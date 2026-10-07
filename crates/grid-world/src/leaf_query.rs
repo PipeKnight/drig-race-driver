@@ -10,6 +10,66 @@ pub struct Hit {
     pub zero_fraction: bool,
 }
 
+pub(crate) struct Cursor {
+    pub(crate) start: [f32; 4],
+    direction: [f32; 4],
+    pub(crate) delta: [f32; 4],
+    fraction: f32,
+    pub(crate) hit: Option<Hit>,
+}
+
+impl Cursor {
+    pub(crate) fn new(start: [f32; 4], direction: [f32; 4]) -> Self {
+        Self {
+            start,
+            direction,
+            delta: direction,
+            fraction: 1.,
+            hit: None,
+        }
+    }
+    pub(crate) fn visit(
+        &mut self,
+        vertices: &[[f32; 3]],
+        triangles: &[[u16; 3]],
+        order: &[u16],
+    ) -> Result<(), Error> {
+        if order.len() > 256 {
+            return Err(Error("authored leaf-size bound exceeded"));
+        }
+        for &index in order {
+            let t = triangles
+                .get(index as usize)
+                .ok_or(Error("leaf triangle outside table"))?;
+            if t.iter().any(|&i| i as usize >= vertices.len()) {
+                return Err(Error("leaf vertex outside table"));
+            }
+        }
+        for &index in order {
+            let points = triangles[index as usize].map(|i| vertices[i as usize]);
+            if let Some(hit) = triangle::query(
+                self.start[..3].try_into().unwrap(),
+                self.delta[..3].try_into().unwrap(),
+                points,
+            ) {
+                self.fraction *= hit.fraction;
+                self.delta = self.direction.map(|v| self.fraction * v);
+                let zero_fraction = self.fraction == 0.;
+                self.hit = Some(Hit {
+                    triangle: index as usize,
+                    fraction: self.fraction,
+                    displacement: self.delta,
+                    zero_fraction,
+                });
+                if zero_fraction {
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 pub fn resolve(
     start: [f32; 4],
     direction: [f32; 4],
@@ -26,41 +86,9 @@ pub fn resolve(
     {
         return Err(Error("invalid leaf input or authored leaf-size bound"));
     }
-    // Check all requested indices before executing the supplied leaf.
-    for &index in order {
-        let t = triangles
-            .get(index as usize)
-            .ok_or(Error("leaf triangle outside table"))?;
-        if t.iter().any(|&i| i as usize >= vertices.len()) {
-            return Err(Error("leaf vertex outside table"));
-        }
-    }
-    let mut fraction = 1.;
-    let mut delta = direction;
-    let mut result = None;
-    for &index in order {
-        let t = triangles[index as usize];
-        let points = t.map(|i| vertices[i as usize]);
-        if let Some(hit) = triangle::query(
-            start[..3].try_into().unwrap(),
-            delta[..3].try_into().unwrap(),
-            points,
-        ) {
-            fraction *= hit.fraction;
-            delta = direction.map(|v| fraction * v);
-            let zero_fraction = fraction == 0.;
-            result = Some(Hit {
-                triangle: index as usize,
-                fraction,
-                displacement: delta,
-                zero_fraction,
-            });
-            if zero_fraction {
-                break;
-            }
-        }
-    }
-    Ok(result)
+    let mut cursor = Cursor::new(start, direction);
+    cursor.visit(vertices, triangles, order)?;
+    Ok(cursor.hit)
 }
 
 #[cfg(test)]

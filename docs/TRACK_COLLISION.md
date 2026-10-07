@@ -1,5 +1,7 @@
 # Donington VCQTC collision geometry
 
+Continuation F086/F089: all245loaded chunks now match complete packed geometry, and original quadrant/leaf traversal matches2,964supplied source/analytic casts. See [production grid](PRODUCTION_GRID.md) and [packed queries](PACKED_QUERIES.md). Earlier opaque-node and sampled-only statements below are historical; outer shape normals/materials and whole-world policy remain separate.
+
 Recorded 6 October 2026. The original `route_0/track.jpk` contains 245 uncompressed `.vcqtc` chunks. Independent Rust decoding recovers 68,803 quantized vertex records, 119,784 triangles, 115,869 node words and 57,208 leaf triangle lists. Independent Python checks every decoded position bit, triangle/material/flag, node word and leaf list against original bytes. Corrected-layout GPU overview and start-grid views were inspected successfully.
 
 This is collision-resource geometry, not an implemented original collision solver. Node words and leaf references are decoded and checked, but original child subdivision/traversal rules, triangle flags and contact handling remain unverified. The viewer's colors are diagnostic labels, not original surface textures.

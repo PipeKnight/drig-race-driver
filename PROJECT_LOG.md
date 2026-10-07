@@ -114,6 +114,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F086 | Complete production grid and all245loaded collision chunks matched by full packed geometry | 2407reads succeed, 68,803vertices/119,784triangles exact; [production grid](docs/PRODUCTION_GRID.md) |
 | F087 | Original candidate collection over retained complete production grid reproduced offline | 1,192cases/8,245words exact debug/release; [candidate replay](docs/CANDIDATE_GRID.md) |
 | F088 | Original horizontal segment/rectangle culling and rejecting-plane cache reproduced | 240cases/480words exact debug/release; [rectangle culling](docs/RECTANGLE_CULL.md) |
+| F089 | Original packed quadrant/leaf traversal with shared shortened-segment state reproduced | 2,964cases/8,277words exact debug/release across245source chunks; [packed traversal](docs/PACKED_QUERIES.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -566,6 +567,13 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Initial unit test reverses X-min/X-max cache expectations while all240original comparisons already pass. Corrected test against original analytic rows; no branch arithmetic adjustment for that failure. Clippy initially rejects multiplication-by-minus-one spelling; unary finite-input equivalent used and comparisons rerun. **80tests (47formats+33world)**, warnings-denied workspace Clippy/fmt pass; final tests/clippy logs rectangle-cull-final-*-20261007.txt, failed originals retained. Python compiles.
 - Probe0f31a639555522d1d16ad7f780961e5239c9650346349ff82d23b118294282fc; existing pinned tools reused. Captured-grid support committed separately9db1714. No new game/session/settings change; run h cleanup complete. Continue quadrant subdivision and whole packed-shape query.
 
+### 7 October 2026 — complete supplied packed-node traversal reproduced
+
+- Added packed_query mesh query, shared private leaf cursor and private CLI/probe/validator. Original quadrant order, distinct min+half/max-half rounding, first-child half extents, allchildmasks before recursion, shared hit/shortened displacement and rejection cache. Original rootcull+wholeb23630 execute with realhelpers, no stubs/codepatch; outerb23800/root setup not whole-original wrapper in this comparison. [Contract](docs/PACKED_QUERIES.md).
+- **2,964cases/8,277words exact debug/release**,759hits/2205misses, packed-query-20261007-02/,03/. Every245Donington chunk has12casts;24authored cases. Installedarchive hashcheckedbefore/after. Initial31chunk148case01also passes. Probe4727660c4c41e25c9b1464f3614844911e833349a270c482d93f9a8144c75828. Authored isolated-cachepage RW/restored, codeRX; no liveinjection/entry/import/TLS.
+- Leaf-cursor regression148cases/819hitwords exactdebug/release, leaf-query-20261007-05/,06/. **82tests (47formats+35world)**, formatting/warnings-denied Clippy pass, packed-query-tests/clippy-20261007.txt. Initial cyclic-controlpoint gets legitimately pruned as quadrantshrinks; movedcontrol tosharedcorner toexercise authoreddepthguard. Failure retained packed-query-initial-tests-20261007.txt. Pythoncompiles, existingtoolsreused.
+- Rectanglecull committed129849e separately. No game/userfilechanges after runhcleanup. Continue original b23800 normal/material-token wrapper then whole-world candidate dispatch/ties/sourcegrid construction; nonzero shape transforms and active tyre/input/drivetrain remain open.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -599,6 +607,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Ordered packed-leaf collision queries](docs/LEAF_QUERIES.md)
 - [Complete production candidate-grid source linkage](docs/PRODUCTION_GRID.md)
 - [Horizontal rectangle culling and cache](docs/RECTANGLE_CULL.md)
+- [Original packed quadrant and leaf traversal](docs/PACKED_QUERIES.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
