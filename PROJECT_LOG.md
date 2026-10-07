@@ -106,6 +106,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F078 | Wheel world-frame preparation matches 216 cases /10,368 words exactly debug/release | Four wheels, supplied local points/axes/displacement and basis, extra tyre axes inactive; no synchronized geometry-boundary claim |
 | F079 | Contact casts and normal adjustment match 240 cases /12,480 words debug/release | Original contact consumer and empty-world query execute; call-site observer captures endpoints. Deliberate tilted axes exercise normalization; hits/material/traversal excluded |
 | F080 | Guarded production contact/material and five-sample radius inputs retained for 12 cars before/after a timed throttle | All303 reads in each capture succeed; unsynchronized retained states, [contact reference](docs/CONTACT_REFERENCE.md) |
+| F081 | Independent five-sample angular radius selector matches whole original helper/CRT modulo | 252cases/252words exact debug/release; supplied captured/sample inputs, [wheel radius](docs/WHEEL_RADIUS.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -499,6 +500,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 - Owner requested focused commits. No Git repository existed; initialized local main with existing Git2.53.0.windows.3. Initial source-only baseline bdd85b3 records prior readers/viewer/scoped physics/research. Private local/, target/, Python caches remain ignored; no remote configured or assets published. No existing Git author identity was configured, so commits use explicit local author Codex <codex@local> without changing global configuration. New contact capture, angular radius and material arithmetic will be separate commits.
 
+### 7 October 2026 — five-sample radius selector verified
+
+- `wheel_radius::adjustment` and private CLI/probe/validator select nearest angular sample with strict first-tie retention, f32 phase/reflection and wide modulo/subtraction. Whole998470 plus original CRT helper run without stubs or writable mapped pages. **252cases/252words exact debug/release**, `isolated-wheel-radius-20261007-01/`, `02/`;96retained wheel inputs plus156controls. Probe b82f3019b96440d01e79ea848e2b188b923a07ca680f0e0ce690cfbe5b85dd6e. Analytic periodic/tie test passes; sample generation remains separate. [Contract](docs/WHEEL_RADIUS.md).
+- Existing tools reused, no new game launch/settings change. Contact capture committed f37ad07. Radius logic is a separate commit; new material arithmetic remains separate until its validation/docs are recorded.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -525,6 +531,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Verified Rust body/wheel parameter prelude](docs/BODY_PARAMETERS.md)
 - [Vehicle update path, internal substeps and controlled dynamics arithmetic](docs/VEHICLE_UPDATE.md)
 - [Guarded production wheel contacts/materials](docs/CONTACT_REFERENCE.md)
+- [Five-sample angular wheel radius selection](docs/WHEEL_RADIUS.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)

@@ -1,0 +1,11 @@
+# Five-sample wheel radius selection (F081)
+
+`grid-world::wheel_radius::adjustment` selects the nearest of five supplied angular samples and returns selected radius minus base radius. Angles are radians. It does not create damage/deformation samples.
+
+Original998470 reads wheel+110 angle and+e0 radius, and five pairs at body30c+(wheelOrdinal*5+sample)*8. Phase is stored f32 pi minus angle. Absolute sample-angle minus phase is computed with x87; original CRT modulo bf90ea reduces by the double representation of stored f32 2pi (6.2831854820251465). Compare the retained wider remainder against stored f32 pi, then reflect distances above pi with f32 2pi minus stored f32 remainder. Strictly smaller distance wins; equal distances retain the earlier sample. Final subtraction remains wider until the caller stores f32. An internal wide result supports the later contact-height caller.
+
+Native finite angle bounds ±1,000,000 and positive radius/sample radii are authored diagnostic constraints, not original guards. The selector accepts exactly five samples. Source generation and damage/flatspot interpretation remain unresolved.
+
+Whole original helper and original CRT modulo execute without stubs, imports/TLS/entry execution, writable mapped pages or live injection. Explicit x8753-bit nearest is supplied; CRT selects and restores its own internal arithmetic control. **252/252 cases/252 output words exact debug/release**, `local/behavior/isolated-wheel-radius-20261007-01/validation.json`, `02/validation.json`:12angular wrap/tie controls,96individual captured wheel input replays from F080 and144synthetic angle/sample cases. Supplied runtime inputs are not synchronized original helper boundaries. Analytic Rust test checks periodic wrap and first-tie selection.
+
+Tools `grid-wheel-radius`, `tools/probe_wheel_radius.c`, `build_wheel_radius_probe.cmd`, `validate_wheel_radius.py`. Probe SHA b82f3019b96440d01e79ea848e2b188b923a07ca680f0e0ce690cfbe5b85dd6e. Existing Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14/Capstone5.0.6 reused; no installation. Private evidence `wheel-radius-full-instructions-20261007.json`, `wheel-radius-constants-20261007.json`, `wheel-radius-modulo-dispatch-20261007.json`, `wheel-radius-crt-setup-20261007.json`.

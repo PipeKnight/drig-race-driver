@@ -12,6 +12,7 @@ pub mod suspension;
 pub mod triangle;
 pub mod wheel_coupling;
 pub mod wheel_frame;
+pub mod wheel_radius;
 pub mod wheel_step;
 
 type Vector = [f64; 3];
