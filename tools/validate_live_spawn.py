@@ -23,8 +23,9 @@ def main():
     parser.add_argument('capture', type=Path)
     parser.add_argument('snapshot', type=Path)
     parser.add_argument('output', type=Path)
-    parser.add_argument('--query-mode', choices=['f64', 'kernel'], default='f64')
+    parser.add_argument('--query-mode', choices=['f64', 'kernel', 'packed'], default='f64')
     parser.add_argument('--source-reports', type=Path)
+    parser.add_argument('--profile', choices=['debug', 'release'], default='debug')
     args = parser.parse_args()
     out = args.output.resolve()
     for path in (args.capture, args.snapshot, out):
@@ -78,7 +79,7 @@ def main():
                           'player': assignment['kind'] == 0, 'displacement_words': displacements,
                           'entry_xz_words': [f'{stack[3]:08x}', f'{stack[4]:08x}'],
                           'original_words': [f'{v:08x}' for v in struct.unpack('<16I', bytes.fromhex(case['pose_hex']))]})
-    executable = ROOT / 'target/debug/grid-placement-track.exe'
+    executable = ROOT / f'target/{args.profile}/grid-placement-track.exe'
     result = subprocess.run([str(executable), str(args.game_root), str(out / 'input.tsv'), str(out / 'native.tsv'), args.query_mode],
                             cwd=ROOT, capture_output=True, text=True, timeout=60)
     execution = {'executable_sha256': digest(executable), 'exit': result.returncode,
@@ -115,7 +116,7 @@ def main():
             case['source_pose_words'] = source_row[5:21]
             case['source_pose_exact_words'] = sum(a == b for a, b in zip(source_row[5:21], case['original_words']))
             assert len(source_row[5:21]) == 16
-    report = {'query_mode': args.query_mode, 'cases': cases, 'source_layouts': sources, 'source_reports': source_reports, 'execution': execution,
+    report = {'query_mode': args.query_mode, 'profile': args.profile, 'cases': cases, 'source_layouts': sources, 'source_reports': source_reports, 'execution': execution,
               'capture_sha256': digest(args.capture), 'snapshot_sha256': digest(args.snapshot),
               'track_sha256': digest(args.game_root / 'tracks/europe/donington/route_0/track.jpk'),
               'summary': {'cases': len(cases), 'exact_matrices': sum(c['exact_words'] == 16 for c in cases),
@@ -123,7 +124,7 @@ def main():
                           'max_basis_error': max(c['max_basis_error'] for c in cases),
                           'max_vertical_error': max(abs(c['vertical_error']) for c in cases),
                           'max_horizontal_error': max(c['horizontal_error'] for c in cases)},
-              'limits': 'Original return-boundary comparison for this restart only. Rust uses f64 candidate selection, optional f32 refinement of selected triangle, and reference f32/SSE placement; original whole query filtering remains unverified. No driving equivalence.'}
+              'limits': ('Original return-boundary comparison for this restart only. Rust uses source-built packed world/candidate/traversal queries and reference f32/SSE placement; no synchronized live query or driving equivalence.' if args.query_mode == 'packed' else 'Original return-boundary comparison for this restart only. Rust uses f64 candidate selection, optional f32 refinement of selected triangle, and reference f32/SSE placement; original whole query filtering remains unverified. No driving equivalence.')}
     if args.source_reports:
         report['summary'].update(source_entry_xz_exact=sum(c['source_entry_xz_exact'] for c in cases),
                                  source_exact_matrices=sum(c['source_pose_exact_words'] == 16 for c in cases),

@@ -19,13 +19,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() < 3 || args.len() > 4 {
         return Err(
-            "usage: grid-placement-track GAME_ROOT INPUT.tsv local/OUTPUT.tsv [f64|kernel]".into(),
+            "usage: grid-placement-track GAME_ROOT INPUT.tsv local/OUTPUT.tsv [f64|kernel|packed]"
+                .into(),
         );
     }
+    let packed = args.get(3).and_then(|v| v.to_str()) == Some("packed");
     let kernel = match args.get(3).and_then(|v| v.to_str()) {
         None | Some("f64") => false,
-        Some("kernel") => true,
-        _ => return Err("query mode must be f64 or kernel".into()),
+        Some("kernel") | Some("packed") => true,
+        _ => return Err("query mode must be f64, kernel or packed".into()),
     };
     let output = Path::new(&args[2]);
     let parent = output
@@ -39,24 +41,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         &Path::new(&args[0]).join("tracks/europe/donington/route_0/track.jpk"),
         256 * 1024 * 1024,
     )?;
+    let source_world = if packed {
+        Some(grid_tools::track::Track::read(&track)?)
+    } else {
+        None
+    };
+    let mut query_cache = grid_world::rectangle_cull::Cache::default();
     let mut triangles = Vec::new();
-    for entry in jpk::inspect(&track)?.entries {
-        if !entry.name.ends_with(b".vcqtc")
-            || entry.uncompressed_size as usize != entry.stored_data.len()
-        {
-            return Err("unsupported collision entry".into());
+    if !packed {
+        for entry in jpk::inspect(&track)?.entries {
+            if !entry.name.ends_with(b".vcqtc")
+                || entry.uncompressed_size as usize != entry.stored_data.len()
+            {
+                return Err("unsupported collision entry".into());
+            }
+            let chunk = collision::read_vcqtc(&track[entry.stored_data])?;
+            if triangles.len() + chunk.triangles.len() > 1_000_000 {
+                return Err("triangle bound".into());
+            }
+            triangles.extend(chunk.triangles.iter().map(|t| Triangle {
+                vertices: t.indices.map(|i| chunk.positions[i as usize]),
+                material: chunk.materials[t.material as usize],
+                flags: t.flags,
+            }));
         }
-        let chunk = collision::read_vcqtc(&track[entry.stored_data])?;
-        if triangles.len() + chunk.triangles.len() > 1_000_000 {
-            return Err("triangle bound".into());
-        }
-        triangles.extend(chunk.triangles.iter().map(|t| Triangle {
-            vertices: t.indices.map(|i| chunk.positions[i as usize]),
-            material: chunk.materials[t.material as usize],
-            flags: t.flags,
-        }));
     }
-    let mesh = Mesh::new(triangles.clone())?;
+    let mesh = if packed {
+        None
+    } else {
+        Some(Mesh::new(triangles.clone())?)
+    };
     let input = String::from_utf8(read(Path::new(&args[1]), 1024 * 1024)?)?;
     let mut reports = Vec::new();
     let mut cases = 0;
@@ -95,10 +109,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             wheels,
             spawn::Normalization::ReferenceSse,
             |x, z, upper, lower| {
-                let result = mesh.query(Segment {
-                    start: [x as f64, upper as f64, z as f64],
-                    end: [x as f64, lower as f64, z as f64],
-                })?;
+                if let Some(world) = source_world.as_ref() {
+                    let result =
+                        world.query([x, upper, z, 1.], [x, lower, z, 1.], &mut query_cache)?;
+                    let height = result
+                        .hit
+                        .map(|h| upper - (upper - lower) * h.contact.fraction);
+                    let triangle = result
+                        .hit
+                        .and_then(|h| world.triangle_index(h.shape, h.contact.triangle));
+                    reports.push(format!(
+                        "Q\t{}\t{ordinal}\t{:08x}\t{:08x}\t{:08x}\t{:08x}\t{}\t{}",
+                        fields[0],
+                        x.to_bits(),
+                        z.to_bits(),
+                        upper.to_bits(),
+                        lower.to_bits(),
+                        height.map_or_else(|| "none".into(), |v| format!("{:08x}", v.to_bits())),
+                        triangle.map_or_else(|| "none".into(), |v| v.to_string())
+                    ));
+                    ordinal += 1;
+                    return Ok(height);
+                }
+
+                let result = mesh
+                    .as_ref()
+                    .ok_or(grid_world::Error("static query mesh absent"))?
+                    .query(Segment {
+                        start: [x as f64, upper as f64, z as f64],
+                        end: [x as f64, lower as f64, z as f64],
+                    })?;
                 let height = if let Some(hit) = result.hit.as_ref() {
                     let fraction = if kernel {
                         triangle::query(
@@ -152,9 +192,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     writeln!(
         writer,
-        "C\tf64_candidate_query\treference_sse\t{}\t{}",
-        mesh.triangle_count(),
-        if kernel { "kernel" } else { "f64" }
+        "C\t{}\treference_sse\t{}\t{}",
+        if packed {
+            "source_packed_world"
+        } else {
+            "f64_candidate_query"
+        },
+        source_world.as_ref().map_or_else(
+            || mesh.as_ref().map_or(0, |m| m.triangle_count()),
+            |w| w.triangle_count()
+        ),
+        if packed {
+            "packed"
+        } else if kernel {
+            "kernel"
+        } else {
+            "f64"
+        }
     )?;
     for row in reports {
         writeln!(writer, "{row}")?;

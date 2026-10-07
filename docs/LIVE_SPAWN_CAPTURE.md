@@ -60,3 +60,13 @@ The capture helper now supports `--arm-running`, avoids explicit pause, passes b
 ## Next behavior questions
 
 Capture actual live corners, extent getter result and deformation flag/lattice at an earlier boundary in a fresh cold load, and verify target survival. Recover complete ground-query filtering/ties. Establish the render-to-body offset before replacing the viewer's horizontal anchor. Trace force/suspension consumers and simulation timestep before implementing driving. [Placement specification](GROUND_PLACEMENT.md) and [implementation roadmap](IMPLEMENTATION_PLAN.md) define the broader scope.
+
+## Source-built packed queries in placement replay (F094)
+
+`grid-placement-track ... packed` now uses the source-owned collision world for all nine casts per car, with shared rejection cache across the replay. It returns height from the selected accumulated f32 fraction and reports the selected source triangle identity. It neither selects a triangle through the f64 BVH nor refines an independently chosen candidate. The packed branch no longer builds that unused BVH. Historical f64/kernel modes remain available for comparing earlier evidence.
+
+**All12retained placement matrices /192words match exactly in both debug and release**, using the original captured incoming X/Z/heading/wheel inputs and the original installed track archive. Final `local/behavior/live-spawn-packed-20261007-04/validation.json` debug, `05/validation.json` release; earlier01..03also match (01has historical limits wording corrected for later reports). All108ordered casts execute per replay. This verifies the retained return-boundary cases, not synchronized live queries or complete driving. The original whole-query comparison and grid/source ownership are separately verified in [source world](SOURCE_WORLD.md).
+
+The earlier two source-derived incoming X differences remain unresolved. Incoming capture values are still supplied to this replay; no artificial correction has been added. Render/body linkage, live extent/deformation/corners and nonzero shape transforms remain open.
+
+Full85workspace tests, formatting and warnings-denied Clippy pass, `packed-placement-tests-20261007.txt`, `packed-placement-clippy-20261007.txt`. Historical selected-kernel mode regression still reproduces12/12 /192words, `live-spawn-kernel-regression-20261007/validation.json`. No failed comparison in this integration. Existing tools reused; no game run, settings or save changes. Source loading is committed separately47d5e69.

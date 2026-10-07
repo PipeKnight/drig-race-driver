@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 45 format tests; 27 world tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 85 workspace tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -119,6 +119,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F091 | Whole original supplied-grid world query reproduced | 1,991cases/13,911words exact debug/release; strict closest-shape ties, capacity25 and shared cache; [packed world](docs/PACKED_WORLD.md) |
 | F092 | Source chunk names reconstruct complete production grid | 78datasets/706,149words exact original debug/release; all1,024captured tiles and872nonemptycell identities match; [population](docs/GRID_POPULATION.md) |
 | F093 | Installed archive directly supplies reconstructed packed collision world | 1,967cases/13,435words exact original debug/release, without captured cells/pointers as Rust inputs; [source world](docs/SOURCE_WORLD.md) |
+| F094 | Source-built packed world supplies exact placement replay | All12retained matrices/192words exact debug/release;108casts; incoming capture values still supplied; [placement](docs/LIVE_SPAWN_CAPTURE.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -601,6 +602,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added shared grid-tools track adapter and grid-track-query. Archive order IDs, owned decoded geometry/node/leaves/materials, namebuilt candidategrid and verified worldquery run directly from purchased Donington JPK. Native triangle identity retained in packed_shape hit for diagnostics. **1,967cases/13,435words exact debug/release**,1030hits/937misses, source-world-20261007-01/,02/. Whole originalquery compares independently rebuilt Pythonfixture; Rust takes no captured cells/pointers. [Contract](docs/SOURCE_WORLD.md).
 - **85workspace tests**, fmt/warnings-denied Clippy pass, source-world-tests/clippy-20261007.txt. No failed comparisons. OriginalworldprobeunchangedSHAa0719efd0b769861a125934ff012f1cc4138098f8cc8ff6c3c979d3a8570e947. No whole originalresource-loader/nonzero-transform/universalcontent/synchronizedlivequery claim. All130Steamresources/originalexe unchanged at17:30:54Z, preservation-20261007-source-world.json. Existing tools reused; no installs/game/userfilechanges.
 - Population committed separately07f6123. Placement replay integration is being kept in a separate commit: preliminary packedmode already matchesall12retainedmatrices/192words; evidence live-spawn-packed-20261007-01/,02/,03/. Full replay record and final diagnostics follow independently.
+
+### 7 October 2026 — placement replay uses reconstructed packed world
+
+- Added packedmode togrid-placement-track, profile/mode-aware limits to validator. Allninecastspercar use sourcebuilt grid/packedworld withsharedcache, noBVHcandidate fallback/refinement; avoidsbuildingunusedBVH. **12/12retained matrices/192words exact debug/release**,108castsperreplay, final live-spawn-packed-20261007-04/,05/. Preliminary01..03alsoexact; first01retains older limits text. [Record](docs/LIVE_SPAWN_CAPTURE.md).
+- Supplied captured incomingX/Z/heading/wheels remain required here. Earlier sourceonly10/12matrix result andtwoXULP differences remainopen; no roundingfix. Not synchronizedlivequeries/driving/renderbodyfidelity. **85workspace tests**, fmt/warnings-deniedClippy pass packed-placement-tests/clippy-20261007.txt; historicalkernelregression12/12/192exact live-spawn-kernel-regression-20261007/. No failed comparison, Pythoncompiles.
+- Sourceworldloading separately47d5e69. No tools installed, game/userfilechanges; originalpreservation17:30:54Zstill latest. Continue coupling real worldcasts towholefourwheelcontactconsumer and source materialmechanics, then active tyre/input/drivetrain/timing.
 
 ## Next actions
 
