@@ -13,9 +13,6 @@ pub fn factor(keys: &[[u8; 4]], values: &[f32], active: bool, key: &mut Key) -> 
     if !active {
         return Ok(1.);
     }
-    if keys.len() != values.len() || values.iter().any(|v| !v.is_finite()) {
-        return Err(Error("invalid supplied tyre table row"));
-    }
     let index = match *key {
         Key::Code(code) => {
             let Some(index) = keys.iter().position(|k| *k == code) else {
@@ -26,6 +23,9 @@ pub fn factor(keys: &[[u8; 4]], values: &[f32], active: bool, key: &mut Key) -> 
         }
         Key::Index(index) => index,
     };
+    if keys.len() != values.len() || values.iter().any(|v| !v.is_finite()) {
+        return Err(Error("invalid supplied tyre table row"));
+    }
     values
         .get(index)
         .copied()

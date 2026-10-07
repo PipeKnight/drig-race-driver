@@ -7,19 +7,30 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 3 {
-        return Err("usage: grid-tyre-grip TABLE.private.bin INPUT.tsv local/OUTPUT.tsv".into());
+    let csv = args.get(3).is_some_and(|v| v == "csv");
+    if args.len() != 3 && !(args.len() == 4 && csv) {
+        return Err("usage: grid-tyre-grip TABLE INPUT.tsv local/OUTPUT.tsv [csv]".into());
     }
     let raw = fs::read(&args[0])?;
-    if raw.len() < 8 || raw.len() > 8 + 64 * 56 || &raw[..4] != b"TYG1" {
+    let source = if csv {
+        Some(grid_tools::tyre_tables::Tables::read(&raw)?)
+    } else {
+        None
+    };
+    if !csv && (raw.len() < 8 || raw.len() > 8 + 64 * 56 || &raw[..4] != b"TYG1") {
         return Err("invalid supplied table".into());
     }
-    let count = u32::from_le_bytes(raw[4..8].try_into()?) as usize;
-    if count > 64 || raw.len() != 8 + count * 56 {
+    let count = if csv {
+        0
+    } else {
+        u32::from_le_bytes(raw[4..8].try_into()?) as usize
+    };
+    if !csv && (count > 64 || raw.len() != 8 + count * 56) {
         return Err("invalid supplied table length".into());
     }
-    let keys = raw[8..8 + count * 4].as_chunks::<4>().0.to_vec();
-    let values: Vec<f32> = raw[8 + count * 4..]
+    let fixture = if csv { &[][..] } else { &raw[8..] };
+    let keys = fixture[..count * 4].as_chunks::<4>().0.to_vec();
+    let values: Vec<f32> = fixture[count * 4..]
         .as_chunks::<4>()
         .0
         .iter()
@@ -48,14 +59,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             Key::Index(words[1] as usize)
         };
-        let factor = tyre_grip::factor(
-            &keys,
-            &values[row * count..(row + 1) * count],
-            words[0] != 0,
-            &mut key,
-        )?;
         let v: Vec<_> = words[4..].iter().map(|v| f32::from_bits(*v)).collect();
-        let grip = tyre_grip::grip(v[0], v[1], v[2], v[3], factor)?;
+        let grip = if let Some(source) = &source {
+            if words[0] == 0 {
+                tyre_grip::grip(v[0], v[1], v[2], v[3], 1.)?
+            } else {
+                source.grip(row, &mut key, [v[0], v[1], v[2]], v[3])?
+            }
+        } else {
+            let factor = tyre_grip::factor(
+                &keys,
+                &values[row * count..(row + 1) * count],
+                words[0] != 0,
+                &mut key,
+            )?;
+            tyre_grip::grip(v[0], v[1], v[2], v[3], factor)?
+        };
         let (cached, unresolved) = match key {
             Key::Code(v) => (u32::from_le_bytes(v), 1),
             Key::Index(v) => (v as u32, 0),

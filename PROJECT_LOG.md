@@ -678,6 +678,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added bounded independent CSV source reader retaining15ordered keys/13fixedrow slots, first matching rows, absence/blanktermination and f64*storedf32.01 normalization. **41datasets/3641report words exact debug/release** against wholeoriginal9c2dd0/tokenizer/accessor/cleanup. Hostallocator methods plus numericstrtod/handle-generation CRT adapters explicit; originaldecoder/tokenizerunmodified. [Contract](docs/TYRE_TABLE.md).
 - Direct originalCRT diagnostic c0000005afterstagingallocation retained01/original-crt.json; consistent with missing isolatedruntime/TLS/importinit, precise fault not localized; not installedcompatfailure. Adapted01/02exact, no numericalmismatches. ProbeSHA3ac045602e0b461d868187bcb3177b5dea290d2ccdbb60272ca56fabf1e2f893. **93workspace tests**, fmt/warnings-denied Clippy pass tyre-table-tests/clippy-20261008.txt. Existingtools reused, no game/userfilechanges. F105grip separately8eb1133. Next connect source table to verified grip query, then production wheelhistory and force application; bodyrowselector remains supplied/unverifiedlive.
 
+### 8 October 2026 — source table-to-grip integration verified (F107)
+
+- Added owned source Tables adapter/CSVdiagnostic mode. OriginalCSVloader -> private decodedtable -> wholeoriginalgrip versus nativeCSVdirect, **41datasets/17794queries/53382words exact debug/release**. Misses/inactivequeries skipabsentrows; matched/cachedabsent nativeguard separatelytested. All consumed rows present; absentfixturepaddingunused. [Contract](docs/SOURCE_TYRE_GRIP.md).
+- Evidence source-tyre-grip-20261008-01/,02/; pinnedF106manifest/sourcehashes/probes. Oldsupplied1394/4182regressesexactbothprofiles. Source/coefficients/rowselector stillsupplied, no completeproductionforces. Preservation23:52:57UTC (8Octoberlocally), **all130trackedSteamresources+exeunchanged**, local/scene/preservation-20261008-source-tyre.json. No game/settings/savechanges/toolsinstalled. **94workspace tests**, fmt/warnings-denied Clippy pass source-tyre-grip-tests/clippy-20261008.txt. No failedcomparisons/checks. F106sourceCSV separatelyc01873f. Continue9ba490wheelhistory/contact-dependentgrip and source rowselector.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -728,6 +733,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Production surface force inputs and defaults](docs/FORCE_MECHANICS.md)
 - [Material speed grip and cached tyre-table query](docs/TYRE_GRIP.md)
 - [Source tyre-grip CSV loader and row slots](docs/TYRE_TABLE.md)
+- [Source table-to-grip integration](docs/SOURCE_TYRE_GRIP.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
