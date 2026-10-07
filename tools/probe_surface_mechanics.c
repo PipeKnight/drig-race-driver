@@ -58,7 +58,7 @@ fail:
 }
 int wmain(int argc,wchar_t **argv){
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4&&argc!=5)return 2;
-    int adapted=argc==4;if(argc==5&&wcscmp(argv[4],L"original"))return 2;
+    int force=argc==5&&!wcscmp(argv[4],L"force"),adapted=argc==4||force;if(argc==5&&!force&&wcscmp(argv[4],L"original"))return 2;
     unsigned char *image=map_reference(argv[1]);if(!image)return 3;if(adapted&&!adapt_numeric(image))return 4;
     unsigned doc[9]={0};unsigned char *xml=read_xml(argv[2],doc);if(!xml)return 5;
     unsigned *root=(unsigned *)(uintptr_t)doc[3];if(strcmp(text(doc,root[0]),"MATERIALS")){free(xml);return 6;}
@@ -80,6 +80,8 @@ int wmain(int argc,wchar_t **argv){
         fprintf(output,"M\t%08x\t%08x",word(name),has);
         const unsigned offsets[]={0x90,0x94,0x98,0x9c,0xa0,0xa4,8,0x64,0xa8};
         for(unsigned a=0;a<9;++a){unsigned v=has?(a==0?material[offsets[a]]:word(material+offsets[a])):0;fprintf(output,"\t%08x",v);}
+        if(force){const unsigned extra[]={0,4,0xc,0x10,0x14,0x18,0x1c,0x20,0x68,0x6c,0x71,0x72,0x75};
+            for(unsigned a=0;a<13;++a){unsigned v=has?(a>=10?material[extra[a]]:word(material+extra[a])):0;fprintf(output,"\t%08x",v);}}
         fputc('\t',output);
         if(has){unsigned n=0;while(n<60&&material[0x24+n]){fprintf(output,"%02x",material[0x24+n]);++n;}if(n==60){error=13;break;}}
         fputc('\n',output);++count;valid+=has;

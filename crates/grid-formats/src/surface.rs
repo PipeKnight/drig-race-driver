@@ -1,4 +1,4 @@
-//! Mechanics fields used by wheel contacts. Other material sections are separate.
+//! Source mechanics fields for contacts and production tyre/drag consumers.
 use crate::{
     Error, Result,
     binxml::{Document, Element},
@@ -9,8 +9,21 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug)]
 pub struct Mechanics<'a> {
     pub name: &'a str,
+    pub grip_per_ms: f32,
+    pub ms_for_max_effect: f32,
     pub grip: f32,
+    pub camera_factor: f32,
+    pub roughness: f32,
+    pub minimum_speed_for_slowdown: f32,
+    pub speed_for_maximum_slowdown: f32,
+    pub slowdown: f32,
+    pub roll_induce: f32,
     pub hardness: f32,
+    pub heat: f32,
+    pub wear: f32,
+    pub curved: bool,
+    pub dirt_build_up: bool,
+    pub high_downforce: bool,
     pub time_based: bool,
     pub wavelength: f32,
     pub magnitude: f32,
@@ -66,11 +79,13 @@ fn mechanics<'a>(element: &Element<'a>) -> Result<Mechanics<'a>> {
     if name.is_empty() || name.len() > 59 || !name.is_ascii() {
         return fail(0, "invalid surface mechanics name");
     }
-    let time_based = match attr(element, "bumpstimebased") {
-        None => true,
-        Some(v) if v.eq_ignore_ascii_case("true") => true,
-        Some(v) if v.eq_ignore_ascii_case("false") => false,
-        _ => return fail(0, "invalid surface mechanics boolean"),
+    let boolean = |key, fallback| match attr(element, key) {
+        None => Ok(fallback),
+        Some(v) if v.eq_ignore_ascii_case("true") => Ok(true),
+        Some(v) if v.eq_ignore_ascii_case("false") => Ok(false),
+        // The original accessor ignores unrecognized text and retains defaults.
+        // In particular, installed "0" is not parsed as a numeric boolean.
+        _ => Ok(fallback),
     };
     let mut tyre_table = *b"DEFA";
     if let Some(text) = attr(element, "tyreTable") {
@@ -83,9 +98,22 @@ fn mechanics<'a>(element: &Element<'a>) -> Result<Mechanics<'a>> {
     }
     Ok(Mechanics {
         name,
+        grip_per_ms: number(element, "grip_per_ms", 0.)?,
+        ms_for_max_effect: number(element, "ms_for_max_effect", 1.)?,
         grip: number(element, "grip", 1.)?,
+        camera_factor: number(element, "camera_factor", 0.)?,
+        roughness: number(element, "roughness", 0.)?,
+        minimum_speed_for_slowdown: number(element, "minimumSpeedForSlowdown", 20.)?,
+        speed_for_maximum_slowdown: number(element, "speedForMaximumSlowdown", 40.)?,
+        slowdown: number(element, "slowdown", 0.)?,
+        roll_induce: number(element, "roll_induce", 0.)?,
         hardness: number(element, "hardness", 1.)?,
-        time_based,
+        heat: number(element, "heat", 1.)?,
+        wear: number(element, "wear", 1.)?,
+        curved: boolean("curved", false)?,
+        dirt_build_up: boolean("dirt_build_up", false)?,
+        high_downforce: boolean("high_downforce", false)?,
+        time_based: boolean("bumpstimebased", true)?,
         wavelength: number(element, "bumpswavelength", f32::from_bits(0x3d4c_cccd))?,
         magnitude: number(element, "bumpsmagnitude", 0.)?,
         real_proportion: number(element, "bumpsrealproportion", 0.)?.clamp(0., 1.),
@@ -214,6 +242,20 @@ mod tests {
         assert!(read(&doc).unwrap()[0].mechanics.is_none());
         let bad = document(vec![("name", "TEST"), ("bumpsmagnitude", "NaN")]);
         assert!(read(&bad).is_err());
+        for field in ["heat", "wear", "slowdown"] {
+            assert!(read(&document(vec![("name", "TEST"), (field, "inf")])).is_err());
+        }
+        for value in ["0", "1", "yes"] {
+            let doc = document(vec![
+                ("name", "TEST"),
+                ("dirt_build_up", value),
+                ("bumpstimebased", value),
+            ]);
+            let material = read(&doc).unwrap();
+            let m = material[0].mechanics.as_ref().unwrap();
+            assert!(!m.dirt_build_up);
+            assert!(m.time_based);
+        }
         let lower = document(vec![
             ("name", "TEST"),
             ("bumpstimebased", "FALSE"),

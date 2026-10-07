@@ -663,6 +663,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Original decoder column311 >0.5 -> properties+4d1 -> body+adc/context+70c. Added finite Standard source selector and diagnostic mode. **44 source rows, zero enabled; 24 retained production flags exact** in debug/release; seven authored f64-boundary controls pass. Previous44body reports regress unchanged in both profiles. Original whole CSV decoder is not invoked. First validator shortened identity tuple omitted radius and was ambiguous; restored full tuple, no numerical mismatch. Final04/05reports; earlier02/03without legacy regression retained. **91workspace tests**, fmt/warnings-denied Clippy pass tyre-selection-tests/clippy-20261008.txt. [Selection evidence and limits](docs/TYRE_SELECTION.md).
 - This establishes the inactive branch for installed Standard rows; F098–F102 active routines remain conditional. Continue downstream a00e10/9ba490 tyre-force consumers before driving-loop integration. No game/userfile changes or tool installation. Existing Ghidra12.1.4/JDK21.0.9, Capstone5.0.6, Python3.12.14, Rust1.99.0 reused; private evidence paths in contract. Logical changes already separated through26ef871.
 
+### 8 October 2026 — extended surface inputs reproduced (F104)
+
+- Source Mechanics now reads10additionalf32fields/3flags for production tyre/drag. **113rows/2486field words exact debug/release** against original loader/initializer/accessors with existing host-strtod adapter; old113rowcontact-only mode regressesbothprofiles. Source89/84MECH and authored24/23MECH. Initial force-mechanics01/ failed native strictboolean guard on installed"0"; original accessor ignores unrecognized text retaining defaults, corrected02/03verified. [Contract and field/default table](docs/FORCE_MECHANICS.md).
+- Existing MSVC14.44.35207/SDK10.0.26100.0 rebuilt probeSHA3651b78f9d84b93d3830579560e5e0c718f86572c6e2d5b12bd6fcfb2fa916ab. No tools/game/userfilechanges. **91workspace tests**, fmt/warnings-denied Clippy pass force-mechanics-tests/clippy-20261008.txt. F103selection separately500a2f7. Follow speed-clamped grip expression and original tyre table query/caching before downstream force assembly.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -710,6 +715,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Coupled active tyre response and comparison](docs/COUPLED_TYRE_STEP.md)
 - [Supplied drive, paired/central exchange and braking](docs/WHEEL_ROTATION.md)
 - [Production source tyre selection and runtime flags](docs/TYRE_SELECTION.md)
+- [Production surface force inputs and defaults](docs/FORCE_MECHANICS.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)

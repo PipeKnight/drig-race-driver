@@ -13,8 +13,9 @@ fn hex(value: &str) -> String {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-surface-mechanics INPUT local/OUTPUT.tsv".into());
+    let force = args.get(2).is_some_and(|v| v == "force");
+    if args.len() != 2 && !(args.len() == 3 && force) {
+        return Err("usage: grid-surface-mechanics INPUT local/OUTPUT.tsv [force]".into());
     }
     let out = Path::new(&args[1]);
     let parent = out.parent().ok_or("output parent absent")?.canonicalize()?;
@@ -63,6 +64,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         };
         for word in words {
             write!(writer, "\t{word:08x}")?;
+        }
+        if force {
+            let extra = if let Some(m) = &material.mechanics {
+                [
+                    m.grip_per_ms.to_bits(),
+                    m.ms_for_max_effect.to_bits(),
+                    m.camera_factor.to_bits(),
+                    m.roughness.to_bits(),
+                    m.minimum_speed_for_slowdown.to_bits(),
+                    m.speed_for_maximum_slowdown.to_bits(),
+                    m.slowdown.to_bits(),
+                    m.roll_induce.to_bits(),
+                    m.heat.to_bits(),
+                    m.wear.to_bits(),
+                    u32::from(m.curved),
+                    u32::from(m.dirt_build_up),
+                    u32::from(m.high_downforce),
+                ]
+            } else {
+                [0; 13]
+            };
+            for word in extra {
+                write!(writer, "\t{word:08x}")?;
+            }
         }
         writeln!(writer, "\t{}", hex(name))?;
     }
