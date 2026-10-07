@@ -19,6 +19,7 @@ pub mod spawn;
 pub mod suspension;
 pub mod triangle;
 pub mod tyre_friction;
+pub mod tyre_grip;
 pub mod tyre_response;
 pub mod wheel_coupling;
 pub mod wheel_frame;

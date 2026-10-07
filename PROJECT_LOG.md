@@ -668,6 +668,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Source Mechanics now reads10additionalf32fields/3flags for production tyre/drag. **113rows/2486field words exact debug/release** against original loader/initializer/accessors with existing host-strtod adapter; old113rowcontact-only mode regressesbothprofiles. Source89/84MECH and authored24/23MECH. Initial force-mechanics01/ failed native strictboolean guard on installed"0"; original accessor ignores unrecognized text retaining defaults, corrected02/03verified. [Contract and field/default table](docs/FORCE_MECHANICS.md).
 - Existing MSVC14.44.35207/SDK10.0.26100.0 rebuilt probeSHA3651b78f9d84b93d3830579560e5e0c718f86572c6e2d5b12bd6fcfb2fa916ab. No tools/game/userfilechanges. **91workspace tests**, fmt/warnings-denied Clippy pass force-mechanics-tests/clippy-20261008.txt. F103selection separately500a2f7. Follow speed-clamped grip expression and original tyre table query/caching before downstream force assembly.
 
+### 8 October 2026 — material speed grip/query reproduced (F105)
+
+- Added supplied ordered tyre-table factor/cache and speed-clamped material grip. Whole original99c990/998690, **1394cases/4182words exact debug/release**, including1008installed-material conditions,384seededcontrols,2emptytables. **39cases expose prematuref32 rounding**, retained f64intermediate. Source CSV/header/row ordinal adaptation supplied; original CSV loader and body row-selection source not yet executed. [Contract](docs/TYRE_GRIP.md).
+- Evidence finaltyre-grip-20261008-03/,04/ (01/02earlierCLIparsingretained); probeSHAf07bcf8de1d1344d23bf63bd97337d8e2e53682e729107ccf2064290d53d9564. No numericalfailedexperiments; initialClippychunks_exactwarning corrected toas_chunks; **92workspace tests**, fmt/finalwarnings-denied Clippy pass tyre-grip-final-clippy-20261008.txt. Code RX/no patches/stubs, isolatedtabledata protection restored; x87PC53/nearest explicit. Existingtools reused, no game/userfilechanges. Surfaceinputs separatelyacc4a94. Continue originaltyretableloader/selector and downstreamwheelhistory.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
