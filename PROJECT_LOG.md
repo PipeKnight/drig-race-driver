@@ -105,6 +105,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F077 | Suspension setup subset matches 200 controls /7,400 words, source ranges/default sliders match 88 cases /2,904 words and runtime chain matches 24 captures /888 words, all debug/release | Nine suspension fields plus height; geometry and cap operand replayed from guarded captures. Full preparation/tyres/driving remain unimplemented |
 | F078 | Wheel world-frame preparation matches 216 cases /10,368 words exactly debug/release | Four wheels, supplied local points/axes/displacement and basis, extra tyre axes inactive; no synchronized geometry-boundary claim |
 | F079 | Contact casts and normal adjustment match 240 cases /12,480 words debug/release | Original contact consumer and empty-world query execute; call-site observer captures endpoints. Deliberate tilted axes exercise normalization; hits/material/traversal excluded |
+| F080 | Guarded production contact/material and five-sample radius inputs retained for 12 cars before/after a timed throttle | All303 reads in each capture succeed; unsynchronized retained states, [contact reference](docs/CONTACT_REFERENCE.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -485,6 +486,19 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Computer Use initialization first fails `CreateProcessWithLogonW1056`; one JS reset/reinitialize recovers normal window inventory. Existing authorized skill/API/macro reused, no new install. User settings/profile backed up under `local/reference-race/resume-20261007g/user-before/` before explicit private executable launch. New owned GRID **7484**, start **2026-10-07T11:03:04.8032772Z**, exact native identity in `session.json`. Fresh UI shows intro at800x600, no debugger. Macro listener started for this exact session; menus/race/contact capture pending.
 - **Outstanding cleanup for run g:** safely stop owned listener/game, compare all backed-up user files, preserve profile changes and restore only temporary display config if changed. Original Steam installation untouched.
 
+### 7 October 2026 — production contact reference captured and cleaned up
+
+- Continued run g through arrows/Enter macros: Touring Cars, Chevrolet Lacetti, Donington Park Grand Prix Circuit, 3 laps, Nevada Autosport, Normal/Random/4 flashbacks. UI confirms loaded race and pause. Existing local profile loaded successfully.
+- Guarded read-only capture `local/behavior/general-vehicle-manager-20261007T1113268018652Z.json`: manager344415e0, twelve cars, all303 blocks succeed. Scan162,553,856 bytes of private RW memory. `runtime-collision-20261007T1113267099631Z.json`: count245, all107 blocks succeed; eight sampled shape wrappers are type11 packed triangles. No suspension, debugger attachment or memory writes.
+- All48 wheels have nonzero contact/material records, same material5303b30; offsets90/94/98/9c/a0/a4 hold false/2.25/.01/1/1/0, matching the smooth dry tarmac source bump tuple. This is a tuple match, not loader identity proof. Wheel C8 is an address-valued face/material token, not a small triangle ordinal. Surface table entry first word is an offset (first64), added to query token to locate material; earlier description of it as a pointer is corrected.
+- Original radius helper998470 selects nearest of five angular radius samples per wheel, using stored f32 pi/2pi and original x87 modulo helper. Current player samples all have angle0/base radius. Bounded isolated comparison is next; no damage/flatspot semantics verified.
+- F5 macro log proves throttle2000ms plus key-up/pause completion; refreshed UI shows pause. Second guarded capture `general-vehicle-manager-20261007T1114213119655Z.json` all303 blocks succeed, player wheel angles now nonzero. These unsynchronized observations are not an exact input/integration trace.
+- Owned GRID7484 closed via Computer Use Alt-F4; listener28352 was still present under elevated inventory, so exact path/start ticks checked before Stop-Process. All17 backed-up user files compared: only display config changed. Post-config retained privately, original config restored SHA d222c1d1c539452335f00cad35553df18a8128e06afa3c003d8b8b36aad54463. All15 save files unchanged and never overwritten. Cleanup complete, evidence `local/reference-race/resume-20261007g/user-after-comparison.json`, `cleanup.json`; no pending owner input.
+
+### 7 October 2026 — local Git history established
+
+- Owner requested focused commits. No Git repository existed; initialized local main with existing Git2.53.0.windows.3. Initial source-only baseline bdd85b3 records prior readers/viewer/scoped physics/research. Private local/, target/, Python caches remain ignored; no remote configured or assets published. No existing Git author identity was configured, so commits use explicit local author Codex <codex@local> without changing global configuration. New contact capture, angular radius and material arithmetic will be separate commits.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -510,6 +524,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Running vehicle-state investigation and failed interface hypothesis](docs/VEHICLE_STATE.md)
 - [Verified Rust body/wheel parameter prelude](docs/BODY_PARAMETERS.md)
 - [Vehicle update path, internal substeps and controlled dynamics arithmetic](docs/VEHICLE_UPDATE.md)
+- [Guarded production wheel contacts/materials](docs/CONTACT_REFERENCE.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
