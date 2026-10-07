@@ -110,6 +110,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F082 | Supplied-hit contact acceptance, material noise/height and radius offsets reproduced | 236cases/13,216words exact debug/release; query fixture replaces original query, [contact arithmetic](docs/CONTACT_MATERIALS.md) |
 | F083 | Typed surface mechanics source defaults/clamps/depth and tyre-name mapping | 113rows exact debug/release; original numeric conversion adapter, [surface mechanics](docs/SURFACE_MECHANICS.md) |
 | F084 | Supplied collision candidate grid preserves original conversion, traversal and duplicate/cap policy | 216cases/2,911words exact debug/release; authored grid, [candidate collection](docs/CANDIDATE_GRID.md) |
+| F085 | Supplied ordered packed leaves match original expansion/decoder/kernel and shortening/tie policy | 148cases/819hitwords exact debug/release, 31Donington chunks; [leaf queries](docs/LEAF_QUERIES.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -529,6 +530,13 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - **76tests (47formats+29world)** pass; formatting passes. Initial Clippy fails on manual modulo predicate; corrected to is_multiple_of, final warnings-denied workspace Clippy passes, both comparisons rerun. Logs candidate-grid-tests-20261007.txt, candidate-grid-clippy-20261007.txt (failed), candidate-grid-final-clippy-20261007.txt. Python validator compiles. Existing pinned tools reused, no install/game/settings changes. Surface mechanics committed separately960e359; this collector will have its own commit.
 - Original packed-shape traversal/closest-hit and token ownership investigation continues using retained decompilation evidence. No pending owner input or session cleanup.
 
+### 7 October 2026 — original packed leaf consumer reproduced
+
+- Added independent leaf_query and private report/probe/validator. Originalb23450 with realb1a370/b23250/adc290 expands source leaves, decodes packed vertices and shortens remaining displacement after every hit. Equal hits may replace earlier triangles; exact zero fraction stops. Native receives decoded order/positions, no quadtree/normal/material/whole-world fidelity claim. [Contract](docs/LEAF_QUERIES.md).
+- **148cases exact debug/release**,117hits/31misses/819checked hit words, final leaf-query-20261007-03/,04/:124source cases from31Donington chunks and24authored tie/layer/zero/continuation/tolerance controls. Installed archive checked against retained resource manifest before/after. Original whole leaf executes without stubs/code patch/writable image pages/live injection. Probef2c42b3349f70118e4e3ea53c38c059888aadb07d6a0ae2ea318afafb0b1759d.
+- **78tests (47formats+31world)** pass; formatting/final warnings-denied workspace Clippy pass. Initial Rust rejects leading-dot decimal literals, MSVC rejects signed/unsigned comparison; corrected before execution. First Clippy rejects assignment spelling; corrected and both comparisons rerun. Logs leaf-query-tests-20261007.txt, leaf-query-clippy-20261007.txt (failed), leaf-query-final-clippy-20261007.txt. Python compiles. Initial tail disassembly starts mid-instruction; full-function disassembly is the evidence used. Existing pinned tools reused, no new installation.
+- Candidate-grid commitcfdc2d3 separate from surface960e359 and this leaf logic. Read latest Computer Use26.1002.52244 skill/guidance/API/confirmations to prepare fresh production grid capture. Fresh window inventory shows no GRID and no LockApp; no UI input/launch yet. Run g cleanup remains complete; no owner input requested.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -559,6 +567,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Conditional contact/material arithmetic](docs/CONTACT_MATERIALS.md)
 - [Surface mechanics source and defaults](docs/SURFACE_MECHANICS.md)
 - [Original candidate-grid collection](docs/CANDIDATE_GRID.md)
+- [Ordered packed-leaf collision queries](docs/LEAF_QUERIES.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)

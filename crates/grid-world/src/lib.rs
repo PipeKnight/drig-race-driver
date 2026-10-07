@@ -7,6 +7,7 @@ pub mod contact_material;
 pub mod contact_ray;
 pub mod dynamics;
 pub mod finalize;
+pub mod leaf_query;
 pub mod pose;
 pub mod setup;
 pub mod spawn;
