@@ -116,6 +116,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F088 | Original horizontal segment/rectangle culling and rejecting-plane cache reproduced | 240cases/480words exact debug/release; [rectangle culling](docs/RECTANGLE_CULL.md) |
 | F089 | Original packed quadrant/leaf traversal with shared shortened-segment state reproduced | 2,964cases/8,277words exact debug/release across245source chunks; [packed traversal](docs/PACKED_QUERIES.md) |
 | F090 | Complete original untransformed packed shape outputs reproduced | 2,964cases/12,687words exact debug/release including normal/material/miss defaults; [packed shapes](docs/PACKED_SHAPES.md) |
+| F091 | Whole original supplied-grid world query reproduced | 1,991cases/13,911words exact debug/release; strict closest-shape ties, capacity25 and shared cache; [packed world](docs/PACKED_WORLD.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -581,6 +582,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Initial01 misclassifies1515misses from full return register; disassembly proves success inAL, corrected authored C return type. Actual hits already match. Initial Clippy rejects two unnecessary usize casts; corrected. Full workspace tests, formatting and final warnings-denied Clippy pass, packed-shape-final-tests/final-clippy-20261007.txt. Python compiles. Failures retained.
 - Probefab37147fe33ad1a1d60f810450683d9f4bcdda1ff9e02670487d3f663b45e6d; data cache/lazy-constant pages temporarily RW/restored, codeRX/no patches/stubs/live injection. Existing pinned tools reused, archivehash guarded before/after. No game/userfilechanges; runhcleanup complete. Traversal committed separatelydb4e6e8. Continue wholeworld candidate dispatch and strict closest-shape tie selection.
 
+### 7 October 2026 — whole supplied-grid packed world query reproduced
+
+- Added packed_world API/private CLI/probe/validator. Whole original96b7f0 with collector/type11dispatch/packedquery executes over retained grid and source nodes/leaves; no stubs/codepatch. Original candidate order/cap25, full segment per shape, shared cull cache, strict closest fraction/first equal-shape selection reproduced. **1,991cases/13,911words exact debug/release**,1046hits/945misses;274multi-candidate and12capacity25cases. Final packed-world-20261007-02/,03/. [Contract](docs/PACKED_WORLD.md).
+- Initial01 rejects dispatch identity before queries because authored guard forgot PE relocation; corrected comparison to mapped address. Authored compile fixes: String newline addition and test temporary material borrow. Failures retained. **84workspace tests**, formatting/warnings-denied Clippy pass, packed-world-final-tests/clippy-20261007.txt. Python compiles. Probea0719efd0b769861a125934ff012f1cc4138098f8cc8ff6c3c979d3a8570e947. Original dispatch table unchanged; isolated data pagesRW/restored; no entry/import/TLS/liveinjection.
+- Source archive/snapshot/grid hashes guarded. Supplied first registry bounds holder/material-code tokens and address relocation; not original registration/population, nonzero transforms or synchronized live contacts. Existing tools reused, no installation/game/userfilechanges afterrunhcleanup. Shape outputs separately committed8d7d161. Grid insertion958470 survey retained20261007T1720307741646Z; continue source population and placement/contact integration.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -616,6 +623,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Horizontal rectangle culling and cache](docs/RECTANGLE_CULL.md)
 - [Original packed quadrant and leaf traversal](docs/PACKED_QUERIES.md)
 - [Whole untransformed packed shape outputs](docs/PACKED_SHAPES.md)
+- [Whole supplied-grid packed world query](docs/PACKED_WORLD.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)

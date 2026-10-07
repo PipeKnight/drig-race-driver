@@ -10,6 +10,7 @@ pub mod finalize;
 pub mod leaf_query;
 pub mod packed_query;
 pub mod packed_shape;
+pub mod packed_world;
 pub mod pose;
 pub mod rectangle_cull;
 pub mod setup;
