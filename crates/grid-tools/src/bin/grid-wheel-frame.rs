@@ -4,8 +4,9 @@ use std::{fs::OpenOptions, io::Write, path::Path};
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-wheel-frame INPUT.tsv local/OUTPUT.tsv".into());
+    let tyre = args.get(2).is_some_and(|v| v == "tyre");
+    if args.len() != 2 && !(args.len() == 3 && tyre) {
+        return Err("usage: grid-wheel-frame INPUT.tsv local/OUTPUT.tsv [tyre]".into());
     }
     let input = Path::new(&args[0]);
     if input.metadata()?.len() > 1024 * 1024 {
@@ -25,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         count += 1;
         let cells: Vec<_> = line.split_whitespace().collect();
         if count > 256
-            || cells.len() != 53
+            || cells.len() != if tyre { 61 } else { 53 }
             || cells[0].len() > 63
             || !cells[0]
                 .bytes()
@@ -48,8 +49,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             |offset| std::array::from_fn(|i| std::array::from_fn(|j| words[offset + i * 4 + j]));
         let result =
             wheel_frame::prepare(matrix(0), matrix(16), matrix(32), words[48..52].try_into()?)?;
+        let tyre_axes = if tyre {
+            Some(wheel_frame::tyre_axes(
+                matrix(0),
+                std::array::from_fn(|w| [words[52 + w * 2], words[53 + w * 2]]),
+            )?)
+        } else {
+            None
+        };
         report += &format!("P\t{}", cells[0]);
-        for frame in result {
+        for (w, frame) in result.into_iter().enumerate() {
             for value in frame
                 .point
                 .into_iter()
@@ -57,6 +66,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .chain(frame.axis)
             {
                 report += &format!("\t{:08x}", value.to_bits());
+            }
+            if let Some(axes) = tyre_axes {
+                for value in axes[w].into_iter().flatten() {
+                    report += &format!("\t{:08x}", value.to_bits());
+                }
             }
         }
         report.push('\n');

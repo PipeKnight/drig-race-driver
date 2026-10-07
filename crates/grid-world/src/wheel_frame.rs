@@ -1,4 +1,4 @@
-//! Four-wheel world geometry before contact queries; extra tyre axes inactive.
+//! Four-wheel world geometry and supplied active tyre-axis preparation.
 use crate::Error;
 
 #[derive(Clone, Copy, Debug)]
@@ -6,6 +6,33 @@ pub struct Frame {
     pub point: [f32; 4],
     pub anchor: [f32; 4],
     pub axis: [f32; 4],
+}
+
+/// Active +70c branch: transform wheel +20/+24 coefficients into two axes.
+/// Their source/input provenance remains the caller's responsibility.
+pub fn tyre_axes(
+    basis: [[f32; 4]; 4],
+    coefficients: [[f32; 2]; 4],
+) -> Result<[[[f32; 4]; 2]; 4], Error> {
+    if basis
+        .iter()
+        .flatten()
+        .chain(coefficients.iter().flatten())
+        .any(|v| !v.is_finite())
+    {
+        return Err(Error("invalid tyre axis inputs"));
+    }
+    let transform = |v: [f32; 4]| {
+        std::array::from_fn(|i| {
+            (v[3] * basis[3][i] + v[1] * basis[1][i]) + (v[2] * basis[2][i] + v[0] * basis[0][i])
+        })
+    };
+    let axes: [[[f32; 4]; 2]; 4] =
+        coefficients.map(|[a, b]| [transform([a, 0., -0. - b, 0.]), transform([b, 0., a, 0.])]);
+    if axes.iter().flatten().flatten().any(|v| !v.is_finite()) {
+        return Err(Error("tyre axes exceed finite range"));
+    }
+    Ok(axes)
 }
 
 /// Supplied affine basis, local wheel centers/axes and displacements. Centers

@@ -1,0 +1,9 @@
+# Supplied active tyre axes (F098)
+
+`wheel_frame::tyre_axes` implements the active context+70c branch in whole original `9c13d0`. Wheel+20/+24 supply two coefficients a,b. The first local axis is `[a,+0,-0-b,+0]`; the second is `[b,+0,a,+0]`. Transform both with the original `(W*row3+Y*row1)+(Z*row2+X*row0)` grouping. Store at context+ C0/D0 per wheel. No normalization or presumed trigonometric relationship is imposed; coefficient provenance remains open.
+
+**216cases/17,280words exact debug/release** against whole original helper, including the earlier point/anchor/suspension-axis outputs. Twelve authored signed-zero controls,24retained inactive-context geometry/coefficient inputs replayed with the active branch enabled,180seeded supplied-basis/coefficient controls. The latter do not assert rigid orientations. Existing inactive mode regresses216cases/10,368words exactly in both profiles.
+
+Evidence `local/behavior/tyre-axes-20261007-01/validation.json`, `02/validation.json`; regressions `wheel-frame-regression-20261007-01/`, `02/`. Probe SHA `7b32dd8bc95e8a10b4b32316a1bf7cff88110242243a9f2fd1dace09881d1762`. Static evidence `tyre-axes-instructions-20261007.json`, `tyre-axes-tail-20261007.json` and `tyre-axes-constants-20261007.json` establishes SIMD order and the negative-zero constant. Initial constants command incorrectly supplied range syntax to the single-word tool; corrected before using its result. No failed comparisons.
+
+`grid-wheel-frame INPUT.tsv local/OUTPUT.tsv tyre` adds eight input words and eight output words per wheel. No patches/stubs/writable mapped pages/entry/import/TLS/live injection. **86workspace tests**, formatting/warnings-denied Clippy pass, `tyre-axes-tests/clippy-20261007.txt`. Existing pinned tools reused; no game/user-file changes. This is direction preparation, not source steering, calibrated active reference state, tyre-force or driving fidelity.

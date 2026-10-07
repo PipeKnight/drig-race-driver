@@ -1,5 +1,5 @@
-/* Whole four-wheel geometry helper with extra tyre axes inactive.
-   x87 53-bit nearest explicitly selected; no stubs or live injection. */
+/* Whole four-wheel geometry helper, optional active tyre-axis branch.
+   No stubs, code patches, writable mapped pages or live injection. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wincrypt.h>
@@ -17,7 +17,7 @@
 typedef void (__fastcall *Initialize)(void *, void *);
 int wmain(int argc,wchar_t **argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
-    if(argc!=4)return 2;
+    int tyre=argc==5&&!wcscmp(argv[4],L"tyre");if(argc!=4&&!tyre)return 2;
     unsigned char *image=map_reference(argv[1]);
     if(!image)return 3;
     FILE *input=NULL;
@@ -37,8 +37,8 @@ int wmain(int argc,wchar_t **argv) {
         size_t length=(size_t)(cursor-start);
         if(!length||length>=sizeof(name)){error=9;break;}
         memcpy(name,start,length);name[length]=0;
-        __declspec(align(16)) float values[52];
-        for(unsigned i=0;i<52;++i) {
+        __declspec(align(16)) float values[60];
+        for(unsigned i=0;i<(tyre?60u:52u);++i) {
             while(*cursor=='\t'||*cursor==' ')++cursor;
             char *stop;unsigned long word=strtoul(cursor,&stop,16);
             if(stop-cursor!=8){error=10;break;}
@@ -51,16 +51,20 @@ int wmain(int argc,wchar_t **argv) {
         memcpy(body+0x15e0,values,64);
         *(unsigned *)(context+0x5d4)=(unsigned)(uintptr_t)body;
         *(unsigned *)(context+0x5d8)=4;
+        context[0x70c]=(unsigned char)tyre;
         for(unsigned w=0;w<4;++w){
             memcpy(body+0x1990+w*0x150,values+16+w*4,16);
             memcpy(context+0x50+w*0x170,values+32+w*4,16);
             memcpy(context+0x64+w*0x170,values+48+w,4);
+            if(tyre)memcpy(body+0x19b0+w*0x150,values+52+w*2,8);
         }
         __try {initialize(context,NULL);}
         __except(EXCEPTION_EXECUTE_HANDLER){fprintf(output,"F\t%s\t%08lx\n",name,GetExceptionCode());error=13;break;}
         fprintf(output,"P\t%s",name);
-        for(unsigned w=0;w<4;++w)for(unsigned j=0;j<12;++j)
-            fprintf(output,"\t%08x",*(unsigned *)(context+0x10+w*0x170+j*4));
+        for(unsigned w=0;w<4;++w){
+            for(unsigned j=0;j<12;++j)fprintf(output,"\t%08x",*(unsigned *)(context+0x10+w*0x170+j*4));
+            if(tyre)for(unsigned j=0;j<8;++j)fprintf(output,"\t%08x",*(unsigned *)(context+0xc0+w*0x170+j*4));
+        }
         fputc('\n',output);
     }
     if(ferror(input)||ferror(output))error=14;

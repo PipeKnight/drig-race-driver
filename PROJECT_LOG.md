@@ -628,6 +628,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Final source-contact-20261007-01/,02/; old uniformmode regression256cases/14336words exactdebug/release track-contact-regression-20261007-01/,02/. Source/fixturehashguarded. No codepatch/stub/liveinjection; authored original material-layout/table offsets still supplied, contextoffset0, originalnumericparser/livecontact/tyreforce fidelity not claimed. Existingtools reused, no installs/game/userfilechanges; runh remains cleaned up. Materialkey logic separatelya7b2807. Continue active tyre force path.
 - **86workspace tests**, fmt/warnings-denied Clippy pass source-contact-tests/clippy-20261007.txt. ProbeSHA3a6587ab29347525fca3f637f3db92f6bd2824998010a79548e505a33ec48c47. No failed comparisons; all8resolved source-record coverage independently checked from retained report.
 
+### 7 October 2026 — active tyre world axes reproduced
+
+- Added wheel_frame::tyre_axes and optional diagnostic activebranch. Whole9c13d0 runs withsuppliedwheel+20/+24coefficients, preserves SIMDgrouping andnegativezero subtraction. **216cases/17280words exact debug/release**; inactive216/10368regressionexactbothprofiles.24retained contexts were inactive; activebranch deliberatelyenabledforreplay, notobservedactive-inputfidelity. [Contract](docs/TYRE_AXES.md).
+- Final tyre-axes-20261007-01/,02/; wheel-frame-regression-20261007-01/,02/. ProbeSHA7b32dd8bc95e8a10b4b32316a1bf7cff88110242243a9f2fd1dace09881d1762. Constants-tool range syntax corrected; nofailedcomparisons. **86workspace tests**, fmt/warnings-deniedClippy pass tyre-axes-tests/clippy-20261007.txt. No patches/stubs/writablemappedpages/liveinjection; no toolsinstalled/game/userfilechanges. Sourcemechanics separately55891fd. Continue friction/activeforce consumers and coefficient/input provenance.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -669,6 +674,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Whole wheel contacts with packed world queries](docs/TRACK_CONTACTS.md)
 - [Raw packed material keys and source-table fallback](docs/PACKED_MATERIAL_KEYS.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
+- [Supplied active tyre direction preparation](docs/TYRE_AXES.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
