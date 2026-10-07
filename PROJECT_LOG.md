@@ -638,6 +638,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added tyre_friction limiter/impulses/rotational response and private wholeactive9c1f60comparison. Neutral springs/damping/coupling/differential/brake/drive increments/responsematrices, realgravity/floorcontact load. **240cases/960wheel evaluations/10560words exact debug/release**,36analytic/12adjacentboundary/192seeded; initial228alsoexact. Not generalcoupled active solver/sourcecoefficient/liveinput fidelity. [Contract](docs/TYRE_FRICTION.md).
 - Final tyre-friction-20261007-02/,03/; probeSHA01d06c4212a9e1174ddb8480e59890840696b00f004956d50d614bb514a9562e. **88workspace tests** pass. InitialClippyrejectsfactor-firstassignments; scopedallowpreservesobservedorder, finalwarningsdenied/fmtpass tyre-friction-final-clippy-20261007.txt. No numericalfailures. Alignedloopresolvesinitialmisalignedtailbyte; constantsverified. No patches/stubs/writablemappedpages/liveinjection/toolinstalls/game/userfilechanges. Tyreaxes separately4bdc33b. Continue active cross-wheel response preparation and force integration.
 
+### 7 October 2026 — active wheel response matrices reproduced
+
+- Added wheel_coupling::prepare_active and optional diagnostic tyre mode. Whole original9e3970 returns all nine suspension/tyre-axis response matrices, baseline tyre speeds and normal secondary projection. **192cases/33024words exact debug/release**; old inactive192/6912regressesexactbothprofiles. Original supplied alternate-inertia side effect checked with double/triple values; native coefficient query immutable.24retained inactive contexts use authored active axes, not synchronized active input evidence. [Contract](docs/TYRE_COUPLING.md).
+- Final tyre-coupling-20261007-01/,02/ and wheel-coupling-regression-20261007-01/,02/; probeSHAd078bd94b795f6b0170495749ee25bf52a421256605d5aafc5e46d01379656ca. **88workspace tests**, fmt/warnings-denied Clippy pass tyre-coupling-tests/clippy-20261007.txt. No failed comparisons/checks. Code RX/no patches/stubs/live injection; private lazy page restored. Tools reused, no game/userfilechanges. Friction separately2bbe70c; continue coupled active wheel step with prepared response matrices and supplied drive conditions.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -681,6 +686,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Supplied active tyre direction preparation](docs/TYRE_AXES.md)
 - [Supplied active tyre friction and rotational response](docs/TYRE_FRICTION.md)
+- [Active suspension/tyre response matrices](docs/TYRE_COUPLING.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)

@@ -7,8 +7,9 @@ use std::{fs::OpenOptions, io::Write, path::Path};
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-wheel-coupling INPUT.tsv local/OUTPUT.tsv".into());
+    let tyre = args.get(2).is_some_and(|v| v == "tyre");
+    if args.len() != 2 && !(args.len() == 3 && tyre) {
+        return Err("usage: grid-wheel-coupling INPUT.tsv local/OUTPUT.tsv [tyre]".into());
     }
     let input = Path::new(&args[0]);
     if input.metadata()?.len() > 1024 * 1024 {
@@ -28,7 +29,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         count += 1;
         let cells: Vec<_> = line.split_whitespace().collect();
         if count > 256
-            || cells.len() != 77
+            || cells.len() != if tyre { 117 } else { 77 }
             || cells[0].len() > 63
             || !cells[0]
                 .bytes()
@@ -75,7 +76,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .expect("four-word projection"),
             }
         });
-        let result = wheel_coupling::prepare(body, state, wheels)?;
+        let active = if tyre {
+            Some(wheel_coupling::prepare_active(
+                body,
+                state,
+                wheels,
+                std::array::from_fn(|w| {
+                    std::array::from_fn(|a| std::array::from_fn(|i| words[76 + w * 10 + a * 4 + i]))
+                }),
+                std::array::from_fn(|w| [words[84 + w * 10], words[85 + w * 10]]),
+            )?)
+        } else {
+            None
+        };
+        let result = if let Some(active) = active {
+            active.normal
+        } else {
+            wheel_coupling::prepare(body, state, wheels)?
+        };
         report += &format!("P\t{}", cells[0]);
         for value in result
             .speeds
@@ -84,6 +102,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .chain(result.secondary.into_iter().flatten())
         {
             report += &format!("\t{:08x}", value.to_bits());
+        }
+        if let Some(active) = active {
+            for value in active.tyre_speeds.into_iter().flatten() {
+                report += &format!("\t{:08x}", value.to_bits());
+            }
+            for source in 0..3 {
+                for target in 0..3 {
+                    if source != 0 || target != 0 {
+                        for value in active.response[source][target].into_iter().flatten() {
+                            report += &format!("\t{:08x}", value.to_bits());
+                        }
+                    }
+                }
+            }
         }
         report.push('\n');
     }

@@ -1,4 +1,4 @@
-"""Conditional four-wheel response preparation, without extra tyre axes."""
+"""Whole four-wheel response preparation, optionally with supplied tyre axes."""
 import argparse
 import hashlib
 import json
@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('output', type=Path)
     parser.add_argument('--profile', choices=['debug', 'release'], default='debug')
+    parser.add_argument('--tyre', action='store_true')
     args = parser.parse_args()
     out = args.output.resolve()
     if not out.is_relative_to((ROOT/'local').resolve()):
@@ -26,7 +27,9 @@ def main():
     identity = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]
     def add(name, parameters, basis, linear, angular, wheels):
         values = parameters+basis+linear+angular+sum(wheels, [])
-        assert len(values)==76 and all(math.isfinite(v) for v in values)
+        if args.tyre:
+            values+=sum([basis[:4]+basis[8:12]+[(-1 if w%2 else 1)*(w+1)*5.,.3+w*.025] for w in range(4)],[])
+        assert len(values)==(116 if args.tyre else 76) and all(math.isfinite(v) for v in values)
         cases.append((name, [struct.unpack('<I', struct.pack('<f', v))[0] for v in values]))
 
     for i in range(8):
@@ -92,6 +95,7 @@ def main():
     for executable, arguments in [
         (ROOT/'local/behavior/wheel-coupling-probe.exe',[image,requests,out/'original.tsv']),
         (ROOT/f'target/{args.profile}/grid-wheel-coupling.exe',[requests,out/'native.tsv'])]:
+        if args.tyre:arguments.append('tyre')
         result=subprocess.run([str(executable),*map(str,arguments)],cwd=ROOT,capture_output=True,text=True,timeout=30)
         executions.append({'path':str(executable),'sha256':digest(executable),'exit':result.returncode,'stdout':result.stdout,'stderr':result.stderr})
         if result.returncode:
@@ -101,7 +105,7 @@ def main():
         results={}
         for line in path.read_text().splitlines():
             row=line.split('\t')
-            assert row[0]=='P' and len(row)==38 and row[1] not in results
+            assert row[0]=='P' and len(row)==(174 if args.tyre else 38) and row[1] not in results
             results[row[1]]=row[2:]
         return results
     original,native=rows(out/'original.tsv'),rows(out/'native.tsv')
@@ -110,7 +114,7 @@ def main():
     for name,_ in cases:
         differences=[{'field':i,'original':a,'native':b} for i,(a,b) in enumerate(zip(original[name],native[name])) if a!=b]
         comparisons.append({'name':name,'exact':not differences,'differences':differences})
-    total=len(cases)*36
+    total=len(cases)*(172 if args.tyre else 36)
     report={'profile':args.profile,'executions':executions,'image_sha256':digest(image),'input_sha256':digest(requests),
             'snapshots':snapshots,'cases':comparisons,'summary':{'cases':len(cases),'exact_cases':sum(c['exact'] for c in comparisons),
             'compared_float_words':total,'exact_float_words':total-sum(len(c['differences']) for c in comparisons)},
@@ -121,6 +125,8 @@ def main():
             'and unchanged velocities/pose. Rust coefficient query does not mutate body. '
             'No point/axis construction, temporary pose prediction, active extra tyre axes, force generation, timing or driving equivalence.'}
     with (out/'validation.json').open('x',encoding='utf-8') as stream:
+        if args.tyre:
+            report['limits']='Whole original9e3970 active branch, supplied tyre axes/body state/spin/radius, nine response matrices and baseline speeds/normal secondary projection. 24retained inactive contexts replayed with authored active axes. Original doubles then triples stored body inertia after copying; probe checks side effect/unchanged pose/velocities. Rust query immutable. No source preparation/differential/drivetrain/activeforce/live/driving claim.'
         json.dump(report,stream,indent=2)
     print(json.dumps(report['summary']))
     assert report['summary']['exact_cases']==len(cases)
