@@ -113,6 +113,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F085 | Supplied ordered packed leaves match original expansion/decoder/kernel and shortening/tie policy | 148cases/819hitwords exact debug/release, 31Donington chunks; [leaf queries](docs/LEAF_QUERIES.md) |
 | F086 | Complete production grid and all245loaded collision chunks matched by full packed geometry | 2407reads succeed, 68,803vertices/119,784triangles exact; [production grid](docs/PRODUCTION_GRID.md) |
 | F087 | Original candidate collection over retained complete production grid reproduced offline | 1,192cases/8,245words exact debug/release; [candidate replay](docs/CANDIDATE_GRID.md) |
+| F088 | Original horizontal segment/rectangle culling and rejecting-plane cache reproduced | 240cases/480words exact debug/release; [rectangle culling](docs/RECTANGLE_CULL.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -559,6 +560,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - SnapshotSHA475fbbaa73cfd25b6bbf33036fcb056b1662db117aa5f95e61d38c468b55befd and fixturehash guarded. Truncated/trailing/width-mismatch fixtures rejected by both authored harness/CLI without output; not original parser equivalence. Prior216authored cases/2,911words rerun exact debug/release, candidate-grid-20261007-05/,06/. Clippy warnings denied/fmt pass, captured-grid-clippy-20261007.txt; Python compiles. Prior78library tests remain latest logic verification.
 - Updated original probesha0df6aa906aaa43157203ec13dfd78562c5a842da0755bb0e5bd2c72cbd26bc8f; existing pinned tools reused. Capture/source linkage committed separatelybf3cd5f. Run h cleanup complete; no new game/settings/profile changes. Continue original rectangle culling and quadtree/packed-shape query.
 
+### 7 October 2026 — original rectangle culling/cache reproduced
+
+- Added rectangle_cull API and private CLI/probe/validator for wholeadb910. f32 near/far clipping, boundary equality, signed zero, rotation from supplied cached plane and cache update only on rejection. **240cases/480words exact debug/release**, final rectangle-cull-20261007-03/,04/:48analytic+192synthetic, independent Python expectation. No stubs/code patches, isolatedcachedata pageRW/restored. [Contract](docs/RECTANGLE_CULL.md).
+- Initial unit test reverses X-min/X-max cache expectations while all240original comparisons already pass. Corrected test against original analytic rows; no branch arithmetic adjustment for that failure. Clippy initially rejects multiplication-by-minus-one spelling; unary finite-input equivalent used and comparisons rerun. **80tests (47formats+33world)**, warnings-denied workspace Clippy/fmt pass; final tests/clippy logs rectangle-cull-final-*-20261007.txt, failed originals retained. Python compiles.
+- Probe0f31a639555522d1d16ad7f780961e5239c9650346349ff82d23b118294282fc; existing pinned tools reused. Captured-grid support committed separately9db1714. No new game/session/settings change; run h cleanup complete. Continue quadrant subdivision and whole packed-shape query.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -591,6 +598,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Original candidate-grid collection](docs/CANDIDATE_GRID.md)
 - [Ordered packed-leaf collision queries](docs/LEAF_QUERIES.md)
 - [Complete production candidate-grid source linkage](docs/PRODUCTION_GRID.md)
+- [Horizontal rectangle culling and cache](docs/RECTANGLE_CULL.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)

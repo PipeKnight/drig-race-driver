@@ -9,6 +9,7 @@ pub mod dynamics;
 pub mod finalize;
 pub mod leaf_query;
 pub mod pose;
+pub mod rectangle_cull;
 pub mod setup;
 pub mod spawn;
 pub mod suspension;
