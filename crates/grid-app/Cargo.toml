@@ -1,0 +1,9 @@
+[package]
+name = "grid-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+grid-formats = { path = "../grid-formats" }
+bevy = { version = "=0.19.1", default-features = false, features = ["3d", "dds", "png"] }

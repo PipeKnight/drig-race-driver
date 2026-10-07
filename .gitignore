@@ -1,0 +1,5 @@
+# Private machine evidence and original-game captures stay local.
+local/
+__pycache__/
+*.pyc
+target/

@@ -1,0 +1,1095 @@
+//! Static reference viewer reading purchased resources without modification.
+use bevy::{
+    app::{AppExit, ScheduleRunnerPlugin},
+    asset::RenderAssetUsages,
+    camera::RenderTarget,
+    image::{
+        CompressedImageFormats, ImageAddressMode, ImageSampler, ImageSamplerDescriptor, ImageType,
+    },
+    mesh::{Indices, PrimitiveTopology},
+    prelude::*,
+    render::{
+        render_resource::{Face, TextureFormat, TextureUsages},
+        view::screenshot::{Screenshot, ScreenshotCaptured},
+    },
+    window::ExitCondition,
+    winit::WinitPlugin,
+};
+use grid_formats::{collision, entities, jpk, material, mesh, ornaments, pssg, scene, texture};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+
+#[derive(Resource)]
+struct Car {
+    parts: Vec<Part>,
+    textures: BTreeMap<String, Vec<u8>>,
+    bindings: BTreeMap<String, String>,
+    center: Vec3,
+    radius: f32,
+    track: bool,
+}
+struct Part {
+    name: String,
+    material: String,
+    mesh: Mesh,
+    matrices: Vec<Mat4>,
+}
+#[derive(Resource)]
+struct Capture {
+    path: PathBuf,
+    target: Option<Handle<Image>>,
+    frames: u32,
+    requested: bool,
+    started: Instant,
+}
+#[derive(Resource, Clone)]
+struct Orbit {
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
+    target: Vec3,
+    scale: f32,
+}
+#[derive(Resource)]
+struct InitialOrbit(Orbit);
+#[derive(Component)]
+struct ViewerCamera;
+
+// Provisional diffuse bindings recovered from executable static tuples.
+fn diffuse(material: &str) -> Option<&'static str> {
+    match material.trim() {
+        "Car Body Paint" | "Matt" | "Shiny Metal" | "Bare Metal" | "Aerials" => {
+            Some("lac_main.tga")
+        }
+        "Window Glass" | "Grills Glass" => Some("lac_glass.tga"),
+        "Cabin" => Some("lac_cabin.tga"),
+        "Wheel" | "Tyre Wall" => Some("lac_wheel_tm.tga"),
+        "Tyre Tread" => Some("lac_tread_tm.tga"),
+        "Suspension" => Some("lac_susp.tga"),
+        "Head Lights Pod" | "Rear Lights Pod" | "Lights Pod Matt" | "Head Lights Glass"
+        | "Rear Lights Glass" | "Discs" | "Grills" => Some("lac_lights.tga"),
+        _ => None,
+    }
+}
+fn read(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let limit = 256 * 1024 * 1024;
+    if file.metadata()?.len() > limit {
+        return Err("resource exceeds viewer limit".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err("resource grew beyond viewer limit".into());
+    }
+    Ok(bytes)
+}
+fn load(
+    root: &Path,
+    lod: &str,
+    track: bool,
+    include_batches: bool,
+) -> Result<Car, Box<dyn std::error::Error>> {
+    let mesh_path = if track {
+        "tracks/europe/donington/tracksplit.pssg"
+    } else {
+        "cars/lac/lac_highLOD.pssg"
+    };
+    let bytes = read(&root.join(mesh_path))?;
+    let tree = pssg::read_tree(&bytes)?;
+    let sources = mesh::read_meshes(&tree)?;
+    let draws = if track {
+        scene::read_static_draws(&tree, &sources)?
+    } else {
+        scene::read_draws(&tree, &sources, lod.as_bytes())?
+    };
+    let mut bindings = BTreeMap::new();
+    if track {
+        for binding in material::read_texture_bindings(&tree)? {
+            if binding.sampler == b"TDiffuseAlphaMap"
+                && bindings
+                    .insert(
+                        String::from_utf8(binding.shader.to_vec())?,
+                        String::from_utf8(binding.texture.to_vec())?,
+                    )
+                    .is_some()
+            {
+                return Err("duplicate diffuse binding".into());
+            }
+        }
+    }
+    let mut parts = Vec::new();
+    let mut bounds = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    let mut triangle_count = 0;
+    let mut fallback_count = 0;
+    let mut omitted_draws = 0;
+    for draw in draws {
+        if track && !include_batches && draw.material == b"batchmaterial" {
+            omitted_draws += 1;
+            continue;
+        }
+        let source = &sources[draw.source];
+        let positions = source.positions[draw.vertices.clone()].to_vec();
+        let normals = if source.normals.is_empty() {
+            vec![]
+        } else {
+            source.normals[draw.vertices.clone()].to_vec()
+        };
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        for p in &positions {
+            let p = Vec3::from_array(scene::transform_point(&draw.transform, *p));
+            bounds.0 = bounds.0.min(p);
+            bounds.1 = bounds.1.max(p);
+        }
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        if !source.texcoords.is_empty() {
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_UV_0,
+                source.texcoords[draw.vertices.clone()].to_vec(),
+            );
+        }
+        triangle_count += draw.indices.len() / 3;
+        mesh.insert_indices(Indices::U16(draw.indices));
+        if normals.is_empty() || normals.iter().any(|n| n.iter().any(|v| !v.is_finite())) {
+            mesh.compute_smooth_normals();
+            fallback_count += 1;
+        } else {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        }
+        parts.push(Part {
+            name: String::from_utf8(draw.id.to_vec())?,
+            material: String::from_utf8(draw.material.to_vec())?,
+            mesh,
+            matrices: vec![Mat4::from_cols_array(&draw.transform)],
+        });
+    }
+    let mut textures = BTreeMap::new();
+    let texture_paths = if track {
+        vec![mesh_path]
+    } else {
+        vec![
+            "cars/lac/livery_00/textures_high/lac_tex_high_00.pssg",
+            "cars/lac/lac_gen_high.pssg",
+        ]
+    };
+    for path in texture_paths {
+        let bytes = read(&root.join(path))?;
+        let tree = pssg::read_tree(&bytes)?;
+        for texture in texture::read_textures(&tree)? {
+            let (dds, levels) = texture.validated_dds();
+            println!(
+                "texture {:?} validated_mip_levels={levels}",
+                String::from_utf8_lossy(texture.id)
+            );
+            if textures
+                .insert(String::from_utf8(texture.id.to_vec())?, dds)
+                .is_some()
+            {
+                return Err("duplicate texture ID".into());
+            }
+        }
+    }
+    for part in &parts {
+        if !track {
+            let name = diffuse(&part.material)
+                .ok_or_else(|| format!("unknown car material {:?}", part.material))?;
+            bindings.insert(part.material.clone(), name.to_string());
+        }
+        let Some(name) = bindings.get(&part.material) else {
+            if track && part.material == "batchmaterial" {
+                continue;
+            }
+            return Err(format!("unresolved diffuse material {:?}", part.material).into());
+        };
+        if !textures.contains_key(name) {
+            return Err(format!("missing diffuse texture: {name}").into());
+        }
+    }
+    println!(
+        "scene track={track} LOD={lod} draws={} omitted_unresolved_batch_draws={omitted_draws} triangles={triangle_count} normal_fallback_draws={fallback_count} bounds={:?}..{:?} textures={}",
+        parts.len(),
+        bounds.0,
+        bounds.1,
+        textures.len()
+    );
+    let mut car = Car {
+        parts,
+        textures,
+        bindings,
+        center: (bounds.0 + bounds.1) * 0.5,
+        radius: (bounds.1 - bounds.0).length() * 0.5,
+        track,
+    };
+    if track {
+        append_objects(root, &mut car)?;
+    }
+    Ok(car)
+}
+fn append_objects(root: &Path, car: &mut Car) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = read(&root.join("tracks/europe/donington/objects.pssg"))?;
+    let tree = pssg::read_tree(&bytes)?;
+    let sources = mesh::read_static_meshes(&tree)?;
+    let draws = scene::read_object_draws(&tree, &sources)?;
+    let placement_bytes = read(&root.join("tracks/europe/donington/route_0/ornaments.bin"))?;
+    let placements = ornaments::read(&placement_bytes)?;
+    let transforms: BTreeMap<_, _> = placements
+        .prototypes
+        .iter()
+        .map(|p| {
+            (
+                format!("{} Root", String::from_utf8_lossy(p.name)),
+                &p.transforms,
+            )
+        })
+        .collect();
+    let mut selected = std::collections::BTreeSet::new();
+    let mut unplaced = std::collections::BTreeSet::new();
+    let mut draw_count = 0;
+    let mut triangles = 0;
+    for binding in material::read_texture_bindings(&tree)? {
+        if binding.sampler == b"TDiffuseAlphaMap" {
+            let name = format!("objects/{}", String::from_utf8(binding.shader.to_vec())?);
+            let container = binding
+                .container
+                .ok_or("object diffuse binding needs a container")?;
+            if ![
+                b"objectstextures.pssg".as_slice(),
+                b"lemans_sponsors.pssg",
+                b"sponsor_minor.pssg",
+                b"sponsor_event.pssg",
+            ]
+            .contains(&container)
+            {
+                return Err("unsupported object texture container".into());
+            }
+            if car
+                .bindings
+                .insert(
+                    name,
+                    format!(
+                        "{}#{}",
+                        String::from_utf8(container.to_vec())?,
+                        String::from_utf8(binding.texture.to_vec())?
+                    ),
+                )
+                .is_some()
+            {
+                return Err("duplicate object diffuse binding".into());
+            }
+        }
+    }
+    for draw in draws {
+        let prototype =
+            String::from_utf8(draw.prototype.ok_or("object prototype absent")?.to_vec())?;
+        let Some(placements) = transforms.get(&prototype) else {
+            unplaced.insert(prototype);
+            continue;
+        };
+        selected.insert(prototype);
+        if placements.is_empty() {
+            continue;
+        }
+        let source = &sources[draw.source];
+        let name = format!("objects/{}", String::from_utf8(draw.material.to_vec())?);
+        if !car.bindings.contains_key(&name) {
+            return Err(format!("unresolved object diffuse binding {name}").into());
+        }
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, source.positions.clone());
+        if !source.texcoords.is_empty() {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, source.texcoords.clone());
+        }
+        mesh.insert_indices(Indices::U16(draw.indices));
+        if source.normals.is_empty() || source.nonfinite_normals != 0 {
+            mesh.compute_smooth_normals();
+        } else {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, source.normals.clone());
+        }
+        let matrices = placements
+            .iter()
+            .map(|placement| Mat4::from_cols_array(&scene::compose(&draw.transform, placement)))
+            .collect::<Vec<_>>();
+        draw_count += matrices.len();
+        triangles += mesh.count_vertices();
+        car.parts.push(Part {
+            name: String::from_utf8(draw.id.to_vec())?,
+            material: name,
+            mesh,
+            matrices,
+        });
+    }
+    for prototype in &placements.prototypes {
+        let name = format!("{} Root", String::from_utf8_lossy(prototype.name));
+        if !prototype.transforms.is_empty() && !selected.contains(&name) {
+            return Err(format!("static prototype has no selected geometry {name}").into());
+        }
+    }
+    for (container, path) in [
+        (
+            "objectstextures.pssg",
+            "tracks/europe/donington/patchup_ot.pssg",
+        ),
+        (
+            "lemans_sponsors.pssg",
+            "tracks/europe/donington/lemans_sponsors.pssg",
+        ),
+        (
+            "sponsor_minor.pssg",
+            "track_sponsors/tag_heuer/sponsor_minor.pssg",
+        ),
+        (
+            "sponsor_event.pssg",
+            "track_sponsors/bridgestone/sponsor_event.pssg",
+        ),
+    ] {
+        let bytes = read(&root.join(path))?;
+        let tree = pssg::read_tree(&bytes)?;
+        for texture in texture::read_textures(&tree)? {
+            let name = format!("{container}#{}", String::from_utf8(texture.id.to_vec())?);
+            let (dds, _) = texture.validated_dds();
+            if let Some(existing) = car.textures.get(&name) {
+                if existing != &dds {
+                    return Err(format!("conflicting shared texture {name}").into());
+                }
+            } else {
+                car.textures.insert(name, dds);
+            }
+        }
+    }
+    for (material, texture) in &car.bindings {
+        if material.starts_with("objects/") && !car.textures.contains_key(texture) {
+            return Err(format!("object texture unresolved {texture}").into());
+        }
+    }
+    println!(
+        "objects static_sources={} placed_draws={draw_count} unique_geometry_vertices={triangles} static_placements={} total_header_instances={} omitted_entity_instances={} textures={}",
+        sources.len(),
+        placements
+            .prototypes
+            .iter()
+            .map(|p| p.transforms.len())
+            .sum::<usize>(),
+        placements.total_instances,
+        placements.total_instances as usize
+            - placements
+                .prototypes
+                .iter()
+                .map(|p| p.transforms.len())
+                .sum::<usize>(),
+        car.textures.len()
+    );
+    println!("unplaced library prototypes={unplaced:?}");
+    append_entities(root, car, &tree, &sources)?;
+    Ok(())
+}
+fn append_entities(
+    root: &Path,
+    car: &mut Car,
+    objects: &pssg::Tree<'_>,
+    sources: &[mesh::Mesh<'_>],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let placement_bytes = read(&root.join("tracks/europe/donington/route_0/objects.ens"))?;
+    let type_bytes = read(&root.join("tracks/europe/donington/objecttypes.pssg"))?;
+    let placement_tree = pssg::read_tree(&placement_bytes)?;
+    let type_tree = pssg::read_tree(&type_bytes)?;
+    let entities = entities::read(&placement_tree, &type_tree)?;
+    let mut placements: BTreeMap<&[u8], Vec<[f32; 16]>> = BTreeMap::new();
+    let mut cloth = 0;
+    let mut boxes = 0;
+    let mut cylinders = 0;
+    let mut links = 0;
+    for entity in &entities {
+        cloth += entity.cloth.len();
+        links += entity.links;
+        for renderable in &entity.renderables {
+            if renderable.container != b"objects.pssg" {
+                return Err("unsupported entity renderable container".into());
+            }
+            placements
+                .entry(renderable.node)
+                .or_default()
+                .push(entity.transform);
+            for shape in &renderable.shapes {
+                match shape.primitive {
+                    entities::Primitive::Box { .. } => boxes += 1,
+                    entities::Primitive::Cylinder { .. } => cylinders += 1,
+                }
+            }
+        }
+    }
+    let mut draw_count = 0;
+    let mut triangles = 0;
+    let closest_lod = scene::read_object_draws(objects, sources)?;
+    let mut provisional_lod_instances = 0;
+    for (node, placements) in &placements {
+        let mut draws = scene::read_renderable_draws(objects, sources, node)?;
+        if draws.is_empty() {
+            // Exact startup renderables containing anchors but no mesh.
+            // Preview intact closest LOD; runtime substitution remains untraced.
+            let prototype: &[u8] = match *node {
+                b"dcushion_green_a01_default_01" => b"cushion_blue Root",
+                b"tyrestack_black_default_01" => b"tyrestack_black Root",
+                _ => {
+                    return Err(format!(
+                        "empty entity renderable {}",
+                        String::from_utf8_lossy(node)
+                    )
+                    .into());
+                }
+            };
+            draws = closest_lod
+                .iter()
+                .filter(|d| d.prototype == Some(prototype))
+                .cloned()
+                .collect();
+            if draws.is_empty() {
+                return Err("provisional intact LOD unavailable".into());
+            }
+            provisional_lod_instances += placements.len();
+            println!(
+                "provisional entity intact LOD {:?} instances={}",
+                String::from_utf8_lossy(prototype),
+                placements.len()
+            );
+        }
+        for draw in draws {
+            let source = &sources[draw.source];
+            let material = format!("objects/{}", String::from_utf8(draw.material.to_vec())?);
+            if !car.bindings.contains_key(&material) {
+                return Err(format!("unresolved entity material {material}").into());
+            }
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, source.positions.clone());
+            if !source.texcoords.is_empty() {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, source.texcoords.clone());
+            }
+            triangles += draw.indices.len() / 3;
+            mesh.insert_indices(Indices::U16(draw.indices));
+            if source.normals.is_empty() || source.nonfinite_normals != 0 {
+                mesh.compute_smooth_normals();
+            } else {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, source.normals.clone());
+            }
+            let matrices = placements
+                .iter()
+                .map(|placement| Mat4::from_cols_array(&scene::compose(&draw.transform, placement)))
+                .collect::<Vec<_>>();
+            draw_count += matrices.len();
+            car.parts.push(Part {
+                name: format!(
+                    "entity/{}/{}",
+                    String::from_utf8_lossy(node),
+                    String::from_utf8_lossy(draw.id)
+                ),
+                material,
+                mesh,
+                matrices,
+            });
+        }
+    }
+    println!(
+        "entities placements={} initial_renderables={} unique_renderables={} placed_draws={draw_count} unique_geometry_triangles={triangles} collision_boxes={boxes} collision_cylinders={cylinders} omitted_cloth_components={cloth} unimplemented_entity_links={links} provisional_lod_instances={provisional_lod_instances}",
+        entities.len(),
+        placements.values().map(Vec::len).sum::<usize>(),
+        placements.len()
+    );
+    Ok(())
+}
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("grid-app: {error}");
+        std::process::exit(1);
+    }
+}
+fn load_collision(root: &Path) -> Result<Car, Box<dyn std::error::Error>> {
+    let bytes = read(&root.join("tracks/europe/donington/route_0/track.jpk"))?;
+    let archive = jpk::inspect(&bytes)?;
+    let mut parts = Vec::new();
+    let mut bounds = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+    let mut vertices = 0;
+    let mut triangles = 0;
+    let mut materials = std::collections::BTreeSet::new();
+    for entry in &archive.entries {
+        if !entry.name.ends_with(b".vcqtc")
+            || entry.uncompressed_size as usize != entry.stored_data.len()
+        {
+            return Err("unsupported track collision entry".into());
+        }
+        let chunk = collision::read_vcqtc(&bytes[entry.stored_data.clone()])?;
+        vertices += chunk.positions.len();
+        triangles += chunk.triangles.len();
+        for &p in &chunk.positions {
+            let p = Vec3::from_array(p);
+            bounds.0 = bounds.0.min(p);
+            bounds.1 = bounds.1.max(p);
+        }
+        for (i, material) in chunk.materials.iter().enumerate() {
+            let indices: Vec<u16> = chunk
+                .triangles
+                .iter()
+                .filter(|t| t.material as usize == i)
+                .flat_map(|t| t.indices)
+                .collect();
+            if indices.is_empty() {
+                continue;
+            }
+            let material = format!(
+                "collision/{}",
+                std::str::from_utf8(material)?.trim_end_matches('\0')
+            );
+            materials.insert(material.clone());
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            );
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, chunk.positions.clone());
+            mesh.insert_indices(Indices::U16(indices));
+            mesh.compute_smooth_normals();
+            parts.push(Part {
+                name: format!("collision/{}", String::from_utf8_lossy(entry.name)),
+                material,
+                mesh,
+                matrices: vec![Mat4::IDENTITY],
+            });
+        }
+    }
+    println!(
+        "collision chunks={} vertices={vertices} triangles={triangles} material_groups={} codes={materials:?} bounds={:?}..{:?}",
+        archive.entries.len(),
+        parts.len(),
+        bounds.0,
+        bounds.1
+    );
+    Ok(Car {
+        parts,
+        textures: BTreeMap::new(),
+        bindings: BTreeMap::new(),
+        center: (bounds.0 + bounds.1) * 0.5,
+        radius: (bounds.1 - bounds.0).length() * 0.5,
+        track: true,
+    })
+}
+fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
+    let coordinates = value
+        .split(',')
+        .map(str::parse::<f32>)
+        .collect::<Result<Vec<_>, _>>()?;
+    if coordinates.len() != 3
+        || coordinates
+            .iter()
+            .any(|v| !v.is_finite() || v.abs() > 100_000.)
+    {
+        return Err("camera vector needs three finite coordinates".into());
+    }
+    Ok(Vec3::new(coordinates[0], coordinates[1], coordinates[2]))
+}
+fn grid_slot(root: &Path, name: &str) -> Result<Mat4, Box<dyn std::error::Error>> {
+    let bytes = read(&root.join("tracks/europe/donington/route_0/grids.pssg"))?;
+    let tree = pssg::read_tree(&bytes)?;
+    let marker = grid_formats::grid::read(&tree, name.as_bytes())?;
+    let transform = marker.horizontal_preview()?;
+    println!(
+        "grid marker {name} raw_matrix={:?} corners={:?} forward={:?}; horizontal preview only, final contact height/offset pending",
+        marker.raw_transform, marker.corners, marker.forward
+    );
+    Ok(Mat4::from_cols_array(&transform))
+}
+fn append_car(
+    root: &Path,
+    lod: &str,
+    car: &mut Car,
+    anchor: Mat4,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut lacetti = load(root, lod, false, false)?;
+    for part in &mut lacetti.parts {
+        part.material = format!("lacetti/{}", part.material);
+        for matrix in &mut part.matrices {
+            *matrix = anchor * *matrix;
+        }
+    }
+    for (name, data) in lacetti.textures {
+        car.textures.insert(format!("lacetti/{name}"), data);
+    }
+    for (name, texture) in lacetti.bindings {
+        car.bindings
+            .insert(format!("lacetti/{name}"), format!("lacetti/{texture}"));
+    }
+    car.parts.extend(lacetti.parts);
+    Ok(())
+}
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut root = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Grid");
+    let mut output = None;
+    let mut lod = String::from("LOD0_");
+    let mut track = false;
+    let mut include_batches = false;
+    let mut reference = false;
+    let mut collision = false;
+    let mut start_view = false;
+    let mut eye = None;
+    let mut target = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--game-root" => root = args.next().ok_or("--game-root needs a path")?.into(),
+            "--render" => {
+                output = Some(PathBuf::from(
+                    args.next().ok_or("--render needs a PNG path")?,
+                ))
+            }
+            "--lod" => lod = args.next().ok_or("--lod needs LOD0_ or LOD1_")?,
+            "--include-batches" => include_batches = true,
+            "--camera" => eye = Some(vector(&args.next().ok_or("--camera needs X,Y,Z")?)?),
+            "--look-at" => target = Some(vector(&args.next().ok_or("--look-at needs X,Y,Z")?)?),
+            "--view" => {
+                start_view = match args
+                    .next()
+                    .ok_or("--view needs overview or start")?
+                    .as_str()
+                {
+                    "overview" => false,
+                    "start" => true,
+                    _ => return Err("unknown view".into()),
+                };
+            }
+            "--scene" => {
+                let scene = args.next().ok_or("--scene needs lacetti or donington")?;
+                track = match scene.as_str() {
+                    "lacetti" => {
+                        collision = false;
+                        reference = false;
+                        false
+                    }
+                    "donington" => {
+                        collision = false;
+                        reference = false;
+                        true
+                    }
+                    "reference" => {
+                        collision = false;
+                        reference = true;
+                        true
+                    }
+                    "collision" => {
+                        collision = true;
+                        reference = false;
+                        true
+                    }
+                    _ => return Err("unknown scene".into()),
+                };
+            }
+            "--help" => {
+                println!(
+                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\nInteractive: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset; Escape exit.\nStatic geometry, provisional PBR materials; collision colors are diagnostic; no driving yet."
+                );
+                return Ok(());
+            }
+            _ => return Err(format!("unknown argument {arg}").into()),
+        }
+    }
+    if lod != "LOD0_" && lod != "LOD1_" {
+        return Err("unsupported LOD selection".into());
+    }
+    let output = output
+        .map(|path| -> Result<PathBuf, Box<dyn std::error::Error>> {
+            if path.extension().is_none_or(|ext| ext != "png") {
+                return Err("render output must be PNG".into());
+            }
+            let parent = path
+                .parent()
+                .ok_or("output needs a parent directory")?
+                .canonicalize()?;
+            if !parent.starts_with(Path::new("local").canonicalize()?) {
+                return Err("game-derived renders must stay under local/".into());
+            }
+            let result = parent.join(path.file_name().ok_or("missing output filename")?);
+            if result.exists() {
+                return Err("refusing to overwrite an existing render".into());
+            }
+            Ok(result)
+        })
+        .transpose()?;
+    if eye.is_some() != target.is_some() {
+        return Err("provide both --camera and --look-at".into());
+    }
+    if start_view && !track {
+        return Err("start view requires a Donington scene".into());
+    }
+    let mut car = if collision {
+        load_collision(&root)?
+    } else {
+        load(&root, &lod, track, include_batches)?
+    };
+    let anchor = if reference || start_view {
+        Some(grid_slot(&root, "slot_00")?)
+    } else {
+        None
+    };
+    if reference {
+        append_car(&root, &lod, &mut car, anchor.unwrap())?;
+    }
+    let mut orbit = if track {
+        Orbit {
+            yaw: -0.4,
+            pitch: 0.85,
+            distance: car.radius * 2.4,
+            target: car.center,
+            scale: car.radius,
+        }
+    } else {
+        Orbit {
+            yaw: -0.75,
+            pitch: 0.25,
+            distance: 7.0,
+            target: Vec3::new(0., 0.65, 0.),
+            scale: 3.0,
+        }
+    };
+    if start_view || reference {
+        let anchor = anchor.unwrap();
+        let at = anchor.transform_point3(Vec3::new(0., 1.0, 0.));
+        let position = anchor.transform_point3(Vec3::new(-8., 6., -12.));
+        let offset = position - at;
+        orbit = Orbit {
+            yaw: offset.x.atan2(offset.z),
+            pitch: (offset.y / offset.length()).asin(),
+            distance: offset.length(),
+            target: at,
+            scale: 6.0,
+        };
+    }
+    if let (Some(position), Some(at)) = (eye, target) {
+        let offset = position - at;
+        if offset.length() < 0.1 {
+            return Err("camera and target too close".into());
+        }
+        orbit = Orbit {
+            yaw: offset.x.atan2(offset.z),
+            pitch: (offset.y / offset.length()).asin(),
+            distance: offset.length(),
+            target: at,
+            scale: (offset.length() / 2.).max(1.),
+        };
+    }
+    let mut app = App::new();
+    if let Some(path) = output {
+        app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: ExitCondition::DontExit,
+                    ..default()
+                })
+                .disable::<WinitPlugin>(),
+        )
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
+            1.0 / 60.0,
+        )))
+        .insert_resource(Capture {
+            path,
+            target: None,
+            frames: 0,
+            requested: false,
+            started: Instant::now(),
+        })
+        .add_systems(Update, capture);
+    } else {
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "GRID independent static resource viewer".into(),
+                resolution: (1280, 800).into(),
+                ..default()
+            }),
+            ..default()
+        }))
+        .add_systems(Update, update_orbit);
+    }
+    let exit = app
+        .insert_resource(car)
+        .insert_resource(InitialOrbit(orbit.clone()))
+        .insert_resource(orbit)
+        .insert_resource(ClearColor(Color::srgb(0.055, 0.07, 0.095)))
+        .add_systems(Startup, setup)
+        .run();
+    if !matches!(exit, AppExit::Success) {
+        return Err("renderer exited with an error".into());
+    }
+    Ok(())
+}
+fn camera_transform(orbit: &Orbit) -> Transform {
+    let target = orbit.target;
+    let offset = Vec3::new(
+        orbit.yaw.sin() * orbit.pitch.cos(),
+        orbit.pitch.sin(),
+        orbit.yaw.cos() * orbit.pitch.cos(),
+    ) * orbit.distance;
+    Transform::from_translation(target + offset).looking_at(target, Vec3::Y)
+}
+// Bevy system parameters are separate ECS borrows, not a public call interface.
+#[allow(clippy::too_many_arguments)]
+fn setup(
+    mut commands: Commands,
+    mut car: ResMut<Car>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    orbit: Res<Orbit>,
+    capture: Option<ResMut<Capture>>,
+    adapter: Res<bevy::render::renderer::RenderAdapterInfo>,
+    device: Res<bevy::render::renderer::RenderDevice>,
+) {
+    println!(
+        "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
+        adapter.name,
+        adapter.backend,
+        adapter.driver,
+        adapter.driver_info,
+        device.features()
+    );
+    assert!(
+        device
+            .features()
+            .contains(bevy::render::render_resource::WgpuFeatures::TEXTURE_COMPRESSION_BC),
+        "viewer requires GPU BC texture support"
+    );
+    let mut texture_handles = BTreeMap::new();
+    for (name, dds) in &car.textures {
+        let image = Image::from_buffer(
+            dds,
+            ImageType::Extension("dds"),
+            CompressedImageFormats::BC,
+            true,
+            if car.track {
+                ImageSampler::Descriptor(ImageSamplerDescriptor {
+                    address_mode_u: ImageAddressMode::Repeat,
+                    address_mode_v: ImageAddressMode::Repeat,
+                    ..ImageSamplerDescriptor::linear()
+                })
+            } else {
+                ImageSampler::Default
+            },
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        )
+        .expect("validated DDS image");
+        texture_handles.insert(name.clone(), images.add(image));
+    }
+    let mut material_handles = BTreeMap::new();
+    let bindings = car.bindings.clone();
+    let track = car.track;
+    for part in car.parts.drain(..) {
+        let material = material_handles
+            .entry(part.material.clone())
+            .or_insert_with(|| {
+                let name = part
+                    .material
+                    .strip_prefix("lacetti/")
+                    .unwrap_or(&part.material)
+                    .trim();
+                let glass = matches!(
+                    name,
+                    "Window Glass" | "Grills Glass" | "Head Lights Glass" | "Rear Lights Glass"
+                );
+                materials.add(StandardMaterial {
+                    base_color_texture: bindings
+                        .get(&part.material)
+                        .map(|texture| texture_handles[texture].clone()),
+                    base_color: if name.starts_with("collision/") {
+                        let rgb = match name.strip_prefix("collision/").unwrap() {
+                            "STDR" => [0.23, 0.25, 0.28],
+                            "GRAS" => [0.3, 0.47, 0.17],
+                            "LGDR" => [0.63, 0.49, 0.32],
+                            "MPDR" => [0.48, 0.51, 0.56],
+                            "RMBL" => [0.82, 0.25, 0.23],
+                            "ROCK" => [0.55, 0.47, 0.39],
+                            "MUD" => [0.27, 0.18, 0.12],
+                            "CONC" => [0.67, 0.68, 0.68],
+                            _ => [1., 0., 1.],
+                        };
+                        Color::srgb(rgb[0], rgb[1], rgb[2])
+                    } else if track && name == "batchmaterial" {
+                        Color::srgb(0.28, 0.32, 0.38)
+                    } else {
+                        Color::WHITE
+                    },
+                    perceptual_roughness: if name == "Car Body Paint" { 0.32 } else { 0.7 },
+                    metallic: if matches!(name, "Wheel" | "Bare Metal" | "Shiny Metal" | "Discs") {
+                        0.6
+                    } else {
+                        0.0
+                    },
+                    alpha_mode: if name.starts_with("objects/") {
+                        AlphaMode::Mask(0.5)
+                    } else if glass {
+                        AlphaMode::Blend
+                    } else {
+                        AlphaMode::Opaque
+                    },
+                    unlit: name.starts_with("collision/"),
+                    double_sided: glass || name.starts_with("collision/"),
+                    cull_mode: if glass || name.starts_with("collision/") {
+                        None
+                    } else {
+                        Some(Face::Back)
+                    },
+                    ..default()
+                })
+            })
+            .clone();
+        let mesh = meshes.add(part.mesh);
+        for matrix in part.matrices {
+            commands.spawn((
+                Name::new(part.name.clone()),
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_matrix(matrix),
+            ));
+        }
+    }
+    if !track {
+        commands.spawn((
+            Mesh3d(meshes.add(Plane3d::default().mesh().size(200.0, 200.0))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.16, 0.19, 0.23),
+                perceptual_roughness: 0.9,
+                ..default()
+            })),
+            Transform::from_xyz(0.0, -0.05, 0.0),
+        ));
+    }
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 18_000.0,
+            shadow_maps_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(-4.0, 8.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+    commands.insert_resource(GlobalAmbientLight {
+        color: Color::WHITE,
+        brightness: 450.0,
+        ..default()
+    });
+    let camera = commands
+        .spawn((Camera3d::default(), camera_transform(&orbit), ViewerCamera))
+        .id();
+    if let Some(mut capture) = capture {
+        let mut image = Image::new_target_texture(1280, 800, TextureFormat::Rgba8UnormSrgb, None);
+        image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+        let target = images.add(image);
+        commands
+            .entity(camera)
+            .insert(RenderTarget::Image(target.clone().into()));
+        capture.target = Some(target);
+    }
+}
+fn capture(mut commands: Commands, mut capture: ResMut<Capture>, mut exit: MessageWriter<AppExit>) {
+    capture.frames += 1;
+    if capture.started.elapsed() > Duration::from_secs(120) {
+        error!("render capture timed out");
+        exit.write(AppExit::error());
+        return;
+    }
+    if capture.frames >= 180 && !capture.requested {
+        capture.requested = true;
+        let path = capture.path.clone();
+        commands
+            .spawn(Screenshot::image(capture.target.as_ref().unwrap().clone()))
+            .observe(
+                move |event: On<ScreenshotCaptured>, mut exit: MessageWriter<AppExit>| {
+                    let result = event
+                        .image
+                        .clone()
+                        .try_into_dynamic()
+                        .map_err(|e| format!("{e:?}"))
+                        .and_then(|image| image.to_rgb8().save(&path).map_err(|e| e.to_string()));
+                    match result {
+                        Ok(()) => {
+                            println!("saved {}", path.display());
+                            exit.write(AppExit::Success);
+                        }
+                        Err(e) => {
+                            error!("capture: {e}");
+                            exit.write(AppExit::error());
+                        }
+                    }
+                },
+            );
+    }
+}
+fn update_orbit(
+    input: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut orbit: ResMut<Orbit>,
+    mut camera: Single<&mut Transform, With<ViewerCamera>>,
+    mut exit: MessageWriter<AppExit>,
+    initial: Res<InitialOrbit>,
+) {
+    let dt = time.delta_secs().min(0.1);
+    let speed = dt
+        * orbit.scale.clamp(1.0, 80.0)
+        * if input.pressed(KeyCode::ShiftLeft) || input.pressed(KeyCode::ShiftRight) {
+            5.0
+        } else {
+            1.0
+        };
+    let forward = *camera.forward();
+    let right = *camera.right();
+    if input.pressed(KeyCode::KeyW) {
+        orbit.target += forward * speed;
+    }
+    if input.pressed(KeyCode::KeyS) {
+        orbit.target -= forward * speed;
+    }
+    if input.pressed(KeyCode::KeyD) {
+        orbit.target += right * speed;
+    }
+    if input.pressed(KeyCode::KeyA) {
+        orbit.target -= right * speed;
+    }
+    if input.pressed(KeyCode::KeyE) {
+        orbit.target.y += speed;
+    }
+    if input.pressed(KeyCode::KeyQ) {
+        orbit.target.y -= speed;
+    }
+    if input.pressed(KeyCode::ArrowLeft) {
+        orbit.yaw -= dt;
+    }
+    if input.pressed(KeyCode::ArrowRight) {
+        orbit.yaw += dt;
+    }
+    if input.pressed(KeyCode::ArrowUp) {
+        orbit.pitch += dt;
+    }
+    if input.pressed(KeyCode::ArrowDown) {
+        orbit.pitch -= dt;
+    }
+    if input.pressed(KeyCode::PageUp) {
+        orbit.distance -= dt * orbit.scale;
+    }
+    if input.pressed(KeyCode::PageDown) {
+        orbit.distance += dt * orbit.scale;
+    }
+    orbit.pitch = orbit.pitch.clamp(-0.1, 1.4);
+    orbit.distance = orbit.distance.clamp(orbit.scale * 0.5, orbit.scale * 8.0);
+    if input.just_pressed(KeyCode::Home) {
+        *orbit = initial.0.clone();
+    }
+    if input.just_pressed(KeyCode::Escape) {
+        exit.write(AppExit::Success);
+    }
+    **camera = camera_transform(&orbit);
+}

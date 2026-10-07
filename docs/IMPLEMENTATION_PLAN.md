@@ -1,0 +1,95 @@
+# Current GRID reverse-engineering and implementation plan
+
+Updated: 7 October 2026, Europe/Kiev. This roadmap is grounded in [our findings](../PROJECT_LOG.md). The [original proposal](reference/GRID_2008_OPEN_SOURCE_PLAN.md) remains background reference. Resource readers and static Lacetti/Donington rendering are implemented; twelve live placement results reproduce exactly from recorded inputs. Source-only alignment, collision policy and driving simulation are the current work.
+
+## Objective and language decision
+
+Implement an independent engine that reads the owner's GRID resources and progressively reproduces driving, racing and the full single-player experience. First supported target: Windows x86-64. The original x86 executable is our behavior reference, not an architecture requirement for the replacement.
+
+**Recommended default: Rust + Bevy**, retaining the owner's original choice. Keep parsers and simulation independent of Bevy so the renderer does not dictate file formats or physics. Use Bevy for application lifecycle, input and rendering integration; recover GRID-specific behavior ourselves.
+
+C++ is a viable alternative, particularly for direct integration with an established native renderer or simulation library. It would require selecting that runtime and defining equivalent module interfaces. It does not remove the main uncertainty: understanding GRID's formats and behavior. C-like decompiler output is evidence, not ready-to-compile original C++ source. Do not switch languages solely because the decompiler prints C.
+
+Use a small C ABI boundary if a justified native dependency is needed. Keep the main implementation in Rust unless a concrete prototype shows that a different choice materially improves the project. Rust 1.99.0 and Bevy 0.19.1 are pinned and validated locally; Cargo.lock records the resolved dependency graph.
+
+## What we already have
+
+- Identified Steam app 12750, build 252066, executable 1.3.0.0, x86/D3D9, with recorded hashes.
+- Preserved the original install. Private reference copy: `C:\Users\debros\Tools\grid-research\grid-compat`.
+- Private Cyrillic-codepage variant loads a race scene. Profile persistence, physical-key driving and AutoHotkey menu/driving control work. Owner confirms Chevrolet Lacetti at Donington Park; traced files confirm Donington route_0. Conditions are recorded in [reference race](REFERENCE_RACE.md). Its unpacked executable is available privately for static analysis.
+- Useful Ghidra, x32dbg, Process Monitor, ProcDump and Python/Capstone operation demonstrated. Rust 1.99.0/MSVC native compilation and execution validated.
+- `grid-formats` and `grid-tools` implement bounded PSSG/JPK framing, recursive trees, selected car/track meshes, BC1/BC3 textures, affine scene assembly, ornaments and entity startup components. Independently checked source bytes and synthetic tests are indexed in the master log; framing coverage remains 222 files.
+- `grid-app` renders both Lacetti LODs, Donington surfaces, 1,985 static scenery placements and 1,045 initial entity visuals. Combined close/start-grid and overview frames pass GPU capture and visual inspection. Original PBR/shader states, cloth, damage and physics remain unimplemented; 156 entity visuals use explicitly provisional intact LODs. See [viewer](STATIC_VIEWER.md), [placements](ORNAMENT_PLACEMENTS.md) and [entities](ENTITY_COMPONENTS.md).
+- Bounded collision/binary XML/progress/tuning readers now include a supported Standard body/wheel parameter prelude. Independent ground queries match 546 source-byte comparisons; the isolated original triangle primitive matches 568 cases bit for bit. The body prelude matches all 44 supported CSVs and 444 live body/wheel words. [Ground contract](GROUND_QUERIES.md), [body parameters](BODY_PARAMETERS.md).
+- Read-only runtime discovery finds the verified twelve-car general manager and 48 wheel records, separately from the indexed rendering manager. The body-to-wrapper pose chain matches all twelve poses; selected velocities retain one observed discrepancy. [Live-state contract](VEHICLE_STATE.md). Original tick timing and force integration remain unresolved.
+- Inventory includes PSSG, JPK, CSV and binary XML. A bounded fresh race-load trace confirms 130 resources, all matching the Steam copies, including `cars/lac` and Donington `route_0`. [Observed dependency map](REFERENCE_DEPENDENCIES.md) gives concrete targets; cached/shared resources and internal container dependencies remain unresolved.
+
+## How decompilation contributes
+
+Work subsystem by subsystem, alongside resource inspection and experiments in the running original. A complete decompilation of every function is not an entry requirement for the first engine milestone.
+
+For each question:
+
+1. **Locate the code.** Search resource paths, field names, strings, imports and cross-references in the private unpacked PE. Follow callers into loaders or consumers. Use the original crash addresses only where they help; recovery is no longer blocked on analyzing that formatter.
+2. **Observe it.** Break at the suspected loader/update routine with x32dbg. Record arguments, buffers, object offsets, inputs and outputs for the selected resource or driving experiment. Label every trace with executable variant/hash and resource hashes.
+3. **Recover a specification.** Reconcile disassembly, Ghidra pseudocode, actual bytes and runtime values. Document structure layouts, units, invariants, update order and unknowns. Inferred names/types remain provisional until supported by evidence.
+4. **Implement it independently.** Write Rust readers or behavior from the specification. Keep raw dumps and game-derived pseudocode private; public source contains our implementation and independently created fixtures.
+5. **Compare it.** Check parsing against observed buffers and independent tools where available; check simulation against repeatable original-game measurements. A plausible screenshot or vehicle model is not sufficient to claim faithful handling.
+
+Initial code targets are resource lookup/decompression, mesh and texture loading, tuning-data consumers, input filtering, simulation timing, vehicle update, collision queries and lap/checkpoint logic. Identify concrete entry points before guessing addresses or field meanings.
+
+Import the private unpacked PE into a new Ghidra project and analyze it using its PE sections/entry point. Keep the existing raw crash-memory project separately: it contains documented uncaptured regions and answers a narrower question.
+
+## Milestones and exit criteria
+
+These preserve the original plan's phase numbering. Research and implementation can overlap once their inputs are known.
+
+| Phase | Concrete work | Exit criterion / present state |
+|---|---|---|
+| 0 — Identify reference | Build, architecture, inventory, hashes and failure reproduction | Identification/reproduction complete; Lacetti/Donington reference confirmed |
+| 1 — Establish tools | Rust/MSVC setup, Cargo smoke build, static PE project and useful native traces | Native builds, partial PE analysis, targeted decompilation and race file tracing work; runtime loader arguments pending |
+| 2 — Reference driving | Select actual car/track, fix race conditions/assists, load and drive/restart | Profile persistence and Lacetti/Donington driving confirmed; route_0 and current conditions recorded; measured repeatability pending |
+| 3 — Resource readers | Trace selected race loads; resolve containers, meshes, textures, materials, tuning, collision and metadata | Car/track geometry, placements and entity startup records verified; collision/tuning and original material semantics in progress |
+| 4 — Scene viewer | Bevy free camera, selected car/track geometry and essential materials | Car/track/scenery images coherent; live camera input and exact reference comparison pending desktop approval; collision treated separately |
+| 5 — Vehicle simulation | Recover timing/input/vehicle mechanisms and compare acceleration, braking, steering, grip and suspension | Measured tolerances agreed from reference variability, plus owner handling comparison |
+| 6 — First playable lap | Input, chase camera, collision, checkpoints, timing, restart and essential sounds | One original car completes repeatable timed laps on one original track in our executable |
+| 7 — Complete short race | Opponents, route/racing lines, starts, position, finish order and collision/damage behavior | A complete race finishes reliably with documented fidelity limits |
+| 8 — Full single player | More content/disciplines, career, sponsors, economy, saves, presentation, replay and Flashback | Each supported mode has end-to-end evidence; feature coverage tracked explicitly |
+| 9 — Releases | Clean-machine runs, input/display/device tests, packaging and compatibility matrix | Versioned engine-only releases with tested claims; Linux/macOS require native validation |
+
+Original multiplayer compatibility is a separate protocol/service investigation. Do not assume it follows from single-player reconstruction. Full coverage remains the project objective; the first timed lap is an intermediate milestone.
+
+## First implementation structure
+
+Start with only these proposed crates:
+
+| Crate | Responsibility |
+|---|---|
+| `grid-formats` | Bounded readers, format structures, synthetic fixtures; no Bevy dependency |
+| `grid-tools` | Resource inspection and dependency reports |
+| `grid-world` | Implemented independent static triangle index and segment queries; no renderer dependency |
+| `grid-app` | Initial viewer; later input, presentation and application integration |
+| `grid-sim` | Add when vehicle work begins: fixed-step state/update logic and comparisons |
+
+Introduce additional asset/render/race/audio/platform modules as their responsibilities become concrete. Do not prebuild an empty framework for every final feature.
+
+Readers must validate counts, offsets, lengths and encodings before indexing/allocating. Preserve unknown fields during research. Determine actual units, coordinate systems and timing; do not assume visible geometry is collision geometry or that a generic vehicle solver matches GRID. Use renderer interpolation with measured simulation timing. Record tick inputs and relevant state to support reproducible comparisons and eventual Flashback; determinism must be tested.
+
+Use original resources directly from the chosen local installation. Keep caches versioned and keyed by data/build hashes; keep our settings and saves outside the Steam directory. Public parser tests use independently created fixtures; purchased-resource integration checks remain local.
+
+## Immediate backlog
+
+1. Reference driving, profile persistence, route_0 mapping and current race conditions are recorded. Use the verified macros for further reference tests; establish repeatability and measure simulation timing before claiming precise physics comparisons. Human-readable layout label and actual display-size reconciliation remain open.
+2. Bounded race-load capture and 130-file dependency list are complete. Extend coverage with a cold process or targeted loader traces only as needed to resolve cached/shared resources and container entries.
+3. The private unpacked PE project is now saved and two car/track candidates decompile; confirm their runtime arguments and loader calls. See [loader research](LOADER_RESEARCH.md). Do not label static candidates as confirmed binary parsers.
+4. Compiler setup, pinned Rust 1.99.0, native smoke build and minimal workspace are complete. Retain the tested build environment for further reader/viewer work.
+5. Wheel geometry and collision bounds are implemented; placement matches 130 controlled cases and twelve actual return boundaries exactly from recorded inputs. Source-only initialization retains two one-ULP X differences. Outer dynamics scheduling/application matches 139 controlled cases with internal solver stubbed; supplied-impulse response (205), conditional suspension (225), point response (253), conditional wheel coupling (192) and coupled substep including floor contacts/travel stops (212) match unstubbed original code. All pass debug/release. Fresh paused/throttle contexts provide input delta values and state observations, not calibrated timing/acceleration. Pose prediction (226) and conditional two-pass finalization (200) also match whole unstubbed original code in debug/release. Initial suspension reader matches all44 Standard sources and whole supplied-record wheel initializer. Preload, runtime setup subset, source ranges/default sliders and constructor cap now reproduce all24 retained suspension/height observations with supplied geometry/dimension operands. Recover production contacts, source deformation, active tyres/input/drivetrain and main timestep. Resolve live extent/deformation/corners, render/body linkage and whole-query policy. [Vehicle update](VEHICLE_UPDATE.md), [live placement](LIVE_SPAWN_CAPTURE.md), [ground queries](GROUND_QUERIES.md) and [live state](VEHICLE_STATE.md) define evidence and limits.
+6. Validate live viewer camera controls when desktop approval is available. Establish repeatable original timing/vehicle measurements before implementing or claiming faithful driving.
+
+Estimate effort after the dependency map and first reader/viewer reveal actual complexity. Handling fidelity, collision, AI, damage and complete progression remain significant unknowns; no reliable full-project finish date is established.
+
+## Development references
+
+Checked for this update: [Bevy setup](https://bevy.org/learn/quick-start/getting-started/setup/) specifies Windows build dependencies; [Rust installation](https://doc.rust-lang.org/book/ch01-01-installation.html) documents toolchain setup. Record selected versions after local validation rather than copying a version from an older example project.
+
+Detailed existing evidence: [Phase 0](PHASE0.md), [toolchain](TOOLCHAIN.md), [encoding workaround and controls](COMPATIBILITY_MEMORY_PATCHES.md). Keep [PROJECT_LOG.md](../PROJECT_LOG.md) as the single progress index.

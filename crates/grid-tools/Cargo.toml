@@ -1,0 +1,10 @@
+[package]
+name = "grid-tools"
+default-run = "grid-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+grid-formats = { path = "../grid-formats" }
+grid-world = { path = "../grid-world" }
