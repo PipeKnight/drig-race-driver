@@ -8,7 +8,7 @@ pub struct Material {
     pub magnitude: f32,
     pub real_proportion: f32,
     pub car_proportion: f32,
-    /// Runtime material +a4; source meaning has not been established.
+    /// Runtime material +a4, loaded from surface MECHANICS depth.
     pub height_offset: f32,
 }
 

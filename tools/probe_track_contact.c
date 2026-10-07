@@ -1,5 +1,5 @@
 /* Whole original four-wheel contact consumer with real source-built world queries.
-   Mechanics values are supplied uniformly to every shape; no live injection. */
+   Mechanics are uniform or supplied in source order and mapped by original raw resolver. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <wincrypt.h>
@@ -54,8 +54,10 @@ static int prepare(unsigned char *chunk,unsigned size,Object *object){
     *(float *)(object->shape+0x25c)=1.f;memcpy(object->header+0x34,chunk+52,nm*4);return 1;
 }
 typedef void (__fastcall *InitializeContacts)(void *,void *,int);
+typedef unsigned *(__fastcall *MaterialLookup)(void *,void *,unsigned);
+typedef struct { __declspec(align(16)) unsigned char data[0xb0]; } SurfaceRecord;
 int wmain(int argc,wchar_t **argv){
-    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=5)return 2;
+    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=5&&argc!=6)return 2;
     unsigned char *image=map_reference(argv[1]);if(!image)return 3;
     DWORD oldgrid,oldcache,oldnormal,ignored;
     if(!VirtualProtect(image+0xe81000-0x400000,0x5000,PAGE_READWRITE,&oldgrid)||!VirtualProtect(image+0xec2000-0x400000,0x1000,PAGE_READWRITE,&oldcache)||!VirtualProtect(image+0xe58000-0x400000,0x1000,PAGE_READWRITE,&oldnormal))return 4;
@@ -83,6 +85,29 @@ int wmain(int argc,wchar_t **argv){
     /* Dispatch table is read-only; verify its actual type-11 entry. */
     if(*(unsigned *)(image+0xe51fd4+11*4-0x400000)!=(unsigned)(uintptr_t)(image+0xb23800-0x400000))return 19;
 
+    unsigned *source_rows=NULL,source_count=0;SurfaceRecord *source_materials=NULL;
+    if(argc==6){
+        FILE *mechanics=NULL;char tag[4];
+        if(_wfopen_s(&mechanics,argv[5],L"rb")||!mechanics)return 40;
+        if(fread(tag,1,4,mechanics)!=4||memcmp(tag,"MEC1",4)||fread(&source_count,4,1,mechanics)!=1||!source_count||source_count>4096)return 41;
+        source_rows=malloc(source_count*32);source_materials=_aligned_malloc(source_count*sizeof(SurfaceRecord),16);
+        if(!source_rows||!source_materials||fread(source_rows,32,source_count,mechanics)!=source_count||fgetc(mechanics)!=EOF||ferror(mechanics)||fclose(mechanics))return 42;
+        memset(source_materials,0,source_count*sizeof(SurfaceRecord));
+        for(unsigned i=0;i<source_count;++i){
+            unsigned *row=source_rows+i*8;if(row[1]>1||row[2]>1)return 43;
+            float parameters[5];memcpy(parameters,row+3,20);for(unsigned j=0;j<5;++j)if(!isfinite(parameters[j]))return 44;
+            source_materials[i].data[0x90]=(unsigned char)row[2];memcpy(source_materials[i].data+0x94,row+3,20);
+        }
+        unsigned key_table[5]={0,(unsigned)(uintptr_t)source_rows,source_count,32,1};
+        MaterialLookup lookup=(MaterialLookup)(image+0xb3b0c0-0x400000);
+        for(unsigned i=0;i<number;++i)for(unsigned j=0;j<*(unsigned *)(objects[i].header+0x20);++j){
+            unsigned *slot=(unsigned *)(objects[i].header+0x34+j*4);unsigned *found=lookup(key_table,NULL,*slot);
+            if(!found||found<source_rows||found>=source_rows+source_count*8||(found-source_rows)%8)return 45;
+            unsigned index=(unsigned)(found-source_rows)/8;if(!source_rows[index*8+1])return 46;
+            *slot=(unsigned)(uintptr_t)source_materials[index].data;
+        }
+    }
+
     unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 37;
     FILE *input=NULL;
     if(_wfopen_s(&input,argv[3],L"r")||!input)return 4;
@@ -95,7 +120,7 @@ int wmain(int argc,wchar_t **argv){
     InitializeContacts initialize=(InitializeContacts)(image+0x9c1660-0x400000);
     char line[8192],name[64];unsigned count=0,error=0;
     while(fgets(line,sizeof(line),input)) {
-        if(++count>256||!strchr(line,'\n')){error=8;break;}
+        if(++count>4096||!strchr(line,'\n')){error=8;break;}
         char *cursor=line,*start=cursor;
         while(*cursor&&*cursor!='\t'&&*cursor!=' ')++cursor;
         size_t length=(size_t)(cursor-start);
@@ -141,7 +166,7 @@ int wmain(int argc,wchar_t **argv){
             memcpy(context+0x7c+w*0x170,values+158+w,4);
             memcpy(context+0x80+w*0x170,values+162+w,4);
         }
-        for(unsigned i=0;i<number;++i)for(unsigned j=0;j<*(unsigned *)(objects[i].header+0x20);++j)*(unsigned *)(objects[i].header+0x34+j*4)=(unsigned)(uintptr_t)material;
+        if(!source_materials)for(unsigned i=0;i<number;++i)for(unsigned j=0;j<*(unsigned *)(objects[i].header+0x20);++j)*(unsigned *)(objects[i].header+0x34+j*4)=(unsigned)(uintptr_t)material;
         *(unsigned *)(image+0xe85b1c-0x400000)=number;*cache=0;
         __try {initialize(context,NULL,values[157]!=0.f);}
         __except(EXCEPTION_EXECUTE_HANDLER){fprintf(output,"F\t%s\t%08lx\n",name,GetExceptionCode());error=13;break;}
@@ -151,11 +176,20 @@ int wmain(int argc,wchar_t **argv){
             for(unsigned j=0;j<4;++j)fprintf(output,"\t%08x",*(unsigned *)(body+0x1990+w*0x150+0xd0+j*4));
             for(unsigned j=0;j<4;++j)fprintf(output,"\t%08x",*(unsigned *)(context+0x40+w*0x170+j*4));
             for(unsigned j=0;j<3;++j)fprintf(output,"\t%08x",*(unsigned *)(body+0x1990+w*0x150+0xc0+j*4)!=0);
+            if(source_materials){
+                unsigned token=*(unsigned *)(body+0x1990+w*0x150+0xc0),index=0;
+                if(token){
+                    uintptr_t base=(uintptr_t)source_materials;
+                    if(token<base||token>=base+source_count*sizeof(SurfaceRecord)||(token-base)%sizeof(SurfaceRecord)){error=47;break;}
+                    index=(unsigned)((token-base)/sizeof(SurfaceRecord))+1;
+                }
+                fprintf(output,"\t%08x",index);
+            }
         }
         fputc('\n',output);
     }
     if(ferror(input)||ferror(output))error=14;
     fclose(input);if(fclose(output))error=15;
     if(!VirtualProtect(image+0xe81000-0x400000,0x5000,oldgrid,&ignored)||!VirtualProtect(image+0xec2000-0x400000,0x1000,oldcache,&ignored)||!VirtualProtect(image+0xe58000-0x400000,0x1000,oldnormal,&ignored))error=36;
-    _aligned_free(objects);free(raw);VirtualFree(image,0,MEM_RELEASE);printf("track_contact_cases=%u error=%u\n",count,error);return error;
+    _aligned_free(source_materials);free(source_rows);_aligned_free(objects);free(raw);VirtualFree(image,0,MEM_RELEASE);printf("track_contact_cases=%u error=%u\n",count,error);return error;
 }

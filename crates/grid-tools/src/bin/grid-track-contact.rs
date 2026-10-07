@@ -1,11 +1,13 @@
-//! Private contact/material comparison with real source world casts and supplied uniform mechanics.
+//! Private contact comparison with real world casts and optional source mechanics.
 use grid_world::{contact_material, contact_ray};
 use std::{fs::OpenOptions, io::Write, path::Path};
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 3 {
-        return Err("usage: grid-track-contact TRACK.jpk INPUT.tsv local/OUTPUT.tsv".into());
+    if !(3..=4).contains(&args.len()) {
+        return Err(
+            "usage: grid-track-contact TRACK.jpk INPUT.tsv local/OUTPUT.tsv [SURFACE.xml]".into(),
+        );
     }
     let input = Path::new(&args[1]);
     if input.metadata()?.len() > 1024 * 1024 {
@@ -25,12 +27,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let track_bytes = std::fs::read(track_path)?;
     let track = grid_tools::track::Track::read(&track_bytes)?;
+    let surfaces = args
+        .get(3)
+        .map(|path| {
+            let path = Path::new(path);
+            if path.metadata()?.len() > 16 * 1024 * 1024 {
+                return Err("surface source exceeds bound".into());
+            }
+            grid_tools::contact_surfaces::Surfaces::read(&std::fs::read(path)?)
+        })
+        .transpose()?;
     let mut report = String::new();
     let mut count = 0;
     for line in std::fs::read_to_string(input)?.lines() {
         count += 1;
         let cells: Vec<_> = line.split_whitespace().collect();
-        if count > 256
+        if count > 4096
             || cells.len() != 167
             || cells[0].len() > 63
             || !cells[0]
@@ -77,6 +89,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         report += &format!("P\t{}", cells[0]);
         for w in 0..4 {
             let hit = track.query(rays[w].start, rays[w].end, &mut cache)?.hit;
+            let selected = match (&surfaces, hit) {
+                (Some(table), Some(h)) => {
+                    let (index, material) = table.contact(h.contact.material)?;
+                    (Some(index), material)
+                }
+                _ => (None, material),
+            };
             let result = contact_material::resolve(contact_material::Input {
                 ray: rays[w],
                 body_y: basis[1],
@@ -84,7 +103,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 query_normal: hit.map_or([0.; 4], |h| h.contact.normal),
                 fraction: hit.map_or(1., |h| h.contact.fraction),
                 hit_present: hit.is_some(),
-                material,
+                material: selected.1,
                 wheel_ordinal: w,
                 speed: words[130],
                 clock: words[131],
@@ -108,6 +127,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             for _ in 0..3 {
                 report += &format!("\t{:08x}", u32::from(result.accepted));
+            }
+            if surfaces.is_some() {
+                report += &format!(
+                    "\t{:08x}",
+                    if result.accepted {
+                        selected.0.unwrap() + 1
+                    } else {
+                        0
+                    }
+                );
             }
         }
         report.push('\n');

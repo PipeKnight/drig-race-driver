@@ -622,6 +622,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Evidence material-key-20261007-01/,02/validation.json; probeSHAf93e58bb148acad4bb78fd3954e378e458a3315570503fd7299b20fffca24475. Source hash guarded; whole resolver, no patches/stubs/live injection. Static search import corrected; mid-instruction garbage/empty refs not interpreted as code evidence. Tools reused, no installs/game/userfilechanges; runh remains cleaned up. Continue source-specific contact mechanics in a separate commit.
 - **86workspace tests**, formatting and warnings-denied Clippy pass; material-key-tests/clippy-20261007.txt. No failed key comparisons. Whole contact/world milestone committed separatelya602333.
 
+### 7 October 2026 — source-specific mechanics joined to actual wheel contacts
+
+- Added shared contact_surfaces adapter and optional surfaceXML input togrid-track-contact. Each selected raw key resolves in source order withF096fallback, explicit missingMECH rejection; depth maps+a4. Originalwhole9c1660/realworldqueries and b3b0c0 execute against independently decoded source fields/stridedkeys. **512cases/2048wheelcasts/30720words exact debug/release**,1201accepted, all8resolved source materials covered including packedMUDNUL→CAR_. Extra accepted-source-index output verifies actual selection. [Contract](docs/TRACK_CONTACTS.md).
+- Final source-contact-20261007-01/,02/; old uniformmode regression256cases/14336words exactdebug/release track-contact-regression-20261007-01/,02/. Source/fixturehashguarded. No codepatch/stub/liveinjection; authored original material-layout/table offsets still supplied, contextoffset0, originalnumericparser/livecontact/tyreforce fidelity not claimed. Existingtools reused, no installs/game/userfilechanges; runh remains cleaned up. Materialkey logic separatelya7b2807. Continue active tyre force path.
+- **86workspace tests**, fmt/warnings-denied Clippy pass source-contact-tests/clippy-20261007.txt. ProbeSHA3a6587ab29347525fca3f637f3db92f6bd2824998010a79548e505a33ec48c47. No failed comparisons; all8resolved source-record coverage independently checked from retained report.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
