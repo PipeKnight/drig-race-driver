@@ -19,7 +19,7 @@ All sampled wheels point to the same material record5303b30. Its short runtime n
 |98|.01|bumpsmagnitude|
 |9c|1|bumpsrealproportion|
 |a0|1|bumpsproportionCarDependent|
-|a4|0|Source meaning unresolved|
+|a4|0|depth (loader proof F083)|
 
 Player radius samples contain five angle0/base-radius pairs per wheel. Current helper consumes these values; the process that creates or changes them is separate. Damage/flatspot interpretation remains unverified.
 

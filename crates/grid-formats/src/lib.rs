@@ -13,6 +13,7 @@ pub mod ornaments;
 pub mod progress;
 pub mod pssg;
 pub mod scene;
+pub mod surface;
 pub mod texture;
 pub mod tuning;
 pub mod vehicle;

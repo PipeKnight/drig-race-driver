@@ -14,7 +14,7 @@ When bump calculation is enabled, material90 chooses time or spatial coordinates
 
 Scale noise by material98, `min(body1648*.1,1)`,1/128 and `(body12ac*materialA0+(1-materialA0))`, preserving each f32 operation. Save new bump to context80. Body1648/12ac semantic provenance remains a caller obligation. Disabled calculation reuses context7c and leaves context80 unchanged; previous/new bump fields are distinct.
 
-Apply material9c*bump plus base floor, then subtract materialA4. Add the wider selected-radius-minus-base result and subtract wheel140 before final f32 storage; the original intermediate f32 store does not pop the wider x87 sum. Source meaning of materialA4/wheel140 and sample generation are still open.
+Apply material9c*bump plus base floor, then subtract materialA4. Add the wider selected-radius-minus-base result and subtract wheel140 before final f32 storage; the original intermediate f32 store does not pop the wider x87 sum. F083 maps materialA4 to source depth; wheel140 provenance and sample generation remain open. See [surface mechanics](SURFACE_MECHANICS.md).
 
 Native input guards enforce finite positive wavelength/radii, four-wheel ordinals, fraction0..1, bounded angular/integer conversions and the existing normal-loop bound. These are authored API constraints, not original parser guarantees. Missing-material branch is outside this API/comparison.
 
