@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 45 format tests; 24 world tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 45 format tests; 27 world tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -107,6 +107,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F079 | Contact casts and normal adjustment match 240 cases /12,480 words debug/release | Original contact consumer and empty-world query execute; call-site observer captures endpoints. Deliberate tilted axes exercise normalization; hits/material/traversal excluded |
 | F080 | Guarded production contact/material and five-sample radius inputs retained for 12 cars before/after a timed throttle | All303 reads in each capture succeed; unsynchronized retained states, [contact reference](docs/CONTACT_REFERENCE.md) |
 | F081 | Independent five-sample angular radius selector matches whole original helper/CRT modulo | 252cases/252words exact debug/release; supplied captured/sample inputs, [wheel radius](docs/WHEEL_RADIUS.md) |
+| F082 | Supplied-hit contact acceptance, material noise/height and radius offsets reproduced | 236cases/13,216words exact debug/release; query fixture replaces original query, [contact arithmetic](docs/CONTACT_MATERIALS.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -505,6 +506,13 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - `wheel_radius::adjustment` and private CLI/probe/validator select nearest angular sample with strict first-tie retention, f32 phase/reflection and wide modulo/subtraction. Whole998470 plus original CRT helper run without stubs or writable mapped pages. **252cases/252words exact debug/release**, `isolated-wheel-radius-20261007-01/`, `02/`;96retained wheel inputs plus156controls. Probe b82f3019b96440d01e79ea848e2b188b923a07ca680f0e0ce690cfbe5b85dd6e. Analytic periodic/tie test passes; sample generation remains separate. [Contract](docs/WHEEL_RADIUS.md).
 - Existing tools reused, no new game launch/settings change. Contact capture committed f37ad07. Radius logic is a separate commit; new material arithmetic remains separate until its validation/docs are recorded.
 
+### 7 October 2026 — conditional contact material arithmetic verified
+
+- Added `contact_material::resolve` and CLI/probe/validator. Strict >.4226182699 acceptance, miss defaults, time/spatial periodic integer bump noise, distinct reused/new bump fields, supplied material/wheel offsets and wide radius combination. Query-result fixture replaces original query call; full original consumer executes around it with original radius/CRT/normal helpers. **236cases/13,216words exact debug/release**, final `isolated-contact-material-20261007-06/`, `07/`;10,384floats+2,832presence flags. No original traversal or synchronized hit fidelity claim. [Contract](docs/CONTACT_MATERIALS.md).
+- Initial01fails54cases/174words in bump/floor output. Switching sqrt to explicit SSE in02 produces identical failures. Temporary coordinate observer03 finds sampling location error: original uses ray start, not center, because9c186a overwrites stack vector. Corrected04/05 pass; temporary observer removed and final06/07 pass. All failed evidence retained. Source materialA4/body12ac/wheel140 provenance remains open.
+- **72tests (45formats+27world)**, formatting and warnings-denied workspace Clippy pass; Python compiles. Logs `contact-material-final-tests-20261007.txt`, `contact-material-final-clippy-20261007.txt`. Probe e88faa6c6a04398380bd9cfa588380f6eef36da74120d301eda03ef8295125c9. Pinned tools reused; no install or new game run. Original preservation2026-10-07T16:00:18Z: all130resources and original exe match (`preservation-20261007-contact-material.json`). Run g cleanup complete.
+- Source baseline bdd85b3, capture/tooling f37ad07, radius f3adc5e are local commits. Contact/material logic is independently committed next; all proprietary evidence remains ignored local/. Continue toward original world traversal and source mechanics mapping without pending user input.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -532,6 +540,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Vehicle update path, internal substeps and controlled dynamics arithmetic](docs/VEHICLE_UPDATE.md)
 - [Guarded production wheel contacts/materials](docs/CONTACT_REFERENCE.md)
 - [Five-sample angular wheel radius selection](docs/WHEEL_RADIUS.md)
+- [Conditional contact/material arithmetic](docs/CONTACT_MATERIALS.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)

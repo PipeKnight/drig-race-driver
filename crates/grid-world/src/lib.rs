@@ -2,6 +2,7 @@
 //! Source triangle order is preserved for stable identity and equal-distance ties.
 use std::{fmt, ops::Range};
 
+pub mod contact_material;
 pub mod contact_ray;
 pub mod dynamics;
 pub mod finalize;
