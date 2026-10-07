@@ -673,6 +673,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added supplied ordered tyre-table factor/cache and speed-clamped material grip. Whole original99c990/998690, **1394cases/4182words exact debug/release**, including1008installed-material conditions,384seededcontrols,2emptytables. **39cases expose prematuref32 rounding**, retained f64intermediate. Source CSV/header/row ordinal adaptation supplied; original CSV loader and body row-selection source not yet executed. [Contract](docs/TYRE_GRIP.md).
 - Evidence finaltyre-grip-20261008-03/,04/ (01/02earlierCLIparsingretained); probeSHAf07bcf8de1d1344d23bf63bd97337d8e2e53682e729107ccf2064290d53d9564. No numericalfailedexperiments; initialClippychunks_exactwarning corrected toas_chunks; **92workspace tests**, fmt/finalwarnings-denied Clippy pass tyre-grip-final-clippy-20261008.txt. Code RX/no patches/stubs, isolatedtabledata protection restored; x87PC53/nearest explicit. Existingtools reused, no game/userfilechanges. Surfaceinputs separatelyacc4a94. Continue originaltyretableloader/selector and downstreamwheelhistory.
 
+### 8 October 2026 — source tyre-table layout reproduced (F106)
+
+- Added bounded independent CSV source reader retaining15ordered keys/13fixedrow slots, first matching rows, absence/blanktermination and f64*storedf32.01 normalization. **41datasets/3641report words exact debug/release** against wholeoriginal9c2dd0/tokenizer/accessor/cleanup. Hostallocator methods plus numericstrtod/handle-generation CRT adapters explicit; originaldecoder/tokenizerunmodified. [Contract](docs/TYRE_TABLE.md).
+- Direct originalCRT diagnostic c0000005afterstagingallocation retained01/original-crt.json; consistent with missing isolatedruntime/TLS/importinit, precise fault not localized; not installedcompatfailure. Adapted01/02exact, no numericalmismatches. ProbeSHA3ac045602e0b461d868187bcb3177b5dea290d2ccdbb60272ca56fabf1e2f893. **93workspace tests**, fmt/warnings-denied Clippy pass tyre-table-tests/clippy-20261008.txt. Existingtools reused, no game/userfilechanges. F105grip separately8eb1133. Next connect source table to verified grip query, then production wheelhistory and force application; bodyrowselector remains supplied/unverifiedlive.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -721,6 +726,8 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Supplied drive, paired/central exchange and braking](docs/WHEEL_ROTATION.md)
 - [Production source tyre selection and runtime flags](docs/TYRE_SELECTION.md)
 - [Production surface force inputs and defaults](docs/FORCE_MECHANICS.md)
+- [Material speed grip and cached tyre-table query](docs/TYRE_GRIP.md)
+- [Source tyre-grip CSV loader and row slots](docs/TYRE_TABLE.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
