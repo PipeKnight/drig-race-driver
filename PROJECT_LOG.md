@@ -120,6 +120,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F092 | Source chunk names reconstruct complete production grid | 78datasets/706,149words exact original debug/release; all1,024captured tiles and872nonemptycell identities match; [population](docs/GRID_POPULATION.md) |
 | F093 | Installed archive directly supplies reconstructed packed collision world | 1,967cases/13,435words exact original debug/release, without captured cells/pointers as Rust inputs; [source world](docs/SOURCE_WORLD.md) |
 | F094 | Source-built packed world supplies exact placement replay | All12retained matrices/192words exact debug/release;108casts; incoming capture values still supplied; [placement](docs/LIVE_SPAWN_CAPTURE.md) |
+| F095 | Whole four-wheel contacts coupled to real packed world queries | 256cases/1,024wheelcasts/14,336words exact debug/release,177accepted; uniform supplied mechanics; [track contacts](docs/TRACK_CONTACTS.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -609,6 +610,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Supplied captured incomingX/Z/heading/wheels remain required here. Earlier sourceonly10/12matrix result andtwoXULP differences remainopen; no roundingfix. Not synchronizedlivequeries/driving/renderbodyfidelity. **85workspace tests**, fmt/warnings-deniedClippy pass packed-placement-tests/clippy-20261007.txt; historicalkernelregression12/12/192exact live-spawn-kernel-regression-20261007/. No failed comparison, Pythoncompiles.
 - Sourceworldloading separately47d5e69. No tools installed, game/userfilechanges; originalpreservation17:30:54Zstill latest. Continue coupling real worldcasts towholefourwheelcontactconsumer and source materialmechanics, then active tyre/input/drivetrain/timing.
 
+### 7 October 2026 — whole contact consumer with actual world queries
+
+- Added grid-track-contact/private unstubbedprobe/validator. Whole original9c1660 invokes realworldcollector/type11dispatch/packednormal/material/radius; no query-result replacement/codepatch/stub. Native sourceworld supplies actual fractions/normals thenverifiedcontact arithmetic. **256cases/1024wheelcasts/14,336words exact debug/release**,177accepted contacts. Final track-contact-20261007-01/,02/. [Contract](docs/TRACK_CONTACTS.md).
+- Oneuniformsuppliedmechanicsrecord percase, contextlookupoffset0, contacttokensnormalizedpresence; no source-specific mechanics/nonzerooffset/preselectedlist/livefidelity/tyreforce claim.236retained fixturecases+20sourcecentroidcontrols; oldfraction/normal/hit inputcolumns ignored. MSVC initiallyrejectsshadowedcursor; renamed beforeexecution. **85workspace tests**, fmt/Clippywarningsdenied pass track-contact-tests/clippy-20261007.txt; nofailedcomparison. Probe499774e8fb6ba6c0a8b03961081ff44c17dc40f6118d9881c5cc6014720d1e9a.
+- Existing tools reused, no game/settings/save changes. Packedplacement separately7f23279. Surface-source investigation discovers nameMUDspace versus packedMUDNUL; follow original key conversion before joiningmechanics. Continue source-specific mechanics then tyre/input/drivetrain/timing.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -647,6 +654,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Whole supplied-grid packed world query](docs/PACKED_WORLD.md)
 - [Source chunk-name grid population](docs/GRID_POPULATION.md)
 - [Installed-source packed collision world](docs/SOURCE_WORLD.md)
+- [Whole wheel contacts with packed world queries](docs/TRACK_CONTACTS.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
