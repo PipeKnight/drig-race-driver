@@ -112,6 +112,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F084 | Supplied collision candidate grid preserves original conversion, traversal and duplicate/cap policy | 216cases/2,911words exact debug/release; authored grid, [candidate collection](docs/CANDIDATE_GRID.md) |
 | F085 | Supplied ordered packed leaves match original expansion/decoder/kernel and shortening/tie policy | 148cases/819hitwords exact debug/release, 31Donington chunks; [leaf queries](docs/LEAF_QUERIES.md) |
 | F086 | Complete production grid and all245loaded collision chunks matched by full packed geometry | 2407reads succeed, 68,803vertices/119,784triangles exact; [production grid](docs/PRODUCTION_GRID.md) |
+| F087 | Original candidate collection over retained complete production grid reproduced offline | 1,192cases/8,245words exact debug/release; [candidate replay](docs/CANDIDATE_GRID.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -551,6 +552,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Full grid exposes old sampler cell attribution bug: read16cells despite width1. Actual memory/shape identities valid but tile/cell labels could refer to adjacent storage. Corrected to min(16,width²), recaptured1644513588531Z and finalfullcoverage1646001077249Z; original1644160164071Z retained. PowerShell parser/Python compile pass. No Rust change; prior78tests remain passing evidence for F085.
 - UI independently confirms reference race loaded and paused, no driving pulse. Owned GRID29672 closed; exact owned idle macro16808 stopped after path/start ticks. All17user files compared: only display config differs; post-config retained, original restored d222c1d1c539452335f00cad35553df18a8128e06afa3c003d8b8b36aad54463. All15saves unchanged, none overwritten. **Run h cleanup complete**, cleanup.json16:46:38Z; no outstanding session/owner input. Preservation16:43:26Z all130resources/originalexe unchanged, preservation-20261007-grid-leaf.json.
 - Source-mapping commit will be separate from candidate-grid and leaf logic. Continue offline captured-grid comparison and original rectangle/quadtree/query behavior.
+
+### 7 October 2026 — retained production-grid collection replayed
+
+- Optional private GRC1 fixture input added to candidate-grid CLI/probe. No library/physics logic change. Whole original96b440/conversion/subdivision runs offline over retained production bounds/widths/exponents/cells; IDs are never dereferenced. **1,192cases/8,245words exact debug/release**, final captured-grid-20261007-03/,04/. Each1024tile center plus32boundaries, capacities/inactive/outside and128synthetic rectangles; independent Python computes expected IDs. [Contract](docs/CANDIDATE_GRID.md).
+- SnapshotSHA475fbbaa73cfd25b6bbf33036fcb056b1662db117aa5f95e61d38c468b55befd and fixturehash guarded. Truncated/trailing/width-mismatch fixtures rejected by both authored harness/CLI without output; not original parser equivalence. Prior216authored cases/2,911words rerun exact debug/release, candidate-grid-20261007-05/,06/. Clippy warnings denied/fmt pass, captured-grid-clippy-20261007.txt; Python compiles. Prior78library tests remain latest logic verification.
+- Updated original probesha0df6aa906aaa43157203ec13dfd78562c5a842da0755bb0e5bd2c72cbd26bc8f; existing pinned tools reused. Capture/source linkage committed separatelybf3cd5f. Run h cleanup complete; no new game/settings/profile changes. Continue original rectangle culling and quadtree/packed-shape query.
 
 ## Next actions
 

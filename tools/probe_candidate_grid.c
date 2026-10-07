@@ -14,8 +14,27 @@
 #include "isolated_reference.h"
 typedef void (__cdecl *Coordinates)(float,float,int *,int *);
 typedef int (__cdecl *Collect)(unsigned *,int,float,float,float,float);
+static unsigned char *read_grid(const wchar_t *path,float *bounds,unsigned *widths,unsigned *exponents,unsigned *pointers){
+    FILE *file=NULL;if(_wfopen_s(&file,path,L"rb")||!file)return NULL;
+    long size;if(fseek(file,0,SEEK_END)||(size=ftell(file))<20||size>5*1024*1024||fseek(file,0,SEEK_SET)){fclose(file);return NULL;}
+    unsigned char *raw=malloc((size_t)size);if(!raw){fclose(file);return NULL;}int ok=fread(raw,1,(size_t)size,file)==(size_t)size;fclose(file);
+    if(!ok||memcmp(raw,"GRC1",4))goto fail;
+    float values[4];memcpy(values,raw+4,16);for(unsigned i=0;i<4;++i)if(!isfinite(values[i]))goto fail;
+    if(values[2]<=values[0]||values[3]<=values[1])goto fail;
+    bounds[0]=values[0];bounds[2]=values[1];bounds[3]=values[2];bounds[5]=values[3];
+    unsigned cursor=20,total=0;
+    for(unsigned i=0;i<1024;++i){
+        if(!inside(cursor,8,(size_t)size))goto fail;memcpy(exponents+i,raw+cursor,4);memcpy(widths+i,raw+cursor+4,4);cursor+=8;
+        if(exponents[i]>6||widths[i]!=(1u<<exponents[i]))goto fail;
+        unsigned length=widths[i]*widths[i]*4;total+=length;
+        if(total>4*1024*1024||!inside(cursor,length,(size_t)size))goto fail;
+        pointers[i]=(unsigned)(uintptr_t)(raw+cursor);cursor+=length;
+    }
+    if(cursor!=(unsigned)size)goto fail;return raw;
+fail:free(raw);return NULL;
+}
 int wmain(int argc,wchar_t **argv){
-    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
+    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4&&argc!=5)return 2;
     unsigned char *image=map_reference(argv[1]);if(!image)return 3;
     DWORD old,ignored;if(!VirtualProtect(image+0xe81000-0x400000,0x5000,PAGE_READWRITE,&old))return 4;
     unsigned *widths=(unsigned *)(image+0xe81af8-0x400000),*exponents=(unsigned *)(image+0xe82af8-0x400000),*pointers=(unsigned *)(image+0xe84af8-0x400000);
@@ -23,6 +42,7 @@ int wmain(int argc,wchar_t **argv){
     wrapper[2]=(unsigned)(uintptr_t)object;*(unsigned *)(object+0x244)=(unsigned)(uintptr_t)bounds;
     *(unsigned *)(image+0xe83af8-0x400000)=(unsigned)(uintptr_t)wrapper;
     unsigned cells[1024][64];for(unsigned i=0;i<1024;++i)pointers[i]=(unsigned)(uintptr_t)cells[i];
+    unsigned char *grid=NULL;if(argc==5){grid=read_grid(argv[4],bounds,widths,exponents,pointers);if(!grid)return 21;}
     FILE *input=NULL;if(_wfopen_s(&input,argv[2],L"r")||!input)return 5;
     HANDLE h=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(h==INVALID_HANDLE_VALUE)return 6;
     int descriptor=_open_osfhandle((intptr_t)h,_O_TEXT);if(descriptor<0){CloseHandle(h);return 7;}
@@ -30,7 +50,7 @@ int wmain(int argc,wchar_t **argv){
     Coordinates coordinates=(Coordinates)(image+0x96b390-0x400000);Collect collect=(Collect)(image+0x96b440-0x400000);
     char line[2048],name[64];unsigned count=0,error=0;
     while(fgets(line,sizeof(line),input)){
-        if(++count>256||!strchr(line,'\n')){error=9;break;}
+        if(++count>4096||!strchr(line,'\n')){error=9;break;}
         char *cursor=line,*begin=cursor;while(*cursor&&*cursor!='\t')++cursor;
         size_t n=(size_t)(cursor-begin);if(!n||n>=sizeof(name)){error=10;break;}memcpy(name,begin,n);name[n]=0;
         unsigned words[12];for(unsigned i=0;i<12;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *end;words[i]=strtoul(cursor,&end,16);if(end-cursor!=8){error=11;break;}cursor=end;}
@@ -38,11 +58,12 @@ int wmain(int argc,wchar_t **argv){
         float values[8];memcpy(values,words,32);for(unsigned i=0;i<8;++i)if(!isfinite(values[i]))error=13;
         unsigned capacity=words[8],seed=words[9],exponent=words[10],active=words[11];
         if(error||capacity>25||seed>1000||exponent>3||active>1||values[2]<=values[0]||values[3]<=values[1]||values[4]>values[6]||values[5]>values[7]){error=14;break;}
-        bounds[0]=values[0];bounds[2]=values[1];bounds[3]=values[2];bounds[5]=values[3];
+        if(grid){if(bounds[0]!=values[0]||bounds[2]!=values[1]||bounds[3]!=values[2]||bounds[5]!=values[3]){error=22;break;}}
+        else{bounds[0]=values[0];bounds[2]=values[1];bounds[3]=values[2];bounds[5]=values[3];}
         for(unsigned i=4;i<8;++i){unsigned a=(i-4)%2;float q=((values[i]-values[a])/(values[a+2]-values[a]))*65536.0f;if(!isfinite(q)||q<-2147483648.0f||q>=2147483648.0f)error=15;}
         if(error)break;
         unsigned width=1u<<exponent;
-        for(unsigned tile=0;tile<1024;++tile){widths[tile]=width;exponents[tile]=exponent;
+        if(!grid)for(unsigned tile=0;tile<1024;++tile){widths[tile]=width;exponents[tile]=exponent;
             for(unsigned c=0;c<width*width;++c){unsigned key=(tile%32)*13+(tile/32)*7+(c%width)*5+(c/width)*11+seed;cells[tile][c]=key%5?key%(seed%31+1)+1:0;}
         }
         *(unsigned *)(image+0xe85b1c-0x400000)=active;
@@ -55,5 +76,5 @@ int wmain(int argc,wchar_t **argv){
     }
     if(ferror(input)||ferror(output))error=18;if(fclose(input)||fclose(output))error=19;
     if(!VirtualProtect(image+0xe81000-0x400000,0x5000,old,&ignored))error=20;
-    VirtualFree(image,0,MEM_RELEASE);printf("candidate_grid_cases=%u error=%u\n",count,error);return error;
+    free(grid);VirtualFree(image,0,MEM_RELEASE);printf("candidate_grid_cases=%u error=%u\n",count,error);return error;
 }
