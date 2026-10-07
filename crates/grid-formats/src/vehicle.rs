@@ -26,6 +26,14 @@ pub struct StandardBodyParameters {
     pub wheel_groups: [WheelParameterGroup; 2],
 }
 
+/// Select the extra coupled tyre axes used by the original wheel substep.
+/// This is independent of the downstream production tyre force computation.
+/// The original decoder compares CSV column 311 with 0.5 before f32 storage.
+pub fn read_standard_coupled_tyres(row: &Row<'_>) -> Result<bool> {
+    read_standard_body(row)?;
+    Ok(row.number(311)?.unwrap_or(0.) > 0.5)
+}
+
 /// Initial Standard suspension fields. Runtime may subsequently change them;
 /// in particular the observed running damping threshold differs from the CSV.
 #[derive(Debug, Clone, Copy)]
@@ -418,6 +426,28 @@ mod tests {
         let mut fields = vec!["1"; 360];
         fields[2] = "Standard";
         fields
+    }
+
+    #[test]
+    fn coupled_tyre_selection_preserves_precision_at_the_activation_boundary() {
+        let mut fields = fixture();
+        for (value, expected) in [
+            ("", false),
+            ("0.5", false),
+            ("0.5000000000000001", true),
+            ("0.49999999999999994", false),
+        ] {
+            fields[311] = value;
+            assert_eq!(
+                read_standard_coupled_tyres(&Row {
+                    fields: fields.clone()
+                })
+                .unwrap(),
+                expected
+            );
+        }
+        fields[311] = "NaN";
+        assert!(read_standard_coupled_tyres(&Row { fields }).is_err());
     }
 
     #[test]

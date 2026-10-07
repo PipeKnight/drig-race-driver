@@ -6,8 +6,9 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-body-tuning INPUT local/OUTPUT.tsv".into());
+    let tyre = args.get(2).is_some_and(|v| v == "tyre");
+    if args.len() != 2 && !(args.len() == 3 && tyre) {
+        return Err("usage: grid-body-tuning INPUT local/OUTPUT.tsv [tyre]".into());
     }
     let output = Path::new(&args[1]);
     let parent = output.parent().ok_or("missing parent")?.canonicalize()?;
@@ -24,6 +25,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .map(grid_formats::vehicle::read_standard_body)
         .collect::<Result<_, _>>()?;
+    let selection = if tyre {
+        table
+            .rows
+            .iter()
+            .map(grid_formats::vehicle::read_standard_coupled_tyres)
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
     let mut writer = std::io::BufWriter::new(
         OpenOptions::new()
             .write(true)
@@ -31,6 +41,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .open(parent.join(output.file_name().ok_or("missing filename")?))?,
     );
     for (ordinal, p) in parameters.iter().enumerate() {
+        if tyre {
+            writeln!(writer, "T\t{ordinal}\t{}", u8::from(selection[ordinal]))?;
+            continue;
+        }
         writeln!(
             writer,
             "B\t{ordinal}\t{:08x}\t{:08x}\t{:08x}\t{:08x}\t{:08x}",
