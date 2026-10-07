@@ -652,6 +652,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - F101release03/also **240cases/12480words exact**; neutral mode240/10560regressesexactbothprofiles, tyre-friction-regression-20261007-01/,02/. **88workspace tests**, fmt/warnings-denied Clippy pass coupled-tyre-tests/clippy-20261007.txt. ProbeSHAbc744fc181c00ed006c53af099e0cfc40a1dd08c5bee0d808ff8b86228c4d5b1. Preparedmatrixhashpinned/normalizedF100rowsrechecked; CRLF/LF explainsdistinct filehashes. [Final contract](docs/COUPLED_TYRE_STEP.md).
 - No further numericfailures after groupingcorrection; originalcode RX, no patches/stubs/writablemappedpages/liveinjection. Native composes existing normalstep withnewfriction/response. Currentcontactimpulse israwaccumulator onlybecauseinitialzero; generalcallermustsupplycurrentimpulse directly. Existingtools reused, no game/userfilechanges. Drive/brake/differential/sourcecoefficients/livecadence stillopen; continue rotation preparation/activation provenance.
 
+### 7 October 2026 — supplied drive/exchange/brake contributions reproduced
+
+- Added wheel_rotation preparation and drive-mode wholeactive9c1f60comparison. Nonzero supplied drive/brake increments, pair/central exchange bounds/strength/gain, existing gravity/contacts/tyre/crosswheel responses compose. **240cases/960wheels/12480words exact debug/release**; previous zero-drive coupled240/12480regressesexactbothprofiles. No engine/gearing/input/source torque or production activation claim. [Contract](docs/WHEEL_ROTATION.md).
+- Evidence wheel-rotation-20261007-01/,02/; coupled-tyre-regression-20261007-01/,02/. ProbeSHAfc85eee1ae0c5cfc90c22c63ad9469d1900254f72c6a8d0f7b65a3c8bb537285. **90workspace tests**, fmt/finalwarnings-denied Clippy pass wheel-rotation-final-clippy-20261007.txt; initialassignment-orderwarning retained/scopedallow. No numeric failures. No patches/stubs/writablemappedpages/liveinjection/newtool/game/userfilechanges. Coupledtyretail separatelyd4f6077.
+- Activation investigation started: direct+70cstoresurvey20261007T1819460403396Z/field-stores.tsv finds5candidates, only1byte storeb19b59; no body/context identity established. Retained reference contexts are inactive. Need distinguish active kernel from downstream production tyre forces and locate source activation before connecting a driving loop.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -697,6 +703,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Supplied active tyre friction and rotational response](docs/TYRE_FRICTION.md)
 - [Active suspension/tyre response matrices](docs/TYRE_COUPLING.md)
 - [Coupled active tyre response and comparison](docs/COUPLED_TYRE_STEP.md)
+- [Supplied drive, paired/central exchange and braking](docs/WHEEL_ROTATION.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)

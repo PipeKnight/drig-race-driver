@@ -1,11 +1,12 @@
 //! Private active-friction comparison with neutral cross-wheel responses.
-use grid_world::{suspension, tyre_friction, tyre_response, wheel_step};
+use grid_world::{suspension, tyre_friction, tyre_response, wheel_rotation, wheel_step};
 use std::{fs::OpenOptions, io::Write, path::Path};
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let coupled = args.get(2).is_some_and(|v| v == "coupled");
+    let drive = args.get(2).is_some_and(|v| v == "drive");
+    let coupled = drive || args.get(2).is_some_and(|v| v == "coupled");
     if args.len() != 2 && !(args.len() == 3 && coupled) {
-        return Err("usage: grid-tyre-friction INPUT.tsv local/OUTPUT.tsv [coupled]".into());
+        return Err("usage: grid-tyre-friction INPUT.tsv local/OUTPUT.tsv [coupled|drive]".into());
     }
     let input = Path::new(&args[0]);
     if input.metadata()?.len() > 1024 * 1024 {
@@ -17,7 +18,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let fields: Vec<_> = line.split_whitespace().collect();
         count += 1;
         if count > 4096
-            || fields.len() != if coupled { 208 } else { 44 }
+            || fields.len()
+                != if drive {
+                    226
+                } else if coupled {
+                    208
+                } else {
+                    44
+                }
             || fields[0].len() > 63
             || !fields[0]
                 .bytes()
@@ -82,6 +90,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let suspension_impulses =
             suspension::impulses(wheels.map(|w| w.suspension), 1., values[0])?;
         let wheels = wheel_step::step(wheels, response[0][0], secondary, 1., values[0], values[1])?;
+        let rotation = std::array::from_fn(|w| wheel_rotation::Wheel {
+            spin: values[5 + w * 10],
+            rate: values[11 + w * 10],
+            inertia: values[6 + w * 10],
+            drive_delta: if drive { values[207 + w] } else { 0. },
+            brake_delta: if drive { values[211 + w] } else { 0. },
+        });
+        let rotation = if drive {
+            wheel_rotation::prepare(
+                rotation,
+                std::array::from_fn(|e| wheel_rotation::Exchange {
+                    lower: values[215 + e * 3],
+                    upper: values[216 + e * 3],
+                    strength: values[217 + e * 3],
+                }),
+                values[224],
+                values[0],
+            )?
+        } else {
+            rotation
+        };
         let prepared: [tyre_response::Wheel; 4] = std::array::from_fn(|w| {
             let v = &values[3 + w * 10..3 + (w + 1) * 10];
             tyre_response::Wheel {
@@ -91,13 +120,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 tyre: tyre_friction::Input {
                     normal_impulse: wheels[w].contact_raw,
                     radius: v[1],
-                    spin: v[2],
+                    spin: rotation[w].spin,
                     inertia: v[3],
                     normal_scale: v[4],
                     lateral_denominator: v[5],
                     lateral: v[6],
                     displacement: v[7],
-                    rate: v[8],
+                    rate: rotation[w].rate,
                     strength: v[9],
                     slide: values[2],
                     delta: values[0],

@@ -13,7 +13,7 @@ def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 def word(value):return struct.unpack('<I',struct.pack('<f',value))[0]
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('output',type=Path);parser.add_argument('--profile',choices=['debug','release'],default='debug');parser.add_argument('--coupled',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('output',type=Path);parser.add_argument('--profile',choices=['debug','release'],default='debug');parser.add_argument('--coupled',action='store_true');parser.add_argument('--drive',action='store_true');args=parser.parse_args();args.coupled=args.coupled or args.drive
     out=args.output.resolve();assert out.is_relative_to((ROOT/'local').resolve());out.mkdir(exist_ok=False)
     cases=[]
     # Pure first/second slips, limiter boundary and low/high normal-load scales.
@@ -52,10 +52,21 @@ def main():
         for i,(name,values) in enumerate(cases):
             preload=[(-1 if (i+w)%2 else 1)*.05*(w+1) for w in range(4)]
             cases[i]=(name,values+preload+rows[i%len(rows)])
+    if args.drive:
+        rng=random.Random(102)
+        for i,(name,values) in enumerate(cases):
+            drive=[rng.uniform(-.5,.5) for _ in range(4)]
+            brakes=[rng.uniform(0,30) for _ in range(4)]
+            exchanges=[]
+            for e in range(3):
+                lower=rng.uniform(0,3);exchanges.extend([lower,lower+rng.uniform(.1,10),rng.uniform(0,100)])
+            if i<12:
+                drive=[0.]*4;brakes=[0.,1.,10.,100.];exchanges=[0.,1.,float(i//3)*10.]*3
+            cases[i]=(name,values+drive+brakes+exchanges+[rng.uniform(0,1)])
     requests=out/'input.tsv';requests.write_text(''.join(name+'\t'+'\t'.join(f'{word(v):08x}' for v in values)+'\n' for name,values in cases))
     executions=[]
     for kind,exe,arguments in [('original',ROOT/'local/behavior/tyre-friction-probe.exe',[ROOT/'local/compatibility/grid-unpacked.exe',requests,out/'original.tsv']),('native',ROOT/f'target/{args.profile}/grid-tyre-friction.exe',[requests,out/'native.tsv'])]:
-        if args.coupled:arguments.append('coupled')
+        if args.coupled:arguments.append('drive' if args.drive else 'coupled')
         result=subprocess.run([str(exe),*map(str,arguments)],cwd=ROOT,capture_output=True,text=True,timeout=30)
         executions.append(dict(kind=kind,path=str(exe),sha256=digest(exe),exit=result.returncode,stdout=result.stdout,stderr=result.stderr))
         if result.returncode:(out/'failure.json').write_text(json.dumps(executions,indent=2));raise RuntimeError('Tyre execution failed')
@@ -67,6 +78,8 @@ def main():
     report=dict(profile=args.profile,cases=len(cases),wheel_evaluations=len(cases)*4,words=len(cases)*44,exact=len(cases)-len(differences),executions=executions,input_sha256=digest(requests),differences=differences,limits='Whole original9c1f60 active+70c executes, original gravity/contact impulse supplies load; zero spring/damping/coupling/response matrices, differential strengths/brake/drive increments zero. Supplied friction/spin/inertia/slip/clock coefficients. Compared limiter/impulses/weighted accumulators/rotational response and preceding neutral contact state. No source tyre tables, calibrated live inputs, general coupled active step or driving fidelity.')
     if args.coupled:
         report.update(words=len(cases)*52,matrices_path=str(matrices),matrices_sha256=digest(matrices),limits='Whole original9c1f60 active+70c with supplied prepared nine response matrices/secondary contacts, nonzero spring/preload and tyre impulses. Native suspension/normal contacts/tyre limiter/cross-wheel responses compose. Differential/brake/drive increments zero; damping/bump/axle coupling zero here; no full drivetrain/tyre source/synchronized live/driving fidelity.')
+    if args.drive:
+        report['limits']='Whole original9c1f60 active substep including supplied drive/brake increments, three exchange ranges/strengths/gain, prepared cross-wheel responses, nonzero spring/preload, gravity/contacts/tyre impulses. Native composes independently verified blocks. No engine/gearing/source torque/tyre table/calibrated live/main delta/driving fidelity.'
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:report[k] for k in ['profile','cases','wheel_evaluations','words','exact']}));assert not differences
 
 if __name__=='__main__':main()
