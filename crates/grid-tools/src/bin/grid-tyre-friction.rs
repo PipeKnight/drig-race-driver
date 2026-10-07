@@ -1,10 +1,11 @@
 //! Private active-friction comparison with neutral cross-wheel responses.
-use grid_world::{suspension, tyre_friction, wheel_step};
+use grid_world::{suspension, tyre_friction, tyre_response, wheel_step};
 use std::{fs::OpenOptions, io::Write, path::Path};
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-tyre-friction INPUT.tsv local/OUTPUT.tsv".into());
+    let coupled = args.get(2).is_some_and(|v| v == "coupled");
+    if args.len() != 2 && !(args.len() == 3 && coupled) {
+        return Err("usage: grid-tyre-friction INPUT.tsv local/OUTPUT.tsv [coupled]".into());
     }
     let input = Path::new(&args[0]);
     if input.metadata()?.len() > 1024 * 1024 {
@@ -16,7 +17,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let fields: Vec<_> = line.split_whitespace().collect();
         count += 1;
         if count > 4096
-            || fields.len() != 44
+            || fields.len() != if coupled { 208 } else { 44 }
             || fields[0].len() > 63
             || !fields[0]
                 .bytes()
@@ -39,8 +40,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             suspension: suspension::Wheel {
                 displacement: 0.,
                 speed: 0.,
-                spring: 0.,
-                preload: 0.,
+                spring: if coupled { 1. } else { 0. },
+                preload: if coupled { values[43 + w] } else { 0. },
                 travel_denominator: 1.,
                 damper: 0.,
                 speed_threshold: 1.,
@@ -62,39 +63,70 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             lower: -98.,
             upper: 98.,
         });
-        let wheels =
-            wheel_step::step(wheels, [[0.; 4]; 4], [[0.; 4]; 4], 1., values[0], values[1])?;
-        report += &format!("P\t{}", fields[0]);
-        for (w, wheel) in wheels.iter().enumerate() {
+        let response = if coupled {
+            std::array::from_fn(|s| {
+                std::array::from_fn(|t| {
+                    std::array::from_fn(|w| {
+                        std::array::from_fn(|j| values[47 + (s * 3 + t) * 16 + w * 4 + j])
+                    })
+                })
+            })
+        } else {
+            [[[[0.; 4]; 4]; 3]; 3]
+        };
+        let secondary = if coupled {
+            std::array::from_fn(|w| std::array::from_fn(|j| values[191 + w * 4 + j]))
+        } else {
+            [[0.; 4]; 4]
+        };
+        let suspension_impulses =
+            suspension::impulses(wheels.map(|w| w.suspension), 1., values[0])?;
+        let wheels = wheel_step::step(wheels, response[0][0], secondary, 1., values[0], values[1])?;
+        let prepared: [tyre_response::Wheel; 4] = std::array::from_fn(|w| {
             let v = &values[3 + w * 10..3 + (w + 1) * 10];
-            let result = tyre_friction::resolve(tyre_friction::Input {
-                normal_impulse: wheel.contact_raw,
-                radius: v[1],
-                spin: v[2],
-                inertia: v[3],
-                normal_scale: v[4],
-                lateral_denominator: v[5],
-                lateral: v[6],
-                displacement: v[7],
-                rate: v[8],
-                strength: v[9],
-                slide: values[2],
-                delta: values[0],
-            })?;
+            tyre_response::Wheel {
+                normal: wheels[w],
+                raw: [0.; 2],
+                weighted: [0.; 2],
+                tyre: tyre_friction::Input {
+                    normal_impulse: wheels[w].contact_raw,
+                    radius: v[1],
+                    spin: v[2],
+                    inertia: v[3],
+                    normal_scale: v[4],
+                    lateral_denominator: v[5],
+                    lateral: v[6],
+                    displacement: v[7],
+                    rate: v[8],
+                    strength: v[9],
+                    slide: values[2],
+                    delta: values[0],
+                },
+            }
+        });
+        let resolved = tyre_response::apply(prepared, response, suspension_impulses, values[1])?;
+        report += &format!("P\t{}", fields[0]);
+        for result in resolved {
+            let wheel = result.normal;
             for value in [
                 wheel.contact_raw,
                 wheel.floor,
                 wheel.suspension.speed,
                 wheel.suspension.displacement,
-                result.displacement,
-                0. + result.first_impulse,
-                result.first_impulse * values[1] + 0.,
-                0. + result.second_impulse,
-                result.second_impulse * values[1] + 0.,
-                result.angular_delta + v[2],
-                v[8] - result.angular_delta,
+                result.tyre.displacement,
+                result.raw[0],
+                result.weighted[0],
+                result.raw[1],
+                result.weighted[1],
+                result.tyre.spin,
+                result.tyre.rate,
             ] {
                 report += &format!("\t{:08x}", value.to_bits());
+            }
+            if coupled {
+                for value in [wheel.body_speed, result.tyre.lateral] {
+                    report += &format!("\t{:08x}", value.to_bits());
+                }
             }
         }
         report.push('\n');

@@ -643,6 +643,15 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added wheel_coupling::prepare_active and optional diagnostic tyre mode. Whole original9e3970 returns all nine suspension/tyre-axis response matrices, baseline tyre speeds and normal secondary projection. **192cases/33024words exact debug/release**; old inactive192/6912regressesexactbothprofiles. Original supplied alternate-inertia side effect checked with double/triple values; native coefficient query immutable.24retained inactive contexts use authored active axes, not synchronized active input evidence. [Contract](docs/TYRE_COUPLING.md).
 - Final tyre-coupling-20261007-01/,02/ and wheel-coupling-regression-20261007-01/,02/; probeSHAd078bd94b795f6b0170495749ee25bf52a421256605d5aafc5e46d01379656ca. **88workspace tests**, fmt/warnings-denied Clippy pass tyre-coupling-tests/clippy-20261007.txt. No failed comparisons/checks. Code RX/no patches/stubs/live injection; private lazy page restored. Tools reused, no game/userfilechanges. Friction separately2bbe70c; continue coupled active wheel step with prepared response matrices and supplied drive conditions.
 
+### 7 October 2026 — coupled active wheel step, verification in progress
+
+- Added tyre_response tail and coupled comparison using F100prepared matrices, nonzero springs/preloads, actual normal contacts and tyre impulses. Drive/brake/differential increments zero; source tyre/input timing still open. Initial coupled-tyre-20261007-01/ finds560lateral-speed-only differences across221cases; incorrect old-speed-first grouping corrected against instructions. Debug02/ now **240cases/960wheels/12480words exact**. [In-progress contract](docs/COUPLED_TYRE_STEP.md). Release/regression/workspace checks pending; not yet a committed verified milestone. Prior response matrices separatelyacb2653.
+
+### 7 October 2026 — coupled active wheel step verification complete
+
+- F101release03/also **240cases/12480words exact**; neutral mode240/10560regressesexactbothprofiles, tyre-friction-regression-20261007-01/,02/. **88workspace tests**, fmt/warnings-denied Clippy pass coupled-tyre-tests/clippy-20261007.txt. ProbeSHAbc744fc181c00ed006c53af099e0cfc40a1dd08c5bee0d808ff8b86228c4d5b1. Preparedmatrixhashpinned/normalizedF100rowsrechecked; CRLF/LF explainsdistinct filehashes. [Final contract](docs/COUPLED_TYRE_STEP.md).
+- No further numericfailures after groupingcorrection; originalcode RX, no patches/stubs/writablemappedpages/liveinjection. Native composes existing normalstep withnewfriction/response. Currentcontactimpulse israwaccumulator onlybecauseinitialzero; generalcallermustsupplycurrentimpulse directly. Existingtools reused, no game/userfilechanges. Drive/brake/differential/sourcecoefficients/livecadence stillopen; continue rotation preparation/activation provenance.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -687,6 +696,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Supplied active tyre direction preparation](docs/TYRE_AXES.md)
 - [Supplied active tyre friction and rotational response](docs/TYRE_FRICTION.md)
 - [Active suspension/tyre response matrices](docs/TYRE_COUPLING.md)
+- [Coupled active tyre response and comparison](docs/COUPLED_TYRE_STEP.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
