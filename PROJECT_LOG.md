@@ -108,6 +108,8 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F080 | Guarded production contact/material and five-sample radius inputs retained for 12 cars before/after a timed throttle | All303 reads in each capture succeed; unsynchronized retained states, [contact reference](docs/CONTACT_REFERENCE.md) |
 | F081 | Independent five-sample angular radius selector matches whole original helper/CRT modulo | 252cases/252words exact debug/release; supplied captured/sample inputs, [wheel radius](docs/WHEEL_RADIUS.md) |
 | F082 | Supplied-hit contact acceptance, material noise/height and radius offsets reproduced | 236cases/13,216words exact debug/release; query fixture replaces original query, [contact arithmetic](docs/CONTACT_MATERIALS.md) |
+| F083 | Typed surface mechanics source defaults/clamps/depth and tyre-name mapping | 113rows exact debug/release; original numeric conversion adapter, [surface mechanics](docs/SURFACE_MECHANICS.md) |
+| F084 | Supplied collision candidate grid preserves original conversion, traversal and duplicate/cap policy | 216cases/2,911words exact debug/release; authored grid, [candidate collection](docs/CANDIDATE_GRID.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -520,6 +522,13 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - **74tests (47formats+27world)**, formatting and warnings-denied workspace Clippy pass; Python validator compiles. Logs surface-mechanics-tests-20261007.txt, surface-mechanics-clippy-20261007.txt. Probe11d20a20b482cd74b52e597ad8297dfa838b9ca972226eddaad493adbdc60ad6. Existing Ghidra12.1.4/JDK21.0.9, Rust1.99.0, strict MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14 reused. No install/game launch/profile change. Source hash remains8a23a960ea0ca837ee49bafaab893cff7446c0089c9ca282e131030f4b3d3251 before/after validation.
 - Smooth-dry-tarmac runtime tuple still matches two source codes STDR/SHTR; no unique token identity proof. Next independent investigation is original candidate-grid collection and query selection. Local commits remain separated by behavior, all game-derived evidence ignored.
 
+### 7 October 2026 — original candidate-grid collection reproduced
+
+- Added independent candidate_grid API and private report/probe/validator for original96b440 with original96b390/9583c0/a6a210. Supplied bounds/1024tiles, quantization scale65536, coarse/fine Z-then-X traversal, first-seen unique IDs and capacity25. No shape intersections or original grid construction claimed. [Contract](docs/CANDIDATE_GRID.md).
+- **216cases/2,911words exact debug/release**, final candidate-grid-20261007-03/,04/, including36boundary/inactive/capacity controls+180synthetic. Whole original helper executes without stubs/code patches; authored data range temporarily RW and restored. Probe1f2105f20171d5d8500528dd3d08da6bb7cd8e3842d8da7ffd6050fb5e22bf4b. Production subdivision exponents/full cells remain uncaptured; native exponent≤6 guard authored, fixtures0..3.
+- **76tests (47formats+29world)** pass; formatting passes. Initial Clippy fails on manual modulo predicate; corrected to is_multiple_of, final warnings-denied workspace Clippy passes, both comparisons rerun. Logs candidate-grid-tests-20261007.txt, candidate-grid-clippy-20261007.txt (failed), candidate-grid-final-clippy-20261007.txt. Python validator compiles. Existing pinned tools reused, no install/game/settings changes. Surface mechanics committed separately960e359; this collector will have its own commit.
+- Original packed-shape traversal/closest-hit and token ownership investigation continues using retained decompilation evidence. No pending owner input or session cleanup.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -549,6 +558,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Five-sample angular wheel radius selection](docs/WHEEL_RADIUS.md)
 - [Conditional contact/material arithmetic](docs/CONTACT_MATERIALS.md)
 - [Surface mechanics source and defaults](docs/SURFACE_MECHANICS.md)
+- [Original candidate-grid collection](docs/CANDIDATE_GRID.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
