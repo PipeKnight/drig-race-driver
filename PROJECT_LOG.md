@@ -118,6 +118,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F090 | Complete original untransformed packed shape outputs reproduced | 2,964cases/12,687words exact debug/release including normal/material/miss defaults; [packed shapes](docs/PACKED_SHAPES.md) |
 | F091 | Whole original supplied-grid world query reproduced | 1,991cases/13,911words exact debug/release; strict closest-shape ties, capacity25 and shared cache; [packed world](docs/PACKED_WORLD.md) |
 | F092 | Source chunk names reconstruct complete production grid | 78datasets/706,149words exact original debug/release; all1,024captured tiles and872nonemptycell identities match; [population](docs/GRID_POPULATION.md) |
+| F093 | Installed archive directly supplies reconstructed packed collision world | 1,967cases/13,435words exact original debug/release, without captured cells/pointers as Rust inputs; [source world](docs/SOURCE_WORLD.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -595,6 +596,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Final grid-population-20261007-01/,02/, initial independent source-grid-exploration-20261007.json also matches. No failed comparisons. **85workspace tests**, fmt/warnings-denied Clippy pass, grid-population-tests/clippy-20261007.txt. ProbeSHA2f66ac5dd537530e5ed0fd12a8d6940ad03324123309e1d4974f09688e30ac4d. Existing Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14/Ghidra12.1.4/JDK21.0.9 reused. No installs/game/userfilechanges; runhcleanup complete.
 - Source path depths2:1/3:17/4:103/5:124 imply allexponents0. Name parser stricterthanoriginal; finite/count/alignment/cell guards authored. Not whole originalresource-loader/deallocator or nonzero-transform/content-universal claim. Wholeworld committed separatelyf7f9842. Continue loading sourcebuilt grid directly and placement replay; pointer/cell capture no longer needed as engine runtime input.
 
+### 7 October 2026 — installed-source collision world integrated
+
+- Added shared grid-tools track adapter and grid-track-query. Archive order IDs, owned decoded geometry/node/leaves/materials, namebuilt candidategrid and verified worldquery run directly from purchased Donington JPK. Native triangle identity retained in packed_shape hit for diagnostics. **1,967cases/13,435words exact debug/release**,1030hits/937misses, source-world-20261007-01/,02/. Whole originalquery compares independently rebuilt Pythonfixture; Rust takes no captured cells/pointers. [Contract](docs/SOURCE_WORLD.md).
+- **85workspace tests**, fmt/warnings-denied Clippy pass, source-world-tests/clippy-20261007.txt. No failed comparisons. OriginalworldprobeunchangedSHAa0719efd0b769861a125934ff012f1cc4138098f8cc8ff6c3c979d3a8570e947. No whole originalresource-loader/nonzero-transform/universalcontent/synchronizedlivequery claim. All130Steamresources/originalexe unchanged at17:30:54Z, preservation-20261007-source-world.json. Existing tools reused; no installs/game/userfilechanges.
+- Population committed separately07f6123. Placement replay integration is being kept in a separate commit: preliminary packedmode already matchesall12retainedmatrices/192words; evidence live-spawn-packed-20261007-01/,02/,03/. Full replay record and final diagnostics follow independently.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -632,6 +639,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Whole untransformed packed shape outputs](docs/PACKED_SHAPES.md)
 - [Whole supplied-grid packed world query](docs/PACKED_WORLD.md)
 - [Source chunk-name grid population](docs/GRID_POPULATION.md)
+- [Installed-source packed collision world](docs/SOURCE_WORLD.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)

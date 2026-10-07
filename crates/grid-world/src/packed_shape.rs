@@ -3,6 +3,8 @@ use crate::{Error, packed_query::Mesh, rectangle_cull::Cache, spawn::reference_s
 
 #[derive(Clone, Copy, Debug)]
 pub struct Hit {
+    /// Native identity retained from the verified packed traversal.
+    pub triangle: usize,
     pub fraction: f32,
     pub normal: [f32; 4],
     pub material: [u8; 4],
@@ -44,6 +46,7 @@ pub fn query(
         return Err(Error("packed-shape normal is nonfinite"));
     }
     Ok(Some(Hit {
+        triangle: hit.triangle,
         fraction: hit.fraction,
         normal,
         material: triangle_materials[hit.triangle],

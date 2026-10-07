@@ -1,5 +1,5 @@
-//! Independent static geometry queries. No original GRID query/contact semantics.
-//! Source triangle order is preserved for stable identity and equal-distance ties.
+//! Independent geometry queries and scoped, reference-verified behavior blocks.
+//! The f64 static BVH and packed reference-style queries expose distinct semantics.
 use std::{fmt, ops::Range};
 
 pub mod candidate_grid;
