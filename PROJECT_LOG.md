@@ -111,6 +111,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F083 | Typed surface mechanics source defaults/clamps/depth and tyre-name mapping | 113rows exact debug/release; original numeric conversion adapter, [surface mechanics](docs/SURFACE_MECHANICS.md) |
 | F084 | Supplied collision candidate grid preserves original conversion, traversal and duplicate/cap policy | 216cases/2,911words exact debug/release; authored grid, [candidate collection](docs/CANDIDATE_GRID.md) |
 | F085 | Supplied ordered packed leaves match original expansion/decoder/kernel and shortening/tie policy | 148cases/819hitwords exact debug/release, 31Donington chunks; [leaf queries](docs/LEAF_QUERIES.md) |
+| F086 | Complete production grid and all245loaded collision chunks matched by full packed geometry | 2407reads succeed, 68,803vertices/119,784triangles exact; [production grid](docs/PRODUCTION_GRID.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -537,6 +538,20 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - **78tests (47formats+31world)** pass; formatting/final warnings-denied workspace Clippy pass. Initial Rust rejects leading-dot decimal literals, MSVC rejects signed/unsigned comparison; corrected before execution. First Clippy rejects assignment spelling; corrected and both comparisons rerun. Logs leaf-query-tests-20261007.txt, leaf-query-clippy-20261007.txt (failed), leaf-query-final-clippy-20261007.txt. Python compiles. Initial tail disassembly starts mid-instruction; full-function disassembly is the evidence used. Existing pinned tools reused, no new installation.
 - Candidate-grid commitcfdc2d3 separate from surface960e359 and this leaf logic. Read latest Computer Use26.1002.52244 skill/guidance/API/confirmations to prepare fresh production grid capture. Fresh window inventory shows no GRID and no LockApp; no UI input/launch yet. Run g cleanup remains complete; no owner input requested.
 
+### 7 October 2026 — reference run h opened for grid capture
+
+- Leaf logic committed b5ef6fe. New private run h preparation backs up all17user files and temporarily selects800x600windowed; originals retained at local/reference-race/resume-20261007h/user-before/ with hashes.
+- Computer Use26.1002.52244 plain path launch resolves Steam URI and exposes no GRID window; fresh inventory/native read-only process check confirms no GRID. Documented explicit process identifier retry succeeds. New verified GRID29672 start2026-10-07T16:39:07.6084095Z, private exeSHA b1da1b2d9469fb0c973dbaaad29b230c1567f212c54de849326f80b4aece34a6; session.json retained. Owned macro16808 start2026-10-07T16:39:30.8319327Z, targets exact GRID session, original authored script hash unchanged; macro evidence20261007T1639305386833Z-server.json.
+- **Outstanding cleanup run h:** close owned game/listener after capture, compare all17files, preserve new saves and restore only temporary config after game exit. No original Steam files edited. Production grid capture not yet performed.
+
+### 7 October 2026 — complete production grid matched; run h cleaned up
+
+- Guarded -IncludeGrid extends read-only collision tool with verified live collector/conversion/subdivision bytes,1024tile widths/exponents/contents and every unique type11wrapper's full packed vertices/triangles, bounded per read/total. Final snapshot runtime-collision-20261007T1646001077249Z.json SHA475fbbaa73cfd25b6bbf33036fcb056b1662db117aa5f95e61d38c468b55befd: **2407/2407reads succeed**. All1024width1/exponent0,872nonemptycells,245unique wrappers. Header tables recheck identical, not synchronized physics boundary. [Contract](docs/PRODUCTION_GRID.md).
+- **245/245installed chunks uniquely match full geometry**,68,803vertices/119,784triangles, allXYZscales/offsets exact, all shape transform pointers170zero. Installed archive hash verified before/after against retained manifest. Validator/retained fixture runtime-grid-20261007-01/. Nodes/leaves/material-mechanics/live-wheel ownership not included in this claim.
+- Full grid exposes old sampler cell attribution bug: read16cells despite width1. Actual memory/shape identities valid but tile/cell labels could refer to adjacent storage. Corrected to min(16,width²), recaptured1644513588531Z and finalfullcoverage1646001077249Z; original1644160164071Z retained. PowerShell parser/Python compile pass. No Rust change; prior78tests remain passing evidence for F085.
+- UI independently confirms reference race loaded and paused, no driving pulse. Owned GRID29672 closed; exact owned idle macro16808 stopped after path/start ticks. All17user files compared: only display config differs; post-config retained, original restored d222c1d1c539452335f00cad35553df18a8128e06afa3c003d8b8b36aad54463. All15saves unchanged, none overwritten. **Run h cleanup complete**, cleanup.json16:46:38Z; no outstanding session/owner input. Preservation16:43:26Z all130resources/originalexe unchanged, preservation-20261007-grid-leaf.json.
+- Source-mapping commit will be separate from candidate-grid and leaf logic. Continue offline captured-grid comparison and original rectangle/quadtree/query behavior.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -568,6 +583,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Surface mechanics source and defaults](docs/SURFACE_MECHANICS.md)
 - [Original candidate-grid collection](docs/CANDIDATE_GRID.md)
 - [Ordered packed-leaf collision queries](docs/LEAF_QUERIES.md)
+- [Complete production candidate-grid source linkage](docs/PRODUCTION_GRID.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
