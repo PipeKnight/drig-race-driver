@@ -633,6 +633,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added wheel_frame::tyre_axes and optional diagnostic activebranch. Whole9c13d0 runs withsuppliedwheel+20/+24coefficients, preserves SIMDgrouping andnegativezero subtraction. **216cases/17280words exact debug/release**; inactive216/10368regressionexactbothprofiles.24retained contexts were inactive; activebranch deliberatelyenabledforreplay, notobservedactive-inputfidelity. [Contract](docs/TYRE_AXES.md).
 - Final tyre-axes-20261007-01/,02/; wheel-frame-regression-20261007-01/,02/. ProbeSHA7b32dd8bc95e8a10b4b32316a1bf7cff88110242243a9f2fd1dace09881d1762. Constants-tool range syntax corrected; nofailedcomparisons. **86workspace tests**, fmt/warnings-deniedClippy pass tyre-axes-tests/clippy-20261007.txt. No patches/stubs/writablemappedpages/liveinjection; no toolsinstalled/game/userfilechanges. Sourcemechanics separately55891fd. Continue friction/activeforce consumers and coefficient/input provenance.
 
+### 7 October 2026 — supplied active tyre friction reproduced
+
+- Added tyre_friction limiter/impulses/rotational response and private wholeactive9c1f60comparison. Neutral springs/damping/coupling/differential/brake/drive increments/responsematrices, realgravity/floorcontact load. **240cases/960wheel evaluations/10560words exact debug/release**,36analytic/12adjacentboundary/192seeded; initial228alsoexact. Not generalcoupled active solver/sourcecoefficient/liveinput fidelity. [Contract](docs/TYRE_FRICTION.md).
+- Final tyre-friction-20261007-02/,03/; probeSHA01d06c4212a9e1174ddb8480e59890840696b00f004956d50d614bb514a9562e. **88workspace tests** pass. InitialClippyrejectsfactor-firstassignments; scopedallowpreservesobservedorder, finalwarningsdenied/fmtpass tyre-friction-final-clippy-20261007.txt. No numericalfailures. Alignedloopresolvesinitialmisalignedtailbyte; constantsverified. No patches/stubs/writablemappedpages/liveinjection/toolinstalls/game/userfilechanges. Tyreaxes separately4bdc33b. Continue active cross-wheel response preparation and force integration.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -675,6 +680,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Raw packed material keys and source-table fallback](docs/PACKED_MATERIAL_KEYS.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Supplied active tyre direction preparation](docs/TYRE_AXES.md)
+- [Supplied active tyre friction and rotational response](docs/TYRE_FRICTION.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)

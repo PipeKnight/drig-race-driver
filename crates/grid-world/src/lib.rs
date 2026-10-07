@@ -18,6 +18,7 @@ pub mod setup;
 pub mod spawn;
 pub mod suspension;
 pub mod triangle;
+pub mod tyre_friction;
 pub mod wheel_coupling;
 pub mod wheel_frame;
 pub mod wheel_radius;
