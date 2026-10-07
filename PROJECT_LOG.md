@@ -117,6 +117,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F089 | Original packed quadrant/leaf traversal with shared shortened-segment state reproduced | 2,964cases/8,277words exact debug/release across245source chunks; [packed traversal](docs/PACKED_QUERIES.md) |
 | F090 | Complete original untransformed packed shape outputs reproduced | 2,964cases/12,687words exact debug/release including normal/material/miss defaults; [packed shapes](docs/PACKED_SHAPES.md) |
 | F091 | Whole original supplied-grid world query reproduced | 1,991cases/13,911words exact debug/release; strict closest-shape ties, capacity25 and shared cache; [packed world](docs/PACKED_WORLD.md) |
+| F092 | Source chunk names reconstruct complete production grid | 78datasets/706,149words exact original debug/release; all1,024captured tiles and872nonemptycell identities match; [population](docs/GRID_POPULATION.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -588,6 +589,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Initial01 rejects dispatch identity before queries because authored guard forgot PE relocation; corrected comparison to mapped address. Authored compile fixes: String newline addition and test temporary material borrow. Failures retained. **84workspace tests**, formatting/warnings-denied Clippy pass, packed-world-final-tests/clippy-20261007.txt. Python compiles. Probea0719efd0b769861a125934ff012f1cc4138098f8cc8ff6c3c979d3a8570e947. Original dispatch table unchanged; isolated data pagesRW/restored; no entry/import/TLS/liveinjection.
 - Source archive/snapshot/grid hashes guarded. Supplied first registry bounds holder/material-code tokens and address relocation; not original registration/population, nonzero transforms or synchronized live contacts. Existing tools reused, no installation/game/userfilechanges afterrunhcleanup. Shape outputs separately committed8d7d161. Grid insertion958470 survey retained20261007T1720307741646Z; continue source population and placement/contact integration.
 
+### 7 October 2026 — source chunk-name grid population verified
+
+- Loader/name-parser/initializer/insertion chain established. Added grid_population canonicalpath/builder/private diagnostic/probe/validator. **78datasets/1,177paths/706,149words exact debug/release**, source245+depth1..11+overlap/reversed+64seeded controls. Whole originalparser/allocatorinitializer/insertion execute with host allocation virtual methods; loader exponent selection authored from static evidence. Source-built identities exactly matchall1,024captured tiles,872nonemptycells; every245sourcechunk shares globalbounds. [Contract](docs/GRID_POPULATION.md).
+- Final grid-population-20261007-01/,02/, initial independent source-grid-exploration-20261007.json also matches. No failed comparisons. **85workspace tests**, fmt/warnings-denied Clippy pass, grid-population-tests/clippy-20261007.txt. ProbeSHA2f66ac5dd537530e5ed0fd12a8d6940ad03324123309e1d4974f09688e30ac4d. Existing Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14/Ghidra12.1.4/JDK21.0.9 reused. No installs/game/userfilechanges; runhcleanup complete.
+- Source path depths2:1/3:17/4:103/5:124 imply allexponents0. Name parser stricterthanoriginal; finite/count/alignment/cell guards authored. Not whole originalresource-loader/deallocator or nonzero-transform/content-universal claim. Wholeworld committed separatelyf7f9842. Continue loading sourcebuilt grid directly and placement replay; pointer/cell capture no longer needed as engine runtime input.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -624,6 +631,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Original packed quadrant and leaf traversal](docs/PACKED_QUERIES.md)
 - [Whole untransformed packed shape outputs](docs/PACKED_SHAPES.md)
 - [Whole supplied-grid packed world query](docs/PACKED_WORLD.md)
+- [Source chunk-name grid population](docs/GRID_POPULATION.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)

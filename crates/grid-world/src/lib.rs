@@ -7,6 +7,7 @@ pub mod contact_material;
 pub mod contact_ray;
 pub mod dynamics;
 pub mod finalize;
+pub mod grid_population;
 pub mod leaf_query;
 pub mod packed_query;
 pub mod packed_shape;
