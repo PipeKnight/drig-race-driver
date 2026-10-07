@@ -115,6 +115,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | F087 | Original candidate collection over retained complete production grid reproduced offline | 1,192cases/8,245words exact debug/release; [candidate replay](docs/CANDIDATE_GRID.md) |
 | F088 | Original horizontal segment/rectangle culling and rejecting-plane cache reproduced | 240cases/480words exact debug/release; [rectangle culling](docs/RECTANGLE_CULL.md) |
 | F089 | Original packed quadrant/leaf traversal with shared shortened-segment state reproduced | 2,964cases/8,277words exact debug/release across245source chunks; [packed traversal](docs/PACKED_QUERIES.md) |
+| F090 | Complete original untransformed packed shape outputs reproduced | 2,964cases/12,687words exact debug/release including normal/material/miss defaults; [packed shapes](docs/PACKED_SHAPES.md) |
 
 ## Hypotheses and unresolved questions
 
@@ -574,6 +575,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Leaf-cursor regression148cases/819hitwords exactdebug/release, leaf-query-20261007-05/,06/. **82tests (47formats+35world)**, formatting/warnings-denied Clippy pass, packed-query-tests/clippy-20261007.txt. Initial cyclic-controlpoint gets legitimately pruned as quadrantshrinks; movedcontrol tosharedcorner toexercise authoreddepthguard. Failure retained packed-query-initial-tests-20261007.txt. Pythoncompiles, existingtoolsreused.
 - Rectanglecull committed129849e separately. No game/userfilechanges after runhcleanup. Continue original b23800 normal/material-token wrapper then whole-world candidate dispatch/ties/sourcegrid construction; nonzero shape transforms and active tyre/input/drivetrain remain open.
 
+### 7 October 2026 — whole supplied packed shape wrapper reproduced
+
+- Added packed_shape API and private report/probe/validator. Whole originalb23800 executes with real traversal, leaf, decoder, primitive and cross helpers, supplied untransformed geometry/scales/material codes. Winding normal/SSE refinement, selected low-nibble material, fraction, auxiliary zero and miss defaults verified. **2,964cases/12,687words exact debug/release**,759hits/2205misses, packed-shape-20261007-02/,03/. [Contract](docs/PACKED_SHAPES.md). No nonzero transform/world population/live query fidelity claim.
+- Initial01 misclassifies1515misses from full return register; disassembly proves success inAL, corrected authored C return type. Actual hits already match. Initial Clippy rejects two unnecessary usize casts; corrected. Full workspace tests, formatting and final warnings-denied Clippy pass, packed-shape-final-tests/final-clippy-20261007.txt. Python compiles. Failures retained.
+- Probefab37147fe33ad1a1d60f810450683d9f4bcdda1ff9e02670487d3f663b45e6d; data cache/lazy-constant pages temporarily RW/restored, codeRX/no patches/stubs/live injection. Existing pinned tools reused, archivehash guarded before/after. No game/userfilechanges; runhcleanup complete. Traversal committed separatelydb4e6e8. Continue wholeworld candidate dispatch and strict closest-shape tie selection.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -608,6 +615,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Complete production candidate-grid source linkage](docs/PRODUCTION_GRID.md)
 - [Horizontal rectangle culling and cache](docs/RECTANGLE_CULL.md)
 - [Original packed quadrant and leaf traversal](docs/PACKED_QUERIES.md)
+- [Whole untransformed packed shape outputs](docs/PACKED_SHAPES.md)
 - [Verified Standard wheel geometry and initialization](docs/WHEEL_GEOMETRY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
