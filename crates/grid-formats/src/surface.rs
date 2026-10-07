@@ -27,6 +27,16 @@ pub struct Material<'a> {
     pub mechanics: Option<Mechanics<'a>>,
 }
 
+/// Original packed-code table policy: first exact key, otherwise first record.
+/// An inactive or empty supplied table has no result. No padding normalization.
+pub fn packed_index(keys: &[[u8; 4]], code: [u8; 4], active: bool) -> Option<usize> {
+    if !active || keys.is_empty() {
+        None
+    } else {
+        Some(keys.iter().position(|key| *key == code).unwrap_or(0))
+    }
+}
+
 fn attr<'a>(element: &Element<'a>, key: &str) -> Option<&'a str> {
     element
         .attributes
@@ -141,6 +151,15 @@ pub fn read<'a>(doc: &Document<'a>) -> Result<Vec<Material<'a>>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn packed_keys_keep_padding_and_first_record_fallback() {
+        let keys = [*b"CAR_", *b"MUD ", *b"TEST", *b"TEST"];
+        assert_eq!(packed_index(&keys, *b"MUD\0", true), Some(0));
+        assert_eq!(packed_index(&keys, *b"MUD ", true), Some(1));
+        assert_eq!(packed_index(&keys, *b"TEST", true), Some(2));
+        assert_eq!(packed_index(&keys, *b"NONE", false), None);
+        assert_eq!(packed_index(&[], *b"NONE", true), None);
+    }
     fn document(attrs: Vec<(&'static str, &'static str)>) -> Document<'static> {
         Document {
             strings: vec![],
