@@ -2,6 +2,8 @@
 
 Inspected on 8 October 2026. Requested upstream: https://github.com/PipeKnight/drig-race-driver.
 
+Current state: source history successfully published to `main`; local `main` tracks `origin/main`. The original GitHub license commit and all 41 existing local commits were preserved. No force push was used.
+
 ## Direct observations
 
 - Local `origin` fetch and push URL is `https://github.com/PipeKnight/drig-race-driver.git`. The local implementation history has not been pushed.
@@ -40,12 +42,18 @@ Installation repository metadata shows the owner has read/write access to one pr
 
 GitHub provides a way to [leave someone else's repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/removing-yourself-from-a-collaborators-repository): personal Settings, Repositories, then Leave beside the exact repository and review the confirmation. After being asked about the specific collaboration, the owner chose **Keep that collaboration for now**. No removal or revocation occurred; preserve that access unless the owner requests otherwise. Account installation permissions and collaboration changes require an owner UI step under the computer-use skill's current guidance.
 
-## Access restored; Git sign-in pending
+## Access restored and history published
 
 After the owner completed installation, connector lookup succeeded for the private repository (ID1407391508, default main, owner PipeKnight). Installation169065485 now targets PipeKnight. Its repository selection is **all**, rather than the narrower selection recommended above. The agent did not change that grant. The other account's installation still appears; no collaboration has been removed.
 
 The main ref is `e2da91958bff208f96cd1863e8243d6f9d5d6bbb`. GitHub's Git API reports a root commit with tree `8f57a99980891ccc68701b94b94342f7ae0e02d6`, containing only LICENSE, blob `261eeb9e9f8b2b4b0d119366dda99c6fd7d35c64`. These objects were read through the connector; no branch was moved.
 
-Local Git still cannot authenticate noninteractively. The connector commit-creation API does not expose original author/committer timestamps, so replaying the history through that API would change existing commit identities. To preserve the focused local commits unchanged, the existing Git Credential Manager device sign-in was started for owner completion; no password or token was requested from the owner or printed. Publication remains pending Git authentication.
+Local Git initially could not authenticate noninteractively. The connector commit-creation API does not expose original author/committer timestamps, so replaying the history through that API would change existing commit identities. To preserve the focused local commits unchanged, the existing Git Credential Manager device sign-in was used. The owner completed it, the process exited successfully, and authenticated `git fetch origin` succeeded. No password or token was requested from the owner or printed.
 
-Next, fetch the existing remote history, preserve its initial license commit, integrate the independently authored local commits without overwriting remote history, and publish. Private `local/` and `target/` remain excluded. The tracked source/history publication audit is recorded in `PROJECT_LOG.md`; it is a scoped review, not a guarantee that every possible secret pattern was checked.
+The fetched upstream had no common ancestor with local main and contained only LICENSE. Merge `d314e8dc6712873262b2679f84a9984e66f94de2` preserves local head `a87063825f68df37609ebec88f30489425437474` and remote initial commit `e2da91958bff208f96cd1863e8243d6f9d5d6bbb` as parents. Its content change is only the addition of LICENSE. No existing source or research commit was rewritten.
+
+The first authenticated `git push -u origin main` advanced GitHub main from `e2da919` to `d314e8d`, with 43 reachable commits, and established branch tracking. Both the connector Git-ref lookup and Git `ls-remote` independently confirmed the same remote SHA; local/remote ahead and behind counts were both zero. This synchronization record is a separate subsequent documentation commit.
+
+The pre-push audit at `d314e8d` checked 488 reachable blob versions: no NUL-byte files, selected credential-pattern matches, ignored local/target paths, selected proprietary/binary extensions, or the known private collaboration association. Evidence: ignored `local/behavior/git-publication-audit-20261008-authenticated.json`. This is a scoped review, not exhaustive certification. Final synchronization verification is stored in `local/behavior/github-sync-20261008.json`.
+
+Private `local/` and `target/` remain excluded. No original game assets or binary captures were published. This change adds license/documentation and repository synchronization only; prior 95 workspace tests, formatting and Clippy remain the latest implementation checks, with no source changes requiring a rerun. Continue engine research from the project log.
