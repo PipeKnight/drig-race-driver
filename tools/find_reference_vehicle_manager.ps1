@@ -74,7 +74,8 @@ try {
  }
  if($IncludeImpact){
   $taskSolverGlobals=Read-TaskBytes 0xe4fc80 0x20 'deformation_solver_globals'
-  if($null -eq $taskSolverGlobals){throw 'Missing deformation solver globals'}
+  $taskSolverClip=Read-TaskBytes 0xe500b8 1 'deformation_solver_clip_flag'
+  if($null -eq $taskSolverGlobals -or $null -eq $taskSolverClip){throw 'Missing deformation solver globals'}
  }
  $taskScanBytes=0L;$taskRegions=0;$taskAddress=0x10000L
  $taskCandidates=[Collections.Generic.List[long]]::new()
