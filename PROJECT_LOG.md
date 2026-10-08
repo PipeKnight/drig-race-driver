@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 99 workspace tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 100 workspace tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -728,6 +728,14 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - CorrectedF114alias assumption: firstsnapshot2groups6each, second3groups4each. Initial01guardfailedbeforeexecution;02nativeblendroles20/24swapped produced17320words across552cases, alignedloads corrected;03exact560beforecrossWliteralzero/control. Final04/05exact. ProbeSHA22ad99b650878c860f26402d5b5827c9a0f14c4c977a230ccf66786df64fe313; originalcodeRX/no stubs/datapagewrites/liveinjection. **95workspace tests**,fmt/warnings-deniedClippypass. Existingtools/no installs. Preservation00:43:15UTC confirms130sourcefiles+exeunchanged. F114research separatelyd96e3f3. Continue wheelblend/angle provenance and force-stage integration.
 
 ## Next actions
+
+### 8 October 2026 — visual wheel-level update verified (F131)
+
+- Added independent `wheel_damage::calculate`, bounded native diagnostic and whole original9f2f80 probe. Supplied deformation/correction/settings/prior; actual notification branch disabled with442=false/status7. Delta unconsumed. [Contract/limits](docs/HANDLING_DAMAGE.md#visual-wheel-level-evolution-f131).
+- **2,426 cases /9,704 words exact debug/release**, including96 wheel replays/two paused captures and7 delta controls. Additional384 captured-level words exact;60/60selected blocks stable. Five invalid guards reject both diagnostics; native output absent. Settled non-atomic idempotence, not incoming tick/impact/notification verification. Final private `wheel-damage-20261008-04/validation.json`,05/; probeSHA6087bb502314bb9a20a4b866f776c621c1c918a935358969db1f33b47bb33aac. RX code/private lazy data page writable/restored, no patches/stubs/injection.
+- Capture adds9f2f80 prefix and C7AE/C740/EEFC correction fields;282/282reads at14:32:01.3171667 and14:32:41.4420465UTC, same verified PID29904/twelve four-wheel cars. Live Standard scales25.6879/.45/terminal105; aligned9c48c0 names/defaults identified, not yet joined. Other helpers9c4b70/9c5250/999c00 remain unimplemented research.
+- **100 workspace tests**, fmt/warnings-deniedClippy, Python compilation/PowerShell syntax checks pass `wheel-damage-checks/`. Initial Rust test literal syntax, nonexistent CLI/build lookups, rg Windows wildcard query and partial doc patch anchor corrected. No numerical failures/new tools/game input/settings changes. Existing pinned toolchain versions recorded in linked doc. GRID paused/handler idle; next source visual limits and steering composition.
+- F130 published as focused2469eaf macro and4f9bb5e live-validation commits. Remote verified4f9bb5e5a41450460779d20177d4969cbea6db93 with0/0 and clean public tree; no trackedlocal/ files or proprietary artifacts.
 
 ### 8 October 2026 — actual HDM selection and live mutable steering (F130)
 

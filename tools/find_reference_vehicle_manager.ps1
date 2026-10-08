@@ -61,7 +61,7 @@ try {
  $taskCodeOffset=0x9ad030-0x400000-0x1000+0x400
  if($null -eq $taskCode -or [Convert]::ToHexString($taskCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskCodeOffset..($taskCodeOffset+31)])){throw 'Live count routine differs'}
  if($IncludeSteering){
-  foreach($taskEntry in @(0x9c5b90,0x9bd7f0)){
+  foreach($taskEntry in @(0x9c5b90,0x9bd7f0,0x9f2f80)){
    $taskSteeringCode=Read-TaskBytes $taskEntry 32 ('steering_code_'+$taskEntry.ToString('x'))
    $taskEntryOffset=$taskEntry-0x400000-0x1000+0x400
    if($null -eq $taskSteeringCode -or [Convert]::ToHexString($taskSteeringCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskEntryOffset..($taskEntryOffset+31)])){throw 'Live steering routine differs'}
@@ -139,6 +139,10 @@ try {
     $null=Read-TaskBytes ($taskBody+0xcdf0) 0x460 "car_$taskIndex-mutable_steering"
     # Keep separately read production copies distinct from the producer output.
     $null=Read-TaskBytes ($taskBody+0x2294) 0x3c "car_$taskIndex-steering_copies"
+    # Optional visual-deformation correction used by the wheel-level updater.
+    $null=Read-TaskBytes ($taskBody+0xc7ae) 1 "car_$taskIndex-visual_damage_flag"
+    $null=Read-TaskBytes ($taskBody+0xc740) 0x10 "car_$taskIndex-visual_damage_correction"
+    $null=Read-TaskBytes ($taskBody+0xeefc) 4 "car_$taskIndex-visual_damage_scale"
    }
    if($IncludeDynamics -or $IncludeContacts){
     if($taskWheelCount -ne 4){throw 'Dynamics context currently scoped to four wheels'}

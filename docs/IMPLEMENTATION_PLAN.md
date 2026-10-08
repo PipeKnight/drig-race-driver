@@ -4,6 +4,8 @@ Updated: 8 October 2026, Europe/Kiev. This roadmap is grounded in [our findings]
 
 ## Objective and language decision
 
+F131 advances damage evolution: the visual wheel-level helper matches2,426original cases in debug/release and preserves96captured wheel levels. Source visual limits and composition with steering are next; notifications, upstream deformation and complete driving remain pending. [Evidence and scope](HANDLING_DAMAGE.md#visual-wheel-level-evolution-f131).
+
 Implement an independent engine that reads the owner's GRID resources and progressively reproduces driving, racing and the full single-player experience. First supported target: Windows x86-64. The original x86 executable is our behavior reference, not an architecture requirement for the replacement.
 
 **Recommended default: Rust + Bevy**, retaining the owner's original choice. Keep parsers and simulation independent of Bevy so the renderer does not dictate file formats or physics. Use Bevy for application lifecycle, input and rendering integration; recover GRID-specific behavior ourselves.

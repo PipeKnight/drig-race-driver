@@ -31,6 +31,7 @@ pub mod tyre_friction;
 pub mod tyre_grip;
 pub mod tyre_response;
 pub mod wheel_coupling;
+pub mod wheel_damage;
 pub mod wheel_frame;
 pub mod wheel_history;
 pub mod wheel_radius;

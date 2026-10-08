@@ -1,6 +1,22 @@
 # Handling-damage source investigation
 
-Recorded 8 October 2026. Current checkpoint F130 confirms actual Standard source selection and the scoped producer against read-only live captures. F129 joins the native source reader to [deterministic reset F128](STEERING.md). The original source parser/loader is not isolated for comparison.
+Recorded 8 October 2026. F131 adds visual wheel-level evolution; F130 confirms actual Standard source selection and live steering. F129 joins source to [deterministic reset F128](STEERING.md). The original XML loader is not isolated for comparison.
+
+## Visual wheel-level evolution (F131)
+
+Production9f3e80 calls whole9f2f80 for each wheel before9c4b70 and the later9c5b90 steering producer. ECX is mutable+258; stack arguments are delta, wheel ordinal and mutable object, with12-byte callee cleanup. Delta is never read. Body identity follows mutable214 -> vehicle24. The selected prior level is mutable18+4*ordinal.
+
+Either signed zero at settings28 (mutable280) skips the entire update. Otherwise divide absolute angular deformation at body1790+4*ordinal by settings28 times stored-f32 degree conversion3c8efa35. Displacement is body1650+16*ordinal's four-lane vector; when bodyC7AE is true, subtract bodyEEFC times bodyC740..C74C. Squared length is `(y*y+x*x)+(w*w+z*z)`. RSQRTPS and ordered refinement `(1-root*seed)*(root*.5)+root` produce length, with positive zero selected for zero squared length. Divide by settings2C (mutable284), choose the larger ratio, clamp[0,1], retain prior if strictly larger. Prior above1 is not reduced; equality selects the new word.
+
+`wheel_damage::calculate` implements finite guarded arithmetic, nonnegative angular scale, positive displacement scale when enabled and x86 SSE seeds. Whole original probe executes intact RX9f2f80 with mutable442=false/status444=7: actual branch skips notifications, no patches/stubs/injection. Its mapped E58000 lazy-data page is writable then restored. Terminal events/status changes and deformation producers remain separate.
+
+**2,426 cases /9,704 original-vs-Rust words exact debug/release**:2,048 authored states, signed-zero skip/prior/clamp/correction/four-lane/ordinal controls, seven identical-output delta controls[-1000,1000], and96 wheel replays from two paused captures. Five invalid fixtures fail both guards; native writes no output.384 additional native-vs-captured words match and60/60 relevant blocks are stable. This verifies settled non-atomic idempotence, not incoming tick evolution or causation of earlier impact damage.
+
+Aligned9c48c0 setup maps WHEEL/damageScaleFromVisual ->280 (default27), damageScaleFromVisualDisplacement ->284 (stored-f32 .45), terminalDamagePercentage ->288 (default150). Current live Standard settings are25.6879/.45/105. Native source joining remains next; current parser exposes seven earlier steering fields.
+
+Final evidence `local/behavior/wheel-damage-20261008-04/validation.json`,05/;01..03 earlier exact runs. Probe SHA6087bb502314bb9a20a4b866f776c621c1c918a935358969db1f33b47bb33aac. Captures `general-vehicle-manager-20261008T1432013171667Z.json`, `general-vehicle-manager-20261008T1432414420465Z.json` each have282/282successful reads; capture adds9f2f80 prefix identity and three correction fields. Static `wheel-level-{instructions,tail,caller,words,source-instructions,source-strings,defaults}-20261008.json`, Ghidra `20261008T1422257334826Z/`, `20261008T1427186138572Z/`.9c4b70/9c5250/999c00 remain unimplemented research.
+
+**100 workspace tests**, fmt and warnings-denied Clippy pass (`wheel-damage-checks/tests-final.txt`, `clippy.txt`); Python compilation and PowerShell syntax checks pass. Initial Rust test literal syntax, two nonexistent CLI/build lookups and one rg Windows wildcard query corrected; no numerical failures. A multi-document patch failed on a partial-line anchor and was reapplied. Reused Python3.12.14/Capstone5.0.6/Ghidra12.1.4/JDK21.0.9/Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0; no installs/additional game input/settings changes. GRID paused.
 
 ## Live selection and mutable outputs (F130)
 

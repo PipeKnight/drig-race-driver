@@ -6,6 +6,8 @@ F130 now confirms actual Standard HDM selection, seven source parameters, produc
 
 ## Deterministic reset (F128)
 
+F131 adds the preceding visual wheel-level update: whole9f2f80 matches2,426cases in both builds, including96 paused wheel replays. Source limits and impact producers remain separate. See [wheel-level evolution](HANDLING_DAMAGE.md#visual-wheel-level-evolution-f131).
+
 `steering_control::reset` reproduces the steering subset of whole9e6070->9c5b90. Reset clears18 input words, generates four rotation seeds50..5C and two cap seeds48/4C, then executes the producer. Its optional secondary component210 is absent here; active four-wheel views have component queries disabled. Parameters are supplied, with finite maximum rotation and maximum cap restricted to[0,1]. Original source configuration/full constructor and live RNG state/cadence are outside this comparison.
 
 Each sample advances explicit wrapping32-bit state by `state*0x41c64e6d+0x40584c0f`. Treating the new state as signed i32, divide by65535 with truncation toward zero, add that signed quotient back with wrapping arithmetic and select the low byte. Four samples derive `(sample*stored_f32(2/255)-1)*maximum_rotation_26c`; the next two derive `(sample*stored_f32(1/255))*(maximum_cap_250-1)+1`, preserving f32 operation order. Stored constants are3C008081/3B808081. Ordinary unsigned quotient or modulo sampling would differ.
