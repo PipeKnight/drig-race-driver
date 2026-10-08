@@ -24,6 +24,7 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('--prepared', type=Path, required=True)
     parser.add_argument('--profile', choices=['debug', 'release'], default='debug')
+    parser.add_argument('--retained-only', action='store_true')
     args = parser.parse_args()
     out, prepared = args.output.resolve(), args.prepared.resolve()
     assert out.is_relative_to((ROOT / 'local').resolve()) and prepared.is_relative_to((ROOT / 'local').resolve())
@@ -36,7 +37,7 @@ def main():
     out.mkdir(exist_ok=False)
     cases = [(cells[0], cells[1:]) for cells in (line.split('\t') for line in (prepared / 'input.tsv').read_text().splitlines())]
     rng = random.Random(134)
-    for index in range(640):
+    for index in range(0 if args.retained_only else 640):
         # Smooth bounded maps keep the original normalization/acos outputs finite.
         dimensions = [3, 4, 5]
         spacing = rng.uniform(.7, 1.4)
@@ -111,9 +112,10 @@ def main():
     report = dict(profile=args.profile, cases=len(cases), fields=len(cases) * 128, exact=not differences,
                   differences=differences, executions=execution, guards=guards,
                   analysis_sha256=PE_SHA, probe_sha256=PROBE_SHA, native_sha256=digest(native), input_sha256=digest(request),
-                  prepared_report_sha256=digest(prepared / 'execution.json'), supplied_retained_cases=48,
+                  prepared_report_sha256=digest(prepared / 'execution.json'), supplied_retained_cases=len(prepared_report['cases']),
                   limits='Whole original9bb1e0 unchanged RX, four restored private lazy pages, no patches/stubs/injection. '
-                         '640 authored maps/policies plus48 retained-grid cases with supplied thresholds/flags/cache. '
+                         f"{0 if args.retained_only else 640} authored maps/policies plus{len(prepared_report['cases'])} retained-grid cases; "
+                         f"captured policy={prepared_report.get('captured_policy', False)}. "
                          'Not synchronized live replay, grid deformation production or simulation cadence.')
     (out / 'validation.json').write_text(json.dumps(report, indent=2))
     print(json.dumps(dict(cases=len(cases), fields=report['fields'], exact=report['exact'], differences=len(differences))))

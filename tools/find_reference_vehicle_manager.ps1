@@ -63,7 +63,7 @@ try {
  if($null -eq $taskCode -or [Convert]::ToHexString($taskCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskCodeOffset..($taskCodeOffset+31)])){throw 'Live count routine differs'}
  if($IncludeSteering){
   $taskSteeringEntries=@(0x9c5b90,0x9bd7f0,0x9f2f80)
-  if($IncludeDeformation){$taskSteeringEntries+=@(0x9bb1e0,0x9a39d0)}
+  if($IncludeDeformation){$taskSteeringEntries+=@(0x9bb1e0,0x9a39d0,0x9a26f0,0x9a2110,0x9fec70)}
   foreach($taskEntry in $taskSteeringEntries){
    $taskSteeringCode=Read-TaskBytes $taskEntry 32 ('steering_code_'+$taskEntry.ToString('x'))
    $taskEntryOffset=$taskEntry-0x400000-0x1000+0x400
@@ -164,6 +164,33 @@ try {
      if($taskGridCount -gt 400 -or ![Single]::IsFinite($taskGridSpacing) -or $taskGridSpacing -le 0){throw 'Unsupported deformation grid size/spacing'}
      $taskGridNodes=Read-TaskBytes ($taskBody+0x2300+0x2580) ($taskGridCount*0x50) "car_$taskIndex-deformation_grid_nodes"
      if($null -eq $taskGridNodes){throw 'Missing deformation grid node records'}
+     # The settling graph addresses the fixed 400-record pool, including
+     # observed sentinel self-edges at node399 outside the sampled dimensions.
+     if($taskGridCount -lt 400){
+      $taskPaddingNodes=Read-TaskBytes ($taskBody+0x2300+0x2580+$taskGridCount*0x50) ((400-$taskGridCount)*0x50) "car_$taskIndex-deformation_grid_padding_nodes"
+      if($null -eq $taskPaddingNodes){throw 'Missing deformation node-pool tail'}
+     }
+     # Descriptor edge graph and state consumed by the settling routines.
+     $taskEdgeCountBytes=Read-TaskBytes ($taskBody+0x2300+0xa410) 4 "car_$taskIndex-deformation_edge_count"
+     if($null -eq $taskEdgeCountBytes){throw 'Missing deformation edge count'}
+     $taskEdgeCount=[BitConverter]::ToInt32($taskEdgeCountBytes,0)
+     if($taskEdgeCount -lt 0 -or $taskEdgeCount -gt 1200){throw 'Unsupported deformation edge count'}
+     if($taskEdgeCount){
+      $taskEdges=Read-TaskBytes ($taskBody+0x2300) ($taskEdgeCount*8) "car_$taskIndex-deformation_edges"
+      if($null -eq $taskEdges){throw 'Missing deformation edges'}
+      for($taskEdge=0;$taskEdge -lt $taskEdgeCount;$taskEdge++){
+       foreach($taskLane in @(0,2)){
+        $taskNodeIndex=[BitConverter]::ToInt16($taskEdges,$taskEdge*8+$taskLane)
+        if($taskNodeIndex -lt 0 -or $taskNodeIndex -ge 400){throw 'Deformation edge index outside fixed node pool'}
+       }
+      }
+     }
+     $taskGridState=Read-TaskBytes ($taskBody+0x2300+0xa4a0) 0x60 "car_$taskIndex-deformation_grid_state"
+     if($null -eq $taskGridState){throw 'Missing deformation grid state'}
+     $taskDeformationSettings=[BitConverter]::ToUInt32($taskGridState,0x58)
+     if($taskDeformationSettings -lt 0x10000 -or $taskDeformationSettings -gt 0x7ffef000){throw 'Deformation settings pointer outside scope'}
+     $taskStrainSettings=Read-TaskBytes ($taskDeformationSettings+0x1024) 8 "car_$taskIndex-deformation_strain_settings"
+     if($null -eq $taskStrainSettings){throw 'Missing deformation strain settings'}
     }
    }
    if($IncludeDynamics -or $IncludeContacts){

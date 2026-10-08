@@ -1,4 +1,4 @@
-"""Run whole wheel geometry with retained grids and explicitly supplied missing inputs."""
+"""Run whole wheel geometry with retained grids and explicit policy provenance."""
 import argparse
 import json
 import struct
@@ -14,6 +14,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('output', type=Path)
     parser.add_argument('snapshot', type=Path)
+    parser.add_argument('--captured-policy', action='store_true', help='Require captured thresholds, tyre flags and incoming radius caches')
     args = parser.parse_args()
     out, path = args.output.resolve(), args.snapshot.resolve()
     assert out.is_relative_to((ROOT / 'local').resolve()) and path.is_relative_to((ROOT / 'local').resolve())
@@ -50,19 +51,29 @@ def main():
         if cache is not None:
             retained_count += 40
         assert len(old) == 124
-        for variant, (threshold, flag) in enumerate([(1., 0.), (.01, 0.), (1., 1.), (.01, 1.)]):
+        if args.captured_policy:
+            assert cache is not None, 'Captured-policy replay requires incoming radius cache'
+            thresholds = floats(blocks[f'car_{i}-deformation_radius_thresholds'], 0, 2)
+            flags = list(map(float, blocks[f'car_{i}-deformation_tyre_flags']))
+            assert len(flags) == 4 and all(v in (0., 1.) for v in flags)
+            policies = [(thresholds, flags)]
+        else:
+            policies = [([threshold] * 2, [flag] * 4) for threshold, flag in [(1., 0.), (.01, 0.), (1., 1.), (.01, 1.)]]
+        for variant, (thresholds, flags) in enumerate(policies):
             wheel_values = []
             for wheel in range(4):
                 wheel_values += floats(wheels, wheel * 0x150, 4)
                 wheel_values += floats(wheels, wheel * 0x150 + 0xe0, 1)
-                wheel_values += floats(wheels, wheel * 0x150 + 0xf4, 2) + [flag]
-            row = list(map(float, dimensions)) + spacing + minimum + center + scale + angle_limit + [threshold] * 2 + [active]
+                wheel_values += floats(wheels, wheel * 0x150 + 0xf4, 2) + [flags[wheel]]
+            row = list(map(float, dimensions)) + spacing + minimum + center + scale + angle_limit + thresholds + [active]
             row += wheel_values + old + grid
             assert len(row) == 173 + len(grid)
-            name = f'car_{i}_authored_policy_{variant}'
+            name = f'car_{i}_captured_policy' if args.captured_policy else f'car_{i}_authored_policy_{variant}'
             inputs.append(name + '\t' + '\t'.join(f'{word(v):08x}' for v in row) + '\n')
             prior[name] = [f'{word(v):08x}' for v in old[:retained_count]]
-            metadata.append(dict(case=name, car=i, active=active, threshold=threshold, initial_tyre_flags=flag,
+            if args.captured_policy:
+                prior[name] += [str(int(v)) for v in flags]
+            metadata.append(dict(case=name, car=i, active=active, thresholds=thresholds, initial_tyre_flags=flags,
                                  dimensions=dimensions, incoming_cache='captured' if cache is not None else 'authored zeros',
                                  retained_numeric_fields=retained_count))
     request = out / 'input.tsv'
@@ -72,9 +83,12 @@ def main():
                          capture_output=True, text=True, timeout=30)
     report = dict(snapshot=str(path), snapshot_sha256=digest(path), input_sha256=digest(request), analysis_sha256=PE_SHA,
                   probe_sha256=PROBE_SHA, execution=dict(exit=run.returncode, stdout=run.stdout, stderr=run.stderr), cases=metadata,
+                  captured_policy=args.captured_policy,
                   limits='Whole original9bb1e0 with actual retained descriptors/nodes/wheel positions and supplied radius thresholds/tyre flags. '
                          'RX code, four private mapped lazy-data pages writable/restored. No patches/stubs/injection. '
-                         'Current policy fields were not captured; missing incoming caches use authored zeros. '
+                         + ('Policy fields and incoming caches captured. ' if args.captured_policy else
+                            'Policies authored; missing incoming caches use authored zeros. ')
+                         +
                          'No synchronized update or native comparison claim.')
     (out / 'execution.json').write_text(json.dumps(report, indent=2))
     if run.returncode:
@@ -85,9 +99,9 @@ def main():
         assert len(cells) == 130 and cells[0] == 'P' and cells[1] not in result
         result[cells[1]] = cells[2:]
     assert result.keys() == prior.keys()
-    # Only retained numeric fields; explicitly authored incoming tyre flags excluded.
+    # Captured flags are compared; explicitly authored incoming flags excluded.
     differences = [dict(case=name, field=i, prior=a, replay=b) for name in result
-                   for i, (a, b) in enumerate(zip(prior[name], result[name][:124])) if a != b]
+                   for i, (a, b) in enumerate(zip(prior[name], result[name])) if a != b]
     retained_fields = sum(map(len, prior.values()))
     report.update(output_sha256=digest(target), retained_fields=retained_fields,
                   retained_differences=differences, replay_cases=len(result))
