@@ -1,0 +1,2 @@
+# Keep Rust source diffs independent of Windows checkout line endings.
+*.rs text eol=lf
