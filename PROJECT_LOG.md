@@ -719,6 +719,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — force-view lifetime resolved (F114)
+
+- Aligned a06a90 writes current stack+70 into body[0]; CarJob supplies the body/delta. Shared retained pointers are temporary update storage, not persistent per-car buffers or embedded body+3d0 context. [Evidence and limits](docs/FORCE_VIEW.md). No pointed bytes were captured; future attribution requires an in-update boundary. Candidate a076f0/9c0200 writers were unrelated; body-linked9b2790 actually prepares four vector arrays, next numerical target. Existing tools reused, no new installs. Several incorrect initial optional-read filenames were corrected; no failed numerical tests.
+- Owner made desktop available. Computer Use launch failed twice with accessibility window-opened handler not ready; no GRID process/capture/macro/debugger started. Seventeen user files backed up, temporary800×600display restored exactly, all17unchanged/no saves overwritten. Private preparation/cleanup in local/reference-race/resume-20261008a/. Rust unchanged; preceding95tests/fmt/Clippy remain the latest verified checks. Continue offline force-view preparation.
+
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
 2. Recover production contacts and active tyre forces/input/drivetrain consumers. Suspension preload/setup/cap subset is verified conditionally; deformation/cap operand source initialization and synchronized incoming delta/main timing remain open.
 3. Extend collision/contact behavior from the exact triangle primitive: material filtering, traversal/ties and car shapes.
@@ -773,6 +778,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Source coordinate-dependent grip reductions](docs/SOURCE_GRIP_REDUCTIONS.md)
 - [Four-wheel production surface slowdown](docs/SURFACE_DRAG.md)
 - [Source material selection joined to slowdown impulses](docs/SOURCE_SURFACE_DRAG.md)
+- [Temporary force-view lifetime and capture requirements](docs/FORCE_VIEW.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
