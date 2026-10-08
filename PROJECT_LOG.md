@@ -683,6 +683,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added owned source Tables adapter/CSVdiagnostic mode. OriginalCSVloader -> private decodedtable -> wholeoriginalgrip versus nativeCSVdirect, **41datasets/17794queries/53382words exact debug/release**. Misses/inactivequeries skipabsentrows; matched/cachedabsent nativeguard separatelytested. All consumed rows present; absentfixturepaddingunused. [Contract](docs/SOURCE_TYRE_GRIP.md).
 - Evidence source-tyre-grip-20261008-01/,02/; pinnedF106manifest/sourcehashes/probes. Oldsupplied1394/4182regressesexactbothprofiles. Source/coefficients/rowselector stillsupplied, no completeproductionforces. Preservation23:52:57UTC (8Octoberlocally), **all130trackedSteamresources+exeunchanged**, local/scene/preservation-20261008-source-tyre.json. No game/settings/savechanges/toolsinstalled. **94workspace tests**, fmt/warnings-denied Clippy pass source-tyre-grip-tests/clippy-20261008.txt. No failedcomparisons/checks. F106sourceCSV separatelyc01873f. Continue9ba490wheelhistory/contact-dependentgrip and source rowselector.
 
+### 8 October 2026 — production wheel history/grip reproduced (F108)
+
+- Added supplied original9ba490calculator: two clocks/recontact/reset/history3/materialstamp/returnedgrip. **364cases/3276words exact debug/release** under wheel+ecanglezero, secondbodyaxisY, tableinactive/factor1. Originalwholecalculator/zero-angleCRTmath/griphelpers, no stubs/patches/writablemappedpages. Nativeextendedgripintermediate retains originalmultiplybeforef32store. [Contract](docs/WHEEL_HISTORY.md).
+- Source84MECHscalarsets +24analytic +256seededstates; actualbody/pointedforceview inputs remain supplied. Initial01/02exact, no numericalfailures. ProbeSHA380074e0fac489cf8592134de0e88dea998cc08847677bb195f554a6a54cd419. Oldgrip1394/4182regressesbothprofiles tyre-grip-extended-regression-01/02. **94workspace tests**, fmt/finalwarnings-denied Clippy pass wheel-history-final-clippy-20261008.txt; initialassignmentorderwarning retained/scopedallow. Existingtools reused, no game/userfilechanges. F107sourceintegration separately0fc02b9. Continue nonzerowheelangle/table/sourceinput provenance and downstreamforcemultipliers/application.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -734,6 +739,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Material speed grip and cached tyre-table query](docs/TYRE_GRIP.md)
 - [Source tyre-grip CSV loader and row slots](docs/TYRE_TABLE.md)
 - [Source table-to-grip integration](docs/SOURCE_TYRE_GRIP.md)
+- [Production wheel history and conditional grip](docs/WHEEL_HISTORY.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)

@@ -35,6 +35,22 @@ pub fn factor(keys: &[[u8; 4]], values: &[f32], active: bool, key: &mut Key) -> 
 /// Result at the consumer's f32 store. Preserve the original x87 double-precision
 /// intermediate rather than rounding slope*speed+base to f32 before the factor.
 pub fn grip(slope: f32, maximum: f32, base: f32, speed: f32, factor: f32) -> Result<f32, Error> {
+    let value = extended(slope, maximum, base, speed, factor)? as f32;
+    if !value.is_finite() {
+        return Err(Error("material grip exceeds finite f32 range"));
+    }
+    Ok(value)
+}
+
+/// Preserve the original returned intermediate when a consumer multiplies it
+/// before its own f32 store, as in the wheel-history calculation.
+pub fn extended(
+    slope: f32,
+    maximum: f32,
+    base: f32,
+    speed: f32,
+    factor: f32,
+) -> Result<f64, Error> {
     if [slope, maximum, base, speed, factor]
         .iter()
         .any(|v| !v.is_finite())
@@ -49,7 +65,7 @@ pub fn grip(slope: f32, maximum: f32, base: f32, speed: f32, factor: f32) -> Res
     } else {
         speed
     };
-    let value = (((slope as f64 * speed as f64) + base as f64) * factor as f64) as f32;
+    let value = ((slope as f64 * speed as f64) + base as f64) * factor as f64;
     if !value.is_finite() {
         return Err(Error("material grip exceeds finite f32 range"));
     }
