@@ -65,7 +65,7 @@ try {
  if($IncludeSteering){
   $taskSteeringEntries=@(0x9c5b90,0x9bd7f0,0x9f2f80)
   if($IncludeDeformation){$taskSteeringEntries+=@(0x9bb1e0,0x9a39d0,0x9a26f0,0x9a2110,0x9fec70)}
-  if($IncludeImpact){$taskSteeringEntries+=@(0x9d4970,0x9ea6e0,0xa08040)}
+  if($IncludeImpact){$taskSteeringEntries+=@(0x9d4970,0x9ea6e0,0xa08040,0x997020,0xa69340,0x989bf0,0x944e00,0x9d4210,0xa064a0,0xa06a10)}
   foreach($taskEntry in $taskSteeringEntries){
    $taskSteeringCode=Read-TaskBytes $taskEntry 32 ('steering_code_'+$taskEntry.ToString('x'))
    $taskEntryOffset=$taskEntry-0x400000-0x1000+0x400
@@ -75,7 +75,9 @@ try {
  if($IncludeImpact){
   $taskSolverGlobals=Read-TaskBytes 0xe4fc80 0x20 'deformation_solver_globals'
   $taskSolverClip=Read-TaskBytes 0xe500b8 1 'deformation_solver_clip_flag'
-  if($null -eq $taskSolverGlobals -or $null -eq $taskSolverClip){throw 'Missing deformation solver globals'}
+  $taskProducerScale=Read-TaskBytes 0xe4fc2c 4 'deformation_producer_corner_scale'
+  $taskProducerGlobals=Read-TaskBytes 0xe500c0 0x20 'deformation_producer_globals'
+  if($null -eq $taskSolverGlobals -or $null -eq $taskSolverClip -or $null -eq $taskProducerScale -or $null -eq $taskProducerGlobals){throw 'Missing deformation solver/producer globals'}
  }
  $taskScanBytes=0L;$taskRegions=0;$taskAddress=0x10000L
  $taskCandidates=[Collections.Generic.List[long]]::new()
@@ -202,7 +204,11 @@ try {
       $taskImpactSettings=Read-TaskBytes ($taskDeformationSettings+0x102c) 0x24 "car_$taskIndex-deformation_impact_settings"
       $taskImpactState=Read-TaskBytes ($taskBody+0x2300+0xa440) 0x40 "car_$taskIndex-deformation_impact_state"
       $taskNodeFlags=Read-TaskBytes ($taskBody+0x2300+0xa280) 400 "car_$taskIndex-deformation_node_flags"
-      if($null -eq $taskImpactSettings -or $null -eq $taskImpactState -or $null -eq $taskNodeFlags){throw 'Missing deformation impact inputs'}
+      $taskProducerState=Read-TaskBytes ($taskBody+0x2300+0xa480) 0x20 "car_$taskIndex-deformation_producer_state"
+      $taskOffsetVector=Read-TaskBytes ($taskBody+0x1630) 0x10 "car_$taskIndex-deformation_body_offset"
+      $taskLinkedResponse=Read-TaskBytes ($taskState+0x360) 0x10 "car_$taskIndex-deformation_linked_response"
+      $taskProducerCallback=Read-TaskBytes ($taskState+0x418) 0xc "car_$taskIndex-deformation_callback_registration"
+      if($null -eq $taskImpactSettings -or $null -eq $taskImpactState -or $null -eq $taskNodeFlags -or $null -eq $taskProducerState -or $null -eq $taskOffsetVector -or $null -eq $taskLinkedResponse -or $null -eq $taskProducerCallback){throw 'Missing deformation impact/producer inputs'}
      }
     }
    }

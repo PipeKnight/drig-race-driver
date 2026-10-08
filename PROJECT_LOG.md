@@ -729,6 +729,14 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — contact producer registration and capture preparation
+
+Published source-only commitscebc5f5 and0793a7e57123cf8a41578af8b0161345d402f763 toownerupstream; independentremoteHEAD/localHEADmatch, ahead/behind0/0, cleanatverification, noignoredlocaltracked. Private `local/behavior/github-impact-sync-20261008.md`.
+
+Continued static work provesA06A10registers linked-state418=9A0C90,41C=A064A0,420=Standardbody2300 throughbodyDB0/wrapper8, withdisabledpathzeroingallthree.9EA6E0is eight-stack-argumentcdecl withlinkedstatefirst/descriptorlast.997020 resolvesStandardbodyseparately.989BF0ismaxoftenA4C4floatsreturningx87/preservingEAX, notcontactgetter.944E00setsallfiveA4F0..A4F4flagswithoutexternalcalls. Actualproducer capsrecords400 andwrites additionalcontactordinal22/weight28, then9D4210→9D4970; fullcontactresponse remainsunexecuted. [Detailed static boundaries](docs/DEFORMATION_GRID.md#contact-to-impact-producer-boundaries). Ghidrahelperoutputs `local/behavior/20261008T2042548580424Z/`, xrefs2047125350258Z, alignedprivateinstructionJSONs.
+
+ExpandedIncludeImpactreaderprepares body1630/linked360/linked418callback/descriptorA480/globalE4FC2C/E500C0 reads and codeprefixchecks;PowerShellsyntaxpasses,actualnewcaptureunverified. TenA4C4windowfloatsarezeroacrosstwelveoldretainedcars. Existingtoolsreused;noRustchangesafterF136checks. Correctedonefollow-upfilename/wildcardreaderror;noevidencechange. ComputerUse skillread, freshskywindowinventoryshowsGRIDabsent/ARCRaidersopen; noinput, activationorlaunch. AskedownerwhetherkeyboardisfreeforfreshGRIDcapture; preparedofflinecaptureworkwhilewaiting. NextreidentifynewGRIDsession/managerandvalidatecallback/producerinputs, thenisolatecontactrecordgeneration. NeverreuseclosedPID5968addresses.
+
 ### 8 October 2026 — whole supplied-impact grid solver (F136)
 
 Rust `deformation_impact::calculate` and private binary diagnostic now reproduce whole9D4970 including9A26F0: **243cases/846,150selected fields exact per debug/release**, all2,566,080descriptor words compared.48retained-pool/authored-impact cases +195boundary/seeded controls cover rounded dimensions/edge tails, records512/edges1200, gates, clipping, gains,64iterations, motion/scales and signedzero. Repeated original outputs are byteidentical with realclock calls;11malformed/singular controls reject both, nativeoutputabsent. FinalprobeSHA1df4653c24e03fe0df9cc8e72d3adf785d552b0e7ab70fe5d7f04cb4a4ca095f; privatefixture `local/behavior/deformation-impact-20261008-02/`, validation `deformation-impact-validation-20261008-{debug,release}-02/validation.json`. [Contract/limits](docs/DEFORMATION_GRID.md#whole-supplied-impact-grid-solver-f136).
