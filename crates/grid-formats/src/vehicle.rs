@@ -34,6 +34,21 @@ pub fn read_standard_coupled_tyres(row: &Row<'_>) -> Result<bool> {
     Ok(row.number(311)?.unwrap_or(0.) > 0.5)
 }
 
+/// Original properties +53c/+540 copied to body +1fa4/+1fa8.
+/// These reductions select positive/nonpositive wheel-record Z respectively.
+/// Zero defaults apply after f64 parsing and f32 storage, including underflow.
+pub fn read_standard_grip_reductions(row: &Row<'_>) -> Result<[f32; 2]> {
+    read_standard_body(row)?;
+    let number = |column| -> Result<f32> {
+        let value = row.number(column)?.unwrap_or(0.) as f32;
+        if !value.is_finite() {
+            return fail(column, "grip reduction exceeds finite f32 range");
+        }
+        Ok(if value == 0. { 0.5 } else { value })
+    };
+    Ok([number(178)?, number(179)?])
+}
+
 /// Initial Standard suspension fields. Runtime may subsequently change them;
 /// in particular the observed running damping threshold differs from the CSV.
 #[derive(Debug, Clone, Copy)]
@@ -426,6 +441,39 @@ mod tests {
         let mut fields = vec!["1"; 360];
         fields[2] = "Standard";
         fields
+    }
+
+    #[test]
+    fn grip_reduction_defaults_follow_f32_storage_including_underflow() {
+        let mut fields = fixture();
+        for text in ["", "0", "-0", "1e-46", "-1e-46"] {
+            fields[178] = text;
+            fields[179] = text;
+            assert_eq!(
+                read_standard_grip_reductions(&Row {
+                    fields: fields.clone()
+                })
+                .unwrap(),
+                [0.5; 2]
+            );
+        }
+        fields[178] = "1e-45";
+        fields[179] = "-1e-45";
+        let values = read_standard_grip_reductions(&Row {
+            fields: fields.clone(),
+        })
+        .unwrap();
+        assert_eq!(values[0].to_bits(), 1);
+        assert_eq!(values[1].to_bits(), 0x8000_0001);
+        for text in ["NaN", "inf", "1e300"] {
+            fields[178] = text;
+            assert!(
+                read_standard_grip_reductions(&Row {
+                    fields: fields.clone()
+                })
+                .is_err()
+            );
+        }
     }
 
     #[test]

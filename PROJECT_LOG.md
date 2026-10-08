@@ -698,6 +698,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added `grip_history::factor/apply` and whole original98db40 probe/validator. **1308cases/2616words exact debug/release**, local/behavior/grip-history-20261008-01/validation.json,02/:96ordinal/flag/Zsign controls,700F109computed-history outputs and512seeded states including outside0..1. No clamps added; exact grouping follows aligned instructions. [Contract](docs/GRIP_HISTORY_FACTOR.md).
 - ProbeSHA1fe31f67e12e1a8bce07ee788913bf800e723afc68c107495ce2d80ef41ae8a9, retainedhistorieshashpinned. **94workspace tests**, fmt/finalwarnings-deniedClippy pass grip-history-tests/final-clippy-20261008.txt. InitialClippy2assignmentorderwarnings retained/scopedallow; no numericalfailures. Original code RX/no patches/stubs/writablemappedpages/liveinjection. Constructorinitializes1f24=1 andcopiesproperties53c/540 to1fa4/1fa8; source decoder/laterstate unverified. Body scalar/flag source and other a00e10 modifiers stillopen. No tool/game/user-file changes. F109angle separatelyb118548. Continue source settings and production force assembly.
 
+### 8 October 2026 — source grip reductions verified (F111)
+
+- Original decoder staging+2c80/+2cc0 -> columns178/179 -> properties+53c/+540; stored-f32zero defaults0.5, constructorcopiesbody1fa4/1fa8. Added Standard reader and optionalCSV diagnostic mode. Originalwhole98db40 receives independent Python conversion while native reads CSV with deliberately different request placeholders. **54datasets/2592cases/5184words exact debug/release**, source-grip-reductions-20261008-01/validation.json,02/.44installedhashed sources+10authoredunderflow/rounding/default controls; all44source pairsdecode0.5/0.5. OriginalCSVdecoder notexecuted; supplied1308/2616mode regressesbothprofiles. [Contract](docs/SOURCE_GRIP_REDUCTIONS.md). **95workspace tests**, fmt/warnings-deniedClippy pass source-grip-reductions-tests/clippy-20261008.txt; no failures. No game/userfile/toolchanges. F110consumer separately0b5bb17.
+- Ghidrafield-store survey20261008T0013240243230Z/field-stores.tsv and targeted20261008T0014152064705Z/:9bd7f0 copiesbody22e0..3 to227c..f;990610 initializes settingsslot0xb=0.5 latercopiedto1ffc;9ae8f0writes1f24 onlyin six-wheel layout branch, notestablished Standardmutation. Candidate surveyliteralMOVonly, doesnotprove exhaustive mutation coverage or flag meaning.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -751,6 +756,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Source table-to-grip integration](docs/SOURCE_TYRE_GRIP.md)
 - [Production wheel history and conditional grip](docs/WHEEL_HISTORY.md)
 - [Downstream wheel-history grip multiplier](docs/GRIP_HISTORY_FACTOR.md)
+- [Source coordinate-dependent grip reductions](docs/SOURCE_GRIP_REDUCTIONS.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
