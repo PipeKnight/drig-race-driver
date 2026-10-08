@@ -729,6 +729,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — whole unassisted wheel coefficient update verified (F117)
+
+- Added steering_coefficients::unassisted with explicit paired ordinals, geometry/caps/mode, toe/offset rotations, separate +38 history, +28/+2c smoothing, final rotation and frozen restoration. Whole original9b3110/realinput+trig helpers, **1176cases/23520words exact debug/release**, steering-coefficients-20261008-03/,04/. All12 ordered distinct pairs covered. [Specification and limits](docs/STEERING.md). RX/read-only mapped data; no patches/stubs/live injection. Source/device input/assistance/cadence remain open; constructor sets assisted e6c true, so this is conditional behavior.
+- Initial01/02exact; Clippy neg_multiply corrected with equivalent unary negation, rebuilt/revalidated bothprofiles; final96workspace tests/fmt/warnings-deniedClippypass steering-coefficients-tests/. One missing constructor-read path corrected. ProbeSHA870ecba047c753823dee0adeb7d502608fe899afd6007f9338087943a37f3cbc. Existingtools/no installs/game/userfile changes. Ghidra20261008T0141512067765Z identifies98ebf0 initializer/property340->bodye54;9ad6b0unrelateddrivetrain. Next aligned/whole initializer check for source geometry/pair identity, then assisted branch and settings source.
+
 ### 8 October 2026 — supplied steering input conditioning verified (F116)
 
 - Recovered 98f790's EAX body / ESI command-copy convention. Added independent steering_input::condition and whole original helper probe. **1351 cases/1351 words exact debug/release**, steering-input-20261008-01/validation.json,02/; clamp/enable/0.5/signed-zero/speed/phase controls and1024seeded inputs. Original trigonometry, RX code/read-only mapped data; no patches/stubs/live injection. [Contract and limits](docs/STEERING.md). Physical scalar meanings/source/device input remain open.
