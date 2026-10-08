@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 97 workspace tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 99 workspace tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -728,6 +728,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - CorrectedF114alias assumption: firstsnapshot2groups6each, second3groups4each. Initial01guardfailedbeforeexecution;02nativeblendroles20/24swapped produced17320words across552cases, alignedloads corrected;03exact560beforecrossWliteralzero/control. Final04/05exact. ProbeSHA22ad99b650878c860f26402d5b5827c9a0f14c4c977a230ccf66786df64fe313; originalcodeRX/no stubs/datapagewrites/liveinjection. **95workspace tests**,fmt/warnings-deniedClippypass. Existingtools/no installs. Preservation00:43:15UTC confirms130sourcefiles+exeunchanged. F114research separatelyd96e3f3. Continue wheelblend/angle provenance and force-stage integration.
 
 ## Next actions
+
+### 8 October 2026 — handling-damage source joined to steering reset (F129)
+
+- Added bounded ASCII legacy HDM reader and `grid-steering-reset --source HDM`. Seven steering parameters/defaults derive from actual source attributes, preserving f64 parsing then f32 storage. **20 datasets /2,560 cases /64,000 fields exact debug/release**, two hashed installed HDMs and18 independently authored controls. Original reset/producer receive independently Python-converted parameters; original XML loader/config reader/converter/full constructor remain unexecuted. [Source reader and limits](docs/HANDLING_DAMAGE.md).
+- `local/behavior/source-steering-reset-20261008-01/validation.json`,02/; original reset probe unchanged/pinned. Seven guards reject malformed/ambiguous/nonfinite source or unordered reset. Prior1,392-case reset regresses both profiles `steering-reset-source-regression-20261008-01/`,02/. **99 workspace tests**, fmt/warnings-deniedClippy pass `source-steering-reset-checks/`. Reused cached quick-xml0.41.0 (already in Cargo.lock; pinned direct formats dependency), built offline with existing Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0; no installs. Initial compile used string methods on byte attributes/declaration version; fixed after inspecting pinned API. Two test literals initially lacked leading zero; corrected. No numerical failures.
+- Private source survey/scripts and bounded static-string inspector now included as independently authored tooling. Original archive, proprietary text and decoded files stay ignored under local. Preservation13:46:41UTC confirms130resources+exe unchanged (`local/scene/preservation-20261008-handling-damage.json`). No game/settings changes. F128 committed2b30d9a. Next capture actual mutable object after a fresh Lacetti/Donington load to verify selected HDM, initialized seeds/parameters and copy/order evidence. Computer Use skill initialized and read fully; list_apps reports The Finals running and GRID closed. Asked desktop availability asynchronously; no desktop input/launch/game changes issued while that answer is pending.
 
 ### 8 October 2026 — deterministic steering reset verified (F128)
 

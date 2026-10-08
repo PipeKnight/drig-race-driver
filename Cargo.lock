@@ -2765,6 +2765,9 @@ dependencies = [
 [[package]]
 name = "grid-formats"
 version = "0.1.0"
+dependencies = [
+ "quick-xml",
+]
 
 [[package]]
 name = "grid-tools"

@@ -7,9 +7,15 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-steering-reset INPUT.tsv local/OUTPUT.tsv".into());
+    let source_mode = args.len() == 4 && args[2] == "--source";
+    if args.len() != 2 && !source_mode {
+        return Err("usage: grid-steering-reset INPUT.tsv local/OUTPUT.tsv [--source HDM]".into());
     }
+    let source = if source_mode {
+        Some(grid_formats::handling_damage::read(&fs::read(&args[3])?)?)
+    } else {
+        None
+    };
     let text = fs::read_to_string(&args[0])?;
     if text.len() > 4 * 1024 * 1024 {
         return Err("input exceeds limit".into());
@@ -21,10 +27,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err("invalid reset row".into());
         }
         let seed = u32::from_str_radix(cells[1], 16)?;
-        let v: Vec<_> = cells[2..]
+        let mut v: Vec<_> = cells[2..]
             .iter()
             .map(|v| u32::from_str_radix(v, 16).map(f32::from_bits))
             .collect::<Result<_, _>>()?;
+        if let Some(source) = source {
+            v[..7].copy_from_slice(&source.scalars());
+        }
         let active = match v[7] {
             0. => false,
             1. => true,
@@ -43,7 +52,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 wheel_views_active: active,
             },
         )?;
-        let mut result = format!("P\t{}\t{:08x}", cells[0], out.random_state);
+        let mut result = format!("P\t{}", cells[0]);
+        if source_mode {
+            for value in &v[..7] {
+                result.push_str(&format!("\t{:08x}", value.to_bits()));
+            }
+        }
+        result.push_str(&format!("\t{:08x}", out.random_state));
         for value in out
             .cap_seeds_48_4c
             .into_iter()
