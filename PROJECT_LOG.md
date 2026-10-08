@@ -1,6 +1,6 @@
 # GRID engine project log
 
-Last updated: 7 October 2026 (Europe/Kiev).
+Last updated: 8 October 2026 (Europe/Kiev).
 
 ## Objective and current state
 
@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 85 workspace tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 95 workspace tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -728,6 +728,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - CorrectedF114alias assumption: firstsnapshot2groups6each, second3groups4each. Initial01guardfailedbeforeexecution;02nativeblendroles20/24swapped produced17320words across552cases, alignedloads corrected;03exact560beforecrossWliteralzero/control. Final04/05exact. ProbeSHA22ad99b650878c860f26402d5b5827c9a0f14c4c977a230ccf66786df64fe313; originalcodeRX/no stubs/datapagewrites/liveinjection. **95workspace tests**,fmt/warnings-deniedClippypass. Existingtools/no installs. Preservation00:43:15UTC confirms130sourcefiles+exeunchanged. F114research separatelyd96e3f3. Continue wheelblend/angle provenance and force-stage integration.
 
 ## Next actions
+
+### 8 October 2026 — wheel-blend research and desktop interruption
+
+- F115preparation committed separately as e0f624c. Existingtools traced997690 to a reset routine (neutralwheel20=1/24=0), not a steering update. ExactStandardbodyoffset survey20261008T0046185903606Z/field-stores.tsv identifies9b3110 as the later coefficient writer; unrelated9e7170object's19b0store is not a wheel proof. Private targeted20261008T0046426401384Z/ and xrefs20261008T0047157545917Z/:9b40d0calls9b3110. Preliminary98f790decompiled20261008T0047401301394Z/. No native steering implementation or verified whole steering comparison yet. Recover actual call arguments and assisted/unassisted branches before implementation; blend update ordering must be established.
+- Owner reported manual launch after helperlaunchfailure. Fresh Computer Use inventory was interrupted by physicalEscape and explicitlyrequired stopping desktop control; no further Computer Use actions issued. Nativeprocessinventory found no GRID process, so freshsessionbackup/capture/macro/debugger was not created. Do not interpret this as a compatibility failure or successful manual launch. Earlier failed-launch17filecleanup remains verified in resume-20261008a/cleanup.json. No game/userfilechanges after that cleanup. All current implementation changes committed; no owner input required for later offline research, fresh desktop capture requires a new uninterrupted window selection.
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
 2. Recover production contacts and active tyre forces/input/drivetrain consumers. Suspension preload/setup/cap subset is verified conditionally; deformation/cap operand source initialization and synchronized incoming delta/main timing remain open.
