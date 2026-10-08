@@ -1,6 +1,39 @@
 # Steering input and wheel coefficients
 
-Recorded 8 October 2026. This specification describes supplied state; source tuning, device input and live timing remain separate questions.
+Recorded 8 October 2026. Source initialization and supplied-state behavior are verified within the scopes below; device input, later overrides and live timing remain separate questions.
+
+## Full source assistance initialization (F123)
+
+The outer Standard constructor a0e880 copies0x197 words (0x65c bytes) from the decoded tuning record into body+e78 at a0f299 (`rep movsd`), before calling a0c9f0 at a0f44b. Thus remaining body fields have properties offsets `body_offset-e78`; the four separate F122 copies retain their own provenance. Whole constructor execution is not part of the comparison. The unrelated9efb30 settings object is unnecessary for this source initialization.
+
+`vehicle::read_standard_steering_parameters` returns20 values in the independently documented `STEERING_PARAMETER_BODY_OFFSETS` order:
+
+| Body field | CSV column | Conversion |
+|---|---|---|
+| fdc | 268 | f32 |
+| 138c | 61 | f32 |
+| 123c | 201 | stored-f32 degree factor, then f32 |
+| 1240 /1244 | 202 /203 | f32 |
+| e70 /e5c /e58 | 111 /132 /131 | F122 subset |
+| 101c | 303 | stored-f32 approximately0.01 factor, then f32 |
+| 1020 | 304 | f32 |
+| 1024 /1028 | 305 /310 | stored-f32 degree factor, then f32 |
+| fec | 333 | f32 |
+| fe8 | 332 | parsed value strictly greater than0.5, stored as0/1 |
+| 1248 /1250 | 204 /206 | f32 |
+| 124c /1254 | 205 /207 | f32 |
+| 1388 | 273 | f32; use one only if parsed value is zero |
+| 1f2c | 165 | f32; use one if stored value is zero |
+
+Input factor1388 compares the original x87 return before its narrowing:9af981 stores with FST while retaining the value;9af98e compares with zero. A nonzero +/-1e-46 leaves signed zero here, whereas smoothing1f2c becomes one. BooleanFE8 also compares before narrowing;0.5000000000000001 becomes one. Decimal conversion retains f64 until the final f32 store.
+
+`grid-assisted-steering --source-parameters CAR.csv` overrides all20 parameters and source angle; prior `--source` retains its five-field subset mode. **58 datasets /2,784 cases /55,680 output words exact in debug/release**:44 hashed installed sources plus14 authored source variants. Source-mode inputs use commands bounded to[-1,1] and nine speeds, including35 and adjacent f32 values. Original whole9b3110 receives independently converted source words; native reads actual CSV with distinct placeholders. Original CSV decoder/numeric converter/constructor remain unexecuted in this comparison. Geometry, motion, coefficients, caps, mode, raw input, delta and prior history remain supplied; later overrides and full driving are unclaimed.
+
+The911 source has equal slew thresholds35 with nonzero endpoints. The original divides by zero, clamps infinities via comparisons, and at speed35 keeps the coefficient when bounds become unordered; it still reconstructs its paired cosine. Rust now preserves that narrowly derived NaN behavior instead of rejecting equal thresholds. Arbitrary nonfinite supplied parameters and negative steps remain rejected. Initial run01 stopped on the too-strict equal-threshold guard. Run03 then stopped on an authored factor near30 combined with raw command outside[-1,1], producing a negative step outside the existing supported bounds. Fixtures now explicitly bound raw source-mode commands; these are recorded coverage choices, not proof that every device always supplies that range. No output-word mismatches occurred in completed comparisons.
+
+Evidence `local/behavior/full-source-assisted-steering-20261008-05/validation.json`,06/. Static copy/decoder instructions `source-steering-copy-instructions-20261008.json`; targeted outer constructor `20261008T1246294613266Z/a0e880.c.txt` and caller refs `20261008T1245330005715Z/`. Original probe unchanged from F121; its private lazy normalization data page remains temporarily writable/restored, original code RX. Five invalid-source guards pass. Supplied assisted2,320-case and subset-source2,640-case regressions remain exact in both profiles (`assisted-full-source-regression-20261008-01/`,02/ and `source-assisted-full-source-regression-20261008-01/`,02/). All97 workspace tests, fmt and warnings-denied Clippy pass (`full-source-assisted-steering-tests/`). Existing tool versions reused; no installs or game/user-setting changes. Field survey now includes both FST and FSTP for future coverage.
+
+Next join the verified source wheel geometry to this assisted path, then recover source/default caps, toe, mode and mutable input state before assembling a complete vehicle update.
 
 ## Source assistance subset (F122)
 

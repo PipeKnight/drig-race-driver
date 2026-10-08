@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('output', type=Path)
     parser.add_argument('--profile', choices=['debug', 'release'], default='debug')
+    parser.add_argument('--all-parameters', action='store_true')
     args = parser.parse_args()
     out = args.output.resolve()
     assert out.is_relative_to((ROOT/'local').resolve())
@@ -36,14 +37,20 @@ def main():
         datasets.append((path, rows[0], True))
     assert len(datasets) == 44
     # Copied source rows stay private, including these independently selected changes.
-    for i, text in enumerate(['', '0', '-0', '1e-46', '-1e-46', '1e-43',
-                              '1e-30', '0.100000004', '30.000000953674315', '30.00000095367432', '45']):
+    controls = ['', '0', '-0', '1e-46', '-1e-46', '1e-43',
+                '1e-30', '0.100000004', '30.000000953674315', '30.00000095367432', '45']
+    if args.all_parameters: controls += ['0.5', '0.5000000000000001', '0.49999999999999994']
+    for i, text in enumerate(controls):
         row = datasets[0][1].copy()
         row[77] = '30'
         row[131] = text
         row[132] = text
         row[165] = text
         row[111] = text
+        if args.all_parameters:
+            for column, value in {268:'.1',61:'-1',201:'20',202:'2',203:'15',303:'10',304:'10',
+                                  305:'60',310:'5',333:'.1',332:text,204:'.1',206:'.4',
+                                  205:'0',207:'20',273:text}.items(): row[column] = value
         path = out/f'authored-{i:02d}.csv'
         path.write_text(','.join(row)+'\r\n', encoding='ascii', newline='')
         datasets.append((path, row, False))
@@ -65,11 +72,29 @@ def main():
                     1. if smoothing == 0. else smoothing,
                     f32(float(row[111] or '0'))]
         indexes = [4, 92, 91, 104, 90]
+        if args.all_parameters:
+            columns = [268,61,201,202,203,111,132,131,303,304,305,310,333,332,204,206,205,207,273,165]
+            scalars = []
+            for i, column in enumerate(columns):
+                value = float(row[column] or '0')
+                factor = constant(0x3c8efa35) if i in [2,6,10,11] else constant(0x3c23d70a) if i in [7,8] else 1.
+                converted = f32(value*factor)
+                if i == 13: converted = float(value > .5)
+                if i == 18 and value == 0.: converted = 1.
+                if i == 19 and converted == 0.: converted = 1.
+                scalars.append(converted)
+            expected = [expected[0], *scalars]
+            indexes = [4, *range(85,105)]
         original_rows, native_rows = [], []
         for i in range(48):
             words = seeds[(i*37+ordinal*7)%len(seeds)].copy()
+            if args.all_parameters:
+                raw_command = struct.unpack('<f', struct.pack('<I', int(words[0],16)))[0]
+                words[0] = word(max(-1.,min(1.,raw_command)))
+                words[2] = word([0.,2.,4.,10.,20.,34.999996,35.,35.000004,40.][i%9])
             # Distinct valid placeholders must be ignored by source mode.
-            for index, value in zip(indexes, [.333333, .123456, .012345, .765432, 17.6543]):
+            placeholders = [.333333, *[float.fromhex('0x1.abcdep-4')]*20] if args.all_parameters else [.333333, .123456, .012345, .765432, 17.6543]
+            for index, value in zip(indexes, placeholders):
                 words[index] = word(value)
             name = f'condition_{i}'
             native_rows.append(name+'\t'+'\t'.join(words)+'\n')
@@ -80,7 +105,7 @@ def main():
         original_output, native_output = out/f'{ordinal:03d}-original.tsv', out/f'{ordinal:03d}-native.tsv'
         for kind, exe, argv in [
             ('original', probe, [ROOT/'local/compatibility/grid-unpacked.exe', original_input, original_output]),
-            ('native', native, [native_input, native_output, '--source', source])]:
+            ('native', native, [native_input, native_output, '--source-parameters' if args.all_parameters else '--source', source])]:
             run = subprocess.run([str(exe), *map(str, argv)], cwd=ROOT, capture_output=True, text=True, timeout=30)
             executions.append(dict(dataset=ordinal, kind=kind, sha256=digest(exe), exit=run.returncode, stdout=run.stdout, stderr=run.stderr))
             if run.returncode:
@@ -106,11 +131,11 @@ def main():
         source = out/f'guard-{name}.csv'
         source.write_text(','.join(row)+'\n'+(','.join(row)+'\n' if column is None else ''), encoding='ascii')
         output = out/f'guard-{name}.tsv'
-        run = subprocess.run([str(native),str(native_input),str(output),'--source',str(source)],
+        run = subprocess.run([str(native),str(native_input),str(output),'--source-parameters' if args.all_parameters else '--source',str(source)],
                              cwd=ROOT,capture_output=True,text=True,timeout=30)
         guards.append(dict(name=name,exit=run.returncode,stderr=run.stderr,output_created=output.exists()))
         assert run.returncode and not output.exists()
-    result = dict(profile=args.profile, datasets=len(datasets), cases=len(datasets)*48, fields=len(datasets)*48*20,
+    result = dict(profile=args.profile, all_parameters=args.all_parameters, datasets=len(datasets), cases=len(datasets)*48, fields=len(datasets)*48*20,
                   guards=guards,
                   differences=differences, datasets_report=reports, executions=executions,
                   limits='Independent CSV conversion vs whole original assisted writer; original CSV decoder/constructor not executed. '

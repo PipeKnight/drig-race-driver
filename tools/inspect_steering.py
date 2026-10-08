@@ -23,7 +23,7 @@ def at(address, size):
     raise ValueError('range not file backed')
 
 result = {'source_sha256': hashlib.sha256(raw).hexdigest(), 'instructions': {}, 'constants': {}}
-for address, size in [(0x98f790, 0x12a), (0x9b3110, 0xd26), (0x9b40d0, 0x160), (0xa03670, 0x3400), (0xbf7112, 0x100), (0x98ebf0, 0x230), (0x9aec60, 0x7000), (0x9ae5a0, 0x300), (0xa0c9f0, 0x2400)]:
+for address, size in [(0x98f790, 0x12a), (0x9b3110, 0xd26), (0x9b40d0, 0x160), (0xa03670, 0x3400), (0xbf7112, 0x100), (0x98ebf0, 0x230), (0x9aec60, 0x7000), (0x9ae5a0, 0x300), (0xa0c9f0, 0x2400), (0xa0e880, 0x1400)]:
     instructions = []
     for i in Cs(CS_ARCH_X86, CS_MODE_32).disasm(at(address, size), address):
         instructions.append({'address': hex(i.address), 'mnemonic': i.mnemonic, 'operands': i.op_str})

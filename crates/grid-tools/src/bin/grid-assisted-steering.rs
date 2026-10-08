@@ -27,9 +27,11 @@ fn ordinal(v: f32) -> Result<usize, &'static str> {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 && !(args.len() == 4 && args[2] == "--source") {
+    if args.len() != 2
+        && !(args.len() == 4 && (args[2] == "--source" || args[2] == "--source-parameters"))
+    {
         return Err(
-            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source CAR.csv]".into(),
+            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source|--source-parameters CAR.csv]".into(),
         );
     }
     let source = if args.len() == 4 {
@@ -40,7 +42,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some((
             grid_formats::vehicle::read_standard_steering_angle(&table.rows[0])?,
-            grid_formats::vehicle::read_standard_steering_assistance(&table.rows[0])?,
+            grid_formats::vehicle::read_standard_steering_parameters(&table.rows[0])?,
         ))
     } else {
         None
@@ -55,10 +57,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if cells.len() != 110 || rows.len() >= 4096 {
             return Err("invalid input row".into());
         }
-        let v: Vec<_> = cells[1..]
+        let mut v: Vec<_> = cells[1..]
             .iter()
             .map(|v| u32::from_str_radix(v, 16).map(f32::from_bits))
             .collect::<Result<_, _>>()?;
+        if let Some((angle, parameters)) = source {
+            v[4] = angle;
+            if args[2] == "--source-parameters" {
+                v[85..105].copy_from_slice(&parameters);
+            } else {
+                for i in [5, 6, 7, 19] {
+                    v[85 + i] = parameters[i];
+                }
+            }
+        }
         let mut wheels = Vec::new();
         for q in v[13..53].as_chunks::<10>().0 {
             wheels.push(Wheel {
@@ -74,7 +86,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 rotation_144: q[9],
             });
         }
-        let mut input = Input {
+        let input = Input {
             command: steering_input::Input {
                 command: v[0],
                 perturbation: v[1],
@@ -100,7 +112,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }),
         };
         let p = &v[85..105];
-        let mut parameters = Parameters {
+        let parameters = Parameters {
             command_deadzone_fdc: p[0],
             shaping_138c: p[1],
             high_scale_123c: p[2],
@@ -122,13 +134,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             input_factor_1388: p[18],
             smoothing_factor_1f2c: p[19],
         };
-        if let Some((angle, source)) = source {
-            input.scale_e54 = angle;
-            parameters.feedback_gain_e58 = source.feedback_gain_e58;
-            parameters.minimum_scale_e5c = source.minimum_scale_e5c;
-            parameters.smoothing_factor_1f2c = source.smoothing_factor_1f2c;
-            parameters.speed_cap_e70 = source.speed_cap_e70;
-        }
         let output =
             assisted_steering::calculate(input, parameters, motion, v[105..109].try_into()?)?;
         let words = output

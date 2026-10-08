@@ -91,6 +91,51 @@ pub fn read_standard_steering_assistance(
     })
 }
 
+/// Body offsets in the full steering parameter array, shared by the diagnostic wire order.
+pub const STEERING_PARAMETER_BODY_OFFSETS: [u32; 20] = [
+    0xfdc, 0x138c, 0x123c, 0x1240, 0x1244, 0xe70, 0xe5c, 0xe58, 0x101c, 0x1020, 0x1024, 0x1028,
+    0xfec, 0xfe8, 0x1248, 0x1250, 0x124c, 0x1254, 0x1388, 0x1f2c,
+];
+
+/// Initial decoded source values; later runtime/device overrides are not modeled here.
+pub fn read_standard_steering_parameters(row: &Row<'_>) -> Result<[f32; 20]> {
+    let subset = read_standard_steering_assistance(row)?;
+    let columns = [
+        268, 61, 201, 202, 203, 111, 132, 131, 303, 304, 305, 310, 333, 332, 204, 206, 205, 207,
+        273, 165,
+    ];
+    let mut result = [0.; 20];
+    for (i, column) in columns.into_iter().enumerate() {
+        let value = row.number(column)?.unwrap_or(0.);
+        let factor = match i {
+            2 | 6 | 10 | 11 => f32::from_bits(0x3c8e_fa35),
+            7 | 8 => f32::from_bits(0x3c23_d70a),
+            _ => 1.,
+        };
+        result[i] = match i {
+            13 => {
+                if value > 0.5 {
+                    1.
+                } else {
+                    0.
+                }
+            }
+            // Original x87 compares the parsed value, not the stored f32.
+            18 if value == 0. => 1.,
+            _ => (value * f64::from(factor)) as f32,
+        };
+        if !result[i].is_finite() {
+            return fail(column, "steering parameter exceeds finite f32 range");
+        }
+    }
+    // Preserve the already verified subset, including the post-store smoothing default.
+    result[5] = subset.speed_cap_e70;
+    result[6] = subset.minimum_scale_e5c;
+    result[7] = subset.feedback_gain_e58;
+    result[19] = subset.smoothing_factor_1f2c;
+    Ok(result)
+}
+
 /// Initial Standard suspension fields. Runtime may subsequently change them;
 /// in particular the observed running damping threshold differs from the CSV.
 #[derive(Debug, Clone, Copy)]

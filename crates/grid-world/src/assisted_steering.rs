@@ -77,9 +77,9 @@ pub fn calculate(
         || p.command_deadzone_fdc < 0.
         || p.command_deadzone_fdc > 1.
         || p.smoothing_factor_1f2c < 0.
-        || (p.high_scale_123c != 0. && p.scale_end_1244 <= p.scale_start_1240)
+        || (p.high_scale_123c != 0. && p.scale_end_1244 < p.scale_start_1240)
         || (p.maximum_angle_1024 > 0. && p.maximum_angle_1024 == p.minimum_angle_1028)
-        || (p.slew_low_1248 != 0. && p.slew_high_1250 != 0. && p.slew_end_1254 <= p.slew_start_124c)
+        || (p.slew_low_1248 != 0. && p.slew_high_1250 != 0. && p.slew_end_1254 < p.slew_start_124c)
     {
         return Err(Error("invalid assisted steering parameters"));
     }
@@ -187,7 +187,13 @@ pub fn calculate(
     };
     if !angle.is_finite()
         || !(p.smoothing_factor_1f2c * (input.delta * 5.)).is_finite()
-        || slew_step.is_some_and(|v| !v.is_finite() || v < 0.)
+        || slew_step.is_some_and(|v| {
+            v < 0.
+                || (!v.is_finite()
+                    && !(v.is_nan()
+                        && p.slew_end_1254 == p.slew_start_124c
+                        && speed == p.slew_start_124c))
+        })
     {
         return Err(Error("nonfinite or negative assisted steering step"));
     }

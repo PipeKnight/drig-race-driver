@@ -18,7 +18,7 @@ public class GridManagerStores extends GhidraScript {
                 monitor.checkCancelled();
                 Instruction instruction = instructions.next();
                 if (!instruction.getMnemonicString().startsWith("MOV") &&
-                    !instruction.getMnemonicString().equals("FSTP")) continue;
+                    !instruction.getMnemonicString().startsWith("FST")) continue;
                 String destination = instruction.getDefaultOperandRepresentation(0);
                 if (!destination.contains("[")) continue;
                 boolean matched = args.length == 1 && destination.contains("0x218c");

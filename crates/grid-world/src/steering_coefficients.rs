@@ -169,7 +169,12 @@ pub(crate) fn update(
         && let Some(step) = tail.slew_step
     {
         for (state, prior) in result.iter_mut().zip(tail.prior_38) {
-            let v = state.blend_24.clamp(prior - step, prior + step);
+            // Original COMISS branches leave the coefficient alone for unordered bounds.
+            let v = if step.is_nan() {
+                state.blend_24
+            } else {
+                state.blend_24.clamp(prior - step, prior + step)
+            };
             state.blend_24 = v;
             state.blend_20 = (1. - v * v).sqrt();
         }
