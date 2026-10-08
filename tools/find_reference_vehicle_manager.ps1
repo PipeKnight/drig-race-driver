@@ -1,9 +1,10 @@
 # Bounded read-only search for an observed exact general-manager vtable.
-param([long]$ScanLimitBytes=64MB,[long]$ManagerAddress=0,[switch]$IncludeDynamics,[switch]$IncludeContacts,[switch]$IncludeSteering,[switch]$IncludeDeformation,
+param([long]$ScanLimitBytes=64MB,[long]$ManagerAddress=0,[switch]$IncludeDynamics,[switch]$IncludeContacts,[switch]$IncludeSteering,[switch]$IncludeDeformation,[switch]$IncludeImpact,
  [string]$SessionJson='local/reference-race/resume-20261007/session.json')
 $ErrorActionPreference='Stop'
 if($ScanLimitBytes -lt 1 -or $ScanLimitBytes -gt 256MB){throw 'Scan limit must be 1..256 MiB'}
 if($IncludeDeformation -and !$IncludeSteering){throw 'Deformation capture requires steering identity checks'}
+if($IncludeImpact -and !$IncludeDeformation){throw 'Impact capture requires deformation identity checks'}
 $taskRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $taskSessionPath=[IO.Path]::GetFullPath((Join-Path $taskRoot $SessionJson))
 if(!$taskSessionPath.StartsWith((Join-Path $taskRoot 'local')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Session must remain under local/'}
@@ -64,11 +65,16 @@ try {
  if($IncludeSteering){
   $taskSteeringEntries=@(0x9c5b90,0x9bd7f0,0x9f2f80)
   if($IncludeDeformation){$taskSteeringEntries+=@(0x9bb1e0,0x9a39d0,0x9a26f0,0x9a2110,0x9fec70)}
+  if($IncludeImpact){$taskSteeringEntries+=@(0x9d4970,0x9ea6e0,0xa08040)}
   foreach($taskEntry in $taskSteeringEntries){
    $taskSteeringCode=Read-TaskBytes $taskEntry 32 ('steering_code_'+$taskEntry.ToString('x'))
    $taskEntryOffset=$taskEntry-0x400000-0x1000+0x400
    if($null -eq $taskSteeringCode -or [Convert]::ToHexString($taskSteeringCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskEntryOffset..($taskEntryOffset+31)])){throw 'Live steering routine differs'}
   }
+ }
+ if($IncludeImpact){
+  $taskSolverGlobals=Read-TaskBytes 0xe4fc80 0x20 'deformation_solver_globals'
+  if($null -eq $taskSolverGlobals){throw 'Missing deformation solver globals'}
  }
  $taskScanBytes=0L;$taskRegions=0;$taskAddress=0x10000L
  $taskCandidates=[Collections.Generic.List[long]]::new()
@@ -191,6 +197,12 @@ try {
      if($taskDeformationSettings -lt 0x10000 -or $taskDeformationSettings -gt 0x7ffef000){throw 'Deformation settings pointer outside scope'}
      $taskStrainSettings=Read-TaskBytes ($taskDeformationSettings+0x1024) 8 "car_$taskIndex-deformation_strain_settings"
      if($null -eq $taskStrainSettings){throw 'Missing deformation strain settings'}
+     if($IncludeImpact){
+      $taskImpactSettings=Read-TaskBytes ($taskDeformationSettings+0x102c) 0x24 "car_$taskIndex-deformation_impact_settings"
+      $taskImpactState=Read-TaskBytes ($taskBody+0x2300+0xa440) 0x40 "car_$taskIndex-deformation_impact_state"
+      $taskNodeFlags=Read-TaskBytes ($taskBody+0x2300+0xa280) 400 "car_$taskIndex-deformation_node_flags"
+      if($null -eq $taskImpactSettings -or $null -eq $taskImpactState -or $null -eq $taskNodeFlags){throw 'Missing deformation impact inputs'}
+     }
     }
    }
    if($IncludeDynamics -or $IncludeContacts){

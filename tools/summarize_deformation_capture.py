@@ -48,6 +48,17 @@ def load(path):
                          wheel_radius_thresholds=struct.unpack('<2f', blocks[prefix + 'deformation_radius_thresholds']),
                          tyre_flags=list(blocks[prefix + 'deformation_tyre_flags']),
                          node_w_range=[min(position_w), max(position_w)]))
+        if prefix + 'deformation_impact_settings' in blocks:
+            impact = blocks[prefix + 'deformation_impact_state']
+            flags = blocks[prefix + 'deformation_node_flags']
+            node_fields = [struct.unpack_from('<f', pool, i * 80 + 0x40)[0] for i in range(count)]
+            assert len(flags) == 400 and all(math.isfinite(v) for v in node_fields)
+            rows[-1]['impact'] = dict(iteration_counter=struct.unpack_from('<i', impact, 0x10)[0],
+                                     descriptor_a440=struct.unpack_from('<4f', impact),
+                                     settings_102c_to_104c=struct.unpack('<9f', blocks[prefix + 'deformation_impact_settings']),
+                                     node_40_range=[min(node_fields), max(node_fields)],
+                                     nonzero_node_40_count=sum(v != 0. for v in node_fields),
+                                     active_ff_node_flags=sum(v == 255 for v in flags[:count]))
     return capture, blocks, rows
 
 

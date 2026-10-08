@@ -729,6 +729,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — impact producer caller and input preparation
+
+Published focused source-only commits5408f7f(capture) andce091064be96a588d1ca34f4237dc1f8fb083afb(F135settling); push/independentls-remote/localHEAD match, ahead/behind0/0 and clean atverification. Private record `local/behavior/github-deformation-settle-sync-20261008.md`. Proprietary evidence/binaries remain ignoredlocal; no forcepush/rewrite.
+
+Continued research decompiles9D4970/A08040/9EA6E0 plus fourtimerhelpers successfully; xrefs and aligned caller instructions prove A18460passes body22F0container, A08040+10 yieldsbody2300receiver.9D4970uses node40nonzero marker, descriptorA450counter, settings1048,48-byte incomingrecords, retainednode30motion; removes mean movement then9A26F0 and writesA4F0(notA4F2). Full input record schema/collisionsemantics and numerical execution pending. [Observed boundaries/evidence](docs/DEFORMATION_GRID.md#impact-producer-preparation). OptionalIncludeImpact reader checks3additionalprefixes and captures settings102C..104F/A440..A47F/400flagbytes/E4FC80globals. Two446/446pausedcaptures arebyteidentical; laterglobalscapture447/447successful. Playercounter10,334/360nonzeronode40valuesrange0..10,360activeflagsFF; globalE4FC8C10. Actualtimer path callsQPC/QPF/GetTickCount and mutatesEC09xx; existing no-import mapper cannot execute unchanged. Next recover exact recordconstraints and narrowly bind realtimerimports or select smaller original numericboundary. No stubs/importbinding/nativeimpactclaim. One print-only nestedPythonSyntaxError corrected withstdin. Python/PowerShell syntax pass, no newRustchanges/test rerun/install/gameinput/settingschange. Game remains paused; no owner answer required for further offlinework.
+
 ### 8 October 2026 — whole supplied-node grid settling implemented (F135)
 
 Whole9A26F0including real9A2110/memset/setter executes without stubs/patches/injection in isolated privatePE; codeRX, only privateE58000lazy data writable/restored. ExistingMSVC14.44.35207/SDK10.0.26100.0 build passes/W4/WX; probeSHAa62bfd35a8428f865bd3869be0b2a6df66831f878d00f0fbdceda637d35c1b0e. Input400node position/rest/bounds records, active dimensions, graph/mode/strainsettings. Twelve-cars replay29,704fields with1,336incomingdifferences before and after macro; not synchronized/idempotent. Exactconstantreads verify mode1spacing*.1, othermode*.2, upper*2 (`local/behavior/deformation-settle-constants-20261008.json`).
