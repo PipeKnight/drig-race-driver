@@ -4,7 +4,7 @@ Updated: 8 October 2026, Europe/Kiev. This roadmap is grounded in [our findings]
 
 ## Objective and language decision
 
-F131 advances damage evolution: the visual wheel-level helper matches2,426original cases in debug/release and preserves96captured wheel levels. Source visual limits and composition with steering are next; notifications, upstream deformation and complete driving remain pending. [Evidence and scope](HANDLING_DAMAGE.md#visual-wheel-level-evolution-f131).
+F132 joins HDM visual limits to wheel-level evolution:3,200source cases exact debug/release and36live source words match. F131's supplied helper preserves96captured wheel levels. Upstream deformation, impact production, notification behavior and full update composition remain pending. [Evidence and scope](HANDLING_DAMAGE.md#source-visual-limits-f132).
 
 Implement an independent engine that reads the owner's GRID resources and progressively reproduces driving, racing and the full single-player experience. First supported target: Windows x86-64. The original x86 executable is our behavior reference, not an architecture requirement for the replacement.
 

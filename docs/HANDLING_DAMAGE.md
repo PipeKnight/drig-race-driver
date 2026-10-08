@@ -1,6 +1,14 @@
 # Handling-damage source investigation
 
-Recorded 8 October 2026. F131 adds visual wheel-level evolution; F130 confirms actual Standard source selection and live steering. F129 joins source to [deterministic reset F128](STEERING.md). The original XML loader is not isolated for comparison.
+Recorded 8 October 2026. F132 joins source limits to visual wheel-level evolution (F131). F130 confirms actual Standard source selection/live steering; F129 joins source to [deterministic reset F128](STEERING.md). The original XML loader is not isolated for comparison.
+
+## Source visual limits (F132)
+
+The bounded HDM reader now exposes ten fields: the earlier seven steering values plus `visual_damage` with angular limit280, displacement limit284 and terminal percentage288. Defaults are27, stored-f32 .45 (3ee66666),150. Numeric conversion remains decimal f64 then f32. `grid-wheel-damage --source HDM` overrides the supplied angular/displacement placeholders and emits the three source words before four result words. Terminal percentage is reported for provenance; its notification behavior is unimplemented.
+
+**20 datasets /3,200 cases /22,400 fields exact debug/release**, comprising both hashed installed HDMs and18 authored default/zero/signed-zero/underflow/decimal/explicit settings controls. Each has160deformation/correction/prior/ordinal states. Whole original9f2f80 receives independently Python-decoded parameters; native reads HDM. Distinct999/998placeholders prove overrides are consumed. All36captured parameter words from twelve Standard cars match independent source and native outputs. Original XML loader/converter/constructor, deformation producers and notifications remain unexecuted; this is source joining to the numeric subset.
+
+Evidence `local/behavior/source-wheel-damage-20261008-01/validation.json`,02/; source probe SHA c45b962f08dad43576157cf26a7ae7360dc3c7367ee109ce50bfb07372319724. Four malformed/range/nonfinite source guards reject before output. Prior2,426-case supplied/live wheel replay and2,560-case source reset regress exactly in both builds (`wheel-damage-source-regression-20261008-01/`,02/ and `source-reset-wheel-damage-regression-20261008-01/`,02/). Prior original probes remain unchanged.100workspace tests/fmt/warnings-deniedClippy pass `source-wheel-damage-checks/`; Python compilation passes. No numerical failures/new tools/game inputs/settings changes. Next upstream deformation/impact production and full update order; this checkpoint supersedes F131's pending source limit work.
 
 ## Visual wheel-level evolution (F131)
 

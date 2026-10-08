@@ -1,9 +1,10 @@
-//! Bounded steering configuration from the observed legacy HDM text subset.
+//! Bounded steering and visual damage configuration from legacy HDM text.
 use crate::{Error, Result, fail};
 use quick_xml::{Reader, events::Event};
 
 #[derive(Clone, Copy, Debug)]
 pub struct SteeringParameters {
+    pub visual_damage: VisualDamageParameters,
     pub maximum_rotation_26c: f32,
     pub maximum_cap_250: f32,
     pub perturbation_gain_270: f32,
@@ -11,6 +12,21 @@ pub struct SteeringParameters {
     pub ramp_end_278: f32,
     pub low_gain_27c: f32,
     pub cap_threshold_254: f32,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct VisualDamageParameters {
+    pub angular_limit_280: f32,
+    pub displacement_limit_284: f32,
+    pub terminal_percentage_288: f32,
+}
+impl VisualDamageParameters {
+    pub fn scalars(self) -> [f32; 3] {
+        [
+            self.angular_limit_280,
+            self.displacement_limit_284,
+            self.terminal_percentage_288,
+        ]
+    }
 }
 impl SteeringParameters {
     pub fn scalars(self) -> [f32; 7] {
@@ -101,6 +117,9 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
         f32::from_bits(0x3f733333),
         f32::from_bits(0x3dcccccd),
         0.,
+        27.,
+        f32::from_bits(0x3ee66666),
+        150.,
     ];
     loop {
         let event = reader.read_event().map_err(|_| Error {
@@ -166,6 +185,9 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
                             ("WHEEL", "damageToStartBaseEffect") => Some(3),
                             ("WHEEL", "damageToHaveFullEffect") => Some(4),
                             ("WHEEL", "damageMinEffect") => Some(5),
+                            ("WHEEL", "damageScaleFromVisual") => Some(7),
+                            ("WHEEL", "damageScaleFromVisualDisplacement") => Some(8),
+                            ("WHEEL", "terminalDamagePercentage") => Some(9),
                             _ => None,
                         }
                     };
@@ -206,6 +228,11 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
         return fail(0, "incomplete HDM steering configuration");
     }
     Ok(SteeringParameters {
+        visual_damage: VisualDamageParameters {
+            angular_limit_280: fields[7],
+            displacement_limit_284: fields[8],
+            terminal_percentage_288: fields[9],
+        },
         maximum_rotation_26c: fields[0],
         maximum_cap_250: fields[1],
         perturbation_gain_270: fields[2],
@@ -229,6 +256,10 @@ mod tests {
         assert_eq!(values.low_gain_27c.to_bits(), 0x3dcccccd);
         assert_eq!(values.perturbation_gain_270, 0.);
         assert_eq!(values.maximum_cap_250, 0.8);
+        assert_eq!(
+            values.visual_damage.scalars().map(f32::to_bits),
+            [27.0f32.to_bits(), 0x3ee66666, 150.0f32.to_bits()]
+        );
     }
     #[test]
     fn malformed_truncated_and_ambiguous_configuration_is_rejected() {

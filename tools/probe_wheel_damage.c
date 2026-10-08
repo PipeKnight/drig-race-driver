@@ -25,13 +25,20 @@ int wmain(int argc,wchar_t **argv){
   if(++cases>4096||!strchr(line,'\n')){error=6;break;}
   char *cursor=line,*start=cursor;while(*cursor&&*cursor!='\t'&&*cursor!=' ')++cursor;size_t n=(size_t)(cursor-start);
   if(!n||n>=sizeof(name)){error=7;break;}memcpy(name,start,n);name[n]=0;
-  float v[19];for(unsigned i=0;i<19;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
+  unsigned word_count=19;
+#ifdef GRID_WHEEL_DAMAGE_SOURCE
+  word_count=20;
+#endif
+  float v[20];for(unsigned i=0;i<word_count;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
   while(*cursor=='\t'||*cursor==' '||*cursor=='\r'||*cursor=='\n')++cursor;if(error||*cursor){error=9;break;}
   if(v[4]<0.f||v[4]>3.f||v[4]!=(float)(unsigned)v[4]||(v[15]!=0.f&&v[15]!=1.f)){error=13;break;}
   if(v[16]<0.f||(v[16]!=0.f&&v[17]<=0.f)){error=14;break;}
   __declspec(align(16)) unsigned char state[0x460]={0},wrapper[0x30]={0},body[0xef00]={0};
   unsigned wheel=(unsigned)v[4];
   memcpy(state+0x18,v,16);memcpy(state+0x280,v+16,8);
+#ifdef GRID_WHEEL_DAMAGE_SOURCE
+  memcpy(state+0x288,v+19,4);
+#endif
   *(unsigned *)(state+0x214)=(unsigned)(uintptr_t)wrapper;*(unsigned *)(wrapper+0x24)=(unsigned)(uintptr_t)body;
   memcpy(body+0x1790+wheel*4,v+5,4);memcpy(body+0x1650+wheel*16,v+6,16);
   memcpy(body+0xc740,v+10,16);memcpy(body+0xeefc,v+14,4);body[0xc7ae]=(unsigned char)v[15];
@@ -40,6 +47,9 @@ int wmain(int argc,wchar_t **argv){
   __try{kernel(state+0x258,NULL,v[18],wheel,state);}__except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"fault=%08lx\n",GetExceptionCode());error=10;break;}
   if(*(unsigned *)(state+0x444)!=7||state[0x448]!=0){error=15;break;}
   fprintf(output,"P\t%s",name);
+#ifdef GRID_WHEEL_DAMAGE_SOURCE
+  for(unsigned i=0;i<3;++i)fprintf(output,"\t%08x",bits(*(float *)(state+0x280+i*4)));
+#endif
   for(unsigned i=0;i<4;++i){float value=*(float *)(state+0x18+i*4);if(!isfinite(value))error=11;fprintf(output,"\t%08x",bits(value));}
   fputc('\n',output);if(error)break;
  }

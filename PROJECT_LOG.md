@@ -729,6 +729,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — source limits joined to visual wheel damage (F132)
+
+- Extended bounded HDM reader with angular limit280, displacement limit284 and terminal percentage288/defaults. `grid-wheel-damage --source HDM` replaces two numeric limits and reports all three source words. Terminal event behavior remains unimplemented. [Source contract](docs/HANDLING_DAMAGE.md#source-visual-limits-f132).
+- **20datasets /3,200cases /22,400fields exact debug/release**, two installed HDMs+18authored precision/default/zero controls,160states each. Original9f2f80 gets independent Python-decoded limits; native reads HDM with different placeholders. Additional36live Standard parameter words match. Original XML loader/converter/full constructor, incoming deformation/impact, notifications/cadence remain unexecuted.
+- Private `source-wheel-damage-20261008-01/validation.json`,02/; new source probeSHAc45b962f08dad43576157cf26a7ae7360dc3c7367ee109ce50bfb07372319724. Four source guards fail before output; supplied/live2,426-case wheel and2,560-case source-reset regressions exact both builds.100tests/fmt/warnings-deniedClippy pass `source-wheel-damage-checks/`, Python compile passes. No numerical failures/install/game input/settings changes, existing pinned tools only. F131 committed separatelyb5949c1. GRID paused/handler idle; continue impact/deformation source and update composition.
+
 ### 8 October 2026 — visual wheel-level update verified (F131)
 
 - Added independent `wheel_damage::calculate`, bounded native diagnostic and whole original9f2f80 probe. Supplied deformation/correction/settings/prior; actual notification branch disabled with442=false/status7. Delta unconsumed. [Contract/limits](docs/HANDLING_DAMAGE.md#visual-wheel-level-evolution-f131).

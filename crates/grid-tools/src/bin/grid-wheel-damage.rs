@@ -7,9 +7,14 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-wheel-damage INPUT.tsv local/OUTPUT.tsv".into());
+    if args.len() != 2 && !(args.len() == 4 && args[2] == "--source") {
+        return Err("usage: grid-wheel-damage INPUT.tsv local/OUTPUT.tsv [--source HDM]".into());
     }
+    let source = if args.len() == 4 {
+        Some(grid_formats::handling_damage::read(&fs::read(&args[3])?)?.visual_damage)
+    } else {
+        None
+    };
     let text = fs::read_to_string(&args[0])?;
     if text.len() > 4 * 1024 * 1024 {
         return Err("input exceeds limit".into());
@@ -21,7 +26,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         {
             return Err("invalid input row".into());
         }
-        let v: Vec<_> = cells[1..]
+        let mut v: Vec<_> = cells[1..]
             .iter()
             .map(|v| u32::from_str_radix(v, 16).map(f32::from_bits))
             .collect::<Result<_, _>>()?;
@@ -33,6 +38,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             1. => true,
             _ => return Err("invalid correction flag".into()),
         };
+        if let Some(p) = source {
+            v[16] = p.angular_limit_280;
+            v[17] = p.displacement_limit_284;
+        }
         let mut levels: [f32; 4] = v[..4].try_into()?;
         let index = v[4] as usize;
         levels[index] = wheel_damage::calculate(Input {
@@ -46,8 +55,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             displacement_limit_284: v[17],
         })?;
         // v[18] is the finite supplied delta, intentionally unconsumed by this helper.
+        let parameters = source
+            .map(|p| {
+                p.scalars()
+                    .iter()
+                    .map(|v| format!("\t{:08x}", v.to_bits()))
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
         results.push(format!(
-            "P\t{}{}",
+            "P\t{}{parameters}{}",
             cells[0],
             levels
                 .iter()
