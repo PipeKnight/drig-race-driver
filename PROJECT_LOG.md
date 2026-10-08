@@ -729,6 +729,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — source geometry joined to assisted steering (F124)
+
+- Added `grid-assisted-steering --source-geometry CAR.csv CAR.ned`, deriving the shared four-wheel points, paired identities/spans and feedback points alongside source angle/all20 assistance parameters. Whole original98ebf0 ->9b3110/real helpers matches **57 datasets /2,736 cases /68,400 fields exactly in debug/release**:43 hashed installed CSV/.ned pairs plus14 private authored variants. One unresolved variant-to-base association stays excluded. Native placeholders ignored; points independently reconstructed for the original. [Contract/limits](docs/STEERING.md). Original source decoders/outer constructors unexecuted; other state/caps/mode/rotations/delta supplied, no live/full-driving claim.
+- Final `source-assisted-geometry-20261008-03/`,04/;01/02 also exact before fixing evidence limit text. New separate probeSHA7080f0243e9c16104ae38949f89419626f49e7c2820aadb02ed0cc750ce47f93; F121 binary unchanged. RX code, private lazy data page writable/restored, no patches/stubs/injection. Five source guards pass. All97 tests/fmt/warnings-deniedClippy pass `source-assisted-geometry-tests/`. Existing pinned tools/no installations/game/user-setting changes/numerical or check failures. One CLI filename lookup corrected.
+- Next recover wheel toe/front424/rear428, smoothing limit42c and mode4f4 from CSV and whole wheel initializer. Mutable2294/2298/229c/rotation fields copy from a separate state block through9bd7f0; preserve this source distinction. F123 is committed8b720d3, not yet published.
+
 ### 8 October 2026 — all20 steering assistance parameters traced to source (F123)
 
 - Proved outer constructor a0e880 copies the decoded0x65c-byte record to body+e78 at a0f299 before a0c9f0. Remaining16 parameter offsets therefore resolve to CSV fields; added full parameter reader and `grid-assisted-steering --source-parameters`. [Mapping and precision contract](docs/STEERING.md). Input factor273 defaults before f32 narrowing; smoothing165 defaults afterward. FE8 compares parsed CSV332 strictly to0.5. Source angle77 joined; original decoder/converter/constructor remain unexecuted in these numerical comparisons.

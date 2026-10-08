@@ -27,14 +27,16 @@ fn ordinal(v: f32) -> Result<usize, &'static str> {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let geometry_mode = args.len() == 5 && args[2] == "--source-geometry";
     if args.len() != 2
         && !(args.len() == 4 && (args[2] == "--source" || args[2] == "--source-parameters"))
+        && !geometry_mode
     {
         return Err(
-            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source|--source-parameters CAR.csv]".into(),
+            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source|--source-parameters CAR.csv | --source-geometry CAR.csv CAR.ned]".into(),
         );
     }
-    let source = if args.len() == 4 {
+    let source = if args.len() == 4 || geometry_mode {
         let bytes = fs::read(&args[3])?;
         let table = grid_formats::tuning::read(&bytes)?;
         if table.rows.len() != 1 {
@@ -43,6 +45,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some((
             grid_formats::vehicle::read_standard_steering_angle(&table.rows[0])?,
             grid_formats::vehicle::read_standard_steering_parameters(&table.rows[0])?,
+            if geometry_mode {
+                let bytes = fs::read(&args[4])?;
+                let document = grid_formats::binxml::read(&bytes)?;
+                let geometry = grid_formats::vehicle::read_wheel_geometry(&document)?;
+                Some(
+                    grid_formats::vehicle::standard_wheel_layout(&table.rows[0], geometry)?
+                        .positions,
+                )
+            } else {
+                None
+            },
         ))
     } else {
         None
@@ -61,14 +74,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .map(|v| u32::from_str_radix(v, 16).map(f32::from_bits))
             .collect::<Result<_, _>>()?;
-        if let Some((angle, parameters)) = source {
+        let mut geometry_words = String::new();
+        if let Some((angle, parameters, points)) = source {
             v[4] = angle;
-            if args[2] == "--source-parameters" {
+            if args[2] == "--source-parameters" || geometry_mode {
                 v[85..105].copy_from_slice(&parameters);
             } else {
                 for i in [5, 6, 7, 19] {
                     v[85 + i] = parameters[i];
                 }
+            }
+            if let Some(points) = points {
+                let g = grid_world::steering_geometry::initialize(points, angle)?;
+                v[5] = g.span_21d4;
+                v[6] = g.span_21d8;
+                v[11] = g.pair[0] as f32;
+                v[12] = g.pair[1] as f32;
+                for (i, point) in points.iter().enumerate() {
+                    v[13 + i * 10] = point[0];
+                }
+                v[77..81].copy_from_slice(&points[2]);
+                v[81..85].copy_from_slice(&points[3]);
+                geometry_words = format!(
+                    "\t{:08x}\t{}\t{}\t{:08x}\t{:08x}",
+                    g.scale_e54.to_bits(),
+                    g.pair[0],
+                    g.pair[1],
+                    g.span_21d4.to_bits(),
+                    g.span_21d8.to_bits()
+                );
             }
         }
         let mut wheels = Vec::new();
@@ -149,7 +183,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             })
             .map(|v| format!("\t{:08x}", v.to_bits()))
             .collect::<String>();
-        rows.push(format!("P\t{}{words}", cells[0]));
+        rows.push(format!("P\t{}{geometry_words}{words}", cells[0]));
     }
     let out = Path::new(&args[1]);
     let parent = out.parent().ok_or("missing parent")?.canonicalize()?;

@@ -11,6 +11,9 @@
 #include <wchar.h>
 #include "isolated_reference.h"
 typedef void (__cdecl *Kernel)(void *,float);
+#ifdef GRID_ASSISTED_GEOMETRY
+typedef void (__cdecl *GeometryKernel)(void *,void *);
+#endif
 
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
@@ -21,11 +24,14 @@ int wmain(int argc,wchar_t **argv){
  if(!VirtualProtect(image+0xe58000-0x400000,0x1000,PAGE_READWRITE,&saved_protection))return 19;
  FILE *input=NULL,*output=NULL;if(_wfopen_s(&input,argv[2],L"r")||!input||_wfopen_s(&output,argv[3],L"wx")||!output)return 5;
  char line[2048],name[64];unsigned cases=0,error=0,word_count=109;
+#ifdef GRID_ASSISTED_GEOMETRY
+ word_count=125;
+#endif
  while(fgets(line,sizeof(line),input)){
   if(++cases>4096||!strchr(line,'\n')){error=6;break;}
   char *cursor=line,*start=cursor;while(*cursor&&*cursor!='\t'&&*cursor!=' ')++cursor;size_t n=(size_t)(cursor-start);
   if(!n||n>=sizeof(name)){error=7;break;}memcpy(name,start,n);name[n]=0;
-  float v[109];for(unsigned i=0;i<word_count;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
+  float v[125];for(unsigned i=0;i<word_count;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
   while(*cursor=='\t'||*cursor==' '||*cursor=='\r'||*cursor=='\n')++cursor;if(error||*cursor){error=9;break;}
   if(v[9]!=0.f&&v[9]!=1.f){error=13;break;}
   if(v[10]<0.f||v[4]<0.f||v[5]<0.f||v[6]<=0.f||v[7]<0.f||v[8]<0.f){error=14;break;}
@@ -48,8 +54,22 @@ int wmain(int argc,wchar_t **argv){
   const unsigned parameters[20]={0xfdc,0x138c,0x123c,0x1240,0x1244,0xe70,0xe5c,0xe58,0x101c,0x1020,0x1024,0x1028,0xfec,0xfe8,0x1248,0x1250,0x124c,0x1254,0x1388,0x1f2c};
   for(unsigned i=0;i<20;++i)memcpy(body+parameters[i],v+85+i,4);
   for(unsigned i=0;i<4;++i)memcpy(body+0x1990+i*0x150+0x38,v+105+i,4);
+#ifdef GRID_ASSISTED_GEOMETRY
+  __declspec(align(16)) unsigned char properties[0x400]={0};unsigned pair[2]={0};
+  memcpy(properties+0x340,v+4,4);
+  for(unsigned i=0;i<4;++i)memcpy(body+0x1990+i*0x150,v+109+i*4,16);
+  GeometryKernel geometry=(GeometryKernel)(image+0x98ebf0-0x400000);
+  __try{geometry(body,properties);}__except(EXCEPTION_EXECUTE_HANDLER){error=21;break;}
+  for(unsigned i=0;i<2;++i){uintptr_t p=*(unsigned *)(body+0x21cc+i*4),first=(uintptr_t)(body+0x1990);
+   if(p<first||p>first+3*0x150||(p-first)%0x150){error=22;break;}pair[i]=(unsigned)((p-first)/0x150);
+  }
+  if(error)break;
+#endif
   __try{kernel(body,v[10]);}__except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"fault=%08lx\n",GetExceptionCode());error=10;break;}
   fprintf(output,"P\t%s",name);
+#ifdef GRID_ASSISTED_GEOMETRY
+  fprintf(output,"\t%08x\t%u\t%u\t%08x\t%08x",bits(*(float *)(body+0xe54)),pair[0],pair[1],bits(*(float *)(body+0x21d4)),bits(*(float *)(body+0x21d8)));
+#endif
   for(unsigned i=0;i<4;++i){unsigned char *w=body+0x1990+i*0x150;
    unsigned offsets[5]={0x20,0x24,0x28,0x2c,0x38};
    for(unsigned j=0;j<5;++j){float value=*(float *)(w+offsets[j]);if(!isfinite(value))error=11;fprintf(output,"\t%08x",bits(value));}
