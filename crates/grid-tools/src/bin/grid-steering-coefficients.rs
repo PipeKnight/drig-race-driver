@@ -1,7 +1,7 @@
 //! Private whole unassisted coefficient update diagnostic.
 use grid_world::{
     steering_coefficients::{self, Input, Wheel},
-    steering_input,
+    steering_geometry, steering_input,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -26,8 +26,11 @@ fn flag(v: f32) -> Result<bool, &'static str> {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-steering-coefficients INPUT.tsv local/OUTPUT.tsv".into());
+    let geometry_mode = args.len() == 3 && args[2] == "--geometry";
+    if args.len() != 2 && !geometry_mode {
+        return Err(
+            "usage: grid-steering-coefficients INPUT.tsv local/OUTPUT.tsv [--geometry]".into(),
+        );
     }
     let text = fs::read_to_string(&args[0])?;
     if text.len() > 4 * 1024 * 1024 {
@@ -36,7 +39,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut results = Vec::new();
     for line in text.lines() {
         let cells: Vec<_> = line.split('\t').collect();
-        if cells.len() != 54 || results.len() >= 4096 {
+        if cells.len() != if geometry_mode { 70 } else { 54 } || results.len() >= 4096 {
             return Err("invalid input row".into());
         }
         let v: Vec<_> = cells[1..]
@@ -44,7 +47,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map(|v| u32::from_str_radix(v, 16).map(f32::from_bits))
             .collect::<Result<_, _>>()?;
         let mut wheels = Vec::new();
-        for q in v[13..].as_chunks::<10>().0 {
+        for q in v[13..53].as_chunks::<10>().0 {
             wheels.push(Wheel {
                 x: q[0],
                 toe_e8: q[1],
@@ -58,7 +61,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 rotation_144: q[9],
             });
         }
-        let output = steering_coefficients::unassisted(Input {
+        let mut input = Input {
             command: steering_input::Input {
                 command: v[0],
                 perturbation: v[1],
@@ -74,7 +77,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             delta: v[10],
             pair: [ordinal(v[11])?, ordinal(v[12])?],
             wheels: wheels.try_into().map_err(|_| "four wheels required")?,
-        })?;
+        };
+        let mut geometry_words = String::new();
+        if geometry_mode {
+            let points = std::array::from_fn(|i| v[53 + i * 4..57 + i * 4].try_into().unwrap());
+            let g = steering_geometry::initialize(points, v[4])?;
+            input.scale_e54 = g.scale_e54;
+            input.span_21d4 = g.span_21d4;
+            input.span_21d8 = g.span_21d8;
+            input.pair = g.pair;
+            for (w, p) in input.wheels.iter_mut().zip(points) {
+                w.x = p[0];
+            }
+            geometry_words = format!(
+                "\t{:08x}\t{}\t{}\t{:08x}\t{:08x}",
+                g.scale_e54.to_bits(),
+                g.pair[0],
+                g.pair[1],
+                g.span_21d4.to_bits(),
+                g.span_21d8.to_bits()
+            );
+        }
+        let output = steering_coefficients::unassisted(input)?;
         let words = output
             .iter()
             .flat_map(|s| {
@@ -88,7 +112,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             })
             .map(|v| format!("\t{:08x}", v.to_bits()))
             .collect::<String>();
-        results.push(format!("P\t{}{words}", cells[0]));
+        results.push(format!("P\t{}{geometry_words}{words}", cells[0]));
     }
     let out = Path::new(&args[1]);
     let parent = out.parent().ok_or("missing parent")?.canonicalize()?;

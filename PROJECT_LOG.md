@@ -729,6 +729,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — steering geometry and whole unassisted chain verified (F118)
+
+- Added four-wheel steering_geometry preserving original second-pass moving cuts. Whole98ebf0, **611cases/3055fields exact debug/release**:43hashed source layouts independently recomputed,24retained non-atomic states,32controls,512asymmetric states. All43source pairs select[3,2]. Whole original98ebf0->9b3110/98f790 vsRust composition, **1833cases/45825fields exact bothprofiles**, with different placeholder geometry overridden. [Contract](docs/STEERING.md). Properties340/tuning/delta supplied; no assisted/live/six-wheel claim.
+- Evidence steering-geometry-20261008-01/,02/ and steering-pipeline-20261008-01/,02/;1176case suppliedmode regressesbothprofiles. Probesb5fc9b34c31ffbf5f875d2720fe649bf0f63667d799cb26e84c615fc88044441 /239af3cc2ee916c81e2cbec2e428a2c6508bac67a0d2e6b0cbeae5132e8219a4; priorF117probe retainedprivately. No numericalfailures. Initialtestsyntax/Clippyorderwarnings and rgoption/missing-helper/two docpatchanchors corrected. **97tests**,fmt/finalwarnings-deniedClippypass steering-geometry-tests/. Existingtools/no installs/game/userfilechanges. Preservation01:49:17UTC130resources+exeunchanged. Next decoder1340/property340/sourcecolumn77 conversion, then assistance/settings and livecadence.
+
 ### 8 October 2026 — whole unassisted wheel coefficient update verified (F117)
 
 - Added steering_coefficients::unassisted with explicit paired ordinals, geometry/caps/mode, toe/offset rotations, separate +38 history, +28/+2c smoothing, final rotation and frozen restoration. Whole original9b3110/realinput+trig helpers, **1176cases/23520words exact debug/release**, steering-coefficients-20261008-03/,04/. All12 ordered distinct pairs covered. [Specification and limits](docs/STEERING.md). RX/read-only mapped data; no patches/stubs/live injection. Source/device input/assistance/cadence remain open; constructor sets assisted e6c true, so this is conditional behavior.

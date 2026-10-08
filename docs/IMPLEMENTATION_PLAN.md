@@ -1,6 +1,6 @@
 # Current GRID reverse-engineering and implementation plan
 
-Updated: 7 October 2026, Europe/Kiev. This roadmap is grounded in [our findings](../PROJECT_LOG.md). The [original proposal](reference/GRID_2008_OPEN_SOURCE_PLAN.md) remains background reference. Resource readers and static Lacetti/Donington rendering are implemented; twelve live placement results reproduce exactly from recorded inputs. Source-only alignment, collision policy and driving simulation are the current work.
+Updated: 8 October 2026, Europe/Kiev. This roadmap is grounded in [our findings](../PROJECT_LOG.md). The [original proposal](reference/GRID_2008_OPEN_SOURCE_PLAN.md) remains background reference. Resource readers and static Lacetti/Donington rendering are implemented; twelve live placement results reproduce exactly from recorded inputs. Source-only alignment, collision policy and driving simulation are the current work.
 
 ## Objective and language decision
 
@@ -78,6 +78,8 @@ Readers must validate counts, offsets, lengths and encodings before indexing/all
 Use original resources directly from the chosen local installation. Keep caches versioned and keyed by data/build hashes; keep our settings and saves outside the Steam directory. Public parser tests use independently created fixtures; purchased-resource integration checks remain local.
 
 ## Immediate backlog
+
+Current vehicle checkpoint F118: source contacts/materials, temporary force vectors, conditional tyre response and unassisted steering blocks have scoped original-code comparisons. Whole four-wheel geometry-to-unassisted steering matches1,833cases in both profiles; source angle, assistance and settings/input provenance remain open. Constructor enables assistance, so the unassisted result does not establish reference-race steering. See [steering contract](STEERING.md) and the current master log before using older backlog entries below. A complete driving loop is still pending.
 
 1. Reference driving, profile persistence, route_0 mapping and current race conditions are recorded. Use the verified macros for further reference tests; establish repeatability and measure simulation timing before claiming precise physics comparisons. Human-readable layout label and actual display-size reconciliation remain open.
 2. Bounded race-load capture and 130-file dependency list are complete. Extend coverage with a cold process or targeted loader traces only as needed to resolve cached/shared resources and container entries.

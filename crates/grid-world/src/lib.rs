@@ -19,6 +19,7 @@ pub mod rectangle_cull;
 pub mod setup;
 pub mod spawn;
 pub mod steering_coefficients;
+pub mod steering_geometry;
 pub mod steering_input;
 pub mod surface_drag;
 pub mod suspension;
