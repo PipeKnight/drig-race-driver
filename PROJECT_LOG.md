@@ -729,6 +729,12 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — upstream deformation investigation (in progress)
+
+- F131b5949c1/F132b50b6cb published; remote main independently verifiedb50b6cbab103051f80e836724659cc28cd9b5058 with0/0 and clean public tree. Original executable/130traced resources match again at14:44:27.533106UTC (`local/scene/preservation-20261008-wheel-damage.json`). No proprietary artifacts published.
+- Direct MOV/FST literal-displacement store survey yields only unrelated candidates and misses pointer setup (`20261008T1442339210619Z/field-stores.tsv`). Added bounded exact-literal all-operand survey (`run_ghidra_field_stores.ps1 -AllOperands`, `GridDisplacementRefs.java`), successfully compiled/executed on actual PE.18matches reveal9bb1e0 pointer setup for1650/1790, a09ce0 reset, and9c1660 contact consumer; no immutable-field inference from failed direct-store search. `20261008T1444011569747Z/displacement-refs.tsv`, PowerShell syntax passes.
+- Targeted `20261008T1444404324279Z/` and `20261008T1446242652420Z/` decompile sampler/callers. Aligned9bb1e0 uses **descriptor body+2300**, not body directly, for9a39d0; relativeA414/A420/A430/node2580 resolve to bodyC714/C720/C730/4880. Sampler is ordered trilinear position interpolation with bounded lookup and unclamped query restoration. Full wheel geometry/deformation remain unexecuted/unimplemented. [Detailed contract and next action](docs/DEFORMATION_GRID.md). One incorrect Java-script filename lookup and one mid-instruction tail inspection corrected before interpreting evidence. GRID paused/handler idle;100tests from F132 remain latest checks. Next guarded descriptor capture and whole sampler comparison.
+
 ### 8 October 2026 — source limits joined to visual wheel damage (F132)
 
 - Extended bounded HDM reader with angular limit280, displacement limit284 and terminal percentage288/defaults. `grid-wheel-damage --source HDM` replaces two numeric limits and reports all three source words. Terminal event behavior remains unimplemented. [Source contract](docs/HANDLING_DAMAGE.md#source-visual-limits-f132).
@@ -879,6 +885,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 
 - [Current reverse-engineering and implementation plan](docs/IMPLEMENTATION_PLAN.md)
+- [Deformation grid sampler and wheel geometry investigation](docs/DEFORMATION_GRID.md)
 - [First Rust resource readers and format specification](docs/RESOURCE_FORMATS.md)
 - [Verified PSSG geometry and base textures](docs/PSSG_PAYLOADS.md)
 - [Static Bevy car viewer and usage](docs/STATIC_VIEWER.md)
