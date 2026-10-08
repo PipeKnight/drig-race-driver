@@ -1,5 +1,5 @@
 # Bounded read-only search for an observed exact general-manager vtable.
-param([long]$ScanLimitBytes=64MB,[long]$ManagerAddress=0,[switch]$IncludeDynamics,[switch]$IncludeContacts,
+param([long]$ScanLimitBytes=64MB,[long]$ManagerAddress=0,[switch]$IncludeDynamics,[switch]$IncludeContacts,[switch]$IncludeSteering,
  [string]$SessionJson='local/reference-race/resume-20261007/session.json')
 $ErrorActionPreference='Stop'
 if($ScanLimitBytes -lt 1 -or $ScanLimitBytes -gt 256MB){throw 'Scan limit must be 1..256 MiB'}
@@ -60,6 +60,13 @@ try {
  $taskCode=Read-TaskBytes 0x9ad030 32 'general_vehicle_count_code'
  $taskCodeOffset=0x9ad030-0x400000-0x1000+0x400
  if($null -eq $taskCode -or [Convert]::ToHexString($taskCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskCodeOffset..($taskCodeOffset+31)])){throw 'Live count routine differs'}
+ if($IncludeSteering){
+  foreach($taskEntry in @(0x9c5b90,0x9bd7f0)){
+   $taskSteeringCode=Read-TaskBytes $taskEntry 32 ('steering_code_'+$taskEntry.ToString('x'))
+   $taskEntryOffset=$taskEntry-0x400000-0x1000+0x400
+   if($null -eq $taskSteeringCode -or [Convert]::ToHexString($taskSteeringCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskEntryOffset..($taskEntryOffset+31)])){throw 'Live steering routine differs'}
+  }
+ }
  $taskScanBytes=0L;$taskRegions=0;$taskAddress=0x10000L
  $taskCandidates=[Collections.Generic.List[long]]::new()
  if($ManagerAddress){
@@ -126,6 +133,13 @@ try {
    $null=Read-TaskBytes ($taskBody+0x1640) 0x350 "car_$taskIndex-parameter_neighborhood"
    $null=Read-TaskBytes ($taskBody+0xe294) 0x24 "car_$taskIndex-source_wheel_geometry"
    $null=Read-TaskBytes ($taskBody+0x14e0) 0x50 "car_$taskIndex-initialized_wheel_geometry"
+   if($IncludeSteering){
+    if($taskWheelCount -ne 4){throw 'Steering capture currently scoped to four wheels'}
+    # Embedded object, source settings, runtime levels/seeds and producer output.
+    $null=Read-TaskBytes ($taskBody+0xcdf0) 0x460 "car_$taskIndex-mutable_steering"
+    # Keep separately read production copies distinct from the producer output.
+    $null=Read-TaskBytes ($taskBody+0x2294) 0x3c "car_$taskIndex-steering_copies"
+   }
    if($IncludeDynamics -or $IncludeContacts){
     if($taskWheelCount -ne 4){throw 'Dynamics context currently scoped to four wheels'}
     $taskDynamics=Read-TaskBytes ($taskBody+0x3d0) 0x740 "car_$taskIndex-dynamics_context"

@@ -2,6 +2,8 @@
 
 Recorded 8 October 2026. Source initialization and supplied-state behavior are verified within the scopes below; device input, later overrides and live timing remain separate questions.
 
+F130 now confirms actual Standard HDM selection, seven source parameters, producer outputs and separate body copies in seven live read-only captures:84vehicle cases/3,360comparisons exact debug/release. Bounded driving/barrier contact changes wheel levels below the steering-effect threshold; nonzero live wobble, pre-reset RNG and scheduling remain unverified. See [live handling-damage evidence](HANDLING_DAMAGE.md#live-selection-and-mutable-outputs-f130).
+
 ## Deterministic reset (F128)
 
 `steering_control::reset` reproduces the steering subset of whole9e6070->9c5b90. Reset clears18 input words, generates four rotation seeds50..5C and two cap seeds48/4C, then executes the producer. Its optional secondary component210 is absent here; active four-wheel views have component queries disabled. Parameters are supplied, with finite maximum rotation and maximum cap restricted to[0,1]. Original source configuration/full constructor and live RNG state/cadence are outside this comparison.
