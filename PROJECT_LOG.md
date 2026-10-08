@@ -693,6 +693,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Added `calculate_angled` and extended private diagnostic inputs while retaining the old zero-angle entry. Original sin/cos double returns are converted to f32 before four-lane vector arithmetic. **700cases/6300words exact debug/release**, `local/behavior/wheel-angle-20261008-01/validation.json`,02/. Includes364old controls,80angle boundaries and256seeded varied axes/normals; angles up to±10000, not arbitrary math-library equivalence. Old364/3276mode regressesbothprofiles. [Extended contract](docs/WHEEL_HISTORY.md).
 - ProbeSHA30651ce6e289e5d34d98b159c04a8e53fc329075608149a1322c289840b1aaa0. **94workspace tests**, fmt/warnings-deniedClippy pass wheel-angle-tests/clippy-20261008.txt. No numerical/check failures; incorrect initial crate-read paths corrected. Whole originalcalculator/trigonometry with no patches/stubs/writablemappedpages; no physical angle label/liveinput/tableactivation/fullforce claim. Existing tools reused; no game/settings/save changes. F108history separately8b2f066. Continue downstream grip multipliers and source/force-view provenance.
 
+### 8 October 2026 — downstream history grip multiplier verified (F110)
+
+- Added `grip_history::factor/apply` and whole original98db40 probe/validator. **1308cases/2616words exact debug/release**, local/behavior/grip-history-20261008-01/validation.json,02/:96ordinal/flag/Zsign controls,700F109computed-history outputs and512seeded states including outside0..1. No clamps added; exact grouping follows aligned instructions. [Contract](docs/GRIP_HISTORY_FACTOR.md).
+- ProbeSHA1fe31f67e12e1a8bce07ee788913bf800e723afc68c107495ce2d80ef41ae8a9, retainedhistorieshashpinned. **94workspace tests**, fmt/finalwarnings-deniedClippy pass grip-history-tests/final-clippy-20261008.txt. InitialClippy2assignmentorderwarnings retained/scopedallow; no numericalfailures. Original code RX/no patches/stubs/writablemappedpages/liveinjection. Constructorinitializes1f24=1 andcopiesproperties53c/540 to1fa4/1fa8; source decoder/laterstate unverified. Body scalar/flag source and other a00e10 modifiers stillopen. No tool/game/user-file changes. F109angle separatelyb118548. Continue source settings and production force assembly.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -745,6 +750,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Source tyre-grip CSV loader and row slots](docs/TYRE_TABLE.md)
 - [Source table-to-grip integration](docs/SOURCE_TYRE_GRIP.md)
 - [Production wheel history and conditional grip](docs/WHEEL_HISTORY.md)
+- [Downstream wheel-history grip multiplier](docs/GRIP_HISTORY_FACTOR.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
