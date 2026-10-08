@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 95 workspace tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 97 workspace tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -728,6 +728,13 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - CorrectedF114alias assumption: firstsnapshot2groups6each, second3groups4each. Initial01guardfailedbeforeexecution;02nativeblendroles20/24swapped produced17320words across552cases, alignedloads corrected;03exact560beforecrossWliteralzero/control. Final04/05exact. ProbeSHA22ad99b650878c860f26402d5b5827c9a0f14c4c977a230ccf66786df64fe313; originalcodeRX/no stubs/datapagewrites/liveinjection. **95workspace tests**,fmt/warnings-deniedClippypass. Existingtools/no installs. Preservation00:43:15UTC confirms130sourcefiles+exeunchanged. F114research separatelyd96e3f3. Continue wheelblend/angle provenance and force-stage integration.
 
 ## Next actions
+
+### 8 October 2026 — mutable steering producer verified (F126)
+
+- Identified body+CDF0 as the mutable object constructed by9f3d30. Whole producer9c5b90 derives perturbation, two caps, four rotations and four freeze flags from runtime levels/seeds/thresholds. Added Rust `steering_control`, private CLI, isolated original probe and reproducible validator. **2,297 finite cases /25,267 fields exact in debug/release**;11 derived-NaN cases demonstrate original nonfinite outputs and native rejection before output creation. [Contract and limits](docs/STEERING.md).
+- Evidence `local/behavior/steering-control-20261008-05/validation.json`,06/;03/04 earlier exact runs before Clippy cleanup. Probe SHA865481d38446062734501c7b47878d2a2effae993113f648c78946e0a38cf4ba. Original code RX/data read-only, component queries inactive, four-wheel wrapper fixture; no stubs/patches/injection. Original RNG/reset/constructor/copier, source configuration and live cadence unexecuted. Reset9e6070 uses global random state; fixed constructor defaults are not established. Static evidence `steering-control-instructions-20261008.json` and targeted `20261008T1310123498555Z/`, `20261008T1311500495038Z/`, `20261008T1313009767539Z/`.
+- Failed experiments: first probe stopped on original derived NaN at case43; aligned COMISS/JBE showed it preserves unordered fractions, correcting the initial Rust inference. Validator02 stopped on a Python float/bool expression; corrected. Initial Clippy rejected manual clamp; equivalent NaN-preserving `clamp` passes both repeated comparisons. Earlier rg shell wildcard path queries failed; use directory plus `-g` instead. Final97tests/fmt/warnings-deniedClippy pass, `steering-control-checks/`. Reused Python3.12.14/Capstone5.0.6/Ghidra12.1.4/JDK21.0.9/Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0; no installs/game/settings changes.
+- Commits8b720d3/76ec922/1fa31b8 (F123–F125) are now published to owner upstream; verified HEAD1fa31b8f350109629ee0139fea771e0c215f5e9b and0/0, `local/behavior/github-source-steering-sync-20261008.md`. Earlier publication notes below are historical checkpoints. Next join the producer outputs to the verified source wheel/geometry/assisted path with explicit transfer provenance, then recover producer setup/input evolution and production cadence.
 
 ### 8 October 2026 — source wheel steering initialization verified (F125)
 
