@@ -18,6 +18,7 @@ pub mod pose;
 pub mod rectangle_cull;
 pub mod setup;
 pub mod spawn;
+pub mod steering_input;
 pub mod surface_drag;
 pub mod suspension;
 pub mod triangle;

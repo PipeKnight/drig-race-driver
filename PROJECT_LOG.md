@@ -729,6 +729,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — supplied steering input conditioning verified (F116)
+
+- Recovered 98f790's EAX body / ESI command-copy convention. Added independent steering_input::condition and whole original helper probe. **1351 cases/1351 words exact debug/release**, steering-input-20261008-01/validation.json,02/; clamp/enable/0.5/signed-zero/speed/phase controls and1024seeded inputs. Original trigonometry, RX code/read-only mapped data; no patches/stubs/live injection. [Contract and limits](docs/STEERING.md). Physical scalar meanings/source/device input remain open.
+- Static a03670 path places force preparation/solver/slowdown before 9b40d0->9b3110; preserve this order in later composition. First instruction inspection stopped at first return, corrected bounded full inspection. Ghidra external Java preference write initially denied by sandbox; authorized escalated retry completed, private20261008T0136288512690Z/. Unit test initially ambiguous float type; explicitf32 corrected. No numerical failures. Existing tool versions reused/no installations/game/user-setting changes. ProbeSHAedc905aba2c5a0821ab263d0d2e8934ca3d368d4fea51209ea4a0acc3296fbe0. **96 workspace tests**,fmt/warnings-deniedClippypass, steering-input-tests/. Continue whole unassisted coefficient writer before assisted branch/source initialization.
+
 ### 8 October 2026 — GitHub upstream configured
 
 - Owner requested https://github.com/PipeKnight/drig-race-driver as upstream after noticing GitHub lacked our commits. Before this request, main had39localcommits and no remote; no prior pushes occurred. Configured origin fetch/push URL https://github.com/PipeKnight/drig-race-driver.git. Branch tracking awaits successful fetch/history comparison; do not claim publication yet.
@@ -814,6 +819,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Four-wheel production surface slowdown](docs/SURFACE_DRAG.md)
 - [Source material selection joined to slowdown impulses](docs/SOURCE_SURFACE_DRAG.md)
 - [Temporary force-view lifetime and capture requirements](docs/FORCE_VIEW.md)
+- [Steering input, coefficient research and update order](docs/STEERING.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
