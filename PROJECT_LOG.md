@@ -703,6 +703,15 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - Original decoder staging+2c80/+2cc0 -> columns178/179 -> properties+53c/+540; stored-f32zero defaults0.5, constructorcopiesbody1fa4/1fa8. Added Standard reader and optionalCSV diagnostic mode. Originalwhole98db40 receives independent Python conversion while native reads CSV with deliberately different request placeholders. **54datasets/2592cases/5184words exact debug/release**, source-grip-reductions-20261008-01/validation.json,02/.44installedhashed sources+10authoredunderflow/rounding/default controls; all44source pairsdecode0.5/0.5. OriginalCSVdecoder notexecuted; supplied1308/2616mode regressesbothprofiles. [Contract](docs/SOURCE_GRIP_REDUCTIONS.md). **95workspace tests**, fmt/warnings-deniedClippy pass source-grip-reductions-tests/clippy-20261008.txt; no failures. No game/userfile/toolchanges. F110consumer separately0b5bb17.
 - Ghidrafield-store survey20261008T0013240243230Z/field-stores.tsv and targeted20261008T0014152064705Z/:9bd7f0 copiesbody22e0..3 to227c..f;990610 initializes settingsslot0xb=0.5 latercopiedto1ffc;9ae8f0writes1f24 onlyin six-wheel layout branch, notestablished Standardmutation. Candidate surveyliteralMOVonly, doesnotprove exhaustive mutation coverage or flag meaning.
 
+### 8 October 2026 — whole four-wheel surface slowdown verified (F112)
+
+- Added `surface_drag::apply` and whole original9dfc50 probe/validator. **620cases/7440words exact debug/release**, surface-drag-20261008-01/validation.json,02/:24analytic+84installedMECHslowdownsets+512seeded bodies/contact states. Four coefficients blended before sequential realimpulseupdates; spinspositiveonly decay. [Contract](docs/SURFACE_DRAG.md). ProbeSHA7a873b985de7d1b45f620037a5e991ad0a200682988c1999cb8849cee198f5ca.
+- Originalcross/impulsehelpers unstubbed/codeRX, private lazy-normalization datapageE58000 writable/restored. Alignedfirstbranch's seveniterationALloop always clearsflag; dead stabilization arm unexecuted. Material73source loaderinitializesfalse; authoredtrue controlsconditional. **95workspace tests**, fmt/warnings-deniedClippy pass surface-drag-tests/clippy-20261008.txt; no failures except harmlesswildcardsearchsyntaxcorrected. No live force/cadence/contact claim. Existingtools/no game/userfilechanges. F111source reductions separately781aea8. Continue originalsource-material selection and force stages.
+
+### 8 October 2026 — Rust line-ending policy separated from logic
+
+- Commit8d90460 adds RustLFpolicy in.gitattributes and normalizes three existing CRLF/mixed files (contact_material.rs, contact_ray.rs, grid-worldlib.rs). StagedRustdiffwithignore-space-at-eol exitszero: no Rustcontent/tokenchanges. Separated from F112physics to keep reviews focused; preceding95workspacechecks pass. Restoring F112module initiallyplaced it aftersuspension; finalfmtcheck foundorderingonly, cargo fmt corrected beforecommit andfinalcheckpasses. No tools/game/userfilechanges.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -757,6 +766,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Production wheel history and conditional grip](docs/WHEEL_HISTORY.md)
 - [Downstream wheel-history grip multiplier](docs/GRIP_HISTORY_FACTOR.md)
 - [Source coordinate-dependent grip reductions](docs/SOURCE_GRIP_REDUCTIONS.md)
+- [Four-wheel production surface slowdown](docs/SURFACE_DRAG.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)

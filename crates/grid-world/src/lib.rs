@@ -17,6 +17,7 @@ pub mod pose;
 pub mod rectangle_cull;
 pub mod setup;
 pub mod spawn;
+pub mod surface_drag;
 pub mod suspension;
 pub mod triangle;
 pub mod tyre_friction;
