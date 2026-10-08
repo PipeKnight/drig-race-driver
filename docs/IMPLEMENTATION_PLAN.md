@@ -4,7 +4,7 @@ Updated: 8 October 2026, Europe/Kiev. This roadmap is grounded in [our findings]
 
 ## Objective and language decision
 
-F134 verifies whole supplied-grid wheel deformation:688cases/88,064fields exact debug/release, including48 retained-grid cases with explicitly supplied missing policy inputs. F133 verifies the ordered deformation-grid sampler:824cases exact debug/release. F132 joins HDM visual limits to wheel damage (3,200source cases and36live words). Incoming grid deformation/impact, notifications and full update composition remain pending. [Deformation scope](DEFORMATION_GRID.md#whole-wheel-deformation-f134), [damage source](HANDLING_DAMAGE.md#source-visual-limits-f132).
+F135 verifies whole supplied-node grid settling:184cases/364,596fields exact per debug/release build, including24retainedcar states and160authored boundary cases. Fresh12-car reference captures now retain graph/settings and complete wheel policies/cache; F134matches664cases/84,992fields across those captures and authored maps, in addition to its prior688case suite. F133 verifies the ordered deformation-grid sampler:824cases exact debug/release. Incoming collision deformation, grid construction, notifications and full update composition remain pending. [Settling scope](DEFORMATION_GRID.md#whole-grid-settling-f135), [damage source](HANDLING_DAMAGE.md#source-visual-limits-f132).
 
 Implement an independent engine that reads the owner's GRID resources and progressively reproduces driving, racing and the full single-player experience. First supported target: Windows x86-64. The original x86 executable is our behavior reference, not an architecture requirement for the replacement.
 

@@ -1,6 +1,6 @@
 # Deformation grid investigation
 
-Recorded8October2026. F133 verifies the supplied-grid sampler; F134 verifies whole supplied-grid wheel geometry. Grid creation and collision deformation remain ahead. See [visual damage consumer](HANDLING_DAMAGE.md).
+Recorded8October2026. F133 verifies the supplied-grid sampler; F134 verifies whole supplied-grid wheel geometry; F135 verifies whole supplied-node grid settling. Grid creation and collision deformation remain ahead. See [visual damage consumer](HANDLING_DAMAGE.md).
 
 ## Native sampler and captured grid replay (F133)
 
@@ -64,8 +64,8 @@ The subsequent 12-offset all-operand survey found 208 literal candidates, includ
 |---|---|---|
 | 9A2A70 | Reads bounds through 989490, expands/selects bounds, chooses spacing/dimensions with product<=400, recenters minimum, invokes 98A7D0 | Original bounds object/constructor not executed in this investigation |
 | 98A7D0 | Initializes position and rest-position vectors at node+0/+10 from minimum+integer*spacing; clears node+30 vector, sets per-node A280 byte to FF and descriptor A440 vector to zero | Node+20 bounds and node+40 semantics remain separate |
-| 9A26F0 | Clips all four position lanes to rest position ± node+20; accumulates edge strain and reduces nodeW monotonically; calls 9A2110 | Whole routine not yet executed or implemented independently |
-| 9A2110 | Recomputes each edge's length using masked XYZ and reference RSQRT root; clamps to mode-dependent spacing bounds and writes edge+4 | Exact constants/controlled numeric execution pending |
+| 9A26F0 | Clips all four position lanes to rest position ± node+20; accumulates edge strain and reduces nodeW monotonically; calls 9A2110 | Whole supplied-node execution and Rust verified below in F135 |
+| 9A2110 | Recomputes each edge's length using masked XYZ and reference RSQRT root; clamps to mode-dependent spacing bounds and writes edge+4 | Executed as real callee in F135; constructor/cadence remain separate |
 | 9FEC70 | On descriptor mode change, refreshes bounds or copies 32,000 node bytes, calls 9A26F0, marks A4F0..A4F4 dirty | Caller context controls which branch runs; live order not recorded |
 | 9D4970 | Another caller of 9A26F0 after position changes; called by A08040 and 9EA6E0 | Candidate deformation producer; collision input interpretation still needs aligned body inspection and live evidence |
 
@@ -73,6 +73,20 @@ A0F710 and 9EBCD0 pass **body+2300** as ECX to 9A2A70. The latter sets the bound
 
 The descriptor's edge count is A410; edge records start0 with eight-byte stride, signed16-bit endpoint indices at0/+2 and derived length at+4. 9A26F0 reads settings pointerA4F8 fields1024/1028, with SSE SQRTSS for edge strain (not an inferred x87 sqrt). Per-node incident counts are bytes and the consuming comparison is signed; do not silently use unbounded integer degree accumulation. NodeW reduction is observed; interpreting it as integrity remains a hypothesis. The original sampler retains that lane and wheel geometry later masks its displacement W.
 
-Before attempting a live settling replay, capture edge count/topology/lengths, descriptor modeA4A0, settings pointerA4F8 and fields1024/1028, plus full 80-byte node records and dirty flags. Bound count, indices and pointer reads before proceeding; keep original snapshot boundaries distinct. Source threshold names/defaults, collision input and synchronized cadence are unresolved. A fresh GRID process/session is required: PID29904 is closed, and desktop availability is pending because Destiny2 was open at the last inventory.
+The initial next action was to capture edge count/topology/lengths, descriptor modeA4A0, settings pointerA4F8 and fields1024/1028, plus full80-byte node records/dirty flags in a fresh session. That capture and settling replay are now completed below. Source threshold names/defaults, collision input and synchronized cadence remain unresolved.
 
 Private evidence: `20261008T1922483657750Z/displacement-refs.tsv`; four candidates `20261008T1923468342390Z/`; helpers/caller `20261008T1925275579534Z/`; references and contexts `20261008T1924259248475Z/`, `20261008T1927035691003Z/`; `grid-producer-instructions-20261008.json` and readable disassembly. Existing Ghidra12.1.4/JDK21.0.9/Capstone5.0.6 reused. All eight decompilations and both caller surveys completed successfully; no numerical execution claim for these new candidates and no game input/settings changes.
+
+## Whole grid settling (F135)
+
+`deformation_settle::calculate` accepts sampled dimensions2..16/product<=400, positive finite spacing, mode0..2, finite threshold/gain, exactly400nodes and up to1,200ordered edges with endpoints0..399. Each node supplies position/rest/boundsvec4; bounds are finite/nonnegative. Previous edge lengths are finite provenance but recomputed. Other node bytes are outside this calculation. Invalid inputs/nonfinite outputs reject; the private CLI accepts up to1,024cases/16MiB and creates output only after all rows succeed.
+
+First clip only the active dimension product: `MAXPS(rest-bounds, position)` then `MINPS(bounds+rest, clipped)`, selecting the second operand at equality to preserve signed zero. All edges, including unused-pool sentinel self-edges, then contribute `(abs(SQRTSS((dx*dx+dy*dy)+dz*dz)-spacing)-threshold)*gain` to both endpoint sums in stored order. Incident counts wrap as bytes and are interpreted as signed for the consuming positive-count test. Active node quality is1for nonpositive count; otherwise `1-strain/count`, floored to positivezero. Only reduce positionW when its previous value is strictly greater; preserve XYZ and inactive pool positions.
+
+Real9A2110refreshes everyedge from updated maskedXYZ, using the reference RSQRT root refinement and zero mask. Lower bound isspacing*stored0.1(3dcccccd) for mode1 andspacing*stored0.2(3e4ccccd) otherwise; upper spacing*2. Ordered branches select lower when lower>length, upper when length>upper, otherwise length. Constants are direct privatePEreads atCAFCD4/CB870C/CB8DA4; `local/behavior/deformation-settle-constants-20261008.json`. No source-friendly names/defaults inferred from these constants.
+
+Whole original9A26F0includes real internal memset/pointer setter and9A2110: unchanged RX code, only privateE58000lazy data writable/restored, no entry/import/TLS calls, stubs, patching or live injection. ProbeSHAa62bfd35a8428f865bd3869be0b2a6df66831f878d00f0fbdceda637d35c1b0e. Initial12retainedcars replay29,704fields with1,336incoming/recomputed differences, repeated after the macro with the same differences. This demonstrates replay execution, not incoming state synchronization/idempotence.
+
+Rust/original **184cases/364,596fields exact per debug/release build**:24retainedcar states before/after the macro plus160authored cases with clipping, signedzero, mode changes, empty/random/duplicate/self-edge graphs, degrees crossing signed/wrapping byte boundaries, and zero/negative/positive threshold/gain. Six invalid spacing/mode/bounds/endpoint/nonfinite/short-pool guards reject bothdiagnostics; native leaves no output. Final `deformation-settle-validation-20261008-debug-final/validation.json`, `deformation-settle-validation-20261008-release/validation.json`, `deformation-settle-post-{debug,release}-20261008/validation.json`; original replays `deformation-settle[-post]-20261008-01/`. No numerical failures. Two Clippy fixed-chunk style diagnostics corrected, both profiles rebuilt and final comparisons passed.102workspace tests/fmt/warnings-deniedClippy and Python/PowerShell syntax pass, private check record `deformation-settle-checks-20261008.md`. Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14 reused; no installations or settings changes.
+
+Next recover bounds/grid initialization and the impact-driven node producer9D4970 with its actual callers. Supplied-node arithmetic is verified; graph construction, collision impulses, source settings initialization and same-tick dirty/update order remain separate work.
