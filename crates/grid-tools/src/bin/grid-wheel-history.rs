@@ -1,4 +1,4 @@
-//! Private supplied production wheel-history comparison, wheel angle zero.
+//! Private supplied production wheel-history comparison.
 use grid_world::wheel_history::{self, Input, Material, Vehicle, Wheel};
 use std::{
     fs::{self, OpenOptions},
@@ -7,8 +7,12 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-wheel-history INPUT.tsv local/OUTPUT.tsv".into());
+    if args.len() != 2 && args.len() != 3 {
+        return Err("usage: grid-wheel-history INPUT.tsv local/OUTPUT.tsv [angle]".into());
+    }
+    let angled = args.len() == 3;
+    if angled && args[2] != "angle" {
+        return Err("unknown mode".into());
     }
     let text = fs::read_to_string(&args[0])?;
     if text.len() > 4 * 1024 * 1024 {
@@ -17,7 +21,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut results = Vec::new();
     for line in text.lines() {
         let cells: Vec<_> = line.split('\t').collect();
-        if cells.len() != 57 || results.len() >= 4096 {
+        if cells.len() != (if angled { 62 } else { 57 }) || results.len() >= 4096 {
             return Err("invalid input row".into());
         }
         let v: Vec<_> = cells[1..]
@@ -80,7 +84,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             longitudinal_axis: v[44..48].try_into()?,
             normal: v[48..52].try_into()?,
         };
-        let r = wheel_history::calculate(input)?;
+        let r = if angled {
+            wheel_history::calculate_angled(input, v[56], v[57..61].try_into()?)?
+        } else {
+            wheel_history::calculate(input)?
+        };
         let w = r.wheel;
         let words = [
             w.air_clock.to_bits(),

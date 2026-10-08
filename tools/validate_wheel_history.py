@@ -1,7 +1,8 @@
-"""Whole original wheel history/grip with supplied state, zero wheel angle/table off."""
+"""Whole original wheel history/grip with supplied state and inactive table."""
 import argparse
 import hashlib
 import json
+import math
 import random
 import struct
 import subprocess
@@ -15,7 +16,8 @@ def word(v):return struct.unpack('<I',struct.pack('<f',v))[0]
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('output',type=Path)
-    parser.add_argument('--profile',choices=['debug','release'],default='debug');args=parser.parse_args()
+    parser.add_argument('--profile',choices=['debug','release'],default='debug')
+    parser.add_argument('--angle',action='store_true');args=parser.parse_args()
     out=args.output.resolve();assert out.is_relative_to((ROOT/'local').resolve());out.mkdir(exist_ok=False)
     # 19 globals, 17 wheel scalars/flags and five four-lane vectors.
     baseline=[.016,0.,8.,1140.,300.,.5,1.,.3,.6,.2,1.,1.,1.,0.,1.,.3,1.,1.,1.,
@@ -52,12 +54,39 @@ def main():
         v[36:48]=[rng.uniform(-10,10) for _ in range(4)]+[rng.uniform(-1,1) for _ in range(8)]
         x=rng.uniform(-.99,.99);v[48:52]=[x,(1-x*x)**.5,0.,0.]
         add(f'authored_{i}',v)
+    if args.angle:
+        # Old controls remain in the extended format, with the former angle/axis.
+        cases=[(name,words+[word(0.),word(0.),word(1.),word(0.),word(0.)]) for name,words in cases]
+        angles=[0.,-0.,1e-30,-1e-30,1e-7,-1e-7,.1,-.1,.5,-.5,1.,-1.,
+                math.pi/2,-math.pi/2,math.pi,-math.pi,2*math.pi,-2*math.pi,1000.,-1000.]
+        for i,angle in enumerate(angles):
+            for j in range(4):
+                v=baseline.copy()+vectors.copy()
+                v[48:52]=[[0.,1.,0.,0.],[.8,.6,0.,0.],[0.,0.,1.,0.],[.5,.5,.5,0.]][j]
+                v[9]=[0.,.2,.5,.9][j]
+                cases.append((f'angle_boundary_{i}_{j}',[word(x) for x in v+[angle,0.,1.,0.,0.]]))
+        rng=random.Random(109)
+        for i in range(256):
+            v=baseline.copy()+vectors.copy()
+            yaw,pitch=[rng.uniform(-math.pi,math.pi) for _ in range(2)]
+            first=[math.cos(yaw)*math.cos(pitch),math.sin(pitch),math.sin(yaw)*math.cos(pitch),0.]
+            second=[-math.cos(yaw)*math.sin(pitch),math.cos(pitch),-math.sin(yaw)*math.sin(pitch),0.]
+            if i%4==0:
+                # Supplied four-lane nonorthogonal controls remain inside sqrt domain.
+                first=[rng.uniform(-.3,.3) for _ in range(4)]
+                second=[rng.uniform(-.3,.3) for _ in range(4)]
+            normal=[rng.uniform(-1,1) for _ in range(4)]
+            normal=[x*.8/math.sqrt(sum(y*y for y in normal)) for x in normal]
+            v[48:52]=normal;v[52:56]=first;v[9]=rng.uniform(0,.95)
+            v[18]=float(i%7!=0)
+            cases.append((f'angle_authored_{i}',[word(x) for x in v+[rng.uniform(-10000.,10000.),*second]]))
     requests=out/'input.tsv';requests.write_text(''.join(name+'\t'+'\t'.join(f'{w:08x}' for w in words)+'\n' for name,words in cases))
     executions=[]
+    mode=['angle'] if args.angle else []
     for kind,exe,arguments in [
         ('original',ROOT/'local/behavior/wheel-history-probe.exe',[ROOT/'local/compatibility/grid-unpacked.exe',requests,out/'original.tsv']),
         ('native',ROOT/f'target/{args.profile}/grid-wheel-history.exe',[requests,out/'native.tsv'])]:
-        run=subprocess.run([str(exe),*map(str,arguments)],cwd=ROOT,capture_output=True,text=True,timeout=30)
+        run=subprocess.run([str(exe),*map(str,arguments),*mode],cwd=ROOT,capture_output=True,text=True,timeout=30)
         executions.append(dict(kind=kind,sha256=digest(exe),exit=run.returncode,stdout=run.stdout,stderr=run.stderr))
         if run.returncode:
             (out/'failure.json').write_text(json.dumps(executions,indent=2));raise RuntimeError('Wheel history run failed')
@@ -68,12 +97,13 @@ def main():
         return result
     original,native=rows(out/'original.tsv'),rows(out/'native.tsv');assert original.keys()==native.keys()=={n for n,_ in cases}
     differences=[dict(case=name,field=i,original=a,native=b) for name in original for i,(a,b) in enumerate(zip(original[name],native[name])) if a!=b]
-    result=dict(profile=args.profile,executions=executions,cases=len(cases),words=len(cases)*9,
+    result=dict(profile=args.profile,angle_mode=args.angle,executions=executions,cases=len(cases),words=len(cases)*9,
                 exact_cases=len(cases)-len({d['case'] for d in differences}),differences=differences,
-                source_sha256=digest(source),limits='Whole original 9ba490 with original 99c990 and zero-angle sin/cos calls. '
+                source_sha256=digest(source),limits='Whole original 9ba490 with original 99c990 and sin/cos calls. '
                 'Supplied body/wheel/force-view vectors and mechanics; table inactive/factor1. '
                 'No patches/stubs/writable pages/live injection. x87 precision53/nearest. '
-                'Opaque material stamp normalized to caller tokens. No nonzero-angle/table-enabled/live force integration claim.')
+                'Opaque material stamp normalized to caller tokens. Angle and second body axis supplied only in angle mode. '
+                'No table-enabled/live force integration or angle physical-meaning claim.')
     (out/'validation.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if k in ('profile','cases','words','exact_cases')}));print('different_words='+str(len(differences)))
     assert not differences
 

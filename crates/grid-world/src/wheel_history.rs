@@ -1,4 +1,4 @@
-//! Supplied production wheel history/grip calculation with zero wheel +ec angle.
+//! Supplied production wheel history/grip calculation.
 //! Offset-qualified fields have observed arithmetic roles, not established units.
 use crate::{Error, tyre_grip};
 
@@ -64,11 +64,21 @@ fn dot(a: [f32; 4], b: [f32; 4]) -> f32 {
     (a[0] * b[0] + a[1] * b[1]) + (a[2] * b[2] + a[3] * b[3])
 }
 
+/// Compatibility entry with zero wheel +ec angle and second body axis Y.
+pub fn calculate(input: Input) -> Result<Output, Error> {
+    calculate_angled(input, 0., [0., 1., 0., 0.])
+}
+
+/// The physical meaning of wheel +ec is not yet established.
 #[allow(
     clippy::assign_op_pattern,
     reason = "Preserve observed change-first floating-point operations"
 )]
-pub fn calculate(input: Input) -> Result<Output, Error> {
+pub fn calculate_angled(
+    input: Input,
+    angle: f32,
+    second_body_axis: [f32; 4],
+) -> Result<Output, Error> {
     let b = input.vehicle;
     let mut w = input.wheel;
     let m = input.material;
@@ -97,6 +107,7 @@ pub fn calculate(input: Input) -> Result<Output, Error> {
         w.history[2],
         input.delta,
         input.scalar_argument_10,
+        angle,
     ];
     if scalars
         .iter()
@@ -105,6 +116,7 @@ pub fn calculate(input: Input) -> Result<Output, Error> {
         .chain(input.lateral_axis.iter())
         .chain(input.longitudinal_axis.iter())
         .chain(input.normal.iter())
+        .chain(second_body_axis.iter())
         .any(|v| !v.is_finite())
         || input.delta < 0.
         || input.delta > 0.1
@@ -183,8 +195,11 @@ pub fn calculate(input: Input) -> Result<Output, Error> {
                 ((w.spin.abs() * f32::from_bits(0x3d2a_aaab)).clamp(0., 1.) * input.delta) * 0.25;
             w.history[2] = (w.history[2] - decrease).max(0.);
         }
-        // Original sin(0)=0/cos(0)=1, with the supplied second body axis fixed Y.
-        let direction = std::array::from_fn(|i| b.direction[i] - 0. * [0., 1., 0., 0.][i]);
+        // Original double trigonometric returns are converted before vector arithmetic.
+        let sine = (angle as f64).sin() as f32;
+        let cosine = (angle as f64).cos() as f32;
+        let direction =
+            std::array::from_fn(|i| cosine * b.direction[i] - sine * second_body_axis[i]);
         let alignment_dot = dot(direction, input.normal);
         let alignment = (1. - alignment_dot * alignment_dot).sqrt();
         grip = if alignment <= b.minimum_alignment {
