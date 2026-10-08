@@ -1,8 +1,10 @@
 # GRID engine project log
 
-Last updated: 8 October 2026 (Europe/Kiev).
+Last updated: 9 October 2026 (Europe/Kiev).
 
 ## Objective and current state
+
+9 October continuation: fresh private GRID session30024 and bound AutoHotkey2.0.29 server41100 successfully load the saved profile and Lacetti/Donington Grand Prix reference race. Expanded impact-producer reads succeed577/577; paired paused captures are identical. Player callback registration matches9A0C90/A064A0/body2300; the eleven AI triplets are disabled/zero. Live clipflag1 is now captured. Two logged2000ms samples return to pause; the second reaches the barrier, after which1,336player position words change and23active node flags decrease. Actual transient contact records remain uncaptured. Fresh supplied-impact replay is bit-exact in debug/release:243cases/846,150selected fields/2,566,080descriptor words per build; original repeats identically. [Detailed findings and private paths](docs/DEFORMATION_GRID.md#fresh-producer-state-capture-9-october). No tools installed, Rust arithmetic changed or original installation modified. First transient-impact capture attempt stops at the process-image query with WinError31 before debugger launch; lifecycle diagnosis is underway.
 
 Independent Rust/Bevy engine for Race Driver: GRID (2008), loading the player's purchased Steam resources. Static Lacetti, Donington surfaces and placed scenery render in Bevy 0.19.1. Entity startup visuals and track collision geometry are GPU-verified; binary XML and collision descriptors decode. Rust reproduces twelve live placement matrices exactly from recorded inputs; source-only alignment retains two one-float-step X differences. Original whole-query policy, render/body linkage, shader fidelity, collision simulation and driving remain ahead. [Live placement evidence](docs/LIVE_SPAWN_CAPTURE.md), [car viewer](docs/STATIC_VIEWER.md), [Donington scene](docs/DONINGTON_SCENE.md).
 

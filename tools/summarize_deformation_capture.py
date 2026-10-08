@@ -59,6 +59,22 @@ def load(path):
                                      node_40_range=[min(node_fields), max(node_fields)],
                                      nonzero_node_40_count=sum(v != 0. for v in node_fields),
                                      active_ff_node_flags=sum(v == 255 for v in flags[:count]))
+            if prefix + 'deformation_callback_registration' in blocks:
+                registration = struct.unpack('<3I', blocks[prefix + 'deformation_callback_registration'])
+                body = int(car['body'], 16)
+                expected = (0x9a0c90, 0xa064a0, body + 0x2300)
+                assert registration in (expected, (0, 0, 0)), 'Unexpected callback registration'
+                state_fields = blocks[prefix + 'linked_state_fields']
+                producer = blocks[prefix + 'deformation_producer_state']
+                rows[-1]['impact']['producer'] = dict(
+                    callback_registration=[f'{v:x}' for v in registration],
+                    callback_enabled=registration == expected,
+                    descriptor_a480_words=struct.unpack('<8I', producer),
+                    descriptor_a4b4_corners=struct.unpack_from('<4f', state, 0x14),
+                    descriptor_a4c4_window=struct.unpack_from('<10f', state, 0x24),
+                    body_1630=struct.unpack('<4f', blocks[prefix + 'deformation_body_offset']),
+                    linked_state_360=struct.unpack('<4f', blocks[prefix + 'deformation_linked_response']),
+                    linked_state_220=struct.unpack_from('<4f', state_fields, 0x90))
     return capture, blocks, rows
 
 
@@ -78,6 +94,13 @@ def main():
     report = dict(snapshot_sha256=digest(args.snapshot), paired_sha256=digest(args.paired),
                   pid=first['pid'], reads=len(a), cars=rows, paired_changed_blocks=changed,
                   limits='Sequential read-only captures while UI paused; byte stability does not prove same-tick synchronization or update cadence.')
+    if 'deformation_solver_clip_flag' in a:
+        assert len(a['deformation_solver_clip_flag']) == 1 and a['deformation_solver_clip_flag'][0] in (0, 1)
+        report['solver_clip_flag'] = a['deformation_solver_clip_flag'][0]
+    if 'deformation_producer_globals' in a:
+        report['producer_globals'] = dict(
+            corner_scale=struct.unpack('<f', a['deformation_producer_corner_scale'])[0],
+            e500c0_to_df_words=struct.unpack('<8I', a['deformation_producer_globals']))
     with output.open('x', encoding='utf-8') as stream:
         json.dump(report, stream, indent=2)
     print(json.dumps(dict(reads=len(a), cars=len(rows), changed_blocks=changed, player=rows[0])))
