@@ -23,7 +23,7 @@ def at(address, size):
     raise ValueError('range not file backed')
 
 result = {'source_sha256': hashlib.sha256(raw).hexdigest(), 'instructions': {}, 'constants': {}}
-for address, size in [(0x98f790, 0x12a), (0x9b3110, 0xd26), (0x9b40d0, 0x160), (0xa03670, 0x3400), (0xbf7112, 0x100), (0x98ebf0, 0x230), (0x9aec60, 0x7000)]:
+for address, size in [(0x98f790, 0x12a), (0x9b3110, 0xd26), (0x9b40d0, 0x160), (0xa03670, 0x3400), (0xbf7112, 0x100), (0x98ebf0, 0x230), (0x9aec60, 0x7000), (0x9ae5a0, 0x300)]:
     instructions = []
     for i in Cs(CS_ARCH_X86, CS_MODE_32).disasm(at(address, size), address):
         instructions.append({'address': hex(i.address), 'mnemonic': i.mnemonic, 'operands': i.op_str})
@@ -32,6 +32,7 @@ for address in [0xcaf888, 0xcaf88c, 0xcb01ac, 0xcb870c, 0xcb0c44, 0xd15038, 0xce
     data = at(address, 4)
     result['constants'][hex(address)] = {'word': data.hex(), 'f32': struct.unpack('<f', data)[0]}
 out = Path(sys.argv[1]).resolve()
+result['masks'] = {hex(address): at(address, 16).hex() for address in [0xcaf430, 0xcaf460]}
 assert out.is_relative_to((ROOT / 'local').resolve())
 with out.open('x') as writer:
     json.dump(result, writer, indent=2)

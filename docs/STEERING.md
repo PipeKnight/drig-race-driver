@@ -2,6 +2,16 @@
 
 Recorded 8 October 2026. This specification describes supplied state; source tuning, device input and live timing remain separate questions.
 
+## Motion feedback (F120)
+
+`steering_feedback::calculate` reproduces the f32 return consumed from whole original9ae5a0. It averages wheel coordinates2/3, replaces W with1, transforms with paired f32 grouping and subtracts the matrix translation afterward. Translation must not be cancelled algebraically: intermediate rounding matters. Original67c200 computes angular cross lever with literal positive-zero W; adding linear velocity gives the feedback point velocity. Four-lane dot products use body axes0/2 and the original adjacent-pair grouping.
+
+Speed blend is `clamp((abs(body1648)-2)*0.5,0,1)`. At zero blend the return is originalbodye54*originalbodye30. Otherwise the x87 routine evaluates principal atan of lateral/longitudinal, then blends this angle with the requested angle before the caller's f32 store. This is division plus atan, not atan2. **Bodye30 is not the helper98f790's private conditioned command copy.** The native adapter preserves that distinction. Rust uses f64 intermediates for the x87-PC53 path and returns f32; arbitrary libm/FP environment equivalence remains unclaimed.
+
+**1,176cases /1,176words exact debug/release**:112speed/sign/zero-longitudinal controls,16inactive zero-motion controls,24hash-pinned non-atomic retained states and1,024 varied authored matrices/motion/points. Original whole9ae5a0 and realcross execute with RX code/read-only mapped data; no patches, stubs, writable mapped data, entry-point execution or live injection. Two guard cases (active0/0motion and overflowing requested angle) are rejected by both diagnostic implementations; original probe may create its empty output file before rejection, while Rust validates before writing.
+
+Final evidence `steering-feedback-20261008-02/validation.json`,03/;01earlier exact comparison before guards. Probe SHA `ad25d5b4ee21d9c3cd529069c7e9093edcd8b5bfbbf83f695b5fb283fd2f1994`; static `steering-feedback-instructions-20261008.json`. CLI takes35f32words and emits1 to private output. Scale/command remain supplied for retained states; those are input observations, not captured original live helper returns. All97workspace tests, fmt and warnings-denied Clippy pass, `steering-feedback-tests/`. Existing pinned toolchain reused, no failed comparisons/checks, installs or game/user-file changes. Continue the assisted9b3110 power/deadzone, speed scaling, velocity-angle gate and coefficient slew path before source tuning/live claims.
+
 ## Source steering angle (F119)
 
 Aligned decoder9aec60 at9af547 reads staging+1340 (CSV column77), calls its numeric converter, multiplies the x87 return by stored-f32 constantcb8200 (`0x3c8efa35`, degrees-to-radians), then stores f32 at properties+340. Whole98ebf0 copies this value to body+e54. `vehicle::read_standard_steering_angle` preserves f64 parsing and multiplication by that stored-f32 constant before final f32 storage. No zero substitution appears in this decoder path; empty fields become zero in the supported source adapter. Nonfinite/out-of-f32 values are rejected by authored bounds.

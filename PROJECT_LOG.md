@@ -729,6 +729,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — whole steering motion feedback verified (F120)
+
+- Added steering_feedback::calculate and whole9ae5a0/realcross probe. **1176cases/1176words exact debug/release**, steering-feedback-20261008-02/,03/:112speed/signcontrols,16inactivezeromotion,24hashed retained non-atomic states,1024authored matrices/motion/points. Original bodye30 vsconditionedcopy distinguished; translation subtraction after transform retained. Principalatan(lateral/longitudinal), x87PC53/nearest blended return with callerf32store. [Contract](docs/STEERING.md). RX/read-only mappeddata/no patches/stubs/liveinjection; suppliedsource/state, no live scheduling/fullassistance claim.
+- Two invalid guard states rejected bothdiagnostics; originalemptyoutputmayexist, nativevalidatesbeforewrite.01exactbeforeguards. ProbeSHAad25d5b4ee21d9c3cd529069c7e9093edcd8b5bfbbf83f695b5fb283fd2f1994. **97tests**,fmt/warnings-deniedClippypass steering-feedback-tests/. Existingtools reused/no installs/game/userfilechanges/numericalfailure. Continuewholeassisted9b3110 withpower/deadzone/speedscale, angle-gatedfeedback andslew/smoothing; sourceparametersstillopen.
+
 ### 8 October 2026 — source steering angle joined to whole routines (F119)
 
 - Aligned9aec60 staging1340/column77 -> stored-f32degreeconversioncb8200(3c8efa35) -> properties340 ->98ebf0bodye54. Added Standard reader and optionalCSV coefficient mode. **56datasets/2688cases/67200fields exact debug/release**,44hashed installed+12authored; originalwhole geometry/input/wheel routines receive independently decoded angle, native readsCSV with differentplaceholder. **OriginalCSVdecoder/numericconversion notinvoked**, staticprovenance explicit. [Contract](docs/STEERING.md). One roundingcontrol exposes prematuref32conversion,4guards reject beforeoutputcreation. Geometry/otherstate/delta supplied; no assisted/live steering claim.
