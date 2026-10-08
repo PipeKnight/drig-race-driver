@@ -136,6 +136,38 @@ pub fn read_standard_steering_parameters(row: &Row<'_>) -> Result<[f32; 20]> {
     Ok(result)
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct WheelSteeringInitialization {
+    /// Rear/front source toe, copied into each pair before later runtime updates.
+    pub toe_e8: [f32; 2],
+    pub limit_f0: f32,
+    pub mode_1f74_is_one: bool,
+}
+
+pub fn read_standard_wheel_steering(row: &Row<'_>) -> Result<WheelSteeringInitialization> {
+    read_standard_body(row)?;
+    let front = (row.number(91)?.unwrap_or(0.) as f32).clamp(-5., 5.);
+    let rear = (row.number(92)?.unwrap_or(0.) as f32).clamp(-2., 2.);
+    let limit = row.number(126)?.unwrap_or(0.) as f32;
+    if !limit.is_finite() {
+        return fail(126, "wheel steering limit exceeds finite f32 range");
+    }
+    let text = row.fields[149];
+    let mode = if text.is_empty() {
+        0
+    } else {
+        text.parse::<i32>().map_err(|_| crate::Error {
+            offset: 149,
+            message: "wheel steering mode requires a signed decimal integer",
+        })?
+    };
+    Ok(WheelSteeringInitialization {
+        toe_e8: [rear, front],
+        limit_f0: if limit == 0. { 1. } else { limit },
+        mode_1f74_is_one: mode == 1,
+    })
+}
+
 /// Initial Standard suspension fields. Runtime may subsequently change them;
 /// in particular the observed running damping threshold differs from the CSV.
 #[derive(Debug, Clone, Copy)]

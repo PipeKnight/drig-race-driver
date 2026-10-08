@@ -25,7 +25,9 @@ def main():
     parser.add_argument('--profile', choices=['debug', 'release'], default='debug')
     parser.add_argument('--all-parameters', action='store_true')
     parser.add_argument('--geometry', action='store_true')
+    parser.add_argument('--wheel-initialization', action='store_true')
     args = parser.parse_args()
+    if args.wheel_initialization: args.geometry = True
     if args.geometry: args.all_parameters = True
     out = args.output.resolve()
     assert out.is_relative_to((ROOT/'local').resolve())
@@ -69,14 +71,25 @@ def main():
         path.write_text(','.join(row)+'\r\n', encoding='ascii', newline='')
         if args.geometry: ned_paths[path] = ned_paths[datasets[0][0]]
         datasets.append((path, row, False))
+    if args.wheel_initialization:
+        for i, text in enumerate(['-0','0','1e-46','1e-43','5.0000002','-5.0000002',
+                                  '2.0000001','-2.0000001','1e300','-1e300']):
+            row = datasets[0][1].copy()
+            row[91] = row[92] = text
+            row[126] = ['0','1e-46','1e-43','.3','1'][i%5]
+            row[149] = ['0','1','2','-1'][i%4]
+            path = out/f'wheel-authored-{i:02d}.csv'
+            path.write_text(','.join(row)+'\r\n',encoding='ascii',newline='')
+            ned_paths[path] = ned_paths[datasets[0][0]]
+            datasets.append((path,row,False))
     seed_dir = ROOT/'local/behavior/assisted-steering-20261008-02'
     seed_report = json.loads((seed_dir/'validation.json').read_text())
     assert seed_report['cases'] == 2320 and not seed_report['differences']
     seed_input = seed_dir/'input.tsv'
     assert digest(seed_input) == seed_report['input_sha256']
     seeds = [line.split('\t')[1:] for line in seed_input.read_text().splitlines()]
-    probe = ROOT/'local/behavior'/('assisted-geometry-probe.exe' if args.geometry else 'assisted-steering-probe.exe')
-    assert digest(probe) == ('7080f0243e9c16104ae38949f89419626f49e7c2820aadb02ed0cc750ce47f93' if args.geometry else 'e9203e0a327691888f8e8d45b3f6ee5b968039856ab99254a8189272884c1457')
+    probe = ROOT/'local/behavior'/('source-wheel-steering-probe.exe' if args.wheel_initialization else 'assisted-geometry-probe.exe' if args.geometry else 'assisted-steering-probe.exe')
+    assert digest(probe) == ('f803bf5475f090fafedd82d988ebb077d461deef1dae2a60624c510e1747ad89' if args.wheel_initialization else '7080f0243e9c16104ae38949f89419626f49e7c2820aadb02ed0cc750ce47f93' if args.geometry else 'e9203e0a327691888f8e8d45b3f6ee5b968039856ab99254a8189272884c1457')
     native = ROOT/f'target/{args.profile}/grid-assisted-steering.exe'
     reports, executions, differences = [], [], []
     for ordinal, (source, row, installed) in enumerate(datasets):
@@ -106,6 +119,12 @@ def main():
             wheels = [e.attrib for e in decode(ned_paths[source].read_bytes())[1].iter() if e.tag == 'WHEELS']
             assert len(wheels) == 1
             points = layout(wheels[0], row)[3]
+        wheel_scalars = None
+        if args.wheel_initialization:
+            cap = f32(float(row[126] or '0'))
+            wheel_scalars = [f32(max(-5.,min(5.,float(row[91] or '0')))),
+                             f32(max(-2.,min(2.,float(row[92] or '0')))),
+                             1. if cap == 0. else cap]
         for i in range(48):
             words = seeds[(i*37+ordinal*7)%len(seeds)].copy()
             if args.all_parameters:
@@ -119,14 +138,17 @@ def main():
             name = f'condition_{i}'
             native_rows.append(name+'\t'+'\t'.join(words)+'\n')
             for index, value in zip(indexes, expected): words[index] = word(value)
+            if args.wheel_initialization:
+                words[9] = word(float(int(row[149] or '0') == 1))
             if args.geometry: words += [word(v) for p in points for v in p]
+            if args.wheel_initialization: words += [word(v) for v in wheel_scalars]
             original_rows.append(name+'\t'+'\t'.join(words)+'\n')
         original_input, native_input = out/f'{ordinal:03d}-original-input.tsv', out/f'{ordinal:03d}-native-input.tsv'
         original_input.write_text(''.join(original_rows)); native_input.write_text(''.join(native_rows))
         original_output, native_output = out/f'{ordinal:03d}-original.tsv', out/f'{ordinal:03d}-native.tsv'
         for kind, exe, argv in [
             ('original', probe, [ROOT/'local/compatibility/grid-unpacked.exe', original_input, original_output]),
-            ('native', native, [native_input, native_output, '--source-geometry' if args.geometry else '--source-parameters' if args.all_parameters else '--source', source, *([ned_paths[source]] if args.geometry else [])])]:
+            ('native', native, [native_input, native_output, '--source-wheel-geometry' if args.wheel_initialization else '--source-geometry' if args.geometry else '--source-parameters' if args.all_parameters else '--source', source, *([ned_paths[source]] if args.geometry else [])])]:
             run = subprocess.run([str(exe), *map(str, argv)], cwd=ROOT, capture_output=True, text=True, timeout=30)
             executions.append(dict(dataset=ordinal, kind=kind, sha256=digest(exe), exit=run.returncode, stdout=run.stdout, stderr=run.stderr))
             if run.returncode:
@@ -136,32 +158,36 @@ def main():
         assert len(original_lines) == len(native_lines) == 48
         for i, (original, actual) in enumerate(zip(original_lines, native_lines)):
             a, b = original.split('\t'), actual.split('\t')
-            assert len(a) == len(b) == (27 if args.geometry else 22) and a[:2] == b[:2]
+            assert len(a) == len(b) == (35 if args.wheel_initialization else 27 if args.geometry else 22) and a[:2] == b[:2]
             differences.extend(dict(dataset=ordinal, case=i, field=j, original=x, native=y)
                                for j, (x,y) in enumerate(zip(a[2:], b[2:])) if x != y)
         reports.append(dict(source=str(source), source_sha256=digest(source), installed=installed,
                             ned_sha256=digest(ned_paths[source]) if args.geometry else None,
                             geometry_points=[[word(v) for v in p] for p in points] if args.geometry else None,
+                            wheel_scalars=[word(v) for v in wheel_scalars] if args.wheel_initialization else None,
                             expected_words=[word(v) for v in expected],
                             premature_f32_words=[word(f32(float(row[c] or '0'))*constant(f)) for c,f in [(77,0x3c8efa35),(131,0x3c23d70a),(132,0x3c8efa35)]],
                             original_input_sha256=digest(original_input), native_input_sha256=digest(native_input)))
     guards = []
-    for name, column, text in [('overflow',131,'1e300'), ('nonfinite',132,'NaN'),
+    guard_inputs = [('overflow',131,'1e300'), ('nonfinite',132,'NaN'),
                                ('negative_smoothing',165,'-1'), ('unsupported',2,'6 Wheeler'),
-                               ('multiple_rows',None,None)]:
+                               ('multiple_rows',None,None)]
+    if args.wheel_initialization: guard_inputs += [('fractional_mode',149,'1.5'),('negative_wheel_cap',126,'-1')]
+    for name, column, text in guard_inputs:
         row = datasets[0][1].copy()
         if column is not None: row[column] = text
         source = out/f'guard-{name}.csv'
         source.write_text(','.join(row)+'\n'+(','.join(row)+'\n' if column is None else ''), encoding='ascii')
         output = out/f'guard-{name}.tsv'
-        run = subprocess.run([str(native),str(native_input),str(output),'--source-geometry' if args.geometry else '--source-parameters' if args.all_parameters else '--source',str(source), *([str(ned_paths[datasets[0][0]])] if args.geometry else [])],
+        run = subprocess.run([str(native),str(native_input),str(output),'--source-wheel-geometry' if args.wheel_initialization else '--source-geometry' if args.geometry else '--source-parameters' if args.all_parameters else '--source',str(source), *([str(ned_paths[datasets[0][0]])] if args.geometry else [])],
                              cwd=ROOT,capture_output=True,text=True,timeout=30)
         guards.append(dict(name=name,exit=run.returncode,stderr=run.stderr,output_created=output.exists()))
         assert run.returncode and not output.exists()
-    result = dict(profile=args.profile, all_parameters=args.all_parameters, geometry=args.geometry, datasets=len(datasets), cases=len(datasets)*48, fields=len(datasets)*48*(25 if args.geometry else 20),
+    result = dict(profile=args.profile, all_parameters=args.all_parameters, geometry=args.geometry, wheel_initialization=args.wheel_initialization, datasets=len(datasets), cases=len(datasets)*48, fields=len(datasets)*48*(33 if args.wheel_initialization else 25 if args.geometry else 20),
                   guards=guards,
                   differences=differences, datasets_report=reports, executions=executions,
-                  limits=('Independent source CSV/.ned conversion vs whole original98ebf0->9b3110, real input/feedback/math. '
+                  limits=('Whole original9b6350/reset initializes source toe/limit before supplied mutable wheel state is installed, followed by geometry and assisted update. Mode source conversion independently supplied. ' if args.wheel_initialization else '')
+                         + ('Independent source CSV/.ned conversion vs whole original98ebf0->9b3110, real input/feedback/math. '
                           'Original source decoders/outer constructors not executed. Original gets independently converted points/parameters; native derives them from sources. '
                           if args.geometry else 'Independent CSV conversion vs whole original assisted writer; original CSV decoder/constructor not executed. ')
                          + 'Other state/caps/mode/rotations/delta supplied; no real input/live cadence/full driving claim.')

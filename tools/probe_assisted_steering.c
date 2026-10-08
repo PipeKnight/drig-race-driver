@@ -14,6 +14,9 @@ typedef void (__cdecl *Kernel)(void *,float);
 #ifdef GRID_ASSISTED_GEOMETRY
 typedef void (__cdecl *GeometryKernel)(void *,void *);
 #endif
+#ifdef GRID_ASSISTED_WHEEL_SOURCE
+typedef void (__cdecl *WheelKernel)(void *,void *,void *,unsigned);
+#endif
 
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
@@ -27,11 +30,14 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_ASSISTED_GEOMETRY
  word_count=125;
 #endif
+#ifdef GRID_ASSISTED_WHEEL_SOURCE
+ word_count=128;
+#endif
  while(fgets(line,sizeof(line),input)){
   if(++cases>4096||!strchr(line,'\n')){error=6;break;}
   char *cursor=line,*start=cursor;while(*cursor&&*cursor!='\t'&&*cursor!=' ')++cursor;size_t n=(size_t)(cursor-start);
   if(!n||n>=sizeof(name)){error=7;break;}memcpy(name,start,n);name[n]=0;
-  float v[125];for(unsigned i=0;i<word_count;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
+  float v[128];for(unsigned i=0;i<word_count;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
   while(*cursor=='\t'||*cursor==' '||*cursor=='\r'||*cursor=='\n')++cursor;if(error||*cursor){error=9;break;}
   if(v[9]!=0.f&&v[9]!=1.f){error=13;break;}
   if(v[10]<0.f||v[4]<0.f||v[5]<0.f||v[6]<=0.f||v[7]<0.f||v[8]<0.f){error=14;break;}
@@ -43,10 +49,23 @@ int wmain(int argc,wchar_t **argv){
   *(unsigned *)(body+0x1620)=4;
   *(unsigned *)(body+0x21cc)=(unsigned)(uintptr_t)(body+0x1990+(unsigned)v[11]*0x150);
   *(unsigned *)(body+0x21d0)=(unsigned)(uintptr_t)(body+0x1990+(unsigned)v[12]*0x150);
+#ifdef GRID_ASSISTED_WHEEL_SOURCE
+  __declspec(align(16)) unsigned char wheel_properties[0x660]={0};
+  memcpy(wheel_properties+0x424,v+125,4);memcpy(wheel_properties+0x428,v+126,4);memcpy(wheel_properties+0x42c,v+127,4);
+  WheelKernel initialize_wheel=(WheelKernel)(image+0x9b6350-0x400000);
+  for(unsigned i=0;i<4;++i){
+   __try{initialize_wheel(body+0x1990+i*0x150,body+0x15a0,wheel_properties,i<2);}
+   __except(EXCEPTION_EXECUTE_HANDLER){error=23;break;}
+  }
+  if(error)break;
+#endif
   for(unsigned i=0;i<4;++i){float *q=v+13+i*10;unsigned char *w=body+0x1990+i*0x150;
    if((q[3]!=0.f&&q[3]!=1.f)||q[8]<0.f||q[8]>1.f){error=16;break;}
-   memcpy(w,q,4);memcpy(w+0xe8,q+1,4);memcpy(body+0x22a0+i*4,q+2,4);body[0x22cc+i]=(unsigned char)q[3];
-   memcpy(w+0x20,q+4,16);memcpy(w+0xf0,q+8,4);memcpy(w+0x144,q+9,4);
+   memcpy(w,q,4);memcpy(body+0x22a0+i*4,q+2,4);body[0x22cc+i]=(unsigned char)q[3];
+#ifndef GRID_ASSISTED_WHEEL_SOURCE
+   memcpy(w+0xe8,q+1,4);memcpy(w+0xf0,q+8,4);
+#endif
+   memcpy(w+0x20,q+4,16);memcpy(w+0x144,q+9,4);
   }
   if(error)break;
   body[0xe6c]=1;memcpy(body+0x15e0,v+53,64);memcpy(body+0x15c0,v+69,16);memcpy(body+0x15d0,v+73,16);
@@ -69,6 +88,9 @@ int wmain(int argc,wchar_t **argv){
   fprintf(output,"P\t%s",name);
 #ifdef GRID_ASSISTED_GEOMETRY
   fprintf(output,"\t%08x\t%u\t%u\t%08x\t%08x",bits(*(float *)(body+0xe54)),pair[0],pair[1],bits(*(float *)(body+0x21d4)),bits(*(float *)(body+0x21d8)));
+#endif
+#ifdef GRID_ASSISTED_WHEEL_SOURCE
+  for(unsigned i=0;i<4;++i){unsigned char *w=body+0x1990+i*0x150;fprintf(output,"\t%08x\t%08x",bits(*(float *)(w+0xe8)),bits(*(float *)(w+0xf0)));}
 #endif
   for(unsigned i=0;i<4;++i){unsigned char *w=body+0x1990+i*0x150;
    unsigned offsets[5]={0x20,0x24,0x28,0x2c,0x38};

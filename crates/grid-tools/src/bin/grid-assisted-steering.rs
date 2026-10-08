@@ -27,13 +27,14 @@ fn ordinal(v: f32) -> Result<usize, &'static str> {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let geometry_mode = args.len() == 5 && args[2] == "--source-geometry";
+    let wheel_source_mode = args.len() == 5 && args[2] == "--source-wheel-geometry";
+    let geometry_mode = (args.len() == 5 && args[2] == "--source-geometry") || wheel_source_mode;
     if args.len() != 2
         && !(args.len() == 4 && (args[2] == "--source" || args[2] == "--source-parameters"))
         && !geometry_mode
     {
         return Err(
-            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source|--source-parameters CAR.csv | --source-geometry CAR.csv CAR.ned]".into(),
+            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source|--source-parameters CAR.csv | --source-geometry|--source-wheel-geometry CAR.csv CAR.ned]".into(),
         );
     }
     let source = if args.len() == 4 || geometry_mode {
@@ -56,6 +57,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 None
             },
+            if wheel_source_mode {
+                Some(grid_formats::vehicle::read_standard_wheel_steering(
+                    &table.rows[0],
+                )?)
+            } else {
+                None
+            },
         ))
     } else {
         None
@@ -75,7 +83,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map(|v| u32::from_str_radix(v, 16).map(f32::from_bits))
             .collect::<Result<_, _>>()?;
         let mut geometry_words = String::new();
-        if let Some((angle, parameters, points)) = source {
+        if let Some((angle, parameters, points, wheel_source)) = source {
             v[4] = angle;
             if args[2] == "--source-parameters" || geometry_mode {
                 v[85..105].copy_from_slice(&parameters);
@@ -103,6 +111,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     g.span_21d4.to_bits(),
                     g.span_21d8.to_bits()
                 );
+            }
+            if let Some(wheel_source) = wheel_source {
+                v[9] = f32::from(wheel_source.mode_1f74_is_one);
+                for i in 0..4 {
+                    let toe = wheel_source.toe_e8[usize::from(i >= 2)];
+                    v[14 + i * 10] = toe;
+                    v[21 + i * 10] = wheel_source.limit_f0;
+                    geometry_words.push_str(&format!(
+                        "\t{:08x}\t{:08x}",
+                        toe.to_bits(),
+                        wheel_source.limit_f0.to_bits()
+                    ));
+                }
             }
         }
         let mut wheels = Vec::new();
