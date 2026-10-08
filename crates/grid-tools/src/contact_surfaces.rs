@@ -1,10 +1,11 @@
 //! Ordered source material keys joined to the verified wheel-contact fields.
 use grid_formats::{binxml, surface};
-use grid_world::contact_material;
+use grid_world::{contact_material, surface_drag};
 
 pub struct Surfaces {
     keys: Vec<[u8; 4]>,
     mechanics: Vec<Option<contact_material::Material>>,
+    drag: Vec<Option<surface_drag::Material>>,
 }
 
 impl Surfaces {
@@ -28,7 +29,23 @@ impl Surfaces {
                 })
             })
             .collect();
-        Ok(Self { keys, mechanics })
+        let drag = materials
+            .iter()
+            .map(|m| {
+                m.mechanics.as_ref().map(|s| surface_drag::Material {
+                    minimum_speed: s.minimum_speed_for_slowdown,
+                    maximum_speed: s.speed_for_maximum_slowdown,
+                    slowdown: s.slowdown,
+                    // Original source initializer and loader clear +73.
+                    flag_73: false,
+                })
+            })
+            .collect();
+        Ok(Self {
+            keys,
+            mechanics,
+            drag,
+        })
     }
 
     pub fn contact(
@@ -38,5 +55,14 @@ impl Surfaces {
         let index = surface::packed_index(&self.keys, code, true).ok_or("surface table absent")?;
         let mechanics = self.mechanics[index].ok_or("selected surface has no mechanics")?;
         Ok((index, mechanics))
+    }
+
+    pub fn drag(
+        &self,
+        code: [u8; 4],
+    ) -> Result<(usize, surface_drag::Material), Box<dyn std::error::Error>> {
+        let index = surface::packed_index(&self.keys, code, true).ok_or("surface table absent")?;
+        let material = self.drag[index].ok_or("selected surface has no mechanics")?;
+        Ok((index, material))
     }
 }

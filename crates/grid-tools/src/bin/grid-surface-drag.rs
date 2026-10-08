@@ -10,9 +10,16 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-surface-drag INPUT.tsv local/OUTPUT.tsv".into());
+    if args.len() != 2 && args.len() != 3 {
+        return Err("usage: grid-surface-drag INPUT.tsv local/OUTPUT.tsv [SURFACE.xml]".into());
     }
+    let surfaces = if args.len() == 3 {
+        Some(grid_tools::contact_surfaces::Surfaces::read(&fs::read(
+            &args[2],
+        )?)?)
+    } else {
+        None
+    };
     let text = fs::read_to_string(&args[0])?;
     if text.len() > 4 * 1024 * 1024 {
         return Err("input exceeds limit".into());
@@ -20,37 +27,43 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut results = Vec::new();
     for line in text.lines() {
         let cells: Vec<_> = line.split('\t').collect();
-        if cells.len() != 79 || results.len() >= 4096 {
+        if cells.len() != (if surfaces.is_some() { 83 } else { 79 }) || results.len() >= 4096 {
             return Err("invalid input row".into());
         }
         let v: Vec<_> = cells[1..]
             .iter()
             .map(|v| u32::from_str_radix(v, 16).map(f32::from_bits))
             .collect::<Result<_, _>>()?;
-        if v.iter().any(|v| !v.is_finite()) {
+        if v[..78].iter().any(|v| !v.is_finite()) {
             return Err("invalid finite inputs".into());
         }
         let mut wheels = Vec::new();
+        let mut selected = [u32::MAX; 4];
         for i in 0..4 {
             let q = &v[30 + i * 12..42 + i * 12];
             if [7, 8].iter().any(|i| q[*i] != 0. && q[*i] != 1.) {
                 return Err("invalid flags".into());
             }
+            let material = if q[7] == 0. {
+                None
+            } else if let Some(surfaces) = &surfaces {
+                let (index, material) = surfaces.drag(v[78 + i].to_bits().to_le_bytes())?;
+                selected[i] = u32::try_from(index)?;
+                Some(material)
+            } else {
+                Some(Material {
+                    flag_73: q[8] != 0.,
+                    minimum_speed: q[9],
+                    maximum_speed: q[10],
+                    slowdown: q[11],
+                })
+            };
             wheels.push(Wheel {
                 lever: q[..4].try_into()?,
                 spin: q[4],
                 radius: q[5],
                 additive_22b4: q[6],
-                material: if q[7] == 0. {
-                    None
-                } else {
-                    Some(Material {
-                        flag_73: q[8] != 0.,
-                        minimum_speed: q[9],
-                        maximum_speed: q[10],
-                        slowdown: q[11],
-                    })
-                },
+                material,
             });
         }
         let input = Input {
@@ -66,13 +79,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             wheels: wheels.try_into().map_err(|_| "four wheels required")?,
         };
         let r = surface_drag::apply(input)?;
-        let words: Vec<_> = r
+        let mut words: Vec<_> = r
             .linear
             .into_iter()
             .chain(r.angular)
             .chain(r.spins)
             .map(f32::to_bits)
             .collect();
+        if surfaces.is_some() {
+            words.extend(selected);
+        }
         results.push(format!(
             "P\t{}{}",
             cells[0],

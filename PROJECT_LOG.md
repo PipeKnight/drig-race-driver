@@ -712,6 +712,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 - Commit8d90460 adds RustLFpolicy in.gitattributes and normalizes three existing CRLF/mixed files (contact_material.rs, contact_ray.rs, grid-worldlib.rs). StagedRustdiffwithignore-space-at-eol exitszero: no Rustcontent/tokenchanges. Separated from F112physics to keep reviews focused; preceding95workspacechecks pass. Restoring F112module initiallyplaced it aftersuspension; finalfmtcheck foundorderingonly, cargo fmt corrected beforecommit andfinalcheckpasses. No tools/game/userfilechanges.
 
+### 8 October 2026 — source-specific surface slowdown verified (F113)
+
+- Extended owned Surfaces adapter with slowdown records and optionalXML diagnostic/rawkey mode. Originalwholeb3b0c0+9dfc50 receives independently decoded source DRG1fixture; native readsinstalledXMLdirect. **620cases/9920words exact debug/release**, finalsource-surface-drag-20261008-02/validation.json,03/; all84MECHrecords,103fallbackcontacts, originalselectedindices additionallymatchindependentpredictions. Initial01exactbeforeaddingexplicitindexassert/inputhashguard. [Contract](docs/SOURCE_SURFACE_DRAG.md).
+- ProbeSHA028db404ad378801f0e9ce77c9bed793ad43281d9ed3b24364891902333ad7cd; input/sourcehashesguarded. Five missingMECH guards exitbeforekernel/nativebothreject; no speculativedefaultMECH. Supplied620/7440mode regressesbothprofiles. **95workspace tests**, fmt/warnings-deniedClippy pass source-surface-drag-tests/clippy-20261008.txt; no failures, twoinitialwrongtool-readfilenamescorrected. Body/contact/lever/speed/additive remain supplied. Source73false; no originalXMLloader/livequeries/cadence claim. Existingtools/no game/userfilechanges. F112consumer separatelyf86f50f. Continue pointedforce-view input provenance and force assembly.
+
 ## Next actions
 
 1. Resolve live extent/deformation/corners at the earlier alignment boundary and original whole-query policy. Establish render/body offset before replacing the viewer's horizontal anchor.
@@ -767,6 +772,7 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - [Downstream wheel-history grip multiplier](docs/GRIP_HISTORY_FACTOR.md)
 - [Source coordinate-dependent grip reductions](docs/SOURCE_GRIP_REDUCTIONS.md)
 - [Four-wheel production surface slowdown](docs/SURFACE_DRAG.md)
+- [Source material selection joined to slowdown impulses](docs/SOURCE_SURFACE_DRAG.md)
 - [Car collision mesh and verified placement bounds](docs/CAR_COLLISION.md)
 - [Ground-placement prototype and numeric fidelity limits](docs/GROUND_PLACEMENT.md)
 - [Live placement boundaries, exact replay and remaining source differences](docs/LIVE_SPAWN_CAPTURE.md)
