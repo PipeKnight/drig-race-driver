@@ -22,6 +22,21 @@ pub struct Output {
     pub frozen_3dc_424: [bool; 4],
 }
 impl Output {
+    /// Steering-only transfer observed in the production body synchronization.
+    pub fn apply(
+        self,
+        mut input: crate::steering_coefficients::Input,
+    ) -> crate::steering_coefficients::Input {
+        input.command.perturbation = self.perturbation_3ac;
+        input.cap_2298 = self.caps_3b0_3b4[0];
+        input.cap_229c = self.caps_3b0_3b4[1];
+        for i in 0..4 {
+            input.wheels[i].rotation_offset = self.rotations_3d4_41c[i];
+            input.wheels[i].frozen = self.frozen_3dc_424[i];
+        }
+        input
+    }
+
     pub fn scalars(self) -> [f32; 7] {
         [
             self.perturbation_3ac,

@@ -17,6 +17,9 @@ typedef void (__cdecl *GeometryKernel)(void *,void *);
 #ifdef GRID_ASSISTED_WHEEL_SOURCE
 typedef void (__cdecl *WheelKernel)(void *,void *,void *,unsigned);
 #endif
+#ifdef GRID_ASSISTED_CONTROL
+typedef void (__fastcall *ControlKernel)(void *,void *);
+#endif
 
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
@@ -33,11 +36,14 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_ASSISTED_WHEEL_SOURCE
  word_count=128;
 #endif
+#ifdef GRID_ASSISTED_CONTROL
+ word_count=146;
+#endif
  while(fgets(line,sizeof(line),input)){
   if(++cases>4096||!strchr(line,'\n')){error=6;break;}
   char *cursor=line,*start=cursor;while(*cursor&&*cursor!='\t'&&*cursor!=' ')++cursor;size_t n=(size_t)(cursor-start);
   if(!n||n>=sizeof(name)){error=7;break;}memcpy(name,start,n);name[n]=0;
-  float v[128];for(unsigned i=0;i<word_count;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
+  float v[146];for(unsigned i=0;i<word_count;++i){while(*cursor=='\t'||*cursor==' ')++cursor;char *stop;unsigned long word=strtoul(cursor,&stop,16);if(stop-cursor!=8){error=8;break;}unsigned w=(unsigned)word;memcpy(v+i,&w,4);cursor=stop;if(!isfinite(v[i])){error=8;break;}}
   while(*cursor=='\t'||*cursor==' '||*cursor=='\r'||*cursor=='\n')++cursor;if(error||*cursor){error=9;break;}
   if(v[9]!=0.f&&v[9]!=1.f){error=13;break;}
   if(v[10]<0.f||v[4]<0.f||v[5]<0.f||v[6]<=0.f||v[7]<0.f||v[8]<0.f){error=14;break;}
@@ -84,8 +90,26 @@ int wmain(int argc,wchar_t **argv){
   }
   if(error)break;
 #endif
+#ifdef GRID_ASSISTED_CONTROL
+  __declspec(align(16)) unsigned char control_state[0x460]={0},control_wrapper[0x30]={0},control_body[0x1640]={0};
+  float *q=v+128;
+  if((q[17]!=0.f&&q[17]!=1.f)||q[6]<0.f||q[6]>1.f||q[7]<0.f||q[7]>1.f){error=24;break;}
+  memcpy(control_state+0x18,q,16);memcpy(control_state+0x30,q+4,8);memcpy(control_state+0x48,q+6,8);memcpy(control_state+0x50,q+8,16);
+  memcpy(control_state+0x270,q+12,16);memcpy(control_state+0x254,q+16,4);
+  if(q[17]!=0.f){*(unsigned *)(control_state+0x214)=(unsigned)(uintptr_t)control_wrapper;*(unsigned *)(control_wrapper+0x24)=(unsigned)(uintptr_t)control_body;*(unsigned *)(control_body+0x1620)=4;}
+  ControlKernel control_kernel=(ControlKernel)(image+0x9c5b90-0x400000);
+  __try{control_kernel(control_state,NULL);}__except(EXCEPTION_EXECUTE_HANDLER){error=25;break;}
+  /* Steering-only transfer with aligned static provenance; whole 9bd7f0 is unexecuted. */
+  memcpy(body+0x2294,control_state+0x3ac,12);
+  for(unsigned i=0;i<4;++i){memcpy(body+0x22a0+i*4,control_state+0x3d4+i*24,4);body[0x22cc+i]=control_state[0x3dc+i*24];}
+#endif
   __try{kernel(body,v[10]);}__except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"fault=%08lx\n",GetExceptionCode());error=10;break;}
   fprintf(output,"P\t%s",name);
+#ifdef GRID_ASSISTED_CONTROL
+  const unsigned control_offsets[7]={0x3ac,0x3b0,0x3b4,0x3d4,0x3ec,0x404,0x41c};
+  for(unsigned i=0;i<7;++i){float value=*(float *)(control_state+control_offsets[i]);if(!isfinite(value))error=11;fprintf(output,"\t%08x",bits(value));}
+  for(unsigned i=0;i<4;++i)fprintf(output,"\t%u",control_state[0x3dc+i*24]);
+#endif
 #ifdef GRID_ASSISTED_GEOMETRY
   fprintf(output,"\t%08x\t%u\t%u\t%08x\t%08x",bits(*(float *)(body+0xe54)),pair[0],pair[1],bits(*(float *)(body+0x21d4)),bits(*(float *)(body+0x21d8)));
 #endif

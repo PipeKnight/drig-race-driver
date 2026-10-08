@@ -2,7 +2,7 @@
 use grid_world::{
     assisted_steering::{self, Motion, Parameters},
     steering_coefficients::{Input, Wheel},
-    steering_input,
+    steering_control, steering_input,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -27,14 +27,16 @@ fn ordinal(v: f32) -> Result<usize, &'static str> {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let wheel_source_mode = args.len() == 5 && args[2] == "--source-wheel-geometry";
+    let control_mode = args.len() == 5 && args[2] == "--source-control-geometry";
+    let wheel_source_mode =
+        (args.len() == 5 && args[2] == "--source-wheel-geometry") || control_mode;
     let geometry_mode = (args.len() == 5 && args[2] == "--source-geometry") || wheel_source_mode;
     if args.len() != 2
         && !(args.len() == 4 && (args[2] == "--source" || args[2] == "--source-parameters"))
         && !geometry_mode
     {
         return Err(
-            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source|--source-parameters CAR.csv | --source-geometry|--source-wheel-geometry CAR.csv CAR.ned]".into(),
+            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source|--source-parameters CAR.csv | --source-geometry|--source-wheel-geometry|--source-control-geometry CAR.csv CAR.ned]".into(),
         );
     }
     let source = if args.len() == 4 || geometry_mode {
@@ -75,7 +77,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut rows = Vec::new();
     for line in text.lines() {
         let cells: Vec<_> = line.split('\t').collect();
-        if cells.len() != 110 || rows.len() >= 4096 {
+        if cells.len() != (if control_mode { 128 } else { 110 }) || rows.len() >= 4096 {
             return Err("invalid input row".into());
         }
         let mut v: Vec<_> = cells[1..]
@@ -141,7 +143,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 rotation_144: q[9],
             });
         }
-        let input = Input {
+        let mut input = Input {
             command: steering_input::Input {
                 command: v[0],
                 perturbation: v[1],
@@ -158,6 +160,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             pair: [ordinal(v[11])?, ordinal(v[12])?],
             wheels: wheels.try_into().map_err(|_| "four wheels required")?,
         };
+        if control_mode {
+            let q = &v[109..127];
+            let control = steering_control::calculate(steering_control::Input {
+                wheel_levels_18_24: q[..4].try_into()?,
+                cap_levels_30_34: q[4..6].try_into()?,
+                cap_seeds_48_4c: q[6..8].try_into()?,
+                rotation_seeds_50_5c: q[8..12].try_into()?,
+                perturbation_gain_270: q[12],
+                ramp_start_274: q[13],
+                ramp_end_278: q[14],
+                low_gain_27c: q[15],
+                cap_threshold_254: q[16],
+                wheel_views_active: flag(q[17])?,
+            })?;
+            input = control.apply(input);
+            let mut control_words = control
+                .scalars()
+                .iter()
+                .map(|v| format!("\t{:08x}", v.to_bits()))
+                .collect::<String>();
+            for active in control.frozen_3dc_424 {
+                control_words.push_str(if active { "\t1" } else { "\t0" });
+            }
+            geometry_words = format!("{control_words}{geometry_words}");
+        }
         let motion = Motion {
             matrix: std::array::from_fn(|i| v[53 + i * 4..57 + i * 4].try_into().unwrap()),
             linear: v[69..73].try_into()?,

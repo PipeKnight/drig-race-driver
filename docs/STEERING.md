@@ -2,6 +2,16 @@
 
 Recorded 8 October 2026. Source initialization and supplied-state behavior are verified within the scopes below; device input, later overrides and live timing remain separate questions.
 
+## Mutable producer and source composition (F127)
+
+`grid-assisted-steering --source-control-geometry CAR.csv CAR.ned` joins F125 source geometry/tuning/wheel initialization to F126 mutable steering output. `steering_control::Output::apply` sets command perturbation, both body caps and the four rotation/freeze pairs with aligned production-copy provenance. The isolated original executes whole9c5b90 followed by whole9b3110/real helpers; an authored adapter transfers only those steering fields between the two. **Whole production copier9bd7f0 is not executed**, including its actor synchronization and other side effects. This comparison tests composition, not actual production scheduling.
+
+**67 datasets /3,216 cases /141,504 fields exact debug/release**:43 hashed installed CSV/.ned pairs,14 assistance and10 wheel source controls, under48 sampled supplied states each. The18 mutable producer inputs are sampled from F126's hash-verified authored finite fixtures. Output compares seven producer float words/four flags, five geometry fields, eight toe/cap words and20 final coefficient/history words. Native source-state placeholders are replaced by independently computed values. Mode/points/tuning are independently converted and supplied to original initialization/writer kernels; original CSV/.ned decoding and outer constructors remain unexecuted. Motion, command, phase, delta and prior coefficient/history remain supplied. There is no reset/RNG, device-input, live timing or full-driving claim.
+
+Final evidence `local/behavior/source-control-steering-20261008-03/validation.json`,04/;01/02 earlier exact runs before guard/metadata expansion. Separate combined probeSHA779f33f98db97736cf8854460267eb071ad10df3b795970c47c2f74ac1cb82e0; prior source-wheel binary retained unchanged. Original code RX, private lazy normalization data page writable/restored as in F121; no patches/stubs/injection/entry-point execution. Nine native invalid-source/control guards pass before writing. Previous3,216-case source-wheel mode regresses both profiles (`source-wheel-control-regression-20261008-01/`,02/). All97 workspace tests, fmt and warnings-denied Clippy pass (`source-control-steering-checks/`). Existing pinned tools reused; no numerical/check failures or game/settings changes.
+
+Call survey `20261008T1327389031808Z/` and targeted `20261008T1328370810021Z/` identify contact/per-wheel paths9e6660/9f3e80 which update the mutable levels before calling9c5b90. This supports a damage-state interpretation, not a verified full damage model. Named setup9c6360 is the next resource lead.
+
 ## Mutable steering producer (F126)
 
 Outer constructor a0e880 passes body+CDF0 to9f3d30 at a0e959/a0e95f. Its reset9e6070 uses global random state and calls producer9c5b90; neither reset nor constructor is executed by this comparison. The earlier literal body-offset store survey found no hits because this object is addressed through a relative pointer. Production copier9bd7f0 statically maps object3AC ->body2294,3B0/3B4 ->2298/229C, rotations3D4/3EC/404/41C ->22A0/4/8/C and freeze bytes3DC/3F4/40C/424 ->22CC/CD/CE/CF. Whole copier execution remains pending.
