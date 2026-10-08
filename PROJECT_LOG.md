@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 101 workspace tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 102 workspace tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -728,6 +728,14 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 - CorrectedF114alias assumption: firstsnapshot2groups6each, second3groups4each. Initial01guardfailedbeforeexecution;02nativeblendroles20/24swapped produced17320words across552cases, alignedloads corrected;03exact560beforecrossWliteralzero/control. Final04/05exact. ProbeSHA22ad99b650878c860f26402d5b5827c9a0f14c4c977a230ccf66786df64fe313; originalcodeRX/no stubs/datapagewrites/liveinjection. **95workspace tests**,fmt/warnings-deniedClippypass. Existingtools/no installs. Preservation00:43:15UTC confirms130sourcefiles+exeunchanged. F114research separatelyd96e3f3. Continue wheelblend/angle provenance and force-stage integration.
 
 ## Next actions
+
+### 8 October 2026 — whole wheel deformation implemented (F134)
+
+Independent `wheel_deformation::calculate` composes F133 sampling with cross/RSQRT normalization, f64 acos rounded to f32, existing reference Rodrigues rotation, masked displacement, angular threshold shaping, puncture flags and all five radius-cache pairs per wheel. Active deformation writes four matrices at1690; inactive preserves angle/matrix words and clears displacement. Bounded finite four-wheel/supplied-grid contract; degenerate directions and rotation beyond ±64 radians reject explicitly. `grid-wheel-deformation` supports1,024cases/16MiB/private create-new output. [Exact contract and limitations](docs/DEFORMATION_GRID.md#whole-wheel-deformation-f134).
+
+Whole original9bb1e0 comparison: **688 cases /88,064 fields exact in debug and release** (124 numeric words +4 flags per case).48 retained-grid cases use explicitly supplied policy/cache inputs;640 authored identity/translated/sheared/nonlinear maps exercise inactive/active branches, ±0/negative/positive angular limits, varying scales, signed Z threshold selection and tyre selection. Five invalid spacing/flag/radius/nonfinite/node-count controls reject both diagnostics; native writes no output. Final `local/behavior/wheel-deformation-20261008-02/validation.json`,03/ retain hashes, exact comparisons and executions.01earlier affine suite also exact.102workspace tests pass, fmt and warnings-denied Clippy pass (`local/behavior/wheel-deformation-checks/`). Test verifies inactive preservation including signed-zero angles and complete cache rebuilding. Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14 reused, no installs/settings/input/new live capture.
+
+The128-field controlled result does not resolve the112differences against the captured incoming state: no same-tick inputs/outputs were recorded. Grid construction, collision-driven node changes, source threshold provenance and update cadence remain next. Research committed separately as82d08fa; native implementation commit follows after these completed checks.
 
 ### 8 October 2026 — whole wheel geometry harness preparation
 
