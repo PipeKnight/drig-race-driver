@@ -2,6 +2,7 @@
 //! The f64 static BVH and packed reference-style queries expose distinct semantics.
 use std::{fmt, ops::Range};
 
+pub mod assisted_steering;
 pub mod candidate_grid;
 pub mod contact_material;
 pub mod contact_ray;

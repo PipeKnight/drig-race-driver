@@ -40,7 +40,7 @@ pub struct State {
 fn trig(angle: f32) -> (f32, f32) {
     (f64::from(angle).sin() as f32, f64::from(angle).cos() as f32)
 }
-pub fn unassisted(input: Input) -> Result<[State; 4], Error> {
+pub(crate) fn validate(input: Input) -> Result<(), Error> {
     if input.pair.into_iter().any(|i| i >= 4)
         || input.pair[0] == input.pair[1]
         || input.delta < 0.
@@ -77,10 +77,26 @@ pub fn unassisted(input: Input) -> Result<[State; 4], Error> {
                 .any(|v| !v.is_finite())
         })
     {
-        return Err(Error("invalid unassisted steering input"));
+        return Err(Error("invalid steering coefficient input"));
     }
+    Ok(())
+}
+pub fn unassisted(input: Input) -> Result<[State; 4], Error> {
+    validate(input)?;
     let command = steering_input::condition(input.command)?;
     let angle = input.scale_e54 * command;
+    update(input, angle, None)
+}
+pub(crate) struct AssistedTail {
+    pub slew_step: Option<f32>,
+    pub prior_38: [f32; 4],
+    pub smoothing_factor: f32,
+}
+pub(crate) fn update(
+    input: Input,
+    angle: f32,
+    tail: Option<AssistedTail>,
+) -> Result<[State; 4], Error> {
     let mut result = input.wheels.map(|w| State {
         blend_20: w.blend_20,
         blend_24: w.blend_24,
@@ -139,7 +155,6 @@ pub fn unassisted(input: Input) -> Result<[State; 4], Error> {
             w.blend_24 = 0.;
         }
     }
-    let step = input.delta * 5.;
     for (w, state) in input.wheels.iter().zip(&mut result) {
         let toe = if w.x < 0. { -0.0 - w.toe_e8 } else { w.toe_e8 };
         let offset = toe + w.rotation_offset;
@@ -149,6 +164,23 @@ pub fn unassisted(input: Input) -> Result<[State; 4], Error> {
             state.blend_24 = old * cos - state.blend_20 * sin;
             state.blend_20 = state.blend_20 * cos + old * sin;
         }
+    }
+    if let Some(tail) = &tail
+        && let Some(step) = tail.slew_step
+    {
+        for (state, prior) in result.iter_mut().zip(tail.prior_38) {
+            let v = state.blend_24.clamp(prior - step, prior + step);
+            state.blend_24 = v;
+            state.blend_20 = (1. - v * v).sqrt();
+        }
+    }
+    let step = input.delta * 5.;
+    let step = if let Some(tail) = &tail {
+        tail.smoothing_factor * step
+    } else {
+        step
+    };
+    for (w, state) in input.wheels.iter().zip(&mut result) {
         state.history_38 = state.blend_24;
         let before_rotation = state.blend_24;
         let target = if w.frozen {
