@@ -729,6 +729,14 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — whole wheel geometry harness preparation
+
+Whole original9bb1e0 executes48cases using the twelve F133 retained grids/wheel/frame inputs and four authored threshold/tyre-flag policies. Final `local/behavior/deformed-wheel-geometry-20261008-04/execution.json` records4,032 retained numeric fields,112 replay differences; this is a controlled whole-routine execution, not synchronized live replay. Missing incoming radius caches explicitly use authored zeros. Final probe SHA1afaf44d6f11ee60b508c8d964082bd3702156934172f3741fd6da8c18b94526; existing MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14 reused. Code stays RX; four private mapped lazy-data pages E58000/E5A000/E5B000/E5E000 temporarily writable and restored. No patches/stubs/injection.
+
+Failed01fixture preparation requested `wheel_radius_samples`, which F133 did not capture (it was contact-only); fixed with explicitly authored fallback. Failed02whole run faulted writing E5AE50 at9BBAB4 because the harness omitted E5A000. Added bounded exception diagnostics, confirmed static lazy initializer and corrected page permissions;48cases then pass.03used the incorrectly inferred1680matrix start; entry-aligned instructions show pointer16B0 minus32 =1690, while1680 is fourth displacement. Corrected both fixture/output ranges before final04comparison. Original failure/intermediate artifacts remain private. Future optional deformation capture now requests radius thresholds, tyre flags, deformation flag and incoming cache without duplicating dynamics/contact reads; PowerShell syntax passes, new live validation pending.
+
+PID29904 closed after the F133 capture; the guarded follow-up reader refused its stale identity. Host event query returned no matching GRID event in its bounded results; closure cause remains unknown. Fresh window inventory shows Destiny2, no GRID. Desktop availability question is pending; no game relaunch/input while awaiting it. Offline next: independently implement and compare whole wheel geometry, including normalization, angle/rotation, cache selection and puncture flags.101tests remain latest completed workspace verification, no new Rust verified yet. Publication before this preparation:fab506937d1a1a4c65b9817aaa1b0bd94876b2e9 matches upstream,0/0; `local/behavior/github-deformation-sync-20261008.md`.
+
 ### 8 October 2026 — whole deformation sampler verified (F133)
 
 - Added independent ordered `deformation_grid::Grid::sample`, private diagnostic and whole original9a39d0/real-setter probe. Descriptor-relative layout/body+2300 linkage preserved. [Contract/evidence](docs/DEFORMATION_GRID.md#native-sampler-and-captured-grid-replay-f133). RX code/read-only mapped data, no patches/stubs/injection/lazy writable page.

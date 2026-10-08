@@ -147,6 +147,10 @@ try {
     $null=Read-TaskBytes ($taskBody+0xc740) 0x10 "car_$taskIndex-visual_damage_correction"
     $null=Read-TaskBytes ($taskBody+0xeefc) 4 "car_$taskIndex-visual_damage_scale"
     if($IncludeDeformation){
+     $null=Read-TaskBytes ($taskBody+0xc7ad) 1 "car_$taskIndex-deformation_flag"
+     if(!$IncludeContacts){$null=Read-TaskBytes ($taskBody+0x30c) 0xa0 "car_$taskIndex-wheel_radius_samples"}
+     $null=Read-TaskBytes ($taskBody+0xe25c) 8 "car_$taskIndex-deformation_radius_thresholds"
+     $null=Read-TaskBytes ($taskBody+0x22e0) 4 "car_$taskIndex-deformation_tyre_flags"
      # Sampler ECX is body+2300; preserve descriptor-relative provenance.
      $taskGridDescriptor=Read-TaskBytes ($taskBody+0x2300+0xa414) 0x2c "car_$taskIndex-deformation_grid_descriptor"
      if($null -eq $taskGridDescriptor){throw 'Missing deformation descriptor'}
@@ -168,7 +172,7 @@ try {
     if($null -eq $taskDynamics -or [BitConverter]::ToUInt32($taskDynamics,0x5d4) -ne $taskBody -or [BitConverter]::ToUInt32($taskDynamics,0x5d8) -ne 4){throw 'Dynamics context identity mismatch'}
     $null=Read-TaskBytes ($taskBody+0xb20) 0x80 "car_$taskIndex-prior_velocity_pose"
     $null=Read-TaskBytes ($taskBody+0x3a0) 0x30 "car_$taskIndex-delta_neighborhood"
-    $null=Read-TaskBytes ($taskBody+0xc7ad) 1 "car_$taskIndex-deformation_flag"
+    if(!$IncludeDeformation){$null=Read-TaskBytes ($taskBody+0xc7ad) 1 "car_$taskIndex-deformation_flag"}
    }
    if($IncludeContacts){
     if($null -eq $taskWheelRecords){throw 'Contact wheel records absent'}
