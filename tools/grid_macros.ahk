@@ -98,15 +98,15 @@ Pulse(name, milliseconds) {
     }
 }
 
-SampleThrottle(*) {
+SampleDrive(name) {
     ; Invoke only from an observed paused race with Continue selected.
     ; One bounded input batch keeps tool/screenshot gaps out of the hold.
-    Log("sample_begin", "paused_throttle", 2000)
-    if !Pulse("pause", 150) || !Pulse("throttle", 2000) || !Pulse("pause", 150) {
-        Log("sample_cancelled", "paused_throttle", 2000)
+    Log("sample_begin", "paused_" name, 2000)
+    if !Pulse("pause", 150) || !Pulse(name, 2000) || !Pulse("pause", 150) {
+        Log("sample_cancelled", "paused_" name, 2000)
         return
     }
-    Log("sample_end", "paused_throttle", 2000, 0, "normal sequence ended with pause key-up")
+    Log("sample_end", "paused_" name, 2000, 0, "normal sequence ended with pause key-up")
 }
 
 if Action = "inspect" {
@@ -116,9 +116,10 @@ if Action = "inspect" {
 if Action = "serve" {
     ; Bound macros are active only for the exact private GRID process.
     HotIf(GridActive)
+    Hotkey("F2", (*) => SampleDrive("throttle_right"))
     Hotkey("F3", (*) => Pulse("left", 150))
     Hotkey("F4", (*) => Pulse("right", 150))
-    Hotkey("F5", SampleThrottle)
+    Hotkey("F5", (*) => SampleDrive("throttle"))
     Hotkey("F6", (*) => Pulse("menu_down", 150))
     Hotkey("F7", (*) => Pulse("menu_up", 150))
     Hotkey("F8", (*) => Pulse("confirm", 150))
@@ -127,7 +128,7 @@ if Action = "serve" {
     Hotkey("F11", (*) => Pulse("pause", 150))
     Hotkey("F12", Stop)
     Persistent()
-    Log("ready", "serve", 0, 0, "F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop")
+    Log("ready", "serve", 0, 0, "F2 paused 2000ms throttle/right sample; F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop")
 } else {
     Pulse(Action, HoldMs)
     ExitApp()

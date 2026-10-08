@@ -10,6 +10,8 @@ Independently authored source: `tools/grid_macros.ahk`; guarded launcher: `tools
 
 ## Controls and scope
 
+8 October extension: F2 performs the same bounded sequence as F5, with combined throttle/right instead of throttle: resume for150ms, hold both scan codes for2,000ms, release, pause for150ms. The common `SampleDrive` keeps physical-stop and exact foreground-process checks. The idle old handler was identity-checked before replacement; no duplicate handlers. AutoHotkey2.0.29 logs a2,000ms hold, key releases and completion; direct screenshots confirm movement into the Donington barrier and the resulting Pause Menu. F5 is also verified after this refactor. Evidence `local/reference-race/steering-20261008/macros/20261008T1416196427122Z-serve.tsv`; wall-clock macro timing remains distinct from game-tick timing. [Live steering comparison](HANDLING_DAMAGE.md#live-selection-and-mutable-outputs-f130).
+
 All bindings apply only when the verified private GRID process is foreground. The launcher checks PID, start time, executable path and SHA-256; the AutoHotkey script checks foreground PID/path before and during a pulse. Runtime mode for the verified experiments is `Event`, with explicit scan-code down/up events. It releases held keys on normal completion, focus loss, stop request and ordinary exit. Physical Escape cancels non-Escape pulses; F12 cancels the current pulse. Requested holds are bounded to 30–2000 ms. Hard process termination cannot guarantee cleanup.
 
 | Hotkey | Macro |
