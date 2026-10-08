@@ -2,6 +2,16 @@
 
 Recorded 8 October 2026. Source initialization and supplied-state behavior are verified within the scopes below; device input, later overrides and live timing remain separate questions.
 
+## Deterministic reset (F128)
+
+`steering_control::reset` reproduces the steering subset of whole9e6070->9c5b90. Reset clears18 input words, generates four rotation seeds50..5C and two cap seeds48/4C, then executes the producer. Its optional secondary component210 is absent here; active four-wheel views have component queries disabled. Parameters are supplied, with finite maximum rotation and maximum cap restricted to[0,1]. Original source configuration/full constructor and live RNG state/cadence are outside this comparison.
+
+Each sample advances explicit wrapping32-bit state by `state*0x41c64e6d+0x40584c0f`. Treating the new state as signed i32, divide by65535 with truncation toward zero, add that signed quotient back with wrapping arithmetic and select the low byte. Four samples derive `(sample*stored_f32(2/255)-1)*maximum_rotation_26c`; the next two derive `(sample*stored_f32(1/255))*(maximum_cap_250-1)+1`, preserving f32 operation order. Stored constants are3C008081/3B808081. Ordinary unsigned quotient or modulo sampling would differ.
+
+**1,392 cases /25,056 fields exact debug/release**:368 boundary/ramp and1,024 seeded authored controls. Eighteen output fields compare final RNG word, six seeds, seven producer float words and four freeze bytes. The original probe also checks all18 cleared words and five status fields (428=-1,42C=0,440=0,444=7,448=0). Five native guards reject invalid amplitude/cap/flag or derived unordered ramp before writing. Evidence `local/behavior/steering-reset-20261008-01/validation.json`,02/; probeSHA60d9a698f2a9e17a03b754e60009554bbda1a2e0cecff8baf98e8ae575dc6ff1. Only the private mapped RNG pageE4F000 is writable/restored; code RX, no patches/stubs/injection/entry-point execution. Ancillary damage outputs are not compared.
+
+Static `handling-damage-setup-instructions-20261008.json` and `handling-damage-reset-constants-20261008.json`;97 workspace tests, fmt and warnings-denied Clippy pass (`steering-reset-checks/`). Existing pinned toolchain reused; no numerical/check failures, installs or game/settings changes. [Handling-damage source investigation](HANDLING_DAMAGE.md) now identifies configuration for these parameters; source-to-reset validation remains next.
+
 ## Mutable producer and source composition (F127)
 
 `grid-assisted-steering --source-control-geometry CAR.csv CAR.ned` joins F125 source geometry/tuning/wheel initialization to F126 mutable steering output. `steering_control::Output::apply` sets command perturbation, both body caps and the four rotation/freeze pairs with aligned production-copy provenance. The isolated original executes whole9c5b90 followed by whole9b3110/real helpers; an authored adapter transfers only those steering fields between the two. **Whole production copier9bd7f0 is not executed**, including its actor synchronization and other side effects. This comparison tests composition, not actual production scheduling.

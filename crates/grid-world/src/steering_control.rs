@@ -21,6 +21,66 @@ pub struct Output {
     pub rotations_3d4_41c: [f32; 4],
     pub frozen_3dc_424: [bool; 4],
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct ResetParameters {
+    pub maximum_rotation_26c: f32,
+    pub maximum_cap_250: f32,
+    pub perturbation_gain_270: f32,
+    pub ramp_start_274: f32,
+    pub ramp_end_278: f32,
+    pub low_gain_27c: f32,
+    pub cap_threshold_254: f32,
+    pub wheel_views_active: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ResetOutput {
+    pub random_state: u32,
+    pub cap_seeds_48_4c: [f32; 2],
+    pub rotation_seeds_50_5c: [f32; 4],
+    pub steering: Output,
+}
+
+/// Reset with the optional secondary component absent and supplied RNG state.
+pub fn reset(mut random_state: u32, p: ResetParameters) -> Result<ResetOutput, Error> {
+    if !p.maximum_rotation_26c.is_finite() || !(0. ..=1.).contains(&p.maximum_cap_250) {
+        return Err(Error("invalid steering reset parameters"));
+    }
+    let mut sample = || {
+        random_state = random_state
+            .wrapping_mul(0x41c64e6d)
+            .wrapping_add(0x40584c0f);
+        // Signed division truncates toward zero. The original then adds the
+        // quotient back to the wrapping state before selecting its low byte.
+        let quotient = (random_state as i32) / 65535;
+        (random_state.wrapping_add(quotient as u32) & 255) as f32
+    };
+    let rotations = std::array::from_fn(|_| {
+        (sample() * f32::from_bits(0x3c008081) - 1.) * p.maximum_rotation_26c
+    });
+    let caps = std::array::from_fn(|_| {
+        (sample() * f32::from_bits(0x3b808081)) * (p.maximum_cap_250 - 1.) + 1.
+    });
+    let steering = calculate(Input {
+        wheel_levels_18_24: [0.; 4],
+        cap_levels_30_34: [0.; 2],
+        cap_seeds_48_4c: caps,
+        rotation_seeds_50_5c: rotations,
+        perturbation_gain_270: p.perturbation_gain_270,
+        ramp_start_274: p.ramp_start_274,
+        ramp_end_278: p.ramp_end_278,
+        low_gain_27c: p.low_gain_27c,
+        cap_threshold_254: p.cap_threshold_254,
+        wheel_views_active: p.wheel_views_active,
+    })?;
+    Ok(ResetOutput {
+        random_state,
+        cap_seeds_48_4c: caps,
+        rotation_seeds_50_5c: rotations,
+        steering,
+    })
+}
 impl Output {
     /// Steering-only transfer observed in the production body synchronization.
     pub fn apply(
