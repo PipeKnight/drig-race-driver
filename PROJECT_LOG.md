@@ -18,7 +18,7 @@ The owner has authorized reasonable analysis/decompilation and Rust rewrite work
 | Car/track reference | Lacetti / Donington pairing and route_0 reads confirmed | Owner confirmation plus [130-file dependency map](docs/REFERENCE_DEPENDENCIES.md) |
 | Agent game controls | AutoHotkey 2.0.29 operational | Menu, bound trigger, throttle, combined throttle/right and pause verified; approximate wall-clock timing |
 | Native compiler | Validated | Pinned Rust 1.99.0, MSVC 14.44.35207, SDK 10.0.26100.0; executable builds and runs |
-| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 100 workspace tests; full vehicle simulation pending |
+| Native resource readers and behavior blocks | Framing, meshes/textures, placements, entities, track/car collision, binary XML, progress, tuning, body prelude, Standard wheel layout and scoped dynamics implemented | 101 workspace tests; full vehicle simulation pending |
 | Geometry diagnostic | Raw Lacetti preview produced | 46,577 position records / 38,803 triangles; transforms, visibility, skinning and materials unapplied |
 | Renderer / playable Rust engine | Static car, Donington surfaces, scenery and entity visuals GPU-verified | Bevy 0.19.1; driving simulation pending |
 
@@ -729,7 +729,14 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
-### 8 October 2026 — upstream deformation investigation (in progress)
+### 8 October 2026 — whole deformation sampler verified (F133)
+
+- Added independent ordered `deformation_grid::Grid::sample`, private diagnostic and whole original9a39d0/real-setter probe. Descriptor-relative layout/body+2300 linkage preserved. [Contract/evidence](docs/DEFORMATION_GRID.md#native-sampler-and-captured-grid-replay-f133). RX code/read-only mapped data, no patches/stubs/injection/lazy writable page.
+- **824cases /3,296words exact debug/release**:72boundary,512authored varied grids,240wheel queries constructed from twelve retained grids. Five invalid guards reject both/native output absent. Native matches original sampler, not live sampled-output captures or complete wheel geometry/collision deformation. Final `deformation-sample-20261008-03/validation.json`,04/; probeSHA8ce8358aeccf155bd5e0b4e4e0cfbf5bbf9dd78a83f0b60e7bdd05aeb7a7073c.
+- Optional deformation capture checks9bb1e0/9a39d0 prefixes then validates dimensions/count/spacing before node reads. Same private PID29904;308/308successful reads at14:50:46.2398351UTC (`general-vehicle-manager-20261008T1450462398351Z.json`). Twelve grids have6×5×12 or6×5×13 dimensions/360or390nodes and three spacing words; finite positions. Player6×5×12 spacing~.4224487245 (3ed84b33). Full80-byte nodes stay private; native consumes first16position bytes only, including W. Initial draft generalized player dimensions to all cars; corrected after per-car report inspection before commit.
+- **101workspace tests** pass `deformation-sample-checks/tests-final.txt`; final builds/fmt/warnings-deniedClippy/Python/PowerShell checks pass. Initial test literal syntax and Clippy test placement/array-chunk style corrected; rebuilt/recompared after borrowing array view. No numerical failures/install/game input/settings changes. Existing pinned toolchain. Prior pointer survey committed separately7cfaa50; publication verification will be kept in ignored `local/behavior/github-deformation-sync-20261008.md`. GRID paused/handler idle. Next whole wheel geometry with sampler, then incoming grid deformation.
+
+### 8 October 2026 — upstream deformation investigation
 
 - F131b5949c1/F132b50b6cb published; remote main independently verifiedb50b6cbab103051f80e836724659cc28cd9b5058 with0/0 and clean public tree. Original executable/130traced resources match again at14:44:27.533106UTC (`local/scene/preservation-20261008-wheel-damage.json`). No proprietary artifacts published.
 - Direct MOV/FST literal-displacement store survey yields only unrelated candidates and misses pointer setup (`20261008T1442339210619Z/field-stores.tsv`). Added bounded exact-literal all-operand survey (`run_ghidra_field_stores.ps1 -AllOperands`, `GridDisplacementRefs.java`), successfully compiled/executed on actual PE.18matches reveal9bb1e0 pointer setup for1650/1790, a09ce0 reset, and9c1660 contact consumer; no immutable-field inference from failed direct-store search. `20261008T1444011569747Z/displacement-refs.tsv`, PowerShell syntax passes.

@@ -1,6 +1,18 @@
 # Deformation grid investigation
 
-Recorded8October2026. Static pointer/caller provenance only at this checkpoint; no native sampler or whole sampler numerical comparison yet. See [visual damage consumer](HANDLING_DAMAGE.md).
+Recorded8October2026. F133 verifies the supplied-grid sampler. Full wheel geometry/grid creation/collision deformation remain ahead. See [visual damage consumer](HANDLING_DAMAGE.md).
+
+## Native sampler and captured grid replay (F133)
+
+`deformation_grid::Grid::sample` implements the aligned four-lane contract below. Supported dimensions2..16 each/product<=400, matching position count, finite positive spacing and finite positions/query. Collapsed bounds, invalid cells and nonfinite results fail before output. `grid-deformation-sample` accepts up to1,024cases/16MiB and writes privately with create-new semantics. No filesystem game lookup or silent generic interpolation fallback.
+
+Whole original9a39d0 and real4b1a90 setters execute with unchanged RX code/read-only mapped data, no stubs/patches/injection or writable mapped pages. **824cases /3,296words exact debug/release**:72boundary controls,512varied authored grids and240constructed wheel queries using twelve retained live grids. Query order is center, radius offsets in positive/negative Z and Y. Centers/radii are independently reconstructed from captured wheel/frame fields. These are supplied queries, not captured original sampler outputs or a synchronized full wheel update. Five invalid dimensions/spacing/nonfinite/collapsed/short-node guards reject both diagnostics; native writes no output.
+
+Capture `local/behavior/general-vehicle-manager-20261008T1450462398351Z.json` records308/308successful reads with two additional code-prefix checks9bb1e0/9a39d0 and bounded descriptor/node records. Live grids are6×5×12 or6×5×13 (360/390nodes), with spacing words3ed84b33/3ed8455a/3ecbdec0; per-car words are in the private report. The player's6×5×12 grid has spacing approximately0.4224487245 (3ed84b33) and minimum(-1.056455374,-.156990886,-2.319298744,1); all captured node positions are finite. Node W is retained without assuming it equals1. Optional `-IncludeDeformation` requires steering identity checks, validates descriptor dimensions/count/spacing before node reads, and never writes/suspends the process. Same verified paused PID29904/session/manager as F130.
+
+Final `local/behavior/deformation-sample-20261008-03/validation.json`,04/ contains capture/grid/input/executable hashes and comparisons;01/02 earlier runs also exact. Original probe SHA8ce8358aeccf155bd5e0b4e4e0cfbf5bbf9dd78a83f0b60e7bdd05aeb7a7073c.101workspace tests pass (`deformation-sample-checks/tests-final.txt`), including identity-grid query restoration outside lookup bounds. Final fmt/warnings-deniedClippy and Python/PowerShell syntax pass. Initial test float literal syntax and two Clippy style diagnostics were corrected; rebuilt diagnostic and repeated both numerical comparisons after replacing an allocation with a borrowed array view. No numerical failures/install/game input/settings change; existing Rust1.99.0/MSVC14.44.35207/SDK10.0.26100.0/Python3.12.14 reused. Next compose sampler into whole wheel geometry, then trace incoming grid deformation.
+
+## Static provenance
 
 Direct-store survey for1650/1790/C740/C7AE/1AA8 finds two unrelated matches and misses pointer-based writes. The authored bounded all-operand survey adds LEA/immediate/compare/read coverage with exact literal boundaries, up to32offsets/2,048matches, private output without overwrite. Actual reference yields18matches, exposing9bb1e0's wheel-array pointers, a09ce0's reset and9c1660's contact consumer. Literal matches alone do not prove object identity.
 

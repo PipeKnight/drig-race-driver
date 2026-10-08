@@ -6,6 +6,7 @@ pub mod assisted_steering;
 pub mod candidate_grid;
 pub mod contact_material;
 pub mod contact_ray;
+pub mod deformation_grid;
 pub mod dynamics;
 pub mod finalize;
 pub mod force_view;

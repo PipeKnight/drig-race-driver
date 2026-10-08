@@ -1,8 +1,9 @@
 # Bounded read-only search for an observed exact general-manager vtable.
-param([long]$ScanLimitBytes=64MB,[long]$ManagerAddress=0,[switch]$IncludeDynamics,[switch]$IncludeContacts,[switch]$IncludeSteering,
+param([long]$ScanLimitBytes=64MB,[long]$ManagerAddress=0,[switch]$IncludeDynamics,[switch]$IncludeContacts,[switch]$IncludeSteering,[switch]$IncludeDeformation,
  [string]$SessionJson='local/reference-race/resume-20261007/session.json')
 $ErrorActionPreference='Stop'
 if($ScanLimitBytes -lt 1 -or $ScanLimitBytes -gt 256MB){throw 'Scan limit must be 1..256 MiB'}
+if($IncludeDeformation -and !$IncludeSteering){throw 'Deformation capture requires steering identity checks'}
 $taskRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $taskSessionPath=[IO.Path]::GetFullPath((Join-Path $taskRoot $SessionJson))
 if(!$taskSessionPath.StartsWith((Join-Path $taskRoot 'local')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Session must remain under local/'}
@@ -61,7 +62,9 @@ try {
  $taskCodeOffset=0x9ad030-0x400000-0x1000+0x400
  if($null -eq $taskCode -or [Convert]::ToHexString($taskCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskCodeOffset..($taskCodeOffset+31)])){throw 'Live count routine differs'}
  if($IncludeSteering){
-  foreach($taskEntry in @(0x9c5b90,0x9bd7f0,0x9f2f80)){
+  $taskSteeringEntries=@(0x9c5b90,0x9bd7f0,0x9f2f80)
+  if($IncludeDeformation){$taskSteeringEntries+=@(0x9bb1e0,0x9a39d0)}
+  foreach($taskEntry in $taskSteeringEntries){
    $taskSteeringCode=Read-TaskBytes $taskEntry 32 ('steering_code_'+$taskEntry.ToString('x'))
    $taskEntryOffset=$taskEntry-0x400000-0x1000+0x400
    if($null -eq $taskSteeringCode -or [Convert]::ToHexString($taskSteeringCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskEntryOffset..($taskEntryOffset+31)])){throw 'Live steering routine differs'}
@@ -143,6 +146,21 @@ try {
     $null=Read-TaskBytes ($taskBody+0xc7ae) 1 "car_$taskIndex-visual_damage_flag"
     $null=Read-TaskBytes ($taskBody+0xc740) 0x10 "car_$taskIndex-visual_damage_correction"
     $null=Read-TaskBytes ($taskBody+0xeefc) 4 "car_$taskIndex-visual_damage_scale"
+    if($IncludeDeformation){
+     # Sampler ECX is body+2300; preserve descriptor-relative provenance.
+     $taskGridDescriptor=Read-TaskBytes ($taskBody+0x2300+0xa414) 0x2c "car_$taskIndex-deformation_grid_descriptor"
+     if($null -eq $taskGridDescriptor){throw 'Missing deformation descriptor'}
+     $taskGridCount=1
+     foreach($taskAxis in 0..2){
+      $taskAxisCount=[BitConverter]::ToInt32($taskGridDescriptor,$taskAxis*4)
+      if($taskAxisCount -lt 2 -or $taskAxisCount -gt 16){throw 'Unsupported deformation grid dimension'}
+      $taskGridCount*=$taskAxisCount
+     }
+     $taskGridSpacing=[BitConverter]::ToSingle($taskGridDescriptor,0xc)
+     if($taskGridCount -gt 400 -or ![Single]::IsFinite($taskGridSpacing) -or $taskGridSpacing -le 0){throw 'Unsupported deformation grid size/spacing'}
+     $taskGridNodes=Read-TaskBytes ($taskBody+0x2300+0x2580) ($taskGridCount*0x50) "car_$taskIndex-deformation_grid_nodes"
+     if($null -eq $taskGridNodes){throw 'Missing deformation grid node records'}
+    }
    }
    if($IncludeDynamics -or $IncludeContacts){
     if($taskWheelCount -ne 4){throw 'Dynamics context currently scoped to four wheels'}
