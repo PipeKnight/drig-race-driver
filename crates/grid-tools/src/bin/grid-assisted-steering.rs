@@ -27,9 +27,24 @@ fn ordinal(v: f32) -> Result<usize, &'static str> {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv".into());
+    if args.len() != 2 && !(args.len() == 4 && args[2] == "--source") {
+        return Err(
+            "usage: grid-assisted-steering INPUT.tsv local/OUTPUT.tsv [--source CAR.csv]".into(),
+        );
     }
+    let source = if args.len() == 4 {
+        let bytes = fs::read(&args[3])?;
+        let table = grid_formats::tuning::read(&bytes)?;
+        if table.rows.len() != 1 {
+            return Err("one source row required".into());
+        }
+        Some((
+            grid_formats::vehicle::read_standard_steering_angle(&table.rows[0])?,
+            grid_formats::vehicle::read_standard_steering_assistance(&table.rows[0])?,
+        ))
+    } else {
+        None
+    };
     let text = fs::read_to_string(&args[0])?;
     if text.len() > 4 * 1024 * 1024 {
         return Err("input exceeds limit".into());
@@ -59,7 +74,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 rotation_144: q[9],
             });
         }
-        let input = Input {
+        let mut input = Input {
             command: steering_input::Input {
                 command: v[0],
                 perturbation: v[1],
@@ -85,7 +100,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }),
         };
         let p = &v[85..105];
-        let parameters = Parameters {
+        let mut parameters = Parameters {
             command_deadzone_fdc: p[0],
             shaping_138c: p[1],
             high_scale_123c: p[2],
@@ -107,6 +122,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             input_factor_1388: p[18],
             smoothing_factor_1f2c: p[19],
         };
+        if let Some((angle, source)) = source {
+            input.scale_e54 = angle;
+            parameters.feedback_gain_e58 = source.feedback_gain_e58;
+            parameters.minimum_scale_e5c = source.minimum_scale_e5c;
+            parameters.smoothing_factor_1f2c = source.smoothing_factor_1f2c;
+            parameters.speed_cap_e70 = source.speed_cap_e70;
+        }
         let output =
             assisted_steering::calculate(input, parameters, motion, v[105..109].try_into()?)?;
         let words = output

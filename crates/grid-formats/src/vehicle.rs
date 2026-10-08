@@ -62,6 +62,35 @@ pub fn read_standard_steering_angle(row: &Row<'_>) -> Result<f32> {
     Ok(angle)
 }
 
+/// Source-backed subset of assisted steering; device/profile settings stay separate.
+#[derive(Debug, Clone, Copy)]
+pub struct SteeringAssistanceInitialization {
+    pub feedback_gain_e58: f32,
+    pub minimum_scale_e5c: f32,
+    pub smoothing_factor_1f2c: f32,
+    pub speed_cap_e70: f32,
+}
+
+pub fn read_standard_steering_assistance(
+    row: &Row<'_>,
+) -> Result<SteeringAssistanceInitialization> {
+    read_standard_body(row)?;
+    let converted = |column, factor: f32| -> Result<f32> {
+        let value = (row.number(column)?.unwrap_or(0.) * f64::from(factor)) as f32;
+        if !value.is_finite() {
+            return fail(column, "steering assistance exceeds finite f32 range");
+        }
+        Ok(value)
+    };
+    let smoothing = converted(165, 1.)?;
+    Ok(SteeringAssistanceInitialization {
+        feedback_gain_e58: converted(131, f32::from_bits(0x3c23_d70a))?,
+        minimum_scale_e5c: converted(132, f32::from_bits(0x3c8e_fa35))?,
+        smoothing_factor_1f2c: if smoothing == 0. { 1. } else { smoothing },
+        speed_cap_e70: converted(111, 1.)?,
+    })
+}
+
 /// Initial Standard suspension fields. Runtime may subsequently change them;
 /// in particular the observed running damping threshold differs from the CSV.
 #[derive(Debug, Clone, Copy)]

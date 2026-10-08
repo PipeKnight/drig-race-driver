@@ -2,6 +2,25 @@
 
 Recorded 8 October 2026. This specification describes supplied state; source tuning, device input and live timing remain separate questions.
 
+## Source assistance subset (F122)
+
+`vehicle::read_standard_steering_assistance` reads four Standard CSV fields with aligned decoder and constructor provenance:
+
+| CSV column | Properties offset | Body offset | Conversion |
+|---|---|---|---|
+| 131 | 1a0 | e58 | Parsed f64 times stored-f32 0x3c23d70a (approximately0.01), then f32 |
+| 132 | 1b4 | e5c | Parsed f64 times stored-f32 0x3c8efa35 (degree conversion), then f32 |
+| 165 | 4e8 | 1f2c | f32 store, then replace zero with one |
+| 111 | 50c | e70 | Direct f32 store |
+
+Empty cells decode as zero in the supported adapter. Smoothing's default occurs after f32 rounding; signed zero and +/-1e-46 therefore become one. Aligned decoder stores are9b0bd9,9b11f7,9b0a1a,9afd32, with the smoothing default at9b1852. Constructor copies are a0cd74,a0cd80,a0cc17,a0e2e9. Source angle column77 from F119 is joined too. `grid-assisted-steering INPUT OUTPUT --source CAR.csv` overrides these five inputs; other assistance settings, geometry, motion/state and delta remain supplied. Multiple rows and unsupported arrangements fail explicitly.
+
+**55 datasets /2,640 cases /52,800 output fields exact in debug and release**:44 hashed installed CSVs plus11 private authored variants. Original whole assisted9b3110 receives independently Python-converted field words; Rust reads the CSV with different placeholders. **The original CSV decoder, numeric converter and constructor are not executed by this comparison.** Their column/default/copy linkage is static evidence. Two authored decimals distinguish premature f32 conversion in minimum angle and feedback gain. Five source guards reject overflow, nonfinite values, negative smoothing, unsupported arrangement and multiple rows before output creation. No installed dataset uses the smoothing zero default; that boundary is authored coverage.
+
+Evidence `local/behavior/source-assisted-steering-20261008-05/validation.json`,06/;01/02 exact before guards,03/04 exact before extending signed-zero inputs to all source fields. The F121 original probe is unchanged. Static `source-assisted-steering-instructions-20261008-02.json`; full earlier source ranges may include adjacent functions. All97 workspace tests, fmt and warnings-denied Clippy pass (`source-assisted-steering-tests/`). Existing pinned tools reused, no numerical failures, installs or game/user-setting changes.
+
+Research follow-up: the MOV-only field survey did not locate remaining settings. It now includes FSTP too, but `20261008T1243237623215Z/field-stores.tsv` found no added matching x87 stores. Literal displacement matches alone do not establish body identity. Target9efb30 (`20261008T1239559195883Z/`) parses a larger settings object; its matching offsets are not proven to be Standard body fields. Do not use those defaults without tracing object/copy identity. Two nonexistent tool-file lookups and a Windows rg wildcard-path error were corrected by listing actual files and using rg's glob option.
+
 ## Whole assisted update (F121)
 
 `assisted_steering::calculate` reproduces original9b3110 with body+e6c true. It shapes the private conditioned command using FDc deadzone times stored0x3f7d70a4 and a signed power response. It interpolates the maximum steering scale with speed, applies E70 speed reduction and E5c minimum, then combines original9ae5a0 motion feedback with the E58/101c/1020 gain ramp. The optional1024/1028 angle gate normalizes all four linear-velocity lanes using the original SSE reciprocal-square-root seed and Newton grouping, projects onto body axis2 and applies acos. Linear FE8 response or weighted positive/negative endpoints determines the final bounded angle.
