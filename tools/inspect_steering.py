@@ -23,12 +23,12 @@ def at(address, size):
     raise ValueError('range not file backed')
 
 result = {'source_sha256': hashlib.sha256(raw).hexdigest(), 'instructions': {}, 'constants': {}}
-for address, size in [(0x98f790, 0x12a), (0x9b3110, 0xd26), (0x9b40d0, 0x160), (0xa03670, 0x3400), (0xbf7112, 0x100), (0x98ebf0, 0x230)]:
+for address, size in [(0x98f790, 0x12a), (0x9b3110, 0xd26), (0x9b40d0, 0x160), (0xa03670, 0x3400), (0xbf7112, 0x100), (0x98ebf0, 0x230), (0x9aec60, 0x7000)]:
     instructions = []
     for i in Cs(CS_ARCH_X86, CS_MODE_32).disasm(at(address, size), address):
         instructions.append({'address': hex(i.address), 'mnemonic': i.mnemonic, 'operands': i.op_str})
     result['instructions'][hex(address)] = instructions
-for address in [0xcaf888, 0xcaf88c, 0xcb01ac, 0xcb870c, 0xcb0c44, 0xd15038, 0xce769c, 0xcb0948, 0xcb093c, 0xcb8da4, 0xd1633c, 0xcb3ba8, 0xcb47e0]:
+for address in [0xcaf888, 0xcaf88c, 0xcb01ac, 0xcb870c, 0xcb0c44, 0xd15038, 0xce769c, 0xcb0948, 0xcb093c, 0xcb8da4, 0xd1633c, 0xcb3ba8, 0xcb47e0, 0xcb8200]:
     data = at(address, 4)
     result['constants'][hex(address)] = {'word': data.hex(), 'f32': struct.unpack('<f', data)[0]}
 out = Path(sys.argv[1]).resolve()

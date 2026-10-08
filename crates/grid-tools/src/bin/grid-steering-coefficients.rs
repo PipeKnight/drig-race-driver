@@ -26,12 +26,26 @@ fn flag(v: f32) -> Result<bool, &'static str> {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let geometry_mode = args.len() == 3 && args[2] == "--geometry";
+    let source_mode = args.len() == 4 && args[2] == "--geometry";
+    let geometry_mode = (args.len() == 3 && args[2] == "--geometry") || source_mode;
     if args.len() != 2 && !geometry_mode {
         return Err(
-            "usage: grid-steering-coefficients INPUT.tsv local/OUTPUT.tsv [--geometry]".into(),
+            "usage: grid-steering-coefficients INPUT.tsv local/OUTPUT.tsv [--geometry [CAR.csv]]"
+                .into(),
         );
     }
+    let source_angle = if source_mode {
+        let bytes = fs::read(&args[3])?;
+        let table = grid_formats::tuning::read(&bytes)?;
+        if table.rows.len() != 1 {
+            return Err("source mode requires one Standard row".into());
+        }
+        Some(grid_formats::vehicle::read_standard_steering_angle(
+            &table.rows[0],
+        )?)
+    } else {
+        None
+    };
     let text = fs::read_to_string(&args[0])?;
     if text.len() > 4 * 1024 * 1024 {
         return Err("input exceeds limit".into());
@@ -81,7 +95,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut geometry_words = String::new();
         if geometry_mode {
             let points = std::array::from_fn(|i| v[53 + i * 4..57 + i * 4].try_into().unwrap());
-            let g = steering_geometry::initialize(points, v[4])?;
+            let g = steering_geometry::initialize(points, source_angle.unwrap_or(v[4]))?;
             input.scale_e54 = g.scale_e54;
             input.span_21d4 = g.span_21d4;
             input.span_21d8 = g.span_21d8;

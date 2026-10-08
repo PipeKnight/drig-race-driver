@@ -2,6 +2,18 @@
 
 Recorded 8 October 2026. This specification describes supplied state; source tuning, device input and live timing remain separate questions.
 
+## Source steering angle (F119)
+
+Aligned decoder9aec60 at9af547 reads staging+1340 (CSV column77), calls its numeric converter, multiplies the x87 return by stored-f32 constantcb8200 (`0x3c8efa35`, degrees-to-radians), then stores f32 at properties+340. Whole98ebf0 copies this value to body+e54. `vehicle::read_standard_steering_angle` preserves f64 parsing and multiplication by that stored-f32 constant before final f32 storage. No zero substitution appears in this decoder path; empty fields become zero in the supported source adapter. Nonfinite/out-of-f32 values are rejected by authored bounds.
+
+Source mode `grid-steering-coefficients INPUT OUTPUT --geometry CAR.csv` reads one Standard row and overrides the supplied scale placeholder. **56datasets /2,688cases /67,200fields exact in debug/release**,44hashed installed CSVs plus12private authored variants. Original whole98ebf0->9b3110/98f790 receives independently Python-converted angle words; Rust reads the actual CSV. Geometry, other tuning/state and delta remain supplied; each source does not imply a matched complete vehicle state. **The original whole CSV decoder and numeric converter are not invoked by this comparison.** Their column/conversion provenance is aligned static evidence.
+
+Control `0.100000004` yields angle word3ae4c389; prematurely converting degrees to f32 yields3ae4c388. Blank, signed-zero, underflow, tiny values and decimal boundaries are covered. Four guards reject overflow/nonfinite values, multiple rows and unsupported arrangement before output creation in both profiles. Previously verified1,833case geometry pipeline regressesexactly in both profiles. Source/assistance cap initialization and actual device input remain open.
+
+Evidence `source-steering-20261008-02/validation.json`,03/;01earlier exact run without guard checks. Static `source-steering-angle-instructions-20261008.json`. Existing expanded coefficient probe SHA `239af3cc2ee916c81e2cbec2e428a2c6508bac67a0d2e6b0cbeae5132e8219a4`; no reference/probe modification for source adaptation. All97workspace tests, fmt and warnings-denied Clippy pass, `source-steering-tests/`. One patch initially mismatched a formatted CLI anchor; reapplied after inspection. No numerical/build/check failures in this source extension, new tools or game/user-setting changes. Existing pinned toolchain reused.
+
+Assistance follow-up: private targeted `20261008T1204201571871Z/9ae5a0.c.txt` identifies a feedback helper using averaged ordinals2/3 coordinates, body transform, angular/linear velocity and speed blend into an x87 atan result. Its decompiler removes branches; no numerical reproduction or live meaning is established yet. Continue aligned instructions and whole helper comparison before the assisted9b3110branch.
+
 ## Geometry initialization and composition (F118)
 
 `steering_geometry::initialize` reproduces whole original98ebf0 for four wheels. It copies supplied properties+340 to scale+e54. The first pass accumulates X/Z cuts as sequential coordinate*0.25 additions. The second pass compares Z to the current cut, selects an ordinal by X side when above it, and accumulates each side's Z*0.5. Both cuts are updated again after every wheel in that second pass. Selection is order-dependent; it must not be replaced by a fixed axle partition. The final width is selected second X minus first X; separation is the accumulated Z values' difference. Missing pairs are rejected by the Rust adapter. Six-wheel and other counts are outside this implementation.

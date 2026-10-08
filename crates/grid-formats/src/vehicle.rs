@@ -49,6 +49,19 @@ pub fn read_standard_grip_reductions(row: &Row<'_>) -> Result<[f32; 2]> {
     Ok([number(178)?, number(179)?])
 }
 
+/// CSV column77 through original properties+340 to steering body+e54.
+/// Multiply parsed f64 by the stored-f32 degree conversion before storing f32.
+/// There is no zero substitution in the inspected decoder.
+pub fn read_standard_steering_angle(row: &Row<'_>) -> Result<f32> {
+    read_standard_body(row)?;
+    let degrees = row.number(77)?.unwrap_or(0.);
+    let angle = (degrees * f64::from(f32::from_bits(0x3c8e_fa35))) as f32;
+    if !angle.is_finite() {
+        return fail(77, "steering angle exceeds finite f32 range");
+    }
+    Ok(angle)
+}
+
 /// Initial Standard suspension fields. Runtime may subsequently change them;
 /// in particular the observed running damping threshold differs from the CSV.
 #[derive(Debug, Clone, Copy)]

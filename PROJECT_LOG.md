@@ -729,6 +729,11 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 8 October 2026 — source steering angle joined to whole routines (F119)
+
+- Aligned9aec60 staging1340/column77 -> stored-f32degreeconversioncb8200(3c8efa35) -> properties340 ->98ebf0bodye54. Added Standard reader and optionalCSV coefficient mode. **56datasets/2688cases/67200fields exact debug/release**,44hashed installed+12authored; originalwhole geometry/input/wheel routines receive independently decoded angle, native readsCSV with differentplaceholder. **OriginalCSVdecoder/numericconversion notinvoked**, staticprovenance explicit. [Contract](docs/STEERING.md). One roundingcontrol exposes prematuref32conversion,4guards reject beforeoutputcreation. Geometry/otherstate/delta supplied; no assisted/live steering claim.
+- Finalsource-steering-20261008-02/,03/;01exactbeforeguards. Sourceangleinstructions private; originalprobe unchanged239af3cc2ee916c81e2cbec2e428a2c6508bac67a0d2e6b0cbeae5132e8219a4. Prior1833casegeometrymode regressesbothprofiles. **97tests**,fmt/warnings-deniedClippypass source-steering-tests/. One formattedpatchanchor corrected; no numerical/checkfailure/newtools/game/userfilechanges. Existingversions reused. Assistance helper9ae5a0 targeted20261008T1204201571871Z/ is preliminarydecomp only: averaged wheel2/3 transform/motion/speed feedback, x87atan; recover alignedcontract and compare whole helper next.
+
 ### 8 October 2026 — steering geometry and whole unassisted chain verified (F118)
 
 - Added four-wheel steering_geometry preserving original second-pass moving cuts. Whole98ebf0, **611cases/3055fields exact debug/release**:43hashed source layouts independently recomputed,24retained non-atomic states,32controls,512asymmetric states. All43source pairs select[3,2]. Whole original98ebf0->9b3110/98f790 vsRust composition, **1833cases/45825fields exact bothprofiles**, with different placeholder geometry overridden. [Contract](docs/STEERING.md). Properties340/tuning/delta supplied; no assisted/live/six-wheel claim.
@@ -779,6 +784,10 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 3. Extend collision/contact behavior from the exact triangle primitive: material filtering, traversal/ties and car shapes.
 4. Retain bounded reference macros for repeatable measurements; no owner answer is currently required for independent research.
 5. Keep successful/failed experiments and provenance in Markdown; all game-derived evidence remains private.
+
+### 8 October 2026 — steering commit batch
+
+- Focused boundaries:66f42de input conditioning(F116),33eb258 whole unassisted coefficients(F117),4a88bbb geometry and composition(F118),then source angle(F119). Public changes are independently authored Rust/C/Python diagnostics and Markdown. Original assets, captured states/decompilation and probe executables remain ignoredlocal/. Publication verification and final branch state are recorded in ignored Markdown `local/behavior/github-steering-sync-20261008.md`; no existing commits are rewritten after publication.
 
 ## Evidence and project navigation
 
