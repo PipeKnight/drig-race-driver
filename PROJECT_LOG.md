@@ -2,6 +2,8 @@
 
 Last updated: 9 October 2026 (Europe/Kiev).
 
+F139 collision response verified: six fresh live calls captured with globalFC38. Final independent Rust generation/solver/response pipelines match139records/1,529written recordwords,63,360descriptorwords and67outer-return response/state words in **debug/release**. Original isolated response slice/repeat also matcheslive.256authored controls match2,871words perbuild, including96active accumulator corrections, and9invalid guardsreject.104workspace tests/fmt/warnings-deniedClippy/PythonAST pass. [Contract, scope, hashes and evidence](docs/IMPACT_RESPONSE.md). GRID is paused; debugger detached exit0. Steam preservation130resources+executable still passes at08:12UTC. Whole9D4210/body effects and contact detection remain open;386literal-field references surveyed for next analysis. Focused source commits are being prepared.
+
 ## Objective and current state
 
 9 October continuation: independent Rust contact-to-record generation **and its combined grid solver pipeline** match six actual live collision calls exactly in debug/release:137records/1,507written recordwords and63,360descriptorwords. Three actual zero-record calls,192authored boundary cases and8invalid guards also pass per build. [F138 contract and evidence](docs/IMPACT_GENERATION.md#independent-rust-generation-and-grid-pipeline-f138). Earlier F137 verifies111actual supplied solver records. Whole collision response, contact detection and full vehicle integration remain open.104workspace tests/fmt/warnings-deniedClippy pass; original130resources+executable still match. No new tools installed.

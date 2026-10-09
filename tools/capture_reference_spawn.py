@@ -107,6 +107,7 @@ def impact_arguments(read, sp, ip, ax, index):
                 response_before_hex=read(response, count * 4).hex() if response else None,
                 solver_globals_hex=read(0xe4fc80, 24).hex(), solver_clip_hex=read(0xe500b8, 1).hex(),
                 producer_corner_scale_hex=read(0xe4fc2c, 4).hex(),
+                response_scale_hex=read(0xe4fc38, 4).hex(),
                 producer_static_mass_hex=read(0xe51d40, 4).hex(),
                 producer_globals_hex=read(0xe500c0, 32).hex())
 
