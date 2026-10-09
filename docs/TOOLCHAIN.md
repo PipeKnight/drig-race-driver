@@ -1,5 +1,9 @@
 # Research toolchain
 
+## Gameplay recorder inventory — 9 October 2026
+
+Bounded PATH/default-location/uninstall/research-directory checks found no OBS installation; this is not a full-drive search. Read-only system inventory identifies Xbox Game Bar `7.326.10010.0`, NVIDIA App `11.0.9.251`, NVIDIA RTX4070 driver `32.0.16.1692` and Intel UHD770 driver `32.0.101.7088`. Initial sandbox Appx/CIM queries denied access; escalated inventory succeeded. Existing portable AHK remains `2.0.29`. No new tools installed or actual gameplay recording tested. [Owner recording guide](GAMEPLAY_RECORDING_GUIDE.md) starts with Game Bar and offers OBS as an optional consistent recorder; official OBS download listed `32.2.2` on inspection. Inventory evidence: `local/recordings/recorder-inventory-20261009.json`. These are inventory/recommendation claims, not validated GRID recording compatibility.
+
 Updated: 6 October 2026 (Europe/Kiev).
 
 ## Initial inventory

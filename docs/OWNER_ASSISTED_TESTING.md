@@ -4,6 +4,8 @@ On 9 October 2026 the owner offered to drive specific cars, complete laps or pro
 
 Human driving is useful for positioning the car, deliberately producing contact conditions and assessing handling. Macros remain useful for repeatable input sequences. Neither method alone establishes simulation timing or numerical fidelity.
 
+The [owner's step-by-step recording guide](GAMEPLAY_RECORDING_GUIDE.md) gives tool choices, recorder settings, session order and individual maneuvers. Start with its short capture/setup test; coordinated diagnostic sessions wait until capture is armed. Use the [session notes template](templates/GAMEPLAY_SESSION_NOTES.md).
+
 ## Useful experiments
 
 | Experiment | Question it can help answer | Preparation required |
