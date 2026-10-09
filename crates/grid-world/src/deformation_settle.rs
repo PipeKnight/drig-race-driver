@@ -35,7 +35,7 @@ fn squared(a: [f32; 4], b: [f32; 4]) -> f32 {
     (d[0] * d[0] + d[1] * d[1]) + d[2] * d[2]
 }
 
-pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
+pub(crate) fn validate(input: &Input<'_>) -> Result<(), Error> {
     if input.dimensions.iter().any(|d| !(2..=16).contains(d))
         || input.dimensions.iter().product::<usize>() > 400
         || input.nodes.len() != 400
@@ -60,6 +60,11 @@ pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
     {
         return Err(Error("invalid deformation settling input"));
     }
+    Ok(())
+}
+
+pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
+    validate(&input)?;
     let count = input.dimensions.iter().product::<usize>();
     let mut positions: Vec<_> = input.nodes.iter().map(|n| n.position).collect();
     for (position, node) in positions.iter_mut().zip(input.nodes).take(count) {
