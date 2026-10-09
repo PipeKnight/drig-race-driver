@@ -116,6 +116,7 @@ if Action = "inspect" {
 if Action = "serve" {
     ; Bound macros are active only for the exact private GRID process.
     HotIf(GridActive)
+    Hotkey("F1", (*) => SampleDrive("throttle_left"))
     Hotkey("F2", (*) => SampleDrive("throttle_right"))
     Hotkey("F3", (*) => Pulse("left", 150))
     Hotkey("F4", (*) => Pulse("right", 150))
@@ -128,7 +129,7 @@ if Action = "serve" {
     Hotkey("F11", (*) => Pulse("pause", 150))
     Hotkey("F12", Stop)
     Persistent()
-    Log("ready", "serve", 0, 0, "F2 paused 2000ms throttle/right sample; F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop")
+    Log("ready", "serve", 0, 0, "F1 paused 2000ms throttle/left sample; F2 paused 2000ms throttle/right sample; F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop")
 } else {
     Pulse(Action, HoldMs)
     ExitApp()

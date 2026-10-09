@@ -16,6 +16,9 @@ All bindings apply only when the verified private GRID process is foreground. Th
 
 | Hotkey | Macro |
 |---|---|
+| F1 | From paused race / Continue: Escape 150 ms, throttle + left 2000 ms, Escape 150 ms |
+| F2 | From paused race / Continue: Escape 150 ms, throttle + right 2000 ms, Escape 150 ms |
+| F3 / F4 | Left / right menu pulse, requested 150 ms |
 | F5 | From paused race / Continue: Escape 150 ms, throttle 2000 ms, Escape 150 ms |
 | F6 | Down, requested 150 ms |
 | F7 | Up, requested 150 ms |
@@ -39,6 +42,10 @@ Named command examples, from the workspace:
 The server launcher refuses a duplicate resident handler. Evidence is retained under `local/macros/`, including individual stdout/stderr, TSV events and resident session identity. The resident created during verification is PID 35864, start `2026-10-06T01:27:47.7542367Z`; recheck identity rather than blindly using this PID on later cleanup.
 
 ## Actual results
+
+9 October extension: F1 uses the existing guarded `SampleDrive` with throttle/left. The old idle handler was checked against its saved PID/start/path/command before replacement; the new handler targets GRID36228, with records under `local/reference-race/impact-20261009-hardware/macros-left/`. Its first sample logs a normal2,000ms combined hold and full key release; screenshots show the car turning across the track and pausing. ScriptSHA256cf248c0c9df8b61a86707ce612e89ada74224a1fbf7f6167ee22a348f63f5d0f. The earlier statement that left steering was unverified is historical.
+
+Nested debugger stops during the following F5 sample disturb real-time pacing: its final Escape did not leave the reference paused. A fresh screenshot detected this, and explicitF11 restored the observed Pause Menu. Always inspect the final state; macro wall-clock duration is not a simulation-tick guarantee.
 
 7 October continuation: F3/F4 bind 150 ms left/right pulses for menu selection. Both directions are verified; four left pulses traverse Okutama → Shibuya → Yokohama → Le Mans → Donington. Current runner/session IDs must be taken from `PROJECT_LOG.md` and the latest private server/session JSON. Prior IDs below are historical. Direct short Right did not visibly change discipline. Macro source SHA after adding bindings: `a66af2285db919e82088dd8cbbad12e7de37951a8b755d030f219c2d9dba1b32`.
 
