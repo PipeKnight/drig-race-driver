@@ -102,10 +102,12 @@ def impact_arguments(read, sp, ip, ax, index):
                 descriptor_before_hex=read(descriptor, 0xa500).hex(),
                 settings_hex=read(settings, 0x1050).hex(), linked_before_hex=read(linked, 0x424).hex(),
                 body_1630_hex=read(body + 0x1630, 16).hex(),
+                body_b20_hex=read(body + 0xb20, 16).hex(),
                 prepared_a_hex=read(prepared_a, 16).hex(), prepared_b_hex=read(prepared_b, 16).hex(),
                 response_before_hex=read(response, count * 4).hex() if response else None,
                 solver_globals_hex=read(0xe4fc80, 24).hex(), solver_clip_hex=read(0xe500b8, 1).hex(),
                 producer_corner_scale_hex=read(0xe4fc2c, 4).hex(),
+                producer_static_mass_hex=read(0xe51d40, 4).hex(),
                 producer_globals_hex=read(0xe500c0, 32).hex())
 
 

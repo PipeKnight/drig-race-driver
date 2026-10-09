@@ -731,6 +731,13 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 9 October 2026 — contact-to-record implementation underway
+
+- Extended outer capture with bodyB20 vec4 and E51D40 scalar after aligned producer reads identified those missing inputs. Capture07 succeeds with three zero-record calls; capture08 after observed Restart Race/F2/F5 succeeds with six active calls (contacts3/7/14/8/4/4, records18/30/43/18/14/14). Both detach/exit0; fresh screenshot after08 verifies Pause Menu / Continue at the concrete barrier, same guarded game36228/macro6868.
+- Added original-prefix probe stopping at9EB534 via its **own thread's** hardware execute boundary and SEH unwind. No game entry point/TLS/import binding, code patches, substituted numeric helpers or execution of9D4210/solver/response. Six private data pages restored and RX code unchanged. Original/second original match all captured written record fields and whole descriptor for07/08. Existing compiler/tools reused. Private `impact-generation-replay-20261009-{01,02}/validation.json` and `impact-generation-constants-20261009.json`.
+- New independent Rust `impact_generation` and private CLI reproduce six actual08calls in debug:137ordered records/1,507written recordwords and63,360descriptorwords exact. First debug run rejected a reverse contact with zero *counterpart* denominator; corrected the guard to retain the observed IEEE division-by-zero path while requiring positive own denominator. No numerical mismatch observed after correction. Private failed/successful reports `impact-generation-rust-20261009-debug-{01,02}/validation.json`. Release, authored boundary controls, workspace checks and focused commits still pending; do not claim completed implementation yet.
+- Published3cb6ef4/8297201/413db89/e6433b9; independent `git ls-remote` confirms e6433b97835de7d5623cdeb86dedcbfe83bb7ccd, ahead/behind0/0 at that checkpoint. Only source/research Markdown published; local/target excluded. Further changes remain local until verification.
+
 ### 9 October 2026 — actual-input solver verification (F137)
 
 - Nested hardware capture succeeds: actual contact counts6/10/10 generate34/53/24 records, all caller/receiver/stack-balance guards pass, debugger detaches and exits0. Private capture `local/behavior/live-impact-20261009-06/capture.json`; debug/release comparisons under `local/behavior/live-impact-replay-20261009-{debug,release}/validation.json`. All31,680 descriptor words match live output in both builds and two original runs each. This verifies supplied-record solver behavior, not contact generation or complete driving.
