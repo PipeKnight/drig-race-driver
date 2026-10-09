@@ -44,7 +44,7 @@ Wheel source/hash metadata: `local/tools/video-decoder/source.json`. Game imager
 | Field/start | HUD shows twelve cars, starting position 5/12 and 0 mph |
 | Presentation | Chase camera, lap/race timers, position, minimap, speed in mph and gear visible |
 | Input | Owner confirms driving with keyboard only; controller remained connected and vibrated. This is owner-reported input/feedback, not a captured input stream |
-| Assists/transmission | Driver Assists page is not opened in the inspected menu sequence; current recording settings remain unconfirmed. Earlier reference sessions' On/On/On/Automatic settings cannot be carried over as proof |
+| Assists/transmission | Owner subsequently confirms all assists On and Automatic transmission: traction control On, braking assist On, stability control On. This is owner confirmation, not a decoded profile or inspected assists-page result |
 | Executable identity | No process path/hash is embedded in the inspected video metadata. Prior private-copy provenance remains separate; this recording alone does not identify the loaded binary |
 
 ### Saved settings checked after the owner's question
@@ -54,6 +54,8 @@ Read the actual Documents path `C:\Users\debros\OneDrive\Документы\Code
 **No traction-control, braking-assist or stability-control values are present in that readable XML.** Fifteen `Autosave0` files were checked for plain ASCII assist/transmission labels without matches; no profile option layout has been decoded by this check. A string search does not establish where the options are stored or their values. All 19 current GRID user files copied for the private snapshot match their source hashes before/after copying; this establishes per-file copy stability, not an atomic snapshot or recording-time settings.
 
 The connected controller and `device_type="auto"` make the owner's vibration report plausible, but do not reveal which device supplied internal commands. For a later controlled keyboard experiment, temporarily disconnecting the controller would remove an input-device variable. It is not necessary to redo this recording. A brief Driver Assists/Controls screen capture before the next prepared test is simpler than guessing binary profile fields.
+
+The owner's subsequent confirmation resolves the recording's assist/transmission uncertainty: **all assists On, Automatic transmission**. Treat the footage as an assisted keyboard-driving baseline. Visible braking, stability and speed changes can include assistance effects; they do not isolate manual input or unassisted vehicle behavior. Match these settings for a later original-versus-Rust comparison, and keep any unassisted experiment as a separately labeled series.
 
 ## Race timing and result
 
@@ -102,4 +104,4 @@ Manually read HUD values are rounded game displays at sampled timestamps. They a
 4. Before the next numerical experiment, record Driver Assists/Controls briefly, establish initial/reset state and remove the connected-controller variable if testing keyboard input. Prepare a short maneuver/capture rather than asking for another whole race.
 5. Continue the first integrated Rust driving loop. This video enriches the reference; it does not establish any new Rust physics equivalence or remove the timing/contact-production dependencies.
 
-No additional owner driving is required for this analysis. Open questions are assist/transmission values at capture time, original input commands, exact recording-time process identity, synchronized update timing and contact geometry. These remain explicitly unresolved.
+No additional owner driving is required for this analysis. Remaining open questions are original input commands, exact recording-time process identity, synchronized update timing and contact geometry. Assist/transmission values are resolved by owner confirmation; their storage in the profile remains undecoded.
