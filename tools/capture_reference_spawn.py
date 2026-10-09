@@ -156,6 +156,32 @@ def collection_arguments(read,sp,ip,ax,cx,index):
         capacity=capacity,initial_count=0,manager_header_hex=header.hex(),pools=pools)
 
 
+def owner_arguments(read,sp,ip,ax,cx,index):
+    """Whole B77770 entry: valid owner registrations and two bounded pools."""
+    stack=read(sp,12);ret,output,capacity=struct.unpack('<3I',stack)
+    if ret not in (0xb78559,0xb7872a) or capacity!=32:
+        raise ValueError('Unverified owner collector caller/capacity')
+    header=read(cx,0x13c);pools=[];owners={}
+    for pool_index,(pointer_offset,count_offset) in enumerate(((0x98,0xac),(0xa0,0xb4))):
+        pointer=struct.unpack_from('<I',header,pointer_offset)[0];count=struct.unpack_from('<i',header,count_offset)[0]
+        if not 0<=count<=512:raise ValueError('Owner pool outside bounded scope')
+        pointers=struct.unpack(f'<{count}I',read(pointer,count*4)) if count else ()
+        entries=[]
+        for address in pointers:
+            contact=read(address,0x80);first,second=struct.unpack_from('<2I',contact,4)
+            if not first or (pool_index==1 and (not second or contact[0xc]!=0)):
+                raise ValueError('Owner collector native pointer precondition failed')
+            for owner in ([first] if pool_index==0 else [first,second]):
+                if owner not in owners:
+                    owners[owner]=dict(address=hex(owner),registration_hex=read(owner+0x418,12).hex())
+                    if len(owners)>32:raise ValueError('Live manager owner output would exceed caller storage')
+            entries.append(dict(address=hex(address),before_hex=contact.hex()))
+        pools.append(dict(pointer=hex(pointer),count=count,entries=entries))
+    return dict(index=index,entry_registers=[ip,sp,ax],receiver=hex(cx),stack_hex=stack.hex(),
+        return_address=hex(ret),output_array=hex(output),capacity=capacity,manager_header_hex=header.hex(),
+        alternating_order_before=read(0xf5e1a4,1)[0],owners=list(owners.values()),pools=pools)
+
+
 def preparation_arguments(read,sp,ip,ax,index):
     """Verified A06050 descriptor policy between reduction and collision producer."""
     stack=read(sp,24);ret,descriptor,linked,direction,inverse,point=struct.unpack('<6I',stack)
@@ -181,7 +207,7 @@ def main():
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--arm-running', action='store_true',
                         help='Arm after attach without the old debugger pause command')
-    parser.add_argument('--boundary', choices=('placement', 'impact','collection','preparation','callback'), default='placement',
+    parser.add_argument('--boundary', choices=('placement', 'impact','collection','owners','preparation','callback'), default='placement',
                         help='Impact captures whole 9EA6E0 entry/return and bounded contact inputs')
     parser.add_argument('--hardware', action='store_true',
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
@@ -190,7 +216,7 @@ def main():
     parser.add_argument('--body-effects', action='store_true',
                         help='Capture9D4210 inputs/return and its optional original random result before solver')
     args = parser.parse_args()
-    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0,'preparation':0xa06050,'callback':0xa064a0}[args.boundary]
+    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0,'owners':0xb77770,'preparation':0xa06050,'callback':0xa064a0}[args.boundary]
     if args.boundary != 'placement' and not args.arm_running:
         raise ValueError('Impact capture requires the previously validated arm-running workflow')
     if args.solver_records and (args.boundary not in ('impact','callback') or not args.hardware):
@@ -198,6 +224,7 @@ def main():
     if args.body_effects and not args.solver_records:
         raise ValueError('Body effects require hardware impact with nested solver capture')
     if args.boundary=='collection' and not args.hardware:raise ValueError('Collector capture requires hardware breakpoints')
+    if args.boundary=='owners' and not args.hardware:raise ValueError('Owner capture requires hardware breakpoints')
     if args.boundary=='preparation' and not args.hardware:raise ValueError('Preparation capture requires hardware breakpoints')
     if args.boundary=='callback' and not args.hardware:raise ValueError('Callback capture requires hardware breakpoints')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
@@ -403,6 +430,11 @@ def main():
                 match=re.search(r'cx=([0-9A-Fa-f]+)',wait('GRID_COLLECTION_RECEIVER cx=',10))
                 if not match:raise ValueError('Missing collector receiver')
                 case=collection_arguments(read,sp,ip,ax,int(match[1],16),index);ret=int(case['return_address'],16)
+            elif args.boundary=='owners':
+                send('log "GRID_OWNER_RECEIVER cx={p:ecx}"')
+                match=re.search(r'cx=([0-9A-Fa-f]+)',wait('GRID_OWNER_RECEIVER cx=',10))
+                if not match:raise ValueError('Missing owner receiver')
+                case=owner_arguments(read,sp,ip,ax,int(match[1],16),index);ret=int(case['return_address'],16)
             elif args.boundary=='preparation':
                 case=preparation_arguments(read,sp,ip,ax,index);ret=int(case['return_address'],16)
             else:
@@ -513,7 +545,7 @@ def main():
                 else:
                     case['solver'] = None
                     send('bphc 9D4970')
-            if returned[0] != ret or returned[1] != sp + (20 if args.boundary=='collection' else 4):
+            if returned[0] != ret or returned[1] != sp + ({'collection':20,'owners':12}.get(args.boundary,4)):
                 raise RuntimeError('Return breakpoint stack/address mismatch')
             if args.hardware:
                 send(f'bphc {ret:X}')
@@ -535,6 +567,14 @@ def main():
                 known={int(e['address'],16) for p in case['pools'] for e in p['entries']}
                 if any(p not in known for p in pointers):raise ValueError('Collector returned unknown contact')
                 case['contact_count']=count;case['output_pointers']=[hex(p) for p in pointers]
+            elif args.boundary=='owners':
+                count=returned[2]
+                if not 0<=count<=32:raise ValueError('Owner count exceeds live caller storage')
+                pointers=struct.unpack(f'<{count}I',read(int(case['output_array'],16),count*4)) if count else ()
+                known={int(o['address'],16) for o in case['owners']}
+                if any(p not in known for p in pointers) or len(set(pointers))!=count:
+                    raise ValueError('Unknown or duplicate returned owner')
+                case['owner_count']=count;case['output_pointers']=[hex(p) for p in pointers]
             elif args.boundary=='preparation':
                 case['descriptor_after_hex']=read(int(case['descriptor'],16),0xa500).hex()
                 case['linked_after_hex']=read(int(case['linked'],16),0x424).hex()
