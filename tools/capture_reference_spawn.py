@@ -119,6 +119,33 @@ def private(path):
     return result
 
 
+def collection_arguments(read,sp,ip,ax,cx,index):
+    """Verified B775D0 thiscall, ordered bounded pools and shape-disable bytes."""
+    stack=read(sp,20);ret,linked,output,count_address,capacity=struct.unpack('<5I',stack)
+    if ret not in (0xb787d6,0xb788f3) or capacity!=80 or struct.unpack('<I',read(count_address,4))[0]!=0:
+        raise ValueError('Unverified collector caller/capacity/initial count')
+    registration=struct.unpack('<3I',read(linked+0x418,12));descriptor=registration[2];body=descriptor-0x2300
+    if registration[:2]!=(0x9a0c90,0xa064a0):raise ValueError('Collector owner callback mismatch')
+    size,=struct.unpack('<I',read(0xe85fcc,4))
+    if not 1<=size<=40 or body not in struct.unpack(f'<{size}I',read(0xe85f28,size*4)):raise ValueError('Collector owner absent from Standard bodies')
+    wrapper,=struct.unpack('<I',read(body+0xdb0,4))
+    if struct.unpack('<I',read(wrapper+8,4))[0]!=linked:raise ValueError('Collector owner body link mismatch')
+    header=read(cx,0x13c);pools=[]
+    for pointer_offset,count_offset in ((0x98,0xac),(0xa0,0xb4)):
+        pointer=struct.unpack_from('<I',header,pointer_offset)[0];count=struct.unpack_from('<i',header,count_offset)[0]
+        if not 0<=count<=512:raise ValueError('Collector pool outside bounded scope')
+        pointers=struct.unpack(f'<{count}I',read(pointer,count*4)) if count else ()
+        entries=[]
+        for address in pointers:
+            contact=read(address,0x80);shape_a,shape_b=struct.unpack_from('<2I',contact,0x28)
+            entries.append(dict(address=hex(address),before_hex=contact.hex(),shape_a=hex(shape_a),shape_b=hex(shape_b),
+                disabled_a=read(shape_a+0x230,1)[0],disabled_b=read(shape_b+0x230,1)[0]))
+        pools.append(dict(pointer=hex(pointer),count=count,entries=entries))
+    return dict(index=index,entry_registers=[ip,sp,ax],receiver=hex(cx),stack_hex=stack.hex(),return_address=hex(ret),
+        linked=hex(linked),body=hex(body),descriptor=hex(descriptor),output_array=hex(output),count_address=hex(count_address),
+        capacity=capacity,initial_count=0,manager_header_hex=header.hex(),pools=pools)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('session', type=Path)
@@ -127,7 +154,7 @@ def main():
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--arm-running', action='store_true',
                         help='Arm after attach without the old debugger pause command')
-    parser.add_argument('--boundary', choices=('placement', 'impact'), default='placement',
+    parser.add_argument('--boundary', choices=('placement', 'impact','collection'), default='placement',
                         help='Impact captures whole 9EA6E0 entry/return and bounded contact inputs')
     parser.add_argument('--hardware', action='store_true',
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
@@ -136,13 +163,14 @@ def main():
     parser.add_argument('--body-effects', action='store_true',
                         help='Capture9D4210 inputs/return and its optional original random result before solver')
     args = parser.parse_args()
-    entry = ENTRY if args.boundary == 'placement' else 0x9ea6e0
-    if args.boundary == 'impact' and not args.arm_running:
+    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0}[args.boundary]
+    if args.boundary != 'placement' and not args.arm_running:
         raise ValueError('Impact capture requires the previously validated arm-running workflow')
     if args.solver_records and (args.boundary != 'impact' or not args.hardware):
         raise ValueError('Nested solver records require hardware impact capture')
     if args.body_effects and not args.solver_records:
         raise ValueError('Body effects require hardware impact with nested solver capture')
+    if args.boundary=='collection' and not args.hardware:raise ValueError('Collector capture requires hardware breakpoints')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -216,7 +244,7 @@ def main():
                     raise ValueError('Live body-effect code differs')
             record['body_code_exact']=True
         exit_address = None
-        if args.boundary == 'impact':
+        if args.boundary != 'placement':
             exit_slot = exit_process_slot(raw)
             exit_address, = struct.unpack('<I', read(exit_slot, 4))
             if not 0x10000000 <= exit_address < 0x7fff0000:
@@ -301,6 +329,7 @@ def main():
                 wait('[STATE] paused', 20)
             record['attach_registers'] = registers('GRID_SPAWN_ATTACH')
         breakpoint(entry, 'GRID_Reference')
+        if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
         if exit_address is not None:
             breakpoint(exit_address, 'GRID_ExitProcess')
         send('log "GRID_SPAWN_ARMED"')
@@ -339,6 +368,11 @@ def main():
             if args.boundary == 'impact':
                 case = impact_arguments(read, sp, ip, ax, index)
                 ret = int(case['return_address'], 16)
+            elif args.boundary=='collection':
+                send('log "GRID_COLLECTION_RECEIVER cx={p:ecx}"')
+                match=re.search(r'cx=([0-9A-Fa-f]+)',wait('GRID_COLLECTION_RECEIVER cx=',10))
+                if not match:raise ValueError('Missing collector receiver')
+                case=collection_arguments(read,sp,ip,ax,int(match[1],16),index);ret=int(case['return_address'],16)
             else:
                 stack = read(sp, 28)
                 words = struct.unpack('<7I', stack)
@@ -445,7 +479,7 @@ def main():
                 else:
                     case['solver'] = None
                     send('bphc 9D4970')
-            if returned[0] != ret or returned[1] != sp + 4:
+            if returned[0] != ret or returned[1] != sp + (20 if args.boundary=='collection' else 4):
                 raise RuntimeError('Return breakpoint stack/address mismatch')
             if args.hardware:
                 send(f'bphc {ret:X}')
@@ -457,6 +491,13 @@ def main():
                     case['response_after_hex'] = read(int(case['response'], 16), case['contact_count'] * 4).hex()
                 for contact in case['contacts']:
                     contact['after_hex'] = read(int(contact['address'], 16), 0x80).hex()
+            elif args.boundary=='collection':
+                count,=struct.unpack('<I',read(int(case['count_address'],16),4))
+                if not 0<=count<=case['capacity']:raise ValueError('Collector output count outside scope')
+                pointers=struct.unpack(f'<{count}I',read(int(case['output_array'],16),count*4)) if count else ()
+                known={int(e['address'],16) for p in case['pools'] for e in p['entries']}
+                if any(p not in known for p in pointers):raise ValueError('Collector returned unknown contact')
+                case['contact_count']=count;case['output_pointers']=[hex(p) for p in pointers]
             else:
                 case['pose_hex'] = read(pose, 64).hex()
             with (out / f'case-{index:02}.json').open('x', encoding='utf-8') as f:
@@ -464,6 +505,7 @@ def main():
             print(f'Captured {args.boundary} {index + 1}/{args.cases}', flush=True)
             if index + 1 < args.cases:
                 breakpoint(entry, 'GRID_Reference')
+                if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
                 send('erun')
                 wait('[STATE] running', 10)
         record['completed'] = True
