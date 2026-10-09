@@ -29,6 +29,7 @@ pub mod packed_shape;
 pub mod packed_world;
 pub mod pose;
 pub mod rectangle_cull;
+pub mod response_consumption;
 pub mod setup;
 pub mod spawn;
 pub mod steering_coefficients;
