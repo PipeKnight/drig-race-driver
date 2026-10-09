@@ -80,6 +80,34 @@ fn root(value: f32) -> Result<f32, Error> {
     Ok((1. - product * seed) * (product * 0.5) + product)
 }
 
+/// Frame shared by record generation and the intervening body adjustment.
+pub fn contact_frame(p: [[f32; 4]; 4], b: [f32; 4]) -> Result<[[f32; 4]; 4], Error> {
+    if p.into_iter().flatten().chain(b).any(|v| !v.is_finite()) {
+        return Err(Error("invalid contact frame input"));
+    }
+    let center: [f32; 4] = std::array::from_fn(|i| {
+        ((b[1] * p[1][i] + b[3] * p[3][i]) + (b[0] * p[0][i] + b[2] * p[2][i])) + p[3][i]
+    });
+    let mut inverse = [[0.; 4]; 4];
+    for (axis, column) in inverse.iter_mut().take(3).enumerate() {
+        for (i, value) in column.iter_mut().take(3).enumerate() {
+            *value = p[i][axis];
+        }
+    }
+    inverse[3] = std::array::from_fn(|i| {
+        if i == 3 {
+            1.
+        } else {
+            ((-center[1]) * inverse[1][i] + (-center[0]) * inverse[0][i])
+                + (-center[2]) * inverse[2][i]
+        }
+    });
+    if inverse.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(Error("nonfinite contact frame"));
+    }
+    Ok(inverse)
+}
+
 #[allow(clippy::assign_op_pattern)] // Retain original SSE multiply/subtract ordering.
 #[allow(clippy::neg_multiply)] // The original reverses all lanes with MULPS by -1.
 pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
@@ -142,25 +170,7 @@ pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
     {
         return Err(Error("invalid contact-to-record input"));
     }
-    let p = input.pose;
-    let b = input.body_offset;
-    let center: [f32; 4] = std::array::from_fn(|i| {
-        ((b[1] * p[1][i] + b[3] * p[3][i]) + (b[0] * p[0][i] + b[2] * p[2][i])) + p[3][i]
-    });
-    let mut inverse = [[0.; 4]; 4];
-    for (axis, column) in inverse.iter_mut().take(3).enumerate() {
-        for (i, value) in column.iter_mut().take(3).enumerate() {
-            *value = p[i][axis];
-        }
-    }
-    inverse[3] = std::array::from_fn(|i| {
-        if i == 3 {
-            1.
-        } else {
-            ((-center[1]) * inverse[1][i] + (-center[0]) * inverse[0][i])
-                + (-center[2]) * inverse[2][i]
-        }
-    });
+    let inverse = contact_frame(input.pose, input.body_offset)?;
     let spacing_squared = input.spacing * input.spacing;
     let flag_radius = input.flag_radius_scale * spacing_squared;
     let record_radius = input.record_radius_scale * spacing_squared;
