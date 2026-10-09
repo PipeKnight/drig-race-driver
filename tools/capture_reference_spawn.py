@@ -24,6 +24,91 @@ GAME = Path(r'C:\Users\debros\Tools\grid-research\grid-compat\grid.exe')
 ENTRY = 0x9DE4E0
 
 
+def exit_process_slot(raw):
+    """Locate the named KERNEL32 import in the hash-verified PE32 file."""
+    pe, = struct.unpack_from('<I', raw, 0x3c)
+    count, = struct.unpack_from('<H', raw, pe + 6)
+    opt_size, = struct.unpack_from('<H', raw, pe + 20)
+    opt = pe + 24
+    if raw[pe:pe + 4] != b'PE\0\0' or struct.unpack_from('<H', raw, opt)[0] != 0x10b:
+        raise ValueError('Expected PE32 import table')
+    base, = struct.unpack_from('<I', raw, opt + 28)
+    sections = [struct.unpack_from('<IIII', raw, opt + opt_size + i * 40 + 8)
+                for i in range(count)]
+
+    def offset(rva):
+        for _, start, length, position in sections:
+            if start <= rva < start + length:
+                return position + rva - start
+        raise ValueError('Import RVA outside file-backed section')
+
+    def string(rva):
+        start = offset(rva)
+        end = raw.find(b'\0', start, start + 256)
+        if end < 0:
+            raise ValueError('Unterminated import name')
+        return raw[start:end]
+
+    imports, length = struct.unpack_from('<II', raw, opt + 104)
+    for i in range(min(length // 20, 4096)):
+        original, _, _, name, first = struct.unpack_from('<5I', raw, offset(imports) + i * 20)
+        if not name:
+            break
+        if string(name).lower() != b'kernel32.dll':
+            continue
+        for j in range(4096):
+            thunk, = struct.unpack_from('<I', raw, offset(original or first) + j * 4)
+            if not thunk:
+                break
+            if not thunk & 0x80000000 and string(thunk + 2) == b'ExitProcess':
+                return base + first + j * 4
+    raise ValueError('Named ExitProcess import absent')
+
+
+def impact_arguments(read, sp, ip, ax, index):
+    """Capture the verified cdecl producer boundary; no inferred receiver ABI."""
+    stack = read(sp, 36)
+    ret, linked, contacts, count, scalar, response, prepared_a, prepared_b, descriptor = struct.unpack('<9I', stack)
+    if ret != 0xa0652b or not 1 <= count <= 80:
+        raise ValueError('Impact caller/contact count outside verified scope')
+    body = descriptor - 0x2300
+    list_count, = struct.unpack('<I', read(0xe85fcc, 4))
+    if not 1 <= list_count <= 40:
+        raise ValueError('Standard body list outside scope')
+    bodies = struct.unpack(f'<{list_count}I', read(0xe85f28, list_count * 4))
+    if body not in bodies:
+        raise ValueError('Impact descriptor does not belong to registered body')
+    wrapper, = struct.unpack('<I', read(body + 0xdb0, 4))
+    if struct.unpack('<I', read(wrapper + 8, 4))[0] != linked:
+        raise ValueError('Impact linked state/body mismatch')
+    if struct.unpack('<3I', read(linked + 0x418, 12)) != (0x9a0c90, 0xa064a0, descriptor):
+        raise ValueError('Impact callback registration mismatch')
+    settings, = struct.unpack('<I', read(descriptor + 0xa4f8, 4))
+    pointers = struct.unpack(f'<{count}I', read(contacts, count * 4))
+    contact_rows = []
+    for pointer in pointers:
+        value = read(pointer, 0x80)
+        counterpart = struct.unpack_from('<I', value, 8)[0] if not value[0xc] else 0
+        if counterpart == linked:
+            counterpart = struct.unpack_from('<I', value, 4)[0]
+        contact_rows.append(dict(address=hex(pointer), before_hex=value.hex(),
+                                 counterpart=hex(counterpart),
+                                 counterpart_360_hex=read(counterpart + 0x360, 16).hex() if counterpart else None))
+    return dict(index=index, entry_registers=[ip, sp, ax], stack_hex=stack.hex(),
+                return_address=hex(ret), body=hex(body), linked=hex(linked),
+                descriptor=hex(descriptor), contact_array=hex(contacts), contact_count=count,
+                scalar_word=f'{scalar:08x}', response=hex(response), prepared_a=hex(prepared_a),
+                prepared_b=hex(prepared_b), settings=hex(settings), contacts=contact_rows,
+                descriptor_before_hex=read(descriptor, 0xa500).hex(),
+                settings_hex=read(settings, 0x1050).hex(), linked_before_hex=read(linked, 0x424).hex(),
+                body_1630_hex=read(body + 0x1630, 16).hex(),
+                prepared_a_hex=read(prepared_a, 16).hex(), prepared_b_hex=read(prepared_b, 16).hex(),
+                response_before_hex=read(response, count * 4).hex() if response else None,
+                solver_globals_hex=read(0xe4fc80, 24).hex(), solver_clip_hex=read(0xe500b8, 1).hex(),
+                producer_corner_scale_hex=read(0xe4fc2c, 4).hex(),
+                producer_globals_hex=read(0xe500c0, 32).hex())
+
+
 def private(path):
     result = path.resolve()
     if not result.is_relative_to((ROOT / 'local').resolve()):
@@ -39,7 +124,14 @@ def main():
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--arm-running', action='store_true',
                         help='Arm after attach without the old debugger pause command')
+    parser.add_argument('--boundary', choices=('placement', 'impact'), default='placement',
+                        help='Impact captures whole 9EA6E0 entry/return and bounded contact inputs')
+    parser.add_argument('--hardware', action='store_true',
+                        help='Use bounded execute debug registers, leaving code bytes unchanged')
     args = parser.parse_args()
+    entry = ENTRY if args.boundary == 'placement' else 0x9ea6e0
+    if args.boundary == 'impact' and not args.arm_running:
+        raise ValueError('Impact capture requires the previously validated arm-running workflow')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -65,9 +157,10 @@ def main():
         raise ctypes.WinError(ctypes.get_last_error())
     process = None
     stream = None
-    record = {'session': session, 'entry': hex(ENTRY), 'cases': [],
-              'input_sent': False, 'debugger_pauses': True, 'completed': False}
+    record = {'session': session, 'entry': hex(entry), 'boundary': args.boundary, 'cases': [],
+              'input_sent': False, 'debugger_pauses': False, 'completed': False}
     record['arm_running'] = args.arm_running
+    record['hardware_breakpoints'] = args.hardware
     try:
         path_buffer = ctypes.create_unicode_buffer(32768)
         path_length = W.DWORD(len(path_buffer))
@@ -94,10 +187,18 @@ def main():
                 raise ctypes.WinError(ctypes.get_last_error())
             return buffer.raw
 
-        offset = ENTRY - 0x400000 - 0x1000 + 0x400
-        if read(ENTRY, 32) != raw[offset:offset + 32]:
+        offset = entry - 0x400000 - 0x1000 + 0x400
+        if read(entry, 32) != raw[offset:offset + 32]:
             raise ValueError('Live placement code differs')
         record['code_exact'] = True
+        exit_address = None
+        if args.boundary == 'impact':
+            exit_slot = exit_process_slot(raw)
+            exit_address, = struct.unpack('<I', read(exit_slot, 4))
+            if not 0x10000000 <= exit_address < 0x7fff0000:
+                raise ValueError('ExitProcess import outside expected system scope')
+            record['exit_watch'] = {'iat': hex(exit_slot), 'address': hex(exit_address),
+                                    'prefix_hex': read(exit_address, 32).hex()}
         debugger = ROOT / 'local/tools/x64dbg/release/x32/headless.exe'
         record['debugger_sha256'] = hashlib.sha256(debugger.read_bytes()).hexdigest()
         stream = (out / 'debugger.log').open('x', encoding='utf-8')
@@ -112,6 +213,7 @@ def main():
                                    text=True, encoding='utf-8', errors='replace', bufsize=1,
                                    creationflags=subprocess.CREATE_NO_WINDOW)
         record['debugger_pid'] = process.pid
+        record['debugger_pauses'] = True
 
         def receive():
             for line in process.stdout:
@@ -160,6 +262,9 @@ def main():
                 raise ValueError('Invalid register marker: ' + line)
             return tuple(int(v, 16) for v in found.groups())
 
+        def breakpoint(address, name):
+            send(f'bph {address:X},x,1' if args.hardware else f'bp {address:X},{name},ss')
+
         wait('[headless] entering command loop', 15)
         send(f'attach {int(session["Pid"]):X}')
         if args.arm_running:
@@ -171,22 +276,33 @@ def main():
                 send('pause')
                 wait('[STATE] paused', 20)
             record['attach_registers'] = registers('GRID_SPAWN_ATTACH')
-        send(f'bp {ENTRY:X},GRID_Placement,ss')
+        breakpoint(entry, 'GRID_Reference')
+        if exit_address is not None:
+            breakpoint(exit_address, 'GRID_ExitProcess')
         send('log "GRID_SPAWN_ARMED"')
         wait('GRID_SPAWN_ARMED', 10)
         if not args.arm_running:
             send('erun')
             wait('[STATE] running', 10)
         with (out / 'ready.json').open('x', encoding='utf-8') as f:
-            json.dump({'pid': session['Pid'], 'debugger_pid': process.pid, 'entry': hex(ENTRY)}, f)
-        print('READY: placement entry armed; private output=' + str(out), flush=True)
+            json.dump({'pid': session['Pid'], 'debugger_pid': process.pid, 'entry': hex(entry)}, f)
+        print(f'READY: {args.boundary} entry armed; private output=' + str(out), flush=True)
         for index in range(args.cases):
             deadline = time.monotonic() + args.timeout
             while True:
                 wait('[STATE] paused', max(0, deadline - time.monotonic()))
                 ip, sp, ax = registers(f'GRID_SPAWN_ENTRY_{index}')
-                if ip == ENTRY:
+                if ip == entry:
+                    if args.hardware:
+                        send(f'bphc {entry:X}')
                     break
+                if ip == exit_address:
+                    stack = read(sp, 256)
+                    caller, exit_code = struct.unpack_from('<2I', stack)
+                    record['exit_boundary'] = {'registers': [ip, sp, ax],
+                                               'caller': hex(caller), 'exit_code': exit_code,
+                                               'stack_hex': stack.hex()}
+                    raise RuntimeError(f'Reference requested ExitProcess({exit_code}) from {caller:08x}')
                 # Only the observed C++ first-chance event may be passed.
                 # Unknown DLL stops/access violations are retained and aborted.
                 if not args.arm_running or index != 0 or last_exception != {'ip': ip, 'code': 0xe06d7363}:
@@ -196,33 +312,47 @@ def main():
                     raise RuntimeError('Pre-entry exception/attach stop bound')
                 send('erun')
                 wait('[STATE] running', 10)
-            stack = read(sp, 28)
-            words = struct.unpack('<7I', stack)
-            ret, pose, body, x, z, heading, upper = words
-            wheel_count = struct.unpack('<I', read(body + 0x1620, 4))[0]
-            if wheel_count != 4 or not 0x400000 <= ret < 0xC00000:
-                raise ValueError('Unverified placement arguments')
-            case = {'index': index, 'entry_registers': [ip, sp, ax], 'stack_hex': stack.hex(),
-                    'return': hex(ret), 'pose_address': hex(pose), 'body': hex(body),
-                    'heading_hex': read(heading, 16).hex() if heading else None,
-                    'wheels_hex': read(body + 0x1990, 4 * 0x150).hex(),
-                    'initial_geometry_hex': read(body + 0x14E0, 0x50).hex(),
-                    'bounds_hex': read(body + 0xED64, 0x40).hex()}
+            if args.boundary == 'impact':
+                case = impact_arguments(read, sp, ip, ax, index)
+                ret = int(case['return_address'], 16)
+            else:
+                stack = read(sp, 28)
+                words = struct.unpack('<7I', stack)
+                ret, pose, body, x, z, heading, upper = words
+                wheel_count = struct.unpack('<I', read(body + 0x1620, 4))[0]
+                if wheel_count != 4 or not 0x400000 <= ret < 0xC00000:
+                    raise ValueError('Unverified placement arguments')
+                case = {'index': index, 'entry_registers': [ip, sp, ax], 'stack_hex': stack.hex(),
+                        'return': hex(ret), 'pose_address': hex(pose), 'body': hex(body),
+                        'heading_hex': read(heading, 16).hex() if heading else None,
+                        'wheels_hex': read(body + 0x1990, 4 * 0x150).hex(),
+                        'initial_geometry_hex': read(body + 0x14E0, 0x50).hex(),
+                        'bounds_hex': read(body + 0xED64, 0x40).hex()}
             record['cases'].append(case)
-            send(f'bp {ret:X},GRID_PlacementReturn,ss')
+            breakpoint(ret, 'GRID_PlacementReturn')
             send('erun')
             wait('[STATE] running', 10)
             wait('[STATE] paused', 30)
             returned = registers(f'GRID_SPAWN_RETURN_{index}')
             if returned[0] != ret or returned[1] != sp + 4:
                 raise RuntimeError('Return breakpoint stack/address mismatch')
+            if args.hardware:
+                send(f'bphc {ret:X}')
             case['return_registers'] = returned
-            case['pose_hex'] = read(pose, 64).hex()
+            if args.boundary == 'impact':
+                case['descriptor_after_hex'] = read(int(case['descriptor'], 16), 0xa500).hex()
+                case['linked_after_hex'] = read(int(case['linked'], 16), 0x424).hex()
+                if int(case['response'], 16):
+                    case['response_after_hex'] = read(int(case['response'], 16), case['contact_count'] * 4).hex()
+                for contact in case['contacts']:
+                    contact['after_hex'] = read(int(contact['address'], 16), 0x80).hex()
+            else:
+                case['pose_hex'] = read(pose, 64).hex()
             with (out / f'case-{index:02}.json').open('x', encoding='utf-8') as f:
                 json.dump(case, f, indent=2)
-            print(f'Captured placement {index + 1}/{args.cases}, body={body:08x}', flush=True)
+            print(f'Captured {args.boundary} {index + 1}/{args.cases}', flush=True)
             if index + 1 < args.cases:
-                send(f'bp {ENTRY:X},GRID_Placement,ss')
+                breakpoint(entry, 'GRID_Reference')
                 send('erun')
                 wait('[STATE] running', 10)
         record['completed'] = True

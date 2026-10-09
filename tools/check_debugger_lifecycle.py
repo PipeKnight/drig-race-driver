@@ -15,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('output', type=Path)
     parser.add_argument('--arm-running', action='store_true')
+    parser.add_argument('--hardware', action='store_true')
     args = parser.parse_args()
     out = args.output.resolve()
     if not out.is_relative_to((ROOT / 'local').resolve()):
@@ -81,7 +82,8 @@ def main():
                 send('log "SMOKE_PAUSED ip={p:cip}"')
                 record['paused_marker'] = wait('SMOKE_PAUSED ip=', 5)
             record['arm_running'] = args.arm_running
-            send(f'bp {entry:X},SMOKE_tick,ss')
+            record['hardware_breakpoints'] = args.hardware
+            send(f'bph {entry:X},x,1' if args.hardware else f'bp {entry:X},SMOKE_tick,ss')
             if not args.arm_running:
                 send('erun')
                 wait('[STATE] running', 5)
@@ -90,6 +92,8 @@ def main():
             record['tick_marker'] = wait('SMOKE_TICK ip=', 5)
             if f'{entry:08X}' not in record['tick_marker'].upper():
                 raise RuntimeError('Test breakpoint not reached after passing exceptions')
+            if args.hardware:
+                send(f'bphc {entry:X}')
             send('detach')
             record['detach_marker'] = wait('Debugging stopped!', 20)
             send('exit')
