@@ -1,6 +1,8 @@
 # GRID engine project log
 
-Last updated: 9 October 2026 (Europe/Kiev).
+Last updated: 10 October 2026 (Europe/Kiev).
+
+F148 closes the scalar response handoff after the supplied-contact callback. Whole original B77490/repeat/independent Rust exactly match 512 authored cases / 2,175 passes / 340,652 output words per debug/release profile; 12 semantic checks and 14 malformed guards pass. Direct updates remain unclamped; deferred pairs preserve addition order, swap-last removal and the original 240-pair limit. Fresh callback-to-consumer composition matches 144 handled callbacks (1,561,525 buffer/return words + 144 controlled seeds) feeding 288 authored handoff scenarios / 576 passes / 12,812 words per profile; 85 callback response changes, all scenarios change accumulated and pending state. Ownership/pending setup is authored, not a live synchronized frame. [F148 contract, hashes, reports, limits and next actions](docs/RESPONSE_CONSUMPTION.md). 108 workspace tests, fmt, warnings-denied Clippy and two Python AST checks pass; no numerical mismatch. Steam 130 resources + executable unchanged at 2026-10-09T21:11:10.875148Z (10 October locally). Existing tools reused; no desktop input/settings edits/installation. No owner help needed now. Continue manager ownership/pending lifetime, geometric contacts and authoritative vehicle timing/initialization; no drivable-engine or increased completion estimate claim.
 
 Owner confirms the recorded race used all assists On (traction control, braking assist, stability control) and Automatic transmission. Updated the [race report](docs/DONINGTON_RACE_VIDEO_2026-10-09.md) and private session notes. This resolves the earlier recording-settings uncertainty by owner testimony, not profile decoding. Treat the lap/speed/contact footage as an assisted keyboard baseline; later comparisons must match these settings, and unassisted tests form a separate series. No new run, settings change or physics validation.
 

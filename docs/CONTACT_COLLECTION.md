@@ -8,7 +8,7 @@ Private targeted decompilations `local/behavior/20261009T0854252290593Z/` cover 
 
 The receiver's first pool is pointer-array98/countAC, its second is pointer-arrayA0/countB4. In pool order, the first accepts only contact04==owner. The second accepts contact04==owner or (contact0C==0 and contact08==owner). Both require zero disable bytes at each shape pointer28/2C plus230. Append only while count<capacity. There is no identity deduplication in this collector; repeated contacts/pool entries remain repeated. This collects already-existing contacts; geometric detection and pool construction are upstream.
 
-B77770 separately gathers unique registered owners using linked418; B77490 consumes response values and pending pairs. Those functions are statically inspected, with no independent execution claim yet. A064A0 prepares operands through9A14D0/9A15D0/A06050 before the whole producer; preparation side effects are still unimplemented. Pseudocode types are inferred and instructions take precedence.
+B77770 separately gathers unique registered owners using linked418; its independent execution remains open. Later [F148](RESPONSE_CONSUMPTION.md) verifies whole B77490 response/pending consumption for supplied ownership and state. [F147](COLLISION_CALLBACK.md) implements and verifies A064A0's reduction/inverse/preparation/producer composition. These later milestones supersede the earlier preparation gap; live manager ordering and geometric pool production remain open. Pseudocode types are inferred and instructions take precedence.
 
 ## Actual reference capture
 
