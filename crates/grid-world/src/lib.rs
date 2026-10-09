@@ -4,6 +4,7 @@ use std::{fmt, ops::Range};
 
 pub mod assisted_steering;
 pub mod candidate_grid;
+pub mod collision_callback;
 pub mod contact_collection;
 pub mod contact_inverse;
 pub mod contact_material;
