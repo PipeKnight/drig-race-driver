@@ -1,10 +1,10 @@
 # Current GRID reverse-engineering and implementation plan
 
-Updated: 8 October 2026, Europe/Kiev. This roadmap is grounded in [our findings](../PROJECT_LOG.md). The [original proposal](reference/GRID_2008_OPEN_SOURCE_PLAN.md) remains background reference. Resource readers and static Lacetti/Donington rendering are implemented; twelve live placement results reproduce exactly from recorded inputs. Source-only alignment, collision policy and driving simulation are the current work.
+Updated: 9 October 2026, Europe/Kiev. This roadmap is grounded in [our findings](../PROJECT_LOG.md). The [original proposal](reference/GRID_2008_OPEN_SOURCE_PLAN.md) remains background reference. Resource readers and static Lacetti/Donington rendering are implemented; twelve live placement results reproduce exactly from recorded inputs. Scoped vehicle components and the supplied-contact collision callback have original-versus-Rust comparisons. A complete driving loop remains ahead. The [dated progress assessment](PROGRESS_ASSESSMENT_2026-10-09.md) records estimates, blockers and their uncertainty.
 
 ## Objective and language decision
 
-F136 verifies the complete supplied-impact grid solver:243cases/846,150selected fields exact per debug/release build, with2,566,080descriptor words compared and repeated original runs identical using real Windows clocks. Actual collision-to-record generation and synchronized vehicle composition remain pending. F135 verifies whole supplied-node grid settling:184cases/364,596fields exact per build. Fresh12-car captures retain graph/settings and wheel policies/cache; F134matches664cases/84,992fields across those captures and authored maps, in addition to its prior688case suite. F133 verifies the ordered deformation-grid sampler:824cases exact debug/release. Grid construction, notifications and full driving remain pending. [Impact scope](DEFORMATION_GRID.md#whole-supplied-impact-grid-solver-f136), [settling](DEFORMATION_GRID.md#whole-grid-settling-f135), [damage source](HANDLING_DAMAGE.md#source-visual-limits-f132).
+Current checkpoint F147: one Rust supplied-contact callback composes reduction, inverse pose, preparation, impact generation, body adjustment, grid solving and response. Whole-original comparisons match six live zero-record calls and 272 authored cases in debug/release; active paths have authored controls and earlier producer evidence. This does not establish geometric contact detection, full initialization, downstream application or synchronized vehicle updates. [Callback contract and limits](COLLISION_CALLBACK.md), [vehicle update](VEHICLE_UPDATE.md). Prior solver/settling milestones remain documented in [deformation research](DEFORMATION_GRID.md).
 
 Implement an independent engine that reads the owner's GRID resources and progressively reproduces driving, racing and the full single-player experience. First supported target: Windows x86-64. The original x86 executable is our behavior reference, not an architecture requirement for the replacement.
 
@@ -52,7 +52,7 @@ These preserve the original plan's phase numbering. Research and implementation 
 | 1 — Establish tools | Rust/MSVC setup, Cargo smoke build, static PE project and useful native traces | Native builds, partial PE analysis, targeted decompilation and race file tracing work; runtime loader arguments pending |
 | 2 — Reference driving | Select actual car/track, fix race conditions/assists, load and drive/restart | Profile persistence and Lacetti/Donington driving confirmed; route_0 and current conditions recorded; measured repeatability pending |
 | 3 — Resource readers | Trace selected race loads; resolve containers, meshes, textures, materials, tuning, collision and metadata | Car/track geometry, placements and entity startup records verified; collision/tuning and original material semantics in progress |
-| 4 — Scene viewer | Bevy free camera, selected car/track geometry and essential materials | Car/track/scenery images coherent; live camera input and exact reference comparison pending desktop approval; collision treated separately |
+| 4 — Scene viewer | Bevy free camera, selected car/track geometry and essential materials | Static car/track/scenery rendering verified; live camera input and exact reference comparison pending validation; collision treated separately |
 | 5 — Vehicle simulation | Recover timing/input/vehicle mechanisms and compare acceleration, braking, steering, grip and suspension | Measured tolerances agreed from reference variability, plus owner handling comparison |
 | 6 — First playable lap | Input, chase camera, collision, checkpoints, timing, restart and essential sounds | One original car completes repeatable timed laps on one original track in our executable |
 | 7 — Complete short race | Opponents, route/racing lines, starts, position, finish order and collision/damage behavior | A complete race finishes reliably with documented fidelity limits |
@@ -61,17 +61,17 @@ These preserve the original plan's phase numbering. Research and implementation 
 
 Original multiplayer compatibility is a separate protocol/service investigation. Do not assume it follows from single-player reconstruction. Full coverage remains the project objective; the first timed lap is an intermediate milestone.
 
-## First implementation structure
+## Implementation structure
 
-Start with only these proposed crates:
+The first four crates exist. Keep simulation separate from rendering; introduce another crate only when a concrete boundary justifies it.
 
 | Crate | Responsibility |
 |---|---|
 | `grid-formats` | Bounded readers, format structures, synthetic fixtures; no Bevy dependency |
 | `grid-tools` | Resource inspection and dependency reports |
-| `grid-world` | Implemented independent static triangle index and segment queries; no renderer dependency |
+| `grid-world` | Geometry queries and scoped vehicle/collision simulation; no renderer dependency |
 | `grid-app` | Initial viewer; later input, presentation and application integration |
-| `grid-sim` | Add when vehicle work begins: fixed-step state/update logic and comparisons |
+| `grid-sim` | Possible later extraction of integrated simulation; currently behavior components live in `grid-world` |
 
 Introduce additional asset/render/race/audio/platform modules as their responsibilities become concrete. Do not prebuild an empty framework for every final feature.
 
@@ -80,6 +80,20 @@ Readers must validate counts, offsets, lengths and encodings before indexing/all
 Use original resources directly from the chosen local installation. Keep caches versioned and keyed by data/build hashes; keep our settings and saves outside the Steam directory. Public parser tests use independently created fixtures; purchased-resource integration checks remain local.
 
 ## Immediate backlog
+
+The current priority is the first drivable Lacetti/Donington loop. The selected scene and many scoped components exist; research should now close dependencies required to connect them.
+
+1. Recover complete vehicle initialization, main timestep, update order and authoritative state transfers. Existing isolated comparisons do not establish a complete frame.
+2. Finish geometric contact-pool production and downstream application of the verified supplied-contact callback. Preserve the distinction between supplied-contact behavior and collision detection.
+3. Assemble a renderer-independent vehicle update and compare meaningful state sequences against the original. Calibrate reference variability before choosing fidelity tolerances.
+4. Integrate controls, vehicle pose, chase camera, collision and restart into Bevy; then add checkpoints, lap timing and essential sound. The exit criterion is a repeatable timed lap, not another isolated function match.
+5. Reassess progress after the first integrated driving run and timed lap. Broader cars/tracks, opponents, race rules, career, replay/Flashback and releases follow those checkpoints.
+
+Offline work is available. Further live capture currently requires recovering a controllable GRID window after the minimized-window attempt; the owner has already authorized desktop use. No reliable completion date is established. See [progress assessment](PROGRESS_ASSESSMENT_2026-10-09.md) for the subjective full-project and first-lap estimates.
+
+### Earlier detailed backlog — F130 checkpoint
+
+The following records the earlier checkpoint and unresolved questions. Later collision work through F147 supersedes its descriptions of missing collision components; use the current backlog above and linked contracts before selecting work.
 
 Current vehicle checkpoint F130: source contacts/materials, temporary force vectors, conditional tyre response and both steering branches have scoped original-code comparisons. Source toe/limit/mode, geometry, angle and all20 assistance parameters joined to whole wheel/geometry initialization and assisted steering match3,216cases in both profiles; supplied assisted mode matches2,320cases. The mutable steering producer matches2,297 authored cases, its steering-only transfer into the source pipeline matches3,216cases, and deterministic reset matches1,392cases. HDM source configuration joined to reset matches2,560cases. Actual Standard HDM selection, seven parameters, mutable producer and body copies now match84live vehicle observations /3,360fields debug/release, including bounded driving/barrier contact below the steering-effect threshold. Live nonzero wobble, pre-reset RNG, complete production transfer, device input and cadence remain pending. Original source decoders/outer constructors are not isolated by these comparisons. See [steering](STEERING.md), [handling damage](HANDLING_DAMAGE.md) and the current master log before using older backlog entries below. A complete driving loop is still pending.
 
