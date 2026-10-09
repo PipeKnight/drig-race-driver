@@ -46,4 +46,4 @@ Final body diagnostic hashes: debug `7871d613e27d38d593ac48c93dc1096b8313627e2be
 
 ## Next work
 
-Build a whole-producer original replay to check the stage composition without boundary substitution, then recover upstream contact production. Saved linked360/380 meanings remain unestablished; those are distinct from the verified angular210/linear220 fields. Original live thread-seed/cadence fidelity and resource-derived history initialization remain separate work.
+[F141 whole-producer replay](IMPACT_PRODUCER.md) now checks the stage composition without boundary substitution in the original routine. Continue with one Rust call path and authored whole-producer controls, then recover upstream contact production. Saved linked360/380 meanings remain unestablished; those are distinct from the verified angular210/linear220 fields. Original live thread-seed/cadence fidelity and resource-derived history initialization remain separate work.
