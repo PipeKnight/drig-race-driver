@@ -4,7 +4,7 @@ Last updated: 9 October 2026 (Europe/Kiev).
 
 ## Objective and current state
 
-9 October continuation: Rust deformation solver matches three actual live collision calls, with 111 generated impact records, exactly in debug and release (31,680 descriptor words per build). Isolated original replays also match live output and repeat byte-identically. Only the process-local settings pointer is normalized. Hardware captures retain whole producer entry/return and nested solver entry/return; GRID survives detach. [Actual-input evidence and limitations](docs/DEFORMATION_GRID.md#actual-generated-impact-records-and-live-solver-replay-f137). Contact-to-record generation and full collision simulation remain open. No tools installed, Rust arithmetic changed or original installation modified.
+9 October continuation: independent Rust contact-to-record generation **and its combined grid solver pipeline** match six actual live collision calls exactly in debug/release:137records/1,507written recordwords and63,360descriptorwords. Three actual zero-record calls,192authored boundary cases and8invalid guards also pass per build. [F138 contract and evidence](docs/IMPACT_GENERATION.md#independent-rust-generation-and-grid-pipeline-f138). Earlier F137 verifies111actual supplied solver records. Whole collision response, contact detection and full vehicle integration remain open.104workspace tests/fmt/warnings-deniedClippy pass; original130resources+executable still match. No new tools installed.
 
 Independent Rust/Bevy engine for Race Driver: GRID (2008), loading the player's purchased Steam resources. Static Lacetti, Donington surfaces and placed scenery render in Bevy 0.19.1. Entity startup visuals and track collision geometry are GPU-verified; binary XML and collision descriptors decode. Rust reproduces twelve live placement matrices exactly from recorded inputs; source-only alignment retains two one-float-step X differences. Original whole-query policy, render/body linkage, shader fidelity, collision simulation and driving remain ahead. [Live placement evidence](docs/LIVE_SPAWN_CAPTURE.md), [car viewer](docs/STATIC_VIEWER.md), [Donington scene](docs/DONINGTON_SCENE.md).
 
@@ -731,6 +731,13 @@ The current roadmap is [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). Ru
 
 ## Next actions
 
+### 9 October 2026 — contact generation and grid pipeline verified (F138)
+
+- `impact_generation::calculate` and bounded private IPG1 CLI now match the original generation prefix for six actual active calls and three actual zero-record calls in debug/release. Active set137records/1,507writtenrecordwords and63,360descriptorwords exact per build; only settings pointer normalized and unwritten record2C excluded. Feeding **Rust-generated records and descriptor into Rust grid solving** also matches all63,360live nested-return words in both builds. [Detailed contract, reports and limits](docs/IMPACT_GENERATION.md#independent-rust-generation-and-grid-pipeline-f138).
+- 192authoredcontrols generate6,648records/73,128recordwords; all2,027,520descriptorwords and recordfields exact per profile. Covers reverse/static/zero counterpart denominator, clipping axes, projection, damage byte wrap, marker/enable/scalar gates, state branch, dimensions and400recordcap. Eight malformedcontrols reject both; Rust creates no output. Private `impact-generation-controls-20261009-{debug-final,release}/validation.json`; actual combined reports `impact-generation-pipeline-20261009-{debug,release}/validation.json`; actual zeros `impact-generation-zero-20261009-{debug,release}/validation.json`.
+- 104workspace tests, formatting and all-target warnings-deniedClippy pass. First Clippy attempt found six style diagnostics, corrected without changing numerical expressions; original MULPS-by-negative-one retained with documented allowance. Existing Rust1.99.0/Bevy0.19.1/Python3.12.14/MSVC14.44.35207/SDK10.0.26100.0 reused. Research harness focused commitbc605b1; Rust implementation/controls form the next focused commit. Exact checks/privatehashes in `local/behavior/impact-generation-checks-20261009.md`.
+- Read-only preservation at2026-10-09T07:52:14.805131UTC confirms130/130sourcefiles+originalexe unchanged (`local/scene/preservation-20261009-generation.json`). Exact private game/macro identities survive, no headless debugger remains, macro releases recorded. Game remains observed paused. Continue with post-solver contact response and9D4210's side effects; no owner answer currently required.
+
 ### 9 October 2026 — contact-to-record implementation underway
 
 - Extended outer capture with bodyB20 vec4 and E51D40 scalar after aligned producer reads identified those missing inputs. Capture07 succeeds with three zero-record calls; capture08 after observed Restart Race/F2/F5 succeeds with six active calls (contacts3/7/14/8/4/4, records18/30/43/18/14/14). Both detach/exit0; fresh screenshot after08 verifies Pause Menu / Continue at the concrete barrier, same guarded game36228/macro6868.
@@ -972,6 +979,7 @@ PID29904 closed after the F133 capture; the guarded follow-up reader refused its
 
 - [Current reverse-engineering and implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Deformation grid sampler and wheel geometry investigation](docs/DEFORMATION_GRID.md)
+- [Contact-to-grid record generation and actual Rust pipeline](docs/IMPACT_GENERATION.md)
 - [First Rust resource readers and format specification](docs/RESOURCE_FORMATS.md)
 - [Verified PSSG geometry and base textures](docs/PSSG_PAYLOADS.md)
 - [Static Bevy car viewer and usage](docs/STATIC_VIEWER.md)
