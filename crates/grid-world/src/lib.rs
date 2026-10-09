@@ -7,6 +7,7 @@ pub mod candidate_grid;
 pub mod contact_collection;
 pub mod contact_material;
 pub mod contact_ray;
+pub mod contact_reduction;
 pub mod deformation_grid;
 pub mod deformation_impact;
 pub mod deformation_settle;
