@@ -16,6 +16,7 @@ pub mod grid_population;
 pub mod grip_history;
 pub mod impact_body;
 pub mod impact_generation;
+pub mod impact_producer;
 pub mod impact_response;
 pub mod leaf_query;
 pub mod packed_query;

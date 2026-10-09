@@ -14,10 +14,11 @@ ROOT=Path(__file__).resolve().parents[1]
 PROBE_SHA='9b7961b8c49ac611d7c8ea7da1a4d2751078e135fd26f5b34328429dbc1d0c38'
 
 
-def pack(cases):
+def pack(cases,body_rows=None):
     data=[struct.pack('<II',0x31574349,len(cases))]
-    for case in cases:
-        body=from_live(case)
+    if body_rows is not None and len(body_rows)!=len(cases):raise ValueError('Body fixture count mismatch')
+    for index,case in enumerate(cases):
+        body=from_live(case) if body_rows is None else body_rows[index]
         data.append(generation_pack([case])[8:])
         data.extend(body[k] for k in ('center','maximum','extra','mass','globals'))
         data.extend([struct.pack('<I',body['seed']),blob(case,'prepared_a_hex',16),blob(case,'prepared_b_hex',16),
@@ -67,8 +68,9 @@ def main():
     if digest(image)!=ANALYSIS or digest(probe)!=PROBE_SHA:raise ValueError('Reference/probe identity changed')
     out.mkdir(parents=True,exist_ok=False);(out/'input.bin').write_bytes(pack(cases));wanted=expected(cases);original=None
     report=dict(scope='Whole original9EA6E0, no skipped instructions/helper stubs/code patches. Seven real clock/TLS imports; controlled private CRT seed produces observed result. Helper-captured history/mass/center/globals supplied as fixture inputs.',capture_sha256=digest(source),probe_sha256=digest(probe),analysis_sha256=ANALYSIS,profile=args.profile,runs={})
-    for label in ('original','repeat'):
-        target=out/f'{label}.bin';run=subprocess.run([str(probe),str(image),str(out/'input.bin'),str(target)],cwd=ROOT,capture_output=True,text=True,timeout=60)
+    native=ROOT/f'target/{args.profile}/grid-impact-producer.exe';report['native_sha256']=digest(native)
+    for label,command in [('original',[str(probe),str(image)]),('repeat',[str(probe),str(image)]),('rust-whole',[str(native)])]:
+        target=out/f'{label}.bin';run=subprocess.run(command+[str(out/'input.bin'),str(target)],cwd=ROOT,capture_output=True,text=True,timeout=60)
         r=dict(exit=run.returncode,stdout=run.stdout,stderr=run.stderr)
         if run.returncode==0:
             actual=target.read_bytes();r.update(compare(actual,wanted,len(cases)))

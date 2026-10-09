@@ -54,7 +54,7 @@ fn point_velocity(
     let rotation = cross(angular, lever);
     std::array::from_fn(|i| linear[i] + rotation[i])
 }
-pub fn calculate(input: Input) -> Result<Output, Error> {
+pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     if input.mass <= 0.
         || input.history_range <= 0.
         || input
@@ -79,6 +79,10 @@ pub fn calculate(input: Input) -> Result<Output, Error> {
     {
         return Err(Error("invalid collision body input"));
     }
+    Ok(())
+}
+pub fn calculate(input: Input) -> Result<Output, Error> {
+    validate(&input)?;
     let mut output = Output {
         angular: input.angular,
         linear: input.linear,
