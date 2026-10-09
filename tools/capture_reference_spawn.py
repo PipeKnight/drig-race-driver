@@ -128,10 +128,14 @@ def main():
                         help='Impact captures whole 9EA6E0 entry/return and bounded contact inputs')
     parser.add_argument('--hardware', action='store_true',
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
+    parser.add_argument('--solver-records', action='store_true',
+                        help='Also capture the nested positive-record 9D4970 solver entry/return')
     args = parser.parse_args()
     entry = ENTRY if args.boundary == 'placement' else 0x9ea6e0
     if args.boundary == 'impact' and not args.arm_running:
         raise ValueError('Impact capture requires the previously validated arm-running workflow')
+    if args.solver_records and (args.boundary != 'impact' or not args.hardware):
+        raise ValueError('Nested solver records require hardware impact capture')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -161,6 +165,7 @@ def main():
               'input_sent': False, 'debugger_pauses': False, 'completed': False}
     record['arm_running'] = args.arm_running
     record['hardware_breakpoints'] = args.hardware
+    record['solver_records'] = args.solver_records
     try:
         path_buffer = ctypes.create_unicode_buffer(32768)
         path_length = W.DWORD(len(path_buffer))
@@ -191,6 +196,11 @@ def main():
         if read(entry, 32) != raw[offset:offset + 32]:
             raise ValueError('Live placement code differs')
         record['code_exact'] = True
+        if args.solver_records:
+            solver_offset = 0x9d4970 - 0x400000 - 0x1000 + 0x400
+            if read(0x9d4970, 32) != raw[solver_offset:solver_offset + 32]:
+                raise ValueError('Live solver code differs')
+            record['solver_code_exact'] = True
         exit_address = None
         if args.boundary == 'impact':
             exit_slot = exit_process_slot(raw)
@@ -330,10 +340,51 @@ def main():
                         'bounds_hex': read(body + 0xED64, 0x40).hex()}
             record['cases'].append(case)
             breakpoint(ret, 'GRID_PlacementReturn')
+            if args.solver_records:
+                breakpoint(0x9d4970, 'GRID_NestedSolver')
+                # Only this producer's verified call site and descriptor may stop.
+                send(f'bphwcond 9D4970,[csp]==9EB570&&ecx=={int(case["descriptor"],16):X}')
             send('erun')
             wait('[STATE] running', 10)
             wait('[STATE] paused', 30)
             returned = registers(f'GRID_SPAWN_RETURN_{index}')
+            if args.solver_records:
+                if returned[0] == 0x9d4970:
+                    solver_sp = returned[1]
+                    solver_stack = read(solver_sp, 16)
+                    solver_ret, records, count, gain = struct.unpack('<4I', solver_stack)
+                    send('log "GRID_SOLVER_RECEIVER cx={p:ecx}"')
+                    receiver_line = wait('GRID_SOLVER_RECEIVER cx=', 10)
+                    receiver_match = re.search(r'cx=([0-9A-Fa-f]+)', receiver_line)
+                    if not receiver_match:
+                        raise ValueError('Missing solver receiver')
+                    receiver = int(receiver_match[1], 16)
+                    if solver_ret != 0x9eb570 or receiver != int(case['descriptor'],16) or not 1 <= count <= 400:
+                        raise ValueError('Nested solver caller/receiver/count mismatch')
+                    case['solver'] = dict(entry_registers=returned, receiver=hex(receiver),
+                        stack_hex=solver_stack.hex(), record_count=count, gain_word=f'{gain:08x}',
+                        records_hex=read(records, count*48).hex(),
+                        descriptor_before_hex=read(receiver, 0xa500).hex(),
+                        settings_hex=read(int(case['settings'],16), 0x1050).hex(),
+                        globals_hex=read(0xe4fc80, 24).hex(), clip_hex=read(0xe500b8, 1).hex())
+                    send('bphc 9D4970')
+                    breakpoint(solver_ret, 'GRID_SolverReturn')
+                    send('erun')
+                    wait('[STATE] running', 10)
+                    wait('[STATE] paused', 30)
+                    solver_returned = registers(f'GRID_SOLVER_RETURN_{index}')
+                    if solver_returned[0] != solver_ret or solver_returned[1] != solver_sp + 16:
+                        raise RuntimeError('Nested solver return ABI mismatch')
+                    case['solver']['return_registers'] = solver_returned
+                    case['solver']['descriptor_after_hex'] = read(receiver, 0xa500).hex()
+                    send(f'bphc {solver_ret:X}')
+                    send('erun')
+                    wait('[STATE] running', 10)
+                    wait('[STATE] paused', 30)
+                    returned = registers(f'GRID_OUTER_RETURN_{index}')
+                else:
+                    case['solver'] = None
+                    send('bphc 9D4970')
             if returned[0] != ret or returned[1] != sp + 4:
                 raise RuntimeError('Return breakpoint stack/address mismatch')
             if args.hardware:
