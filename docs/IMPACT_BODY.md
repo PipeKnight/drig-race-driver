@@ -1,0 +1,49 @@
+# Collision body adjustment
+
+9 October 2026 continuation after [F139 response](IMPACT_RESPONSE.md). **F140:** independent Rust matches six directly observed whole `9D4210` calls and the connected generation/body/solver/response pipeline in debug/release.256authored controls and7invalid guards pass per build. This is a supplied-boundary result, not integrated vehicle simulation.
+
+## Direct observations
+
+Private capture `local/behavior/live-impact-20261009-10/capture.json`, SHA-256 `c34887e65bb5bc0f6f7e8274422f4c169b6eb9f7351713e50eb04cc1cf745519`. Same PID36228/private executable, fresh observed race restart and F2/F5 collision sample. Six outer calls, contact counts3/7/13/11/4/3, generated records10/42/50/12/11/12 (137total). Entry code, body entry/random-return code and solver entry guards passed; completedtrue/debuggerexit0. Debugger timing left the game running; an explicit F11 afterward produced an inspected paused Continue menu. Timed key duration is not simulation duration.
+
+The new `--body-effects` capture tracks the verified nested caller/owner, full linked state, computed frame, both prepared vectors, pointed-to center, body290history/2E0/mass15A8, five globals and return state. It observes the optional original random result at `9D46FD`, immediately after the call. Hardware slots are released/reused so ExitProcess, outer return, body return and random return never exceed four slots. Solver entry is rearmed only after body return. No game input originates in the Python helper.
+
+Case1 executes original rand and returns14737, consumes its low byte145, clears all ten body290history floats and2E0, and changes linked210/214/218 and220/224/228. PreparedA remains unchanged. Other five calls leave these compared linked words unchanged. GlobalsA4/A8/AC/B0/B4 are approximately1.98/.1/15/7/6.4; mass15A8 is2000. These are observed data, not universal tuning constants. Initial live capture09 also had one changed linked-state call but lacked the required helper inputs/random observation.
+
+## Static contract and corrections
+
+Private full instructions `local/behavior/impact-body-instructions-20261009.json`, random/TLS/point-velocity instructions `impact-random-thread-20261009.json`, decompilations `20261009T0815392270535Z/`, `20261009T0817569988630Z/`, and `20261009T0818245540459Z/bfdd2f.c.txt`. The last survey aborted at unverified addressA14D00 after successfully producing the CRT getter; that failed sweep is not counted as successful additional linked-method discovery. Subsequent analysis uses identified entries and aligned instructions.
+
+The inferred decompiler prototype incorrectly labels the third argument a scalar. Instructions and expression helpers show it is a **world-point pointer**, matching captured PreparedA. The helper copies its four lanes to a local vector; it does not overwrite the supplied point. Linked210 is the angular state and220 the linear state, consistent with the earlier [setter chain](VEHICLE_STATE.md). Point velocity helperB107A0 computes `linear + cross(angular, point - *linked334)` with real helper67C200.
+
+Whole9D4210 computes a grouped RSQRT-refined magnitude of linked220 and returns at/above supplied speed thresholdB4. In the lower-speed branch it takes the maximum of ten body290history values; `(maximum-B0)/AC` is capped at1 and must be positive. It transforms the supplied direction through the supplied frame, normalizes it, and uses factor1.5 when localZ>.7 or abs(localX)>.7, otherwise1. Once the history gate passes it clears290..2B4 and2E0, even if a later cross-axis gate returns.
+
+It forms `cross(direction,[0,1,0,0])`; squared magnitude must exceed float word29E12E13 (approximately1e-13). It normalizes using SQRTSS/division, then replaces the Y lane with `((randLowByte-127.5)*A8)*float(3C008081)`. The original CRT updates its u32 seed with wrapping `seed*214013+2531011`, returning `(seed>>16)&32767`; this caller uses only the low byte. The axis is normalized again with the SSE seed/refinement.
+
+Adjustment gain is capped history intensity × min(1000/mass,1) × A4 × side factor. If dot(axis,angular)<gain*.5, angular gains gain×axis. The final linear state subtracts the change in point velocity caused by that angular update. This describes the arithmetic, without asserting physical units or complete collision behavior.
+
+## Whole-original replay
+
+`tools/probe_impact_body.c` executes all of original9D4210 and its helpers without code patches, context skipping or stubs. Four import slots are verified by PE names and addresses and bound to real Windows GetLastError, SetLastError, TlsGetValue and TlsSetValue. Two private TLS slots supply a214-byte-layout thread-data fixture and the cached real TLS getter. Original CRT getters and rand execute normally; the already-present thread-data branch avoids unrelated CRT allocation/initialization. All executable-section bytes are checked unchanged/RX; four private data pages and four imports are restored, TLS values cleared and slots freed.
+
+The **original live seed was not captured**. For the active live case, a controlled predecessor seed is derived to make the original generator produce the exact observed full15-bit result. Thus the six seed output words are controlled checks, not captured live seed equality. The138compared live words comprise48linked angular/linear words,24unchanged supplied-point words,60history words and6extra-state words. No arithmetic fields are masked.
+
+Probe SHA-256 `2855f8e00d88e702a7e25410f0b3feefead374ea681e0ab8cc068dad39ab8acb`, MSVC14.44.35207/SDK10.0.26100.0, `/W4 /WX /O2 /MT /fp:strict /arch:SSE2`, x8753-bit nearest. Original/repeat exactly match138live words plus6controlled seed words: `local/behavior/impact-body-replay-20261009-01/validation.json`.
+
+Initial Rust debug/release matches the same words, reports `impact-body-rust-20261009-{debug,release}-01/validation.json`. Initial diagnostic hashes: debug `a692c45cb1b62731b613b2dbb46078fc0c3940c27821be614e12c45776051fcf`, release `dca6680003a74bbd33622892cc635b13da7cae7d08931704c8db17a81f988dd8`. Wider controls and final checks remain pending; do not treat these initial results as completed integration.
+
+## Final independent implementation and pipeline (F140)
+
+Final `impact-body-controls-20261009-{debug,release}-final/validation.json`:256authored cases/6,144words exactly match whole original/repeat per build.184cases advance the original random state and130change angular state. Controls cover speed/history/side/cross-axis gates, zero direction, threshold neighbors, history saturation/clearing, mass cap, zero/negative gains, seed wrap, arbitrary fourth lanes/frames, aligned angular state and coincident points. Seven malformed requests reject; Rust creates no output, while original failure files can contain partial diagnostic output. Authored controls are separate from live evidence.
+
+`impact_generation::contact_frame` now shares the unchanged frame arithmetic used by generation. The connected pipeline derives it from **outer incoming pose/body offset**, compares all96frame words with the directly observed helper frame, then supplies the independently computed frame to Rust body adjustment. It uses outer captured linked state and both prepared vectors; history/mass/center/globals are supplied from the directly captured helper input. Contact detection and resource-derived initialization are not implemented. The existing192generation controls/73,128written recordwords and2,027,520descriptorwords per profile still pass after extracting the shared helper: `impact-generation-frame-regression-20261009-{debug,release}/validation.json`.
+
+Final `impact-body-pipeline-20261009-{debug,release}-final/validation.json` exactly matches137generated records/1,507written recordwords,96computed framewords,138body live words+6controlled seedwords,63,360complete outer descriptorwords,71response/statewords and1,590complete outer linked-statewords. These categories overlap; they are not disjoint output totals. Body output angular/linear words and response output380/390 are merged into the incoming linked state, then every word is compared with the outer return. Actual generated records, helper frame and solved positions are comparison targets only. The descriptor settings pointer is normalized and unwritten record2C excluded as previously documented; no arithmetic fields are masked.
+
+Capture10 case1 also supplies nonzero linked360 `[-.0116119384765625,0,.06208992004394531,0]`, and the final response changes380 to approximately `[.00969611015,0,-.05182620883,0]` and390from0to1. This provides **actual live active accumulator-correction coverage**, extending capture09's zero-vector evidence. Its physical meaning remains open.
+
+Final body diagnostic hashes: debug `7871d613e27d38d593ac48c93dc1096b8313627e2beeac344198b598ddad7cff`, release `1089cdcec110956118b1ee2ef6138567d453eca684bb44882f21ae89c2903681`; frame diagnostic debug `b4b1b1e2b38e9699ef141152f34385ee3780344cfface6465d6769d3fa21d35b`, release `77a7d374f0d084cd935d795b2a8f44f6a897b06d965df70e37cc5dd83577f62c`. Rust/Cargo1.99.0;104workspace tests/fmt/warnings-deniedClippy/PythonAST pass. Clippy initially requested `as_chunks` for the frame diagnostic; applied and rechecked. No numerical mismatch observed. No new tools installed. Steam preservation at `2026-10-09T08:33:27.826110+00:00`:130resources+original executable match, `local/scene/preservation-20261009-body.json`.
+
+## Next work
+
+Build a whole-producer original replay to check the stage composition without boundary substitution, then recover upstream contact production. Saved linked360/380 meanings remain unestablished; those are distinct from the verified angular210/linear220 fields. Original live thread-seed/cadence fidelity and resource-derived history initialization remain separate work.

@@ -133,12 +133,16 @@ def main():
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
     parser.add_argument('--solver-records', action='store_true',
                         help='Also capture the nested positive-record 9D4970 solver entry/return')
+    parser.add_argument('--body-effects', action='store_true',
+                        help='Capture9D4210 inputs/return and its optional original random result before solver')
     args = parser.parse_args()
     entry = ENTRY if args.boundary == 'placement' else 0x9ea6e0
     if args.boundary == 'impact' and not args.arm_running:
         raise ValueError('Impact capture requires the previously validated arm-running workflow')
     if args.solver_records and (args.boundary != 'impact' or not args.hardware):
         raise ValueError('Nested solver records require hardware impact capture')
+    if args.body_effects and not args.solver_records:
+        raise ValueError('Body effects require hardware impact with nested solver capture')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -169,6 +173,7 @@ def main():
     record['arm_running'] = args.arm_running
     record['hardware_breakpoints'] = args.hardware
     record['solver_records'] = args.solver_records
+    record['body_effects'] = args.body_effects
     try:
         path_buffer = ctypes.create_unicode_buffer(32768)
         path_length = W.DWORD(len(path_buffer))
@@ -204,6 +209,12 @@ def main():
             if read(0x9d4970, 32) != raw[solver_offset:solver_offset + 32]:
                 raise ValueError('Live solver code differs')
             record['solver_code_exact'] = True
+        if args.body_effects:
+            for address in (0x9d4210,0x9d46fd):
+                body_offset=address-0x400000-0x1000+0x400
+                if read(address,32)!=raw[body_offset:body_offset+32]:
+                    raise ValueError('Live body-effect code differs')
+            record['body_code_exact']=True
         exit_address = None
         if args.boundary == 'impact':
             exit_slot = exit_process_slot(raw)
@@ -347,10 +358,56 @@ def main():
                 breakpoint(0x9d4970, 'GRID_NestedSolver')
                 # Only this producer's verified call site and descriptor may stop.
                 send(f'bphwcond 9D4970,[csp]==9EB570&&ecx=={int(case["descriptor"],16):X}')
+            if args.body_effects:
+                breakpoint(0x9d4210,'GRID_BodyEffects')
+                send(f'bphwcond 9D4210,[csp]==9EB553&&[csp+4]=={int(case["linked"],16):X}')
             send('erun')
             wait('[STATE] running', 10)
             wait('[STATE] paused', 30)
             returned = registers(f'GRID_SPAWN_RETURN_{index}')
+            if args.body_effects:
+                send('bphc 9D4210')
+                if returned[0]==0x9d4210:
+                    body_sp=returned[1]
+                    body_stack=read(body_sp,20)
+                    body_ret,owner,frame,prepared_a,prepared_b=struct.unpack('<5I',body_stack)
+                    if body_ret!=0x9eb553 or owner!=int(case['linked'],16) or prepared_a!=int(case['prepared_a'],16) or prepared_b!=int(case['prepared_b'],16):
+                        raise ValueError('Body-effect caller/arguments mismatch')
+                    center,=struct.unpack_from('<I',read(owner+0x334,4))
+                    body=int(case['body'],16)
+                    case['body_effect']=dict(entry_registers=returned,stack_hex=body_stack.hex(),frame_hex=read(frame,64).hex(),
+                        linked_before_hex=read(owner,0x424).hex(),center_address=hex(center),center_hex=read(center,16).hex(),
+                        body_290_before_hex=read(body+0x290,40).hex(),body_2e0_before_hex=read(body+0x2e0,4).hex(),body_15a8_hex=read(body+0x15a8,4).hex(),
+                        globals_hex=read(0xe500a4,20).hex(),prepared_a_before_hex=read(prepared_a,16).hex(),prepared_b_hex=read(prepared_b,16).hex(),random_result=None)
+                    # Keep ExitProcess and outer return; release solver entry so
+                    # body return plus optional random return fit four DR slots.
+                    send('bphc 9D4970')
+                    breakpoint(body_ret,'GRID_BodyReturn')
+                    breakpoint(0x9d46fd,'GRID_BodyRandomReturn')
+                    send('erun');wait('[STATE] running',10);wait('[STATE] paused',30)
+                    body_returned=registers(f'GRID_BODY_RETURN_{index}')
+                    random_hit=body_returned[0]==0x9d46fd
+                    if random_hit:
+                        if body_returned[1] >= body_sp or body_sp-body_returned[1]>0x200:
+                            raise ValueError('Body random return stack outside frame')
+                        case['body_effect']['random_result']=body_returned[2]
+                        case['body_effect']['random_registers']=body_returned
+                        send('bphc 9D46FD');send('erun');wait('[STATE] running',10);wait('[STATE] paused',30)
+                        body_returned=registers(f'GRID_BODY_COMPLETE_{index}')
+                    if body_returned[0]!=body_ret or body_returned[1]!=body_sp+4:
+                        raise RuntimeError('Body return ABI mismatch')
+                    if not random_hit:send('bphc 9D46FD')
+                    case['body_effect'].update(return_registers=body_returned,linked_after_hex=read(owner,0x424).hex(),
+                        body_290_after_hex=read(body+0x290,40).hex(),body_2e0_after_hex=read(body+0x2e0,4).hex(),prepared_a_after_hex=read(prepared_a,16).hex())
+                    send(f'bphc {body_ret:X}')
+                    breakpoint(0x9d4970,'GRID_NestedSolver')
+                    send(f'bphwcond 9D4970,[csp]==9EB570&&ecx=={int(case["descriptor"],16):X}')
+                    send('erun');wait('[STATE] running',10);wait('[STATE] paused',30)
+                    returned=registers(f'GRID_AFTER_BODY_{index}')
+                elif returned[0]==ret:
+                    case['body_effect']=None
+                else:
+                    raise RuntimeError('Unexpected body-effect boundary')
             if args.solver_records:
                 if returned[0] == 0x9d4970:
                     solver_sp = returned[1]

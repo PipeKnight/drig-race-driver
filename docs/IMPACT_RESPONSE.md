@@ -8,7 +8,7 @@ The private Cyrillic-compatible GRID reference remained PID36228, start `2026-10
 
 Private evidence: `local/behavior/live-impact-20261009-09/capture.json`, SHA-256 `e8fb9ee3f04839e3c7652eb9cadbe86f87fcd029ac51b1690f20ff0b7ca1ec31`. Contact counts3/7/11/8/4/4; generated record counts11/40/41/19/13/15, total139. The capture now retains global `E4FC38`, observed1.0, in addition to the existing producer inputs. Policy byte `E500C4` was1 and gain `E500C0` was1.0 in all six calls.
 
-The saved linked vector at360, accumulator380 and byte390 were all zero before and after these calls. The response arrays changed. These observations verify response-array behavior but do **not** exercise a live nonzero vector correction. No physical unit or velocity interpretation is established for linked360/380 here.
+The saved linked vector at360, accumulator380 and byte390 were all zero before and after these calls. The response arrays changed. These observations verify response-array behavior but do **not** exercise a live nonzero vector correction. Later capture10 supplies one active live correction, exactly reproduced in debug/release by the [F140 connected pipeline](IMPACT_BODY.md#final-independent-implementation-and-pipeline-f140). No physical unit or velocity interpretation is established for linked360/380 here.
 
 ## Recovered contract
 

@@ -93,7 +93,7 @@ def execute(rows, out, profile, expected=None):
     return report
 
 
-def pipeline(live, out, profile, expected):
+def pipeline(live, out, profile, expected, body_stage=None):
     from validate_impact_generation import pack as generation_pack, decode as generation_decode
     from validate_deformation_impact import pack as solver_pack
     result=dict(scope='Rust contact generation -> Rust grid solver -> Rust response; compared with live outer return. Does not implement9D4210 physics or contact detection.',stages={})
@@ -116,6 +116,10 @@ def pipeline(live, out, profile, expected):
         for i in range(count):
             r=records[i*48:(i+1)*48]
             response['records'].append(dict(direction=struct.unpack_from('<4f',r),anchor=struct.unpack_from('<4f',r,16),node=struct.unpack_from('<H',r,32)[0],contact=struct.unpack_from('<H',r,34)[0],weight=struct.unpack_from('<f',r,40)[0]))
+    linked_states=None
+    if body_stage is not None:
+        body_report,linked_states=body_stage(live,out,profile)
+        result['stages']['body']=body_report
     solved=run('solver',solver_pack(solver_rows),ROOT/f'target/{profile}/grid-deformation-impact.exe')
     if solved[:8]!=struct.pack('<II',0x314d4947,len(live)) or len(solved)!=8+len(live)*0xa500:raise ValueError('Solver pipeline framing')
     descriptor_differences=[]
@@ -128,6 +132,17 @@ def pipeline(live, out, profile, expected):
     actual=run('response',pack(response_rows),ROOT/f'target/{profile}/grid-impact-response.exe')
     result['stages']['response'].update(compare(actual,expected,response_rows))
     result['passed']=all(c['passed'] for c in result['stages']['generation']['cases']) and not descriptor_differences and result['stages']['response']['passed']
+    if linked_states is not None:
+        cursor=8;differences=[]
+        for i,(row,linked) in enumerate(zip(live,linked_states)):
+            linked[0x380:0x390]=actual[cursor:cursor+16];dirty,=struct.unpack_from('<I',actual,cursor+16)
+            if dirty>1:raise ValueError('Pipeline dirty state outside boolean bound')
+            linked[0x390]=dirty;cursor+=20+row['contact_count']*4
+            wanted=blob(row,'linked_after_hex',0x424)
+            differences.extend(dict(case=i,offset=hex(j)) for j in range(0,0x424,4) if linked[j:j+4]!=wanted[j:j+4])
+        result['outer_linked']=dict(compared_words=len(live)*0x424//4,mismatched_words=len(differences),first_differences=differences[:20],passed=not differences)
+        result['passed'] &= result['stages']['body']['passed'] and not differences
+        result['scope']='Rust generation/shared frame -> Rust body adjustment -> Rust grid solver -> Rust response; full outer descriptor/linked state and response comparison. Controlled seed yields observed random result; captured helper history/mass/center/global inputs, no contact detection or main cadence.'
     return result
 
 
