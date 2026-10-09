@@ -70,3 +70,5 @@ Remaining scope risks include exact material/shader behavior, more cars and trac
 5. Reassess scope and percentages after the first driving loop and after the first timed lap. Only then expand toward opponents, a complete race and broader single-player coverage.
 
 Keep [the implementation plan](IMPLEMENTATION_PLAN.md) as the active roadmap and [the project log](../PROJECT_LOG.md) as the chronological evidence index. Future assessments should report observable milestone changes and changed assumptions rather than automatically increasing the percentage with each commit.
+
+The owner has also offered targeted driving assistance. The [owner-assisted testing protocol](OWNER_ASSISTED_TESTING.md) describes useful maneuvers and how to prepare captures without unnecessary owner effort. This offer does not change the completion estimate or establish new validation results.
