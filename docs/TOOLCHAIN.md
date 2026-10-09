@@ -1,5 +1,9 @@
 # Research toolchain
 
+## Video analysis decoder — 9 October 2026
+
+After checking PATH, existing research tools, bundled runtimes and Python modules, no FFmpeg/ffprobe, PyAV or OpenCV decoder was found in those locations. Installed official PyAV **19.0.0** Windows wheel `av-19.0.0-cp312-abi3-win_amd64.whl` only into ignored `local/tools/video-python`, with bundled Python **3.12.14** and no global interpreter change. SHA-256 **96e4c0981ec21cadfef4c0b840d04a5e3c3be821894aa6a7d7a8ee870ba6b727** matches [official PyPI metadata](https://pypi.org/pypi/av/19.0.0/json). Wheel/source record: `local/tools/video-decoder/source.json`. Proved useful operation by decoding all18,021AV1frames and AAC audio in the owner's actual GRID recording and exporting170timestamped samples. [Analysis, versions, evidence and limits](DONINGTON_RACE_VIDEO_2026-10-09.md). This validates local video analysis, not recording-time capture-hook behavior or Rust game compatibility.
+
 ## Gameplay recorder inventory — 9 October 2026
 
 Bounded PATH/default-location/uninstall/research-directory checks found no OBS installation; this is not a full-drive search. Read-only system inventory identifies Xbox Game Bar `7.326.10010.0`, NVIDIA App `11.0.9.251`, NVIDIA RTX4070 driver `32.0.16.1692` and Intel UHD770 driver `32.0.101.7088`. Initial sandbox Appx/CIM queries denied access; escalated inventory succeeded. Existing portable AHK remains `2.0.29`. No new tools installed or actual gameplay recording tested. [Owner recording guide](GAMEPLAY_RECORDING_GUIDE.md) starts with Game Bar and offers OBS as an optional consistent recorder; official OBS download listed `32.2.2` on inspection. Inventory evidence: `local/recordings/recorder-inventory-20261009.json`. These are inventory/recommendation claims, not validated GRID recording compatibility.

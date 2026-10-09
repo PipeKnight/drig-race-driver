@@ -2,6 +2,8 @@
 
 Prepared 9 October 2026, Europe/Kiev. Start with **Session 1 only**. We will review the short test clip before you spend time on longer recordings. The complete sequence below is a plan, not a claim that any recording or recorder compatibility has been verified.
 
+**Later same-day result:** the owner supplied a complete NVIDIA three-lap recording, and [analysis confirms it is usable](DONINGTON_RACE_VIDEO_2026-10-09.md). It includes setup and a first-place finish; AV1/MP4 decodes with the local analysis tool. No need to repeat Session1 or the baseline race for this reference. OBS remains optional. Before the next coordinated test, only a short assists/controls capture and the prepared diagnostic setup are needed; historical inventory/untested statements below describe the earlier planning checkpoint.
+
 ## 1. Tools: what you need
 
 You do not need to install development tools, debuggers, controller drivers or a keyboard-overlay plugin. Our existing research tools handle diagnostic captures; I will prepare those when required.
