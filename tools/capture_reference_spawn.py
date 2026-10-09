@@ -65,11 +65,16 @@ def exit_process_slot(raw):
     raise ValueError('Named ExitProcess import absent')
 
 
-def impact_arguments(read, sp, ip, ax, index):
+def impact_arguments(read, sp, ip, ax, index, callback=False):
     """Capture the verified cdecl producer boundary; no inferred receiver ABI."""
-    stack = read(sp, 36)
-    ret, linked, contacts, count, scalar, response, prepared_a, prepared_b, descriptor = struct.unpack('<9I', stack)
-    if ret != 0xa0652b or not 1 <= count <= 80:
+    stack = read(sp, 32 if callback else 36)
+    if callback:
+        ret,linked,contacts,count,scalar,unused,response,descriptor=struct.unpack('<8I',stack)
+        prepared_a=prepared_b=0
+        if ret not in (0xb77bd8,0xb784fa) or unused!=0:raise ValueError('Unverified callback caller/unused argument')
+    else:
+        ret, linked, contacts, count, scalar, response, prepared_a, prepared_b, descriptor = struct.unpack('<9I', stack)
+    if (not callback and ret != 0xa0652b) or not 1 <= count <= 80:
         raise ValueError('Impact caller/contact count outside verified scope')
     body = descriptor - 0x2300
     list_count, = struct.unpack('<I', read(0xe85fcc, 4))
@@ -94,7 +99,7 @@ def impact_arguments(read, sp, ip, ax, index):
         contact_rows.append(dict(address=hex(pointer), before_hex=value.hex(),
                                  counterpart=hex(counterpart),
                                  counterpart_360_hex=read(counterpart + 0x360, 16).hex() if counterpart else None))
-    return dict(index=index, entry_registers=[ip, sp, ax], stack_hex=stack.hex(),
+    result=dict(index=index, entry_registers=[ip, sp, ax], stack_hex=stack.hex(),
                 return_address=hex(ret), body=hex(body), linked=hex(linked),
                 descriptor=hex(descriptor), contact_array=hex(contacts), contact_count=count,
                 scalar_word=f'{scalar:08x}', response=hex(response), prepared_a=hex(prepared_a),
@@ -103,13 +108,18 @@ def impact_arguments(read, sp, ip, ax, index):
                 settings_hex=read(settings, 0x1050).hex(), linked_before_hex=read(linked, 0x424).hex(),
                 body_1630_hex=read(body + 0x1630, 16).hex(),
                 body_b20_hex=read(body + 0xb20, 16).hex(),
-                prepared_a_hex=read(prepared_a, 16).hex(), prepared_b_hex=read(prepared_b, 16).hex(),
+                prepared_a_hex=read(prepared_a, 16).hex() if prepared_a else None, prepared_b_hex=read(prepared_b, 16).hex() if prepared_b else None,
                 response_before_hex=read(response, count * 4).hex() if response else None,
                 solver_globals_hex=read(0xe4fc80, 24).hex(), solver_clip_hex=read(0xe500b8, 1).hex(),
                 producer_corner_scale_hex=read(0xe4fc2c, 4).hex(),
                 response_scale_hex=read(0xe4fc38, 4).hex(),
                 producer_static_mass_hex=read(0xe51d40, 4).hex(),
                 producer_globals_hex=read(0xe500c0, 32).hex())
+    if callback:
+        center,=struct.unpack('<I',read(linked+0x334,4))
+        result.update(callback_global_disable=read(0xe85fad,1)[0],body_d16c_hex=read(body+0xd16c,4).hex(),body_d22c_hex=read(body+0xd22c,4).hex(),global_d1676c_hex=read(0xd1676c,4).hex(),
+            preparation_scale_hex=read(0xe4fc30,4).hex(),preparation_table_hex=read(0xe4fc48,64).hex(),callback_body_state=dict(center_hex=read(center,16).hex(),body_290_before_hex=read(body+0x290,40).hex(),body_2e0_before_hex=read(body+0x2e0,4).hex(),body_15a8_hex=read(body+0x15a8,4).hex(),globals_hex=read(0xe500a4,20).hex()))
+    return result
 
 
 def private(path):
@@ -171,7 +181,7 @@ def main():
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--arm-running', action='store_true',
                         help='Arm after attach without the old debugger pause command')
-    parser.add_argument('--boundary', choices=('placement', 'impact','collection','preparation'), default='placement',
+    parser.add_argument('--boundary', choices=('placement', 'impact','collection','preparation','callback'), default='placement',
                         help='Impact captures whole 9EA6E0 entry/return and bounded contact inputs')
     parser.add_argument('--hardware', action='store_true',
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
@@ -180,15 +190,16 @@ def main():
     parser.add_argument('--body-effects', action='store_true',
                         help='Capture9D4210 inputs/return and its optional original random result before solver')
     args = parser.parse_args()
-    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0,'preparation':0xa06050}[args.boundary]
+    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0,'preparation':0xa06050,'callback':0xa064a0}[args.boundary]
     if args.boundary != 'placement' and not args.arm_running:
         raise ValueError('Impact capture requires the previously validated arm-running workflow')
-    if args.solver_records and (args.boundary != 'impact' or not args.hardware):
+    if args.solver_records and (args.boundary not in ('impact','callback') or not args.hardware):
         raise ValueError('Nested solver records require hardware impact capture')
     if args.body_effects and not args.solver_records:
         raise ValueError('Body effects require hardware impact with nested solver capture')
     if args.boundary=='collection' and not args.hardware:raise ValueError('Collector capture requires hardware breakpoints')
     if args.boundary=='preparation' and not args.hardware:raise ValueError('Preparation capture requires hardware breakpoints')
+    if args.boundary=='callback' and not args.hardware:raise ValueError('Callback capture requires hardware breakpoints')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -384,8 +395,8 @@ def main():
                     raise RuntimeError('Pre-entry exception/attach stop bound')
                 send('erun')
                 wait('[STATE] running', 10)
-            if args.boundary == 'impact':
-                case = impact_arguments(read, sp, ip, ax, index)
+            if args.boundary in ('impact','callback'):
+                case = impact_arguments(read, sp, ip, ax, index,callback=args.boundary=='callback')
                 ret = int(case['return_address'], 16)
             elif args.boundary=='collection':
                 send('log "GRID_COLLECTION_RECEIVER cx={p:ecx}"')
@@ -426,8 +437,10 @@ def main():
                     body_sp=returned[1]
                     body_stack=read(body_sp,20)
                     body_ret,owner,frame,prepared_a,prepared_b=struct.unpack('<5I',body_stack)
-                    if body_ret!=0x9eb553 or owner!=int(case['linked'],16) or prepared_a!=int(case['prepared_a'],16) or prepared_b!=int(case['prepared_b'],16):
+                    if body_ret!=0x9eb553 or owner!=int(case['linked'],16) or (args.boundary!='callback' and (prepared_a!=int(case['prepared_a'],16) or prepared_b!=int(case['prepared_b'],16))):
                         raise ValueError('Body-effect caller/arguments mismatch')
+                    if args.boundary=='callback':
+                        case.update(prepared_a=hex(prepared_a),prepared_b=hex(prepared_b),prepared_a_hex=read(prepared_a,16).hex(),prepared_b_hex=read(prepared_b,16).hex())
                     center,=struct.unpack_from('<I',read(owner+0x334,4))
                     body=int(case['body'],16)
                     case['body_effect']=dict(entry_registers=returned,stack_hex=body_stack.hex(),frame_hex=read(frame,64).hex(),
@@ -505,13 +518,16 @@ def main():
             if args.hardware:
                 send(f'bphc {ret:X}')
             case['return_registers'] = returned
-            if args.boundary == 'impact':
+            if args.boundary in ('impact','callback'):
                 case['descriptor_after_hex'] = read(int(case['descriptor'], 16), 0xa500).hex()
                 case['linked_after_hex'] = read(int(case['linked'], 16), 0x424).hex()
                 if int(case['response'], 16):
                     case['response_after_hex'] = read(int(case['response'], 16), case['contact_count'] * 4).hex()
                 for contact in case['contacts']:
                     contact['after_hex'] = read(int(contact['address'], 16), 0x80).hex()
+                if args.boundary=='callback':
+                    case['callback_result']=returned[2]&255
+                    case['callback_body_state'].update(body_290_after_hex=read(int(case['body'],16)+0x290,40).hex(),body_2e0_after_hex=read(int(case['body'],16)+0x2e0,4).hex())
             elif args.boundary=='collection':
                 count,=struct.unpack('<I',read(int(case['count_address'],16),4))
                 if not 0<=count<=case['capacity']:raise ValueError('Collector output count outside scope')
