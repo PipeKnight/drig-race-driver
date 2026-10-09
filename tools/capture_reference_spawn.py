@@ -146,6 +146,23 @@ def collection_arguments(read,sp,ip,ax,cx,index):
         capacity=capacity,initial_count=0,manager_header_hex=header.hex(),pools=pools)
 
 
+def preparation_arguments(read,sp,ip,ax,index):
+    """Verified A06050 descriptor policy between reduction and collision producer."""
+    stack=read(sp,24);ret,descriptor,linked,direction,inverse,point=struct.unpack('<6I',stack)
+    if ret!=0xa06505:raise ValueError('Unverified preparation caller')
+    body=descriptor-0x2300;size,=struct.unpack('<I',read(0xe85fcc,4))
+    if not 1<=size<=40 or body not in struct.unpack(f'<{size}I',read(0xe85f28,size*4)):raise ValueError('Preparation owner absent from Standard bodies')
+    wrapper,=struct.unpack('<I',read(body+0xdb0,4))
+    if struct.unpack('<I',read(wrapper+8,4))[0]!=linked or struct.unpack('<3I',read(linked+0x418,12))!=(0x9a0c90,0xa064a0,descriptor):raise ValueError('Preparation body/callback registration mismatch')
+    settings,=struct.unpack('<I',read(descriptor+0xa4f8,4))
+    return dict(index=index,entry_registers=[ip,sp,ax],stack_hex=stack.hex(),return_address=hex(ret),body=hex(body),linked=hex(linked),descriptor=hex(descriptor),
+        direction_address=hex(direction),point_address=hex(point),inverse_address=hex(inverse),inverse_hex=read(inverse,64).hex(),
+        direction_before_hex=read(direction,16).hex(),point_before_hex=read(point,16).hex(),linked_before_hex=read(linked,0x424).hex(),
+        descriptor_before_hex=read(descriptor,0xa500).hex(),settings_hex=read(settings,0x1050).hex(),
+        body_d16c_hex=read(body+0xd16c,4).hex(),body_d22c_hex=read(body+0xd22c,4).hex(),global_d1676c_hex=read(0xd1676c,4).hex(),
+        preparation_scale_hex=read(0xe4fc30,4).hex(),preparation_table_hex=read(0xe4fc48,64).hex())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('session', type=Path)
@@ -154,7 +171,7 @@ def main():
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--arm-running', action='store_true',
                         help='Arm after attach without the old debugger pause command')
-    parser.add_argument('--boundary', choices=('placement', 'impact','collection'), default='placement',
+    parser.add_argument('--boundary', choices=('placement', 'impact','collection','preparation'), default='placement',
                         help='Impact captures whole 9EA6E0 entry/return and bounded contact inputs')
     parser.add_argument('--hardware', action='store_true',
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
@@ -163,7 +180,7 @@ def main():
     parser.add_argument('--body-effects', action='store_true',
                         help='Capture9D4210 inputs/return and its optional original random result before solver')
     args = parser.parse_args()
-    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0}[args.boundary]
+    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0,'preparation':0xa06050}[args.boundary]
     if args.boundary != 'placement' and not args.arm_running:
         raise ValueError('Impact capture requires the previously validated arm-running workflow')
     if args.solver_records and (args.boundary != 'impact' or not args.hardware):
@@ -171,6 +188,7 @@ def main():
     if args.body_effects and not args.solver_records:
         raise ValueError('Body effects require hardware impact with nested solver capture')
     if args.boundary=='collection' and not args.hardware:raise ValueError('Collector capture requires hardware breakpoints')
+    if args.boundary=='preparation' and not args.hardware:raise ValueError('Preparation capture requires hardware breakpoints')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -330,6 +348,7 @@ def main():
             record['attach_registers'] = registers('GRID_SPAWN_ATTACH')
         breakpoint(entry, 'GRID_Reference')
         if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
+        if args.boundary=='preparation':send('bphwcond A06050,[csp]==A06505')
         if exit_address is not None:
             breakpoint(exit_address, 'GRID_ExitProcess')
         send('log "GRID_SPAWN_ARMED"')
@@ -373,6 +392,8 @@ def main():
                 match=re.search(r'cx=([0-9A-Fa-f]+)',wait('GRID_COLLECTION_RECEIVER cx=',10))
                 if not match:raise ValueError('Missing collector receiver')
                 case=collection_arguments(read,sp,ip,ax,int(match[1],16),index);ret=int(case['return_address'],16)
+            elif args.boundary=='preparation':
+                case=preparation_arguments(read,sp,ip,ax,index);ret=int(case['return_address'],16)
             else:
                 stack = read(sp, 28)
                 words = struct.unpack('<7I', stack)
@@ -498,6 +519,12 @@ def main():
                 known={int(e['address'],16) for p in case['pools'] for e in p['entries']}
                 if any(p not in known for p in pointers):raise ValueError('Collector returned unknown contact')
                 case['contact_count']=count;case['output_pointers']=[hex(p) for p in pointers]
+            elif args.boundary=='preparation':
+                case['descriptor_after_hex']=read(int(case['descriptor'],16),0xa500).hex()
+                case['linked_after_hex']=read(int(case['linked'],16),0x424).hex()
+                case['direction_after_hex']=read(int(case['direction_address'],16),16).hex()
+                case['point_after_hex']=read(int(case['point_address'],16),16).hex()
+                case['inverse_after_hex']=read(int(case['inverse_address'],16),64).hex()
             else:
                 case['pose_hex'] = read(pose, 64).hex()
             with (out / f'case-{index:02}.json').open('x', encoding='utf-8') as f:
@@ -506,6 +533,7 @@ def main():
             if index + 1 < args.cases:
                 breakpoint(entry, 'GRID_Reference')
                 if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
+                if args.boundary=='preparation':send('bphwcond A06050,[csp]==A06505')
                 send('erun')
                 wait('[STATE] running', 10)
         record['completed'] = True
