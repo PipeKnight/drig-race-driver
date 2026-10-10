@@ -1,0 +1,97 @@
+/* Bounded whole 9E41F0 adapter, called after the real packed world is installed.
+   Address-looking input words are opaque; consumed pointers must be zero and
+   are relocated only to owned allocations. No helper replacements/code writes. */
+typedef void (__fastcall *SuspensionPrepare)(void *,void *,float);
+static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *request,const wchar_t *output,
+    SurfaceRecord *materials,unsigned material_count,unsigned *completed){
+    unsigned error=0,protected=0,number=0,tag=0;
+    FILE *input=NULL,*result=NULL;
+    unsigned char *saved=malloc(0x4000);if(!saved)return 60;
+    const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000};DWORD protections[4];
+    IMAGE_NT_HEADERS32 *pe=(IMAGE_NT_HEADERS32 *)(image+((IMAGE_DOS_HEADER *)image)->e_lfanew);
+    IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
+    unsigned char *code=malloc(pe->OptionalHeader.SizeOfImage);
+    if(!code){free(saved);return 60;}memcpy(code,image,pe->OptionalHeader.SizeOfImage);
+    for(unsigned i=0;i<4;i++){
+        unsigned char *page=image+pages[i]-0x400000;
+        memcpy(saved+i*4096,page,4096);
+        if(!VirtualProtect(page,4096,PAGE_READWRITE,protections+i)){error=61;goto finish;}
+        ++protected;
+    }
+    if(!materials||!material_count||_wfopen_s(&input,request,L"rb")||!input){error=62;goto finish;}
+    if(fread(&tag,4,1,input)!=1||tag!=0x31305053||fread(&number,4,1,input)!=1||!number||number>128){error=63;goto finish;}
+    unsigned char *records=malloc((size_t)number*0x2608);
+    if(!records){error=64;goto finish;}
+    if(fread(records,0x2608,number,input)!=number||fgetc(input)!=EOF||ferror(input)){free(records);error=65;goto finish;}
+    for(unsigned index=0;index<number;index++){
+        unsigned char *record=records+index*0x2608;
+        __declspec(align(16)) unsigned char body[0x2600];memcpy(body,record+8,sizeof(body));
+        unsigned char *context=body+0x3d0;float delta;memcpy(&delta,record+4,4);
+        if(getword(record)!=index||!isfinite(delta)||delta<=0||delta>.1f||!isfinite(1.f/delta)||getword(context+0x5d8)!=4
+            ||context[0x70c]||getword(context+0x604)||getword(context+0x5d4)||getword(context+0x608)||getword(context+0x60c)){error=66;break;}
+        const unsigned finite_blocks[][2]={{0xb20,32},{0x15a0,1},{0x15a8,3},{0x15c0,24},{0x1650,16},{0xac0,3},{0x159c,1},{0x1648,1},{0x12ac,1}};
+        for(unsigned i=0;i<sizeof(finite_blocks)/sizeof(*finite_blocks);i++)for(unsigned j=0;j<finite_blocks[i][1];j++){
+            float value;memcpy(&value,body+finite_blocks[i][0]+j*4,4);if(!isfinite(value)){error=67;break;}
+        }
+        if(*(float *)(body+0x15a0)<=0)error=67;
+        for(unsigned j=0;j<3;j++)if(*(float *)(context+0x6f0+j*4)<=0)error=67;
+        for(unsigned i=0;i<4;i++){
+            unsigned char *c=context+i*0x170,*w=body+0x1990+i*0x150;
+            if(getword(c+0x178)||getword(c+0x17c)){error=68;break;}
+            const unsigned offsets[]={0,4,8,12,0x3c,0x40,0x48,0x4c,0x5c,0xe0,0x110,0x140};
+            for(unsigned j=0;j<sizeof(offsets)/sizeof(*offsets);j++){float v;memcpy(&v,w+offsets[j],4);if(!isfinite(v))error=69;}
+            if(*(float *)(w+0xe0)<=0||*(float *)(w+0x48)>*(float *)(w+0x4c))error=69;
+            for(unsigned j=0;j<4;j++)if(!isfinite(*(float *)(c+0x50+j*4)))error=69;
+            const unsigned history[]={0x6c,0x7c,0x80};
+            for(unsigned j=0;j<3;j++)if(!isfinite(*(float *)(c+history[j])))error=69;
+            for(unsigned j=0;j<5;j++){
+                float angle=*(float *)(body+0x30c+i*40+j*8),radius=*(float *)(body+0x310+i*40+j*8);
+                if(!isfinite(angle)||!isfinite(radius)||radius<=0)error=69;
+            }
+            *(unsigned *)(c+0x178)=(unsigned)(uintptr_t)w;
+        }
+        if(error)break;
+        __declspec(align(16)) unsigned char table[0x20]={0};unsigned entry[3]={0};
+        *(unsigned *)(table+0xc)=1;*(unsigned *)(table+0x14)=(unsigned)(uintptr_t)entry;
+        *(unsigned *)(context+0x608)=(unsigned)(uintptr_t)table;
+        *(unsigned *)(context+0x5d4)=(unsigned)(uintptr_t)body;
+        *(unsigned *)(image+0xec2c54-0x400000)=0;
+        __try {((SuspensionPrepare)(image+0x9e41f0-0x400000))(context,NULL,delta);}
+        __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"case=%u fault=%08lx\n",index,GetExceptionCode());error=70;}
+        if(error)break;
+        *(unsigned *)(context+0x608)=0;*(unsigned *)(context+0x5d4)=0;
+        for(unsigned i=0;i<4;i++){
+            unsigned char *c=context+i*0x170,*w=body+0x1990+i*0x150;
+            if(getword(c+0x178)!=(unsigned)(uintptr_t)w){error=71;break;}
+            *(unsigned *)(c+0x178)=0;
+            unsigned token=getword(w+0xc0);uintptr_t base=(uintptr_t)materials;
+            if(token){
+                if(token<base||token>=base+material_count*sizeof(SurfaceRecord)||(token-base)%sizeof(SurfaceRecord)){error=72;break;}
+                *(unsigned *)(w+0xc0)=(unsigned)((token-base)/sizeof(SurfaceRecord))+1;
+            }
+            *(unsigned *)(w+0xc4)=getword(w+0xc4)!=0;*(unsigned *)(w+0xc8)=getword(w+0xc8)!=0;
+        }
+        if(error)break;
+        memcpy(record+8,body,sizeof(body));++*completed;
+    }
+    if(!error){
+        HANDLE handle=CreateFileW(output,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(handle==INVALID_HANDLE_VALUE)error=73;
+        else {int fd=_open_osfhandle((intptr_t)handle,_O_BINARY);
+            if(fd<0){CloseHandle(handle);error=73;}else{result=_fdopen(fd,"wb");if(!result){_close(fd);error=73;}}
+        }
+        if(!error&&(fwrite(&tag,4,1,result)!=1||fwrite(&number,4,1,result)!=1||fwrite(records,0x2608,number,result)!=number))error=74;
+    }
+    free(records);
+finish:
+    for(unsigned i=0;i<protected;i++){
+        unsigned char *page=image+pages[i]-0x400000;memcpy(page,saved+i*4096,4096);
+        DWORD ignored;if(!VirtualProtect(page,4096,protections[i],&ignored))error=75;
+    }
+    for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE){
+        size_t length=sections[i].Misc.VirtualSize>sections[i].SizeOfRawData?sections[i].Misc.VirtualSize:sections[i].SizeOfRawData;
+        if(memcmp(code+sections[i].VirtualAddress,image+sections[i].VirtualAddress,length))error=76;
+    }
+    if(input&&fclose(input))error=77;if(result&&fclose(result))error=77;
+    free(code);free(saved);printf("suspension_preparation_records=%u error=%u code_unchanged=%u\n",*completed,error,error!=76);return error;
+}

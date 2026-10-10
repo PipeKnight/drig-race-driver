@@ -56,6 +56,9 @@ static int prepare(unsigned char *chunk,unsigned size,Object *object){
 typedef void (__fastcall *InitializeContacts)(void *,void *,int);
 typedef unsigned *(__fastcall *MaterialLookup)(void *,void *,unsigned);
 typedef struct { __declspec(align(16)) unsigned char data[0xb0]; } SurfaceRecord;
+#ifdef GRID_SUSPENSION_PREPARE
+#include "suspension_prepare_probe.h"
+#endif
 int wmain(int argc,wchar_t **argv){
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=5&&argc!=6)return 2;
     unsigned char *image=map_reference(argv[1]);if(!image)return 3;
@@ -109,6 +112,11 @@ int wmain(int argc,wchar_t **argv){
     }
 
     unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 37;
+#ifdef GRID_SUSPENSION_PREPARE
+    *cache=0;
+    *(unsigned *)(image+0xe85b1c-0x400000)=number;
+    unsigned count=0,error=run_suspension_prepare(image,argv[3],argv[4],source_materials,source_count,&count);
+#else
     FILE *input=NULL;
     if(_wfopen_s(&input,argv[3],L"r")||!input)return 4;
     HANDLE handle=CreateFileW(argv[4],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
@@ -190,6 +198,7 @@ int wmain(int argc,wchar_t **argv){
     }
     if(ferror(input)||ferror(output))error=14;
     fclose(input);if(fclose(output))error=15;
+#endif
     if(!VirtualProtect(image+0xe81000-0x400000,0x5000,oldgrid,&ignored)||!VirtualProtect(image+0xec2000-0x400000,0x1000,oldcache,&ignored)||!VirtualProtect(image+0xe58000-0x400000,0x1000,oldnormal,&ignored))error=36;
     _aligned_free(source_materials);free(source_rows);_aligned_free(objects);free(raw);VirtualFree(image,0,MEM_RELEASE);printf("track_contact_cases=%u error=%u\n",count,error);return error;
 }
