@@ -62,3 +62,25 @@ Failures/uncertainty retained:
 Rust/Cargo1.99.0, Python3.12.14, MSVC14.44.35207/SDK10.0.26100.0, Ghidra12.1.4/JDK21.0.9, Capstone5.0.6 reused. No installation or desktop input/owner help. Proprietary evidence stays in ignored `local/`.
 
 Next integrate the existing optional correction into this whole manager; then active preparation/bulk callbacks, shape/link publication and actual pose-advance scheduling. Preserve natural bypasses and prove larger joined paths against original whole functions. Asset/vehicle initialization, contact generation and Bevy driving remain open; completion estimates unchanged. Temporary unattended work ends07:30UTC.
+
+## Optional correction integration draft — F160
+
+**Status: compiled native/debug draft only; numerical verification has not run.** This section records unfinished work and does not extend the verified F159 contract above. F159 commits `66c1444` and `9386493` were pushed to owner origin/main; its last independently confirmed head is `93864931e18dd1a51452030a0afb3f1a646da3e4`.
+
+The uncommitted `impact_frame.rs` extension accepts optional correction settings and invokes the previously verified `impact_correction::calculate` after successful main solving, before force cleanup/damping/limits/pending-shift publication. It adapts normal rows, response workspace and pose publications while retaining main contact impulses and tangent rows. `main_contact_response::typed` becomes crate-visible for this adapter. Existing `grid-physical-frame` explicitly selects no correction. New `grid-corrected-physical-frame` supplies correction settings; the separate older `grid-impact-frame` remains untouched.
+
+New authored research tools are `tools/probe_corrected_impact_frame.c`, `tools/build_corrected_impact_frame_probe.cmd` and `tools/validate_corrected_impact_frame.py`. The whole-original target remains B7B850 with naturally absent callbacks, empty other/joint pools and no body links/shapes. PFR2 adds five words after each original 144-byte PFR1 case header: correction iterations, softness, scale, threshold and relaxation. These initialize original manager +F4/+E0/+E4/+E8/+F0. Static file inspection established D85A50 as positive zero (bits00000000), used by the outer optional-pass relaxation guard. This is a static observation, not execution validation.
+
+The native probe compiled with MSVC14.44.35207/SDK10.0.26100.0 (`/W4 /WX /O2 /MT /std:c17 /fp:strict /arch:SSE2`) and has SHA256 `d5061ab307ece7dae07d97e3a2915962facc6f5867f692a4377a7ce9e01acfbe`. The debug Rust diagnostic compiled with Rust/Cargo1.99.0. An initial unused-config warning revealed the new diagnostic still selected `None`; corrected to supply its parsed settings and rebuilt without that warning. Python3.12.14 is the intended validator runtime. No new tools were installed.
+
+The first attempted comparison, targeting `local/behavior/corrected-impact-frame-20261010-debug-01`, **did not execute**. Automatic approval review reported that its service usage limit had been reached and could not complete review. It explicitly distinguished review failure from an unsafe-action determination. No bypass, alternate execution route or successful comparison is claimed. Release compilation, final tests/fmt/Clippy and native malformed-input guards remain pending. F159's existing passing tests do not validate the modified working tree.
+
+Resume in a new authorized work session:
+
+1. Read PROJECT_LOG.md and inspect the dirty tree; preserve the draft and this handoff.
+2. Once normal approval review is available, run the new validator in debug. It first replays F159 original/new Rust as a regression, then compares complete corrected original/repeat/Rust outputs for the same 695 scenarios with varied correction settings.
+3. Inspect complete normal-span reset, tangent-pointer canonicalization after span shrinking, inactive/active correction, pose publication followed by pending shifts, main impulse retention and cleanup. These are planned checks, not passed results.
+4. Repair any mismatch, build release and repeat numerical/semantic/malformed checks. Run relevant library tests, formatting and all-target warnings-denied Clippy against the final state.
+5. Record actual counts/hashes/failures and preservation evidence, then split verified research and Rust changes into focused commits and push owner origin. Continue toward active callbacks/contact production and actual vehicle/pose scheduling; no drivable-loop claim yet.
+
+On the next resumed wake, the clock was 10 October 2026 10:58:50 UTC, already beyond the unattended deadline. No further research execution or desktop control was started. The temporary automation was paused through the app API, confirmed PAUSED; its deadline was not extended. The repository retains the F160 draft for later work. The project itself remains open.
