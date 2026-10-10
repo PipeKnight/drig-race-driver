@@ -1,5 +1,7 @@
 # Physical contact handoff — 10 October 2026
 
+F158 now verifies the whole impact-only B7ACC0 manager, including initial construction, main normal/friction solve, contact/body impulse publication, force/velocity integration and empty/capacity bypasses: [complete impact step](IMPACT_STEP.md).695scenarios/25,809rows/3,841,665words match in debug/release. Outer body preparation/final pose integration, other pools and vehicle wiring remain open; statements below retain the dependency-selection history.
+
 F157 now joins whole main response preparation with all four normal/friction solve spans, including constructed-row handoffs and unchanged shared-path regressions: [main contact response](MAIN_CONTACT_RESPONSE.md).695scenarios/34,517rows match in both profiles. Whole B7ACC0 construction/writeback/velocity integration is next; historical open-tangent statements below describe earlier checkpoints.
 
 F156 now verifies complete initial single/two-body contact builders, material/cache/compliance helpers and all grouped friction rows: [initial contact rows](CONTACT_ROWS.md). Whole original/repeat/Rust match711scenarios in both profiles, including5,840freshly replayed accumulator operands. Main preparation and normal+friction iteration composition are next; historical unverified-builder statements below describe earlier checkpoints.
