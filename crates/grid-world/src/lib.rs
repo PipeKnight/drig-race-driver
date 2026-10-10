@@ -19,6 +19,7 @@ pub mod deformation_impact;
 pub mod deformation_settle;
 pub mod dynamics;
 pub mod finalize;
+pub mod force_equations;
 pub mod force_view;
 pub mod grid_population;
 pub mod grip_history;
