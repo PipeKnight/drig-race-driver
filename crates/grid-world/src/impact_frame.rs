@@ -78,8 +78,7 @@ fn asleep(b: &mut Body, s: &impact_step::Body, delta: f32) -> bool {
         }
     }
 }
-#[allow(clippy::assign_op_pattern)] // Preserve original force and damping operand order.
-pub fn calculate(input: &Input) -> Result<Output, Error> {
+pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     let delta = input.step.parameters[0];
     if input.bodies.len() != input.step.bodies.len()
         || input.correction.as_ref().is_some_and(|c| {
@@ -116,8 +115,14 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     {
         return Err(Error("invalid impact frame input"));
     }
+    impact_step::validate(&input.step)
+}
+
+#[allow(clippy::assign_op_pattern)] // Preserve original force and damping operand order.
+pub fn calculate(input: &Input) -> Result<Output, Error> {
+    validate(input)?;
+    let delta = input.step.parameters[0];
     let s = &input.step;
-    impact_step::validate(s)?;
     let mut out = Output {
         status: 0,
         started: false,
@@ -530,5 +535,26 @@ mod tests {
             assert!(!o.correction_active);
             assert!(o.publications[0].is_none());
         }
+    }
+    #[test]
+    fn physical_tick_advances_before_zero_iteration_bypass() {
+        let mut input = input();
+        input.step.iterations = 0;
+        input.step.bodies[0].contact.linear = [2., 0., 0., 0.];
+        let o = crate::physical_tick::calculate(&input).unwrap();
+        assert!(!o.frame.started);
+        assert_eq!(o.advanced[0].corrected[3], [0.2, 0., 0., 1.]);
+        assert_eq!(o.frame.step.bodies[0].contact.position, [0.2, 0., 0., 1.]);
+        assert_eq!(o.frame.step.bodies[0].contact.linear, [2., 0., 0., 0.]);
+    }
+    #[test]
+    fn physical_tick_uses_incoming_velocity_before_new_gravity() {
+        let mut input = input();
+        input.step.bodies[0].contact.linear = [1., 0., 0., 0.];
+        let o = crate::physical_tick::calculate(&input).unwrap();
+        assert!(o.frame.started);
+        assert_eq!(o.advanced[0].corrected[3], [0.1, 0., 0., 1.]);
+        assert_eq!(o.frame.step.bodies[0].contact.position, [0.1, 0., 0., 1.]);
+        assert_eq!(o.frame.step.bodies[0].contact.linear, [1., -1., 0., 0.]);
     }
 }

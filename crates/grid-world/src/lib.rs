@@ -37,6 +37,7 @@ pub mod packed_shape;
 pub mod packed_world;
 pub mod physical_pose;
 pub mod physical_response;
+pub mod physical_tick;
 pub mod pose;
 pub mod rectangle_cull;
 pub mod response_consumption;

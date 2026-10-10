@@ -103,21 +103,29 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
             corrected[2] = corrected[2].map(|v| -v);
         }
     }
+    publish(corrected, input.offset, input.local_matrices, &input.shapes)
+}
+
+pub(crate) fn publish(
+    corrected: Matrix,
+    offset: [f32; 4],
+    local_matrices: [Matrix; 2],
+    shape_matrices: &[Option<Matrix>],
+) -> Result<Output, Error> {
     let mut published = corrected;
-    let o = input.offset;
+    let o = offset;
     published[3] = std::array::from_fn(|i| {
         corrected[3][i]
             - ((o[3] * corrected[3][i] + o[1] * corrected[1][i])
                 + (o[2] * corrected[2][i] + o[0] * corrected[0][i]))
     });
-    let shapes: Vec<_> = input
-        .shapes
+    let shapes: Vec<_> = shape_matrices
         .iter()
         .map(|local| local.map_or(published, |m| multiply(m, published)))
         .collect();
     let mut orientation = corrected;
     orientation[3] = [0., 0., 0., 1.];
-    let derived = input.local_matrices.map(|local| {
+    let derived = local_matrices.map(|local| {
         let middle = multiply(local, orientation);
         std::array::from_fn(|r| {
             std::array::from_fn(|i| {
