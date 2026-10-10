@@ -54,4 +54,8 @@ Python3.12.14, Rust/Cargo1.99.0, MSVC14.44.35207/SDK10.0.26100.0 reused; no inst
 
 ## Next actions and limits
 
+Research8ef315d and Rust5a5d39f are pushed to owner origin/main; remote head independently matches5a5d39fbf0a243351ae1cad987151d67cf3775c3. Private publication record: `local/behavior/github-impact-correction-sync-20261010.md`.
+
 Prioritize initial physical normal-row construction and main solver integration, while retaining this verified optional impact-only pass. AEF930/AEFBB0 multirow/joint-style helpers are statically recovered, with disabled/prefix/axis/special branches, but not implemented or executed here. Original nonempty pools with zero normal rows are outside the one-row-per-impact-contact contract. Initial constraints, friction/tangent rows, live ownership/cadence/enabling parameters, vehicle initialization and a drivable Bevy loop remain open. Completion estimates stay unchanged.
+
+Next-path preparation: complete aligned B0D1B0/B0E040 and material mixerB3B130 are retained in `local/behavior/initial-contact-row-aligned-20261010.json`. Private044415survey recovers count/batch metadataB0CD20/B0CD50 and impulse writebackB0EBB0/B0EC60. Private044432survey recovers B82550 compliance/fallback arithmetic and4B1A70 vector-lane access. The builders call those plus original67C200 cross; grouped contacts generate normal and additional tangent rows. Compare the whole builders, context mutations, material equal/cached/mixed branches and output rows, rather than verifying another unrelated scalar component. Ghidra integer/float casts are not authoritative numerical types; aligned x87/SSE arithmetic and full original execution must establish rounding. No new execution/equivalence claim for these prepared dependencies.
