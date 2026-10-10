@@ -40,8 +40,7 @@ pub struct Output {
     pub pending: Vec<Pending>,
 }
 
-#[allow(clippy::assign_op_pattern)] // Preserve pending/current and current/accumulator order.
-pub fn consume(input: Input<'_>) -> Result<Output, Error> {
+pub(crate) fn validate(input: &Input<'_>) -> Result<(), Error> {
     if input.owner == 0
         || input.contacts.len() > 512
         || input.selected.len() > 80
@@ -80,6 +79,12 @@ pub fn consume(input: Input<'_>) -> Result<Output, Error> {
         }
         owners.push(owner);
     }
+    Ok(())
+}
+
+#[allow(clippy::assign_op_pattern)] // Preserve pending/current and current/accumulator order.
+pub fn consume(input: Input<'_>) -> Result<Output, Error> {
+    validate(&input)?;
     let mut output = Output {
         contacts: input.contacts.to_vec(),
         response: input.response.to_vec(),

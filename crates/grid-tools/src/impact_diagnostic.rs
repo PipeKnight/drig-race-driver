@@ -33,6 +33,26 @@ fn take<'a>(
     Ok(result)
 }
 pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
+    run_mode(callback, false)
+}
+pub fn run_serial() -> Result<(), Box<dyn std::error::Error>> {
+    run_mode(true, true)
+}
+fn write_consumption(
+    output: &mut Vec<u8>,
+    contacts: &[grid_world::response_consumption::Contact],
+    pending: &[grid_world::response_consumption::Pending],
+) {
+    for contact in contacts {
+        output.extend(contact.accumulated.to_le_bytes());
+    }
+    output.extend((pending.len() as u32).to_le_bytes());
+    for pair in pending {
+        output.extend((pair.contact - 1).to_le_bytes());
+        output.extend(pair.value.to_le_bytes());
+    }
+}
+fn run_mode(callback: bool, serial: bool) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
         return Err("usage: grid-impact-producer INPUT.bin local/OUTPUT.bin".into());
@@ -44,9 +64,14 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
     let mut cursor = 0;
     let header = take(&data, &mut cursor, 8)?;
     let cases = word(header, 4) as usize;
-    if word(header, 0) != if callback { 0x31434349 } else { 0x31574349 }
-        || !(1..=1024).contains(&cases)
-    {
+    let magic = if serial {
+        0x31435349
+    } else if callback {
+        0x31434349
+    } else {
+        0x31574349
+    };
+    if word(header, 0) != magic || !(1..=1024).contains(&cases) {
         return Err("invalid input header".into());
     }
     let mut output = header.to_vec();
@@ -66,6 +91,7 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
         let corner_scale = number(take(&data, &mut cursor, 4)?, 0);
         let static_mass = number(take(&data, &mut cursor, 4)?, 0);
         let mut contacts = Vec::with_capacity(count);
+        let mut roles = Vec::with_capacity(count);
         for _ in 0..count {
             let c = take(&data, &mut cursor, 0x80)?;
             let has_other = word(take(&data, &mut cursor, 4)?, 0);
@@ -73,6 +99,7 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
                 return Err("invalid counterpart flag".into());
             }
             let other = vector(take(&data, &mut cursor, 16)?, 0);
+            roles.push((c[0xc] == 0, has_other != 0));
             contacts.push(Contact {
                 enabled: c[0x73] != 0,
                 reverse: c[0xc] == 0 && word(c, 8) == old_linked,
@@ -123,6 +150,57 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
         } else {
             None
         };
+        let mut consumed_contacts = Vec::new();
+        let mut pending = Vec::new();
+        let selected: Vec<_> = (0..count).collect();
+        if serial {
+            use grid_world::response_consumption::{Contact as ConsumedContact, Owner, Pending};
+            if present != 1 || values.iter().any(|&v| v != 0.) {
+                return Err("serial wrapper requires zero initialized response operands".into());
+            }
+            let pending_count = word(take(&data, &mut cursor, 4)?, 0) as usize;
+            if pending_count > 240 {
+                return Err("pending pairs exceed bound".into());
+            }
+            for (i, g) in contacts.iter().enumerate() {
+                let registered = word(take(&data, &mut cursor, 4)?, 0);
+                if registered > 1 || (registered != 0 && !roles[i].1) {
+                    return Err("invalid other-owner registration".into());
+                }
+                let current = Some(Owner {
+                    identity: 1,
+                    registered: true,
+                });
+                let other = roles[i].1.then_some(Owner {
+                    identity: 2 + i as u32,
+                    registered: registered != 0,
+                });
+                let (first, second) = if g.reverse {
+                    (other, current)
+                } else {
+                    (current, other)
+                };
+                consumed_contacts.push(ConsumedContact {
+                    identity: 1 + i as u32,
+                    first,
+                    second,
+                    second_is_body: roles[i].0,
+                    accumulated: g.value_38,
+                });
+            }
+            for _ in 0..pending_count {
+                let pair = take(&data, &mut cursor, 8)?;
+                let index = word(pair, 0) as usize;
+                let value = number(pair, 4);
+                if index >= count || !value.is_finite() {
+                    return Err("invalid pending pair".into());
+                }
+                pending.push(Pending {
+                    contact: 1 + index as u32,
+                    value,
+                });
+            }
+        }
         let edge_count = word(&d, 0xa410) as usize;
         if edge_count > 1200 {
             return Err("edge count exceeds bound".into());
@@ -214,15 +292,29 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
                 subtract_baseline: globals[4] != 0,
             },
         };
+        let mut consumption = None;
         let result = if let Some((disabled, policy)) = preparation {
-            let result =
-                grid_world::collision_callback::calculate(grid_world::collision_callback::Input {
-                    producer: input,
-                    intensity: number(&d, 0xa494),
-                    descriptor_disabled: d[0xa4af] != 0,
-                    global_disabled: disabled,
-                    policy,
-                })?;
+            let callback_input = grid_world::collision_callback::Input {
+                producer: input,
+                intensity: number(&d, 0xa494),
+                descriptor_disabled: d[0xa4af] != 0,
+                global_disabled: disabled,
+                policy,
+            };
+            let result = if serial {
+                let result =
+                    grid_world::serial_callback::calculate(grid_world::serial_callback::Input {
+                        callback: callback_input,
+                        owner: 1,
+                        contacts: &consumed_contacts,
+                        selected: &selected,
+                        pending: &pending,
+                    })?;
+                consumption = result.consumption;
+                result.callback
+            } else {
+                grid_world::collision_callback::calculate(callback_input)?
+            };
             if let Some(active) = result.activation {
                 d[0xa4a0..0xa4a4].copy_from_slice(&1u32.to_le_bytes());
                 d[0xa454..0xa458].copy_from_slice(&active.strength.to_le_bytes());
@@ -238,10 +330,14 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
                 output.extend(history);
                 output.extend(history_extra.to_le_bytes());
                 output.extend(seed.to_le_bytes());
-                for v in values {
-                    output.extend(v.to_le_bytes());
+                if serial {
+                    write_consumption(&mut output, &consumed_contacts, &pending);
+                } else {
+                    for v in values {
+                        output.extend(v.to_le_bytes());
+                    }
+                    output.extend(0u32.to_le_bytes());
                 }
-                output.extend(0u32.to_le_bytes());
                 continue;
             }
         } else {
@@ -273,11 +369,16 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
         }
         output.extend(result.body.history_extra.to_le_bytes());
         output.extend(result.body.random_seed.to_le_bytes());
-        for v in result.response.response.unwrap_or(values) {
-            output.extend(v.to_le_bytes());
-        }
-        if callback {
-            output.extend(1u32.to_le_bytes());
+        if serial {
+            let consumed = consumption.ok_or("serial callback missing consumption")?;
+            write_consumption(&mut output, &consumed.contacts, &consumed.pending);
+        } else {
+            for v in result.response.response.unwrap_or(values) {
+                output.extend(v.to_le_bytes());
+            }
+            if callback {
+                output.extend(1u32.to_le_bytes());
+            }
         }
     }
     if cursor != data.len() {
@@ -296,7 +397,9 @@ pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
     file.flush()?;
     println!(
         "{}_cases={cases}",
-        if callback {
+        if serial {
+            "serial_callback"
+        } else if callback {
             "collision_callback"
         } else {
             "impact_producer"
