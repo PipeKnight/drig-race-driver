@@ -1,5 +1,7 @@
 # Physical contact handoff — 10 October 2026
 
+F155 now executes the whole optional correction manager with impact pools only, joining bias→normalization→iteration→complete pose publication, including all inactive/empty/zero-iteration bypass behavior: [joined impact correction](IMPACT_CORRECTION.md). Other pools, initial constraints and the main physical frame remain open; the dependency-selection history below predates that comparison.
+
 Static analysis locates the serial callback/consumer inside the larger physical update. This is a map of dependencies, not verification of a whole physical frame or live scheduling.
 
 The outer update at B7B850 gathers contacts into four ordered pools, calls preparation manager B78530, runs the physical solver B7ACC0 and, on its successful branch, invokes impact manager B78710. The latter contains F151's verified serial callback/consumer. An optional correction pass B7B5E0 follows when manager +F4 is nonzero and +F0 exceeds global D85A50; body publication helpers follow it. The precise meanings of these enabling fields and live cadence remain unresolved.
