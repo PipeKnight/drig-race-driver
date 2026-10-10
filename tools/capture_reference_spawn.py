@@ -9,6 +9,7 @@ from ctypes import wintypes as W
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import queue
 import re
@@ -199,6 +200,47 @@ def preparation_arguments(read,sp,ip,ax,index):
         preparation_scale_hex=read(0xe4fc30,4).hex(),preparation_table_hex=read(0xe4fc48,64).hex())
 
 
+def wheel_force_arguments(read, sp, ip, ax, index):
+    """Read the selected whole cdecl force update while its stack view is live."""
+    stack = read(sp, 16)
+    ret, body, delta_word = struct.unpack_from('<3I', stack)
+    delta = struct.unpack('<f', struct.pack('<I', delta_word))[0]
+    if ret != 0xa04182 or not math.isfinite(delta) or not 0 < delta <= .25:
+        raise ValueError('Unverified wheel-force caller/delta')
+    count, = struct.unpack('<I', read(0xe85fcc, 4))
+    if not 1 <= count <= 40 or body not in struct.unpack(f'<{count}I', read(0xe85f28, count*4)):
+        raise ValueError('Wheel-force owner absent from Standard bodies')
+    before = read(body, 0x2600)
+    if before[0xadc] != 0 or struct.unpack_from('<I', before, 0x1620)[0] != 4:
+        raise ValueError('Wheel-force selection/wheel count outside scope')
+    mode, = struct.unpack_from('<I', before, 0x1598)
+    driven_count, = struct.unpack_from('<I', before, 0x18f0)
+    driven = struct.unpack_from(f'<{driven_count}I', before, 0x18d8) if driven_count <= 4 else ()
+    wheel_addresses = {body+0x1990+i*0x150 for i in range(4)}
+    if mode > 2 or driven_count > 4 or len(set(driven)) != driven_count or any(p not in wheel_addresses for p in driven):
+        raise ValueError('Wheel-force mode/driven ownership outside scope')
+    materials = []
+    for i in range(4):
+        wheel = 0x1990+i*0x150
+        if struct.unpack_from('<I', before, wheel+0x34)[0] != body+0x15a0:
+            raise ValueError('Wheel-force matrix owner mismatch')
+        # 9B5660 follows wheel+C0 and reads pointed+64, not wheel+64.
+        pointer, = struct.unpack_from('<I', before, wheel+0xc0)
+        materials.append(dict(wheel=i, address=hex(pointer), before_hex=read(pointer, 0x140).hex() if pointer else None))
+    view, = struct.unpack_from('<I', before)
+    view_before = read(view, 0x300)
+    solver, = struct.unpack_from('<I', view_before)
+    # Entry storage may contain stale counts from another car. Preserve raw bytes;
+    # never interpret them or read variable-length buffers before this call resets it.
+    solver_before = read(solver, 0xdd0)
+    return dict(index=index, entry_registers=[ip, sp, ax], stack_hex=stack.hex(),
+                return_address=hex(ret), body=hex(body), delta_word=f'{delta_word:08x}',
+                view=hex(view), solver=hex(solver), mode=mode, driven_count=driven_count,
+                body_before_hex=before.hex(), view_before_hex=view_before.hex(),
+                solver_before_hex=solver_before.hex(), materials=materials,
+                engine_limit_hex=read(0xd16348, 4).hex(), friction_diagnostics_before_hex=read(0xe85df0, 32).hex())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('session', type=Path)
@@ -207,8 +249,8 @@ def main():
     parser.add_argument('--timeout', type=int, default=600)
     parser.add_argument('--arm-running', action='store_true',
                         help='Arm after attach without the old debugger pause command')
-    parser.add_argument('--boundary', choices=('placement', 'impact','collection','owners','preparation','callback'), default='placement',
-                        help='Impact captures whole 9EA6E0 entry/return and bounded contact inputs')
+    parser.add_argument('--boundary', choices=('placement', 'impact','collection','owners','preparation','callback','wheel-force'), default='placement',
+                        help='Select a guarded entry/return boundary; wheel-force captures whole 9DF8B0')
     parser.add_argument('--hardware', action='store_true',
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
     parser.add_argument('--solver-records', action='store_true',
@@ -216,7 +258,7 @@ def main():
     parser.add_argument('--body-effects', action='store_true',
                         help='Capture9D4210 inputs/return and its optional original random result before solver')
     args = parser.parse_args()
-    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0,'owners':0xb77770,'preparation':0xa06050,'callback':0xa064a0}[args.boundary]
+    entry = {'placement':ENTRY,'impact':0x9ea6e0,'collection':0xb775d0,'owners':0xb77770,'preparation':0xa06050,'callback':0xa064a0,'wheel-force':0x9df8b0}[args.boundary]
     if args.boundary != 'placement' and not args.arm_running:
         raise ValueError('Impact capture requires the previously validated arm-running workflow')
     if args.solver_records and (args.boundary not in ('impact','callback') or not args.hardware):
@@ -227,6 +269,7 @@ def main():
     if args.boundary=='owners' and not args.hardware:raise ValueError('Owner capture requires hardware breakpoints')
     if args.boundary=='preparation' and not args.hardware:raise ValueError('Preparation capture requires hardware breakpoints')
     if args.boundary=='callback' and not args.hardware:raise ValueError('Callback capture requires hardware breakpoints')
+    if args.boundary=='wheel-force' and not args.hardware:raise ValueError('Wheel-force capture requires hardware breakpoints')
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -404,6 +447,7 @@ def main():
         breakpoint(entry, 'GRID_Reference')
         if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
         if args.boundary=='preparation':send('bphwcond A06050,[csp]==A06505')
+        if args.boundary=='wheel-force':send('bphwcond 9DF8B0,[csp]==A04182')
         if exit_address is not None:
             breakpoint(exit_address, 'GRID_ExitProcess')
         send('log "GRID_SPAWN_ARMED"')
@@ -454,6 +498,8 @@ def main():
                 case=owner_arguments(read,sp,ip,ax,int(match[1],16),index);ret=int(case['return_address'],16)
             elif args.boundary=='preparation':
                 case=preparation_arguments(read,sp,ip,ax,index);ret=int(case['return_address'],16)
+            elif args.boundary=='wheel-force':
+                case=wheel_force_arguments(read,sp,ip,ax,index);ret=int(case['return_address'],16)
             else:
                 stack = read(sp, 28)
                 words = struct.unpack('<7I', stack)
@@ -469,6 +515,10 @@ def main():
                         'bounds_hex': read(body + 0xED64, 0x40).hex()}
             record['cases'].append(case)
             breakpoint(ret, 'GRID_PlacementReturn')
+            if args.boundary=='wheel-force':
+                # Other vehicle workers use the same caller. Stop only when our
+                # captured frame has returned, before its caller removes arguments.
+                send(f'bphwcond {ret:X},csp=={sp+4:X}')
             if args.solver_records:
                 breakpoint(0x9d4970, 'GRID_NestedSolver')
                 # Only this producer's verified call site and descriptor may stop.
@@ -598,6 +648,18 @@ def main():
                 case['direction_after_hex']=read(int(case['direction_address'],16),16).hex()
                 case['point_after_hex']=read(int(case['point_address'],16),16).hex()
                 case['inverse_after_hex']=read(int(case['inverse_address'],16),64).hex()
+            elif args.boundary=='wheel-force':
+                body, view, solver = (int(case[k], 16) for k in ('body', 'view', 'solver'))
+                after = read(body, 0x2600)
+                if struct.unpack_from('<I', after)[0] != view or struct.unpack('<I', read(view, 4))[0] != solver:
+                    raise ValueError('Wheel-force temporary storage identity changed before return')
+                case['body_after_hex'] = after.hex()
+                case['view_after_hex'] = read(view, 0x300).hex()
+                case['solver_after_hex'] = read(solver, 0xdd0).hex()
+                case['friction_diagnostics_after_hex'] = read(0xe85df0, 32).hex()
+                for material in case['materials']:
+                    pointer = int(material['address'], 16)
+                    material['after_hex'] = read(pointer, 0x140).hex() if pointer else None
             else:
                 case['pose_hex'] = read(pose, 64).hex()
             with (out / f'case-{index:02}.json').open('x', encoding='utf-8') as f:
@@ -607,6 +669,7 @@ def main():
                 breakpoint(entry, 'GRID_Reference')
                 if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
                 if args.boundary=='preparation':send('bphwcond A06050,[csp]==A06505')
+                if args.boundary=='wheel-force':send('bphwcond 9DF8B0,[csp]==A04182')
                 send('erun')
                 wait('[STATE] running', 10)
         record['completed'] = True

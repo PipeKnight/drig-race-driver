@@ -166,3 +166,45 @@ completion-estimate increase is claimed.
 | Native joined probe | `42df62ce7f7b3f82e1ff108ba4bc83d5c0bc7d6b53369b1b2d2d2032e4570b52` |
 | Rust debug diagnostic | `68756fd6ad7fca72c140e3609d92d4da3246b638409b8a56fa00ddeb4c5ae824` |
 | Rust release diagnostic | `5fb24908cc77d85817dce11338d9372ac8d490f97821e5aadcb7b7abec9efec5` |
+
+## Prepared synchronized whole-update capture — F165
+
+This is preparation, **not a completed live capture or whole-driver replay**.
+Existing `tools/capture_reference_spawn.py` has an opt-in `wheel-force` boundary
+at `9DF8B0`, requiring its already verified arm-running/hardware-breakpoint
+workflow and exact private process path/hash/start identity. Aligned complete
+caller inspection in `local/behavior/vehicle-force-caller-aligned-20261010.json`
+shows the cdecl call at `A0417D`, return at `A04182`, then the caller's eight-byte
+argument removal. The return breakpoint is conditioned on the captured stack
+frame to exclude other vehicle workers using the same caller.
+
+The decoder checks Standard-body registration, source-selected axes, four
+wheels, supported mode, driven-wheel ownership and each wheel's matrix-owner
+link. It captures fixed-size body `2600`, view `300` and solver `DD0` buffers,
+material bytes, engine-limit scalar and mutable friction diagnostics before and
+after the call. The material pointer used by `9B5660` is at **wheel+C0**, with
+its multiplier at pointed+64; do not confuse it with wheel+64. The temporary
+body/view/solver pointer identities must remain equal through return.
+
+Entry solver counts may be stale from another car: only raw bounded bytes are
+captured, with no variable-length dereferences based on those counts. Hardware
+breakpoints leave code bytes unchanged; the existing checked exception-consume,
+resume and detach lifecycle is retained. The tool sends no game input. Macros
+remain a separate owner-authorized, foreground-guarded Computer Use workflow.
+
+`tools/check_wheel_force_capture.py` passes one owned-memory fixture, retains
+deliberately invalid stale solver counts, and rejects thirteen caller/delta/
+registration/mode/ownership/pointer faults. These are synthetic decoder guards;
+they do not prove debugger compatibility or original execution of the new mode.
+The CLI help and Python AST checks pass. No native attachment, breakpoint,
+game launch, keyboard/mouse input, settings edit or tool installation occurred.
+
+Computer Use window inventory found ARC Raiders open and no GRID process.
+Desktop availability was asked once and remains pending. The owner has returned,
+so the expired unattended desktop window is not reused. Once available: inspect
+the private reference window, load the documented Lacetti/Donington race,
+record a fresh exact process session, arm six whole-update captures, use only
+the observed-state guarded macro, then inspect pause state and detach evidence.
+If activation/capture fails after the documented bounded recovery, preserve
+failure evidence and continue offline rather than repeat blind input. Captured
+bytes remain under ignored `local/`.
