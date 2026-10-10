@@ -1,0 +1,123 @@
+/* Whole original selected wheel-force update. Captured bounded owned memory;
+   explicit pointer relocation only, no live injection or helper replacement. */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <wincrypt.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <io.h>
+#include <fcntl.h>
+#include "isolated_reference.h"
+typedef void (__cdecl *Update)(void *,float);
+typedef struct {
+    unsigned index,delta,body_address,view_address,solver_address,present[4];
+    unsigned char body[0x2600],view[0x300],solver[0xdd0],material[4][0x140];
+    unsigned char engine_limit[4],diagnostics[32];
+} Record;
+static unsigned get(const void *p,unsigned offset) {unsigned v;memcpy(&v,(const unsigned char *)p+offset,4);return v;}
+static void put(void *p,unsigned offset,unsigned v) {memcpy((unsigned char *)p+offset,&v,4);}
+static unsigned exception(EXCEPTION_POINTERS *e) {
+    fprintf(stderr,"exception=%08lx instruction=%p",e->ExceptionRecord->ExceptionCode,e->ExceptionRecord->ExceptionAddress);
+    if(e->ExceptionRecord->NumberParameters>=2)fprintf(stderr," access=%lu address=%p",(unsigned long)e->ExceptionRecord->ExceptionInformation[0],(void *)e->ExceptionRecord->ExceptionInformation[1]);
+    fputc('\n',stderr);return EXCEPTION_EXECUTE_HANDLER;
+}
+int wmain(int argc,wchar_t **argv) {
+    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
+    if(argc!=4)return 2;
+    unsigned char *image=map_reference(argv[1]);if(!image)return 3;
+    IMAGE_NT_HEADERS32 *pe=(IMAGE_NT_HEADERS32 *)(image+((IMAGE_DOS_HEADER *)image)->e_lfanew);
+    IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
+    unsigned char *saved=malloc(pe->OptionalHeader.SizeOfImage);if(!saved)return 4;
+    memcpy(saved,image,pe->OptionalHeader.SizeOfImage);
+    const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xd16000,0xe85000};
+    DWORD protections[6];unsigned protected=0,error=0,count=0,completed=0;
+    for(unsigned i=0;i<6;i++){
+        if(!VirtualProtect(image+pages[i]-0x400000,4096,PAGE_READWRITE,protections+i)){error=5;break;}
+        ++protected;
+    }
+    FILE *input=NULL,*output=NULL;
+    if(error||_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto finish;}
+    unsigned header[2];
+    if(fread(header,sizeof(header),1,input)!=1||header[0]!=0x31304657||!header[1]||header[1]>64){error=7;goto finish;}
+    count=header[1];
+    HANDLE handle=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+    if(handle==INVALID_HANDLE_VALUE){error=8;goto finish;}
+    int descriptor=_open_osfhandle((intptr_t)handle,_O_BINARY);
+    if(descriptor<0){CloseHandle(handle);error=8;goto finish;}
+    output=_fdopen(descriptor,"wb");if(!output){_close(descriptor);error=8;goto finish;}
+    if(fwrite(header,sizeof(header),1,output)!=1){error=9;goto finish;}
+    Update update=(Update)(image+0x9df8b0-0x400000);
+    for(unsigned index=0;index<count;index++){
+        Record r;
+        if(fread(&r,sizeof(r),1,input)!=1||r.index!=index){error=10;break;}
+        float delta;memcpy(&delta,&r.delta,4);
+        unsigned driven=get(r.body,0x18f0),gear=get(r.body,0x196c);
+        if(!isfinite(delta)||delta<=0||delta>.1f||r.body[0xadc]||get(r.body,0x1598)!=1||
+           get(r.body,0x1620)!=4||!driven||driven>4||gear>=16||
+           get(r.body,0)!=r.view_address||get(r.view,0)!=r.solver_address||
+           r.solver_address-r.view_address!=0x2b0||memcmp(r.view+0x2b0,r.solver,0x50)){error=11;break;}
+        __declspec(align(16)) unsigned char body[0x2600],storage[0x1080],material[4][0x140];
+        unsigned char *view=storage,*solver=storage+0x2b0;
+        memcpy(body,r.body,sizeof(body));memcpy(view,r.view,0x300);memcpy(solver,r.solver,0xdd0);memcpy(material,r.material,sizeof(material));
+        put(body,0,(unsigned)(uintptr_t)view);put(view,0,(unsigned)(uintptr_t)solver);
+        for(unsigned i=0;i<4;i++){
+            unsigned w=0x1990+i*0x150,ptr=get(r.body,w+0xc0),alias=i;
+            if(get(r.body,w+0x34)!=r.body_address+0x15a0||r.present[i]!=(unsigned)(ptr!=0)){error=12;break;}
+            for(unsigned j=0;j<i;j++)if(ptr&&ptr==get(r.body,0x1990+j*0x150+0xc0)){
+                if(memcmp(r.material[i],r.material[j],0x140)){error=12;break;}alias=j;break;
+            }
+            put(body,w+0x34,(unsigned)(uintptr_t)(body+0x15a0));
+            put(body,w+0xc0,ptr?(unsigned)(uintptr_t)material[alias]:0);
+        }
+        for(unsigned i=0;i<driven;i++){
+            unsigned ptr=get(r.body,0x18d8+4*i),offset=ptr-r.body_address;
+            if(offset<0x1990||offset>=0x1990+4*0x150||(offset-0x1990)%0x150){error=13;break;}
+            for(unsigned j=0;j<i;j++)if(ptr==get(r.body,0x18d8+4*j))error=13;
+            put(body,0x18d8+4*i,(unsigned)(uintptr_t)(body+offset));
+        }
+        if(error)break;
+        memcpy(image+0xd16348-0x400000,r.engine_limit,4);
+        memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
+        __try {update(body,delta);}
+        __except(exception(GetExceptionInformation())){error=20;}
+        if(error)break;
+        /* Normalize only the explicit input relocations, checking preservation. */
+        if(get(body,0)!=(unsigned)(uintptr_t)view||get(view,0)!=(unsigned)(uintptr_t)solver){error=21;break;}
+        put(body,0,r.view_address);put(view,0,r.solver_address);
+        for(unsigned i=0;i<4;i++){
+            unsigned w=0x1990+i*0x150;
+            if(get(body,w+0x34)!=(unsigned)(uintptr_t)(body+0x15a0)){error=21;break;}
+            unsigned ptr=get(r.body,w+0xc0),alias=i;
+            for(unsigned j=0;j<i;j++)if(ptr&&ptr==get(r.body,0x1990+j*0x150+0xc0)){alias=j;break;}
+            if(get(body,w+0xc0)!=(ptr?(unsigned)(uintptr_t)material[alias]:0)){error=21;break;}
+            put(body,w+0x34,get(r.body,w+0x34));put(body,w+0xc0,ptr);
+            memcpy(r.material[i],material[alias],0x140);
+        }
+        for(unsigned i=0;i<driven;i++){
+            unsigned offset=get(r.body,0x18d8+4*i)-r.body_address;
+            if(get(body,0x18d8+4*i)!=(unsigned)(uintptr_t)(body+offset)){error=21;break;}
+            put(body,0x18d8+4*i,get(r.body,0x18d8+4*i));
+        }
+        if(error)break;
+        memcpy(r.body,body,sizeof(body));memcpy(r.view,view,0x300);memcpy(r.solver,solver,0xdd0);
+        memcpy(r.engine_limit,image+0xd16348-0x400000,4);memcpy(r.diagnostics,image+0xe85df0-0x400000,32);
+        if(fwrite(&r,sizeof(r),1,output)!=1){error=22;break;}++completed;
+    }
+    if(!error&&fgetc(input)!=EOF)error=23;
+finish:
+    if(input)fclose(input);if(output&&fclose(output))error=24;
+    unsigned unchanged=1;
+    for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if((sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE)&&
+        memcmp(image+sections[i].VirtualAddress,saved+sections[i].VirtualAddress,sections[i].SizeOfRawData))unchanged=0;
+    for(unsigned i=0;i<protected;i++){
+        memcpy(image+pages[i]-0x400000,saved+pages[i]-0x400000,4096);DWORD previous;
+        if(!VirtualProtect(image+pages[i]-0x400000,4096,protections[i],&previous))error=25;
+    }
+    if(!unchanged)error=26;
+    free(saved);VirtualFree(image,0,MEM_RELEASE);
+    printf("vehicle_force_cases=%u completed=%u code_unchanged=%u error=%u\n",count,completed,unchanged,error);
+    return error;
+}

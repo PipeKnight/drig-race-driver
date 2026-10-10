@@ -208,3 +208,75 @@ the observed-state guarded macro, then inspect pause state and detach evidence.
 If activation/capture fails after the documented bounded recovery, preserve
 failure evidence and continue offline rather than repeat blind input. Captured
 bytes remain under ignored `local/`.
+
+## Complete live capture and original replay — F165
+
+The preparation-only status above is superseded by a successful owner-authorized
+desktop run on 10 October. Observed race setup: Chevrolet Lacetti / Donington
+Park Grand Prix / three laps / Nevada Autosport, Normal difficulty, Random grid,
+four flashbacks, traction/braking/stability assists On and Automatic transmission.
+The existing saved profile loaded. These settings were inspected without edits.
+
+Computer Use's plain executable launch resolved to Steam app12750 and exposed no
+targetable window. One retry using the explicit `process:` private-executable
+identifier succeeded. This verifies that retry on this run, not universal launcher
+compatibility. GRID PID13940 started `2026-10-10T13:38:26.3079980Z`, compatible
+executable SHA `b1da1b2d9469fb0c973dbaaad29b230c1567f212c54de849326f80b4aece34a6`.
+Fresh identity: `local/reference-race/force-20261010/session.json`. Existing
+AutoHotkey2.0.29 handler22436 was bound to that exact process; guarded F5 resumed,
+held throttle for a reported 2000ms, released and paused. Hardware debugging
+disturbs game timing; this hold is not a simulated-tick measurement.
+
+Six complete `9DF8B0` entry/return pairs are retained in
+`local/behavior/wheel-force-live-20261010-01/`. Metadata SHA:
+`e42ef2d763e2fae0de50bc6910d6ad8e03946af1a5c840c0a8a53dd2d4f1e2e5`.
+Capture completed, code remained exact, the pending hardware stop was consumed
+and resumed, and debugger detached with exit0. A subsequent screenshot showed
+Pause Menu / Continue. The capture tool itself sends no input.
+
+All six calls use mode1, four wheels and delta word `3bc8e061`
+(approximately0.006130263675 seconds). Each changes all six linear/angular XYZ
+words and all four wheel-spin words. View success byte54 is1 in every return.
+One return has logical-row count20 / physical-row count16, while the others have
+20/20; all have25 variables. This directly exercises active row compaction.
+The six distinct body identities have not been mapped to player versus AI or
+vehicle model. The player's selected Lacetti does not establish that every
+captured body is a Lacetti.
+
+`tools/probe_vehicle_force.c` executes the complete original routine and its real
+dependencies in an isolated process, with hash-checked analysis PE, owned
+buffers, no entry/import/TLS execution, no helper replacements and no executable
+page modifications. Explicit relocations cover body/view/solver, wheel matrix
+owners, driven-wheel identities and material aliases. Those fields are checked
+afterward and restored to captured identities for comparison. Captured engine
+limit and friction diagnostics are supplied; six data pages are temporarily
+writable and restored, including the existing lazy SSE-mask pages. Every
+executable section is compared against its pre-call bytes.
+
+The live layout puts solver at **view+2B0**. Thus the fixed300-byte view capture
+overlaps the first50 hexadecimal bytes of the DD0-byte solver. The owned replay
+preserves this alias and material-pointer aliases; it neither masks nor drops
+the overlapping output bytes. Initial replay01 used separate buffers and had199
+differing bytes, all in that overlap, despite exact body/full-solver outputs.
+Correcting the allocation produced full exactness in02 and final03. The first
+native build also rejected a signedness warning under `/WX`; corrected before
+execution. No native exception or numerical mismatch remains.
+
+Final report:
+`local/behavior/vehicle-force-replay-20261010-final-03/validation.json`.
+Original and independent repeat reproduce all **92,312 framed bytes** exactly
+against the six live returns, including complete body/view/solver/materials and
+diagnostics. Fifteen malformed-fixture checks reject before original execution.
+Probe SHA `448ddafb7307af0348ff2cb57753c3cccdf65988249b082f92a70de22b0aac0c`;
+request SHA `8552f09f9c710db53c9c2d1eba2232aa70b4a4cd5cbcac5946c2337e06aeb605`;
+expected/original/repeat SHA
+`df36804ef6e1ec94fc33ac475112eb746ed344c61471cc4cae3b4115e5bdc3ec`.
+MSVC14.44.35207 / SDK10.0.26100.0 / Python3.12.14 were reused; no installation.
+
+This is whole-original replay evidence, **not yet independent Rust vehicle-force
+equivalence**. Mode0/2, player identity, broad driving states and live time/input
+cadence remain unverified. Next join row production, group selection, active
+limits and event advancement around F164's Rust equation core, preserving logical
+row remapping and stale storage. Fresh successful Ghidra survey
+`local/behavior/20261010T1351380646699Z/` recovers whole9922A0 compaction,
+9DF330 force application,9DF540 event advancement and9B5520 grip limiting.
