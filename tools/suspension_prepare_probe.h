@@ -19,12 +19,13 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         ++protected;
     }
     if(!materials||!material_count||_wfopen_s(&input,request,L"rb")||!input){error=62;goto finish;}
-    if(fread(&tag,4,1,input)!=1||tag!=0x31305053||fread(&number,4,1,input)!=1||!number||number>128){error=63;goto finish;}
-    unsigned char *records=malloc((size_t)number*0x2608);
+    if(fread(&tag,4,1,input)!=1||(tag!=0x31305053&&tag!=0x31304653)||fread(&number,4,1,input)!=1||!number||number>128){error=63;goto finish;}
+    const unsigned whole=tag==0x31304653,record_size=whole?0x2614:0x2608;
+    unsigned char *records=malloc((size_t)number*record_size);
     if(!records){error=64;goto finish;}
-    if(fread(records,0x2608,number,input)!=number||fgetc(input)!=EOF||ferror(input)){free(records);error=65;goto finish;}
+    if(fread(records,record_size,number,input)!=number||fgetc(input)!=EOF||ferror(input)){free(records);error=65;goto finish;}
     for(unsigned index=0;index<number;index++){
-        unsigned char *record=records+index*0x2608;
+        unsigned char *record=records+index*record_size;
         __declspec(align(16)) unsigned char body[0x2600];memcpy(body,record+8,sizeof(body));
         unsigned char *context=body+0x3d0;float delta;memcpy(&delta,record+4,4);
         if(getword(record)!=index||!isfinite(delta)||delta<=0||delta>.1f||!isfinite(1.f/delta)||getword(context+0x5d8)!=4
@@ -35,6 +36,14 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         }
         if(*(float *)(body+0x15a0)<=0)error=67;
         for(unsigned j=0;j<3;j++)if(*(float *)(context+0x6f0+j*4)<=0)error=67;
+        if(whole){
+            if(getword(body)||!isfinite(*(float *)context)||*(float *)context<=0)error=67;
+            if(getword(body+0x2278))error=67;
+            for(unsigned j=0;j<3;j++)if(*(float *)(body+0x15a8+j*4)<=0)error=67;
+            const unsigned extras[]={0x11e8,0x185c,0x2198,0x219c,0x21a0,0x21a4,0x21a8,0x21ac,0x21b0,0x21b4,0x21b8,0x21bc,0x21c0};
+            for(unsigned j=0;j<sizeof(extras)/sizeof(*extras);j++)if(!isfinite(*(float *)(body+extras[j])))error=67;
+            if(!(*(float *)(body+0x21b4)<*(float *)(body+0x21b8)&&*(float *)(body+0x21b8)<*(float *)(body+0x21bc)))error=67;
+        }
         for(unsigned i=0;i<4;i++){
             unsigned char *c=context+i*0x170,*w=body+0x1990+i*0x150;
             if(getword(c+0x178)||getword(c+0x17c)){error=68;break;}
@@ -44,6 +53,12 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
             for(unsigned j=0;j<4;j++)if(!isfinite(*(float *)(c+0x50+j*4)))error=69;
             const unsigned history[]={0x6c,0x7c,0x80};
             for(unsigned j=0;j<3;j++)if(!isfinite(*(float *)(c+history[j])))error=69;
+            if(whole){
+                const unsigned parameters[]={0x50,0x54,0x58,0x60,0x64,0x68,0x70,0x114};
+                for(unsigned j=0;j<8;j++)if(!isfinite(*(float *)(w+parameters[j])))error=69;
+                if(*(float *)(w+0x4c)<=0||*(float *)(w+0x48)>*(float *)(w+0x50)||fabsf(*(float *)(w+0x48))>=99||fabsf(*(float *)(w+0x50))>=99)error=69;
+                if(*(float *)(w+0x64)<0)error=69;
+            }
             for(unsigned j=0;j<5;j++){
                 float angle=*(float *)(body+0x30c+i*40+j*8),radius=*(float *)(body+0x310+i*40+j*8);
                 if(!isfinite(angle)||!isfinite(radius)||radius<=0)error=69;
@@ -55,10 +70,16 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         *(unsigned *)(table+0xc)=1;*(unsigned *)(table+0x14)=(unsigned)(uintptr_t)entry;
         *(unsigned *)(context+0x608)=(unsigned)(uintptr_t)table;
         *(unsigned *)(context+0x5d4)=(unsigned)(uintptr_t)body;
+        __declspec(align(16)) unsigned char view[0x300]={0};
+        if(whole)*(unsigned *)body=(unsigned)(uintptr_t)view;
         *(unsigned *)(image+0xec2c54-0x400000)=0;
-        __try {((SuspensionPrepare)(image+0x9e41f0-0x400000))(context,NULL,delta);}
+        __try {((SuspensionPrepare)(image+(whole?0x9f1e10:0x9e41f0)-0x400000))(context,NULL,delta);}
         __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"case=%u fault=%08lx\n",index,GetExceptionCode());error=70;}
         if(error)break;
+        if(whole){
+            if(getword(body)!=(unsigned)(uintptr_t)view){error=71;break;}
+            *(unsigned *)body=0;memcpy(record+0x2608,view+0x48,12);
+        }
         *(unsigned *)(context+0x608)=0;*(unsigned *)(context+0x5d4)=0;
         for(unsigned i=0;i<4;i++){
             unsigned char *c=context+i*0x170,*w=body+0x1990+i*0x150;
@@ -80,7 +101,7 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         else {int fd=_open_osfhandle((intptr_t)handle,_O_BINARY);
             if(fd<0){CloseHandle(handle);error=73;}else{result=_fdopen(fd,"wb");if(!result){_close(fd);error=73;}}
         }
-        if(!error&&(fwrite(&tag,4,1,result)!=1||fwrite(&number,4,1,result)!=1||fwrite(records,0x2608,number,result)!=number))error=74;
+        if(!error&&(fwrite(&tag,4,1,result)!=1||fwrite(&number,4,1,result)!=1||fwrite(records,record_size,number,result)!=number))error=74;
     }
     free(records);
 finish:
