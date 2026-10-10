@@ -19,6 +19,7 @@ MAGIC=b'JF01'
 GRIP_TAG=b'VG01'
 GRIP_NATIVE=grip.NATIVE
 REFERENCE=ROOT/'local/compatibility/grid-unpacked.exe'
+POST_FORCE=False
 
 
 def request(records,tag=None):
@@ -88,6 +89,16 @@ def native(out,records,name,full,allow_failure=False):
     runs.append(execute(ROOT/'local/behavior/vehicle-prepared-probe.exe',[REFERENCE,source,target],out,name+'-prepared',allow_failure))
     if runs[-1]['exit']:return None,runs
     result=MAGIC+target.read_bytes()[4:]
+    if POST_FORCE:
+        source=out/f'{name}-post-force-input.bin';target=out/f'{name}-post-force-output.bin'
+        rows=[result[8+i*RECORD:8+(i+1)*RECORD] for i in range(len(records))]
+        source.write_bytes(b'TA01'+struct.pack('<I',len(rows))+b''.join(r[4:8]+r[BODY:VIEW] for r in rows))
+        runs.append(execute(ROOT/'local/behavior/vehicle-post-force-probe.exe',[REFERENCE,source,target],out,name+'-post-force',allow_failure))
+        if runs[-1]['exit']:return None,runs
+        tail=target.read_bytes();joined=bytearray(result)
+        for i in range(len(rows)):
+            start=8+i*0x2604;joined[8+i*RECORD+BODY:8+i*RECORD+VIEW]=tail[start+4:start+0x2604]
+        result=bytes(joined)
     (out/f'{name}-output.bin').write_bytes(result)
     return result,runs
 
@@ -107,7 +118,7 @@ def run_set(out,profile,branches,prefix,full):
     counts=collections.Counter()
     for i,r in enumerate(branches['original']):
         after=a[8+i*RECORD:8+(i+1)*RECORD]
-        if MAGIC==b'UF01':
+        if MAGIC in [b'UF01',b'HF01']:
             f32=lambda x:struct.unpack('<f',struct.pack('<f',x))[0]
             scale=struct.unpack_from('<f',r,BODY+0x3d0)[0];delta=struct.unpack_from('<f',r,4)[0]
             amount=f32(delta*.25);expected=min(f32(scale+amount),1) if scale<1 else max(f32(scale-amount),1)
@@ -116,6 +127,13 @@ def run_set(out,profile,branches,prefix,full):
             stage=(out/f'{prefix}-original-grip-output.bin').read_bytes();v=8+i*grip.RECORD+0x2608
             assert after[VIEW+0x190:VIEW+0x290]==stage[v+0x190:v+0x290]
             counts['prepared_vector_changes']+=after[VIEW+0x190:VIEW+0x290]!=r[VIEW+0x190:VIEW+0x290]
+        if POST_FORCE:
+            prior=(out/f'{prefix}-original-prepared-output.bin').read_bytes()[8+i*RECORD:8+(i+1)*RECORD]
+            for label,o,size in [('speed_refresh',0x1648,4),('rpm_history',0x1f00,4),('post_angular',0x15d0,16)]:
+                counts[label]+=after[BODY+o:BODY+o+size]!=prior[BODY+o:BODY+o+size]
+            for j in range(4):
+                for label,o in [('camber',0xec),('wheel_response',0x13c)]:
+                    o=BODY+0x1990+j*0x150+o;counts[label]+=after[o:o+4]!=prior[o:o+4]
         counts['pose_changes']+=r[BODY+0x15e0:BODY+0x1620]!=after[BODY+0x15e0:BODY+0x1620]
         counts['velocity_changes']+=r[BODY+0x15c0:BODY+0x15e0]!=after[BODY+0x15c0:BODY+0x15e0]
         for j in range(4):
@@ -137,9 +155,10 @@ def guards(out,profile,first,full):
         ('disabled_wheel',BODY+0x2278,1),('event_count',BODY+0x21ec,5),('zero_mass',BODY+0x15a0,0),
         ('zero_inertia',BODY+0x15a8,0),('zero_radius',BODY+0x1990+0xe0,0),('negative_speed',BODY+0x1648,0xbf800000),
         ('grip_nan',BODY+0x12a8,0x7fc00000),('history_token',BODY+0x1990+0x128,0xffffffff),
-        ('view_nan',VIEW+(0x298 if MAGIC==b'UF01' else 0x190),0x7fc00000),('late_mode',BODY+0x1598,0),('late_search',BODY+0x1348,1),
+        ('view_nan',VIEW+(0x298 if MAGIC in [b'UF01',b'HF01'] else 0x190),0x7fc00000),('late_mode',BODY+0x1598,0),('late_search',BODY+0x1348,1),
         ('late_override',BODY+0xe48,11),('late_engine',BODY+0x17a4,0),('late_timer',BODY+0x1f6c,0x7fc00000)]
-    if MAGIC==b'UF01':tests.extend([('blend_nan',BODY+0x1990+0x20,0x7fc00000),('scale_zero',BODY+0x3d0,0)])
+    if MAGIC in [b'UF01',b'HF01']:tests.extend([('blend_nan',BODY+0x1990+0x20,0x7fc00000),('scale_zero',BODY+0x3d0,0)])
+    if POST_FORCE:tests.append(('post_force_nan',BODY+0x2274,0x7fc00000))
     results=[]
     for name,offset,value in tests:
         r=bytearray(first);ui(r,offset,value);r=bytes(r)
@@ -194,6 +213,12 @@ def main():
     guard_results=guards(out,a.profile,current[1],full)
     report=dict(profile=a.profile,guards=len(guard_results),calls=sum(r['calls'] for r in reports),carried_calls=sum(r['calls'] for r in carried),record_bytes=sum(r['record_bytes'] for r in reports+carried),reports=reports,carried=carried,
         full_mechanics_sha256=digest(full),scope=('Whole original9B2790, actual caller scale recovery, wholeA00E10 then post-grip controls/forces in two composed original processes vs one Rust call. Source geometry/materials; earlier controls/history and material-table binding supplied; no wholeA03670/world/driving claim.' if MAGIC==b'UF01' else 'Whole original A00E10 then authored actual post-grip interval using unchanged helpers in two isolated processes; Rust one call. Source contact geometry/materials, supplied earlier force vectors/history schedule; no whole A03670/world/driving claim.'))
+    if POST_FORCE:
+        report['scope']='Whole original9B2790/scale recovery/A00E10/post-grip forces then actual post-force interval through whole9BF230 in three composed original adapters vs one Rust call. Source geometry/materials; earlier controls/history/table binding supplied; following9BE1E0, wholeA03670/world/driving open.'
+        combined=collections.Counter()
+        for item in reports+carried:combined.update(item['coverage'])
+        assert all(combined[k]>0 for k in ['speed_refresh','rpm_history','post_angular','camber','wheel_response'])
+        report['coverage']=dict(combined)
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k not in ['reports','carried']}))
 
 if __name__=='__main__':main()
