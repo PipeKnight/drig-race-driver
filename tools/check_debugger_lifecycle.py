@@ -94,12 +94,21 @@ def main():
                 raise RuntimeError('Test breakpoint not reached after passing exceptions')
             if args.hardware:
                 send(f'bphc {entry:X}')
+            # Handle the debugger-owned exception before detaching. In particular,
+            # erun's pass-exceptions policy must not leak a single-step to target.
+            send('con')
+            wait('Exception will be swallowed', 5)
+            send('run')
+            wait('[STATE] running', 5)
             send('detach')
             record['detach_marker'] = wait('Debugging stopped!', 20)
             send('exit')
             dbg.wait(timeout=15)
             thread.join(timeout=3)
+            time.sleep(1)
             record['target_survives'] = game.poll() is None
+            if not record['target_survives']:
+                raise RuntimeError('Target died after detach')
             record['debugger_exit'] = dbg.returncode
         except Exception as error:
             record['error'] = repr(error)

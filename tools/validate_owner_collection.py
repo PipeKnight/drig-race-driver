@@ -76,7 +76,7 @@ def live_rows(path):
                 entries.append([*struct.unpack_from('<2I', b, 4), int(b[0xc] != 0)])
             if len(entries) != pool['count']: raise ValueError('Pool count mismatch')
             pools.append(entries)
-        if len(pools) != 2 or case['capacity'] != 32 or case['return_address'] not in ('0xb78559', '0xb7872a'):
+        if len(pools) != 2 or case['capacity'] != 32 or case['return_address'] not in ('0xb7855e', '0xb7872a'):
             raise ValueError('Unverified live owner ABI')
         values = [int(p, 16) for p in case['output_pointers']]
         if len(values) != case['owner_count']: raise ValueError('Live output count mismatch')

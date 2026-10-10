@@ -23,7 +23,7 @@ def fixture(kind=0, first=0x10000, capacity=32, ret=0xb7872a):
 
 
 def main():
-    for ret in (0xb78559,0xb7872a):
+    for ret in (0xb7855e,0xb7872a):
         result=owner_arguments(fixture(ret=ret),0x60000,0xb77770,0,0x50000,0)
         assert result['return_address']==hex(ret) and result['capacity']==32
         assert [o['address'] for o in result['owners']]==['0x10000','0x11000']

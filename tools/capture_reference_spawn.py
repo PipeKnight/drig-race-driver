@@ -159,8 +159,8 @@ def collection_arguments(read,sp,ip,ax,cx,index):
 def owner_arguments(read,sp,ip,ax,cx,index):
     """Whole B77770 entry: valid owner registrations and two bounded pools."""
     stack=read(sp,12);ret,output,capacity=struct.unpack('<3I',stack)
-    if ret not in (0xb78559,0xb7872a) or capacity!=32:
-        raise ValueError('Unverified owner collector caller/capacity')
+    if ret not in (0xb7855e,0xb7872a) or capacity!=32:
+        raise ValueError(f'Unverified owner collector caller/capacity: return={ret:08x} capacity={capacity}')
     header=read(cx,0x13c);pools=[];owners={}
     for pool_index,(pointer_offset,count_offset) in enumerate(((0x98,0xac),(0xa0,0xb4))):
         pointer=struct.unpack_from('<I',header,pointer_offset)[0];count=struct.unpack_from('<i',header,count_offset)[0]
@@ -313,6 +313,7 @@ def main():
         commands = (out / 'commands.log').open('x', encoding='utf-8')
         messages = queue.Queue()
         debugging_stopped = threading.Event()
+        hardware_stop = threading.Event()
         last_exception = {}
         (out / 'debugger-user').mkdir()
         process = subprocess.Popen([str(debugger), '-userdir', str(out / 'debugger-user')],
@@ -329,6 +330,10 @@ def main():
                 stream.flush()
                 if 'Debugging stopped!' in line:
                     debugging_stopped.set()
+                if 'Hardware breakpoint (execute)' in line:
+                    hardware_stop.set()
+                if '[STATE] running' in line or 'First chance exception on ' in line:
+                    hardware_stop.clear()
                 match = re.search(r'First chance exception on ([0-9A-Fa-f]+) \(([0-9A-Fa-f]+),', line)
                 if match:
                     last_exception.clear()
@@ -344,10 +349,10 @@ def main():
             process.stdin.write(command + '\n')
             process.stdin.flush()
 
-        def wait(marker, timeout):
+        def wait(marker, timeout, cleanup=False):
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
-                if (out / 'stop').exists():
+                if not cleanup and (out / 'stop').exists():
                     raise RuntimeError('Requested stop')
                 try:
                     line = messages.get(timeout=0.2)
@@ -372,6 +377,18 @@ def main():
 
         def breakpoint(address, name):
             send(f'bph {address:X},x,1' if args.hardware else f'bp {address:X},{name},ss')
+
+        def prepare_detach():
+            if hardware_stop.is_set():
+                # Consume only our debugger-owned hardware exception. Detaching
+                # directly while erun's policy is active can deliver 80000004 to
+                # the target. Resume the same instruction; never skip code.
+                send('bphc')
+                send('con')
+                wait('Exception will be swallowed', 5, cleanup=True)
+                send('run')
+                wait('[STATE] running', 5, cleanup=True)
+                record['hardware_stop_resumed_before_detach'] = True
 
         wait('[headless] entering command loop', 15)
         send(f'attach {int(session["Pid"]):X}')
@@ -593,6 +610,7 @@ def main():
                 send('erun')
                 wait('[STATE] running', 10)
         record['completed'] = True
+        prepare_detach()
         send('detach')
         wait('Debugging stopped!', 20)
         send('exit')
@@ -607,8 +625,8 @@ def main():
         if process is not None and process.poll() is None:
             try:
                 if not debugging_stopped.is_set():
-                    process.stdin.write('detach\n')
-                    process.stdin.flush()
+                    prepare_detach()
+                    send('detach')
                 deadline = time.monotonic() + 20
                 detached = debugging_stopped.is_set()
                 while time.monotonic() < deadline:
@@ -627,7 +645,7 @@ def main():
                 process.stdin.write('exit\n')
                 process.stdin.flush()
                 process.wait(timeout=15)
-            except (OSError, subprocess.TimeoutExpired):
+            except (OSError, subprocess.TimeoutExpired, TimeoutError, RuntimeError):
                 record['cleanup_uncertain'] = True
                 # Do not terminate an attached debugger: target survival takes priority.
                 print('Debugger cleanup uncertain; inspect recorded identity', flush=True)
