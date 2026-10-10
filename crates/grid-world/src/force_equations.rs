@@ -28,6 +28,9 @@ struct Row {
 pub struct System {
     variables: Vec<Variable>,
     rows: Vec<Row>,
+    storage: [u32; SNAPSHOT_WORDS],
+    mapping: [u32; CAPACITY],
+    logical_count: usize,
 }
 
 impl System {
@@ -38,12 +41,98 @@ impl System {
         Ok(Self {
             variables: vec![Variable::default(); variables],
             rows: Vec::new(),
+            storage: [0; SNAPSHOT_WORDS],
+            mapping: [0; CAPACITY],
+            logical_count: 0,
         })
+    }
+
+    /// Start a vehicle solve over retained storage. Entry counts may be stale;
+    /// only the three counters and low solver-mode byte are reset.
+    pub fn reset_storage(mut storage: [u32; SNAPSHOT_WORDS]) -> Self {
+        storage[0] = 0;
+        storage[1] = (storage[1] & !255) | 1;
+        storage[2] = 0;
+        storage[3] = 0;
+        let mapping = std::array::from_fn(|i| storage[844 + i]);
+        Self {
+            variables: Vec::new(),
+            rows: Vec::new(),
+            storage,
+            mapping,
+            logical_count: 0,
+        }
+    }
+
+    pub fn allocate_variable(&mut self) -> Result<usize, Error> {
+        let id = self.variables.len();
+        if id == CAPACITY {
+            return Err(Error("too many force variables"));
+        }
+        self.variables.push(Variable::default());
+        Ok(id)
+    }
+
+    pub fn logical_count(&self) -> usize {
+        self.logical_count
+    }
+
+    pub fn is_fixed(&self, id: usize) -> Result<bool, Error> {
+        self.variables
+            .get(id)
+            .map(|v| v.fixed)
+            .ok_or(Error("invalid force variable"))
+    }
+
+    pub fn unfix(&mut self, id: usize) -> Result<(), Error> {
+        self.variables
+            .get_mut(id)
+            .ok_or(Error("invalid force variable"))?
+            .fixed = false;
+        Ok(())
+    }
+
+    pub fn set_value(&mut self, id: usize, value: f32) -> Result<(), Error> {
+        if !value.is_finite() {
+            return Err(Error("nonfinite force value"));
+        }
+        self.variables
+            .get_mut(id)
+            .ok_or(Error("invalid force variable"))?
+            .value = value;
+        Ok(())
+    }
+
+    /// Remove by logical identity, move the last physical row and retain its tail.
+    pub fn remove(&mut self, logical: usize) -> Result<(), Error> {
+        if logical >= self.logical_count {
+            return Err(Error("invalid logical force row"));
+        }
+        let physical = self.mapping[logical] as usize;
+        if physical >= self.rows.len() {
+            return Err(Error("removed force row"));
+        }
+        let last = self.rows.len() - 1;
+        self.storage = self.snapshot();
+        for id in &mut self.mapping {
+            if *id == physical as u32 {
+                *id = u32::MAX;
+            }
+            if *id == last as u32 {
+                *id = physical as u32;
+            }
+        }
+        let tail = 84 + last * 19;
+        let target = 84 + physical * 19;
+        self.storage.copy_within(tail..tail + 19, target);
+        self.rows.swap_remove(physical);
+        Ok(())
     }
 
     /// Append in input order; fixed terms reduce RHS even if their coefficient is zero.
     pub fn add(&mut self, terms: &[(usize, f32)], rhs: f32) -> Result<(), Error> {
         if self.rows.len() == CAPACITY
+            || self.logical_count == CAPACITY
             || terms.len() > MAX_TERMS
             || !rhs.is_finite()
             || terms
@@ -56,6 +145,11 @@ impl System {
             rhs,
             ..Row::default()
         };
+        let offset = 84 + self.rows.len() * 19;
+        for j in 0..MAX_TERMS {
+            row.coefficients[j] = f32::from_bits(self.storage[offset + 1 + j]);
+            row.variables[j] = self.storage[offset + 9 + j] as usize;
+        }
         for &(id, coefficient) in terms {
             let variable = self.variables[id];
             if variable.fixed {
@@ -66,6 +160,8 @@ impl System {
                 row.count += 1;
             }
         }
+        self.mapping[self.logical_count] = self.rows.len() as u32;
+        self.logical_count += 1;
         self.rows.push(row);
         Ok(())
     }
@@ -90,6 +186,20 @@ impl System {
 
     /// Solve a nonempty square closed group. Failure still marks its selected rows.
     pub fn select(&mut self, rows: &[usize], variables: &[usize]) -> Result<bool, Error> {
+        let physical: Result<Vec<_>, _> = rows
+            .iter()
+            .map(|id| {
+                if *id >= self.logical_count {
+                    Err(Error("invalid logical force row"))
+                } else {
+                    Ok(self.mapping[*id] as usize)
+                }
+            })
+            .collect();
+        self.select_physical(&physical?, variables)
+    }
+
+    fn select_physical(&mut self, rows: &[usize], variables: &[usize]) -> Result<bool, Error> {
         self.validate_selection(rows, variables)?;
         let n = variables.len();
         let mut matrix = vec![0.; n * n];
@@ -161,7 +271,7 @@ impl System {
         let success = if variables.is_empty() {
             true
         } else {
-            self.select(&rows, &variables)?
+            self.select_physical(&rows, &variables)?
         };
         for row in &mut self.rows {
             row.selected = false;
@@ -178,13 +288,15 @@ impl System {
 
     /// Canonical bounded reference layout, including inactive slots and stale row tails.
     pub fn snapshot(&self) -> [u32; SNAPSHOT_WORDS] {
-        let mut out = [0; SNAPSHOT_WORDS];
-        out[0] = self.rows.len() as u32;
+        let mut out = self.storage;
+        out[0] = self.logical_count as u32;
         out[2] = self.variables.len() as u32;
         out[3] = self.rows.len() as u32;
         for (i, variable) in self.variables.iter().enumerate() {
             out[4 + i * 2] = variable.value.to_bits();
-            out[5 + i * 2] = u32::from(variable.fixed) | (u32::from(variable.solved) << 8);
+            out[5 + i * 2] = (out[5 + i * 2] & 0xffff0000)
+                | u32::from(variable.fixed)
+                | (u32::from(variable.solved) << 8);
         }
         for (i, row) in self.rows.iter().enumerate() {
             let offset = 84 + i * 19;
@@ -194,9 +306,9 @@ impl System {
                 out[offset + 9 + j] = row.variables[j] as u32;
             }
             out[offset + 17] = row.rhs.to_bits();
-            out[offset + 18] = u32::from(row.selected);
-            out[844 + i] = i as u32;
+            out[offset + 18] = (out[offset + 18] & !255) | u32::from(row.selected);
         }
+        out[844..884].copy_from_slice(&self.mapping);
         out
     }
 }
@@ -254,6 +366,32 @@ fn eliminate(matrix: &mut [f32], rhs: &mut [f32]) -> Option<Vec<f32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_storage_and_logical_rows_survive_compaction() {
+        let mut raw = [0x12345678; SNAPSHOT_WORDS];
+        raw[0] = u32::MAX;
+        raw[1] = 0xaabbccdd;
+        raw[2] = u32::MAX;
+        raw[3] = u32::MAX;
+        let mut system = System::reset_storage(raw);
+        let id = system.allocate_variable().unwrap();
+        system.add(&[(id, 2.)], 4.).unwrap();
+        system.add(&[(id, 3.)], 9.).unwrap();
+        system.add(&[(id, 4.)], 16.).unwrap();
+        system.remove(0).unwrap();
+        assert!(system.select(&[0], &[id]).is_err());
+        assert!(system.select(&[2], &[id]).unwrap());
+        assert_eq!(system.value(id), Some(4.));
+        assert_eq!(system.snapshot()[1], 0xaabbcc01);
+        assert_eq!(system.snapshot()[5] & 0xffff0000, 0x12340000);
+        assert_eq!(system.snapshot()[844], u32::MAX);
+        assert_eq!(system.snapshot()[846], 0);
+        system.add(&[(id, 5.)], 25.).unwrap();
+        assert_eq!(system.logical_count(), 4);
+        assert!(system.select(&[3], &[id]).unwrap());
+        assert_eq!(system.value(id), Some(5.));
+    }
 
     #[test]
     fn fixes_then_solves_and_clears_marks() {

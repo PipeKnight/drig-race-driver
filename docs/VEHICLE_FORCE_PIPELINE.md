@@ -280,3 +280,85 @@ limits and event advancement around F164's Rust equation core, preserving logica
 row remapping and stale storage. Fresh successful Ghidra survey
 `local/behavior/20261010T1351380646699Z/` recovers whole9922A0 compaction,
 9DF330 force application,9DF540 event advancement and9B5520 grip limiting.
+
+## Joined Rust vehicle-force update — F166
+
+`grid_world::vehicle_force::apply` now implements the whole selected four-wheel
+**mode1** update around the verified equation core. It initializes brake/grip
+state, temporarily adds drivetrain inertia to driven wheels, builds all vehicle
+rows, selects wheel groups, enforces brake/grip limits, compacts logical rows,
+re-solves, advances wheel-stop events and applies lateral/longitudinal impulses
+through the existing verified angular-response code. It restores wheel inertia
+and derives/clamps engine speed. Prepared velocity/axis/lever vectors are supplied
+and retained in original caller order; pose is not advanced here.
+
+The equation core now retains raw inactive storage and padding, resets only the
+actual counters/mode byte, allocates variables, supports explicit unfixing and
+value changes, and preserves logical identity through swap-last physical row
+compaction. Deletion updates **all40** logical-map entries, including stale ones,
+as the original does. Removed physical tail storage survives; new rows overwrite
+only fields the original overwrites. Selected solves resolve logical IDs, while
+the remaining solve operates on physical row order.
+
+Aligned loads corrected two potentially misleading static interpretations:
+low-speed brake limiting activates below **3.0**, with wheel spin magnitude below
+0.5, and uses wheel **+E0** radius / max(grip,10) /0.9. Body-response row coefficient
+from CB22B0 is **-0.2**, not-1. The initial Rust draft used-1 and differed on937
+live bytes; correcting that coefficient yields full live equality. The earlier
+borrow-check failure was fixed before execution. One operand-order Clippy allow
+is scoped to the update function; a diagnostic iterator warning was corrected
+using bounded array chunks. Failed intermediate files remain private.
+
+Both final debug and release independently match whole original/repeat outputs:
+
+- Six actual complete live calls: all92,304record bytes, plus the8-byte framing.
+- 288 varied authored private controls:4,430,592record bytes. These cover positive,
+  reverse, zero/signed-zero/tiny wheel spin, zero/negative/large brake inputs,
+  airborne/low/high grip, material presence/multiplier, one-to-four driven wheels
+  in varied order, ratios/gears, low-speed threshold, delta1e-6..0.1, inertia/mass,
+  and deliberately stale solver counts/padding/row tails/maps.176compact rows,
+  120mark wheel-stop transitions and252change body velocity.
+- 32 independently carried sequences of12updates:5,907,456record bytes. Each
+  branch consumes its own previous return, preserving complete state/storage.
+  Prepared geometry/vectors remain fixed; these are arithmetic state sequences,
+  not road trajectories.
+- Fifteen native malformed-input guards and19Rust guards pass. Rust validates
+  consumed finite inputs and positive mass/inertia/radius, executes on a copy,
+  and creates private diagnostic output only after every case succeeds. Invalid
+  inputs leave caller state unchanged. Event/limit iteration bounds64 are
+  authored safety limits, not measured original maxima.
+
+Total: **678whole updates /10,430,352record bytes** per profile. No vehicle-level
+solver failure occurs in these controls; F164 separately verifies core singular
+outcomes. Do not generalize this result to every possible singular vehicle.
+Final reports:
+`local/behavior/vehicle-force-rust-20261010-debug-final-04/validation.json` and
+`local/behavior/vehicle-force-rust-20261010-release-final-05/validation.json`.
+Earlier debug01/final02 and releasefinal03 also pass but pin prior binaries.
+Final Rust diagnostic hashes: debug
+`d801de0e473c26ccfe22c9f17f7a65410e9b44cc4fca3d18a002a735b6b08631`, release
+`3c4bc540e41bfbf1edae837019c59ee0d85713e82494874f6fb6f25f55bbad24`.
+Authored aggregate request SHA
+`2cad51da5db82559e172616c58258a596644122e44a45ae8c4e8a83c03733c63`;
+carried final SHA
+`1c3f47ade17c763d74d3522b4d360b1a8c6998f46331bf74e36f16464f9d00a3`.
+The aggregate fixture is split into bounded48-case native/CLI batches.
+
+Fresh F164 regressions still match394cases/7,498snapshots/6,635,730words per
+debug/release after the shared core changes:
+`local/behavior/force-equations-20261010-compaction-debug-06/validation.json` and
+`force-equations-20261010-compaction-release-07/validation.json`.
+All119library tests (20formats/1tools/98world), fmt, all-target warnings-denied
+Clippy and Python AST checks pass. Existing Rust/Cargo1.99.0, Python3.12.14,
+MSVC14.44.35207/SDK10.0.26100.0, Ghidra12.1.4/JDK21.0.9 and Capstone5.0.6 reused.
+No new desktop input/install/settings edits after F165. Steam130resources and
+executable remain unchanged at14:04:00.923152UTC:
+`local/scene/preservation-20261010-vehicle-force.json`.
+
+This closes the selected mode1 force/limit/event boundary, not complete driving.
+Modes0/2, synchronized player identity and long driving trajectories are open.
+Next prioritize the real suspension/contact preparation wrapper and authoritative
+vehicle-to-physical state transfer; join those to Bevy input/camera only once the
+whole ordering is checked. Merely chaining supplied-boundary components would
+not establish original contact production or world timing. Completion estimates
+remain unchanged, and the expired overnight automation stays paused.

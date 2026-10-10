@@ -57,6 +57,7 @@ pub mod triangle;
 pub mod tyre_friction;
 pub mod tyre_grip;
 pub mod tyre_response;
+pub mod vehicle_force;
 pub mod wheel_coupling;
 pub mod wheel_damage;
 pub mod wheel_deformation;
