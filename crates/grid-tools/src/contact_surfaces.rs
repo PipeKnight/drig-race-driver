@@ -1,11 +1,12 @@
 //! Ordered source material keys joined to the verified wheel-contact fields.
 use grid_formats::{binxml, surface};
-use grid_world::{contact_material, surface_drag};
+use grid_world::{contact_material, surface_drag, wheel_history};
 
 pub struct Surfaces {
     keys: Vec<[u8; 4]>,
     mechanics: Vec<Option<contact_material::Material>>,
     drag: Vec<Option<surface_drag::Material>>,
+    history: Vec<Option<wheel_history::Material>>,
 }
 
 impl Surfaces {
@@ -41,11 +42,40 @@ impl Surfaces {
                 })
             })
             .collect();
+        let history = materials
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                m.mechanics.as_ref().map(|s| wheel_history::Material {
+                    wear: s.wear,
+                    speed_grip: [s.grip_per_ms, s.ms_for_max_effect, s.grip],
+                    flag_70: true,
+                    dirt_build_up: s.dirt_build_up,
+                    token: i as u32 + 1,
+                })
+            })
+            .collect();
         Ok(Self {
             keys,
             mechanics,
             drag,
+            history,
         })
+    }
+
+    pub fn history(
+        &self,
+        token: u32,
+    ) -> Result<Option<wheel_history::Material>, grid_world::Error> {
+        if token == 0 {
+            return Ok(None);
+        }
+        self.history
+            .get(token as usize - 1)
+            .copied()
+            .flatten()
+            .map(Some)
+            .ok_or(grid_world::Error("unknown source mechanics token"))
     }
 
     pub fn contact(

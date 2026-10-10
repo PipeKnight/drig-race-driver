@@ -1,5 +1,5 @@
 //! Whole suspension preparation against locally purchased packed track geometry.
-use grid_world::{Error, rectangle_cull, suspension_prepare, suspension_vehicle};
+use grid_world::{Error, rectangle_cull, suspension_prepare, suspension_vehicle, vehicle_grip};
 use std::{fs::OpenOptions, io::Write, path::Path};
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,12 +16,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut bytes = std::fs::read(input)?;
     let word = |b: &[u8]| u32::from_le_bytes(b.try_into().unwrap());
-    if bytes.len() < 8 || (&bytes[..4] != b"SP01" && &bytes[..4] != b"SF01") {
+    if bytes.len() < 8
+        || ![b"SP01".as_slice(), b"SF01".as_slice(), b"VG01".as_slice()].contains(&&bytes[..4])
+    {
         return Err("invalid preparation header".into());
     }
     let count = word(&bytes[4..8]) as usize;
-    let whole = &bytes[..4] == b"SF01";
-    let record_size = if whole { 0x2614 } else { 0x2608 };
+    let grip = &bytes[..4] == b"VG01";
+    let whole = &bytes[..4] == b"SF01" || grip;
+    let record_size = if grip {
+        0x2908
+    } else if whole {
+        0x2614
+    } else {
+        0x2608
+    };
     if !(1..=128).contains(&count) || bytes.len() != 8 + count * record_size {
         return Err("invalid preparation framing".into());
     }
@@ -80,7 +89,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             })
             .transpose()
         };
-        if whole {
+        if grip {
+            let mut view = std::array::from_fn(|i| word(&record[0x2608 + i * 4..0x260c + i * 4]));
+            vehicle_grip::apply(&mut state, &mut view, delta, &mut query, |token| {
+                surfaces.history(token)
+            })?;
+            for (slot, value) in record[0x2608..].as_chunks_mut::<4>().0.iter_mut().zip(view) {
+                slot.copy_from_slice(&value.to_le_bytes());
+            }
+        } else if whole {
             let inertia = suspension_vehicle::apply(&mut state, delta, &mut query)?;
             for (i, value) in inertia.into_iter().enumerate() {
                 record[0x2608 + i * 4..0x260c + i * 4]
