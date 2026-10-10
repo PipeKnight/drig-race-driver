@@ -35,16 +35,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut data = std::fs::read(input)?;
     if data.len() < 8
         || ![
-            0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655,
+            0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let vectors = word(&data, 0) == 0x31304655;
+    let post_force = word(&data, 0) == 0x31304648;
+    let vectors = word(&data, 0) == 0x31304655 || post_force;
     let joined = word(&data, 0) == 0x3130464a || vectors;
     if joined != (args.len() == 4) {
-        return Err("source arguments required only for JF01/UF01".into());
+        return Err("source arguments required only for JF01/UF01/HF01".into());
     }
     let sources = if joined {
         let track = Path::new(&args[0]);
@@ -156,7 +157,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 *slot = (off / 0x150) as usize;
             }
             let mut cache = grid_world::rectangle_cull::Cache::default();
-            let apply = if vectors {
+            let apply = if post_force {
+                grid_world::vehicle_contact_update::apply_with_post_force
+            } else if vectors {
                 grid_world::vehicle_contact_update::apply
             } else {
                 grid_world::vehicle_contact_force::apply
