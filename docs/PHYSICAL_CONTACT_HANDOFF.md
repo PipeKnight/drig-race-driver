@@ -10,6 +10,23 @@ The optional pass calls B0CE10 for impact two-body contacts and B0CEC0 for impac
 
 The main physical solver remains substantial: constraint construction (including B0D1B0/B0E040), solving, writeback, force/velocity integration and body publication are unimplemented as a whole. Verifying the small correction helpers will close one dependency; it will not establish drivable physics.
 
+F152 now verifies those complete correction helpers and their authored callback handoff in both profiles: [correction contract and comparison](CONTACT_BIAS.md).
+
+## Next larger comparison
+
+Private decompilation at `local/behavior/20261010T0329318212252Z/` successfully covers B7A810, B791B0, B77CB0, B79EE0 and B3B130. This provides a tractable next target: correction rows → normalization → iterative body response, using whole original functions as the comparison reference. Prefer this joined path over adding unrelated small arithmetic helpers.
+
+Static observations, still awaiting execution verification:
+
+- B7A810 scales existing normal-row coefficients using supplied step/relaxation, row denominator +B0/+84 and saved normalization +AC; it resets row impulse +94 and updates bias +90 and softness +9C. Prefix C4 uses16coefficient floats; the remaining rows through BC use8. Names of denominator/normalization fields are provisional.
+- B791B0 zeros the body-response workspace (manager +80;32bytes per body) through original BF3B70, then iterates four ordered row spans split by C4, BC, C8 and C0. The latter spans scale bounds by a referenced normal impulse at row+A8. Row body indices +A0/+A4 and batch metadata +B4 require aligned instruction confirmation and bounded adapter construction. Decompiled float casts around these fields are not reliable types.
+- The optional correction pass sets C8 and C0 to BC before solving, excluding the latter tangent/friction spans for this path. Initially compare single/two-body normal rows, shared-body ordering, disabled rows, zero/multiple iterations and clamped impulses; then extend deliberately to the other spans.
+- B79EE0 prepares the main physical solver using row coefficient/response dot products; B77CB0 supplies initial response terms. Neither has been executed in this new research. B3B130 is a material-pair cache/mixer; its scalar outputs and equal-pointer/cached-pair branches are additional constraint-construction dependencies.
+
+Aligned entry-to-return evidence now confirms B791B0 is thiscall with body count and iteration count on the stack, `ret8` at B79DA1. +A0/+A4 body indices and +B4 batch count are loaded as32-bit integers; +A8 is a pointer used for scaled bounds. An initial guessed tail start B79CC0 was not an instruction boundary and produced meaningless decoding; discard that range. The corrected complete decode is `local/behavior/physical-iteration-aligned-20261010.json`; initial entry/normalization evidence is `physical-solver-abi-20261010.json`.
+
+Next steps: finish complete aligned row arithmetic/layout recovery; build an owned, bounded whole normalization-plus-iteration probe with original memset and unchanged executable sections; implement a typed Rust path; compare full rows and body responses in debug/release; compose F152-produced bias without fabricating live-frame provenance. Only after that, expand initial row construction and body publication. The owner need not drive another lap for these offline checks.
+
 ## Private evidence and research-tool correction
 
 - Caller references: `local/behavior/20261010T0311427235400Z/`.
