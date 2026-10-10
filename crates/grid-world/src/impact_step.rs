@@ -68,8 +68,7 @@ fn force_update(body: &mut Body, delta: f32) {
         }
     }
 }
-#[allow(clippy::assign_op_pattern)] // Retain original multiply/add operand order.
-pub fn calculate(input: &Input) -> Result<Output, Error> {
+pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     let n = input.contacts.len();
     let delta = input.parameters[0] * input.parameters[1];
     if n > 64
@@ -131,6 +130,13 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     {
         return Err(Error("invalid impact step input"));
     }
+    Ok(())
+}
+#[allow(clippy::assign_op_pattern)] // Retain original multiply/add operand order.
+pub fn calculate(input: &Input) -> Result<Output, Error> {
+    validate(input)?;
+    let n = input.contacts.len();
+    let delta = input.parameters[0] * input.parameters[1];
     let mut out = Output {
         success: true,
         ends: input.initial_ends,

@@ -24,6 +24,7 @@ pub mod grid_population;
 pub mod grip_history;
 pub mod impact_body;
 pub mod impact_correction;
+pub mod impact_frame;
 pub mod impact_generation;
 pub mod impact_producer;
 pub mod impact_response;
