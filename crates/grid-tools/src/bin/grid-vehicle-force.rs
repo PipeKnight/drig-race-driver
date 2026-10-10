@@ -30,9 +30,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("bounded input and private output required".into());
     }
     let mut data = std::fs::read(input)?;
-    if data.len() < 8 || word(&data, 0) != 0x31304657 {
+    if data.len() < 8 || ![0x31304657, 0x31304650].contains(&word(&data, 0)) {
         return Err("invalid header".into());
     }
+    let propulsion = word(&data, 0) == 0x31304650;
     let count = word(&data, 4) as usize;
     if !(1..=64).contains(&count) || data.len() != 8 + count * RECORD {
         return Err("invalid size/count".into());
@@ -82,6 +83,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("invalid material presence".into());
             }
             if present != 0 {
+                if propulsion {
+                    let pointer = body[(0x1990 + i * 0x150 + 0xc0) / 4];
+                    let base = 36 + 0x2600 + 0x300 + 0xdd0;
+                    for j in 0..i {
+                        if body[(0x1990 + j * 0x150 + 0xc0) / 4] == pointer
+                            && record[base + i * 0x140..base + (i + 1) * 0x140]
+                                != record[base + j * 0x140..base + (j + 1) * 0x140]
+                        {
+                            return Err("inconsistent material alias".into());
+                        }
+                    }
+                }
                 *material = Some(f32::from_bits(word(
                     record,
                     36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140 + 0x64,
@@ -98,7 +111,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             material_multipliers: materials,
             diagnostics,
         };
-        vehicle_force::apply(&mut frame, f32::from_bits(word(record, 4)))?;
+        let delta = f32::from_bits(word(record, 4));
+        if propulsion {
+            let roll = std::array::from_fn(|i| {
+                materials[i].map(|_| {
+                    f32::from_bits(word(record, 36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140 + 0x20))
+                })
+            });
+            grid_world::vehicle_propulsion::apply(&mut frame, roll, delta)?;
+        } else {
+            vehicle_force::apply(&mut frame, delta)?;
+        }
         put(record, 36, &frame.body);
         put(record, 36 + 0x2600, &frame.view);
         put(record, 36 + 0x2600 + 0x2b0, &frame.solver[..0x50 / 4]);

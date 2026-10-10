@@ -62,6 +62,7 @@ pub mod tyre_response;
 pub mod vehicle_bridge;
 pub mod vehicle_force;
 pub mod vehicle_grip;
+pub mod vehicle_propulsion;
 pub mod wheel_coupling;
 pub mod wheel_damage;
 pub mod wheel_deformation;
