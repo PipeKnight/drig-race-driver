@@ -1,5 +1,5 @@
 //! Whole suspension preparation against locally purchased packed track geometry.
-use grid_world::{Error, rectangle_cull, suspension_prepare};
+use grid_world::{Error, rectangle_cull, suspension_prepare, suspension_vehicle};
 use std::{fs::OpenOptions, io::Write, path::Path};
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,12 +16,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut bytes = std::fs::read(input)?;
     let word = |b: &[u8]| u32::from_le_bytes(b.try_into().unwrap());
-    if bytes.len() < 8 || &bytes[..4] != b"SP01" {
+    if bytes.len() < 8 || (&bytes[..4] != b"SP01" && &bytes[..4] != b"SF01") {
         return Err("invalid preparation header".into());
     }
     let count = word(&bytes[4..8]) as usize;
-    const RECORD: usize = 0x2608;
-    if !(1..=128).contains(&count) || bytes.len() != 8 + count * RECORD {
+    let whole = &bytes[..4] == b"SF01";
+    let record_size = if whole { 0x2614 } else { 0x2608 };
+    if !(1..=128).contains(&count) || bytes.len() != 8 + count * record_size {
         return Err("invalid preparation framing".into());
     }
     let output = Path::new(&args[3]);
@@ -41,18 +42,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let track = grid_tools::track::Track::read(&std::fs::read(track_path)?)?;
     let surfaces = grid_tools::contact_surfaces::Surfaces::read(&std::fs::read(surface_path)?)?;
-    for (index, record) in bytes[8..]
-        .as_chunks_mut::<RECORD>()
-        .0
-        .iter_mut()
-        .enumerate()
-    {
+    for (index, record) in bytes[8..].chunks_exact_mut(record_size).enumerate() {
         if word(&record[..4]) as usize != index {
             return Err("case index mismatch".into());
         }
         let delta = f32::from_bits(word(&record[4..8]));
         let words = std::array::from_fn(|i| word(&record[8 + i * 4..12 + i * 4]));
         let mut state = suspension_prepare::State { words };
+        if whole && state.words[0] != 0 {
+            return Err("unowned force-view pointer".into());
+        }
         for offset in [0x5d4, 0x608, 0x60c]
             .into_iter()
             .map(|o| o + 0x3d0)
@@ -63,7 +62,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         let mut cache = rectangle_cull::Cache::default();
-        suspension_prepare::apply(&mut state, delta, |_, ray| {
+        let mut query = |_, ray: grid_world::contact_ray::Ray| {
             let hit = track
                 .query(ray.start, ray.end, &mut cache)
                 .map_err(|_| Error("track query failed"))?
@@ -80,8 +79,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
             })
             .transpose()
-        })?;
-        for (slot, word) in record[8..]
+        };
+        if whole {
+            let inertia = suspension_vehicle::apply(&mut state, delta, &mut query)?;
+            for (i, value) in inertia.into_iter().enumerate() {
+                record[0x2608 + i * 4..0x260c + i * 4]
+                    .copy_from_slice(&value.to_bits().to_le_bytes());
+            }
+        } else {
+            suspension_prepare::apply(&mut state, delta, &mut query)?;
+        }
+        for (slot, word) in record[8..0x2608]
             .as_chunks_mut::<4>()
             .0
             .iter_mut()
