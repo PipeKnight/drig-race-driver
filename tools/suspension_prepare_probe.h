@@ -2,6 +2,9 @@
    Address-looking input words are opaque; consumed pointers must be zero and
    are relocated only to owned allocations. No helper replacements/code writes. */
 typedef void (__fastcall *SuspensionPrepare)(void *,void *,float);
+#ifdef GRID_VEHICLE_GRIP
+typedef void (__cdecl *VehicleGrip)(void *,float);
+#endif
 static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *request,const wchar_t *output,
     SurfaceRecord *materials,unsigned material_count,unsigned *completed){
     unsigned error=0,protected=0,number=0,tag=0;
@@ -19,8 +22,16 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         ++protected;
     }
     if(!materials||!material_count||_wfopen_s(&input,request,L"rb")||!input){error=62;goto finish;}
-    if(fread(&tag,4,1,input)!=1||(tag!=0x31305053&&tag!=0x31304653)||fread(&number,4,1,input)!=1||!number||number>128){error=63;goto finish;}
-    const unsigned whole=tag==0x31304653,record_size=whole?0x2614:0x2608;
+    if(fread(&tag,4,1,input)!=1||(tag!=0x31305053&&tag!=0x31304653
+#ifdef GRID_VEHICLE_GRIP
+        &&tag!=0x31304756
+#endif
+        )||fread(&number,4,1,input)!=1||!number||number>128){error=63;goto finish;}
+    unsigned grip=0;
+#ifdef GRID_VEHICLE_GRIP
+    grip=tag==0x31304756;
+#endif
+    const unsigned whole=tag==0x31304653||grip,record_size=grip?0x2908:(whole?0x2614:0x2608);
     unsigned char *records=malloc((size_t)number*record_size);
     if(!records){error=64;goto finish;}
     if(fread(records,record_size,number,input)!=number||fgetc(input)!=EOF||ferror(input)){free(records);error=65;goto finish;}
@@ -66,19 +77,42 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
             *(unsigned *)(c+0x178)=(unsigned)(uintptr_t)w;
         }
         if(error)break;
+#ifdef GRID_VEHICLE_GRIP
+        if(grip){
+            const unsigned scalars[]={0xfcc,0xfe4,0xe1c,0xe20,0xe74,0x1160,0x1164,0x1168,0x116c,0x1170,0x1174,0x11f4,0x12a8,0x1354,0x137c,0x187c,0x1efc,0x1f10,0x1f20,0x1f24,0x1f3c,0x1f64,0x1f8c,0x1f90,0x1fa4,0x1fa8,0x1ffc,0x21f8,0x21fc,0x2200};
+            for(unsigned j=0;j<sizeof(scalars)/sizeof(*scalars);j++)if(!isfinite(*(float *)(body+scalars[j])))error=78;
+            for(unsigned j=0;j<10;j++)if(!isfinite(*(float *)(body+0x11fc+j*4)))error=78;
+            if(getword(body+0x1620)!=4||getword(body+0x21ec)>4||*(float *)(body+0x1648)<0||*(float *)(body+0x1648)>1000000||*(float *)(body+0x1f3c)<=0||*(float *)(body+0x1ffc)<0||*(float *)(body+0x137c)<0||*(float *)(body+0x137c)>=1||*(float *)(body+0xfcc)<=0||*(float *)(body+0xfcc)>=1||*(float *)(body+0x1160)==0||*(float *)(body+0x21f8)==*(float *)(body+0x21fc)||*(float *)(body+0x12a8)<0||*(float *)(body+0x12a8)>4)error=78;
+            for(unsigned i=0;i<4;i++){
+                unsigned char *w=body+0x1990+i*0x150;const unsigned offsets[]={0xb0,0xb4,0xb8,0xbc,0x80,0x104,0xe4,0xec,0x10c,0x11c,0x120,0x124};
+                for(unsigned j=0;j<12;j++)if(!isfinite(*(float *)(w+offsets[j])))error=78;
+                unsigned token=getword(w+0x128);if(token>material_count)error=78;else if(token)*(unsigned *)(w+0x128)=(unsigned)(uintptr_t)materials[token-1].data;
+                const unsigned vectors[]={0x190,0x1d0,0x210};
+                for(unsigned j=0;j<3;j++)for(unsigned k=0;k<4;k++)if(!isfinite(*(float *)(record+0x2608+vectors[j]+i*16+k*4)))error=78;
+                if(!isfinite(*(float *)(record+0x2608+0x298+i*4)))error=78;
+            }
+        }
+        if(error)break;
+#endif
         __declspec(align(16)) unsigned char table[0x20]={0};unsigned entry[3]={0};
         *(unsigned *)(table+0xc)=1;*(unsigned *)(table+0x14)=(unsigned)(uintptr_t)entry;
         *(unsigned *)(context+0x608)=(unsigned)(uintptr_t)table;
         *(unsigned *)(context+0x5d4)=(unsigned)(uintptr_t)body;
         __declspec(align(16)) unsigned char view[0x300]={0};
+        if(grip)memcpy(view,record+0x2608,0x300);
         if(whole)*(unsigned *)body=(unsigned)(uintptr_t)view;
         *(unsigned *)(image+0xec2c54-0x400000)=0;
-        __try {((SuspensionPrepare)(image+(whole?0x9f1e10:0x9e41f0)-0x400000))(context,NULL,delta);}
+        __try {
+#ifdef GRID_VEHICLE_GRIP
+            if(grip)((VehicleGrip)(image+0xa00e10-0x400000))(body,delta);else
+#endif
+            ((SuspensionPrepare)(image+(whole?0x9f1e10:0x9e41f0)-0x400000))(context,NULL,delta);
+        }
         __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"case=%u fault=%08lx\n",index,GetExceptionCode());error=70;}
         if(error)break;
         if(whole){
             if(getword(body)!=(unsigned)(uintptr_t)view){error=71;break;}
-            *(unsigned *)body=0;memcpy(record+0x2608,view+0x48,12);
+            *(unsigned *)body=0;if(grip)memcpy(record+0x2608,view,0x300);else memcpy(record+0x2608,view+0x48,12);
         }
         *(unsigned *)(context+0x608)=0;*(unsigned *)(context+0x5d4)=0;
         for(unsigned i=0;i<4;i++){
@@ -91,6 +125,11 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
                 *(unsigned *)(w+0xc0)=(unsigned)((token-base)/sizeof(SurfaceRecord))+1;
             }
             *(unsigned *)(w+0xc4)=getword(w+0xc4)!=0;*(unsigned *)(w+0xc8)=getword(w+0xc8)!=0;
+            if(grip){
+                unsigned history=getword(w+0x128);
+                if(history){if(history<base||history>=base+material_count*sizeof(SurfaceRecord)||(history-base)%sizeof(SurfaceRecord)){error=79;break;}*(unsigned *)(w+0x128)=(unsigned)((history-base)/sizeof(SurfaceRecord))+1;}
+                if(!isfinite(*(float *)(w+0x78))||!isfinite(*(float *)(view+0x5c+i*4))||!isfinite(*(float *)(view+0x6c+i*4))){error=80;break;}
+            }
         }
         if(error)break;
         memcpy(record+8,body,sizeof(body));++*completed;

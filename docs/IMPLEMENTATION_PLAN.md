@@ -1,6 +1,6 @@
 # Current GRID reverse-engineering and implementation plan
 
-Current checkpoint F169: whole vehicle/physical setters, advance/shape displacement, optional correction and readback match320calls/4,295,784words per debug/release with32fresh suspension handoffs. Actual selected outer driver and world schedule remain next before Bevy driving. [State transfer](VEHICLE_PHYSICAL_BRIDGE.md), [whole suspension](SUSPENSION_VEHICLE.md), [selected force](VEHICLE_FORCE_PIPELINE.md#joined-rust-vehicle-force-update--f166). Earlier checkpoints retain dependency history.
+Current checkpoint F170: complete source-contact/suspension/history/grip update matches312calls/818,688words per debug/release;560prior suspension inputs freshly exact. Next actual selected grip-to-force segment and outer/world scheduling before Bevy driving. [Grip integration](SUSPENSION_GRIP_PIPELINE.md), [state transfer](VEHICLE_PHYSICAL_BRIDGE.md), [force solver](VEHICLE_FORCE_PIPELINE.md#joined-rust-vehicle-force-update--f166). Earlier checkpoints retain dependency history.
 
 Current checkpoint F156 supersedes earlier checkpoints: complete initial single/two-body constraints, material/cache/compliance behavior and grouped friction rows match711scenarios in debug/release, including5,840fresh upstream operands. Next join construction with main response preparation and all normal/friction solve spans, then impulse publication. Full frame, contact production, initialization/timing and Bevy driving remain open. [Contact construction](CONTACT_ROWS.md).
 

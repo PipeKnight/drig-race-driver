@@ -60,6 +60,10 @@ typedef struct { __declspec(align(16)) unsigned char data[0xb0]; } SurfaceRecord
 #include "suspension_prepare_probe.h"
 #endif
 int wmain(int argc,wchar_t **argv){
+#ifdef GRID_VEHICLE_GRIP
+    if(argc!=7)return 2;
+    --argc;
+#endif
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=5&&argc!=6)return 2;
     unsigned char *image=map_reference(argv[1]);if(!image)return 3;
     DWORD oldgrid,oldcache,oldnormal,ignored;
@@ -112,6 +116,19 @@ int wmain(int argc,wchar_t **argv){
     }
 
     unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 37;
+#ifdef GRID_VEHICLE_GRIP
+    FILE *full=NULL;unsigned full_count=0;char full_tag[4];
+    if(_wfopen_s(&full,argv[6],L"rb")||!full)return 50;
+    if(fread(full_tag,1,4,full)!=4||memcmp(full_tag,"MEX1",4)||fread(&full_count,4,1,full)!=1||full_count!=source_count)return 51;
+    for(unsigned i=0;i<full_count;i++){
+        unsigned char record[0xb0];if(fread(record,1,0xb0,full)!=0xb0)return 52;
+        if(record[0x90]!=source_materials[i].data[0x90]||memcmp(record+0x94,source_materials[i].data+0x94,20))return 53;
+        const unsigned finite[]={0,4,8,0x6c};for(unsigned j=0;j<4;j++)if(!isfinite(*(float *)(record+finite[j])))return 54;
+        if(*(float *)(record+4)<0||record[0x70]>1||record[0x72]>1||record[0xac]>1)return 54;
+        memcpy(source_materials[i].data,record,0xb0);
+    }
+    if(fgetc(full)!=EOF||ferror(full)||fclose(full))return 55;
+#endif
 #ifdef GRID_SUSPENSION_PREPARE
     *cache=0;
     *(unsigned *)(image+0xe85b1c-0x400000)=number;
