@@ -1,5 +1,10 @@
-param([string[]]$Entries)
+param([string[]]$Entries,[string[]]$ReturnContracts)
 $ErrorActionPreference='Stop'
+if($Entries.Count -and $ReturnContracts.Count){throw 'Choose entries or return contracts'}
+if($ReturnContracts.Count -gt 64){throw 'At most 64 return contracts are supported'}
+foreach($taskContract in $ReturnContracts){
+ if($taskContract -notmatch '^[0-9a-fA-F]{1,8}:(float|void)$'){throw 'Contracts must be hexadecimal-address:float or :void'}
+}
 foreach($taskEntry in $Entries){
  if($taskEntry -notmatch '^(0x)?[0-9a-fA-F]{1,8}$'){throw 'Entries must be quoted hexadecimal addresses'}
 }
@@ -11,11 +16,12 @@ $taskOutput=Join-Path $taskRoot "local/behavior/$taskStamp"
 $taskPreviousJava=$env:JAVA_HOME
 try {
  $env:JAVA_HOME='C:\Program Files (x86)\Steam\steamapps\common\Songs of Syx Demo\jre'
- $taskScripts=if($Entries.Count){@('-postScript','GridProbe.java',$taskOutput)+$Entries}else{@('-postScript','GridBehaviorSurvey.java',$taskOutput)}
+ $taskScripts=if($ReturnContracts.Count){@('-postScript','GridReturnContracts.java',$taskOutput)+$ReturnContracts}elseif($Entries.Count){@('-postScript','GridProbe.java',$taskOutput)+$Entries}else{@('-postScript','GridBehaviorSurvey.java',$taskOutput)}
  & 'C:\Users\debros\Tools\grid-research\ghidra_12.1.4_PUBLIC\support\analyzeHeadless.bat' (Join-Path $taskRoot 'local/phase3/ghidra-project') 'grid-unpacked' '-process' 'grid-unpacked.exe' '-noanalysis' '-scriptPath' (Join-Path $PSScriptRoot 'ghidra') @taskScripts
  if($LASTEXITCODE -ne 0){throw "Behavior survey failed: $LASTEXITCODE"}
- if($Entries.Count){
-  foreach($taskEntry in $Entries){
+ if($Entries.Count -or $ReturnContracts.Count){
+  $taskRequestedEntries=if($ReturnContracts.Count){$ReturnContracts | ForEach-Object {($_ -split ':')[0]}}else{$Entries}
+  foreach($taskEntry in $taskRequestedEntries){
    $taskName=([Convert]::ToUInt64($taskEntry.Replace('0x',''),16)).ToString('x')+'.c.txt'
    $taskResult=Join-Path $taskOutput $taskName
    if(!(Test-Path -LiteralPath $taskResult) -or (Get-Content -LiteralPath $taskResult -Raw).Contains('// FAILED')){throw "Missing/failed decompilation output for $taskEntry"}

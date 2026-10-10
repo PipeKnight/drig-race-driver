@@ -10,6 +10,9 @@
 #include <math.h>
 #include <io.h>
 #include <fcntl.h>
+#ifdef GRID_PROPULSION
+#include <float.h>
+#endif
 #include "isolated_reference.h"
 typedef void (__cdecl *Update)(void *,float);
 typedef struct {
@@ -24,9 +27,15 @@ static unsigned exception(EXCEPTION_POINTERS *e) {
     if(e->ExceptionRecord->NumberParameters>=2)fprintf(stderr," access=%lu address=%p",(unsigned long)e->ExceptionRecord->ExceptionInformation[0],(void *)e->ExceptionRecord->ExceptionInformation[1]);
     fputc('\n',stderr);return EXCEPTION_EXECUTE_HANDLER;
 }
+#ifdef GRID_PROPULSION
+#include "vehicle_propulsion_probe.h"
+#endif
 int wmain(int argc,wchar_t **argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     if(argc!=4)return 2;
+#ifdef GRID_PROPULSION
+    unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 2;
+#endif
     unsigned char *image=map_reference(argv[1]);if(!image)return 3;
     IMAGE_NT_HEADERS32 *pe=(IMAGE_NT_HEADERS32 *)(image+((IMAGE_DOS_HEADER *)image)->e_lfanew);
     IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
@@ -34,6 +43,9 @@ int wmain(int argc,wchar_t **argv) {
     memcpy(saved,image,pe->OptionalHeader.SizeOfImage);
     const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xd16000,0xe85000};
     DWORD protections[6];unsigned protected=0,error=0,count=0,completed=0;
+#ifdef GRID_PROPULSION
+    unsigned created=0;
+#endif
     for(unsigned i=0;i<6;i++){
         if(!VirtualProtect(image+pages[i]-0x400000,4096,PAGE_READWRITE,protections+i)){error=5;break;}
         ++protected;
@@ -41,13 +53,22 @@ int wmain(int argc,wchar_t **argv) {
     FILE *input=NULL,*output=NULL;
     if(error||_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto finish;}
     unsigned header[2];
-    if(fread(header,sizeof(header),1,input)!=1||header[0]!=0x31304657||!header[1]||header[1]>64){error=7;goto finish;}
+    const unsigned tag=
+#ifdef GRID_PROPULSION
+        0x31304650;
+#else
+        0x31304657;
+#endif
+    if(fread(header,sizeof(header),1,input)!=1||header[0]!=tag||!header[1]||header[1]>64){error=7;goto finish;}
     count=header[1];
     HANDLE handle=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
     if(handle==INVALID_HANDLE_VALUE){error=8;goto finish;}
     int descriptor=_open_osfhandle((intptr_t)handle,_O_BINARY);
     if(descriptor<0){CloseHandle(handle);error=8;goto finish;}
     output=_fdopen(descriptor,"wb");if(!output){_close(descriptor);error=8;goto finish;}
+#ifdef GRID_PROPULSION
+    created=1;
+#endif
     if(fwrite(header,sizeof(header),1,output)!=1){error=9;goto finish;}
     Update update=(Update)(image+0x9df8b0-0x400000);
     for(unsigned index=0;index<count;index++){
@@ -79,9 +100,18 @@ int wmain(int argc,wchar_t **argv) {
             put(body,0x18d8+4*i,(unsigned)(uintptr_t)(body+offset));
         }
         if(error)break;
+#ifdef GRID_PROPULSION
+        error=propulsion_guard(body,view,material);if(error)break;
+#endif
         memcpy(image+0xd16348-0x400000,r.engine_limit,4);
         memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
-        __try {update(body,delta);}
+        __try {
+#ifdef GRID_PROPULSION
+            error=propulsion_run(image,body,view,update,delta);
+#else
+            update(body,delta);
+#endif
+        }
         __except(exception(GetExceptionInformation())){error=20;}
         if(error)break;
         /* Normalize only the explicit input relocations, checking preservation. */
@@ -117,6 +147,9 @@ finish:
         if(!VirtualProtect(image+pages[i]-0x400000,4096,protections[i],&previous))error=25;
     }
     if(!unchanged)error=26;
+#ifdef GRID_PROPULSION
+    if(error&&created)_wremove(argv[3]);
+#endif
     free(saved);VirtualFree(image,0,MEM_RELEASE);
     printf("vehicle_force_cases=%u completed=%u code_unchanged=%u error=%u\n",count,completed,unchanged,error);
     return error;
