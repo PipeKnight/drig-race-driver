@@ -28,6 +28,7 @@ pub mod impact_generation;
 pub mod impact_producer;
 pub mod impact_response;
 pub mod leaf_query;
+pub mod main_contact_response;
 pub mod owner_collection;
 pub mod packed_query;
 pub mod packed_shape;

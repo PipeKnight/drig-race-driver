@@ -124,12 +124,71 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
             }
         }
     }
-    let mut bodies = vec![[[0.; 4]; 2]; input.body_count];
-    for _ in 0..input.iterations {
-        for (start, end, two) in [
-            (0, input.two_body_rows, true),
-            (input.two_body_rows, rows.len(), false),
-        ] {
+    let count = rows.len();
+    iterate(
+        rows,
+        [input.two_body_rows, count, count, count],
+        &vec![None; count],
+        input.body_count,
+        input.iterations,
+    )
+}
+
+/// Shared complete iterator: two/single normal spans, then two/single friction.
+/// Friction bounds scale by the referenced normal row's current prefix impulse.
+#[allow(clippy::assign_op_pattern)] // Preserve response multiplication/addition order.
+pub(crate) fn iterate(
+    mut rows: Vec<Row>,
+    ends: [usize; 4],
+    references: &[Option<usize>],
+    body_count: usize,
+    iterations: usize,
+) -> Result<Output, Error> {
+    if rows.len() > 256
+        || body_count > 64
+        || iterations > 32
+        || references.len() != rows.len()
+        || ends[3] != rows.len()
+        || ends.windows(2).any(|w| w[0] > w[1])
+        || rows.iter().any(|r| !finite(r) || r.lower > r.upper)
+    {
+        return Err(Error("invalid physical iteration input"));
+    }
+    let mut start = 0;
+    for (span, &end) in ends.iter().enumerate() {
+        let two = span % 2 == 0;
+        let mut cursor = start;
+        while cursor < end {
+            let row = &rows[cursor];
+            let next = cursor
+                .checked_add(row.batch_len)
+                .ok_or(Error("batch overflow"))?;
+            if row.batch_len == 0
+                || next > end
+                || row.bodies[0] >= body_count
+                || (two && row.bodies[1] >= body_count)
+                || rows[cursor..next]
+                    .iter()
+                    .any(|r| r.bodies[0] != row.bodies[0] || (two && r.bodies[1] != row.bodies[1]))
+                || references[cursor..next].iter().any(|r| {
+                    if span >= 2 {
+                        r.is_none_or(|i| i >= ends[1])
+                    } else {
+                        r.is_some()
+                    }
+                })
+            {
+                return Err(Error("invalid physical iteration batch/reference"));
+            }
+            cursor = next;
+        }
+        start = end;
+    }
+    let mut bodies = vec![[[0.; 4]; 2]; body_count];
+    for _ in 0..iterations {
+        let mut start = 0;
+        for (span, &end) in ends.iter().enumerate() {
+            let two = span % 2 == 0;
             let mut cursor = start;
             while cursor < end {
                 let first = &rows[cursor];
@@ -138,7 +197,9 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
                 let mut left = bodies[a];
                 let mut right = if two { bodies[b] } else { [[0.; 4]; 2] };
                 let mut cumulative = 0.;
-                for row in &mut rows[cursor..next] {
+                for index in cursor..next {
+                    let scale = references[index].map(|r| rows[r].cumulative);
+                    let row = &mut rows[index];
                     let mut projection =
                         dot(row.jacobian[0], left[0]) + dot(row.jacobian[1], left[1]);
                     if two {
@@ -150,17 +211,24 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
                     if !candidate.is_finite() {
                         return Err(Error("nonfinite physical impulse"));
                     }
-                    let impulse = if candidate < row.lower {
-                        row.lower
-                    } else if candidate > row.upper {
-                        row.upper
+                    let lower = scale.map_or(row.lower, |s| row.lower * s);
+                    let upper = scale.map_or(row.upper, |s| row.upper * s);
+                    if !lower.is_finite() || !upper.is_finite() {
+                        return Err(Error("nonfinite physical friction bounds"));
+                    }
+                    let impulse = if candidate < lower {
+                        lower
+                    } else if candidate > upper {
+                        upper
                     } else {
                         candidate
                     };
                     let change = impulse - row.impulse;
                     row.impulse = impulse;
-                    cumulative = impulse + cumulative;
-                    row.cumulative = cumulative;
+                    if span < 2 {
+                        cumulative = impulse + cumulative;
+                        row.cumulative = cumulative;
+                    }
                     for v in 0..2 {
                         for i in 0..4 {
                             left[v][i] = change * row.response[v][i] + left[v][i];
@@ -181,6 +249,7 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
                 }
                 cursor = next;
             }
+            start = end;
         }
     }
     Ok(Output { rows, bodies })
