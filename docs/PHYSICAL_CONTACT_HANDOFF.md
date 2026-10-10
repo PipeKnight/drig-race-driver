@@ -1,5 +1,7 @@
 # Physical contact handoff — 10 October 2026
 
+F160 joins optional correction into the complete outer frame: [main plus correction](IMPACT_FRAME_CORRECTION.md). Whole original/repeat/Rust match695scenarios/3,895,485words per debug/release, including217active correction cases. Main construction/solve, correction publication and final cleanup/damping/limits/shifts are joined. Active callbacks, authoritative contact production and actual vehicle/pose scheduling remain open. The owner resumed work; the expired overnight automation is paused.
+
 F159 verifies whole outer B7B850 with impact pools, naturally absent registered callbacks, optional correction disabled and no body-link/shape lists: [outer impact frame](IMPACT_FRAME.md).695scenarios/18,560rows/3,895,485words match in debug/release, including183F158-return handoffs. Body preparation, normalized inverse properties, sleep/capacity/zero-iteration bypasses, main solver and final damping/limits/pending shifts are joined. Continuous pose advance, active callbacks, optional-pass composition and real vehicle/contact wiring remain open.
 
 F158 now verifies the whole impact-only B7ACC0 manager, including initial construction, main normal/friction solve, contact/body impulse publication, force/velocity integration and empty/capacity bypasses: [complete impact step](IMPACT_STEP.md).695scenarios/25,809rows/3,841,665words match in debug/release. Outer body preparation/final pose integration, other pools and vehicle wiring remain open; statements below retain the dependency-selection history.
