@@ -30,10 +30,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("bounded input and private output required".into());
     }
     let mut data = std::fs::read(input)?;
-    if data.len() < 8 || ![0x31304657, 0x31304650].contains(&word(&data, 0)) {
+    if data.len() < 8 || ![0x31304657, 0x31304650, 0x31304643].contains(&word(&data, 0)) {
         return Err("invalid header".into());
     }
-    let propulsion = word(&data, 0) == 0x31304650;
+    let controls = word(&data, 0) == 0x31304643;
+    let propulsion = word(&data, 0) == 0x31304650 || controls;
     let count = word(&data, 4) as usize;
     if !(1..=64).contains(&count) || data.len() != 8 + count * RECORD {
         return Err("invalid size/count".into());
@@ -118,7 +119,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     f32::from_bits(word(record, 36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140 + 0x20))
                 })
             });
-            grid_world::vehicle_propulsion::apply(&mut frame, roll, delta)?;
+            if controls {
+                let mut pair = [0; 2];
+                for (i, wheel) in pair.iter_mut().enumerate() {
+                    let offset = body[(0x21cc + i * 4) / 4]
+                        .checked_sub(address)
+                        .and_then(|v| v.checked_sub(0x1990))
+                        .ok_or("foreign steering wheel")?;
+                    if offset % 0x150 != 0 || offset / 0x150 >= 4 {
+                        return Err("foreign steering wheel".into());
+                    }
+                    *wheel = (offset / 0x150) as usize;
+                }
+                grid_world::vehicle_controls::apply(&mut frame, pair, roll, delta)?;
+            } else {
+                grid_world::vehicle_propulsion::apply(&mut frame, roll, delta)?;
+            }
         } else {
             vehicle_force::apply(&mut frame, delta)?;
         }
