@@ -25,11 +25,17 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
     if(fread(&tag,4,1,input)!=1||(tag!=0x31305053&&tag!=0x31304653
 #ifdef GRID_VEHICLE_GRIP
         &&tag!=0x31304756
+#ifdef GRID_VEHICLE_VECTORS
+        &&tag!=0x31305556
+#endif
 #endif
         )||fread(&number,4,1,input)!=1||!number||number>128){error=63;goto finish;}
     unsigned grip=0;
 #ifdef GRID_VEHICLE_GRIP
     grip=tag==0x31304756;
+#ifdef GRID_VEHICLE_VECTORS
+    grip=grip||tag==0x31305556;
+#endif
 #endif
     const unsigned whole=tag==0x31304653||grip,record_size=grip?0x2908:(whole?0x2614:0x2608);
     unsigned char *records=malloc((size_t)number*record_size);
@@ -87,8 +93,15 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
                 unsigned char *w=body+0x1990+i*0x150;const unsigned offsets[]={0xb0,0xb4,0xb8,0xbc,0x80,0x104,0xe4,0xec,0x10c,0x11c,0x120,0x124};
                 for(unsigned j=0;j<12;j++)if(!isfinite(*(float *)(w+offsets[j])))error=78;
                 unsigned token=getword(w+0x128);if(token>material_count)error=78;else if(token)*(unsigned *)(w+0x128)=(unsigned)(uintptr_t)materials[token-1].data;
+#ifdef GRID_VEHICLE_VECTORS
+                if(tag==0x31305556){
+                    if(!isfinite(*(float *)(w+0x20))||!isfinite(*(float *)(w+0x24)))error=78;
+                }else
+#endif
+                {
                 const unsigned vectors[]={0x190,0x1d0,0x210};
                 for(unsigned j=0;j<3;j++)for(unsigned k=0;k<4;k++)if(!isfinite(*(float *)(record+0x2608+vectors[j]+i*16+k*4)))error=78;
+                }
                 if(!isfinite(*(float *)(record+0x2608+0x298+i*4)))error=78;
             }
         }
@@ -103,6 +116,19 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         if(whole)*(unsigned *)body=(unsigned)(uintptr_t)view;
         *(unsigned *)(image+0xec2c54-0x400000)=0;
         __try {
+#ifdef GRID_VEHICLE_VECTORS
+            if(tag==0x31305556){
+                unsigned owners[4];
+                for(unsigned i=0;i<4;i++){
+                    unsigned char *w=body+0x1990+i*0x150;owners[i]=getword(w+0x34);
+                    *(unsigned *)(w+0x34)=(unsigned)(uintptr_t)(body+0x15a0);
+                }
+                ((void (__cdecl *)(void *))(image+0x9b2790-0x400000))(body);
+                for(unsigned i=0;i<4;i++)*(unsigned *)(body+0x1990+i*0x150+0x34)=owners[i];
+                float scale=*(float *)(body+0x3d0),amount=delta*.25f;
+                *(float *)(body+0x3d0)=scale<1.f?fminf(scale+amount,1.f):fmaxf(scale-amount,1.f);
+            }
+#endif
 #ifdef GRID_VEHICLE_GRIP
             if(grip)((VehicleGrip)(image+0xa00e10-0x400000))(body,delta);else
 #endif

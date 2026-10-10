@@ -1,6 +1,6 @@
 # Current GRID reverse-engineering and implementation plan
 
-Current checkpoint F174: source contact/suspension/grip through controls/forces match312updates/4,799,808bytes per debug/release in one Rust call vs explicitly composed original adapters. Next actual force-vector preparation/intervening schedule, then source initialization, physical-world wiring and Bevy driving. [Source contact-to-forces](VEHICLE_CONTACT_FORCES.md), [post-grip](VEHICLE_PREPARED_FRAME.md), [state transfer](VEHICLE_PHYSICAL_BRIDGE.md).
+Current checkpoint F175: actual force-vector preparation/scale recovery through source contacts, suspension, controls and forces match312updates/4,799,808bytes per debug/release. Next earlier/later driver stages, source initialization, physical-world wiring and Bevy driving. [Prepared contact update](VEHICLE_CONTACT_UPDATE.md), [source contact-to-forces](VEHICLE_CONTACT_FORCES.md), [state transfer](VEHICLE_PHYSICAL_BRIDGE.md).
 
 Current checkpoint F156 supersedes earlier checkpoints: complete initial single/two-body constraints, material/cache/compliance behavior and grouped friction rows match711scenarios in debug/release, including5,840fresh upstream operands. Next join construction with main response preparation and all normal/friction solve spans, then impulse publication. Full frame, contact production, initialization/timing and Bevy driving remain open. [Contact construction](CONTACT_ROWS.md).
 

@@ -15,10 +15,14 @@ BODY=36
 VIEW=BODY+0x2600
 SOLVER=VIEW+0x300
 MATERIAL=SOLVER+0xdd0
+MAGIC=b'JF01'
+GRIP_TAG=b'VG01'
+GRIP_NATIVE=grip.NATIVE
 REFERENCE=ROOT/'local/compatibility/grid-unpacked.exe'
 
 
-def request(records,tag=b'JF01'):
+def request(records,tag=None):
+    if tag is None:tag=MAGIC
     return tag+struct.pack('<I',len(records))+b''.join(struct.pack('<I',i)+r[4:] for i,r in enumerate(records))
 
 
@@ -62,8 +66,8 @@ def native(out,records,name,full,allow_failure=False):
     for r in records:
         body=bytearray(r[BODY:VIEW]);ui(body,0,0)
         vg.append(struct.pack('<If',len(vg),struct.unpack_from('<f',r,4)[0])+body+r[VIEW:SOLVER])
-    source.write_bytes(b'VG01'+struct.pack('<I',len(vg))+b''.join(vg))
-    runs=[execute(grip.NATIVE,[REFERENCE,WORLD,source,target,MECHANICS,full],out,name+'-grip',allow_failure)]
+    source.write_bytes(GRIP_TAG+struct.pack('<I',len(vg))+b''.join(vg))
+    runs=[execute(GRIP_NATIVE,[REFERENCE,WORLD,source,target,MECHANICS,full],out,name+'-grip',allow_failure)]
     if runs[-1]['exit']:return None,runs
     data=target.read_bytes();mechanics=full.read_bytes();following=[]
     for i,r in enumerate(records):
@@ -83,7 +87,7 @@ def native(out,records,name,full,allow_failure=False):
     source.write_bytes(request(following,b'GF01'))
     runs.append(execute(ROOT/'local/behavior/vehicle-prepared-probe.exe',[REFERENCE,source,target],out,name+'-prepared',allow_failure))
     if runs[-1]['exit']:return None,runs
-    result=b'JF01'+target.read_bytes()[4:]
+    result=MAGIC+target.read_bytes()[4:]
     (out/f'{name}-output.bin').write_bytes(result)
     return result,runs
 
@@ -103,6 +107,15 @@ def run_set(out,profile,branches,prefix,full):
     counts=collections.Counter()
     for i,r in enumerate(branches['original']):
         after=a[8+i*RECORD:8+(i+1)*RECORD]
+        if MAGIC==b'UF01':
+            f32=lambda x:struct.unpack('<f',struct.pack('<f',x))[0]
+            scale=struct.unpack_from('<f',r,BODY+0x3d0)[0];delta=struct.unpack_from('<f',r,4)[0]
+            amount=f32(delta*.25);expected=min(f32(scale+amount),1) if scale<1 else max(f32(scale-amount),1)
+            assert after[BODY+0x3d0:BODY+0x3d4]==struct.pack('<f',expected)
+            counts['scale_changes']+=after[BODY+0x3d0:BODY+0x3d4]!=r[BODY+0x3d0:BODY+0x3d4]
+            stage=(out/f'{prefix}-original-grip-output.bin').read_bytes();v=8+i*grip.RECORD+0x2608
+            assert after[VIEW+0x190:VIEW+0x290]==stage[v+0x190:v+0x290]
+            counts['prepared_vector_changes']+=after[VIEW+0x190:VIEW+0x290]!=r[VIEW+0x190:VIEW+0x290]
         counts['pose_changes']+=r[BODY+0x15e0:BODY+0x1620]!=after[BODY+0x15e0:BODY+0x1620]
         counts['velocity_changes']+=r[BODY+0x15c0:BODY+0x15e0]!=after[BODY+0x15c0:BODY+0x15e0]
         for j in range(4):
@@ -124,8 +137,9 @@ def guards(out,profile,first,full):
         ('disabled_wheel',BODY+0x2278,1),('event_count',BODY+0x21ec,5),('zero_mass',BODY+0x15a0,0),
         ('zero_inertia',BODY+0x15a8,0),('zero_radius',BODY+0x1990+0xe0,0),('negative_speed',BODY+0x1648,0xbf800000),
         ('grip_nan',BODY+0x12a8,0x7fc00000),('history_token',BODY+0x1990+0x128,0xffffffff),
-        ('view_nan',VIEW+0x190,0x7fc00000),('late_mode',BODY+0x1598,0),('late_search',BODY+0x1348,1),
+        ('view_nan',VIEW+(0x298 if MAGIC==b'UF01' else 0x190),0x7fc00000),('late_mode',BODY+0x1598,0),('late_search',BODY+0x1348,1),
         ('late_override',BODY+0xe48,11),('late_engine',BODY+0x17a4,0),('late_timer',BODY+0x1f6c,0x7fc00000)]
+    if MAGIC==b'UF01':tests.extend([('blend_nan',BODY+0x1990+0x20,0x7fc00000),('scale_zero',BODY+0x3d0,0)])
     results=[]
     for name,offset,value in tests:
         r=bytearray(first);ui(r,offset,value);r=bytes(r)
@@ -139,10 +153,10 @@ def guards(out,profile,first,full):
     # Framing and ownership are checked at the single Rust API's CLI boundary.
     payload=request([first])
     extra=[('bad_header',b'BAD!'+payload[4:]),('truncated',payload[:-1]),('trailing',payload+b'!'),
-           ('zero_count',b'JF01'+bytes(4)),('too_many',b'JF01'+struct.pack('<I',65))]
+           ('zero_count',MAGIC+bytes(4)),('too_many',MAGIC+struct.pack('<I',65))]
     for name,offset,value in [('identity',0,1),('view_owner',BODY,0),('view_alias',VIEW,0),('overlap',VIEW+0x2b0,0xffffffff),
         ('wheel_owner',BODY+0x1990+0x34,0),('foreign_drive',BODY+0x18d8,1),('foreign_steering',BODY+0x21cc,1)]:
-        r=bytearray(first);ui(r,offset,value);extra.append((name,b'JF01'+struct.pack('<I',1)+r))
+        r=bytearray(first);ui(r,offset,value);extra.append((name,MAGIC+struct.pack('<I',1)+r))
     for name,payload in extra:
         source=out/f'guard-{name}-input.bin';target=out/f'guard-{name}-output.bin';source.write_bytes(payload)
         run=execute(ROOT/f'target/{profile}/grid-vehicle-force.exe',[TRACK,SURFACE,source,target],out,'guard-'+name,True)
@@ -179,7 +193,7 @@ def main():
             branches[kind]=following
     guard_results=guards(out,a.profile,current[1],full)
     report=dict(profile=a.profile,guards=len(guard_results),calls=sum(r['calls'] for r in reports),carried_calls=sum(r['calls'] for r in carried),record_bytes=sum(r['record_bytes'] for r in reports+carried),reports=reports,carried=carried,
-        full_mechanics_sha256=digest(full),scope='Whole original A00E10 then authored actual post-grip interval using unchanged helpers in two isolated processes; Rust one call. Source contact geometry/materials, supplied earlier force vectors/history schedule; no whole A03670/world/driving claim.')
+        full_mechanics_sha256=digest(full),scope=('Whole original9B2790, actual caller scale recovery, wholeA00E10 then post-grip controls/forces in two composed original processes vs one Rust call. Source geometry/materials; earlier controls/history and material-table binding supplied; no wholeA03670/world/driving claim.' if MAGIC==b'UF01' else 'Whole original A00E10 then authored actual post-grip interval using unchanged helpers in two isolated processes; Rust one call. Source contact geometry/materials, supplied earlier force vectors/history schedule; no whole A03670/world/driving claim.'))
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k not in ['reports','carried']}))
 
 if __name__=='__main__':main()
