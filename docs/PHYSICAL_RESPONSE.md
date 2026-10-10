@@ -57,6 +57,8 @@ Python3.12.14, Rust/Cargo1.99.0, MSVC14.44.35207/SDK10.0.26100.0 reused; no inst
 
 ## Next integration dependency
 
+F154 now verifies the complete pose/publication dependency, including both group branches, shapes and derived matrices: [physical pose comparison](PHYSICAL_POSE.md). Notes below describe earlier static selection. The preliminary quaternion label below is incorrect: B12B10 orthonormalizes basis rows, confirmed by captured pointers, aligned instructions and whole execution in F154.
+
 Static B13B00 takes the resulting two vectors as **position and angular corrections** in this optional pass: it adds the first to pointed position at linked+334, builds a rotation from the second, updates the linked+190 matrix and calls B13720. The main solver separately uses its response workspace to update velocities; the workspace alone does not establish units or meaning without its caller. Do not label the optional output as a complete velocity update.
 
 Private `local/behavior/20261010T0353278363010Z/b13b00.c.txt` and `b78d30.c.txt` decompile successfully. B13B00's rotation helper772670 overlaps already verified pose research, but its complete basis/derived-state refresh has not been executed or implemented. Next priority: recover B13720 and verify whole pose correction/publication, then compose the complete optional impact-contact correction pass with original and Rust, before expanding initial row creation/main solver/tangent spans. Geometric contact creation, vehicle initialization/timing and a drivable application remain open. Completion estimates stay unchanged.

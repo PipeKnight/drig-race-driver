@@ -14,6 +14,8 @@ F152 now verifies those complete correction helpers and their authored callback 
 
 F153 now executes and reproduces whole normal-row normalization plus iteration, including authored correction handoff: [physical response contract](PHYSICAL_RESPONSE.md). The dependency map below records how that target was selected; its normal-row subset is now verified. Tangent spans and full physical frames remain open.
 
+F154 verifies complete pose correction/publication, conditional basis orthonormalization, linked shape transforms and derived matrices: [physical pose contract](PHYSICAL_POSE.md). Next join these through whole optional B7B5E0, retaining its no-active-contact bypass and recovering other-pool helpers; main physical frame/constraint creation remain unverified.
+
 ## Next larger comparison
 
 Private decompilation at `local/behavior/20261010T0329318212252Z/` successfully covers B7A810, B791B0, B77CB0, B79EE0 and B3B130. This provides a tractable next target: correction rows → normalization → iterative body response, using whole original functions as the comparison reference. Prefer this joined path over adding unrelated small arithmetic helpers.
