@@ -30,10 +30,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("bounded input and private output required".into());
     }
     let mut data = std::fs::read(input)?;
-    if data.len() < 8 || ![0x31304657, 0x31304650, 0x31304643].contains(&word(&data, 0)) {
+    if data.len() < 8 || ![0x31304657, 0x31304650, 0x31304643, 0x31304647].contains(&word(&data, 0))
+    {
         return Err("invalid header".into());
     }
-    let controls = word(&data, 0) == 0x31304643;
+    let prepared = word(&data, 0) == 0x31304647;
+    let controls = word(&data, 0) == 0x31304643 || prepared;
     let propulsion = word(&data, 0) == 0x31304650 || controls;
     let count = word(&data, 4) as usize;
     if !(1..=64).contains(&count) || data.len() != 8 + count * RECORD {
@@ -131,7 +133,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     *wheel = (offset / 0x150) as usize;
                 }
-                grid_world::vehicle_controls::apply(&mut frame, pair, roll, delta)?;
+                if prepared {
+                    let mechanics = std::array::from_fn(|i| {
+                        materials[i].map(|_| {
+                            let base = 36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140;
+                            let value = |o| f32::from_bits(word(record, base + o));
+                            grid_world::vehicle_prepared_frame::Material {
+                                drag: grid_world::surface_drag::Material {
+                                    minimum_speed: value(0x14),
+                                    maximum_speed: value(0x18),
+                                    slowdown: value(0x1c),
+                                    flag_73: record[base + 0x73] != 0,
+                                },
+                                roughness: value(0x10),
+                                roll: value(0x20),
+                            }
+                        })
+                    });
+                    grid_world::vehicle_prepared_frame::apply(&mut frame, pair, mechanics, delta)?;
+                } else {
+                    grid_world::vehicle_controls::apply(&mut frame, pair, roll, delta)?;
+                }
             } else {
                 grid_world::vehicle_propulsion::apply(&mut frame, roll, delta)?;
             }

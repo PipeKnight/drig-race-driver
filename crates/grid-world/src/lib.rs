@@ -63,6 +63,7 @@ pub mod vehicle_bridge;
 pub mod vehicle_controls;
 pub mod vehicle_force;
 pub mod vehicle_grip;
+pub mod vehicle_prepared_frame;
 pub mod vehicle_propulsion;
 pub mod wheel_coupling;
 pub mod wheel_damage;

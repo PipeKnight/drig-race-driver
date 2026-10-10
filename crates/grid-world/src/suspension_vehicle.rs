@@ -8,7 +8,7 @@ use crate::{
 const C: usize = 0x3d0;
 
 #[allow(clippy::assign_op_pattern)] // Retain the observed multiplication operand order.
-fn alternate_inertia(s: &State, incoming: [f32; 3]) -> Result<[f32; 3], Error> {
+pub(crate) fn alternate_inertia(s: &State, incoming: [f32; 3]) -> Result<[f32; 3], Error> {
     let low = s.f(0x21b4);
     let high = s.f(0x21b8);
     let top = s.f(0x21bc);
