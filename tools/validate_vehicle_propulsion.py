@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import random
+import re
 import struct
 import subprocess
 from pathlib import Path
@@ -73,7 +74,9 @@ def run_set(out,profile,current,prefix):
     for i,record in enumerate(current['original']):
         start=8+i*RECORD_SIZE;after=a[start:start+RECORD_SIZE];body=36;view=body+0x2600
         assert after[view+0x250:view+0x290]==record[view+0x250:view+0x290]
-        assert after[body+0x15a8:body+0x15b4]==record[view+0x48:view+0x54]
+        expected_inertia=record[body+0x15a8:body+0x15b4] if MAGIC==b'GF01' else record[view+0x48:view+0x54]
+        assert after[body+0x15a8:body+0x15b4]==expected_inertia
+        if MAGIC==b'GF01':assert after[view+0x48:view+0x54]==expected_inertia
         coverage['torque_nonzero']+=struct.unpack_from('<f',after,view+0x58)[0]!=0
         coverage['rng_changes']+=after[body+0x1644:body+0x1648]!=record[body+0x1644:body+0x1648]
         coverage['traction_active']+=bool(after[body+0x198c])
@@ -85,6 +88,11 @@ def run_set(out,profile,current,prefix):
             o=body+0x1990+j*0x150+0x104;coverage['wheel_spin_changes']+=after[o:o+4]!=record[o:o+4]
             o=body+0x1990+j*0x150+0x20;coverage['steering_changes']+=after[o:o+0x10]!=record[o:o+0x10]
     report=dict(calls=len(current['original']),record_bytes=len(current['original'])*RECORD_SIZE,repeat_exact=a==repeat,differing_words=len(differences),differences=differences,coverage=coverage,executions=runs,hashes={k:hashlib.sha256(v).hexdigest() for k,v in outputs.items()})
+    if MAGIC==b'GF01':
+        fields=['prepared_drag_changes','roughness_rng','roughness_changes','inertia_changes']
+        observed=[{key:int(re.search(rf'{key}=(\d+)',r['stdout'])[1]) for key in fields} for r in runs[:2]]
+        assert observed[0]==observed[1]
+        report['observed_original_stages']=observed[0]
     (out/f'{prefix}-validation.json').write_text(json.dumps(report,indent=2))
     return report,outputs
 
@@ -100,7 +108,7 @@ def guards(out,profile,first,extra_mutations=()):
         ('huge_speed',36+0x1894,0x7f7fffff,30),('huge_phase',36+0x1898,0x7f7fffff,30),
         ('traction_mode',36+0x1988,3,30),('material_roll',36+0x2600+0x300+0xdd0+0x20,0x7fc00000,30)]
     gear=struct.unpack_from('<I',first,36+0x196c)[0]
-    mutations.append(('ratio',36+0x18f4+gear*4,0x7fc00000,40 if MAGIC==b'CF01' else 31))
+    mutations.append(('ratio',36+0x18f4+gear*4,0x7fc00000,40 if MAGIC in [b'CF01',b'GF01'] else 31))
     mutations.append(('inconsistent_material_alias',36+0x2600+0x300+0xdd0+0x20,0x7fc00000,12))
     for o in [0x17a0,0x17a4,0x17a8,0x1848,0x1854,0x185c,0x1864,0x1868,0x1870,0x1874,
               0x187c,0x1880,0x1884,0x1888,0x188c,0x1894,0x1898,0x189c,0x18a0,0x18a4,0x18a8,0x18ac,
@@ -110,11 +118,13 @@ def guards(out,profile,first,extra_mutations=()):
     payloads=[]
     for name,o,value,expected in mutations:
         b=bytearray(first);struct.pack_into('<I',b,o,value)
-        if name=='material_roll':
-            pointer=struct.unpack_from('<I',first,36+0x1990+0xc0)[0]
-            for j in range(1,4):
+        material_base=36+0x2600+0x300+0xdd0
+        if material_base<=o<material_base+4*0x140 and name!='inconsistent_material_alias':
+            slot=(o-material_base)//0x140;field=(o-material_base)%0x140
+            pointer=struct.unpack_from('<I',first,36+0x1990+slot*0x150+0xc0)[0]
+            for j in range(4):
                 if struct.unpack_from('<I',first,36+0x1990+j*0x150+0xc0)[0]==pointer:
-                    struct.pack_into('<I',b,36+0x2600+0x300+0xdd0+j*0x140+0x20,value)
+                    struct.pack_into('<I',b,material_base+j*0x140+field,value)
         payloads.append((name,request([bytes(b)]) if o!=0 else MAGIC+struct.pack('<I',1)+bytes(b),expected))
     payloads.extend([('header',b'BAD!'+struct.pack('<I',1)+first,7),('empty',MAGIC+bytes(4),7),
                      ('oversize',MAGIC+struct.pack('<I',65),7),('truncated',request([first])[:-1],10)])
@@ -158,7 +168,7 @@ def main():
     guard_results=guards(out,a.profile,current[0])
     report=dict(profile=a.profile,calls=sum(r['calls'] for r in reports),record_bytes=sum(r['record_bytes'] for r in reports),repeat_exact=all(r['repeat_exact'] for r in reports),differing_words=sum(r['differing_words'] for r in reports),reports=reports,
                 carried_calls=sum(r['calls'] for r in carried),carried_record_bytes=sum(r['record_bytes'] for r in carried),carried=carried,guards=len(guard_results),
-                scope=('Whole9B40D0 control wrapper feeding authored actual propulsion/force schedule; contact geometry remains supplied, gear-search1348inactive and reverse-disable global zero; no complete vehicle/world/driving claim.' if MAGIC==b'CF01' else 'Authored actual post-control A03670 segment around whole9B1B90/996290/990060/9DF8B0; inherited later-boundary observations are supplied inputs, not live captures of this segment. Controls/contact geometry remain supplied; no complete vehicle/world/driving claim.'))
+                scope=('Whole slowdown/inertia/roughness helpers, actual caller timer/reset schedule, whole controls and propulsion/force schedule; prepared contacts/vectors supplied, no whole A03670/world/driving claim.' if MAGIC==b'GF01' else 'Whole9B40D0 control wrapper feeding authored actual propulsion/force schedule; contact geometry remains supplied, gear-search1348inactive and reverse-disable global zero; no complete vehicle/world/driving claim.' if MAGIC==b'CF01' else 'Authored actual post-control A03670 segment around whole9B1B90/996290/990060/9DF8B0; inherited later-boundary observations are supplied inputs, not live captures of this segment. Controls/contact geometry remain supplied; no complete vehicle/world/driving claim.'))
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:report[k] for k in ['profile','calls','record_bytes','repeat_exact','differing_words']}))
     assert report['calls']==len(current) and report['repeat_exact'] and report['differing_words']==0
     assert report['carried_calls']==384 and all(r['repeat_exact'] and not r['differences'] for r in carried)

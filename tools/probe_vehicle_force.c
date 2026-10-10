@@ -32,6 +32,9 @@ static unsigned exception(EXCEPTION_POINTERS *e) {
 #include "vehicle_controls_probe.h"
 #endif
 #include "vehicle_propulsion_probe.h"
+#ifdef GRID_PREPARED
+#include "vehicle_prepared_probe.h"
+#endif
 #endif
 int wmain(int argc,wchar_t **argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -57,7 +60,9 @@ int wmain(int argc,wchar_t **argv) {
     if(error||_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto finish;}
     unsigned header[2];
     const unsigned tag=
-#ifdef GRID_CONTROL
+#ifdef GRID_PREPARED
+        0x31304647;
+#elif defined(GRID_CONTROL)
         0x31304643;
 #elif defined(GRID_PROPULSION)
         0x31304650;
@@ -120,10 +125,15 @@ int wmain(int argc,wchar_t **argv) {
 #ifdef GRID_CONTROL
         error=controls_guard(body);if(error)break;
 #endif
+#ifdef GRID_PREPARED
+        error=prepared_guard(body,material,delta);if(error)break;
+#endif
         memcpy(image+0xd16348-0x400000,r.engine_limit,4);
         memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
         __try {
-#ifdef GRID_PROPULSION
+#ifdef GRID_PREPARED
+            error=prepared_run(image,body,view,update,delta);
+#elif defined(GRID_PROPULSION)
             error=propulsion_run(image,body,view,update,delta);
 #else
             update(body,delta);
@@ -177,5 +187,8 @@ finish:
 #endif
     free(saved);VirtualFree(image,0,MEM_RELEASE);
     printf("vehicle_force_cases=%u completed=%u code_unchanged=%u error=%u\n",count,completed,unchanged,error);
+#ifdef GRID_PREPARED
+    printf("prepared_drag_changes=%u roughness_rng=%u roughness_changes=%u inertia_changes=%u\n",prepared_drag_changes,prepared_roughness_rng,prepared_roughness_changes,prepared_inertia_changes);
+#endif
     return error;
 }
