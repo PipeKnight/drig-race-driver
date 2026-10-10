@@ -14,11 +14,25 @@
 #include "isolated_reference.h"
 #include "isolated_imports.h"
 enum {DESCRIPTOR=0xa500,SETTINGS=0x1050,LINKED=0x424,CONTACT=0x80,MAX_CONTACTS=80};
+#ifdef GRID_SERIAL_CALLBACK
+/* Each counterpart must retain movaps alignment after adding +41c metadata. */
+enum {OTHER_SIZE=0x420};
+#else
+enum {OTHER_SIZE=0x370};
+#endif
 typedef void (__cdecl *Kernel)(void *,void **,int,float,void *,void *,void *,void *);
 #ifdef GRID_COLLISION_CALLBACK
 typedef unsigned (__cdecl *Callback)(void *,void **,int,float,void *,void *,void *);
+#ifdef GRID_SERIAL_CALLBACK
+typedef void (__stdcall *Serial)(void *,void **,int,float,void *,int *);
+typedef struct {void *contact;float value;} SerialPair;
+_Static_assert(sizeof(SerialPair)==8,"x86 pair layout");
+enum {BODY_SIZE=0xd230,PAGE_COUNT=10,MAGIC=0x31435349,MIN_CONTACTS=0};
+#define PROBE_LABEL "serial_callback_whole"
+#else
 enum {BODY_SIZE=0xd230,PAGE_COUNT=10,MAGIC=0x31434349,MIN_CONTACTS=0};
 #define PROBE_LABEL "collision_callback_whole"
+#endif
 #else
 enum {BODY_SIZE=0x1650,PAGE_COUNT=9,MAGIC=0x31574349,MIN_CONTACTS=1};
 #define PROBE_LABEL "impact_producer_whole"
@@ -27,7 +41,7 @@ static GridBinding bindings[]={ {0xc89148,"GetLastError",0,NULL},{0xc890d4,"SetL
  {0xc8912c,"TlsGetValue",0,NULL},{0xc89130,"TlsSetValue",0,NULL},{0xc8911c,"QueryPerformanceFrequency",0,NULL},
  {0xc89218,"QueryPerformanceCounter",0,NULL},{0xc8925c,"GetTickCount",0,NULL} };
 static int finite_words(const unsigned char *p,unsigned count){for(unsigned i=0;i<count;++i){float value;memcpy(&value,p+i*4,4);if(!isfinite(value))return 0;}return 1;}
-static int fault(EXCEPTION_POINTERS *p){fprintf(stderr,"producer_fault=%08lx ip=%08lx access=%lu target=%08lx\n",p->ExceptionRecord->ExceptionCode,p->ContextRecord->Eip,(unsigned long)p->ExceptionRecord->ExceptionInformation[0],(unsigned long)p->ExceptionRecord->ExceptionInformation[1]);return EXCEPTION_EXECUTE_HANDLER;}
+static int fault(EXCEPTION_POINTERS *p){fprintf(stderr,"producer_fault=%08lx ip=%08lx access=%lu target=%08lx sp=%08lx ax=%08lx bx=%08lx cx=%08lx dx=%08lx si=%08lx di=%08lx bp=%08lx\n",p->ExceptionRecord->ExceptionCode,p->ContextRecord->Eip,(unsigned long)p->ExceptionRecord->ExceptionInformation[0],(unsigned long)p->ExceptionRecord->ExceptionInformation[1],p->ContextRecord->Esp,p->ContextRecord->Eax,p->ContextRecord->Ebx,p->ContextRecord->Ecx,p->ContextRecord->Edx,p->ContextRecord->Esi,p->ContextRecord->Edi,p->ContextRecord->Ebp);return EXCEPTION_EXECUTE_HANDLER;}
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
  unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 3;
@@ -48,7 +62,7 @@ int wmain(int argc,wchar_t **argv){
  fwrite(&magic,4,1,output);fwrite(&total,4,1,output);
  for(unsigned row=0;row<total;++row){
   __declspec(align(16)) unsigned char d[DESCRIPTOR],s[SETTINGS],linked[LINKED],body[BODY_SIZE]={0},wrapper[16]={0};
-  __declspec(align(16)) unsigned char contacts[MAX_CONTACTS][CONTACT],others[MAX_CONTACTS][0x370],center[16],a[16],b[16],ptd[0x214]={0};
+  __declspec(align(16)) unsigned char contacts[MAX_CONTACTS][CONTACT],others[MAX_CONTACTS][OTHER_SIZE],center[16],a[16],b[16],ptd[0x214]={0};
   unsigned char globals[32],corner[4],mass[4],body_globals[20],scale[4],solver_globals[24];float response[MAX_CONTACTS],scalar;
   unsigned count,old_linked,seed,clip,present;void *pointers[MAX_CONTACTS];
   if(fread(&count,4,1,input)!=1||count<MIN_CONTACTS||count>MAX_CONTACTS||fread(&scalar,4,1,input)!=1||fread(&old_linked,4,1,input)!=1||
@@ -83,21 +97,54 @@ int wmain(int argc,wchar_t **argv){
   unsigned old_center=*(unsigned *)(linked+0x334);*(void **)(linked+0x334)=center;*(void **)(body+0xdb0)=wrapper;*(void **)(wrapper+8)=linked;*(void **)(d+0xa4f8)=s;
   *(void **)(image+0xe85f28-0x400000)=body;*(unsigned *)(image+0xe85fcc-0x400000)=1;
 #ifdef GRID_COLLISION_CALLBACK
-  unsigned char preparation[80];unsigned disabled,handled=0;
+  unsigned char preparation[80];unsigned disabled;
+#ifndef GRID_SERIAL_CALLBACK
+  unsigned handled=0;
+#endif
   if(fread(preparation,1,80,input)!=80||fread(&disabled,4,1,input)!=1){error=11;break;}
   if(disabled>1||d[0xa4af]>1||!finite_words(preparation,20)||*(float *)preparation<=0||*(float *)(preparation+4)<=0||*(float *)(preparation+8)<=0||!finite_words(linked+0x3f0,1)||*(float *)(linked+0x3f0)<=0||!finite_words(d+0xa494,1)){error=12;break;}
   memcpy(body+0xd16c,preparation,4);memcpy(body+0xd22c,preparation+4,4);memcpy(image+0xd1676c-0x400000,preparation+8,4);memcpy(image+0xe4fc30-0x400000,preparation+12,4);memcpy(image+0xe4fc48-0x400000,preparation+16,64);image[0xe85fad-0x400000]=(unsigned char)disabled;
+#ifdef GRID_SERIAL_CALLBACK
+  unsigned pending_count;SerialPair pairs[240]={0};int pending;
+  if(!present||fread(&pending_count,4,1,input)!=1||pending_count>240){error=11;break;}
+  for(unsigned i=0;i<count;++i){unsigned registered;
+   if(response[i]!=0||fread(&registered,4,1,input)!=1||registered>1||
+      (registered&&*(void **)(contacts[i]+4)!=others[i]&&*(void **)(contacts[i]+8)!=others[i])){error=12;break;}
+   *(unsigned *)(others[i]+0x41c)=registered;
+  }
+  if(error)break;
+  for(unsigned i=0;i<pending_count;++i){unsigned index;float value;
+   if(fread(&index,4,1,input)!=1||fread(&value,4,1,input)!=1||index>=count||!isfinite(value)){error=12;break;}
+   pairs[i].contact=contacts[index];pairs[i].value=value;
+  }
+  if(error)break;pending=(int)pending_count;
+  unsigned old_callback=*(unsigned *)(linked+0x41c),old_descriptor=*(unsigned *)(linked+0x420);
+  *(void **)(linked+0x41c)=image+0xa064a0-0x400000;*(void **)(linked+0x420)=d;
+  Serial serial=(Serial)(image+0xb784b0-0x400000);
+  __try{serial(linked,pointers,(int)count,scalar,pairs,&pending);}__except(fault(GetExceptionInformation())){error=14;}
+  *(unsigned *)(linked+0x41c)=old_callback;*(unsigned *)(linked+0x420)=old_descriptor;
+  if(pending<0||pending>240){error=14;break;}
+#else
   Callback callback=(Callback)(image+0xa064a0-0x400000);
   __try{handled=callback(linked,pointers,(int)count,scalar,NULL,present?response:NULL,d)&255;}__except(fault(GetExceptionInformation())){error=14;}
+#endif
 #else
   Kernel kernel=(Kernel)(image+0x9ea6e0-0x400000);
   __try{kernel(linked,pointers,(int)count,scalar,present?response:NULL,a,b,d);}__except(fault(GetExceptionInformation())){error=14;}
 #endif
   if(error)break;
   *(unsigned *)(d+0xa4f8)=0;*(unsigned *)(linked+0x334)=old_center;
-  fwrite(d,1,DESCRIPTOR,output);fwrite(linked,1,LINKED,output);fwrite(body+0x290,1,40,output);fwrite(body+0x2e0,1,4,output);fwrite(ptd+0x14,1,4,output);fwrite(response,4,count,output);++cases;
+  fwrite(d,1,DESCRIPTOR,output);fwrite(linked,1,LINKED,output);fwrite(body+0x290,1,40,output);fwrite(body+0x2e0,1,4,output);fwrite(ptd+0x14,1,4,output);++cases;
+#ifdef GRID_SERIAL_CALLBACK
+  for(unsigned i=0;i<count;++i){if(!finite_words(contacts[i]+0x38,1)){error=14;break;}fwrite(contacts[i]+0x38,4,1,output);}
+  fwrite(&pending,4,1,output);
+  for(int i=0;i<pending;++i){unsigned index;for(index=0;index<count&&pairs[i].contact!=contacts[index];++index){}
+   if(index==count||!isfinite(pairs[i].value)){error=14;break;}fwrite(&index,4,1,output);fwrite(&pairs[i].value,4,1,output);}
+#else
+  fwrite(response,4,count,output);
 #ifdef GRID_COLLISION_CALLBACK
   fwrite(&handled,4,1,output);
+#endif
 #endif
  }
  if(!error&&fgetc(input)!=EOF)error=15;
