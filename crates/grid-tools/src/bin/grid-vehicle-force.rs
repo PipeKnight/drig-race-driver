@@ -34,13 +34,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut data = std::fs::read(input)?;
     if data.len() < 8
-        || ![0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a].contains(&word(&data, 0))
+        || ![
+            0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655,
+        ]
+        .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let joined = word(&data, 0) == 0x3130464a;
+    let vectors = word(&data, 0) == 0x31304655;
+    let joined = word(&data, 0) == 0x3130464a || vectors;
     if joined != (args.len() == 4) {
-        return Err("source arguments required only for JF01".into());
+        return Err("source arguments required only for JF01/UF01".into());
     }
     let sources = if joined {
         let track = Path::new(&args[0]);
@@ -152,11 +156,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 *slot = (off / 0x150) as usize;
             }
             let mut cache = grid_world::rectangle_cull::Cache::default();
-            let resolved = grid_world::vehicle_contact_force::apply(
+            let apply = if vectors {
+                grid_world::vehicle_contact_update::apply
+            } else {
+                grid_world::vehicle_contact_force::apply
+            };
+            let resolved = apply(
                 &mut frame,
                 pair,
                 delta,
-                |_, ray| {
+                |_, ray: grid_world::contact_ray::Ray| {
                     track
                         .query(ray.start, ray.end, &mut cache)
                         .map_err(|_| grid_world::Error("track query failed"))?

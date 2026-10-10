@@ -66,10 +66,9 @@ pub fn apply(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    #[test]
-    fn later_control_failure_rolls_back_completed_source_suspension_and_grip() {
+    pub(crate) fn failure_frame() -> Frame {
         let mut state = State {
             words: [0; crate::suspension_prepare::WORDS],
         };
@@ -134,6 +133,11 @@ mod tests {
         for i in 0..4 {
             frame.view[(0x298 + i * 4) / 4] = 1f32.to_bits();
         }
+        frame
+    }
+    #[test]
+    fn later_control_failure_rolls_back_completed_source_suspension_and_grip() {
+        let mut frame = failure_frame();
         let before = frame.clone();
         let mut queries = 0;
         let error = apply(
