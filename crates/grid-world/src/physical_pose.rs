@@ -119,6 +119,32 @@ pub(crate) fn publish(
             - ((o[3] * corrected[3][i] + o[1] * corrected[1][i])
                 + (o[2] * corrected[2][i] + o[0] * corrected[0][i]))
     });
+    outputs(corrected, published, local_matrices, shape_matrices)
+}
+
+/// Publish an externally supplied object pose, retaining it exactly while the
+/// center matrix includes the object's local center offset.
+pub(crate) fn from_publication(
+    published: Matrix,
+    offset: [f32; 4],
+    local_matrices: [Matrix; 2],
+    shape_matrices: &[Option<Matrix>],
+) -> Result<Output, Error> {
+    let mut corrected = published;
+    corrected[3] = std::array::from_fn(|i| {
+        ((offset[3] * published[3][i] + offset[1] * published[1][i])
+            + (offset[2] * published[2][i] + offset[0] * published[0][i]))
+            + published[3][i]
+    });
+    outputs(corrected, published, local_matrices, shape_matrices)
+}
+
+fn outputs(
+    corrected: Matrix,
+    published: Matrix,
+    local_matrices: [Matrix; 2],
+    shape_matrices: &[Option<Matrix>],
+) -> Result<Output, Error> {
     let shapes: Vec<_> = shape_matrices
         .iter()
         .map(|local| local.map_or(published, |m| multiply(m, published)))
