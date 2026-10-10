@@ -1,5 +1,7 @@
 # Physical contact handoff — 10 October 2026
 
+F156 now verifies complete initial single/two-body contact builders, material/cache/compliance helpers and all grouped friction rows: [initial contact rows](CONTACT_ROWS.md). Whole original/repeat/Rust match711scenarios in both profiles, including5,840freshly replayed accumulator operands. Main preparation and normal+friction iteration composition are next; historical unverified-builder statements below describe earlier checkpoints.
+
 F155 now executes the whole optional correction manager with impact pools only, joining bias→normalization→iteration→complete pose publication, including all inactive/empty/zero-iteration bypass behavior: [joined impact correction](IMPACT_CORRECTION.md). Other pools, initial constraints and the main physical frame remain open; the dependency-selection history below predates that comparison.
 
 Static analysis locates the serial callback/consumer inside the larger physical update. This is a map of dependencies, not verification of a whole physical frame or live scheduling.

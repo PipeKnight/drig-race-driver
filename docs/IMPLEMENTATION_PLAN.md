@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F156 supersedes earlier checkpoints: complete initial single/two-body constraints, material/cache/compliance behavior and grouped friction rows match711scenarios in debug/release, including5,840fresh upstream operands. Next join construction with main response preparation and all normal/friction solve spans, then impulse publication. Full frame, contact production, initialization/timing and Bevy driving remain open. [Contact construction](CONTACT_ROWS.md).
+
 Updated: 10 October 2026, Europe/Kiev. This roadmap is grounded in [our findings](../PROJECT_LOG.md). The [original proposal](reference/GRID_2008_OPEN_SOURCE_PLAN.md) remains background reference. Resource readers and static Lacetti/Donington rendering are implemented; twelve live placement results reproduce exactly from recorded inputs. Scoped vehicle components, the supplied-contact collision callback and its response consumer have original-versus-Rust comparisons. A complete driving loop remains ahead. The [dated progress assessment](PROGRESS_ASSESSMENT_2026-10-09.md) records estimates, blockers and their uncertainty.
 
 ## Objective and language decision
