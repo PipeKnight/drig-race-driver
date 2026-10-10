@@ -15,11 +15,14 @@ fn put(data: &mut [u8], offset: usize, words: &[u32]) {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-vehicle-force INPUT.bin local/OUTPUT.bin".into());
+    if args.len() != 2 && args.len() != 4 {
+        return Err(
+            "usage: grid-vehicle-force [TRACK.jpk SURFACE.xml] INPUT.bin local/OUTPUT.bin".into(),
+        );
     }
-    let input = Path::new(&args[0]);
-    let output = Path::new(&args[1]);
+    let offset = args.len() - 2;
+    let input = Path::new(&args[offset]);
+    let output = Path::new(&args[offset + 1]);
     if input.metadata()?.len() > 2 * 1024 * 1024
         || !output
             .parent()
@@ -30,11 +33,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("bounded input and private output required".into());
     }
     let mut data = std::fs::read(input)?;
-    if data.len() < 8 || ![0x31304657, 0x31304650, 0x31304643, 0x31304647].contains(&word(&data, 0))
+    if data.len() < 8
+        || ![0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a].contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let prepared = word(&data, 0) == 0x31304647;
+    let joined = word(&data, 0) == 0x3130464a;
+    if joined != (args.len() == 4) {
+        return Err("source arguments required only for JF01".into());
+    }
+    let sources = if joined {
+        let track = Path::new(&args[0]);
+        let surface = Path::new(&args[1]);
+        if track.metadata()?.len() > 256 * 1024 * 1024
+            || surface.metadata()?.len() > 16 * 1024 * 1024
+        {
+            return Err("source exceeds bound".into());
+        }
+        Some((
+            grid_tools::track::Track::read(&std::fs::read(track)?)?,
+            grid_tools::contact_surfaces::Surfaces::read(&std::fs::read(surface)?)?,
+        ))
+    } else {
+        None
+    };
+    let prepared = word(&data, 0) == 0x31304647 || joined;
     let controls = word(&data, 0) == 0x31304643 || prepared;
     let propulsion = word(&data, 0) == 0x31304650 || controls;
     let count = word(&data, 4) as usize;
@@ -115,7 +138,63 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics,
         };
         let delta = f32::from_bits(word(record, 4));
-        if propulsion {
+        if joined {
+            let (track, surfaces) = sources.as_ref().unwrap();
+            let mut pair = [0; 2];
+            for (i, slot) in pair.iter_mut().enumerate() {
+                let off = body[(0x21cc + i * 4) / 4]
+                    .checked_sub(address)
+                    .and_then(|x| x.checked_sub(0x1990))
+                    .ok_or("foreign steering wheel")?;
+                if off % 0x150 != 0 || off / 0x150 >= 4 {
+                    return Err("foreign steering wheel".into());
+                }
+                *slot = (off / 0x150) as usize;
+            }
+            let mut cache = grid_world::rectangle_cull::Cache::default();
+            let resolved = grid_world::vehicle_contact_force::apply(
+                &mut frame,
+                pair,
+                delta,
+                |_, ray| {
+                    track
+                        .query(ray.start, ray.end, &mut cache)
+                        .map_err(|_| grid_world::Error("track query failed"))?
+                        .hit
+                        .map(|h| {
+                            let (index, material) = surfaces
+                                .contact(h.contact.material)
+                                .map_err(|_| grid_world::Error("missing source mechanics"))?;
+                            Ok(grid_world::suspension_prepare::Contact {
+                                normal: h.contact.normal,
+                                fraction: h.contact.fraction,
+                                material,
+                                tokens: [index as u32 + 1, 1, 1],
+                            })
+                        })
+                        .transpose()
+                },
+                |token| surfaces.joined(token),
+            )?;
+            for (i, m) in resolved.into_iter().enumerate() {
+                record[20 + 4 * i..24 + 4 * i]
+                    .copy_from_slice(&u32::from(m.is_some()).to_le_bytes());
+                let base = 36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140;
+                record[base..base + 0x140].fill(0);
+                if let Some(m) = m {
+                    for (o, x) in [
+                        (0x10, m.prepared.roughness),
+                        (0x14, m.prepared.drag.minimum_speed),
+                        (0x18, m.prepared.drag.maximum_speed),
+                        (0x1c, m.prepared.drag.slowdown),
+                        (0x20, m.prepared.roll),
+                        (0x64, m.hardness),
+                    ] {
+                        put(record, base + o, &[x.to_bits()]);
+                    }
+                }
+            }
+        } else if propulsion {
             let roll = std::array::from_fn(|i| {
                 materials[i].map(|_| {
                     f32::from_bits(word(record, 36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140 + 0x20))

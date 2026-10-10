@@ -7,6 +7,7 @@ pub struct Surfaces {
     mechanics: Vec<Option<contact_material::Material>>,
     drag: Vec<Option<surface_drag::Material>>,
     history: Vec<Option<wheel_history::Material>>,
+    joined: Vec<Option<grid_world::vehicle_contact_force::Material>>,
 }
 
 impl Surfaces {
@@ -30,7 +31,7 @@ impl Surfaces {
                 })
             })
             .collect();
-        let drag = materials
+        let drag: Vec<_> = materials
             .iter()
             .map(|m| {
                 m.mechanics.as_ref().map(|s| surface_drag::Material {
@@ -42,7 +43,7 @@ impl Surfaces {
                 })
             })
             .collect();
-        let history = materials
+        let history: Vec<_> = materials
             .iter()
             .enumerate()
             .map(|(i, m)| {
@@ -55,12 +56,45 @@ impl Surfaces {
                 })
             })
             .collect();
+        let joined = materials
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                m.mechanics
+                    .as_ref()
+                    .map(|s| grid_world::vehicle_contact_force::Material {
+                        history: history[i].unwrap(),
+                        prepared: grid_world::vehicle_prepared_frame::Material {
+                            drag: drag[i].unwrap(),
+                            roughness: s.roughness,
+                            roll: s.roll_induce,
+                        },
+                        hardness: s.hardness,
+                    })
+            })
+            .collect();
         Ok(Self {
             keys,
             mechanics,
             drag,
             history,
+            joined,
         })
+    }
+
+    pub fn joined(
+        &self,
+        token: u32,
+    ) -> Result<Option<grid_world::vehicle_contact_force::Material>, grid_world::Error> {
+        if token == 0 {
+            return Ok(None);
+        }
+        self.joined
+            .get(token as usize - 1)
+            .copied()
+            .flatten()
+            .map(Some)
+            .ok_or(grid_world::Error("unknown source mechanics token"))
     }
 
     pub fn history(
