@@ -26,7 +26,7 @@ Bounded support: at most80 selected contacts,512 distinct supplied contact state
 
 Initial `serial-callback-20261010-debug-01` failed after four guarded cases with isolated native C0000005 at relocated original9EABE3. Adding registration metadata had changed counterpart row stride from0x370 to0x424, breaking16-byte alignment for `movaps [counterpart+360]`. Corrected owned stride0x420 retains alignment and covers+41C; original instructions are unchanged. Private fault instruction evidence is `serial-wrapper-fault-20261010.json`; raw partial outputs `fault-details.bin`/`fault-details-02.bin` are retained. First strict build also rejected unused `handled` in the serial-only mode; made it callback-only. These were probe-construction failures, not Rust numerical mismatches or GRID compatibility findings.
 
-Python3.12.14, Rust/Cargo1.99.0, MSVC14.44.35207/SDK10.0.26100.0 reused, no installation. Strict C build,112 workspace library tests, formatting and warnings-denied all-target Clippy pass. Steam130 resources and executable remain unchanged at2026-10-10T03:07:53.571543Z: `local/scene/preservation-20261010-serial-callback.json`.
+Python3.12.14, Rust/Cargo1.99.0, MSVC14.44.35207/SDK10.0.26100.0 reused, no installation. Strict C build,79 workspace library tests (corrected from112 after checking the saved log), formatting and warnings-denied all-target Clippy pass. Steam130 resources and executable remain unchanged at2026-10-10T03:07:53.571543Z: `local/scene/preservation-20261010-serial-callback.json`.
 
 ## What remains
 
