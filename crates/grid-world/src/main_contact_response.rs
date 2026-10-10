@@ -49,7 +49,7 @@ fn projection(row: &RawRow, vectors: [[f32; 4]; 4], two: bool) -> f32 {
     }
     result
 }
-fn typed(row: &RawRow) -> Row {
+pub(crate) fn typed(row: &RawRow) -> Row {
     Row {
         jacobian: std::array::from_fn(|i| v(row, i * 4)),
         response: std::array::from_fn(|i| v(row, 16 + i * 4)),

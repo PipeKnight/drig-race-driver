@@ -1,8 +1,9 @@
 //! Whole outer impact-only frame with no registered callbacks, joints or links.
 //! Includes body preparation and final damping/clamping/pending-shift publication.
 use crate::{
-    Error,
+    Error, impact_correction,
     impact_step::{self, Input as Step, Output as StepOutput},
+    main_contact_response,
     physical_pose::{self, Matrix},
 };
 #[derive(Clone)]
@@ -24,11 +25,20 @@ pub struct Body {
     pub shift_active: bool,
 }
 #[derive(Clone)]
+pub struct Correction {
+    pub iterations: usize,
+    pub softness: f32,
+    pub scale: f32,
+    pub threshold: f32,
+    pub relaxation: f32,
+}
+#[derive(Clone)]
 pub struct Input {
     /// Step scalars1..4 are supplied by the outer frame's mass normalization.
     pub step: Step,
     pub gravity: [f32; 4],
     pub bodies: Vec<Body>,
+    pub correction: Option<Correction>,
 }
 pub struct Output {
     pub status: u32,
@@ -37,6 +47,8 @@ pub struct Output {
     pub bodies: Vec<Body>,
     /// None means original published/derived matrices are retained.
     pub publications: Vec<Option<physical_pose::Output>>,
+    pub correction_invoked: bool,
+    pub correction_active: bool,
 }
 fn dot(a: [f32; 4], b: [f32; 4]) -> f32 {
     (a[0] * b[0] + a[1] * b[1]) + (a[2] * b[2] + a[3] * b[3])
@@ -70,6 +82,12 @@ fn asleep(b: &mut Body, s: &impact_step::Body, delta: f32) -> bool {
 pub fn calculate(input: &Input) -> Result<Output, Error> {
     let delta = input.step.parameters[0];
     if input.bodies.len() != input.step.bodies.len()
+        || input.correction.as_ref().is_some_and(|c| {
+            c.iterations > 32
+                || [c.softness, c.scale, c.threshold, c.relaxation]
+                    .iter()
+                    .any(|v| !v.is_finite())
+        })
         || input.bodies.is_empty()
         || input.bodies.len() > 16
         || !delta.is_finite()
@@ -105,6 +123,8 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
         started: false,
         bodies: input.bodies.clone(),
         publications: (0..input.bodies.len()).map(|_| None).collect(),
+        correction_invoked: false,
+        correction_active: false,
         step: StepOutput {
             success: true,
             ends: s.initial_ends,
@@ -192,6 +212,100 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     if !out.step.success {
         out.status = 1;
         return Ok(out);
+    }
+    // The file-backed D85A50 threshold is positive zero. Preserve the outer
+    // iteration/nonpositive-relaxation guard before entering the optional pass.
+    if let Some(c) = input
+        .correction
+        .as_ref()
+        .filter(|c| c.iterations != 0 && c.relaxation > 0.)
+    {
+        out.correction_invoked = true;
+        let contacts = |two| {
+            out.step
+                .contacts
+                .iter()
+                .filter(|v| v.two_bodies == two)
+                .map(|v| impact_correction::Contact {
+                    disabled: v.disabled,
+                    accumulated: v.accumulated,
+                })
+                .collect()
+        };
+        let poses = out
+            .bodies
+            .iter()
+            .zip(&out.step.bodies)
+            .map(|(b, s)| {
+                let mut basis = b.basis;
+                basis[3] = s.contact.position;
+                physical_pose::Input {
+                    basis,
+                    offset: b.offset,
+                    local_matrices: b.local_matrices,
+                    group_head: false,
+                    shapes: vec![],
+                    linear: [0.; 4],
+                    angular: [0.; 4],
+                }
+            })
+            .collect();
+        // Empty contact pools retain the manager's previous span ends. Those
+        // ends need not describe the current row allocation on this bypass.
+        let n = out.step.contacts.len();
+        let result = impact_correction::calculate(&impact_correction::Input {
+            rows: out.step.rows[..n]
+                .iter()
+                .map(main_contact_response::typed)
+                .collect(),
+            two_body_contacts: contacts(true),
+            single_body_contacts: contacts(false),
+            poses,
+            workspace: out.step.workspace.clone(),
+            span_ends: [out.step.ends[3], out.step.ends[2]],
+            iterations: c.iterations,
+            softness: c.softness,
+            scale: c.scale,
+            threshold: c.threshold,
+            relaxation: c.relaxation,
+        })?;
+        out.correction_active = result.active;
+        out.step.workspace = result.workspace;
+        out.step.ends[3] = result.span_ends[0];
+        out.step.ends[2] = result.span_ends[1];
+        for (raw, row) in out.step.rows[..n].iter_mut().zip(result.rows) {
+            for (i, v) in row
+                .jacobian
+                .iter()
+                .chain(&row.response)
+                .flatten()
+                .enumerate()
+            {
+                raw[i] = v.to_bits();
+            }
+            if result.rows_reset {
+                raw[32] = 0;
+            }
+            for (i, v) in [
+                (33, row.softness_input),
+                (34, row.lower),
+                (35, row.upper),
+                (36, row.bias),
+                (37, row.impulse),
+                (38, row.cumulative),
+                (39, row.softness),
+            ] {
+                raw[i] = v.to_bits();
+            }
+        }
+        for (i, pose) in result.poses.into_iter().enumerate() {
+            if let Some(pose) = pose {
+                out.bodies[i].basis = pose.corrected;
+                out.step.bodies[i].contact.position = pose.corrected[3];
+                out.step.bodies[i].torque_matrix = pose.derived[1];
+                out.publications[i] = Some(pose);
+            }
+        }
     }
     for (i, (b, s)) in out.bodies.iter_mut().zip(&mut out.step.bodies).enumerate() {
         s.force = [0.; 4];
@@ -293,6 +407,7 @@ mod tests {
     ];
     fn input() -> Input {
         Input {
+            correction: None,
             gravity: [0., -10., 0., 0.],
             bodies: vec![Body {
                 basis: IDENTITY,
@@ -379,5 +494,41 @@ mod tests {
         let mut input = input();
         input.bodies[0].basis[3][0] = 1.;
         assert!(calculate(&input).is_err());
+    }
+    #[test]
+    fn empty_correction_retains_stale_spans_without_indexing_rows() {
+        let mut input = input();
+        input.step.initial_ends = [3, 7, 11, 13];
+        input.correction = Some(Correction {
+            iterations: 2,
+            softness: 0.1,
+            scale: 0.001,
+            threshold: 0.,
+            relaxation: 1.,
+        });
+        let o = calculate(&input).unwrap();
+        assert!(o.correction_invoked);
+        assert!(!o.correction_active);
+        assert_eq!(o.step.ends, input.step.initial_ends);
+        assert_eq!(o.step.rows, input.step.rows);
+        assert_eq!(o.step.workspace, input.step.workspace);
+        assert!(o.publications[0].is_none());
+    }
+    #[test]
+    fn outer_correction_guards_skip_the_pass() {
+        for (iterations, relaxation) in [(0, 1.), (2, 0.), (2, -1.)] {
+            let mut input = input();
+            input.correction = Some(Correction {
+                iterations,
+                softness: 0.1,
+                scale: 0.001,
+                threshold: 0.,
+                relaxation,
+            });
+            let o = calculate(&input).unwrap();
+            assert!(!o.correction_invoked);
+            assert!(!o.correction_active);
+            assert!(o.publications[0].is_none());
+        }
     }
 }

@@ -203,6 +203,7 @@ fn run() -> Result<(), Failure> {
             .map(|r| std::array::from_fn(|i| word(r, 4 * i)))
             .collect();
         let frame = impact_frame::calculate(&impact_frame::Input {
+            correction: None,
             gravity,
             bodies: settings,
             step: Input {
