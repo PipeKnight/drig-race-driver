@@ -12,6 +12,8 @@ The main physical solver remains substantial: constraint construction (including
 
 F152 now verifies those complete correction helpers and their authored callback handoff in both profiles: [correction contract and comparison](CONTACT_BIAS.md).
 
+F153 now executes and reproduces whole normal-row normalization plus iteration, including authored correction handoff: [physical response contract](PHYSICAL_RESPONSE.md). The dependency map below records how that target was selected; its normal-row subset is now verified. Tangent spans and full physical frames remain open.
+
 ## Next larger comparison
 
 Private decompilation at `local/behavior/20261010T0329318212252Z/` successfully covers B7A810, B791B0, B77CB0, B79EE0 and B3B130. This provides a tractable next target: correction rows → normalization → iterative body response, using whole original functions as the comparison reference. Prefer this joined path over adding unrelated small arithmetic helpers.
