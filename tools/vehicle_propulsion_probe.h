@@ -26,6 +26,9 @@ static unsigned propulsion_guard(const unsigned char *body,const unsigned char *
     return 0;
 }
 static unsigned propulsion_run(unsigned char *image,unsigned char *body,unsigned char *view,Update update,float delta){
+#ifdef GRID_CONTROL
+    ((Update)(image+0x9b40d0-0x400000))(body,delta);
+#endif
     const unsigned gear=get(body,0x196c);float ratio=*(float *)(body+0x18f4+gear*4);if(ratio==0)ratio=1;
     const float torque=((EngineTorque)(image+0x9b1b90-0x400000))(body,body+0x17a0,delta);
     *(float *)(view+0x58)=(float)((double)torque/(double)ratio);

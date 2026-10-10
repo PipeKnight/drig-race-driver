@@ -11,6 +11,7 @@ from validate_vehicle_force import ROOT, RECORD_SIZE, record, authored_records, 
 CAPTURE=ROOT/'local/behavior/wheel-force-live-20261010-01'
 NATIVE=ROOT/'local/behavior/vehicle-propulsion-probe.exe'
 REFERENCE=ROOT/'local/compatibility/grid-unpacked.exe'
+MAGIC=b'PF01'
 
 
 def cases():
@@ -51,7 +52,7 @@ def cases():
 
 
 def request(records):
-    return b'PF01'+struct.pack('<I',len(records))+b''.join(struct.pack('<I',i)+r[4:] for i,r in enumerate(records))
+    return MAGIC+struct.pack('<I',len(records))+b''.join(struct.pack('<I',i)+r[4:] for i,r in enumerate(records))
 
 
 def run_set(out,profile,current,prefix):
@@ -68,7 +69,7 @@ def run_set(out,profile,current,prefix):
     a,repeat,b=[outputs[k] for k in ['original','repeat','rust']]
     assert len(a)==len(repeat)==len(b)==len(request(current['original']))
     differences=[dict(case=(i-8)//RECORD_SIZE,offset=hex((i-8)%RECORD_SIZE),original=a[i:i+4].hex(),rust=b[i:i+4].hex()) for i in range(8,len(a),4) if a[i:i+4]!=b[i:i+4]]
-    coverage=dict(torque_nonzero=0,rng_changes=0,traction_active=0,body_velocity_changes=0,wheel_spin_changes=0)
+    coverage=dict(torque_nonzero=0,rng_changes=0,traction_active=0,body_velocity_changes=0,wheel_spin_changes=0,gear_changes=0,brake_changes=0,steering_changes=0,events=0)
     for i,record in enumerate(current['original']):
         start=8+i*RECORD_SIZE;after=a[start:start+RECORD_SIZE];body=36;view=body+0x2600
         assert after[view+0x250:view+0x290]==record[view+0x250:view+0x290]
@@ -77,14 +78,18 @@ def run_set(out,profile,current,prefix):
         coverage['rng_changes']+=after[body+0x1644:body+0x1648]!=record[body+0x1644:body+0x1648]
         coverage['traction_active']+=bool(after[body+0x198c])
         coverage['body_velocity_changes']+=after[body+0x15c0:body+0x15e0]!=record[body+0x15c0:body+0x15e0]
+        coverage['gear_changes']+=after[body+0x196c:body+0x1970]!=record[body+0x196c:body+0x1970]
+        coverage['brake_changes']+=after[view+0x28:view+0x38]!=record[view+0x28:view+0x38]
+        coverage['events']+=after[body+0x21ec:body+0x21f0]!=record[body+0x21ec:body+0x21f0]
         for j in range(4):
             o=body+0x1990+j*0x150+0x104;coverage['wheel_spin_changes']+=after[o:o+4]!=record[o:o+4]
+            o=body+0x1990+j*0x150+0x20;coverage['steering_changes']+=after[o:o+0x10]!=record[o:o+0x10]
     report=dict(calls=len(current['original']),record_bytes=len(current['original'])*RECORD_SIZE,repeat_exact=a==repeat,differing_words=len(differences),differences=differences,coverage=coverage,executions=runs,hashes={k:hashlib.sha256(v).hexdigest() for k,v in outputs.items()})
     (out/f'{prefix}-validation.json').write_text(json.dumps(report,indent=2))
     return report,outputs
 
 
-def guards(out,profile,first):
+def guards(out,profile,first,extra_mutations=()):
     mutations=[('identity',0,9,10),('nan_delta',4,0x7fc00000,11),('zero_delta',4,0,11),
         ('mode',36+0x1598,0,11),('axes',36+0xadc,1,11),('wheel_count',36+0x1620,5,11),
         ('drive_count',36+0x18f0,5,11),('gear',36+0x196c,16,11),('view_pointer',36,0,11),
@@ -95,12 +100,13 @@ def guards(out,profile,first):
         ('huge_speed',36+0x1894,0x7f7fffff,30),('huge_phase',36+0x1898,0x7f7fffff,30),
         ('traction_mode',36+0x1988,3,30),('material_roll',36+0x2600+0x300+0xdd0+0x20,0x7fc00000,30)]
     gear=struct.unpack_from('<I',first,36+0x196c)[0]
-    mutations.append(('ratio',36+0x18f4+gear*4,0x7fc00000,31))
+    mutations.append(('ratio',36+0x18f4+gear*4,0x7fc00000,40 if MAGIC==b'CF01' else 31))
     mutations.append(('inconsistent_material_alias',36+0x2600+0x300+0xdd0+0x20,0x7fc00000,12))
     for o in [0x17a0,0x17a4,0x17a8,0x1848,0x1854,0x185c,0x1864,0x1868,0x1870,0x1874,
               0x187c,0x1880,0x1884,0x1888,0x188c,0x1894,0x1898,0x189c,0x18a0,0x18a4,0x18a8,0x18ac,
               0x17ac,0x1828,0x1570,0x1580,0x1f70,0x22c8,0x1990+0x108,0x1990+0x110]:
         mutations.append((f'nan_{o:x}',36+o,0x7fc00000,30))
+    mutations.extend(extra_mutations)
     payloads=[]
     for name,o,value,expected in mutations:
         b=bytearray(first);struct.pack_into('<I',b,o,value)
@@ -109,9 +115,9 @@ def guards(out,profile,first):
             for j in range(1,4):
                 if struct.unpack_from('<I',first,36+0x1990+j*0x150+0xc0)[0]==pointer:
                     struct.pack_into('<I',b,36+0x2600+0x300+0xdd0+j*0x140+0x20,value)
-        payloads.append((name,request([bytes(b)]) if o!=0 else b'PF01'+struct.pack('<I',1)+bytes(b),expected))
-    payloads.extend([('header',b'BAD!'+struct.pack('<I',1)+first,7),('empty',b'PF01'+bytes(4),7),
-                     ('oversize',b'PF01'+struct.pack('<I',65),7),('truncated',request([first])[:-1],10)])
+        payloads.append((name,request([bytes(b)]) if o!=0 else MAGIC+struct.pack('<I',1)+bytes(b),expected))
+    payloads.extend([('header',b'BAD!'+struct.pack('<I',1)+first,7),('empty',MAGIC+bytes(4),7),
+                     ('oversize',MAGIC+struct.pack('<I',65),7),('truncated',request([first])[:-1],10)])
     results=[]
     for name,payload,expected in payloads:
         source=out/f'guard-{name}.bin';source.write_bytes(payload)
@@ -152,7 +158,7 @@ def main():
     guard_results=guards(out,a.profile,current[0])
     report=dict(profile=a.profile,calls=sum(r['calls'] for r in reports),record_bytes=sum(r['record_bytes'] for r in reports),repeat_exact=all(r['repeat_exact'] for r in reports),differing_words=sum(r['differing_words'] for r in reports),reports=reports,
                 carried_calls=sum(r['calls'] for r in carried),carried_record_bytes=sum(r['record_bytes'] for r in carried),carried=carried,guards=len(guard_results),
-                scope='Authored actual post-control A03670 segment around whole9B1B90/996290/990060/9DF8B0; inherited later-boundary observations are supplied inputs, not live captures of this segment. Controls/contact geometry remain supplied; no complete vehicle/world/driving claim.')
+                scope=('Whole9B40D0 control wrapper feeding authored actual propulsion/force schedule; contact geometry remains supplied, gear-search1348inactive and reverse-disable global zero; no complete vehicle/world/driving claim.' if MAGIC==b'CF01' else 'Authored actual post-control A03670 segment around whole9B1B90/996290/990060/9DF8B0; inherited later-boundary observations are supplied inputs, not live captures of this segment. Controls/contact geometry remain supplied; no complete vehicle/world/driving claim.'))
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:report[k] for k in ['profile','calls','record_bytes','repeat_exact','differing_words']}))
     assert report['calls']==len(current) and report['repeat_exact'] and report['differing_words']==0
     assert report['carried_calls']==384 and all(r['repeat_exact'] and not r['differences'] for r in carried)

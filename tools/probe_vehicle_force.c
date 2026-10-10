@@ -28,6 +28,9 @@ static unsigned exception(EXCEPTION_POINTERS *e) {
     fputc('\n',stderr);return EXCEPTION_EXECUTE_HANDLER;
 }
 #ifdef GRID_PROPULSION
+#ifdef GRID_CONTROL
+#include "vehicle_controls_probe.h"
+#endif
 #include "vehicle_propulsion_probe.h"
 #endif
 int wmain(int argc,wchar_t **argv) {
@@ -54,7 +57,9 @@ int wmain(int argc,wchar_t **argv) {
     if(error||_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto finish;}
     unsigned header[2];
     const unsigned tag=
-#ifdef GRID_PROPULSION
+#ifdef GRID_CONTROL
+        0x31304643;
+#elif defined(GRID_PROPULSION)
         0x31304650;
 #else
         0x31304657;
@@ -100,8 +105,20 @@ int wmain(int argc,wchar_t **argv) {
             put(body,0x18d8+4*i,(unsigned)(uintptr_t)(body+offset));
         }
         if(error)break;
+#ifdef GRID_CONTROL
+        for(unsigned i=0;i<2;i++){
+            unsigned offset=get(r.body,0x21cc+i*4)-r.body_address;
+            if(offset<0x1990||offset>=0x1990+4*0x150||(offset-0x1990)%0x150){error=41;break;}
+            put(body,0x21cc+i*4,(unsigned)(uintptr_t)(body+offset));
+        }
+        if(get(body,0x21cc)==get(body,0x21d0))error=41;
+        if(error)break;
+#endif
 #ifdef GRID_PROPULSION
         error=propulsion_guard(body,view,material);if(error)break;
+#endif
+#ifdef GRID_CONTROL
+        error=controls_guard(body);if(error)break;
 #endif
         memcpy(image+0xd16348-0x400000,r.engine_limit,4);
         memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
@@ -117,6 +134,14 @@ int wmain(int argc,wchar_t **argv) {
         /* Normalize only the explicit input relocations, checking preservation. */
         if(get(body,0)!=(unsigned)(uintptr_t)view||get(view,0)!=(unsigned)(uintptr_t)solver){error=21;break;}
         put(body,0,r.view_address);put(view,0,r.solver_address);
+#ifdef GRID_CONTROL
+        for(unsigned i=0;i<2;i++){
+            unsigned offset=get(r.body,0x21cc+i*4)-r.body_address;
+            if(get(body,0x21cc+i*4)!=(unsigned)(uintptr_t)(body+offset)){error=21;break;}
+            put(body,0x21cc+i*4,get(r.body,0x21cc+i*4));
+        }
+        if(error)break;
+#endif
         for(unsigned i=0;i<4;i++){
             unsigned w=0x1990+i*0x150;
             if(get(body,w+0x34)!=(unsigned)(uintptr_t)(body+0x15a0)){error=21;break;}
