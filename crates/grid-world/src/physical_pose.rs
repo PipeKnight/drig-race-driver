@@ -4,6 +4,7 @@ use crate::{Error, pose, spawn::reference_seed};
 
 pub type Matrix = [[f32; 4]; 4];
 
+#[derive(Clone)]
 pub struct Input {
     pub basis: Matrix,
     pub offset: [f32; 4],
