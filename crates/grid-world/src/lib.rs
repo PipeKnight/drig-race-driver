@@ -53,6 +53,7 @@ pub mod steering_input;
 pub mod surface_drag;
 pub mod suspension;
 pub mod suspension_frame;
+pub mod suspension_prepare;
 pub mod triangle;
 pub mod tyre_friction;
 pub mod tyre_grip;
