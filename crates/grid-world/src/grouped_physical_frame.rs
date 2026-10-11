@@ -79,7 +79,37 @@ pub fn calculate_tick_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    contact_groups::validate_with_shapes(input, shapes)?;
+    tick(input, manager, shapes, None)
+}
+
+pub(crate) fn calculate_tick_carried(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+    carry: &contact_groups::Carry,
+) -> Result<Output, Error> {
+    tick(input, manager, shapes, Some(carry))
+}
+
+fn validate(
+    input: &contact_groups::Input,
+    shapes: &[contact_groups::Shape],
+    carry: Option<&contact_groups::Carry>,
+) -> Result<(), Error> {
+    if let Some(carry) = carry {
+        contact_groups::validate_carried(input, shapes, carry)
+    } else {
+        contact_groups::validate_with_shapes(input, shapes)
+    }
+}
+
+fn tick(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+    carry: Option<&contact_groups::Carry>,
+) -> Result<Output, Error> {
+    validate(input, shapes, carry)?;
     let delta = manager.parameters[0];
     if !delta.is_finite() || delta <= 0. || delta > 0.25 {
         return Err(Error("invalid grouped tick delta"));
@@ -118,7 +148,7 @@ pub fn calculate_tick_with_shapes(
             store_matrix(raw, offset, value);
         }
     }
-    let mut out = calculate_with_shapes(&next, manager, shapes)?;
+    let mut out = calculate_impl(&next, manager, shapes, carry)?;
     for (body, next) in out.groups.bodies.iter_mut().zip(update_next) {
         body[0x318 / 4] = next;
     }
@@ -134,7 +164,16 @@ pub fn calculate_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    contact_groups::validate_with_shapes(input, shapes)?;
+    calculate_impl(input, manager, shapes, None)
+}
+
+fn calculate_impl(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+    carry: Option<&contact_groups::Carry>,
+) -> Result<Output, Error> {
+    validate(input, shapes, carry)?;
     if manager.properties.len() != input.bodies.len()
         || manager.workspace.len() != input.bodies.len()
         || manager.rows.is_empty()
@@ -168,7 +207,11 @@ pub fn calculate_with_shapes(
     {
         return Err(Error("unsupported grouped physical manager"));
     }
-    let mut groups = contact_groups::calculate_with_shapes(input, shapes)?;
+    let mut groups = if let Some(carry) = carry {
+        contact_groups::calculate_carried(input, shapes, carry)?
+    } else {
+        contact_groups::calculate_with_shapes(input, shapes)?
+    };
     let mut manager = manager.clone();
     let mut visits = Vec::new();
     let roots = chain(groups.world[1], &groups.bodies, 0x1c);

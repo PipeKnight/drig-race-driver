@@ -57,7 +57,8 @@ fn run() -> Result<(), Failure> {
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
-    let whole_world = word(h, 0) == 0x34535747;
+    let carried_world = word(h, 0) == 0x35535747;
+    let whole_world = word(h, 0) == 0x34535747 || carried_world;
     let owned_shapes = matches!(word(h, 0), 0x34534647 | 0x34535447) || whole_world;
     let grouped_tick = matches!(word(h, 0), 0x33525447 | 0x34535447) || whole_world;
     let grouped = word(h, 0) == 0x33524647 || grouped_tick || owned_shapes;
@@ -139,6 +140,11 @@ fn run() -> Result<(), Failure> {
             }
         }
         let mut bodies = Vec::new();
+        let world_steps = if carried_world {
+            word(take(&data, &mut p, 4)?, 0)
+        } else {
+            1
+        };
         let mut settings = Vec::new();
         let mut body_wire = Vec::new();
         let mut active_next = Vec::new();
@@ -316,34 +322,36 @@ fn run() -> Result<(), Failure> {
             } else {
                 grouped_physical_frame::calculate_with_shapes
             };
-            let result = calculate(
-                &contact_groups::Input {
-                    bodies,
-                    contacts,
-                    active_order,
-                    selector: 0,
-                },
-                &grouped_physical_frame::Manager {
-                    parameters: input.step.parameters,
-                    gravity: input.gravity,
-                    correction: input.correction.clone(),
-                    materials: input.step.materials.clone(),
-                    rows: input.step.rows.clone(),
-                    capacity: input.step.capacity,
-                    iterations: input.step.iterations,
-                    ends: input.step.initial_ends,
-                    workspace: input.step.workspace.clone(),
-                    properties: input
-                        .step
-                        .bodies
-                        .iter()
-                        .map(|b| (b.inverse_mass, b.inverse_inertia))
-                        .collect(),
-                    cached_pair: input.step.cached_pair,
-                    cached_material: input.step.cached_material,
-                },
-                &shapes,
-            )?;
+            let group_input = contact_groups::Input {
+                bodies,
+                contacts,
+                active_order,
+                selector: 0,
+            };
+            let manager = grouped_physical_frame::Manager {
+                parameters: input.step.parameters,
+                gravity: input.gravity,
+                correction: input.correction.clone(),
+                materials: input.step.materials.clone(),
+                rows: input.step.rows.clone(),
+                capacity: input.step.capacity,
+                iterations: input.step.iterations,
+                ends: input.step.initial_ends,
+                workspace: input.step.workspace.clone(),
+                properties: input
+                    .step
+                    .bodies
+                    .iter()
+                    .map(|b| (b.inverse_mass, b.inverse_inertia))
+                    .collect(),
+                cached_pair: input.step.cached_pair,
+                cached_material: input.step.cached_material,
+            };
+            let result = if carried_world {
+                physical_world::calculate_steps(&group_input, &manager, &shapes, world_steps)
+            } else {
+                calculate(&group_input, &manager, &shapes)
+            }?;
             output.extend(0u32.to_le_bytes());
             output.extend(u32::from(result.visits.last().is_some_and(|v| v.3)).to_le_bytes());
             for end in result.manager.ends {
@@ -388,6 +396,9 @@ fn run() -> Result<(), Failure> {
                 for value in [0, parameters[0].to_bits(), result.pool_used as u32, 0, 0, 0] {
                     output.extend(value.to_le_bytes());
                 }
+            }
+            if carried_world {
+                output.extend(world_steps.to_le_bytes());
             }
             continue;
         }

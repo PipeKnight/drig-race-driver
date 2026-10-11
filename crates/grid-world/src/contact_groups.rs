@@ -32,6 +32,13 @@ pub struct Output {
     pub world: [u32; 11],
 }
 
+/// Retained ownership from the preceding completed world step. Contact links
+/// may refer to consumed slots, so capacity is distinct from the active count.
+pub(crate) struct Carry {
+    pub dirty_head: u32,
+    pub contact_capacity: usize,
+}
+
 fn byte(row: &[u32], offset: usize) -> u8 {
     (row[offset / 4] >> (8 * (offset % 4))) as u8
 }
@@ -51,6 +58,18 @@ pub fn validate(input: &Input) -> Result<(), Error> {
 }
 
 pub fn validate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<(), Error> {
+    validate_scope(input, shapes, None)
+}
+
+pub(crate) fn validate_carried(
+    input: &Input,
+    shapes: &[Shape],
+    carry: &Carry,
+) -> Result<(), Error> {
+    validate_scope(input, shapes, Some(carry))
+}
+
+fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Result<(), Error> {
     let n = input.bodies.len();
     if !(1..=16).contains(&n)
         || input.contacts.len() > 64
@@ -68,23 +87,81 @@ pub fn validate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<(), Error
         seen[i] = true;
     }
     for b in &input.bodies {
-        if [
+        let cold_links = [
             0, 4, 8, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x2f0, 0x2f4, 0x2fc, 0x300, 0x304, 0x308, 0x30c,
-            0x318, 0x320, 0x324, 0x328, 0x32c, 0x418, 0x41c, 0x420,
-        ]
-        .iter()
-        .any(|&o| field(b, o) != 0)
+            0x318,
+        ];
+        if [0x320, 0x324, 0x328, 0x32c, 0x418, 0x41c, 0x420]
+            .iter()
+            .any(|&o| field(b, o) != 0)
+            || (carry.is_none() && cold_links.iter().any(|&o| field(b, o) != 0))
             || field(b, 0x334) != 0x1c0
             || field(b, 0x400) != input.selector
             || byte(b, 0x2c) > 1
             || byte(b, 0x2d) != 0
-            || byte(b, 0x412) != 0
+            || byte(b, 0x412) > u8::from(carry.is_some())
             || byte(b, 0x413) != 0
             || b[0x1c0 / 4..0x1d0 / 4]
                 .iter()
                 .any(|&x| !f32::from_bits(x).is_finite())
         {
             return Err(Error("unsupported contact-group body ownership"));
+        }
+    }
+    if let Some(carry) = carry {
+        if carry.contact_capacity > 64
+            || input.contacts.len() > carry.contact_capacity
+            || carry.dirty_head as usize > n
+        {
+            return Err(Error("invalid carried contact capacity or dirty head"));
+        }
+        for (i, b) in input.bodies.iter().enumerate() {
+            if [
+                8, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x2f0, 0x2f4, 0x2fc, 0x300, 0x304, 0x308, 0x30c,
+                0x318,
+            ]
+            .iter()
+            .any(|&o| field(b, o) as usize > n)
+                || [0, 4]
+                    .iter()
+                    .any(|&o| field(b, o) as usize > carry.contact_capacity)
+            {
+                return Err(Error("foreign carried group link"));
+            }
+            let at = input.active_order.iter().position(|&id| id == i).unwrap();
+            if field(b, 0x300)
+                != input
+                    .active_order
+                    .get(at + 1)
+                    .map_or(0, |&id| id as u32 + 1)
+                || field(b, 0x304)
+                    != at
+                        .checked_sub(1)
+                        .map_or(0, |j| input.active_order[j] as u32 + 1)
+            {
+                return Err(Error("inconsistent carried active links"));
+            }
+        }
+        let mut seen = vec![false; n];
+        let mut id = carry.dirty_head;
+        let mut previous = 0;
+        while id != 0 {
+            let i = id as usize - 1;
+            if seen[i]
+                || byte(&input.bodies[i], 0x412) != 1
+                || field(&input.bodies[i], 0x2f4) != previous
+            {
+                return Err(Error("invalid carried dirty chain"));
+            }
+            seen[i] = true;
+            previous = id;
+            id = field(&input.bodies[i], 0x2f0);
+        }
+        if input.bodies.iter().enumerate().any(|(i, b)| {
+            seen[i] != (byte(b, 0x412) == 1)
+                || (!seen[i] && (field(b, 0x2f0) != 0 || field(b, 0x2f4) != 0))
+        }) {
+            return Err(Error("inconsistent carried dirty membership"));
         }
     }
     for c in &input.contacts {
@@ -96,7 +173,7 @@ pub fn validate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<(), Error
             || b as usize > n
             || single > 1
             || (single == 0 && b != 0 && a == b)
-            || field(c, 0x10) != 0
+            || field(c, 0x10) as usize > carry.map_or(0, |c| c.contact_capacity)
             || byte(c, 0xf) != 1
             || byte(c, 0x73) > 1
             || field(c, 0x28) as usize > shapes.len()
@@ -274,6 +351,19 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
 
 pub fn calculate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<Output, Error> {
     validate_with_shapes(input, shapes)?;
+    build(input, shapes, 0)
+}
+
+pub(crate) fn calculate_carried(
+    input: &Input,
+    shapes: &[Shape],
+    carry: &Carry,
+) -> Result<Output, Error> {
+    validate_carried(input, shapes, carry)?;
+    build(input, shapes, carry.dirty_head)
+}
+
+fn build(input: &Input, shapes: &[Shape], mut dirty: u32) -> Result<Output, Error> {
     let mut out = Build {
         bodies: input.bodies.clone(),
         contacts: input.contacts.clone(),
@@ -286,17 +376,18 @@ pub fn calculate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<Output, 
     let ids: Vec<_> = input.active_order.iter().map(|&i| i as u32 + 1).collect();
     out.heads[source] = ids[0];
     out.tails[source] = *ids.last().unwrap();
-    let mut dirty = 0;
     for (i, &id) in ids.iter().enumerate() {
         out.set(id, 0x300, ids.get(i + 1).copied().unwrap_or(0));
         out.set(id, 0x304, if i == 0 { 0 } else { ids[i - 1] });
-        out.set(id, 0x2f0, dirty);
-        out.set(id, 0x2f4, 0);
-        if dirty != 0 {
-            out.set(dirty, 0x2f4, id);
+        if byte(&out.bodies[id as usize - 1], 0x412) == 0 {
+            out.set(id, 0x2f0, dirty);
+            out.set(id, 0x2f4, 0);
+            if dirty != 0 {
+                out.set(dirty, 0x2f4, id);
+            }
+            dirty = id;
+            out.flag(id, 0x412, 1);
         }
-        dirty = id;
-        out.flag(id, 0x412, 1);
         out.flag(id, 0x2c, 0);
         out.set(id, 0x2fc, 0);
     }
