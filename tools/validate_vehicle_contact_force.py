@@ -21,6 +21,7 @@ GRIP_NATIVE=grip.NATIVE
 REFERENCE=ROOT/'local/compatibility/grid-unpacked.exe'
 POST_FORCE=False
 POST_CHASSIS=False
+DRIVER_PREPARE=False
 
 
 def request(records,tag=None):
@@ -63,13 +64,20 @@ def execute(exe,args,out,name,allow_failure=False):
 
 
 def native(out,records,name,full,allow_failure=False):
+    prefix_runs=[]
+    if DRIVER_PREPARE:
+        source=out/f'{name}-driver-prepare-input.bin';target=out/f'{name}-driver-prepare-output.bin'
+        source.write_bytes(request(records,b'DF01'))
+        prefix_runs.append(execute(ROOT/'local/behavior/vehicle-driver-prepare-probe.exe',[REFERENCE,source,target],out,name+'-driver-prepare',allow_failure))
+        if prefix_runs[-1]['exit']:return None,prefix_runs
+        data=target.read_bytes();records=[data[8+i*RECORD:8+(i+1)*RECORD] for i in range(len(records))]
     source=out/f'{name}-grip-input.bin';target=out/f'{name}-grip-output.bin'
     vg=[]
     for r in records:
         body=bytearray(r[BODY:VIEW]);ui(body,0,0)
         vg.append(struct.pack('<If',len(vg),struct.unpack_from('<f',r,4)[0])+body+r[VIEW:SOLVER])
     source.write_bytes(GRIP_TAG+struct.pack('<I',len(vg))+b''.join(vg))
-    runs=[execute(GRIP_NATIVE,[REFERENCE,WORLD,source,target,MECHANICS,full],out,name+'-grip',allow_failure)]
+    runs=prefix_runs+[execute(GRIP_NATIVE,[REFERENCE,WORLD,source,target,MECHANICS,full],out,name+'-grip',allow_failure)]
     if runs[-1]['exit']:return None,runs
     data=target.read_bytes();mechanics=full.read_bytes();following=[]
     for i,r in enumerate(records):
@@ -84,6 +92,7 @@ def native(out,records,name,full,allow_failure=False):
             if token:
                 s=8+(token-1)*0xb0
                 for o in [0x10,0x14,0x18,0x1c,0x20,0x64]:r[m+o:m+o+4]=mechanics[s+o:s+o+4]
+                r[m+0x75]=mechanics[s+0x75]
         following.append(bytes(r))
     source=out/f'{name}-prepared-input.bin';target=out/f'{name}-prepared-output.bin'
     source.write_bytes(request(following,b'GF01'))
@@ -129,7 +138,7 @@ def run_set(out,profile,branches,prefix,full):
     counts=collections.Counter()
     for i,r in enumerate(branches['original']):
         after=a[8+i*RECORD:8+(i+1)*RECORD]
-        if MAGIC in [b'UF01',b'HF01',b'MF01']:
+        if MAGIC in [b'UF01',b'HF01',b'MF01',b'EF01']:
             f32=lambda x:struct.unpack('<f',struct.pack('<f',x))[0]
             scale=struct.unpack_from('<f',r,BODY+0x3d0)[0];delta=struct.unpack_from('<f',r,4)[0]
             amount=f32(delta*.25);expected=min(f32(scale+amount),1) if scale<1 else max(f32(scale-amount),1)
@@ -146,6 +155,10 @@ def run_set(out,profile,branches,prefix,full):
                 for label,o in [('camber',0xec),('wheel_response',0x13c)]:
                     o=BODY+0x1990+j*0x150+o;counts[label]+=after[o:o+4]!=prior[o:o+4]
         counts['pose_changes']+=r[BODY+0x15e0:BODY+0x1620]!=after[BODY+0x15e0:BODY+0x1620]
+        if DRIVER_PREPARE:
+            prior=(out/f'{prefix}-original-driver-prepare-output.bin').read_bytes()[8+i*RECORD:8+(i+1)*RECORD]
+            assert prior[BODY+0xb20:BODY+0xb40]==r[BODY+0x15c0:BODY+0x15e0]
+            for label,start,end in [('driver_velocity',0x15c0,0x15e0),('driver_fuel',0x1fa0,0x1fa4),('driver_history',0xb20,0xb40),('driver_aero',0x1f10,0x1f14)]:counts[label]+=prior[BODY+start:BODY+end]!=r[BODY+start:BODY+end]
         if POST_CHASSIS:
             prior=(out/f'{prefix}-original-post-force-output.bin').read_bytes()[8+i*0x2604:8+(i+1)*0x2604]
             assert after[BODY+0x15e0:BODY+0x1620]==prior[4+0x15e0:4+0x1620]
@@ -171,11 +184,14 @@ def guards(out,profile,first,full):
         ('disabled_wheel',BODY+0x2278,1),('event_count',BODY+0x21ec,5),('zero_mass',BODY+0x15a0,0),
         ('zero_inertia',BODY+0x15a8,0),('zero_radius',BODY+0x1990+0xe0,0),('negative_speed',BODY+0x1648,0xbf800000),
         ('grip_nan',BODY+0x12a8,0x7fc00000),('history_token',BODY+0x1990+0x128,0xffffffff),
-        ('view_nan',VIEW+(0x298 if MAGIC in [b'UF01',b'HF01',b'MF01'] else 0x190),0x7fc00000),('late_mode',BODY+0x1598,0),('late_search',BODY+0x1348,1),
+        ('view_nan',VIEW+(0x298 if MAGIC in [b'UF01',b'HF01',b'MF01',b'EF01'] else 0x190),0x7fc00000),('late_mode',BODY+0x1598,0),('late_search',BODY+0x1348,1),
         ('late_override',BODY+0xe48,11),('late_engine',BODY+0x17a4,0),('late_timer',BODY+0x1f6c,0x7fc00000)]
-    if MAGIC in [b'UF01',b'HF01',b'MF01']:tests.extend([('blend_nan',BODY+0x1990+0x20,0x7fc00000),('scale_zero',BODY+0x3d0,0)])
+    if MAGIC in [b'UF01',b'HF01',b'MF01',b'EF01']:tests.extend([('blend_nan',BODY+0x1990+0x20,0x7fc00000),('scale_zero',BODY+0x3d0,0)])
     if POST_FORCE:tests.append(('post_force_nan',BODY+0x2274,0x7fc00000))
     if POST_CHASSIS:tests.extend([('chassis_nan',BODY+0x1494,0x7fc00000),('chassis_phase',BODY+0x60,0x43480000)])
+    if DRIVER_PREPARE:
+        tests=[t for t in tests if t[0] not in ['negative_speed','view_nan']]
+        tests.extend([('driver_previous_speed_nan',BODY+0x1648,0x7fc00000),('driver_friction_nan',BODY+0x1ee4,0x7fc00000),('driver_ring',BODY+0x3c0,5),('driver_respawn',BODY+0xdfc,1)])
     results=[]
     for name,offset,value in tests:
         r=bytearray(first);ui(r,offset,value);r=bytes(r)
@@ -239,6 +255,9 @@ def main():
     if POST_CHASSIS:
         assert all(report['coverage'][k]>0 for k in ['chassis_matrix','chassis_acceleration','chassis_phases'])
         report['scope']='Whole original9B2790/scale/A00E10/post-grip force/post-force/9BE1E0 in four composed original adapters vs one Rust call. Source geometry/materials; earlier controls/history/table binding supplied; physical pose unchanged by chassis stage; wholeA03670/world/driving open.'
+    if DRIVER_PREPARE:
+        assert report['coverage']['driver_velocity']>0 and report['coverage']['driver_history']>0
+        report['scope']='Selected engaged assisted-automatic earlyA03670 preparation, source vector/contact/suspension/grip, controls/forces/assists/chassis in five composed original adapters vs one Rust call. Gravity and full source mechanics supplied; early respawn/nitro inactive; no wholeA03670/world/driving claim.'
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k not in ['reports','carried']}))
 
 if __name__=='__main__':main()

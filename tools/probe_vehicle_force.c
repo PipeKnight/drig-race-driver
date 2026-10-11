@@ -14,6 +14,9 @@
 #include <float.h>
 #endif
 #include "isolated_reference.h"
+#ifdef GRID_DRIVER_PREPARE
+#include <xmmintrin.h>
+#endif
 typedef void (__cdecl *Update)(void *,float);
 typedef struct {
     unsigned index,delta,body_address,view_address,solver_address,present[4];
@@ -36,6 +39,9 @@ static unsigned exception(EXCEPTION_POINTERS *e) {
 #include "vehicle_prepared_probe.h"
 #endif
 #endif
+#ifdef GRID_DRIVER_PREPARE
+#include "vehicle_driver_prepare_probe.h"
+#endif
 int wmain(int argc,wchar_t **argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
     if(argc!=4)return 2;
@@ -47,12 +53,16 @@ int wmain(int argc,wchar_t **argv) {
     IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
     unsigned char *saved=malloc(pe->OptionalHeader.SizeOfImage);if(!saved)return 4;
     memcpy(saved,image,pe->OptionalHeader.SizeOfImage);
-    const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xd16000,0xe85000};
-    DWORD protections[6];unsigned protected=0,error=0,count=0,completed=0;
+    const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xd16000,0xe85000
+#ifdef GRID_DRIVER_PREPARE
+        ,0xe8e000
+#endif
+    };
+    DWORD protections[sizeof(pages)/sizeof(*pages)];unsigned protected=0,error=0,count=0,completed=0;
 #ifdef GRID_PROPULSION
     unsigned created=0;
 #endif
-    for(unsigned i=0;i<6;i++){
+    for(unsigned i=0;i<sizeof(pages)/sizeof(*pages);i++){
         if(!VirtualProtect(image+pages[i]-0x400000,4096,PAGE_READWRITE,protections+i)){error=5;break;}
         ++protected;
     }
@@ -60,7 +70,9 @@ int wmain(int argc,wchar_t **argv) {
     if(error||_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto finish;}
     unsigned header[2];
     const unsigned tag=
-#ifdef GRID_PREPARED
+#ifdef GRID_DRIVER_PREPARE
+        0x31304644;
+#elif defined(GRID_PREPARED)
         0x31304647;
 #elif defined(GRID_CONTROL)
         0x31304643;
@@ -80,7 +92,9 @@ int wmain(int argc,wchar_t **argv) {
     created=1;
 #endif
     if(fwrite(header,sizeof(header),1,output)!=1){error=9;goto finish;}
+#ifndef GRID_DRIVER_PREPARE
     Update update=(Update)(image+0x9df8b0-0x400000);
+#endif
     for(unsigned index=0;index<count;index++){
         Record r;
         if(fread(&r,sizeof(r),1,input)!=1||r.index!=index){error=10;break;}
@@ -119,8 +133,11 @@ int wmain(int argc,wchar_t **argv) {
         if(get(body,0x21cc)==get(body,0x21d0))error=41;
         if(error)break;
 #endif
-#ifdef GRID_PROPULSION
+#if defined(GRID_PROPULSION) && !defined(GRID_DRIVER_PREPARE)
         error=propulsion_guard(body,view,material);if(error)break;
+#endif
+#ifdef GRID_DRIVER_PREPARE
+        error=driver_guard(body);if(error){printf("driver_guard_case=%u group=%x bits=%08x\n",index,driver_guard_group,get(body,driver_guard_group));break;}
 #endif
 #ifdef GRID_CONTROL
         error=controls_guard(body);if(error)break;
@@ -131,7 +148,10 @@ int wmain(int argc,wchar_t **argv) {
         memcpy(image+0xd16348-0x400000,r.engine_limit,4);
         memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
         __try {
-#ifdef GRID_PREPARED
+#ifdef GRID_DRIVER_PREPARE
+            float gravity=-9.8100004196167f;memcpy(image+0xe8efd4-0x400000,&gravity,4);
+            error=driver_run(image,body,view,delta);
+#elif defined(GRID_PREPARED)
             error=prepared_run(image,body,view,update,delta);
 #elif defined(GRID_PROPULSION)
             error=propulsion_run(image,body,view,update,delta);
