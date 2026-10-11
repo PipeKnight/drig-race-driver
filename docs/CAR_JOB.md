@@ -1,5 +1,7 @@
 # Registered car-job integration
 
+F194 encloses this job in the original single-car manager, including real direct dispatch/completion wait, basis repair and history. See [manager and frame ordering](CAR_MANAGER.md). Active constraint production and the complete world frame remain open.
+
 F193 extends this selected job with [owned handling queries and healthy enabled
 notifications](HANDLING_QUERIES.md), including first-match lookup and the
 unclamped notification threshold. The F192 query-absent comparison below remains

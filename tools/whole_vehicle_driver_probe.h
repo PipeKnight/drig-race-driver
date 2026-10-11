@@ -16,6 +16,9 @@ typedef struct {
 } DriverRecord;
 static unsigned get(const void *p,unsigned o){return getword((const unsigned char *)p+o);}
 static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4);}
+#ifdef GRID_CAR_MANAGER
+#include "vehicle_manager_probe.h"
+#endif
 #ifdef GRID_WHOLE_OUTER
 #include "vehicle_outer_probe.h"
 #endif
@@ -86,13 +89,18 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
     IMAGE_NT_HEADERS32 *pe=(IMAGE_NT_HEADERS32 *)(image+((IMAGE_DOS_HEADER *)image)->e_lfanew);
     IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
     unsigned char *saved=malloc(pe->OptionalHeader.SizeOfImage);if(!saved)return 60;memcpy(saved,image,pe->OptionalHeader.SizeOfImage);
+#ifdef GRID_CAR_MANAGER
+    error=manager_open(image);if(error)goto finish;
+#endif
     for(unsigned i=0;i<sizeof(pages)/sizeof(*pages);i++){
         if(!VirtualProtect(image+pages[i]-0x400000,4096,PAGE_READWRITE,protections+i)){error=61;goto finish;}++protected;
     }
     if(!materials||!material_count||_wfopen_s(&input,request,L"rb")||!input){error=62;goto finish;}
     const unsigned tag=
 #ifdef GRID_CAR_JOB
-#ifdef GRID_HANDLING_QUERIES
+#ifdef GRID_CAR_MANAGER
+        0x31304654;
+#elif defined(GRID_HANDLING_QUERIES)
         0x3230464b;
 #else
         0x3130464b;
@@ -126,6 +134,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #ifdef GRID_WHOLE_OUTER
         __declspec(align(16)) unsigned char body[0x21000],physical[0x430],wrapper[16]={0},component[0x100]={0},group[0x70]={0};
         memcpy(body,r.body,0x2600);memcpy(body+0x2600,r.extra,sizeof(r.extra));memcpy(physical,r.physical,0x424);
+#ifdef GRID_CAR_MANAGER
+        error=manager_guard(body);if(error)break;
+#endif
 #ifdef GRID_HANDLING_QUERIES
         unsigned char receiver[HANDLING_QUERY_BYTES],receiver_before[HANDLING_QUERY_BYTES];HandlingQueries queries;
         queries.present=r.query_present;queries.count=r.query_count;memcpy(queries.records,r.query_records,sizeof(queries.records));
@@ -206,11 +217,17 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         memcpy(saved_wrapper,wrapper,sizeof(wrapper));memcpy(saved_component,component,sizeof(component));memcpy(saved_group,group,sizeof(group));memcpy(saved_table,table,sizeof(table));memcpy(saved_entry,entry,sizeof(entry));
         for(unsigned j=0;j<sizeof(pages)/sizeof(*pages);j++)memcpy(saved_pages[j],image+pages[j]-0x400000,4096);
         __try{
+#ifdef GRID_CAR_MANAGER
+            put(body,0x21c4,0x3f800000);
+#endif
             ((void (__fastcall *)(void *,void *))(image+0x9bd7f0-0x400000))(body,NULL);
             ((void (__fastcall *)(void *,void *,float))(image+0xa06a90-0x400000))(body,NULL,delta);
             ((void (__fastcall *)(void *,void *,float,unsigned))(image+0xa03220-0x400000))(body,NULL,delta,0);
         }__except(driver_fault(GetExceptionInformation())){error=70;}
         if(!error){put(body,0xdb0,0);error=handling_guard(body,physical,delta);}
+#ifdef GRID_CAR_MANAGER
+        if(!error)error=manager_finish_guard(body);
+#endif
         if(memcmp(materials,saved_materials,material_bytes))error=71;
         memcpy(materials,saved_materials,material_bytes);free(saved_materials);
         memcpy(body,saved_body,sizeof(body));memcpy(physical,saved_physical,sizeof(physical));memcpy(storage,saved_storage,sizeof(storage));
@@ -221,13 +238,23 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #ifdef GRID_HANDLING_QUERIES
         put(component,0x10,queries.present?(unsigned)(uintptr_t)receiver:0);
 #endif
+#ifdef GRID_CAR_MANAGER
+        __declspec(align(16)) unsigned char taskmanager[0xd0]={0};
+        manager_setup(image,body);
+        if(get(body,0xdc8))put(body,0xdc8,(unsigned)(uintptr_t)wrapper);
+#else
         unsigned job[7]={0},completion_table[6]={0};
         job[1]=(unsigned)(uintptr_t)body;job[2]=r.delta;job[3]=(unsigned)(uintptr_t)completion_table;job[6]=0x125ac07e;
         completion_table[5]=(unsigned)(uintptr_t)job_complete;
 #endif
+#endif
         __try{
 #ifdef GRID_CAR_JOB
+#ifdef GRID_CAR_MANAGER
+            ((void (__cdecl *)(float,void *))(image+0xa02b70-0x400000))(delta,taskmanager);
+#else
             ((void (__fastcall *)(void *,void *))(image+0xa0a290-0x400000))(job,NULL);
+#endif
 #elif defined(GRID_WHOLE_OUTER)
             /* Entry has ret8: callee pops the two stack arguments. */
             ((void (__stdcall *)(void *,float))(image+0xa09a80-0x400000))(component,delta);
@@ -244,8 +271,16 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         __except(driver_fault(GetExceptionInformation())){error=70;}
         if(error)break;
 #ifdef GRID_CAR_JOB
+#ifdef GRID_CAR_MANAGER
+        if(!manager_retained(image,body,r.delta)){error=71;break;}
+        if(get(body,0xdc8)!=(get(r.body,0xdc8)?(unsigned)(uintptr_t)wrapper:0u)){error=71;break;}
+        put(body,0xdc8,get(r.body,0xdc8));
+        for(unsigned j=0;j<sizeof(taskmanager);j++)if(taskmanager[j])error=71;
+        if(error)break;
+#else
         if(job[0]||job[1]!=(unsigned)(uintptr_t)body||job[2]!=r.delta||job[3]!=(unsigned)(uintptr_t)completion_table||job[4]!=1||job[5]!=(unsigned)(uintptr_t)(job+3)||job[6]!=0x125ac07e||completion_table[5]!=(unsigned)(uintptr_t)job_complete){error=71;break;}
         for(unsigned j=0;j<5;j++)if(completion_table[j])error=71;
+#endif
         if(get(body,MUTABLE+0x214)!=(unsigned)(uintptr_t)component){error=71;break;}
 #ifdef GRID_HANDLING_QUERIES
         if(get(component,0x10)!=(queries.present?(unsigned)(uintptr_t)receiver:0)||memcmp(receiver,receiver_before,sizeof(receiver))){error=71;break;}
@@ -296,9 +331,17 @@ finish:
     unsigned unchanged=1;
     for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE){size_t n=sections[i].Misc.VirtualSize>sections[i].SizeOfRawData?sections[i].Misc.VirtualSize:sections[i].SizeOfRawData;if(memcmp(image+sections[i].VirtualAddress,saved+sections[i].VirtualAddress,n))unchanged=0;}
     unsigned restored=1;for(unsigned i=0;i<protected;i++){DWORD ignored;memcpy(image+pages[i]-0x400000,saved+pages[i]-0x400000,4096);if(!VirtualProtect(image+pages[i]-0x400000,4096,protections[i],&ignored))restored=0;}
+#ifdef GRID_CAR_MANAGER
+    if(!manager_close(image))restored=0;
+    if(memcmp(image+0xc89000-0x400000,saved+0xc89000-0x400000,4096))restored=0;
+#endif
     if(!unchanged)error=76;if(!restored)error=75;if(error&&created)_wremove(output);free(saved);
 #ifdef GRID_CAR_JOB
+#ifdef GRID_CAR_MANAGER
+    printf("car_manager_intervals=%u original_dispatch_wait=1 owned_events_consumed=1\n",*completed);
+#else
     printf("car_job_completions=%u owned_completion_identity=1\n",*completed);
+#endif
 #endif
     printf("whole_driver_records=%u error=%u code_unchanged=%u driver_globals_restored=%u\n",*completed,error,unchanged,restored);return error;
 }
