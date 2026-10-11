@@ -191,11 +191,14 @@ fn automatic(b: &mut [u32]) {
     }
 }
 
-fn change_gear(b: &mut [u32], old: usize, next: usize) {
+fn change_gear(b: &mut [u32], old: usize, next: usize) -> Result<(), Error> {
     let mut emitted = false;
     set(b, 0x1974, 0.);
     if byte(b, 0x1971) != 0 || f(b, 0xe34) == 0. {
         if next != 0 && old != 0 && byte(b, 0x1640) == 0 && f(b, 0x226c) == 0. {
+            if f(b, 0x18f4 + next * 4) == 0. {
+                return Err(Error("selected gear transition divides by zero"));
+            }
             let x = (f(b, 0x18f4 + old * 4) / f(b, 0x18f4 + next * 4)) * f(b, 0x1894);
             set(b, 0x1894, x);
         }
@@ -216,7 +219,7 @@ fn change_gear(b: &mut [u32], old: usize, next: usize) {
                 event(b, 0x21dc, 0x21ec, 0);
             }
             b[0x196c / 4] = next as u32;
-            return;
+            return Ok(());
         }
         if speed >= 2. {
             event(b, 0x18b0, 0x18c0, 1);
@@ -226,6 +229,7 @@ fn change_gear(b: &mut [u32], old: usize, next: usize) {
         event(b, 0x21dc, 0x21ec, 1);
     }
     b[0x196c / 4] = next as u32;
+    Ok(())
 }
 
 #[allow(
@@ -385,7 +389,9 @@ fn control(s: &mut Frame, pair: [usize; 2], delta: f32) -> Result<(), Error> {
             next
         };
         if multiple && next != 9 && f(b, 0x18f8 + next * 4) > 0. && f(b, 0x18fc + next * 4) <= 0. {
-            next -= 1;
+            next = next
+                .checked_sub(1)
+                .ok_or(Error("gear selection underflows supported table"))?;
         }
     }
     if byte(b, 0xe24) != 0 {
@@ -421,7 +427,7 @@ fn control(s: &mut Frame, pair: [usize; 2], delta: f32) -> Result<(), Error> {
     if next != old {
         let flag = u8::from(byte(b, 0x1970) != 0 && byte(b, 0x1972) == 0);
         put_byte(b, 0x198d, flag);
-        change_gear(b, old, next);
+        change_gear(b, old, next)?;
     }
     brakes(s, delta);
     let b = &mut s.body;
@@ -473,7 +479,6 @@ pub fn apply(
         || f(b, 0x17a4) <= 0.
         || f(b, 0x125c) + f(b, 0x1260) == 0.
         || (0..12).any(|i| !f(b, 0x18f4 + i * 4).is_finite())
-        || (1..=9).any(|i| f(b, 0x18f4 + i * 4) == 0.)
         || (0..10).any(|i| !f(b, 0x191c + i * 4).is_finite() || !f(b, 0x1944 + i * 4).is_finite())
         || (0..4).any(|i| {
             [0x78, 0xa0, 0xa4, 0xe0, 0xf4, 0xf8, 0x104, 0x108, 0x10c]
@@ -495,8 +500,7 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn later_force_failure_preserves_controls_gears_and_all_force_storage() {
+    fn failure_frame() -> Frame {
         let mut frame = Frame {
             body: [0; crate::vehicle_force::BODY_WORDS],
             view: [0; crate::vehicle_force::VIEW_WORDS],
@@ -534,6 +538,45 @@ mod tests {
         for i in 0..4 {
             set(&mut frame.body, w(i) + 0xf0, 1.);
             set(&mut frame.body, w(i) + 0xf4, 1.);
+        }
+        frame
+    }
+    #[test]
+    fn selected_zero_ratio_rejects_after_steering_without_publishing_changes() {
+        let mut frame = failure_frame();
+        frame.body[0xe2c / 4] = 0;
+        frame.body[0xe48 / 4] = 7;
+        set(&mut frame.body, 0x18f4 + 7 * 4, 0.);
+        let before = frame.clone();
+        let error = apply(&mut frame, [3, 2], [None; 4], 0.01).unwrap_err();
+        assert_eq!(error.0, "selected gear transition divides by zero");
+        assert_eq!(frame.body, before.body);
+        assert_eq!(frame.view, before.view);
+        assert_eq!(frame.solver, before.solver);
+        assert_eq!(frame.diagnostics, before.diagnostics);
+    }
+    #[test]
+    fn single_forward_gear_downshift_rejects_underflow_without_panicking() {
+        let mut frame = failure_frame();
+        frame.body[0xe2c / 4] = 0;
+        put_byte(&mut frame.body, 0xe28, 1);
+        set(&mut frame.body, 0x2280, 1.);
+        for i in 2..=8 {
+            set(&mut frame.body, 0x18f4 + i * 4, 0.);
+        }
+        let before = frame.clone();
+        let error = apply(&mut frame, [3, 2], [None; 4], 0.01).unwrap_err();
+        assert_eq!(error.0, "gear selection underflows supported table");
+        assert_eq!(frame.body, before.body);
+        assert_eq!(frame.view, before.view);
+        assert_eq!(frame.solver, before.solver);
+    }
+    #[test]
+    fn later_force_failure_preserves_controls_gears_and_all_force_storage() {
+        let mut frame = failure_frame();
+        // Unused sparse slots must not prevent the earlier valid shift to gear two.
+        for i in 7..=8 {
+            set(&mut frame.body, 0x18f4 + i * 4, 0.);
         }
         let before = frame.clone();
         let error = apply(&mut frame, [3, 2], [None; 4], 0.01).unwrap_err();
