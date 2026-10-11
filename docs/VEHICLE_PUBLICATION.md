@@ -1,5 +1,7 @@
 # Complete selected outer velocity publication — F186
 
+F191 adds [whole selected notification-one handling/publication](VEHICLE_HANDLING.md):396calls perprofile exact, preserving published-before-handling order. Existing notification-zero comparison regresses unchanged. Live queries/notifications and full CarJob remain separate.
+
 F187 correction: the complete synchronous `A09A80` final local masks clear linear X, angular Y and position X/Z; the earlier W-only interpretation was incorrect. `A03220` itself still clears velocity W. See [whole wrapper evidence and live-job distinction](VEHICLE_OUTER_WRAPPER.md).
 
 11 October 2026. Rust now matches one unchanged original `A03220` call and its

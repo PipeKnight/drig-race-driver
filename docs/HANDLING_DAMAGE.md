@@ -1,5 +1,7 @@
 # Handling-damage source investigation
 
+F191 supersedes earlier isolated-update scope: [complete selected9F3E80 and notification-one publication](VEHICLE_HANDLING.md) include visual evolution, wear, rollover, gear history and full selected effects. Above-threshold collision distribution and live queries/notifications remain unimplemented.
+
 Recorded 8 October 2026. F132 joins source limits to visual wheel-level evolution (F131). F130 confirms actual Standard source selection/live steering; F129 joins source to [deterministic reset F128](STEERING.md). The original XML loader is not isolated for comparison.
 
 ## Source visual limits (F132)

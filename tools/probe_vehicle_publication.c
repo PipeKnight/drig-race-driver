@@ -22,6 +22,9 @@ static unsigned guard(const unsigned char *v,float delta){
     if(!finite(v+0xc798,1)||!finite(v+0xc790,1)||!finite(v+0x15c0,3)||!finite(v+0x15d0,3))return 32;
     return 0;
 }
+#ifdef GRID_HANDLING_PUBLICATION
+#include "vehicle_handling_probe.h"
+#endif
 static int fault(EXCEPTION_POINTERS *p){fprintf(stderr,"vehicle_publication_fault=%08lx eip=%08lx\n",p->ExceptionRecord->ExceptionCode,p->ContextRecord->Eip);return EXCEPTION_EXECUTE_HANDLER;}
 int wmain(int argc,wchar_t **argv){
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
@@ -33,7 +36,11 @@ int wmain(int argc,wchar_t **argv){
     for(unsigned i=0;i<5;i++){if(!VirtualProtect(image+pages[i]-0x400000,4096,PAGE_READWRITE,previous+i)){error=5;break;}++protected;}
     FILE *input=NULL,*output=NULL;unsigned header[2]={0};
     if(error||_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto finish;}
-    if(fseek(input,0,SEEK_END)||ftell(input)>16*1024*1024||fseek(input,0,SEEK_SET)||fread(header,8,1,input)!=1||header[0]!=0x31305056||!header[1]||header[1]>64){error=7;goto finish;}
+    unsigned magic=0x31305056;
+#ifdef GRID_HANDLING_PUBLICATION
+    magic=0x31304e56;
+#endif
+    if(fseek(input,0,SEEK_END)||ftell(input)>16*1024*1024||fseek(input,0,SEEK_SET)||fread(header,8,1,input)!=1||header[0]!=magic||!header[1]||header[1]>64){error=7;goto finish;}
     HANDLE h=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(h==INVALID_HANDLE_VALUE){error=8;goto finish;}
     int fd=_open_osfhandle((intptr_t)h,_O_BINARY);if(fd<0){CloseHandle(h);error=8;goto finish;}
     output=_fdopen(fd,"wb");if(!output){_close(fd);error=8;goto finish;}created=1;
@@ -43,11 +50,28 @@ int wmain(int argc,wchar_t **argv){
         __declspec(align(16)) unsigned char vehicle[0x21000],physical[0x430],wrapper[16]={0};float delta;
         if(fread(&delta,4,1,input)!=1||fread(vehicle,0x21000,1,input)!=1||fread(physical,0x424,1,input)!=1){error=10;break;}
         error=guard(vehicle,delta);if(error)break;
+#ifdef GRID_HANDLING_PUBLICATION
+        __declspec(align(16)) unsigned char component[0x100]={0},prepared[0x424];
+        memcpy(prepared,physical,sizeof(prepared));memcpy(prepared+0x210,vehicle+0x15d0,16);memcpy(prepared+0x220,vehicle+0x15c0,16);put(prepared,0x21c,0);put(prepared,0x22c,0);
+        error=handling_guard(vehicle,prepared,delta);if(error)break;
+        put(component,0x24,(unsigned)(uintptr_t)vehicle);put(vehicle,MUTABLE+0x214,(unsigned)(uintptr_t)component);
+#endif
         put(wrapper,8,(unsigned)(uintptr_t)physical);put(vehicle,0xdb0,(unsigned)(uintptr_t)wrapper);
-        __try{((void (__fastcall *)(void *,void *,float,unsigned))(image+0xa03220-0x400000))(vehicle,NULL,delta,0);}__except(fault(GetExceptionInformation())){error=20;}
+        unsigned notify=0;
+#ifdef GRID_HANDLING_PUBLICATION
+        notify=1;
+#endif
+        __try{((void (__fastcall *)(void *,void *,float,unsigned))(image+0xa03220-0x400000))(vehicle,NULL,delta,notify);}__except(fault(GetExceptionInformation())){error=20;}
         if(error)break;
         if(get(vehicle,0xdb0)!=(unsigned)(uintptr_t)wrapper||get(wrapper,8)!=(unsigned)(uintptr_t)physical||get(vehicle,0xc784)!=(unsigned)(uintptr_t)(image+0x9a0c90-0x400000)){error=21;break;}
         put(vehicle,0xdb0,0);put(vehicle,0xc784,0x9a0c90); /* Checked generated code-pointer relocation. */
+#ifdef GRID_HANDLING_PUBLICATION
+        if(get(vehicle,MUTABLE+0x214)!=(unsigned)(uintptr_t)component||get(component,0x24)!=(unsigned)(uintptr_t)vehicle){error=21;break;}
+        put(vehicle,MUTABLE+0x214,0);put(component,0x24,0);for(unsigned j=0;j<sizeof(component);j++)if(component[j])error=21;
+        if(!bounded(vehicle+MUTABLE,0,0x60)||!bounded(vehicle+MUTABLE,0x3a0,0x3c4)||!bounded(vehicle+MUTABLE,0x42c,0x430))error=27;
+        for(unsigned j=0;j<4;j++)if(!bounded(vehicle+MUTABLE,0x3c8+j*0x18,0x3dc+j*0x18))error=27;
+        if(error)break;
+#endif
         if(fwrite(&delta,4,1,output)!=1||fwrite(vehicle,0x21000,1,output)!=1||fwrite(physical,0x424,1,output)!=1){error=22;break;}++completed;
     }
     if(!error&&fgetc(input)!=EOF)error=23;
