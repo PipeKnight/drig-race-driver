@@ -8,6 +8,7 @@ pub struct Surfaces {
     drag: Vec<Option<surface_drag::Material>>,
     history: Vec<Option<wheel_history::Material>>,
     joined: Vec<Option<grid_world::vehicle_contact_force::Material>>,
+    physical: Vec<grid_world::contact_rows::Material>,
 }
 
 impl Surfaces {
@@ -18,6 +19,10 @@ impl Surfaces {
         let document = binxml::read(bytes)?;
         let materials = surface::read(&document)?;
         let keys = materials.iter().map(|m| m.code).collect();
+        let physical = materials
+            .iter()
+            .map(|m| m.physical.row_words(m.code).map(f32::from_bits))
+            .collect();
         let mechanics = materials
             .iter()
             .map(|m| {
@@ -80,7 +85,18 @@ impl Surfaces {
             drag,
             history,
             joined,
+            physical,
         })
+    }
+
+    /// Select by the source packed-code policy; this does not establish which
+    /// resource key a live car shape owns.
+    pub fn physical(
+        &self,
+        code: [u8; 4],
+    ) -> Result<(usize, grid_world::contact_rows::Material), Box<dyn std::error::Error>> {
+        let index = surface::packed_index(&self.keys, code, true).ok_or("surface table absent")?;
+        Ok((index, self.physical[index]))
     }
 
     pub fn joined(

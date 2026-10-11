@@ -1,4 +1,4 @@
-//! Source mechanics fields for contacts and production tyre/drag consumers.
+//! Source physical materials and mechanics for contact, tyre and drag consumers.
 use crate::{
     Error, Result,
     binxml::{Document, Element},
@@ -36,8 +36,110 @@ pub struct Mechanics<'a> {
 #[derive(Clone, Debug)]
 pub struct Material<'a> {
     pub code: [u8; 4],
+    pub physical: Physical,
     /// Missing mechanics stays explicit; no complete default object is inferred.
     pub mechanics: Option<Mechanics<'a>>,
+}
+
+/// Source physical-contact coefficients, separate from tyre mechanics.
+#[derive(Clone, Copy, Debug)]
+pub struct Physical {
+    pub restitution: f32,
+    pub friction: f32,
+    pub cfm: f32,
+    pub correction_velocity: f32,
+    pub minimum_bounce_velocity: f32,
+    pub minimum_soft_k: f32,
+    pub minimum_soft_s: f32,
+    pub maximum_soft_k: f32,
+    pub maximum_soft_s: f32,
+    pub speed_for_maximum_softness: f32,
+    pub dynamic_scale: f32,
+    pub dynamic_threshold: f32,
+    pub color: [u8; 4],
+    pub sheet: bool,
+}
+
+impl Physical {
+    /// Original row-material layout. The first word is an opaque packed key.
+    pub fn row_words(&self, code: [u8; 4]) -> [u32; 13] {
+        let values = [
+            self.restitution,
+            self.friction,
+            self.cfm,
+            self.correction_velocity,
+            self.minimum_bounce_velocity,
+            self.minimum_soft_k,
+            self.minimum_soft_s,
+            self.maximum_soft_k,
+            self.maximum_soft_s,
+            self.speed_for_maximum_softness,
+            self.dynamic_scale,
+            self.dynamic_threshold,
+        ];
+        std::array::from_fn(|i| {
+            if i == 0 {
+                u32::from_le_bytes(code)
+            } else {
+                values[i - 1].to_bits()
+            }
+        })
+    }
+}
+
+fn color_component(element: &Element<'_>, key: &str, default: u8) -> Result<u8> {
+    let Some(text) = attr(element, key) else {
+        return Ok(default);
+    };
+    let text = text.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let (negative, digits) = if let Some(s) = text.strip_prefix('-') {
+        (true, s)
+    } else {
+        (false, text.strip_prefix('+').unwrap_or(text))
+    };
+    let (radix, digits) = if let Some(s) = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        (16, s)
+    } else if digits.len() > 1 && digits.starts_with('0') {
+        (8, &digits[1..])
+    } else {
+        (10, digits)
+    };
+    let magnitude = i64::from_str_radix(digits, radix).map_err(|_| Error {
+        offset: 0,
+        message: "invalid physical material color",
+    })?;
+    let value = if negative { -magnitude } else { magnitude };
+    if i32::try_from(value).is_err() {
+        return fail(0, "physical material color outside signed range");
+    }
+    Ok(value.clamp(0, 255) as u8)
+}
+
+fn physical(element: &Element<'_>) -> Result<Physical> {
+    Ok(Physical {
+        restitution: number(element, "restitution", 0.)?,
+        friction: number(element, "friction", f32::from_bits(0x3ecc_cccd))?,
+        cfm: number(element, "cfm", f32::from_bits(0x3c23_d70a))?,
+        correction_velocity: number(element, "correctionVel", 1.)?,
+        minimum_bounce_velocity: number(element, "minBounceVel", 0.)?,
+        minimum_soft_k: number(element, "minSoftK", 0.)?,
+        minimum_soft_s: number(element, "minSoftS", 0.)?,
+        maximum_soft_k: number(element, "maxSoftK", 0.)?,
+        maximum_soft_s: number(element, "maxSoftS", 0.)?,
+        speed_for_maximum_softness: number(element, "speedForMaxSoftness", 0.)?,
+        dynamic_scale: number(element, "dynamicScale", 0.)?,
+        dynamic_threshold: number(element, "dynamicThreshold", 10.)?,
+        color: [
+            color_component(element, "red", 255)?,
+            color_component(element, "green", 255)?,
+            color_component(element, "blue", 255)?,
+            color_component(element, "alpha", 180)?,
+        ],
+        sheet: attr(element, "sheet").is_some_and(|s| s.eq_ignore_ascii_case("true")),
+    })
 }
 
 /// Original packed-code table policy: first exact key, otherwise first record.
@@ -167,6 +269,7 @@ pub fn read<'a>(doc: &Document<'a>) -> Result<Vec<Material<'a>>> {
         }
         result.push(Material {
             code,
+            physical: physical(e)?,
             mechanics: found,
         });
     }
