@@ -12,7 +12,8 @@ GAME=Path(r'C:\Users\debros\Tools\grid-research\grid-compat\grid.exe')
 HASH='b1da1b2d9469fb0c973dbaaad29b230c1567f212c54de849326f80b4aece34a6'
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('session',type=Path);p.add_argument('output',type=Path);p.add_argument('--ownership',action='store_true');p.add_argument('--handling',action='store_true');p.add_argument('--queries',action='store_true');p.add_argument('--schedule',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('session',type=Path);p.add_argument('output',type=Path);p.add_argument('--ownership',action='store_true');p.add_argument('--handling',action='store_true');p.add_argument('--queries',action='store_true');p.add_argument('--schedule',action='store_true');p.add_argument('--physical-materials',action='store_true');a=p.parse_args()
+    assert not a.physical_materials or a.schedule,'Physical material inspection requires schedule ownership'
     assert a.session.resolve().is_relative_to((ROOT/'local').resolve()) and a.output.resolve().is_relative_to((ROOT/'local').resolve())
     session=json.loads(a.session.read_text());assert Path(session['Path'])==GAME and session['ExeSHA256']==HASH
     assert hashlib.sha256(GAME.read_bytes()).hexdigest()==HASH
@@ -43,7 +44,7 @@ def main():
         def word(address):return struct.unpack('<I',read(address,4))[0]
         for address,length in [(0xcaf400,0x70),(0xa09a80,0x170),(0xa0a290,0x130)]:
             read(address,length)
-        ownership=[];worlds=[];handling=[];jobs=[];post_job=[];completion_wait=[]
+        ownership=[];worlds=[];handling=[];jobs=[];post_job=[];completion_wait=[];physical_materials={}
         if a.ownership or a.handling or a.queries or a.schedule:
             count=word(0xe85fcc);assert 1<=count<=40,'Registered car count outside scope'
             cars=struct.unpack(f'<{count}I',read(0xe85f28,count*4));assert len(set(cars))==count
@@ -73,6 +74,12 @@ def main():
                         shape=word(address+8);assert shape,'Producer shape is absent'
                         raw_shape=read(shape,0x274)
                         shword=lambda o:struct.unpack_from('<I',raw_shape,o)[0]
+                        if a.physical_materials:
+                            material=shword(0xc8)
+                            assert material,'Owned producer shape material absent'
+                            if material not in physical_materials:
+                                raw_material=read(material,0x39)
+                                physical_materials[material]=dict(address=hex(material),words=list(struct.unpack('<14I',raw_material[:0x38])),sheet=raw_material[0x38])
                         return dict(wrapper=hex(address),shape=hex(shape),kind_10=shword(0x10),physical_d8=hex(shword(0xd8)),material_c8=hex(shword(0xc8)),flags_216_217=raw_shape[0x216:0x218].hex(),flags_228_230=raw_shape[0x228:0x231].hex(),value_224=struct.unpack_from('<f',raw_shape,0x224)[0],value_22c=struct.unpack_from('<f',raw_shape,0x22c)[0],alias_270=hex(shword(0x270)))
                     post_job.append(dict(body=hex(body),state_248_24b=read(body+0x248,4).hex(),deferred_counts={hex(o):word(body+o) for o in [0xcd8,0xda8,0xc0c,0xd40]},producer_enabled_1ee0=read(body+0x1ee0,1).hex(),producer_wrapper_dc8=hex(word(body+0xdc8)),producer_shape=producer_shape(word(body+0xdc8)),wheels=[dict(distance_40=wheel_value(i,0x40),limit_50=wheel_value(i,0x50),other_wrapper_c4=hex(struct.unpack_from('<I',wheels,i*0x150+0xc4)[0]),other_shape=producer_shape(struct.unpack_from('<I',wheels,i*0x150+0xc4)[0])) for i in range(4)]))
             if a.schedule:
@@ -97,7 +104,7 @@ def main():
                     assert backlink==owner,'Update list/world ownership differs'
                     lists.append(dict(address=hex(entry),head=hex(head),world=hex(backlink)))
                 worlds.append(dict(address=hex(owner),update_lists=lists,manager_count=field(4),solve_async=raw[0x94],advance_async=raw[0x95],active_selector=field(0x60),active_heads=[hex(field(0x3c+i*4)) for i in range(2)],special_body=hex(field(0x28)),contact_groups=hex(field(0x50)),phase=field(0x7c4),delta_bits=hex(field(0x7c8)),delta=struct.unpack_from('<f',raw,0x7c8)[0]))
-        result=dict(ownership=ownership,worlds=worlds,handling=handling,jobs=jobs,post_job=post_job,completion_wait=[hex(p) for p in completion_wait],atomic=False,utc=datetime.now(timezone.utc).isoformat(),session=session,read_only=True,rows=rows)
+        result=dict(ownership=ownership,worlds=worlds,handling=handling,jobs=jobs,post_job=post_job,physical_materials=list(physical_materials.values()),completion_wait=[hex(p) for p in completion_wait],atomic=False,utc=datetime.now(timezone.utc).isoformat(),session=session,read_only=True,rows=rows)
         with a.output.open('x') as f:json.dump(result,f,indent=2)
         print(json.dumps(dict(utc=result['utc'],pid=session['Pid'],masks=rows[0]['hex'],ownership=ownership,worlds=worlds,handling=handling,jobs=jobs,post_job=post_job,completion_wait=result['completion_wait'],read_only=True)))
     finally:k.CloseHandle(h)
