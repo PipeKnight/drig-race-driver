@@ -8,8 +8,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let tyre = args.get(2).is_some_and(|v| v == "tyre");
     let gears = args.get(2).is_some_and(|v| v == "gears");
-    if args.len() != 2 && !(args.len() == 3 && (tyre || gears)) {
-        return Err("usage: grid-body-tuning INPUT local/OUTPUT.tsv [tyre|gears]".into());
+    let shift = args.get(2).is_some_and(|v| v == "shift");
+    if args.len() != 2 && !(args.len() == 3 && (tyre || gears || shift)) {
+        return Err("usage: grid-body-tuning INPUT local/OUTPUT.tsv [tyre|gears|shift]".into());
     }
     let output = Path::new(&args[1]);
     let parent = output.parent().ok_or("missing parent")?.canonicalize()?;
@@ -44,6 +45,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         Vec::new()
     };
+    let shift_inputs = if shift {
+        table
+            .rows
+            .iter()
+            .map(grid_formats::vehicle::read_standard_shift_inputs)
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
     let mut writer = std::io::BufWriter::new(
         OpenOptions::new()
             .write(true)
@@ -51,6 +61,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .open(parent.join(output.file_name().ok_or("missing filename")?))?,
     );
     for (ordinal, p) in parameters.iter().enumerate() {
+        if shift {
+            let value = shift_inputs[ordinal];
+            write!(
+                writer,
+                "S\t{ordinal}\t{:08x}",
+                value.maximum_speed_17a4.to_bits()
+            )?;
+            for node in value.torque_curve_17ac {
+                write!(writer, "\t{:08x}", node.to_bits())?;
+            }
+            writeln!(
+                writer,
+                "\t{:08x}",
+                value.second_downshift_scale_2218.to_bits()
+            )?;
+            continue;
+        }
         if gears {
             write!(writer, "G\t{ordinal}")?;
             for ratio in ratios[ordinal] {

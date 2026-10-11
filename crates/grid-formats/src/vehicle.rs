@@ -66,6 +66,39 @@ pub fn read_standard_gear_ratios(row: &Row<'_>) -> Result<[f32; 10]> {
     Ok(ratios)
 }
 
+/// Source subset consumed by shift initialization. Other engine configuration,
+/// reset state and runtime setup modifiers are deliberately separate.
+#[derive(Debug, Clone, Copy)]
+pub struct StandardShiftInputs {
+    pub maximum_speed_17a4: f32,
+    pub torque_curve_17ac: [f32; 32],
+    pub second_downshift_scale_2218: f32,
+}
+
+pub fn read_standard_shift_inputs(row: &Row<'_>) -> Result<StandardShiftInputs> {
+    read_standard_body(row)?;
+    let number = |column| -> Result<f32> {
+        let value = row.number(column)?.unwrap_or(0.) as f32;
+        if !value.is_finite() {
+            return fail(column, "shift input exceeds finite f32 range");
+        }
+        Ok(value)
+    };
+    let mut curve = [0.; 32];
+    for (i, value) in curve.iter_mut().enumerate() {
+        *value = number(17 + i)?;
+    }
+    // The decoder tests the parsed double before storing the default. A tiny
+    // nonzero value can underflow to f32 zero without receiving this default.
+    let parsed = row.number(173)?.unwrap_or(0.);
+    let modifier = if parsed == 0. { 1. } else { number(173)? };
+    Ok(StandardShiftInputs {
+        maximum_speed_17a4: number(16)?,
+        torque_curve_17ac: curve,
+        second_downshift_scale_2218: modifier,
+    })
+}
+
 /// CSV column77 through original properties+340 to steering body+e54.
 /// Multiply parsed f64 by the stored-f32 degree conversion before storing f32.
 /// There is no zero substitution in the inspected decoder.
@@ -603,6 +636,30 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn shift_inputs_keep_curve_order_and_double_zero_default() {
+        let mut fields = fixture();
+        fields[16] = "750";
+        fields[17] = "-0";
+        fields[48] = "1.25";
+        for text in ["", "-0", "1e-300"] {
+            fields[173] = text;
+            let value = read_standard_shift_inputs(&Row {
+                fields: fields.clone(),
+            })
+            .unwrap();
+            assert_eq!(value.maximum_speed_17a4, 750.);
+            assert_eq!(value.torque_curve_17ac[0].to_bits(), (-0f32).to_bits());
+            assert_eq!(value.torque_curve_17ac[31], 1.25);
+            assert_eq!(
+                value.second_downshift_scale_2218,
+                if text == "1e-300" { 0. } else { 1. }
+            );
+        }
+        fields[48] = "1e300";
+        assert!(read_standard_shift_inputs(&Row { fields }).is_err());
     }
 
     #[test]
