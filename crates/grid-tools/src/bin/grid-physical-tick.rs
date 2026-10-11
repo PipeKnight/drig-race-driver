@@ -57,7 +57,8 @@ fn run() -> Result<(), Failure> {
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
-    let carried_world = word(h, 0) == 0x35535747;
+    let reproduced_world = word(h, 0) == 0x36535747;
+    let carried_world = word(h, 0) == 0x35535747 || reproduced_world;
     let whole_world = word(h, 0) == 0x34535747 || carried_world;
     let owned_shapes = matches!(word(h, 0), 0x34534647 | 0x34535447) || whole_world;
     let grouped_tick = matches!(word(h, 0), 0x33525447 | 0x34535447) || whole_world;
@@ -145,6 +146,25 @@ fn run() -> Result<(), Failure> {
         } else {
             1
         };
+        let mut requests = Vec::new();
+        let mut counts = Vec::new();
+        if reproduced_world {
+            if !(1..=64).contains(&world_steps) {
+                return Err("invalid reproduced world steps".into());
+            }
+            for _ in 0..4 {
+                let r = take(&data, &mut p, 40)?;
+                requests.push(grid_world::wheel_contacts::Request {
+                    local: vector(r, 0),
+                    direction: vector(r, 16),
+                    penetration: number(r, 32),
+                    shape: word(r, 36),
+                });
+            }
+            for _ in 0..world_steps {
+                counts.push(word(take(&data, &mut p, 4)?, 0));
+            }
+        }
         let mut settings = Vec::new();
         let mut body_wire = Vec::new();
         let mut active_next = Vec::new();
@@ -347,7 +367,15 @@ fn run() -> Result<(), Failure> {
                 cached_pair: input.step.cached_pair,
                 cached_material: input.step.cached_material,
             };
-            let result = if carried_world {
+            let result = if reproduced_world {
+                physical_world::calculate_produced(
+                    &group_input,
+                    &manager,
+                    &shapes,
+                    &requests,
+                    &counts,
+                )
+            } else if carried_world {
                 physical_world::calculate_steps(&group_input, &manager, &shapes, world_steps)
             } else {
                 calculate(&group_input, &manager, &shapes)

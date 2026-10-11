@@ -27,11 +27,22 @@ pub fn advance(
     previous: &grouped_physical_frame::Output,
     shapes: &[contact_groups::Shape],
 ) -> Result<grouped_physical_frame::Output, Error> {
+    advance_with_pool(previous, &previous.groups.contacts, 0, shapes)
+}
+
+pub fn advance_with_pool(
+    previous: &grouped_physical_frame::Output,
+    slots: &[contact_groups::Contact],
+    used: usize,
+    shapes: &[contact_groups::Shape],
+) -> Result<grouped_physical_frame::Output, Error> {
     let world = previous.groups.world;
     let selector = world[5];
     if selector > 1
         || previous.pool_used != 0
         || previous.groups.contacts.len() > 64
+        || slots.len() != previous.groups.contacts.len()
+        || used > slots.len()
         || previous
             .groups
             .bodies
@@ -59,7 +70,7 @@ pub fn advance(
     }
     let input = contact_groups::Input {
         bodies: previous.groups.bodies.clone(),
-        contacts: vec![],
+        contacts: slots[..used].to_vec(),
         active_order: order,
         selector,
     };
@@ -69,7 +80,9 @@ pub fn advance(
     };
     let mut out =
         grouped_physical_frame::calculate_tick_carried(&input, &previous.manager, shapes, &carry)?;
-    out.groups.contacts = previous.groups.contacts.clone();
+    let active = out.groups.contacts;
+    out.groups.contacts = slots.to_vec();
+    out.groups.contacts[..used].copy_from_slice(&active);
     out.pool_used = 0;
     Ok(out)
 }
@@ -86,6 +99,66 @@ pub fn calculate_steps(
     let mut out = calculate_cold(input, manager, shapes)?;
     for _ in 1..steps {
         out = advance(&out, shapes)?;
+    }
+    Ok(out)
+}
+
+/// Repeated selected external contact construction and whole world solving.
+/// Counts are authored decisions; this does not perform geometry queries.
+pub fn calculate_produced(
+    input: &contact_groups::Input,
+    manager: &grouped_physical_frame::Manager,
+    shapes: &[contact_groups::Shape],
+    requests: &[crate::wheel_contacts::Request],
+    counts: &[u32],
+) -> Result<grouped_physical_frame::Output, Error> {
+    if input.bodies.len() != 1
+        || input.contacts.len() != 4
+        || requests.len() != 4
+        || !(1..=64).contains(&counts.len())
+        || counts.iter().any(|&n| n > 4)
+        || shapes.len() < 2
+        || shapes[0]
+            != (contact_groups::Shape {
+                angular: false,
+                flag217: false,
+                flag229: true,
+                flag230: false,
+            })
+        || shapes[1..].iter().any(|s| {
+            *s != (contact_groups::Shape {
+                angular: true,
+                ..Default::default()
+            })
+        })
+    {
+        return Err(Error("unsupported selected reproduced world"));
+    }
+    let mut pool = crate::wheel_contacts::Pool {
+        slots: input.contacts.clone(),
+        used: 0,
+        shapes: shapes.len() - 1,
+    };
+    crate::wheel_contacts::validate_requests(requests, pool.shapes)?;
+    pool =
+        crate::wheel_contacts::produce(&input.bodies[0], &pool, &requests[..counts[0] as usize])?;
+    let mut first = input.clone();
+    first.contacts = pool.slots[..pool.used].to_vec();
+    let mut out = calculate_cold(&first, manager, shapes)?;
+    pool.slots[..pool.used].copy_from_slice(&out.groups.contacts);
+    out.groups.contacts = pool.slots;
+    for &count in &counts[1..] {
+        let pool = crate::wheel_contacts::Pool {
+            slots: out.groups.contacts.clone(),
+            used: 0,
+            shapes: shapes.len() - 1,
+        };
+        let produced = crate::wheel_contacts::produce(
+            &out.groups.bodies[0],
+            &pool,
+            &requests[..count as usize],
+        )?;
+        out = advance_with_pool(&out, &produced.slots, produced.used, shapes)?;
     }
     Ok(out)
 }
