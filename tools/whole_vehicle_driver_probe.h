@@ -87,7 +87,6 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         for(unsigned i=0;i<sizeof(outer_fields)/sizeof(*outer_fields);i++)if(!isfinite(*(float *)(r.body+outer_fields[i])))error=66;
         if((*(float *)(r.body+0x122c)>0||*(float *)(r.body+0x1230)>0)&&*(float *)(r.body+0x1224)==*(float *)(r.body+0x1228))error=66;
         if(*(float *)(r.body+0x11f0)>0&&!isfinite((*(float *)(r.body+0xe20)* *(float *)(r.body+0x11f0))*delta))error=66;
-        if(delta>0&&(r.body[0xe38]||(*(float *)(r.body+0x1648)<.5f&&*(float *)(r.body+0xe1c)==0&&*(float *)(r.body+0xe20)==0)))error=66;
         if(error)break;
 #endif
         if(!isfinite(*(float *)r.engine_limit)){error=66;break;}

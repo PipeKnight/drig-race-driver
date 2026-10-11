@@ -1,5 +1,9 @@
 # Complete selected vehicle wrapper — F183
 
+11 October update: [F185](VEHICLE_CLUTCH_TRANSITIONS.md) extends the verified
+positive-duration path to idle/clutch modes one/two. The original F183 scope
+and results below remain a historical record of the engaged-path milestone.
+
 11 October 2026, Europe/Kiev. Independent Rust now matches one call to the complete unchanged original `A06A90`, including its temporary-frame initialization and the motion assistance, settling and contact braking after the driver. The same result holds inside linked synchronization and physical publication. Positive-duration idle/clutch transitions, `A03220` and physical-world scheduling remain unfinished; the Bevy viewer is not drivable yet.
 
 ## Behavior and ownership

@@ -56,7 +56,8 @@ def publish(out,profile,branches,owners,prefix,ignore_temporary=False):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);mode=p.add_mutually_exclusive_group();mode.add_argument('--whole-driver',action='store_true');mode.add_argument('--whole-step',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);mode=p.add_mutually_exclusive_group();mode.add_argument('--whole-driver',action='store_true');mode.add_argument('--whole-step',action='store_true');p.add_argument('--idle',action='store_true');a=p.parse_args()
+    if a.idle and not a.whole_step:p.error('--idle requires --whole-step')
     b=driver.base;out=a.output.resolve();assert out.is_relative_to((b.ROOT/'local').resolve());out.mkdir(exist_ok=False)
     tables=sources.verify_shift(out.with_name(out.name+'-source'),a.profile);records=[]
     for i,raw in enumerate(driver.cases()):
@@ -70,7 +71,7 @@ def main():
         whole.configure()
     if a.whole_step:
         import validate_whole_vehicle_step as step
-        records=step.cases(tables);b.MAGIC=b'QF01';b.run_set=step.compare
+        records=step.cases(tables,a.idle);b.MAGIC=b'QF01';b.run_set=step.compare
     for path,sha in [(b.TRACK,'6e161e5bee8f946ff0622ca836af9071c9474cec7aef53609180b84319f9d8ef'),(b.SURFACE,'8a23a960ea0ca837ee49bafaab893cff7446c0089c9ca282e131030f4b3d3251'),(b.WORLD,'b83d245aa380bb0524f45e4b9a323c44cbf536536ec6cc6722bf22765d90d8d7')]:assert b.digest(path)==sha
     full=b.grip.mechanics_fixture(out);reports=[];sync_reports=[];publication=[];initial=[];coverage=collections.Counter()
     def tick(branches,owners,prefix):
@@ -83,14 +84,20 @@ def main():
             for i,row in enumerate(rows):
                 r=bytearray(row);previous=branches[kind][i];o=b.BODY
                 r[o+0xb40:o+0xb80]=previous[o+0x15e0:o+0x1620];r[o+0xb80:o+0xba0]=previous[o+0xb20:o+0xb40];r[o+0xb20:o+0xb40]=r[o+0x15c0:o+0x15e0]
-                if a.whole_step:b.put(r,o+0xe1c,.5)
+                if a.whole_step:
+                    b.put(r,o+0xe1c,.5)
+                    if a.idle:
+                        inactive=int(len(reports)%4<2);r[o+0xe38]=inactive
+                        b.put(r,o+0xe1c,0 if inactive else .5);b.put(r,o+0xe20,0)
                 rows[i]=bytes(r)
         report,result=publish(out,a.profile,after,owners,prefix+'-publish',a.whole_step);publication.append(report)
         return {k:v[0] for k,v in result.items()},{k:v[1] for k,v in result.items()}
     for start in range(0,len(records),40):
         batch=records[start:start+40];r,branches=gearing.initialize(out,a.profile,{k:batch for k in ['original','repeat','rust']},f'init-{start}');initial.append(r)
+        if a.whole_step:branches=step.runtime_modes(branches,a.idle)
         owners={k:[owner(r) for r in rows] for k,rows in branches.items()};tick(branches,owners,f'initial-{start}')
     r,branches=gearing.initialize(out,a.profile,{k:records[8:24] for k in ['original','repeat','rust']},'init-carry');initial.append(r)
+    if a.whole_step:branches=step.runtime_modes(branches,a.idle)
     owners={k:[owner(r) for r in rows] for k,rows in branches.items()}
     for step in range(12):branches,owners=tick(branches,owners,f'carry-{step}')
     required=['contacts','spin','chassis','velocity'] if a.whole_driver or a.whole_step else ['contacts','spin_changes','chassis_matrix','driver_velocity']
@@ -99,7 +106,8 @@ def main():
     if a.whole_driver:result['scope']='Whole9BD7F0 -> whole original A03670 versus Rust -> linked setters/readback without advance/correction; independent carried state, authored history/ownership, zero deformation/emptyshapes, omitted A06A90tail/A03220/world dispatch. No whole synchronous wrapper/driving claim.'
     if a.whole_step:
         result['driver_observable_bytes']=result.pop('driver_record_bytes');result['driver_body_bytes']=sum(r['body_bytes'] for r in reports)
-        result['scope']='Whole9BD7F0 -> whole original A06A90 versus Rust -> linked publication without advance/correction, each branch carrying its own state. Full car and physical state compare; expired native temporary view/solver excluded. Authored input/history/ownership, selected engaged mode1, zero deformation/emptyshapes; omitted A03220/world dispatch, no driving claim.'
+        result['scope']='Whole9BD7F0 -> whole original A06A90 versus Rust -> linked publication without advance/correction, each branch carrying its own state. Full car and physical state compare; expired native temporary view/solver excluded. Authored input/history/ownership, assisted automatic modes one/two with clutch transitions, zero deformation/emptyshapes; omitted A03220/world dispatch, no driving claim.'
+        result['idle']=a.idle
     (out/'validation.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if not k.endswith('reports')}))
 
 

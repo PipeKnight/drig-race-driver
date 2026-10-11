@@ -82,7 +82,7 @@ def guards(out,profile,first):
     tests=[('zero_delta',4,0),('nan_delta',4,0x7fc00000),('large_delta',4,0x3e800000)]
     tests += [(name,BODY+offset,value) for name,offset,value in [
         ('disabled',0x24a,1),('disabled_wheel',0x2278,1),('nitro',0xde4,1),('respawn',0xdfc,1),
-        ('mode',0x1598,0),('neutral',0x196c,0),('gear',0x196c,10),('clutch_transition',0x1640,1),
+        ('mode',0x1598,0),('neutral',0x196c,0),('gear',0x196c,10),('manual_clutch',0x1971,0),
         ('automatic_off',0x1970,0),('delta_ring',0x3c0,5),('speed_ring',0x2e0,10),
         ('mass',0x15a0,0),('inverse_mass',0x15a4,0),('inertia',0x15a8,0),('max_rpm',0x17a4,0),
         ('radius',0x1990+0xe0,0),('wheel_contact_nan',0x1990+0x78,0x7fc00000),
