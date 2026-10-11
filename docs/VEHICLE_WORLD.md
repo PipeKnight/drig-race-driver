@@ -26,13 +26,14 @@ between calls. Native pointer identities are checked and normalized only at
 the private final output boundary. Rust retains center identity `1C0` internally;
 the old standalone job API continues to require its unlinked input contract.
 
-The single-car native notification path leaves its owned pose-list head pointing
-to the physical body, with body `318` null. An added assertion initially assumed
-this list stayed empty and rejected an otherwise exact run. It now checks the
-actual owned head and unchanged list/world binding. The selected world has
-registered pose cursor `24` zero, so this queued list is not traversed. That
-fixed single-owner native metadata is audited; a general registered pose queue
-and its normalization are not implemented by the Rust composition.
+The native advance stage `AD7040` rebuilds the owned world `8` update-list head
+from active bodies. In this single-body scope the head is the physical body,
+with body `318` null. An added assertion initially assumed this list stayed
+empty and rejected an otherwise exact run; it now checks the actual owned head
+and unchanged list/world binding. This advance list is separate from the
+registered pose queue at world `24`/`28`, which is empty in this scope. The
+earlier description as a notification pose list was incorrect. General
+registered pose traversal and periodic normalization remain excluded.
 
 Native audits also retain the complete car shape, wrapper and shared material;
 check all source shapes still have kind11, null physical owner/callback and the
@@ -97,7 +98,7 @@ native harness required <=16; wire validation now agrees. An independent check
 incorrectly assumed contact activation byte70 stayed zero; solving legitimately
 writes boolean0/1, while bytes71..73 retain0/1/1. The check was corrected without
 changing any numerical output. Native final02's added ownership audit exposed
-the pending pose-list head described above. No F200 native access violation or
+the advance update-list head described above. No F200 native access violation or
 accepted original/Rust numerical mismatch occurred.
 
 An input inventory initially included other source-initialization wire types;
