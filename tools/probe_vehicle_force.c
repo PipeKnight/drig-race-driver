@@ -30,7 +30,7 @@ static unsigned exception(EXCEPTION_POINTERS *e) {
     if(e->ExceptionRecord->NumberParameters>=2)fprintf(stderr," access=%lu address=%p",(unsigned long)e->ExceptionRecord->ExceptionInformation[0],(void *)e->ExceptionRecord->ExceptionInformation[1]);
     fputc('\n',stderr);return EXCEPTION_EXECUTE_HANDLER;
 }
-#ifdef GRID_PROPULSION
+#if defined(GRID_PROPULSION) && !defined(GRID_SHIFT_INITIALIZE)
 #ifdef GRID_CONTROL
 #include "vehicle_controls_probe.h"
 #endif
@@ -41,6 +41,9 @@ static unsigned exception(EXCEPTION_POINTERS *e) {
 #endif
 #ifdef GRID_DRIVER_PREPARE
 #include "vehicle_driver_prepare_probe.h"
+#endif
+#ifdef GRID_SHIFT_INITIALIZE
+#include "vehicle_gearing_probe.h"
 #endif
 int wmain(int argc,wchar_t **argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -70,7 +73,9 @@ int wmain(int argc,wchar_t **argv) {
     if(error||_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto finish;}
     unsigned header[2];
     const unsigned tag=
-#ifdef GRID_DRIVER_PREPARE
+#ifdef GRID_SHIFT_INITIALIZE
+        0x31304653;
+#elif defined(GRID_DRIVER_PREPARE)
         0x31304644;
 #elif defined(GRID_PREPARED)
         0x31304647;
@@ -92,7 +97,7 @@ int wmain(int argc,wchar_t **argv) {
     created=1;
 #endif
     if(fwrite(header,sizeof(header),1,output)!=1){error=9;goto finish;}
-#ifndef GRID_DRIVER_PREPARE
+#if !defined(GRID_DRIVER_PREPARE) && !defined(GRID_SHIFT_INITIALIZE)
     Update update=(Update)(image+0x9df8b0-0x400000);
 #endif
     for(unsigned index=0;index<count;index++){
@@ -133,11 +138,14 @@ int wmain(int argc,wchar_t **argv) {
         if(get(body,0x21cc)==get(body,0x21d0))error=41;
         if(error)break;
 #endif
-#if defined(GRID_PROPULSION) && !defined(GRID_DRIVER_PREPARE)
+#if defined(GRID_PROPULSION) && !defined(GRID_DRIVER_PREPARE) && !defined(GRID_SHIFT_INITIALIZE)
         error=propulsion_guard(body,view,material);if(error)break;
 #endif
 #ifdef GRID_DRIVER_PREPARE
         error=driver_guard(body);if(error){printf("driver_guard_case=%u group=%x bits=%08x\n",index,driver_guard_group,get(body,driver_guard_group));break;}
+#endif
+#ifdef GRID_SHIFT_INITIALIZE
+        error=gearing_guard(body);if(error)break;
 #endif
 #ifdef GRID_CONTROL
         error=controls_guard(body);if(error)break;
@@ -148,7 +156,9 @@ int wmain(int argc,wchar_t **argv) {
         memcpy(image+0xd16348-0x400000,r.engine_limit,4);
         memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
         __try {
-#ifdef GRID_DRIVER_PREPARE
+#ifdef GRID_SHIFT_INITIALIZE
+            error=gearing_run(image,body);
+#elif defined(GRID_DRIVER_PREPARE)
             float gravity=-9.8100004196167f;memcpy(image+0xe8efd4-0x400000,&gravity,4);
             error=driver_run(image,body,view,delta);
 #elif defined(GRID_PREPARED)

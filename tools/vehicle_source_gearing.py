@@ -30,3 +30,19 @@ def verify(out,profile):
     counts=sorted(set(sum(struct.unpack('<f',struct.pack('<I',w))[0]>0 for w in t['words'][1:9]) for t in tables))
     result=dict(files=metadata,source_files=44,forward_counts=counts,unused_zero_slots=sum(w&0x7fffffff==0 for t in tables for w in t['words'][1:9]),tables=tables,cli_sha256=digest(ROOT/f'target/{profile}/grid-body-tuning.exe'),scope='Decoded ratio columns and constructor slot-zero alias only; no runtime setup scaling, shift thresholds or whole constructor claim.')
     (out/'validation.json').write_text(json.dumps(result,indent=2));return tables
+
+
+def verify_shift(out,profile):
+    """Independent byte/f32 audit of decoder fields and constructor direct copies."""
+    tables=verify(out,profile)
+    for ordinal,t in enumerate(tables):
+        path=GAME/t['path'];rows=[r for r in csv.reader(path.read_text().splitlines()) if r];assert len(rows)==1
+        row=rows[0];report=out/f'{ordinal:03}-shift.tsv';exe=ROOT/f'target/{profile}/grid-body-tuning.exe'
+        run=subprocess.run([str(exe),str(path),str(report),'shift'],cwd=ROOT,capture_output=True,text=True,timeout=30)
+        assert run.returncode==0 and not run.stderr,(path,run.stderr)
+        parsed=float(row[173] or 0);values=[float(row[i] or 0) for i in [16,*range(17,49)]]+[1 if parsed==0 else parsed]
+        words=[struct.unpack('<I',struct.pack('<f',v))[0] for v in values]
+        assert report.read_text().split()==['S','0',*[f'{w:08x}' for w in words]]
+        t['shift_words']=words
+    result=dict(source_files=len(tables),source_words=len(tables)*34,tables=tables,cli_sha256=digest(ROOT/f'target/{profile}/grid-body-tuning.exe'),scope='CSV max engine speed16, curve17..48, modifier173 with pre-storage-double-zero default; constructor direct copies. Other engine/init/setup state remains supplied.')
+    (out/'shift-validation.json').write_text(json.dumps(result,indent=2));return tables
