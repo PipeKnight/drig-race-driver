@@ -38,6 +38,7 @@ pub mod owner_collection;
 pub mod packed_query;
 pub mod packed_shape;
 pub mod packed_world;
+pub mod physical_constructor;
 pub mod physical_pose;
 pub mod physical_response;
 pub mod physical_tick;
