@@ -37,13 +37,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if data.len() < 8
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
-            0x3130464d, 0x31304644, 0x31304645,
+            0x3130464d, 0x31304644, 0x31304645, 0x31304653,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
     let driver = word(&data, 0) == 0x31304645;
+    let initialize_gearing = word(&data, 0) == 0x31304653;
     let chassis = word(&data, 0) == 0x3130464d || driver;
     let driver_prepare = word(&data, 0) == 0x31304644;
     let post_force = word(&data, 0) == 0x31304648 || chassis;
@@ -148,7 +149,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics,
         };
         let delta = f32::from_bits(word(record, 4));
-        if driver_prepare {
+        if initialize_gearing {
+            grid_world::vehicle_gearing::initialize(&mut frame)?;
+        } else if driver_prepare {
             let flags = std::array::from_fn(|i| {
                 record[36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140 + 0x75] != 0
             });

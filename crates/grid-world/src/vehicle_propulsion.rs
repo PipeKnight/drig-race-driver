@@ -32,7 +32,7 @@ fn c(bits: u32) -> f32 {
     f32::from_bits(bits)
 }
 
-fn curve(b: &[u32], mut speed: f32) -> f32 {
+pub(crate) fn curve53(b: &[u32], mut speed: f32) -> f64 {
     if speed < 0. {
         speed = 0.;
     } else if speed > c(0x44d17084) {
@@ -46,8 +46,12 @@ fn curve(b: &[u32], mut speed: f32) -> f32 {
         return 0.;
     }
     // SSE stores the fractional index; x87 interpolates in 53-bit precision.
-    // The caller then stores the returned result as a float before torque math.
-    (((f(b, 0x17b0 + i * 4) as f64 - a as f64) * (scaled - raw as f32) as f64) + a as f64) as f32
+    ((f(b, 0x17b0 + i * 4) as f64 - a as f64) * (scaled - raw as f32) as f64) + a as f64
+}
+
+fn curve(b: &[u32], speed: f32) -> f32 {
+    // The engine caller stores the extended return before torque math.
+    curve53(b, speed) as f32
 }
 
 #[allow(
