@@ -38,7 +38,8 @@ int wmain(int argc,wchar_t **argv){
     unsigned char saved[sizeof(pages)/sizeof(*pages)][4096];DWORD protections[sizeof(pages)/sizeof(*pages)];
     if(_wfopen_s(&input,argv[2],L"rb")||!input){error=5;goto done;}
     int valid=fread(request,1,sizeof(request),input)==sizeof(request)&&fgetc(input)==EOF;fclose(input);input=NULL;
-    if(!valid||get(request,0)!=0x32304353){error=6;goto done;}
+    unsigned source_prelude=get(request,0)==0x33304353;
+    if(!valid||(get(request,0)!=0x32304353&&!source_prelude)){error=6;goto done;}
     memcpy(props,request+8,sizeof(props));memcpy(points,request+8+sizeof(props),sizeof(points));
     memcpy(radii,request+8+sizeof(props)+sizeof(points),sizeof(radii));
     memcpy(widths,request+8+sizeof(props)+sizeof(points)+sizeof(radii),sizeof(widths));
@@ -49,6 +50,14 @@ int wmain(int argc,wchar_t **argv){
     for(unsigned i=0;i<10;++i){float value;memcpy(&value,props+0x318+i*4,4);if(!isfinite(value)){error=8;goto done;}}
     for(unsigned i=0;i<16;++i)if(!isfinite(points[i])||fabsf(points[i])>100.f){error=8;goto done;}
     for(unsigned i=0;i<4;++i)if(!isfinite(radii[i])||radii[i]<=0.f||radii[i]>10.f||!isfinite(widths[i])||widths[i]<=0.f||widths[i]>10.f){error=8;goto done;}
+    if(source_prelude){
+        memcpy(body+0xe78,props,0x65c);float one=1.f;unsigned value=10;
+        memcpy(body+0x1560,&one,4);memcpy(body+0x1564,props+0x3e0,4);memcpy(body+0xe48,&value,4);
+        value=4;memcpy(body+0x9a8,&value,4);value=2;memcpy(body+0xba0,&value,4);
+        body[0xb13]=body[0xb14]=body[0x1ee0]=body[0x21c8]=1;
+        for(unsigned i=0;i<4;++i){memcpy(body+0x10+i*20,&one,4);memcpy(body+0x15e0+i*20,&one,4);}
+        value=(unsigned)(uintptr_t)body;memcpy(body+0x9a4,&value,4);
+    }
     for(unsigned i=0;i<sizeof(pages)/sizeof(*pages);++i){
         unsigned char *p=image+pages[i]-0x400000;memcpy(saved[i],p,4096);
         if(!VirtualProtect(p,4096,PAGE_READWRITE,protections+i)){error=9;goto done;}++protected;
@@ -72,6 +81,7 @@ int wmain(int argc,wchar_t **argv){
             if(value){if(value<(unsigned)(uintptr_t)body||value>=(unsigned)(uintptr_t)(body+0x21000)){error=13;break;}
                 value-=(unsigned)(uintptr_t)body;memcpy(body+pointers[i],&value,4);}}
         unsigned callback=get(body,0xc784);
+        if(source_prelude){unsigned self=get(body,0x9a4);if(self!=(unsigned)(uintptr_t)body)error=13;else memset(body+0x9a4,0,4);}
         if(callback!=(unsigned)(uintptr_t)(image+0x9a0c90-0x400000))error=13;
         else{callback=0x9a0c90;memcpy(body+0xc784,&callback,4);}
         /* 990610 writes 22 byte flags at settings48..5D; settings5E/5F

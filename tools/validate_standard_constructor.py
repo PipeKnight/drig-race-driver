@@ -22,6 +22,7 @@ def main():
     p.add_argument('--profile', choices=['debug', 'release'])
     p.add_argument('--seed',type=lambda s:int(s,0),default=200679)
     p.add_argument('--controls',action='store_true')
+    p.add_argument('--source-prelude',action='store_true')
     a = p.parse_args()
     out = a.output.resolve()
     assert out.is_relative_to((v.ROOT / 'local').resolve())
@@ -71,7 +72,7 @@ def main():
                 radii.append(radius)
             widths.extend(f32(float(attrs[0][f'm_{axle}_{side}_width'])) for side in ['l', 'r'])
         request = out / f'{i:03}-input.bin'
-        request.write_bytes(b'SC02' + struct.pack('<I',a.seed) + props.read_bytes() + struct.pack('<24f', *points, *radii, *widths))
+        request.write_bytes((b'SC03' if a.source_prelude else b'SC02') + struct.pack('<I',a.seed) + props.read_bytes() + struct.pack('<24f', *points, *radii, *widths))
         assert request.stat().st_size == 1732
         executions = []
         for kind in ['original', 'repeat']:
@@ -90,7 +91,9 @@ def main():
         assert answers[0] == answers[1]
         if a.profile:
             target = out / f'{i:03}-rust.bin'
-            run = subprocess.run([str(v.ROOT / f'target/{a.profile}/grid-standard-car.exe'), str(path), str(ned), f'{a.seed:08x}', str(target)], cwd=v.ROOT, capture_output=True, text=True, timeout=30)
+            command = [str(v.ROOT / f'target/{a.profile}/grid-standard-car.exe'), str(path), str(ned), f'{a.seed:08x}', str(target)]
+            if a.source_prelude: command.append('--source-prelude')
+            run = subprocess.run(command, cwd=v.ROOT, capture_output=True, text=True, timeout=30)
             execution = dict(source=source['source'], kind='rust', exit=run.returncode, stdout=run.stdout, stderr=run.stderr)
             executions.append(execution)
             if run.returncode or run.stderr:
@@ -106,6 +109,7 @@ def main():
     assert any(q.get('repeat_exact') for q in results)
     report = dict(native_reference_passed=True, rust_equivalence=bool(a.profile) and not differences, profile=a.profile, random_seed=a.seed, differences=differences, properties_report=str(a.properties_report), properties_report_sha256=v.digest(a.properties_report), exe_sha256=v.digest(exe), results=results,
                   limits='Whole A0C9F0 with decoded properties, explicit geometry/cold zero storage/gravity/RNG; two stack padding bytes excluded and owned pointers tokenized. Original outer factory/asset caller/physical owner/live initialization and driving excluded. Cold zero control ramp retains original intermediate NaN.')
+    report['source_prelude'] = a.source_prelude
     if a.profile:report.update(rust_exe_sha256=v.digest(v.ROOT/f'target/{a.profile}/grid-standard-car.exe'))
     (out / 'validation.json').write_text(json.dumps(report, indent=2))
     print(json.dumps(dict(native_reference_passed=True, rust_equivalence=report['rust_equivalence'], cases=sum(bool(q.get('repeat_exact')) for q in results), differences=len(differences), first=differences[:25])))

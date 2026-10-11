@@ -4,12 +4,14 @@ from pathlib import Path
 import validate_handling_configuration as v
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('reports',nargs=2,type=Path);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('reports',nargs=2,type=Path)
+    p.add_argument('--cold-prefix',default='standard-constructor');p.add_argument('--source-prelude',action='store_true');a=p.parse_args()
     out=a.output.resolve();assert out.is_relative_to((v.ROOT/'local').resolve());out.mkdir(exist_ok=False)
     reports=[];guards=[];cold=[]
     for path in a.reports:
         r=json.loads(path.read_text());profile=r['profile'];root=path.parent
         assert r['passed'] and r['settings_cases']==r['settings_bytes']//360
+        assert r.get('source_prelude',False)==a.source_prelude
         assert r['joined_cases']==r['joined_bytes']//0x21000
         assert r['native_sha256']==v.v.digest(v.NATIVE) and r['image_sha256']==v.v.digest(v.IMAGE)
         assert r['layout_sha256']==v.v.digest(v.LAYOUT) and r['archive_sha256']==v.v.digest(v.v.GAME/'raceload.jpk')
@@ -31,7 +33,7 @@ def main():
         reports.append(dict(path=str(path),sha256=v.v.digest(path),profile=profile,settings=r['settings_cases'],joined=r['joined_cases']))
         # Every existing F203 source/control/seed is replayed through CURRENT Rust.
         for seed in ['200679','0','1','0x80000000','0xffffffff']:
-            upstream=v.ROOT/f'local/behavior/standard-constructor-{profile}-20261011-final-{seed}/validation.json';old=json.loads(upstream.read_text())
+            upstream=v.ROOT/f'local/behavior/{a.cold_prefix}-{profile}-20261011-final-{seed}/validation.json';old=json.loads(upstream.read_text())
             assert old['native_reference_passed'] and old['rust_equivalence'] and not old['differences']
             assert old['exe_sha256']==v.v.digest(v.ROOT/'local/behavior/standard-constructor-probe.exe')
             for i,case in enumerate(old['results']):
@@ -53,7 +55,9 @@ def main():
         first=r['joined'][0];i=first['hdm_index'];hdm=root/f'{i:03}.hdm';xml=root/f'{i:03}-xml.bin';source=v.v.GAME/first['car'];ned=first['ned'];seed=f'{first["seed"]:08x}'
         for label,text,active in [('reset-ramp',b'<VEHICLEHANDLINGDAMAGE><WHEEL damageToHaveFullEffect="0"/></VEHICLEHANDLINGDAMAGE>','1'),('reset-cap',b'<VEHICLEHANDLINGDAMAGE><SUSPENSION maxWheelLockScale="2"/></VEHICLEHANDLINGDAMAGE>','1'),('wheel-mode',hdm.read_bytes(),'2')]:
             source_hdm=out/f'{profile}-{label}.hdm';source_hdm.write_bytes(text);target=out/f'{profile}-{label}-car.bin'
-            reject(label,car_exe,[source,ned,seed,target,source_hdm,active],target)
+            args=[source,ned,seed,target,source_hdm,active]
+            if a.source_prelude:args.append('--source-prelude')
+            reject(label,car_exe,args,target)
         data=xml.read_bytes()
         for label,wire in [('short',data[:30]),('extra',data+b'\0'),('tag',b'FAIL'+data[4:])]:
             bad=out/f'{profile}-native-{label}.bin';bad.write_bytes(wire);target=out/f'{profile}-native-{label}-output.bin'
@@ -63,5 +67,6 @@ def main():
     for name in ['validate_handling_configuration.py','audit_handling_configuration.py']:ast.parse((v.ROOT/'tools'/name).read_text())
     assert len(cold)==690
     result=dict(passed=True,reports=reports,cold_cases=len(cold),cold=cold,guards=guards,guard_count=len(guards),limits='Historical unchanged native constructor outputs rechecked against current Rust. Distinct malformed native framing/source/reset contracts; no malformed original XML/CRT equivalence.')
+    result['source_prelude']=a.source_prelude
     (out/'audit.json').write_text(json.dumps(result,indent=2));print(json.dumps(dict(passed=True,reports=reports,cold_cases=len(cold),guards=len(guards))))
 if __name__=='__main__':main()

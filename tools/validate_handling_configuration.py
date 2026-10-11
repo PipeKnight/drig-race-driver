@@ -19,7 +19,8 @@ def rng(seed,count):
     for _ in range(count):seed=(seed*0x41c64e6d+0x40584c0f)&0xffffffff
     return seed
 def main():
-    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--join',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--join',action='store_true')
+    p.add_argument('--constructor-prefix',default='standard-constructor');p.add_argument('--source-prelude',action='store_true');a=p.parse_args()
     out=a.output.resolve();assert out.is_relative_to((ROOT/'local').resolve());out.mkdir(exist_ok=False)
     assert v.digest(LAYOUT)=='224c7041edb9158fdcc229c602e34f6a7a8bdf131250dcf09a928c3414a2e560'
     layout=json.loads(LAYOUT.read_text());archive=v.GAME/'raceload.jpk'
@@ -75,7 +76,7 @@ def main():
         for node,key,value in [('WHEEL','maxMisalignAngle','0.5'),('WHEEL','maxMisalignAngle','-0.0'),('SUSPENSION','maxWheelLockScale','0'),('SUSPENSION','maxWheelLockScale','1'),('WHEEL','damageToStartBaseEffect','-0.1'),('WHEEL','damageToHaveFullEffect','0.5'),('WHEEL','damageMinEffect','0.5'),('WHEEL','maxSteerWobbleScale','0'),('SUSPENSION','damageToStartEffect','0'),('DRIVESHAFT','damageToStartEffect','-0.1'),('ENGINE','damageToStartBaseEffect','-0.1'),('GEARBOX','damageToStartEffect','-0.1')]:
             root=copy.deepcopy(base);root.find(node).set(key,value);extra.append((node+'-'+key+'='+value,root))
         for seed in ['200679','0','0xffffffff']:
-            report_path=ROOT/f'local/behavior/standard-constructor-debug-20261011-final-{seed}/validation.json';r=json.loads(report_path.read_text());assert r['rust_equivalence'] and not r['differences'];upstream.append(dict(path=str(report_path),sha256=v.digest(report_path)))
+            report_path=ROOT/f'local/behavior/{a.constructor_prefix}-debug-20261011-final-{seed}/validation.json';r=json.loads(report_path.read_text());assert r['rust_equivalence'] and not r['differences'] and r.get('source_prelude',False)==a.source_prelude;upstream.append(dict(path=str(report_path),sha256=v.digest(report_path)))
             for car_index,car in enumerate(r['results'][:44]):
                 if car.get('skipped'):continue
                 cold=report_path.parent/f'{car_index:03}-original.bin';assert v.digest(cold)==car['output_sha256']
@@ -90,6 +91,7 @@ def main():
                         for kind in ['original','repeat','rust']:
                             target=out/f'joined-{index:04}-{kind}.bin';exe=ROOT/f'target/{a.profile}/grid-standard-car.exe' if kind=='rust' else NATIVE
                             args=[v.GAME/car['source'],car['ned'],f'{int(seed,0):08x}',target,out/f'{hdm_index:03}.hdm',active] if kind=='rust' else [IMAGE,out/f'{hdm_index:03}-xml.bin',target,'adapted',cold,f'{rng(int(seed,0),12):08x}',active]
+                            if kind=='rust' and a.source_prelude:args.append('--source-prelude')
                             e=run(exe,args);executions.append(e);(out/'current-joined.json').write_text(json.dumps(dict(index=index,car=car['source'],hdm=label,seed=seed,active=active,executions=executions),indent=2))
                             assert e['exit']==0 and not e['stderr'],executions
                             assert f'random_state={rng(int(seed,0),18):08x}' in e['stdout']
@@ -101,5 +103,6 @@ def main():
                             assert all(__import__('math').isfinite(x) for x in struct.unpack_from('<9f',body,0xcdf0+0x3a0))
                         joined.append(dict(index=index,car=car['source'],source_sha256=car['source_sha256'],ned=car['ned'],ned_sha256=car['ned_sha256'],cold=str(cold),cold_sha256=v.digest(cold),hdm=label,hdm_index=hdm_index,hdm_sha256=v.digest(out/f'{hdm_index:03}.hdm'),xml_sha256=v.digest(out/f'{hdm_index:03}-xml.bin'),seed=int(seed,0),active=active,output_sha256=v.digest(out/f'joined-{index:04}-original.bin'),executions=executions))
     result=dict(passed=True,profile=a.profile,native_sha256=v.digest(NATIVE),image_sha256=v.digest(IMAGE),rust_settings_sha256=v.digest(ROOT/f'target/{a.profile}/grid-handling-configuration.exe'),rust_car_sha256=v.digest(ROOT/f'target/{a.profile}/grid-standard-car.exe'),layout_sha256=v.digest(LAYOUT),archive_sha256=v.digest(archive),settings=settings,joined=joined,upstream=upstream,settings_cases=len(settings),joined_cases=len(joined),settings_bytes=len(settings)*360,joined_bytes=len(joined)*0x21000,limits='Whole settings and reset on cold constructed owners. Numeric CRT conversion adapted; original text/resource/outer factory/physical owner/driving excluded. Owned optional wheel-view mode explicit, secondary/query objects absent.')
+    result['source_prelude']=a.source_prelude
     (out/'validation.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if k.endswith('cases') or k.endswith('bytes') or k=='passed'}))
 if __name__=='__main__':main()
