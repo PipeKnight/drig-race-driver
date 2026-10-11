@@ -105,10 +105,23 @@ int wmain(int argc,wchar_t **argv) {
         if(fread(&r,sizeof(r),1,input)!=1||r.index!=index){error=10;break;}
         float delta;memcpy(&delta,&r.delta,4);
         unsigned driven=get(r.body,0x18f0),gear=get(r.body,0x196c);
-        if(!isfinite(delta)||delta<=0||delta>.1f||r.body[0xadc]||get(r.body,0x1598)!=1||
+        unsigned mode=get(r.body,0x1598);
+#ifdef GRID_PROPULSION
+        if(mode!=1){error=11;break;}
+#else
+        if(mode!=1&&mode!=2){error=11;break;}
+#endif
+        if(!isfinite(delta)||delta<=0||delta>.1f||r.body[0xadc]||
            get(r.body,0x1620)!=4||!driven||driven>4||gear>=16||
            get(r.body,0)!=r.view_address||get(r.view,0)!=r.solver_address||
            r.solver_address-r.view_address!=0x2b0||memcmp(r.view+0x2b0,r.solver,0x50)){error=11;break;}
+        if(mode==2){
+            float ratio,inertia;
+            memcpy(&ratio,r.body+0x18f4+4*gear,4);memcpy(&inertia,r.body+0x17a0,4);
+            if(ratio==0)ratio=1;
+            inertia=inertia/(ratio*ratio);
+            if(!isfinite(inertia)||inertia<=0||!isfinite(1.f/inertia)){error=14;break;}
+        }
         __declspec(align(16)) unsigned char body[0x2600],storage[0x1080],material[4][0x140];
         unsigned char *view=storage,*solver=storage+0x2b0;
         memcpy(body,r.body,sizeof(body));memcpy(view,r.view,0x300);memcpy(solver,r.solver,0xdd0);memcpy(material,r.material,sizeof(material));

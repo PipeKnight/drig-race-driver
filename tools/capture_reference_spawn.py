@@ -251,6 +251,8 @@ def main():
                         help='Arm after attach without the old debugger pause command')
     parser.add_argument('--boundary', choices=('placement', 'impact','collection','owners','preparation','callback','wheel-force'), default='placement',
                         help='Select a guarded entry/return boundary; wheel-force captures whole 9DF8B0')
+    parser.add_argument('--force-mode', type=int, choices=(0, 1, 2),
+                        help='Restrict wheel-force entry stops to the selected body mode')
     parser.add_argument('--hardware', action='store_true',
                         help='Use bounded execute debug registers, leaving code bytes unchanged')
     parser.add_argument('--solver-records', action='store_true',
@@ -270,6 +272,10 @@ def main():
     if args.boundary=='preparation' and not args.hardware:raise ValueError('Preparation capture requires hardware breakpoints')
     if args.boundary=='callback' and not args.hardware:raise ValueError('Callback capture requires hardware breakpoints')
     if args.boundary=='wheel-force' and not args.hardware:raise ValueError('Wheel-force capture requires hardware breakpoints')
+    if args.force_mode is not None and args.boundary!='wheel-force':
+        raise ValueError('Force mode requires wheel-force boundary')
+    force_condition='[csp]==A04182'
+    if args.force_mode is not None:force_condition+=f'&&[[csp+4]+1598]=={args.force_mode:X}'
     if not 1 <= args.cases <= 32 or not 30 <= args.timeout <= 900:
         raise ValueError('Case/time limit outside scope')
     session = json.loads(private(args.session).read_text(encoding='utf-8-sig'))
@@ -301,6 +307,7 @@ def main():
     record['hardware_breakpoints'] = args.hardware
     record['solver_records'] = args.solver_records
     record['body_effects'] = args.body_effects
+    record['force_mode'] = args.force_mode
     try:
         path_buffer = ctypes.create_unicode_buffer(32768)
         path_length = W.DWORD(len(path_buffer))
@@ -447,7 +454,7 @@ def main():
         breakpoint(entry, 'GRID_Reference')
         if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
         if args.boundary=='preparation':send('bphwcond A06050,[csp]==A06505')
-        if args.boundary=='wheel-force':send('bphwcond 9DF8B0,[csp]==A04182')
+        if args.boundary=='wheel-force':send('bphwcond 9DF8B0,'+force_condition)
         if exit_address is not None:
             breakpoint(exit_address, 'GRID_ExitProcess')
         send('log "GRID_SPAWN_ARMED"')
@@ -500,6 +507,8 @@ def main():
                 case=preparation_arguments(read,sp,ip,ax,index);ret=int(case['return_address'],16)
             elif args.boundary=='wheel-force':
                 case=wheel_force_arguments(read,sp,ip,ax,index);ret=int(case['return_address'],16)
+                if args.force_mode is not None and case['mode']!=args.force_mode:
+                    raise ValueError('Force mode breakpoint condition mismatch')
             else:
                 stack = read(sp, 28)
                 words = struct.unpack('<7I', stack)
@@ -669,7 +678,7 @@ def main():
                 breakpoint(entry, 'GRID_Reference')
                 if args.boundary=='collection':send('bphwcond B775D0,[[csp+4]+41C]==A064A0')
                 if args.boundary=='preparation':send('bphwcond A06050,[csp]==A06505')
-                if args.boundary=='wheel-force':send('bphwcond 9DF8B0,[csp]==A04182')
+                if args.boundary=='wheel-force':send('bphwcond 9DF8B0,'+force_condition)
                 send('erun')
                 wait('[STATE] running', 10)
         record['completed'] = True

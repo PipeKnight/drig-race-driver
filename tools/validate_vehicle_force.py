@@ -1,6 +1,6 @@
 """Replay complete captured wheel-force calls with the unchanged original code.
 
-Private numeric evidence only. This does not yet claim Rust vehicle equivalence.
+Private numeric evidence only; bounded prepared-force equivalence, not a whole vehicle/world claim.
 """
 import argparse
 import hashlib
@@ -43,7 +43,7 @@ def record(case, phase):
         raise ValueError('need the observed view/solver overlap, with equal aliased bytes')
     delta_word = int(case['delta_word'], 16)
     delta = struct.unpack('<f', struct.pack('<I', delta_word))[0]
-    if not 0 < delta <= .1 or case['mode'] != 1 or not 1 <= case['driven_count'] <= 4:
+    if not 0 < delta <= .1 or case['mode'] not in (1, 2) or not 1 <= case['driven_count'] <= 4:
         raise ValueError('unsupported live mode/delta/driven count')
     materials = sorted(case['materials'], key=lambda item: item['wheel'])
     if [m['wheel'] for m in materials] != list(range(4)):
@@ -69,6 +69,10 @@ def malformed_runs(output, probe, reference, first):
                  ('wheel_owner', 36+0x1990+0x34, 0, 12), ('material_presence', 20, 0, 12),
                  ('foreign_driven', 36+0x18d8, 1, 13),
                  ('duplicate_driven', 36+0x18dc, struct.unpack_from('<I', first, 36+0x18d8)[0], 13)]
+    if struct.unpack_from('<I', first, 36+0x1598)[0] == 2:
+        mutations += [('zero_engine_inertia', 36+0x17a0, 0, 14),
+                      ('negative_engine_inertia', 36+0x17a0, 0xbf800000, 14),
+                      ('nan_engine_inertia', 36+0x17a0, 0x7fc00000, 14)]
     result = []
     for name, offset, value, expected in mutations:
         data = bytearray(first)
@@ -152,7 +156,8 @@ def authored_comparison(output, probe, reference, rust, cases):
     source.write_bytes(struct.pack('<2I', 0x31304657, len(records)) + b''.join(records))
     # Native/CLI accept 64 cases per bounded request; preserve all comparisons.
     executions, total, mismatch, outputs = [], 0, [], []
-    counts = {'compacted': 0, 'wheel_stop_marked': 0, 'solver_failure': 0, 'velocity_changed': 0}
+    counts = {'compacted': 0, 'wheel_stop_marked': 0, 'solver_failure': 0, 'velocity_changed': 0,
+              'engine_speed_changed': 0, 'wheel_inertia_preserved': 0}
     for start in range(0, len(records), 48):
         batch = [struct.pack('<I', i) + data[4:] for i, data in enumerate(records[start:start+48])]
         path = output / f'authored-{start:03d}.bin'
@@ -177,6 +182,10 @@ def authored_comparison(output, probe, reference, rust, cases):
             counts['wheel_stop_marked'] += any(original[view+0x3d:view+0x41])
             counts['solver_failure'] += original[view+0x54] == 0
             counts['velocity_changed'] += original[body+0x15c0:body+0x15e0] != request[body+0x15c0:body+0x15e0]
+            counts['engine_speed_changed'] += original[body+0x1894:body+0x1898] != request[body+0x1894:body+0x1898]
+            counts['wheel_inertia_preserved'] += all(
+                original[body+0x1990+i*0x150+0x100:body+0x1990+i*0x150+0x104]
+                == request[body+0x1990+i*0x150+0x100:body+0x1990+i*0x150+0x104] for i in range(4))
             total += RECORD_SIZE
         outputs.append(hashlib.sha256(actual[0]).hexdigest())
     return {'passed': not mismatch, 'cases': len(records), 'compared_bytes': total, 'request_sha256': digest(source),
@@ -237,6 +246,8 @@ def main():
     parser.add_argument('capture', type=Path)
     parser.add_argument('output', type=Path)
     parser.add_argument('--profile', choices=['debug', 'release'], help='also compare independent Rust and varied private controls')
+    parser.add_argument('--shared-diagnostics', action='store_true',
+                        help='exclude shared friction diagnostics only from live comparison of idle mode-two calls')
     args = parser.parse_args()
     capture, output = private(args.capture), private(args.output)
     metadata_path = capture / 'capture.json'
@@ -249,6 +260,11 @@ def main():
     if not 1 <= len(paths) <= 64:
         raise ValueError('case count must be 1..64')
     cases = [json.loads(path.read_text()) for path in paths]
+    if args.shared_diagnostics and any(
+            case['mode'] != 2 or any(not abs(struct.unpack_from('<f', bytes.fromhex(case['body_before_hex']),
+                                                              0x1990+i*0x150+0x104)[0]) <= 2.
+                                    for i in range(4)) for case in cases):
+        raise ValueError('shared diagnostics exception requires idle mode two; per-call writes must be inactive')
     if [case['index'] for case in cases] != list(range(len(cases))):
         raise ValueError('case indexes must be contiguous')
     header = struct.pack('<2I', 0x31304657, len(cases))
@@ -265,6 +281,14 @@ def main():
               'probe_sha256': digest(probe), 'reference_sha256': digest(reference),
               'request_sha256': digest(request_path), 'expected_sha256': digest(expected_path),
               'cases': len(cases), 'rust_compared': False, 'runs': []}
+    report['live_comparison_scope'] = ('all record bytes except 32 shared friction diagnostic bytes per call'
+                                       if args.shared_diagnostics else 'all record bytes')
+    def live_equal(actual):
+        if not args.shared_diagnostics:
+            return actual == expected
+        return len(actual) == len(expected) and actual[:8] == expected[:8] and all(
+            actual[8+i*RECORD_SIZE:8+(i+1)*RECORD_SIZE-32]
+            == expected[8+i*RECORD_SIZE:8+(i+1)*RECORD_SIZE-32] for i in range(len(cases)))
     outputs = []
     for name in ('original', 'repeat'):
         target = output / f'{name}.bin'
@@ -290,20 +314,31 @@ def main():
                 start += size
         item['differences'] = differences
     report['repeat_exact'] = len(outputs) == 2 and outputs[0] == outputs[1]
-    report['live_exact'] = len(outputs) == 2 and all(data == expected for data in outputs)
+    report['live_exact'] = len(outputs) == 2 and all(live_equal(data) for data in outputs)
+    report['live_all_bytes_exact'] = len(outputs) == 2 and all(data == expected for data in outputs)
+    if args.shared_diagnostics:
+        report['shared_diagnostics_replay_unchanged'] = all(
+            data[8+(i+1)*RECORD_SIZE-32:8+(i+1)*RECORD_SIZE]
+            == request[8+(i+1)*RECORD_SIZE-32:8+(i+1)*RECORD_SIZE]
+            for data in outputs for i in range(len(cases)))
+        if not report['shared_diagnostics_replay_unchanged']:
+            raise ValueError('idle replay unexpectedly wrote shared diagnostics')
     report['malformed_guards'] = malformed_runs(output, probe, reference, record(cases[0], 'before'))
     report['guards_passed'] = all(item['passed'] for item in report['malformed_guards'])
     if args.profile:
         rust = ROOT / f'target/{args.profile}/grid-vehicle-force.exe'
         target = output / 'rust-live.bin'
         run = subprocess.run([str(rust), str(request_path), str(target)], cwd=ROOT, capture_output=True, text=True, timeout=60)
-        live_exact = run.returncode == 0 and target.read_bytes() == expected
+        live_exact = run.returncode == 0 and live_equal(target.read_bytes())
         report['rust_compared'] = True
-        report['rust'] = {'profile': args.profile, 'sha256': digest(rust), 'exit': run.returncode, 'stderr': run.stderr, 'live_exact': live_exact}
+        report['rust'] = {'profile': args.profile, 'sha256': digest(rust), 'exit': run.returncode, 'stderr': run.stderr, 'live_exact': live_exact,
+                          'original_all_bytes_exact': run.returncode == 0 and len(outputs) == 2 and target.read_bytes() == outputs[0]}
         report['authored'] = authored_comparison(output, probe, reference, rust, cases)
         report['carried'] = carried_comparison(output, probe, reference, rust, cases)
         report['rust_guards'] = rust_guards(output, rust, record(cases[0], 'before'))
-        report['rust_passed'] = live_exact and report['authored']['passed'] and report['carried']['passed'] and all(item['passed'] for item in report['rust_guards'])
+        report['rust_passed'] = (live_exact and report['rust']['original_all_bytes_exact']
+                                and report['authored']['passed'] and report['carried']['passed']
+                                and all(item['passed'] for item in report['rust_guards']))
     (output / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
     return 0 if report['live_exact'] and report['repeat_exact'] and report['guards_passed'] and report.get('rust_passed', True) else 1
