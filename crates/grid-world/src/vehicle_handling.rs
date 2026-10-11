@@ -245,7 +245,13 @@ pub fn calculate_with_queries(
         || car[0x2118 / 4] > 1
         || car[0x211c / 4] > 2
         || !bounded(b, 0, 0x60)
-        || !bounded(b, 0x218, 0x37c)
+        // Source Standard HDM's wear-force divisor exceeds ten million.
+        // These two force parameters are compared/divided, not accumulated as
+        // bounded level values. Keep their finite and active-divisor checks.
+        || !bounded(b, 0x218, 0x2f0)
+        || !f(b, 0x2f0).is_finite()
+        || !f(b, 0x2f4).is_finite()
+        || !bounded(b, 0x2f8, 0x37c)
         || !bounded(b, 0x3a0, 0x3a4)
         || !bounded(b, 0x42c, 0x43c)
         || !bounded(p, 0x1d0, 0x230)
