@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F192: whole registeredA0A290 car job now matches428updates/58,305,584fullownerbytes perdebug/release, including complete driver andnotification-one handling/publication pluscheckedowned completion. No extra synchronousprojection/9A0clear/physicalposepublication. Next actualquery/notification contracts, car/worldgeometry-order/persistentstate/sourceinitializedBevydriving. [Car job evidence](CAR_JOB.md).
+
 Current checkpoint F191: complete selected mutable handling and whole notification-one A03220 publication match396calls/53,947,872completebytes eachdebug/release. Whole CarJob join, live query/notification behavior, geometric contacts, persistent world and source-initialized Bevy driving remain open. [Handling/publication evidence](VEHICLE_HANDLING.md).
 
 Current checkpoint F190: generated contact groups now feed complete serial physical solving, with an optional preceding whole world-advance stage. Each variant matches400scenarios/1817bodies/1162groups per debug/release; shared manager arrays/cache and global/local identities are preserved. Actual car job/handling handoff, authoritative geometry, persistent state and source-initialized Bevy driving remain open. [Integrated physical sequence](GROUPED_PHYSICAL_FRAME.md).

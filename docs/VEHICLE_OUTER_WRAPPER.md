@@ -1,5 +1,7 @@
 # Complete synchronous vehicle wrapper
 
+F192 now verifies [whole registeredA0A290 job](CAR_JOB.md) with owned observational completion. Positive driver itself writes9A0=1; job adds no later clear or synchronous pose projection. Live task dispatch/query/notification contracts remain separate.
+
 F191 now verifies [whole selected mutable handling and A03220(delta,1)](VEHICLE_HANDLING.md), required by CarJob. Whole A0A290 scheduling/completion and live component queries/notifications remain open; this does not make the synchronous projection the normal race path.
 
 11 October 2026, F187. The independently authored Rust `vehicle_outer::calculate` now matches one unchanged original `A09A80` call within the selected scope. This closes the synchronous wrapper comparison, **not the live racing job/world schedule or the first drivable lap**.

@@ -1,5 +1,7 @@
 # Mutable handling and notification-one publication
 
+F192 adds [whole registered car-job comparison](CAR_JOB.md), joining sync/driver/notification-one publication and owned completion. Remaining query/notification/live world-order scope is explicit.
+
 11 October 2026, F191. Rust reproduces the complete selected `9F3E80` mutable
 handling update and one unchanged `A03220(delta,1)` call. This closes the larger
 handling stage required by the registered car job. Complete car-job execution,

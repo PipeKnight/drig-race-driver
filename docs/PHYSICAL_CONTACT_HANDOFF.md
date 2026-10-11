@@ -1,5 +1,7 @@
 # Physical contact handoff — 10 October 2026
 
+F192 verifies [whole selected car job](CAR_JOB.md) on the car side. F190 verifies [grouped physical advance/solve](GROUPED_PHYSICAL_FRAME.md). Their original world ordering, geometric contact generation and persistent ownership still need a joined contract before a playable loop.
+
 11OctoberF190 now joins generated contact groups to complete serial solving, with a variant including original world advance;400scenarios per variant/profile match. See [integrated physical sequence](GROUPED_PHYSICAL_FRAME.md). Geometric production, active callbacks, persistent ownership and actual car-job linkage remain open. Historical statements below retain their dated scopes.
 
 F162 joins whole pre-contact B13E10 body advance to main/optional B7B850: [body advance and physical frame](PHYSICAL_TICK.md).711scenarios/3,189body advances/3,925,133words match original/repeat/one Rust call per debug/release. Contact geometry is supplied at the intermediate boundary; whole world/contact generation/active callbacks/group heads/shapes remain outside this adapter. Previous center/published poses and cleared response preserved; zero-iteration advance and gravity ordering tested.113library tests and existing whole pose/shape regression pass.
