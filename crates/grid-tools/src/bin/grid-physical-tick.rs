@@ -2,7 +2,7 @@
 use grid_world::{
     contact_groups, contact_rows, grouped_physical_frame, impact_frame,
     impact_step::{Body, Input},
-    physical_tick,
+    physical_tick, physical_world,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -57,8 +57,9 @@ fn run() -> Result<(), Failure> {
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
-    let owned_shapes = matches!(word(h, 0), 0x34534647 | 0x34535447);
-    let grouped_tick = matches!(word(h, 0), 0x33525447 | 0x34535447);
+    let whole_world = word(h, 0) == 0x34535747;
+    let owned_shapes = matches!(word(h, 0), 0x34534647 | 0x34535447) || whole_world;
+    let grouped_tick = matches!(word(h, 0), 0x33525447 | 0x34535447) || whole_world;
     let grouped = word(h, 0) == 0x33524647 || grouped_tick || owned_shapes;
     if (!world && !grouped && word(h, 0) != 0x33524650) || !(1..=1024).contains(&count) {
         return Err("invalid header".into());
@@ -308,7 +309,9 @@ fn run() -> Result<(), Failure> {
                 };
                 contacts.push(c);
             }
-            let calculate = if grouped_tick {
+            let calculate = if whole_world {
+                physical_world::calculate_cold
+            } else if grouped_tick {
                 grouped_physical_frame::calculate_tick_with_shapes
             } else {
                 grouped_physical_frame::calculate_with_shapes
@@ -380,6 +383,11 @@ fn run() -> Result<(), Failure> {
             }
             for value in result.groups.world {
                 output.extend(value.to_le_bytes());
+            }
+            if whole_world {
+                for value in [0, parameters[0].to_bits(), result.pool_used as u32, 0, 0, 0] {
+                    output.extend(value.to_le_bytes());
+                }
             }
             continue;
         }

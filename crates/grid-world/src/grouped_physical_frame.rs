@@ -27,6 +27,8 @@ pub struct Manager {
 pub struct Output {
     pub groups: contact_groups::Output,
     pub manager: Manager,
+    /// Supplied transient pool remains occupied until the wrapper consumes it.
+    pub pool_used: usize,
     /// Root identity, number of bodies, number of contacts, started, corrected.
     pub visits: Vec<(usize, usize, usize, bool, bool)>,
 }
@@ -331,6 +333,7 @@ pub fn calculate_with_shapes(
     Ok(Output {
         groups,
         manager,
+        pool_used: input.contacts.len(),
         visits,
     })
 }
