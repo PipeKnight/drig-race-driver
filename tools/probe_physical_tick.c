@@ -50,7 +50,11 @@ int wmain(int argc,wchar_t **argv){
  FILE *input=NULL,*output=NULL;unsigned magic=0,total=0;
  if(!error&&(_wfopen_s(&input,argv[2],L"rb")||!input||_wfopen_s(&output,argv[3],L"wbx")||!output))error=6;
  if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=
-#ifdef GRID_GROUPED_TICK
+#if defined(GRID_OWNED_SHAPES) && defined(GRID_GROUPED_TICK)
+ 0x34535447
+#elif defined(GRID_OWNED_SHAPES)
+ 0x34534647
+#elif defined(GRID_GROUPED_TICK)
  0x33525447
 #elif defined(GRID_CONTACT_GROUPS)
  0x33524647
@@ -77,12 +81,29 @@ int wmain(int argc,wchar_t **argv){
 #endif
 #endif
   float parameters[11],correction[4];unsigned correction_iterations;
-  __declspec(align(16)) unsigned char bodies[16][0x430]={0},contacts[64][0x80]={0},shapes[2][0x220]={0},manager[0x240]={0},group[0x90]={0},rows[256][192];
+#ifdef GRID_OWNED_SHAPES
+  enum { MAX_SHAPES=513 };
+#else
+  enum { MAX_SHAPES=2 };
+#endif
+  unsigned shape_count=MAX_SHAPES;
+  unsigned char shape_flags[MAX_SHAPES][4]={0};
+  __declspec(align(16)) unsigned char bodies[16][0x430]={0},contacts[64][0x80]={0},shapes[MAX_SHAPES][0x240]={0},manager[0x240]={0},group[0x90]={0},rows[256][192];
   __declspec(align(16)) float materials[8][16]={0},inertia[16][16],mass[16],workspace[16][8];
   unsigned char manager_before[0x100];
   if(!read(input,h,24)||!h[0]||h[0]>16||!h[1]||h[1]>8||h[2]>64||!h[3]||h[3]>256||h[4]>h[3]||h[5]>32||!read(input,parameters,44)||!finite_words(parameters,11)||parameters[0]<=0||parameters[0]>.25f||!read(input,ends,16)||!read(input,cache,60)){error=8;break;}
   if(!read(input,&correction_iterations,4)||correction_iterations>32||!read(input,correction,16)||!finite_words(correction,4)){error=8;break;}
   if((cache[0]!=0xffffffff&&cache[0]>=h[1])||(cache[1]!=0xffffffff&&cache[1]>=h[1])||((cache[0]==0xffffffff)!=(cache[1]==0xffffffff))||!finite_words(cache+2,13)){error=8;break;}
+#ifdef GRID_OWNED_SHAPES
+  if(!read(input,&shape_count,4)||!shape_count||shape_count>MAX_SHAPES||!read(input,shape_flags,shape_count*4)){error=8;break;}
+  for(unsigned s=0;s<shape_count;s++){
+   for(unsigned k=0;k<4;k++)if(shape_flags[s][k]>1)error=8;
+   shapes[s][0x216]=shape_flags[s][0];shapes[s][0x217]=shape_flags[s][1];shapes[s][0x229]=shape_flags[s][2];shapes[s][0x230]=shape_flags[s][3];
+  }
+  if(error)break;
+#else
+  (void)shape_flags;
+#endif
   for(unsigned j=0;j<h[0];j++){
    unsigned char *b=bodies[j];float properties[17];
    if(!read(input,b,0x424)||get(b,0x334)!=0x1c0||!finite_words(b+0x110,16)||!finite_words(b+0x1c0,4)||!finite_words(b+0x210,8)||!finite_words(b+0x240,12)||!finite_words(b+0x3f4,1)||!read(input,properties,68)||!finite_words(properties,17)||!read(input,workspace[j],32)||!finite_words(workspace[j],8)){error=8;break;}
@@ -109,21 +130,29 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned j=0;!error&&j<h[1];j++)if(!read(input,materials[j],52)||!finite_words(materials[j],13))error=8;
   for(unsigned j=0;!error&&j<h[2];j++){
    unsigned char *c=contacts[j];
-   if(!read(input,modes+j,4)||modes[j]>1||!read(input,c,128)||get(c,0x1c)>=h[0]||get(c,0x20)>=h[0]||get(c,4)!=get(c,0x1c)||get(c,8)!=get(c,0x20)||get(c,0x30)>=h[1]||get(c,0x34)>=h[1]||get(c,0x2c)>2||get(c,0x28)>2||c[0xe]>1||c[0x70]||c[0x73]>1||!finite_words(c+0x38,2)||!finite_words(c+0x50,8)){error=8;break;}
+   if(!read(input,modes+j,4)||!read(input,c,128)||get(c,0x1c)>=h[0]||get(c,4)!=get(c,0x1c)||get(c,8)!=get(c,0x20)||get(c,0x30)>=h[1]||get(c,0x34)>=h[1]||get(c,0x2c)>shape_count||get(c,0x28)>shape_count||c[0xe]>1||c[0x70]||c[0x73]>1||!finite_words(c+0x38,2)||!finite_words(c+0x50,8)){error=8;break;}
+#ifdef GRID_OWNED_SHAPES
+   if(modes[j]>2||(modes[j]==2?get(c,8)!=0xffffffff:get(c,8)>=h[0])||(c[0x73]&&(!get(c,0x28)||!get(c,0x2c)))){error=8;break;}
+#else
+   if(modes[j]>1||get(c,0x20)>=h[0]){error=8;break;}
+#endif
    float previous;memcpy(&previous,c+0x3c,4);if(previous<0||get(c,0x10)||c[0xc]!=(modes[j]?0:1)||c[0xd]||c[0xf]!=1){error=8;break;}
    shape_ids[j][0]=get(c,0x2c);shape_ids[j][1]=get(c,0x28);material_ids[j][0]=get(c,0x30);material_ids[j][1]=get(c,0x34);
 #ifdef GRID_CONTACT_GROUPS
    body_ids[j][0]=get(c,4);body_ids[j][1]=get(c,8);
-   if(c[0x73]||shape_ids[j][0]||shape_ids[j][1]||(modes[j]&&body_ids[j][0]==body_ids[j][1])){error=8;break;}
+#ifndef GRID_OWNED_SHAPES
+   if(c[0x73]||shape_ids[j][0]||shape_ids[j][1]){error=8;break;}
+#endif
+   if(modes[j]==1&&body_ids[j][0]==body_ids[j][1]){error=8;break;}
    for(unsigned k=0;k<4;k++){float x,y;memcpy(&x,bodies[body_ids[j][0]]+0x1c0+4*k,4);memcpy(&y,c+0x50+4*k,4);if(!isfinite(x+y))error=8;}
 #endif
-   put(c,4,bodyptrs[get(c,0x1c)]);put(c,8,bodyptrs[get(c,0x20)]);
+   put(c,4,bodyptrs[get(c,0x1c)]);put(c,8,modes[j]==2?0:bodyptrs[get(c,0x20)]);
    put(c,0x30,(unsigned)(uintptr_t)materials[material_ids[j][0]]);put(c,0x34,(unsigned)(uintptr_t)materials[material_ids[j][1]]);
    put(c,0x2c,shape_ids[j][0]?(unsigned)(uintptr_t)shapes[shape_ids[j][0]-1]:0);put(c,0x28,shape_ids[j][1]?(unsigned)(uintptr_t)shapes[shape_ids[j][1]-1]:0);
 #ifndef GRID_CONTACT_GROUPS
    put(c,0x10,j+1<h[2]?(unsigned)(uintptr_t)contacts[j+1]:0);
 #endif
-   if(modes[j])pool_two[nt++]=(unsigned)(uintptr_t)c;else pool_single[ns++]=(unsigned)(uintptr_t)c;
+   if(modes[j]==1)pool_two[nt++]=(unsigned)(uintptr_t)c;else pool_single[ns++]=(unsigned)(uintptr_t)c;
   }
   #ifdef GRID_WORLD_ADVANCE
   if(!error){
@@ -163,7 +192,9 @@ int wmain(int argc,wchar_t **argv){
   }
 #endif
   if(error||!read(input,rows,h[3]*192)){error=8;break;}
+#ifndef GRID_OWNED_SHAPES
   shapes[1][0x216]=1;
+#endif
   for(unsigned j=0;j<2;j++)cache[j]=cache[j]==0xffffffff?0:(unsigned)(uintptr_t)materials[cache[j]];
   memcpy(manager+0x20,cache,60);put(manager,0x68,16);put(manager,0x6c,64);memcpy(manager+0x10,parameters+1,16);put(manager,0x70,h[4]);put(manager,0x80,(unsigned)(uintptr_t)workspace);put(manager,0x84,(unsigned)(uintptr_t)inertia);put(manager,0x88,(unsigned)(uintptr_t)mass);put(manager,0x8c,(unsigned)(uintptr_t)rows);put(manager,0x90,(unsigned)(uintptr_t)bodyptrs);put(manager,0x98,(unsigned)(uintptr_t)pool_single);put(manager,0xa0,(unsigned)(uintptr_t)pool_two);put(manager,0xa8,h[0]);put(manager,0xac,ns);put(manager,0xb4,nt);
   put(manager,0xc4,ends[0]);put(manager,0xbc,ends[1]);put(manager,0xc8,ends[2]);put(manager,0xc0,ends[3]);memcpy(manager+0xcc,parameters+5,16);put(manager,0xdc,h[5]);memcpy(image+0xe52f24-0x400000,parameters+9,8);
@@ -262,13 +293,21 @@ int wmain(int argc,wchar_t **argv){
    for(unsigned k=0;k<3;k++)put(bodies[j],0x338+4*k,0);fwrite(bodies[j],1,0x424,output);}
   for(unsigned j=0;j<h[2];j++){unsigned char *c=contacts[j];
 #ifdef GRID_CONTACT_GROUPS
-   if(get(c,4)!=(unsigned)(uintptr_t)bodies[body_ids[j][0]]||get(c,8)!=(unsigned)(uintptr_t)bodies[body_ids[j][1]]||get(c,0x30)!=(unsigned)(uintptr_t)materials[material_ids[j][0]]||get(c,0x34)!=(unsigned)(uintptr_t)materials[material_ids[j][1]])error=10;
+   if(get(c,4)!=(unsigned)(uintptr_t)bodies[body_ids[j][0]]||get(c,8)!=(modes[j]==2?0:(unsigned)(uintptr_t)bodies[body_ids[j][1]])||get(c,0x30)!=(unsigned)(uintptr_t)materials[material_ids[j][0]]||get(c,0x34)!=(unsigned)(uintptr_t)materials[material_ids[j][1]])error=10;
+   if(get(c,0x28)!=(shape_ids[j][1]?(unsigned)(uintptr_t)shapes[shape_ids[j][1]-1]:0)||get(c,0x2c)!=(shape_ids[j][0]?(unsigned)(uintptr_t)shapes[shape_ids[j][0]-1]:0))error=10;
    put(c,0x10,owned_token(get(c,0x10),contacts[0],0x80,h[2],&error));put(c,4,body_ids[j][0]);put(c,8,body_ids[j][1]);
 #else
    put(c,0x10,0);put(c,4,get(c,0x1c));put(c,8,get(c,0x20));
 #endif
    put(c,0x30,material_ids[j][0]);put(c,0x34,material_ids[j][1]);put(c,0x2c,shape_ids[j][0]);put(c,0x28,shape_ids[j][1]);fwrite(c,1,128,output);}
 #ifdef GRID_CONTACT_GROUPS
+  if(error)break;
+#endif
+#ifdef GRID_OWNED_SHAPES
+  for(unsigned s=0;s<shape_count;s++)for(unsigned o=0;o<0x240;o++){
+   unsigned char expected=o==0x216?shape_flags[s][0]:o==0x217?shape_flags[s][1]:o==0x229?shape_flags[s][2]:o==0x230?shape_flags[s][3]:0;
+   if(shapes[s][o]!=expected)error=10;
+  }
   if(error)break;
 #endif
   fwrite(rows,192,h[3],output);++cases;

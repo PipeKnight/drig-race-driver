@@ -1,5 +1,9 @@
 # Wheel contacts produced by the complete car manager
 
+F196 subsequently verifies [generated records through grouping and complete
+physical solving](WHEEL_PHYSICAL_HANDOFF.md). The producer checkpoint below
+remains the separately validated F195 baseline.
+
 F195, 11 October 2026. The selected whole `A02B70` manager now includes active
 wheel overtravel production through unchanged `9BAB10 → A72400 → B15E70 →
 B0EE80`. Original/repeat/Rust agree across 428 updates per debug/release,

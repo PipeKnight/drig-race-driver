@@ -1,5 +1,9 @@
 # Generated contact groups joined to complete physical solving
 
+F196 extends this ordinary-contact baseline with verified [shape classification
+and generated wheel-contact handoff](WHEEL_PHYSICAL_HANDOFF.md), retaining special
+flags and null second physical ownership through complete solving.
+
 11 October 2026, F190. Independent Rust now joins [contact-group reconstruction](CONTACT_GROUPS.md) to whole serial group dispatch and complete physical solving. A second API also performs the verified world body-advance stage before this sequence. This closes the previous assumption that the physical solver receives one preassembled group.
 
 ## Integrated behavior
