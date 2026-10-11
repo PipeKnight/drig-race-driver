@@ -3,6 +3,9 @@
    none of their authored stage schedules produces the comparison output. */
 #include <xmmintrin.h>
 typedef void (__cdecl *Update)(void *,float);
+#ifdef GRID_VEHICLE_WORLD
+#include "vehicle_world_record.h"
+#endif
 typedef struct {
     unsigned index,delta,body_address,view_address,solver_address,present[4];
     unsigned char body[0x2600],view[0x300],solver[0xdd0],material[4][0x140];
@@ -16,6 +19,9 @@ typedef struct {
 #ifdef GRID_WHEEL_PRODUCER
     unsigned producer_capacity,producer_used,contact_slots[4][32];
 #endif
+#ifdef GRID_VEHICLE_WORLD
+    VehicleWorldRecord world;
+#endif
 } DriverRecord;
 static unsigned get(const void *p,unsigned o){return getword((const unsigned char *)p+o);}
 static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4);}
@@ -24,6 +30,9 @@ static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4)
 #endif
 #ifdef GRID_WHEEL_PRODUCER
 #include "wheel_producer_probe.h"
+#ifdef GRID_VEHICLE_WORLD
+#include "vehicle_world_probe.h"
+#endif
 #endif
 #ifdef GRID_WHOLE_OUTER
 #include "vehicle_outer_probe.h"
@@ -89,6 +98,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
     const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xd16000,0xe85000,0xe8e000
 #ifdef GRID_CAR_JOB
     ,0xec2000
+#ifdef GRID_VEHICLE_WORLD
+    ,0xe52000
+#endif
 #endif
     };
     DWORD protections[sizeof(pages)/sizeof(*pages)];
@@ -106,7 +118,11 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #ifdef GRID_CAR_JOB
 #ifdef GRID_CAR_MANAGER
 #ifdef GRID_WHEEL_PRODUCER
+#ifdef GRID_VEHICLE_WORLD
+        0x33304654;
+#else
         0x32304654;
+#endif
 #else
         0x31304654;
 #endif
@@ -262,6 +278,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         manager_setup(image,body);
 #ifdef GRID_WHEEL_PRODUCER
         __declspec(align(16)) WheelOwner wheel_owner;wheel_setup(&wheel_owner,&r,body,physical);
+#ifdef GRID_VEHICLE_WORLD
+        error=vw_setup(&wheel_owner,&r.world,physical,image,r.delta);if(error)break;
+#endif
         unsigned char wheel_before[sizeof(WheelOwner)-sizeof(wheel_owner.slots)];memcpy(wheel_before,&wheel_owner,sizeof(wheel_before));
 #else
         if(get(body,0xdc8))put(body,0xdc8,(unsigned)(uintptr_t)wrapper);
@@ -271,6 +290,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         job[1]=(unsigned)(uintptr_t)body;job[2]=r.delta;job[3]=(unsigned)(uintptr_t)completion_table;job[6]=0x125ac07e;
         completion_table[5]=(unsigned)(uintptr_t)job_complete;
 #endif
+#endif
+#ifdef GRID_VEHICLE_WORLD
+        for(unsigned world_interval=0;world_interval<r.world.steps;world_interval++){
 #endif
         __try{
 #ifdef GRID_CAR_JOB
@@ -294,11 +316,22 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         }
         __except(driver_fault(GetExceptionInformation())){error=70;}
         if(error)break;
+#ifdef GRID_VEHICLE_WORLD
+        if(!manager_retained(image,body,r.delta)){error=71;break;}
+        __try{error=vw_step(&wheel_owner,&r.world,physical,image);}__except(driver_fault(GetExceptionInformation())){error=70;}
+        if(error)break;
+        }
+        if(error)break;
+#endif
 #ifdef GRID_CAR_JOB
 #ifdef GRID_CAR_MANAGER
         if(!manager_retained(image,body,r.delta)){error=71;break;}
 #ifdef GRID_WHEEL_PRODUCER
+#ifdef GRID_VEHICLE_WORLD
+        error=vw_output(&wheel_owner,wheel_before,&r,body,physical);if(error)break;
+#else
         error=wheel_output(&wheel_owner,wheel_before,&r,body,physical);if(error)break;
+#endif
 #else
         if(get(body,0xdc8)!=(get(r.body,0xdc8)?(unsigned)(uintptr_t)wrapper:0u)){error=71;break;}
         put(body,0xdc8,get(r.body,0xdc8));
@@ -348,7 +381,13 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         if(error)break;
 #ifdef GRID_WHOLE_OUTER
         if(get(body,0xdb0)!=(unsigned)(uintptr_t)wrapper||get(wrapper,8)!=(unsigned)(uintptr_t)physical||get(component,0x24)!=(unsigned)(uintptr_t)body||get(body,0xc784)!=(unsigned)(uintptr_t)(image+0x9a0c90-0x400000)){error=71;break;}
-        if(get(physical,0x32c)!=(unsigned)(uintptr_t)group){error=71;break;}
+        if(get(physical,0x32c)!=(unsigned)(uintptr_t)
+#ifdef GRID_VEHICLE_WORLD
+           wheel_owner.world
+#else
+           group
+#endif
+        ){error=71;break;}
         for(unsigned i=0;i<4;i++)if(get(physical,0x334+i*4)!=(unsigned)(uintptr_t)(physical+(i?0x180+i*16:0x1c0)))error=71;
         if(error)break;
         put(body,0xdb0,0);put(body,0xc784,0x9a0c90);
@@ -375,6 +414,9 @@ finish:
 #else
     printf("car_job_completions=%u owned_completion_identity=1\n",*completed);
 #endif
+#endif
+#ifdef GRID_VEHICLE_WORLD
+    printf("vehicle_world_steps=%u contacts=%u repeated_contacts=%u empty_steps=%u common_delta=1 authoritative_physical_feedback=1 no_cold_reset=1\n",vw_steps_completed,vw_contacts_produced,vw_repeated_contacts,vw_empty_steps);
 #endif
     printf("whole_driver_records=%u error=%u code_unchanged=%u driver_globals_restored=%u\n",*completed,error,unchanged,restored);return error;
 }

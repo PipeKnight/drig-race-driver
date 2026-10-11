@@ -1,7 +1,19 @@
 /* Selected recorded car/static-shape metadata; whole original producer output. */
 static Object *wheel_source_objects;static unsigned wheel_source_count;
 typedef struct {
-    __declspec(align(16)) unsigned char producer[0x940],world[0x20],world_wrapper[16],car_shape[0x280],car_wrapper[16];
+    __declspec(align(16)) unsigned char producer[
+#ifdef GRID_VEHICLE_WORLD
+      0xc40],world[0x810
+#else
+      0x940],world[0x20
+#endif
+    ],world_wrapper[16],car_shape[0x280],car_wrapper[16];
+#ifdef GRID_VEHICLE_WORLD
+    __declspec(align(16)) unsigned char manager[0x240],worker[0x50],broadphase[0x100],worker_contacts[128],worker_pairs[128];
+    __declspec(align(16)) unsigned rows[16][48],material[16],properties[20],workspace[8];
+    unsigned manager_ptrs[1],worker_ptrs[1],update_lists[1],update_list[2],bodyptrs[1],all_contacts[4],single_contacts[4],two_contacts[4],row_refs[16],max_used,padding;
+    unsigned char world_before[0x810],producer_before[0xc40],worker_before[0x50],manager_before[0x100];
+#endif
     __declspec(align(16)) unsigned slots[4][32];
 } WheelOwner;
 static unsigned wheel_token(unsigned address,int wrapper){
@@ -37,6 +49,7 @@ static void wheel_setup(WheelOwner *o,const DriverRecord *r,unsigned char *b,uns
     put(o->car_wrapper,8,(unsigned)(uintptr_t)o->car_shape);
     put(b,0xdd8,(unsigned)(uintptr_t)o->world_wrapper);if(get(b,0xdc8))put(b,0xdc8,(unsigned)(uintptr_t)o->car_wrapper);
 }
+#ifndef GRID_VEHICLE_WORLD
 static unsigned wheel_output(WheelOwner *o,unsigned char *saved,DriverRecord *r,unsigned char *b,unsigned char *p){
     unsigned used=get(o->producer,0x924);
     put(saved,0x924,used);if(memcmp(o,saved,sizeof(WheelOwner)-sizeof(o->slots)))return 43;
@@ -47,3 +60,4 @@ static unsigned wheel_output(WheelOwner *o,unsigned char *saved,DriverRecord *r,
     }
     memcpy(r->contact_slots,o->slots,sizeof(o->slots));r->producer_used=used;put(b,0xdd8,0);put(b,0xdc8,get(r->body,0xdc8));return 0;
 }
+#endif
