@@ -50,7 +50,9 @@ int wmain(int argc,wchar_t **argv){
  FILE *input=NULL,*output=NULL;unsigned magic=0,total=0;
  if(!error&&(_wfopen_s(&input,argv[2],L"rb")||!input||_wfopen_s(&output,argv[3],L"wbx")||!output))error=6;
  if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=
-#if defined(GRID_OWNED_SHAPES) && defined(GRID_GROUPED_TICK)
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+ 0x34535747
+#elif defined(GRID_OWNED_SHAPES) && defined(GRID_GROUPED_TICK)
  0x34535447
 #elif defined(GRID_OWNED_SHAPES)
  0x34534647
@@ -74,8 +76,13 @@ int wmain(int argc,wchar_t **argv){
 #endif
 #ifdef GRID_CONTACT_GROUPS
   unsigned active_next[16],body_ids[64][2],manager_ptrs[1],state[11],ref_limits[256]={0};
-  __declspec(align(16)) unsigned char world[0x810]={0},producer[0x940]={0};
-  unsigned char world_before[0x810],producer_before[0x940];
+  __declspec(align(16)) unsigned char world[0x810]={0},producer[0xc40]={0};
+  unsigned char world_before[0x810],producer_before[0xc40];
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+  __declspec(align(16)) unsigned char worker[0x48]={0},worker_before[0x48],broadphase[0x100]={0},world_wrapper[16]={0};
+  __declspec(align(16)) unsigned char worker_contacts[128]={0},worker_pairs[128]={0};
+  unsigned worker_ptrs[1]={(unsigned)(uintptr_t)worker};
+#endif
 #ifdef GRID_GROUPED_TICK
   unsigned update_list[2]={0},lists[1]={(unsigned)(uintptr_t)update_list},last_active=0,update_next[16]={0};
 #endif
@@ -108,6 +115,9 @@ int wmain(int argc,wchar_t **argv){
    unsigned char *b=bodies[j];float properties[17];
    if(!read(input,b,0x424)||get(b,0x334)!=0x1c0||!finite_words(b+0x110,16)||!finite_words(b+0x1c0,4)||!finite_words(b+0x210,8)||!finite_words(b+0x240,12)||!finite_words(b+0x3f4,1)||!read(input,properties,68)||!finite_words(properties,17)||!read(input,workspace[j],32)||!finite_words(workspace[j],8)){error=8;break;}
    for(unsigned o=0x40c;o<=0x410;o++)if(b[o]>1)error=8;
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+   if(b[0x415]){error=8;break;}
+#endif
    const unsigned pointers[]={0x2fc,0x320,0x324,0x328,0x32c,0x338,0x33c,0x340,0x418,0x41c,0x420};
    for(unsigned k=0;k<11;k++)if(get(b,pointers[k]))error=8;
    if(get(b,0x400)||b[0x390]>1||!finite_words(b+0x90,16)||!finite_words(b+0x150,16)||!finite_words(b+0x190,16)||!finite_words(b+0x230,4)||!finite_words(b+0x380,4)||!finite_words(b+0x3a0,23))error=8;
@@ -187,6 +197,13 @@ int wmain(int argc,wchar_t **argv){
     update_list[1]=(unsigned)(uintptr_t)world;put(world,8,(unsigned)(uintptr_t)lists);put(world,0xc,1);last_active=last;
     for(unsigned j=0;j<h[0];j++)if(active_next[j])update_next[active_next[j]-1]=j+1;
 #endif
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+    put(world,0x84,(unsigned)(uintptr_t)broadphase);put(world_wrapper,4,(unsigned)(uintptr_t)world);
+    put(producer,0xa80,(unsigned)(uintptr_t)world);put(producer,0x928,(unsigned)(uintptr_t)worker_ptrs);put(producer,0x92c,1);
+    put(producer,0xa78,0x1234);put(producer,0xa7c,0x5678);
+    put(worker,0xc,(unsigned)(uintptr_t)worker_pairs);put(worker,0x18,(unsigned)(uintptr_t)worker_contacts);
+    memcpy(worker_before,worker,sizeof(worker));
+#endif
     memcpy(world_before,world,sizeof(world));memcpy(producer_before,producer,sizeof(producer));
    }
   }
@@ -204,11 +221,16 @@ int wmain(int argc,wchar_t **argv){
   unsigned success=0;
   __try{
 #ifdef GRID_CONTACT_GROUPS
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+   ((void (__fastcall *)(void *,void *,unsigned))(image+0xad8d70-0x400000))(world,NULL,*(unsigned *)parameters);
+   ((void (__fastcall *)(void *,void *))(image+0xa727a0-0x400000))(world_wrapper,NULL);
+#else
 #ifdef GRID_GROUPED_TICK
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xad7040-0x400000))(world,NULL,*(unsigned *)parameters);
 #endif
    ((void (__fastcall *)(void *,void *))(image+0xad6c40-0x400000))(world,NULL);
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xb77310-0x400000))(manager,NULL,*(unsigned *)parameters);
+#endif
 #elif defined(GRID_WORLD_ADVANCE)
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xad7040-0x400000))(world,NULL,*(unsigned *)parameters);
 #else
@@ -238,6 +260,15 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned o=0xa8;o<=0xb8;o+=4)memcpy(manager_before+o,manager+o,4);
   const unsigned changed[]={0x38,0x3c,0x40,0x44,0x48,0x50,0x60,0x64,0x7f8,0x7fc};
   for(unsigned j=0;j<sizeof(changed)/sizeof(*changed);j++)memcpy(world_before+changed[j],world+changed[j],4);
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+  if(get(world,0x7c4)||get(world,0x7c8)!=*(unsigned *)parameters||get(world,0x7cc)||get(producer,0x924)||get(producer,0xa78)||get(producer,0xa7c)||get(producer,0x930)||get(producer,0xc20)||producer[0xc24]){error=10;break;}
+  put(world_before,0x7c8,*(unsigned *)parameters);put(producer_before,0x924,0);put(producer_before,0xa78,0);put(producer_before,0xa7c,0);
+  put(worker_before,0x1c,get(worker_before,0x18));put(worker_before,0x40,get(worker_before,0xc));
+  if(memcmp(worker_before,worker,sizeof(worker))){error=10;break;}
+  for(unsigned j=0;j<sizeof(broadphase);j++)if(broadphase[j])error=10;
+  for(unsigned j=0;j<sizeof(worker_contacts);j++)if(worker_contacts[j]||worker_pairs[j])error=10;
+  if(worker_ptrs[0]!=(unsigned)(uintptr_t)worker||get(world_wrapper,4)!=(unsigned)(uintptr_t)world){error=10;break;}
+#endif
   if(memcmp(world_before,world,sizeof(world))||memcmp(producer_before,producer,sizeof(producer))){error=10;break;}
 #endif
   if(memcmp(manager_before,manager,0x20)||memcmp(manager_before+0x5c,manager+0x5c,0x60)||memcmp(manager_before+0xcc,manager+0xcc,0x34)){error=10;break;}
@@ -313,6 +344,9 @@ int wmain(int argc,wchar_t **argv){
   fwrite(rows,192,h[3],output);++cases;
 #ifdef GRID_CONTACT_GROUPS
   fwrite(state,4,11,output);
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+  unsigned lifecycle[6]={get(world,0x7c4),get(world,0x7c8),get(producer,0x924),get(producer,0xa78),get(producer,0xa7c),get(world,0x7cc)};fwrite(lifecycle,4,6,output);
+#endif
 #endif
  }
  if(!error&&fgetc(input)!=EOF)error=11;
@@ -325,5 +359,9 @@ finish:
  if(error&&output)_wremove(argv[3]);
 #endif
  free(code);VirtualFree(image,0,MEM_RELEASE);
- printf("physical_tick_cases=%u error=%u code_unchanged=%u no_imports=1\n",cases,error,error!=13);return (int)error;
+ printf("physical_tick_cases=%u error=%u code_unchanged=%u no_imports=1\n",cases,error,error!=13);
+#ifdef GRID_WHOLE_PHYSICAL_WORLD
+ printf("whole_serial_world=1 wrapper_pool_consumed=1 owned_workers_retained=1\n");
+#endif
+ return (int)error;
 }

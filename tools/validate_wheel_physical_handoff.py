@@ -64,26 +64,30 @@ def physical_case(row,index):
                 correction=[4,.01,1.,0.,.8],order=[0],shapes=[(0,0,1,0)]+[(1,0,0,0)]*512)
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--advance',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--advance',action='store_true');p.add_argument('--whole-world',action='store_true');a=p.parse_args()
+    if a.whole_world:a.advance=True
     out=s.private(a.output);out.mkdir(exist_ok=False);rows,evidence=prior_rows(a.profile);producer=out/'producer';producer.mkdir();full=w.b.grip.mechanics_fixture(producer)
     reports=[];branches={k:[] for k in ['original','repeat','rust']}
     for start in range(0,len(rows),32):
         result,answers=w.m.compare(producer,a.profile,{k:rows[start:start+32] for k in branches},f'producer-{start}',full,True);reports.append(result)
         for k in branches:branches[k].extend(answers[k])
-    s.MAGIC=0x34535447 if a.advance else 0x34534647;s.g.MAGIC=s.MAGIC
+    s.MAGIC=0x34535747 if a.whole_world else (0x34535447 if a.advance else 0x34534647);s.g.MAGIC=s.MAGIC
     cases={k:[physical_case(r,i) for i,r in enumerate(rs)] for k,rs in branches.items()}
-    probe=ROOT/f'local/behavior/shaped-physical-{"tick" if a.advance else "frame"}-probe.exe';rust=ROOT/f'target/{a.profile}/grid-physical-tick.exe';reference=w.b.REFERENCE
+    probe=ROOT/('local/behavior/whole-physical-world-probe.exe' if a.whole_world else f'local/behavior/shaped-physical-{"tick" if a.advance else "frame"}-probe.exe');rust=ROOT/f'target/{a.profile}/grid-physical-tick.exe';reference=w.b.REFERENCE
     answers={};runs={};baseline=None
     for kind in branches:
         source=out/f'{kind}-input.bin';source.write_bytes(s.pack(cases[kind]));command=[str(rust)] if kind=='rust' else [str(probe),str(reference)]
-        raw,run=execute(command,source,out/f'{kind}-output.bin');baseline=raw if baseline is None else baseline;run.update(compare(raw,baseline));runs[kind]=run;answers[kind]=s.g.decode(raw,cases[kind])
+        raw,run=execute(command,source,out/f'{kind}-output.bin');baseline=raw if baseline is None else baseline;run.update(compare(raw,baseline));runs[kind]=run;answers[kind]=s.decode(raw,cases[kind],a.whole_world)
         if kind!='rust':assert 'code_unchanged=1 no_imports=1' in run['stdout']
+        if a.whole_world and kind!='rust':assert 'whole_serial_world=1 wrapper_pool_consumed=1 owned_workers_retained=1' in run['stdout']
     checks,activity=s.semantics(cases['original'],answers['original'],a.advance)
     checks['generated_contacts_present']=activity['contacts']>0
     checks['all_generated_contacts_enabled']=activity['enabled']==activity['contacts'] and activity['disabled']==0
     checks['all_generated_contacts_special_null_second']=activity['special']==activity['null_second']==activity['contacts']
     checks['physical_velocity_changes']=activity['velocity_changes']>0
     checks['full_physical_owner_from_manager']=all(c['bodies'][0]['raw'][:0x334]+c['bodies'][0]['raw'][0x338:]==r[PO:PO+0x334]+r[PO+0x338:PO+0x424] for k in branches for c,r in zip(cases[k],branches[k]))
+    if a.whole_world:checks.update(s.lifecycle_checks(cases['original'],answers['original']))
     report=dict(profile=a.profile,advance=a.advance,cases=len(rows),bytes=len(baseline)-8,producer_calls=sum(r['calls'] for r in reports),producer_contacts=sum(r['coverage']['produced_contacts'] for r in reports),producer_reports=reports,upstream=evidence,runs=runs,checks=checks,activity=activity,executables={str(q.relative_to(ROOT)):digest(q) for q in [probe,rust,ROOT/f'target/{a.profile}/grid-vehicle-force.exe',w.NATIVE]},scope='Fresh whole car manager from cold physical/pool seeds -> generated contact records and full physical owner -> optional whole AD7040 -> whole AD6C40/B77310/B7B850. Independent branches; only identity normalization after production. Authored shared material, physical-stage delta, cold configuration before producer; not whole enclosing frame, persistent world or drivable lap.')
+    if a.whole_world:report.update(whole_world=True,scope='Fresh whole manager -> generated contact pool and complete physical owner -> whole serial AD8D70 -> actual A727A0 callback-free pool consumption. Independent branches, identity normalization only after production. Authored cold configuration/material and separate physical timestep; no persistent world/whole frame/source registry/driving claim.')
     report['passed']=all(checks.values()) and all(r['passed'] for r in runs.values());(out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k not in ['producer_reports','upstream','runs','executables']}));assert report['passed']
 if __name__=='__main__':main()

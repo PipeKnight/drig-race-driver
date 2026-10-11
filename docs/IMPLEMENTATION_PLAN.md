@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F197: the whole selected serial world step and actual wrapper pool consumption match 465 scenarios per profile; fresh manager production feeds 66 owners/176 contacts into that boundary exactly. Persistent active/dirty/group ownership, source initialization and Bevy driving remain ahead. [Whole world evidence](WHOLE_PHYSICAL_WORLD.md).
+
 Current checkpoint F196: actual manager-generated wheel contacts and the complete physical owner reach shape-aware grouping and complete serial solving, with and without preceding body advance.66fresh manager calls/176contacts per variant/profile match;465shape controls and ordinary regressions also pass. Cold initialization and physical timestep/materials remain supplied. Next original pool/group lifecycle, carried physical→car updates and source-initialized Bevy driving. [Physical handoff](WHEEL_PHYSICAL_HANDOFF.md).
 
 Current checkpoint F195: the whole single-car manager includes actual wheel-contact production, matching428updates per debug/release and155 generated contacts per profile. Bounded pool ownership, source shape identities, retained templates and capacity are verified; generated C=0/null-second-body and special73 must survive later classification. Next group and solve these contacts, then persistent/source-initialized Bevy driving. [Wheel contact production](WHEEL_CONTACT_PRODUCTION.md).
