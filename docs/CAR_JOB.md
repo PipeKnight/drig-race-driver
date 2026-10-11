@@ -1,5 +1,10 @@
 # Registered car-job integration
 
+F193 extends this selected job with [owned handling queries and healthy enabled
+notifications](HANDLING_QUERIES.md), including first-match lookup and the
+unclamped notification threshold. The F192 query-absent comparison below remains
+the legacy contract and regression baseline.
+
 11 October 2026, F192. One unchanged registered `A0A290` car-job call now matches
 the independent Rust `vehicle_job::calculate` across the complete selected
 synchronization, source-contact driver and notification-one handling/publication

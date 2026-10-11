@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F193: whole registered car job with owned ordered handling queries and healthy enabled notifications matches444calls/60,485,232completeownerbytes per profile. Empty versus absent query objects, duplicate first-match lookup and the unclamped event threshold are explicit. Next original car/world ordering, geometric contact production, persistent ownership and source-initialized Bevy driving. [Query/notification evidence](HANDLING_QUERIES.md).
+
 Current checkpoint F192: whole registeredA0A290 car job now matches428updates/58,305,584fullownerbytes perdebug/release, including complete driver andnotification-one handling/publication pluscheckedowned completion. No extra synchronousprojection/9A0clear/physicalposepublication. Next actualquery/notification contracts, car/worldgeometry-order/persistentstate/sourceinitializedBevydriving. [Car job evidence](CAR_JOB.md).
 
 Current checkpoint F191: complete selected mutable handling and whole notification-one A03220 publication match396calls/53,947,872completebytes eachdebug/release. Whole CarJob join, live query/notification behavior, geometric contacts, persistent world and source-initialized Bevy driving remain open. [Handling/publication evidence](VEHICLE_HANDLING.md).

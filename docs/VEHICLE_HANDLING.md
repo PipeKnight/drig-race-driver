@@ -1,5 +1,9 @@
 # Mutable handling and notification-one publication
 
+F193 adds [owned optional query records and healthy enabled notifications](HANDLING_QUERIES.md)
+through the whole registered car job. Legacy APIs and the F191 evidence below
+retain their explicitly selected absent-query/disabled-notification scope.
+
 F192 adds [whole registered car-job comparison](CAR_JOB.md), joining sync/driver/notification-one publication and owned completion. Remaining query/notification/live world-order scope is explicit.
 
 11 October 2026, F191. Rust reproduces the complete selected `9F3E80` mutable

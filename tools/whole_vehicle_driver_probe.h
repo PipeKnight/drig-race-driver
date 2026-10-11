@@ -10,6 +10,9 @@ typedef struct {
 #ifdef GRID_WHOLE_OUTER
     unsigned char extra[0x21000-0x2600],physical[0x424];
 #endif
+#ifdef GRID_HANDLING_QUERIES
+    unsigned query_present,query_count,query_records[64][2];
+#endif
 } DriverRecord;
 static unsigned get(const void *p,unsigned o){return getword((const unsigned char *)p+o);}
 static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4);}
@@ -18,6 +21,9 @@ static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4)
 #endif
 #ifdef GRID_CAR_JOB
 #include "vehicle_handling_probe.h"
+#ifdef GRID_HANDLING_QUERIES
+#include "handling_query_probe.h"
+#endif
 /* Observes the actual job's tail-called owned completion object. It does not
    replace any car/physics helper or emulate the original task manager. */
 static void __fastcall job_complete(void *self,void *unused){
@@ -86,7 +92,11 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
     if(!materials||!material_count||_wfopen_s(&input,request,L"rb")||!input){error=62;goto finish;}
     const unsigned tag=
 #ifdef GRID_CAR_JOB
+#ifdef GRID_HANDLING_QUERIES
+        0x3230464b;
+#else
         0x3130464b;
+#endif
 #elif defined(GRID_WHOLE_OUTER)
         0x3130464f;
 #elif defined(GRID_WHOLE_WRAPPER)
@@ -116,6 +126,11 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #ifdef GRID_WHOLE_OUTER
         __declspec(align(16)) unsigned char body[0x21000],physical[0x430],wrapper[16]={0},component[0x100]={0},group[0x70]={0};
         memcpy(body,r.body,0x2600);memcpy(body+0x2600,r.extra,sizeof(r.extra));memcpy(physical,r.physical,0x424);
+#ifdef GRID_HANDLING_QUERIES
+        unsigned char receiver[HANDLING_QUERY_BYTES],receiver_before[HANDLING_QUERY_BYTES];HandlingQueries queries;
+        queries.present=r.query_present;queries.count=r.query_count;memcpy(queries.records,r.query_records,sizeof(queries.records));
+        error=query_receiver(&queries,receiver);if(error)break;memcpy(receiver_before,receiver,sizeof(receiver));
+#endif
         error=outer_guard(body,physical);if(error)break;
         /* Guard the state seen by the driver using owned scratch synchronization.
            Restore the entry state before the sole result-producing A09A80 call. */
@@ -203,6 +218,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         for(unsigned j=0;j<sizeof(pages)/sizeof(*pages);j++)memcpy(image+pages[j]-0x400000,saved_pages[j],4096);
         if(error)break;
         put(body,MUTABLE+0x214,(unsigned)(uintptr_t)component);
+#ifdef GRID_HANDLING_QUERIES
+        put(component,0x10,queries.present?(unsigned)(uintptr_t)receiver:0);
+#endif
         unsigned job[7]={0},completion_table[6]={0};
         job[1]=(unsigned)(uintptr_t)body;job[2]=r.delta;job[3]=(unsigned)(uintptr_t)completion_table;job[6]=0x125ac07e;
         completion_table[5]=(unsigned)(uintptr_t)job_complete;
@@ -229,6 +247,10 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         if(job[0]||job[1]!=(unsigned)(uintptr_t)body||job[2]!=r.delta||job[3]!=(unsigned)(uintptr_t)completion_table||job[4]!=1||job[5]!=(unsigned)(uintptr_t)(job+3)||job[6]!=0x125ac07e||completion_table[5]!=(unsigned)(uintptr_t)job_complete){error=71;break;}
         for(unsigned j=0;j<5;j++)if(completion_table[j])error=71;
         if(get(body,MUTABLE+0x214)!=(unsigned)(uintptr_t)component){error=71;break;}
+#ifdef GRID_HANDLING_QUERIES
+        if(get(component,0x10)!=(queries.present?(unsigned)(uintptr_t)receiver:0)||memcmp(receiver,receiver_before,sizeof(receiver))){error=71;break;}
+        put(component,0x10,0);
+#endif
         put(body,MUTABLE+0x214,0);put(component,0x24,0);for(unsigned j=0;j<sizeof(component);j++)if(component[j])error=71;put(component,0x24,(unsigned)(uintptr_t)body);
         if(!bounded(body+MUTABLE,0,0x60)||!bounded(body+MUTABLE,0x3a0,0x3c4)||!bounded(body+MUTABLE,0x42c,0x430))error=27;
         for(unsigned j=0;j<4;j++)if(!bounded(body+MUTABLE,0x3c8+j*0x18,0x3dc+j*0x18))error=27;
