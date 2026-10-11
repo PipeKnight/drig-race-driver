@@ -1,6 +1,6 @@
 //! Private body-advance plus supplied-contact frame diagnostic, PFR3.
 use grid_world::{
-    contact_rows, impact_frame,
+    contact_groups, contact_rows, grouped_physical_frame, impact_frame,
     impact_step::{Body, Input},
     physical_tick,
 };
@@ -57,7 +57,9 @@ fn run() -> Result<(), Failure> {
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
-    if (!world && word(h, 0) != 0x33524650) || !(1..=1024).contains(&count) {
+    let grouped_tick = word(h, 0) == 0x33525447;
+    let grouped = word(h, 0) == 0x33524647 || grouped_tick;
+    if (!world && !grouped && word(h, 0) != 0x33524650) || !(1..=1024).contains(&count) {
         return Err("invalid header".into());
     }
     let mut output = h.to_vec();
@@ -125,7 +127,7 @@ fn run() -> Result<(), Failure> {
             if word(b, 0x334) != 0x1c0 || (0x40c..=0x410).any(|o| b[o] > 1) {
                 return Err("invalid body framing".into());
             }
-            if world {
+            if world || grouped {
                 let next = word(b, 0x300) as usize;
                 if next > nb || word(b, 0x318) != 0 {
                     return Err("invalid world body list".into());
@@ -238,6 +240,105 @@ fn run() -> Result<(), Failure> {
                 cached_material,
             },
         };
+        if grouped {
+            let mut active_order = Vec::new();
+            let mut current = Some(0);
+            while let Some(i) = current {
+                if i >= nb || active_order.contains(&i) {
+                    return Err("invalid grouped active chain".into());
+                }
+                active_order.push(i);
+                current = active_next[i];
+            }
+            let bodies = body_wire
+                .iter()
+                .map(|b| {
+                    let mut row = std::array::from_fn(|i| word(b, i * 4));
+                    row[0x300 / 4] = 0;
+                    row
+                })
+                .collect();
+            let mut contacts = Vec::new();
+            for raw in &contact_wire {
+                let mut c: contact_groups::Contact = std::array::from_fn(|i| word(raw, i * 4));
+                c[1] = c[1].checked_add(1).ok_or("contact identity overflow")?;
+                c[2] = c[2].checked_add(1).ok_or("contact identity overflow")?;
+                contacts.push(c);
+            }
+            let calculate = if grouped_tick {
+                grouped_physical_frame::calculate_tick
+            } else {
+                grouped_physical_frame::calculate
+            };
+            let result = calculate(
+                &contact_groups::Input {
+                    bodies,
+                    contacts,
+                    active_order,
+                    selector: 0,
+                },
+                &grouped_physical_frame::Manager {
+                    parameters: input.step.parameters,
+                    gravity: input.gravity,
+                    correction: input.correction.clone(),
+                    materials: input.step.materials.clone(),
+                    rows: input.step.rows.clone(),
+                    capacity: input.step.capacity,
+                    iterations: input.step.iterations,
+                    ends: input.step.initial_ends,
+                    workspace: input.step.workspace.clone(),
+                    properties: input
+                        .step
+                        .bodies
+                        .iter()
+                        .map(|b| (b.inverse_mass, b.inverse_inertia))
+                        .collect(),
+                    cached_pair: input.step.cached_pair,
+                    cached_material: input.step.cached_material,
+                },
+            )?;
+            output.extend(0u32.to_le_bytes());
+            output.extend(u32::from(result.visits.last().is_some_and(|v| v.3)).to_le_bytes());
+            for end in result.manager.ends {
+                output.extend((end as u32).to_le_bytes());
+            }
+            for id in result
+                .manager
+                .cached_pair
+                .map_or([u32::MAX; 2], |p| p.map(|i| i as u32))
+            {
+                output.extend(id.to_le_bytes());
+            }
+            for value in result.manager.cached_material {
+                output.extend(value.to_le_bytes());
+            }
+            for (mass, inertia) in result.manager.properties {
+                output.extend(mass.to_le_bytes());
+                for value in inertia.into_iter().flatten() {
+                    output.extend(value.to_le_bytes());
+                }
+            }
+            for value in result.manager.workspace.into_iter().flatten().flatten() {
+                output.extend(value.to_le_bytes());
+            }
+            for value in result.groups.bodies.into_iter().flatten() {
+                output.extend(value.to_le_bytes());
+            }
+            for mut contact in result.groups.contacts {
+                contact[1] -= 1;
+                contact[2] -= 1;
+                for value in contact {
+                    output.extend(value.to_le_bytes());
+                }
+            }
+            for value in result.manager.rows.into_iter().flatten() {
+                output.extend(value.to_le_bytes());
+            }
+            for value in result.groups.world {
+                output.extend(value.to_le_bytes());
+            }
+            continue;
+        }
         let tick = if world {
             let result = physical_tick::calculate_serial_world(&input, &active_next, 0)?;
             for (raw, next) in body_wire.iter_mut().zip(result.update_next) {
