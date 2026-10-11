@@ -111,5 +111,7 @@ to `E78`, supplies mass scale `1560=1`, active flags `B13/B14`, and publication
 mode; these must be established before runtime attachment. The ordinary
 handling update's old generic bound also rejects the shipped brake-wear divisor
 10,016,380; a targeted finite-force admission fix and source runtime comparison
-are now underway. Cold gear zero requires a supported start/engagement contract.
+are now underway. The cold constructor selects gear **1** at `196C`; its ratio
+table slot **0** at `18F4` is zero. An earlier note confused these two fields;
+there is no established neutral-start blocker for this selected source owner.
 Continue these steps into the retained vehicle world and Bevy fixed-step driving.

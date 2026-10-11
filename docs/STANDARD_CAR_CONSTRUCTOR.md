@@ -10,7 +10,7 @@ The original cdecl function receives a zeroed owned car, the complete 0x65C-byte
 
 Original, repeat and Rust debug/release match **345 cases and 46,632,270 observable bytes per profile**. Every output is 135,168 bytes; two undefined stack-padding bytes are excluded. Final RNG state agrees after all twelve advances in every case. Current-binary, source, NED, property-report, request and all output hashes are audited. Thirteen native framing guards and seven strict Rust source/CLI guards per profile reject without creating outputs (27 total); these are distinct contracts, not paired malformed-input equivalence.
 
-The Rust constructor composes already verified suspension preloads, steering geometry, two gear initializations, impulse and point-velocity arithmetic with the full constructor stores, wheel resets, engine curves, setup copy, auxiliary owner defaults and control reset. The final gear slot zero comes from the decoded setup table and is zero, superseding the early constructor alias of one. Intermediate and final states must not be confused.
+The Rust constructor composes already verified suspension preloads, steering geometry, two gear initializations, impulse and point-velocity arithmetic with the full constructor stores, wheel resets, engine curves, setup copy, auxiliary owner defaults and control reset. The final ratio-table slot zero (`18F4`) comes from the decoded setup table and is zero, superseding the early constructor alias of one. Selected gear (`196C`) remains integer **1**; ratio-slot zero must not be interpreted as neutral selection. Intermediate and final states must not be confused.
 
 ## Original execution and explicit exclusions
 
