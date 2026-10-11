@@ -5,9 +5,13 @@ use std::{
     path::Path,
 };
 fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+    let source_prelude = args.last().is_some_and(|v| v == "--source-prelude");
+    if source_prelude {
+        args.pop();
+    }
     if args.len() != 4 && args.len() != 6 {
-        return Err("usage: grid-standard-car CAR.csv CAR.ned RNG_HEX local/OUTPUT.bin [HDM WHEEL_VIEWS_0_OR_1]".into());
+        return Err("usage: grid-standard-car CAR.csv CAR.ned RNG_HEX local/OUTPUT.bin [HDM WHEEL_VIEWS_0_OR_1] [--source-prelude]".into());
     }
     let random_state = u32::from_str_radix(args[2].to_str().ok_or("invalid RNG text")?, 16)?;
     let output = Path::new(&args[3]);
@@ -50,7 +54,12 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .1
             .parse::<f64>()? as f32;
     }
-    let mut car = grid_tools::standard_car::initialize(
+    let initialize = if source_prelude {
+        grid_tools::standard_car::initialize_with_source_prelude
+    } else {
+        grid_tools::standard_car::initialize
+    };
+    let mut car = initialize(
         &properties,
         geometry,
         widths,

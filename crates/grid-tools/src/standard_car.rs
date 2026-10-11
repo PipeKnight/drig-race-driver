@@ -77,6 +77,30 @@ pub fn initialize(
     gravity: f32,
     random_state: u32,
 ) -> Result<Car, Error> {
+    initialize_owned(properties, geometry, widths, gravity, random_state, false)
+}
+
+/// Selected observed outer-factory stores before whole Standard construction.
+/// This is the properties/mass/identity-pose/activation prelude, not execution
+/// of the original outer resource factory or player-preference application.
+pub fn initialize_with_source_prelude(
+    properties: &Properties,
+    geometry: WheelGeometry,
+    widths: [f32; 4],
+    gravity: f32,
+    random_state: u32,
+) -> Result<Car, Error> {
+    initialize_owned(properties, geometry, widths, gravity, random_state, true)
+}
+
+fn initialize_owned(
+    properties: &Properties,
+    geometry: WheelGeometry,
+    widths: [f32; 4],
+    gravity: f32,
+    random_state: u32,
+    source_prelude: bool,
+) -> Result<Car, Error> {
     let p = properties.bytes();
     let n = |o| f(p, o);
     if u(p, 0x140) != 1
@@ -105,6 +129,23 @@ pub fn initialize(
         driven: Vec::new(),
         random_state,
     };
+    if source_prelude {
+        car.bytes[0xe78..0x14d4].copy_from_slice(p);
+        car.set(0x1560, 1.);
+        car.word(0x1564, u(p, 0x3e0));
+        for (o, value) in [(0xe48, 10), (0x9a8, 4), (0xba0, 2)] {
+            car.word(o, value);
+        }
+        for o in [0xb13, 0xb14, 0x1ee0, 0x21c8] {
+            car.bytes[o] = 1;
+        }
+        for base in [0x10, 0x15e0] {
+            for i in 0..4 {
+                car.set(base + i * 20, 1.);
+            }
+        }
+        // Context9A4's owned self identity is zero at this pointer-free boundary.
+    }
     car.copy(p, EARLY);
     car.set(0x15a4, 1. / n(0x130));
     for (o, value) in [
