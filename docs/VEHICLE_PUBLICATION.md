@@ -1,5 +1,7 @@
 # Complete selected outer velocity publication — F186
 
+F187 correction: the complete synchronous `A09A80` final local masks clear linear X, angular Y and position X/Z; the earlier W-only interpretation was incorrect. `A03220` itself still clears velocity W. See [whole wrapper evidence and live-job distinction](VEHICLE_OUTER_WRAPPER.md).
+
 11 October 2026. Rust now matches one unchanged original `A03220` call and its
 composition with synchronization, the complete idle-capable vehicle wrapper and
 final pose publication. This closes the selected outer velocity-publication

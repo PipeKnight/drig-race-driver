@@ -1,5 +1,7 @@
 # Linked vehicle synchronization and carried publication — F181
 
+F187 correction: the complete synchronous `A09A80` final local masks clear linear X, angular Y and position X/Z; the earlier W-only interpretation was incorrect. `A03220` itself still clears velocity W. See [whole wrapper evidence and live-job distinction](VEHICLE_OUTER_WRAPPER.md).
+
 11 October 2026, Europe/Kiev. The independent vehicle update now consumes authoritative linked physical pose and velocities, updates physical mass/inertia, and copies the original car control settings before the selected source-track driver. Complete original/repeat/Rust records match in debug and release, including carried synchronization → driver → linked publication. Actual world scheduling and a drivable Bevy loop remain required.
 
 ## Recovered contract

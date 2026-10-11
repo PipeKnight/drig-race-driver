@@ -1,5 +1,7 @@
 # Vehicle and physical state transfer — F169
 
+F187 correction: the complete synchronous `A09A80` final local masks clear linear X, angular Y and position X/Z; the earlier W-only interpretation was incorrect. `A03220` itself still clears velocity W. See [whole wrapper evidence and live-job distinction](VEHICLE_OUTER_WRAPPER.md).
+
 10 October 2026. Independent Rust joins complete linked pose/velocity setters, optional whole body advance, optional supplied physical correction and linked getters. **Original/repeat/Rust match 320 calls /4,295,784 body, vehicle and shape words per debug and release build**, including three complete intermediate snapshots per call. Scheduling and physical ownership are authored. This establishes a transfer boundary; it does not establish a live world frame or drivable lap.
 
 ## Contract and order

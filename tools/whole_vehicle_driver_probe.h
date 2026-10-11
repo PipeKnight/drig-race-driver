@@ -7,9 +7,15 @@ typedef struct {
     unsigned index,delta,body_address,view_address,solver_address,present[4];
     unsigned char body[0x2600],view[0x300],solver[0xdd0],material[4][0x140];
     unsigned char engine_limit[4],diagnostics[32];
+#ifdef GRID_WHOLE_OUTER
+    unsigned char extra[0x21000-0x2600],physical[0x424];
+#endif
 } DriverRecord;
 static unsigned get(const void *p,unsigned o){return getword((const unsigned char *)p+o);}
 static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4);}
+#ifdef GRID_WHOLE_OUTER
+#include "vehicle_outer_probe.h"
+#endif
 #pragma warning(push)
 #pragma warning(disable:4505) /* Guard-only inclusion leaves old schedules unused. */
 #define GRID_CONTROL
@@ -67,12 +73,14 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
     }
     if(!materials||!material_count||_wfopen_s(&input,request,L"rb")||!input){error=62;goto finish;}
     const unsigned tag=
-#ifdef GRID_WHOLE_WRAPPER
+#ifdef GRID_WHOLE_OUTER
+        0x3130464f;
+#elif defined(GRID_WHOLE_WRAPPER)
         0x31304651;
 #else
         0x31304645;
 #endif
-    if(fseek(input,0,SEEK_END)||ftell(input)>8*1024*1024||fseek(input,0,SEEK_SET)||fread(header,8,1,input)!=1||header[0]!=tag||!header[1]||header[1]>64){error=63;goto finish;}
+    if(fseek(input,0,SEEK_END)||ftell(input)>16*1024*1024||fseek(input,0,SEEK_SET)||fread(header,8,1,input)!=1||header[0]!=tag||!header[1]||header[1]>64){error=63;goto finish;}
     HANDLE h=CreateFileW(output,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(h==INVALID_HANDLE_VALUE){error=73;goto finish;}
     int fd=_open_osfhandle((intptr_t)h,_O_BINARY);if(fd<0){CloseHandle(h);error=73;goto finish;}created=1;result=_fdopen(fd,"wb");if(!result){_close(fd);error=73;goto finish;}
     if(fwrite(header,8,1,result)!=1){error=74;goto finish;}
@@ -91,8 +99,23 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #endif
         if(!isfinite(*(float *)r.engine_limit)){error=66;break;}
         for(unsigned i=0;i<8;i++)if(!isfinite(*(float *)(r.diagnostics+i*4)))error=66;if(error)break;
-        __declspec(align(16)) unsigned char body[0x2600],storage[0x1080],old_material[4][0x140]={0},table[0x20]={0};unsigned entry[3]={0};
-        unsigned char *view=storage,*solver=storage+0x2b0;memcpy(body,r.body,sizeof(body));memcpy(view,r.view,0x300);memcpy(solver,r.solver,0xdd0);
+#ifdef GRID_WHOLE_OUTER
+        __declspec(align(16)) unsigned char body[0x21000],physical[0x430],wrapper[16]={0},component[0x30]={0},group[0x70]={0};
+        memcpy(body,r.body,0x2600);memcpy(body+0x2600,r.extra,sizeof(r.extra));memcpy(physical,r.physical,0x424);
+        error=outer_guard(body,physical);if(error)break;
+        /* Guard the state seen by the driver using owned scratch synchronization.
+           Restore the entry state before the sole result-producing A09A80 call. */
+        put(wrapper,8,(unsigned)(uintptr_t)physical);put(body,0xdb0,(unsigned)(uintptr_t)wrapper);
+        __try{((void (__fastcall *)(void *,void *))(image+0x9bd7f0-0x400000))(body,NULL);}
+        __except(driver_fault(GetExceptionInformation())){error=70;}if(error)break;
+        put(body,0xdb0,0);
+        if(!outer_finite(physical+0x90,16)||!outer_finite(physical+0x150,16)||!outer_finite(physical+0x3f0,2)){error=33;break;}
+#else
+        __declspec(align(16)) unsigned char body[0x2600];
+        memcpy(body,r.body,0x2600);
+#endif
+        __declspec(align(16)) unsigned char storage[0x1080],old_material[4][0x140]={0},table[0x20]={0};unsigned entry[3]={0};
+        unsigned char *view=storage,*solver=storage+0x2b0;memcpy(view,r.view,0x300);memcpy(solver,r.solver,0xdd0);
         error=source_guard(body,view,material_count);if(error)break;
         for(unsigned i=0;i<4;i++){
             unsigned w=0x1990+i*0x150,token=get(body,w+0xc0);
@@ -120,6 +143,16 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
             if(o<0x1990||o>=0x1ed0||(o-0x1990)%0x150)error=68;
         }
         if(get(body,0x21cc)==get(body,0x21d0))error=68;if(error)break;
+#ifdef GRID_WHOLE_OUTER
+        memcpy(body,r.body,0x2600);memcpy(body+0x2600,r.extra,sizeof(r.extra));memcpy(physical,r.physical,0x424);
+        put(wrapper,8,(unsigned)(uintptr_t)physical);put(body,0xdb0,(unsigned)(uintptr_t)wrapper);put(component,0x24,(unsigned)(uintptr_t)body);
+        put(physical,0x32c,(unsigned)(uintptr_t)group);
+        for(unsigned i=0;i<4;i++)put(physical,0x334+i*4,(unsigned)(uintptr_t)(physical+(i?0x180+i*16:0x1c0)));
+        /* Preflight synchronization's temporary SIMD global scratch must not
+           leak into the result-producing call. Other per-case inputs follow. */
+        memcpy(image+0xe5b000-0x400000,saved+0xe5b000-0x400000,4096);
+        put(image,0xe85fcc-0x400000,0);
+#endif
         put(body,0,(unsigned)(uintptr_t)view);put(view,0,(unsigned)(uintptr_t)solver);
         for(unsigned i=0;i<driven;i++)put(body,0x18d8+i*4,(unsigned)(uintptr_t)(body+get(r.body,0x18d8+i*4)-r.body_address));
         for(unsigned i=0;i<2;i++)put(body,0x21cc+i*4,(unsigned)(uintptr_t)(body+get(r.body,0x21cc+i*4)-r.body_address));
@@ -132,13 +165,20 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         put(image,0xe85fd0-0x400000,(unsigned)(uintptr_t)table);put(image,0xe85ed4-0x400000,0);put(image,0xec2c54-0x400000,0);
         memcpy(image+0xd16348-0x400000,r.engine_limit,4);memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
         float gravity=-9.8100004196167f;memcpy(image+0xe8efd4-0x400000,&gravity,4);
-        __try{((void (__fastcall *)(void *,void *,float))(image+
+        __try{
+#ifdef GRID_WHOLE_OUTER
+            /* Entry has ret8: callee pops the two stack arguments. */
+            ((void (__stdcall *)(void *,float))(image+0xa09a80-0x400000))(component,delta);
+#else
+            ((void (__fastcall *)(void *,void *,float))(image+
 #ifdef GRID_WHOLE_WRAPPER
             0xa06a90
 #else
             0xa03670
 #endif
-            -0x400000))(body,NULL,delta);}
+            -0x400000))(body,NULL,delta);
+#endif
+        }
         __except(driver_fault(GetExceptionInformation())){error=70;}
         if(error)break;
 #ifndef GRID_WHOLE_WRAPPER
@@ -163,7 +203,16 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
             if(token){const unsigned fields[]={0x10,0x14,0x18,0x1c,0x20,0x64};for(unsigned j=0;j<6;j++)memcpy(r.material[i]+fields[j],materials[token-1].data+fields[j],4);r.material[i][0x75]=materials[token-1].data[0x75];}
         }
         if(error)break;
-        memcpy(r.body,body,sizeof(body));memcpy(r.view,view,0x300);memcpy(r.solver,solver,0xdd0);memcpy(r.engine_limit,image+0xd16348-0x400000,4);memcpy(r.diagnostics,image+0xe85df0-0x400000,32);
+#ifdef GRID_WHOLE_OUTER
+        if(get(body,0xdb0)!=(unsigned)(uintptr_t)wrapper||get(wrapper,8)!=(unsigned)(uintptr_t)physical||get(component,0x24)!=(unsigned)(uintptr_t)body||get(body,0xc784)!=(unsigned)(uintptr_t)(image+0x9a0c90-0x400000)){error=71;break;}
+        if(get(physical,0x32c)!=(unsigned)(uintptr_t)group){error=71;break;}
+        for(unsigned i=0;i<4;i++)if(get(physical,0x334+i*4)!=(unsigned)(uintptr_t)(physical+(i?0x180+i*16:0x1c0)))error=71;
+        if(error)break;
+        put(body,0xdb0,0);put(body,0xc784,0x9a0c90);
+        put(physical,0x32c,0);for(unsigned i=0;i<4;i++)put(physical,0x334+i*4,0);
+        memcpy(r.extra,body+0x2600,sizeof(r.extra));memcpy(r.physical,physical,0x424);
+#endif
+        memcpy(r.body,body,0x2600);memcpy(r.view,view,0x300);memcpy(r.solver,solver,0xdd0);memcpy(r.engine_limit,image+0xd16348-0x400000,4);memcpy(r.diagnostics,image+0xe85df0-0x400000,32);
         if(fwrite(&r,sizeof(r),1,result)!=1){error=74;break;}++*completed;
     }
     if(!error&&(fgetc(input)!=EOF||ferror(input)))error=65;
