@@ -3,6 +3,58 @@
 //! Four supplied impact values must remain below the original damage threshold.
 use crate::{Error, steering_control, vehicle_publication::State, wheel_damage};
 pub const MUTABLE: usize = 0xcdf0;
+pub struct ResetOutput {
+    pub owner: [u32; 280],
+    pub random_state: u32,
+}
+/// Whole selected 9E6070 reset and 9C5B90 effects. Optional secondary component
+/// and query list are absent; wheel-view ownership is supplied independently.
+pub fn reset(
+    input: &[u32; 280],
+    random_state: u32,
+    wheel_views_active: bool,
+) -> Result<ResetOutput, Error> {
+    if input[0x210 / 4] != 0
+        || input[0x214 / 4] != 0
+        || !input[0x218 / 4..0x380 / 4]
+            .iter()
+            .all(|&word| f32::from_bits(word).is_finite())
+    {
+        return Err(Error("invalid handling reset owner"));
+    }
+    let f = |o| f(input, o);
+    let seeds = steering_control::reset(
+        random_state,
+        steering_control::ResetParameters {
+            maximum_rotation_26c: f(0x26c),
+            maximum_cap_250: f(0x250),
+            perturbation_gain_270: f(0x270),
+            ramp_start_274: f(0x274),
+            ramp_end_278: f(0x278),
+            low_gain_27c: f(0x27c),
+            cap_threshold_254: f(0x254),
+            wheel_views_active,
+        },
+    )?;
+    let mut b = *input;
+    b[..0x60 / 4].fill(0);
+    for (i, value) in seeds.rotation_seeds_50_5c.into_iter().enumerate() {
+        b.store(0x50 + i * 4, value);
+    }
+    for (i, value) in seeds.cap_seeds_48_4c.into_iter().enumerate() {
+        b.store(0x48 + i * 4, value);
+    }
+    b[0x428 / 4] = u32::MAX;
+    b.store(0x42c, 0.);
+    b.store_byte(0x440, 0);
+    effects(&mut b, None, wheel_views_active)?;
+    b[0x444 / 4] = 7;
+    b.store_byte(0x448, 0);
+    Ok(ResetOutput {
+        owner: b,
+        random_state: seeds.random_state,
+    })
+}
 /// Only these two fields of each original 2E0-byte record are consumed here.
 #[derive(Clone, Copy, Debug)]
 pub struct QueryRecord {
@@ -68,7 +120,11 @@ fn ramp(level: f32, start: f32, end: f32, low: f32) -> f32 {
     }
 }
 #[allow(clippy::assign_op_pattern)] // Preserve the original SSE operand order.
-fn effects(b: &mut [u32], queries: Option<&[QueryRecord]>) -> Result<(), Error> {
+fn effects(
+    b: &mut [u32],
+    queries: Option<&[QueryRecord]>,
+    wheel_views_active: bool,
+) -> Result<(), Error> {
     let s = steering_control::calculate(steering_control::Input {
         wheel_levels_18_24: std::array::from_fn(|i| f(b, 0x18 + 4 * i)),
         cap_levels_30_34: [f(b, 0x30), f(b, 0x34)],
@@ -79,7 +135,7 @@ fn effects(b: &mut [u32], queries: Option<&[QueryRecord]>) -> Result<(), Error> 
         ramp_end_278: f(b, 0x278),
         low_gain_27c: f(b, 0x27c),
         cap_threshold_254: f(b, 0x254),
-        wheel_views_active: true,
+        wheel_views_active,
     })?;
     b.store_byte(0x3c4, byte(b, 0x440));
     let wear = f(b, 0xc);
@@ -115,6 +171,13 @@ fn effects(b: &mut [u32], queries: Option<&[QueryRecord]>) -> Result<(), Error> 
     );
     for i in 0..4 {
         let at = 0x3c8 + i * 0x18;
+        if !wheel_views_active {
+            for (offset, value) in [(0, 1.), (4, 0.), (8, 0.), (12, 0.), (16, 1.)] {
+                b.store(at + offset, value);
+            }
+            b.store_byte(at + 0x14, 0);
+            continue;
+        }
         let level = f(b, 0x18 + i * 4);
         let blend = ramp(level, f(b, 0x274), f(b, 0x278), f(b, 0x27c));
         b.store(
@@ -316,7 +379,7 @@ pub fn calculate_with_queries(
         let timer = f(&b, 0x42c) - delta;
         b.store(0x42c, if timer < 0. { 0. } else { timer });
     }
-    effects(&mut b, queries)?;
+    effects(&mut b, queries, true)?;
     if !bounded(&b, 0, 0x60) || !bounded(&b, 0x42c, 0x430) {
         return Err(Error("nonfinite handling result"));
     }

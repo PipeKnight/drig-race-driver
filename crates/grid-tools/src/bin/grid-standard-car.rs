@@ -6,8 +6,8 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 4 {
-        return Err("usage: grid-standard-car CAR.csv CAR.ned RNG_HEX local/OUTPUT.bin".into());
+    if args.len() != 4 && args.len() != 6 {
+        return Err("usage: grid-standard-car CAR.csv CAR.ned RNG_HEX local/OUTPUT.bin [HDM WHEEL_VIEWS_0_OR_1]".into());
     }
     let random_state = u32::from_str_radix(args[2].to_str().ok_or("invalid RNG text")?, 16)?;
     let output = Path::new(&args[3]);
@@ -50,13 +50,25 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .1
             .parse::<f64>()? as f32;
     }
-    let car = grid_tools::standard_car::initialize(
+    let mut car = grid_tools::standard_car::initialize(
         &properties,
         geometry,
         widths,
         f32::from_bits(0x411c_f5c3),
         random_state,
     )?;
+    if args.len() == 6 {
+        if fs::metadata(&args[4])?.len() > 65536 {
+            return Err("HDM size exceeds limit".into());
+        }
+        let active = match args[5].to_str() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => return Err("invalid wheel-view mode".into()),
+        };
+        let settings = grid_formats::handling_damage::read_configuration(&fs::read(&args[4])?)?;
+        car.configure_handling(&settings, active)?;
+    }
     let mut writer = OpenOptions::new()
         .write(true)
         .create_new(true)

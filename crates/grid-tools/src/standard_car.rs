@@ -13,6 +13,23 @@ impl Car {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+    /// Install the complete source HDM settings, then run the selected original
+    /// reset order. Commit only after every parameter and effect is valid.
+    pub fn configure_handling(
+        &mut self,
+        settings: &grid_formats::handling_damage::Configuration,
+        wheel_views_active: bool,
+    ) -> Result<(), Error> {
+        let mut owner = std::array::from_fn(|i| u(&self.bytes, 0xcdf0 + i * 4));
+        owner[0x218 / 4..0x380 / 4].copy_from_slice(settings.words());
+        let result =
+            grid_world::vehicle_handling::reset(&owner, self.random_state, wheel_views_active)?;
+        for (i, word) in result.owner.into_iter().enumerate() {
+            self.word(0xcdf0 + i * 4, word);
+        }
+        self.random_state = result.random_state;
+        Ok(())
+    }
     fn word(&mut self, offset: usize, value: u32) {
         self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }
@@ -438,4 +455,32 @@ pub fn initialize(
     car.set(0x1efc, 1.);
     car.shift()?;
     Ok(car)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn failed_source_reset_preserves_car_and_rng() {
+        let mut car = Car {
+            bytes: vec![0; 0x21000],
+            driven: vec![2, 3],
+            random_state: 200679,
+        };
+        car.word(0xd19c, 0xffc0_0000);
+        let before = car.bytes.clone();
+        // Defaults have zero ramp start; explicitly make its end zero too.
+        let bad = grid_formats::handling_damage::read_configuration(
+            b"<VEHICLEHANDLINGDAMAGE><WHEEL damageToHaveFullEffect='0'/></VEHICLEHANDLINGDAMAGE>",
+        )
+        .unwrap();
+        assert!(car.configure_handling(&bad, true).is_err());
+        assert_eq!(car.bytes, before);
+        assert_eq!(car.random_state, 200679);
+        let good = grid_formats::handling_damage::read_configuration(b"<VEHICLEHANDLINGDAMAGE><BRAKE maxForceToCauseDamage='10016380'/><WHEEL damageToStartBaseEffect='.65'/></VEHICLEHANDLINGDAMAGE>").unwrap();
+        car.configure_handling(&good, true).unwrap();
+        assert!(car.get(0xd19c).is_finite());
+        assert_eq!(car.get(0xcdf0 + 0x2f4), 10016380.);
+        assert_ne!(car.random_state, 200679);
+    }
 }
