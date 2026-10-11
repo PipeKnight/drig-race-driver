@@ -10,7 +10,7 @@ from capture_reference_spawn import ANALYSIS,private
 ROOT=g.ROOT
 MAGIC=0x34534647
 
-def decode(data,cases,whole_world=False):
+def decode(data,cases,whole_world=False,carried=False):
     if not whole_world:return g.decode(data,cases)
     assert struct.unpack_from('<II',data)==(MAGIC,len(cases))
     at=8;plain=bytearray(data[:8]);lifecycle=[]
@@ -18,6 +18,8 @@ def decode(data,cases,whole_world=False):
         n=128+len(c['bodies'])*(100+0x424)+len(c['contacts'])*128+len(c['rows'])*192
         plain.extend(data[at:at+n]);at+=n
         lifecycle.append(list(struct.unpack_from('<6I',data,at)));at+=24
+        if carried:
+            assert struct.unpack_from('<I',data,at)[0]==c['steps'];at+=4
     assert at==len(data)
     outputs=g.decode(plain,cases)
     for o,state in zip(outputs,lifecycle):o['lifecycle']=state
@@ -30,12 +32,37 @@ def lifecycle_checks(cases,outputs):
                 producer_statistics_cleared=all(o['lifecycle'][3:5]==[0,0] for o in outputs),
                 wake_queue_empty=all(o['lifecycle'][5]==0 for o in outputs))
 
+def carried_cases(seeds):
+    cases=[]
+    for i,c in enumerate(seeds):
+        count=[2,3,4,8,16,32,64][i%7]
+        for steps in [1,count-1,count]:
+            c=copy.deepcopy(c);c.update(steps=steps,carry_seed=i);cases.append(c)
+    return cases
+
+def carried_checks(cases,outputs):
+    checks=dict(history=True,dirty_membership_retained=True,consumed_contact_storage_retained=True,row_storage_retained=True,selector_alternates=True)
+    by_seed={(c['carry_seed'],c['steps']):o for c,o in zip(cases,outputs)};history_pairs=0
+    for c,o in zip(cases,outputs):
+        first=by_seed[c['carry_seed'],1]
+        prior=c['bodies'] if c['steps']==1 else by_seed.get((c['carry_seed'],c['steps']-1),{}).get('bodies')
+        if prior is not None:
+            history_pairs+=1
+            checks['history'] &= all((b['raw'] if isinstance(b,dict) else b)[0x190:0x210]==after[0x270:0x2f0] for b,after in zip(prior,o['bodies']))
+        checks['dirty_membership_retained'] &= o['world'][4]==first['world'][4] and all(b[0x2f0:0x2f8]==f[0x2f0:0x2f8] and b[0x412]==1 for b,f in zip(o['bodies'],first['bodies']))
+        checks['consumed_contact_storage_retained'] &= o['contacts']==first['contacts']
+        checks['row_storage_retained'] &= o['rows']==first['rows']
+        checks['selector_alternates'] &= o['world'][5]==c['steps']%2 and o['world'][6]==1-c['steps']%2
+    return checks,dict(world_steps=sum(c['steps'] for c in cases),carried_steps=sum(c['steps']-1 for c in cases),history_pairs=history_pairs)
+
 def pack(cases):
     data=bytearray(struct.pack('<II',MAGIC,len(cases)))
     for c in cases:
         raw=tick_pack([c])[8:]
         data.extend(raw[:164]);data.extend(struct.pack('<I',len(c['shapes'])))
-        data.extend(b''.join(bytes(s) for s in c['shapes']));data.extend(raw[164:])
+        data.extend(b''.join(bytes(s) for s in c['shapes']))
+        if MAGIC==0x35535747:data.extend(struct.pack('<I',c['steps']))
+        data.extend(raw[164:])
     assert len(data)<=32*1024*1024
     return data
 
@@ -90,13 +117,18 @@ def semantics(cases,outputs,advance):
 
 def main():
     global MAGIC
-    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--advance',action='store_true');p.add_argument('--whole-world',action='store_true');p.add_argument('--limit',type=int,default=0);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--advance',action='store_true');p.add_argument('--whole-world',action='store_true');p.add_argument('--carried',action='store_true');p.add_argument('--limit',type=int,default=0);a=p.parse_args()
+    if a.carried:a.whole_world=True
     if a.whole_world:a.advance=True
     if a.advance:MAGIC=0x34535447
     if a.whole_world:MAGIC=0x34535747
+    if a.carried:MAGIC=0x35535747
     out=private(a.output);out.mkdir(exist_ok=False);reference=ROOT/'local/compatibility/grid-unpacked.exe';assert digest(reference)==ANALYSIS
     probe=ROOT/('local/behavior/whole-physical-world-probe.exe' if a.whole_world else f'local/behavior/shaped-physical-{"tick" if a.advance else "frame"}-probe.exe');rust=ROOT/f'target/{a.profile}/grid-physical-tick.exe'
+    if a.carried:probe=ROOT/'local/behavior/carried-physical-world-probe.exe'
     cases=authored();cases=cases[:a.limit] if a.limit else cases
+    if a.carried:
+        seeds=cases if a.limit else cases[:96]+cases[-65:];cases=carried_cases(seeds)
     if a.whole_world:
         for c in cases:
             for b in c['bodies']:b['raw'][0x415]=0
@@ -105,11 +137,15 @@ def main():
         data,run=execute(command,source,out/f'{kind}.bin');original=data if original is None else original;run.update(compare(data,original));runs[kind]=run
         if kind!='rust':assert 'code_unchanged=1 no_imports=1' in run['stdout']
         if a.whole_world and kind!='rust':assert 'whole_serial_world=1 wrapper_pool_consumed=1 owned_workers_retained=1' in run['stdout']
-    g.MAGIC=MAGIC;outputs=decode(original,cases,a.whole_world);checks,activity=semantics(cases,outputs,a.advance)
+        if a.carried and kind!='rust':assert 'carried_world_ownership=1 no_cold_reset=1 no_pool_rearm=1' in run['stdout']
+    g.MAGIC=MAGIC;outputs=decode(original,cases,a.whole_world,a.carried);checks,activity=semantics(cases,outputs,a.advance)
     if a.whole_world:checks.update(lifecycle_checks(cases,outputs))
+    if a.carried:
+        extra,counts=carried_checks(cases,outputs);checks.update(extra);activity.update(counts)
     base=copy.deepcopy(next(c for c in cases if c['contacts']));good=pack([base]);bad={'truncated':good[:-1],'trailing':good+b'!','empty':good[:4]+bytes(4)+good[8:]}
     mutations=[('empty_shapes',lambda c:c.update(shapes=[])),('shape_flag',lambda c:c['shapes'].__setitem__(0,(2,0,0,0))),('foreign_shape',lambda c:uput(c['contacts'][0][1],0x28,514)),('missing_special_shape',lambda c:(c['contacts'][0][1].__setitem__(0x73,1),uput(c['contacts'][0][1],0x28,0))),('foreign_body',lambda c:uput(c['contacts'][0][1],4,16)),('zero_iterations',lambda c:c.update(iterations=0)),('insufficient_capacity',lambda c:c.update(capacity=0)),('body_callback',lambda c:uput(c['bodies'][0]['raw'],0x418,1)),('nan_basis',lambda c:uput(c['bodies'][0]['raw'],0x190,0x7fc00000))]
     if a.whole_world:mutations.append(('deferred_publication',lambda c:c['bodies'][0]['raw'].__setitem__(0x415,1)))
+    if a.carried:mutations.extend([('zero_steps',lambda c:c.update(steps=0)),('excess_steps',lambda c:c.update(steps=65))])
     for name,change in mutations:c=copy.deepcopy(base);change(c);bad[name]=pack([c])
     guards={}
     for name,data in bad.items():
@@ -119,5 +155,6 @@ def main():
             guards[name][kind]=dict(exit=r.returncode,stdout=r.stdout,stderr=r.stderr,passed=0<r.returncode<256 and 'physical_tick_fault=' not in r.stderr and not target.exists() and (kind=='rust' or not r.stderr and 'code_unchanged=1 no_imports=1' in r.stdout))
     report=dict(profile=a.profile,advance=a.advance,cases=len(cases),bytes=len(original)-8,runs=runs,checks=checks,activity=activity,guards=guards,probe_sha256=digest(probe),rust_sha256=digest(rust),analysis_sha256=ANALYSIS,scope='Owned shape216/217/229/230 classification; ordinary/special and C0/nullsecond contacts; whole AD6C40/B77310/B7B850, optional preceding AD7040. Cold active bodies/MAX sleep duration/full capacity; no geometric production/persistence/full world schedule/driving.')
     if a.whole_world:report.update(whole_world=True,scope='Whole unchanged serial AD8D70 then A727A0 pool consumption. Cold active shape-free physical bodies, external impact pool with callback-free owned shapes, preallocated empty geometry workers, no registered pose cursor/sleep/joints/wakeup/async. No persistent world, production registry setup or drivable lap claim.')
+    if a.carried:report.update(carried=True,scope='1..64 successive whole serial AD8D70/A727A0 calls on each original branch own retained world/body/contact/manager/worker buffers. First-step contacts then real consumed pool remains empty; no cold reset/rearm or additional production. Rust retains active/dirty/group state, manager/cache/workspace and consumed slots. Geometry-free/all-active/unsleepable, no async/registered pose cursor/driving claim.')
     report['passed']=all(checks.values()) and all(r['passed'] for r in runs.values()) and all(r['passed'] for pair in guards.values() for r in pair.values());(out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:v for k,v in report.items() if k not in ['runs','guards']}));assert report['passed']
 if __name__=='__main__':main()

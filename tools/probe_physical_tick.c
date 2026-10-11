@@ -50,7 +50,9 @@ int wmain(int argc,wchar_t **argv){
  FILE *input=NULL,*output=NULL;unsigned magic=0,total=0;
  if(!error&&(_wfopen_s(&input,argv[2],L"rb")||!input||_wfopen_s(&output,argv[3],L"wbx")||!output))error=6;
  if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=
-#ifdef GRID_WHOLE_PHYSICAL_WORLD
+#ifdef GRID_CARRIED_PHYSICAL_WORLD
+ 0x35535747
+#elif defined(GRID_WHOLE_PHYSICAL_WORLD)
  0x34535747
 #elif defined(GRID_OWNED_SHAPES) && defined(GRID_GROUPED_TICK)
  0x34535447
@@ -94,6 +96,10 @@ int wmain(int argc,wchar_t **argv){
   enum { MAX_SHAPES=2 };
 #endif
   unsigned shape_count=MAX_SHAPES;
+  unsigned world_steps=1;
+#ifndef GRID_CARRIED_PHYSICAL_WORLD
+  (void)world_steps;
+#endif
   unsigned char shape_flags[MAX_SHAPES][4]={0};
   __declspec(align(16)) unsigned char bodies[16][0x430]={0},contacts[64][0x80]={0},shapes[MAX_SHAPES][0x240]={0},manager[0x240]={0},group[0x90]={0},rows[256][192];
   __declspec(align(16)) float materials[8][16]={0},inertia[16][16],mass[16],workspace[16][8];
@@ -110,6 +116,9 @@ int wmain(int argc,wchar_t **argv){
   if(error)break;
 #else
   (void)shape_flags;
+#endif
+#ifdef GRID_CARRIED_PHYSICAL_WORLD
+  if(!read(input,&world_steps,4)||!world_steps||world_steps>64){error=8;break;}
 #endif
   for(unsigned j=0;j<h[0];j++){
    unsigned char *b=bodies[j];float properties[17];
@@ -222,8 +231,33 @@ int wmain(int argc,wchar_t **argv){
   __try{
 #ifdef GRID_CONTACT_GROUPS
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
+   for(unsigned step=0;step<world_steps;step++){
+#ifdef GRID_CARRIED_PHYSICAL_WORLD
+    unsigned cursor=get(world,0x3c+4*get(world,0x60)),previous=0,count=0;memset(update_next,0,sizeof(update_next));
+    while(cursor){
+     unsigned token=owned_token(cursor,bodies[0],0x430,h[0],&error);if(error||++count>h[0]){error=10;break;}
+     update_next[token-1]=previous;previous=token;last_active=token-1;cursor=get((void *)(uintptr_t)cursor,0x300);
+    }
+    if(error||count!=h[0]){error=10;break;}
+#endif
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xad8d70-0x400000))(world,NULL,*(unsigned *)parameters);
    ((void (__fastcall *)(void *,void *))(image+0xa727a0-0x400000))(world_wrapper,NULL);
+#ifdef GRID_CARRIED_PHYSICAL_WORLD
+    if(get(producer,0x924)||get(world,0x7c4)||get(world,0x7cc)){error=10;break;}
+    if(step==0){
+     for(unsigned root=get(manager,0x74),groups_seen=0;root;root=get((void *)(uintptr_t)root,0x1c)){
+      if(++groups_seen>h[0]||!owned_token(root,bodies[0],0x430,h[0],&error)){error=10;break;}
+      unsigned constructed=0,normals=0;
+      for(unsigned contact=get((void *)(uintptr_t)root,0),n=0;contact;contact=get((void *)(uintptr_t)contact,0x10)){
+       if(++n>h[2]||!owned_token(contact,contacts[0],0x80,h[2],&error)){error=10;break;}
+       constructed+=get((void *)(uintptr_t)contact,0x14);normals+=get((void *)(uintptr_t)contact,0x18);
+      }
+      if(error||constructed>h[3]||normals>constructed){error=10;break;}
+      for(unsigned r=0;r<constructed;r++)ref_limits[r]=r>=normals?normals:0;
+     }
+    }
+#endif
+   }
 #else
 #ifdef GRID_GROUPED_TICK
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xad7040-0x400000))(world,NULL,*(unsigned *)parameters);
@@ -346,6 +380,9 @@ int wmain(int argc,wchar_t **argv){
   fwrite(state,4,11,output);
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
   unsigned lifecycle[6]={get(world,0x7c4),get(world,0x7c8),get(producer,0x924),get(producer,0xa78),get(producer,0xa7c),get(world,0x7cc)};fwrite(lifecycle,4,6,output);
+#ifdef GRID_CARRIED_PHYSICAL_WORLD
+  fwrite(&world_steps,4,1,output);
+#endif
 #endif
 #endif
  }
@@ -362,6 +399,9 @@ finish:
  printf("physical_tick_cases=%u error=%u code_unchanged=%u no_imports=1\n",cases,error,error!=13);
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
  printf("whole_serial_world=1 wrapper_pool_consumed=1 owned_workers_retained=1\n");
+#ifdef GRID_CARRIED_PHYSICAL_WORLD
+ printf("carried_world_ownership=1 no_cold_reset=1 no_pool_rearm=1\n");
+#endif
 #endif
  return (int)error;
 }

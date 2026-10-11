@@ -16,7 +16,7 @@ def audit(path):
     if 'executables' in report:
         for name,expected in report['executables'].items():assert digest(ROOT/name)==expected
     else:
-        name='whole-physical-world' if report.get('whole_world') else ('shaped-physical-tick' if report['advance'] else 'shaped-physical-frame')
+        name='carried-physical-world' if report.get('carried') else ('whole-physical-world' if report.get('whole_world') else ('shaped-physical-tick' if report['advance'] else 'shaped-physical-frame'))
         assert digest(ROOT/f'local/behavior/{name}-probe.exe')==report['probe_sha256']
         assert digest(ROOT/f'target/{report["profile"]}/grid-physical-tick.exe')==report['rust_sha256']
     for item in report.get('upstream',[]):assert digest(ROOT/item['path'])==item['sha256']
