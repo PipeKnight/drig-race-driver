@@ -22,20 +22,21 @@ def configure(row,index):
         for i in range(4):struct.pack_into('<I',r,at(0x1990+i*0x150+0xc4),0)
     return bytes(r)
 
-def compare(out,profile,branches,prefix,full):
+def compare(out,profile,branches,prefix,full,producer=False):
     answers={};runs=[]
+    record_size=RECORD+(520 if producer else 0)
     for kind,rows in branches.items():
         source=out/f'{prefix}-{kind}-input.bin';target=out/f'{prefix}-{kind}-output.bin'
-        source.write_bytes(b.request(rows,b'TF01'))
-        exe=b.ROOT/f'target/{profile}/grid-vehicle-force.exe' if kind=='rust' else NATIVE
+        source.write_bytes(b.request(rows,b'TF02' if producer else b'TF01'))
+        exe=b.ROOT/f'target/{profile}/grid-vehicle-force.exe' if kind=='rust' else b.ROOT/'local/behavior/wheel-car-manager-probe.exe' if producer else NATIVE
         args=[b.TRACK,b.SURFACE,source,target] if kind=='rust' else [b.REFERENCE,b.WORLD,source,target,b.MECHANICS,full]
         run=b.execute(exe,args,out,f'{prefix}-{kind}');runs.append(run)
         if kind!='rust':
             assert 'code_unchanged=1 driver_globals_restored=1' in run['stdout']
             assert f'car_manager_intervals={len(rows)} original_dispatch_wait=1 owned_events_consumed=1' in run['stdout']
-        raw=target.read_bytes();assert len(raw)==8+RECORD*len(rows)
-        answers[kind]=[raw[8+i*RECORD:8+(i+1)*RECORD] for i in range(len(rows))]
-    ranges=[(0,b.VIEW),(b.MATERIAL,RECORD)];differences=[];coverage=collections.Counter()
+        raw=target.read_bytes();assert len(raw)==8+record_size*len(rows)
+        answers[kind]=[raw[8+i*record_size:8+(i+1)*record_size] for i in range(len(rows))]
+    ranges=[(0,b.VIEW),(b.MATERIAL,record_size)];differences=[];coverage=collections.Counter()
     for i,old in enumerate(branches['original']):
         original,repeat,rust=[answers[k][i] for k in ['original','repeat','rust']]
         for start,end in ranges:
@@ -45,7 +46,20 @@ def compare(out,profile,branches,prefix,full):
         assert original[at(0xb80):at(0xba0)]==original[at(0x15c0):at(0x15e0)]
         assert original[at(0x24b)]==0
         assert original[at(0x21c4):at(0x21c8)]==struct.pack('<f',1)
-        assert original[job.OWNER_RECORD:]==old[job.OWNER_RECORD:]
+        assert original[job.OWNER_RECORD:RECORD]==old[job.OWNER_RECORD:RECORD]
+        if producer:
+            cap,before=struct.unpack_from('<II',old,RECORD);after=struct.unpack_from('<I',original,RECORD+4)[0]
+            assert before<=after<=cap
+            assert original[RECORD+8:RECORD+8+before*128]==old[RECORD+8:RECORD+8+before*128]
+            assert original[RECORD+8+after*128:]==old[RECORD+8+after*128:]
+            for j in range(before,after):
+                c=original[RECORD+8+j*128:RECORD+8+(j+1)*128]
+                assert struct.unpack_from('<II',c,4)==(1,0) and c[0xc]==0
+                assert struct.unpack_from('<I',c,0x28)[0]==1 and struct.unpack_from('<I',c,0x2c)[0]>=2
+                assert c[0x70:0x74]==bytes([0,0,1,1]) and struct.unpack_from('<f',c,0x3c)[0]>1e38
+                assert struct.unpack_from('<f',c,0x38)[0]>0
+            coverage['produced_contacts']+=after-before;coverage['production_intervals']+=after>before
+            coverage['capacity_skips']+=cap==before;coverage['retained_records']+=before
         po=b.RECORD+job.EXTRA
         assert original[po+0x190:po+0x210]==old[po+0x190:po+0x210]
         for name,o,n in [('velocity',0x15c0,32),('basis',0x15e0,48),('pose_history',0xb40,64),('velocity_history',0xb80,32),('factor',0x21c4,4),('pending_cleared',0x24b,1),('mode',0x1598,4),('engine',0x1894,4),('handling',0xcdf0+0x3a0,0x88)]:coverage[name]+=old[at(o):at(o)+n]!=original[at(o):at(o)+n]

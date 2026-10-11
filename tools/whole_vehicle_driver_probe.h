@@ -13,11 +13,17 @@ typedef struct {
 #ifdef GRID_HANDLING_QUERIES
     unsigned query_present,query_count,query_records[64][2];
 #endif
+#ifdef GRID_WHEEL_PRODUCER
+    unsigned producer_capacity,producer_used,contact_slots[4][32];
+#endif
 } DriverRecord;
 static unsigned get(const void *p,unsigned o){return getword((const unsigned char *)p+o);}
 static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4);}
 #ifdef GRID_CAR_MANAGER
 #include "vehicle_manager_probe.h"
+#endif
+#ifdef GRID_WHEEL_PRODUCER
+#include "wheel_producer_probe.h"
 #endif
 #ifdef GRID_WHOLE_OUTER
 #include "vehicle_outer_probe.h"
@@ -99,7 +105,11 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
     const unsigned tag=
 #ifdef GRID_CAR_JOB
 #ifdef GRID_CAR_MANAGER
+#ifdef GRID_WHEEL_PRODUCER
+        0x32304654;
+#else
         0x31304654;
+#endif
 #elif defined(GRID_HANDLING_QUERIES)
         0x3230464b;
 #else
@@ -136,6 +146,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         memcpy(body,r.body,0x2600);memcpy(body+0x2600,r.extra,sizeof(r.extra));memcpy(physical,r.physical,0x424);
 #ifdef GRID_CAR_MANAGER
         error=manager_guard(body);if(error)break;
+#ifdef GRID_WHEEL_PRODUCER
+        error=wheel_input_guard(&r);if(error)break;
+#endif
 #endif
 #ifdef GRID_HANDLING_QUERIES
         unsigned char receiver[HANDLING_QUERY_BYTES],receiver_before[HANDLING_QUERY_BYTES];HandlingQueries queries;
@@ -198,6 +211,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         for(unsigned i=0;i<2;i++)put(body,0x21cc+i*4,(unsigned)(uintptr_t)(body+get(r.body,0x21cc+i*4)-r.body_address));
         for(unsigned i=0;i<4;i++){
             unsigned w=0x1990+i*0x150;put(body,w+0x34,(unsigned)(uintptr_t)(body+0x15a0));
+#ifdef GRID_WHEEL_PRODUCER
+            unsigned other=get(body,w+0xc4);if(other)put(body,w+0xc4,(unsigned)(uintptr_t)wheel_source_objects[other-2].wrapper);
+#endif
             for(unsigned o=0xc0;o<=0x128;o+=0x68){unsigned token=get(body,w+o);put(body,w+o,token?(unsigned)(uintptr_t)materials[token-1].data:0);}
             put(body,0x3d0+i*0x170+0x178,(unsigned)(uintptr_t)(body+w));
         }
@@ -227,6 +243,9 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         if(!error){put(body,0xdb0,0);error=handling_guard(body,physical,delta);}
 #ifdef GRID_CAR_MANAGER
         if(!error)error=manager_finish_guard(body);
+#ifdef GRID_WHEEL_PRODUCER
+        if(!error)error=wheel_point_guard(body,physical);
+#endif
 #endif
         if(memcmp(materials,saved_materials,material_bytes))error=71;
         memcpy(materials,saved_materials,material_bytes);free(saved_materials);
@@ -241,7 +260,12 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #ifdef GRID_CAR_MANAGER
         __declspec(align(16)) unsigned char taskmanager[0xd0]={0};
         manager_setup(image,body);
+#ifdef GRID_WHEEL_PRODUCER
+        __declspec(align(16)) WheelOwner wheel_owner;wheel_setup(&wheel_owner,&r,body,physical);
+        unsigned char wheel_before[sizeof(WheelOwner)-sizeof(wheel_owner.slots)];memcpy(wheel_before,&wheel_owner,sizeof(wheel_before));
+#else
         if(get(body,0xdc8))put(body,0xdc8,(unsigned)(uintptr_t)wrapper);
+#endif
 #else
         unsigned job[7]={0},completion_table[6]={0};
         job[1]=(unsigned)(uintptr_t)body;job[2]=r.delta;job[3]=(unsigned)(uintptr_t)completion_table;job[6]=0x125ac07e;
@@ -273,8 +297,12 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #ifdef GRID_CAR_JOB
 #ifdef GRID_CAR_MANAGER
         if(!manager_retained(image,body,r.delta)){error=71;break;}
+#ifdef GRID_WHEEL_PRODUCER
+        error=wheel_output(&wheel_owner,wheel_before,&r,body,physical);if(error)break;
+#else
         if(get(body,0xdc8)!=(get(r.body,0xdc8)?(unsigned)(uintptr_t)wrapper:0u)){error=71;break;}
         put(body,0xdc8,get(r.body,0xdc8));
+#endif
         for(unsigned j=0;j<sizeof(taskmanager);j++)if(taskmanager[j])error=71;
         if(error)break;
 #else
@@ -308,7 +336,12 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
                 if(token&&(token<base||token>=base+material_count*sizeof(SurfaceRecord)||(token-base)%sizeof(SurfaceRecord))){error=72;break;}
                 put(body,w+o,token?(unsigned)((token-base)/sizeof(SurfaceRecord))+1:0);
             }
-            put(body,w+0xc4,get(body,w+0xc4)!=0);put(body,w+0xc8,get(body,w+0xc8)!=0);
+#ifdef GRID_WHEEL_PRODUCER
+            unsigned shape_token=wheel_token(get(body,w+0xc4),1);if(shape_token==0xffffffff){error=71;break;}put(body,w+0xc4,shape_token);
+#else
+            put(body,w+0xc4,get(body,w+0xc4)!=0);
+#endif
+            put(body,w+0xc8,get(body,w+0xc8)!=0);
             unsigned token=get(body,w+0xc0);r.present[i]=token!=0;memset(r.material[i],0,0x140);
             if(token){const unsigned fields[]={0x10,0x14,0x18,0x1c,0x20,0x64};for(unsigned j=0;j<6;j++)memcpy(r.material[i]+fields[j],materials[token-1].data+fields[j],4);r.material[i][0x75]=materials[token-1].data[0x75];}
         }

@@ -136,6 +136,10 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_SUSPENSION_PREPARE
     *cache=0;
     *(unsigned *)(image+0xe85b1c-0x400000)=number;
+#ifdef GRID_WHEEL_PRODUCER
+    wheel_source_objects=objects;wheel_source_count=number;
+    for(unsigned i=0;i<number;i++){objects[i].shape[0x216]=1;objects[i].shape[0x228]=1;put(objects[i].shape,0x224,0x7f7fffff);put(objects[i].shape,0x22c,0x7f7fffff);}
+#endif
     unsigned count=0,error=run_suspension_prepare(image,argv[3],argv[4],source_materials,source_count,&count);
 #else
     FILE *input=NULL;

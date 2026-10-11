@@ -1,5 +1,9 @@
 # Single-car manager and frame ordering
 
+F195 extends this inactive-producer checkpoint with verified [active wheel contact
+production](WHEEL_CONTACT_PRODUCTION.md) inside the complete manager. The earlier
+scope and evidence below remain the F194 regression baseline.
+
 F194, 11 October 2026. Whole original/repeat/Rust comparison passes 428 manager
 intervals in both debug and release: 58,305,584 complete owner bytes and
 59,106,800 observable bytes per profile. This includes 192 carried intervals,

@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F195: the whole single-car manager includes actual wheel-contact production, matching428updates per debug/release and155 generated contacts per profile. Bounded pool ownership, source shape identities, retained templates and capacity are verified; generated C=0/null-second-body and special73 must survive later classification. Next group and solve these contacts, then persistent/source-initialized Bevy driving. [Wheel contact production](WHEEL_CONTACT_PRODUCTION.md).
+
 Current checkpoint F194: the complete single-car manager interval, original direct dispatch and real Windows completion wait match428 updates per debug/release, including192 carried intervals with manager-authored orientation/history. The enclosing frame order is recovered, including its deferred final world phase. Next active wheel-constraint production into the physical contact pool, persistent world ownership and source-initialized Bevy driving. [Manager and frame ordering](CAR_MANAGER.md).
 
 Current checkpoint F193: whole registered car job with owned ordered handling queries and healthy enabled notifications matches444calls/60,485,232completeownerbytes per profile. Empty versus absent query objects, duplicate first-match lookup and the unclamped event threshold are explicit. Next original car/world ordering, geometric contact production, persistent ownership and source-initialized Bevy driving. [Query/notification evidence](HANDLING_QUERIES.md).

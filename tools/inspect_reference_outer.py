@@ -68,7 +68,13 @@ def main():
                 if a.schedule:
                     wheels=read(body+0x1990,0x540)
                     def wheel_value(i,o):return struct.unpack_from('<f',wheels,i*0x150+o)[0]
-                    post_job.append(dict(body=hex(body),state_248_24b=read(body+0x248,4).hex(),deferred_counts={hex(o):word(body+o) for o in [0xcd8,0xda8,0xc0c,0xd40]},producer_enabled_1ee0=read(body+0x1ee0,1).hex(),producer_wrapper_dc8=hex(word(body+0xdc8)),wheels=[dict(distance_40=wheel_value(i,0x40),limit_50=wheel_value(i,0x50),other_wrapper_c4=hex(struct.unpack_from('<I',wheels,i*0x150+0xc4)[0])) for i in range(4)]))
+                    def producer_shape(address):
+                        if not address:return None
+                        shape=word(address+8);assert shape,'Producer shape is absent'
+                        raw_shape=read(shape,0x274)
+                        shword=lambda o:struct.unpack_from('<I',raw_shape,o)[0]
+                        return dict(wrapper=hex(address),shape=hex(shape),kind_10=shword(0x10),physical_d8=hex(shword(0xd8)),material_c8=hex(shword(0xc8)),flags_216_217=raw_shape[0x216:0x218].hex(),flags_228_230=raw_shape[0x228:0x231].hex(),value_224=struct.unpack_from('<f',raw_shape,0x224)[0],value_22c=struct.unpack_from('<f',raw_shape,0x22c)[0],alias_270=hex(shword(0x270)))
+                    post_job.append(dict(body=hex(body),state_248_24b=read(body+0x248,4).hex(),deferred_counts={hex(o):word(body+o) for o in [0xcd8,0xda8,0xc0c,0xd40]},producer_enabled_1ee0=read(body+0x1ee0,1).hex(),producer_wrapper_dc8=hex(word(body+0xdc8)),producer_shape=producer_shape(word(body+0xdc8)),wheels=[dict(distance_40=wheel_value(i,0x40),limit_50=wheel_value(i,0x50),other_wrapper_c4=hex(struct.unpack_from('<I',wheels,i*0x150+0xc4)[0]),other_shape=producer_shape(struct.unpack_from('<I',wheels,i*0x150+0xc4)[0])) for i in range(4)]))
             if a.schedule:
                 raw=read(0xe8ed98,20*0x14)
                 for i in range(20):

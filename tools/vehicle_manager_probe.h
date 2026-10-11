@@ -32,7 +32,9 @@ static unsigned manager_normal(float *v,int square_first){
 }
 static void manager_cross(float *out,const float *a,const float *b){out[0]=a[1]*b[2]-a[2]*b[1];out[1]=b[0]*a[2]-b[2]*a[0];out[2]=b[1]*a[0]-a[1]*b[0];out[3]=0;}
 static unsigned manager_finish_guard(const unsigned char *b){
+#ifndef GRID_WHEEL_PRODUCER
     if(b[0x1ee0]&&get(b,0xdc8)&&!b[0x22e4])for(unsigned i=0;i<4;i++){unsigned w=0x1990+i*0x150;if(*(const float *)(b+w+0x40)>*(const float *)(b+w+0x50)&&get(b,w+0xc4))return 40;}
+#endif
     float forward[4],up[4],side[4];memcpy(forward,b+0x1600,16);
     unsigned error=manager_normal(forward,0);if(error)return error;
     manager_cross(up,forward,(const float *)(b+0x15e0));error=manager_normal(up,0);if(error)return error;
