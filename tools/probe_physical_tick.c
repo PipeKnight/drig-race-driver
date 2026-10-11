@@ -18,6 +18,7 @@ __declspec(noinline) static unsigned invoke(void *function,void *manager,void *g
          mov result,eax }
  return result;
 }
+#ifndef GRID_WORLD_ADVANCE
 __declspec(noinline) static void advance(void *function,void *body,unsigned delta){
  __asm { mov ecx,body
          push 0
@@ -25,6 +26,7 @@ __declspec(noinline) static void advance(void *function,void *body,unsigned delt
          push delta
          call function }
 }
+#endif
 static unsigned get(const void *p,unsigned o){unsigned v;memcpy(&v,(const unsigned char *)p+o,4);return v;}
 static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4);}
 static int read(FILE *f,void *p,size_t n){return fread(p,1,n,f)==n;}
@@ -40,11 +42,21 @@ int wmain(int argc,wchar_t **argv){
  for(unsigned i=0;i<5;i++){unsigned char *page=image+pages[i]-0x400000;memcpy(saved[i],page,4096);if(!VirtualProtect(page,4096,PAGE_READWRITE,&protections[i])){error=5;break;}++protected;}
  FILE *input=NULL,*output=NULL;unsigned magic=0,total=0;
  if(!error&&(_wfopen_s(&input,argv[2],L"rb")||!input||_wfopen_s(&output,argv[3],L"wbx")||!output))error=6;
- if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=0x33524650||!read(input,&total,4)||!total||total>1024))error=7;
+ if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=
+#ifdef GRID_WORLD_ADVANCE
+ 0x33525750
+#else
+ 0x33524650
+#endif
+||!read(input,&total,4)||!total||total>1024))error=7;
  if(error)goto finish;
  fwrite(&magic,4,1,output);fwrite(&total,4,1,output);
  for(unsigned i=0;i<total;i++){
   unsigned h[6],cache[15],ends[4],modes[64],shape_ids[64][2],material_ids[64][2],bodyptrs[16],all_contacts[64],pool_single[64],pool_two[64],ns=0,nt=0;
+  #ifdef GRID_WORLD_ADVANCE
+  unsigned active_next[16],update_next[16]={0},last=0;
+  __declspec(align(16)) unsigned char world[0x100]={0};unsigned update_list[2]={0},lists[1]={(unsigned)(uintptr_t)update_list};
+#endif
   float parameters[11],correction[4];unsigned correction_iterations;
   __declspec(align(16)) unsigned char bodies[16][0x430]={0},contacts[64][0x80]={0},shapes[2][0x220]={0},manager[0x240]={0},group[0x90]={0},rows[256][192];
   __declspec(align(16)) float materials[8][16]={0},inertia[16][16],mass[16],workspace[16][8];
@@ -59,6 +71,9 @@ int wmain(int argc,wchar_t **argv){
    const unsigned pointers[]={0x2fc,0x320,0x324,0x328,0x32c,0x338,0x33c,0x340,0x418,0x41c,0x420};
    for(unsigned k=0;k<11;k++)if(get(b,pointers[k]))error=8;
    if(get(b,0x400)||b[0x390]>1||!finite_words(b+0x90,16)||!finite_words(b+0x150,16)||!finite_words(b+0x190,16)||!finite_words(b+0x230,4)||!finite_words(b+0x380,4)||!finite_words(b+0x3a0,23))error=8;
+   #ifdef GRID_WORLD_ADVANCE
+   if(get(b,0x300)>h[0]||get(b,0x318)){error=8;break;}active_next[j]=get(b,0x300);
+#endif
    put(b,0x334,(unsigned)(uintptr_t)(b+0x1c0));put(b,0x32c,(unsigned)(uintptr_t)group);
    put(b,0x2fc,j+1<h[0]?(unsigned)(uintptr_t)bodies[j+1]:0);
    for(unsigned k=0;k<3;k++)put(b,0x338+k*4,(unsigned)(uintptr_t)(b+0x190+k*16));
@@ -76,6 +91,21 @@ int wmain(int argc,wchar_t **argv){
    put(c,0x10,j+1<h[2]?(unsigned)(uintptr_t)contacts[j+1]:0);
    if(modes[j])pool_two[nt++]=(unsigned)(uintptr_t)c;else pool_single[ns++]=(unsigned)(uintptr_t)c;
   }
+  #ifdef GRID_WORLD_ADVANCE
+  if(!error){
+   unsigned visited[16]={0},cursor=0,count=0,previous=0;
+   for(;;){
+    if(cursor>=h[0]||visited[cursor]){error=8;break;}
+    visited[cursor]=1;++count;update_next[cursor]=previous;previous=cursor+1;last=cursor;
+    if(!active_next[cursor])break;cursor=active_next[cursor]-1;
+   }
+   if(count!=h[0])error=8;
+   if(!error){
+    for(unsigned j=0;j<h[0];j++)put(bodies[j],0x300,active_next[j]?bodyptrs[active_next[j]-1]:0);
+    update_list[1]=(unsigned)(uintptr_t)group;put(world,8,(unsigned)(uintptr_t)lists);put(world,0xc,1);put(world,0x60,i%9);put(world,0x3c+(i%9)*4,bodyptrs[0]);
+   }
+  }
+#endif
   if(error||!read(input,rows,h[3]*192)){error=8;break;}
   shapes[1][0x216]=1;
   for(unsigned j=0;j<2;j++)cache[j]=cache[j]==0xffffffff?0:(unsigned)(uintptr_t)materials[cache[j]];
@@ -85,9 +115,23 @@ int wmain(int argc,wchar_t **argv){
   put(manager,0x94,(unsigned)(uintptr_t)all_contacts);put(manager_before,0x94,(unsigned)(uintptr_t)all_contacts);
   put(group,0,h[2]?(unsigned)(uintptr_t)contacts[0]:0);put(group,8,(unsigned)(uintptr_t)bodies[0]);put(group,0x20,h[0]);put(group,0x24,h[2]);
   unsigned success=0;
-  __try{for(unsigned j=0;j<h[0];j++)advance(image+0xb13e10-0x400000,bodies[j],*(unsigned *)parameters);success=invoke(image+0xb7b850-0x400000,manager,group,*(unsigned *)parameters);}
+  __try{
+#ifdef GRID_WORLD_ADVANCE
+   ((void (__fastcall *)(void *,void *,unsigned))(image+0xad7040-0x400000))(world,NULL,*(unsigned *)parameters);
+#else
+   for(unsigned j=0;j<h[0];j++)advance(image+0xb13e10-0x400000,bodies[j],*(unsigned *)parameters);
+#endif
+   success=invoke(image+0xb7b850-0x400000,manager,group,*(unsigned *)parameters);}
   __except(fault(GetExceptionInformation())){fprintf(stderr,"case=%u\n",i);error=9;}
   if(error)break;
+  #ifdef GRID_WORLD_ADVANCE
+  if(update_list[0]!=bodyptrs[last]||update_list[1]!=(unsigned)(uintptr_t)group||get(world,0x3c+(i%9)*4)!=bodyptrs[0]){error=10;break;}
+  for(unsigned j=0;j<h[0];j++){
+   if(get(bodies[j],0x300)!=(active_next[j]?bodyptrs[active_next[j]-1]:0)||get(bodies[j],0x318)!=(update_next[j]?bodyptrs[update_next[j]-1]:0)){error=10;break;}
+   put(bodies[j],0x300,active_next[j]);put(bodies[j],0x318,update_next[j]);
+  }
+  if(error)break;
+#endif
   if(memcmp(manager_before,manager,0x20)||memcmp(manager_before+0x5c,manager+0x5c,0x60)||memcmp(manager_before+0xcc,manager+0xcc,0x34)){error=10;break;}
   ends[0]=get(manager,0xc4);ends[1]=get(manager,0xbc);ends[2]=get(manager,0xc8);ends[3]=get(manager,0xc0);memcpy(cache,manager+0x20,60);
   for(unsigned j=0;j<2;j++){if(!cache[j])cache[j]=0xffffffff;else{unsigned found=0;for(unsigned m=0;m<h[1];m++)if(cache[j]==(unsigned)(uintptr_t)materials[m]){cache[j]=m;found=1;break;}if(!found)error=10;}}
@@ -110,6 +154,9 @@ finish:
  for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE){size_t size=sections[i].Misc.VirtualSize>sections[i].SizeOfRawData?sections[i].Misc.VirtualSize:sections[i].SizeOfRawData;if(memcmp(code+sections[i].VirtualAddress,image+sections[i].VirtualAddress,size))error=13;}
  if(input&&ferror(input))error=14;if(output&&ferror(output))error=14;
  if(input&&fclose(input))error=14;if(output&&fclose(output))error=14;
+ #ifdef GRID_WORLD_ADVANCE
+ if(error&&output)_wremove(argv[3]);
+#endif
  free(code);VirtualFree(image,0,MEM_RELEASE);
  printf("physical_tick_cases=%u error=%u code_unchanged=%u no_imports=1\n",cases,error,error!=13);return (int)error;
 }

@@ -1,5 +1,7 @@
 # Physical-frame ownership and scheduling research
 
+F188 verifies the complete synchronous AD7040 world advance/list construction joined to supplied-contact physical solving,711scenarios per profile. See [world body advance](WORLD_BODY_ADVANCE.md). Whole world/contact production and active callbacks remain open; earlier sections retain history.
+
 10 October 2026. This is **static dependency recovery**, not a measured runtime schedule. [F160](IMPACT_FRAME_CORRECTION.md) verifies a supplied physical-frame branch; authoritative contact production, active callbacks and its relationship to the car/wheel update remain open.
 
 ## Confirmed static chain
