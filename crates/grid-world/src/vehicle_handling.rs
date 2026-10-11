@@ -206,13 +206,23 @@ pub fn calculate_with_queries(
     // operands multiply exactly in f64, matching the selected 53-bit FPU mode.
     let threshold = (f(p, 0x3f0) as f64 * f(b, 0x368) as f64) as f32;
     for i in 0..4 {
-        if !bounded(car, 0x1aa8 + i * 0x150, 0x1aac + i * 0x150)
-            || !bounded(car, 0x1ac8 + i * 0x150, 0x1acc + i * 0x150)
-            || f(car, 0x1ac8 + i * 0x150) * delta > threshold
-            || (f(car, 0x1aa8 + i * 0x150) > f(b, 0x2f0) && f(b, 0x2f4) <= 0.)
-            || !bounded(b, 0x60 + i * 0x30, 0x70 + i * 0x30)
-        {
+        if !bounded(car, 0x1aa8 + i * 0x150, 0x1aac + i * 0x150) {
+            return Err(Error("out-of-bound handling wheel wear"));
+        }
+        // Integrated wheel forces can exceed the old diagnostic's arbitrary
+        // one-million bound. Delta is <= .02, so any finite f32 operand has a
+        // finite product; retain the original damage-threshold guard below.
+        if !f(car, 0x1ac8 + i * 0x150).is_finite() {
+            return Err(Error("nonfinite handling wheel impact"));
+        }
+        if !bounded(b, 0x60 + i * 0x30, 0x70 + i * 0x30) {
+            return Err(Error("out-of-bound handling collision point"));
+        }
+        if f(car, 0x1ac8 + i * 0x150) * delta > threshold {
             return Err(Error("unsupported handling collision damage"));
+        }
+        if f(car, 0x1aa8 + i * 0x150) > f(b, 0x2f0) && f(b, 0x2f4) <= 0. {
+            return Err(Error("invalid active handling wheel-wear divisor"));
         }
     }
     let mut next = input.clone();
@@ -363,6 +373,26 @@ mod tests {
         s.physical.store(0x1e4, 1.);
         s
     }
+    #[test]
+    fn finite_large_impact_keeps_original_damage_threshold_guard() {
+        let mut s = fixture();
+        s.vehicle.store(MUTABLE + 0x368, 10000.);
+        s.vehicle.store(0x1ac8, f32::from_bits(0x4a222f9b));
+        assert!(calculate(&s, 0.001).is_ok());
+        let before = s.clone();
+        s.vehicle.store(MUTABLE + 0x368, 0.8);
+        assert_eq!(
+            calculate(&s, 0.001).err().unwrap().0,
+            "unsupported handling collision damage"
+        );
+        assert_eq!(s.physical, before.physical);
+        s.vehicle.store(0x1ac8, f32::INFINITY);
+        assert_eq!(
+            calculate(&s, 0.001).err().unwrap().0,
+            "nonfinite handling wheel impact"
+        );
+    }
+
     #[test]
     fn late_effect_failure_rolls_back_earlier_wear_and_gear_history() {
         let mut s = fixture();
