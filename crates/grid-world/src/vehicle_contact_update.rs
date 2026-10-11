@@ -99,6 +99,33 @@ pub fn apply_with_chassis(
     Ok(materials)
 }
 
+/// Selected engaged assisted-automatic driver, including the earlier history,
+/// gravity/aerodynamic interval and all source contact/force/chassis stages.
+/// World synchronization, source initialization and respawn remain caller work.
+pub fn apply_driver(
+    frame: &mut Frame,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    mut material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<[Option<Material>; 4], Error> {
+    let mut next = frame.clone();
+    let mut high = [false; 4];
+    for (i, slot) in high.iter_mut().enumerate() {
+        let token = next.body[(0x1990 + i * 0x150 + 0xc0) / 4];
+        if token != 0 {
+            *slot = material(token)?
+                .ok_or(Error("missing previous wheel mechanics"))?
+                .high_downforce;
+        }
+    }
+    crate::vehicle_driver_prepare::apply(&mut next, delta, gravity, high)?;
+    let materials = apply_with_chassis(&mut next, pair, delta, query, material)?;
+    *frame = next;
+    Ok(materials)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +169,58 @@ mod tests {
             }
         }
         frame
+    }
+    fn valid_driver_frame() -> Frame {
+        let mut frame = valid_prior_frame();
+        frame.body[0x1970 / 4] = 0x101;
+        for (o, x) in [(0x1ef0, 10f32), (0xe14, 0.5), (0x21c4, 1.2)] {
+            frame.body[o / 4] = x.to_bits();
+        }
+        frame
+    }
+    #[test]
+    fn driver_late_failure_rolls_back_gravity_contact_forces_and_chassis() {
+        let mut frame = valid_driver_frame();
+        frame.body[0x1494 / 4] = f32::NAN.to_bits();
+        let before = frame.clone();
+        let mut prepared = frame.clone();
+        crate::vehicle_driver_prepare::apply(&mut prepared, 0.01, 9.81, [false; 4]).unwrap();
+        assert_ne!(prepared.body[0x15c4 / 4], before.body[0x15c4 / 4]);
+        let mut queries = 0;
+        let error = apply_driver(
+            &mut frame,
+            [2, 3],
+            0.01,
+            9.81,
+            |_, _| {
+                queries += 1;
+                Ok(None)
+            },
+            |_| Ok(None),
+        )
+        .unwrap_err();
+        assert_eq!(queries, 4);
+        assert_eq!(error.0, "invalid chassis scalar or span");
+        assert_eq!(frame.body, before.body);
+        assert_eq!(frame.view, before.view);
+        assert_eq!(frame.solver, before.solver);
+        assert_eq!(frame.material_multipliers, before.material_multipliers);
+        assert_eq!(frame.diagnostics, before.diagnostics);
+        assert_eq!(frame.driven, before.driven);
+    }
+    #[test]
+    fn driver_periodic_overflow_rolls_back_after_gravity_and_history_writes() {
+        let mut frame = valid_driver_frame();
+        frame.body[0x300 / 4] = 1; // Positive subnormal; reciprocal overflows later.
+        let before = frame.clone();
+        let error =
+            crate::vehicle_driver_prepare::apply(&mut frame, 0.01, 9.81, [false; 4]).unwrap_err();
+        assert_eq!(error.0, "nonfinite driver preparation output");
+        assert_eq!(frame.body, before.body);
+        assert_eq!(frame.view, before.view);
+        assert_eq!(frame.solver, before.solver);
+        assert_eq!(frame.material_multipliers, before.material_multipliers);
+        assert_eq!(frame.diagnostics, before.diagnostics);
     }
     #[test]
     fn chassis_failure_preserves_completed_contact_controls_assists_and_solver() {

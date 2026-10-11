@@ -70,6 +70,7 @@ impl Surfaces {
                             roll: s.roll_induce,
                         },
                         hardness: s.hardness,
+                        high_downforce: s.high_downforce,
                     })
             })
             .collect();

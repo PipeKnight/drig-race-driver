@@ -2,6 +2,7 @@
 use grid_world::vehicle_force::{self, Frame};
 use std::{fs::OpenOptions, io::Write, path::Path};
 const RECORD: usize = 15384;
+const REFERENCE_GRAVITY: f32 = f32::from_bits(0x411cf5c3);
 fn word(data: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
 }
@@ -36,18 +37,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if data.len() < 8
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
-            0x3130464d,
+            0x3130464d, 0x31304644, 0x31304645,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let chassis = word(&data, 0) == 0x3130464d;
+    let driver = word(&data, 0) == 0x31304645;
+    let chassis = word(&data, 0) == 0x3130464d || driver;
+    let driver_prepare = word(&data, 0) == 0x31304644;
     let post_force = word(&data, 0) == 0x31304648 || chassis;
     let vectors = word(&data, 0) == 0x31304655 || post_force;
     let joined = word(&data, 0) == 0x3130464a || vectors;
     if joined != (args.len() == 4) {
-        return Err("source arguments required only for JF01/UF01/HF01/MF01".into());
+        return Err("source arguments required only for JF01/UF01/HF01/MF01/EF01".into());
     }
     let sources = if joined {
         let track = Path::new(&args[0]);
@@ -145,7 +148,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             diagnostics,
         };
         let delta = f32::from_bits(word(record, 4));
-        if joined {
+        if driver_prepare {
+            let flags = std::array::from_fn(|i| {
+                record[36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140 + 0x75] != 0
+            });
+            grid_world::vehicle_driver_prepare::apply(&mut frame, delta, REFERENCE_GRAVITY, flags)?;
+        } else if joined {
             let (track, surfaces) = sources.as_ref().unwrap();
             let mut pair = [0; 2];
             for (i, slot) in pair.iter_mut().enumerate() {
@@ -159,7 +167,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 *slot = (off / 0x150) as usize;
             }
             let mut cache = grid_world::rectangle_cull::Cache::default();
-            let apply = if chassis {
+            let apply = if driver {
+                |frame: &mut Frame, pair, delta, query, material| {
+                    grid_world::vehicle_contact_update::apply_driver(
+                        frame,
+                        pair,
+                        delta,
+                        REFERENCE_GRAVITY,
+                        query,
+                        material,
+                    )
+                }
+            } else if chassis {
                 grid_world::vehicle_contact_update::apply_with_chassis
             } else if post_force {
                 grid_world::vehicle_contact_update::apply_with_post_force
@@ -198,6 +217,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let base = 36 + 0x2600 + 0x300 + 0xdd0 + i * 0x140;
                 record[base..base + 0x140].fill(0);
                 if let Some(m) = m {
+                    record[base + 0x75] = u8::from(m.high_downforce);
                     for (o, x) in [
                         (0x10, m.prepared.roughness),
                         (0x14, m.prepared.drag.minimum_speed),

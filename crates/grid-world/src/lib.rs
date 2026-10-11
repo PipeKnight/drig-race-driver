@@ -64,6 +64,7 @@ pub mod vehicle_chassis;
 pub mod vehicle_contact_force;
 pub mod vehicle_contact_update;
 pub mod vehicle_controls;
+pub mod vehicle_driver_prepare;
 pub mod vehicle_force;
 pub mod vehicle_grip;
 pub mod vehicle_post_force;

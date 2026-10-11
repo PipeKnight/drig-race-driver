@@ -11,6 +11,7 @@ pub struct Material {
     pub history: wheel_history::Material,
     pub prepared: vehicle_prepared_frame::Material,
     pub hardness: f32,
+    pub high_downforce: bool,
 }
 
 /// Source identities remain opaque tokens. Earlier force vectors are supplied.
