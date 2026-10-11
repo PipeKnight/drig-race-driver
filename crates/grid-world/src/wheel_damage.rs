@@ -16,6 +16,20 @@ pub struct Input {
 /// Updates one level at mutable18..24. The original does not read its delta.
 /// The caller supplies deformation; impact production and notifications are separate.
 pub fn calculate(input: Input) -> Result<f32, Error> {
+    let Some(ratio) = raw_ratio(input)? else {
+        return Ok(input.previous_level);
+    };
+    let level = ratio.clamp(0., 1.);
+    Ok(if input.previous_level > level {
+        input.previous_level
+    } else {
+        level
+    })
+}
+
+/// Unclamped deformation used by the original notification test, before
+/// monotonic level publication. None means either signed-zero setting disabled it.
+pub(crate) fn raw_ratio(input: Input) -> Result<Option<f32>, Error> {
     if input
         .displacement_1650
         .into_iter()
@@ -35,7 +49,7 @@ pub fn calculate(input: Input) -> Result<f32, Error> {
     }
     // Either signed zero disables the entire update, preserving the old word.
     if input.angular_limit_280 == 0. {
-        return Ok(input.previous_level);
+        return Ok(None);
     }
     let angular = input.angular_deformation_1790.abs()
         / (input.angular_limit_280 * f32::from_bits(0x3c8efa35));
@@ -62,17 +76,11 @@ pub fn calculate(input: Input) -> Result<f32, Error> {
         return Err(Error("nonfinite visual wheel damage result"));
     }
     // Equality selects displacement, and equality with the prior selects new.
-    let level = if angular > displacement {
+    Ok(Some(if angular > displacement {
         angular
     } else {
         displacement
-    }
-    .clamp(0., 1.);
-    Ok(if input.previous_level > level {
-        input.previous_level
-    } else {
-        level
-    })
+    }))
 }
 
 #[cfg(test)]

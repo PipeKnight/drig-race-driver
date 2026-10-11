@@ -38,12 +38,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
             0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f, 0x3130464b,
+            0x3230464b,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let car_job = word(&data, 0) == 0x3130464b;
+    let handling_queries = word(&data, 0) == 0x3230464b;
+    let car_job = word(&data, 0) == 0x3130464b || handling_queries;
     let complete = word(&data, 0) == 0x3130464f || car_job;
     let outer = word(&data, 0) == 0x31304651 || complete;
     let driver = word(&data, 0) == 0x31304645 || outer;
@@ -80,11 +82,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             0x21000 - 0x2600 + 0x424
         } else {
             0
-        };
+        }
+        + if handling_queries { 8 + 64 * 8 } else { 0 };
     if !(1..=64).contains(&count) || data.len() != 8 + count * record_size {
         return Err("invalid size/count".into());
     }
     for (index, record) in data[8..].chunks_exact_mut(record_size).enumerate() {
+        let mut query_rows = Vec::new();
+        let mut query_present = false;
+        if handling_queries {
+            let tail = RECORD + 0x21000 - 0x2600 + 0x424;
+            let present = word(record, tail);
+            let n = word(record, tail + 4) as usize;
+            if present > 1
+                || n > 64
+                || (present == 0 && n != 0)
+                || record[tail + 8 + n.min(64) * 8..].iter().any(|&x| x != 0)
+            {
+                return Err("invalid handling query records".into());
+            }
+            query_present = present != 0;
+            query_rows.extend((0..n).map(|i| grid_world::vehicle_handling::QueryRecord {
+                id: word(record, tail + 8 + i * 8),
+                status: word(record, tail + 12 + i * 8),
+            }));
+        }
         if word(record, 0) as usize != index {
             return Err("invalid case identity".into());
         }
@@ -235,25 +257,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .step_by(4)
                         .map(|o| word(record, o)),
                 );
-                let calculate = if car_job {
-                    grid_world::vehicle_job::calculate
-                } else {
-                    grid_world::vehicle_outer::calculate
-                };
-                let result = calculate(
-                    &grid_world::vehicle_outer::State {
-                        owner: grid_world::vehicle_publication::State {
-                            vehicle,
-                            physical: words(record, RECORD + 0x21000 - 0x2600),
-                        },
-                        frame,
+                let state = grid_world::vehicle_outer::State {
+                    owner: grid_world::vehicle_publication::State {
+                        vehicle,
+                        physical: words(record, RECORD + 0x21000 - 0x2600),
                     },
-                    pair,
-                    delta,
-                    REFERENCE_GRAVITY,
-                    query,
-                    |token| surfaces.joined(token),
-                )?;
+                    frame,
+                };
+                let result = if handling_queries {
+                    grid_world::vehicle_job::calculate_with_queries(
+                        &state,
+                        pair,
+                        delta,
+                        REFERENCE_GRAVITY,
+                        query_present.then_some(query_rows.as_slice()),
+                        query,
+                        |token| surfaces.joined(token),
+                    )?
+                } else {
+                    let calculate = if car_job {
+                        grid_world::vehicle_job::calculate
+                    } else {
+                        grid_world::vehicle_outer::calculate
+                    };
+                    calculate(&state, pair, delta, REFERENCE_GRAVITY, query, |token| {
+                        surfaces.joined(token)
+                    })?
+                };
                 frame = result.state.frame;
                 put(record, RECORD, &result.state.owner.vehicle[0x2600 / 4..]);
                 put(

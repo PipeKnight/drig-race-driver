@@ -15,6 +15,24 @@ pub fn calculate(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
 ) -> Result<Output, Error> {
+    if input.owner.vehicle.len() == vehicle_publication::VEHICLE_WORDS
+        && input.owner.vehicle[(vehicle_handling::MUTABLE + 0x440) / 4] & 0xff0000 != 0
+    {
+        return Err(Error("unsupported handling branch"));
+    }
+    calculate_with_queries(input, pair, delta, gravity, None, query, material)
+}
+
+/// Registered job with owned handling lookup records and healthy notifications.
+pub fn calculate_with_queries(
+    input: &State,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<Output, Error> {
     if input.owner.vehicle.len() != vehicle_publication::VEHICLE_WORDS
         || input.owner.vehicle[..input.frame.body.len()] != input.frame.body
     {
@@ -44,7 +62,7 @@ pub fn calculate(
     let materials =
         crate::vehicle_step::apply(&mut next.frame, pair, delta, gravity, query, material)?;
     next.owner.vehicle[..vehicle_force::BODY_WORDS].copy_from_slice(&next.frame.body);
-    next.owner = vehicle_handling::publish(&next.owner, delta)?;
+    next.owner = vehicle_handling::publish_with_queries(&next.owner, delta, handling_queries)?;
     next.frame
         .body
         .copy_from_slice(&next.owner.vehicle[..vehicle_force::BODY_WORDS]);
