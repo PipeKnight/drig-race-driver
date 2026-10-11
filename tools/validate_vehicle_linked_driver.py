@@ -28,7 +28,7 @@ def owner(record):
     return bytes(car+physical)
 
 
-def publish(out,profile,branches,owners,prefix):
+def publish(out,profile,branches,owners,prefix,ignore_temporary=False):
     b=driver.base;results={};runs=[]
     for kind,records in branches.items():
         source=out/f'{prefix}-{kind}-input.bin';target=out/f'{prefix}-{kind}.bin';rows=[]
@@ -48,13 +48,15 @@ def publish(out,profile,branches,owners,prefix):
             row=bytearray(r);row[b.BODY:b.VIEW]=car[:0x2600]
             following.append(bytes(row));newowners.append(bytes(car+physical))
         results[kind]=(following,newowners)
-    assert results['original']==results['repeat']==results['rust']
+    if ignore_temporary:
+        assert results['original'][1]==results['repeat'][1]==results['rust'][1]
+    else:assert results['original']==results['repeat']==results['rust']
     report=dict(calls=len(branches['original']),whole_buffers_exact=True,advance_calls=0,correction_calls=0,executions=runs)
     (out/f'{prefix}-validation.json').write_text(json.dumps(report,indent=2));return report,results
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--whole-driver',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);mode=p.add_mutually_exclusive_group();mode.add_argument('--whole-driver',action='store_true');mode.add_argument('--whole-step',action='store_true');a=p.parse_args()
     b=driver.base;out=a.output.resolve();assert out.is_relative_to((b.ROOT/'local').resolve());out.mkdir(exist_ok=False)
     tables=sources.verify_shift(out.with_name(out.name+'-source'),a.profile);records=[]
     for i,raw in enumerate(driver.cases()):
@@ -66,6 +68,9 @@ def main():
     if a.whole_driver:
         import validate_whole_vehicle_driver as whole
         whole.configure()
+    if a.whole_step:
+        import validate_whole_vehicle_step as step
+        records=step.cases(tables);b.MAGIC=b'QF01';b.run_set=step.compare
     for path,sha in [(b.TRACK,'6e161e5bee8f946ff0622ca836af9071c9474cec7aef53609180b84319f9d8ef'),(b.SURFACE,'8a23a960ea0ca837ee49bafaab893cff7446c0089c9ca282e131030f4b3d3251'),(b.WORLD,'b83d245aa380bb0524f45e4b9a323c44cbf536536ec6cc6722bf22765d90d8d7')]:assert b.digest(path)==sha
     full=b.grip.mechanics_fixture(out);reports=[];sync_reports=[];publication=[];initial=[];coverage=collections.Counter()
     def tick(branches,owners,prefix):
@@ -77,8 +82,10 @@ def main():
         for kind,rows in after.items():
             for i,row in enumerate(rows):
                 r=bytearray(row);previous=branches[kind][i];o=b.BODY
-                r[o+0xb40:o+0xb80]=previous[o+0x15e0:o+0x1620];r[o+0xb80:o+0xba0]=previous[o+0xb20:o+0xb40];r[o+0xb20:o+0xb40]=r[o+0x15c0:o+0x15e0];rows[i]=bytes(r)
-        report,result=publish(out,a.profile,after,owners,prefix+'-publish');publication.append(report)
+                r[o+0xb40:o+0xb80]=previous[o+0x15e0:o+0x1620];r[o+0xb80:o+0xba0]=previous[o+0xb20:o+0xb40];r[o+0xb20:o+0xb40]=r[o+0x15c0:o+0x15e0]
+                if a.whole_step:b.put(r,o+0xe1c,.5)
+                rows[i]=bytes(r)
+        report,result=publish(out,a.profile,after,owners,prefix+'-publish',a.whole_step);publication.append(report)
         return {k:v[0] for k,v in result.items()},{k:v[1] for k,v in result.items()}
     for start in range(0,len(records),40):
         batch=records[start:start+40];r,branches=gearing.initialize(out,a.profile,{k:batch for k in ['original','repeat','rust']},f'init-{start}');initial.append(r)
@@ -86,10 +93,13 @@ def main():
     r,branches=gearing.initialize(out,a.profile,{k:records[8:24] for k in ['original','repeat','rust']},'init-carry');initial.append(r)
     owners={k:[owner(r) for r in rows] for k,rows in branches.items()}
     for step in range(12):branches,owners=tick(branches,owners,f'carry-{step}')
-    required=['contacts','spin','chassis','velocity'] if a.whole_driver else ['contacts','spin_changes','chassis_matrix','driver_velocity']
+    required=['contacts','spin','chassis','velocity'] if a.whole_driver or a.whole_step else ['contacts','spin_changes','chassis_matrix','driver_velocity']
     assert all(coverage[k]>0 for k in required)
-    result=dict(profile=a.profile,driver_calls=sum(r['calls'] for r in reports),driver_record_bytes=sum(r['record_bytes'] for r in reports),sync_calls=sum(r['calls'] for r in sync_reports),sync_bytes=sum(r['record_bytes'] for r in sync_reports),source_files=len(tables),coverage=dict(coverage),initialization_reports=initial,sync_reports=sync_reports,driver_reports=reports,publication_reports=publication,scope='Whole9BD7F0 -> selected initialized source driver -> linked setters/readback without advance/correction, independent carried states. Authored history/ownership, zero deformation dimensions/shape lists, omitted A06A90 tail/A03220/world dispatch; no actual whole synchronous wrapper or driving claim.')
+    result=dict(profile=a.profile,driver_calls=sum(r['calls'] for r in reports),driver_record_bytes=sum(r.get('record_bytes',r.get('observable_bytes',0)) for r in reports),sync_calls=sum(r['calls'] for r in sync_reports),sync_bytes=sum(r['record_bytes'] for r in sync_reports),source_files=len(tables),coverage=dict(coverage),initialization_reports=initial,sync_reports=sync_reports,driver_reports=reports,publication_reports=publication,scope='Whole9BD7F0 -> selected initialized source driver -> linked setters/readback without advance/correction, independent carried states. Authored history/ownership, zero deformation dimensions/shape lists, omitted A06A90 tail/A03220/world dispatch; no actual whole synchronous wrapper or driving claim.')
     if a.whole_driver:result['scope']='Whole9BD7F0 -> whole original A03670 versus Rust -> linked setters/readback without advance/correction; independent carried state, authored history/ownership, zero deformation/emptyshapes, omitted A06A90tail/A03220/world dispatch. No whole synchronous wrapper/driving claim.'
+    if a.whole_step:
+        result['driver_observable_bytes']=result.pop('driver_record_bytes');result['driver_body_bytes']=sum(r['body_bytes'] for r in reports)
+        result['scope']='Whole9BD7F0 -> whole original A06A90 versus Rust -> linked publication without advance/correction, each branch carrying its own state. Full car and physical state compare; expired native temporary view/solver excluded. Authored input/history/ownership, selected engaged mode1, zero deformation/emptyshapes; omitted A03220/world dispatch, no driving claim.'
     (out/'validation.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if not k.endswith('reports')}))
 
 

@@ -66,14 +66,30 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         if(!VirtualProtect(image+pages[i]-0x400000,4096,PAGE_READWRITE,protections+i)){error=61;goto finish;}++protected;
     }
     if(!materials||!material_count||_wfopen_s(&input,request,L"rb")||!input){error=62;goto finish;}
-    if(fseek(input,0,SEEK_END)||ftell(input)>8*1024*1024||fseek(input,0,SEEK_SET)||fread(header,8,1,input)!=1||header[0]!=0x31304645||!header[1]||header[1]>64){error=63;goto finish;}
+    const unsigned tag=
+#ifdef GRID_WHOLE_WRAPPER
+        0x31304651;
+#else
+        0x31304645;
+#endif
+    if(fseek(input,0,SEEK_END)||ftell(input)>8*1024*1024||fseek(input,0,SEEK_SET)||fread(header,8,1,input)!=1||header[0]!=tag||!header[1]||header[1]>64){error=63;goto finish;}
     HANDLE h=CreateFileW(output,GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(h==INVALID_HANDLE_VALUE){error=73;goto finish;}
     int fd=_open_osfhandle((intptr_t)h,_O_BINARY);if(fd<0){CloseHandle(h);error=73;goto finish;}created=1;result=_fdopen(fd,"wb");if(!result){_close(fd);error=73;goto finish;}
     if(fwrite(header,8,1,result)!=1){error=74;goto finish;}
     for(unsigned index=0;index<header[1];index++){
         DriverRecord r;if(fread(&r,sizeof(r),1,input)!=1||r.index!=index){error=65;break;}
         float delta;memcpy(&delta,&r.delta,4);
-        if(!isfinite(delta)||delta<=0||delta>.1f||!isfinite(1.f/delta)||r.body[0xadc]||get(r.body,0)!=r.view_address||get(r.view,0)!=r.solver_address||r.solver_address-r.view_address!=0x2b0||memcmp(r.view+0x2b0,r.solver,0x50)){error=66;break;}
+        if(!isfinite(delta)||delta<0||delta>.1f||(delta>0&&!isfinite(1.f/delta))||r.body[0xadc]||get(r.body,0)!=r.view_address||get(r.view,0)!=r.solver_address||r.solver_address-r.view_address!=0x2b0||memcmp(r.view+0x2b0,r.solver,0x50)){error=66;break;}
+#ifndef GRID_WHOLE_WRAPPER
+        if(delta==0){error=66;break;}
+#else
+        const unsigned outer_fields[]={0x2e8,0xe1c,0xe20,0x11f0,0x1224,0x1228,0x122c,0x1230,0x1234,0x1238,0x1648};
+        for(unsigned i=0;i<sizeof(outer_fields)/sizeof(*outer_fields);i++)if(!isfinite(*(float *)(r.body+outer_fields[i])))error=66;
+        if((*(float *)(r.body+0x122c)>0||*(float *)(r.body+0x1230)>0)&&*(float *)(r.body+0x1224)==*(float *)(r.body+0x1228))error=66;
+        if(*(float *)(r.body+0x11f0)>0&&!isfinite((*(float *)(r.body+0xe20)* *(float *)(r.body+0x11f0))*delta))error=66;
+        if(delta>0&&(r.body[0xe38]||(*(float *)(r.body+0x1648)<.5f&&*(float *)(r.body+0xe1c)==0&&*(float *)(r.body+0xe20)==0)))error=66;
+        if(error)break;
+#endif
         if(!isfinite(*(float *)r.engine_limit)){error=66;break;}
         for(unsigned i=0;i<8;i++)if(!isfinite(*(float *)(r.diagnostics+i*4)))error=66;if(error)break;
         __declspec(align(16)) unsigned char body[0x2600],storage[0x1080],old_material[4][0x140]={0},table[0x20]={0};unsigned entry[3]={0};
@@ -92,7 +108,7 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         /* Suspension publishes wheel load138 before the later response guard. */
         __declspec(align(16)) unsigned char later_guard[0x2600];memcpy(later_guard,body,sizeof(later_guard));
         for(unsigned i=0;i<4;i++)put(later_guard,0x1990+i*0x150+0x138,0);
-        if(!error){guard_stage=5;error=post_guard(later_guard,delta);}if(!error){guard_stage=6;error=chassis_guard(body,delta);}
+        if(!error&&delta>0){guard_stage=5;error=post_guard(later_guard,delta);}if(!error&&delta>0){guard_stage=6;error=chassis_guard(body,delta);}
         if(error){printf("whole_driver_guard_case=%u stage=%u group=%x\n",index,guard_stage,driver_guard_group);break;}
         unsigned driven=get(body,0x18f0);if(!driven||driven>4){error=68;break;}
         for(unsigned i=0;i<driven;i++){
@@ -117,10 +133,20 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
         put(image,0xe85fd0-0x400000,(unsigned)(uintptr_t)table);put(image,0xe85ed4-0x400000,0);put(image,0xec2c54-0x400000,0);
         memcpy(image+0xd16348-0x400000,r.engine_limit,4);memcpy(image+0xe85df0-0x400000,r.diagnostics,32);
         float gravity=-9.8100004196167f;memcpy(image+0xe8efd4-0x400000,&gravity,4);
-        __try{((void (__fastcall *)(void *,void *,float))(image+0xa03670-0x400000))(body,NULL,delta);}
+        __try{((void (__fastcall *)(void *,void *,float))(image+
+#ifdef GRID_WHOLE_WRAPPER
+            0xa06a90
+#else
+            0xa03670
+#endif
+            -0x400000))(body,NULL,delta);}
         __except(driver_fault(GetExceptionInformation())){error=70;}
         if(error)break;
-        if(get(body,0)!=(unsigned)(uintptr_t)view||get(view,0)!=(unsigned)(uintptr_t)solver||get(body,0x3d0+0x608)!=(unsigned)(uintptr_t)table||get(body,0x3d0+0x5d4)!=(unsigned)(uintptr_t)body){error=71;break;}
+#ifndef GRID_WHOLE_WRAPPER
+        if(get(body,0)!=(unsigned)(uintptr_t)view){error=71;break;}
+#endif
+        /* The wrapper's private temporary view has expired. Never follow it. */
+        if(get(view,0)!=(unsigned)(uintptr_t)solver||(delta>0&&get(body,0x3d0+0x608)!=(unsigned)(uintptr_t)table)||get(body,0x3d0+0x5d4)!=(unsigned)(uintptr_t)body){error=71;break;}
         put(body,0,r.view_address);put(view,0,r.solver_address);put(body,0x3d0+0x608,0);put(body,0x3d0+0x5d4,0);
         for(unsigned i=0;i<driven;i++){unsigned o=get(r.body,0x18d8+i*4)-r.body_address;if(get(body,0x18d8+i*4)!=(unsigned)(uintptr_t)(body+o))error=71;put(body,0x18d8+i*4,get(r.body,0x18d8+i*4));}
         for(unsigned i=0;i<2;i++){unsigned o=get(r.body,0x21cc+i*4)-r.body_address;if(get(body,0x21cc+i*4)!=(unsigned)(uintptr_t)(body+o))error=71;put(body,0x21cc+i*4,get(r.body,0x21cc+i*4));}

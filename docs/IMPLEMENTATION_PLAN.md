@@ -1,6 +1,6 @@
 # Current GRID reverse-engineering and implementation plan
 
-Current checkpoint F182: one complete originalA03670 driver call matches Rust332updates per debug/release, also inside332sync/publication updates.79existing+15native framing guards pass; Rust unchanged from142library tests. Next actualA06A90 temporary-frame initialization/settling/assistance, A03220 and physical-world scheduling, then Bevy driving. [Whole driver](WHOLE_VEHICLE_DRIVER.md), [synchronization](VEHICLE_SYNCHRONIZATION.md), [initialization](VEHICLE_SHIFT_INITIALIZATION.md).
+Current checkpoint F183: complete originalA06A90 wrapper matches Rust428calls per debug/release, also within332sync/publication updates. Angular assistance/contact braking/timers verified; expired original temporary storage excluded, complete car state compared.144library tests and freshF182regressions pass. Next positive idle/clutch/mode2, A03220 and real physical-world contacts/scheduling, then Bevy driving. [Whole wrapper](VEHICLE_STEP.md), [whole driver](WHOLE_VEHICLE_DRIVER.md), [synchronization](VEHICLE_SYNCHRONIZATION.md).
 
 Current checkpoint F156 supersedes earlier checkpoints: complete initial single/two-body constraints, material/cache/compliance behavior and grouped friction rows match711scenarios in debug/release, including5,840fresh upstream operands. Next join construction with main response preparation and all normal/friction solve spans, then impulse publication. Full frame, contact production, initialization/timing and Bevy driving remain open. [Contact construction](CONTACT_ROWS.md).
 
