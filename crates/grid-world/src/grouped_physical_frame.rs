@@ -24,6 +24,7 @@ pub struct Manager {
     pub cached_pair: Option<[usize; 2]>,
     pub cached_material: contact_rows::Material,
 }
+#[derive(Clone)]
 pub struct Output {
     pub groups: contact_groups::Output,
     pub manager: Manager,

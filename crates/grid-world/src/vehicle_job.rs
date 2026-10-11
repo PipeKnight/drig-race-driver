@@ -33,15 +33,39 @@ pub fn calculate_with_queries(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
 ) -> Result<Output, Error> {
+    calculate_owned(
+        input,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calculate_owned(
+    input: &State,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    world_center: bool,
+) -> Result<Output, Error> {
     if input.owner.vehicle.len() != vehicle_publication::VEHICLE_WORDS
         || input.owner.vehicle[..input.frame.body.len()] != input.frame.body
     {
         return Err(Error("inconsistent car job ownership"));
     }
     let p = &input.owner.physical;
-    if [0x328, 0x32c, 0x334, 0x338, 0x33c, 0x340]
+    if [0x328, 0x32c, 0x338, 0x33c, 0x340]
         .iter()
         .any(|&o| p[o / 4] != 0)
+        || p[0x334 / 4] != if world_center { 0x1c0 } else { 0 }
         || p[0x400 / 4] == u32::MAX
         || p[0x230 / 4..0x240 / 4]
             .iter()

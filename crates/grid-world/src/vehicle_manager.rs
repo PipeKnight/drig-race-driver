@@ -87,6 +87,7 @@ pub fn calculate(
         handling_queries,
         query,
         material,
+        false,
     )?;
     finish(&mut out.state.owner.vehicle)?;
     out.state
@@ -114,6 +115,57 @@ pub fn calculate_with_contacts(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
 ) -> Result<ContactOutput, Error> {
+    contacts(
+        input,
+        pool,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        false,
+    )
+}
+
+/// The physical center backlink is the owned offset1C0 used by the retained
+/// world. Its group/list fields stay intact across the registered job.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_world_contacts(
+    input: &State,
+    pool: &crate::wheel_contacts::Pool,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<ContactOutput, Error> {
+    contacts(
+        input,
+        pool,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn contacts(
+    input: &State,
+    pool: &crate::wheel_contacts::Pool,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    world_center: bool,
+) -> Result<ContactOutput, Error> {
     crate::wheel_contacts::validate(&input.owner.vehicle, pool)?;
     let mut out = run_job(
         input,
@@ -123,6 +175,7 @@ pub fn calculate_with_contacts(
         handling_queries,
         query,
         material,
+        world_center,
     )?;
     let contacts = crate::wheel_contacts::calculate(
         &out.state.owner.vehicle,
@@ -146,6 +199,7 @@ fn run_job(
     handling_queries: Option<&[vehicle_handling::QueryRecord]>,
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    world_center: bool,
 ) -> Result<Output, Error> {
     let b = &input.owner.vehicle;
     if b.len() != crate::vehicle_publication::VEHICLE_WORDS
@@ -185,7 +239,7 @@ fn run_job(
     next.frame
         .body
         .copy_from_slice(&next.owner.vehicle[..vehicle_force::BODY_WORDS]);
-    vehicle_job::calculate_with_queries(
+    vehicle_job::calculate_owned(
         &next,
         pair,
         delta,
@@ -193,6 +247,7 @@ fn run_job(
         handling_queries,
         query,
         material,
+        world_center,
     )
 }
 

@@ -24,6 +24,7 @@ pub struct Input {
     pub selector: u32,
 }
 
+#[derive(Clone)]
 pub struct Output {
     pub bodies: Vec<Body>,
     pub contacts: Vec<Contact>,
