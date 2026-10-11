@@ -7,6 +7,7 @@ pub mod collision;
 pub mod entities;
 pub mod grid;
 pub mod handling_damage;
+mod handling_damage_fields;
 pub mod jpk;
 pub mod material;
 pub mod mesh;

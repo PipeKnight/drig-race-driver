@@ -1,4 +1,5 @@
-//! Bounded steering and visual damage configuration from legacy HDM text.
+//! Bounded complete cold handling configuration from legacy HDM text.
+use crate::handling_damage_fields::{DEFAULTS, FIELDS, STRENGTHS};
 use crate::{Error, Result, fail};
 use quick_xml::{Reader, events::Event};
 
@@ -94,7 +95,40 @@ fn normalize(text: &str) -> Result<String> {
     Ok(output)
 }
 
+/// Complete cold 0x168-byte settings block, relative to mutable owner218.
+#[derive(Clone, Debug)]
+pub struct Configuration {
+    words: [u32; 90],
+}
+impl Configuration {
+    pub fn words(&self) -> &[u32; 90] {
+        &self.words
+    }
+    pub fn steering(&self) -> SteeringParameters {
+        let f = |o: usize| f32::from_bits(self.words[o / 4]);
+        SteeringParameters {
+            visual_damage: VisualDamageParameters {
+                angular_limit_280: f(0x68),
+                displacement_limit_284: f(0x6c),
+                terminal_percentage_288: f(0x70),
+            },
+            maximum_rotation_26c: f(0x54),
+            maximum_cap_250: f(0x38),
+            perturbation_gain_270: f(0x58),
+            ramp_start_274: f(0x5c),
+            ramp_end_278: f(0x60),
+            low_gain_27c: f(0x64),
+            cap_threshold_254: f(0x3c),
+        }
+    }
+}
 pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
+    Ok(parse(bytes, true)?.steering())
+}
+pub fn read_configuration(bytes: &[u8]) -> Result<Configuration> {
+    parse(bytes, false)
+}
+fn parse(bytes: &[u8], require_steering: bool) -> Result<Configuration> {
     if bytes.len() > 65536 || !bytes.is_ascii() || bytes.contains(&0) {
         return fail(0, "unsupported HDM text size or encoding");
     }
@@ -107,20 +141,13 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
     let mut depth = 0usize;
     let mut roots = 0;
     let mut count = 0;
-    let mut suspension = false;
-    let mut wheel = false;
-    let mut fields = [
-        0.,
-        0.,
-        0.,
-        0.,
-        f32::from_bits(0x3f733333),
-        f32::from_bits(0x3dcccccd),
-        0.,
-        27.,
-        f32::from_bits(0x3ee66666),
-        150.,
-    ];
+    let mut stack: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut strengths_seen = std::collections::HashSet::new();
+    let mut fields = [0u32; 90];
+    for &(offset, value) in DEFAULTS {
+        fields[offset / 4] = value;
+    }
     loop {
         let event = reader.read_event().map_err(|_| Error {
             offset: reader.error_position() as usize,
@@ -147,17 +174,17 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
                         return fail(0, "unsupported HDM root");
                     }
                 }
-                let selected = depth == 1 && matches!(name, "SUSPENSION" | "WHEEL");
-                if selected {
-                    let seen = if name == "SUSPENSION" {
-                        &mut suspension
-                    } else {
-                        &mut wheel
-                    };
-                    if *seen {
-                        return fail(0, "duplicate HDM steering node");
-                    }
-                    *seen = true;
+                let selected = depth == 1 && FIELDS.iter().any(|&(node, _, _)| node == name);
+                let strength = STRENGTHS.iter().find(|&&(parent, node, _)| {
+                    depth == 2 && node == name && stack.last().is_some_and(|s| s == parent)
+                });
+                if selected && !seen.insert(name.to_string()) {
+                    return fail(0, "duplicate HDM configuration node");
+                }
+                if let Some(&(_, _, offset)) = strength
+                    && !strengths_seen.insert(offset)
+                {
+                    return fail(0, "duplicate HDM strength node");
                 }
                 for (i, attr) in e.attributes().enumerate() {
                     if i >= 64 {
@@ -174,22 +201,18 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
                     if key.len() > 64 || attr.value.len() > 256 || attr.value.contains(&b'&') {
                         return fail(0, "unsupported HDM attribute");
                     }
-                    let slot = if !selected {
-                        None
+                    let slot = if selected {
+                        FIELDS
+                            .iter()
+                            .find(|&&(node, attribute, _)| node == name && attribute == key)
+                            .map(|&(_, _, offset)| offset / 4)
+                    } else if let Some(&(_, _, offset)) = strength {
+                        ["damageScale", "chanceOfMinorDamage", "chanceOfMajorDamage"]
+                            .iter()
+                            .position(|&k| k == key)
+                            .map(|i| offset / 4 + i)
                     } else {
-                        match (name, key) {
-                            ("SUSPENSION", "maxWheelLockScale") => Some(1),
-                            ("SUSPENSION", "damageToStartEffect") => Some(6),
-                            ("WHEEL", "maxMisalignAngle") => Some(0),
-                            ("WHEEL", "maxSteerWobbleScale") => Some(2),
-                            ("WHEEL", "damageToStartBaseEffect") => Some(3),
-                            ("WHEEL", "damageToHaveFullEffect") => Some(4),
-                            ("WHEEL", "damageMinEffect") => Some(5),
-                            ("WHEEL", "damageScaleFromVisual") => Some(7),
-                            ("WHEEL", "damageScaleFromVisualDisplacement") => Some(8),
-                            ("WHEEL", "terminalDamagePercentage") => Some(9),
-                            _ => None,
-                        }
+                        None
                     };
                     if let Some(slot) = slot {
                         let value = std::str::from_utf8(&attr.value).map_err(|_| Error {
@@ -204,14 +227,16 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
                         if !value.is_finite() {
                             return fail(0, "nonfinite HDM steering number");
                         }
-                        fields[slot] = value;
+                        fields[slot] = value.to_bits();
                     }
                 }
                 if !empty {
+                    stack.push(name.to_string());
                     depth += 1;
                 }
             }
             Event::End(_) => {
+                stack.pop();
                 depth = depth.checked_sub(1).ok_or(Error {
                     offset: 0,
                     message: "unmatched HDM end",
@@ -224,28 +249,38 @@ pub fn read(bytes: &[u8]) -> Result<SteeringParameters> {
             _ => return fail(0, "unsupported HDM XML content"),
         }
     }
-    if depth != 0 || roots != 1 || !suspension || !wheel {
-        return fail(0, "incomplete HDM steering configuration");
+    if depth != 0
+        || roots != 1
+        || (require_steering && (!seen.contains("SUSPENSION") || !seen.contains("WHEEL")))
+    {
+        return fail(0, "incomplete HDM configuration");
     }
-    Ok(SteeringParameters {
-        visual_damage: VisualDamageParameters {
-            angular_limit_280: fields[7],
-            displacement_limit_284: fields[8],
-            terminal_percentage_288: fields[9],
-        },
-        maximum_rotation_26c: fields[0],
-        maximum_cap_250: fields[1],
-        perturbation_gain_270: fields[2],
-        ramp_start_274: fields[3],
-        ramp_end_278: fields[4],
-        low_gain_27c: fields[5],
-        cap_threshold_254: fields[6],
-    })
+    for offset in strengths_seen {
+        let i = offset / 4;
+        let minor = f32::from_bits(fields[i + 1]);
+        let major = f32::from_bits(fields[i + 2]);
+        let total = minor + major;
+        if total > 1. {
+            let scale = 1. / total;
+            fields[i + 2] = (major * scale).to_bits();
+            fields[i + 1] = (minor * scale).to_bits();
+        }
+    }
+    Ok(Configuration { words: fields })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn strength_probabilities_are_normalized_only_in_the_matching_parent() {
+        let source = b"<VEHICLEHANDLINGDAMAGE><WHEEL><WHEELSTRENGTH damageScale='7' chanceOfMinorDamage='2' chanceOfMajorDamage='3'/></WHEEL><SUSPENSION><WHEELSTRENGTH damageScale='999'/></SUSPENSION></VEHICLEHANDLINGDAMAGE>";
+        let settings = read_configuration(source).unwrap();
+        assert_eq!(f32::from_bits(settings.words()[0x40 / 4]), 7.);
+        assert_eq!(f32::from_bits(settings.words()[0x44 / 4]), 2. * (1. / 5.));
+        assert_eq!(f32::from_bits(settings.words()[0x48 / 4]), 3. * (1. / 5.));
+        assert!(read_configuration(b"<VEHICLEHANDLINGDAMAGE><WHEEL><WHEELSTRENGTH/><WHEELSTRENGTH/></WHEEL></VEHICLEHANDLINGDAMAGE>").is_err());
+    }
     const FIXTURE: &str = "<?xml version=\"1.0\"?><VEHICLEHANDLINGDAMAGE><!legacy note, level<1><SUSPENSION maxWheelLockScale=\".8\"/><WHEEL maxMisalignAngle=\"-0\" damageToStartBaseEffect=\".100000004\" damageToStartSteeringWobble=\"999\"/></VEHICLEHANDLINGDAMAGE>";
     #[test]
     fn descriptions_defaults_and_distinct_attribute_mapping() {
