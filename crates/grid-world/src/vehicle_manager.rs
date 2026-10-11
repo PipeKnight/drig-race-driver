@@ -50,6 +50,9 @@ fn finish(b: &mut [u32]) -> Result<(), Error> {
     {
         return Err(Error("unsupported manager wheel constraint"));
     }
+    repair(b)
+}
+fn repair(b: &mut [u32]) -> Result<(), Error> {
     let v = |o| std::array::from_fn(|i| f(b, o + i * 4));
     let forward = norm(v(0x1600), false)?;
     let up = norm(cross(forward, v(0x15e0)), false)?;
@@ -68,6 +71,74 @@ fn finish(b: &mut [u32]) -> Result<(), Error> {
 /// orientation repair and history copies. A late failure preserves all input.
 #[allow(clippy::too_many_arguments)] // Same owned query/contact inputs as the job.
 pub fn calculate(
+    input: &State,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<Output, Error> {
+    let mut out = run_job(
+        input,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+    )?;
+    finish(&mut out.state.owner.vehicle)?;
+    out.state
+        .frame
+        .body
+        .copy_from_slice(&out.state.owner.vehicle[..vehicle_force::BODY_WORDS]);
+    Ok(out)
+}
+
+pub struct ContactOutput {
+    pub job: Output,
+    pub contacts: crate::wheel_contacts::Pool,
+}
+
+/// Complete manager with selected active wheel contacts. The pool and the
+/// complete owner remain unchanged if contact construction or basis repair fails.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_contacts(
+    input: &State,
+    pool: &crate::wheel_contacts::Pool,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<ContactOutput, Error> {
+    crate::wheel_contacts::validate(&input.owner.vehicle, pool)?;
+    let mut out = run_job(
+        input,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+    )?;
+    let contacts = crate::wheel_contacts::calculate(
+        &out.state.owner.vehicle,
+        &out.state.owner.physical,
+        pool,
+    )?;
+    repair(&mut out.state.owner.vehicle)?;
+    out.state
+        .frame
+        .body
+        .copy_from_slice(&out.state.owner.vehicle[..vehicle_force::BODY_WORDS]);
+    Ok(ContactOutput { job: out, contacts })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_job(
     input: &State,
     pair: [usize; 2],
     delta: f32,
@@ -114,7 +185,7 @@ pub fn calculate(
     next.frame
         .body
         .copy_from_slice(&next.owner.vehicle[..vehicle_force::BODY_WORDS]);
-    let mut out = vehicle_job::calculate_with_queries(
+    vehicle_job::calculate_with_queries(
         &next,
         pair,
         delta,
@@ -122,13 +193,7 @@ pub fn calculate(
         handling_queries,
         query,
         material,
-    )?;
-    finish(&mut out.state.owner.vehicle)?;
-    out.state
-        .frame
-        .body
-        .copy_from_slice(&out.state.owner.vehicle[..vehicle_force::BODY_WORDS]);
-    Ok(out)
+    )
 }
 
 #[cfg(test)]
@@ -219,5 +284,42 @@ mod tests {
         assert_eq!(input.owner.vehicle, before.owner.vehicle);
         assert_eq!(input.owner.physical, before.owner.physical);
         assert_eq!(format!("{:?}", input.frame), format!("{:?}", before.frame));
+        // The active path builds all four contacts before the same late basis
+        // error. Neither the external pool nor complete owner can leak changes.
+        input.owner.physical[0x1f8 / 4] = 1f32.to_bits();
+        input.owner.vehicle[0xdc8 / 4] = 1;
+        input.owner.vehicle[0x1ee0 / 4] = 1;
+        for i in 0..4 {
+            input.owner.vehicle[(0x1a54 + i * 0x150) / 4] = 2;
+            input.owner.vehicle[(0x19d0 + i * 0x150) / 4] = 1f32.to_bits();
+            input.owner.vehicle[(0x19e0 + i * 0x150) / 4] = 0.5f32.to_bits();
+        }
+        input
+            .frame
+            .body
+            .copy_from_slice(&input.owner.vehicle[..vehicle_force::BODY_WORDS]);
+        let pool = crate::wheel_contacts::Pool {
+            slots: vec![[0; 32]; 4],
+            used: 0,
+            shapes: 1,
+        };
+        let active =
+            calculate_with_contacts(&input, &pool, [0, 1], 0., 9.81, None, query, |_| Ok(None))
+                .unwrap();
+        assert_eq!(active.contacts.used, 4);
+        input.owner.physical[0x1f8 / 4] = 0;
+        let before = input.clone();
+        let pool_before = pool.clone();
+        assert_eq!(
+            calculate_with_contacts(&input, &pool, [0, 1], 0., 9.81, None, query, |_| Ok(None))
+                .err()
+                .unwrap()
+                .0,
+            "invalid manager basis"
+        );
+        assert_eq!(input.owner.vehicle, before.owner.vehicle);
+        assert_eq!(input.owner.physical, before.owner.physical);
+        assert_eq!(format!("{:?}", input.frame), format!("{:?}", before.frame));
+        assert_eq!(pool, pool_before);
     }
 }

@@ -80,6 +80,7 @@ pub mod vehicle_propulsion;
 pub mod vehicle_publication;
 pub mod vehicle_step;
 pub mod vehicle_sync;
+pub mod wheel_contacts;
 pub mod wheel_coupling;
 pub mod wheel_damage;
 pub mod wheel_deformation;

@@ -38,13 +38,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
             0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f, 0x3130464b,
-            0x3230464b, 0x31304654,
+            0x3230464b, 0x31304654, 0x32304654,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let car_manager = word(&data, 0) == 0x31304654;
+    let wheel_producer = word(&data, 0) == 0x32304654;
+    let car_manager = word(&data, 0) == 0x31304654 || wheel_producer;
     let handling_queries = word(&data, 0) == 0x3230464b || car_manager;
     let car_job = word(&data, 0) == 0x3130464b || handling_queries;
     let complete = word(&data, 0) == 0x3130464f || car_job;
@@ -84,7 +85,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             0
         }
-        + if handling_queries { 8 + 64 * 8 } else { 0 };
+        + if handling_queries { 8 + 64 * 8 } else { 0 }
+        + if wheel_producer { 8 + 4 * 128 } else { 0 };
     if !(1..=64).contains(&count) || data.len() != 8 + count * record_size {
         return Err("invalid size/count".into());
     }
@@ -98,7 +100,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if present > 1
                 || n > 64
                 || (present == 0 && n != 0)
-                || record[tail + 8 + n.min(64) * 8..].iter().any(|&x| x != 0)
+                || record[tail + 8 + n.min(64) * 8..tail + 8 + 64 * 8]
+                    .iter()
+                    .any(|&x| x != 0)
             {
                 return Err("invalid handling query records".into());
             }
@@ -246,7 +250,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             normal: h.contact.normal,
                             fraction: h.contact.fraction,
                             material,
-                            tokens: [index as u32 + 1, 1, 1],
+                            tokens: [
+                                index as u32 + 1,
+                                if wheel_producer { h.shape + 1 } else { 1 },
+                                1,
+                            ],
                         })
                     })
                     .transpose()
@@ -265,7 +273,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     },
                     frame,
                 };
-                let result = if handling_queries {
+                let result = if wheel_producer {
+                    let tail = RECORD + 0x21000 - 0x2600 + 0x424 + 8 + 64 * 8;
+                    let capacity = word(record, tail) as usize;
+                    let used = word(record, tail + 4) as usize;
+                    if capacity > 4 || used > capacity {
+                        return Err("invalid wheel pool counts".into());
+                    }
+                    let pool = grid_world::wheel_contacts::Pool {
+                        used,
+                        shapes: track.shape_count(),
+                        slots: (0..capacity)
+                            .map(|i| words(record, tail + 8 + i * 128))
+                            .collect(),
+                    };
+                    let result = grid_world::vehicle_manager::calculate_with_contacts(
+                        &state,
+                        &pool,
+                        pair,
+                        delta,
+                        REFERENCE_GRAVITY,
+                        query_present.then_some(query_rows.as_slice()),
+                        query,
+                        |token| surfaces.joined(token),
+                    )?;
+                    put(record, tail + 4, &[result.contacts.used as u32]);
+                    for (i, c) in result.contacts.slots.iter().enumerate() {
+                        put(record, tail + 8 + i * 128, c);
+                    }
+                    result.job
+                } else if handling_queries {
                     let calculate = if car_manager {
                         grid_world::vehicle_manager::calculate
                     } else {
