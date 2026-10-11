@@ -57,8 +57,9 @@ fn run() -> Result<(), Failure> {
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
-    let grouped_tick = word(h, 0) == 0x33525447;
-    let grouped = word(h, 0) == 0x33524647 || grouped_tick;
+    let owned_shapes = matches!(word(h, 0), 0x34534647 | 0x34535447);
+    let grouped_tick = matches!(word(h, 0), 0x33525447 | 0x34535447);
+    let grouped = word(h, 0) == 0x33524647 || grouped_tick || owned_shapes;
     if (!world && !grouped && word(h, 0) != 0x33524650) || !(1..=1024).contains(&count) {
         return Err("invalid header".into());
     }
@@ -117,6 +118,25 @@ fn run() -> Result<(), Failure> {
             threshold: number(extra, 12),
             relaxation: number(extra, 16),
         });
+        let mut shapes = Vec::new();
+        if owned_shapes {
+            let n = word(take(&data, &mut p, 4)?, 0) as usize;
+            if !(1..=513).contains(&n) {
+                return Err("invalid owned shape count".into());
+            }
+            for _ in 0..n {
+                let b = take(&data, &mut p, 4)?;
+                if b.iter().any(|&v| v > 1) {
+                    return Err("invalid owned shape flags".into());
+                }
+                shapes.push(contact_groups::Shape {
+                    angular: b[0] != 0,
+                    flag217: b[1] != 0,
+                    flag229: b[2] != 0,
+                    flag230: b[3] != 0,
+                });
+            }
+        }
         let mut bodies = Vec::new();
         let mut settings = Vec::new();
         let mut body_wire = Vec::new();
@@ -191,7 +211,10 @@ fn run() -> Result<(), Failure> {
                 || c[0xc] != if mode != 0 { 0 } else { 1 }
                 || c[0xd] != 0
                 || c[0xf] != 1
-                || mode > 1
+                || mode > if owned_shapes { 2 } else { 1 }
+                || (mode == 2 && word(c, 8) != u32::MAX)
+                || (mode != 2 && (word(c, 4) as usize >= nb || word(c, 8) as usize >= nb))
+                || word(c, 4) as usize >= nb
                 || word(c, 4) != word(c, 0x1c)
                 || word(c, 8) != word(c, 0x20)
                 || c[0xe] > 1
@@ -200,11 +223,27 @@ fn run() -> Result<(), Failure> {
             {
                 return Err("invalid contact framing".into());
             }
+            let permissions = if owned_shapes {
+                let mut result = [None; 2];
+                for (o, v) in [0x2c, 0x28].into_iter().zip(&mut result) {
+                    let id = word(c, o) as usize;
+                    if id > shapes.len() {
+                        return Err("foreign owned contact shape".into());
+                    }
+                    *v = id.checked_sub(1).map(|i| shapes[i].angular);
+                }
+                result
+            } else {
+                [shape(word(c, 0x2c))?, shape(word(c, 0x28))?]
+            };
             contacts.push(contact_rows::Contact {
-                two_bodies: mode != 0,
-                bodies: [word(c, 0x1c) as usize, word(c, 0x20) as usize],
+                two_bodies: mode == 1,
+                bodies: [
+                    word(c, 0x1c) as usize,
+                    if mode == 2 { 0 } else { word(c, 0x20) as usize },
+                ],
                 materials: [word(c, 0x30) as usize, word(c, 0x34) as usize],
-                shapes: [shape(word(c, 0x2c))?, shape(word(c, 0x28))?],
+                shapes: permissions,
                 special: c[0x73] != 0,
                 group_end: false,
                 disabled: c[0xe] != 0,
@@ -262,13 +301,17 @@ fn run() -> Result<(), Failure> {
             for raw in &contact_wire {
                 let mut c: contact_groups::Contact = std::array::from_fn(|i| word(raw, i * 4));
                 c[1] = c[1].checked_add(1).ok_or("contact identity overflow")?;
-                c[2] = c[2].checked_add(1).ok_or("contact identity overflow")?;
+                c[2] = if owned_shapes && c[2] == u32::MAX {
+                    0
+                } else {
+                    c[2].checked_add(1).ok_or("contact identity overflow")?
+                };
                 contacts.push(c);
             }
             let calculate = if grouped_tick {
-                grouped_physical_frame::calculate_tick
+                grouped_physical_frame::calculate_tick_with_shapes
             } else {
-                grouped_physical_frame::calculate
+                grouped_physical_frame::calculate_with_shapes
             };
             let result = calculate(
                 &contact_groups::Input {
@@ -296,6 +339,7 @@ fn run() -> Result<(), Failure> {
                     cached_pair: input.step.cached_pair,
                     cached_material: input.step.cached_material,
                 },
+                &shapes,
             )?;
             output.extend(0u32.to_le_bytes());
             output.extend(u32::from(result.visits.last().is_some_and(|v| v.3)).to_le_bytes());
@@ -326,7 +370,7 @@ fn run() -> Result<(), Failure> {
             }
             for mut contact in result.groups.contacts {
                 contact[1] -= 1;
-                contact[2] -= 1;
+                contact[2] = contact[2].wrapping_sub(1);
                 for value in contact {
                     output.extend(value.to_le_bytes());
                 }

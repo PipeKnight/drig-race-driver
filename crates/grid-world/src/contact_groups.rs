@@ -6,6 +6,16 @@ use crate::Error;
 pub type Body = [u32; 0x424 / 4];
 pub type Contact = [u32; 0x80 / 4];
 
+/// Consumed collision-shape bytes 216, 217, 229 and 230. Identity is the
+/// one-based position in the caller's owned shape table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Shape {
+    pub angular: bool,
+    pub flag217: bool,
+    pub flag229: bool,
+    pub flag230: bool,
+}
+
 #[derive(Clone)]
 pub struct Input {
     pub bodies: Vec<Body>,
@@ -37,11 +47,16 @@ fn put(row: &mut [u32], offset: usize, value: u32) {
 }
 
 pub fn validate(input: &Input) -> Result<(), Error> {
+    validate_with_shapes(input, &[])
+}
+
+pub fn validate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<(), Error> {
     let n = input.bodies.len();
     if !(1..=16).contains(&n)
         || input.contacts.len() > 64
         || input.selector > 1
         || input.active_order.len() != n
+        || shapes.len() > 513
     {
         return Err(Error("invalid contact-group counts or selector"));
     }
@@ -80,12 +95,13 @@ pub fn validate(input: &Input) -> Result<(), Error> {
             || a as usize > n
             || b as usize > n
             || single > 1
-            || (single == 0 && (b == 0 || a == b))
+            || (single == 0 && b != 0 && a == b)
             || field(c, 0x10) != 0
             || byte(c, 0xf) != 1
-            || byte(c, 0x73) != 0
-            || field(c, 0x28) != 0
-            || field(c, 0x2c) != 0
+            || byte(c, 0x73) > 1
+            || field(c, 0x28) as usize > shapes.len()
+            || field(c, 0x2c) as usize > shapes.len()
+            || (byte(c, 0x73) != 0 && (field(c, 0x28) == 0 || field(c, 0x2c) == 0))
             || c[0x50 / 4..0x70 / 4]
                 .iter()
                 .any(|&x| !f32::from_bits(x).is_finite())
@@ -253,7 +269,11 @@ impl Build {
 
 /// Whole selected serial group reconstruction; input state is immutable on error.
 pub fn calculate(input: &Input) -> Result<Output, Error> {
-    validate(input)?;
+    calculate_with_shapes(input, &[])
+}
+
+pub fn calculate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<Output, Error> {
+    validate_with_shapes(input, shapes)?;
     let mut out = Build {
         bodies: input.bodies.clone(),
         contacts: input.contacts.clone(),
@@ -321,9 +341,16 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
             } else {
                 u32::MAX
             };
+            let disabled = if byte(c, 0x73) == 0 {
+                true
+            } else {
+                let a = shapes[field(c, 0x28) as usize - 1];
+                let b = shapes[field(c, 0x2c) as usize - 1];
+                a.flag217 || b.flag217 || (a.flag229 && b.flag230) || (b.flag229 && a.flag230)
+            };
             put(&mut out.contacts[i], 0x1c, a);
             put(&mut out.contacts[i], 0x20, b);
-            put_byte(&mut out.contacts[i], 0xe, 1);
+            put_byte(&mut out.contacts[i], 0xe, u8::from(disabled));
             contact = field(&out.contacts[i], 0x10);
         }
         out.set(root, 0x1c, manager);

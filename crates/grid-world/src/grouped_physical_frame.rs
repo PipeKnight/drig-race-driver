@@ -69,7 +69,15 @@ fn chain(head: u32, rows: &[[u32; 0x424 / 4]], offset: usize) -> Vec<usize> {
 /// Contact offsets are supplied, then translated using the advanced centers;
 /// they are not geometrically detected by this function.
 pub fn calculate_tick(input: &contact_groups::Input, manager: &Manager) -> Result<Output, Error> {
-    contact_groups::validate(input)?;
+    calculate_tick_with_shapes(input, manager, &[])
+}
+
+pub fn calculate_tick_with_shapes(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+) -> Result<Output, Error> {
+    contact_groups::validate_with_shapes(input, shapes)?;
     let delta = manager.parameters[0];
     if !delta.is_finite() || delta <= 0. || delta > 0.25 {
         return Err(Error("invalid grouped tick delta"));
@@ -108,7 +116,7 @@ pub fn calculate_tick(input: &contact_groups::Input, manager: &Manager) -> Resul
             store_matrix(raw, offset, value);
         }
     }
-    let mut out = calculate(&next, manager)?;
+    let mut out = calculate_with_shapes(&next, manager, shapes)?;
     for (body, next) in out.groups.bodies.iter_mut().zip(update_next) {
         body[0x318 / 4] = next;
     }
@@ -116,7 +124,15 @@ pub fn calculate_tick(input: &contact_groups::Input, manager: &Manager) -> Resul
 }
 
 pub fn calculate(input: &contact_groups::Input, manager: &Manager) -> Result<Output, Error> {
-    contact_groups::validate(input)?;
+    calculate_with_shapes(input, manager, &[])
+}
+
+pub fn calculate_with_shapes(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+) -> Result<Output, Error> {
+    contact_groups::validate_with_shapes(input, shapes)?;
     if manager.properties.len() != input.bodies.len()
         || manager.workspace.len() != input.bodies.len()
         || manager.rows.is_empty()
@@ -150,7 +166,7 @@ pub fn calculate(input: &contact_groups::Input, manager: &Manager) -> Result<Out
     {
         return Err(Error("unsupported grouped physical manager"));
     }
-    let mut groups = contact_groups::calculate(input)?;
+    let mut groups = contact_groups::calculate_with_shapes(input, shapes)?;
     let mut manager = manager.clone();
     let mut visits = Vec::new();
     let roots = chain(groups.world[1], &groups.bodies, 0x1c);
@@ -213,18 +229,19 @@ pub fn calculate(input: &contact_groups::Input, manager: &Manager) -> Result<Out
             .map(|&i| {
                 let c = &groups.contacts[i];
                 contact_rows::Contact {
-                    two_bodies: !flag(c, 0xc),
+                    two_bodies: !flag(c, 0xc) && c[8 / 4] != 0,
                     bodies: [
                         c[0x1c / 4] as usize,
-                        if flag(c, 0xc) {
+                        if flag(c, 0xc) || c[8 / 4] == 0 {
                             0
                         } else {
                             c[0x20 / 4] as usize
                         },
                     ],
                     materials: [c[0x30 / 4] as usize, c[0x34 / 4] as usize],
-                    shapes: [None, None],
-                    special: false,
+                    shapes: [c[0x2c / 4], c[0x28 / 4]]
+                        .map(|id| id.checked_sub(1).map(|i| shapes[i as usize].angular)),
+                    special: flag(c, 0x73),
                     group_end: false,
                     disabled: flag(c, 0xe),
                     accumulated: f(c, 0x38),
@@ -390,5 +407,47 @@ mod tests {
             before.bodies[0][0x220 / 4]
         );
         assert!(!flag(&success.groups.bodies[0], 0x40e));
+
+        // A real producer-style special contact reaches row construction in an
+        // earlier group, then a later pose error must publish neither result.
+        let mut shaped = input.clone();
+        let mut c = [0; 32];
+        for (o, v) in [(4, 1), (0x28, 1), (0x2c, 2)] {
+            c[o / 4] = v;
+        }
+        set_flag(&mut c, 0xf, true);
+        set_flag(&mut c, 0x72, true);
+        set_flag(&mut c, 0x73, true);
+        c[0x38 / 4] = 0.25f32.to_bits();
+        c[0x3c / 4] = f32::MAX.to_bits();
+        c[0x64 / 4] = 1f32.to_bits();
+        shaped.contacts.push(c);
+        let shapes = [
+            contact_groups::Shape {
+                flag229: true,
+                ..Default::default()
+            },
+            contact_groups::Shape {
+                angular: true,
+                ..Default::default()
+            },
+        ];
+        contact_groups::validate_with_shapes(&shaped, &shapes).unwrap();
+        assert!(calculate_with_shapes(&shaped, &manager, &shapes).is_err());
+        assert!(calculate_tick_with_shapes(&shaped, &manager, &shapes).is_err());
+        assert_eq!(shaped.bodies, before.bodies);
+        assert_eq!(shaped.contacts, vec![c]);
+        assert_eq!(manager.rows, scratch.rows);
+        assert_eq!(manager.workspace, scratch.workspace);
+        assert_eq!(manager.properties, scratch.properties);
+        first.contacts.push(c);
+        let good = calculate_with_shapes(&first, &smaller, &shapes).unwrap();
+        assert!(good.visits[0].3);
+        let contact = good.groups.contacts[0];
+        assert_eq!(contact[8 / 4], 0);
+        assert_eq!(contact[0x20 / 4], u32::MAX);
+        assert_eq!(contact[0x18 / 4], 1);
+        assert!(!flag(&contact, 0xe));
+        assert!(flag(&contact, 0x73));
     }
 }
