@@ -1,5 +1,7 @@
 # Control wrapper feeding propulsion — F172
 
+F179 supersedes the conservative nonzero-table restriction below: [source sparse gearing and transition safety](VEHICLE_GEARING.md). Earlier counts and restrictions remain historical evidence.
+
 10 October 2026. Whole original 9B40D0 followed by the recovered [propulsion/force schedule](VEHICLE_PROPULSION.md) agrees with independent Rust for **288 authored initial +384 carried calls /10,338,048 complete record bytes per debug/release profile**. This adds steering, automatic/manual gear selection, rev matching, gear events and brake preparation to the selected vehicle force update. Earlier grip/contact preparation and the complete A03670/world schedule remain separate.
 
 ## Actual ordering

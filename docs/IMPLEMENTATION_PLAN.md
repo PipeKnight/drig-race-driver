@@ -1,6 +1,6 @@
 # Current GRID reverse-engineering and implementation plan
 
-Current checkpoint F178: selected early driver preparation now joins gravity/aerodynamics/history/fuel to source contact/suspension/controls/forces/assists/chassis;332updates/5,107,488bytes per debug/release exact. Prefix672updates/10,338,048bytes eachprofile exact. Next source initialization/sparse gearbox tables, authoritative physical-world scheduling and Bevy driving. [Driver integration](VEHICLE_DRIVER_PREPARATION.md), [chassis](VEHICLE_CHASSIS.md), [state transfer](VEHICLE_PHYSICAL_BRIDGE.md).
+Current checkpoint F179: real sparse source gear tables now feed selected controls/forces and full driver/contact/assist/chassis execution.44sourcefiles/1200controls+332driverupdates eachdebug/release exact, top-gear and unsafe-transition checks pass. Next source engine/shift-threshold initialization, authoritative physical-world scheduling and Bevy driving. [Source gearing](VEHICLE_GEARING.md), [driver integration](VEHICLE_DRIVER_PREPARATION.md), [state transfer](VEHICLE_PHYSICAL_BRIDGE.md).
 
 Current checkpoint F156 supersedes earlier checkpoints: complete initial single/two-body constraints, material/cache/compliance behavior and grouped friction rows match711scenarios in debug/release, including5,840fresh upstream operands. Next join construction with main response preparation and all normal/friction solve spans, then impulse publication. Full frame, contact production, initialization/timing and Bevy driving remain open. [Contact construction](CONTACT_ROWS.md).
 

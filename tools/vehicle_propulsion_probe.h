@@ -27,6 +27,7 @@ static unsigned propulsion_guard(const unsigned char *body,const unsigned char *
 }
 static unsigned propulsion_run(unsigned char *image,unsigned char *body,unsigned char *view,Update update,float delta){
 #ifdef GRID_CONTROL
+    unsigned control_error=controls_transition_guard(image,body,delta);if(control_error)return control_error;
     ((Update)(image+0x9b40d0-0x400000))(body,delta);
 #endif
     const unsigned gear=get(body,0x196c);float ratio=*(float *)(body+0x18f4+gear*4);if(ratio==0)ratio=1;
