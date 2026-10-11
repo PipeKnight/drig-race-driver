@@ -54,7 +54,7 @@ def publish(out,profile,branches,owners,prefix):
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',required=True,choices=['debug','release']);p.add_argument('--whole-driver',action='store_true');a=p.parse_args()
     b=driver.base;out=a.output.resolve();assert out.is_relative_to((b.ROOT/'local').resolve());out.mkdir(exist_ok=False)
     tables=sources.verify_shift(out.with_name(out.name+'-source'),a.profile);records=[]
     for i,raw in enumerate(driver.cases()):
@@ -63,6 +63,9 @@ def main():
         struct.pack_into('<I',r,b.BODY+0xe48,10);struct.pack_into('<I',r,b.BODY+0xdb0,0);r[b.BODY+0x1972]=0
         records.append(bytes(r))
     b.MAGIC=b'EF01';b.GRIP_TAG=b'VU01';b.GRIP_NATIVE=b.ROOT/'local/behavior/vehicle-contact-update-probe.exe';b.DRIVER_PREPARE=True;b.POST_FORCE=True;b.POST_CHASSIS=True
+    if a.whole_driver:
+        import validate_whole_vehicle_driver as whole
+        whole.configure()
     for path,sha in [(b.TRACK,'6e161e5bee8f946ff0622ca836af9071c9474cec7aef53609180b84319f9d8ef'),(b.SURFACE,'8a23a960ea0ca837ee49bafaab893cff7446c0089c9ca282e131030f4b3d3251'),(b.WORLD,'b83d245aa380bb0524f45e4b9a323c44cbf536536ec6cc6722bf22765d90d8d7')]:assert b.digest(path)==sha
     full=b.grip.mechanics_fixture(out);reports=[];sync_reports=[];publication=[];initial=[];coverage=collections.Counter()
     def tick(branches,owners,prefix):
@@ -83,8 +86,10 @@ def main():
     r,branches=gearing.initialize(out,a.profile,{k:records[8:24] for k in ['original','repeat','rust']},'init-carry');initial.append(r)
     owners={k:[owner(r) for r in rows] for k,rows in branches.items()}
     for step in range(12):branches,owners=tick(branches,owners,f'carry-{step}')
-    assert all(coverage[k]>0 for k in ['contacts','spin_changes','chassis_matrix','driver_velocity'])
+    required=['contacts','spin','chassis','velocity'] if a.whole_driver else ['contacts','spin_changes','chassis_matrix','driver_velocity']
+    assert all(coverage[k]>0 for k in required)
     result=dict(profile=a.profile,driver_calls=sum(r['calls'] for r in reports),driver_record_bytes=sum(r['record_bytes'] for r in reports),sync_calls=sum(r['calls'] for r in sync_reports),sync_bytes=sum(r['record_bytes'] for r in sync_reports),source_files=len(tables),coverage=dict(coverage),initialization_reports=initial,sync_reports=sync_reports,driver_reports=reports,publication_reports=publication,scope='Whole9BD7F0 -> selected initialized source driver -> linked setters/readback without advance/correction, independent carried states. Authored history/ownership, zero deformation dimensions/shape lists, omitted A06A90 tail/A03220/world dispatch; no actual whole synchronous wrapper or driving claim.')
+    if a.whole_driver:result['scope']='Whole9BD7F0 -> whole original A03670 versus Rust -> linked setters/readback without advance/correction; independent carried state, authored history/ownership, zero deformation/emptyshapes, omitted A06A90tail/A03220/world dispatch. No whole synchronous wrapper/driving claim.'
     (out/'validation.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if not k.endswith('reports')}))
 
 
