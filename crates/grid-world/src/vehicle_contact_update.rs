@@ -209,6 +209,22 @@ mod tests {
         assert_eq!(frame.driven, before.driven);
     }
     #[test]
+    fn clutch_engagement_failure_preserves_preparation_storage() {
+        let mut frame = valid_driver_frame();
+        frame.body[0x1598 / 4] = 2;
+        frame.body[0x1640 / 4] &= !255;
+        frame.body[0x18f8 / 4] = 1.0e-30f32.to_bits();
+        let before = frame.clone();
+        let error =
+            crate::vehicle_driver_prepare::apply(&mut frame, 0.01, 9.81, [false; 4]).unwrap_err();
+        assert_eq!(error.0, "invalid clutch engagement arithmetic");
+        assert_eq!(frame.body, before.body);
+        assert_eq!(frame.view, before.view);
+        assert_eq!(frame.solver, before.solver);
+        assert_eq!(frame.material_multipliers, before.material_multipliers);
+        assert_eq!(frame.diagnostics, before.diagnostics);
+    }
+    #[test]
     fn driver_periodic_overflow_rolls_back_after_gravity_and_history_writes() {
         let mut frame = valid_driver_frame();
         frame.body[0x300 / 4] = 1; // Positive subnormal; reciprocal overflows later.

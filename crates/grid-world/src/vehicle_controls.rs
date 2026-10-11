@@ -460,7 +460,7 @@ pub fn apply(
     if !delta.is_finite()
         || delta <= 0.
         || delta > 0.1
-        || b[0x1598 / 4] != 1
+        || !matches!(b[0x1598 / 4], 1 | 2)
         || b[0x1620 / 4] != 4
         || byte(b, 0x1348) != 0
         || b[0x196c / 4] > 9

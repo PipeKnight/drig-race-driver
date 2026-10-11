@@ -1,5 +1,5 @@
-//! Selected engaged, assisted-automatic driver preparation before source suspension.
-//! Respawn/nitro and clutch-mode transitions require separate contracts.
+//! Selected assisted-automatic driver preparation, including clutch engagement.
+//! Respawn/nitro and neutral/manual operation require separate contracts.
 use crate::{Error, dynamics, spawn, vehicle_force::Frame};
 fn f(b: &[u32], o: usize) -> f32 {
     f32::from_bits(b[o / 4])
@@ -62,9 +62,8 @@ pub fn apply(
         || b[0x2278 / 4] != 0
         || byte(b, 0xde4) != 0
         || byte(b, 0xdfc) != 0
-        || b[0x1598 / 4] != 1
+        || !matches!(b[0x1598 / 4], 1 | 2)
         || !(1..=9).contains(&b[0x196c / 4])
-        || byte(b, 0x1640) != 0
         || byte(b, 0x1970) == 0
         || byte(b, 0x1971) == 0
         || b[0x3c0 / 4] >= 5
@@ -92,14 +91,14 @@ pub fn apply(
             .chain((0x1f4c..0x1f5c).step_by(4))
             .any(|o| !f(b, o).is_finite())
         || (0..4).any(|i| {
-            [8, 0x78, 0x104, 0x10c, 0xe0, 0xa0, 0x9c, 0x12c]
+            [8, 0x78, 0x100, 0x104, 0x10c, 0xe0, 0xa0, 0x9c, 0x12c]
                 .into_iter()
                 .any(|o| !f(b, w(i) + o).is_finite())
         })
-        || [0x15a0, 0x15a4, 0x15a8, 0x15ac, 0x15b0, 0x17a4]
+        || [0x15a0, 0x15a4, 0x15a8, 0x15ac, 0x15b0, 0x17a0, 0x17a4]
             .into_iter()
             .any(|o| f(b, o) <= 0.)
-        || (0..4).any(|i| f(b, w(i) + 0xe0) <= 0.)
+        || (0..4).any(|i| f(b, w(i) + 0xe0) <= 0. || f(b, w(i) + 0x100) <= 0.)
         || f(b, 0x1ef0) == f(b, 0x1eec)
         || f(b, 0xe14) >= 1.
         || !(0. ..=2.).contains(&f(b, 0x2ec))
@@ -185,6 +184,7 @@ pub fn apply(
         set(&mut next.view, 0x298 + i * 4, factor);
         set(b, w(i) + 0x74, factor);
     }
+    clutch(b, &next.driven)?;
     set(b, 0x159c, f(b, 0x159c) + delta);
     set(b, 0x2e4, f(b, 0x2e4) + delta);
     b.copy_within(0x15c0 / 4..0x15d0 / 4, 0x1fc0 / 4);
@@ -267,6 +267,45 @@ pub fn apply(
         return Err(Error("nonfinite driver preparation output"));
     }
     *frame = next;
+    Ok(())
+}
+// Selected 98E1B0 call: assisted automatic, a non-neutral gear, modes one/two.
+#[allow(clippy::assign_op_pattern)] // Keep wheel-first sums from the SIMD helper.
+fn clutch(b: &mut [u32], driven: &[usize]) -> Result<(), Error> {
+    if byte(b, 0x1640) != 0 {
+        b[0x1598 / 4] = 2;
+        return Ok(());
+    }
+    if b[0x1598 / 4] == 1 {
+        return Ok(());
+    }
+    let ratio = f(b, 0x18f4 + 4 * b[0x196c / 4] as usize);
+    if !ratio.is_finite() || !f(b, 0x17a8).is_finite() {
+        return Err(Error("invalid clutch engagement input"));
+    }
+    if ratio != 0. {
+        let inertia = f(b, 0x17a0) / (ratio * ratio);
+        let mut spin = 0.;
+        let mut wheels = 0.;
+        for &i in driven {
+            spin = f(b, w(i) + 0x104) + spin;
+            wheels = f(b, w(i) + 0x100) + wheels;
+        }
+        let difference = f(b, 0x1894) * ratio - spin / driven.len() as f32;
+        let blend = 1. - inertia / (wheels + inertia);
+        if !difference.is_finite() || !blend.is_finite() {
+            return Err(Error("invalid clutch engagement arithmetic"));
+        }
+        if ratio * difference < 0. || f(b, 0x17a8) * c(0x3f8ccccd) < f(b, 0x1894) {
+            let speed = f(b, 0x1894) - (blend / ratio) * difference;
+            set(b, 0x1894, speed);
+            let change = (1. - blend) * difference;
+            for &i in driven {
+                set(b, w(i) + 0x104, change + f(b, w(i) + 0x104));
+            }
+        }
+    }
+    b[0x1598 / 4] = 1;
     Ok(())
 }
 fn oscillator(b: &mut [u32], delta: f32) {
