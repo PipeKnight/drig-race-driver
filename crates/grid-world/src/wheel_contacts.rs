@@ -10,6 +10,93 @@ pub struct Pool {
     /// Source static shapes; token1 is the car, source tokens start at2.
     pub shapes: usize,
 }
+/// Authored local point and world normal for the selected car/static producer.
+/// Geometry queries and wheel-overtravel decisions remain the caller's work.
+#[derive(Clone, Copy)]
+pub struct Request {
+    pub local: [f32; 4],
+    pub direction: [f32; 4],
+    pub penetration: f32,
+    pub shape: u32,
+}
+
+pub(crate) fn validate_requests(requests: &[Request], shapes: usize) -> Result<(), Error> {
+    if requests.len() > 4
+        || !(1..=512).contains(&shapes)
+        || requests.iter().any(|r| {
+            !(2..=shapes as u32 + 1).contains(&r.shape)
+                || r.local[3] != 1.
+                || !r.penetration.is_finite()
+                || r.local
+                    .into_iter()
+                    .chain(r.direction)
+                    .any(|v| !v.is_finite())
+        })
+    {
+        return Err(Error("invalid selected producer request"));
+    }
+    Ok(())
+}
+
+pub fn produce(
+    physical: &[u32; 0x424 / 4],
+    input: &Pool,
+    requests: &[Request],
+) -> Result<Pool, Error> {
+    if input.slots.len() > 4
+        || input.used > input.slots.len()
+        || !(1..=512).contains(&input.shapes)
+        || requests.len() > 4
+    {
+        return Err(Error("invalid selected producer pool"));
+    }
+    validate_requests(requests, input.shapes)?;
+    let mut out = input.clone();
+    for request in requests {
+        let point = std::array::from_fn(|j| {
+            let v = request.local;
+            let world = (v[3] * f(physical, 0x200 + 4 * j) + v[1] * f(physical, 0x1e0 + 4 * j))
+                + (v[0] * f(physical, 0x1d0 + 4 * j) + v[2] * f(physical, 0x1f0 + 4 * j));
+            world - f(physical, 0x1c0 + 4 * j)
+        });
+        if point.iter().any(|v: &f32| !v.is_finite()) {
+            return Err(Error("nonfinite selected producer point"));
+        }
+        if out.used == out.slots.len() {
+            continue;
+        }
+        initialize(
+            &mut out.slots[out.used],
+            point,
+            request.direction,
+            request.penetration,
+            request.shape,
+        );
+        out.used += 1;
+    }
+    Ok(out)
+}
+
+fn initialize(c: &mut Contact, point: [f32; 4], direction: [f32; 4], penetration: f32, token: u32) {
+    for (o, v) in [
+        (4, 1),
+        (8, 0),
+        (0x28, 1),
+        (0x2c, token),
+        (0x30, 0),
+        (0x34, 0),
+    ] {
+        c[o / 4] = v;
+    }
+    for (o, v) in [(0xc, 0), (0x70, 0), (0x71, 0), (0x72, 1), (0x73, 1)] {
+        set_byte(c, o, v);
+    }
+    c[0x38 / 4] = penetration.to_bits();
+    c[0x3c / 4] = f32::MAX.to_bits();
+    c[0x50 / 4..0x60 / 4].copy_from_slice(&point.map(f32::to_bits));
+    c[0x60 / 4..0x70 / 4].copy_from_slice(&direction.map(f32::to_bits));
+}
+
 fn f(b: &[u32], o: usize) -> f32 {
     f32::from_bits(b[o / 4])
 }
@@ -82,24 +169,13 @@ pub fn calculate(car: &[u32], physical: &[u32; 0x424 / 4], input: &Pool) -> Resu
         if out.used == out.slots.len() {
             continue;
         }
-        let c = &mut out.slots[out.used];
-        for (o, v) in [
-            (4, 1),
-            (8, 0),
-            (0x28, 1),
-            (0x2c, token),
-            (0x30, 0),
-            (0x34, 0),
-        ] {
-            c[o / 4] = v;
-        }
-        for (o, v) in [(0xc, 0), (0x70, 0), (0x71, 0), (0x72, 1), (0x73, 1)] {
-            set_byte(c, o, v);
-        }
-        c[0x38 / 4] = penetration.to_bits();
-        c[0x3c / 4] = f32::MAX.to_bits();
-        c[0x50 / 4..0x60 / 4].copy_from_slice(&point.map(f32::to_bits));
-        c[0x60 / 4..0x70 / 4].copy_from_slice(&direction.map(f32::to_bits));
+        initialize(
+            &mut out.slots[out.used],
+            point,
+            direction,
+            penetration,
+            token,
+        );
         out.used += 1;
     }
     Ok(out)
@@ -154,6 +230,22 @@ mod tests {
         assert_eq!(calculate(&car, &physical, &full).unwrap(), full);
         car[(0x1990 + 3 * 0x150) / 4] = f32::MAX.to_bits();
         let before = pool.clone();
+        let mut requests = vec![
+            Request {
+                local: [1., 2., 3., 1.],
+                direction: [0., 1., 0., 0.],
+                penetration: 1.,
+                shape: 2
+            };
+            4
+        ];
+        assert_eq!(produce(&physical, &pool, &requests).unwrap().used, 4);
+        requests[3].local[0] = f32::MAX;
+        assert_eq!(
+            produce(&physical, &pool, &requests).unwrap_err().0,
+            "nonfinite selected producer point"
+        );
+        assert_eq!(pool, before);
         assert_eq!(
             calculate(&car, &physical, &pool).unwrap_err().0,
             "nonfinite wheel contact"
