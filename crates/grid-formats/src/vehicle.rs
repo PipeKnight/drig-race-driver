@@ -49,6 +49,23 @@ pub fn read_standard_grip_reductions(row: &Row<'_>) -> Result<[f32; 2]> {
     Ok([number(178)?, number(179)?])
 }
 
+/// Decoded columns 69..76 populate forward slots 1..8; column 68 is reverse.
+/// The constructor aliases slot zero to slot one. Preserve unused zero slots;
+/// later setup scaling and shift-threshold construction are separate stages.
+pub fn read_standard_gear_ratios(row: &Row<'_>) -> Result<[f32; 10]> {
+    read_standard_body(row)?;
+    let mut ratios = [0.; 10];
+    for (slot, ratio) in ratios.iter_mut().enumerate().skip(1) {
+        let column = if slot == 9 { 68 } else { 68 + slot };
+        *ratio = row.number(column)?.unwrap_or(0.) as f32;
+        if !ratio.is_finite() {
+            return fail(column, "gear ratio exceeds finite f32 range");
+        }
+    }
+    ratios[0] = ratios[1];
+    Ok(ratios)
+}
+
 /// CSV column77 through original properties+340 to steering body+e54.
 /// Multiply parsed f64 by the stored-f32 degree conversion before storing f32.
 /// There is no zero substitution in the inspected decoder.
@@ -560,6 +577,32 @@ mod tests {
         let mut fields = vec!["1"; 360];
         fields[2] = "Standard";
         fields
+    }
+
+    #[test]
+    fn gearing_preserves_sparse_slots_reverse_and_constructor_alias() {
+        let mut fields = fixture();
+        fields[68] = "-0.25";
+        fields[69] = "0.35";
+        fields[75] = "";
+        fields[76] = "-0";
+        let r = read_standard_gear_ratios(&Row {
+            fields: fields.clone(),
+        })
+        .unwrap();
+        assert_eq!(r[0].to_bits(), r[1].to_bits());
+        assert_eq!(r[7].to_bits(), 0);
+        assert_eq!(r[8].to_bits(), (-0f32).to_bits());
+        assert_eq!(r[9], -0.25);
+        for text in ["NaN", "inf", "1e300"] {
+            fields[72] = text;
+            assert!(
+                read_standard_gear_ratios(&Row {
+                    fields: fields.clone()
+                })
+                .is_err()
+            );
+        }
     }
 
     #[test]

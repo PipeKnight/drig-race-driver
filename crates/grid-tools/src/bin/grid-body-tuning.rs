@@ -7,8 +7,9 @@ use std::{
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let tyre = args.get(2).is_some_and(|v| v == "tyre");
-    if args.len() != 2 && !(args.len() == 3 && tyre) {
-        return Err("usage: grid-body-tuning INPUT local/OUTPUT.tsv [tyre]".into());
+    let gears = args.get(2).is_some_and(|v| v == "gears");
+    if args.len() != 2 && !(args.len() == 3 && (tyre || gears)) {
+        return Err("usage: grid-body-tuning INPUT local/OUTPUT.tsv [tyre|gears]".into());
     }
     let output = Path::new(&args[1]);
     let parent = output.parent().ok_or("missing parent")?.canonicalize()?;
@@ -34,6 +35,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         Vec::new()
     };
+    let ratios = if gears {
+        table
+            .rows
+            .iter()
+            .map(grid_formats::vehicle::read_standard_gear_ratios)
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
     let mut writer = std::io::BufWriter::new(
         OpenOptions::new()
             .write(true)
@@ -41,6 +51,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .open(parent.join(output.file_name().ok_or("missing filename")?))?,
     );
     for (ordinal, p) in parameters.iter().enumerate() {
+        if gears {
+            write!(writer, "G\t{ordinal}")?;
+            for ratio in ratios[ordinal] {
+                write!(writer, "\t{:08x}", ratio.to_bits())?;
+            }
+            writeln!(writer)?;
+            continue;
+        }
         if tyre {
             writeln!(writer, "T\t{ordinal}\t{}", u8::from(selection[ordinal]))?;
             continue;
