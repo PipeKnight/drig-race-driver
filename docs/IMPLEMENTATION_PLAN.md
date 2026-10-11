@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F190: generated contact groups now feed complete serial physical solving, with an optional preceding whole world-advance stage. Each variant matches400scenarios/1817bodies/1162groups per debug/release; shared manager arrays/cache and global/local identities are preserved. Actual car job/handling handoff, authoritative geometry, persistent state and source-initialized Bevy driving remain open. [Integrated physical sequence](GROUPED_PHYSICAL_FRAME.md).
+
 Current checkpoint F189: whole selected AD6C40 contact-group reconstruction matches628cases per profile, including ordered merges and solver-local body indices. F188 closes serial world body advance. Next join these generated groups to complete physical solving, actual CarJob notification-one handling, source initialization and Bevy driving. Live paused world enables async modes; stored lists do not establish cadence. [Contact groups](CONTACT_GROUPS.md), [world advance](WORLD_BODY_ADVANCE.md).
 
 Current checkpoint F187: complete scoped synchronous A09A80 matches428calls per debug/release; live/file masks corrected to linearX/angularY/positionX/Z projection. This wrapper is not established as normal racing; CarJob uses a different notification-one path. Next original world body-advance scheduling joined to physical contact solving, active callbacks/geometric contacts, source construction and Bevy driving. [Whole wrapper evidence](VEHICLE_OUTER_WRAPPER.md). Earlier checkpoints below retain history.

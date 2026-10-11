@@ -1,5 +1,7 @@
 # Contact-pool ownership and original group reconstruction
 
+F190 now joins generated groups to complete serial solving, optionally preceded by world advance: [integrated physical sequence](GROUPED_PHYSICAL_FRAME.md). The following F189 results remain the isolated reconstruction contract.
+
 11 October 2026, F189. Whole unchanged original `AD6C40` matches independent Rust `contact_groups::calculate` for the selected cold, all-active impact-contact boundary. This constructs the groups and local solver indices from a supplied contact pool. Geometric contact detection and physical solving are subsequent boundaries.
 
 ## Actual reference ownership

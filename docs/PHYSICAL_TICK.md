@@ -1,5 +1,7 @@
 # Body advance joined to physical contact solving — F162
 
+F190 now additionally reconstructs groups and dispatches complete solving after world advance: [integrated physical sequence](GROUPED_PHYSICAL_FRAME.md). The original F162 supplied-single-group boundary below remains separately verified.
+
 F188 verifies the complete synchronous AD7040 world advance/list construction joined to supplied-contact physical solving,711scenarios per profile. See [world body advance](WORLD_BODY_ADVANCE.md). Whole world/contact production and active callbacks remain open; earlier sections retain history.
 
 10 October 2026. Whole original **B13E10** for each body, followed by supplied contacts and whole **B7B850** main/optional frame, repeat and one Rust `physical_tick::calculate` call match **711 scenarios /3,189 body advances /3,925,133 output words per debug and release**. This joins actual pre-contact pose advance, publication and derived matrices to [F160's main/correction physical frame](IMPACT_FRAME_CORRECTION.md).
