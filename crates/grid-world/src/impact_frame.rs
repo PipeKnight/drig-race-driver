@@ -557,4 +557,37 @@ mod tests {
         assert_eq!(o.frame.step.bodies[0].contact.position, [0.1, 0., 0., 1.]);
         assert_eq!(o.frame.step.bodies[0].contact.linear, [1., -1., 0., 0.]);
     }
+    #[test]
+    fn serial_world_reorders_advances_without_reindexing_bodies_or_publishing_failure() {
+        let mut input = input();
+        input.step.iterations = 0;
+        input.bodies = vec![input.bodies[0].clone(); 3];
+        input.step.bodies = vec![input.step.bodies[0].clone(); 3];
+        input.step.workspace = vec![input.step.workspace[0]; 3];
+        for (i, body) in input.step.bodies.iter_mut().enumerate() {
+            body.contact.linear[0] = (i + 1) as f32;
+        }
+        let links = [Some(2), None, Some(1)];
+        let out = crate::physical_tick::calculate_serial_world(&input, &links, 0).unwrap();
+        assert_eq!(out.update_head, 1);
+        assert_eq!(out.update_next, [None, Some(2), Some(0)]);
+        for (i, publication) in out.tick.advanced.iter().enumerate() {
+            assert_eq!(publication.corrected[3][0], (i + 1) as f32 * 0.1);
+            assert_eq!(input.step.bodies[i].contact.position[0], 0.);
+        }
+        for invalid in [
+            [Some(0), None, Some(1)],
+            [Some(3), None, Some(1)],
+            [None; 3],
+        ] {
+            assert!(crate::physical_tick::calculate_serial_world(&input, &invalid, 0).is_err());
+        }
+        // Body1 advances first; body2 then overflows. Input body1 stays intact.
+        input.bodies[2].basis[3][0] = f32::MAX;
+        input.step.bodies[2].contact.position[0] = f32::MAX;
+        input.step.bodies[2].contact.linear[0] = f32::MAX;
+        assert!(crate::physical_tick::calculate_serial_world(&input, &links, 0).is_err());
+        assert_eq!(input.step.bodies[1].contact.position[0], 0.);
+        assert_eq!(input.bodies[1].basis[3][0], 0.);
+    }
 }

@@ -56,7 +56,8 @@ fn run() -> Result<(), Failure> {
     let mut p = 0;
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
-    if word(h, 0) != 0x33524650 || !(1..=1024).contains(&count) {
+    let world = word(h, 0) == 0x33525750;
+    if (!world && word(h, 0) != 0x33524650) || !(1..=1024).contains(&count) {
         return Err("invalid header".into());
     }
     let mut output = h.to_vec();
@@ -117,11 +118,19 @@ fn run() -> Result<(), Failure> {
         let mut bodies = Vec::new();
         let mut settings = Vec::new();
         let mut body_wire = Vec::new();
+        let mut active_next = Vec::new();
         let mut workspace = Vec::new();
         for _ in 0..nb {
             let b = take(&data, &mut p, 0x424)?;
             if word(b, 0x334) != 0x1c0 || (0x40c..=0x410).any(|o| b[o] > 1) {
                 return Err("invalid body framing".into());
+            }
+            if world {
+                let next = word(b, 0x300) as usize;
+                if next > nb || word(b, 0x318) != 0 {
+                    return Err("invalid world body list".into());
+                }
+                active_next.push((next != 0).then(|| next - 1));
             }
             let pointers = [
                 0x2fc, 0x320, 0x324, 0x328, 0x32c, 0x338, 0x33c, 0x340, 0x418, 0x41c, 0x420,
@@ -211,7 +220,7 @@ fn run() -> Result<(), Failure> {
             .iter()
             .map(|r| std::array::from_fn(|i| word(r, 4 * i)))
             .collect();
-        let tick = physical_tick::calculate(&impact_frame::Input {
+        let input = impact_frame::Input {
             correction,
             gravity,
             bodies: settings,
@@ -228,7 +237,16 @@ fn run() -> Result<(), Failure> {
                 cached_pair,
                 cached_material,
             },
-        })?;
+        };
+        let tick = if world {
+            let result = physical_tick::calculate_serial_world(&input, &active_next, 0)?;
+            for (raw, next) in body_wire.iter_mut().zip(result.update_next) {
+                put(raw, 0x318, next.map_or(0, |i| i as u32 + 1));
+            }
+            result.tick
+        } else {
+            physical_tick::calculate(&input)?
+        };
         let frame = tick.frame;
         for (raw, publication) in body_wire.iter_mut().zip(&tick.advanced) {
             let previous_center = raw[0x190..0x1d0].to_vec();
