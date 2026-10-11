@@ -8,6 +8,7 @@ pub mod collision_callback;
 pub mod collision_dispatch;
 pub mod contact_bias;
 pub mod contact_collection;
+pub mod contact_groups;
 pub mod contact_inverse;
 pub mod contact_material;
 pub mod contact_preparation;
