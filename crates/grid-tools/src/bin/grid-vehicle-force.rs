@@ -37,13 +37,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if data.len() < 8
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
-            0x3130464d, 0x31304644, 0x31304645, 0x31304653,
+            0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let driver = word(&data, 0) == 0x31304645;
+    let outer = word(&data, 0) == 0x31304651;
+    let driver = word(&data, 0) == 0x31304645 || outer;
     let initialize_gearing = word(&data, 0) == 0x31304653;
     let chassis = word(&data, 0) == 0x3130464d || driver;
     let driver_prepare = word(&data, 0) == 0x31304644;
@@ -170,7 +171,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 *slot = (off / 0x150) as usize;
             }
             let mut cache = grid_world::rectangle_cull::Cache::default();
-            let apply = if driver {
+            let apply = if outer {
+                |frame: &mut Frame, pair, delta, query, material| {
+                    grid_world::vehicle_step::apply(
+                        frame,
+                        pair,
+                        delta,
+                        REFERENCE_GRAVITY,
+                        query,
+                        material,
+                    )
+                }
+            } else if driver {
                 |frame: &mut Frame, pair, delta, query, material| {
                     grid_world::vehicle_contact_update::apply_driver(
                         frame,
