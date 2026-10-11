@@ -19,6 +19,8 @@ pub mod texture;
 pub mod tuning;
 pub mod tyre_table;
 pub mod vehicle;
+pub mod vehicle_properties;
+mod vehicle_properties_fields;
 
 use std::{fmt, ops::Range};
 
