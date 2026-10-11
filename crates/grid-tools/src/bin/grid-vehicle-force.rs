@@ -37,13 +37,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if data.len() < 8
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
-            0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f,
+            0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f, 0x3130464b,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let complete = word(&data, 0) == 0x3130464f;
+    let car_job = word(&data, 0) == 0x3130464b;
+    let complete = word(&data, 0) == 0x3130464f || car_job;
     let outer = word(&data, 0) == 0x31304651 || complete;
     let driver = word(&data, 0) == 0x31304645 || outer;
     let initialize_gearing = word(&data, 0) == 0x31304653;
@@ -234,7 +235,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .step_by(4)
                         .map(|o| word(record, o)),
                 );
-                let result = grid_world::vehicle_outer::calculate(
+                let calculate = if car_job {
+                    grid_world::vehicle_job::calculate
+                } else {
+                    grid_world::vehicle_outer::calculate
+                };
+                let result = calculate(
                     &grid_world::vehicle_outer::State {
                         owner: grid_world::vehicle_publication::State {
                             vehicle,
