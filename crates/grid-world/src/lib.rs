@@ -60,6 +60,7 @@ pub mod tyre_friction;
 pub mod tyre_grip;
 pub mod tyre_response;
 pub mod vehicle_bridge;
+pub mod vehicle_chassis;
 pub mod vehicle_contact_force;
 pub mod vehicle_contact_update;
 pub mod vehicle_controls;

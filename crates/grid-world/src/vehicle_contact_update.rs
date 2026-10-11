@@ -83,17 +83,32 @@ pub fn apply_with_post_force(
     Ok(materials)
 }
 
+/// Extend the selected source contact/force/assist interval through local
+/// chassis-motion publication. The physical pose retains its existing schedule.
+pub fn apply_with_chassis(
+    frame: &mut Frame,
+    pair: [usize; 2],
+    delta: f32,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<[Option<Material>; 4], Error> {
+    let mut next = frame.clone();
+    let materials = apply_with_post_force(&mut next, pair, delta, query, material)?;
+    crate::vehicle_chassis::apply(&mut next.body, delta)?;
+    *frame = next;
+    Ok(materials)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn post_force_failure_preserves_completed_contact_controls_and_solver() {
+    fn valid_prior_frame() -> Frame {
         let mut frame = crate::vehicle_contact_force::tests::failure_frame();
         frame.body[0x1598 / 4] = 1;
         frame.body[0x196c / 4] = 1;
         frame.body[0xe48 / 4] = 10;
         for (o, x) in [
-            (0x15a4, 0.001),
+            (0x15a4, 0.001f32),
             (0x17a0, 0.22),
             (0x17a4, 900.),
             (0x17a8, 105.),
@@ -107,7 +122,7 @@ mod tests {
             (0x21d8, 2.6),
             (0x2298, 1.),
             (0x229c, 1.),
-            (0x2274, f32::NAN),
+            (0x2274, 0.),
         ] {
             frame.body[o / 4] = x.to_bits();
         }
@@ -126,6 +141,37 @@ mod tests {
                 frame.body[(w + o) / 4] = x.to_bits();
             }
         }
+        frame
+    }
+    #[test]
+    fn chassis_failure_preserves_completed_contact_controls_assists_and_solver() {
+        let mut frame = valid_prior_frame();
+        frame.body[0x1494 / 4] = f32::NAN.to_bits();
+        let before = frame.clone();
+        let mut queries = 0;
+        let error = apply_with_chassis(
+            &mut frame,
+            [2, 3],
+            0.01,
+            |_, _| {
+                queries += 1;
+                Ok(None)
+            },
+            |_| Ok(None),
+        )
+        .unwrap_err();
+        assert_eq!(queries, 4);
+        assert_eq!(error.0, "invalid chassis scalar or span");
+        assert_eq!(frame.body, before.body);
+        assert_eq!(frame.view, before.view);
+        assert_eq!(frame.solver, before.solver);
+        assert_eq!(frame.material_multipliers, before.material_multipliers);
+        assert_eq!(frame.diagnostics, before.diagnostics);
+    }
+    #[test]
+    fn post_force_failure_preserves_completed_contact_controls_and_solver() {
+        let mut frame = valid_prior_frame();
+        frame.body[0x2274 / 4] = f32::NAN.to_bits();
         let before = frame.clone();
         let mut queries = 0;
         let error = apply_with_post_force(

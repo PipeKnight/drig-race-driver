@@ -36,16 +36,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if data.len() < 8
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
+            0x3130464d,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let post_force = word(&data, 0) == 0x31304648;
+    let chassis = word(&data, 0) == 0x3130464d;
+    let post_force = word(&data, 0) == 0x31304648 || chassis;
     let vectors = word(&data, 0) == 0x31304655 || post_force;
     let joined = word(&data, 0) == 0x3130464a || vectors;
     if joined != (args.len() == 4) {
-        return Err("source arguments required only for JF01/UF01/HF01".into());
+        return Err("source arguments required only for JF01/UF01/HF01/MF01".into());
     }
     let sources = if joined {
         let track = Path::new(&args[0]);
@@ -157,7 +159,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 *slot = (off / 0x150) as usize;
             }
             let mut cache = grid_world::rectangle_cull::Cache::default();
-            let apply = if post_force {
+            let apply = if chassis {
+                grid_world::vehicle_contact_update::apply_with_chassis
+            } else if post_force {
                 grid_world::vehicle_contact_update::apply_with_post_force
             } else if vectors {
                 grid_world::vehicle_contact_update::apply
