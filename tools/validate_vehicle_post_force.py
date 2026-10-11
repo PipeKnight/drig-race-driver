@@ -11,12 +11,14 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 REFERENCE=ROOT/'local/compatibility/grid-unpacked.exe'
 NATIVE=ROOT/'local/behavior/vehicle-post-force-probe.exe'
+MAGIC=b'TA01'
+RUST_NAME='grid-vehicle-post-force'
 RECORD=0x2604
 FIELDS=[0xe1c,0xe20,0xe74,0x15a4,0x17a4,0x17a8,0x185c,0x1894,0x18fc,0x1974,0x1f00,0x1fa0,0x226c,0x2274]
 def put(b,o,x):struct.pack_into('<f',b,4+o,x)
 def ui(b,o,x):struct.pack_into('<I',b,4+o,x)
 def digest(p):return hashlib.sha256(p.read_bytes()).hexdigest()
-def request(records):return b'TA01'+struct.pack('<I',len(records))+b''.join(records)
+def request(records):return MAGIC+struct.pack('<I',len(records))+b''.join(records)
 
 def cases():
     rng=random.Random(2008176);result=[]
@@ -53,7 +55,7 @@ def cases():
 
 def execute(out,profile,name,payload,kind,allow=False):
     source=out/f'{name}-{kind}-input.bin';target=out/f'{name}-{kind}-output.bin';source.write_bytes(payload)
-    exe=ROOT/f'target/{profile}/grid-vehicle-post-force.exe' if kind=='rust' else NATIVE
+    exe=ROOT/f'target/{profile}/{RUST_NAME}.exe' if kind=='rust' else NATIVE
     args=[source,target] if kind=='rust' else [REFERENCE,source,target]
     run=subprocess.run([str(exe),*map(str,args)],cwd=ROOT,capture_output=True,text=True,timeout=30)
     report=dict(exit=run.returncode,stdout=run.stdout,stderr=run.stderr,sha256=digest(exe))
