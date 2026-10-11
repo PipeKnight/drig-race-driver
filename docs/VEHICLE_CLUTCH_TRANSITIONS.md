@@ -1,5 +1,8 @@
 # Idle and clutch transitions through the complete vehicle wrapper — F185
 
+Follow-up: [F186](VEHICLE_PUBLICATION.md) verifies the selected complete `A03220`
+publication stage and joins it to the carried vehicle loop.
+
 11 October 2026. Rust now follows the selected assisted-automatic idle/clutch
 path through complete `A06A90`, including source contacts, suspension, controls,
 engine/wheel forces, assistance and chassis integration. This extends
