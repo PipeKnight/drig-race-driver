@@ -4,6 +4,8 @@
 
 ## List ownership and order
 
+F189 ownership correction: update-list`+4` identifies the **world**; its`+28` supplies the special body identity used by B13E10's conditional orthonormalization. The F188 fixture supplies zero for this identity, so the numeric scope and all comparisons remain unchanged. The term group-head below refers to that conditional identity, not physical`+32C`, which is the world owner. [Actual ownership](CONTACT_GROUPS.md).
+
 Aligned entries establish that world `+60` selects an active head slot beginning at `+3C`; active bodies link through `+300`. With world byte `+95` zero, `AD7040` clears the first update-list head and prepends each active body through `+318`, reversing active order. It then calls complete `AD6C00`, which walks that update list and supplies delta, body identity and group head identity to whole `B13E10`. The selected group head is absent, so the group-head-specific rotation branch remains inactive. This is the synchronous branch; asynchronous task submission/imports are not executed.
 
 Rust validates an owned complete active list before work, rejects foreign/cyclic/incomplete topology, builds the reverse update list, advances in that order and retains publications indexed by body identity. It then uses the established complete physical frame implementation. Input buffers remain unchanged on failure. A three-body test distinguishes update order from body identity and proves rollback when the second visited body overflows after another body has advanced.

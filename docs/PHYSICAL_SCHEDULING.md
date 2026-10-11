@@ -1,5 +1,7 @@
 # Physical-frame ownership and scheduling research
 
+F189 verifies selected whole AD6C40 group reconstruction from supplied impact contacts: [contact groups and actual world ownership](CONTACT_GROUPS.md). Live paused state has three advance lists/two solve managers and both async flags enabled; physical32C is the world owner, while18 is the gated group root. This is not a measured live schedule. Earlier sections retain history.
+
 F188 verifies the complete synchronous AD7040 world advance/list construction joined to supplied-contact physical solving,711scenarios per profile. See [world body advance](WORLD_BODY_ADVANCE.md). Whole world/contact production and active callbacks remain open; earlier sections retain history.
 
 10 October 2026. This is **static dependency recovery**, not a measured runtime schedule. [F160](IMPACT_FRAME_CORRECTION.md) verifies a supplied physical-frame branch; authoritative contact production, active callbacks and its relationship to the car/wheel update remain open.
