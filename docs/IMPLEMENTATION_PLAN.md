@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F199: repeated original contact append→whole serial world→actual pool consumption matches2,772 world calls/profile and5,199 produced contacts on retained storage, including694empty intervals. Fresh manager owners provide initial physical state; subsequent contact decisions are authored. Next repeated complete vehicle jobs against carried world state, authoritative geometry/source initialization and Bevy driving. [Repeated contact world](REPEATED_CONTACT_WORLD.md).
+
 Current checkpoint F198: carried physical ownership matches 5,934 successive original world steps per profile, including64-step runs, with retained dirty/active/group/manager/contact storage. Fresh manager-generated owners feed another2,340 world steps/profile. Contacts are initial-only; next repeat production and vehicle jobs against carried physical state, then source initialization and Bevy driving. [Carried world](CARRIED_PHYSICAL_WORLD.md).
 
 Current checkpoint F197: the whole selected serial world step and actual wrapper pool consumption match 465 scenarios per profile; fresh manager production feeds 66 owners/176 contacts into that boundary exactly. Persistent active/dirty/group ownership, source initialization and Bevy driving remain ahead. [Whole world evidence](WHOLE_PHYSICAL_WORLD.md).

@@ -38,10 +38,12 @@ static unsigned owned_token(unsigned address,unsigned char *base,unsigned stride
  if(!address)return 0;for(unsigned i=0;i<count;i++)if(address==(unsigned)(uintptr_t)(base+i*stride))return i+1;*error=10;return 0;
 }
 #endif
-static int fault(EXCEPTION_POINTERS *p){fprintf(stderr,"physical_tick_fault=%08lx eip=%08lx address=%08lx\n",p->ExceptionRecord->ExceptionCode,p->ContextRecord->Eip,p->ExceptionRecord->NumberParameters>1?(unsigned long)p->ExceptionRecord->ExceptionInformation[1]:0);return EXCEPTION_EXECUTE_HANDLER;}
+static uintptr_t reference_base;
+static int fault(EXCEPTION_POINTERS *p){fprintf(stderr,"physical_tick_fault=%08lx eip=%08lx original_eip=%08lx address=%08lx\n",p->ExceptionRecord->ExceptionCode,p->ContextRecord->Eip,(unsigned long)(p->ContextRecord->Eip-reference_base+0x400000),p->ExceptionRecord->NumberParameters>1?(unsigned long)p->ExceptionRecord->ExceptionInformation[1]:0);return EXCEPTION_EXECUTE_HANDLER;}
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
  unsigned char *image=map_reference(argv[1]);if(!image)return 3;
+ reference_base=(uintptr_t)image;
  IMAGE_NT_HEADERS32 *pe=(IMAGE_NT_HEADERS32 *)(image+((IMAGE_DOS_HEADER *)image)->e_lfanew);
  IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
  unsigned char *code=malloc(pe->OptionalHeader.SizeOfImage);if(!code)return 4;memcpy(code,image,pe->OptionalHeader.SizeOfImage);
@@ -50,7 +52,9 @@ int wmain(int argc,wchar_t **argv){
  FILE *input=NULL,*output=NULL;unsigned magic=0,total=0;
  if(!error&&(_wfopen_s(&input,argv[2],L"rb")||!input||_wfopen_s(&output,argv[3],L"wbx")||!output))error=6;
  if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=
-#ifdef GRID_CARRIED_PHYSICAL_WORLD
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+ 0x36535747
+#elif defined(GRID_CARRIED_PHYSICAL_WORLD)
  0x35535747
 #elif defined(GRID_WHOLE_PHYSICAL_WORLD)
  0x34535747
@@ -97,6 +101,9 @@ int wmain(int argc,wchar_t **argv){
 #endif
   unsigned shape_count=MAX_SHAPES;
   unsigned world_steps=1;
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+  __declspec(align(16)) unsigned requests[4][10];unsigned production_counts[64];
+#endif
 #ifndef GRID_CARRIED_PHYSICAL_WORLD
   (void)world_steps;
 #endif
@@ -119,6 +126,16 @@ int wmain(int argc,wchar_t **argv){
 #endif
 #ifdef GRID_CARRIED_PHYSICAL_WORLD
   if(!read(input,&world_steps,4)||!world_steps||world_steps>64){error=8;break;}
+#endif
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+  if(h[0]!=1||h[2]!=4||shape_count<2||!read(input,requests,sizeof(requests))||!read(input,production_counts,world_steps*4)){error=8;break;}
+  for(unsigned j=0;j<4;j++)if(!finite_words(requests[j],9)||requests[j][3]!=0x3f800000||requests[j][9]<2||requests[j][9]>shape_count)error=8;
+  for(unsigned j=0;j<world_steps;j++)if(production_counts[j]>4)error=8;
+  for(unsigned s=0;s<shape_count;s++){
+   if(shape_flags[s][0]!=(s!=0)||shape_flags[s][1]||shape_flags[s][2]!=(s==0)||shape_flags[s][3])error=8;
+   put(shapes[s],0x10,s?11:0);put(shapes[s],0x224,0x7f7fffff);put(shapes[s],0x22c,0x7f7fffff);shapes[s][0x228]=(unsigned char)(s!=0);
+  }
+  if(error)break;
 #endif
   for(unsigned j=0;j<h[0];j++){
    unsigned char *b=bodies[j];float properties[17];
@@ -147,6 +164,10 @@ int wmain(int argc,wchar_t **argv){
    mass[j]=properties[0];memcpy(inertia[j],properties+1,64);bodyptrs[j]=(unsigned)(uintptr_t)b;
   }
   for(unsigned j=0;!error&&j<h[1];j++)if(!read(input,materials[j],52)||!finite_words(materials[j],13))error=8;
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+  put(shapes[0],0xd8,bodyptrs[0]);
+  for(unsigned s=0;s<shape_count;s++)put(shapes[s],0xc8,(unsigned)(uintptr_t)materials[0]);
+#endif
   for(unsigned j=0;!error&&j<h[2];j++){
    unsigned char *c=contacts[j];
    if(!read(input,modes+j,4)||!read(input,c,128)||get(c,0x1c)>=h[0]||get(c,4)!=get(c,0x1c)||get(c,8)!=get(c,0x20)||get(c,0x30)>=h[1]||get(c,0x34)>=h[1]||get(c,0x2c)>shape_count||get(c,0x28)>shape_count||c[0xe]>1||c[0x70]||c[0x73]>1||!finite_words(c+0x38,2)||!finite_words(c+0x50,8)){error=8;break;}
@@ -201,6 +222,9 @@ int wmain(int argc,wchar_t **argv){
     for(unsigned j=0;j<h[0];j++)put(bodies[j],0x300,active_next[j]?bodyptrs[active_next[j]-1]:0);
     manager_ptrs[0]=(unsigned)(uintptr_t)manager;put(world,4,1);put(world,0x10,(unsigned)(uintptr_t)manager_ptrs);put(world,0x18,(unsigned)(uintptr_t)producer);
     put(world,0x3c,bodyptrs[0]);put(world,0x44,bodyptrs[last]);put(world,0x64,1);put(producer,0x91c,(unsigned)(uintptr_t)contacts);put(producer,0x924,h[2]);
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+    put(producer,0x924,0);put(producer,0x920,4);
+#endif
     put(manager,0,(unsigned)(uintptr_t)(image+0xd42654-0x400000));
 #ifdef GRID_GROUPED_TICK
     update_list[1]=(unsigned)(uintptr_t)world;put(world,8,(unsigned)(uintptr_t)lists);put(world,0xc,1);last_active=last;
@@ -232,6 +256,19 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_CONTACT_GROUPS
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
    for(unsigned step=0;step<world_steps;step++){
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+    if(get(producer,0x924)){error=10;break;}
+    for(unsigned r=0;r<production_counts[step];r++){
+     __declspec(align(16)) float point[4],normal[4];const float *v=(const float *)requests[r];memcpy(normal,requests[r]+4,sizeof(normal));
+     for(unsigned j=0;j<4;j++){
+      point[j]=(v[3]* *(float *)(bodies[0]+0x200+4*j)+v[1]* *(float *)(bodies[0]+0x1e0+4*j))+(v[0]* *(float *)(bodies[0]+0x1d0+4*j)+v[2]* *(float *)(bodies[0]+0x1f0+4*j));
+      if(!isfinite(point[j])||!isfinite(point[j]- *(float *)(bodies[0]+0x1c0+4*j)))error=8;
+     }
+     if(error)break;
+     ((void (__fastcall *)(void *,void *,void *,void *,void *,void *,unsigned,unsigned,unsigned))(image+0xb15e70-0x400000))(producer,NULL,shapes[0],shapes[requests[r][9]-1],point,normal,requests[r][8],1,1);
+    }
+    if(error||get(producer,0x924)!=production_counts[step]){error=8;break;}
+#endif
 #ifdef GRID_CARRIED_PHYSICAL_WORLD
     unsigned cursor=get(world,0x3c+4*get(world,0x60)),previous=0,count=0;memset(update_next,0,sizeof(update_next));
     while(cursor){
@@ -244,7 +281,11 @@ int wmain(int argc,wchar_t **argv){
    ((void (__fastcall *)(void *,void *))(image+0xa727a0-0x400000))(world_wrapper,NULL);
 #ifdef GRID_CARRIED_PHYSICAL_WORLD
     if(get(producer,0x924)||get(world,0x7c4)||get(world,0x7cc)){error=10;break;}
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+    {
+#else
     if(step==0){
+#endif
      for(unsigned root=get(manager,0x74),groups_seen=0;root;root=get((void *)(uintptr_t)root,0x1c)){
       if(++groups_seen>h[0]||!owned_token(root,bodies[0],0x430,h[0],&error)){error=10;break;}
       unsigned constructed=0,normals=0;
@@ -369,9 +410,13 @@ int wmain(int argc,wchar_t **argv){
   if(error)break;
 #endif
 #ifdef GRID_OWNED_SHAPES
-  for(unsigned s=0;s<shape_count;s++)for(unsigned o=0;o<0x240;o++){
-   unsigned char expected=o==0x216?shape_flags[s][0]:o==0x217?shape_flags[s][1]:o==0x229?shape_flags[s][2]:o==0x230?shape_flags[s][3]:0;
-   if(shapes[s][o]!=expected)error=10;
+  for(unsigned s=0;s<shape_count;s++){
+   unsigned char expected[0x240]={0};expected[0x216]=shape_flags[s][0];expected[0x217]=shape_flags[s][1];expected[0x229]=shape_flags[s][2];expected[0x230]=shape_flags[s][3];
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+   put(expected,0x10,s?11:0);put(expected,0x224,0x7f7fffff);put(expected,0x22c,0x7f7fffff);expected[0x228]=(unsigned char)(s!=0);
+   put(expected,0xc8,(unsigned)(uintptr_t)materials[0]);put(expected,0xd8,s?0:bodyptrs[0]);
+#endif
+   if(memcmp(shapes[s],expected,sizeof(expected)))error=10;
   }
   if(error)break;
 #endif
@@ -400,7 +445,12 @@ finish:
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
  printf("whole_serial_world=1 wrapper_pool_consumed=1 owned_workers_retained=1\n");
 #ifdef GRID_CARRIED_PHYSICAL_WORLD
+#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+ printf("carried_world_ownership=1 no_cold_reset=1 original_pool_append=1\n");
+ printf("original_contact_production=1 repeated_pool_consumption=1\n");
+#else
  printf("carried_world_ownership=1 no_cold_reset=1 no_pool_rearm=1\n");
+#endif
 #endif
 #endif
  return (int)error;

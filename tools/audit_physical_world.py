@@ -30,7 +30,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('reports',type=Path,nargs='+');a=p.parse_args()
     assert digest(ROOT/'local/compatibility/grid-unpacked.exe')==ANALYSIS
     rows=[audit(q.resolve()) for q in a.reports]
-    scripts=['validate_shaped_physical_frame.py','validate_wheel_physical_handoff.py','audit_physical_world.py']
+    scripts=['validate_shaped_physical_frame.py','validate_wheel_physical_handoff.py','validate_reproduced_physical_world.py','audit_physical_world.py']
     for name in scripts:ast.parse((ROOT/'tools'/name).read_text())
     result=dict(passed=True,reports=rows,report_count=len(rows),checks=sum(r['checks'] for r in rows),guards=sum(r['guards'] for r in rows),scripts=scripts)
     private(a.output).write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if k!='reports'}))

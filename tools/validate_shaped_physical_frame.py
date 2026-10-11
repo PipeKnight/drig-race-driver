@@ -61,7 +61,10 @@ def pack(cases):
         raw=tick_pack([c])[8:]
         data.extend(raw[:164]);data.extend(struct.pack('<I',len(c['shapes'])))
         data.extend(b''.join(bytes(s) for s in c['shapes']))
-        if MAGIC==0x35535747:data.extend(struct.pack('<I',c['steps']))
+        if MAGIC in [0x35535747,0x36535747]:data.extend(struct.pack('<I',c['steps']))
+        if MAGIC==0x36535747:
+            for request in c['requests']:data.extend(struct.pack('<9fI',*request))
+            data.extend(struct.pack('<'+'I'*c['steps'],*c['counts'][:c['steps']]))
         data.extend(raw[164:])
     assert len(data)<=32*1024*1024
     return data
