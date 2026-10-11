@@ -1,6 +1,6 @@
 # Current GRID reverse-engineering and implementation plan
 
-Current checkpoint F181: whole linked-state/mass/control synchronization372calls plus332carried source-driver/publication updates match every word in debug/release;142library tests pass. Authoritative physical state now feeds the driver and receives linked publication without a second advance. Next wholeA03670 one-call validation, A06A90tail/A03220 and physical-world scheduling, then Bevy driving. [Synchronization](VEHICLE_SYNCHRONIZATION.md), [initialization](VEHICLE_SHIFT_INITIALIZATION.md), [driver](VEHICLE_DRIVER_PREPARATION.md).
+Current checkpoint F182: one complete originalA03670 driver call matches Rust332updates per debug/release, also inside332sync/publication updates.79existing+15native framing guards pass; Rust unchanged from142library tests. Next actualA06A90 temporary-frame initialization/settling/assistance, A03220 and physical-world scheduling, then Bevy driving. [Whole driver](WHOLE_VEHICLE_DRIVER.md), [synchronization](VEHICLE_SYNCHRONIZATION.md), [initialization](VEHICLE_SHIFT_INITIALIZATION.md).
 
 Current checkpoint F156 supersedes earlier checkpoints: complete initial single/two-body constraints, material/cache/compliance behavior and grouped friction rows match711scenarios in debug/release, including5,840fresh upstream operands. Next join construction with main response preparation and all normal/friction solve spans, then impulse publication. Full frame, contact production, initialization/timing and Bevy driving remain open. [Contact construction](CONTACT_ROWS.md).
 

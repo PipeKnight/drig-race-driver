@@ -57,7 +57,11 @@ typedef void (__fastcall *InitializeContacts)(void *,void *,int);
 typedef unsigned *(__fastcall *MaterialLookup)(void *,void *,unsigned);
 typedef struct { __declspec(align(16)) unsigned char data[0xb0]; } SurfaceRecord;
 #ifdef GRID_SUSPENSION_PREPARE
+#ifdef GRID_WHOLE_DRIVER
+#include "whole_vehicle_driver_probe.h"
+#else
 #include "suspension_prepare_probe.h"
+#endif
 #endif
 int wmain(int argc,wchar_t **argv){
 #ifdef GRID_VEHICLE_GRIP
