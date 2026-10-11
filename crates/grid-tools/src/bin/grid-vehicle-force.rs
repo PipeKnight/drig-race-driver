@@ -38,13 +38,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
             0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f, 0x3130464b,
-            0x3230464b, 0x31304654, 0x32304654,
+            0x3230464b, 0x31304654, 0x32304654, 0x33304654,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let wheel_producer = word(&data, 0) == 0x32304654;
+    let vehicle_world = word(&data, 0) == 0x33304654;
+    let wheel_producer = word(&data, 0) == 0x32304654 || vehicle_world;
     let car_manager = word(&data, 0) == 0x31304654 || wheel_producer;
     let handling_queries = word(&data, 0) == 0x3230464b || car_manager;
     let car_job = word(&data, 0) == 0x3130464b || handling_queries;
@@ -86,7 +87,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             0
         }
         + if handling_queries { 8 + 64 * 8 } else { 0 }
-        + if wheel_producer { 8 + 4 * 128 } else { 0 };
+        + if wheel_producer { 8 + 4 * 128 } else { 0 }
+        + if vehicle_world {
+            grid_tools::vehicle_world_diagnostic::SIZE
+        } else {
+            0
+        };
     if !(1..=64).contains(&count) || data.len() != 8 + count * record_size {
         return Err("invalid size/count".into());
     }
@@ -280,28 +286,44 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if capacity > 4 || used > capacity {
                         return Err("invalid wheel pool counts".into());
                     }
-                    let pool = grid_world::wheel_contacts::Pool {
+                    let mut pool = grid_world::wheel_contacts::Pool {
                         used,
                         shapes: track.shape_count(),
                         slots: (0..capacity)
                             .map(|i| words(record, tail + 8 + i * 128))
                             .collect(),
                     };
-                    let result = grid_world::vehicle_manager::calculate_with_contacts(
-                        &state,
-                        &pool,
-                        pair,
-                        delta,
-                        REFERENCE_GRAVITY,
-                        query_present.then_some(query_rows.as_slice()),
-                        query,
-                        |token| surfaces.joined(token),
-                    )?;
-                    put(record, tail + 4, &[result.contacts.used as u32]);
-                    for (i, c) in result.contacts.slots.iter().enumerate() {
+                    let job = if vehicle_world {
+                        grid_tools::vehicle_world_diagnostic::calculate(
+                            state,
+                            &mut pool,
+                            &mut record[tail + 520..],
+                            delta,
+                            pair,
+                            REFERENCE_GRAVITY,
+                            query_present.then_some(query_rows.as_slice()),
+                            query,
+                            |token| surfaces.joined(token),
+                        )?
+                    } else {
+                        let result = grid_world::vehicle_manager::calculate_with_contacts(
+                            &state,
+                            &pool,
+                            pair,
+                            delta,
+                            REFERENCE_GRAVITY,
+                            query_present.then_some(query_rows.as_slice()),
+                            query,
+                            |token| surfaces.joined(token),
+                        )?;
+                        pool = result.contacts;
+                        result.job
+                    };
+                    put(record, tail + 4, &[pool.used as u32]);
+                    for (i, c) in pool.slots.iter().enumerate() {
                         put(record, tail + 8 + i * 128, c);
                     }
-                    result.job
+                    job
                 } else if handling_queries {
                     let calculate = if car_manager {
                         grid_world::vehicle_manager::calculate
@@ -419,7 +441,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() {
-    if let Err(error) = run() {
+    // Debug builds retain several complete car/frame copies during composition.
+    // Keep diagnostic stack storage explicitly bounded on Windows.
+    let result = std::thread::Builder::new()
+        .name("vehicle-diagnostic".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(|| run().map_err(|e| e.to_string()))
+        .expect("create vehicle diagnostic worker")
+        .join()
+        .expect("vehicle diagnostic worker panicked");
+    if let Err(error) = result {
         eprintln!("{error}");
         std::process::exit(1);
     }
