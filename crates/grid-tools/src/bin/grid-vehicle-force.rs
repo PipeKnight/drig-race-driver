@@ -24,7 +24,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let offset = args.len() - 2;
     let input = Path::new(&args[offset]);
     let output = Path::new(&args[offset + 1]);
-    if input.metadata()?.len() > 2 * 1024 * 1024
+    if input.metadata()?.len() > 16 * 1024 * 1024
         || !output
             .parent()
             .ok_or("missing parent")?
@@ -37,13 +37,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if data.len() < 8
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
-            0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651,
+            0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let outer = word(&data, 0) == 0x31304651;
+    let complete = word(&data, 0) == 0x3130464f;
+    let outer = word(&data, 0) == 0x31304651 || complete;
     let driver = word(&data, 0) == 0x31304645 || outer;
     let initialize_gearing = word(&data, 0) == 0x31304653;
     let chassis = word(&data, 0) == 0x3130464d || driver;
@@ -52,7 +53,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let vectors = word(&data, 0) == 0x31304655 || post_force;
     let joined = word(&data, 0) == 0x3130464a || vectors;
     if joined != (args.len() == 4) {
-        return Err("source arguments required only for JF01/UF01/HF01/MF01/EF01".into());
+        return Err("source arguments required only for JF01/UF01/HF01/MF01/EF01/QF01/OF01".into());
     }
     let sources = if joined {
         let track = Path::new(&args[0]);
@@ -73,10 +74,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let controls = word(&data, 0) == 0x31304643 || prepared;
     let propulsion = word(&data, 0) == 0x31304650 || controls;
     let count = word(&data, 4) as usize;
-    if !(1..=64).contains(&count) || data.len() != 8 + count * RECORD {
+    let record_size = RECORD
+        + if complete {
+            0x21000 - 0x2600 + 0x424
+        } else {
+            0
+        };
+    if !(1..=64).contains(&count) || data.len() != 8 + count * record_size {
         return Err("invalid size/count".into());
     }
-    for (index, record) in data[8..].as_chunks_mut::<RECORD>().0.iter_mut().enumerate() {
+    for (index, record) in data[8..].chunks_exact_mut(record_size).enumerate() {
         if word(record, 0) as usize != index {
             return Err("invalid case identity".into());
         }
@@ -202,30 +209,58 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 grid_world::vehicle_contact_force::apply
             };
-            let resolved = apply(
-                &mut frame,
-                pair,
-                delta,
-                |_, ray: grid_world::contact_ray::Ray| {
-                    track
-                        .query(ray.start, ray.end, &mut cache)
-                        .map_err(|_| grid_world::Error("track query failed"))?
-                        .hit
-                        .map(|h| {
-                            let (index, material) = surfaces
-                                .contact(h.contact.material)
-                                .map_err(|_| grid_world::Error("missing source mechanics"))?;
-                            Ok(grid_world::suspension_prepare::Contact {
-                                normal: h.contact.normal,
-                                fraction: h.contact.fraction,
-                                material,
-                                tokens: [index as u32 + 1, 1, 1],
-                            })
+            let query = |_, ray: grid_world::contact_ray::Ray| {
+                track
+                    .query(ray.start, ray.end, &mut cache)
+                    .map_err(|_| grid_world::Error("track query failed"))?
+                    .hit
+                    .map(|h| {
+                        let (index, material) = surfaces
+                            .contact(h.contact.material)
+                            .map_err(|_| grid_world::Error("missing source mechanics"))?;
+                        Ok(grid_world::suspension_prepare::Contact {
+                            normal: h.contact.normal,
+                            fraction: h.contact.fraction,
+                            material,
+                            tokens: [index as u32 + 1, 1, 1],
                         })
-                        .transpose()
-                },
-                |token| surfaces.joined(token),
-            )?;
+                    })
+                    .transpose()
+            };
+            let resolved = if complete {
+                let mut vehicle = frame.body.to_vec();
+                vehicle.extend(
+                    (RECORD..RECORD + 0x21000 - 0x2600)
+                        .step_by(4)
+                        .map(|o| word(record, o)),
+                );
+                let result = grid_world::vehicle_outer::calculate(
+                    &grid_world::vehicle_outer::State {
+                        owner: grid_world::vehicle_publication::State {
+                            vehicle,
+                            physical: words(record, RECORD + 0x21000 - 0x2600),
+                        },
+                        frame,
+                    },
+                    pair,
+                    delta,
+                    REFERENCE_GRAVITY,
+                    query,
+                    |token| surfaces.joined(token),
+                )?;
+                frame = result.state.frame;
+                put(record, RECORD, &result.state.owner.vehicle[0x2600 / 4..]);
+                put(
+                    record,
+                    RECORD + 0x21000 - 0x2600,
+                    &result.state.owner.physical,
+                );
+                result.materials
+            } else {
+                apply(&mut frame, pair, delta, query, |token| {
+                    surfaces.joined(token)
+                })?
+            };
             for (i, m) in resolved.into_iter().enumerate() {
                 record[20 + 4 * i..24 + 4 * i]
                     .copy_from_slice(&u32::from(m.is_some()).to_le_bytes());

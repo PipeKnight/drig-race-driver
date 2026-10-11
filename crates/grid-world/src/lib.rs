@@ -68,6 +68,7 @@ pub mod vehicle_driver_prepare;
 pub mod vehicle_force;
 pub mod vehicle_gearing;
 pub mod vehicle_grip;
+pub mod vehicle_outer;
 pub mod vehicle_post_force;
 pub mod vehicle_prepared_frame;
 pub mod vehicle_propulsion;
