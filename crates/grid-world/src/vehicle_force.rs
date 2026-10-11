@@ -1,4 +1,4 @@
-//! Joined four-wheel, mode-one force solve, active limits and event advancement.
+//! Joined four-wheel force solve in engaged and disconnected drivetrain modes.
 //! Supplied prepared vectors/contact state; no contact detection or pose advance.
 use crate::{Error, dynamics, force_equations::System};
 
@@ -141,6 +141,10 @@ impl Frame {
     }
     fn build(&mut self, delta: f32) -> Result<System, Error> {
         let mut system = System::reset_storage(self.solver);
+        let disconnected = u(&self.body, 0x1598) == 2;
+        if disconnected {
+            integer(&mut self.view, 0x16c, system.allocate_variable()?);
+        }
         for i in 0..4 {
             for offset in [0x128, 0x138, 0x148] {
                 integer(&mut self.view, offset + 4 * i, system.allocate_variable()?);
@@ -198,8 +202,25 @@ impl Frame {
             }
         }
         integer(&mut self.view, 0x168, system.allocate_variable()?);
-        system.fix(self.id(0x168, 0), f(&self.view, 0x58))?;
+        system.fix(
+            self.id(0x168, 0),
+            if disconnected {
+                0.
+            } else {
+                f(&self.view, 0x58)
+            },
+        )?;
         integer(&mut self.view, 4, 1);
+        if disconnected {
+            let inverse = 1. / f(&self.view, 0x294);
+            self.row(
+                &mut system,
+                0x104,
+                0,
+                &[(self.id(0x16c, 0), 1.), (self.id(0x168, 0), inverse)],
+                f(&self.view, 0x290) * inverse,
+            )?;
+        }
         for i in 0..4 {
             self.torque_row(&mut system, i)?;
             let inv = f(&self.body, 0x15a4);
@@ -221,6 +242,9 @@ impl Frame {
         Ok(system)
     }
     fn solve(&mut self, system: &mut System) -> Result<bool, Error> {
+        if u(&self.body, 0x1598) == 2 && self.id(4, 0) != 0 {
+            system.select(&[self.id(0x104, 0)], &[self.id(0x16c, 0)])?;
+        }
         for i in 0..4 {
             if self.id(0x18, i) == 0 {
                 system.select(
@@ -408,6 +432,13 @@ impl Frame {
             }
         }
         if duration >= EPSILON {
+            if u(&self.body, 0x1598) == 2 {
+                let ratio = f(&self.body, 0x18f4 + 4 * u(&self.body, 0x196c));
+                let ratio = if ratio == 0. { 1. } else { ratio };
+                let speed =
+                    (self.value(system, 0x16c, 0)? / ratio) * duration + f(&self.body, 0x1894);
+                set(&mut self.body, 0x1894, speed);
+            }
             for i in 0..4 {
                 let brake = self.value(system, 0x108, i)?;
                 let spin =
@@ -469,8 +500,10 @@ impl Frame {
             .iter()
             .map(|i| f(&self.body, wheel(*i) + 0x100))
             .collect();
-        for (&i, &old) in self.driven.iter().zip(&saved) {
-            set(&mut self.body, wheel(i) + 0x100, extra + old);
+        if u(&self.body, 0x1598) == 1 {
+            for (&i, &old) in self.driven.iter().zip(&saved) {
+                set(&mut self.body, wheel(i) + 0x100, extra + old);
+            }
         }
         let mut remaining = delta;
         let mut events = 0;
@@ -501,6 +534,9 @@ impl Frame {
                 }
             }
             if byte(&self.view, 0x54) == 0 {
+                if u(&self.body, 0x1598) == 2 {
+                    system.fix(self.id(0x16c, 0), 0.)?;
+                }
                 for i in 0..4 {
                     for offset in [0x118, 0x128, 0x138, 0x158] {
                         system.fix(self.id(offset, i), 0.)?;
@@ -517,6 +553,10 @@ impl Frame {
                 }
             }
             self.solver = system.snapshot();
+        }
+        if u(&self.body, 0x1598) == 2 {
+            set_byte(&mut self.body, 0x1f0c, u8::from(self.view[1] == 0));
+            return Ok(());
         }
         let mut sum = 0.;
         for (&i, &old) in self.driven.iter().zip(&saved) {
@@ -559,7 +599,7 @@ pub fn apply(frame: &mut Frame, delta: f32) -> Result<(), Error> {
         || delta <= 0.
         || delta > 0.1
         || byte(&frame.body, 0xadc) != 0
-        || u(&frame.body, 0x1598) != 1
+        || !matches!(u(&frame.body, 0x1598), 1 | 2)
         || u(&frame.body, 0x1620) != 4
         || u(&frame.body, 0x196c) >= 16
         || frame.driven.is_empty()
@@ -632,6 +672,14 @@ pub fn apply(frame: &mut Frame, delta: f32) -> Result<(), Error> {
         return Err(Error("nonfinite or invalid physical force inputs"));
     }
     let mut next = frame.clone();
+    if u(&next.body, 0x1598) == 2 {
+        let ratio = f(&next.body, 0x18f4 + 4 * gear);
+        let ratio = if ratio == 0. { 1. } else { ratio };
+        let inertia = f(&next.body, 0x17a0) / (ratio * ratio);
+        if inertia <= 0. || !inertia.is_finite() || !(1. / inertia).is_finite() {
+            return Err(Error("invalid disconnected engine inertia"));
+        }
+    }
     next.run(delta)?;
     *frame = next;
     Ok(())
@@ -640,6 +688,39 @@ pub fn apply(frame: &mut Frame, delta: f32) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disconnected_equation_overflow_rolls_back_initialized_storage() {
+        let mut frame = Frame {
+            body: [0; BODY_WORDS],
+            view: [0; VIEW_WORDS],
+            solver: [0xdeadbeef; 884],
+            driven: vec![0, 1],
+            material_multipliers: [None; 4],
+            diagnostics: [0.; 8],
+        };
+        integer(&mut frame.body, 0x1598, 2);
+        integer(&mut frame.body, 0x1620, 4);
+        for offset in [0x15a0, 0x15a8, 0x15ac, 0x15b0] {
+            set(&mut frame.body, offset, 1000.);
+        }
+        set(&mut frame.body, 0x17a0, 0.01);
+        for i in 0..4 {
+            set(&mut frame.body, wheel(i) + 0x100, 1.);
+            set(&mut frame.body, wheel(i) + 0xe0, 0.3);
+        }
+        set(&mut frame.view, 0x58, f32::MAX);
+        set(&mut frame.view, 0x9c, f32::MAX);
+        let before = frame.clone();
+        assert_eq!(
+            apply(&mut frame, 0.016),
+            Err(Error("invalid force equation"))
+        );
+        assert_eq!(frame.body, before.body);
+        assert_eq!(frame.view, before.view);
+        assert_eq!(frame.solver, before.solver);
+        assert_eq!(frame.diagnostics, before.diagnostics);
+    }
 
     #[test]
     fn malformed_frame_leaves_all_storage_intact() {
