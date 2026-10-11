@@ -38,13 +38,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
             0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f, 0x3130464b,
-            0x3230464b,
+            0x3230464b, 0x31304654,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let handling_queries = word(&data, 0) == 0x3230464b;
+    let car_manager = word(&data, 0) == 0x31304654;
+    let handling_queries = word(&data, 0) == 0x3230464b || car_manager;
     let car_job = word(&data, 0) == 0x3130464b || handling_queries;
     let complete = word(&data, 0) == 0x3130464f || car_job;
     let outer = word(&data, 0) == 0x31304651 || complete;
@@ -265,7 +266,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     frame,
                 };
                 let result = if handling_queries {
-                    grid_world::vehicle_job::calculate_with_queries(
+                    let calculate = if car_manager {
+                        grid_world::vehicle_manager::calculate
+                    } else {
+                        grid_world::vehicle_job::calculate_with_queries
+                    };
+                    calculate(
                         &state,
                         pair,
                         delta,
