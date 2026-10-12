@@ -1,5 +1,8 @@
 # Retained triangle manifold append
 
+Follow-up: [F232](ORIENTED_TRIANGLE_MANIFOLD.md) composes and validates original
+witness reorientation with this retained manifold path.
+
 F231, 12 October 2026. Retained manifold append is verified at the selected
 source boundary. This is not a runtime barrier implementation. Builds reuse Python 3.12.14, Rust/Cargo 1.99.0,
 MSVC 14.44.35207 / Developer Prompt 17.14.41 / SDK 10.0.26100.0, with strict

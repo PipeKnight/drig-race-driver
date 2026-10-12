@@ -1,5 +1,10 @@
 # Contact reorientation integration research
 
+Follow-up: [F232](ORIENTED_TRIANGLE_MANIFOLD.md) verifies the whole reorientation
+helper composed with retained manifold assembly. Caller normal/depth selection
+and backface correction remain separate; the research below records the
+original contract that informed that implementation.
+
 12 October 2026. This records observed original call contracts and the next
 implementation boundary. No new Rust reorientation equivalence or fresh runtime
 contact detection is claimed here.
