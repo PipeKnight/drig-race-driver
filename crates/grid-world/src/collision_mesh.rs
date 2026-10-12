@@ -49,6 +49,70 @@ fn squared(v: [f32; 4]) -> f32 {
     (v[0] * v[0] + v[1] * v[1]) + (v[2] * v[2] + v[3] * v[3])
 }
 
+/// Selected whole 9B8B70 -> 9B8890 coordinate adjustment, deformation disabled.
+/// `vertical_extents` are source bottom/roof. The mesh retains the car's local
+/// X/Z offset while Y is centered for the separate shape transform.
+pub fn prepare_points(
+    points: &[[f32; 4]],
+    offset: [f32; 4],
+    vertical_extents: [f32; 2],
+) -> Result<Vec<[f32; 4]>, Error> {
+    if !(4..=80).contains(&points.len())
+        || offset
+            .iter()
+            .chain(&vertical_extents)
+            .any(|x| !x.is_finite() || x.abs() > 10000.)
+        || offset[3] != 0.
+        || vertical_extents[0] > vertical_extents[1]
+        || points
+            .iter()
+            .any(|v| v.iter().any(|x| !x.is_finite() || x.abs() > 100000.) || v[3] != 1.)
+    {
+        return Err(Error("invalid source collision adjustment"));
+    }
+    let mut floor = points[0][1];
+    for p in &points[1..] {
+        if p[1] < floor {
+            floor = p[1];
+        }
+    }
+    let center = offset[1] + (vertical_extents[1] + vertical_extents[0]) * 0.5;
+    let result: Vec<[f32; 4]> = points
+        .iter()
+        .map(|p| {
+            let y = if p[1] < floor { floor } else { p[1] };
+            [
+                (offset[0] + p[0]) - 0.,
+                (offset[1] + y) - center,
+                (offset[2] + p[2]) - 0.,
+                1.,
+            ]
+        })
+        .collect();
+    if result
+        .iter()
+        .flatten()
+        .any(|x| !x.is_finite() || x.abs() > 100000.)
+    {
+        return Err(Error("source collision adjustment exceeds range"));
+    }
+    Ok(result)
+}
+
+pub fn build_from_source(
+    points: &[[f32; 4]],
+    triangles: &[[u32; 3]],
+    offset: [f32; 4],
+    vertical_extents: [f32; 2],
+    fill: u8,
+) -> Result<Mesh, Error> {
+    build(
+        &prepare_points(points, offset, vertical_extents)?,
+        triangles,
+        fill,
+    )
+}
+
 /// Build complete supplied mesh bytes, preserving the selected zero/CD fill in
 /// untouched padding. Source geometry adjustment, allocation and shape factory
 /// are external. Adjacency order follows source triangle and corner order.
@@ -194,6 +258,35 @@ pub fn build(points: &[[f32; 4]], triangles: &[[u32; 3]], fill: u8) -> Result<Me
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_mesh_centers_height_and_keeps_owned_source_unchanged() {
+        let raw = [
+            [1., 3., 2., 1.],
+            [-1., 3., -2., 1.],
+            [1., 1., -2., 1.],
+            [-1., 1., 2., 1.],
+        ];
+        let before = raw;
+        let triangles = [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
+        let offset = [-0., -0.375, -0.25, 0.];
+        let mesh = build_from_source(&raw, &triangles, offset, [1., 3.], 0xcd).unwrap();
+        assert_eq!(raw, before);
+        for (i, point) in raw.iter().enumerate() {
+            let adjusted = mesh.point(i).unwrap();
+            assert_eq!(adjusted, [point[0], point[1] - 2., point[2] - 0.25, 1.]);
+            // Shape-local translation restores the offset geometry position.
+            assert_eq!(adjusted[1] + 1.625, point[1] - 0.375);
+        }
+        assert!(prepare_points(&raw, offset, [3., 1.]).is_err());
+        assert!(prepare_points(&raw, [0., 0., 0., 1.], [1., 3.]).is_err());
+        assert!(prepare_points(&raw, [0., f32::NAN, 0., 0.], [1., 3.]).is_err());
+        let huge = raw.map(|mut p| {
+            p[0] = 100000.;
+            p
+        });
+        assert!(prepare_points(&huge, [1., 0., 0., 0.], [1., 3.]).is_err());
+    }
+
     #[test]
     fn tetrahedron_preserves_topology_padding_and_normal_winding() {
         let p = [
