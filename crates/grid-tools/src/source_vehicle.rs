@@ -25,7 +25,7 @@ pub struct Runtime {
     pub ticks: u64,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct Controls {
     pub throttle: f32,
     pub brake: f32,
@@ -180,7 +180,9 @@ impl Runtime {
         byte(&mut owner, 4, 0);
         byte(&mut owner, 0x1970, 1);
         byte(&mut owner, 0x1971, 1);
-        byte(&mut owner, 0x1972, 0);
+        // Explicit keyboard preference: brake selects reverse near rest; the
+        // original automatic control helper consumes the two raw pedal slots.
+        byte(&mut owner, 0x1972, 1);
         byte(&mut owner, 0x20fb4, 1);
         let mut physical: [u32; 0x424 / 4] = factory.physical.body[..0x424 / 4].try_into().unwrap();
         for o in [0x32c, 0x334, 0x338, 0x33c, 0x340] {
@@ -319,6 +321,8 @@ impl Runtime {
         for (o, v) in [
             (0xe1c, controls.throttle),
             (0xe20, controls.brake),
+            (0xe3c, controls.throttle),
+            (0xe40, controls.brake),
             (0xe30, controls.steering),
         ] {
             staged.car.owner.vehicle[o / 4] = v.to_bits();
@@ -443,5 +447,119 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(runtime.state.car.owner.vehicle[0xe38 / 4] & 255, 1);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to the purchased installation"]
+    fn source_driving_handbrake_and_reverse() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let mut runtime = Runtime::lacetti(Path::new(&root), "slot_00", 200679).unwrap();
+        for _ in 0..120 {
+            runtime
+                .tick(Controls {
+                    throttle: 1.,
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let powered = runtime.state.clone();
+        let cache = runtime.cache;
+        let mut speeds = Vec::new();
+        for handbrake in [false, true] {
+            runtime.state = powered.clone();
+            runtime.cache = cache;
+            runtime.ticks = 120;
+            for i in 0..60 {
+                runtime
+                    .tick(Controls {
+                        handbrake,
+                        ..Default::default()
+                    })
+                    .unwrap();
+                if i == 0 || i == 59 {
+                    let b = &runtime.state.car.owner.vehicle;
+                    let f = |o: usize| f32::from_bits(b[o / 4]);
+                    println!(
+                        "handbrake_probe hand={handbrake} tick={} velocity={:?} derived={} brake={:?} rear_spin={:?} factors={:?}",
+                        runtime.ticks,
+                        runtime.velocity(),
+                        b[0x1640 / 4] & 255,
+                        (0..4)
+                            .map(|i| f32::from_bits(runtime.state.car.frame.view[0x28 / 4 + i]))
+                            .collect::<Vec<_>>(),
+                        [f(0x1a94), f(0x1be4)],
+                        [
+                            f(0x1260),
+                            f(0x125c),
+                            f(0x1358),
+                            f(0x1ef4),
+                            f(0x1a98),
+                            f(0x1d38)
+                        ]
+                    );
+                    if handbrake && i == 0 {
+                        let brakes = &runtime.state.car.frame.view[0x28 / 4..0x38 / 4];
+                        assert!(brakes[..2].iter().all(|w| f32::from_bits(*w) > 1000.));
+                        assert!(brakes[2..].iter().all(|w| f32::from_bits(*w) == 0.));
+                    }
+                }
+            }
+            speeds.push(
+                runtime.velocity()[..3]
+                    .iter()
+                    .map(|v| v * v)
+                    .sum::<f32>()
+                    .sqrt(),
+            );
+        }
+        assert!(
+            speeds[0] > 5. && speeds[1] < 0.1,
+            "coast versus handbrake: {speeds:?}"
+        );
+        runtime.state = powered;
+        runtime.cache = cache;
+        runtime.ticks = 120;
+        runtime
+            .tick(Controls {
+                brake: 1.,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_ne!(
+            runtime.state.car.owner.vehicle[0x196c / 4],
+            9,
+            "braking at forward speed must not immediately select reverse"
+        );
+        runtime.reset();
+        for _ in 0..120 {
+            runtime
+                .tick(Controls {
+                    brake: 1.,
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        println!(
+            "reverse_probe gear={} velocity={:?}",
+            runtime.state.car.owner.vehicle[0x196c / 4],
+            runtime.velocity()
+        );
+        let signed_speed = |r: &Runtime| {
+            let p = r.pose();
+            let v = r.velocity();
+            v[0] * p[8] + v[1] * p[9] + v[2] * p[10]
+        };
+        assert_eq!(runtime.state.car.owner.vehicle[0x196c / 4], 9);
+        assert!(signed_speed(&runtime) < -1.);
+        for _ in 0..240 {
+            runtime
+                .tick(Controls {
+                    throttle: 1.,
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        assert_ne!(runtime.state.car.owner.vehicle[0x196c / 4], 9);
+        assert!(signed_speed(&runtime) > 1.);
     }
 }
