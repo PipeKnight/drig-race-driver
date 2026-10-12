@@ -33,9 +33,15 @@ static unsigned get(const void *p,unsigned o){unsigned v;memcpy(&v,(const unsign
 static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4);}
 static int read(FILE *f,void *p,size_t n){return fread(p,1,n,f)==n;}
 static int finite_words(const void *p,unsigned n){for(unsigned i=0;i<n;i++){float v;memcpy(&v,(const unsigned char *)p+4*i,4);if(!isfinite(v))return 0;}return 1;}
+#ifdef GRID_CARRIED_GEOMETRY
+static unsigned ownership_error(unsigned line){fprintf(stderr,"carried_geometry_guard_line=%u\n",line);return 10;}
+#define OWNERSHIP_ERROR ownership_error(__LINE__)
+#else
+#define OWNERSHIP_ERROR 10
+#endif
 #ifdef GRID_CONTACT_GROUPS
 static unsigned owned_token(unsigned address,unsigned char *base,unsigned stride,unsigned count,unsigned *error){
- if(!address)return 0;for(unsigned i=0;i<count;i++)if(address==(unsigned)(uintptr_t)(base+i*stride))return i+1;*error=10;return 0;
+ if(!address)return 0;for(unsigned i=0;i<count;i++)if(address==(unsigned)(uintptr_t)(base+i*stride))return i+1;*error=OWNERSHIP_ERROR;return 0;
 }
 #endif
 static uintptr_t reference_base;
@@ -52,7 +58,9 @@ int wmain(int argc,wchar_t **argv){
  FILE *input=NULL,*output=NULL;unsigned magic=0,total=0;
  if(!error&&(_wfopen_s(&input,argv[2],L"rb")||!input||_wfopen_s(&output,argv[3],L"wbx")||!output))error=6;
  if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=
-#ifdef GRID_REPRODUCED_PHYSICAL_WORLD
+#ifdef GRID_CARRIED_GEOMETRY
+ 0x32475447
+#elif defined(GRID_REPRODUCED_PHYSICAL_WORLD)
  0x36535747
 #elif defined(GRID_CARRIED_PHYSICAL_WORLD)
  0x35535747
@@ -108,10 +116,14 @@ int wmain(int argc,wchar_t **argv){
 #endif
   unsigned shape_count=MAX_SHAPES;
   unsigned world_steps=1;
+#ifdef GRID_CARRIED_GEOMETRY
+  unsigned geometry_counts[64][2];
+  __declspec(align(16)) unsigned char contact_templates[64][0x80];
+#endif
 #ifdef GRID_REPRODUCED_PHYSICAL_WORLD
   __declspec(align(16)) unsigned requests[4][10];unsigned production_counts[64];
 #endif
-#ifndef GRID_CARRIED_PHYSICAL_WORLD
+#if !defined(GRID_CARRIED_PHYSICAL_WORLD) && !defined(GRID_CARRIED_GEOMETRY)
   (void)world_steps;
 #endif
   unsigned char shape_flags[MAX_SHAPES][4]={0};
@@ -133,6 +145,11 @@ int wmain(int argc,wchar_t **argv){
 #endif
 #ifdef GRID_CARRIED_PHYSICAL_WORLD
   if(!read(input,&world_steps,4)||!world_steps||world_steps>64){error=8;break;}
+#endif
+#ifdef GRID_CARRIED_GEOMETRY
+  if(!read(input,&world_steps,4)||!world_steps||world_steps>64||!read(input,geometry_counts,world_steps*8)){error=8;break;}
+  for(unsigned step=0;step<world_steps;step++)if(geometry_counts[step][0]>geometry_counts[step][1]||geometry_counts[step][1]>h[2])error=8;
+  if(error)break;
 #endif
 #ifdef GRID_REPRODUCED_PHYSICAL_WORLD
   if(h[0]!=1||h[2]!=4||shape_count<2||!read(input,requests,sizeof(requests))||!read(input,production_counts,world_steps*4)){error=8;break;}
@@ -269,7 +286,7 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
    for(unsigned step=0;step<world_steps;step++){
 #ifdef GRID_REPRODUCED_PHYSICAL_WORLD
-    if(get(producer,0x924)){error=10;break;}
+    if(get(producer,0x924)){error=OWNERSHIP_ERROR;break;}
     for(unsigned r=0;r<production_counts[step];r++){
      __declspec(align(16)) float point[4],normal[4];const float *v=(const float *)requests[r];memcpy(normal,requests[r]+4,sizeof(normal));
      for(unsigned j=0;j<4;j++){
@@ -284,39 +301,76 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_CARRIED_PHYSICAL_WORLD
     unsigned cursor=get(world,0x3c+4*get(world,0x60)),previous=0,count=0;memset(update_next,0,sizeof(update_next));
     while(cursor){
-     unsigned token=owned_token(cursor,bodies[0],0x430,h[0],&error);if(error||++count>h[0]){error=10;break;}
+     unsigned token=owned_token(cursor,bodies[0],0x430,h[0],&error);if(error||++count>h[0]){error=OWNERSHIP_ERROR;break;}
      update_next[token-1]=previous;previous=token;last_active=token-1;cursor=get((void *)(uintptr_t)cursor,0x300);
     }
-    if(error||count!=h[0]){error=10;break;}
+    if(error||count!=h[0]){error=OWNERSHIP_ERROR;break;}
 #endif
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xad8d70-0x400000))(world,NULL,*(unsigned *)parameters);
    ((void (__fastcall *)(void *,void *))(image+0xa727a0-0x400000))(world_wrapper,NULL);
 #ifdef GRID_CARRIED_PHYSICAL_WORLD
-    if(get(producer,0x924)||get(world,0x7c4)||get(world,0x7cc)){error=10;break;}
+    if(get(producer,0x924)||get(world,0x7c4)||get(world,0x7cc)){error=OWNERSHIP_ERROR;break;}
 #ifdef GRID_REPRODUCED_PHYSICAL_WORLD
     {
 #else
     if(step==0){
 #endif
      for(unsigned root=get(manager,0x74),groups_seen=0;root;root=get((void *)(uintptr_t)root,0x1c)){
-      if(++groups_seen>h[0]||!owned_token(root,bodies[0],0x430,h[0],&error)){error=10;break;}
+      if(++groups_seen>h[0]||!owned_token(root,bodies[0],0x430,h[0],&error)){error=OWNERSHIP_ERROR;break;}
       unsigned constructed=0,normals=0;
       for(unsigned contact=get((void *)(uintptr_t)root,0),n=0;contact;contact=get((void *)(uintptr_t)contact,0x10)){
-       if(++n>h[2]||!owned_token(contact,contacts[0],0x80,h[2],&error)){error=10;break;}
+       if(++n>h[2]||!owned_token(contact,contacts[0],0x80,h[2],&error)){error=OWNERSHIP_ERROR;break;}
        constructed+=get((void *)(uintptr_t)contact,0x14);normals+=get((void *)(uintptr_t)contact,0x18);
       }
-      if(error||constructed>h[3]||normals>constructed){error=10;break;}
+      if(error||constructed>h[3]||normals>constructed){error=OWNERSHIP_ERROR;break;}
       for(unsigned r=0;r<constructed;r++)ref_limits[r]=r>=normals?normals:0;
      }
     }
 #endif
    }
 #else
+#ifdef GRID_CARRIED_GEOMETRY
+   memcpy(contact_templates,contacts,sizeof(contact_templates));
+   for(unsigned step=0;step<world_steps;step++){
+    unsigned external=geometry_counts[step][0],used=geometry_counts[step][1];
+    /* AD8D70 resets these per-frame statistics before its selected stages. */
+    put(world,0x7f4,0);put(world,0x7f8,0);put(world,0x7fc,0);
+    memcpy(contacts,contact_templates,used*0x80);
+    for(unsigned j=0;j<external;j++)for(unsigned k=0;k<4;k++){
+     float value=*(float *)(contacts[j]+0x50+4*k)- *(float *)((uintptr_t)get(contacts[j],4)+0x1c0+4*k);
+     if(!isfinite(value))error=8;memcpy(contacts[j]+0x50+4*k,&value,4);
+    }
+    put(producer,0x924,external);put(producer,0x930,used>external?(unsigned)(uintptr_t)geometry_pair:0);
+    put(geometry_pair,0x20,(unsigned)(uintptr_t)contacts+external*0x80);put(geometry_pair,0x24,used-external);
+    memcpy(producer_before,producer,sizeof(producer));memcpy(geometry_pair_before,geometry_pair,0x50);
+    unsigned cursor=get(world,0x3c+4*get(world,0x60)),previous=0,count=0;
+    memset(update_next,0,sizeof(update_next));
+    while(cursor){
+     unsigned token=owned_token(cursor,bodies[0],0x430,h[0],&error);
+     if(error||++count>h[0]){error=OWNERSHIP_ERROR;break;}
+     update_next[token-1]=previous;previous=token;last_active=token-1;cursor=get((void *)(uintptr_t)cursor,0x300);
+    }
+    if(error||count!=h[0]){error=OWNERSHIP_ERROR;break;}
+#endif
 #ifdef GRID_GROUPED_TICK
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xad7040-0x400000))(world,NULL,*(unsigned *)parameters);
 #endif
    ((void (__fastcall *)(void *,void *))(image+0xad6c40-0x400000))(world,NULL);
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xb77310-0x400000))(manager,NULL,*(unsigned *)parameters);
+#ifdef GRID_CARRIED_GEOMETRY
+    for(unsigned root=get(manager,0x74),groups_seen=0;root;root=get((void *)(uintptr_t)root,0x1c)){
+     if(++groups_seen>h[0]||!owned_token(root,bodies[0],0x430,h[0],&error)){error=OWNERSHIP_ERROR;break;}
+     unsigned constructed=0,normals=0;
+     for(unsigned contact=get((void *)(uintptr_t)root,0),n=0;contact;contact=get((void *)(uintptr_t)contact,0x10)){
+      if(++n>h[2]||!owned_token(contact,contacts[0],0x80,h[2],&error)){error=OWNERSHIP_ERROR;break;}
+      constructed+=get((void *)(uintptr_t)contact,0x14);normals+=get((void *)(uintptr_t)contact,0x18);
+     }
+     if(error||constructed>h[3]||normals>constructed){error=OWNERSHIP_ERROR;break;}
+     for(unsigned r=0;r<constructed;r++)ref_limits[r]=r>=normals?normals:0;
+    }
+    if(error)break;
+   }
+#endif
 #endif
 #elif defined(GRID_WORLD_ADVANCE)
    ((void (__fastcall *)(void *,void *,unsigned))(image+0xad7040-0x400000))(world,NULL,*(unsigned *)parameters);
@@ -330,17 +384,17 @@ int wmain(int argc,wchar_t **argv){
   __except(fault(GetExceptionInformation())){fprintf(stderr,"case=%u\n",i);error=9;}
   if(error)break;
   #ifdef GRID_WORLD_ADVANCE
-  if(update_list[0]!=bodyptrs[last]||update_list[1]!=(unsigned)(uintptr_t)group||get(world,0x3c+(i%9)*4)!=bodyptrs[0]){error=10;break;}
+  if(update_list[0]!=bodyptrs[last]||update_list[1]!=(unsigned)(uintptr_t)group||get(world,0x3c+(i%9)*4)!=bodyptrs[0]){error=OWNERSHIP_ERROR;break;}
   for(unsigned j=0;j<h[0];j++){
-   if(get(bodies[j],0x300)!=(active_next[j]?bodyptrs[active_next[j]-1]:0)||get(bodies[j],0x318)!=(update_next[j]?bodyptrs[update_next[j]-1]:0)){error=10;break;}
+   if(get(bodies[j],0x300)!=(active_next[j]?bodyptrs[active_next[j]-1]:0)||get(bodies[j],0x318)!=(update_next[j]?bodyptrs[update_next[j]-1]:0)){error=OWNERSHIP_ERROR;break;}
    put(bodies[j],0x300,active_next[j]);put(bodies[j],0x318,update_next[j]);
   }
   if(error)break;
 #endif
 #ifdef GRID_CONTACT_GROUPS
 #ifdef GRID_GROUPED_TICK
-  if(update_list[0]!=(unsigned)(uintptr_t)bodies[last_active]||update_list[1]!=(unsigned)(uintptr_t)world){error=10;break;}
-  for(unsigned j=0;j<h[0];j++)if(get(bodies[j],0x318)!=(update_next[j]?(unsigned)(uintptr_t)bodies[update_next[j]-1]:0)){error=10;break;}
+  if(update_list[0]!=(unsigned)(uintptr_t)bodies[last_active]||update_list[1]!=(unsigned)(uintptr_t)world){error=OWNERSHIP_ERROR;break;}
+  for(unsigned j=0;j<h[0];j++)if(get(bodies[j],0x318)!=(update_next[j]?(unsigned)(uintptr_t)bodies[update_next[j]-1]:0)){error=OWNERSHIP_ERROR;break;}
   if(error)break;
 #endif
   memcpy(manager_before+0x74,manager+0x74,4);
@@ -348,51 +402,56 @@ int wmain(int argc,wchar_t **argv){
   const unsigned changed[]={0x38,0x3c,0x40,0x44,0x48,0x50,0x60,0x64,0x7f8,0x7fc};
   for(unsigned j=0;j<sizeof(changed)/sizeof(*changed);j++)memcpy(world_before+changed[j],world+changed[j],4);
 #ifdef GRID_GEOMETRY_CONTACTS
-  if(get(world,0x7f4)!=h[2]||memcmp(geometry_pair_before,geometry_pair,0x50)){error=10;break;}
-  put(world_before,0x7f4,h[2]);
-  for(unsigned j=0;j<32;j++)if(geometry_pair_owned[j]!=0xcd||geometry_pair_owned[32+0x50+j]!=0xcd)error=10;
+#ifdef GRID_CARRIED_GEOMETRY
+  unsigned expected_contacts=geometry_counts[world_steps-1][1]-geometry_counts[world_steps-1][0];
+#else
+  unsigned expected_contacts=h[2];
+#endif
+  if(get(world,0x7f4)!=expected_contacts||memcmp(geometry_pair_before,geometry_pair,0x50)){error=OWNERSHIP_ERROR;break;}
+  put(world_before,0x7f4,expected_contacts);
+  for(unsigned j=0;j<32;j++)if(geometry_pair_owned[j]!=0xcd||geometry_pair_owned[32+0x50+j]!=0xcd)error=OWNERSHIP_ERROR;
   if(error)break;
 #endif
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
-  if(get(world,0x7c4)||get(world,0x7c8)!=*(unsigned *)parameters||get(world,0x7cc)||get(producer,0x924)||get(producer,0xa78)||get(producer,0xa7c)||get(producer,0x930)||get(producer,0xc20)||producer[0xc24]){error=10;break;}
+  if(get(world,0x7c4)||get(world,0x7c8)!=*(unsigned *)parameters||get(world,0x7cc)||get(producer,0x924)||get(producer,0xa78)||get(producer,0xa7c)||get(producer,0x930)||get(producer,0xc20)||producer[0xc24]){error=OWNERSHIP_ERROR;break;}
   put(world_before,0x7c8,*(unsigned *)parameters);put(producer_before,0x924,0);put(producer_before,0xa78,0);put(producer_before,0xa7c,0);
   put(worker_before,0x1c,get(worker_before,0x18));put(worker_before,0x40,get(worker_before,0xc));
-  if(memcmp(worker_before,worker,sizeof(worker))){error=10;break;}
-  for(unsigned j=0;j<sizeof(broadphase);j++)if(broadphase[j])error=10;
-  for(unsigned j=0;j<sizeof(worker_contacts);j++)if(worker_contacts[j]||worker_pairs[j])error=10;
-  if(worker_ptrs[0]!=(unsigned)(uintptr_t)worker||get(world_wrapper,4)!=(unsigned)(uintptr_t)world){error=10;break;}
+  if(memcmp(worker_before,worker,sizeof(worker))){error=OWNERSHIP_ERROR;break;}
+  for(unsigned j=0;j<sizeof(broadphase);j++)if(broadphase[j])error=OWNERSHIP_ERROR;
+  for(unsigned j=0;j<sizeof(worker_contacts);j++)if(worker_contacts[j]||worker_pairs[j])error=OWNERSHIP_ERROR;
+  if(worker_ptrs[0]!=(unsigned)(uintptr_t)worker||get(world_wrapper,4)!=(unsigned)(uintptr_t)world){error=OWNERSHIP_ERROR;break;}
 #endif
-  if(memcmp(world_before,world,sizeof(world))||memcmp(producer_before,producer,sizeof(producer))){error=10;break;}
+  if(memcmp(world_before,world,sizeof(world))||memcmp(producer_before,producer,sizeof(producer))){error=OWNERSHIP_ERROR;break;}
 #endif
-  if(memcmp(manager_before,manager,0x20)||memcmp(manager_before+0x5c,manager+0x5c,0x60)||memcmp(manager_before+0xcc,manager+0xcc,0x34)){error=10;break;}
+  if(memcmp(manager_before,manager,0x20)||memcmp(manager_before+0x5c,manager+0x5c,0x60)||memcmp(manager_before+0xcc,manager+0xcc,0x34)){error=OWNERSHIP_ERROR;break;}
   ends[0]=get(manager,0xc4);ends[1]=get(manager,0xbc);ends[2]=get(manager,0xc8);ends[3]=get(manager,0xc0);memcpy(cache,manager+0x20,60);
-  for(unsigned j=0;j<2;j++){if(!cache[j])cache[j]=0xffffffff;else{unsigned found=0;for(unsigned m=0;m<h[1];m++)if(cache[j]==(unsigned)(uintptr_t)materials[m]){cache[j]=m;found=1;break;}if(!found)error=10;}}
+  for(unsigned j=0;j<2;j++){if(!cache[j])cache[j]=0xffffffff;else{unsigned found=0;for(unsigned m=0;m<h[1];m++)if(cache[j]==(unsigned)(uintptr_t)materials[m]){cache[j]=m;found=1;break;}if(!found)error=OWNERSHIP_ERROR;}}
 #ifdef GRID_CONTACT_GROUPS
   const unsigned fields[11]={0x50,0x74,0x7fc,0x7f8,0x38,0x60,0x64,0x3c,0x40,0x44,0x48};
   for(unsigned j=0;j<11;j++)state[j]=get(j==1?manager:world,fields[j]);
   for(unsigned j=0;j<11;j++)if(j==0||j==1||j==4||j>=7)state[j]=owned_token(state[j],bodies[0],0x430,h[0],&error);
   unsigned last_root=0;
   for(unsigned root=get(manager,0x74),count=0;root;root=get((void *)(uintptr_t)root,0x1c)){
-   if(++count>h[0]||!owned_token(root,bodies[0],0x430,h[0],&error)||get((void *)(uintptr_t)root,0x30)){error=10;break;}
+   if(++count>h[0]||!owned_token(root,bodies[0],0x430,h[0],&error)||get((void *)(uintptr_t)root,0x30)){error=OWNERSHIP_ERROR;break;}
    unsigned constructed=0,normals=0,contact=get((void *)(uintptr_t)root,0),n=0;
    for(;contact;contact=get((void *)(uintptr_t)contact,0x10)){
-    if(++n>h[2]||!owned_token(contact,contacts[0],0x80,h[2],&error)){error=10;break;}
+    if(++n>h[2]||!owned_token(contact,contacts[0],0x80,h[2],&error)){error=OWNERSHIP_ERROR;break;}
     constructed+=get((void *)(uintptr_t)contact,0x14);normals+=get((void *)(uintptr_t)contact,0x18);
    }
-   if(constructed>h[3]||normals>constructed){error=10;break;}
+   if(constructed>h[3]||normals>constructed){error=OWNERSHIP_ERROR;break;}
    if(h[5])for(unsigned r=0;r<constructed;r++)ref_limits[r]=r>=normals?normals:0;
    last_root=root;
   }
-  if(!last_root||get(manager,0xa8)!=get((void *)(uintptr_t)last_root,0x20)||get(manager,0xac)+get(manager,0xb4)!=get((void *)(uintptr_t)last_root,0x24)||get(manager,0xb0)||get(manager,0xb8)){error=10;break;}
+  if(!last_root||get(manager,0xa8)!=get((void *)(uintptr_t)last_root,0x20)||get(manager,0xac)+get(manager,0xb4)!=get((void *)(uintptr_t)last_root,0x24)||get(manager,0xb0)||get(manager,0xb8)){error=OWNERSHIP_ERROR;break;}
   for(unsigned r=0;r<h[3];r++)if(ref_limits[r]){
    unsigned offset=get(rows[r],0xa8)-(unsigned)(uintptr_t)rows;
-   if(offset%192!=0x98||offset/192>=ref_limits[r]){error=10;break;}put(rows[r],0xa8,offset/192);
+   if(offset%192!=0x98||offset/192>=ref_limits[r]){error=OWNERSHIP_ERROR;break;}put(rows[r],0xa8,offset/192);
   }
 #else
   unsigned constructed=0;for(unsigned j=0;j<h[2];j++)constructed+=get(contacts[j],0x14);
   if(success==0&&get(manager,0x118)&&h[2])for(unsigned r=ends[1];r<constructed;r++){
    unsigned offset=get(rows[r],0xa8)-(unsigned)(uintptr_t)rows;
-   if(offset%192!=0x98||offset/192>=ends[1]){error=10;break;}put(rows[r],0xa8,offset/192);
+   if(offset%192!=0x98||offset/192>=ends[1]){error=OWNERSHIP_ERROR;break;}put(rows[r],0xa8,offset/192);
   }
 #endif
   if(error)break;
@@ -400,8 +459,8 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned j=0;j<h[0];j++){fwrite(mass+j,4,1,output);fwrite(inertia[j],4,16,output);}fwrite(workspace,32,h[0],output);
   for(unsigned j=0;j<h[0];j++){
 #ifdef GRID_CONTACT_GROUPS
-   if(get(bodies[j],0x32c)!=(unsigned)(uintptr_t)world||get(bodies[j],0x334)!=(unsigned)(uintptr_t)(bodies[j]+0x1c0))error=10;
-   for(unsigned k=0;k<3;k++)if(get(bodies[j],0x338+k*4)!=(unsigned)(uintptr_t)(bodies[j]+0x190+k*16))error=10;
+   if(get(bodies[j],0x32c)!=(unsigned)(uintptr_t)world||get(bodies[j],0x334)!=(unsigned)(uintptr_t)(bodies[j]+0x1c0))error=OWNERSHIP_ERROR;
+   for(unsigned k=0;k<3;k++)if(get(bodies[j],0x338+k*4)!=(unsigned)(uintptr_t)(bodies[j]+0x190+k*16))error=OWNERSHIP_ERROR;
 #endif
    put(bodies[j],0x334,0x1c0);put(bodies[j],0x32c,0);
 #ifdef GRID_CONTACT_GROUPS
@@ -417,8 +476,8 @@ int wmain(int argc,wchar_t **argv){
    for(unsigned k=0;k<3;k++)put(bodies[j],0x338+4*k,0);fwrite(bodies[j],1,0x424,output);}
   for(unsigned j=0;j<h[2];j++){unsigned char *c=contacts[j];
 #ifdef GRID_CONTACT_GROUPS
-   if(get(c,4)!=(unsigned)(uintptr_t)bodies[body_ids[j][0]]||get(c,8)!=(modes[j]==2?0:(unsigned)(uintptr_t)bodies[body_ids[j][1]])||get(c,0x30)!=(unsigned)(uintptr_t)materials[material_ids[j][0]]||get(c,0x34)!=(unsigned)(uintptr_t)materials[material_ids[j][1]])error=10;
-   if(get(c,0x28)!=(shape_ids[j][1]?(unsigned)(uintptr_t)shapes[shape_ids[j][1]-1]:0)||get(c,0x2c)!=(shape_ids[j][0]?(unsigned)(uintptr_t)shapes[shape_ids[j][0]-1]:0))error=10;
+   if(get(c,4)!=(unsigned)(uintptr_t)bodies[body_ids[j][0]]||get(c,8)!=(modes[j]==2?0:(unsigned)(uintptr_t)bodies[body_ids[j][1]])||get(c,0x30)!=(unsigned)(uintptr_t)materials[material_ids[j][0]]||get(c,0x34)!=(unsigned)(uintptr_t)materials[material_ids[j][1]])error=OWNERSHIP_ERROR;
+   if(get(c,0x28)!=(shape_ids[j][1]?(unsigned)(uintptr_t)shapes[shape_ids[j][1]-1]:0)||get(c,0x2c)!=(shape_ids[j][0]?(unsigned)(uintptr_t)shapes[shape_ids[j][0]-1]:0))error=OWNERSHIP_ERROR;
    put(c,0x10,owned_token(get(c,0x10),contacts[0],0x80,h[2],&error));put(c,4,body_ids[j][0]);put(c,8,body_ids[j][1]);
 #else
    put(c,0x10,0);put(c,4,get(c,0x1c));put(c,8,get(c,0x20));
@@ -434,7 +493,7 @@ int wmain(int argc,wchar_t **argv){
    put(expected,0x10,s?11:0);put(expected,0x224,0x7f7fffff);put(expected,0x22c,0x7f7fffff);expected[0x228]=(unsigned char)(s!=0);
    put(expected,0xc8,(unsigned)(uintptr_t)materials[0]);put(expected,0xd8,s?0:bodyptrs[0]);
 #endif
-   if(memcmp(shapes[s],expected,sizeof(expected)))error=10;
+   if(memcmp(shapes[s],expected,sizeof(expected)))error=OWNERSHIP_ERROR;
   }
   if(error)break;
 #endif
