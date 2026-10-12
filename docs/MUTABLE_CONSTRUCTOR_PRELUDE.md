@@ -1,5 +1,7 @@
 # Outer mutable constructor before Standard construction
 
+F246 follow-up: [source wheel regions and collision RNG](SOURCE_WHEEL_DAMAGE_STARTUP.md) resolves the selected caller-array/alias uncertainty below and enables the owned collision producer after separate original/reset/driving verification. F245 results and limits here describe the earlier milestone.
+
 F245 recovers the missing mutable-constructor prelude in source startup. Whole original `9F3D30` followed by whole `A0C9F0` matches independently constructed Rust state in 690 comparisons. The runtime now uses the recovered prelude; collision RNG opt-in remains disabled until the four wheel damage regions and caller argument mapping are recovered.
 
 ## Recovered behavior
