@@ -46,4 +46,4 @@ Private final evidence:
 
 Steam's 130 reference resources and executable remain unchanged at `2026-10-12T16:12:14.857904+00:00`, recorded in `local/scene/preservation-20261012-packed-complete.json`. No desktop input or settings changes were used.
 
-Next: Rust query-witness/normal reorientation and multi-triangle manifold append, followed by fresh moving body/track queries and carried physical geometry. The existing carried group path still treats every contact point as relative; it must preserve the external-wheel prefix versus world-space geometric suffix before runtime integration. A drivable owner lap and current handbraking are confirmed separately in [the playtest record](PLAYTEST_2026_10_12.md).
+Follow-up: [F230](CARRIED_GEOMETRIC_PHYSICS.md) adds and validates the retained external-wheel prefix versus world-space geometric suffix contract. Rust query-witness/normal reorientation, multi-triangle manifold append and fresh moving body/track detection remain before runtime barrier integration. A drivable owner lap and current handbraking are confirmed separately in [the playtest record](PLAYTEST_2026_10_12.md).
