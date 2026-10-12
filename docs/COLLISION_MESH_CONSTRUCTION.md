@@ -44,3 +44,5 @@ Existing Rust/Cargo1.99.0, MSVC14.44.35207/SDK10.0.26100.0, Python3.12.14, Ghidr
 | Rust release diagnostic | `8efb079e8c22ca9a806728a9c9a48614db7aa7be82010b1521bacfad892c9724` |
 
 Exact source hashes are retained in the final report/audit. The next step is the enclosing source coordinate adjustment and mesh-shape attachment, followed by actual geometric contacts through the retained physical world. Those steps must be validated before claiming barrier support or a first lap.
+
+F213 follow-up: [source coordinate adjustment](SOURCE_COLLISION_MESH.md) now validates the deformation-off supplied-setting path before whole mesh construction. Initial shape attachment has a separate normal reorientation step; it remains under investigation.
