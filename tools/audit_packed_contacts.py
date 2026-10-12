@@ -12,17 +12,19 @@ ROOT, digest = primary.ROOT, primary.digest
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('debug', type=Path); p.add_argument('release', type=Path); p.add_argument('output', type=Path)
+    p.add_argument('--native-debug', type=Path, default=primary.NATIVE)
+    p.add_argument('--native-release', type=Path, default=primary.NATIVE)
     a = p.parse_args()
     reference = json.loads(primary.REFERENCE.read_text())
     assert reference['passed'] and reference['cases'] == 2642
     reports = [(path.resolve(), json.loads(path.read_text())) for path in [a.debug, a.release]]
-    for path, report in reports:
+    for (path, report), native_path in zip(reports, [a.native_debug, a.native_release]):
         assert report['passed'] and report['cases'] == 2642 and report['selected_fresh_rust_generator']
         assert report['reference_sha256'] == digest(primary.REFERENCE)
         assert report['rust_sha256'] == digest(Path(report['rust_path']))
         assert report['script_sha256'] == digest(ROOT/'tools/validate_packed_contacts.py')
         assert report['table_sha256'] == digest(primary.TABLE) and report['sampling_sha256'] == digest(primary.SAMPLING)
-        assert report['native_sha256'] == digest(primary.NATIVE) and report['image_sha256'] == digest(primary.source.IMAGE)
+        assert report['native_sha256'] == digest(native_path) and report['image_sha256'] == digest(primary.source.IMAGE)
     assert reports[0][1]['fresh_original_execution'] and not reports[1][1]['fresh_original_execution']
     files = 0
     totals = [dict(accepted=0, visited=0, stamps=0, observable_bytes=0, contacts=0, positive=0) for _ in reports]
@@ -81,7 +83,8 @@ def main():
             guards += 1
     target = a.output.resolve(); assert target.is_relative_to((ROOT/'local').resolve()) and not target.exists()
     result = dict(passed=True, cases=2642, complete_files=files, guard_records=guards, totals_per_profile=totals,
-                  reports={str(path.relative_to(ROOT)): digest(path) for path, _ in reports}, script_sha256=digest(Path(__file__)))
+                  reports={str(path.relative_to(ROOT)): digest(path) for path, _ in reports},
+                  native_paths={str(path): digest(path) for path in [a.native_debug, a.native_release]}, script_sha256=digest(Path(__file__)))
     target.write_text(json.dumps(result, indent=2)); print(json.dumps(result), flush=True)
 
 

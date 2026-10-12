@@ -35,6 +35,7 @@ def main():
     p.add_argument('--rust', type=Path, default=ROOT/'target/debug/grid-packed-contacts.exe')
     p.add_argument('--max-cases', type=int, default=2642)
     p.add_argument('--fresh-native', action='store_true')
+    p.add_argument('--native', type=Path, default=NATIVE)
     a = p.parse_args()
     assert 1 <= a.max_cases <= 2642
     out = a.output.resolve()
@@ -61,7 +62,7 @@ def main():
         native_execution = None
         if a.fresh_native:
             target = out/f'{index:04}-native.bin'
-            e = subprocess.run([str(NATIVE), str(source.IMAGE), str(inp), str(target)], cwd=ROOT,
+            e = subprocess.run([str(a.native), str(source.IMAGE), str(inp), str(target)], cwd=ROOT,
                                capture_output=True, text=True, timeout=30)
             native_execution = dict(exit=e.returncode, stdout=e.stdout, stderr=e.stderr)
             assert e.returncode == 0 and not e.stderr and 'code_unchanged=1 globals_restored=1 code_replacements=0 error=0' in e.stdout
@@ -118,7 +119,7 @@ def main():
                   reference=str(REFERENCE.relative_to(ROOT)), reference_sha256=digest(REFERENCE),
                   rust_path=str(a.rust.resolve()), rust_sha256=digest(a.rust), script_sha256=digest(Path(__file__)),
                   sampling_sha256=digest(SAMPLING), table_sha256=digest(TABLE),
-                  native_sha256=digest(NATIVE), image_sha256=digest(source.IMAGE),
+                  native_sha256=digest(a.native), image_sha256=digest(source.IMAGE),
                   fresh_original_execution=a.fresh_native, selected_fresh_rust_generator=True, runtime_barriers=False)
     (out/'validation.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({k: report[k] for k in ['passed', 'cases', 'contacts', 'positive', 'accepted', 'observable_bytes']}))

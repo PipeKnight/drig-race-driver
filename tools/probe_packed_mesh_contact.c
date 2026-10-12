@@ -12,7 +12,11 @@
 #include <float.h>
 #include "isolated_reference.h"
 #include "owned_collision_mesh_probe.h"
+#ifdef GRID_CQTC_CONTACTS
+#include "owned_cqtc_shape_probe.h"
+#else
 #include "owned_packed_shape_probe.h"
+#endif
 #ifdef GRID_TRIANGLE_DISTANCE_SEQUENCE
 #define GRID_TRIANGLE_QUERY_SEQUENCE
 #endif
@@ -54,7 +58,11 @@
 #else
 #define ROOT_BYTES 0xa80
 #ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+#ifdef GRID_CQTC_CONTACTS
+#define REQUEST_TAG 0x31304343
+#else
 #define REQUEST_TAG 0x38304350
+#endif
 #else
 #define REQUEST_TAG 0x31304350
 #endif
@@ -152,8 +160,10 @@ int wmain(int argc,wchar_t **argv){
  if(!isfinite(num(seed,0x220))||num(seed,0x220)<0.f||num(seed,0x220)>1e6f||!prepare(chunk,chunk_size,&track)){error=8;goto done;}
 #ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
  if(sheet_mask>>get(track.header,0x20)){error=8;goto done;}
+#ifndef GRID_CQTC_CONTACTS
  put(track.shape,0x290,sheet_mask);
  for(unsigned o=0x294;o<=0x2a0;o+=4)put(track.shape,o,0x7f7fffff);
+#endif
 #endif
 #ifdef GRID_TRIANGLE_MESH_QUERY
  if(triangle_index>=get(track.header,0x18)||get(seed+0x500,8)!=1||get(seed+0x500,12)!=1){error=8;goto done;}
@@ -174,9 +184,16 @@ int wmain(int argc,wchar_t **argv){
  for(unsigned o=0xd0;o<=0xec;o+=4)if(o!=0xd8&&o!=0xdc)put(first,o,0);
  first[0x15]=track.shape[0x15]=1;first[0x14]=track.shape[0x14]=0;first[0x1a]=track.shape[0x1a]=0xff;
  put(track.shape,0xcc,address(root));put(track.shape,0xc8,address(materials));put(track.shape,0x224,0x7f7fffff);
+#ifdef GRID_CQTC_CONTACTS
+ materials[0x38]=(unsigned char)sheet_mask;
+#endif
  for(unsigned i=0;i<get(track.header,0x20);i++)put(track.header,0x34+i*4,address(materials));
  put(pair,0x28,address(first));put(pair,0x2c,address(track.shape));
  put(root,0x5f0,address(image+0xaea1f0-0x400000));put(root,0x5f4,address(image+0xade540-0x400000));put(root,0x5f8,address(image+0xae4700-0x400000));
+#ifdef GRID_CQTC_CONTACTS
+ put(root,0x5f0,0);put(root,0x5f4,0);put(root,0x5f8,0);
+ put(root,0x5e0,address(image+0xae95b0-0x400000));put(root,0x5e4,address(image+0xade2d0-0x400000));put(root,0x5e8,address(image+0xae3f20-0x400000));
+#endif
  put(worker,0,address(scratch));put(worker,4,limit);put(worker,0xc,address(contacts));put(worker,0x14,limit);put(worker,0x34,cache_limit);put(worker,0x38,address(cache.value));put(worker,0x40,address(contacts));
  put(cache.value,0x20,address(indices));put(cache.value,0x24,address(visited));put(cache.value,0x28,index_limit);put(cache.value,0x38,address(triangle));put(cache.value,0x3c,address(triangle));
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
@@ -300,8 +317,12 @@ int wmain(int argc,wchar_t **argv){
 #endif
 #endif
 #ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+#ifndef GRID_CQTC_CONTACTS
   if(get(track.shape,0x290)!=sheet_mask)error=14;
   for(unsigned o=0x294;o<=0x2a0;o+=4)if(get(track.shape,o)!=0x7f7fffff)error=14;
+#else
+  if(materials[0x38]!=sheet_mask)error=14;
+#endif
 #endif
   const unsigned pointers[]={0xb0,0xb4,0xb8,0xbc,0xc8,0xcc,0xd0,0xd4,0xd8,0xe0,0xe4,0xe8,0xec,0x170,0x174,0x178,0x17c,0x180,0x19c,0x1a0,0x1a4,0x1b0,0x1b4,0x1b8,0x1c4,0x1c8,0x1cc,0x1d8,0x1dc,0x1e0,0x1ec,0x1f0,0x1f4,0x200,0x204,0x208,0x21c};
   unsigned char *shapes[]={first,track.shape,triangle};for(unsigned s=0;s<3;s++)for(unsigned j=0;j<sizeof(pointers)/sizeof(pointers[0]);j++)if(!canonical(shapes[s],pointers[j],regions,n)){fprintf(stderr,"pointer shape=%u offset=%x value=%08x\n",s,pointers[j],get(shapes[s],pointers[j]));error=13;}
@@ -318,6 +339,10 @@ int wmain(int argc,wchar_t **argv){
   const unsigned pp[]={0x20,0x28,0x2c};for(unsigned i=0;i<3;i++)if(!canonical(pair,pp[i],regions,n))error=13;
   for(unsigned i=0;i<16;i++){unsigned char *c=contacts+i*0x80;if(get(c,0)!=address(image+0xd3d434-0x400000))error=13;put(c,0,0x7200);if(i<count){const unsigned offsets[]={4,8,0x28,0x2c,0x30,0x34};for(unsigned j=0;j<6;j++)if(!canonical(c,offsets[j],regions,n))error=13;for(unsigned j=0x38;j<0x70;j+=4)if(!isfinite(num(c,j)))error=15;}}
   put(root,0x5f0,0x7100);put(root,0x5f4,0x7101);put(root,0x5f8,0x7102);put(body,0x334,0x1c0);
+#ifdef GRID_CQTC_CONTACTS
+  put(root,0x5f0,0);put(root,0x5f4,0);put(root,0x5f8,0);
+  put(root,0x5e0,0x7110);put(root,0x5e4,0x7111);put(root,0x5e8,0x7112);
+#endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   put(root,0x8b0,0x7100);put(root,0x8b4,0x7101);put(root,0x8b8,0x7102);
   if(!canonical(root,0x928,regions,n)||!canonical(root,0x930,regions,n)||!canonical(root,0xc20,regions,n)||!canonical(worker,8,regions,n)||!canonical(body,0x328,regions,n)||!canonical(&worker_pointer,0,regions,n)||!canonical(&assigned_head,0,regions,n))error=13;
@@ -339,7 +364,9 @@ done:
  unsigned unchanged=1;IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(memcmp(image+sections[i].VirtualAddress,snapshot+sections[i].VirtualAddress,(sections[i].Misc.VirtualSize>sections[i].SizeOfRawData?sections[i].Misc.VirtualSize:sections[i].SizeOfRawData)))unchanged=0;if(!unchanged)error=17;
  if(!error){HANDLE output=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(output==INVALID_HANDLE_VALUE)error=18;else{const void *parts[]={first,track.shape,root,pair,worker,contacts,body,materials,scratch,cache.value,triangle,track.header,indices,visited
 #ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+#ifndef GRID_CQTC_CONTACTS
   ,track.shape+0x280
+#endif
 #endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   ,root+0xa80,&worker_pointer,&group_head,&assigned_head
@@ -355,7 +382,9 @@ done:
 #endif
  };const DWORD lengths[]={0x250,0x280,0xa80,0x50,0x48,16*0x80,0x430,0x40,0x570,0x2050,0x280,0x60,index_limit*4,index_limit*4
 #ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+#ifndef GRID_CQTC_CONTACTS
   ,0x40
+#endif
 #endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   ,ROOT_BYTES-0xa80,4,4,4
