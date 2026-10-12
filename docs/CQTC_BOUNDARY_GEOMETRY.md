@@ -1,5 +1,8 @@
 # Donington CQTC boundary geometry (F239)
 
+F240 subsequently validates contact generation and joins this layer to the
+optional driving mode: [boundary contacts](CQTC_BOUNDARY_CONTACTS.md).
+
 The purchased Donington routes contain a separate `boundarylines.cqtc`, which
 the current packed-track driving adapter does not load. This is a candidate for
 the missing wall layer. Finding and decoding it does not establish that a

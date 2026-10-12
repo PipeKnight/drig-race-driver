@@ -1,5 +1,9 @@
 # Experimental packed-track body contacts
 
+This records the F237/F238 packed-only milestone. F240 adds the separate
+CQTC boundary layer to the same optional launcher; see
+[current boundary verification and limits](CQTC_BOUNDARY_CONTACTS.md).
+
 F237/F238, 12 October 2026. `BodyGeometry` now builds the moving Lacetti mesh
 from the purchased NED and verified owner offset. It composes its selected local
 Y center with the advanced physical pose, queries actual Donington packed chunks

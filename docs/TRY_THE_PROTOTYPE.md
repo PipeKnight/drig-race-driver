@@ -29,10 +29,11 @@ Useful first-drive feedback: whether left/right and braking feel correct, whethe
 ## Other checkouts
 
 An optional **Play GRID Body Contacts.cmd** mode now joins the source body mesh
-to Donington's packed-track contacts. Controlled road intersections and reset
-checks pass; boundary CQTC and heavy-impact damage remain unfinished, so this
-does not yet establish general barrier collision support. See the
-[mode instructions and current limits](DONINGTON_BODY_CONTACTS.md). The private
+to Donington's packed-track and separate CQTC boundary contacts. A 600-tick
+scripted barrier-sliding check passes in both Rust builds and the rendered app;
+the corresponding packed-only control falls off the supported world. Heavy
+impacts can still pause at the unported damage branch. See the
+[boundary verification and current limits](CQTC_BOUNDARY_CONTACTS.md). The private
 sampling file is already prepared on the owner's PC; no installation is needed.
 
 Build with `cargo build --release -p grid-app`, then launch with `target\release\grid-app.exe --drive --game-root "YOUR_GRID_FOLDER"`. The launcher accepts a game-folder argument and defaults to `C:\Program Files (x86)\Steam\steamapps\common\Grid`. It reads locally purchased resources; no game assets or compiled toolchain are bundled in the repository.
