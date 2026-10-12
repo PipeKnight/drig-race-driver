@@ -1,5 +1,7 @@
 # Retained triangle–mesh distance state (F224)
 
+Later milestone: [F225 complete selected outer/penetration query](TRIANGLE_MESH_CONTACT_QUERY.md). The unimplemented outer-query statements below describe the F224 boundary; runtime manifold and barriers remain open.
+
 12 October 2026. Rust now retains the mesh support cache and partially reset simplex between triangle queries. Original/repeat/Rust debug/release match **46,352 queries in 1,273 sequences**. This extends the [cold distance loop](TRIANGLE_MESH_DISTANCE.md) toward the multi-triangle contact generator. It does not yet implement the outer penetration test, contact manifold or moving runtime barriers.
 
 ## State ownership and behavior
