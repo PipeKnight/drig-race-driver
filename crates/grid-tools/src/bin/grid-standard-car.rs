@@ -6,7 +6,8 @@ use std::{
 };
 fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut args: Vec<_> = std::env::args_os().skip(1).collect();
-    let mutable_prelude = args.last().is_some_and(|v| v == "--mutable-prelude");
+    let outer_wheels = args.last().is_some_and(|v| v == "--outer-wheels");
+    let mutable_prelude = outer_wheels || args.last().is_some_and(|v| v == "--mutable-prelude");
     let source_prelude = mutable_prelude || args.last().is_some_and(|v| v == "--source-prelude");
     if source_prelude {
         args.pop();
@@ -55,7 +56,9 @@ fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             .1
             .parse::<f64>()? as f32;
     }
-    let initialize = if mutable_prelude {
+    let initialize = if outer_wheels {
+        grid_tools::standard_car::initialize_with_outer_wheels
+    } else if mutable_prelude {
         grid_tools::standard_car::initialize_with_mutable_prelude
     } else if source_prelude {
         grid_tools::standard_car::initialize_with_source_prelude

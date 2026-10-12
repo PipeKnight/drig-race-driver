@@ -170,6 +170,55 @@ pub fn initialize_with_mutable_prelude(
     Ok(car)
 }
 
+/// Selected outer source wheel arrays, aliased Standard point storage and
+/// original inline wheel damage-region stores. Full resource factory excluded.
+pub fn initialize_with_outer_wheels(
+    properties: &Properties,
+    geometry: WheelGeometry,
+    widths: [f32; 4],
+    gravity: f32,
+    random_state: u32,
+) -> Result<Car, Error> {
+    if widths
+        .iter()
+        .any(|v| !v.is_finite() || *v <= 0. || *v > 10.)
+    {
+        return Err(Error("invalid outer wheel widths"));
+    }
+    let radii = [
+        geometry.rear.radius,
+        geometry.rear.radius,
+        geometry.front.radius,
+        geometry.front.radius,
+    ];
+    let auxiliary = radii.map(|r| r * f32::from_bits(0x3f4c_cccd));
+    let mut car =
+        initialize_with_mutable_prelude(properties, geometry, auxiliary, gravity, random_state)?;
+    for i in 0..4 {
+        let wheel = 0x1990 + i * 0x150;
+        let center: [f32; 4] = std::array::from_fn(|j| car.get(wheel + j * 4));
+        for (j, value) in center.into_iter().enumerate() {
+            car.set(0x14e0 + i * 16 + j * 4, value);
+            car.set(0xcdf0 + 0x60 + i * 48 + j * 4, value);
+        }
+        for (at, value) in [
+            (0x1520, radii[i]),
+            (0x1530, auxiliary[i]),
+            (0x1540, widths[i]),
+        ] {
+            car.set(at + i * 4, value);
+        }
+        for (j, value) in [widths[i], car.get(wheel + 0xe0), car.get(wheel + 0xe0), 0.]
+            .into_iter()
+            .enumerate()
+        {
+            car.set(0xcdf0 + 0x70 + i * 48 + j * 4, value);
+        }
+        car.bytes[0xcdf0 + 0x80 + i * 48] = 1;
+    }
+    Ok(car)
+}
+
 fn initialize_owned(
     properties: &Properties,
     geometry: WheelGeometry,

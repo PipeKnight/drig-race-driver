@@ -1,6 +1,6 @@
 //! Source-only Lacetti/Donington serial driving prototype. No saved native state.
 //! The manager's single shared physical material and serial scheduling are explicit
-//! prototype choices; full body collisions, damage events and racing remain absent.
+//! prototype choices; full factory behavior, damage events and racing remain absent.
 use crate::{contact_surfaces::Surfaces, source_physical, standard_car, track::Track};
 use grid_formats::{
     binxml, car_collision, grid, handling_damage, jpk, pssg, tuning, vehicle, vehicle_properties,
@@ -149,7 +149,7 @@ impl Runtime {
         }
         let settings =
             handling_damage::read_configuration(&archive_bytes[hdm.stored_data.clone()])?;
-        let mut car = standard_car::initialize_with_mutable_prelude(
+        let mut car = standard_car::initialize_with_outer_wheels(
             &properties,
             geometry,
             widths,
@@ -302,7 +302,7 @@ impl Runtime {
                     diagnostics: [0.; 8],
                 },
                 owner: vehicle_publication::State {
-                    damage_random_state: None,
+                    damage_random_state: Some(car.random_state),
                     vehicle: owner,
                     physical,
                 },
@@ -387,7 +387,8 @@ impl Runtime {
     }
 
     /// Experimental actual-track body geometry. Uses the existing selected
-    /// shared solver material; heavy-impact damage remains explicitly guarded.
+    /// shared solver material and selected collision damage. Notifications remain
+    /// explicitly guarded until their original event behavior is implemented.
     pub fn tick_with_body_geometry(
         &mut self,
         controls: Controls,
@@ -885,92 +886,105 @@ mod tests {
                 0.,
             )
             .unwrap();
-        // Authored shallow wall, not a recovered Donington barrier placement.
-        let x = bounds[1][0] - 0.01;
-        let z = center[14];
-        let y = center[13];
-        let vertices = [
-            [x, y - 10., z - 10.],
-            [x, y + 10., z - 10.],
-            [x, y, z + 10.],
-        ];
-        let leaves = std::collections::BTreeMap::from([(0, vec![0])]);
-        let track = packed_query::Mesh {
-            bounds: [x - 20., y - 20., z - 20., x + 20., y + 20., z + 20.],
-            vertices: &vertices,
-            triangles: &[[0, 1, 2]],
-            nodes: &[0x8000],
-            leaves: &leaves,
-        };
-        let mut total = 0;
-        let mut responses = 0;
-        legacy.reset();
-        for tick in 0..20 {
-            legacy.tick(Controls::default()).unwrap();
-            enabled
-                .tick_with_geometry(Controls::default(), |bodies, remaining| {
-                    let published = publish(&bodies[0])?;
-                    let generated = packed_contacts::calculate(
-                        shape.mesh(),
-                        published.shapes[0],
-                        &track,
-                        &[0],
-                        &packed_contacts::Settings {
-                            query: convex_distance::ContactSettings {
-                                margin: 0.,
-                                directions,
+        // Authored walls, not recovered Donington barrier placements. The
+        // center-plane case previously reached the collision-damage guard.
+        for (label, x) in [("shallow", bounds[1][0] - 0.01), ("deep", center[12])] {
+            enabled.reset();
+            let damage_rng_before = enabled.state.car.owner.damage_random_state;
+            let z = center[14];
+            let y = center[13];
+            let vertices = [
+                [x, y - 10., z - 10.],
+                [x, y + 10., z - 10.],
+                [x, y, z + 10.],
+            ];
+            let leaves = std::collections::BTreeMap::from([(0, vec![0])]);
+            let track = packed_query::Mesh {
+                bounds: [x - 20., y - 20., z - 20., x + 20., y + 20., z + 20.],
+                vertices: &vertices,
+                triangles: &[[0, 1, 2]],
+                nodes: &[0x8000],
+                leaves: &leaves,
+            };
+            let mut total = 0;
+            let mut responses = 0;
+            legacy.reset();
+            for tick in 0..20 {
+                legacy.tick(Controls::default()).unwrap();
+                enabled
+                    .tick_with_geometry(Controls::default(), |bodies, remaining| {
+                        let published = publish(&bodies[0])?;
+                        let generated = packed_contacts::calculate(
+                            shape.mesh(),
+                            published.shapes[0],
+                            &track,
+                            &[0],
+                            &packed_contacts::Settings {
+                                query: convex_distance::ContactSettings {
+                                    margin: 0.,
+                                    directions,
+                                },
+                                contact_capacity: remaining.min(16),
+                                cache_enabled: true,
+                                candidate_capacity: 4096,
+                                sheet_mask: 0,
+                                correction_bounds: [f32::MAX; 4],
                             },
-                            contact_capacity: remaining.min(16),
-                            cache_enabled: true,
-                            candidate_capacity: 4096,
-                            sheet_mask: 0,
-                            correction_bounds: [f32::MAX; 4],
-                        },
-                    )?;
-                    eprintln!(
-                        "geometry_probe tick={tick} contacts={} depths={:?}",
-                        generated.contacts.len(),
-                        generated
+                        )?;
+                        eprintln!(
+                            "geometry_probe tick={tick} contacts={} depths={:?}",
+                            generated.contacts.len(),
+                            generated
+                                .contacts
+                                .iter()
+                                .map(|c| c.penetration)
+                                .collect::<Vec<_>>()
+                        );
+                        total += generated.contacts.len();
+                        Ok(generated
                             .contacts
-                            .iter()
-                            .map(|c| c.penetration)
-                            .collect::<Vec<_>>()
-                    );
-                    total += generated.contacts.len();
-                    Ok(generated
-                        .contacts
-                        .into_iter()
-                        .map(|contact| {
-                            let mut c: contact_groups::Contact = [0; 32];
-                            c[1] = 1;
-                            c[0xc / 4] = 0x01000000;
-                            c[0x1c / 4] = u32::MAX;
-                            c[0x20 / 4] = u32::MAX;
-                            c[0x24 / 4] = 1;
-                            c[0x28 / 4] = 1;
-                            c[0x2c / 4] = 2;
-                            c[0x38 / 4] = contact.penetration.to_bits();
-                            c[0x3c / 4] = f32::MAX.to_bits();
-                            c[0x50 / 4..0x60 / 4].copy_from_slice(&contact.point.map(f32::to_bits));
-                            c[0x60 / 4..0x70 / 4]
-                                .copy_from_slice(&contact.normal.map(f32::to_bits));
-                            c[0x70 / 4] = (u32::from(contact.flipped) << 8) | (1 << 24);
-                            c
-                        })
-                        .collect())
-                })
-                .unwrap_or_else(|e| panic!("wall tick {tick}: {e:?}"));
-            responses +=
-                usize::from(enabled.state.car.owner.physical != legacy.state.car.owner.physical);
+                            .into_iter()
+                            .map(|contact| {
+                                let mut c: contact_groups::Contact = [0; 32];
+                                c[1] = 1;
+                                c[0xc / 4] = 0x01000000;
+                                c[0x1c / 4] = u32::MAX;
+                                c[0x20 / 4] = u32::MAX;
+                                c[0x24 / 4] = 1;
+                                c[0x28 / 4] = 1;
+                                c[0x2c / 4] = 2;
+                                c[0x38 / 4] = contact.penetration.to_bits();
+                                c[0x3c / 4] = f32::MAX.to_bits();
+                                c[0x50 / 4..0x60 / 4]
+                                    .copy_from_slice(&contact.point.map(f32::to_bits));
+                                c[0x60 / 4..0x70 / 4]
+                                    .copy_from_slice(&contact.normal.map(f32::to_bits));
+                                c[0x70 / 4] = (u32::from(contact.flipped) << 8) | (1 << 24);
+                                c
+                            })
+                            .collect())
+                    })
+                    .unwrap_or_else(|e| panic!("wall tick {tick}: {e:?}"));
+                responses += usize::from(
+                    enabled.state.car.owner.physical != legacy.state.car.owner.physical,
+                );
+            }
+            assert!(total > 0);
+            assert!(responses > 0);
+            assert_eq!(enabled.ticks, 20);
+            assert!(enabled.velocity().iter().all(|x| x.is_finite()));
+            eprintln!(
+                "fresh_source_mesh_wall label={label} ticks=20 contacts={total} response_ticks={responses} damage_rng_changed={} velocity={:?}",
+                enabled.state.car.owner.damage_random_state != damage_rng_before,
+                enabled.velocity()
+            );
+            if label == "deep" {
+                assert_ne!(
+                    enabled.state.car.owner.damage_random_state,
+                    damage_rng_before
+                );
+            }
         }
-        assert!(total > 0);
-        assert!(responses > 0);
-        assert_eq!(enabled.ticks, 20);
-        assert!(enabled.velocity().iter().all(|x| x.is_finite()));
-        eprintln!(
-            "fresh_source_mesh_wall ticks=20 contacts={total} response_ticks={responses} velocity={:?}",
-            enabled.velocity()
-        );
     }
 
     // Deliberately opt-in: purchased resources never become test fixtures.
@@ -979,11 +993,11 @@ mod tests {
     fn source_driving_reset_controls_and_rollback() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let mut runtime = Runtime::lacetti(Path::new(&root), "slot_00", 200679).unwrap();
-        assert_eq!(runtime.state.car.owner.damage_random_state, None);
-        // Opt in only within this test: prove the independent staged RNG
-        // survives manager/world handoffs, invalid controls and reset.
-        runtime.state.car.owner.damage_random_state = Some(0x8291_abcd);
-        runtime.initial.car.owner.damage_random_state = Some(0x8291_abcd);
+        let initial_damage_rng = runtime.state.car.owner.damage_random_state;
+        let expected_seed = (0..24).fold(200679_u32, |seed, _| {
+            seed.wrapping_mul(0x41c64e6d).wrapping_add(0x40584c0f)
+        });
+        assert_eq!(initial_damage_rng, Some(expected_seed));
         let initial = runtime.state.car.owner.vehicle.clone();
         let controls = Controls {
             throttle: 1.,
@@ -1020,7 +1034,7 @@ mod tests {
         assert_eq!(runtime.state.car.owner.vehicle, initial);
         assert_eq!(
             runtime.state.car.owner.damage_random_state,
-            Some(0x8291_abcd)
+            initial_damage_rng
         );
         for _ in 0..240 {
             runtime.tick(controls).unwrap();
