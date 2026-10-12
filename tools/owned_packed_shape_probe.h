@@ -16,8 +16,11 @@ static int validate_tree(const unsigned char *raw,unsigned no,unsigned nodes,uns
     for(unsigned i=0;i<4;++i)if(!validate_tree(raw,no,nodes,ro,size,nt,node+i,depth+1,active,visits)){active[index]=0;return 0;}
     active[index]=0;return 1;
 }
+#ifndef GRID_PACKED_SHAPE_BYTES
+#define GRID_PACKED_SHAPE_BYTES 0x280
+#endif
 typedef struct {
-    __declspec(align(16)) unsigned char shape[0x280];
+    __declspec(align(16)) unsigned char shape[GRID_PACKED_SHAPE_BYTES];
     unsigned char header[0x60];
     unsigned wrapper[4];
 } Object;

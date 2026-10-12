@@ -39,7 +39,11 @@
 #endif
 #else
 #define ROOT_BYTES 0xa80
+#ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+#define REQUEST_TAG 0x38304350
+#else
 #define REQUEST_TAG 0x31304350
+#endif
 #endif
 typedef struct {unsigned char before[32]; __declspec(align(16)) unsigned char value[0x2050]; unsigned char after[32];} Cache;
 static int canary(const unsigned char *p,unsigned size){for(unsigned i=0;i<32;i++)if(p[i]!=0xcd||p[32+size+i]!=0xcd)return 0;return 1;}
@@ -58,6 +62,9 @@ int wmain(int argc,wchar_t **argv){
  unsigned char *first=first_owned+32,*contacts=contacts_owned+32,*scratch=scratch_owned+32,*triangle=triangle_owned+32,*root=root_owned+32,*pair=pair_owned+32,*worker=worker_owned+32;
  unsigned char *chunk=NULL,*chunk_before=NULL,*indices_owned=NULL,*visited_owned=NULL,*indices=NULL,*visited=NULL;
  unsigned error=0,protected=0,header[6],mesh_bytes=0,seed_size=0,chunk_size=0,limit=0,cache_limit=0,index_limit=0;float center[4];FILE *input=NULL;
+#ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+ unsigned sheet_mask=0;
+#endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
  unsigned schedule_flags=0,worker_pointer=address(worker),group_head=0,assigned_head=0;
 #endif
@@ -78,6 +85,9 @@ int wmain(int argc,wchar_t **argv){
  const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xf5e000};DWORD protections[5];unsigned char saved[5][4096];
  if(_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto done;}
  if(fread(header,4,6,input)!=6||header[0]!=REQUEST_TAG||header[1]<0x1680||header[1]>sizeof(seed)||header[2]<52||header[2]>2*1024*1024||header[3]>16||header[4]>1||header[5]>32768||fread(center,4,4,input)!=4){error=7;goto done;}
+#ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+ if(fread(&sheet_mask,4,1,input)!=1||sheet_mask>255){error=7;goto done;}
+#endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
  if(fread(&schedule_flags,4,1,input)!=1||schedule_flags>3){error=7;goto done;}
 #endif
@@ -118,6 +128,11 @@ int wmain(int argc,wchar_t **argv){
  for(unsigned j=0;j<4;j++)if(!isfinite(num(seed,0x500+mesh_bytes+0x1c0+j*4))){error=8;goto done;}
  memset(&track_owned,0xcd,sizeof(track_owned));
  if(!isfinite(num(seed,0x220))||num(seed,0x220)<0.f||num(seed,0x220)>1e6f||!prepare(chunk,chunk_size,&track)){error=8;goto done;}
+#ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+ if(sheet_mask>>get(track.header,0x20)){error=8;goto done;}
+ put(track.shape,0x290,sheet_mask);
+ for(unsigned o=0x294;o<=0x2a0;o+=4)put(track.shape,o,0x7f7fffff);
+#endif
 #ifdef GRID_TRIANGLE_MESH_QUERY
  if(triangle_index>=get(track.header,0x18)||get(seed+0x500,8)!=1||get(seed+0x500,12)!=1){error=8;goto done;}
 #endif
@@ -215,7 +230,7 @@ int wmain(int argc,wchar_t **argv){
  }__except(fault(GetExceptionInformation())){error=11;}
  if(!relocate_mesh(mesh,mesh_bytes,0)||memcmp(mesh,mesh_before,mesh_bytes)||memcmp(chunk,chunk_before,chunk_size)||memcmp(body,body_before,sizeof(body)))error=12;
  if(!error){
-  Region regions[]={{first,0x250,0x1000},{track.shape,0x280,0xc000},{root,ROOT_BYTES,0x20000},{pair,0x50,0xd000},{body,0x430,0xa000},{mesh,mesh_bytes,0x30000},{materials,0x40,0x1420},{contacts,16*0x80+1,0xe000},{scratch,0x570,0xf000},{cache.value,0x2050,0x40000},{triangle,0x280,0x50000},{track.header,0x60,0x60000},{chunk,chunk_size,0x100000},{indices,index_limit*4+1,0x400000},{visited,index_limit*4+1,0x500000}
+  Region regions[]={{first,0x250,0x1000},{track.shape,GRID_PACKED_SHAPE_BYTES,0xc000},{root,ROOT_BYTES,0x20000},{pair,0x50,0xd000},{body,0x430,0xa000},{mesh,mesh_bytes,0x30000},{materials,0x40,0x1420},{contacts,16*0x80+1,0xe000},{scratch,0x570,0xf000},{cache.value,0x2050,0x40000},{triangle,0x280,0x50000},{track.header,0x60,0x60000},{chunk,chunk_size,0x100000},{indices,index_limit*4+1,0x400000},{visited,index_limit*4+1,0x500000}
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   ,{(unsigned char *)&worker_pointer,4,0x70000},{worker,0x48,0x80000}
 #endif
@@ -226,6 +241,10 @@ int wmain(int argc,wchar_t **argv){
 #endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
   for(unsigned step=0;step<sequence_count;step++)for(unsigned i=0;i<8;i++)if(!canonical(sequence_records+step*SEQUENCE_RECORD_BYTES,0x160+i*4,regions,n))error=13;
+#endif
+#ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+  if(get(track.shape,0x290)!=sheet_mask)error=14;
+  for(unsigned o=0x294;o<=0x2a0;o+=4)if(get(track.shape,o)!=0x7f7fffff)error=14;
 #endif
   const unsigned pointers[]={0xb0,0xb4,0xb8,0xbc,0xc8,0xcc,0xd0,0xd4,0xd8,0xe0,0xe4,0xe8,0xec,0x170,0x174,0x178,0x17c,0x180,0x19c,0x1a0,0x1a4,0x1b0,0x1b4,0x1b8,0x1c4,0x1c8,0x1cc,0x1d8,0x1dc,0x1e0,0x1ec,0x1f0,0x1f4,0x200,0x204,0x208,0x21c};
   unsigned char *shapes[]={first,track.shape,triangle};for(unsigned s=0;s<3;s++)for(unsigned j=0;j<sizeof(pointers)/sizeof(pointers[0]);j++)if(!canonical(shapes[s],pointers[j],regions,n)){fprintf(stderr,"pointer shape=%u offset=%x value=%08x\n",s,pointers[j],get(shapes[s],pointers[j]));error=13;}
@@ -262,6 +281,9 @@ done:
  for(unsigned i=0;i<protected;i++){DWORD ignored;unsigned char *page=image+pages[i]-0x400000;memcpy(page,saved[i],4096);if(!VirtualProtect(page,4096,protections[i],&ignored))error=17;}
  unsigned unchanged=1;IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(memcmp(image+sections[i].VirtualAddress,snapshot+sections[i].VirtualAddress,(sections[i].Misc.VirtualSize>sections[i].SizeOfRawData?sections[i].Misc.VirtualSize:sections[i].SizeOfRawData)))unchanged=0;if(!unchanged)error=17;
  if(!error){HANDLE output=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(output==INVALID_HANDLE_VALUE)error=18;else{const void *parts[]={first,track.shape,root,pair,worker,contacts,body,materials,scratch,cache.value,triangle,track.header,indices,visited
+#ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+  ,track.shape+0x280
+#endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   ,root+0xa80,&worker_pointer,&group_head,&assigned_head
 #endif
@@ -275,6 +297,9 @@ done:
   ,&sequence_count,sequence_records
 #endif
  };const DWORD lengths[]={0x250,0x280,0xa80,0x50,0x48,16*0x80,0x430,0x40,0x570,0x2050,0x280,0x60,index_limit*4,index_limit*4
+#ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
+  ,0x40
+#endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   ,ROOT_BYTES-0xa80,4,4,4
 #endif
