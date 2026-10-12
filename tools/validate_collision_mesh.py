@@ -3,6 +3,7 @@ import argparse,csv,hashlib,itertools,json,math,random,struct,subprocess
 from pathlib import Path
 from validate_binxml import decode
 from validate_wheel_geometry import layout
+from validate_physical_constructor import fixture as physical_fixture
 
 ROOT=Path(__file__).resolve().parent.parent
 IMAGE=ROOT/'local/compatibility/grid-unpacked.exe'
@@ -14,11 +15,12 @@ def adjusted(points,parameters):
     center=f32(offset[1]+f32(f32(roof+bottom)*.5))
     return [[f32(f32(offset[0]+p[0])-0.),f32(f32(offset[1]+max(p[1],floor))-center),f32(f32(offset[2]+p[2])-0.),1.] for p in points]
 
-def request(points,faces,fill,parameters=None,shape=None,base=None):
-    header=(b'CM04' if base is not None else (b'CM03' if shape is not None else (b'CM01' if parameters is None else b'CM02')))+struct.pack('<III',len(points),len(faces),fill)
+def request(points,faces,fill,parameters=None,shape=None,base=None,physical=None):
+    header=(b'CM05' if physical is not None else (b'CM04' if base is not None else (b'CM03' if shape is not None else (b'CM01' if parameters is None else b'CM02'))))+struct.pack('<III',len(points),len(faces),fill)
     if parameters is not None:header+=struct.pack('<6f',*parameters)
     if base is not None:header+=base[0]+struct.pack('<5I',*base[1])
     elif shape is not None:header+=struct.pack('<IfII',*shape)
+    if physical is not None:header+=physical
     return header+b''.join(struct.pack('<4f',*p) for p in points)+b''.join(struct.pack('<3I',*t) for t in faces)
 def run(exe,args):
     r=subprocess.run([str(exe),*map(str,args)],capture_output=True,text=True,cwd=ROOT,timeout=30)
@@ -40,7 +42,7 @@ def base_settings(shape,parameters,index):
     struct.pack_into('<I',d,0x7c,[7,8,99][index%3])
     return bytes(d),[index*17,index%2,7,8,index*123]
 
-def check_base(data,descriptor,controls,fill):
+def check_base(data,descriptor,controls,fill,attached=False):
     u=lambda o:struct.unpack_from('<I',data,o)[0]
     assert u(0)==0x7000 and u(0x10)==7 and u(0x21c)==0x13e0 and u(0xcc)==0x12e0 and u(0x240)==0x1500
     d=bytearray(descriptor);struct.pack_into('<I',d,0,0x1500);struct.pack_into('<I',d,0x5c,0x12e0)
@@ -56,16 +58,55 @@ def check_base(data,descriptor,controls,fill):
     expected=0 if controls[1]==0 else (0x1440 if identifier==controls[3] and identifier!=controls[2] else 0x1420)
     assert u(0xc8)==expected
     identity=struct.pack('<16f',*[float(i%5==0) for i in range(16)])
-    assert data[0x70:0xb0]==identity
-    if descriptor[0x50]:assert data[0xf0:0x130]==d[0x10:0x50] and data[0x130:0x170]==identity and data[0x214]==1
-    else:assert data[0xf0:0x170]==bytes([fill])*0x80 and data[0x214]==0
+    if not attached:assert data[0x70:0xb0]==identity
+    if descriptor[0x50]:
+        assert data[0xf0:0x130]==d[0x10:0x50] and data[0x214]==1
+        if not attached:assert data[0x130:0x170]==identity
+    else:
+        assert data[0xf0:0x130]==bytes([fill])*0x40 and data[0x214]==0
+        if not attached:assert data[0x130:0x170]==bytes([fill])*0x40
     assert data[0x2d4:0x2e0]==bytes([fill])*12 and data[0x460:0x500]==bytes([fill])*0xa0
     assert u(0x244)==(struct.unpack_from('<I',descriptor,4)[0]+15)&~15
     for dst,src in [(0xc4,0x58),(0x18c,0x60),(0x224,0x6c),(0x22c,0x74)]:assert u(dst)==struct.unpack_from('<I',descriptor,src)[0]
 
-def check(data,points,faces,fill,shape=None,base=None):
+def attachment_settings(mass,index):
+    b=physical_fixture(mass[0],mass[1:]);angle=index*.047
+    matrix=[float(i%5==0) for i in range(16)];matrix[:3]=[f32(math.cos(angle)),0.,f32(-math.sin(angle))];matrix[8:11]=[f32(math.sin(angle)),0.,f32(math.cos(angle))]
+    matrix[12:15]=[f32(math.sin(index)*5),f32(index%5*.125),f32(math.cos(index)*5)]
+    struct.pack_into('<16f',b,0xf0,*matrix)
+    struct.pack_into('<4f',b,0x50,f32(math.sin(index)*.12),f32(math.cos(index)*.05),-.1,0.)
+    b[0x131]=int(index%4!=0)
+    return bytes(b)
+
+def check_attachment(data,points,base,physical,mesh_bytes):
+    prefix=data[:0x500];tail=data[0x500+mesh_bytes:];assert len(tail)==0x430+0x160+0x100+0xa80+16
+    body=tail[:0x430];settings=tail[0x430:0x590];registry=tail[0x590:0x690];root=tail[0x690:0x1110];cells=tail[0x1110:]
+    u=lambda b,o:struct.unpack_from('<I',b,o)[0]
+    assert u(body,0x328)==0x1000 and u(body,0x32c)==0x9000 and body[0x411]==1 and u(prefix,0xd8)==0xa000 and u(prefix,0xe0)==0 and u(prefix,0x198)==1
+    assert u(settings,0x64)==0 and u(registry,0x18)==0x12e0 and cells==struct.pack('<4I',0,0,0,0x1000)
+    assert root[:0x100]==prefix[0x2e0:0x3e0] and [u(root,o) for o in [0x940,0x944,0x948,0x94c,0x950,0x954]]==[0x447a0000,0x447a0000,1,1,0xb000,0xb008]
+    bounds=struct.unpack_from('<8f',prefix,0x20)
+    for j in range(3):
+        start=0x19c+j*40;end=start+20
+        assert [u(prefix,o) for o in [start,start+4,end,end+4]]==[0x1000+end,0,0,0x1000+start]
+        assert u(root,0x900+j*4)==0x1000+start
+        assert prefix[start+12:start+16]==prefix[0x20+j*4:0x24+j*4] and prefix[end+12:end+16]==prefix[0x30+j*4:0x34+j*4]
+    body_matrix=struct.unpack_from('<16f',physical,0xf0);descriptor=base[0]
+    local=list(struct.unpack_from('<16f',descriptor,0x10));local[3]=local[7]=local[11]=0.;local[15]=1.
+    def transform(point,m):return [sum(point[k]*m[k*4+j] for k in range(4)) for j in range(4)]
+    transformed=[transform(transform(p,local) if descriptor[0x50] else p,body_matrix) for p in points]
+    margin=struct.unpack_from('<f',descriptor,0x68)[0]
+    for j in range(3):
+        low=min(p[j] for p in transformed)-margin;high=max(p[j] for p in transformed)+margin
+        assert abs(bounds[j]-low)<2e-5+abs(low)*2e-6 and abs(bounds[4+j]-high)<2e-5+abs(high)*2e-6
+
+def check(data,points,faces,fill,shape=None,base=None,physical=None):
+    if physical is not None:
+        a16=lambda n:(n+15)&~15
+        size=0x60+len(points)*48+len(faces)*32+a16(len(points)*40)+a16(len(faces)*12)
+        check_attachment(data,points,base,physical,size);data=data[:0x500+size]
     if base is not None:
-        check_base(data[:0x500],*base,fill);data=data[0x500:]
+        check_base(data[:0x500],*base,fill,physical is not None);data=data[0x500:]
     elif shape is not None:
         expected=bytearray([fill]*0x250);span,scalar,layer,flag=shape
         expected[0x19]=layer;expected[0xc0]=flag
@@ -112,11 +153,12 @@ def check(data,points,faces,fill,shape=None,base=None):
     return dict(directed_edges=edge_cursor,incidences=face_cursor)
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('output',type=Path);parser.add_argument('--profile',required=True,choices=['debug','release']);parser.add_argument('--source-adjustment',action='store_true');parser.add_argument('--shape',action='store_true');parser.add_argument('--base',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('output',type=Path);parser.add_argument('--profile',required=True,choices=['debug','release']);parser.add_argument('--source-adjustment',action='store_true');parser.add_argument('--shape',action='store_true');parser.add_argument('--base',action='store_true');parser.add_argument('--attach',action='store_true');args=parser.parse_args()
+    if args.attach:args.base=True
     if args.base:args.shape=True
     if args.shape:args.source_adjustment=True
     out=args.output.resolve();assert out.is_relative_to((ROOT/'local').resolve());out.mkdir(exist_ok=False)
-    game=Path(r'C:\Program Files (x86)\Steam\steamapps\common\Grid');native=ROOT/('local/behavior/mesh-shape-base-probe.exe' if args.base else ('local/behavior/mesh-shape-probe.exe' if args.shape else ('local/behavior/source-collision-mesh-probe.exe' if args.source_adjustment else 'local/behavior/collision-mesh-probe.exe')));rust=ROOT/f'target/{args.profile}'/('grid-mesh-shape-base.exe' if args.base else ('grid-mesh-shape.exe' if args.shape else 'grid-collision-mesh.exe'))
+    game=Path(r'C:\Program Files (x86)\Steam\steamapps\common\Grid');native=ROOT/('local/behavior/mesh-shape-attach-probe.exe' if args.attach else ('local/behavior/mesh-shape-base-probe.exe' if args.base else ('local/behavior/mesh-shape-probe.exe' if args.shape else ('local/behavior/source-collision-mesh-probe.exe' if args.source_adjustment else 'local/behavior/collision-mesh-probe.exe'))));rust=ROOT/f'target/{args.profile}'/('grid-mesh-shape-attach.exe' if args.attach else ('grid-mesh-shape-base.exe' if args.base else ('grid-mesh-shape.exe' if args.shape else 'grid-collision-mesh.exe')))
     source_cases=[];skipped=[]
     for csvpath in sorted((game/'cars').rglob('*.csv')):
         rows=[row for row in csv.reader(csvpath.read_text().splitlines()) if row]
@@ -133,6 +175,7 @@ def main():
             wheels=list(tree.iter('WHEELS'));assert len(wheels)==1
             parameters=layout(wheels[0].attrib,rows[0])[2]+[min(p[1] for p in points),max(p[1] for p in points)]
             metadata.update(csv=str(csvpath.relative_to(game)),csv_sha256=digest(csvpath),row=0,source_parameters=parameters)
+            if args.attach:metadata.update(mass_inertia=[f32(float(x)) for x in rows[0][3:7]])
         source_cases.append((metadata,points,faces,parameters))
     assert len(source_cases)==43 and len(skipped)==1
     source_rejections=[];admitted=[]
@@ -159,19 +202,24 @@ def main():
         rng.shuffle(faces)
         parameters=[*[f32(rng.uniform(-10,10)) for _ in range(3)],0.,f32(rng.uniform(-5,0)),f32(rng.uniform(0,5))] if args.source_adjustment else None
         cases.append((dict(kind='authored',control=i,source_parameters=parameters),points,faces,[0,0xcd][i%2],parameters))
-    def encode(points,faces,fill,parameters=None,shape=None,base=None):
+    def encode(points,faces,fill,parameters=None,shape=None,base=None,physical=None):
         if args.shape and shape is None:shape=[1,.01,7,1]
         if args.base and base is None:base=base_settings(shape,parameters,0)
-        return request(points,faces,fill,parameters,shape,base)
+        if args.attach and physical is None:physical=attachment_settings([1000.,1000.,2000.,3000.],0)
+        return request(points,faces,fill,parameters,shape,base,physical)
     results=[]
     for i,(metadata,points,faces,fill,parameters) in enumerate(cases):
         shape=None
         if args.shape:
             span=[1,15,16,17,8192,16000][i%6];scalar=[-0.,.01,-.125,1.5][i%4]
-            shape=[span,scalar,(i*17)%256,i%2];metadata=dict(**metadata,shape_settings=shape)
+            shape=[span,scalar,(i*17)%256,i%2]
+            if args.attach:shape[1]=abs(scalar);shape[2]%=32
+            metadata=dict(**metadata,shape_settings=shape)
         base=base_settings(shape,parameters,i) if args.base else None
         if base is not None:metadata=dict(**metadata,base_descriptor_hex=base[0].hex(),base_controls=base[1])
-        inp=out/f'{i:03}-input.bin';inp.write_bytes(encode(points,faces,fill,parameters,shape,base));executions=[];answers=[]
+        physical=attachment_settings(metadata.get('mass_inertia',[rng.uniform(100,2500),*[rng.uniform(50,5000) for _ in range(3)]]),i) if args.attach else None
+        if physical is not None:metadata=dict(**metadata,physical_settings_hex=physical.hex())
+        inp=out/f'{i:03}-input.bin';inp.write_bytes(encode(points,faces,fill,parameters,shape,base,physical));executions=[];answers=[]
         for kind in ['original','repeat','rust']:
             output=out/f'{i:03}-{kind}.bin';e=run(rust if kind=='rust' else native,[inp,output] if kind=='rust' else [IMAGE,inp,output]);executions.append(e)
             (out/'current-executions.json').write_text(json.dumps(dict(index=i,executions=executions),indent=2));assert e['exit']==0 and not e['stderr'],(i,e)
@@ -179,10 +227,10 @@ def main():
             answers.append(output.read_bytes())
         diff=[dict(offset=hex(j),original=answers[0][j:j+4].hex(),repeat=answers[1][j:j+4].hex(),rust=answers[2][j:j+4].hex()) for j in range(0,len(answers[0]),4) if len({a[j:j+4] for a in answers})!=1]
         (out/'current-differences.json').write_text(json.dumps(dict(index=i,differences=diff),indent=2));assert not diff,(i,diff[:12])
-        checked=check(answers[0],adjusted(points,parameters),faces,fill,shape,base)
+        checked=check(answers[0],adjusted(points,parameters),faces,fill,shape,base,physical)
         results.append(dict(index=i,**metadata,points=len(points),faces=len(faces),fill=fill,bytes=len(answers[0]),input_sha256=digest(inp),output_sha256=digest(out/f'{i:03}-original.bin'),**checked,executions=executions))
     parameters=[0.,0.,0.,0.,-1.,1.] if args.source_adjustment else None
-    extra=176 if args.base else (40 if args.shape else (24 if args.source_adjustment else 0))
+    extra=528 if args.attach else (176 if args.base else (40 if args.shape else (24 if args.source_adjustment else 0)))
     sample=encode(cube,triangles,0,parameters);variants=[('short',sample[:-1]),('long',sample+b'\0')]
     for label,o,value in [('tag',0,0),('points-low',4,3),('points-high',4,81),('faces-low',8,3),('faces-high',8,111),('fill',12,1),('point-nan',16,0x7fc00000),('point-inf',20,0x7f800000),('point-bound',24,struct.unpack('<I',struct.pack('<f',100001.))[0]),('point-w',28,0),('index',16+8*16,8),('duplicate-index',16+8*16+4,0)]:
         data=bytearray(sample);struct.pack_into('<I',data,o+(extra if o>=16 else 0),value);variants.append((label,data))
@@ -199,6 +247,9 @@ def main():
             data=bytearray(sample);struct.pack_into('<I',data,o,value);variants.append((label,data))
     if args.base:
         for label,o,value in [('mesh-pointer',40,1),('world-pointer',40+0x5c,1),('matrix-nan',40+0x10,0x7fc00000),('matrix-inf',40+0x14,0x7f800000),('matrix-bound',40+0x18,struct.unpack('<I',struct.pack('<f',10001.))[0]),('base-scalar-nan',40+0x58,0x7fc00000),('base-scalar-bound',40+0x60,struct.unpack('<I',struct.pack('<f',1000001.))[0]),('base-scalar-inf',40+0x68,0x7f800000),('base-span-zero',44,0),('base-span-high',44,16001),('base-flag',40+0x50,2),('base-counter',172,1000001),('base-mode',176,2),('base-owner',188,1000001)]:
+            data=bytearray(sample);struct.pack_into('<I',data,o,value);variants.append((label,data))
+    if args.attach:
+        for label,o,value in [('attach-layer',40+0x80,32),('attach-margin',40+0x68,0xbf800000),('physical-mass-zero',192,0),('physical-mass-nan',192,0x7fc00000),('physical-mass-reciprocal',192,1),('physical-inertia-zero',192+0x10,0),('physical-inertia-offdiagonal',192+0x14,1),('physical-world',192+0x64,1),('physical-shape',192+0x68,1),('physical-shape-count',192+0x134,1),('physical-mode',192+0x60,0),('physical-flags',192+0x130,2),('physical-velocity-nan',192+0x140,0x7fc00000)]:
             data=bytearray(sample);struct.pack_into('<I',data,o,value);variants.append((label,data))
     source_rejected=[]
     for metadata,points,faces,parameters in source_rejections:
@@ -224,6 +275,6 @@ def main():
         inp=out/'000-input.bin';e=run(exe,[IMAGE,inp,existing] if kind=='native' else [inp,existing]);assert 0<e['exit']<256 and digest(existing)==before
         if kind=='native':assert not e['stderr'] and 'error=19' in e['stdout']
         guards.append(dict(label='existing-output',kind=kind,execution=e,existing_output_preserved=True))
-    report=dict(passed=True,profile=args.profile,cases=len(results),examined_source_meshes=43,admitted_source_meshes=42,source_cases=84,authored_controls=96,observable_bytes=sum(r['bytes'] for r in results),results=results,source_rejected=source_rejected,guards=guards,guard_count=len(guards),skipped=skipped,executables={str(p.relative_to(ROOT)):digest(p) for p in [native,rust,IMAGE]},source_adjustment=args.source_adjustment,shape_update=args.shape,base_constructor=args.base,scope=('Whole B460F0 base/shape and B23D70 wrapper; owned empty-world counter/two-record material lookup, full descriptor mutation and canonical graph. No physical registration. ' if args.base else '')+('Whole B444D0 supplied owned shape update after the following stages; mesh planes oriented away from average vertex. Physical registration excluded. ' if args.shape else '')+('Whole 9B8B70/9B8890 deformation-off adjustment then whole B44E80. Source offset from CSV/NED wheel layout, raw min/max Y supplied as bottom/roof; owned car and raw inputs unchanged. ' if args.source_adjustment else 'Whole supplied B44E80. ')+ 'Complete normal/extent/topology and owned relative pointers. BOS zero-area faces explicitly rejected. Not whole outer source factory, deformation, convexification, allocation, shape registration or contact generation.')
+    report=dict(passed=True,profile=args.profile,cases=len(results),examined_source_meshes=43,admitted_source_meshes=42,source_cases=84,authored_controls=96,observable_bytes=sum(r['bytes'] for r in results),results=results,source_rejected=source_rejected,guards=guards,guard_count=len(guards),skipped=skipped,executables={str(p.relative_to(ROOT)):digest(p) for p in [native,rust,IMAGE]},source_adjustment=args.source_adjustment,shape_update=args.shape,base_constructor=args.base,physical_attachment=args.attach,scope=('Whole cold B11F40 then whole B142D0 with skipWake1; owned registry/full one-cell world and initial empty endpoints/region arrays. Source mass/inertia plus authored settings; no geometry pairs, world advancement or wake-up. ' if args.attach else '')+('Whole B460F0 base/shape and B23D70 wrapper; owned empty-world counter/two-record material lookup, full descriptor mutation and canonical graph. ' + ('' if args.attach else 'No physical registration. ') if args.base else '')+('Whole B444D0 supplied owned shape update after the following stages; mesh planes oriented away from average vertex. ' + ('' if args.attach else 'Physical registration excluded. ') if args.shape else '')+('Whole 9B8B70/9B8890 deformation-off adjustment then whole B44E80. Source offset from CSV/NED wheel layout, raw min/max Y supplied as bottom/roof; owned car and raw inputs unchanged. ' if args.source_adjustment else 'Whole supplied B44E80. ')+ 'Complete normal/extent/topology and owned relative pointers. BOS zero-area faces explicitly rejected. Not whole outer source factory, deformation, convexification, allocation, ' + ('' if args.attach else 'shape registration or ') + 'contact generation.')
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:report[k] for k in ['passed','cases','observable_bytes','guard_count']}))
 if __name__=='__main__':main()
