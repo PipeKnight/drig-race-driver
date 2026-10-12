@@ -2,6 +2,8 @@
 
 12 October 2026, Europe/Kiev. The isolated original mesh7/7 narrow phase now generates positive geometry contacts. **720 fixtures / 6,203,520 complete output bytes** agree between original and repeated original execution: **255 positive cases / 499 contacts**, with19 rejection/output-preservation checks. This is native reference evidence. Rust does not yet implement this geometric generator, and this checkpoint does not establish runtime barriers or a drivable lap.
 
+[F220](GEOMETRIC_CONTACT_HANDOFF.md) extends this historical zero-filled-arena proof with the original B0ECE0 slot constructors and verifies the geometric contact handoff into original/Rust solving. Its linked reports carry the current native probe hash; the original F219 records below retain their earlier binary/template scope.
+
 ## Recovered boundary
 
 Actual B18E70 world-constructor analysis identifies the mesh7/7 dispatch entry at5B0: AE8AD0, ADBD50, AE34B0, with swap disabled. B39500 checks enable/disable flags, same-body/joint/callback exclusions and secondary layer masks, derives old/current transforms from the dynamic body, obtains capacity from the worker and calls AE8AD0. Positive results publish pair20/24 and advance the worker's contact cursor and used count.
