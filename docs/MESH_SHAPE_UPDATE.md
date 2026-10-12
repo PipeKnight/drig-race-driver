@@ -36,3 +36,5 @@ Aligned constructor inspection shows `B460F0` invokes the complete base initiali
 | Native shape probe | `bc9384e039767380607db127bf471bdffb6c68a932c6a88dc822db49254da99b` |
 | Rust debug | `9dec82a23b6c64e771da8bb034591a7aee133f4f45a0235677ce313a7c123a6d` |
 | Rust release | `ec70d4749d4c1594a81a15ff7f7afb08af2c69928fce032fa76a560c336efd1e` |
+
+F215 follow-up: [complete selected constructor/wrapper](MESH_SHAPE_CONSTRUCTOR.md) now validates the enclosing base/world/material/counter/backlink graph. Physical registration remains separate.
