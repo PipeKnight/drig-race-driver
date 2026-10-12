@@ -22,6 +22,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+const BUILD_REVISION: &str = match option_env!("GRID_BUILD_REVISION") {
+    Some(value) => value,
+    None => "unversioned",
+};
+
 #[derive(Resource)]
 struct Car {
     parts: Vec<Part>,
@@ -710,6 +715,7 @@ fn append_car(
     Ok(())
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    println!("prototype_build revision={BUILD_REVISION}");
     let mut root = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Grid");
     let mut output = None;
     let mut lod = String::from("LOD0_");
@@ -1347,7 +1353,7 @@ fn drive_present(
     };
     for mut window in &mut windows {
         window.title = format!(
-            "GRID prototype | {speed:.1} km/h | gear {gear}{handbrake}{geometry} | tick {} | {}",
+            "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry} | tick {} | {}",
             driving.runtime.ticks,
             driving.failure.as_deref().unwrap_or(if driving.paused {
                 "Paused; P resumes; R resets"

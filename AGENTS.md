@@ -12,6 +12,7 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 - Update `PROJECT_LOG.md` during substantive work and before ending a turn. Record successful work, failed experiments, decisions, exact tool/build versions, evidence paths, uncertainty and next actions.
 - Put detailed research in `docs/`; link it from the project log. Do not rely on conversation memory as the only record of a finding.
 - Distinguish observations from interpretations. Never promote a skipped test, tool installation or plausible hypothesis into verified compatibility.
+- On 13 October 2026 the owner requested periodic playable prototype updates. Rebuild after verified driving changes, keep both launchers using the current release executable, and record the source revision, executable hash, checks and changes. Do not replace or close a prototype session the owner is currently running; continue independent work until the executable is available.
 
 ## Original reference and provenance
 
