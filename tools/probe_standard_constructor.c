@@ -28,7 +28,7 @@ int wmain(int argc,wchar_t **argv){
     unsigned char *code_snapshot=malloc(pe->OptionalHeader.SizeOfImage);
     if(!code_snapshot){VirtualFree(image,0,MEM_RELEASE);return 17;}
     memcpy(code_snapshot,image,pe->OptionalHeader.SizeOfImage);
-    unsigned error=0,protected=0,globals_restored=1;FILE *input=NULL;
+    unsigned error=0,protected=0,globals_restored=1,mutable_prelude=0;FILE *input=NULL;
     __declspec(align(16)) unsigned char request[1732];
     __declspec(align(16)) unsigned char props[0x65c];
     __declspec(align(16)) float points[16],radii[4],widths[4];
@@ -38,7 +38,8 @@ int wmain(int argc,wchar_t **argv){
     unsigned char saved[sizeof(pages)/sizeof(*pages)][4096];DWORD protections[sizeof(pages)/sizeof(*pages)];
     if(_wfopen_s(&input,argv[2],L"rb")||!input){error=5;goto done;}
     int valid=fread(request,1,sizeof(request),input)==sizeof(request)&&fgetc(input)==EOF;fclose(input);input=NULL;
-    unsigned source_prelude=get(request,0)==0x33304353;
+    mutable_prelude=get(request,0)==0x34304353;
+    unsigned source_prelude=get(request,0)==0x33304353||mutable_prelude;
     if(!valid||(get(request,0)!=0x32304353&&!source_prelude)){error=6;goto done;}
     memcpy(props,request+8,sizeof(props));memcpy(points,request+8+sizeof(props),sizeof(points));
     memcpy(radii,request+8+sizeof(props)+sizeof(points),sizeof(radii));
@@ -65,7 +66,10 @@ int wmain(int argc,wchar_t **argv){
     float gravity=-9.8100004196167f;memcpy(image+0xe8efd4-0x400000,&gravity,4);
     unsigned random_state=get(request,4);memcpy(image+0xe4fcc0-0x400000,&random_state,4);
     Construct construct=(Construct)(image+0xa0c9f0-0x400000);void *answer=NULL;
-    __try{answer=construct(body,props,points,radii,widths);}
+    __try{
+        if(mutable_prelude)((void *(__fastcall *)(void *,void *))(image+0x9f3d30-0x400000))(body+0xcdf0,NULL);
+        answer=construct(body,props,points,radii,widths);
+    }
     __except(fault(GetExceptionInformation())){error=10;}
     memcpy(&random_state,image+0xe4fcc0-0x400000,4);
     if(!error)printf("random_state=%08x\n",random_state);
@@ -95,6 +99,7 @@ done:
     unsigned code_unchanged=1;IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
     for(unsigned i=0;i<pe->FileHeader.NumberOfSections;++i)if((sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE)&&memcmp(image+sections[i].VirtualAddress,code_snapshot+sections[i].VirtualAddress,sections[i].SizeOfRawData))code_unchanged=0;
     if(!code_unchanged)error=18;
+    if(mutable_prelude&&memcmp(image,code_snapshot,pe->OptionalHeader.SizeOfImage))error=18;
     if(!error){HANDLE output=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
         if(output==INVALID_HANDLE_VALUE)error=14;else{DWORD written=0;if(!WriteFile(output,body,0x21000,&written,NULL)||written!=0x21000)error=15;CloseHandle(output);}}
     if(input)fclose(input);free(code_snapshot);VirtualFree(image,0,MEM_RELEASE);

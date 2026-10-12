@@ -2,22 +2,28 @@
 import argparse,csv,io,json,struct,subprocess
 from pathlib import Path
 import validate_standard_properties as v
+from validate_binxml import decode
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('output',type=Path)
     p.add_argument('--prefix',default='standard-constructor')
-    p.add_argument('--source-prelude',action='store_true');a=p.parse_args()
+    p.add_argument('--source-prelude',action='store_true')
+    p.add_argument('--mutable-prelude',action='store_true')
+    p.add_argument('--date',default='20261011');a=p.parse_args()
+    assert len(a.date)==8 and a.date.isdecimal()
+    if a.mutable_prelude:a.source_prelude=True
     out=a.output.resolve();assert out.is_relative_to((v.ROOT/'local').resolve());out.mkdir(exist_ok=False)
     reports=[];seeds=['200679','0','1','0x80000000','0xffffffff']
-    native=v.ROOT/'local/behavior/standard-constructor-probe.exe';image=v.ROOT/'local/compatibility/grid-unpacked.exe'
+    native=v.ROOT/('local/behavior/mutable-standard-probe.exe' if a.mutable_prelude else 'local/behavior/standard-constructor-probe.exe');image=v.ROOT/'local/compatibility/grid-unpacked.exe'
     assert v.digest(image)=='aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514'
     for profile in ['debug','release']:
         rust=v.ROOT/f'target/{profile}/grid-standard-car.exe'
         for seed in seeds:
-            root=v.ROOT/f'local/behavior/{a.prefix}-{profile}-20261011-final-{seed}';path=root/'validation.json'
+            root=v.ROOT/f'local/behavior/{a.prefix}-{profile}-{a.date}-final-{seed}';path=root/'validation.json'
             r=json.loads(path.read_text());assert r['native_reference_passed'] and r['rust_equivalence'] and not r['differences']
             assert r['profile']==profile and r['random_seed']==int(seed,0)
             assert r.get('source_prelude',False)==a.source_prelude
+            assert r.get('mutable_prelude',False)==a.mutable_prelude
             assert r['exe_sha256']==v.digest(native) and r['rust_exe_sha256']==v.digest(rust)
             assert r['properties_report_sha256']==v.digest(Path(r['properties_report']))
             completed=[s for s in r['results'] if s.get('repeat_exact')];assert len(completed)==69
@@ -29,6 +35,20 @@ def main():
                 assert source['ned_sha256']==v.digest(Path(source['ned']))
                 assert source['properties_sha256']==v.digest(Path(source['properties']))
                 assert source['request_sha256']==v.digest(root/f'{i:03}-input.bin')
+                if a.mutable_prelude:
+                    row=next(row for row in csv.reader((v.GAME/source['source']).read_text().splitlines()) if row)
+                    attrs=[e.attrib for e in decode(Path(source['ned']).read_bytes())[1].iter() if e.tag=='WHEELS'];assert len(attrs)==1
+                    f32=lambda value:struct.unpack('<f',struct.pack('<f',value))[0]
+                    bias=f32(float(row[194] or 0));points=[];radii=[];widths=[]
+                    for axle in ['rear','front']:
+                        x,y,z,radius=[f32(float(attrs[0][f'm_{axle}_{c}'])) for c in 'xyzr']
+                        for side in [1,-1]:points.extend([x*side,f32(y-bias),z,1]);radii.append(radius)
+                        widths.extend(f32(float(attrs[0][f'm_{axle}_{side}_width'])) for side in ['l','r'])
+                    expected=b'SC04'+struct.pack('<I',int(seed,0))+Path(source['properties']).read_bytes()+struct.pack('<24f',*points,*radii,*widths)
+                    assert (root/f'{i:03}-input.bin').read_bytes()==expected
+                    random_state=int(seed,0)
+                    for _ in range(18):random_state=(random_state*0x41c64e6d+0x40584c0f)&0xffffffff
+                    assert all(f'random_state={random_state:08x}' in e['stdout'] for e in source['executions'])
                 answers=[root/f'{i:03}-{kind}.bin' for kind in ['original','repeat','rust']]
                 assert all(q.stat().st_size==0x21000 and v.digest(q)==source['output_sha256'] for q in answers)
                 assert all(e['exit']==0 and not e['stderr'] for e in source['executions'])
@@ -38,6 +58,10 @@ def main():
                     assert b[0x202e:0x2030]==b'\0\0'
                     assert struct.unpack_from('<I',b,0x18f4)[0]==0
                     assert struct.unpack_from('<I',b,0x196c)[0]==1
+                    if a.mutable_prelude:
+                        assert all(struct.unpack_from('<f',b,0xcdf0+at+12)[0]==1 for at in [0x60,0x90,0xc0,0xf0,0x120,0x150,0x180,0x1b0,0x1e0])
+                        assert all(struct.unpack_from('<f',b,0xcdf0+at)[0]==1 for at in [0x430,0x434,0x438,0x43c])
+                        assert b[0xcdf0+0x442]==1
                     if a.source_prelude:
                         assert b[0xe78:0x14d4]==Path(source['properties']).read_bytes()
                         assert struct.unpack_from('<f',b,0x1560)[0]==1
@@ -46,7 +70,7 @@ def main():
                         assert all(b[o]==1 for o in [0xb13,0xb14,0x1ee0,0x21c8])
             reports.append(dict(path=str(path),sha256=v.digest(path),profile=profile,seed=int(seed,0),cases=69,observable_bytes=69*(0x21000-2)))
     guards=[]
-    sample=(v.ROOT/f'local/behavior/{a.prefix}-debug-20261011-final-200679/000-input.bin').read_bytes()
+    sample=(v.ROOT/f'local/behavior/{a.prefix}-debug-{a.date}-final-200679/000-input.bin').read_bytes()
     def reject(label,command,target,native_guard=False):
         e=subprocess.run(command,cwd=v.ROOT,capture_output=True,text=True,timeout=30)
         assert e.returncode!=0 and not target.exists(),(label,e)
@@ -70,11 +94,22 @@ def main():
         for label,source in sources:
             target=out/f'{profile}-{label}-output.bin'
             command=[str(rust),str(source),str(ned),'00030fe7',str(target)]
-            if a.source_prelude:command.append('--source-prelude')
+            if a.source_prelude:command.append('--mutable-prelude' if a.mutable_prelude else '--source-prelude')
             reject(profile+'-'+label,command,target)
         target=out/f'{profile}-bad-seed-output.bin'
-        reject(profile+'-bad-seed',[str(rust),str(v.GAME/'cars/lac/lac.csv'),str(ned),'nothex',str(target)],target)
+        command=[str(rust),str(v.GAME/'cars/lac/lac.csv'),str(ned),'nothex',str(target)]
+        if a.mutable_prelude:command.append('--mutable-prelude')
+        reject(profile+'-bad-seed',command,target)
+    if a.mutable_prelude:
+        target=out/'existing.bin';target.write_bytes(b'KEEP');source=out/'existing-input.bin';source.write_bytes(sample)
+        commands=[('native',[str(native),str(image),str(source),str(target)])]
+        commands.extend((profile,[str(v.ROOT/f'target/{profile}/grid-standard-car.exe'),str(v.GAME/'cars/lac/lac.csv'),str(ned),'00030fe7',str(target),'--mutable-prelude']) for profile in ['debug','release'])
+        for label,command in commands:
+            e=subprocess.run(command,cwd=v.ROOT,capture_output=True,text=True,timeout=30);assert e.returncode!=0 and target.read_bytes()==b'KEEP'
+            guards.append(dict(label=label+'-existing',exit=e.returncode,stdout=e.stdout,stderr=e.stderr,preserved=True))
     result=dict(passed=True,reports=reports,guards=guards,guard_count=len(guards),source_pairs=43,authored_variations=26,seeds=5,cases_per_profile=345,observable_bytes_per_profile=345*(0x21000-2),limits='Native framing and Rust source guards are distinct; two native padding bytes and explicit address canonicalization are excluded. Cold control NaN is retained; no outer factory/physical owner/driving claim.')
     result['source_prelude']=a.source_prelude
+    result['mutable_prelude']=a.mutable_prelude
+    result['current_inputs']={str(path):v.digest(path) for path in [native,image,Path(__file__),v.ROOT/'tools/validate_standard_constructor.py',v.ROOT/'tools/probe_standard_constructor.c',v.ROOT/'crates/grid-tools/src/standard_car.rs',v.ROOT/'crates/grid-tools/src/bin/grid-standard-car.rs']}
     (out/'audit.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if k not in ['reports','guards']}))
 if __name__=='__main__':main()
