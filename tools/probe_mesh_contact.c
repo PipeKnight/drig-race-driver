@@ -91,6 +91,7 @@ int wmain(int argc,wchar_t **argv){
  __declspec(align(16)) unsigned descriptor[33];memcpy(descriptor,seed+0x250,sizeof(descriptor));descriptor[0]=address(mesh);descriptor[0x5c/4]=address(root);((unsigned char *)descriptor)[0x50]=0;memcpy((unsigned char *)descriptor+0x6c,&contact_limit,4);
  __try{
   ((void (__cdecl *)(void))(image+0xc7dae0-0x400000))();
+  for(unsigned i=0;i<16;i++)((void (__fastcall *)(void *,void *))(image+0xb0ece0-0x400000))(contacts+i*0x80,NULL);
   ((void (__fastcall *)(void *,void *,void *))(image+0xb460f0-0x400000))(second,NULL,descriptor);
   memcpy(second+0x130,first+0x130,64);for(unsigned j=0;j<3;j++){float v=num(second,0x160+j*4)+shift[j];memcpy(second+0x160+j*4,&v,4);}
   ((void (__fastcall *)(void *,void *))(image+0xabc7b0-0x400000))(second,NULL);
@@ -115,6 +116,7 @@ int wmain(int argc,wchar_t **argv){
   if(memcmp(body,body_before,sizeof(body)))error=13;
   unsigned count=get(worker,0x10);if(count>16||get(pair,0x24)!=count||get(worker,0x40)!=address(contacts)+count*0x80)error=18;
   if(!canonical(worker,0,regions,11)||!canonical(worker,0x40,regions,11))error=12;
+  for(unsigned i=0;i<16;i++){if(get(contacts+i*0x80,0)!=address(image+0xd3d434-0x400000))error=12;put(contacts+i*0x80,0,0x7200);}
   for(unsigned i=0;i<count;i++){
    unsigned char *contact=contacts+i*0x80;const unsigned offsets[]={4,8,0x28,0x2c,0x30,0x34};
    for(unsigned j=0;j<6;j++)if(!canonical(contact,offsets[j],regions,11))error=12;

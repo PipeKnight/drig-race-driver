@@ -66,7 +66,11 @@ def check(answer, baseline, seed, contact_capacity, contact_limit):
     assert normalized == baseline
     if not u(baseline, 0x4a0+0x910):
         assert count == 0
-    assert answer[0xfc8+count*128:0x17c8] == bytes((16-count)*128)
+    template = bytearray(128)
+    struct.pack_into('<I', template, 0, 0x7200)
+    template[0xf] = 1
+    struct.pack_into('<3I', template, 0x1c, 0xffffffff, 0xffffffff, 1)
+    assert answer[0xfc8+count*128:0x17c8] == template*(16-count)
     body_start = len(seed)-0x1120
     body = bytearray(seed[body_start:body_start+0x430])
     struct.pack_into('<I', body, 0x334, 0x1c0)
@@ -76,7 +80,9 @@ def check(answer, baseline, seed, contact_capacity, contact_limit):
     for i in range(count):
         c = answer[0xfc8+i*128:0x1048+i*128]
         assert [u(c, o) for o in [4, 8, 0x28, 0x2c, 0x30, 0x34]] == [0xa000, 0, 0x1000, 0xc000, 0x1420, 0x1420]
-        assert c[:4] == bytes(4) and c[0xc:0x28] == bytes(0x1c)
+        assert u(c, 0) == 0x7200 and c[0xc:0x10] == bytes([0, 0, 0, 1])
+        assert c[0x10:0x1c] == bytes(12)
+        assert struct.unpack_from('<3I', c, 0x1c) == (0xffffffff, 0xffffffff, 1)
         assert f(c, 0x3c) == friction_limit(answer[:0x250], answer[0x250:0x4a0], f(c, 0x64))
         assert c[0x40:0x50] == bytes(16)
         assert c[0x70] == c[0x72] == 0 and c[0x71] in [0, 1] and c[0x73] == 1
@@ -178,14 +184,14 @@ def main():
     e = run(out/'0000-input.bin', existing)
     assert 0 < e['exit'] < 256 and not e['stderr'] and digest(existing) == before
     guards.append(dict(label='existing', execution=e, existing_output_preserved=True))
-    report = dict(passed=True, native_reference_only=True, cases=len(results),
+    report = dict(passed=True, native_reference_only=True, contact_slot_constructor=True, cases=len(results),
                   observable_bytes=sum(r['bytes'] for r in results),
                   positive_cases=sum(r['contact_count'] > 0 for r in results),
                   contacts=sum(r['contact_count'] for r in results), guard_count=len(guards),
                   guards=guards, results=results, upstream=str(upstream.relative_to(ROOT)),
                   upstream_sha256=digest(upstream), image_sha256=digest(IMAGE),
                   native_sha256=digest(NATIVE), script_sha256=digest(Path(__file__)),
-                  scope='Whole original startup direction initializer, scratch constructor, static clone registration and B39500/AE8AD0 mesh7/7 kernel. Owned bodies, zero material scalars, 0/1/2/4/16 contact capacity, explicitly supplied finite contact limit replaces formerly opaque descriptor6C/shape224. Repeated native reference only: no Rust contact generator, world solve, source barrier shape or runtime integration claim.')
+                  scope='Whole original startup direction initializer, scratch constructor and all16 B0ECE0 contact-slot constructors, static clone registration and B39500/AE8AD0 mesh7/7 kernel. Owned bodies, zero material scalars, 0/1/2/4/16 contact capacity, explicitly supplied finite contact limit replaces formerly opaque descriptor6C/shape224. Repeated native reference only: no Rust contact generator, world solve, source barrier shape or runtime integration claim.')
     (out/'validation.json').write_text(json.dumps(report, indent=2))
     print(json.dumps({k: report[k] for k in ['passed', 'cases', 'positive_cases', 'contacts', 'observable_bytes', 'guard_count']}))
 
