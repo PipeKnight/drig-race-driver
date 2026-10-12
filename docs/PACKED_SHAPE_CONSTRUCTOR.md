@@ -36,4 +36,4 @@ Private final reports:
 
 Existing MSVC 14.44.35207 / DevPrompt 17.14.41 / SDK 10.0.26100.0, Python 3.12.14 and Capstone 5.0.6 were reused. Native build uses C17, strict floating point, SSE2 and warnings as errors. Both initial builds succeeded; the first 40-case draft and final sweep/audit passed without an original execution fault or numerical comparison failure. Two Python AST checks and Git whitespace checks pass. Harmless guessed filename reads and a documentation patch with an incomplete line context failed without changing evidence; corrected against actual files. No Rust changes, installation, interactive desktop input, user-setting change or Steam modification was required.
 
-Next: a full owned packed generator fixture with explicit verified sheet mask, then query witness/normal reorientation and retained multi-triangle manifold integration into fresh moving physical frames.
+Follow-up: [F229](PACKED_GENERATOR_COMPLETE.md) verifies a full, nonaliased owned generator fixture and its composed physical-solver handoff. Query witness/normal reorientation and retained multi-triangle manifold integration into fresh moving physical frames remain next.
