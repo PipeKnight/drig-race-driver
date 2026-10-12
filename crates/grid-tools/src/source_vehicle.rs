@@ -157,6 +157,7 @@ impl Runtime {
             seed,
         )?;
         car.configure_suspension(geometry)?;
+        car.configure_damage_regions(&ned)?;
         car.configure_handling(&settings, true)?;
         let mut owner = car.bytes().to_vec();
         owner.resize(source_physical::CAR_BYTES, 0);

@@ -13,6 +13,28 @@ impl Car {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+    /// Install the five NED regions using the already selected local car offset.
+    /// Wheel regions, mutable constructor defaults and impact dispatch are separate.
+    pub fn configure_damage_regions(
+        &mut self,
+        document: &grid_formats::binxml::Document<'_>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let regions = grid_formats::damage_boxes::read(document)?;
+        let offset = std::array::from_fn(|i| self.get(0x1630 + i * 4));
+        let mut records = [[0u8; 48]; 5];
+        for ((record, region), at) in records
+            .iter_mut()
+            .zip(regions)
+            .zip(grid_formats::damage_boxes::OFFSETS)
+        {
+            record.copy_from_slice(&self.bytes[0xcdf0 + at..0xcdf0 + at + 48]);
+            grid_formats::damage_boxes::apply(region, offset, record)?;
+        }
+        for (record, at) in records.into_iter().zip(grid_formats::damage_boxes::OFFSETS) {
+            self.bytes[0xcdf0 + at..0xcdf0 + at + 48].copy_from_slice(&record);
+        }
+        Ok(())
+    }
     /// Prepare source suspension axes from raw NED positions and copied caster/
     /// camber properties. Preserve the complete owner on failure.
     pub fn configure_suspension(&mut self, geometry: WheelGeometry) -> Result<(), Error> {
@@ -527,6 +549,71 @@ fn initialize_owned(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn incomplete_last_region_preserves_car_rng_and_unrelated_fields() {
+        use grid_formats::binxml::{Document, Element};
+        let mut car = Car {
+            bytes: vec![0; 0x21000],
+            driven: vec![2, 3],
+            random_state: 200679,
+        };
+        car.set(0x1634, -0.5);
+        let attributes = vec![
+            ("m_centre_x", "0"),
+            ("m_centre_y", "1"),
+            ("m_centre_z", "0"),
+            ("m_size_x", "1"),
+            ("m_size_y", "2"),
+            ("m_size_z", "3"),
+        ];
+        let mut elements = vec![
+            Element {
+                name: "DAMAGE",
+                value: None,
+                attributes: vec![],
+                children: 1..2,
+                parent: None,
+            },
+            Element {
+                name: "HANDLINGDAMAGE",
+                value: None,
+                attributes: vec![],
+                children: 2..7,
+                parent: Some(0),
+            },
+        ];
+        for name in grid_formats::damage_boxes::NAMES {
+            elements.push(Element {
+                name,
+                value: None,
+                attributes: attributes.clone(),
+                children: 7..7,
+                parent: Some(1),
+            });
+        }
+        elements[6].attributes.pop();
+        let mut document = Document {
+            strings: vec![],
+            elements,
+            string_padding: &[],
+        };
+        let before = car.bytes.clone();
+        assert!(car.configure_damage_regions(&document).is_err());
+        assert_eq!(car.bytes, before);
+        assert_eq!(car.random_state, 200679);
+        document.elements[6].attributes = attributes;
+        car.configure_damage_regions(&document).unwrap();
+        assert_eq!(car.random_state, 200679);
+        let mut expected = before;
+        for at in grid_formats::damage_boxes::OFFSETS {
+            let start = 0xcdf0 + at;
+            for (j, value) in [0_f32, 0.5, 0., 1., 1., 2., 3., 1.].into_iter().enumerate() {
+                expected[start + j * 4..start + j * 4 + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            expected[start + 32] = 1;
+        }
+        assert_eq!(car.bytes, expected);
+    }
     #[test]
     fn failed_source_reset_preserves_car_and_rng() {
         let mut car = Car {
