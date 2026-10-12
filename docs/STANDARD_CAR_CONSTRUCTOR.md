@@ -1,5 +1,7 @@
 # Complete cold Standard car constructor (F203)
 
+Later [outer mutable-prelude research](MUTABLE_CONSTRUCTOR_PRELUDE.md) recovers missing startup defaults and identifies a still-open caller mapping: the fifth argument historically called `widths` below is an explicit diagnostic input; the original outer caller appears to supply radius times0.8 there. Historical comparisons remain valid for their selected inputs and do not prove that caller selection.
+
 Verified 12 October 2026 local time. `grid_tools::standard_car::initialize` reconstructs the complete owned 0x21000-byte cold car produced by original A0C9F0. This closes the constructor boundary after the [complete Standard properties decoder](STANDARD_PROPERTIES.md), before the resource factory and physical-world attachment. It is not yet a drivable car.
 
 ## Inputs and numerical proof
