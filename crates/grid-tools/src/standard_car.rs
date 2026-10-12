@@ -141,6 +141,35 @@ pub fn initialize_with_source_prelude(
     initialize_owned(properties, geometry, widths, gravity, random_state, true)
 }
 
+/// Selected outer mutable constructor followed by complete Standard creation.
+/// The first reset consumes six global draws; Standard consumes twelve more.
+/// Resource association and the later four wheel-region stores are separate.
+pub fn initialize_with_mutable_prelude(
+    properties: &Properties,
+    geometry: WheelGeometry,
+    widths: [f32; 4],
+    gravity: f32,
+    mut random_state: u32,
+) -> Result<Car, Error> {
+    for _ in 0..6 {
+        random_state = random_state
+            .wrapping_mul(0x41c64e6d)
+            .wrapping_add(0x40584c0f);
+    }
+    let mut car =
+        initialize_with_source_prelude(properties, geometry, widths, gravity, random_state)?;
+    // Only these constructor defaults survive Standard's saved mutable block
+    // and later reset. Whole original chain comparison verifies all car bytes.
+    for at in [0x60, 0x90, 0xc0, 0xf0, 0x120, 0x150, 0x180, 0x1b0, 0x1e0] {
+        car.set(0xcdf0 + at + 12, 1.);
+    }
+    for at in [0x430, 0x434, 0x438, 0x43c] {
+        car.set(0xcdf0 + at, 1.);
+    }
+    car.bytes[0xcdf0 + 0x442] = 1;
+    Ok(car)
+}
+
 fn initialize_owned(
     properties: &Properties,
     geometry: WheelGeometry,

@@ -149,7 +149,7 @@ impl Runtime {
         }
         let settings =
             handling_damage::read_configuration(&archive_bytes[hdm.stored_data.clone()])?;
-        let mut car = standard_car::initialize_with_source_prelude(
+        let mut car = standard_car::initialize_with_mutable_prelude(
             &properties,
             geometry,
             widths,
