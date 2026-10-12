@@ -886,6 +886,36 @@ mod tests {
                 0.,
             )
             .unwrap();
+        // Bitwise trajectory projection: complete car/physical/frame buffers,
+        // contact pools, solver rows/workspace, both RNGs and runtime metadata.
+        let trace = |runtime: &Runtime| {
+            let mut words = runtime.state.car.owner.vehicle.clone();
+            words.extend(runtime.state.car.owner.physical);
+            words.extend(runtime.state.car.frame.body);
+            words.extend(runtime.state.car.frame.view);
+            words.extend(runtime.state.car.frame.solver);
+            for body in &runtime.state.world.groups.bodies {
+                words.extend(body);
+            }
+            for contact in &runtime.state.world.groups.contacts {
+                words.extend(contact);
+            }
+            words.extend(runtime.state.world.groups.world);
+            for row in &runtime.state.world.manager.rows {
+                words.extend(row);
+            }
+            for pair in &runtime.state.world.manager.workspace {
+                words.extend(pair.iter().flatten().map(|v| v.to_bits()));
+            }
+            words.push(u32::from(
+                runtime.state.car.owner.damage_random_state.is_some(),
+            ));
+            words.push(runtime.state.car.owner.damage_random_state.unwrap_or(0));
+            words.push(u32::from(runtime.cache.plane));
+            words.push(runtime.ticks as u32);
+            words.push(runtime.last_body_contacts as u32);
+            words
+        };
         // Authored walls, not recovered Donington barrier placements. The
         // center-plane case previously reached the collision-damage guard.
         for (label, x) in [("shallow", bounds[1][0] - 0.01), ("deep", center[12])] {
@@ -906,83 +936,120 @@ mod tests {
                 nodes: &[0x8000],
                 leaves: &leaves,
             };
-            let mut total = 0;
-            let mut responses = 0;
-            legacy.reset();
-            for tick in 0..20 {
-                legacy.tick(Controls::default()).unwrap();
-                enabled
-                    .tick_with_geometry(Controls::default(), |bodies, remaining| {
-                        let published = publish(&bodies[0])?;
-                        let generated = packed_contacts::calculate(
-                            shape.mesh(),
-                            published.shapes[0],
-                            &track,
-                            &[0],
-                            &packed_contacts::Settings {
-                                query: convex_distance::ContactSettings {
-                                    margin: 0.,
-                                    directions,
+            let mut baseline = Vec::new();
+            for pass in 0..if label == "deep" { 3 } else { 1 } {
+                enabled.reset();
+                let legacy_guard = pass == 2;
+                if legacy_guard {
+                    enabled.state.car.owner.damage_random_state = None;
+                }
+                let mut total = 0;
+                let mut trajectory = Vec::new();
+                let mut rejected = false;
+                let mut responses = 0;
+                legacy.reset();
+                for tick in 0..20 {
+                    legacy.tick(Controls::default()).unwrap();
+                    let before_tick = trace(&enabled);
+                    let result =
+                        enabled.tick_with_geometry(Controls::default(), |bodies, remaining| {
+                            let published = publish(&bodies[0])?;
+                            let generated = packed_contacts::calculate(
+                                shape.mesh(),
+                                published.shapes[0],
+                                &track,
+                                &[0],
+                                &packed_contacts::Settings {
+                                    query: convex_distance::ContactSettings {
+                                        margin: 0.,
+                                        directions,
+                                    },
+                                    contact_capacity: remaining.min(16),
+                                    cache_enabled: true,
+                                    candidate_capacity: 4096,
+                                    sheet_mask: 0,
+                                    correction_bounds: [f32::MAX; 4],
                                 },
-                                contact_capacity: remaining.min(16),
-                                cache_enabled: true,
-                                candidate_capacity: 4096,
-                                sheet_mask: 0,
-                                correction_bounds: [f32::MAX; 4],
-                            },
-                        )?;
-                        eprintln!(
-                            "geometry_probe tick={tick} contacts={} depths={:?}",
-                            generated.contacts.len(),
-                            generated
+                            )?;
+                            eprintln!(
+                                "geometry_probe tick={tick} contacts={} depths={:?}",
+                                generated.contacts.len(),
+                                generated
+                                    .contacts
+                                    .iter()
+                                    .map(|c| c.penetration)
+                                    .collect::<Vec<_>>()
+                            );
+                            total += generated.contacts.len();
+                            Ok(generated
                                 .contacts
-                                .iter()
-                                .map(|c| c.penetration)
-                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .map(|contact| {
+                                    let mut c: contact_groups::Contact = [0; 32];
+                                    c[1] = 1;
+                                    c[0xc / 4] = 0x01000000;
+                                    c[0x1c / 4] = u32::MAX;
+                                    c[0x20 / 4] = u32::MAX;
+                                    c[0x24 / 4] = 1;
+                                    c[0x28 / 4] = 1;
+                                    c[0x2c / 4] = 2;
+                                    c[0x38 / 4] = contact.penetration.to_bits();
+                                    c[0x3c / 4] = f32::MAX.to_bits();
+                                    c[0x50 / 4..0x60 / 4]
+                                        .copy_from_slice(&contact.point.map(f32::to_bits));
+                                    c[0x60 / 4..0x70 / 4]
+                                        .copy_from_slice(&contact.normal.map(f32::to_bits));
+                                    c[0x70 / 4] = (u32::from(contact.flipped) << 8) | (1 << 24);
+                                    c
+                                })
+                                .collect())
+                        });
+                    if let Err(error) = result {
+                        assert!(legacy_guard, "wall tick {tick}: {error:?}");
+                        assert_eq!(error.0, "unsupported handling collision damage");
+                        assert_eq!(trace(&enabled), before_tick);
+                        eprintln!(
+                            "heavy_wall_legacy_guard attempted_tick={} unchanged=true",
+                            tick + 1
                         );
-                        total += generated.contacts.len();
-                        Ok(generated
-                            .contacts
-                            .into_iter()
-                            .map(|contact| {
-                                let mut c: contact_groups::Contact = [0; 32];
-                                c[1] = 1;
-                                c[0xc / 4] = 0x01000000;
-                                c[0x1c / 4] = u32::MAX;
-                                c[0x20 / 4] = u32::MAX;
-                                c[0x24 / 4] = 1;
-                                c[0x28 / 4] = 1;
-                                c[0x2c / 4] = 2;
-                                c[0x38 / 4] = contact.penetration.to_bits();
-                                c[0x3c / 4] = f32::MAX.to_bits();
-                                c[0x50 / 4..0x60 / 4]
-                                    .copy_from_slice(&contact.point.map(f32::to_bits));
-                                c[0x60 / 4..0x70 / 4]
-                                    .copy_from_slice(&contact.normal.map(f32::to_bits));
-                                c[0x70 / 4] = (u32::from(contact.flipped) << 8) | (1 << 24);
-                                c
-                            })
-                            .collect())
-                    })
-                    .unwrap_or_else(|e| panic!("wall tick {tick}: {e:?}"));
-                responses += usize::from(
-                    enabled.state.car.owner.physical != legacy.state.car.owner.physical,
+                        rejected = true;
+                        break;
+                    }
+                    assert!(!legacy_guard || enabled.state.car.owner.damage_random_state.is_none());
+                    trajectory.push(trace(&enabled));
+                    responses += usize::from(
+                        enabled.state.car.owner.physical != legacy.state.car.owner.physical,
+                    );
+                }
+                if legacy_guard {
+                    assert!(
+                        rejected,
+                        "paired None control must reach the old damage guard"
+                    );
+                    continue;
+                }
+                assert!(!rejected);
+                if pass == 0 {
+                    baseline = trajectory;
+                } else {
+                    assert_eq!(trajectory, baseline);
+                    eprintln!("heavy_wall_reset_replay ticks=20 bitwise_equal=true");
+                }
+                assert!(total > 0);
+                assert!(responses > 0);
+                assert_eq!(enabled.ticks, 20);
+                assert!(enabled.velocity().iter().all(|x| x.is_finite()));
+                eprintln!(
+                    "fresh_source_mesh_wall label={label} ticks=20 contacts={total} response_ticks={responses} damage_rng_changed={} velocity={:?}",
+                    enabled.state.car.owner.damage_random_state != damage_rng_before,
+                    enabled.velocity()
                 );
-            }
-            assert!(total > 0);
-            assert!(responses > 0);
-            assert_eq!(enabled.ticks, 20);
-            assert!(enabled.velocity().iter().all(|x| x.is_finite()));
-            eprintln!(
-                "fresh_source_mesh_wall label={label} ticks=20 contacts={total} response_ticks={responses} damage_rng_changed={} velocity={:?}",
-                enabled.state.car.owner.damage_random_state != damage_rng_before,
-                enabled.velocity()
-            );
-            if label == "deep" {
-                assert_ne!(
-                    enabled.state.car.owner.damage_random_state,
-                    damage_rng_before
-                );
+                if label == "deep" {
+                    assert_ne!(
+                        enabled.state.car.owner.damage_random_state,
+                        damage_rng_before
+                    );
+                }
             }
         }
     }
