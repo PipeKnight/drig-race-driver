@@ -1,6 +1,8 @@
 # Independent GRID (2008) engine research
 
-The engine uses Rust and Bevy and loads resources from a player's purchased installation of Race Driver: GRID (2008). Resource readers, a static Lacetti/Donington scene viewer and scoped vehicle/collision components are implemented. A drivable Rust game remains ahead.
+The engine uses Rust and Bevy and loads resources from a player's purchased installation of Race Driver: GRID (2008). Resource readers, a Lacetti/Donington scene viewer and an experimental keyboard driving prototype are implemented. Body/barrier collisions, a verified full lap and a complete independent game remain ahead.
+
+To try the current build on this PC, double-click **Play GRID Prototype.cmd**. See [prototype controls and limitations](docs/TRY_THE_PROTOTYPE.md).
 
 Start with [PROJECT_LOG.md](PROJECT_LOG.md) for current progress, findings and next actions. The [9 October progress assessment](docs/PROGRESS_ASSESSMENT_2026-10-09.md) records completed capabilities, blockers, completion estimates and the next integration milestones. Detailed initial work is in [Phase 0 reference identification and compatibility investigation](docs/PHASE0.md).
 
@@ -13,7 +15,7 @@ The workspace uses pinned Rust 1.99.0 and Bevy 0.19.1:
 - `grid-formats`: bounded resource readers and format structures.
 - `grid-world`: geometry queries and independently implemented, scoped simulation components.
 - `grid-tools`: inspection and private diagnostic comparison CLIs.
-- `grid-app`: the static Bevy scene viewer.
+- `grid-app`: the Bevy scene viewer and experimental driving prototype.
 
 [PSSG payload decoding](docs/PSSG_PAYLOADS.md) covers selected Lacetti vertex/index/UV buffers and BC1/BC3 base textures. See [resource formats and validation](docs/RESOURCE_FORMATS.md) for scope and commands. Dependencies are recorded in Cargo.lock; proprietary game assets are excluded.
 
