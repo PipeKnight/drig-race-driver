@@ -36,6 +36,20 @@ pub fn advance_with_pool(
     used: usize,
     shapes: &[contact_groups::Shape],
 ) -> Result<grouped_physical_frame::Output, Error> {
+    advance_with_geometry(previous, slots, used, shapes, used)
+}
+
+/// Advance retained bodies and solver state with supplied fresh contacts.
+/// The external prefix stores relative points; the geometric suffix stores
+/// world points. Unused slots retain their bytes and owned link capacity.
+/// Detection, scheduling and callback consumption remain caller responsibilities.
+pub fn advance_with_geometry(
+    previous: &grouped_physical_frame::Output,
+    slots: &[contact_groups::Contact],
+    used: usize,
+    shapes: &[contact_groups::Shape],
+    external_count: usize,
+) -> Result<grouped_physical_frame::Output, Error> {
     let world = previous.groups.world;
     let selector = world[5];
     if selector > 1
@@ -43,6 +57,7 @@ pub fn advance_with_pool(
         || previous.groups.contacts.len() > 64
         || slots.len() != previous.groups.contacts.len()
         || used > slots.len()
+        || external_count > used
         || previous
             .groups
             .bodies
@@ -78,8 +93,13 @@ pub fn advance_with_pool(
         dirty_head: world[4],
         contact_capacity: previous.groups.contacts.len(),
     };
-    let mut out =
-        grouped_physical_frame::calculate_tick_carried(&input, &previous.manager, shapes, &carry)?;
+    let mut out = grouped_physical_frame::calculate_tick_carried(
+        &input,
+        &previous.manager,
+        shapes,
+        &carry,
+        external_count,
+    )?;
     let active = out.groups.contacts;
     out.groups.contacts = slots.to_vec();
     out.groups.contacts[..used].copy_from_slice(&active);
@@ -250,6 +270,7 @@ mod tests {
         let world = out.groups.world;
         let manager = out.manager.clone();
         assert!(advance(&out, &[]).is_err());
+        assert!(advance_with_geometry(&out, &contacts, 1, &[], 0).is_err());
         assert_eq!(out.groups.bodies, bodies);
         assert_eq!(out.groups.contacts, contacts);
         assert_eq!(out.groups.world, world);
@@ -260,5 +281,33 @@ mod tests {
         assert_eq!(out.manager.ends, manager.ends);
         assert_eq!(out.manager.cached_pair, manager.cached_pair);
         assert_eq!(out.manager.cached_material, manager.cached_material);
+    }
+
+    #[test]
+    fn retained_geometry_point_is_not_translated_by_body_center() {
+        let mut previous = completed();
+        for offset in [0x1c0, 0x200] {
+            for (j, value) in [2f32, 3., 4., 1.].into_iter().enumerate() {
+                previous.groups.bodies[0][offset / 4 + j] = value.to_bits();
+            }
+        }
+        let mut c = [0; 0x80 / 4];
+        c[1] = 1;
+        c[2] = 2;
+        c[0xc / 4] = 0x01000001;
+        c[0x3c / 4] = f32::MAX.to_bits();
+        c[0x64 / 4] = 1f32.to_bits();
+        let point = [100f32, 200., 300., 1.].map(f32::to_bits);
+        c[0x50 / 4..0x60 / 4].copy_from_slice(&point);
+        let geometric = advance_with_geometry(&previous, &[c], 1, &[], 0).unwrap();
+        assert_eq!(geometric.groups.contacts[0][0x50 / 4..0x60 / 4], point);
+        c[0x5c / 4] = 0;
+        let external = advance_with_geometry(&previous, &[c], 1, &[], 1).unwrap();
+        assert_eq!(
+            external.groups.contacts[0][0x50 / 4..0x60 / 4],
+            [102f32, 203., 304., 1.].map(f32::to_bits)
+        );
+        assert_eq!(geometric.groups.world, external.groups.world);
+        assert!(advance_with_geometry(&previous, &[c], 1, &[], 2).is_err());
     }
 }

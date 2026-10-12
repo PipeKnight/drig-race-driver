@@ -372,9 +372,13 @@ pub(crate) fn calculate_carried(
     input: &Input,
     shapes: &[Shape],
     carry: &Carry,
+    external_count: usize,
 ) -> Result<Output, Error> {
     validate_carried(input, shapes, carry)?;
-    build(input, shapes, carry.dirty_head, input.contacts.len())
+    if external_count > input.contacts.len() {
+        return Err(Error("invalid external contact prefix"));
+    }
+    build(input, shapes, carry.dirty_head, external_count)
 }
 
 fn build(

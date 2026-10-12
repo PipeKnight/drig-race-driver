@@ -102,8 +102,12 @@ pub(crate) fn calculate_tick_carried(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
     carry: &contact_groups::Carry,
+    external_count: usize,
 ) -> Result<Output, Error> {
-    tick(input, manager, shapes, Some(carry), input.contacts.len())
+    if external_count > input.contacts.len() {
+        return Err(Error("invalid external contact prefix"));
+    }
+    tick(input, manager, shapes, Some(carry), external_count)
 }
 
 fn validate(
@@ -225,7 +229,7 @@ fn calculate_impl(
         return Err(Error("unsupported grouped physical manager"));
     }
     let mut groups = if let Some(carry) = carry {
-        contact_groups::calculate_carried(input, shapes, carry)?
+        contact_groups::calculate_carried(input, shapes, carry, external_count)?
     } else {
         contact_groups::calculate_with_geometry(input, shapes, external_count)?
     };

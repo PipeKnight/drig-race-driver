@@ -44,6 +44,57 @@ fn shape(i: u32) -> Result<Option<bool>, Failure> {
         _ => Err("invalid shape".into()),
     }
 }
+/// Diagnostic composition: rebuild active records from supplied world-point
+/// templates, then retain bodies, group links and complete solver workspace.
+/// Prefix points become relative before advance; suffix points stay in world.
+fn calculate_carried_geometry(
+    input: &contact_groups::Input,
+    manager: &grouped_physical_frame::Manager,
+    shapes: &[contact_groups::Shape],
+    counts: &[[usize; 2]],
+) -> Result<grouped_physical_frame::Output, grid_world::Error> {
+    contact_groups::validate_with_shapes(input, shapes)?;
+    if manager.capacity < input.contacts.len() * 4 {
+        return Err(grid_world::Error("insufficient carried geometry capacity"));
+    }
+    let mut previous: Option<grouped_physical_frame::Output> = None;
+    for &[external, used] in counts {
+        let bodies = previous
+            .as_ref()
+            .map_or(&input.bodies, |p| &p.groups.bodies);
+        let mut slots = previous
+            .as_ref()
+            .map_or_else(|| input.contacts.clone(), |p| p.groups.contacts.clone());
+        slots[..used].copy_from_slice(&input.contacts[..used]);
+        for contact in &mut slots[..external] {
+            let owner = contact[1] as usize - 1;
+            for j in 0..4 {
+                let relative = f32::from_bits(contact[0x50 / 4 + j])
+                    - f32::from_bits(bodies[owner][0x1c0 / 4 + j]);
+                if !relative.is_finite() {
+                    return Err(grid_world::Error("carried geometry point overflow"));
+                }
+                contact[0x50 / 4 + j] = relative.to_bits();
+            }
+        }
+        let next = if let Some(previous) = &previous {
+            physical_world::advance_with_geometry(previous, &slots, used, shapes, external)?
+        } else {
+            let mut first = input.clone();
+            first.contacts = slots[..used].to_vec();
+            let mut first = grouped_physical_frame::calculate_tick_with_geometry(
+                &first, manager, shapes, external,
+            )?;
+            slots[..used].copy_from_slice(&first.groups.contacts);
+            first.groups.contacts = slots;
+            first.pool_used = 0;
+            first
+        };
+        previous = Some(next);
+    }
+    previous.ok_or(grid_world::Error("empty carried geometry sequence"))
+}
+
 fn run() -> Result<(), Failure> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
@@ -57,7 +108,8 @@ fn run() -> Result<(), Failure> {
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
-    let geometry_tick = word(h, 0) == 0x31475447;
+    let geometry_sequence = word(h, 0) == 0x32475447;
+    let geometry_tick = word(h, 0) == 0x31475447 || geometry_sequence;
     let reproduced_world = word(h, 0) == 0x36535747;
     let carried_world = word(h, 0) == 0x35535747 || reproduced_world;
     let whole_world = word(h, 0) == 0x34535747 || carried_world;
@@ -144,13 +196,28 @@ fn run() -> Result<(), Failure> {
             }
         }
         let mut bodies = Vec::new();
-        let world_steps = if carried_world {
+        let world_steps = if carried_world || geometry_sequence {
             word(take(&data, &mut p, 4)?, 0)
         } else {
             1
         };
         let mut requests = Vec::new();
         let mut counts = Vec::new();
+        let mut geometry_counts = Vec::new();
+        if geometry_sequence {
+            if !(1..=64).contains(&world_steps) {
+                return Err("invalid carried geometry steps".into());
+            }
+            for _ in 0..world_steps {
+                let counts = take(&data, &mut p, 8)?;
+                let external = word(counts, 0) as usize;
+                let used = word(counts, 4) as usize;
+                if external > used || used > nc {
+                    return Err("invalid carried geometry contact counts".into());
+                }
+                geometry_counts.push([external, used]);
+            }
+        }
         if reproduced_world {
             if !(1..=64).contains(&world_steps) {
                 return Err("invalid reproduced world steps".into());
@@ -370,7 +437,9 @@ fn run() -> Result<(), Failure> {
                 cached_pair: input.step.cached_pair,
                 cached_material: input.step.cached_material,
             };
-            let result = if geometry_tick {
+            let result = if geometry_sequence {
+                calculate_carried_geometry(&group_input, &manager, &shapes, &geometry_counts)
+            } else if geometry_tick {
                 grouped_physical_frame::calculate_tick_with_geometry(
                     &group_input,
                     &manager,
