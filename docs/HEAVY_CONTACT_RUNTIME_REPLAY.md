@@ -1,0 +1,13 @@
+# Reached heavy-contact runtime replay
+
+F247 strengthens [source wheel/damage integration](SOURCE_WHEEL_DAMAGE_STARTUP.md) with reset/replay and a paired legacy guard control. Production behavior and the playable executable are unchanged.
+
+The source Lacetti mesh is placed against the same authored center-plane wall used in F246. With production-owned global RNG, both original and reset replay complete20 ticks with35 contacts,20 physical responses and a changed global damage RNG. Every successful tick's bitwise projection agrees after reset: complete car and physical buffers, force-frame body/view/solver buffers, world bodies/contact pool/heads, solver rows/workspace, global RNG, rectangle-query cache, tick and last-contact count. The car buffer contains the separate wear RNG. This is a specific projection of the selected runtime, not a claim that every allocator, manager metadata field or original frame is reproduced.
+
+The identical paired run with `damage_random_state=None` reaches `unsupported handling collision damage` on attempted tick2. Its complete checked pre-tick projection remains unchanged. This negative control demonstrates that the positive run passes the previously guarded branch; success is not just an empty or below-threshold contact case. The shallow control still gives3 contacts/20 physical responses without advancing global damage RNG.
+
+Both debug and release source integration tests pass, each checking all20 per-tick replay projections. Warnings-denied workspace all-target Clippy and formatting pass. These runs do not compare whole trajectories between compiler profiles or against the original game. The earlier native F244/F246 comparisons remain the original-function evidence. No new manual lap, arbitrary crash compatibility, damage notification or visual deformation is claimed.
+
+Private logs: `local/behavior/heavy-wall-replay-release-20261013-draft-01.txt`, `heavy-wall-replay-debug-20261013-final-01.txt`, `heavy-wall-replay-clippy-20261013-final-01.txt`. The release log is named draft because it was the first run; its positive/negative controls completed successfully. It also includes harmless zero-test binary targets after the selected library test. Python3.12.14 and Rust/Cargo1.99.0 reused; no installation, UI, game-settings or Steam changes. F246 app SHA-256 remains `2dad35aca0379be2a48f55b9b5dbe99cbcd8916be4fd3b2636c14f1f0be53261`.
+
+Next: controlled faster approaches to actual source Donington boundaries, with input schedules and retained failure telemetry. Shared materials, authored scheduling/boundary order, warm caches and unsupported damage notifications remain explicit limitations.
