@@ -2,16 +2,42 @@
 use std::{fs, io::Write, path::Path};
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 23580 {
-        return Err("usage: grid-convex-distance PC04_OR_PC05_INPUT local/OUTPUT".into());
+    if !(2..=3).contains(&args.len()) || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 23580 {
+        return Err(
+            "usage: grid-convex-distance PC03_TO_PC06_INPUT local/OUTPUT [PRIVATE_CD01]".into(),
+        );
     }
     let b = fs::read(&args[0])?;
-    if b.len() < 44 || !matches!(&b[..4], b"PC04" | b"PC05") {
+    if b.len() < 44 || !matches!(&b[..4], b"PC03" | b"PC04" | b"PC05" | b"PC06") {
         return Err("invalid distance framing".into());
     }
     let word = |o| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let float = |o| f32::from_bits(word(o));
-    let sequence = &b[..4] == b"PC05";
+    let sequence = matches!(&b[..4], b"PC05" | b"PC06");
+    let outer = matches!(&b[..4], b"PC03" | b"PC06");
+    if args.len() != if outer { 3 } else { 2 } {
+        return Err("outer query requires private CD01 sampling data".into());
+    }
+    let sampling = if outer {
+        if fs::metadata(&args[2])?.len() != 712 {
+            return Err("invalid sampling extent".into());
+        }
+        let table = fs::read(&args[2])?;
+        if &table[..8] != b"CD01\x2c\0\0\0" {
+            return Err("invalid sampling framing".into());
+        }
+        Some(std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                f32::from_le_bytes(
+                    table[8 + i * 16 + j * 4..12 + i * 16 + j * 4]
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+        }))
+    } else {
+        None
+    };
     let count = if sequence { word(40) as usize } else { 1 };
     if !(1..=64).contains(&count) {
         return Err("invalid distance sequence count".into());
@@ -136,18 +162,51 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let p = chunk.positions[i as usize];
             [p[0], p[1], p[2], 1.]
         });
-        let result = context.query(&mesh, matrix, triangle, float(s + 0x220), direction)?;
-        direction = result.direction;
+        let mut extras = None;
+        let (returned, flags, witnesses, support_vertices, simplex_bytes) =
+            if let Some(directions) = sampling {
+                let result = context.contact(
+                    &mesh,
+                    matrix,
+                    triangle,
+                    direction,
+                    &grid_world::convex_distance::ContactSettings {
+                        margin: float(s + 0x220),
+                        directions,
+                    },
+                )?;
+                extras = Some(result.extra_directions);
+                (
+                    result.direction,
+                    [false; 2],
+                    result.witnesses,
+                    result.support_vertices,
+                    result.simplex_bytes,
+                )
+            } else {
+                let result = context.query(&mesh, matrix, triangle, float(s + 0x220), direction)?;
+                (
+                    result.direction,
+                    result.flags,
+                    result.witnesses,
+                    result.support_vertices,
+                    result.simplex_bytes,
+                )
+            };
+        direction = returned;
         let mut query = [0u8; 0xa0];
         query[..4].copy_from_slice(&index.to_le_bytes());
-        query[8] = result.flags[0] as u8;
-        query[9] = result.flags[1] as u8;
+        query[8] = flags[0] as u8;
+        query[9] = flags[1] as u8;
+        if outer {
+            query[4] = witnesses.is_some() as u8;
+        }
         query[0x20..0x40].fill(0xcd);
         let put = |q: &mut [u8], o: usize, v: u32| q[o..o + 4].copy_from_slice(&v.to_le_bytes());
-        for (j, v) in result.direction.into_iter().enumerate() {
+        for (j, v) in returned.into_iter().enumerate() {
             put(&mut query, 0x10 + j * 4, v.to_bits());
         }
-        if let Some(witnesses) = result.witnesses {
+        if let Some(witnesses) = witnesses {
             for (i, p) in witnesses.into_iter().enumerate() {
                 for (j, v) in p.into_iter().enumerate() {
                     put(&mut query, 0x20 + i * 16 + j * 4, v.to_bits());
@@ -155,7 +214,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         put(&mut query, 0x40, 0x1000);
-        for (j, i) in result.support_vertices.into_iter().enumerate() {
+        for (j, i) in support_vertices.into_iter().enumerate() {
             put(&mut query, 0x44 + j * 4, 0x30060 + i as u32 * 32);
         }
         for (i, p) in triangle.into_iter().enumerate() {
@@ -163,8 +222,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 put(&mut query, 0x60 + i * 16 + j * 4, v.to_bits());
             }
         }
-        records.extend_from_slice(&result.simplex_bytes);
+        records.extend_from_slice(&simplex_bytes);
         records.extend_from_slice(&query);
+        if let Some(extras) = extras {
+            for v in extras.into_iter().flatten() {
+                records.extend_from_slice(&v.to_le_bytes());
+            }
+        }
     }
     let output = Path::new(&args[1]);
     let parent = output.parent().ok_or("missing parent")?.canonicalize()?;

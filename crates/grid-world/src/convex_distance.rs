@@ -353,6 +353,18 @@ fn mesh_support(
     direction: V,
     cache: &mut [usize; 7],
 ) -> Result<V, Error> {
+    let p = mesh_support_local(mesh, matrix, direction, cache)?;
+    Ok(std::array::from_fn(|j| {
+        (p[3] * matrix[3][j] + p[1] * matrix[1][j]) + (p[2] * matrix[2][j] + p[0] * matrix[0][j])
+    }))
+}
+
+fn mesh_support_local(
+    mesh: &Mesh,
+    matrix: Matrix,
+    direction: V,
+    cache: &mut [usize; 7],
+) -> Result<V, Error> {
     let local = [
         dot(direction, matrix[0]),
         dot(direction, matrix[1]),
@@ -391,10 +403,7 @@ fn mesh_support(
         }
         cache[6] = vertex;
         cache[slot] = vertex;
-        return Ok(std::array::from_fn(|j| {
-            (p[3] * matrix[3][j] + p[1] * matrix[1][j])
-                + (p[2] * matrix[2][j] + p[0] * matrix[0][j])
-        }));
+        return Ok(p);
     }
     Err(Error("mesh support did not converge"))
 }
@@ -417,6 +426,7 @@ pub fn calculate(
 pub struct Context {
     simplex: Simplex,
     cache: [usize; 7],
+    extra_directions: [V; 10],
 }
 impl Default for Context {
     fn default() -> Self {
@@ -428,6 +438,7 @@ impl Context {
         Self {
             simplex: Simplex::new(),
             cache: [0; 7],
+            extra_directions: [[0.; 4]; 10],
         }
     }
     /// Use one context per mesh pair; reset it if the mesh/topology changes.
@@ -448,7 +459,10 @@ impl Context {
             mesh,
             matrix,
             triangle,
-            margin,
+            DistanceOptions {
+                margin,
+                witnesses: true,
+            },
             direction,
             &mut staged.simplex,
             &mut staged.cache,
@@ -461,16 +475,274 @@ impl Context {
     }
 }
 
+struct DistanceOptions {
+    margin: f32,
+    witnesses: bool,
+}
+
+/// Sampling data supplied privately from the owner's identified installation.
+/// This diagnostic API does not embed original game tables in public source.
+pub struct ContactSettings {
+    pub margin: f32,
+    pub directions: [V; 44],
+}
+
+/// Complete selected triangle/one-level mesh outer query, with both witnesses
+/// present only on success. Manifold assembly and world integration are separate.
+pub struct ContactOutput {
+    pub direction: V,
+    pub witnesses: Option<[V; 2]>,
+    pub support_vertices: [usize; 7],
+    pub simplex_bytes: [u8; 0x120],
+    pub extra_directions: [V; 10],
+}
+
+fn normalize_sample(v: V) -> Result<V, Error> {
+    let square = dot(v, v);
+    if !square.is_finite() || square <= 0. {
+        return Err(Error("unsupported penetration sample normal"));
+    }
+    let seed = crate::spawn::reference_seed(square, false)?;
+    let inverse = (1. - (seed * square) * seed) * (seed * 0.5) + seed;
+    Ok(v.map(|x| inverse * x))
+}
+
+fn triangle_support(triangle: [V; 3], direction: V) -> V {
+    let scores = triangle.map(|p| dot(direction, p));
+    if scores[1] <= scores[0] && scores[2] <= scores[0] {
+        triangle[0]
+    } else if scores[0] <= scores[1] && scores[2] <= scores[1] {
+        triangle[1]
+    } else {
+        triangle[2]
+    }
+}
+
+#[allow(clippy::neg_multiply)] // Original triangle batch multiplies by -1.
+fn batch_depth(
+    mesh: &Mesh,
+    matrix: Matrix,
+    triangle: [V; 3],
+    directions: &[V],
+    cache: &mut [usize; 7],
+) -> Result<(usize, f32), Error> {
+    let mut minimum = f32::MAX;
+    let mut selected = None;
+    for (i, &direction) in directions.iter().enumerate() {
+        let opposite = direction.map(|v| -1. * v);
+        let triangle_min = -0. - dot(opposite, triangle_support(triangle, opposite));
+        let point = mesh_support_local(mesh, matrix, direction, cache)?;
+        let local = [
+            dot(direction, matrix[0]),
+            dot(direction, matrix[1]),
+            dot(direction, matrix[2]),
+            0.,
+        ];
+        let depth = (dot(local, point) + dot(direction, matrix[3])) - triangle_min;
+        if depth < minimum {
+            minimum = depth;
+            selected = Some(i);
+        }
+    }
+    Ok((
+        selected.ok_or(Error("no finite penetration sample"))?,
+        minimum,
+    ))
+}
+
+impl Context {
+    /// Selected scope: untransformed source triangle, supplied mesh matrix,
+    /// zero triangle margin and finite nondegenerate triangle winding.
+    /// A failed/invalid operation leaves the context intact.
+    #[allow(clippy::assign_op_pattern)] // Preserve the original operand order.
+    pub fn contact(
+        &mut self,
+        mesh: &Mesh,
+        matrix: Matrix,
+        triangle: [V; 3],
+        direction: V,
+        settings: &ContactSettings,
+    ) -> Result<ContactOutput, Error> {
+        if self.cache.iter().any(|&v| v >= mesh.point_count())
+            || matrix
+                .iter()
+                .flatten()
+                .chain(triangle.iter().flatten())
+                .chain(direction.iter())
+                .any(|v| !v.is_finite() || v.abs() > 100000.)
+            || triangle.iter().any(|v| v[3] != 1.)
+            || direction[3] != 0.
+            || !settings.margin.is_finite()
+            || !(0. ..=1e6).contains(&settings.margin)
+            || settings.directions.iter().any(|d| {
+                d[3] != 0.
+                    || d.iter().any(|v| !v.is_finite() || v.abs() > 2.)
+                    || !(0.99..=1.01).contains(&dot(*d, *d))
+            })
+        {
+            return Err(Error("invalid triangle mesh contact input"));
+        }
+        let mut staged = self.clone();
+        let mut direction = direction;
+        if dot(direction, direction) < EPS {
+            direction = [1., 0., 0., 0.];
+        }
+        let normal = normalize_sample(direction)?;
+        let (_, depth) = batch_depth(mesh, matrix, triangle, &[normal], &mut staged.cache)?;
+        let mut witnesses = None;
+        if -0.01 <= (0. + settings.margin) + depth {
+            let previous = direction;
+            let result = run_query(
+                mesh,
+                matrix,
+                triangle,
+                DistanceOptions {
+                    margin: settings.margin,
+                    witnesses: false,
+                },
+                direction,
+                &mut staged.simplex,
+                &mut staged.cache,
+            )?;
+            direction = result.direction;
+            if result.flags[0] {
+                let [mut a, mut b] = staged.simplex.witnesses();
+                let inverse = 1. / dot(direction, direction).sqrt();
+                let am = inverse * 0.;
+                let bm = inverse * settings.margin;
+                for j in 0..4 {
+                    a[j] -= am * direction[j];
+                    b[j] = bm * direction[j] + b[j];
+                }
+                witnesses = Some([a, b]);
+            } else if result.flags[1] {
+                direction = previous;
+                witnesses = staged.penetration(mesh, matrix, triangle, &mut direction, settings)?;
+            }
+        }
+        let output = ContactOutput {
+            direction,
+            witnesses,
+            support_vertices: staged.cache,
+            simplex_bytes: staged.simplex.bytes,
+            extra_directions: staged.extra_directions,
+        };
+        if output
+            .direction
+            .iter()
+            .chain(output.witnesses.iter().flatten().flatten())
+            .any(|v| !v.is_finite())
+        {
+            return Err(Error("nonfinite triangle mesh contact result"));
+        }
+        *self = staged;
+        Ok(output)
+    }
+
+    #[allow(clippy::assign_op_pattern, clippy::neg_multiply)] // Preserve original operations.
+    fn penetration(
+        &mut self,
+        mesh: &Mesh,
+        matrix: Matrix,
+        triangle: [V; 3],
+        direction: &mut V,
+        settings: &ContactSettings,
+    ) -> Result<Option<[V; 2]>, Error> {
+        self.extra_directions[0] = normalize_sample(*direction)?;
+        self.extra_directions[1] = self.extra_directions[0].map(|v| -v);
+        for (i, row) in matrix.into_iter().take(3).enumerate() {
+            self.extra_directions[2 + i * 2] = row;
+            self.extra_directions[3 + i * 2] = row.map(|v| -v);
+        }
+        self.extra_directions[8] = normalize_sample(cross(
+            sub(triangle[0], triangle[1]),
+            sub(triangle[0], triangle[2]),
+        ))?;
+        self.extra_directions[9] = self.extra_directions[8].map(|v| -v);
+        let mut samples = [[0.; 4]; 54];
+        samples[..44].copy_from_slice(&settings.directions);
+        samples[44..].copy_from_slice(&self.extra_directions);
+        let (index, depth) = batch_depth(mesh, matrix, triangle, &samples, &mut self.cache)?;
+        let mut axis = samples[index];
+        let depth = (0. + settings.margin) + depth;
+        if depth <= 0. {
+            *direction = axis;
+            return Ok(None);
+        }
+        let distance = depth * 1.05 + 0.02;
+        let mut shifted = matrix;
+        shifted[3] = std::array::from_fn(|j| matrix[3][j] - distance * axis[j]);
+        let first = run_query(
+            mesh,
+            shifted,
+            triangle,
+            DistanceOptions {
+                margin: 100.,
+                witnesses: false,
+            },
+            *direction,
+            &mut self.simplex,
+            &mut self.cache,
+        )?;
+        *direction = first.direction;
+        if !first.flags[0] {
+            return Ok(None);
+        }
+        axis = normalize_sample(*direction)?;
+        let opposite = axis.map(|v| -1. * v);
+        let a = triangle_support(triangle, opposite);
+        let b = mesh_support(mesh, matrix, axis, &mut self.cache)?;
+        let difference = sub(b, a);
+        let depth = dot(axis, difference);
+        let distance = ((0. + settings.margin) + depth) * 1.05 + 0.02;
+        shifted[3] = std::array::from_fn(|j| matrix[3][j] - distance * axis[j]);
+        let second = run_query(
+            mesh,
+            shifted,
+            triangle,
+            DistanceOptions {
+                margin: 100.,
+                witnesses: false,
+            },
+            *direction,
+            &mut self.simplex,
+            &mut self.cache,
+        )?;
+        *direction = second.direction;
+        if !second.flags[0] {
+            return Ok(None);
+        }
+        let [mut a, mut b] = self.simplex.witnesses();
+        let length = dot(*direction, *direction).sqrt();
+        let seed = crate::spawn::reference_seed(length, true)?;
+        let normal = direction.map(|v| {
+            let scaled = seed * v;
+            (1. - seed * length) * scaled + scaled
+        });
+        let displacement = axis.map(|v| distance * v);
+        for j in 0..4 {
+            a[j] -= 0. * normal[j];
+            b[j] = (settings.margin * normal[j] + b[j]) + displacement[j];
+        }
+        let along = dot(displacement, normal);
+        for j in 0..4 {
+            a[j] = (displacement[j] - along * normal[j]) + a[j];
+        }
+        Ok(Some([a, b]))
+    }
+}
+
 #[allow(clippy::neg_multiply)] // Preserve the original multiply-by-minus-one.
 fn run_query(
     mesh: &Mesh,
     matrix: Matrix,
     triangle: [V; 3],
-    margin: f32,
+    options: DistanceOptions,
     mut direction: V,
     simplex: &mut Simplex,
     cache: &mut [usize; 7],
 ) -> Result<Output, Error> {
+    let margin = options.margin;
     if matrix
         .iter()
         .flatten()
@@ -541,7 +813,7 @@ fn run_query(
     if !finished {
         return Err(Error("convex distance did not converge"));
     }
-    let witnesses = flags[0].then(|| simplex.witnesses());
+    let witnesses = (flags[0] && options.witnesses).then(|| simplex.witnesses());
     if direction
         .iter()
         .chain(simplex.read(0xc0).iter())
@@ -629,5 +901,48 @@ mod tests {
         let cold = calculate(&mesh, IDENTITY, triangle, 0., [1., 0., 0., 0.]).unwrap();
         assert_eq!(reset.simplex_bytes, cold.simplex_bytes);
         assert_eq!(reset.support_vertices, cold.support_vertices);
+    }
+    #[test]
+    fn outer_contacts_and_late_failure_preserve_owned_state() {
+        let mesh = tetrahedron();
+        let settings = ContactSettings {
+            margin: 0.,
+            directions: [[0., 1., 0., 0.]; 44],
+        };
+        let mut context = Context::new();
+        let triangle = [[-8., 0., -8., 1.], [8., 0., -8., 1.], [0., 0., 8., 1.]];
+        let contact = context
+            .contact(&mesh, IDENTITY, triangle, [0.; 4], &settings)
+            .unwrap();
+        let witnesses = contact.witnesses.unwrap();
+        assert!(witnesses.into_iter().flatten().all(|v| v.is_finite()));
+        assert!(witnesses.into_iter().all(|v| v[3] == 1.));
+        assert!(dot(contact.direction, contact.direction) > 0.);
+        let before = context.clone();
+        assert!(
+            context
+                .contact(
+                    &mesh,
+                    IDENTITY,
+                    [[0., 0., 0., 1.]; 3],
+                    [1., 0., 0., 0.],
+                    &settings
+                )
+                .is_err()
+        );
+        assert_eq!(context.simplex.bytes, before.simplex.bytes);
+        assert_eq!(context.cache, before.cache);
+        assert_eq!(context.extra_directions, before.extra_directions);
+        let separated = triangle.map(|mut p| {
+            p[1] = 4.;
+            p
+        });
+        assert!(
+            context
+                .contact(&mesh, IDENTITY, separated, [0., 1., 0., 0.], &settings)
+                .unwrap()
+                .witnesses
+                .is_none()
+        );
     }
 }
