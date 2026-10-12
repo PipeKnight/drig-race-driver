@@ -74,7 +74,7 @@ impl Feature {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Contact {
     pub point: V,
     /// Published normal, including static-reference sign correction.
@@ -189,13 +189,19 @@ fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool 
 }
 
 #[allow(clippy::neg_multiply)] // Original margin/sign operations retain -0 lanes.
-fn assemble(features: &[Feature; 2], s: &Settings) -> Result<Vec<Contact>, Error> {
+fn assemble(
+    features: &[Feature; 2],
+    s: &Settings,
+    existing: &[Contact],
+) -> Result<Vec<Contact>, Error> {
     let [a, b] = features;
-    let mut contacts = Vec::new();
+    let mut contacts = existing.to_vec();
+    let limit = contacts.len() + s.capacity;
     if s.capacity == 0 {
         return Ok(contacts);
     }
-    if a.oriented || b.oriented {
+    let clipping = a.oriented || b.oriented;
+    if clipping {
         // The mesh has a moving body; the selected triangle has no body.
         let reference_a = a.oriented && !b.oriented;
         let mut normal = if reference_a { a.normal } else { b.normal };
@@ -227,7 +233,7 @@ fn assemble(features: &[Feature; 2], s: &Settings) -> Result<Vec<Contact>, Error
         for point in polygon {
             let depth = dot(sub(point, reference[0]), plane);
             let depth = if depth < 0. { 0. } else { depth };
-            if contacts.len() < s.capacity && !duplicate(&mut contacts, point, plane, depth) {
+            if contacts.len() < limit && !duplicate(&mut contacts, point, plane, depth) {
                 contacts.push(Contact {
                     point,
                     normal: if reference_a {
@@ -238,14 +244,14 @@ fn assemble(features: &[Feature; 2], s: &Settings) -> Result<Vec<Contact>, Error
                     penetration: depth,
                     flipped: !reference_a,
                 });
-                if contacts.len() == s.capacity {
+                if contacts.len() == limit {
                     break;
                 }
             }
         }
     }
-    if contacts.len() <= 2
-        && contacts.len() != s.capacity
+    if (!clipping || contacts.len() <= 2)
+        && contacts.len() != limit
         && !duplicate(&mut contacts, s.fallback_point, s.normal, s.fallback_depth)
     {
         contacts.push(Contact {
@@ -268,7 +274,32 @@ pub fn calculate(
     triangle: [V; 3],
     s: &Settings,
 ) -> Result<Output, Error> {
-    if s.capacity > 16
+    calculate_append(context, mesh, matrix, triangle, s, &[])
+}
+
+/// Append to a retained manifold, merging duplicates across prior triangles.
+/// `capacity` is the number of remaining slots; the complete result is bounded
+/// to sixteen contacts. Existing publication metadata belongs to the caller;
+/// merging changes only penetration. Errors preserve the context and input.
+pub fn calculate_append(
+    context: &mut Context,
+    mesh: &Mesh,
+    matrix: Matrix,
+    triangle: [V; 3],
+    s: &Settings,
+    existing: &[Contact],
+) -> Result<Output, Error> {
+    if existing.len() > 16
+        || s.capacity > 16 - existing.len()
+        || existing.iter().any(|c| {
+            !c.penetration.is_finite()
+                || c.penetration.abs() > 1e6
+                || c.point.iter().any(|x| !x.is_finite() || x.abs() > 1e5)
+                || c.point[3] != 1.
+                || c.normal.iter().any(|x| !x.is_finite())
+                || c.normal[3] != 0.
+                || (dot(c.normal, c.normal) - 1.).abs() > 0.001
+        })
         || !s.margin.is_finite()
         || !(0. ..=1e6).contains(&s.margin)
         || !s.fallback_depth.is_finite()
@@ -294,7 +325,7 @@ pub fn calculate(
     }
     let mut staged = context.clone();
     let (features, support_vertices) = features(&mut staged, mesh, matrix, triangle, s)?;
-    let contacts = assemble(&features, s)?;
+    let contacts = assemble(&features, s, existing)?;
     if s.capacity > 0 {
         *context = staged;
     }
@@ -312,6 +343,113 @@ pub fn calculate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retained_count_controls_fallback_and_duplicate_depth() {
+        let a = Feature::new(
+            [0., 1., 0., 0.],
+            [[0., 0., 0., 1.], [1., 0., 0., 1.], [0., 0., 1., 1.]],
+            true,
+            0.,
+        );
+        let b = Feature::new(
+            [0., 1., 0., 0.],
+            [[10., 1., 10., 1.], [11., 1., 10., 1.], [10., 1., 11., 1.]],
+            false,
+            0.,
+        );
+        let prior: Vec<_> = (0..3)
+            .map(|i| Contact {
+                point: [i as f32, -2., 0., 1.],
+                normal: [0., 1., 0., 0.],
+                penetration: 0.1,
+                flipped: false,
+            })
+            .collect();
+        let mut s = Settings {
+            margin: 0.,
+            normal: [0., 1., 0., 0.],
+            fallback_point: [20., 0., 0., 1.],
+            fallback_depth: 0.5,
+            capacity: 13,
+        };
+        let mut features = [a, b];
+        assert_eq!(assemble(&features, &s, &prior).unwrap(), prior);
+        assert_eq!(assemble(&features, &s, &prior[..2]).unwrap().len(), 3);
+        features[0].oriented = false;
+        assert_eq!(assemble(&features, &s, &prior).unwrap().len(), 4);
+        s.fallback_point = prior[1].point;
+        let merged = assemble(&features, &s, &prior).unwrap();
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[1].penetration, 0.5);
+        assert_eq!(merged[1].point, prior[1].point);
+        s.capacity = 0;
+        assert_eq!(assemble(&features, &s, &prior).unwrap(), prior);
+    }
+
+    #[test]
+    fn append_failure_preserves_retained_contacts_and_cache() {
+        let mesh = crate::collision_mesh::build(
+            &[
+                [1., 1., 1., 1.],
+                [-1., -1., 1., 1.],
+                [-1., 1., -1., 1.],
+                [1., -1., -1., 1.],
+            ],
+            &[[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]],
+            0,
+        )
+        .unwrap();
+        let matrix = [
+            [1., 0., 0., 0.],
+            [0., 1., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., 0., 0., 1.],
+        ];
+        let prior = vec![Contact {
+            point: [0., 0., 0., 1.],
+            normal: [0., 1., 0., 0.],
+            penetration: 0.25,
+            flipped: false,
+        }];
+        let saved = prior.clone();
+        let mut context = Context::new();
+        let cache = context.cached_support();
+        let mut s = Settings {
+            margin: 0.,
+            normal: [0., 1., 0., 0.],
+            fallback_point: prior[0].point,
+            fallback_depth: 1.,
+            capacity: 15,
+        };
+        // Degenerate static feature fails after staged moving-feature support.
+        assert!(
+            calculate_append(
+                &mut context,
+                &mesh,
+                matrix,
+                [[0., 0., 0., 1.]; 3],
+                &s,
+                &prior
+            )
+            .is_err()
+        );
+        assert_eq!(context.cached_support(), cache);
+        assert_eq!(prior, saved);
+        s.capacity = 16;
+        assert!(
+            calculate_append(
+                &mut context,
+                &mesh,
+                matrix,
+                [[0., 0., 0., 1.]; 3],
+                &s,
+                &prior
+            )
+            .is_err()
+        );
+        assert_eq!(context.cached_support(), cache);
+    }
+
     #[test]
     fn clipping_preserves_rotation_and_boundary_intersections() {
         let p = [[1., 0., 0., 1.], [1., 1., 0., 1.], [-1., 0., 0., 1.]];

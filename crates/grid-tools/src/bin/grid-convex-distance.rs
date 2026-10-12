@@ -4,18 +4,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if !(2..=3).contains(&args.len()) || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 23580 {
         return Err(
-            "usage: grid-convex-distance PC03_TO_PC07_INPUT local/OUTPUT [PRIVATE_CD01]".into(),
+            "usage: grid-convex-distance PC03_TO_PC07_OR_PC09_INPUT local/OUTPUT [PRIVATE_CD01]"
+                .into(),
         );
     }
     let b = fs::read(&args[0])?;
-    if b.len() < 44 || !matches!(&b[..4], b"PC03" | b"PC04" | b"PC05" | b"PC06" | b"PC07") {
+    if b.len() < 44
+        || !matches!(
+            &b[..4],
+            b"PC03" | b"PC04" | b"PC05" | b"PC06" | b"PC07" | b"PC09"
+        )
+    {
         return Err("invalid distance framing".into());
     }
     let word = |o| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let float = |o| f32::from_bits(word(o));
-    let sequence = matches!(&b[..4], b"PC05" | b"PC06");
+    let sequence = matches!(&b[..4], b"PC05" | b"PC06" | b"PC09");
     let outer = matches!(&b[..4], b"PC03" | b"PC06");
-    let manifold = &b[..4] == b"PC07";
+    let manifold = matches!(&b[..4], b"PC07" | b"PC09");
+    let stride = if manifold { 48 } else { 24 };
     if args.len() != if outer { 3 } else { 2 } {
         return Err("outer query requires private CD01 sampling data".into());
     }
@@ -44,7 +51,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("invalid distance sequence count".into());
     }
     let s = if sequence {
-        44 + count * 24
+        44 + count * stride
     } else if manifold {
         84
     } else {
@@ -78,7 +85,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut requests = Vec::with_capacity(count);
     for i in 0..count {
-        let o = if sequence { 44 + i * 24 } else { 40 };
+        let o = if sequence { 44 + i * stride } else { 40 };
         let mode = if sequence { word(o + 4) } else { 1 };
         let d = if sequence { o + 8 } else { o + 4 };
         let direction: [f32; 4] = std::array::from_fn(|j| float(d + j * 4));
@@ -86,10 +93,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             || (i == 0 && mode != 1)
             || direction.iter().any(|v| !v.is_finite() || v.abs() > 10000.)
             || direction[3] != 0.
+            || (manifold
+                && !(0.999..=1.001).contains(
+                    &((direction[0] * direction[0] + direction[1] * direction[1])
+                        + direction[2] * direction[2]),
+                ))
         {
             return Err("invalid distance sequence controls".into());
         }
-        requests.push((word(o), mode, direction));
+        let fallback = if sequence { o + 24 } else { 60 };
+        if manifold && word(fallback + 20) > 1 {
+            return Err("invalid manifold publication flag".into());
+        }
+        requests.push((word(o), mode, direction, fallback));
     }
     let m = s + 0x500;
     let points = word(m) as usize;
@@ -183,10 +199,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut context = grid_world::convex_distance::Context::new();
     let mut direction = [0.; 4];
     let mut records = Vec::with_capacity(count * 448 + 4);
+    let mut retained = Vec::new();
+    let mut publication_flags = Vec::new();
     if sequence {
         records.extend_from_slice(&(count as u32).to_le_bytes());
     }
-    for (index, mode, supplied_direction) in requests {
+    for (index, mode, supplied_direction, fallback) in requests {
         if mode == 1 {
             direction = supplied_direction;
         }
@@ -200,11 +218,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             [p[0], p[1], p[2], 1.]
         });
         if manifold {
-            let fallback_point = std::array::from_fn(|j| float(60 + j * 4));
-            if word(80) > 1 {
-                return Err("invalid manifold publication flag".into());
-            }
-            let result = grid_world::contact_manifold::calculate(
+            let fallback_point = std::array::from_fn(|j| float(fallback + j * 4));
+            let prior = retained.len();
+            let result = grid_world::contact_manifold::calculate_append(
                 &mut context,
                 mesh,
                 matrix,
@@ -213,10 +229,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     margin: float(s + 0x220),
                     normal: direction,
                     fallback_point,
-                    fallback_depth: float(76),
-                    capacity: word(12) as usize,
+                    fallback_depth: float(fallback + 16),
+                    capacity: word(12) as usize - prior,
                 },
+                &retained,
             )?;
+            publication_flags.resize(result.contacts.len(), word(fallback + 20) as u8);
             let mut arena = vec![0u8; 16 * 128];
             let put =
                 |q: &mut [u8], o: usize, v: u32| q[o..o + 4].copy_from_slice(&v.to_le_bytes());
@@ -245,15 +263,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     c[0x71] = contact.flipped as u8;
-                    c[0x73] = word(80) as u8;
+                    c[0x73] = publication_flags[i];
                 }
             }
             let mut query = [0u8; 0xa0];
             query[0x20..0x40].fill(0xcd);
             put(&mut query, 0, index);
             put(&mut query, 4, result.contacts.len() as u32);
-            query[0x10..0x20].copy_from_slice(&b[44..60]);
-            query[0x20..0x38].copy_from_slice(&b[60..84]);
+            if sequence {
+                put(&mut query, 8, (result.contacts.len() - prior) as u32);
+            }
+            for (j, x) in direction.into_iter().enumerate() {
+                put(&mut query, 0x10 + j * 4, x.to_bits());
+            }
+            query[0x20..0x38].copy_from_slice(&b[fallback..fallback + 24]);
             put(&mut query, 0x40, 0x1000);
             for (j, i) in result.support_vertices.into_iter().enumerate() {
                 put(&mut query, 0x44 + j * 4, 0x30060 + i as u32 * 32);
@@ -268,6 +291,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             for feature in result.features {
                 records.extend_from_slice(&feature.bytes);
             }
+            retained = result.contacts;
             continue;
         }
         let mut extras = None;
