@@ -66,6 +66,34 @@ struct Driving {
     failure: Option<String>,
     scripted_ticks: Option<u64>,
     scripted: grid_tools::source_vehicle::Controls,
+    last_controls: Option<grid_tools::source_vehicle::Controls>,
+    segment: u64,
+    started: Instant,
+}
+impl Driving {
+    fn report(&self, event: &str, controls: grid_tools::source_vehicle::Controls) {
+        let b = &self.runtime.state.car.owner.vehicle;
+        let brakes: [f32; 4] = std::array::from_fn(|i| {
+            f32::from_bits(self.runtime.state.car.frame.view[0x28 / 4 + i])
+        });
+        let hits = (0..4)
+            .filter(|i| b[(0x1990 + i * 0x150 + 0xc0) / 4] != 0)
+            .count();
+        println!(
+            "drive_sample version=1 event={event} segment={} tick={} seconds={:.6} wall_seconds={:.6} throttle={} brake={} steering={} handbrake={} gear={} wheel_hits={hits} pose={:?} velocity={:?} wheel_brakes={brakes:?}",
+            self.segment,
+            self.runtime.ticks,
+            self.runtime.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
+            self.started.elapsed().as_secs_f64(),
+            controls.throttle,
+            controls.brake,
+            controls.steering,
+            controls.handbrake,
+            b[0x196c / 4],
+            self.runtime.pose(),
+            self.runtime.velocity()
+        );
+    }
 }
 #[derive(Component)]
 struct MovingPart {
@@ -778,6 +806,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             failure: None,
             scripted_ticks: drive_ticks,
             scripted,
+            last_controls: None,
+            segment: 0,
+            started: Instant::now(),
         })
     } else {
         None
@@ -928,6 +959,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 grid_tools::source_vehicle::DELTA,
             )))
             .add_systems(FixedUpdate, drive_tick)
+            .add_systems(Last, drive_exit_log)
             .add_systems(Update, (drive_actions, drive_present).chain());
     }
     let exit = app
@@ -1201,7 +1233,17 @@ fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
         let text = format!("tick {}: {error}; R resets", driving.runtime.ticks + 1);
         error!("driving paused: {text}");
         driving.failure = Some(text);
-    } else if driving.scripted_ticks == Some(driving.runtime.ticks) {
+        driving.report("failure", controls);
+    } else {
+        if driving.last_controls != Some(controls)
+            || driving.runtime.ticks.is_multiple_of(16)
+            || driving.scripted_ticks == Some(driving.runtime.ticks)
+        {
+            driving.report("tick", controls);
+        }
+        driving.last_controls = Some(controls);
+    }
+    if driving.failure.is_none() && driving.scripted_ticks == Some(driving.runtime.ticks) {
         println!(
             "drive_script_complete ticks={} pose={:?} velocity={:?}",
             driving.runtime.ticks,
@@ -1216,15 +1258,27 @@ fn drive_actions(
     mut exit: MessageWriter<AppExit>,
 ) {
     if input.just_pressed(KeyCode::KeyR) {
+        driving.report("reset", driving.last_controls.unwrap_or_default());
         driving.runtime.reset();
+        driving.segment += 1;
+        driving.last_controls = None;
         driving.failure = None;
         driving.paused = false;
     }
     if input.just_pressed(KeyCode::KeyP) {
         driving.paused = !driving.paused;
+        driving.report(
+            if driving.paused { "pause" } else { "resume" },
+            driving.last_controls.unwrap_or_default(),
+        );
     }
     if input.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
+    }
+}
+fn drive_exit_log(driving: Res<Driving>, mut exits: MessageReader<AppExit>) {
+    if exits.read().next().is_some() {
+        driving.report("exit", driving.last_controls.unwrap_or_default());
     }
 }
 fn drive_present(
@@ -1244,9 +1298,20 @@ fn drive_present(
     **camera = Transform::from_translation(eye).looking_at(at, Vec3::Y);
     let v = driving.runtime.velocity();
     let speed = Vec3::new(v[0], v[1], v[2]).length() * 3.6;
+    let gear = driving.runtime.state.car.owner.vehicle[0x196c / 4];
+    let gear = match gear {
+        0 => "N".into(),
+        9 => "R".into(),
+        n => n.to_string(),
+    };
+    let handbrake = if driving.last_controls.is_some_and(|c| c.handbrake) {
+        " | HB"
+    } else {
+        ""
+    };
     for mut window in &mut windows {
         window.title = format!(
-            "GRID prototype | {speed:.1} km/h | tick {} | {}",
+            "GRID prototype | {speed:.1} km/h | gear {gear}{handbrake} | tick {} | {}",
             driving.runtime.ticks,
             driving.failure.as_deref().unwrap_or(if driving.paused {
                 "Paused; P resumes; R resets"
@@ -1414,6 +1479,9 @@ mod driving_tests {
                 failure: None,
                 scripted_ticks: None,
                 scripted: Default::default(),
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
             })
             .add_systems(Update, (drive_actions, drive_tick).chain());
         app.world_mut()
@@ -1496,5 +1564,61 @@ mod driving_tests {
         app.update();
         assert!(app.world().resource::<Driving>().failure.is_none());
         assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        // Exercise the actual keyboard path, not just the runtime control flag.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        for _ in 0..120 {
+            app.update();
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        app.update();
+        let driving = app.world().resource::<Driving>();
+        assert!(driving.last_controls.unwrap().handbrake);
+        assert!(
+            driving.runtime.state.car.frame.view[0x28 / 4..0x30 / 4]
+                .iter()
+                .all(|v| f32::from_bits(*v) > 1000.)
+        );
+        for _ in 0..59 {
+            app.update();
+        }
+        assert!(
+            app.world().resource::<Driving>().runtime.velocity()[..3]
+                .iter()
+                .map(|v| v * v)
+                .sum::<f32>()
+                < 0.01
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowDown);
+        for _ in 0..120 {
+            app.update();
+        }
+        let driving = app.world().resource::<Driving>();
+        assert_eq!(driving.segment, 3);
+        assert_eq!(driving.runtime.state.car.owner.vehicle[0x196c / 4], 9);
+        let p = driving.runtime.pose();
+        let v = driving.runtime.velocity();
+        assert!(v[0] * p[8] + v[1] * p[9] + v[2] * p[10] < -1.);
     }
 }
