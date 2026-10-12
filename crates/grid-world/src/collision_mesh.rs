@@ -25,6 +25,87 @@ impl Mesh {
         })
     }
 }
+/// Selected B444D0 shape settings. Names retain unknown field semantics.
+#[derive(Clone, Copy)]
+pub struct ShapeSettings {
+    pub span: u32,
+    pub scalar220: f32,
+    pub layer: u8,
+    pub flag_c0: bool,
+}
+
+/// Complete retained supplied shape storage and its owned mesh.
+/// This update does not perform base construction or physical registration.
+pub struct MeshShape {
+    shape: [u8; 0x250],
+    mesh: Mesh,
+}
+impl MeshShape {
+    pub fn shape_bytes(&self) -> &[u8] {
+        &self.shape
+    }
+    pub fn mesh(&self) -> &Mesh {
+        &self.mesh
+    }
+}
+
+impl Mesh {
+    // Preserve original SIMD operand order and multiply-by-minus-one operation.
+    #[allow(clippy::assign_op_pattern, clippy::neg_multiply)]
+    pub fn initialize_shape(
+        mut self,
+        settings: ShapeSettings,
+        fill: u8,
+    ) -> Result<MeshShape, Error> {
+        if settings.span == 0
+            || settings.span > 16000
+            || !settings.scalar220.is_finite()
+            || settings.scalar220.abs() > 1e6
+            || ![0, 0xcd].contains(&fill)
+        {
+            return Err(Error("invalid mesh shape settings"));
+        }
+        let points: Vec<_> = (0..self.points).map(|i| self.point(i).unwrap()).collect();
+        let mut center = [0.; 4];
+        for p in &points {
+            for j in 0..4 {
+                center[j] = p[j] + center[j];
+            }
+        }
+        let reciprocal = 1. / self.points as f32;
+        center = center.map(|x| reciprocal * x);
+        let planes = 0x60 + self.points * 48;
+        for i in 0..self.faces {
+            let tri = std::array::from_fn(|j| word(&self.bytes, planes + i * 32 + 16 + j * 4));
+            let n = cross(&points, tri);
+            let sq = squared(n);
+            let seed = spawn::reference_seed(sq, false)?;
+            let factor = (1. - (seed * sq) * seed) * (seed * 0.5) + seed;
+            let mut normal = n.map(|x| factor * x);
+            let delta: [f32; 4] = std::array::from_fn(|j| points[tri[0] as usize][j] - center[j]);
+            let dot = (delta[0] * normal[0] + delta[1] * normal[1])
+                + (delta[2] * normal[2] + delta[3] * normal[3]);
+            if dot < 0. {
+                normal = normal.map(|x| -1. * x);
+            }
+            if !dot.is_finite() || normal.iter().any(|x| !x.is_finite()) {
+                return Err(Error("mesh shape normal exceeds range"));
+            }
+            for (j, x) in normal.iter().enumerate() {
+                put(&mut self.bytes, planes + i * 32 + j * 4, x.to_bits());
+            }
+        }
+        let mut shape = [fill; 0x250];
+        shape[0x19] = settings.layer;
+        shape[0xc0] = u8::from(settings.flag_c0);
+        put(&mut shape, 0x220, settings.scalar220.to_bits());
+        // Canonical owned mesh token in shape+mesh diagnostic representation.
+        put(&mut shape, 0x240, 0x250);
+        put(&mut shape, 0x244, align16(settings.span as usize) as u32);
+        Ok(MeshShape { shape, mesh: self })
+    }
+}
+
 fn word(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
 }
@@ -258,6 +339,70 @@ pub fn build(points: &[[f32; 4]], triangles: &[[u32; 3]], fill: u8) -> Result<Me
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shape_planes_enclose_a_convex_mesh_and_preserve_other_storage() {
+        let p = [
+            [1., 1., 1., 1.],
+            [-1., -1., 1., 1.],
+            [-1., 1., -1., 1.],
+            [1., -1., -1., 1.],
+        ];
+        let t = [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
+        let raw = build(&p, &t, 0xcd).unwrap();
+        let before = raw.bytes().to_vec();
+        let shape = raw
+            .initialize_shape(
+                ShapeSettings {
+                    span: 17,
+                    scalar220: -0.,
+                    layer: 255,
+                    flag_c0: true,
+                },
+                0xcd,
+            )
+            .unwrap();
+        assert_eq!(word(shape.shape_bytes(), 0x244), 32);
+        assert_eq!(word(shape.shape_bytes(), 0x220), (-0.0f32).to_bits());
+        assert_eq!(shape.shape_bytes()[0x19], 255);
+        assert_eq!(shape.shape_bytes()[0xc0], 1);
+        assert_eq!(&shape.shape_bytes()[0x248..], &[0xcd; 8]);
+        for (i, tri) in t.iter().enumerate() {
+            let n = shape.mesh().face_normal(i).unwrap();
+            let anchor = p[tri[0] as usize];
+            for vertex in p {
+                let distance = (0..3).map(|j| n[j] * (vertex[j] - anchor[j])).sum::<f32>();
+                assert!(distance <= 1e-6);
+            }
+        }
+        let planes = 0x60 + 4 * 48;
+        for (i, &byte) in before.iter().enumerate() {
+            if !(i >= planes && i < planes + 4 * 32 && (i - planes) % 32 < 16) {
+                assert_eq!(shape.mesh().bytes()[i], byte);
+            }
+        }
+        for settings in [
+            ShapeSettings {
+                span: 0,
+                scalar220: 0.,
+                layer: 0,
+                flag_c0: false,
+            },
+            ShapeSettings {
+                span: 1,
+                scalar220: f32::INFINITY,
+                layer: 0,
+                flag_c0: false,
+            },
+        ] {
+            assert!(
+                build(&p, &t, 0)
+                    .unwrap()
+                    .initialize_shape(settings, 0)
+                    .is_err()
+            );
+        }
+    }
+
     #[test]
     fn source_mesh_centers_height_and_keeps_owned_source_unchanged() {
         let raw = [
