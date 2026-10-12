@@ -29,6 +29,11 @@ int wmain(int argc,wchar_t **argv){
  __declspec(align(16)) float points[80][4];unsigned triangles[110][3];
 #ifdef GRID_SOURCE_COLLISION_MESH
  float source_parameters[6];
+#ifdef GRID_MESH_SHAPE
+ unsigned shape_parameters[4];float shape_scalar;
+ __declspec(align(16)) unsigned char shape_owned[32+0x250+32];unsigned char *shape=shape_owned+32;
+ unsigned char mesh_before_shape[16000];
+#endif
  __declspec(align(16)) float raw_points[80][4];unsigned char raw_before[sizeof(raw_points)];
  __declspec(align(16)) unsigned char car_owned[32+0x21000+32],car_before[0x21000];unsigned char *car=car_owned+32;
 #endif
@@ -39,7 +44,9 @@ int wmain(int argc,wchar_t **argv){
  if(_wfopen_s(&input,argv[2],L"rb")||!input){error=5;goto done;}
  int valid=fread(&tag,4,1,input)==1&&fread(&count,4,1,input)==1&&fread(&faces,4,1,input)==1&&fread(&fill,4,1,input)==1;
  if(!valid||tag!=
-#ifdef GRID_SOURCE_COLLISION_MESH
+#ifdef GRID_MESH_SHAPE
+ 0x33304d43
+#elif defined(GRID_SOURCE_COLLISION_MESH)
  0x32304d43
 #else
  0x31304d43
@@ -50,6 +57,11 @@ int wmain(int argc,wchar_t **argv){
  for(unsigned i=0;i<6;i++)if(!isfinite(source_parameters[i])||fabsf(source_parameters[i])>10000.f)error=22;
  if(source_parameters[3]!=0.f||source_parameters[4]>source_parameters[5])error=22;
  if(error)goto done;
+#ifdef GRID_MESH_SHAPE
+ if(fread(shape_parameters,4,4,input)!=4){error=6;goto done;}
+ memcpy(&shape_scalar,shape_parameters+1,4);
+ if(!shape_parameters[0]||shape_parameters[0]>16000||!isfinite(shape_scalar)||fabsf(shape_scalar)>1e6f||shape_parameters[2]>255||shape_parameters[3]>1){error=25;goto done;}
+#endif
 #endif
  valid=fread(points,16,count,input)==count&&fread(triangles,12,faces,input)==faces&&fgetc(input)==EOF;
  fclose(input);input=NULL;if(!valid){error=6;goto done;}
@@ -92,6 +104,20 @@ int wmain(int argc,wchar_t **argv){
  __try{((void (__cdecl *)(void *,void *))(image+0xb44e80-0x400000))(body,settings);}
  __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"mesh_fault=%08lx\n",GetExceptionCode());error=11;}
  if(memcmp(point_before,points,count*16)||memcmp(triangle_before,triangles,faces*12)||memcmp(settings_before,settings,sizeof(settings)))error=21;
+#ifdef GRID_MESH_SHAPE
+ if(!error){
+  unsigned descriptor[33]={0};descriptor[0]=(unsigned)(uintptr_t)body;descriptor[1]=shape_parameters[0];descriptor[0x1a]=shape_parameters[1];descriptor[0x20]=shape_parameters[2];descriptor[0x15]=shape_parameters[3];
+  unsigned descriptor_before[33];memcpy(descriptor_before,descriptor,sizeof(descriptor));
+  memcpy(mesh_before_shape,body,length);memset(shape_owned,0xcd,sizeof(shape_owned));memset(shape,(int)fill,0x250);
+  __try{((void (__fastcall *)(void *,void *,void *))(image+0xb444d0-0x400000))(shape,NULL,descriptor);}
+  __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"mesh_shape_fault=%08lx\n",GetExceptionCode());error=26;}
+  if(memcmp(descriptor,descriptor_before,sizeof(descriptor)))error=27;
+  for(unsigned i=0;i<32;i++)if(shape_owned[i]!=0xcd||shape_owned[32+0x250+i]!=0xcd)error=27;
+  unsigned planes=0x60+count*48;
+  for(unsigned i=0;i<length;i++)if(!(i>=planes&&i<planes+faces*32&&((i-planes)%32)<16)&&body[i]!=mesh_before_shape[i])error=27;
+  if(get(shape,0x240)!=(unsigned)(uintptr_t)body)error=27;else put(shape,0x240,0x250);
+ }
+#endif
  if(!error){
   unsigned vertex=0x60,aux=vertex+count*32,face=aux+count*16,neighbor=face+faces*32,incident=neighbor+align16(count*40);
   if(get(body,0)!=count||get(body,4)!=faces||get(body,0x54)!=(unsigned)(uintptr_t)(body+vertex)||get(body,0x58)!=(unsigned)(uintptr_t)(body+face))error=12;
@@ -115,7 +141,11 @@ done:
  unsigned code_unchanged=1;IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
  for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if((sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE)&&memcmp(image+sections[i].VirtualAddress,snapshot+sections[i].VirtualAddress,sections[i].SizeOfRawData))code_unchanged=0;
  if(!code_unchanged)error=18;
- if(!error){HANDLE output=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(output==INVALID_HANDLE_VALUE)error=19;else{DWORD n=0;if(!WriteFile(output,body,length,&n,NULL)||n!=length)error=20;CloseHandle(output);}}
+ if(!error){HANDLE output=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(output==INVALID_HANDLE_VALUE)error=19;else{DWORD n=0;
+#ifdef GRID_MESH_SHAPE
+ if(!WriteFile(output,shape,0x250,&n,NULL)||n!=0x250)error=20;
+#endif
+ if(!WriteFile(output,body,length,&n,NULL)||n!=length)error=20;CloseHandle(output);}}
  free(snapshot);VirtualFree(image,0,MEM_RELEASE);
  printf("mesh_bytes=%u code_unchanged=%u code_replacements=0 globals_restored=%u error=%u\n",length,code_unchanged,restored,error);return (int)error;
 }
