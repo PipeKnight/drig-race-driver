@@ -1,6 +1,6 @@
 # Physical shape attachment boundary (F216 research)
 
-12 October 2026. This is static research; whole physical attachment has not executed in the owned harness or Rust. [F215](MESH_SHAPE_CONSTRUCTOR.md) proves shape construction separately. No geometric driving/barrier claim follows from this document.
+12 October 2026. This records the initial static research. [F217 complete attachment](MESH_SHAPE_ATTACHMENT.md) now verifies the selected first-shape owned path against the original in debug and release. [F215](MESH_SHAPE_CONSTRUCTOR.md) proves shape construction separately. No geometric driving/barrier claim follows from this document.
 
 `run_ghidra_behavior_survey.ps1 -Containing` resolves1..64 interior addresses to existing analyzed functions without inventing function starts. Actual Ghidra12.1.4 operation resolves body328 writeB142E9 toB142D0 andB144FE toB144C0. Normal entry mode still works against four actual functions. PowerShell AST and four malformed/mixed/oversized argument checks pass. The first attempt's PowerShell array flattening miscounted one supplied mode and rejected before launching Ghidra; corrected using explicit boolean mode counts. Private validation: `local/behavior/containing-survey-validation-20261012.json`.
 
