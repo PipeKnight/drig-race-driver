@@ -1,6 +1,6 @@
 # Try Lacetti at Donington
 
-The experimental keyboard driving build is available now. A complete manually driven lap has not been verified. Road support and vehicle movement work; body/barrier collisions, race rules and lap timing are unfinished. Leaving the supported road can make the car fall, and unsupported simulation conditions can pause it. **R** returns to the starting position.
+The experimental keyboard driving build is available now. On 12 October the owner reported completing a full Donington lap with Lacetti. That first lap is a manual playtest result; automated lap validation is unfinished. Road support and vehicle movement work; body/barrier collisions, race rules and lap timing are unfinished. Leaving the supported road can make the car fall, and unsupported simulation conditions can pause it. **R** returns to the starting position.
 
 ## Launch on this PC
 
@@ -13,14 +13,16 @@ The experimental keyboard driving build is available now. A complete manually dr
 | Key | Action |
 | --- | --- |
 | Up / W | Throttle |
-| Down / S | Brake |
+| Down / S | Brake; hold near rest to select reverse and drive backward |
 | Left / A, Right / D | Steer |
 | Space | Handbrake |
 | P | Pause / resume |
 | R | Reset car and simulation to the start |
 | Escape | Close |
 
-The window title shows speed, tick number and pause/failure status. If movement pauses after a simulation error, note the title or keep the diagnostic log, then press R. Each launch saves output under ignored `local/playtest/`; game-derived evidence stays private. The original Steam installation is read for resources.
+The window title shows speed, gear, tick number and pause/failure status. **HB** means the simulation received the Space handbrake command; gear **R** means reverse. While reversing, Up/W brakes and selects forward again near rest. Hold Space while releasing throttle to check the rear-wheel handbrake. Its controlled runtime and Bevy keyboard tests pass; the owner's first-session report of an ineffective handbrake has not been reproduced.
+
+If movement pauses after a simulation error, note the title or keep the diagnostic log, then press R. Each launch saves output under ignored `local/playtest/`; game-derived evidence stays private. New logs record control changes and periodic pose/velocity/gear/wheel-force samples, plus pause/reset/exit events. The first build's two logs contained startup diagnostics only, so they cannot reconstruct that lap. The original Steam installation is read for resources.
 
 Useful first-drive feedback: whether left/right and braking feel correct, whether the camera lets you see the next corner, and the first place where you cannot continue. If you complete a lap, say so and keep the log; it will guide a reproducible lap validation. Recording video is optional for this first try.
 
@@ -29,3 +31,5 @@ Useful first-drive feedback: whether left/right and braking feel correct, whethe
 Build with `cargo build --release -p grid-app`, then launch with `target\release\grid-app.exe --drive --game-root "YOUR_GRID_FOLDER"`. The launcher accepts a game-folder argument and defaults to `C:\Program Files (x86)\Steam\steamapps\common\Grid`. It reads locally purchased resources; no game assets or compiled toolchain are bundled in the repository.
 
 Implementation and earlier verification: [source driving prototype](SOURCE_DRIVING.md). New contact-query/manifold research does not become driving behavior until separately integrated and checked.
+
+First-session findings and control follow-up: [12 October playtest](PLAYTEST_2026_10_12.md).
