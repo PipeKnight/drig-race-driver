@@ -8,7 +8,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let bytes = fs::read(&args[0])?;
     let c = grid_formats::cqtc::read(&bytes)?;
     let output = Path::new(&args[1]);
-    if !output.starts_with("local") {
+    let parent = output
+        .parent()
+        .ok_or("missing output parent")?
+        .canonicalize()?;
+    if !parent.starts_with(Path::new("local").canonicalize()?) {
         return Err("output must be private local/".into());
     }
     let mut data = Vec::new();
