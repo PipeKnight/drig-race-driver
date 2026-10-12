@@ -23,13 +23,17 @@ def main():
         upstream = ROOT/r['upstream']
         assert digest(upstream) == r['upstream_sha256']
         producer = json.loads(upstream.read_text())
-        assert producer['passed'] and producer['contact_slot_constructor']
+        assert producer['passed']
+        if r.get('packed_track', False):
+            assert producer['native_reference_only'] and producer['attachment_index'] == 48
+        else:
+            assert producer['contact_slot_constructor']
         cases = []
         for row in r['provenance']:
             old = producer['results'][row['source_index']]
             source = upstream.parent/f"{row['source_index']:04}-original.bin"
             assert digest(source) == old['output_sha256'] == row['source_sha256']
-            c = handoff.fixture(source.read_bytes(), row['source_index'])
+            c = handoff.fixture(source.read_bytes(), row['source_index'], r.get('packed_track', False))
             if row['kind'] == 'correction_disabled':
                 c['shapes'][1] = (1, 1, 0, 0)
             elif row['kind'] == 'empty':

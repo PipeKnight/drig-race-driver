@@ -18,8 +18,10 @@ MAGIC = 0x31475447
 MAX = struct.unpack('<f', bytes.fromhex('ffff7f7f'))[0]
 
 
-def fixture(answer, index):
-    body = bytearray(answer[0x17c8:0x17c8+0x424])
+def fixture(answer, index, packed=False):
+    body_offset, count_offset, contact_offset = ((0x17e8, 0xfb0, 0xfe8) if packed
+                                                else (0x17c8, 0xf90, 0xfc8))
+    body = bytearray(answer[body_offset:body_offset+0x424])
     # Convert the verified attached body to the existing cold serial solver scope.
     # Geometry shape/pair ownership stays in the preceding probe, not these queues.
     for o in [0, 4, 8, 12, 16, 20, 24, 28, 0x28, 0x2f0, 0x2f4, 0x2fc, 0x300,
@@ -30,14 +32,14 @@ def fixture(answer, index):
     body[0x412:0x414] = bytes(2)
     body[0x415] = 0
     fput(body, 0x3b4, MAX)
-    count = uget(answer, 0xf90)
-    normal = struct.unpack_from('<4f', answer, 0xfc8+0x60)
+    count = uget(answer, count_offset)
+    normal = struct.unpack_from('<4f', answer, contact_offset+0x60)
     for j in range(4):
         fput(body, 0x210+4*j, 0.)
         fput(body, 0x220+4*j, -normal[j]*[0., 1., 5., 15.][index % 4])
     contacts = []
     for j in range(count):
-        c = bytearray(answer[0xfc8+j*128:0x1048+j*128])
+        c = bytearray(answer[contact_offset+j*128:contact_offset+(j+1)*128])
         assert uget(c, 4) == 0xa000 and uget(c, 8) == 0 and c[0xf] == 1
         for o, value in [(4, 0), (8, 0xffffffff), (0x1c, 0), (0x20, 0xffffffff),
                          (0x28, 1), (0x2c, 2), (0x30, 0), (0x34, 0)]:
@@ -57,21 +59,32 @@ def main():
     p.add_argument('--upstream', type=Path, required=True)
     p.add_argument('--profile', choices=['debug', 'release'], required=True)
     p.add_argument('--limit', type=int, default=0)
+    p.add_argument('--seed-offset', type=int, default=0)
+    p.add_argument('--packed-track', action='store_true')
     args = p.parse_args()
+    assert args.limit >= 0 and args.seed_offset >= 0
     out = args.output.resolve()
     assert out.is_relative_to((ROOT/'local').resolve())
     out.mkdir(exist_ok=False)
     upstream = args.upstream.resolve()
     report = json.loads(upstream.read_text())
-    assert report['passed'] and report['contact_slot_constructor'] and report['cases'] == 720
+    assert report['passed']
+    if args.packed_track:
+        assert report['native_reference_only'] and report['attachment_index'] == 48
+        assert report['cases'] >= 15 and 'B39500/AEA1F0' in report['scope']
+    else:
+        assert report['contact_slot_constructor'] and report['cases'] == 720
     shaped.MAGIC = grouped.MAGIC = MAGIC
     cases, provenance = [], []
-    for row in report['results']:
-        if not row['contact_count']:
+    eligible = [row for row in report['results']
+                if row['contacts' if args.packed_track else 'contact_count']]
+    assert args.seed_offset < len(eligible)
+    for row in eligible[args.seed_offset:]:
+        if not row['contacts' if args.packed_track else 'contact_count']:
             continue
         source = upstream.parent/f"{row['index']:04}-original.bin"
         assert digest(source) == row['output_sha256']
-        baseline = fixture(source.read_bytes(), row['index'])
+        baseline = fixture(source.read_bytes(), row['index'], args.packed_track)
         for kind in ['enabled', 'correction_disabled', 'empty']:
             c = copy.deepcopy(baseline)
             if kind == 'correction_disabled':
@@ -149,7 +162,8 @@ def main():
         e = subprocess.run([*map(str, command), str(existing_input), str(target)], cwd=ROOT, capture_output=True, text=True, timeout=30)
         assert 0 < e.returncode < 256 and digest(target) == before
         guards.append(dict(label='existing', kind=kind, exit=e.returncode, existing_output_preserved=True))
-    result = dict(passed=True, profile=args.profile, cases=len(cases), positive_mesh_seeds=len(cases)//3,
+    result = dict(passed=True, profile=args.profile, packed_track=args.packed_track,
+                  cases=len(cases), positive_mesh_seeds=len(cases)//3,
                   contacts=sum(len(c['contacts']) for c in cases), response_cases=sum(responses),
                   observable_bytes=len(answers[0])-8, world_points_unchanged=points_unchanged,
                   correction_flag_retains_main_response=True, guard_count=len(guards), guards=guards, runs=runs, provenance=provenance,
