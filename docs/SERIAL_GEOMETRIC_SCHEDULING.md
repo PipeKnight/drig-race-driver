@@ -1,5 +1,7 @@
 # Serial geometric pair scheduling (F222)
 
+The next implemented Rust boundary is [triangle–mesh distance iteration (F223)](TRIANGLE_MESH_DISTANCE.md).
+
 12 October2026, Europe/Kiev. Whole original serial pair assignment, worker dispatch and finish now run against actual Lacetti/Donington geometry: **1,364 original/repeated cases /64,689,104 complete output bytes per run**, producing2,888 contacts in726 positive cases. Both ownership orders produce the exact same contact arenas as [F221 direct generation](PACKED_MESH_CONTACTS.md). The static-collision gate disables generation in both orders.26 rejection/existing-output guards pass.
 
 The complete audit checks4,145 output files,245 separately executed zero-capacity references, reconstructed requests and current hashes. A rebuilt default probe replays all1,417 F221 cases and matches all69,092,472 earlier output bytes. This validates the original serial scheduling boundary with an existing pair. It does not execute moving broad-phase publication, body advance/group/solve in one native frame, sleeping/inactive-group rescheduling, asynchronous workers or a Rust geometric generator.
