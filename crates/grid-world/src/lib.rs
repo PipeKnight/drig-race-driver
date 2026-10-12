@@ -39,6 +39,7 @@ pub mod leaf_query;
 pub mod main_contact_response;
 pub mod owner_collection;
 pub mod packed_candidates;
+pub mod packed_contacts;
 pub mod packed_query;
 pub mod packed_shape;
 pub mod packed_world;
