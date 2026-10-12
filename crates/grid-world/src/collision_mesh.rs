@@ -316,11 +316,140 @@ impl AttachedShape {
     pub fn cell_bytes(&self) -> &[u8] {
         &self.cells
     }
+
+    /// Register a static instance of the same mesh against this first dynamic shape.
+    /// The original bounds/endpoint/pair path is selected; no narrow phase or tick.
+    pub fn register_static_clone(
+        &self,
+        shift: [f32; 4],
+        mask: u32,
+        pair_capacity: bool,
+    ) -> Result<MeshOverlap, Error> {
+        if shift.iter().any(|x| !x.is_finite() || x.abs() > 10000.) || shift[3] != 0. {
+            return Err(Error("invalid static mesh translation"));
+        }
+        let mut descriptor: [u8; 0x84] = self.shape.prefix[0x250..0x2d4].try_into().unwrap();
+        put(&mut descriptor, 0, 0);
+        put(&mut descriptor, 0x5c, 0);
+        descriptor[0x50] = 0;
+        let mesh = Mesh {
+            bytes: self.shape.mesh.bytes.clone(),
+            points: self.shape.mesh.points,
+            faces: self.shape.mesh.faces,
+        };
+        let id = word(&self.shape.prefix, 0x194) + 1;
+        let mut second = mesh.construct_shape(descriptor, [id, 0, 0, 0, 0], 0xcd)?;
+        let mut pose = std::array::from_fn(|r| {
+            std::array::from_fn(|c| {
+                f32::from_bits(word(&self.shape.prefix, 0x130 + r * 16 + c * 4))
+            })
+        });
+        for j in 0..3 {
+            pose[3][j] += shift[j];
+        }
+        for (i, v) in pose.into_iter().flatten().enumerate() {
+            put(&mut second.prefix, 0x130 + i * 4, v.to_bits());
+            put(&mut second.prefix, 0x70 + i * 4, v.to_bits());
+        }
+        update_bounds(&mut second, pose)?;
+        let mut first: [u8; 0x250] = self.shape.prefix[..0x250].try_into().unwrap();
+        put(&mut first, 0xc8, 0);
+        put(&mut first, 0x21c, 0);
+        put(&mut second.prefix, 0x21c, 0);
+        put(&mut second.prefix, 0x198, 1);
+        for o in [
+            0xb0, 0xb4, 0xb8, 0xbc, 0x170, 0x174, 0x178, 0x17c, 0x180, 0x1a4, 0x1b8, 0x1cc, 0x1e0,
+            0x1f4, 0x208,
+        ] {
+            let token = word(&second.prefix, o);
+            put(&mut second.prefix, o, token + 0xb000);
+        }
+        let mut root = self.root;
+        put(&mut root, 0x80, id + 1);
+        for i in 0..32 {
+            put(&mut root, 0x974 + i * 4, mask);
+        }
+        let mut cells = self.cells;
+        put(&mut cells, 4, 0xc000);
+        let mut pair = [0; 0x50];
+        put(&mut root, 0x914, if pair_capacity { 0xd000 } else { 0 });
+        for axis in 0..3 {
+            // Stable equal-coordinate ordering: minima before maxima, older
+            // same-kind endpoints before newly inserted endpoints.
+            let mut nodes = [(0usize, false), (0, true), (1, false), (1, true)];
+            let coordinate = |(owner, maximum): (usize, bool)| {
+                let shape = if owner == 0 {
+                    &first[..]
+                } else {
+                    &second.prefix[..]
+                };
+                f32::from_bits(word(shape, 0x20 + usize::from(maximum) * 16 + axis * 4))
+            };
+            nodes.sort_by(|&a, &b| {
+                coordinate(a)
+                    .partial_cmp(&coordinate(b))
+                    .unwrap()
+                    .then_with(|| a.1.cmp(&b.1))
+                    .then_with(|| a.0.cmp(&b.0))
+            });
+            let token = |(owner, maximum): (usize, bool)| {
+                (if owner == 0 { 0x1000 } else { 0xc000 })
+                    + 0x19c
+                    + axis as u32 * 40
+                    + u32::from(maximum) * 20
+            };
+            put(&mut root, 0x900 + axis * 4, token(nodes[0]));
+            for (i, &(owner, maximum)) in nodes.iter().enumerate() {
+                let shape = if owner == 0 {
+                    &mut first[..]
+                } else {
+                    &mut second.prefix[..]
+                };
+                let offset = 0x19c + axis * 40 + usize::from(maximum) * 20;
+                put(shape, offset, nodes.get(i + 1).map_or(0, |&n| token(n)));
+                put(
+                    shape,
+                    offset + 4,
+                    i.checked_sub(1).map_or(0, |j| token(nodes[j])),
+                );
+                let bound = word(shape, 0x20 + usize::from(maximum) * 16 + axis * 4);
+                put(shape, offset + 12, bound);
+            }
+        }
+        let overlap = (0..3).all(|j| {
+            f32::from_bits(word(&first, 0x20 + j * 4))
+                <= f32::from_bits(word(&second.prefix, 0x30 + j * 4))
+                && f32::from_bits(word(&second.prefix, 0x20 + j * 4))
+                    <= f32::from_bits(word(&first, 0x30 + j * 4))
+        });
+        if pair_capacity && mask & (1 << second.prefix[0x19]) != 0 && overlap {
+            put(&mut root, 0x914, 0);
+            put(&mut root, 0x910, 0xd000);
+            put(&mut first, 0xd0, 0xd000);
+            put(&mut second.prefix, 0xd4, 0xd000);
+            put(&mut pair, 0x28, 0x1000);
+            put(&mut pair, 0x2c, 0xc000);
+        }
+        Ok(MeshOverlap {
+            first,
+            second: second.prefix[..0x250].try_into().unwrap(),
+            root,
+            cells,
+            pair,
+        })
+    }
+}
+
+/// Retained two-shape broad-phase ownership graph, without contact generation.
+pub struct MeshOverlap {
+    pub first: [u8; 0x250],
+    pub second: [u8; 0x250],
+    pub root: [u8; 0xa80],
+    pub cells: [u8; 16],
+    pub pair: [u8; 0x50],
 }
 
 impl Mesh {
-    // Retain original bounds expansion operand order, including signed zero.
-    #[allow(clippy::assign_op_pattern)]
     pub fn construct_and_attach(
         self,
         descriptor: [u8; 0x84],
@@ -348,50 +477,7 @@ impl Mesh {
             put(&mut shape.prefix, 0x130 + i * 4, v.to_bits());
             put(&mut shape.prefix, 0x70 + i * 4, v.to_bits());
         }
-        let mut lows = [[f32::MAX, f32::MAX, f32::MAX, 1.]; 4];
-        let mut highs = [[-f32::MAX, -f32::MAX, -f32::MAX, 1.]; 4];
-        // Original four independent accumulators, with remaining vertices in slot0.
-        let grouped = shape.mesh.points / 4 * 4;
-        for i in 0..shape.mesh.points {
-            let v = shape.mesh.point(i).unwrap();
-            let slot = if i < grouped { i % 4 } else { 0 };
-            let transformed: [f32; 4] = std::array::from_fn(|j| {
-                (v[2] * pose[2][j] + v[0] * pose[0][j]) + (v[3] * pose[3][j] + v[1] * pose[1][j])
-            });
-            for j in 0..4 {
-                if lows[slot][j] >= transformed[j] {
-                    lows[slot][j] = transformed[j];
-                }
-                if highs[slot][j] <= transformed[j] {
-                    highs[slot][j] = transformed[j];
-                }
-            }
-        }
-        let mut low = lows[0];
-        let mut high = highs[0];
-        for i in 1..4 {
-            for j in 0..4 {
-                if low[j] >= lows[i][j] {
-                    low[j] = lows[i][j];
-                }
-                if high[j] <= highs[i][j] {
-                    high[j] = highs[i][j];
-                }
-            }
-        }
-        let margin = f32::from_bits(word(&shape.prefix, 0x220));
-        for j in 0..4 {
-            let expansion = if j < 3 { margin } else { 0. };
-            low[j] -= expansion;
-            high[j] = expansion + high[j];
-        }
-        if low.iter().chain(&high).any(|x| !x.is_finite()) || (0..3).any(|j| low[j] > high[j]) {
-            return Err(Error("invalid physical shape bounds"));
-        }
-        for j in 0..4 {
-            put(&mut shape.prefix, 0x20 + j * 4, low[j].to_bits());
-            put(&mut shape.prefix, 0x30 + j * 4, high[j].to_bits());
-        }
+        update_bounds(&mut shape, pose)?;
         put(&mut shape.prefix, 0xd8, 0xa000);
         put(&mut shape.prefix, 0xe0, 0);
         put(&mut shape.prefix, 0x198, 1);
@@ -414,8 +500,10 @@ impl Mesh {
             put(&mut shape.prefix, start + 4, 0);
             put(&mut shape.prefix, end, 0);
             put(&mut shape.prefix, end + 4, 0x1000 + start as u32);
-            put(&mut shape.prefix, start + 12, low[j].to_bits());
-            put(&mut shape.prefix, end + 12, high[j].to_bits());
+            let low = word(&shape.prefix, 0x20 + j * 4);
+            let high = word(&shape.prefix, 0x30 + j * 4);
+            put(&mut shape.prefix, start + 12, low);
+            put(&mut shape.prefix, end + 12, high);
             put(&mut root, 0x900 + j * 4, 0x1000 + start as u32);
         }
         body.body[0x328 / 4] = 0x1000;
@@ -435,6 +523,59 @@ impl Mesh {
             cells,
         })
     }
+}
+
+// Original kind7 bounds reduction; the supplied publication is already checked.
+#[allow(clippy::assign_op_pattern)]
+fn update_bounds(
+    shape: &mut ConstructedShape,
+    pose: crate::physical_pose::Matrix,
+) -> Result<(), Error> {
+    let mut lows = [[f32::MAX, f32::MAX, f32::MAX, 1.]; 4];
+    let mut highs = [[-f32::MAX, -f32::MAX, -f32::MAX, 1.]; 4];
+    // Original four independent accumulators, with remaining vertices in slot0.
+    let grouped = shape.mesh.points / 4 * 4;
+    for i in 0..shape.mesh.points {
+        let v = shape.mesh.point(i).unwrap();
+        let slot = if i < grouped { i % 4 } else { 0 };
+        let transformed: [f32; 4] = std::array::from_fn(|j| {
+            (v[2] * pose[2][j] + v[0] * pose[0][j]) + (v[3] * pose[3][j] + v[1] * pose[1][j])
+        });
+        for j in 0..4 {
+            if lows[slot][j] >= transformed[j] {
+                lows[slot][j] = transformed[j];
+            }
+            if highs[slot][j] <= transformed[j] {
+                highs[slot][j] = transformed[j];
+            }
+        }
+    }
+    let mut low = lows[0];
+    let mut high = highs[0];
+    for i in 1..4 {
+        for j in 0..4 {
+            if low[j] >= lows[i][j] {
+                low[j] = lows[i][j];
+            }
+            if high[j] <= highs[i][j] {
+                high[j] = highs[i][j];
+            }
+        }
+    }
+    let margin = f32::from_bits(word(&shape.prefix, 0x220));
+    for j in 0..4 {
+        let expansion = if j < 3 { margin } else { 0. };
+        low[j] -= expansion;
+        high[j] = expansion + high[j];
+    }
+    if low.iter().chain(&high).any(|x| !x.is_finite()) || (0..3).any(|j| low[j] > high[j]) {
+        return Err(Error("invalid physical shape bounds"));
+    }
+    for j in 0..4 {
+        put(&mut shape.prefix, 0x20 + j * 4, low[j].to_bits());
+        put(&mut shape.prefix, 0x30 + j * 4, high[j].to_bits());
+    }
+    Ok(())
 }
 
 fn word(b: &[u8], o: usize) -> u32 {
@@ -717,6 +858,33 @@ mod tests {
         assert_eq!(word(p, 0x19c), 0x11b0);
         assert_eq!(word(p, 0x1b4), 0x119c);
         assert_eq!(settings[0x64 / 4], 0);
+        // Inclusive AABB contact: a new minimum precedes an old maximum at
+        // the shared face. Capacity and filtering independently suppress pairs.
+        let touch = attached
+            .register_static_clone([2.5, 0., 0., 0.], 1, true)
+            .unwrap();
+        assert_eq!(word(&touch.root, 0x910), 0xd000);
+        assert_eq!(word(&touch.first, 0x19c), 0xc19c);
+        assert_eq!(word(&touch.second, 0x19c), 0x11b0);
+        assert_eq!(word(&touch.pair, 0x28), 0x1000);
+        assert_eq!(word(&touch.pair, 0x2c), 0xc000);
+        for (shift, mask, capacity) in [
+            ([2.5001, 0., 0., 0.], 1, true),
+            ([0.; 4], 0, true),
+            ([0.; 4], 1, false),
+        ] {
+            let result = attached
+                .register_static_clone(shift, mask, capacity)
+                .unwrap();
+            assert_eq!(word(&result.root, 0x910), 0);
+            assert_eq!(result.pair, [0; 0x50]);
+        }
+        assert!(
+            attached
+                .register_static_clone([f32::NAN, 0., 0., 0.], 1, true)
+                .is_err()
+        );
+        assert_eq!(word(attached.root_bytes(), 0x910), 0);
     }
 
     #[test]
