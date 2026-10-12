@@ -20,3 +20,13 @@ Private evidence:
 - `body-damage-caller-survey-20261013-draft-01.txt`: sandboxed launcher failed saving Java path in AppData, despite installed JDK. Authorized escalated retry `body-damage-caller-survey-20261013-final-01.txt` succeeds; subsequent caller/builder surveys succeed. This was a filesystem restriction, not an automatic approval rejection or missing-tool problem.
 
 Ghidra12.1.4/JDK21.0.9 and Capstone5.0.6 reused, analysis image SHA-256 `aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514`. All original/derived code remains private. Next verify the event ABI and whole builder/consumer on owned registered contexts, then recover the reached whole handler and source registrations before changing driving behavior. No owner capture is currently required.
+
+## Aligned ABI follow-up
+
+Subsequent aligned inspection confirms the builder mapping above, with two numerical details for the eventual native proof: point/direction are copied with aligned SIMD moves, while contact38/3C pass through x87 load/store. A raw-bit copy is therefore not assumed equivalent for every NaN payload. Event storage and contact storage require the observed alignment; the builder preserves event0/4.
+
+`A726B0` takes three stack arguments and returns with12-byte stack cleanup. The consumer does not use an incoming object register for its own state. Its registered callbacks use caller cleanup, receiving event pointer, the third consumer argument as an x87-loaded/stored float, the second consumer argument as a raw word, and user data. Original `A6A270` retrieves callback/user from registrationC/10. Equal callback and user pairs are deduplicated; otherwise eligible sides run in order. These are observed ABI facts, pending owned native execution.
+
+`A01910` selects the first side whose `A6A1D0` result equals carDB0. The getter follows registration8, then that object'sD8, then a424 link when non-null. This is not a direct registration8-to-car-owner equality. Class meanings and source registration ownership remain unverified; native fixtures must own the complete reached chain rather than reinterpret numeric pose words as pointers. The handler receives last argument0, so proving its wheel-mode early exit alone would not cover the actual body event.
+
+Aligned private evidence: `local/behavior/body-impact-event-abi-20261013-draft-01.{json,txt}`, `body-impact-event-side-owner-20261013-draft-01.{json,txt}`, `body-impact-event-owner-getter-20261013-draft-01.{json,txt}`. No new runtime implementation or native equivalence is claimed. One guessed native-probe filename read failed harmlessly and was corrected with inventory. The executable and purchased files remain unchanged.
