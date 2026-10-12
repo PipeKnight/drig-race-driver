@@ -20,7 +20,7 @@ The experimental keyboard driving build is available now. On 12 October the owne
 | R | Reset car and simulation to the start |
 | Escape | Close |
 
-The window title shows speed, gear, tick number and pause/failure status. **HB** means the simulation received the Space handbrake command; gear **R** means reverse. While reversing, Up/W brakes and selects forward again near rest. Hold Space while releasing throttle to check the rear-wheel handbrake. Its controlled runtime and Bevy keyboard tests pass; the owner's first-session report of an ineffective handbrake has not been reproduced.
+The window title shows speed, gear, tick number and pause/failure status. **HB** means the simulation received the Space handbrake command; gear **R** means reverse. While reversing, Up/W brakes and selects forward again near rest. Hold Space while releasing throttle to check the rear-wheel handbrake. Its controlled runtime and Bevy keyboard tests pass; the owner subsequently confirmed HB appears and the car slows.
 
 If movement pauses after a simulation error, note the title or keep the diagnostic log, then press R. Each launch saves output under ignored `local/playtest/`; game-derived evidence stays private. New logs record control changes and periodic pose/velocity/gear/wheel-force samples, plus pause/reset/exit events. The first build's two logs contained startup diagnostics only, so they cannot reconstruct that lap. The original Steam installation is read for resources.
 
@@ -31,9 +31,10 @@ Useful first-drive feedback: whether left/right and braking feel correct, whethe
 An optional **Play GRID Body Contacts.cmd** mode now joins the source body mesh
 to Donington's packed-track and separate CQTC boundary contacts. A 600-tick
 scripted barrier-sliding check passes in both Rust builds and the rendered app;
-the corresponding packed-only control falls off the supported world. Heavy
-impacts can still pause at the unported damage branch. See the
-[boundary verification and current limits](CQTC_BOUNDARY_CONTACTS.md). The private
+the corresponding packed-only control falls off the supported world. Selected
+collision damage now runs with recovered source wheel regions and owned RNG;
+unsupported notification events can still pause driving. See the
+[damage integration and current limits](SOURCE_WHEEL_DAMAGE_STARTUP.md). The private
 sampling file is already prepared on the owner's PC; no installation is needed.
 
 Build with `cargo build --release -p grid-app`, then launch with `target\release\grid-app.exe --drive --game-root "YOUR_GRID_FOLDER"`. The launcher accepts a game-folder argument and defaults to `C:\Program Files (x86)\Steam\steamapps\common\Grid`. It reads locally purchased resources; no game assets or compiled toolchain are bundled in the repository.
