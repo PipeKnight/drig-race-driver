@@ -13,6 +13,32 @@ impl Car {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+    /// Prepare source suspension axes from raw NED positions and copied caster/
+    /// camber properties. Preserve the complete owner on failure.
+    pub fn configure_suspension(&mut self, geometry: WheelGeometry) -> Result<(), Error> {
+        let mut body = std::array::from_fn(|i| u(&self.bytes, i * 4));
+        for (i, axle) in [geometry.rear, geometry.rear, geometry.front, geometry.front]
+            .into_iter()
+            .enumerate()
+        {
+            for (j, value) in [
+                axle.position[0] * if i % 2 == 0 { 1. } else { -1. },
+                axle.position[1],
+                axle.position[2],
+                1.,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                body[(0x14e0 + i * 16 + j * 4) / 4] = value.to_bits();
+            }
+        }
+        let body = grid_world::suspension_context::initialize(&body)?;
+        for (i, value) in body.into_iter().enumerate() {
+            self.word(i * 4, value);
+        }
+        Ok(())
+    }
     /// Install the complete source HDM settings, then run the selected original
     /// reset order. Commit only after every parameter and effect is valid.
     pub fn configure_handling(
