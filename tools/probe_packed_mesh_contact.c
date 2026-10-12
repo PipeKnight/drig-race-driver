@@ -16,6 +16,13 @@
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
 #define ROOT_BYTES 0xc40
 #define REQUEST_TAG 0x32304350
+#elif defined(GRID_TRIANGLE_MESH_QUERY)
+#define ROOT_BYTES 0xa80
+#ifdef GRID_TRIANGLE_DISTANCE
+#define REQUEST_TAG 0x34304350
+#else
+#define REQUEST_TAG 0x33304350
+#endif
 #else
 #define ROOT_BYTES 0xa80
 #define REQUEST_TAG 0x31304350
@@ -40,11 +47,22 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
  unsigned schedule_flags=0,worker_pointer=address(worker),group_head=0,assigned_head=0;
 #endif
+#ifdef GRID_TRIANGLE_MESH_QUERY
+ __declspec(align(16)) unsigned char query_owned[32+0xa0+32];
+ unsigned char *query=query_owned+32;unsigned triangle_index=0;
+ memset(query_owned,0xcd,sizeof(query_owned));memset(query,0,0xa0);
+ memset(query+0x20,0xcd,32);
+#endif
  const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xf5e000};DWORD protections[5];unsigned char saved[5][4096];
  if(_wfopen_s(&input,argv[2],L"rb")||!input){error=6;goto done;}
  if(fread(header,4,6,input)!=6||header[0]!=REQUEST_TAG||header[1]<0x1680||header[1]>sizeof(seed)||header[2]<52||header[2]>2*1024*1024||header[3]>16||header[4]>1||header[5]>32768||fread(center,4,4,input)!=4){error=7;goto done;}
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
  if(fread(&schedule_flags,4,1,input)!=1||schedule_flags>3){error=7;goto done;}
+#endif
+#ifdef GRID_TRIANGLE_MESH_QUERY
+ if(fread(&triangle_index,4,1,input)!=1||fread(query+0x10,4,4,input)!=4){error=7;goto done;}
+ put(query,0,triangle_index);
+ for(unsigned j=0;j<4;j++)if(!isfinite(num(query,0x10+j*4))||fabsf(num(query,0x10+j*4))>10000.f||(j==3&&num(query,0x10+j*4)!=0.f)){error=8;goto done;}
 #endif
  seed_size=header[1];chunk_size=header[2];limit=header[3];cache_limit=header[4];index_limit=header[5];
  for(unsigned i=0;i<4;i++)if(!isfinite(center[i])||fabsf(center[i])>10000.f||(i==3&&center[i]!=1.f)){error=8;goto done;}
@@ -61,6 +79,9 @@ int wmain(int argc,wchar_t **argv){
  for(unsigned j=0;j<4;j++)if(!isfinite(num(seed,0x500+mesh_bytes+0x1c0+j*4))){error=8;goto done;}
  memset(&track_owned,0xcd,sizeof(track_owned));
  if(!isfinite(num(seed,0x220))||num(seed,0x220)<0.f||num(seed,0x220)>1e6f||!prepare(chunk,chunk_size,&track)){error=8;goto done;}
+#ifdef GRID_TRIANGLE_MESH_QUERY
+ if(triangle_index>=get(track.header,0x18)||get(seed+0x500,8)!=1||get(seed+0x500,12)!=1){error=8;goto done;}
+#endif
  memcpy(chunk_before,chunk,chunk_size);memset(first_owned,0xcd,sizeof(first_owned));memcpy(first,seed,0x250);memcpy(mesh,seed+0x500,mesh_bytes);memcpy(mesh_before,mesh,mesh_bytes);memcpy(body,seed+0x500+mesh_bytes,sizeof(body));
  if(!relocate_mesh(mesh,mesh_bytes,1)){error=8;goto done;}
  memset(root_owned,0xcd,sizeof(root_owned));memset(pair_owned,0xcd,sizeof(pair_owned));memset(worker_owned,0xcd,sizeof(worker_owned));memset(root,0,ROOT_BYTES);memset(pair,0,0x50);memset(worker,0,0x48);memset(materials,0,sizeof(materials));memset(&cache,0xcd,sizeof(cache));memset(cache.value,0,sizeof(cache.value));memset(indices_owned,0xcd,64+index_limit*4);memset(visited_owned,0xcd,64+index_limit*4);memset(indices,0,index_limit*4);memset(visited,0,index_limit*4);
@@ -101,6 +122,26 @@ int wmain(int argc,wchar_t **argv){
   ((void (__fastcall *)(void *,void *,void *))(image+0xb184f0-0x400000))(root,NULL,&group_head);
   ((void (__fastcall *)(void *,void *))(image+0xb187d0-0x400000))(root,NULL);
   if(group_head||root[0xc24]||get(root,0xa78)!=(schedule_flags&1)||get(worker,8)||assigned_head!=((schedule_flags&1)?address(pair):0)||get(root,0x930)!=((schedule_flags&1)?address(pair):0)){error=20;}
+#elif defined(GRID_TRIANGLE_MESH_QUERY)
+  {
+   unsigned char *vertices[3];
+   unsigned char *encoded=chunk+getword(chunk+44)+triangle_index*4;
+   ((void (__fastcall *)(void *,void *,void *,void *))(image+0xb19ee0-0x400000))(encoded,NULL,track.header,vertices);
+   for(unsigned i=0;i<3;i++){
+    ((void (__fastcall *)(void *,void *,void *,void *))(image+0xb1abc0-0x400000))(track.shape,NULL,query+0x60+i*16,vertices[i]);
+    ((void (__fastcall *)(void *,void *,unsigned,void *))(image+0xaee620-0x400000))(triangle,NULL,i,query+0x60+i*16);
+   }
+   ((void (__cdecl *)(void *,void *))(image+0xb41f80-0x400000))(query+0x40,first);
+#ifdef GRID_TRIANGLE_DISTANCE
+   float margin=num(triangle,0x220)+num(first,0x220);
+   ((void (__fastcall *)(void *,void *,float,void *,void *,void *,void *,void *,void *,void *,void *,void *,void *))(image+0xb7ea60-0x400000))(scratch+0xe0,NULL,margin*margin,triangle,first,NULL,query+0x40,first+0x130,image+0xb7c830-0x400000,image+0xb43390-0x400000,query+0x10,query+8,query+9);
+   if(query[8])((void (__fastcall *)(void *,void *,void *,void *))(image+0xb82380-0x400000))(scratch+0xe0,NULL,query+0x20,query+0x30);
+   if(query[8]>1||query[9]>1)error=21;
+#else
+   unsigned hit=((unsigned char (__fastcall *)(void *,void *,void *,void *,void *,void *,void *,void *,void *,void *,void *,void *,void *))(image+0xb7f740-0x400000))(scratch,NULL,triangle,first,NULL,query+0x40,NULL,first+0x130,image+0xe53490-0x400000,image+0xe53440-0x400000,query+0x10,query+0x20,query+0x30);
+   put(query,4,hit);if(hit>1)error=21;
+#endif
+  }
 #else
   ((unsigned (__fastcall *)(void *,void *,void *,void *))(image+0xb39500-0x400000))(worker,NULL,root,pair);
 #endif
@@ -113,6 +154,9 @@ int wmain(int argc,wchar_t **argv){
 #endif
   };
   unsigned n=sizeof(regions)/sizeof(regions[0]);
+#ifdef GRID_TRIANGLE_MESH_QUERY
+  for(unsigned i=0;i<8;i++)if(!canonical(query,0x40+i*4,regions,n))error=13;
+#endif
   const unsigned pointers[]={0xb0,0xb4,0xb8,0xbc,0xc8,0xcc,0xd0,0xd4,0xd8,0xe0,0xe4,0xe8,0xec,0x170,0x174,0x178,0x17c,0x180,0x19c,0x1a0,0x1a4,0x1b0,0x1b4,0x1b8,0x1c4,0x1c8,0x1cc,0x1d8,0x1dc,0x1e0,0x1ec,0x1f0,0x1f4,0x200,0x204,0x208,0x21c};
   unsigned char *shapes[]={first,track.shape,triangle};for(unsigned s=0;s<3;s++)for(unsigned j=0;j<sizeof(pointers)/sizeof(pointers[0]);j++)if(!canonical(shapes[s],pointers[j],regions,n)){fprintf(stderr,"pointer shape=%u offset=%x value=%08x\n",s,pointers[j],get(shapes[s],pointers[j]));error=13;}
   if(get(first,0)!=address(image+0xd3e7e0-0x400000)||get(triangle,0)!=address(image+0xd42670-0x400000))error=13;put(first,0,0x7000);put(triangle,0,0x7300);
@@ -134,6 +178,9 @@ int wmain(int argc,wchar_t **argv){
 #endif
  }
  if(!canary(first_owned,0x250)||!canary(contacts_owned,16*0x80)||!canary(scratch_owned,0x570)||!canary(triangle_owned,0x280)||!canary((unsigned char *)&cache,0x2050)||!canary(root_owned,ROOT_BYTES)||!canary(pair_owned,0x50)||!canary(worker_owned,0x48)||!canary((unsigned char *)&track_owned,sizeof(Object))||(indices_owned&&!canary(indices_owned,index_limit*4))||(visited_owned&&!canary(visited_owned,index_limit*4)))error=16;
+#ifdef GRID_TRIANGLE_MESH_QUERY
+ if(!canary(query_owned,0xa0))error=16;
+#endif
 done:
  if(input)fclose(input);
  for(unsigned i=0;i<protected;i++){DWORD ignored;unsigned char *page=image+pages[i]-0x400000;memcpy(page,saved[i],4096);if(!VirtualProtect(page,4096,protections[i],&ignored))error=17;}
@@ -142,9 +189,15 @@ done:
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   ,root+0xa80,&worker_pointer,&group_head,&assigned_head
 #endif
+#ifdef GRID_TRIANGLE_MESH_QUERY
+  ,query
+#endif
  };const DWORD lengths[]={0x250,0x280,0xa80,0x50,0x48,16*0x80,0x430,0x40,0x570,0x2050,0x280,0x60,index_limit*4,index_limit*4
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
   ,ROOT_BYTES-0xa80,4,4,4
+#endif
+#ifdef GRID_TRIANGLE_MESH_QUERY
+  ,0xa0
 #endif
  };for(unsigned i=0;i<sizeof(lengths)/sizeof(lengths[0]);i++){DWORD written;if(!WriteFile(output,parts[i],lengths[i],&written,NULL)||written!=lengths[i])error=19;}CloseHandle(output);}}
  free(chunk);free(chunk_before);free(indices_owned);free(visited_owned);free(snapshot);VirtualFree(image,0,MEM_RELEASE);printf("packed_mesh_contact code_unchanged=%u globals_restored=%u code_replacements=0 error=%u\n",unchanged,unchanged,error);return (int)error;
