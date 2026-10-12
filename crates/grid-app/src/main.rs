@@ -58,6 +58,17 @@ struct InitialOrbit(Orbit);
 #[derive(Component)]
 struct ViewerCamera;
 
+#[derive(Resource)]
+struct Driving {
+    runtime: grid_tools::source_vehicle::Runtime,
+    paused: bool,
+    failure: Option<String>,
+    scripted_ticks: Option<u64>,
+    scripted: grid_tools::source_vehicle::Controls,
+}
+#[derive(Component)]
+struct MovingPart(Mat4);
+
 // Provisional diffuse bindings recovered from executable static tuples.
 fn diffuse(material: &str) -> Option<&'static str> {
     match material.trim() {
@@ -641,9 +652,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut start_view = false;
     let mut eye = None;
     let mut target = None;
+    let mut drive = false;
+    let mut drive_ticks = None;
+    let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--drive" => drive = true,
+            "--drive-ticks" => {
+                drive_ticks = Some(args.next().ok_or("missing tick count")?.parse::<u64>()?)
+            }
+            "--throttle" => scripted.throttle = args.next().ok_or("missing throttle")?.parse()?,
+            "--steering" => scripted.steering = args.next().ok_or("missing steering")?.parse()?,
             "--game-root" => root = args.next().ok_or("--game-root needs a path")?.into(),
             "--render" => {
                 output = Some(PathBuf::from(
@@ -693,13 +713,38 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\nInteractive: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset; Escape exit.\nStatic geometry, provisional PBR materials; collision colors are diagnostic; no driving yet."
+                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Full body collisions and race rules are not implemented.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 return Ok(());
             }
             _ => return Err(format!("unknown argument {arg}").into()),
         }
     }
+    if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
+        return Err("scripted ticks require --drive and must be <=36000".into());
+    }
+    if !scripted.throttle.is_finite()
+        || !(0. ..=1.).contains(&scripted.throttle)
+        || !scripted.steering.is_finite()
+        || !(-1. ..=1.).contains(&scripted.steering)
+    {
+        return Err("invalid scripted controls".into());
+    }
+    let driving = if drive {
+        track = true;
+        reference = true;
+        collision = false;
+        start_view = true;
+        Some(Driving {
+            runtime: grid_tools::source_vehicle::Runtime::lacetti(&root, "slot_00", 200679)?,
+            paused: false,
+            failure: None,
+            scripted_ticks: drive_ticks,
+            scripted,
+        })
+    } else {
+        None
+    };
     if lod != "LOD0_" && lod != "LOD1_" {
         return Err("unsupported LOD selection".into());
     }
@@ -733,13 +778,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         load(&root, &lod, track, include_batches)?
     };
-    let anchor = if reference || start_view {
+    let anchor = if let Some(driving) = &driving {
+        Some(Mat4::from_cols_array(&driving.runtime.pose()))
+    } else if reference || start_view {
         Some(grid_slot(&root, "slot_00")?)
     } else {
         None
     };
     if reference {
-        append_car(&root, &lod, &mut car, anchor.unwrap())?;
+        let model = if let Some(driving) = &driving {
+            let owner = &driving.runtime.state.car.owner.vehicle;
+            // Model wheel coordinates are NED coordinates; constructor shifts
+            // them into its local physical frame. Apply that same translation.
+            Mat4::from_translation(Vec3::new(
+                f32::from_bits(owner[0x1630 / 4]),
+                f32::from_bits(owner[0x1634 / 4]) - f32::from_bits(owner[0x1564 / 4]),
+                f32::from_bits(owner[0x1638 / 4]),
+            ))
+        } else {
+            anchor.unwrap()
+        };
+        append_car(&root, &lod, &mut car, model)?;
     }
     let mut orbit = if track {
         Orbit {
@@ -807,15 +866,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .add_systems(Update, capture);
     } else {
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "GRID independent static resource viewer".into(),
-                resolution: (1280, 800).into(),
+        app.add_plugins(
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: if drive {
+                        "GRID independent driving prototype"
+                    } else {
+                        "GRID independent static resource viewer"
+                    }
+                    .into(),
+                    resolution: (1280, 800).into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
-        .add_systems(Update, update_orbit);
+        );
+        if !drive {
+            app.add_systems(Update, update_orbit);
+        }
+    }
+    if let Some(driving) = driving {
+        app.insert_resource(driving)
+            .insert_resource(Time::<Fixed>::from_seconds(f64::from(
+                grid_tools::source_vehicle::DELTA,
+            )))
+            .add_systems(FixedUpdate, drive_tick)
+            .add_systems(Update, (drive_actions, drive_present).chain());
     }
     let exit = app
         .insert_resource(car)
@@ -850,6 +926,7 @@ fn setup(
     capture: Option<ResMut<Capture>>,
     adapter: Res<bevy::render::renderer::RenderAdapterInfo>,
     device: Res<bevy::render::renderer::RenderDevice>,
+    driving: Option<Res<Driving>>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -950,12 +1027,21 @@ fn setup(
             .clone();
         let mesh = meshes.add(part.mesh);
         for matrix in part.matrices {
-            commands.spawn((
+            let moving = driving.is_some() && part.material.starts_with("lacetti/");
+            let transform = if moving {
+                Mat4::from_cols_array(&driving.as_ref().unwrap().runtime.pose()) * matrix
+            } else {
+                matrix
+            };
+            let mut entity = commands.spawn((
                 Name::new(part.name.clone()),
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
-                Transform::from_matrix(matrix),
+                Transform::from_matrix(transform),
             ));
+            if moving {
+                entity.insert(MovingPart(matrix));
+            }
         }
     }
     if !track {
@@ -995,12 +1081,29 @@ fn setup(
         capture.target = Some(target);
     }
 }
-fn capture(mut commands: Commands, mut capture: ResMut<Capture>, mut exit: MessageWriter<AppExit>) {
+fn capture(
+    mut commands: Commands,
+    mut capture: ResMut<Capture>,
+    mut exit: MessageWriter<AppExit>,
+    driving: Option<Res<Driving>>,
+) {
     capture.frames += 1;
     if capture.started.elapsed() > Duration::from_secs(120) {
         error!("render capture timed out");
         exit.write(AppExit::error());
         return;
+    }
+    if let Some(driving) = &driving {
+        if driving.failure.is_some() {
+            exit.write(AppExit::error());
+            return;
+        }
+        if driving
+            .scripted_ticks
+            .is_some_and(|n| driving.runtime.ticks < n)
+        {
+            return;
+        }
     }
     if capture.frames >= 180 && !capture.requested {
         capture.requested = true;
@@ -1027,6 +1130,84 @@ fn capture(mut commands: Commands, mut capture: ResMut<Capture>, mut exit: Messa
                     }
                 },
             );
+    }
+}
+fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
+    if driving.paused
+        || driving.failure.is_some()
+        || driving
+            .scripted_ticks
+            .is_some_and(|n| driving.runtime.ticks >= n)
+    {
+        return;
+    }
+    let controls = if driving.scripted_ticks.is_some() {
+        driving.scripted
+    } else {
+        let pressed = |a, b| input.pressed(a) || input.pressed(b);
+        grid_tools::source_vehicle::Controls {
+            throttle: f32::from(pressed(KeyCode::ArrowUp, KeyCode::KeyW)),
+            brake: f32::from(pressed(KeyCode::ArrowDown, KeyCode::KeyS)),
+            steering: f32::from(pressed(KeyCode::ArrowLeft, KeyCode::KeyA))
+                - f32::from(pressed(KeyCode::ArrowRight, KeyCode::KeyD)),
+            handbrake: input.pressed(KeyCode::Space),
+        }
+    };
+    if let Err(error) = driving.runtime.tick(controls) {
+        let text = format!("tick {}: {error}; R resets", driving.runtime.ticks + 1);
+        error!("driving paused: {text}");
+        driving.failure = Some(text);
+    } else if driving.scripted_ticks == Some(driving.runtime.ticks) {
+        println!(
+            "drive_script_complete ticks={} pose={:?} velocity={:?}",
+            driving.runtime.ticks,
+            driving.runtime.pose(),
+            driving.runtime.velocity()
+        );
+    }
+}
+fn drive_actions(
+    mut driving: ResMut<Driving>,
+    input: Res<ButtonInput<KeyCode>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if input.just_pressed(KeyCode::KeyR) {
+        driving.runtime.reset();
+        driving.failure = None;
+        driving.paused = false;
+    }
+    if input.just_pressed(KeyCode::KeyP) {
+        driving.paused = !driving.paused;
+    }
+    if input.just_pressed(KeyCode::Escape) {
+        exit.write(AppExit::Success);
+    }
+}
+fn drive_present(
+    driving: Res<Driving>,
+    mut parts: Query<(&MovingPart, &mut Transform), Without<ViewerCamera>>,
+    mut camera: Single<&mut Transform, With<ViewerCamera>>,
+    mut windows: Query<&mut Window>,
+) {
+    let pose = Mat4::from_cols_array(&driving.runtime.pose());
+    for (part, mut transform) in &mut parts {
+        *transform = Transform::from_matrix(pose * part.0);
+    }
+    let at = pose.transform_point3(Vec3::new(0., 1., 0.));
+    let eye = pose.transform_point3(Vec3::new(0., 3., -9.));
+    **camera = Transform::from_translation(eye).looking_at(at, Vec3::Y);
+    let v = driving.runtime.velocity();
+    let speed = Vec3::new(v[0], v[1], v[2]).length() * 3.6;
+    for mut window in &mut windows {
+        window.title = format!(
+            "GRID prototype | {speed:.1} km/h | tick {} | {}",
+            driving.runtime.ticks,
+            driving.failure.as_deref().unwrap_or(if driving.paused {
+                "Paused; P resumes; R resets"
+            } else {
+                "Arrows drive; Space handbrake; P pause; R reset"
+            })
+        );
     }
 }
 fn update_orbit(
@@ -1092,4 +1273,109 @@ fn update_orbit(
         exit.write(AppExit::Success);
     }
     **camera = camera_transform(&orbit);
+}
+
+#[cfg(test)]
+mod driving_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn keyboard_pause_reset_and_failure_recovery() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
+                .unwrap();
+        let mut app = App::new();
+        app.add_message::<AppExit>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(Driving {
+                runtime,
+                paused: false,
+                failure: None,
+                scripted_ticks: None,
+                scripted: Default::default(),
+            })
+            .add_systems(Update, (drive_actions, drive_tick).chain());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        for _ in 0..120 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 120);
+        assert!(
+            app.world().resource::<Driving>().runtime.velocity()[..3]
+                .iter()
+                .map(|v| v * v)
+                .sum::<f32>()
+                > 1.
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowLeft);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle[0xe30 / 4],
+            1f32.to_bits()
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::ArrowLeft);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowRight);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle[0xe30 / 4],
+            (-1f32).to_bits()
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyP);
+        app.update();
+        assert!(app.world().resource::<Driving>().paused);
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 122);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        // An inconsistent authoritative owner must pause, preserve its tick,
+        // and allow the same R path to restore a valid source world.
+        app.world_mut()
+            .resource_mut::<Driving>()
+            .runtime
+            .state
+            .car
+            .owner
+            .vehicle[0x15a0 / 4] = 0;
+        app.update();
+        assert!(app.world().resource::<Driving>().failure.is_some());
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        assert!(app.world().resource::<Driving>().failure.is_none());
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+    }
 }
