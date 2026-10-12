@@ -38,6 +38,8 @@ Private evidence:
 
 ## Startup gap and next integration
 
+Subsequent [F242 source-region integration](SOURCE_DAMAGE_REGIONS.md) initializes the five named NED regions. The snapshot observations below describe the earlier F241 startup; wheel regions, gains and full impact dispatch remain open.
+
 The fresh source-built prototype snapshot `local/behavior/damage-region-20261012-draft-01/source.state.bin` has all nine selected damage boxes disabled/zero and three damage gains zero. This describes the current incomplete prototype startup, not the original game. Its HDM coefficient/settings joins above use explicitly authored active boxes/gain and do not establish original car-region initialization.
 
 The original mutable constructor initializes region center W components and unit damage gains before its reset. The separate NED region loader reads five named `HANDLINGDAMAGE` children (gearbox, driveshaft, turbo, radiator, exhaust), adds the supplied local offset to their centers, stores source size values directly as extents, and enables each present child. These observations require a guarded original-loader comparison and constructor-order/RNG proof before changing runtime startup. Wheel regions and outer resource acquisition remain separate.
