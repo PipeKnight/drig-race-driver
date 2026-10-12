@@ -26,18 +26,16 @@
 #define REQUEST_TAG 0x32304350
 #elif defined(GRID_TRIANGLE_MESH_QUERY)
 #define ROOT_BYTES 0xa80
-#if defined(GRID_TRIANGLE_QUERY_SEQUENCE) && !defined(GRID_TRIANGLE_DISTANCE)
+#ifdef GRID_TRIANGLE_MANIFOLD
+#define REQUEST_TAG 0x37304350
+#elif defined(GRID_TRIANGLE_QUERY_SEQUENCE) && !defined(GRID_TRIANGLE_DISTANCE)
 #define REQUEST_TAG 0x36304350
-#else
-#ifdef GRID_TRIANGLE_DISTANCE
-#ifdef GRID_TRIANGLE_QUERY_SEQUENCE
+#elif defined(GRID_TRIANGLE_DISTANCE) && defined(GRID_TRIANGLE_QUERY_SEQUENCE)
 #define REQUEST_TAG 0x35304350
-#else
+#elif defined(GRID_TRIANGLE_DISTANCE)
 #define REQUEST_TAG 0x34304350
-#endif
 #else
 #define REQUEST_TAG 0x33304350
-#endif
 #endif
 #else
 #define ROOT_BYTES 0xa80
@@ -69,6 +67,10 @@ int wmain(int argc,wchar_t **argv){
  memset(query_owned,0xcd,sizeof(query_owned));memset(query,0,0xa0);
  memset(query+0x20,0xcd,32);
 #endif
+#ifdef GRID_TRIANGLE_MANIFOLD
+ __declspec(align(16)) unsigned char features_owned[2][32+0xc0+32];
+ memset(features_owned,0xcd,sizeof(features_owned));
+#endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
  unsigned sequence_count=0;unsigned char sequence_requests[64*24];
  unsigned char *sequence_owned=NULL,*sequence_records=NULL;
@@ -93,6 +95,12 @@ int wmain(int argc,wchar_t **argv){
  if(fread(&triangle_index,4,1,input)!=1||fread(query+0x10,4,4,input)!=4){error=7;goto done;}
  put(query,0,triangle_index);
  for(unsigned j=0;j<4;j++)if(!isfinite(num(query,0x10+j*4))||fabsf(num(query,0x10+j*4))>10000.f||(j==3&&num(query,0x10+j*4)!=0.f)){error=8;goto done;}
+#ifdef GRID_TRIANGLE_MANIFOLD
+ if(fread(query+0x20,1,24,input)!=24){error=7;goto done;}
+ for(unsigned j=0;j<4;j++)if(!isfinite(num(query,0x20+j*4))||fabsf(num(query,0x20+j*4))>10000.f||(j==3&&num(query,0x20+j*4)!=1.f)){error=8;goto done;}
+ float normal_squared=0.f;for(unsigned j=0;j<3;j++)normal_squared+=num(query,0x10+j*4)*num(query,0x10+j*4);
+ if(normal_squared<.999f||normal_squared>1.001f||!isfinite(num(query,0x30))||fabsf(num(query,0x30))>10000.f||get(query,0x34)>1){error=8;goto done;}
+#endif
 #endif
 #endif
  seed_size=header[1];chunk_size=header[2];limit=header[3];cache_limit=header[4];index_limit=header[5];
@@ -173,7 +181,17 @@ int wmain(int argc,wchar_t **argv){
     ((void (__fastcall *)(void *,void *,void *,void *))(image+0xb1abc0-0x400000))(track.shape,NULL,query+0x60+i*16,vertices[i]);
     ((void (__fastcall *)(void *,void *,unsigned,void *))(image+0xaee620-0x400000))(triangle,NULL,i,query+0x60+i*16);
    }
-#ifdef GRID_TRIANGLE_DISTANCE
+#ifdef GRID_TRIANGLE_MANIFOLD
+   ((void (__fastcall *)(void *,void *,void *))(image+0xaee5f0-0x400000))(triangle,NULL,materials);
+   ((void (__fastcall *)(void *,void *,void *))(image+0xaee610-0x400000))(triangle,NULL,track.shape);
+   __declspec(align(16)) float negative[4];for(unsigned j=0;j<4;j++)negative[j]=-1.f*num(query,0x10+j*4);
+   unsigned char saved_support[32];memcpy(saved_support,query+0x40,32);
+   if(!((unsigned char (__cdecl *)(void *,void *,void *,void *))(image+0xb45310-0x400000))(first,negative,features_owned[0]+32,query+0x40)){error=21;}
+   if(!((unsigned char (__cdecl *)(void *,void *,void *,void *))(image+0xb7c5d0-0x400000))(triangle,query+0x10,features_owned[1]+32,NULL)){error=21;}
+   memcpy(query+0x40,saved_support,32);
+   unsigned count=((unsigned (__cdecl *)(void *,void *,void *,void *,void *,void *,float,void *,unsigned,void *,void *,void *,unsigned))(image+0xae2fa0-0x400000))(first,triangle,image+0xb45310-0x400000,image+0xb7c5d0-0x400000,query+0x20,query+0x10,num(query,0x30),contacts,limit,contacts,query+0x40,NULL,get(query,0x34));
+   if(count>limit){error=21;}else{put(query,4,count);put(worker,0x10,count);put(worker,0x40,address(contacts)+count*0x80);put(pair,0x20,count?address(contacts):0);put(pair,0x24,count);}
+#elif defined(GRID_TRIANGLE_DISTANCE)
    float margin=num(triangle,0x220)+num(first,0x220);
    ((void (__fastcall *)(void *,void *,float,void *,void *,void *,void *,void *,void *,void *,void *,void *,void *))(image+0xb7ea60-0x400000))(scratch+0xe0,NULL,margin*margin,triangle,first,NULL,query+0x40,first+0x130,image+0xb7c830-0x400000,image+0xb43390-0x400000,query+0x10,query+8,query+9);
    if(query[8])((void (__fastcall *)(void *,void *,void *,void *))(image+0xb82380-0x400000))(scratch+0xe0,NULL,query+0x20,query+0x30);
@@ -233,6 +251,9 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_TRIANGLE_MESH_QUERY
  if(!canary(query_owned,0xa0))error=16;
 #endif
+#ifdef GRID_TRIANGLE_MANIFOLD
+ for(unsigned i=0;i<2;i++)if(!canary(features_owned[i],0xc0))error=16;
+#endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
  if(sequence_owned&&!canary(sequence_owned,sequence_count*SEQUENCE_RECORD_BYTES))error=16;
 #endif
@@ -247,6 +268,9 @@ done:
 #ifdef GRID_TRIANGLE_MESH_QUERY
   ,query
 #endif
+#ifdef GRID_TRIANGLE_MANIFOLD
+  ,features_owned[0]+32,features_owned[1]+32
+#endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
   ,&sequence_count,sequence_records
 #endif
@@ -256,6 +280,9 @@ done:
 #endif
 #ifdef GRID_TRIANGLE_MESH_QUERY
   ,0xa0
+#endif
+#ifdef GRID_TRIANGLE_MANIFOLD
+  ,0xc0,0xc0
 #endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
   ,4,sequence_count*SEQUENCE_RECORD_BYTES
