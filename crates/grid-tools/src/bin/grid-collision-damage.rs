@@ -21,6 +21,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err("unsupported impact reserved words".into());
         }
         let state = State {
+            damage_random_state: None,
             vehicle: (0..VEHICLE_WORDS).map(|i| u(32 + i * 4)).collect(),
             physical: std::array::from_fn(|i| u(32 + VEHICLE_WORDS * 4 + i * 4)),
         };

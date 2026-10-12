@@ -110,7 +110,11 @@ mod tests {
                 material_multipliers: [None; 4],
                 diagnostics: [0.; 8],
             },
-            owner: vehicle_publication::State { vehicle, physical },
+            owner: vehicle_publication::State {
+                vehicle,
+                physical,
+                damage_random_state: None,
+            },
         };
         let query = |_, _| panic!("zero delta must skip source queries");
         let good = calculate(&input, [0, 1], 0., 9.81, query, |_| Ok(None)).unwrap();

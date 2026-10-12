@@ -275,6 +275,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 let state = grid_world::vehicle_outer::State {
                     owner: grid_world::vehicle_publication::State {
+                        damage_random_state: None,
                         vehicle,
                         physical: words(record, RECORD + 0x21000 - 0x2600),
                     },

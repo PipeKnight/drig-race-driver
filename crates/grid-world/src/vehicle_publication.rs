@@ -7,6 +7,10 @@ pub const PHYSICAL_WORDS: usize = 0x424 / 4;
 pub struct State {
     pub vehicle: Vec<u32>,
     pub physical: [u32; PHYSICAL_WORDS],
+    /// Independent original global damage RNG. None retains the legacy
+    /// below-threshold scope; Some opts into the owned collision producer.
+    /// Kept with the staged car so frame failure and reset restore it together.
+    pub damage_random_state: Option<u32>,
 }
 fn f(b: &[u32], o: usize) -> f32 {
     f32::from_bits(b[o / 4])
@@ -69,6 +73,7 @@ mod tests {
     #[test]
     fn zero_delta_still_decays_expired_state_and_clears_unused_w() {
         let mut s = State {
+            damage_random_state: None,
             vehicle: vec![0; VEHICLE_WORDS],
             physical: [0; PHYSICAL_WORDS],
         };

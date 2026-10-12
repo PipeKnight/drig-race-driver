@@ -15,10 +15,27 @@ pub fn calculate(
     wheel_mode: bool,
     random_state: u32,
 ) -> Result<Output, Error> {
+    if point[3] != 1. {
+        return Err(Error("invalid collision damage framing"));
+    }
+    calculate_with_queries(input, point, impact, wheel_mode, random_state, None)
+}
+
+/// Whole dispatcher with the surrounding handling producer's owned query list.
+/// Its wheel-center forward transform may yield homogeneous W zero or one.
+pub fn calculate_with_queries(
+    input: &State,
+    point: [f32; 4],
+    impact: f32,
+    wheel_mode: bool,
+    random_state: u32,
+    queries: Option<&[vehicle_handling::QueryRecord]>,
+) -> Result<Output, Error> {
     let f = |b: &[u32], o: usize| f32::from_bits(b[o / 4]);
     if input.vehicle.len() != crate::vehicle_publication::VEHICLE_WORDS
         || point.iter().any(|v| !v.is_finite() || v.abs() > 1000.)
-        || point[3] != 1.
+        || !matches!(point[3], 0. | 1.)
+        || queries.is_some_and(|rows| rows.len() > 64)
         || !(0. ..=1_000_000_000.).contains(&impact)
     {
         return Err(Error("invalid collision damage framing"));
@@ -76,7 +93,7 @@ pub fn calculate(
         }
         damage_region::calculate(damage_region::Input {
             previous: 0.,
-            point,
+            point: [point[0], point[1], point[2], 1.],
             impact: 0.,
             gain: 1.,
             enabled: false,
@@ -152,7 +169,7 @@ pub fn calculate(
     if f(b, 0x42c) > 0. {
         apply(0x14, 0x120, 0x340, main_gain)?;
     }
-    vehicle_handling::effects(&mut mutable, None, true)?;
+    vehicle_handling::effects(&mut mutable, queries, true)?;
     next.state.vehicle[m / 4..(m + 0x460) / 4].copy_from_slice(&mutable);
     next.applied = true;
     Ok(next)

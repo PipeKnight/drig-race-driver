@@ -302,6 +302,7 @@ impl Runtime {
                     diagnostics: [0.; 8],
                 },
                 owner: vehicle_publication::State {
+                    damage_random_state: None,
                     vehicle: owner,
                     physical,
                 },
@@ -978,6 +979,11 @@ mod tests {
     fn source_driving_reset_controls_and_rollback() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let mut runtime = Runtime::lacetti(Path::new(&root), "slot_00", 200679).unwrap();
+        assert_eq!(runtime.state.car.owner.damage_random_state, None);
+        // Opt in only within this test: prove the independent staged RNG
+        // survives manager/world handoffs, invalid controls and reset.
+        runtime.state.car.owner.damage_random_state = Some(0x8291_abcd);
+        runtime.initial.car.owner.damage_random_state = Some(0x8291_abcd);
         let initial = runtime.state.car.owner.vehicle.clone();
         let controls = Controls {
             throttle: 1.,
@@ -990,6 +996,8 @@ mod tests {
         let car = runtime.state.car.owner.vehicle.clone();
         let physical = runtime.state.car.owner.physical;
         let cache = runtime.cache.plane;
+        let damage_random_state = runtime.state.car.owner.damage_random_state;
+        assert!(damage_random_state.is_some());
         assert_ne!(car, initial);
         assert!(
             runtime
@@ -1003,14 +1011,26 @@ mod tests {
         assert_eq!(runtime.cache.plane, cache);
         assert_eq!(runtime.state.car.owner.vehicle, car);
         assert_eq!(runtime.state.car.owner.physical, physical);
+        assert_eq!(
+            runtime.state.car.owner.damage_random_state,
+            damage_random_state
+        );
         runtime.reset();
         assert_eq!(runtime.ticks, 0);
         assert_eq!(runtime.state.car.owner.vehicle, initial);
+        assert_eq!(
+            runtime.state.car.owner.damage_random_state,
+            Some(0x8291_abcd)
+        );
         for _ in 0..240 {
             runtime.tick(controls).unwrap();
         }
         assert_eq!(runtime.state.car.owner.vehicle, car);
         assert_eq!(runtime.state.car.owner.physical, physical);
+        assert_eq!(
+            runtime.state.car.owner.damage_random_state,
+            damage_random_state
+        );
         let before = runtime.velocity();
         for _ in 0..120 {
             runtime

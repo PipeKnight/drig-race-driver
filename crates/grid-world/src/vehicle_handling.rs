@@ -1,6 +1,6 @@
 //! Whole selected 9F3E80 mutable handling update, before car publication.
 //! Own the car/physical buffers and bounded optional component query records.
-//! Four supplied impact values must remain below the original damage threshold.
+//! Reached impacts require an independently owned global damage RNG.
 use crate::{Error, steering_control, vehicle_publication::State, wheel_damage};
 pub const MUTABLE: usize = 0xcdf0;
 pub struct ResetOutput {
@@ -287,7 +287,7 @@ pub fn calculate_with_queries(
         if !bounded(b, 0x60 + i * 0x30, 0x70 + i * 0x30) {
             return Err(Error("out-of-bound handling collision point"));
         }
-        if f(car, 0x1ac8 + i * 0x150) * delta > threshold {
+        if input.damage_random_state.is_none() && f(car, 0x1ac8 + i * 0x150) * delta > threshold {
             return Err(Error("unsupported handling collision damage"));
         }
         if f(car, 0x1aa8 + i * 0x150) > f(b, 0x2f0) && f(b, 0x2f4) <= 0. {
@@ -295,6 +295,32 @@ pub fn calculate_with_queries(
         }
     }
     let mut next = input.clone();
+    if let Some(mut random_state) = input.damage_random_state {
+        // Original order: all four collision dispatches precede wheel wear.
+        // Transform grouping follows 9F3F7D..9F3FD0, including homogeneous W.
+        for i in 0..4 {
+            let impact = f(car, 0x1ac8 + i * 0x150) * delta;
+            if impact <= threshold {
+                continue;
+            }
+            let local: [f32; 4] = std::array::from_fn(|j| f(b, 0x60 + i * 0x30 + j * 4));
+            let point = std::array::from_fn(|j| {
+                (local[3] * f(p, 0x200 + j * 4) + local[1] * f(p, 0x1e0 + j * 4))
+                    + (local[2] * f(p, 0x1f0 + j * 4) + local[0] * f(p, 0x1d0 + j * 4))
+            });
+            let output = crate::collision_damage::calculate_with_queries(
+                &next,
+                point,
+                impact,
+                true,
+                random_state,
+                queries,
+            )?;
+            random_state = output.random_state;
+            next = output.state;
+        }
+        next.damage_random_state = Some(random_state);
+    }
     let car = &mut next.vehicle;
     // Separate owned mutable storage prevents aliases during the full update.
     let mut b = car[MUTABLE / 4..(MUTABLE + 0x460) / 4].to_vec();
@@ -415,6 +441,7 @@ mod tests {
     use super::*;
     fn fixture() -> State {
         let mut s = State {
+            damage_random_state: None,
             vehicle: vec![0; crate::vehicle_publication::VEHICLE_WORDS],
             physical: [0; crate::vehicle_publication::PHYSICAL_WORDS],
         };
@@ -441,6 +468,52 @@ mod tests {
         s.physical.store(0x3f0, 1140.);
         s.physical.store(0x1e4, 1.);
         s
+    }
+    fn activate_damage(s: &mut State) {
+        s.damage_random_state = Some(0x8291_abcd);
+        for at in [0x1d0, 0x1e4, 0x1f8, 0x20c] {
+            s.physical.store(at, 1.);
+        }
+        s.vehicle.store(MUTABLE + 0x368, 0.);
+        s.vehicle.store(MUTABLE + 0x36c, 1.);
+        s.vehicle.store(MUTABLE + 0x370, 1.);
+        s.vehicle.store(MUTABLE + 0x240, 0.7);
+        s.vehicle.store(MUTABLE + 0x254, 0.5);
+        for at in [0x60, 0x90, 0xc0, 0xf0, 0x120, 0x150, 0x180, 0x1b0, 0x1e0] {
+            s.vehicle.store(MUTABLE + at + 12, 1.);
+            for j in 0..4 {
+                s.vehicle.store(MUTABLE + at + 16 + j * 4, 1.);
+            }
+            s.vehicle.store_byte(MUTABLE + at + 32, 1);
+        }
+        s.vehicle.store(0x1ac8, 100_000.);
+    }
+    #[test]
+    fn owned_damage_rng_is_distinct_and_failed_late_event_rolls_back() {
+        let mut s = fixture();
+        activate_damage(&mut s);
+        s.vehicle.store(MUTABLE + 0x280, 27.);
+        s.vehicle.store(MUTABLE + 0x284, 0.45);
+        s.vehicle.store(MUTABLE + 0x288, 105.);
+        s.vehicle.store_byte(MUTABLE + 0x442, 1);
+        s.vehicle.store(MUTABLE + 0x2f0, 1.);
+        s.vehicle.store(MUTABLE + 0x2f4, 10.);
+        s.vehicle.store(MUTABLE + 0x28c, 1.);
+        s.vehicle.store(0x1aa8, 2.);
+        let good = publish_with_queries(&s, 0.016, Some(&[])).unwrap();
+        assert_ne!(good.damage_random_state, s.damage_random_state);
+        assert_ne!(good.vehicle[0x1644 / 4], s.vehicle[0x1644 / 4]);
+        assert!(f(&good.vehicle, MUTABLE + 0x28) > 0.);
+        // Collision RNG and wheel0 wear precede the unsupported fourth event.
+        s.vehicle.store(0x1790 + 3 * 4, 1.);
+        let before = s.clone();
+        assert_eq!(
+            publish_with_queries(&s, 0.016, Some(&[])).err().unwrap().0,
+            "unsupported handling notification event"
+        );
+        assert_eq!(s.damage_random_state, before.damage_random_state);
+        assert_eq!(s.vehicle, before.vehicle);
+        assert_eq!(s.physical, before.physical);
     }
     #[test]
     fn finite_large_impact_keeps_original_damage_threshold_guard() {

@@ -32,6 +32,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for record in data[8..].as_chunks_mut::<RECORD>().0 {
         let delta = f32::from_bits(word(record, 0));
         let state = State {
+            damage_random_state: None,
             vehicle: (0..VEHICLE_WORDS)
                 .map(|i| word(record, 4 + i * 4))
                 .collect(),

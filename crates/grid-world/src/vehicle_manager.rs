@@ -317,7 +317,11 @@ mod tests {
                 material_multipliers: [None; 4],
                 diagnostics: [0.; 8],
             },
-            owner: crate::vehicle_publication::State { vehicle, physical },
+            owner: crate::vehicle_publication::State {
+                vehicle,
+                physical,
+                damage_random_state: None,
+            },
         };
         let query = |_, _| panic!("zero driver must not query contacts");
         let good = calculate(&input, [0, 1], 0., 9.81, None, query, |_| Ok(None)).unwrap();
