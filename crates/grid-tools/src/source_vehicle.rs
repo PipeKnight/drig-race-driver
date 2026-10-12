@@ -355,7 +355,21 @@ impl Runtime {
         let offset =
             std::array::from_fn(|j| f32::from_bits(self.state.car.owner.vehicle[0x1630 / 4 + j]));
         let geometry = crate::body_geometry::BodyGeometry::read(&ned, offset, table)?;
+        let boundary = crate::cqtc_geometry::Geometry::read(&read(
+            root,
+            "tracks/europe/donington/route_0/boundarylines.cqtc",
+            2 * 1024 * 1024,
+        )?)?;
+        if self.track.has_boundary() || self.state.shapes.len() != self.track.shape_count() + 1 {
+            return Err("body boundary already prepared or shape registration differs".into());
+        }
         self.reserve_geometry_pool(20)?;
+        self.track.attach_boundary(boundary);
+        self.state.shapes.push(grid_world::contact_groups::Shape {
+            angular: true,
+            ..Default::default()
+        });
+        self.initial = self.state.clone();
         Ok(geometry)
     }
 
@@ -488,6 +502,139 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn source_driving_cqtc_boundary() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let mut enabled = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let geometry = enabled.prepare_body_geometry(root, &table).unwrap();
+        assert!(enabled.track.has_boundary());
+        assert_eq!(enabled.track.shape_count(), 246);
+        assert_eq!(enabled.state.shapes.len(), 247);
+        assert_eq!(enabled.track.shape_name(246), Some("boundarylines.cqtc"));
+        assert!(enabled.prepare_body_geometry(root, &table).is_err());
+        enabled.reset();
+        assert_eq!(enabled.state.shapes.len(), 247);
+        assert_eq!(enabled.state.world.groups.contacts.len(), 20);
+        let mut legacy = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        for _ in 0..240 {
+            let controls = Controls {
+                throttle: 1.,
+                ..Default::default()
+            };
+            legacy.tick(controls).unwrap();
+            enabled
+                .tick_with_body_geometry(controls, &geometry)
+                .unwrap();
+            assert_eq!(
+                enabled.state.car.owner.physical,
+                legacy.state.car.owner.physical
+            );
+            assert_eq!(enabled.last_body_contacts, 0);
+        }
+        enabled.reset();
+        legacy.reset();
+        legacy.reserve_geometry_pool(20).unwrap();
+        let bytes = read(
+            root,
+            "tracks/europe/donington/route_0/boundarylines.cqtc",
+            2 * 1024 * 1024,
+        )
+        .unwrap();
+        let boundary = grid_formats::cqtc::read(&bytes).unwrap();
+        let points = boundary.triangles[0]
+            .indices
+            .map(|i| boundary.positions[i as usize]);
+        let center: [f32; 3] =
+            std::array::from_fn(|j| ((points[0][j] + points[1][j]) + points[2][j]) / 3.);
+        for runtime in [&mut enabled, &mut legacy] {
+            let p = &mut runtime.state.car.owner.physical;
+            for j in 0..3 {
+                p[0x1c0 / 4 + j] = center[j].to_bits();
+            }
+            runtime.state.world.groups.bodies[0] = *p;
+        }
+        let hits = geometry
+            .contacts(
+                &enabled.track,
+                &enabled.surfaces,
+                &[enabled.state.car.owner.physical],
+                20,
+            )
+            .unwrap();
+        assert!(!hits.is_empty());
+        assert!(hits.iter().any(|c| c[0x2c / 4] == 247));
+        let one = geometry
+            .contacts(
+                &enabled.track,
+                &enabled.surfaces,
+                &[enabled.state.car.owner.physical],
+                1,
+            )
+            .unwrap();
+        assert_eq!(one, hits[..1]);
+        let mut generated = 0;
+        let mut responses = 0;
+        for tick in 0..20 {
+            legacy
+                .tick_with_geometry(Controls::default(), |_, _| Ok(Vec::new()))
+                .unwrap();
+            enabled
+                .tick_with_body_geometry(Controls::default(), &geometry)
+                .unwrap_or_else(|e| panic!("source boundary tick {tick}: {e:?}"));
+            generated += enabled.last_body_contacts;
+            responses +=
+                usize::from(enabled.state.car.owner.physical != legacy.state.car.owner.physical);
+            assert!(enabled.velocity().iter().all(|v| v.is_finite()));
+        }
+        assert!(generated > 0 && responses > 0);
+        eprintln!(
+            "source_boundary ticks=20 contacts={generated} responses={responses} velocity={:?}",
+            enabled.velocity()
+        );
+        enabled.reset();
+        legacy.reset();
+        let mut first_difference = None;
+        let mut body_hits = 0;
+        for tick in 0..600 {
+            let controls = Controls {
+                throttle: 1.,
+                steering: 0.25,
+                ..Default::default()
+            };
+            legacy.tick_with_body_geometry(controls, &geometry).unwrap();
+            enabled
+                .tick_with_body_geometry(controls, &geometry)
+                .unwrap();
+            body_hits += enabled.last_body_contacts;
+            if first_difference.is_none()
+                && enabled.state.car.owner.physical != legacy.state.car.owner.physical
+            {
+                assert!(enabled.last_body_contacts > 0);
+                assert!(
+                    enabled
+                        .state
+                        .world
+                        .groups
+                        .contacts
+                        .iter()
+                        .any(|c| c[0x2c / 4] == 247)
+                );
+                first_difference = Some(tick + 1);
+            }
+        }
+        assert!(first_difference.is_some() && body_hits > 0);
+        assert!(enabled.pose()[13] > -30. && legacy.pose()[13] < -100.);
+        assert!(enabled.velocity().iter().all(|v| v.is_finite()));
+        eprintln!(
+            "source_boundary_turn ticks=600 first_difference={first_difference:?} body_contacts={body_hits} boundary_y={} packed_only_y={}",
+            enabled.pose()[13],
+            legacy.pose()[13]
+        );
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]

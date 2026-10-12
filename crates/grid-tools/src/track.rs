@@ -22,6 +22,7 @@ pub struct Track {
     pub grid: Grid,
     chunks: Vec<Chunk>,
     triangle_count: usize,
+    boundary: Option<crate::cqtc_geometry::Geometry>,
 }
 
 /// Fresh geometric record and the same one-based packed shape identity used
@@ -78,25 +79,36 @@ impl Track {
             grid,
             chunks,
             triangle_count,
+            boundary: None,
         })
     }
     pub fn triangle_count(&self) -> usize {
         self.triangle_count
     }
     pub fn shape_count(&self) -> usize {
-        self.chunks.len()
+        self.chunks.len() + usize::from(self.boundary.is_some())
     }
     pub fn shape_name(&self, id: u32) -> Option<&str> {
+        if self.boundary.is_some() && id as usize == self.chunks.len() + 1 {
+            return Some("boundarylines.cqtc");
+        }
         id.checked_sub(1)
             .and_then(|i| self.chunks.get(i as usize))
             .map(|c| c.name.as_str())
+    }
+
+    pub(crate) fn attach_boundary(&mut self, boundary: crate::cqtc_geometry::Geometry) {
+        self.boundary = Some(boundary);
+    }
+    pub fn has_boundary(&self) -> bool {
+        self.boundary.is_some()
     }
     pub fn triangle_index(&self, id: u32, local: usize) -> Option<usize> {
         let c = self.chunks.get(id.checked_sub(1)? as usize)?;
         (local < c.triangles.len()).then_some(c.first_triangle + local)
     }
 
-    /// Selected cold pair queries in archive order, with inclusive root AABB
+    /// Selected cold pair queries in boundary-first then archive order, with inclusive root AABB
     /// culling and at most 16 contacts per pair / 64 in the returned world pool.
     /// Archive order is authored scheduling, not the original broadphase order.
     pub fn body_contacts(
@@ -114,6 +126,38 @@ impl Track {
         }
         let bounds = mesh.world_bounds(matrix, query.margin)?;
         let mut contacts = Vec::new();
+        // Authored boundary-first scheduling keeps packed road contacts from
+        // exhausting the selected pool before this separate source shape.
+        if let Some(boundary) = &self.boundary
+            && capacity != 0
+            && (0..3).all(|j| {
+                bounds[0][j] <= boundary.bounds[j + 3] && bounds[1][j] >= boundary.bounds[j]
+            })
+        {
+            let mut mask = 0;
+            for (j, &key) in boundary.material_keys.iter().enumerate() {
+                mask |= u8::from(sheet(key)?) << j;
+            }
+            let generated = boundary.contacts(
+                mesh,
+                matrix,
+                &grid_world::packed_contacts::Settings {
+                    query: grid_world::convex_distance::ContactSettings {
+                        margin: query.margin,
+                        directions: query.directions,
+                    },
+                    contact_capacity: capacity.min(16),
+                    cache_enabled: true,
+                    candidate_capacity: 4096,
+                    sheet_mask: mask,
+                    correction_bounds: [f32::MAX; 4],
+                },
+            )?;
+            contacts.extend(generated.contacts.into_iter().map(|contact| BodyContact {
+                shape: self.chunks.len() as u32 + 1,
+                contact,
+            }));
+        }
         for (i, c) in self.chunks.iter().enumerate() {
             if contacts.len() == capacity {
                 break;
