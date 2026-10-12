@@ -39,3 +39,5 @@ A draft Markdown insertion assumed uniform CRLF and stopped on its assertion wit
 ## Next physical boundary
 
 Static inspection of the actual attachment path shows `A72EF0` constructs a kind7 mesh shape through `B460F0`, then `B444D0` recomputes face normals with a different reciprocal-root refinement and orients them away from the average vertex position. The initial mesh planes must therefore not be treated as final attached-shape planes. This is a static finding, not a validated shape call yet. Next reproduce complete shape initialization/update, physical linkage and actual narrow-phase/barrier contacts through the retained world. The prototype still has no geometric body/barrier response, and no complete lap is claimed.
+
+F214 follow-up: [complete supplied shape update](MESH_SHAPE_UPDATE.md) now validates the distinct outward-plane recalculation. Base construction and physical registration remain separate.
