@@ -38,7 +38,7 @@ fn normalized(v: [f32; 4]) -> Result<[f32; 4], Error> {
     Ok(v.map(|x| inverse * x))
 }
 
-fn multiply(a: Matrix, b: Matrix) -> Matrix {
+pub(crate) fn multiply(a: Matrix, b: Matrix) -> Matrix {
     std::array::from_fn(|r| {
         std::array::from_fn(|i| {
             (a[r][2] * b[2][i] + a[r][0] * b[0][i]) + (a[r][3] * b[3][i] + a[r][1] * b[1][i])

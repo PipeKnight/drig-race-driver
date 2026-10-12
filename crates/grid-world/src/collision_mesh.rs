@@ -1,6 +1,6 @@
 //! Owned collision mesh topology corresponding to selected whole B44E80.
 //! Pointer fields are checked relative offsets, never process addresses.
-//! Supplied geometry is not convexified or registered as a physical shape.
+//! Supplied geometry is not convexified. Selected first-shape attachment is explicit.
 use crate::{Error, spawn};
 
 pub struct Mesh {
@@ -294,6 +294,149 @@ impl Mesh {
     }
 }
 
+/// Complete selected cold physical construction then first shape attachment.
+/// One cell, empty endpoint lists, supplied diagonal inertia and skip-wake=true.
+/// This does not generate geometry pairs or advance the physical world.
+pub struct AttachedShape {
+    shape: ConstructedShape,
+    body: crate::physical_constructor::Output,
+    root: [u8; 0xa80],
+    cells: [u8; 16],
+}
+impl AttachedShape {
+    pub fn shape(&self) -> &ConstructedShape {
+        &self.shape
+    }
+    pub fn body(&self) -> &crate::physical_constructor::Output {
+        &self.body
+    }
+    pub fn root_bytes(&self) -> &[u8] {
+        &self.root
+    }
+    pub fn cell_bytes(&self) -> &[u8] {
+        &self.cells
+    }
+}
+
+impl Mesh {
+    // Retain original bounds expansion operand order, including signed zero.
+    #[allow(clippy::assign_op_pattern)]
+    pub fn construct_and_attach(
+        self,
+        descriptor: [u8; 0x84],
+        controls: [u32; 5],
+        physical_settings: [u32; 88],
+        fill: u8,
+    ) -> Result<AttachedShape, Error> {
+        if descriptor[0x80] > 31 || f32::from_bits(word(&descriptor, 0x68)) < 0. {
+            return Err(Error("invalid physical shape layer or margin"));
+        }
+        let mut body = crate::physical_constructor::initialize(&physical_settings, 0, fill)?;
+        let mut shape = self.construct_shape(descriptor, controls, fill)?;
+        let published = std::array::from_fn(|r| {
+            std::array::from_fn(|c| f32::from_bits(body.body[(0x1d0 + r * 16 + c * 4) / 4]))
+        });
+        let pose = if shape.prefix[0x214] == 0 {
+            published
+        } else {
+            let local = std::array::from_fn(|r| {
+                std::array::from_fn(|c| f32::from_bits(word(&shape.prefix, 0xf0 + r * 16 + c * 4)))
+            });
+            crate::physical_pose::multiply(local, published)
+        };
+        for (i, v) in pose.into_iter().flatten().enumerate() {
+            put(&mut shape.prefix, 0x130 + i * 4, v.to_bits());
+            put(&mut shape.prefix, 0x70 + i * 4, v.to_bits());
+        }
+        let mut lows = [[f32::MAX, f32::MAX, f32::MAX, 1.]; 4];
+        let mut highs = [[-f32::MAX, -f32::MAX, -f32::MAX, 1.]; 4];
+        // Original four independent accumulators, with remaining vertices in slot0.
+        let grouped = shape.mesh.points / 4 * 4;
+        for i in 0..shape.mesh.points {
+            let v = shape.mesh.point(i).unwrap();
+            let slot = if i < grouped { i % 4 } else { 0 };
+            let transformed: [f32; 4] = std::array::from_fn(|j| {
+                (v[2] * pose[2][j] + v[0] * pose[0][j]) + (v[3] * pose[3][j] + v[1] * pose[1][j])
+            });
+            for j in 0..4 {
+                if lows[slot][j] >= transformed[j] {
+                    lows[slot][j] = transformed[j];
+                }
+                if highs[slot][j] <= transformed[j] {
+                    highs[slot][j] = transformed[j];
+                }
+            }
+        }
+        let mut low = lows[0];
+        let mut high = highs[0];
+        for i in 1..4 {
+            for j in 0..4 {
+                if low[j] >= lows[i][j] {
+                    low[j] = lows[i][j];
+                }
+                if high[j] <= highs[i][j] {
+                    high[j] = highs[i][j];
+                }
+            }
+        }
+        let margin = f32::from_bits(word(&shape.prefix, 0x220));
+        for j in 0..4 {
+            let expansion = if j < 3 { margin } else { 0. };
+            low[j] -= expansion;
+            high[j] = expansion + high[j];
+        }
+        if low.iter().chain(&high).any(|x| !x.is_finite()) || (0..3).any(|j| low[j] > high[j]) {
+            return Err(Error("invalid physical shape bounds"));
+        }
+        for j in 0..4 {
+            put(&mut shape.prefix, 0x20 + j * 4, low[j].to_bits());
+            put(&mut shape.prefix, 0x30 + j * 4, high[j].to_bits());
+        }
+        put(&mut shape.prefix, 0xd8, 0xa000);
+        put(&mut shape.prefix, 0xe0, 0);
+        put(&mut shape.prefix, 0x198, 1);
+        let mut root = [0; 0xa80];
+        root[..0x100].copy_from_slice(&shape.prefix[0x2e0..0x3e0]);
+        for (o, v) in [
+            (0x940, 1000f32.to_bits()),
+            (0x944, 1000f32.to_bits()),
+            (0x948, 1),
+            (0x94c, 1),
+            (0x950, 0xb000),
+            (0x954, 0xb008),
+        ] {
+            put(&mut root, o, v);
+        }
+        for j in 0..3 {
+            let start = 0x19c + j * 40;
+            let end = start + 20;
+            put(&mut shape.prefix, start, 0x1000 + end as u32);
+            put(&mut shape.prefix, start + 4, 0);
+            put(&mut shape.prefix, end, 0);
+            put(&mut shape.prefix, end + 4, 0x1000 + start as u32);
+            put(&mut shape.prefix, start + 12, low[j].to_bits());
+            put(&mut shape.prefix, end + 12, high[j].to_bits());
+            put(&mut root, 0x900 + j * 4, 0x1000 + start as u32);
+        }
+        body.body[0x328 / 4] = 0x1000;
+        body.body[0x32c / 4] = 0x9000;
+        for (i, v) in body.world.iter_mut().enumerate() {
+            if i * 4 != 0x60 && *v != 0 {
+                *v = 0xa000;
+            }
+        }
+        body.world[0x18 / 4] = 0x12e0;
+        let mut cells = [0; 16];
+        put(&mut cells, 12, 0x1000);
+        Ok(AttachedShape {
+            shape,
+            body,
+            root,
+            cells,
+        })
+    }
+}
+
 fn word(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
 }
@@ -527,6 +670,55 @@ pub fn build(points: &[[f32; 4]], triangles: &[[u32; 3]], fill: u8) -> Result<Me
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn first_attachment_composes_bounds_and_preserves_supplied_inertia_without_waking() {
+        let points = [
+            [1., 1., 1., 1.],
+            [-1., -1., 1., 1.],
+            [-1., 1., -1., 1.],
+            [1., -1., -1., 1.],
+        ];
+        let faces = [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
+        let mut descriptor = [0; 0x84];
+        put(&mut descriptor, 4, 1);
+        for i in 0..4 {
+            put(&mut descriptor, 0x10 + i * 20, 1f32.to_bits());
+        }
+        descriptor[0x50] = 1;
+        put(&mut descriptor, 0x44, 2f32.to_bits());
+        put(&mut descriptor, 0x68, 0.25f32.to_bits());
+        let mut settings = [0; 88];
+        settings[0] = 1000f32.to_bits();
+        for (i, x) in [1000f32, 2000., 3000., 1.].into_iter().enumerate() {
+            settings[(0x10 + i * 20) / 4] = x.to_bits();
+            settings[(0xf0 + i * 20) / 4] = 1f32.to_bits();
+        }
+        settings[0x60 / 4] = 1;
+        settings[0x130 / 4] = 1; // Published pose, inactive body.
+        settings[0x120 / 4] = 10f32.to_bits();
+        settings[0x128 / 4] = (-4f32).to_bits();
+        let cold = crate::physical_constructor::initialize(&settings, 0, 0xcd).unwrap();
+        let attached = build(&points, &faces, 0xcd)
+            .unwrap()
+            .construct_and_attach(descriptor, [0; 5], settings, 0xcd)
+            .unwrap();
+        let p = attached.shape().prefix_bytes();
+        let bounds: [f32; 8] = std::array::from_fn(|i| f32::from_bits(word(p, 0x20 + i * 4)));
+        assert_eq!(bounds, [8.75, 0.75, -5.25, 1., 11.25, 3.25, -2.75, 1.]);
+        assert_eq!(attached.body().body[0x400 / 4], u32::MAX);
+        assert_eq!(
+            &attached.body().body[0x90 / 4..0x190 / 4],
+            &cold.body[0x90 / 4..0x190 / 4]
+        );
+        assert_eq!(attached.body().body[0x328 / 4], 0x1000);
+        assert_eq!(word(p, 0xd8), 0xa000);
+        assert_eq!(word(attached.cell_bytes(), 12), 0x1000);
+        assert_eq!(word(attached.root_bytes(), 0x900), 0x119c);
+        assert_eq!(word(p, 0x19c), 0x11b0);
+        assert_eq!(word(p, 0x1b4), 0x119c);
+        assert_eq!(settings[0x64 / 4], 0);
+    }
+
     #[test]
     fn constructed_shape_has_owned_wrapper_material_identity_and_world_counter() {
         let p = [
