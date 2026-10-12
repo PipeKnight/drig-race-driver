@@ -80,7 +80,21 @@ pub fn calculate_tick_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    tick(input, manager, shapes, None)
+    tick(input, manager, shapes, None, input.contacts.len())
+}
+
+/// Advance bodies, then solve an external relative-point prefix followed by
+/// world-space geometric contacts. Geometry generation remains external.
+pub fn calculate_tick_with_geometry(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+    external_count: usize,
+) -> Result<Output, Error> {
+    if external_count > input.contacts.len() {
+        return Err(Error("invalid external contact prefix"));
+    }
+    tick(input, manager, shapes, None, external_count)
 }
 
 pub(crate) fn calculate_tick_carried(
@@ -89,7 +103,7 @@ pub(crate) fn calculate_tick_carried(
     shapes: &[contact_groups::Shape],
     carry: &contact_groups::Carry,
 ) -> Result<Output, Error> {
-    tick(input, manager, shapes, Some(carry))
+    tick(input, manager, shapes, Some(carry), input.contacts.len())
 }
 
 fn validate(
@@ -109,6 +123,7 @@ fn tick(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
     carry: Option<&contact_groups::Carry>,
+    external_count: usize,
 ) -> Result<Output, Error> {
     validate(input, shapes, carry)?;
     let delta = manager.parameters[0];
@@ -149,7 +164,7 @@ fn tick(
             store_matrix(raw, offset, value);
         }
     }
-    let mut out = calculate_impl(&next, manager, shapes, carry)?;
+    let mut out = calculate_impl(&next, manager, shapes, carry, external_count)?;
     for (body, next) in out.groups.bodies.iter_mut().zip(update_next) {
         body[0x318 / 4] = next;
     }
@@ -165,7 +180,7 @@ pub fn calculate_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    calculate_impl(input, manager, shapes, None)
+    calculate_impl(input, manager, shapes, None, input.contacts.len())
 }
 
 fn calculate_impl(
@@ -173,6 +188,7 @@ fn calculate_impl(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
     carry: Option<&contact_groups::Carry>,
+    external_count: usize,
 ) -> Result<Output, Error> {
     validate(input, shapes, carry)?;
     if manager.properties.len() != input.bodies.len()
@@ -211,7 +227,7 @@ fn calculate_impl(
     let mut groups = if let Some(carry) = carry {
         contact_groups::calculate_carried(input, shapes, carry)?
     } else {
-        contact_groups::calculate_with_shapes(input, shapes)?
+        contact_groups::calculate_with_geometry(input, shapes, external_count)?
     };
     let mut manager = manager.clone();
     let mut visits = Vec::new();

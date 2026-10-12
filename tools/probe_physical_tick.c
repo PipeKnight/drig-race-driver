@@ -58,6 +58,8 @@ int wmain(int argc,wchar_t **argv){
  0x35535747
 #elif defined(GRID_WHOLE_PHYSICAL_WORLD)
  0x34535747
+#elif defined(GRID_GEOMETRY_CONTACTS)
+ 0x31475447
 #elif defined(GRID_OWNED_SHAPES) && defined(GRID_GROUPED_TICK)
  0x34535447
 #elif defined(GRID_OWNED_SHAPES)
@@ -84,6 +86,11 @@ int wmain(int argc,wchar_t **argv){
   unsigned active_next[16],body_ids[64][2],manager_ptrs[1],state[11],ref_limits[256]={0};
   __declspec(align(16)) unsigned char world[0x810]={0},producer[0xc40]={0};
   unsigned char world_before[0x810],producer_before[0xc40];
+#ifdef GRID_GEOMETRY_CONTACTS
+  __declspec(align(16)) unsigned char geometry_pair_owned[32+0x50+32],geometry_pair_before[0x50];
+  unsigned char *geometry_pair=geometry_pair_owned+32;
+  memset(geometry_pair_owned,0xcd,sizeof(geometry_pair_owned));memset(geometry_pair,0,0x50);
+#endif
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
   __declspec(align(16)) unsigned char worker[0x48]={0},worker_before[0x48],broadphase[0x100]={0},world_wrapper[16]={0};
   __declspec(align(16)) unsigned char worker_contacts[128]={0},worker_pairs[128]={0};
@@ -222,6 +229,11 @@ int wmain(int argc,wchar_t **argv){
     for(unsigned j=0;j<h[0];j++)put(bodies[j],0x300,active_next[j]?bodyptrs[active_next[j]-1]:0);
     manager_ptrs[0]=(unsigned)(uintptr_t)manager;put(world,4,1);put(world,0x10,(unsigned)(uintptr_t)manager_ptrs);put(world,0x18,(unsigned)(uintptr_t)producer);
     put(world,0x3c,bodyptrs[0]);put(world,0x44,bodyptrs[last]);put(world,0x64,1);put(producer,0x91c,(unsigned)(uintptr_t)contacts);put(producer,0x924,h[2]);
+#ifdef GRID_GEOMETRY_CONTACTS
+    put(producer,0x924,0);put(producer,0x930,h[2]?(unsigned)(uintptr_t)geometry_pair:0);
+    put(geometry_pair,0x20,(unsigned)(uintptr_t)contacts);put(geometry_pair,0x24,h[2]);
+    memcpy(geometry_pair_before,geometry_pair,0x50);
+#endif
 #ifdef GRID_REPRODUCED_PHYSICAL_WORLD
     put(producer,0x924,0);put(producer,0x920,4);
 #endif
@@ -335,6 +347,12 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned o=0xa8;o<=0xb8;o+=4)memcpy(manager_before+o,manager+o,4);
   const unsigned changed[]={0x38,0x3c,0x40,0x44,0x48,0x50,0x60,0x64,0x7f8,0x7fc};
   for(unsigned j=0;j<sizeof(changed)/sizeof(*changed);j++)memcpy(world_before+changed[j],world+changed[j],4);
+#ifdef GRID_GEOMETRY_CONTACTS
+  if(get(world,0x7f4)!=h[2]||memcmp(geometry_pair_before,geometry_pair,0x50)){error=10;break;}
+  put(world_before,0x7f4,h[2]);
+  for(unsigned j=0;j<32;j++)if(geometry_pair_owned[j]!=0xcd||geometry_pair_owned[32+0x50+j]!=0xcd)error=10;
+  if(error)break;
+#endif
 #ifdef GRID_WHOLE_PHYSICAL_WORLD
   if(get(world,0x7c4)||get(world,0x7c8)!=*(unsigned *)parameters||get(world,0x7cc)||get(producer,0x924)||get(producer,0xa78)||get(producer,0xa7c)||get(producer,0x930)||get(producer,0xc20)||producer[0xc24]){error=10;break;}
   put(world_before,0x7c8,*(unsigned *)parameters);put(producer_before,0x924,0);put(producer_before,0xa78,0);put(producer_before,0xa7c,0);

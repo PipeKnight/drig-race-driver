@@ -57,11 +57,14 @@ fn run() -> Result<(), Failure> {
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
+    let geometry_tick = word(h, 0) == 0x31475447;
     let reproduced_world = word(h, 0) == 0x36535747;
     let carried_world = word(h, 0) == 0x35535747 || reproduced_world;
     let whole_world = word(h, 0) == 0x34535747 || carried_world;
-    let owned_shapes = matches!(word(h, 0), 0x34534647 | 0x34535447) || whole_world;
-    let grouped_tick = matches!(word(h, 0), 0x33525447 | 0x34535447) || whole_world;
+    let owned_shapes =
+        matches!(word(h, 0), 0x34534647 | 0x34535447) || whole_world || geometry_tick;
+    let grouped_tick =
+        matches!(word(h, 0), 0x33525447 | 0x34535447) || whole_world || geometry_tick;
     let grouped = word(h, 0) == 0x33524647 || grouped_tick || owned_shapes;
     if (!world && !grouped && word(h, 0) != 0x33524650) || !(1..=1024).contains(&count) {
         return Err("invalid header".into());
@@ -367,7 +370,14 @@ fn run() -> Result<(), Failure> {
                 cached_pair: input.step.cached_pair,
                 cached_material: input.step.cached_material,
             };
-            let result = if reproduced_world {
+            let result = if geometry_tick {
+                grouped_physical_frame::calculate_tick_with_geometry(
+                    &group_input,
+                    &manager,
+                    &shapes,
+                    0,
+                )
+            } else if reproduced_world {
                 physical_world::calculate_produced(
                     &group_input,
                     &manager,

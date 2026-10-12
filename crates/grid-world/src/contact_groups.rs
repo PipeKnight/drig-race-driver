@@ -351,8 +351,21 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
 }
 
 pub fn calculate_with_shapes(input: &Input, shapes: &[Shape]) -> Result<Output, Error> {
+    calculate_with_geometry(input, shapes, input.contacts.len())
+}
+
+/// External pool records form the prefix and store points relative to body one.
+/// Geometric pair records form the suffix and already store world-space points.
+pub fn calculate_with_geometry(
+    input: &Input,
+    shapes: &[Shape],
+    external_count: usize,
+) -> Result<Output, Error> {
     validate_with_shapes(input, shapes)?;
-    build(input, shapes, 0)
+    if external_count > input.contacts.len() {
+        return Err(Error("invalid external contact prefix"));
+    }
+    build(input, shapes, 0, external_count)
 }
 
 pub(crate) fn calculate_carried(
@@ -361,10 +374,15 @@ pub(crate) fn calculate_carried(
     carry: &Carry,
 ) -> Result<Output, Error> {
     validate_carried(input, shapes, carry)?;
-    build(input, shapes, carry.dirty_head)
+    build(input, shapes, carry.dirty_head, input.contacts.len())
 }
 
-fn build(input: &Input, shapes: &[Shape], mut dirty: u32) -> Result<Output, Error> {
+fn build(
+    input: &Input,
+    shapes: &[Shape],
+    mut dirty: u32,
+    external_count: usize,
+) -> Result<Output, Error> {
     let mut out = Build {
         bodies: input.bodies.clone(),
         contacts: input.contacts.clone(),
@@ -393,14 +411,16 @@ fn build(input: &Input, shapes: &[Shape], mut dirty: u32) -> Result<Output, Erro
         out.set(id, 0x2fc, 0);
     }
     for i in 0..out.contacts.len() {
-        let id = field(&out.contacts[i], 4);
-        for k in 0..4 {
-            let value = f32::from_bits(out.b(id, 0x1c0 + k * 4))
-                + f32::from_bits(field(&out.contacts[i], 0x50 + k * 4));
-            if !value.is_finite() {
-                return Err(Error("contact-group point overflow"));
+        if i < external_count {
+            let id = field(&out.contacts[i], 4);
+            for k in 0..4 {
+                let value = f32::from_bits(out.b(id, 0x1c0 + k * 4))
+                    + f32::from_bits(field(&out.contacts[i], 0x50 + k * 4));
+                if !value.is_finite() {
+                    return Err(Error("contact-group point overflow"));
+                }
+                put(&mut out.contacts[i], 0x50 + k * 4, value.to_bits());
             }
-            put(&mut out.contacts[i], 0x50 + k * 4, value.to_bits());
         }
         out.contact(i, destination);
     }
@@ -472,6 +492,44 @@ fn build(input: &Input, shapes: &[Shape], mut dirty: u32) -> Result<Output, Erro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geometric_points_are_not_translated_as_external_pool_offsets() {
+        let mut body = [0; 0x424 / 4];
+        put(&mut body, 0x334, 0x1c0);
+        for (i, v) in [10f32, 20., 30., 1.].into_iter().enumerate() {
+            put(&mut body, 0x1c0 + i * 4, v.to_bits());
+        }
+        let mut contacts = vec![[0; 32]; 2];
+        for (i, c) in contacts.iter_mut().enumerate() {
+            put(c, 4, 1);
+            put_byte(c, 0xc, 1);
+            put_byte(c, 0xf, 1);
+            let point = if i == 0 {
+                [1f32, 2., 3., 0.]
+            } else {
+                [11., 22., 33., 1.]
+            };
+            for (j, v) in point.into_iter().enumerate() {
+                put(c, 0x50 + j * 4, v.to_bits());
+            }
+        }
+        let input = Input {
+            bodies: vec![body],
+            contacts,
+            active_order: vec![0],
+            selector: 0,
+        };
+        let before = input.clone();
+        let out = calculate_with_geometry(&input, &[], 1).unwrap();
+        assert_eq!(out.contacts[0][20..24], out.contacts[1][20..24]);
+        assert_eq!(out.contacts[1][20..24], before.contacts[1][20..24]);
+        let relative = calculate(&input).unwrap();
+        assert_ne!(relative.contacts[1][20..24], out.contacts[1][20..24]);
+        assert!(calculate_with_geometry(&input, &[], 3).is_err());
+        assert_eq!(input.bodies, before.bodies);
+        assert_eq!(input.contacts, before.contacts);
+    }
 
     #[test]
     fn late_point_overflow_keeps_complete_input_after_an_earlier_group() {
