@@ -526,56 +526,77 @@ impl Mesh {
 }
 
 // Original kind7 bounds reduction; the supplied publication is already checked.
-#[allow(clippy::assign_op_pattern)]
 fn update_bounds(
     shape: &mut ConstructedShape,
     pose: crate::physical_pose::Matrix,
 ) -> Result<(), Error> {
-    let mut lows = [[f32::MAX, f32::MAX, f32::MAX, 1.]; 4];
-    let mut highs = [[-f32::MAX, -f32::MAX, -f32::MAX, 1.]; 4];
-    // Original four independent accumulators, with remaining vertices in slot0.
-    let grouped = shape.mesh.points / 4 * 4;
-    for i in 0..shape.mesh.points {
-        let v = shape.mesh.point(i).unwrap();
-        let slot = if i < grouped { i % 4 } else { 0 };
-        let transformed: [f32; 4] = std::array::from_fn(|j| {
-            (v[2] * pose[2][j] + v[0] * pose[0][j]) + (v[3] * pose[3][j] + v[1] * pose[1][j])
-        });
-        for j in 0..4 {
-            if lows[slot][j] >= transformed[j] {
-                lows[slot][j] = transformed[j];
-            }
-            if highs[slot][j] <= transformed[j] {
-                highs[slot][j] = transformed[j];
-            }
-        }
-    }
-    let mut low = lows[0];
-    let mut high = highs[0];
-    for i in 1..4 {
-        for j in 0..4 {
-            if low[j] >= lows[i][j] {
-                low[j] = lows[i][j];
-            }
-            if high[j] <= highs[i][j] {
-                high[j] = highs[i][j];
-            }
-        }
-    }
     let margin = f32::from_bits(word(&shape.prefix, 0x220));
-    for j in 0..4 {
-        let expansion = if j < 3 { margin } else { 0. };
-        low[j] -= expansion;
-        high[j] = expansion + high[j];
-    }
-    if low.iter().chain(&high).any(|x| !x.is_finite()) || (0..3).any(|j| low[j] > high[j]) {
-        return Err(Error("invalid physical shape bounds"));
-    }
+    let [low, high] = shape.mesh.world_bounds(pose, margin)?;
     for j in 0..4 {
         put(&mut shape.prefix, 0x20 + j * 4, low[j].to_bits());
         put(&mut shape.prefix, 0x30 + j * 4, high[j].to_bits());
     }
     Ok(())
+}
+
+impl Mesh {
+    /// Current transformed mesh bounds, including the selected shape margin.
+    #[allow(clippy::assign_op_pattern)] // Preserve the original expansion operand order.
+    pub fn world_bounds(
+        &self,
+        pose: crate::physical_pose::Matrix,
+        margin: f32,
+    ) -> Result<[[f32; 4]; 2], Error> {
+        if !margin.is_finite()
+            || !(0. ..=1e6).contains(&margin)
+            || pose
+                .iter()
+                .flatten()
+                .any(|x| !x.is_finite() || x.abs() > 1e5)
+        {
+            return Err(Error("invalid mesh bounds controls"));
+        }
+        let mut lows = [[f32::MAX, f32::MAX, f32::MAX, 1.]; 4];
+        let mut highs = [[-f32::MAX, -f32::MAX, -f32::MAX, 1.]; 4];
+        // Original four independent accumulators, with remaining vertices in slot0.
+        let grouped = self.points / 4 * 4;
+        for i in 0..self.points {
+            let v = self.point(i).unwrap();
+            let slot = if i < grouped { i % 4 } else { 0 };
+            let transformed: [f32; 4] = std::array::from_fn(|j| {
+                (v[2] * pose[2][j] + v[0] * pose[0][j]) + (v[3] * pose[3][j] + v[1] * pose[1][j])
+            });
+            for j in 0..4 {
+                if lows[slot][j] >= transformed[j] {
+                    lows[slot][j] = transformed[j];
+                }
+                if highs[slot][j] <= transformed[j] {
+                    highs[slot][j] = transformed[j];
+                }
+            }
+        }
+        let mut low = lows[0];
+        let mut high = highs[0];
+        for i in 1..4 {
+            for j in 0..4 {
+                if low[j] >= lows[i][j] {
+                    low[j] = lows[i][j];
+                }
+                if high[j] <= highs[i][j] {
+                    high[j] = highs[i][j];
+                }
+            }
+        }
+        for j in 0..4 {
+            let expansion = if j < 3 { margin } else { 0. };
+            low[j] -= expansion;
+            high[j] = expansion + high[j];
+        }
+        if low.iter().chain(&high).any(|x| !x.is_finite()) || (0..3).any(|j| low[j] > high[j]) {
+            return Err(Error("invalid physical shape bounds"));
+        }
+        Ok([low, high])
+    }
 }
 
 fn word(b: &[u8], o: usize) -> u32 {
