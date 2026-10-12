@@ -120,7 +120,7 @@ fn ramp(level: f32, start: f32, end: f32, low: f32) -> f32 {
     }
 }
 #[allow(clippy::assign_op_pattern)] // Preserve the original SSE operand order.
-fn effects(
+pub(crate) fn effects(
     b: &mut [u32],
     queries: Option<&[QueryRecord]>,
     wheel_views_active: bool,

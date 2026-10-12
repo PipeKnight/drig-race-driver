@@ -5,6 +5,7 @@ use std::{fmt, ops::Range};
 pub mod assisted_steering;
 pub mod candidate_grid;
 pub mod collision_callback;
+pub mod collision_damage;
 pub mod collision_dispatch;
 pub mod collision_mesh;
 pub mod contact_bias;
