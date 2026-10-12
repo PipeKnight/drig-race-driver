@@ -14,6 +14,12 @@ use std::path::Path;
 pub const DELTA: f32 = 0.016;
 pub const GRAVITY: f32 = f32::from_bits(0x411c_f5c3);
 
+type GeometryProvider<'a> = dyn FnMut(
+        &[grid_world::contact_groups::Body],
+        usize,
+    ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>
+    + 'a;
+
 pub struct Runtime {
     pub state: vehicle_world::State,
     initial: vehicle_world::State,
@@ -309,6 +315,42 @@ impl Runtime {
     /// Stage controls, queries and the complete world. A failed tick preserves
     /// all authoritative state, including the query cache and tick counter.
     pub fn tick(&mut self, controls: Controls) -> Result<(), Error> {
+        self.tick_owned(controls, None)
+    }
+
+    /// Enlarge the initial stable pool and solver rows for a geometry provider.
+    /// Reset retains this reservation. Call before the first driving tick.
+    /// After enlarging beyond four slots, use `tick_with_geometry` for all ticks.
+    pub fn reserve_geometry_pool(&mut self, capacity: usize) -> Result<(), Error> {
+        if self.ticks != 0
+            || !(4..=64).contains(&capacity)
+            || self.state.world.groups.contacts.len() != 4
+        {
+            return Err(Error("invalid initial geometry reservation"));
+        }
+        self.state.world.groups.contacts.resize(capacity, [0; 32]);
+        self.state.world.manager.rows.resize(capacity * 4, [0; 48]);
+        self.state.world.manager.capacity = capacity * 4;
+        self.initial = self.state.clone();
+        Ok(())
+    }
+
+    pub fn tick_with_geometry(
+        &mut self,
+        controls: Controls,
+        mut geometry: impl FnMut(
+            &[grid_world::contact_groups::Body],
+            usize,
+        ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>,
+    ) -> Result<(), Error> {
+        self.tick_owned(controls, Some(&mut geometry))
+    }
+
+    fn tick_owned(
+        &mut self,
+        controls: Controls,
+        geometry: Option<&mut GeometryProvider<'_>>,
+    ) -> Result<(), Error> {
         if [controls.throttle, controls.brake]
             .iter()
             .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
@@ -339,31 +381,32 @@ impl Runtime {
             u8::from(controls.handbrake),
         );
         let mut cache = self.cache;
-        let output = vehicle_world::calculate(
-            &staged,
-            self.pair,
-            GRAVITY,
-            None,
-            |_, ray| {
-                self.track
-                    .query(ray.start, ray.end, &mut cache)?
-                    .hit
-                    .map(|h| {
-                        let (index, material) = self
-                            .surfaces
-                            .contact(h.contact.material)
-                            .map_err(|_| Error("missing source mechanics"))?;
-                        Ok(suspension_prepare::Contact {
-                            normal: h.contact.normal,
-                            fraction: h.contact.fraction,
-                            material,
-                            tokens: [index as u32 + 1, h.shape + 1, 1],
-                        })
+        let query = |_, ray: grid_world::contact_ray::Ray| {
+            self.track
+                .query(ray.start, ray.end, &mut cache)?
+                .hit
+                .map(|h| {
+                    let (index, material) = self
+                        .surfaces
+                        .contact(h.contact.material)
+                        .map_err(|_| Error("missing source mechanics"))?;
+                    Ok(suspension_prepare::Contact {
+                        normal: h.contact.normal,
+                        fraction: h.contact.fraction,
+                        material,
+                        tokens: [index as u32 + 1, h.shape + 1, 1],
                     })
-                    .transpose()
-            },
-            |token| self.surfaces.joined(token),
-        )?;
+                })
+                .transpose()
+        };
+        let material = |token| self.surfaces.joined(token);
+        let output = if let Some(geometry) = geometry {
+            vehicle_world::calculate_with_geometry(
+                &staged, self.pair, GRAVITY, None, query, material, geometry,
+            )?
+        } else {
+            vehicle_world::calculate(&staged, self.pair, GRAVITY, None, query, material)?
+        };
         self.state = output.state;
         self.cache = cache;
         self.ticks += 1;
@@ -385,6 +428,240 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn source_driving_geometry_provider() {
+        use grid_world::{
+            collision_mesh, contact_groups, convex_distance, packed_contacts, packed_query,
+        };
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let mut legacy = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let mut enabled = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        assert!(enabled.reserve_geometry_pool(65).is_err());
+        enabled.reserve_geometry_pool(20).unwrap();
+        let controls = Controls {
+            throttle: 1.,
+            steering: 0.03,
+            ..Default::default()
+        };
+        let mut calls = 0;
+        for _ in 0..240 {
+            legacy.tick(controls).unwrap();
+            enabled
+                .tick_with_geometry(controls, |bodies, remaining| {
+                    calls += 1;
+                    assert_eq!(bodies.len(), 1);
+                    assert!((16..=20).contains(&remaining));
+                    Ok(Vec::new())
+                })
+                .unwrap();
+            assert_eq!(
+                legacy.state.car.owner.vehicle,
+                enabled.state.car.owner.vehicle
+            );
+            assert_eq!(
+                legacy.state.car.owner.physical,
+                enabled.state.car.owner.physical
+            );
+            assert_eq!(
+                legacy.state.world.groups.world,
+                enabled.state.world.groups.world
+            );
+            assert_eq!(
+                legacy.state.world.manager.workspace,
+                enabled.state.world.manager.workspace
+            );
+        }
+        assert_eq!(calls, 240);
+        assert_eq!(enabled.state.world.groups.contacts.len(), 20);
+        assert!(enabled.reserve_geometry_pool(20).is_err());
+        let before = enabled.state.clone();
+        let cache = enabled.cache.plane;
+        assert!(
+            enabled
+                .tick_with_geometry(controls, |_, _| Err(Error("geometry failure")))
+                .is_err()
+        );
+        assert_eq!(enabled.ticks, 240);
+        assert_eq!(enabled.cache.plane, cache);
+        assert_eq!(enabled.state.car.owner.vehicle, before.car.owner.vehicle);
+        assert_eq!(enabled.state.car.owner.physical, before.car.owner.physical);
+        assert_eq!(
+            enabled.state.world.groups.contacts,
+            before.world.groups.contacts
+        );
+        assert_eq!(enabled.state.world.groups.world, before.world.groups.world);
+        assert_eq!(enabled.state.world.manager.rows, before.world.manager.rows);
+        assert_eq!(
+            enabled.state.world.manager.workspace,
+            before.world.manager.workspace
+        );
+        enabled.reset();
+        assert_eq!(enabled.ticks, 0);
+        assert_eq!(enabled.state.world.groups.contacts.len(), 20);
+
+        let ned_bytes = read(root, "cars/lac/lac.ned", 16 * 1024 * 1024).unwrap();
+        let ned = binxml::read(&ned_bytes).unwrap();
+        let raw = car_collision::read(&ned).unwrap();
+        let points: Vec<_> = raw.points.iter().map(|p| [p[0], p[1], p[2], 1.]).collect();
+        let offset: [f32; 4] = std::array::from_fn(|j| {
+            f32::from_bits(enabled.state.car.owner.vehicle[0x1630 / 4 + j])
+        });
+        let mesh = collision_mesh::build_from_source(
+            &points,
+            &raw.triangles,
+            offset,
+            [raw.bounds.min[1], raw.bounds.max[1]],
+            0,
+        )
+        .unwrap();
+        let span = mesh.bytes().len() as u32;
+        let shape = mesh
+            .initialize_shape(
+                collision_mesh::ShapeSettings {
+                    span,
+                    scalar220: 0.,
+                    layer: 0,
+                    flag_c0: false,
+                },
+                0,
+            )
+            .unwrap();
+        let height = offset[1] + (raw.bounds.max[1] + raw.bounds.min[1]) * 0.5;
+        let local = [
+            [1., 0., 0., 0.],
+            [0., 1., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., height, 0., 1.],
+        ];
+        let table = std::fs::read(
+            std::env::var_os("GRID_CONTACT_DIRECTIONS").expect("private directions required"),
+        )
+        .unwrap();
+        assert_eq!(table.len(), 712);
+        assert_eq!(&table[..8], b"CD01\x2c\0\0\0");
+        let directions = std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                f32::from_le_bytes(
+                    table[8 + i * 16 + j * 4..12 + i * 16 + j * 4]
+                        .try_into()
+                        .unwrap(),
+                )
+            })
+        });
+        let publish = |body: &contact_groups::Body| {
+            let matrix = |o: usize| {
+                std::array::from_fn(|i| {
+                    std::array::from_fn(|j| f32::from_bits(body[o / 4 + i * 4 + j]))
+                })
+            };
+            grid_world::physical_pose::calculate(&grid_world::physical_pose::Input {
+                basis: matrix(0x190),
+                offset: std::array::from_fn(|j| f32::from_bits(body[0x230 / 4 + j])),
+                local_matrices: [matrix(0x90), matrix(0x150)],
+                shapes: vec![Some(local)],
+                group_head: false,
+                linear: [0.; 4],
+                angular: [0.; 4],
+            })
+        };
+        let center = enabled.pose();
+        let bounds = shape
+            .mesh()
+            .world_bounds(
+                publish(&enabled.state.car.owner.physical).unwrap().shapes[0],
+                0.,
+            )
+            .unwrap();
+        // Authored shallow wall, not a recovered Donington barrier placement.
+        let x = bounds[1][0] - 0.01;
+        let z = center[14];
+        let y = center[13];
+        let vertices = [
+            [x, y - 10., z - 10.],
+            [x, y + 10., z - 10.],
+            [x, y, z + 10.],
+        ];
+        let leaves = std::collections::BTreeMap::from([(0, vec![0])]);
+        let track = packed_query::Mesh {
+            bounds: [x - 20., y - 20., z - 20., x + 20., y + 20., z + 20.],
+            vertices: &vertices,
+            triangles: &[[0, 1, 2]],
+            nodes: &[0x8000],
+            leaves: &leaves,
+        };
+        let mut total = 0;
+        let mut responses = 0;
+        legacy.reset();
+        for tick in 0..20 {
+            legacy.tick(Controls::default()).unwrap();
+            enabled
+                .tick_with_geometry(Controls::default(), |bodies, remaining| {
+                    let published = publish(&bodies[0])?;
+                    let generated = packed_contacts::calculate(
+                        shape.mesh(),
+                        published.shapes[0],
+                        &track,
+                        &[0],
+                        &packed_contacts::Settings {
+                            query: convex_distance::ContactSettings {
+                                margin: 0.,
+                                directions,
+                            },
+                            contact_capacity: remaining.min(16),
+                            cache_enabled: true,
+                            candidate_capacity: 4096,
+                            sheet_mask: 0,
+                            correction_bounds: [f32::MAX; 4],
+                        },
+                    )?;
+                    eprintln!(
+                        "geometry_probe tick={tick} contacts={} depths={:?}",
+                        generated.contacts.len(),
+                        generated
+                            .contacts
+                            .iter()
+                            .map(|c| c.penetration)
+                            .collect::<Vec<_>>()
+                    );
+                    total += generated.contacts.len();
+                    Ok(generated
+                        .contacts
+                        .into_iter()
+                        .map(|contact| {
+                            let mut c: contact_groups::Contact = [0; 32];
+                            c[1] = 1;
+                            c[0xc / 4] = 0x01000000;
+                            c[0x1c / 4] = u32::MAX;
+                            c[0x20 / 4] = u32::MAX;
+                            c[0x24 / 4] = 1;
+                            c[0x28 / 4] = 1;
+                            c[0x2c / 4] = 2;
+                            c[0x38 / 4] = contact.penetration.to_bits();
+                            c[0x3c / 4] = f32::MAX.to_bits();
+                            c[0x50 / 4..0x60 / 4].copy_from_slice(&contact.point.map(f32::to_bits));
+                            c[0x60 / 4..0x70 / 4]
+                                .copy_from_slice(&contact.normal.map(f32::to_bits));
+                            c[0x70 / 4] = (u32::from(contact.flipped) << 8) | (1 << 24);
+                            c
+                        })
+                        .collect())
+                })
+                .unwrap_or_else(|e| panic!("wall tick {tick}: {e:?}"));
+            responses +=
+                usize::from(enabled.state.car.owner.physical != legacy.state.car.owner.physical);
+        }
+        assert!(total > 0);
+        assert!(responses > 0);
+        assert_eq!(enabled.ticks, 20);
+        assert!(enabled.velocity().iter().all(|x| x.is_finite()));
+        eprintln!(
+            "fresh_source_mesh_wall ticks=20 contacts={total} response_ticks={responses} velocity={:?}",
+            enabled.velocity()
+        );
+    }
 
     // Deliberately opt-in: purchased resources never become test fixtures.
     #[test]
