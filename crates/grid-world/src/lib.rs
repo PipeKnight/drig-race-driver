@@ -6,6 +6,7 @@ pub mod assisted_steering;
 pub mod candidate_grid;
 pub mod collision_callback;
 pub mod collision_dispatch;
+pub mod collision_mesh;
 pub mod contact_bias;
 pub mod contact_collection;
 pub mod contact_groups;
