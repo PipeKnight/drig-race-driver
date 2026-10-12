@@ -62,6 +62,7 @@ struct ViewerCamera;
 #[derive(Resource)]
 struct Driving {
     runtime: grid_tools::source_vehicle::Runtime,
+    geometry: Option<grid_tools::body_geometry::BodyGeometry>,
     paused: bool,
     failure: Option<String>,
     scripted_ticks: Option<u64>,
@@ -80,7 +81,7 @@ impl Driving {
             .filter(|i| b[(0x1990 + i * 0x150 + 0xc0) / 4] != 0)
             .count();
         println!(
-            "drive_sample version=1 event={event} segment={} tick={} seconds={:.6} wall_seconds={:.6} throttle={} brake={} steering={} handbrake={} gear={} wheel_hits={hits} pose={:?} velocity={:?} wheel_brakes={brakes:?}",
+            "drive_sample version=1 event={event} segment={} tick={} seconds={:.6} wall_seconds={:.6} throttle={} brake={} steering={} handbrake={} gear={} wheel_hits={hits} pose={:?} velocity={:?} wheel_brakes={brakes:?} body_geometry={} body_contacts={}",
             self.segment,
             self.runtime.ticks,
             self.runtime.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
@@ -91,7 +92,9 @@ impl Driving {
             controls.handbrake,
             b[0x196c / 4],
             self.runtime.pose(),
-            self.runtime.velocity()
+            self.runtime.velocity(),
+            self.geometry.is_some(),
+            self.runtime.last_body_contacts
         );
     }
 }
@@ -719,11 +722,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut target = None;
     let mut drive = false;
     let mut drive_ticks = None;
+    let mut body_contacts = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--drive" => drive = true,
+            "--body-contacts" => {
+                body_contacts = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--body-contacts needs a private CD01 path")?,
+                ));
+            }
             "--drive-ticks" => {
                 drive_ticks = Some(args.next().ok_or("missing tick count")?.parse::<u64>()?)
             }
@@ -778,7 +788,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Full body collisions and race rules are not implemented.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Full body collisions and race rules are not implemented.\n--body-contacts PRIVATE_CD01: experimental Donington body contacts; shared material, archive order, above-threshold damage pauses driving.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 return Ok(());
             }
@@ -787,6 +797,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=36000".into());
+    }
+    if body_contacts.is_some() && !drive {
+        return Err("--body-contacts requires --drive".into());
     }
     if !scripted.throttle.is_finite()
         || !(0. ..=1.).contains(&scripted.throttle)
@@ -800,8 +813,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         reference = true;
         collision = false;
         start_view = true;
+        let mut runtime = grid_tools::source_vehicle::Runtime::lacetti(&root, "slot_00", 200679)?;
+        let geometry = body_contacts.map(|path| -> Result<_, Box<dyn std::error::Error>> {
+            if std::fs::metadata(&path)?.len() != 712 {
+                return Err("invalid private body sampling extent".into());
+            }
+            let table = std::fs::read(path)?;
+            let geometry = runtime.prepare_body_geometry(&root, &table)?;
+            println!("drive_body_geometry enabled=true pool=20 order=archive materials=shared damage=guarded");
+            Ok(geometry)
+        }).transpose()?;
         Some(Driving {
-            runtime: grid_tools::source_vehicle::Runtime::lacetti(&root, "slot_00", 200679)?,
+            runtime,
+            geometry,
             paused: false,
             failure: None,
             scripted_ticks: drive_ticks,
@@ -1229,7 +1253,13 @@ fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
             handbrake: input.pressed(KeyCode::Space),
         }
     };
-    if let Err(error) = driving.runtime.tick(controls) {
+    let driving = &mut *driving;
+    let result = if let Some(geometry) = &driving.geometry {
+        driving.runtime.tick_with_body_geometry(controls, geometry)
+    } else {
+        driving.runtime.tick(controls)
+    };
+    if let Err(error) = result {
         let text = format!("tick {}: {error}; R resets", driving.runtime.ticks + 1);
         error!("driving paused: {text}");
         driving.failure = Some(text);
@@ -1237,6 +1267,7 @@ fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
     } else {
         if driving.last_controls != Some(controls)
             || driving.runtime.ticks.is_multiple_of(16)
+            || driving.runtime.last_body_contacts > 0
             || driving.scripted_ticks == Some(driving.runtime.ticks)
         {
             driving.report("tick", controls);
@@ -1309,9 +1340,14 @@ fn drive_present(
     } else {
         ""
     };
+    let geometry = if driving.geometry.is_some() {
+        format!(" | BODY {}", driving.runtime.last_body_contacts)
+    } else {
+        String::new()
+    };
     for mut window in &mut windows {
         window.title = format!(
-            "GRID prototype | {speed:.1} km/h | gear {gear}{handbrake} | tick {} | {}",
+            "GRID prototype | {speed:.1} km/h | gear {gear}{handbrake}{geometry} | tick {} | {}",
             driving.runtime.ticks,
             driving.failure.as_deref().unwrap_or(if driving.paused {
                 "Paused; P resumes; R resets"
@@ -1466,15 +1502,32 @@ mod driving_tests {
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn keyboard_pause_reset_and_failure_recovery() {
+        exercise_keyboard_recovery(None);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn body_geometry_keyboard_pause_reset_and_failure_recovery() {
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        exercise_keyboard_recovery(Some(&table));
+    }
+
+    fn exercise_keyboard_recovery(table: Option<&[u8]>) {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
-        let runtime =
+        let mut runtime =
             grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
                 .unwrap();
+        let geometry = table.map(|table| {
+            runtime
+                .prepare_body_geometry(Path::new(&root), table)
+                .unwrap()
+        });
         let mut app = App::new();
         app.add_message::<AppExit>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(Driving {
                 runtime,
+                geometry,
                 paused: false,
                 failure: None,
                 scripted_ticks: None,

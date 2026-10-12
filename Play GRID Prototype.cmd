@@ -33,7 +33,12 @@ echo Click the game window once if keyboard input does not respond.
 echo Drive slowly at first. Body/barrier collisions and lap timing are unfinished.
 echo Private diagnostic log: %GRID_PLAY_LOG%
 echo Loading the source track can take a little while...
-"target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
+if "%~2"=="" (
+  "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
+) else (
+  echo Experimental body contacts enabled. Heavy impacts can pause; R resets.
+  "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
+)
 set "GRID_PLAY_EXIT=%ERRORLEVEL%"
 echo Prototype exited with code %GRID_PLAY_EXIT%.
 echo Log saved to %GRID_PLAY_LOG%.
