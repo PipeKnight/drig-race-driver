@@ -5,10 +5,16 @@ use crate::{Error, spawn};
 
 pub struct Mesh {
     bytes: Vec<u8>,
-    pub points: usize,
-    pub faces: usize,
+    points: usize,
+    faces: usize,
 }
 impl Mesh {
+    pub fn point_count(&self) -> usize {
+        self.points
+    }
+    pub fn face_count(&self) -> usize {
+        self.faces
+    }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -103,6 +109,188 @@ impl Mesh {
         put(&mut shape, 0x240, 0x250);
         put(&mut shape, 0x244, align16(settings.span as usize) as u32);
         Ok(MeshShape { shape, mesh: self })
+    }
+}
+
+/// Complete selected B460F0/B23D70 construction with an owned empty world.
+/// Tokens identify only the diagnostic ownership graph; no allocation/registration.
+pub struct ConstructedShape {
+    prefix: [u8; 0x500],
+    mesh: Mesh,
+}
+impl ConstructedShape {
+    pub fn prefix_bytes(&self) -> &[u8] {
+        &self.prefix
+    }
+    pub fn mesh(&self) -> &Mesh {
+        &self.mesh
+    }
+}
+
+impl Mesh {
+    pub fn construct_shape(
+        self,
+        descriptor: [u8; 0x84],
+        controls: [u32; 5],
+        fill: u8,
+    ) -> Result<ConstructedShape, Error> {
+        let mut d = descriptor;
+        if word(&d, 0) != 0
+            || word(&d, 0x5c) != 0
+            || controls[0] > 1000000
+            || controls[1] > 1
+            || controls[4] > 1000000
+            || (0x10..0x50).step_by(4).any(|o| {
+                let v = f32::from_bits(word(&d, o));
+                !v.is_finite() || v.abs() > 10000.
+            })
+            || [0x58, 0x60, 0x68].iter().any(|&o| {
+                let v = f32::from_bits(word(&d, o));
+                !v.is_finite() || v.abs() > 1e6
+            })
+            || [0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x71, 0x79, 0x7a]
+                .iter()
+                .any(|&o| d[o] > 1)
+        {
+            return Err(Error("invalid mesh shape constructor settings"));
+        }
+        let updated = self.initialize_shape(
+            ShapeSettings {
+                span: word(&d, 4),
+                scalar220: f32::from_bits(word(&d, 0x68)),
+                layer: d[0x80],
+                flag_c0: d[0x54] != 0,
+            },
+            fill,
+        )?;
+        let mut p = [fill; 0x500];
+        put(&mut p, 0, 0x7000);
+        put(&mut p, 0x10, 7);
+        for o in [0x231, 0x216, 0x215, 0x217, 0x218, 0x16, 0x229, 0x230, 0x60] {
+            p[o] = 0;
+        }
+        p[0x15] = 1;
+        p[0x228] = 1;
+        for o in [0x184, 0x188, 0xec, 0xe8, 0x21c, 0x224, 0x22c] {
+            put(&mut p, o, 0);
+        }
+        put(&mut p, 0x198, u32::MAX);
+        for r in 0..4 {
+            for c in 0..4 {
+                put(
+                    &mut p,
+                    0x70 + r * 16 + c * 4,
+                    if r == c { 1f32.to_bits() } else { 0 },
+                );
+            }
+        }
+        for j in 0..4 {
+            put(&mut p, 0xb0 + j * 4, 0x1070 + j as u32 * 16);
+        }
+        p[0x229] = d[0x71];
+        put(&mut p, 0x22c, word(&d, 0x74));
+        p[0x230] = d[0x78];
+        p[0x216] = d[0x7a];
+        for r in 0..3 {
+            put(&mut d, 0x1c + r * 16, 0);
+        }
+        put(&mut d, 0x4c, 1f32.to_bits());
+        for (dst, src) in [
+            (0x17, 0x52),
+            (0x18, 0x53),
+            (0xc0, 0x54),
+            (0xc1, 0x55),
+            (0x228, 0x70),
+            (0x15, 0x79),
+            (0x190, 0x64),
+            (0x19, 0x80),
+            (0x1a, 0x81),
+            (0x14, 0x51),
+        ] {
+            p[dst] = d[src];
+        }
+        for (dst, src) in [(0xc4, 0x58), (0x224, 0x6c), (0x220, 0x68), (0x18c, 0x60)] {
+            put(&mut p, dst, word(&d, src));
+        }
+        put(&mut p, 0xcc, 0x12e0);
+        let material = if controls[1] == 0 {
+            0
+        } else if word(&d, 0x7c) == controls[3] && word(&d, 0x7c) != controls[2] {
+            0x1440
+        } else {
+            0x1420
+        };
+        put(&mut p, 0xc8, material);
+        put(&mut p, 0x194, controls[0]);
+        for (o, value) in [
+            (0x170, 0x1130),
+            (0x174, 0x1130),
+            (0x178, 0x1140),
+            (0x17c, 0x1150),
+            (0x180, 0x1160),
+        ] {
+            put(&mut p, o, value);
+        }
+        if d[0x50] == 0 {
+            p[0x214] = 0;
+        } else {
+            p[0xf0..0x130].copy_from_slice(&d[0x10..0x50]);
+            for r in 0..4 {
+                for c in 0..4 {
+                    put(
+                        &mut p,
+                        0x130 + r * 16 + c * 4,
+                        if r == c { 1f32.to_bits() } else { 0 },
+                    );
+                }
+            }
+            p[0x214] = 1;
+        }
+        for i in 0..6 {
+            let o = 0x19c + i * 20;
+            put(&mut p, o, 0);
+            put(&mut p, o + 4, 0);
+            put(&mut p, o + 8, 0x1000);
+            put(&mut p, o + 12, 0);
+            p[o + 16] = u8::from(i % 2 == 0);
+        }
+        for o in (0x20..0x40).chain(0xd0..0xe8).step_by(4) {
+            put(&mut p, o, 0);
+        }
+        p[0x19] = updated.shape[0x19];
+        p[0xc0] = updated.shape[0xc0];
+        put(&mut p, 0x220, word(&updated.shape, 0x220));
+        put(&mut p, 0x240, 0x1500);
+        put(&mut p, 0x244, word(&updated.shape, 0x244));
+        // Complete original wrapper/backlink, retaining its final eight fill bytes.
+        put(&mut p, 0x21c, 0x13e0);
+        for (o, value) in [
+            (0x3e0, 0x7001),
+            (0x3e4, controls[4]),
+            (0x3e8, 0x1000),
+            (0x3ec, 0),
+            (0x3f0, 0),
+            (0x3f4, 0x1000),
+        ] {
+            put(&mut p, o, value);
+        }
+        p[0x2e0..0x3e0].fill(0);
+        put(&mut p, 0x2f4, 0x1400);
+        put(&mut p, 0x360, controls[0] + 1);
+        p[0x400..0x460].fill(0);
+        put(&mut p, 0x404, 0x1420);
+        put(&mut p, 0x408, 2);
+        put(&mut p, 0x40c, 0x20);
+        p[0x410] = controls[1] as u8;
+        put(&mut p, 0x420, controls[2]);
+        put(&mut p, 0x440, controls[3]);
+        put(&mut d, 0, 0x1500);
+        put(&mut d, 0x5c, 0x12e0);
+        p[0x250..0x2d4].copy_from_slice(&d);
+        Ok(ConstructedShape {
+            prefix: p,
+            mesh: updated.mesh,
+        })
     }
 }
 
@@ -339,6 +527,63 @@ pub fn build(points: &[[f32; 4]], triangles: &[[u32; 3]], fill: u8) -> Result<Me
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn constructed_shape_has_owned_wrapper_material_identity_and_world_counter() {
+        let p = [
+            [1., 1., 1., 1.],
+            [-1., -1., 1., 1.],
+            [-1., 1., -1., 1.],
+            [1., -1., -1., 1.],
+        ];
+        let t = [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
+        let mut descriptor = [0; 0x84];
+        put(&mut descriptor, 4, 17);
+        for i in 0..16 {
+            put(
+                &mut descriptor,
+                0x10 + i * 4,
+                if i % 5 == 0 { 1f32.to_bits() } else { 0 },
+            );
+        }
+        put(&mut descriptor, 0x1c, 2f32.to_bits());
+        put(&mut descriptor, 0x7c, 8);
+        let before = descriptor;
+        let made = build(&p, &t, 0xcd)
+            .unwrap()
+            .construct_shape(descriptor, [41, 1, 7, 8, 23], 0xcd)
+            .unwrap();
+        assert_eq!(descriptor, before);
+        let b = made.prefix_bytes();
+        assert_eq!(word(b, 0x194), 41);
+        assert_eq!(word(b, 0x360), 42);
+        assert_eq!(word(b, 0xc8), 0x1440);
+        assert_eq!(word(b, 0x21c), 0x13e0);
+        assert_eq!(word(b, 0x3e8), 0x1000);
+        assert_eq!(word(b, 0x3e4), 23);
+        assert_eq!(&b[0xf0..0x170], &[0xcd; 0x80]);
+        assert_eq!(word(b, 0x250 + 0x1c), 0);
+        assert_eq!(word(b, 0x250 + 0x4c), 1f32.to_bits());
+        assert_eq!(made.mesh().point_count(), 4);
+        assert_eq!(made.mesh().face_count(), 4);
+        for controls in [[41, 0, 7, 8, 23], [41, 1, 7, 9, 23]] {
+            let m = build(&p, &t, 0)
+                .unwrap()
+                .construct_shape(descriptor, controls, 0)
+                .unwrap();
+            assert_eq!(
+                word(m.prefix_bytes(), 0xc8),
+                if controls[1] == 0 { 0 } else { 0x1420 }
+            );
+        }
+        put(&mut descriptor, 0x5c, 1);
+        assert!(
+            build(&p, &t, 0)
+                .unwrap()
+                .construct_shape(descriptor, [41, 1, 7, 8, 23], 0)
+                .is_err()
+        );
+    }
+
     #[test]
     fn shape_planes_enclose_a_convex_mesh_and_preserve_other_storage() {
         let p = [
