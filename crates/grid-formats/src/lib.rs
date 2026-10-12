@@ -4,6 +4,7 @@
 pub mod binxml;
 pub mod car_collision;
 pub mod collision;
+pub mod cqtc;
 pub mod entities;
 pub mod grid;
 pub mod handling_damage;
