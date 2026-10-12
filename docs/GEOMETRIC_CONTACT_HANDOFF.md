@@ -1,5 +1,7 @@
 # Geometric contacts into physical solving (F220)
 
+F221 extends this handoff to actual Lacetti/Donington packed-track contacts: [packed mesh contacts](PACKED_MESH_CONTACTS.md). Legacy mesh7/7 regressions remain verified separately.
+
 12 October 2026, Europe/Kiev. Actual mesh-generated contacts now pass through independently implemented Rust body advance, grouping and physical solving. Original/repeated original/Rust debug and release agree on **765 scenarios / 10,513,384 complete output bytes per profile**. The255 positive geometry seeds produce499 contacts; enabled and correction-disabled variants exercise998 records per profile. **243 seeds change linear/angular velocity against empty-contact controls.** All geometry points and normals retain their exact world-space bytes.
 
 This proves a stage-composed geometry-to-solver handoff. The preceding generator is still native reference execution, and the Rust driving runtime does not yet generate body collision contacts. These are not full AD8D70 runs with moving geometric shapes, Donington barrier tests or a completed lap.
