@@ -50,6 +50,41 @@ pub fn advance_with_geometry(
     shapes: &[contact_groups::Shape],
     external_count: usize,
 ) -> Result<grouped_physical_frame::Output, Error> {
+    advance_owned(previous, slots, used, shapes, external_count, None)
+}
+
+/// Advance poses, then obtain fresh world-space geometry before grouping/solving.
+/// The supplied occupied slots are the relative wheel/external prefix. The
+/// provider sees advanced bodies and remaining stable capacity, returns only the
+/// geometric suffix, and cannot mutate authoritative input or the prefix.
+pub fn advance_with_geometry_provider(
+    previous: &grouped_physical_frame::Output,
+    slots: &[contact_groups::Contact],
+    external_count: usize,
+    shapes: &[contact_groups::Shape],
+    mut provider: impl FnMut(
+        &[contact_groups::Body],
+        usize,
+    ) -> Result<Vec<contact_groups::Contact>, Error>,
+) -> Result<grouped_physical_frame::Output, Error> {
+    advance_owned(
+        previous,
+        slots,
+        external_count,
+        shapes,
+        external_count,
+        Some(&mut provider),
+    )
+}
+
+fn advance_owned(
+    previous: &grouped_physical_frame::Output,
+    slots: &[contact_groups::Contact],
+    used: usize,
+    shapes: &[contact_groups::Shape],
+    external_count: usize,
+    provider: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
+) -> Result<grouped_physical_frame::Output, Error> {
     let world = previous.groups.world;
     let selector = world[5];
     if selector > 1
@@ -93,16 +128,26 @@ pub fn advance_with_geometry(
         dirty_head: world[4],
         contact_capacity: previous.groups.contacts.len(),
     };
-    let mut out = grouped_physical_frame::calculate_tick_carried(
-        &input,
-        &previous.manager,
-        shapes,
-        &carry,
-        external_count,
-    )?;
+    let mut out = if let Some(provider) = provider {
+        grouped_physical_frame::calculate_tick_carried_with_provider(
+            &input,
+            &previous.manager,
+            shapes,
+            &carry,
+            provider,
+        )?
+    } else {
+        grouped_physical_frame::calculate_tick_carried(
+            &input,
+            &previous.manager,
+            shapes,
+            &carry,
+            external_count,
+        )?
+    };
     let active = out.groups.contacts;
     out.groups.contacts = slots.to_vec();
-    out.groups.contacts[..used].copy_from_slice(&active);
+    out.groups.contacts[..active.len()].copy_from_slice(&active);
     out.pool_used = 0;
     Ok(out)
 }
@@ -309,5 +354,78 @@ mod tests {
         );
         assert_eq!(geometric.groups.world, external.groups.world);
         assert!(advance_with_geometry(&previous, &[c], 1, &[], 2).is_err());
+    }
+
+    #[test]
+    fn provider_observes_advanced_pose_and_preserves_prefix_suffix_and_unused_slots() {
+        let mut previous = completed();
+        previous.groups.contacts.resize(3, [0; 32]);
+        previous.groups.contacts[2][0x40 / 4] = 0x12345678;
+        for offset in [0x1c0, 0x200] {
+            previous.groups.bodies[0][offset / 4] = 2f32.to_bits();
+        }
+        previous.groups.bodies[0][0x220 / 4] = 5f32.to_bits();
+        let mut c = [0; 32];
+        c[1] = 1;
+        c[2] = 2;
+        c[0xc / 4] = 0x01000001;
+        c[0x3c / 4] = f32::MAX.to_bits();
+        c[0x64 / 4] = 1f32.to_bits();
+        let mut slots = previous.groups.contacts.clone();
+        slots[0] = c;
+        slots[0][0x50 / 4..0x60 / 4].copy_from_slice(&[100f32, 200., 300., 0.].map(f32::to_bits));
+        c[0x50 / 4..0x60 / 4].copy_from_slice(&[200f32, 300., 400., 1.].map(f32::to_bits));
+        let next_x = 2f32 + 5. * previous.manager.parameters[0];
+        let mut calls = 0;
+        let out = advance_with_geometry_provider(&previous, &slots, 1, &[], |bodies, remaining| {
+            calls += 1;
+            assert_eq!(remaining, 2);
+            assert_eq!(bodies[0][0x1c0 / 4], next_x.to_bits());
+            assert_eq!(bodies[0][0x200 / 4], next_x.to_bits());
+            assert_eq!(bodies[0][0x2a0 / 4], 2f32.to_bits());
+            Ok(vec![c])
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(
+            out.groups.contacts[0][0x50 / 4..0x60 / 4],
+            [100f32 + next_x, 200., 300., 1.].map(f32::to_bits)
+        );
+        assert_eq!(
+            out.groups.contacts[1][0x50 / 4..0x60 / 4],
+            c[0x50 / 4..0x60 / 4]
+        );
+        assert_eq!(out.groups.contacts[2], slots[2]);
+        assert_eq!(out.pool_used, 0);
+        let bodies = previous.groups.bodies.clone();
+        let world = previous.groups.world;
+        let manager = previous.manager.clone();
+        let old_slots = slots.clone();
+        assert!(
+            advance_with_geometry_provider(&previous, &slots, 1, &[], |_, _| Err(Error(
+                "provider failure"
+            )))
+            .is_err()
+        );
+        assert!(
+            advance_with_geometry_provider(&previous, &slots, 1, &[], |_, _| Ok(vec![c; 3]))
+                .is_err()
+        );
+        let mut invalid = c;
+        invalid[0x50 / 4] = f32::NAN.to_bits();
+        assert!(
+            advance_with_geometry_provider(&previous, &slots, 1, &[], |_, _| Ok(vec![invalid]))
+                .is_err()
+        );
+        assert_eq!(previous.groups.bodies, bodies);
+        assert_eq!(previous.groups.world, world);
+        assert_eq!(slots, old_slots);
+        assert_eq!(previous.groups.contacts[2], old_slots[2]);
+        assert_eq!(previous.manager.rows, manager.rows);
+        assert_eq!(previous.manager.workspace, manager.workspace);
+        assert_eq!(previous.manager.properties, manager.properties);
+        assert_eq!(previous.manager.ends, manager.ends);
+        assert_eq!(previous.manager.cached_pair, manager.cached_pair);
+        assert_eq!(previous.manager.cached_material, manager.cached_material);
     }
 }

@@ -80,7 +80,7 @@ pub fn calculate_tick_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    tick(input, manager, shapes, None, input.contacts.len())
+    tick(input, manager, shapes, None, input.contacts.len(), None)
 }
 
 /// Advance bodies, then solve an external relative-point prefix followed by
@@ -94,7 +94,7 @@ pub fn calculate_tick_with_geometry(
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    tick(input, manager, shapes, None, external_count)
+    tick(input, manager, shapes, None, external_count, None)
 }
 
 pub(crate) fn calculate_tick_carried(
@@ -107,7 +107,27 @@ pub(crate) fn calculate_tick_carried(
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    tick(input, manager, shapes, Some(carry), external_count)
+    tick(input, manager, shapes, Some(carry), external_count, None)
+}
+
+pub(crate) type GeometryProvider<'a> =
+    dyn FnMut(&[contact_groups::Body], usize) -> Result<Vec<contact_groups::Contact>, Error> + 'a;
+
+pub(crate) fn calculate_tick_carried_with_provider(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+    carry: &contact_groups::Carry,
+    provider: &mut GeometryProvider<'_>,
+) -> Result<Output, Error> {
+    tick(
+        input,
+        manager,
+        shapes,
+        Some(carry),
+        input.contacts.len(),
+        Some(provider),
+    )
 }
 
 fn validate(
@@ -128,6 +148,7 @@ fn tick(
     shapes: &[contact_groups::Shape],
     carry: Option<&contact_groups::Carry>,
     external_count: usize,
+    provider: Option<&mut GeometryProvider<'_>>,
 ) -> Result<Output, Error> {
     validate(input, shapes, carry)?;
     let delta = manager.parameters[0];
@@ -167,6 +188,19 @@ fn tick(
         ] {
             store_matrix(raw, offset, value);
         }
+    }
+    if let Some(provider) = provider {
+        let capacity = carry
+            .ok_or(Error("geometry provider requires retained capacity"))?
+            .contact_capacity;
+        let remaining = capacity
+            .checked_sub(next.contacts.len())
+            .ok_or(Error("invalid geometry capacity"))?;
+        let contacts = provider(&next.bodies, remaining)?;
+        if contacts.len() > remaining {
+            return Err(Error("geometry provider exceeded remaining capacity"));
+        }
+        next.contacts.extend(contacts);
     }
     let mut out = calculate_impl(&next, manager, shapes, carry, external_count)?;
     for (body, next) in out.groups.bodies.iter_mut().zip(update_next) {
