@@ -1,5 +1,7 @@
 # Lacetti mesh contacts with packed Donington geometry (F221)
 
+**Later scope correction (F226):** the historical packed fixture's280-byte descriptor lets original shape+290 alias its adjacent header. Whole-output results below preserve that fixture; source-correct sheet-mask/normal selection is not established. See [the finding and required correction](TRIANGLE_MESH_MANIFOLD.md#newly-identified-earlier-fixture-limitation). Direct triangle/mesh proofs and supplied-contact solver comparisons remain separate.
+
 F222 subsequently verifies [serial pair scheduling and worker lifecycle](SERIAL_GEOMETRIC_SCHEDULING.md), preserving complete contact records in both pair ownership orders.
 
 12 October 2026, Europe/Kiev. The original mesh7/packed11 contact path now runs on the purchased Lacetti collision mesh and all245 Donington packed chunks. **1,417 original/repeated-original cases match69,092,472 complete output bytes per run**, producing2,393 contacts in608 positive cases.25 framing, ownership, geometry and existing-output guards pass. A source/request/current-binary audit verifies all2,834 complete outputs.

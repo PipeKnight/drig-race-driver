@@ -1,5 +1,7 @@
 # Serial geometric pair scheduling (F222)
 
+**Later scope correction (F226):** this scheduling proof inherits F221's undersized packed descriptor and aliased shape+290 normal-selection field. Queue/order comparisons remain valid for that prepared fixture, while source-correct sheet behavior must be established before generator integration. See [the identified layout issue](TRIANGLE_MESH_MANIFOLD.md#newly-identified-earlier-fixture-limitation).
+
 The next implemented Rust boundary is [triangle–mesh distance iteration (F223)](TRIANGLE_MESH_DISTANCE.md).
 
 12 October2026, Europe/Kiev. Whole original serial pair assignment, worker dispatch and finish now run against actual Lacetti/Donington geometry: **1,364 original/repeated cases /64,689,104 complete output bytes per run**, producing2,888 contacts in726 positive cases. Both ownership orders produce the exact same contact arenas as [F221 direct generation](PACKED_MESH_CONTACTS.md). The static-collision gate disables generation in both orders.26 rejection/existing-output guards pass.
