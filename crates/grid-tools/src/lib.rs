@@ -2,6 +2,7 @@
 pub mod contact_surfaces;
 pub mod impact_diagnostic;
 pub mod source_physical;
+pub mod source_vehicle;
 pub mod standard_car;
 mod standard_car_fields;
 pub mod track;
