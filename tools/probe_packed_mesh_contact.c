@@ -18,7 +18,11 @@
 #endif
 #ifdef GRID_MANIFOLD_SEQUENCE
 #define SEQUENCE_RECORD_BYTES 0xa20
+#ifdef GRID_MANIFOLD_REORIENTATION
+#define SEQUENCE_REQUEST_BYTES 64
+#else
 #define SEQUENCE_REQUEST_BYTES 48
+#endif
 #elif defined(GRID_TRIANGLE_DISTANCE)
 #define SEQUENCE_RECORD_BYTES 0x1c0
 #else
@@ -32,7 +36,9 @@
 #define REQUEST_TAG 0x32304350
 #elif defined(GRID_TRIANGLE_MESH_QUERY)
 #define ROOT_BYTES 0xa80
-#ifdef GRID_MANIFOLD_SEQUENCE
+#ifdef GRID_MANIFOLD_REORIENTATION
+#define REQUEST_TAG 0x30314350
+#elif defined(GRID_MANIFOLD_SEQUENCE)
 #define REQUEST_TAG 0x39304350
 #elif defined(GRID_TRIANGLE_MANIFOLD)
 #define REQUEST_TAG 0x37304350
@@ -110,6 +116,9 @@ int wmain(int argc,wchar_t **argv){
   float square=0.f;for(unsigned j=0;j<3;j++)square+=num(r,8+j*4)*num(r,8+j*4);
   if(square<.999f||square>1.001f||!isfinite(num(r,40))||fabsf(num(r,40))>10000.f||get(r,44)>1){error=8;goto done;}
   for(unsigned j=0;j<4;j++)if(!isfinite(num(r,24+j*4))||fabsf(num(r,24+j*4))>10000.f||(j==3&&num(r,24+j*4)!=1.f)){error=8;goto done;}
+#ifdef GRID_MANIFOLD_REORIENTATION
+  for(unsigned j=0;j<4;j++)if(!isfinite(num(r,48+j*4))||fabsf(num(r,48+j*4))>10000.f||(j==3&&num(r,48+j*4)!=1.f)){error=8;goto done;}
+#endif
 #endif
  }
  sequence_owned=malloc(64+sequence_count*SEQUENCE_RECORD_BYTES);if(!sequence_owned){error=9;goto done;}
@@ -214,6 +223,10 @@ int wmain(int argc,wchar_t **argv){
     ((void (__fastcall *)(void *,void *,unsigned,void *))(image+0xaee620-0x400000))(triangle,NULL,i,query+0x60+i*16);
    }
 #ifdef GRID_TRIANGLE_MANIFOLD
+#ifdef GRID_MANIFOLD_REORIENTATION
+   memcpy(query+0x90,r+48,16);
+   ((void (__cdecl *)(void *,void *,void *,void *,void *))(image+0xaee640-0x400000))(query+0x60,first+0x160,query+0x10,query+0x90,query+0x20);
+#endif
    ((void (__fastcall *)(void *,void *,void *))(image+0xaee5f0-0x400000))(triangle,NULL,materials);
    ((void (__fastcall *)(void *,void *,void *))(image+0xaee610-0x400000))(triangle,NULL,track.shape);
    __declspec(align(16)) float negative[4];for(unsigned j=0;j<4;j++)negative[j]=-1.f*num(query,0x10+j*4);
