@@ -14,16 +14,59 @@ def adjusted(points,parameters):
     center=f32(offset[1]+f32(f32(roof+bottom)*.5))
     return [[f32(f32(offset[0]+p[0])-0.),f32(f32(offset[1]+max(p[1],floor))-center),f32(f32(offset[2]+p[2])-0.),1.] for p in points]
 
-def request(points,faces,fill,parameters=None,shape=None):
-    header=(b'CM03' if shape is not None else (b'CM01' if parameters is None else b'CM02'))+struct.pack('<III',len(points),len(faces),fill)
+def request(points,faces,fill,parameters=None,shape=None,base=None):
+    header=(b'CM04' if base is not None else (b'CM03' if shape is not None else (b'CM01' if parameters is None else b'CM02')))+struct.pack('<III',len(points),len(faces),fill)
     if parameters is not None:header+=struct.pack('<6f',*parameters)
-    if shape is not None:header+=struct.pack('<IfII',*shape)
+    if base is not None:header+=base[0]+struct.pack('<5I',*base[1])
+    elif shape is not None:header+=struct.pack('<IfII',*shape)
     return header+b''.join(struct.pack('<4f',*p) for p in points)+b''.join(struct.pack('<3I',*t) for t in faces)
 def run(exe,args):
     r=subprocess.run([str(exe),*map(str,args)],capture_output=True,text=True,cwd=ROOT,timeout=30)
     return dict(exit=r.returncode,stdout=r.stdout,stderr=r.stderr)
-def check(data,points,faces,fill,shape=None):
-    if shape is not None:
+def base_settings(shape,parameters,index):
+    span,scalar,layer,flag=shape;d=bytearray(0x84)
+    struct.pack_into('<I',d,4,span)
+    matrix=[float(i%5==0) for i in range(16)]
+    matrix[13]=f32(parameters[1]+f32(f32(parameters[4]+parameters[5])*.5))
+    if index%3==1:
+        angle=index*.17;matrix[:3]=[f32(math.cos(angle)),0.,f32(-math.sin(angle))];matrix[8:11]=[f32(math.sin(angle)),0.,f32(math.cos(angle))]
+    # Homogeneous lanes are normalized even when no transform is published.
+    matrix[3],matrix[7],matrix[11],matrix[15]=[-.75,.25,-0.,2.]
+    struct.pack_into('<16f',d,0x10,*matrix)
+    for j,o in enumerate([0x50,0x51,0x52,0x53,0x54,0x55,0x70,0x71,0x78,0x79,0x7a,0x81]):d[o]=(index>>j)%2
+    d[0x50]=int(index%3!=0);d[0x54]=flag;d[0x80]=layer
+    struct.pack_into('<f',d,0x58,f32(index*.125));struct.pack_into('<f',d,0x60,f32(-index*.0625));struct.pack_into('<f',d,0x68,scalar)
+    struct.pack_into('<I',d,0x64,index*13);struct.pack_into('<I',d,0x6c,[0,0xffffffff,0x3f800000][index%3]);struct.pack_into('<I',d,0x74,[0xffffffff,0,0x40000000][index%3])
+    struct.pack_into('<I',d,0x7c,[7,8,99][index%3])
+    return bytes(d),[index*17,index%2,7,8,index*123]
+
+def check_base(data,descriptor,controls,fill):
+    u=lambda o:struct.unpack_from('<I',data,o)[0]
+    assert u(0)==0x7000 and u(0x10)==7 and u(0x21c)==0x13e0 and u(0xcc)==0x12e0 and u(0x240)==0x1500
+    d=bytearray(descriptor);struct.pack_into('<I',d,0,0x1500);struct.pack_into('<I',d,0x5c,0x12e0)
+    for o in [0x1c,0x2c,0x3c]:struct.pack_into('<I',d,o,0)
+    struct.pack_into('<f',d,0x4c,1.)
+    assert data[0x250:0x2d4]==d
+    assert u(0x194)==controls[0] and u(0x360)==controls[0]+1
+    world=bytearray(0x100);struct.pack_into('<I',world,0x14,0x1400);struct.pack_into('<I',world,0x80,controls[0]+1);assert data[0x2e0:0x3e0]==world
+    assert data[0x3e0:0x3f8]==struct.pack('<6I',0x7001,controls[4],0x1000,0,0,0x1000) and data[0x3f8:0x400]==bytes([fill])*8
+    manager=bytearray(0x20);struct.pack_into('<3I',manager,4,0x1420,2,0x20);manager[0x10]=controls[1];assert data[0x400:0x420]==manager
+    records=bytearray(0x40);struct.pack_into('<I',records,0,controls[2]);struct.pack_into('<I',records,32,controls[3]);assert data[0x420:0x460]==records
+    identifier=struct.unpack_from('<I',descriptor,0x7c)[0]
+    expected=0 if controls[1]==0 else (0x1440 if identifier==controls[3] and identifier!=controls[2] else 0x1420)
+    assert u(0xc8)==expected
+    identity=struct.pack('<16f',*[float(i%5==0) for i in range(16)])
+    assert data[0x70:0xb0]==identity
+    if descriptor[0x50]:assert data[0xf0:0x130]==d[0x10:0x50] and data[0x130:0x170]==identity and data[0x214]==1
+    else:assert data[0xf0:0x170]==bytes([fill])*0x80 and data[0x214]==0
+    assert data[0x2d4:0x2e0]==bytes([fill])*12 and data[0x460:0x500]==bytes([fill])*0xa0
+    assert u(0x244)==(struct.unpack_from('<I',descriptor,4)[0]+15)&~15
+    for dst,src in [(0xc4,0x58),(0x18c,0x60),(0x224,0x6c),(0x22c,0x74)]:assert u(dst)==struct.unpack_from('<I',descriptor,src)[0]
+
+def check(data,points,faces,fill,shape=None,base=None):
+    if base is not None:
+        check_base(data[:0x500],*base,fill);data=data[0x500:]
+    elif shape is not None:
         expected=bytearray([fill]*0x250);span,scalar,layer,flag=shape
         expected[0x19]=layer;expected[0xc0]=flag
         struct.pack_into('<f',expected,0x220,scalar);struct.pack_into('<II',expected,0x240,0x250,(span+15)&~15)
@@ -69,10 +112,11 @@ def check(data,points,faces,fill,shape=None):
     return dict(directed_edges=edge_cursor,incidences=face_cursor)
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('output',type=Path);parser.add_argument('--profile',required=True,choices=['debug','release']);parser.add_argument('--source-adjustment',action='store_true');parser.add_argument('--shape',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('output',type=Path);parser.add_argument('--profile',required=True,choices=['debug','release']);parser.add_argument('--source-adjustment',action='store_true');parser.add_argument('--shape',action='store_true');parser.add_argument('--base',action='store_true');args=parser.parse_args()
+    if args.base:args.shape=True
     if args.shape:args.source_adjustment=True
     out=args.output.resolve();assert out.is_relative_to((ROOT/'local').resolve());out.mkdir(exist_ok=False)
-    game=Path(r'C:\Program Files (x86)\Steam\steamapps\common\Grid');native=ROOT/('local/behavior/mesh-shape-probe.exe' if args.shape else ('local/behavior/source-collision-mesh-probe.exe' if args.source_adjustment else 'local/behavior/collision-mesh-probe.exe'));rust=ROOT/f'target/{args.profile}'/('grid-mesh-shape.exe' if args.shape else 'grid-collision-mesh.exe')
+    game=Path(r'C:\Program Files (x86)\Steam\steamapps\common\Grid');native=ROOT/('local/behavior/mesh-shape-base-probe.exe' if args.base else ('local/behavior/mesh-shape-probe.exe' if args.shape else ('local/behavior/source-collision-mesh-probe.exe' if args.source_adjustment else 'local/behavior/collision-mesh-probe.exe')));rust=ROOT/f'target/{args.profile}'/('grid-mesh-shape-base.exe' if args.base else ('grid-mesh-shape.exe' if args.shape else 'grid-collision-mesh.exe'))
     source_cases=[];skipped=[]
     for csvpath in sorted((game/'cars').rglob('*.csv')):
         rows=[row for row in csv.reader(csvpath.read_text().splitlines()) if row]
@@ -115,16 +159,19 @@ def main():
         rng.shuffle(faces)
         parameters=[*[f32(rng.uniform(-10,10)) for _ in range(3)],0.,f32(rng.uniform(-5,0)),f32(rng.uniform(0,5))] if args.source_adjustment else None
         cases.append((dict(kind='authored',control=i,source_parameters=parameters),points,faces,[0,0xcd][i%2],parameters))
-    def encode(points,faces,fill,parameters=None,shape=None):
+    def encode(points,faces,fill,parameters=None,shape=None,base=None):
         if args.shape and shape is None:shape=[1,.01,7,1]
-        return request(points,faces,fill,parameters,shape)
+        if args.base and base is None:base=base_settings(shape,parameters,0)
+        return request(points,faces,fill,parameters,shape,base)
     results=[]
     for i,(metadata,points,faces,fill,parameters) in enumerate(cases):
         shape=None
         if args.shape:
             span=[1,15,16,17,8192,16000][i%6];scalar=[-0.,.01,-.125,1.5][i%4]
             shape=[span,scalar,(i*17)%256,i%2];metadata=dict(**metadata,shape_settings=shape)
-        inp=out/f'{i:03}-input.bin';inp.write_bytes(encode(points,faces,fill,parameters,shape));executions=[];answers=[]
+        base=base_settings(shape,parameters,i) if args.base else None
+        if base is not None:metadata=dict(**metadata,base_descriptor_hex=base[0].hex(),base_controls=base[1])
+        inp=out/f'{i:03}-input.bin';inp.write_bytes(encode(points,faces,fill,parameters,shape,base));executions=[];answers=[]
         for kind in ['original','repeat','rust']:
             output=out/f'{i:03}-{kind}.bin';e=run(rust if kind=='rust' else native,[inp,output] if kind=='rust' else [IMAGE,inp,output]);executions.append(e)
             (out/'current-executions.json').write_text(json.dumps(dict(index=i,executions=executions),indent=2));assert e['exit']==0 and not e['stderr'],(i,e)
@@ -132,10 +179,10 @@ def main():
             answers.append(output.read_bytes())
         diff=[dict(offset=hex(j),original=answers[0][j:j+4].hex(),repeat=answers[1][j:j+4].hex(),rust=answers[2][j:j+4].hex()) for j in range(0,len(answers[0]),4) if len({a[j:j+4] for a in answers})!=1]
         (out/'current-differences.json').write_text(json.dumps(dict(index=i,differences=diff),indent=2));assert not diff,(i,diff[:12])
-        checked=check(answers[0],adjusted(points,parameters),faces,fill,shape)
+        checked=check(answers[0],adjusted(points,parameters),faces,fill,shape,base)
         results.append(dict(index=i,**metadata,points=len(points),faces=len(faces),fill=fill,bytes=len(answers[0]),input_sha256=digest(inp),output_sha256=digest(out/f'{i:03}-original.bin'),**checked,executions=executions))
     parameters=[0.,0.,0.,0.,-1.,1.] if args.source_adjustment else None
-    extra=40 if args.shape else (24 if args.source_adjustment else 0)
+    extra=176 if args.base else (40 if args.shape else (24 if args.source_adjustment else 0))
     sample=encode(cube,triangles,0,parameters);variants=[('short',sample[:-1]),('long',sample+b'\0')]
     for label,o,value in [('tag',0,0),('points-low',4,3),('points-high',4,81),('faces-low',8,3),('faces-high',8,111),('fill',12,1),('point-nan',16,0x7fc00000),('point-inf',20,0x7f800000),('point-bound',24,struct.unpack('<I',struct.pack('<f',100001.))[0]),('point-w',28,0),('index',16+8*16,8),('duplicate-index',16+8*16+4,0)]:
         data=bytearray(sample);struct.pack_into('<I',data,o+(extra if o>=16 else 0),value);variants.append((label,data))
@@ -147,8 +194,11 @@ def main():
             data=bytearray(sample);struct.pack_into('<I',data,o,value);variants.append((label,data))
         points=[[f32(p[0]+99999.),p[1],p[2],1.] for p in cube]
         variants.append(('adjusted-bound',encode(points,triangles,0,[10.,0.,0.,0.,-1.,1.])))
-    if args.shape:
+    if args.shape and not args.base:
         for label,o,value in [('span-zero',40,0),('span-high',40,16001),('scalar-nan',44,0x7fc00000),('scalar-inf',44,0x7f800000),('scalar-bound',44,struct.unpack('<I',struct.pack('<f',1000001.))[0]),('layer',48,256),('flag-c0',52,2)]:
+            data=bytearray(sample);struct.pack_into('<I',data,o,value);variants.append((label,data))
+    if args.base:
+        for label,o,value in [('mesh-pointer',40,1),('world-pointer',40+0x5c,1),('matrix-nan',40+0x10,0x7fc00000),('matrix-inf',40+0x14,0x7f800000),('matrix-bound',40+0x18,struct.unpack('<I',struct.pack('<f',10001.))[0]),('base-scalar-nan',40+0x58,0x7fc00000),('base-scalar-bound',40+0x60,struct.unpack('<I',struct.pack('<f',1000001.))[0]),('base-scalar-inf',40+0x68,0x7f800000),('base-span-zero',44,0),('base-span-high',44,16001),('base-flag',40+0x50,2),('base-counter',172,1000001),('base-mode',176,2),('base-owner',188,1000001)]:
             data=bytearray(sample);struct.pack_into('<I',data,o,value);variants.append((label,data))
     source_rejected=[]
     for metadata,points,faces,parameters in source_rejections:
@@ -174,6 +224,6 @@ def main():
         inp=out/'000-input.bin';e=run(exe,[IMAGE,inp,existing] if kind=='native' else [inp,existing]);assert 0<e['exit']<256 and digest(existing)==before
         if kind=='native':assert not e['stderr'] and 'error=19' in e['stdout']
         guards.append(dict(label='existing-output',kind=kind,execution=e,existing_output_preserved=True))
-    report=dict(passed=True,profile=args.profile,cases=len(results),examined_source_meshes=43,admitted_source_meshes=42,source_cases=84,authored_controls=96,observable_bytes=sum(r['bytes'] for r in results),results=results,source_rejected=source_rejected,guards=guards,guard_count=len(guards),skipped=skipped,executables={str(p.relative_to(ROOT)):digest(p) for p in [native,rust,IMAGE]},source_adjustment=args.source_adjustment,shape_update=args.shape,scope=('Whole B444D0 supplied owned shape update after the following stages; mesh planes oriented away from average vertex. Base constructor/physical registration excluded. ' if args.shape else '')+('Whole 9B8B70/9B8890 deformation-off adjustment then whole B44E80. Source offset from CSV/NED wheel layout, raw min/max Y supplied as bottom/roof; owned car and raw inputs unchanged. ' if args.source_adjustment else 'Whole supplied B44E80. ')+ 'Complete normal/extent/topology and owned relative pointers. BOS zero-area faces explicitly rejected. Not whole outer source factory, deformation, convexification, allocation, shape registration or contact generation.')
+    report=dict(passed=True,profile=args.profile,cases=len(results),examined_source_meshes=43,admitted_source_meshes=42,source_cases=84,authored_controls=96,observable_bytes=sum(r['bytes'] for r in results),results=results,source_rejected=source_rejected,guards=guards,guard_count=len(guards),skipped=skipped,executables={str(p.relative_to(ROOT)):digest(p) for p in [native,rust,IMAGE]},source_adjustment=args.source_adjustment,shape_update=args.shape,base_constructor=args.base,scope=('Whole B460F0 base/shape and B23D70 wrapper; owned empty-world counter/two-record material lookup, full descriptor mutation and canonical graph. No physical registration. ' if args.base else '')+('Whole B444D0 supplied owned shape update after the following stages; mesh planes oriented away from average vertex. Physical registration excluded. ' if args.shape else '')+('Whole 9B8B70/9B8890 deformation-off adjustment then whole B44E80. Source offset from CSV/NED wheel layout, raw min/max Y supplied as bottom/roof; owned car and raw inputs unchanged. ' if args.source_adjustment else 'Whole supplied B44E80. ')+ 'Complete normal/extent/topology and owned relative pointers. BOS zero-area faces explicitly rejected. Not whole outer source factory, deformation, convexification, allocation, shape registration or contact generation.')
     (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:report[k] for k in ['passed','cases','observable_bytes','guard_count']}))
 if __name__=='__main__':main()

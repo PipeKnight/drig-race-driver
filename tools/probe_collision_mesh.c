@@ -31,7 +31,13 @@ int wmain(int argc,wchar_t **argv){
  float source_parameters[6];
 #ifdef GRID_MESH_SHAPE
  unsigned shape_parameters[4];float shape_scalar;
- __declspec(align(16)) unsigned char shape_owned[32+0x250+32];unsigned char *shape=shape_owned+32;
+ #ifdef GRID_MESH_BASE
+ unsigned base_descriptor[33],base_controls[5];
+ #define SHAPE_STORAGE 0x500
+#else
+ #define SHAPE_STORAGE 0x250
+#endif
+ __declspec(align(16)) unsigned char shape_owned[32+SHAPE_STORAGE+32];unsigned char *shape=shape_owned+32;
  unsigned char mesh_before_shape[16000];
 #endif
  __declspec(align(16)) float raw_points[80][4];unsigned char raw_before[sizeof(raw_points)];
@@ -44,7 +50,9 @@ int wmain(int argc,wchar_t **argv){
  if(_wfopen_s(&input,argv[2],L"rb")||!input){error=5;goto done;}
  int valid=fread(&tag,4,1,input)==1&&fread(&count,4,1,input)==1&&fread(&faces,4,1,input)==1&&fread(&fill,4,1,input)==1;
  if(!valid||tag!=
-#ifdef GRID_MESH_SHAPE
+#ifdef GRID_MESH_BASE
+ 0x34304d43
+#elif defined(GRID_MESH_SHAPE)
  0x33304d43
 #elif defined(GRID_SOURCE_COLLISION_MESH)
  0x32304d43
@@ -58,7 +66,18 @@ int wmain(int argc,wchar_t **argv){
  if(source_parameters[3]!=0.f||source_parameters[4]>source_parameters[5])error=22;
  if(error)goto done;
 #ifdef GRID_MESH_SHAPE
+#ifdef GRID_MESH_BASE
+ if(fread(base_descriptor,4,33,input)!=33||fread(base_controls,4,5,input)!=5){error=6;goto done;}
+ if(base_descriptor[0]||base_descriptor[0x5c/4]||base_controls[0]>1000000||base_controls[1]>1||base_controls[4]>1000000){error=28;goto done;}
+ for(unsigned i=0x10;i<0x50;i+=4){float v;memcpy(&v,(char *)base_descriptor+i,4);if(!isfinite(v)||fabsf(v)>10000.f)error=28;}
+ for(unsigned i=0;i<3;i++){float v;unsigned o=0x58+i*8;memcpy(&v,(char *)base_descriptor+o,4);if(!isfinite(v)||fabsf(v)>1e6f)error=28;}
+ const unsigned flags[]={0x50,0x51,0x52,0x53,0x54,0x55,0x71,0x79,0x7a};
+ for(unsigned i=0;i<sizeof(flags)/sizeof(flags[0]);i++)if(((unsigned char *)base_descriptor)[flags[i]]>1)error=28;
+ if(error)goto done;
+ shape_parameters[0]=base_descriptor[1];shape_parameters[1]=base_descriptor[0x68/4];shape_parameters[2]=((unsigned char *)base_descriptor)[0x80];shape_parameters[3]=((unsigned char *)base_descriptor)[0x54];
+#else
  if(fread(shape_parameters,4,4,input)!=4){error=6;goto done;}
+#endif
  memcpy(&shape_scalar,shape_parameters+1,4);
  if(!shape_parameters[0]||shape_parameters[0]>16000||!isfinite(shape_scalar)||fabsf(shape_scalar)>1e6f||shape_parameters[2]>255||shape_parameters[3]>1){error=25;goto done;}
 #endif
@@ -106,16 +125,55 @@ int wmain(int argc,wchar_t **argv){
  if(memcmp(point_before,points,count*16)||memcmp(triangle_before,triangles,faces*12)||memcmp(settings_before,settings,sizeof(settings)))error=21;
 #ifdef GRID_MESH_SHAPE
  if(!error){
-  unsigned descriptor[33]={0};descriptor[0]=(unsigned)(uintptr_t)body;descriptor[1]=shape_parameters[0];descriptor[0x1a]=shape_parameters[1];descriptor[0x20]=shape_parameters[2];descriptor[0x15]=shape_parameters[3];
+  __declspec(align(16)) unsigned descriptor[33]={0};descriptor[0]=(unsigned)(uintptr_t)body;descriptor[1]=shape_parameters[0];descriptor[0x1a]=shape_parameters[1];descriptor[0x20]=shape_parameters[2];descriptor[0x15]=shape_parameters[3];
+#ifdef GRID_MESH_BASE
+  memcpy(descriptor,base_descriptor,sizeof(descriptor));descriptor[0]=(unsigned)(uintptr_t)body;
+#endif
   unsigned descriptor_before[33];memcpy(descriptor_before,descriptor,sizeof(descriptor));
-  memcpy(mesh_before_shape,body,length);memset(shape_owned,0xcd,sizeof(shape_owned));memset(shape,(int)fill,0x250);
-  __try{((void (__fastcall *)(void *,void *,void *))(image+0xb444d0-0x400000))(shape,NULL,descriptor);}
+  memcpy(mesh_before_shape,body,length);memset(shape_owned,0xcd,sizeof(shape_owned));memset(shape,(int)fill,SHAPE_STORAGE);
+#ifdef GRID_MESH_BASE
+  unsigned char *shape_world=shape+0x2e0,*wrapper=shape+0x3e0,*material_manager=shape+0x400,*materials=shape+0x420;
+  memset(shape_world,0,0x100);memset(material_manager,0,0x20);memset(materials,0,0x40);
+  put(shape_world,0x14,(unsigned)(uintptr_t)material_manager);put(shape_world,0x80,base_controls[0]);
+  put(material_manager,4,(unsigned)(uintptr_t)materials);put(material_manager,8,2);put(material_manager,0xc,0x20);material_manager[0x10]=(unsigned char)base_controls[1];
+  put(materials,0,base_controls[2]);put(materials,0x20,base_controls[3]);descriptor[0x5c/4]=(unsigned)(uintptr_t)shape_world;
+#endif
+  __try{
+#ifdef GRID_MESH_BASE
+   ((void (__fastcall *)(void *,void *,void *))(image+0xb460f0-0x400000))(shape,NULL,descriptor);
+   ((void (__fastcall *)(void *,void *,void *,unsigned))(image+0xb23d70-0x400000))(wrapper,NULL,shape,base_controls[4]);
+#else
+   ((void (__fastcall *)(void *,void *,void *))(image+0xb444d0-0x400000))(shape,NULL,descriptor);
+#endif
+  }
   __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"mesh_shape_fault=%08lx\n",GetExceptionCode());error=26;}
+#ifndef GRID_MESH_BASE
   if(memcmp(descriptor,descriptor_before,sizeof(descriptor)))error=27;
-  for(unsigned i=0;i<32;i++)if(shape_owned[i]!=0xcd||shape_owned[32+0x250+i]!=0xcd)error=27;
+#else
+  (void)descriptor_before;
+  if(get(shape_world,0x80)!=base_controls[0]+1||get(shape,0)!=(unsigned)(uintptr_t)(image+0xd3e7e0-0x400000)||get(wrapper,0)!=(unsigned)(uintptr_t)(image+0xd3d4c4-0x400000)||get(shape,0x21c)!=(unsigned)(uintptr_t)wrapper||get(shape,0xcc)!=(unsigned)(uintptr_t)shape_world||get(wrapper,8)!=(unsigned)(uintptr_t)shape||get(wrapper,0x14)!=(unsigned)(uintptr_t)shape)error=29;
+  put(shape,0,0x7000);put(wrapper,0,0x7001);put(wrapper,8,0x1000);put(wrapper,0x14,0x1000);put(shape,0x21c,0x13e0);put(shape,0xcc,0x12e0);
+  unsigned selected=base_controls[1]?0x1420:0;
+  if(base_controls[1]&&descriptor[0x7c/4]==base_controls[3]&&descriptor[0x7c/4]!=base_controls[2])selected+=0x20;
+  unsigned expected_material=selected?(unsigned)(uintptr_t)(shape+selected-0x1000):0;
+  if(get(shape,0xc8)!=expected_material)error=29;else put(shape,0xc8,selected);
+  const unsigned pointers[]={0xb0,0xb4,0xb8,0xbc,0x170,0x174,0x178,0x17c,0x180,0x1a4,0x1b8,0x1cc,0x1e0,0x1f4,0x208};
+  for(unsigned i=0;i<sizeof(pointers)/sizeof(pointers[0]);i++){
+   unsigned value=get(shape,pointers[i]),base=(unsigned)(uintptr_t)shape;
+   if(value<base||value>=base+0x250)error=29;else put(shape,pointers[i],0x1000+value-base);
+  }
+  put(shape_world,0x14,0x1400);put(material_manager,4,0x1420);descriptor[0]=0x1500;descriptor[0x5c/4]=0x12e0;memcpy(shape+0x250,descriptor,sizeof(descriptor));
+#endif
+  for(unsigned i=0;i<32;i++)if(shape_owned[i]!=0xcd||shape_owned[32+SHAPE_STORAGE+i]!=0xcd)error=27;
   unsigned planes=0x60+count*48;
   for(unsigned i=0;i<length;i++)if(!(i>=planes&&i<planes+faces*32&&((i-planes)%32)<16)&&body[i]!=mesh_before_shape[i])error=27;
-  if(get(shape,0x240)!=(unsigned)(uintptr_t)body)error=27;else put(shape,0x240,0x250);
+  if(get(shape,0x240)!=(unsigned)(uintptr_t)body)error=27;else put(shape,0x240,
+#ifdef GRID_MESH_BASE
+ 0x1500
+#else
+ 0x250
+#endif
+ );
  }
 #endif
  if(!error){
@@ -143,7 +201,7 @@ done:
  if(!code_unchanged)error=18;
  if(!error){HANDLE output=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(output==INVALID_HANDLE_VALUE)error=19;else{DWORD n=0;
 #ifdef GRID_MESH_SHAPE
- if(!WriteFile(output,shape,0x250,&n,NULL)||n!=0x250)error=20;
+ if(!WriteFile(output,shape,SHAPE_STORAGE,&n,NULL)||n!=SHAPE_STORAGE)error=20;
 #endif
  if(!WriteFile(output,body,length,&n,NULL)||n!=length)error=20;CloseHandle(output);}}
  free(snapshot);VirtualFree(image,0,MEM_RELEASE);
