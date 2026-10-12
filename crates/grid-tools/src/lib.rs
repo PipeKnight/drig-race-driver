@@ -1,4 +1,5 @@
 //! Resource-to-behavior adapters shared by local diagnostics.
+pub mod body_geometry;
 pub mod contact_surfaces;
 pub mod impact_diagnostic;
 pub mod source_physical;

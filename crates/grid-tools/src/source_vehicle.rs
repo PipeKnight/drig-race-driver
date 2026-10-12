@@ -20,6 +20,11 @@ type GeometryProvider<'a> = dyn FnMut(
     ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>
     + 'a;
 
+enum Geometry<'a> {
+    Callback(&'a mut GeometryProvider<'a>),
+    Source(&'a crate::body_geometry::BodyGeometry),
+}
+
 pub struct Runtime {
     pub state: vehicle_world::State,
     initial: vehicle_world::State,
@@ -29,6 +34,9 @@ pub struct Runtime {
     cache: rectangle_cull::Cache,
     pair: [usize; 2],
     pub ticks: u64,
+    /// Fresh body records from the last successful tick; diagnostics only.
+    /// Failure preserves this count and reset clears it.
+    pub last_body_contacts: usize,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -309,6 +317,7 @@ impl Runtime {
             cache,
             pair,
             ticks: 0,
+            last_body_contacts: 0,
         })
     }
 
@@ -335,6 +344,21 @@ impl Runtime {
         Ok(())
     }
 
+    /// Prepare the selected source body shape and reserve four wheel plus sixteen
+    /// geometric slots. Sampling remains an explicit locally prepared input.
+    pub fn prepare_body_geometry(
+        &mut self,
+        root: &Path,
+        table: &[u8],
+    ) -> Result<crate::body_geometry::BodyGeometry, Box<dyn std::error::Error>> {
+        let ned = read(root, "cars/lac/lac.ned", 16 * 1024 * 1024)?;
+        let offset =
+            std::array::from_fn(|j| f32::from_bits(self.state.car.owner.vehicle[0x1630 / 4 + j]));
+        let geometry = crate::body_geometry::BodyGeometry::read(&ned, offset, table)?;
+        self.reserve_geometry_pool(20)?;
+        Ok(geometry)
+    }
+
     pub fn tick_with_geometry(
         &mut self,
         controls: Controls,
@@ -343,13 +367,23 @@ impl Runtime {
             usize,
         ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>,
     ) -> Result<(), Error> {
-        self.tick_owned(controls, Some(&mut geometry))
+        self.tick_owned(controls, Some(Geometry::Callback(&mut geometry)))
+    }
+
+    /// Experimental actual-track body geometry. Uses the existing selected
+    /// shared solver material; heavy-impact damage remains explicitly guarded.
+    pub fn tick_with_body_geometry(
+        &mut self,
+        controls: Controls,
+        geometry: &crate::body_geometry::BodyGeometry,
+    ) -> Result<(), Error> {
+        self.tick_owned(controls, Some(Geometry::Source(geometry)))
     }
 
     fn tick_owned(
         &mut self,
         controls: Controls,
-        geometry: Option<&mut GeometryProvider<'_>>,
+        geometry: Option<Geometry<'_>>,
     ) -> Result<(), Error> {
         if [controls.throttle, controls.brake]
             .iter()
@@ -400,22 +434,48 @@ impl Runtime {
                 .transpose()
         };
         let material = |token| self.surfaces.joined(token);
-        let output = if let Some(geometry) = geometry {
-            vehicle_world::calculate_with_geometry(
-                &staged, self.pair, GRAVITY, None, query, material, geometry,
-            )?
-        } else {
-            vehicle_world::calculate(&staged, self.pair, GRAVITY, None, query, material)?
+        let mut body_contacts = 0;
+        let output = match geometry {
+            Some(Geometry::Callback(geometry)) => vehicle_world::calculate_with_geometry(
+                &staged,
+                self.pair,
+                GRAVITY,
+                None,
+                query,
+                material,
+                |bodies, remaining| {
+                    let contacts = geometry(bodies, remaining)?;
+                    body_contacts = contacts.len();
+                    Ok(contacts)
+                },
+            )?,
+            Some(Geometry::Source(geometry)) => vehicle_world::calculate_with_geometry(
+                &staged,
+                self.pair,
+                GRAVITY,
+                None,
+                query,
+                material,
+                |bodies, remaining| {
+                    let contacts =
+                        geometry.contacts(&self.track, &self.surfaces, bodies, remaining)?;
+                    body_contacts = contacts.len();
+                    Ok(contacts)
+                },
+            )?,
+            None => vehicle_world::calculate(&staged, self.pair, GRAVITY, None, query, material)?,
         };
         self.state = output.state;
         self.cache = cache;
         self.ticks += 1;
+        self.last_body_contacts = body_contacts;
         Ok(())
     }
     pub fn reset(&mut self) {
         self.state = self.initial.clone();
         self.cache = self.initial_cache;
         self.ticks = 0;
+        self.last_body_contacts = 0;
     }
     pub fn pose(&self) -> [f32; 16] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x1d0 / 4 + i]))
@@ -428,6 +488,107 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn source_driving_donington_body_geometry() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let mut enabled = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let mut legacy = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let ned = read(root, "cars/lac/lac.ned", 16 * 1024 * 1024).unwrap();
+        let offset = std::array::from_fn(|j| {
+            f32::from_bits(enabled.state.car.owner.vehicle[0x1630 / 4 + j])
+        });
+        let geometry = crate::body_geometry::BodyGeometry::read(&ned, offset, &table).unwrap();
+        assert_eq!(enabled.track.shape_count(), 245);
+        let body = enabled.state.car.owner.physical;
+        let mut lowered = body;
+        lowered[0x1c4 / 4] = (f32::from_bits(lowered[0x1c4 / 4]) - 0.5).to_bits();
+        let full = geometry
+            .contacts(&enabled.track, &enabled.surfaces, &[lowered], 64)
+            .unwrap();
+        assert!(!full.is_empty());
+        assert!(full.len() <= 64);
+        assert!(full.iter().all(|c| c[0x2c / 4] >= 2 && c[0x2c / 4] <= 246));
+        let one = geometry
+            .contacts(&enabled.track, &enabled.surfaces, &[lowered], 1)
+            .unwrap();
+        assert_eq!(one, full[..1]);
+        assert!(
+            geometry
+                .contacts(&enabled.track, &enabled.surfaces, &[lowered], 0)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            geometry
+                .contacts(&enabled.track, &enabled.surfaces, &[lowered], 65)
+                .is_err()
+        );
+        assert!(
+            geometry
+                .contacts(&enabled.track, &enabled.surfaces, &[], 20)
+                .is_err()
+        );
+        eprintln!(
+            "donington_lowered_body contacts={} shapes={:?} depths={:?}",
+            full.len(),
+            full.iter().map(|c| c[0x2c / 4]).collect::<Vec<_>>(),
+            full.iter()
+                .map(|c| f32::from_bits(c[0x38 / 4]))
+                .collect::<Vec<_>>()
+        );
+        enabled.reserve_geometry_pool(20).unwrap();
+        for tick in 0..240 {
+            let controls = Controls {
+                throttle: 1.,
+                ..Default::default()
+            };
+            legacy.tick(controls).unwrap();
+            enabled
+                .tick_with_body_geometry(controls, &geometry)
+                .unwrap_or_else(|e| panic!("Donington tick {tick}: {e:?}"));
+        }
+        assert_eq!(enabled.ticks, 240);
+        assert!(enabled.velocity().iter().all(|v| v.is_finite()));
+        assert!((enabled.pose()[12] - f32::from_bits(body[0x1c0 / 4])).abs() > 1.);
+        eprintln!(
+            "donington_body_drive ticks={} velocity={:?} unchanged_wheel_path={}",
+            enabled.ticks,
+            enabled.velocity(),
+            enabled.state.car.owner.physical == legacy.state.car.owner.physical
+        );
+        enabled.reset();
+        legacy.reset();
+        for r in [&mut enabled, &mut legacy] {
+            let p = &mut r.state.car.owner.physical;
+            p[0x1c4 / 4] = (f32::from_bits(p[0x1c4 / 4]) - 0.12).to_bits();
+            r.state.world.groups.bodies[0] = *p;
+        }
+        let mut generated = 0;
+        let mut responses = 0;
+        for tick in 0..20 {
+            legacy.tick(Controls::default()).unwrap();
+            enabled
+                .tick_with_geometry(Controls::default(), |bodies, remaining| {
+                    let contacts =
+                        geometry.contacts(&legacy.track, &legacy.surfaces, bodies, remaining)?;
+                    generated += contacts.len();
+                    Ok(contacts)
+                })
+                .unwrap_or_else(|e| panic!("shallow road tick {tick}: {e:?}"));
+            responses +=
+                usize::from(enabled.state.car.owner.physical != legacy.state.car.owner.physical);
+        }
+        assert!(generated > 0);
+        assert!(responses > 0);
+        eprintln!(
+            "donington_shallow_road ticks=20 contacts={generated} responses={responses} velocity={:?}",
+            enabled.velocity()
+        );
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]

@@ -9,6 +9,7 @@ pub struct Surfaces {
     history: Vec<Option<wheel_history::Material>>,
     joined: Vec<Option<grid_world::vehicle_contact_force::Material>>,
     physical: Vec<grid_world::contact_rows::Material>,
+    sheets: Vec<bool>,
 }
 
 impl Surfaces {
@@ -19,6 +20,7 @@ impl Surfaces {
         let document = binxml::read(bytes)?;
         let materials = surface::read(&document)?;
         let keys = materials.iter().map(|m| m.code).collect();
+        let sheets = materials.iter().map(|m| m.physical.sheet).collect();
         let physical = materials
             .iter()
             .map(|m| m.physical.row_words(m.code).map(f32::from_bits))
@@ -86,6 +88,7 @@ impl Surfaces {
             history,
             joined,
             physical,
+            sheets,
         })
     }
 
@@ -97,6 +100,14 @@ impl Surfaces {
     ) -> Result<(usize, grid_world::contact_rows::Material), Box<dyn std::error::Error>> {
         let index = surface::packed_index(&self.keys, code, true).ok_or("surface table absent")?;
         Ok((index, self.physical[index]))
+    }
+
+    /// Exact four-byte source lookup with first-record fallback, matching the
+    /// selected packed constructor policy. No key padding normalization.
+    pub fn sheet(&self, code: [u8; 4]) -> Result<bool, grid_world::Error> {
+        let index = surface::packed_index(&self.keys, code, true)
+            .ok_or(grid_world::Error("surface table absent"))?;
+        Ok(self.sheets[index])
     }
 
     pub fn joined(

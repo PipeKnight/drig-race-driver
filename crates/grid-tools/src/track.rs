@@ -11,6 +11,8 @@ struct Chunk {
     positions: Vec<[f32; 3]>,
     triangles: Vec<[u16; 3]>,
     materials: Vec<[u8; 4]>,
+    material_indices: Vec<u8>,
+    material_keys: Vec<[u8; 4]>,
     nodes: Vec<u16>,
     leaves: BTreeMap<usize, Vec<u16>>,
     first_triangle: usize,
@@ -20,6 +22,13 @@ pub struct Track {
     pub grid: Grid,
     chunks: Vec<Chunk>,
     triangle_count: usize,
+}
+
+/// Fresh geometric record and the same one-based packed shape identity used
+/// by wheel queries. Solver material registration remains a separate adapter.
+pub struct BodyContact {
+    pub shape: u32,
+    pub contact: grid_world::contact_manifold::Contact,
 }
 
 impl Track {
@@ -56,6 +65,8 @@ impl Track {
                     .iter()
                     .map(|t| chunk.materials[t.material as usize])
                     .collect(),
+                material_indices: chunk.triangles.iter().map(|t| t.material).collect(),
+                material_keys: chunk.materials,
                 nodes: chunk.nodes,
                 leaves: chunk.references,
                 first_triangle,
@@ -83,6 +94,71 @@ impl Track {
     pub fn triangle_index(&self, id: u32, local: usize) -> Option<usize> {
         let c = self.chunks.get(id.checked_sub(1)? as usize)?;
         (local < c.triangles.len()).then_some(c.first_triangle + local)
+    }
+
+    /// Selected cold pair queries in archive order, with inclusive root AABB
+    /// culling and at most 16 contacts per pair / 64 in the returned world pool.
+    /// Archive order is authored scheduling, not the original broadphase order.
+    pub fn body_contacts(
+        &self,
+        mesh: &grid_world::collision_mesh::Mesh,
+        matrix: grid_world::physical_pose::Matrix,
+        query: &grid_world::convex_distance::ContactSettings,
+        capacity: usize,
+        mut sheet: impl FnMut([u8; 4]) -> Result<bool, grid_world::Error>,
+    ) -> Result<Vec<BodyContact>, grid_world::Error> {
+        if capacity > 64 {
+            return Err(grid_world::Error(
+                "body world contact capacity exceeds bound",
+            ));
+        }
+        let bounds = mesh.world_bounds(matrix, query.margin)?;
+        let mut contacts = Vec::new();
+        for (i, c) in self.chunks.iter().enumerate() {
+            if contacts.len() == capacity {
+                break;
+            }
+            if (0..3).any(|j| bounds[0][j] > c.bounds[j + 3] || bounds[1][j] < c.bounds[j]) {
+                continue;
+            }
+            if c.material_keys.len() > 8 {
+                return Err(grid_world::Error(
+                    "packed body material count exceeds bound",
+                ));
+            }
+            let mut mask = 0;
+            for (j, &key) in c.material_keys.iter().enumerate() {
+                mask |= u8::from(sheet(key)?) << j;
+            }
+            let generated = grid_world::packed_contacts::calculate(
+                mesh,
+                matrix,
+                &Mesh {
+                    bounds: c.bounds,
+                    vertices: &c.positions,
+                    triangles: &c.triangles,
+                    nodes: &c.nodes,
+                    leaves: &c.leaves,
+                },
+                &c.material_indices,
+                &grid_world::packed_contacts::Settings {
+                    query: grid_world::convex_distance::ContactSettings {
+                        margin: query.margin,
+                        directions: query.directions,
+                    },
+                    contact_capacity: (capacity - contacts.len()).min(16),
+                    cache_enabled: true,
+                    candidate_capacity: 4096,
+                    sheet_mask: mask,
+                    correction_bounds: [f32::MAX; 4],
+                },
+            )?;
+            contacts.extend(generated.contacts.into_iter().map(|contact| BodyContact {
+                shape: i as u32 + 1,
+                contact,
+            }));
+        }
+        Ok(contacts)
     }
     pub fn query(
         &self,
