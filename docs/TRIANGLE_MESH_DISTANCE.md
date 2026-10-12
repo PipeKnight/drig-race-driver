@@ -1,5 +1,7 @@
 # Triangle–mesh distance iteration (F223)
 
+Follow-up: [F224 retained query sequences](RETAINED_TRIANGLE_MESH_DISTANCE.md) now implement and verify partial scratch reset and persistent support state. The cold-only scope, hashes and counts below describe the preserved F223 checkpoint.
+
 12 October 2026. Rust implements the complete selected **cold triangle/mesh support-distance loop**. It matches the unchanged original on **1,801 cases**, including every byte of its retained simplex, support cache, direction, termination flags and conditional witnesses.
 
 This is a required part of geometric contact generation. The outer collision test, penetration search, manifold construction and moving runtime integration remain unfinished. A distance-loop result is not a finished barrier contact or a drivable lap.
