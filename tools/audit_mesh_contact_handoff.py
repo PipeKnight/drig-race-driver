@@ -24,7 +24,13 @@ def main():
         assert digest(upstream) == r['upstream_sha256']
         producer = json.loads(upstream.read_text())
         assert producer['passed']
-        if r.get('packed_track', False):
+        if r.get('packed_complete', False):
+            assert producer['full_descriptor'] and not producer['rust_generator_equivalence']
+            original_path = ROOT/producer['upstream']
+            assert digest(original_path) == producer['upstream_sha256']
+            assert json.loads(original_path.read_text())['attachment_index'] == 48
+            assert all(producer['results'][row['source_index']]['label'] == 'source' for row in r['provenance'])
+        elif r.get('packed_track', False):
             assert producer['native_reference_only'] and producer['attachment_index'] == 48
         else:
             assert producer['contact_slot_constructor']

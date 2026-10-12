@@ -61,6 +61,7 @@ def main():
     p.add_argument('--limit', type=int, default=0)
     p.add_argument('--seed-offset', type=int, default=0)
     p.add_argument('--packed-track', action='store_true')
+    p.add_argument('--packed-complete', action='store_true', help='Use source-mask records from the full nonaliased PC08 fixture')
     args = p.parse_args()
     assert args.limit >= 0 and args.seed_offset >= 0
     out = args.output.resolve()
@@ -69,7 +70,14 @@ def main():
     upstream = args.upstream.resolve()
     report = json.loads(upstream.read_text())
     assert report['passed']
-    if args.packed_track:
+    assert not args.packed_complete or args.packed_track
+    if args.packed_complete:
+        assert report['full_descriptor'] and not report['rust_generator_equivalence']
+        origin = ROOT/report['upstream']
+        assert digest(origin) == report['upstream_sha256']
+        original_report = json.loads(origin.read_text())
+        assert original_report['attachment_index'] == 48 and original_report['native_reference_only']
+    elif args.packed_track:
         assert report['native_reference_only'] and report['attachment_index'] == 48
         assert report['cases'] >= 15 and 'B39500/AEA1F0' in report['scope']
     else:
@@ -77,7 +85,8 @@ def main():
     shaped.MAGIC = grouped.MAGIC = MAGIC
     cases, provenance = [], []
     eligible = [row for row in report['results']
-                if row['contacts' if args.packed_track else 'contact_count']]
+                if row['contacts' if args.packed_track else 'contact_count']
+                and (not args.packed_complete or row['label'] == 'source')]
     assert args.seed_offset < len(eligible)
     for row in eligible[args.seed_offset:]:
         if not row['contacts' if args.packed_track else 'contact_count']:
@@ -162,7 +171,7 @@ def main():
         e = subprocess.run([*map(str, command), str(existing_input), str(target)], cwd=ROOT, capture_output=True, text=True, timeout=30)
         assert 0 < e.returncode < 256 and digest(target) == before
         guards.append(dict(label='existing', kind=kind, exit=e.returncode, existing_output_preserved=True))
-    result = dict(passed=True, profile=args.profile, packed_track=args.packed_track,
+    result = dict(passed=True, profile=args.profile, packed_track=args.packed_track, packed_complete=args.packed_complete,
                   cases=len(cases), positive_mesh_seeds=len(cases)//3,
                   contacts=sum(len(c['contacts']) for c in cases), response_cases=sum(responses),
                   observable_bytes=len(answers[0])-8, world_points_unchanged=points_unchanged,
