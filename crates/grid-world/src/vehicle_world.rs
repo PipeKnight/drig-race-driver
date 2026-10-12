@@ -81,10 +81,57 @@ pub fn calculate(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
 ) -> Result<Output, Error> {
+    calculate_owned(
+        input,
+        pair,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        None,
+    )
+}
+
+/// Registered car/wheel job followed by advanced-pose body geometry and solving.
+/// The stable full pool may have up to 64 slots. Only its first four slots are
+/// exposed to wheel production; fresh geometric records follow the used prefix.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_geometry(
+    input: &State,
+    pair: [usize; 2],
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    mut geometry: impl FnMut(
+        &[contact_groups::Body],
+        usize,
+    ) -> Result<Vec<contact_groups::Contact>, Error>,
+) -> Result<Output, Error> {
+    calculate_owned(
+        input,
+        pair,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        Some(&mut geometry),
+    )
+}
+
+fn calculate_owned(
+    input: &State,
+    pair: [usize; 2],
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    geometry: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
+) -> Result<Output, Error> {
     if input.world.groups.bodies.len() != 1
         || input.car.owner.physical != input.world.groups.bodies[0]
         || input.world.pool_used != 0
-        || input.world.groups.contacts.len() > 4
+        || input.world.groups.contacts.len() > if geometry.is_some() { 64 } else { 4 }
         || input.shapes.len() < 2
         || input.shapes.len() > 513
         || input.shapes[0]
@@ -104,7 +151,7 @@ pub fn calculate(
         return Err(Error("inconsistent single-car physical world ownership"));
     }
     let pool = wheel_contacts::Pool {
-        slots: input.world.groups.contacts.clone(),
+        slots: input.world.groups.contacts[..input.world.groups.contacts.len().min(4)].to_vec(),
         used: 0,
         shapes: input.shapes.len() - 1,
     };
@@ -120,12 +167,24 @@ pub fn calculate(
     )?;
     let mut previous = input.world.clone();
     previous.groups.bodies[0] = manager.job.state.owner.physical;
-    let world = physical_world::advance_with_pool(
-        &previous,
-        &manager.contacts.slots,
-        manager.contacts.used,
-        &input.shapes,
-    )?;
+    let world = if let Some(geometry) = geometry {
+        let mut slots = input.world.groups.contacts.clone();
+        slots[..manager.contacts.slots.len()].copy_from_slice(&manager.contacts.slots);
+        physical_world::advance_with_geometry_provider(
+            &previous,
+            &slots,
+            manager.contacts.used,
+            &input.shapes,
+            geometry,
+        )?
+    } else {
+        physical_world::advance_with_pool(
+            &previous,
+            &manager.contacts.slots,
+            manager.contacts.used,
+            &input.shapes,
+        )?
+    };
     let mut car = manager.job.state;
     car.owner.physical = world.groups.bodies[0];
     Ok(Output {
