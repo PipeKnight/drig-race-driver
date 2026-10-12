@@ -46,4 +46,8 @@ Final evidence remains private:
 
 Steam's 130 reference resources and executable remain unchanged at `2026-10-12T17:55:35.304760+00:00` (`local/scene/preservation-20261012-carried-geometry.json`). No UI input, settings changes or current approval blocker occurred. The existing playable application was not replaced with a barrier-capable build.
 
-Next: retained manifold append/duplicate merging across triangles, then Rust witness/normal reorientation and fresh moving body/track detection feeding this mixed-coordinate retained physical path.
+Follow-up: [F231](RETAINED_TRIANGLE_MANIFOLD.md) verifies retained manifold
+append/duplicate merging across triangles. Next: Rust witness/normal
+reorientation and fresh moving body/track detection feeding this mixed-coordinate
+retained physical path; the [integration research](CONTACT_REORIENTATION_RESEARCH.md)
+records the original moving-shape origin contract.

@@ -1,5 +1,10 @@
 # Source triangle–mesh manifold (F226)
 
+Follow-up: [F231](RETAINED_TRIANGLE_MANIFOLD.md) verifies retained append and
+duplicate merging across triangles. The historical cold proof below remains
+separate; reorientation, fresh detection and driving collision integration
+remain open.
+
 12 October 2026. Rust implements selected moving-mesh/static-triangle feature selection and complete AE2FA0 manifold assembly. Whole original/repeat/Rust debug/release agree on **2,425 cases /4,394 contact records /123,597,400 native bytes per profile**. This follows [F225 hit/penetration queries](TRIANGLE_MESH_CONTACT_QUERY.md). The combined packed dispatcher, retained multi-triangle manifold and driving integration remain open.
 
 ## Boundary and source reconstruction
