@@ -1,0 +1,132 @@
+"""Whole original mesh construction, source topology and complete owned bytes."""
+import argparse,csv,hashlib,itertools,json,math,random,struct,subprocess
+from pathlib import Path
+from validate_binxml import decode
+
+ROOT=Path(__file__).resolve().parent.parent
+IMAGE=ROOT/'local/compatibility/grid-unpacked.exe'
+def digest(p): return hashlib.sha256(p.read_bytes()).hexdigest()
+def f32(x): return struct.unpack('<f',struct.pack('<f',x))[0]
+def request(points,faces,fill):
+    return b'CM01'+struct.pack('<III',len(points),len(faces),fill)+b''.join(struct.pack('<4f',*p) for p in points)+b''.join(struct.pack('<3I',*t) for t in faces)
+def run(exe,args):
+    r=subprocess.run([str(exe),*map(str,args)],capture_output=True,text=True,cwd=ROOT,timeout=30)
+    return dict(exit=r.returncode,stdout=r.stdout,stderr=r.stderr)
+def check(data,points,faces,fill):
+    p=len(points);t=len(faces);a16=lambda n:(n+15)&~15
+    vertices=0x60;aux=vertices+32*p;planes=aux+16*p;neighbors=planes+32*t;incidents=neighbors+a16(40*p)
+    u=lambda o:struct.unpack_from('<I',data,o)[0]
+    assert len(data)==incidents+a16(12*t)
+    assert [u(o) for o in [0,4,8,12,0x50,0x54,0x58]]==[p,t,1,1,0x3f800000,vertices,planes]
+    assert struct.unpack_from('<16f',data,0x10)==tuple(1. if i%5==0 else 0. for i in range(16))
+    extrema=[min(v[j] for v in points) for j in range(3)]+[max(v[j] for v in points) for j in range(3)]
+    assert struct.unpack_from('<f',data,0x5c)[0]==min(map(abs,extrema))
+    edge_cursor=face_cursor=0
+    for i,point in enumerate(points):
+        v=vertices+i*32;a=aux+i*16;adj=[];inc=[]
+        for j,face in enumerate(faces):
+            if i not in face:continue
+            inc.append(j)
+            for k in face:
+                if k!=i and k not in adj:adj.append(k)
+        assert data[v:v+16]==struct.pack('<4f',*point)
+        assert [u(v+o) for o in [0x10,0x14,0x18]]==[a,len(inc),incidents+face_cursor*4]
+        assert [u(a+o) for o in [0,4]]==[len(adj),neighbors+edge_cursor*4]
+        assert [u(neighbors+(edge_cursor+j)*4) for j in range(len(adj))]==[vertices+j*32 for j in adj]
+        assert [u(incidents+(face_cursor+j)*4) for j in range(len(inc))]==[planes+j*32 for j in inc]
+        assert data[v+28:v+32]==bytes([fill])*4 and data[a+8:a+16]==bytes([fill])*8
+        edge_cursor+=len(adj);face_cursor+=len(inc)
+    assert face_cursor==3*t and edge_cursor<=p*10
+    assert data[neighbors+edge_cursor*4:incidents]==bytes([fill])*(incidents-neighbors-edge_cursor*4)
+    assert data[incidents+face_cursor*4:]==bytes([fill])*(len(data)-incidents-face_cursor*4)
+    for i,face in enumerate(faces):
+        o=planes+i*32;n=struct.unpack_from('<4f',data,o)
+        assert all(math.isfinite(x) for x in n) and abs(sum(x*x for x in n)-1)<1e-6 and n[3]==0
+        assert struct.unpack_from('<3I',data,o+16)==tuple(face) and data[o+28:o+32]==bytes([fill])*4
+        a,b,c=[points[j] for j in face];ab=[b[j]-a[j] for j in range(3)];ac=[c[j]-a[j] for j in range(3)]
+        cross=[ab[1]*ac[2]-ab[2]*ac[1],ac[0]*ab[2]-ac[2]*ab[0],ac[1]*ab[0]-ac[0]*ab[1]]
+        assert sum(x*y for x,y in zip(n,cross))<0 # Original stores opposite winding.
+    return dict(directed_edges=edge_cursor,incidences=face_cursor)
+
+def main():
+    parser=argparse.ArgumentParser();parser.add_argument('output',type=Path);parser.add_argument('--profile',required=True,choices=['debug','release']);args=parser.parse_args()
+    out=args.output.resolve();assert out.is_relative_to((ROOT/'local').resolve());out.mkdir(exist_ok=False)
+    game=Path(r'C:\Program Files (x86)\Steam\steamapps\common\Grid');native=ROOT/'local/behavior/collision-mesh-probe.exe';rust=ROOT/f'target/{args.profile}/grid-collision-mesh.exe'
+    source_cases=[];skipped=[]
+    for csvpath in sorted((game/'cars').rglob('*.csv')):
+        rows=[row for row in csv.reader(csvpath.read_text().splitlines()) if row]
+        if not rows or any(len(row)<360 or row[2]!='Standard' for row in rows):continue
+        ned=csvpath.with_suffix('.ned')
+        if not ned.is_file():skipped.append(str(csvpath.relative_to(game)));continue
+        tree=decode(ned.read_bytes())[1];collisions=list(tree.iter('COLLISION'));assert len(collisions)==1
+        geometry=[e for e in collisions[0] if e.tag=='GEOMETRY' and e.get('id')=='collision_main'];assert len(geometry)==1
+        points=[[*map(f32,map(float,e.get('pos').split())),1.] for e in geometry[0] if e.tag=='POINT']
+        faces=[list(map(int,e.get('points').split())) for e in geometry[0] if e.tag=='TRIANGLE']
+        source_cases.append((dict(kind='source',source=str(ned.relative_to(game)),source_sha256=digest(ned)),points,faces))
+    assert len(source_cases)==43 and len(skipped)==1
+    source_rejections=[];admitted=[]
+    for metadata,points,faces in source_cases:
+        degenerate=[]
+        for i,tri in enumerate(faces):
+            a,b,c=[points[k] for k in tri];ab=[f32(b[j]-a[j]) for j in range(3)];ac=[f32(c[j]-a[j]) for j in range(3)]
+            n=[f32(f32(ab[1]*ac[2])-f32(ab[2]*ac[1])),f32(f32(ac[0]*ab[2])-f32(ac[2]*ab[0])),f32(f32(ac[1]*ab[0])-f32(ac[0]*ab[1]))]
+            sq=f32(f32(f32(n[0]*n[0])+f32(n[1]*n[1]))+f32(n[2]*n[2]))
+            if not math.isfinite(sq) or not 1e-20<=sq<=1e20:degenerate.append(i)
+        if degenerate:
+            source_rejections.append((dict(**metadata,degenerate_faces=degenerate),points,faces))
+        else:admitted.append((metadata,points,faces))
+    assert len(admitted)==42 and len(source_rejections)==1
+    assert source_rejections[0][0]['source']==str(Path('cars/bos/bos.ned')) and source_rejections[0][0]['degenerate_faces']==[11,47]
+    cases=[(metadata,p,t,fill) for metadata,p,t in admitted for fill in [0,0xcd]]
+    cube=[[-1.,-1.,-1.,1.],[1.,-1.,-1.,1.],[1.,1.,-1.,1.],[-1.,1.,-1.,1.],[-1.,-1.,1.,1.],[1.,-1.,1.,1.],[1.,1.,1.,1.],[-1.,1.,1.,1.]]
+    triangles=[[0,1,2],[0,2,3],[4,6,5],[4,7,6],[0,4,5],[0,5,1],[3,2,6],[3,6,7],[0,3,7],[0,7,4],[1,5,6],[1,6,2]]
+    rng=random.Random(2008212)
+    for i in range(96):
+        scales=[rng.uniform(.2,4) for _ in range(3)];offset=[rng.uniform(-4,4) for _ in range(3)]
+        points=[[f32(p[j]*scales[j]+offset[j]) for j in range(3)]+[1.] for p in cube]
+        faces=[list(reversed(t)) if i%2 else t[:] for t in triangles]
+        rng.shuffle(faces)
+        cases.append((dict(kind='authored',control=i),points,faces,[0,0xcd][i%2]))
+    results=[]
+    for i,(metadata,points,faces,fill) in enumerate(cases):
+        inp=out/f'{i:03}-input.bin';inp.write_bytes(request(points,faces,fill));executions=[];answers=[]
+        for kind in ['original','repeat','rust']:
+            output=out/f'{i:03}-{kind}.bin';e=run(rust if kind=='rust' else native,[inp,output] if kind=='rust' else [IMAGE,inp,output]);executions.append(e)
+            (out/'current-executions.json').write_text(json.dumps(dict(index=i,executions=executions),indent=2));assert e['exit']==0 and not e['stderr'],(i,e)
+            if kind!='rust':assert 'code_unchanged=1 code_replacements=0 globals_restored=1 error=0' in e['stdout']
+            answers.append(output.read_bytes())
+        diff=[dict(offset=hex(j),original=answers[0][j:j+4].hex(),repeat=answers[1][j:j+4].hex(),rust=answers[2][j:j+4].hex()) for j in range(0,len(answers[0]),4) if len({a[j:j+4] for a in answers})!=1]
+        (out/'current-differences.json').write_text(json.dumps(dict(index=i,differences=diff),indent=2));assert not diff,(i,diff[:12])
+        checked=check(answers[0],points,faces,fill)
+        results.append(dict(index=i,**metadata,points=len(points),faces=len(faces),fill=fill,bytes=len(answers[0]),input_sha256=digest(inp),output_sha256=digest(out/f'{i:03}-original.bin'),**checked,executions=executions))
+    sample=request(cube,triangles,0);variants=[('short',sample[:-1]),('long',sample+b'\0')]
+    for label,o,value in [('tag',0,0),('points-low',4,3),('points-high',4,81),('faces-low',8,3),('faces-high',8,111),('fill',12,1),('point-nan',16,0x7fc00000),('point-inf',20,0x7f800000),('point-bound',24,struct.unpack('<I',struct.pack('<f',100001.))[0]),('point-w',28,0),('index',16+8*16,8),('duplicate-index',16+8*16+4,0)]:
+        data=bytearray(sample);struct.pack_into('<I',data,o,value);variants.append((label,data))
+    points=[v[:] for v in cube];points[1]=points[0][:];variants.append(('coincident',request(points,triangles,0)))
+    points=[[f32(v*.0000001) for v in p[:3]]+[1.] for p in cube];variants.append(('tiny-normal',request(points,triangles,0)))
+    points=[[rng.uniform(-2,2) for _ in range(3)]+[1.] for _ in range(12)];faces=list(itertools.islice(itertools.combinations(range(12),3),110));variants.append(('adjacency-capacity',request(points,faces,0)))
+    source_rejected=[]
+    for metadata,points,faces in source_rejections:
+        for fill in [0,0xcd]:
+            inp=out/f'source-rejected-{fill}.bin';inp.write_bytes(request(points,faces,fill))
+            for kind,exe in [('native',native),('rust',rust)]:
+                output=out/f'source-rejected-{fill}-{kind}.bin';e=run(exe,[IMAGE,inp,output] if kind=='native' else [inp,output]);assert 0<e['exit']<256 and not output.exists()
+                if kind=='native':assert not e['stderr'] and 'error=8' in e['stdout']
+                source_rejected.append(dict(**metadata,fill=fill,implementation=kind,execution=e,no_output=True,input_sha256=digest(inp)))
+    guards=[]
+    for label,data in variants:
+        inp=out/f'guard-{label}.bin';inp.write_bytes(data)
+        for kind,exe in [('native',native),('rust',rust)]:
+            output=out/f'guard-{label}-{kind}.bin';e=run(exe,[IMAGE,inp,output] if kind=='native' else [inp,output]);assert 0<e['exit']<256 and not output.exists(),(label,kind,e)
+            if kind=='native':assert not e['stderr'] and 'code_unchanged=1' in e['stdout'] and 'globals_restored=1' in e['stdout']
+            guards.append(dict(label=label,kind=kind,execution=e,no_output=True))
+    assert digest(IMAGE)=='aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514'
+    for metadata,_,_ in source_cases:assert digest(game/metadata['source'])==metadata['source_sha256']
+    for kind,exe in [('native',native),('rust',rust)]:
+        existing=out/f'existing-{kind}.bin';existing.write_bytes(b'preserve existing evidence');before=digest(existing)
+        inp=out/'000-input.bin';e=run(exe,[IMAGE,inp,existing] if kind=='native' else [inp,existing]);assert 0<e['exit']<256 and digest(existing)==before
+        if kind=='native':assert not e['stderr'] and 'error=19' in e['stdout']
+        guards.append(dict(label='existing-output',kind=kind,execution=e,existing_output_preserved=True))
+    report=dict(passed=True,profile=args.profile,cases=len(results),examined_source_meshes=43,admitted_source_meshes=42,source_cases=84,authored_controls=96,observable_bytes=sum(r['bytes'] for r in results),results=results,source_rejected=source_rejected,guards=guards,guard_count=len(guards),skipped=skipped,executables={str(p.relative_to(ROOT)):digest(p) for p in [native,rust,IMAGE]},scope='Whole supplied B44E80, original cross/normal/extent/topology, owned canonical pointer offsets. BOS raw mesh rejected for two zero-area faces; source adjustment may matter and is unverified. Not convexification, allocation, shape registration or contact generation.')
+    (out/'validation.json').write_text(json.dumps(report,indent=2));print(json.dumps({k:report[k] for k in ['passed','cases','observable_bytes','guard_count']}))
+if __name__=='__main__':main()
