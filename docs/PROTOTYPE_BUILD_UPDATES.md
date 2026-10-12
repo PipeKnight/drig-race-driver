@@ -15,3 +15,11 @@ Use the existing launchers to try the current build. Changes that affect driving
 The first helper run on 13 October passed all five purchased-source driving tests and all three Bevy tests, then rebuilt the release executable. Formatting, all-target workspace Clippy with warnings denied, PowerShell AST parsing and whitespace checks also passed. Private evidence is `local/playtest/build-20261012T2257094306737Z/`; its manifest labels the uncommitted build `fe5d9cd9836e-dirty` and records SHA-256 `7de798e1f864de582a7dc79b419d6834f688c0146275a1495dc6350fd1c7896a`. A subsequent committed-source build supersedes it through the current-build manifest. This update adds build identification and maintenance tooling, with no driving-physics change.
 
 The initial tool inventory found Cargo and Rust absent from the shell PATH. Both were already installed in `C:\Users\debros\.cargo\bin`; the fallback reuses Cargo 1.99.0 and Rust 1.99.0. No installation was needed. Bevy remains 0.19.1.
+
+## Current playable update
+
+The clean committed-source build is **c7a38624b983** (full revision `c7a38624b98342c99860ae2d6fe04a20ca43c141`), built at `2026-10-12T22:59:24.6974411Z`. Release executable SHA-256 is `8f9b3cee26ce4c069766decb13a3cab3325dcd525e8829a506f907049eb2c41e`. The same five source and three Bevy checks passed for this build; private evidence and manifest are under `local/playtest/build-20261012T2258565096574Z/`.
+
+Its 600-tick powered Donington barrier run completed with 132 telemetry samples and no recorded simulation failure. The screenshot was inspected: the Lacetti and circuit render, with the car beside the barrier. This is a bounded scripted check, not a new manual lap. Files are `local/playtest/build-c7a38624b983-20261013.{txt,json,png}`; log SHA-256 `401bcf36fafecf6f3adcda4fa9a60e8efcc406cb0f825edca5bd836c4d6108b3`, image SHA-256 `a6e4035fbbb380ede67c844feda9fa5e0ee6ea4ee438486063e3f2c7ffa5ccf0`. The existing gamepad error `80070057` recurs, while the scripted driving run completes. Keyboard controls remain the tested path.
+
+Both existing launchers still point at `target/release/grid-app.exe`. Documentation and diagnostic-only commits after the recorded revision do not change this playable executable. No owner action or additional recording is needed for the current research step.
