@@ -4,17 +4,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if !(2..=3).contains(&args.len()) || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 23580 {
         return Err(
-            "usage: grid-convex-distance PC03_TO_PC06_INPUT local/OUTPUT [PRIVATE_CD01]".into(),
+            "usage: grid-convex-distance PC03_TO_PC07_INPUT local/OUTPUT [PRIVATE_CD01]".into(),
         );
     }
     let b = fs::read(&args[0])?;
-    if b.len() < 44 || !matches!(&b[..4], b"PC03" | b"PC04" | b"PC05" | b"PC06") {
+    if b.len() < 44 || !matches!(&b[..4], b"PC03" | b"PC04" | b"PC05" | b"PC06" | b"PC07") {
         return Err("invalid distance framing".into());
     }
     let word = |o| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let float = |o| f32::from_bits(word(o));
     let sequence = matches!(&b[..4], b"PC05" | b"PC06");
     let outer = matches!(&b[..4], b"PC03" | b"PC06");
+    let manifold = &b[..4] == b"PC07";
     if args.len() != if outer { 3 } else { 2 } {
         return Err("outer query requires private CD01 sampling data".into());
     }
@@ -42,7 +43,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if !(1..=64).contains(&count) {
         return Err("invalid distance sequence count".into());
     }
-    let s = if sequence { 44 + count * 24 } else { 60 };
+    let s = if sequence {
+        44 + count * 24
+    } else if manifold {
+        84
+    } else {
+        60
+    };
     let size = word(4) as usize;
     let chunk_size = word(8) as usize;
     if !(0x1680..=22000).contains(&size)
@@ -129,6 +136,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    // Face normals are source shape initialization results, not the earlier
+    // inverted construction normals. Rebuild them independently for the manifold.
+    let initialized = if manifold {
+        Some(
+            grid_world::collision_mesh::build(&vertices, &triangles, 0)?.initialize_shape(
+                grid_world::collision_mesh::ShapeSettings {
+                    span: mesh_size as u32,
+                    scalar220: float(s + 0x220),
+                    layer: 0,
+                    flag_c0: false,
+                },
+                0,
+            )?,
+        )
+    } else {
+        None
+    };
+    let mesh = initialized
+        .as_ref()
+        .map(|shape| shape.mesh())
+        .unwrap_or(&mesh);
+    if manifold {
+        for i in 0..faces {
+            for (j, value) in mesh.face_normal(i).unwrap().into_iter().enumerate() {
+                if value.to_bits() != word(m + face_start + i * 32 + j * 4) {
+                    return Err("invalid source manifold face normal".into());
+                }
+            }
+        }
+    }
     let mut matrix: [[f32; 4]; 4] =
         std::array::from_fn(|i| std::array::from_fn(|j| float(s + 0x130 + i * 16 + j * 4)));
     if matrix
@@ -162,11 +199,82 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let p = chunk.positions[i as usize];
             [p[0], p[1], p[2], 1.]
         });
+        if manifold {
+            let fallback_point = std::array::from_fn(|j| float(60 + j * 4));
+            if word(80) > 1 {
+                return Err("invalid manifold publication flag".into());
+            }
+            let result = grid_world::contact_manifold::calculate(
+                &mut context,
+                mesh,
+                matrix,
+                triangle,
+                &grid_world::contact_manifold::Settings {
+                    margin: float(s + 0x220),
+                    normal: direction,
+                    fallback_point,
+                    fallback_depth: float(76),
+                    capacity: word(12) as usize,
+                },
+            )?;
+            let mut arena = vec![0u8; 16 * 128];
+            let put =
+                |q: &mut [u8], o: usize, v: u32| q[o..o + 4].copy_from_slice(&v.to_le_bytes());
+            for i in 0..16 {
+                let c = &mut arena[i * 128..(i + 1) * 128];
+                put(c, 0, 0x7200);
+                c[0xf] = 1;
+                put(c, 0x1c, u32::MAX);
+                put(c, 0x20, u32::MAX);
+                put(c, 0x24, 1);
+                if let Some(contact) = result.contacts.get(i) {
+                    for (o, v) in [
+                        (4, 0xa000),
+                        (0x28, 0x1000),
+                        (0x2c, 0xc000),
+                        (0x30, 0x1420),
+                        (0x34, 0x1420),
+                        (0x38, contact.penetration.to_bits()),
+                        (0x3c, f32::MAX.to_bits()),
+                    ] {
+                        put(c, o, v);
+                    }
+                    for (o, p) in [(0x50, contact.point), (0x60, contact.normal)] {
+                        for (j, x) in p.into_iter().enumerate() {
+                            put(c, o + j * 4, x.to_bits());
+                        }
+                    }
+                    c[0x71] = contact.flipped as u8;
+                    c[0x73] = word(80) as u8;
+                }
+            }
+            let mut query = [0u8; 0xa0];
+            query[0x20..0x40].fill(0xcd);
+            put(&mut query, 0, index);
+            put(&mut query, 4, result.contacts.len() as u32);
+            query[0x10..0x20].copy_from_slice(&b[44..60]);
+            query[0x20..0x38].copy_from_slice(&b[60..84]);
+            put(&mut query, 0x40, 0x1000);
+            for (j, i) in result.support_vertices.into_iter().enumerate() {
+                put(&mut query, 0x44 + j * 4, 0x30060 + i as u32 * 32);
+            }
+            for (i, p) in triangle.into_iter().enumerate() {
+                for (j, x) in p.into_iter().enumerate() {
+                    put(&mut query, 0x60 + i * 16 + j * 4, x.to_bits());
+                }
+            }
+            records.extend_from_slice(&arena);
+            records.extend_from_slice(&query);
+            for feature in result.features {
+                records.extend_from_slice(&feature.bytes);
+            }
+            continue;
+        }
         let mut extras = None;
         let (returned, flags, witnesses, support_vertices, simplex_bytes) =
             if let Some(directions) = sampling {
                 let result = context.contact(
-                    &mesh,
+                    mesh,
                     matrix,
                     triangle,
                     direction,
@@ -184,7 +292,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     result.simplex_bytes,
                 )
             } else {
-                let result = context.query(&mesh, matrix, triangle, float(s + 0x220), direction)?;
+                let result = context.query(mesh, matrix, triangle, float(s + 0x220), direction)?;
                 (
                     result.direction,
                     result.flags,

@@ -11,6 +11,7 @@ pub mod contact_bias;
 pub mod contact_collection;
 pub mod contact_groups;
 pub mod contact_inverse;
+pub mod contact_manifold;
 pub mod contact_material;
 pub mod contact_preparation;
 pub mod contact_ray;

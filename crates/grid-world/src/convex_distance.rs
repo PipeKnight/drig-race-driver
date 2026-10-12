@@ -1,5 +1,5 @@
-//! Triangle/owned-mesh support distance iteration. Manifold and penetration
-//! construction are separate. This implements the complete selected B7EA60 loop.
+//! Triangle/owned-mesh distance and selected outer penetration queries.
+//! Contact manifold construction and world integration are separate.
 use crate::{Error, collision_mesh::Mesh, physical_pose::Matrix};
 
 type V = [f32; 4];
@@ -434,6 +434,23 @@ impl Default for Context {
     }
 }
 impl Context {
+    pub(crate) fn cached_support(&self) -> [usize; 7] {
+        self.cache
+    }
+
+    pub(crate) fn feature_support(
+        &mut self,
+        mesh: &Mesh,
+        matrix: Matrix,
+        direction: V,
+    ) -> Result<[usize; 7], Error> {
+        if self.cache.iter().any(|&i| i >= mesh.point_count()) {
+            return Err(Error("feature support cache belongs to another mesh"));
+        }
+        mesh_support_local(mesh, matrix, direction, &mut self.cache)?;
+        Ok(self.cache)
+    }
+
     pub fn new() -> Self {
         Self {
             simplex: Simplex::new(),
