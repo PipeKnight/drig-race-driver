@@ -70,10 +70,20 @@ pub struct Output {
 }
 /// Cold generation-one candidate order and bounded visited/accepted stores.
 pub fn collect(mesh: &Mesh<'_>, bounds: [V; 2], capacity: usize) -> Result<Output, Error> {
+    if mesh.vertices.len() > 1024 {
+        return Err(Error("packed candidate vertex count exceeds bound"));
+    }
+    collect_decoded(mesh, bounds, capacity)
+}
+
+/// The same ordered collector on an independently decoded tree with up to
+/// 65535 vertices. Wider source node encodings must be admitted/transcoded by
+/// the source adapter before calling this selected representation.
+pub fn collect_decoded(mesh: &Mesh<'_>, bounds: [V; 2], capacity: usize) -> Result<Output, Error> {
     if capacity > 32768
         || mesh.nodes.is_empty()
         || mesh.triangles.len() > 32768
-        || mesh.vertices.len() > 1024
+        || mesh.vertices.len() > 65535
         || bounds
             .iter()
             .flatten()

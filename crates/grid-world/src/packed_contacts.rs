@@ -42,6 +42,29 @@ pub fn calculate(
     materials: &[u8],
     settings: &Settings,
 ) -> Result<Output, Error> {
+    calculate_owned(mesh, matrix, track, materials, settings, false)
+}
+
+/// Selected source-decoded wider-vertex tree using the shared cold query and
+/// manifold path. The adapter must retain child order and material sheet flags.
+pub fn calculate_decoded(
+    mesh: &Mesh,
+    matrix: Matrix,
+    track: &packed_query::Mesh<'_>,
+    materials: &[u8],
+    settings: &Settings,
+) -> Result<Output, Error> {
+    calculate_owned(mesh, matrix, track, materials, settings, true)
+}
+
+fn calculate_owned(
+    mesh: &Mesh,
+    matrix: Matrix,
+    track: &packed_query::Mesh<'_>,
+    materials: &[u8],
+    settings: &Settings,
+    decoded: bool,
+) -> Result<Output, Error> {
     if settings.contact_capacity > 16
         || settings.candidate_capacity > 32768
         || settings.correction_bounds != [f32::MAX; 4]
@@ -64,7 +87,11 @@ pub fn calculate(
     if settings.contact_capacity == 0 || !settings.cache_enabled {
         return Ok(result);
     }
-    let candidates = packed_candidates::collect(track, bounds, settings.candidate_capacity)?;
+    let candidates = if decoded {
+        packed_candidates::collect_decoded(track, bounds, settings.candidate_capacity)?
+    } else {
+        packed_candidates::collect(track, bounds, settings.candidate_capacity)?
+    };
     let mut context = convex_distance::Context::new();
     for &id in &candidates.accepted {
         let triangle = track.triangles[id].map(|index| {
