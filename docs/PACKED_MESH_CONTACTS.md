@@ -1,5 +1,7 @@
 # Lacetti mesh contacts with packed Donington geometry (F221)
 
+F222 subsequently verifies [serial pair scheduling and worker lifecycle](SERIAL_GEOMETRIC_SCHEDULING.md), preserving complete contact records in both pair ownership orders.
+
 12 October 2026, Europe/Kiev. The original mesh7/packed11 contact path now runs on the purchased Lacetti collision mesh and all245 Donington packed chunks. **1,417 original/repeated-original cases match69,092,472 complete output bytes per run**, producing2,393 contacts in608 positive cases.25 framing, ownership, geometry and existing-output guards pass. A source/request/current-binary audit verifies all2,834 complete outputs.
 
 All608 positive results also pass through the original and Rust body-advance/group/solve stages: **1,824 cases /25,375,232 output bytes per debug and release profile**, with4,786 contact uses each. Every positive seed changes linear/angular velocity against its empty-contact control. World-space points/normals remain unchanged. This is stage-composed verification, not a Rust geometric generator, fresh contacts after movement, a complete native world frame or runtime barrier collision support.
