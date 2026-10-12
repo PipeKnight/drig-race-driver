@@ -2,27 +2,32 @@
 use std::{fs, io::Write, path::Path};
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 22060 {
-        return Err("usage: grid-convex-distance PC04_INPUT local/OUTPUT".into());
+    if args.len() != 2 || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 23580 {
+        return Err("usage: grid-convex-distance PC04_OR_PC05_INPUT local/OUTPUT".into());
     }
     let b = fs::read(&args[0])?;
-    if b.len() < 60 || &b[..4] != b"PC04" {
+    if b.len() < 44 || !matches!(&b[..4], b"PC04" | b"PC05") {
         return Err("invalid distance framing".into());
     }
     let word = |o| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let float = |o| f32::from_bits(word(o));
+    let sequence = &b[..4] == b"PC05";
+    let count = if sequence { word(40) as usize } else { 1 };
+    if !(1..=64).contains(&count) {
+        return Err("invalid distance sequence count".into());
+    }
+    let s = if sequence { 44 + count * 24 } else { 60 };
     let size = word(4) as usize;
     let chunk_size = word(8) as usize;
     if !(0x1680..=22000).contains(&size)
         || !(52..=2 * 1024 * 1024).contains(&chunk_size)
-        || b.len() != 60 + size + chunk_size
+        || b.len() != s + size + chunk_size
         || word(12) > 16
         || word(16) > 1
         || word(20) > 32768
     {
         return Err("invalid distance extent".into());
     }
-    let s = 60;
     let mesh_size = size - 0x1620;
     let body = s + 0x500 + mesh_size;
     if !(0x60..=16000).contains(&mesh_size)
@@ -35,15 +40,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("invalid distance mesh ownership".into());
     }
     let center: [f32; 4] = std::array::from_fn(|j| float(24 + j * 4));
-    let direction: [f32; 4] = std::array::from_fn(|j| float(44 + j * 4));
-    if center
-        .iter()
-        .chain(direction.iter())
-        .any(|v| !v.is_finite() || v.abs() > 10000.)
-        || center[3] != 1.
-        || direction[3] != 0.
-    {
+    if center.iter().any(|v| !v.is_finite() || v.abs() > 10000.) || center[3] != 1. {
         return Err("invalid distance controls".into());
+    }
+    let mut requests = Vec::with_capacity(count);
+    for i in 0..count {
+        let o = if sequence { 44 + i * 24 } else { 40 };
+        let mode = if sequence { word(o + 4) } else { 1 };
+        let d = if sequence { o + 8 } else { o + 4 };
+        let direction: [f32; 4] = std::array::from_fn(|j| float(d + j * 4));
+        if mode > 1
+            || (i == 0 && mode != 1)
+            || direction.iter().any(|v| !v.is_finite() || v.abs() > 10000.)
+            || direction[3] != 0.
+        {
+            return Err("invalid distance sequence controls".into());
+        }
+        requests.push((word(o), mode, direction));
     }
     let m = s + 0x500;
     let points = word(m) as usize;
@@ -104,46 +117,54 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         matrix[3][j] += center[j] - float(body + 0x1c0 + j * 4);
     }
     let chunk = grid_formats::collision::read_vcqtc(&b[s + size..])?;
-    let ids = chunk
-        .triangles
-        .get(word(40) as usize)
-        .ok_or("triangle out of range")?
-        .indices;
-    let triangle = ids.map(|i| {
-        let p = chunk.positions[i as usize];
-        [p[0], p[1], p[2], 1.]
-    });
-    let result = grid_world::convex_distance::calculate(
-        &mesh,
-        matrix,
-        triangle,
-        float(s + 0x220),
-        direction,
-    )?;
-    let mut query = [0u8; 0xa0];
-    query[..4].copy_from_slice(&word(40).to_le_bytes());
-    query[8] = result.flags[0] as u8;
-    query[9] = result.flags[1] as u8;
-    query[0x20..0x40].fill(0xcd);
-    let put = |q: &mut [u8], o: usize, v: u32| q[o..o + 4].copy_from_slice(&v.to_le_bytes());
-    for (j, v) in result.direction.into_iter().enumerate() {
-        put(&mut query, 0x10 + j * 4, v.to_bits());
+    let mut context = grid_world::convex_distance::Context::new();
+    let mut direction = [0.; 4];
+    let mut records = Vec::with_capacity(count * 448 + 4);
+    if sequence {
+        records.extend_from_slice(&(count as u32).to_le_bytes());
     }
-    if let Some(witnesses) = result.witnesses {
-        for (i, p) in witnesses.into_iter().enumerate() {
-            for (j, v) in p.into_iter().enumerate() {
-                put(&mut query, 0x20 + i * 16 + j * 4, v.to_bits());
+    for (index, mode, supplied_direction) in requests {
+        if mode == 1 {
+            direction = supplied_direction;
+        }
+        let ids = chunk
+            .triangles
+            .get(index as usize)
+            .ok_or("triangle out of range")?
+            .indices;
+        let triangle = ids.map(|i| {
+            let p = chunk.positions[i as usize];
+            [p[0], p[1], p[2], 1.]
+        });
+        let result = context.query(&mesh, matrix, triangle, float(s + 0x220), direction)?;
+        direction = result.direction;
+        let mut query = [0u8; 0xa0];
+        query[..4].copy_from_slice(&index.to_le_bytes());
+        query[8] = result.flags[0] as u8;
+        query[9] = result.flags[1] as u8;
+        query[0x20..0x40].fill(0xcd);
+        let put = |q: &mut [u8], o: usize, v: u32| q[o..o + 4].copy_from_slice(&v.to_le_bytes());
+        for (j, v) in result.direction.into_iter().enumerate() {
+            put(&mut query, 0x10 + j * 4, v.to_bits());
+        }
+        if let Some(witnesses) = result.witnesses {
+            for (i, p) in witnesses.into_iter().enumerate() {
+                for (j, v) in p.into_iter().enumerate() {
+                    put(&mut query, 0x20 + i * 16 + j * 4, v.to_bits());
+                }
             }
         }
-    }
-    put(&mut query, 0x40, 0x1000);
-    for (j, i) in result.support_vertices.into_iter().enumerate() {
-        put(&mut query, 0x44 + j * 4, 0x30060 + i as u32 * 32);
-    }
-    for (i, p) in triangle.into_iter().enumerate() {
-        for (j, v) in p.into_iter().enumerate() {
-            put(&mut query, 0x60 + i * 16 + j * 4, v.to_bits());
+        put(&mut query, 0x40, 0x1000);
+        for (j, i) in result.support_vertices.into_iter().enumerate() {
+            put(&mut query, 0x44 + j * 4, 0x30060 + i as u32 * 32);
         }
+        for (i, p) in triangle.into_iter().enumerate() {
+            for (j, v) in p.into_iter().enumerate() {
+                put(&mut query, 0x60 + i * 16 + j * 4, v.to_bits());
+            }
+        }
+        records.extend_from_slice(&result.simplex_bytes);
+        records.extend_from_slice(&query);
     }
     let output = Path::new(&args[1]);
     let parent = output.parent().ok_or("missing parent")?.canonicalize()?;
@@ -154,9 +175,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .write(true)
         .create_new(true)
         .open(parent.join(output.file_name().ok_or("missing output name")?))?;
-    file.write_all(&result.simplex_bytes)?;
-    file.write_all(&query)?;
-    println!("convex_distance bytes=448");
+    file.write_all(&records)?;
+    println!("convex_distance bytes={}", records.len());
     Ok(())
 }
 fn main() {

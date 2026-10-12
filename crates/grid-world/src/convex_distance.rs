@@ -150,6 +150,7 @@ fn tetrahedron_feature(p: [V; 4]) -> Result<Option<Feature>, ()> {
     Ok(best)
 }
 
+#[derive(Clone)]
 struct Simplex {
     bytes: [u8; 0x120],
 }
@@ -157,10 +158,18 @@ impl Simplex {
     fn new() -> Self {
         let mut s = Self { bytes: [0; 0x120] };
         s.vector(0xc0, [1., 0., 0., 0.]);
-        s.vector(0xf0, [f32::MAX, f32::MAX, f32::MAX, 1.]);
-        s.put(0x118, u32::MAX);
-        s.bytes[0x11e] = 1;
+        s.reset();
         s
+    }
+    fn reset(&mut self) {
+        self.bytes[0x60..0xb0].fill(0);
+        self.bytes[0] = 0;
+        self.bytes[0x11c] = 0;
+        self.bytes[0x11d] = 0;
+        self.bytes[0x11e] = 1;
+        self.vector(0xf0, [f32::MAX, f32::MAX, f32::MAX, 1.]);
+        self.put(0x100, 0);
+        self.put(0x118, u32::MAX);
     }
     fn word(&self, o: usize) -> u32 {
         u32::from_le_bytes(self.bytes[o..o + 4].try_into().unwrap())
@@ -392,13 +401,75 @@ fn mesh_support(
 
 /// Source-owned triangle versus a one-level constructed collision mesh.
 /// This does not run the outer feature test, penetration search or manifold.
-#[allow(clippy::neg_multiply)] // Preserve the original multiply-by-minus-one.
 pub fn calculate(
     mesh: &Mesh,
     matrix: Matrix,
     triangle: [V; 3],
     margin: f32,
+    direction: V,
+) -> Result<Output, Error> {
+    Context::new().query(mesh, matrix, triangle, margin, direction)
+}
+
+/// Owned per-mesh-pair distance state. Queries preserve the support cache and
+/// the scratch fields that the original partial reset leaves intact.
+#[derive(Clone)]
+pub struct Context {
+    simplex: Simplex,
+    cache: [usize; 7],
+}
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            simplex: Simplex::new(),
+            cache: [0; 7],
+        }
+    }
+    /// Use one context per mesh pair; reset it if the mesh/topology changes.
+    /// Failure leaves its complete state intact.
+    pub fn query(
+        &mut self,
+        mesh: &Mesh,
+        matrix: Matrix,
+        triangle: [V; 3],
+        margin: f32,
+        direction: V,
+    ) -> Result<Output, Error> {
+        if self.cache.iter().any(|&v| v >= mesh.point_count()) {
+            return Err(Error("distance cache index outside supplied mesh"));
+        }
+        let mut staged = self.clone();
+        let output = run_query(
+            mesh,
+            matrix,
+            triangle,
+            margin,
+            direction,
+            &mut staged.simplex,
+            &mut staged.cache,
+        )?;
+        *self = staged;
+        Ok(output)
+    }
+    pub fn reset(&mut self) {
+        *self = Self::new();
+    }
+}
+
+#[allow(clippy::neg_multiply)] // Preserve the original multiply-by-minus-one.
+fn run_query(
+    mesh: &Mesh,
+    matrix: Matrix,
+    triangle: [V; 3],
+    margin: f32,
     mut direction: V,
+    simplex: &mut Simplex,
+    cache: &mut [usize; 7],
 ) -> Result<Output, Error> {
     if matrix
         .iter()
@@ -413,8 +484,7 @@ pub fn calculate(
     {
         return Err(Error("invalid convex distance input"));
     }
-    let mut simplex = Simplex::new();
-    let mut cache = [0; 7];
+    simplex.reset();
     let mut flags = [false, true];
     let mut previous = f32::MAX;
     let mut bound = f32::MAX;
@@ -430,7 +500,7 @@ pub fn calculate(
         } else {
             triangle[2]
         };
-        let b = mesh_support(mesh, matrix, direction, &mut cache)?;
+        let b = mesh_support(mesh, matrix, direction, cache)?;
         let difference = sub(a, b);
         let projection = dot(direction, difference);
         if 0. < projection && bound < projection * projection {
@@ -483,7 +553,7 @@ pub fn calculate(
         direction,
         flags,
         witnesses,
-        support_vertices: cache,
+        support_vertices: *cache,
         simplex_bytes: simplex.bytes,
     })
 }
@@ -535,5 +605,29 @@ mod tests {
         assert!(r.witnesses.is_none());
         assert!(calculate(&mesh, IDENTITY, triangle, -1., [1., 0., 0., 0.]).is_err());
         assert!(calculate(&mesh, IDENTITY, triangle, 0., [f32::NAN, 0., 0., 0.]).is_err());
+    }
+    #[test]
+    fn persistent_failure_rolls_back_and_reset_reproduces_cold_query() {
+        let mesh = tetrahedron();
+        let triangle = [[-8., 0., -8., 1.], [8., 0., -8., 1.], [0., 0., 8., 1.]];
+        let mut context = Context::new();
+        context
+            .query(&mesh, IDENTITY, triangle, 0., [1., 0., 0., 0.])
+            .unwrap();
+        let before = context.clone();
+        assert!(
+            context
+                .query(&mesh, IDENTITY, triangle, -1., [1., 0., 0., 0.])
+                .is_err()
+        );
+        assert_eq!(context.simplex.bytes, before.simplex.bytes);
+        assert_eq!(context.cache, before.cache);
+        context.reset();
+        let reset = context
+            .query(&mesh, IDENTITY, triangle, 0., [1., 0., 0., 0.])
+            .unwrap();
+        let cold = calculate(&mesh, IDENTITY, triangle, 0., [1., 0., 0., 0.]).unwrap();
+        assert_eq!(reset.simplex_bytes, cold.simplex_bytes);
+        assert_eq!(reset.support_vertices, cold.support_vertices);
     }
 }
