@@ -16,17 +16,25 @@
 #ifdef GRID_TRIANGLE_DISTANCE_SEQUENCE
 #define GRID_TRIANGLE_QUERY_SEQUENCE
 #endif
-#ifdef GRID_TRIANGLE_DISTANCE
+#ifdef GRID_MANIFOLD_SEQUENCE
+#define SEQUENCE_RECORD_BYTES 0xa20
+#define SEQUENCE_REQUEST_BYTES 48
+#elif defined(GRID_TRIANGLE_DISTANCE)
 #define SEQUENCE_RECORD_BYTES 0x1c0
 #else
 #define SEQUENCE_RECORD_BYTES 0x260
+#endif
+#ifndef SEQUENCE_REQUEST_BYTES
+#define SEQUENCE_REQUEST_BYTES 24
 #endif
 #ifdef GRID_PACKED_CONTACT_SCHEDULE
 #define ROOT_BYTES 0xc40
 #define REQUEST_TAG 0x32304350
 #elif defined(GRID_TRIANGLE_MESH_QUERY)
 #define ROOT_BYTES 0xa80
-#ifdef GRID_TRIANGLE_MANIFOLD
+#ifdef GRID_MANIFOLD_SEQUENCE
+#define REQUEST_TAG 0x39304350
+#elif defined(GRID_TRIANGLE_MANIFOLD)
 #define REQUEST_TAG 0x37304350
 #elif defined(GRID_TRIANGLE_QUERY_SEQUENCE) && !defined(GRID_TRIANGLE_DISTANCE)
 #define REQUEST_TAG 0x36304350
@@ -79,7 +87,7 @@ int wmain(int argc,wchar_t **argv){
  memset(features_owned,0xcd,sizeof(features_owned));
 #endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
- unsigned sequence_count=0;unsigned char sequence_requests[64*24];
+ unsigned sequence_count=0;unsigned char sequence_requests[64*SEQUENCE_REQUEST_BYTES];
  unsigned char *sequence_owned=NULL,*sequence_records=NULL;
 #endif
  const unsigned pages[]={0xe58000,0xe5a000,0xe5b000,0xe5e000,0xf5e000};DWORD protections[5];unsigned char saved[5][4096];
@@ -93,11 +101,16 @@ int wmain(int argc,wchar_t **argv){
 #endif
 #ifdef GRID_TRIANGLE_MESH_QUERY
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
- if(fread(&sequence_count,4,1,input)!=1||sequence_count<1||sequence_count>64||fread(sequence_requests,24,sequence_count,input)!=sequence_count){error=7;goto done;}
+ if(fread(&sequence_count,4,1,input)!=1||sequence_count<1||sequence_count>64||fread(sequence_requests,SEQUENCE_REQUEST_BYTES,sequence_count,input)!=sequence_count){error=7;goto done;}
  for(unsigned i=0;i<sequence_count;i++){
-  unsigned char *r=sequence_requests+i*24;
+  unsigned char *r=sequence_requests+i*SEQUENCE_REQUEST_BYTES;
   if(get(r,4)>1||(i==0&&get(r,4)!=1)){error=8;goto done;}
   for(unsigned j=0;j<4;j++)if(!isfinite(num(r,8+j*4))||fabsf(num(r,8+j*4))>10000.f||(j==3&&num(r,8+j*4)!=0.f)){error=8;goto done;}
+#ifdef GRID_MANIFOLD_SEQUENCE
+  float square=0.f;for(unsigned j=0;j<3;j++)square+=num(r,8+j*4)*num(r,8+j*4);
+  if(square<.999f||square>1.001f||!isfinite(num(r,40))||fabsf(num(r,40))>10000.f||get(r,44)>1){error=8;goto done;}
+  for(unsigned j=0;j<4;j++)if(!isfinite(num(r,24+j*4))||fabsf(num(r,24+j*4))>10000.f||(j==3&&num(r,24+j*4)!=1.f)){error=8;goto done;}
+#endif
  }
  sequence_owned=malloc(64+sequence_count*SEQUENCE_RECORD_BYTES);if(!sequence_owned){error=9;goto done;}
  memset(sequence_owned,0xcd,64+sequence_count*SEQUENCE_RECORD_BYTES);sequence_records=sequence_owned+32;
@@ -137,7 +150,7 @@ int wmain(int argc,wchar_t **argv){
  if(triangle_index>=get(track.header,0x18)||get(seed+0x500,8)!=1||get(seed+0x500,12)!=1){error=8;goto done;}
 #endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
- for(unsigned i=0;i<sequence_count;i++)if(get(sequence_requests+i*24,0)>=get(track.header,0x18)){error=8;goto done;}
+ for(unsigned i=0;i<sequence_count;i++)if(get(sequence_requests+i*SEQUENCE_REQUEST_BYTES,0)>=get(track.header,0x18)){error=8;goto done;}
 #endif
  memcpy(chunk_before,chunk,chunk_size);memset(first_owned,0xcd,sizeof(first_owned));memcpy(first,seed,0x250);memcpy(mesh,seed+0x500,mesh_bytes);memcpy(mesh_before,mesh,mesh_bytes);memcpy(body,seed+0x500+mesh_bytes,sizeof(body));
  if(!relocate_mesh(mesh,mesh_bytes,1)){error=8;goto done;}
@@ -184,10 +197,14 @@ int wmain(int argc,wchar_t **argv){
    ((void (__cdecl *)(void *,void *))(image+0xb41f80-0x400000))(query+0x40,first);
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
    for(unsigned step=0;step<sequence_count;step++){
-    unsigned char *r=sequence_requests+step*24;
+    unsigned char *r=sequence_requests+step*SEQUENCE_REQUEST_BYTES;
     triangle_index=get(r,0);put(query,0,triangle_index);
     if(get(r,4))memcpy(query+0x10,r+8,16);
     memset(query+0x20,0xcd,32);
+#ifdef GRID_MANIFOLD_SEQUENCE
+    memcpy(query+0x20,r+24,24);
+    memset(features_owned,0xcd,sizeof(features_owned));
+#endif
 #endif
    unsigned char *vertices[3];
    unsigned char *encoded=chunk+getword(chunk+44)+triangle_index*4;
@@ -204,8 +221,16 @@ int wmain(int argc,wchar_t **argv){
    if(!((unsigned char (__cdecl *)(void *,void *,void *,void *))(image+0xb45310-0x400000))(first,negative,features_owned[0]+32,query+0x40)){error=21;}
    if(!((unsigned char (__cdecl *)(void *,void *,void *,void *))(image+0xb7c5d0-0x400000))(triangle,query+0x10,features_owned[1]+32,NULL)){error=21;}
    memcpy(query+0x40,saved_support,32);
-   unsigned count=((unsigned (__cdecl *)(void *,void *,void *,void *,void *,void *,float,void *,unsigned,void *,void *,void *,unsigned))(image+0xae2fa0-0x400000))(first,triangle,image+0xb45310-0x400000,image+0xb7c5d0-0x400000,query+0x20,query+0x10,num(query,0x30),contacts,limit,contacts,query+0x40,NULL,get(query,0x34));
+   unsigned prior=0;
+#ifdef GRID_MANIFOLD_SEQUENCE
+   prior=get(worker,0x10);
+#endif
+   unsigned added=((unsigned (__cdecl *)(void *,void *,void *,void *,void *,void *,float,void *,unsigned,void *,void *,void *,unsigned))(image+0xae2fa0-0x400000))(first,triangle,image+0xb45310-0x400000,image+0xb7c5d0-0x400000,query+0x20,query+0x10,num(query,0x30),contacts+prior*0x80,limit-prior,contacts,query+0x40,NULL,get(query,0x34));
+   unsigned count=prior+added;
    if(count>limit){error=21;}else{put(query,4,count);put(worker,0x10,count);put(worker,0x40,address(contacts)+count*0x80);put(pair,0x20,count?address(contacts):0);put(pair,0x24,count);}
+#ifdef GRID_MANIFOLD_SEQUENCE
+   put(query,8,added);
+#endif
 #elif defined(GRID_TRIANGLE_DISTANCE)
    float margin=num(triangle,0x220)+num(first,0x220);
    ((void (__fastcall *)(void *,void *,float,void *,void *,void *,void *,void *,void *,void *,void *,void *,void *))(image+0xb7ea60-0x400000))(scratch+0xe0,NULL,margin*margin,triangle,first,NULL,query+0x40,first+0x130,image+0xb7c830-0x400000,image+0xb43390-0x400000,query+0x10,query+8,query+9);
@@ -216,10 +241,17 @@ int wmain(int argc,wchar_t **argv){
    put(query,4,hit);if(hit>1)error=21;
 #endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
+#ifdef GRID_MANIFOLD_SEQUENCE
+   memcpy(sequence_records+step*SEQUENCE_RECORD_BYTES,contacts,0x800);
+   memcpy(sequence_records+step*SEQUENCE_RECORD_BYTES+0x800,query,0xa0);
+   memcpy(sequence_records+step*SEQUENCE_RECORD_BYTES+0x8a0,features_owned[0]+32,0xc0);
+   memcpy(sequence_records+step*SEQUENCE_RECORD_BYTES+0x960,features_owned[1]+32,0xc0);
+#else
    memcpy(sequence_records+step*SEQUENCE_RECORD_BYTES,scratch+0xe0,0x120);
    memcpy(sequence_records+step*SEQUENCE_RECORD_BYTES+0x120,query,0xa0);
 #ifndef GRID_TRIANGLE_DISTANCE
    memcpy(sequence_records+step*SEQUENCE_RECORD_BYTES+0x1c0,scratch+0x4d0,0xa0);
+#endif
 #endif
    }
 #endif
@@ -240,7 +272,19 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned i=0;i<8;i++)if(!canonical(query,0x40+i*4,regions,n))error=13;
 #endif
 #ifdef GRID_TRIANGLE_QUERY_SEQUENCE
+#ifdef GRID_MANIFOLD_SEQUENCE
+  for(unsigned step=0;step<sequence_count;step++){
+   unsigned char *record=sequence_records+step*SEQUENCE_RECORD_BYTES;
+   for(unsigned i=0;i<8;i++)if(!canonical(record,0x840+i*4,regions,n))error=13;
+   unsigned used=get(record,0x804);if(used>limit){error=14;break;}
+   for(unsigned i=0;i<16;i++){
+    unsigned char *c=record+i*0x80;if(get(c,0)!=address(image+0xd3d434-0x400000))error=13;put(c,0,0x7200);
+    if(i<used){const unsigned offsets[]={4,8,0x28,0x2c,0x30,0x34};for(unsigned j=0;j<6;j++)if(!canonical(c,offsets[j],regions,n))error=13;for(unsigned j=0x38;j<0x70;j+=4)if(!isfinite(num(c,j)))error=15;}
+   }
+  }
+#else
   for(unsigned step=0;step<sequence_count;step++)for(unsigned i=0;i<8;i++)if(!canonical(sequence_records+step*SEQUENCE_RECORD_BYTES,0x160+i*4,regions,n))error=13;
+#endif
 #endif
 #ifdef GRID_PACKED_COMPLETE_DESCRIPTOR
   if(get(track.shape,0x290)!=sheet_mask)error=14;
