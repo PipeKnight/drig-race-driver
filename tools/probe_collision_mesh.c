@@ -27,17 +27,46 @@ int wmain(int argc,wchar_t **argv){
  unsigned char *snapshot=malloc(pe->OptionalHeader.SizeOfImage);if(!snapshot){VirtualFree(image,0,MEM_RELEASE);return 17;}
  memcpy(snapshot,image,pe->OptionalHeader.SizeOfImage);
  __declspec(align(16)) float points[80][4];unsigned triangles[110][3];
+#ifdef GRID_SOURCE_COLLISION_MESH
+ float source_parameters[6];
+ __declspec(align(16)) float raw_points[80][4];unsigned char raw_before[sizeof(raw_points)];
+ __declspec(align(16)) unsigned char car_owned[32+0x21000+32],car_before[0x21000];unsigned char *car=car_owned+32;
+#endif
  __declspec(align(16)) unsigned char owned[32+16000+32];unsigned char *body=owned+32;
  memset(owned,0xcd,sizeof(owned));
  unsigned error=0,protected=0,tag=0,count=0,faces=0,fill=0,length=0,restored=1;DWORD protection=0;
  unsigned char saved[4096];FILE *input=NULL;
  if(_wfopen_s(&input,argv[2],L"rb")||!input){error=5;goto done;}
  int valid=fread(&tag,4,1,input)==1&&fread(&count,4,1,input)==1&&fread(&faces,4,1,input)==1&&fread(&fill,4,1,input)==1;
- if(!valid||tag!=0x31304d43||count<4||count>80||faces<4||faces>110||(fill!=0&&fill!=0xcd)){error=6;goto done;}
+ if(!valid||tag!=
+#ifdef GRID_SOURCE_COLLISION_MESH
+ 0x32304d43
+#else
+ 0x31304d43
+#endif
+ ||count<4||count>80||faces<4||faces>110||(fill!=0&&fill!=0xcd)){error=6;goto done;}
+#ifdef GRID_SOURCE_COLLISION_MESH
+ if(fread(source_parameters,4,6,input)!=6){error=6;goto done;}
+ for(unsigned i=0;i<6;i++)if(!isfinite(source_parameters[i])||fabsf(source_parameters[i])>10000.f)error=22;
+ if(source_parameters[3]!=0.f||source_parameters[4]>source_parameters[5])error=22;
+ if(error)goto done;
+#endif
  valid=fread(points,16,count,input)==count&&fread(triangles,12,faces,input)==faces&&fgetc(input)==EOF;
  fclose(input);input=NULL;if(!valid){error=6;goto done;}
  unsigned edges=0;
  for(unsigned i=0;i<count;i++)for(unsigned j=0;j<4;j++)if(!isfinite(points[i][j])||fabsf(points[i][j])>100000.f||(j==3&&points[i][j]!=1.f))error=7;
+#ifdef GRID_SOURCE_COLLISION_MESH
+ if(error)goto done;
+ memcpy(raw_points,points,count*16);memcpy(raw_before,raw_points,count*16);
+ memset(car_owned,0xcd,sizeof(car_owned));memset(car,0,0x21000);
+ memcpy(car+0x1630,source_parameters,16);memcpy(car+0xed68,source_parameters+4,4);memcpy(car+0xed94,source_parameters+5,4);memcpy(car_before,car,0x21000);
+ __try{((void (__fastcall *)(void *,void *,void *,void *,int))(image+0x9b8b70-0x400000))(car,NULL,points,raw_points,(int)count);}
+ __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"source_adjustment_fault=%08lx\n",GetExceptionCode());error=23;}
+ if(memcmp(car,car_before,0x21000)||memcmp(raw_points,raw_before,count*16))error=24;
+ for(unsigned i=0;i<32;i++)if(car_owned[i]!=0xcd||car_owned[32+0x21000+i]!=0xcd)error=24;
+ for(unsigned i=0;i<count;i++)for(unsigned j=0;j<4;j++)if(!isfinite(points[i][j])||fabsf(points[i][j])>100000.f||(j==3&&points[i][j]!=1.f))error=7;
+ if(error)goto done;
+#endif
  for(unsigned i=0;i<faces;i++){
   unsigned a=triangles[i][0],b=triangles[i][1],c=triangles[i][2];
   if(a>=count||b>=count||c>=count||a==b||b==c||a==c){error=8;break;}
