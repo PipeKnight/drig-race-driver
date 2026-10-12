@@ -34,6 +34,17 @@ pub struct Controls {
     pub handbrake: bool,
 }
 
+/// Read-only presentation inputs in the same rear-left/right, front-left/right
+/// order as source wheel initialization. These never feed back into physics.
+#[derive(Clone, Copy, Debug)]
+pub struct WheelPose {
+    pub anchor: [f32; 3],
+    pub axis: [f32; 3],
+    pub displacement: f32,
+    pub steering: [f32; 2],
+    pub phase: f32,
+}
+
 fn read(root: &Path, relative: &str, bound: u64) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use std::io::Read;
     let mut bytes = Vec::new();
@@ -57,6 +68,22 @@ fn byte(b: &mut [u32], o: usize, v: u8) {
 }
 
 impl Runtime {
+    pub fn wheels(&self) -> [WheelPose; 4] {
+        let b = &self.state.car.owner.vehicle;
+        let f = |o: usize| f32::from_bits(b[o / 4]);
+        std::array::from_fn(|i| {
+            let w = 0x1990 + i * 0x150;
+            let c = 0x3d0 + i * 0x170;
+            WheelPose {
+                anchor: std::array::from_fn(|j| f(w + j * 4)),
+                axis: std::array::from_fn(|j| f(c + 0x50 + j * 4)),
+                displacement: f(w + 0x40).min(f(w + 0x4c)),
+                steering: [f(w + 0x20), f(w + 0x24)],
+                phase: f(w + 0x110),
+            }
+        })
+    }
+
     /// Load purchased source files directly. The selected assisted automatic
     /// preferences/readiness and serial manager configuration are supplied here,
     /// rather than pretending to execute the original resource/preferences layer.

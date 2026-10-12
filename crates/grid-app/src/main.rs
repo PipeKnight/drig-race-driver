@@ -1,4 +1,4 @@
-//! Static reference viewer reading purchased resources without modification.
+//! Source reference viewer and serial driving prototype.
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -36,6 +36,7 @@ struct Part {
     material: String,
     mesh: Mesh,
     matrices: Vec<Mat4>,
+    wheel: Option<usize>,
 }
 #[derive(Resource)]
 struct Capture {
@@ -67,7 +68,39 @@ struct Driving {
     scripted: grid_tools::source_vehicle::Controls,
 }
 #[derive(Component)]
-struct MovingPart(Mat4);
+struct MovingPart {
+    rest: Mat4,
+    wheel: Option<usize>,
+}
+
+fn wheel_joint(joint: &[u8]) -> Option<usize> {
+    let name = std::str::from_utf8(joint).ok()?;
+    let (_, name) = name.split_once('_')?;
+    let (kind, side) = name.split_once('_')?;
+    if !matches!(kind, "wheel" | "tyre" | "disc") {
+        return None;
+    }
+    match side {
+        "bl" => Some(0),
+        "br" => Some(1),
+        "fl" => Some(2),
+        "fr" => Some(3),
+        _ => None,
+    }
+}
+
+/// Authored presentation composition using source wheel state. Retain each
+/// mesh's bind offset around the shared physics pivot; never animate by input
+/// command or integrate a second wheel clock. Camber/deformation are separate.
+fn wheel_motion(wheel: grid_tools::source_vehicle::WheelPose) -> Mat4 {
+    let anchor = Vec3::from_array(wheel.anchor);
+    let center = anchor + Vec3::from_array(wheel.axis) * wheel.displacement;
+    let yaw = wheel.steering[1].atan2(wheel.steering[0]);
+    Mat4::from_translation(center)
+        * Mat4::from_rotation_y(yaw)
+        * Mat4::from_rotation_x(wheel.phase)
+        * Mat4::from_translation(-anchor)
+}
 
 // Provisional diffuse bindings recovered from executable static tuples.
 fn diffuse(material: &str) -> Option<&'static str> {
@@ -179,6 +212,7 @@ fn load(
             material: String::from_utf8(draw.material.to_vec())?,
             mesh,
             matrices: vec![Mat4::from_cols_array(&draw.transform)],
+            wheel: if track { None } else { wheel_joint(draw.joint) },
         });
     }
     let mut textures = BTreeMap::new();
@@ -337,6 +371,7 @@ fn append_objects(root: &Path, car: &mut Car) -> Result<(), Box<dyn std::error::
             material: name,
             mesh,
             matrices,
+            wheel: None,
         });
     }
     for prototype in &placements.prototypes {
@@ -508,6 +543,7 @@ fn append_entities(
                 material,
                 mesh,
                 matrices,
+                wheel: None,
             });
         }
     }
@@ -574,6 +610,7 @@ fn load_collision(root: &Path) -> Result<Car, Box<dyn std::error::Error>> {
                 material,
                 mesh,
                 matrices: vec![Mat4::IDENTITY],
+                wheel: None,
             });
         }
     }
@@ -1029,7 +1066,11 @@ fn setup(
         for matrix in part.matrices {
             let moving = driving.is_some() && part.material.starts_with("lacetti/");
             let transform = if moving {
-                Mat4::from_cols_array(&driving.as_ref().unwrap().runtime.pose()) * matrix
+                let runtime = &driving.as_ref().unwrap().runtime;
+                let motion = part
+                    .wheel
+                    .map_or(Mat4::IDENTITY, |i| wheel_motion(runtime.wheels()[i]));
+                Mat4::from_cols_array(&runtime.pose()) * motion * matrix
             } else {
                 matrix
             };
@@ -1040,7 +1081,10 @@ fn setup(
                 Transform::from_matrix(transform),
             ));
             if moving {
-                entity.insert(MovingPart(matrix));
+                entity.insert(MovingPart {
+                    rest: matrix,
+                    wheel: part.wheel,
+                });
             }
         }
     }
@@ -1190,8 +1234,10 @@ fn drive_present(
     mut windows: Query<&mut Window>,
 ) {
     let pose = Mat4::from_cols_array(&driving.runtime.pose());
+    let wheels = driving.runtime.wheels().map(wheel_motion);
     for (part, mut transform) in &mut parts {
-        *transform = Transform::from_matrix(pose * part.0);
+        let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
+        *transform = Transform::from_matrix(pose * motion * part.rest);
     }
     let at = pose.transform_point3(Vec3::new(0., 1., 0.));
     let eye = pose.transform_point3(Vec3::new(0., 3., -9.));
@@ -1278,6 +1324,79 @@ fn update_orbit(
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn source_wheel_joints_follow_physics_without_feedback() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let car = load(root, "LOD0_", false, false).unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let mut counts = [0; 4];
+        for part in &car.parts {
+            if let Some(i) = part.wheel {
+                counts[i] += 1;
+            }
+        }
+        // Rim, two tyre materials and rotating brake disc per corner.
+        assert_eq!(counts, [4; 4]);
+        let initial = runtime.wheels().map(wheel_motion);
+        let b = &runtime.state.car.owner.vehicle;
+        let model_offset = Mat4::from_translation(Vec3::new(
+            f32::from_bits(b[0x1630 / 4]),
+            f32::from_bits(b[0x1634 / 4]) - f32::from_bits(b[0x1564 / 4]),
+            f32::from_bits(b[0x1638 / 4]),
+        ));
+        for part in &car.parts {
+            if let Some(i) = part.wheel {
+                // Source NED and PSSG were authored with small distinct pivot
+                // offsets. Preserve them, while detecting ordinal/axis swaps.
+                let pivot = (model_offset * part.matrices[0]).w_axis.truncate();
+                assert!(pivot.distance(Vec3::from_array(runtime.wheels()[i].anchor)) < 0.003);
+            }
+        }
+        let mut moved = [false; 4];
+        for tick in 0..160 {
+            runtime
+                .tick(grid_tools::source_vehicle::Controls {
+                    throttle: 1.,
+                    steering: 0.2,
+                    ..Default::default()
+                })
+                .unwrap();
+            let owner_before = runtime.state.car.owner.vehicle.clone();
+            let body_before = runtime.state.car.owner.physical;
+            for (i, wheel) in runtime.wheels().into_iter().enumerate() {
+                let motion = wheel_motion(wheel);
+                assert!(motion.is_finite());
+                let anchor = Vec3::from_array(wheel.anchor);
+                let center = anchor + Vec3::from_array(wheel.axis) * wheel.displacement;
+                assert!((motion.transform_point3(anchor) - center).length() < 1e-5);
+                // Spin leaves the axle invariant; steered axle is the source
+                // [cos,0,-sin] used by the tyre frame, after normalization.
+                let expected = Vec3::new(wheel.steering[0], 0., -wheel.steering[1]).normalize();
+                assert!((motion.transform_vector3(Vec3::X) - expected).length() < 1e-5);
+                assert!((motion.determinant() - 1.).abs() < 1e-5);
+                moved[i] |= motion != initial[i];
+                // Rim and tyre bind offsets must rotate around the common
+                // physics center rather than orbit around the car origin.
+                if tick == 159 {
+                    for part in car.parts.iter().filter(|p| p.wheel == Some(i)) {
+                        let bind = model_offset * part.matrices[0];
+                        let before = bind.w_axis.truncate().distance(anchor);
+                        let after = (motion * bind).w_axis.truncate().distance(center);
+                        assert!((before - after).abs() < 1e-5);
+                    }
+                }
+            }
+            assert_eq!(runtime.state.car.owner.vehicle, owner_before);
+            assert_eq!(runtime.state.car.owner.physical, body_before);
+        }
+        assert_eq!(moved, [true; 4]);
+        runtime.reset();
+        assert_eq!(runtime.wheels().map(wheel_motion), initial);
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
