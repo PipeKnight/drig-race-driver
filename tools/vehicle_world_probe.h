@@ -5,15 +5,33 @@ static unsigned vw_body(unsigned address,unsigned char *p,unsigned *error){if(!a
 static unsigned vw_slot(unsigned address,WheelOwner *o,unsigned *error){if(!address)return 0;for(unsigned i=0;i<4;i++)if(address==(unsigned)(uintptr_t)o->slots[i])return i+1;*error=44;return 0;}
 
 static unsigned vw_setup(WheelOwner *o,VehicleWorldRecord *r,unsigned char *p,unsigned char *image,unsigned delta){
- if(!r->steps||r->steps>64||r->parameters[0]!=delta||!delta||!vw_finite(r->parameters,11)||!vw_finite(r->material,13)||!vw_finite(r->cache+2,13)||!vw_finite(r->properties,17)||!vw_finite(r->workspace,8)||!vw_finite(r->rows,16*48)||!vw_finite(r->correction+1,4)||r->correction[0]>32||get(p,0x3b4)!=0x7f7fffff||p[0x415]||get(p,0x328)||get(o->producer,0x920)!=4||get(o->producer,0x924))return 44;
+#ifdef GRID_SOURCE_VEHICLE_WORLD
+ const unsigned step_limit=4096;
+#else
+ const unsigned step_limit=64;
+#endif
+ if(!r->steps||r->steps>step_limit||r->parameters[0]!=delta||!delta||!vw_finite(r->parameters,11)||!vw_finite(r->material,13)||!vw_finite(r->cache+2,13)||!vw_finite(r->properties,17)||!vw_finite(r->workspace,8)||!vw_finite(r->rows,16*48)||!vw_finite(r->correction+1,4)||r->correction[0]>32||get(p,0x3b4)!=0x7f7fffff||p[0x415]||get(p,0x328)||get(o->producer,0x920)!=4||get(o->producer,0x924))return 44;
  for(unsigned i=0;i<11;i++)if(r->world[i])return 44;
  for(unsigned i=0;i<6;i++)if(r->lifecycle[i])return 44;
  for(unsigned i=0;i<16;i++)if(r->row_refs[i])return 44;
  for(unsigned i=0;i<4;i++)if(r->ends[i]>16)return 44;
  if(r->cache[0]!=r->cache[1])return 44;
  const unsigned links[]={0,4,8,0xc,0x10,0x14,0x18,0x1c,0x28,0x2f0,0x2f4,0x2fc,0x300,0x304,0x308,0x30c,0x318,0x320,0x324,0x400};
- for(unsigned i=0;i<sizeof(links)/sizeof(*links);i++)if(get(p,links[i]))return 44;
- if(p[0x2c]||p[0x2d]||p[0x412]||p[0x413])return 44;
+ for(unsigned i=0;i<sizeof(links)/sizeof(*links);i++){
+#ifdef GRID_SOURCE_VEHICLE_WORLD
+  unsigned expected=links[i]==8||links[i]==0xc||links[i]==0x18;
+#else
+  unsigned expected=0;
+#endif
+  if(get(p,links[i])!=expected)return 44;
+ }
+#ifdef GRID_SOURCE_VEHICLE_WORLD
+ if(p[0x2c]!=1||get(p,0x20)!=1)return 44;
+ for(unsigned i=8;i<=0x18;i+=4)if(i!=0x10&&i!=0x14)put(p,i,(unsigned)(uintptr_t)p);
+#else
+ if(p[0x2c])return 44;
+#endif
+ if(p[0x2d]||p[0x412]||p[0x413])return 44;
  memcpy(o->rows,r->rows,sizeof(o->rows));memcpy(o->material,r->material,52);o->properties[0]=r->properties[0];memcpy(o->properties+4,r->properties+1,64);memcpy(o->workspace,r->workspace,32);
  o->manager_ptrs[0]=(unsigned)(uintptr_t)o->manager;o->worker_ptrs[0]=(unsigned)(uintptr_t)o->worker;o->update_lists[0]=(unsigned)(uintptr_t)o->update_list;o->update_list[1]=(unsigned)(uintptr_t)o->world;o->bodyptrs[0]=(unsigned)(uintptr_t)p;
  put(o->world,4,1);put(o->world,8,(unsigned)(uintptr_t)o->update_lists);put(o->world,0xc,1);put(o->world,0x10,(unsigned)(uintptr_t)o->manager_ptrs);put(o->world,0x3c,(unsigned)(uintptr_t)p);put(o->world,0x44,(unsigned)(uintptr_t)p);put(o->world,0x64,1);put(o->world,0x84,(unsigned)(uintptr_t)o->broadphase);

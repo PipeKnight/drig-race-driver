@@ -38,13 +38,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || ![
             0x31304657, 0x31304650, 0x31304643, 0x31304647, 0x3130464a, 0x31304655, 0x31304648,
             0x3130464d, 0x31304644, 0x31304645, 0x31304653, 0x31304651, 0x3130464f, 0x3130464b,
-            0x3230464b, 0x31304654, 0x32304654, 0x33304654,
+            0x3230464b, 0x31304654, 0x32304654, 0x33304654, 0x34304654,
         ]
         .contains(&word(&data, 0))
     {
         return Err("invalid header".into());
     }
-    let vehicle_world = word(&data, 0) == 0x33304654;
+    let registered_world = word(&data, 0) == 0x34304654;
+    let vehicle_world = word(&data, 0) == 0x33304654 || registered_world;
     let wheel_producer = word(&data, 0) == 0x32304654 || vehicle_world;
     let car_manager = word(&data, 0) == 0x31304654 || wheel_producer;
     let handling_queries = word(&data, 0) == 0x3230464b || car_manager;
@@ -294,7 +295,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .collect(),
                     };
                     let job = if vehicle_world {
-                        grid_tools::vehicle_world_diagnostic::calculate(
+                        let calculate = if registered_world {
+                            grid_tools::vehicle_world_diagnostic::calculate_registered
+                        } else {
+                            grid_tools::vehicle_world_diagnostic::calculate
+                        };
+                        calculate(
                             state,
                             &mut pool,
                             &mut record[tail + 520..],

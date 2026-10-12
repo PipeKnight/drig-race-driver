@@ -20,6 +20,56 @@ pub struct Output {
     pub materials: [Option<Material>; 4],
 }
 
+/// Attach a source factory body to one owned serial world. The factory's initial
+/// self-rooted group, active flag, tensors and pose are retained. External world
+/// and object links must already have been converted to canonical owned tokens.
+pub fn from_registered(
+    mut car: vehicle_manager::State,
+    manager: grouped_physical_frame::Manager,
+    static_shapes: usize,
+) -> Result<State, Error> {
+    let p = &mut car.owner.physical;
+    if !(1..=512).contains(&static_shapes)
+        || car.owner.vehicle.len() != crate::vehicle_publication::VEHICLE_WORDS
+        || car.owner.vehicle[..car.frame.body.len()] != car.frame.body
+        || [8, 0xc, 0x18, 0x20].iter().any(|&o| p[o / 4] != 1)
+        || [
+            0, 4, 0x10, 0x14, 0x1c, 0x24, 0x28, 0x2f0, 0x2f4, 0x2fc, 0x300, 0x304, 0x308, 0x30c,
+            0x318, 0x320, 0x324, 0x328, 0x32c, 0x334, 0x338, 0x33c, 0x340, 0x400,
+        ]
+        .iter()
+        .any(|&o| p[o / 4] != 0)
+        || p[0x2c / 4] & 0xffff != 1
+        || p[0x410 / 4] & 0xffff0000 != 0
+        || p[0x414 / 4] & 0xff00 != 0
+    {
+        return Err(Error("invalid registered single-car world attachment"));
+    }
+    p[0x334 / 4] = 0x1c0;
+    let mut shapes = vec![contact_groups::Shape {
+        flag229: true,
+        ..Default::default()
+    }];
+    shapes.extend((0..static_shapes).map(|_| contact_groups::Shape {
+        angular: true,
+        ..Default::default()
+    }));
+    Ok(State {
+        world: grouped_physical_frame::Output {
+            groups: contact_groups::Output {
+                bodies: vec![car.owner.physical],
+                contacts: vec![[0; 32]; 4],
+                world: [0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0],
+            },
+            manager,
+            pool_used: 0,
+            visits: Vec::new(),
+        },
+        car,
+        shapes,
+    })
+}
+
 /// One common positive timestep: registered car manager (including contacts),
 /// then the selected complete serial physical world and pool consumption.
 /// Complete car/world/pool/RNG/manager state remains unchanged on any failure.

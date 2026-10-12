@@ -23,6 +23,41 @@ fn store(b: &mut [u8], o: usize, values: impl IntoIterator<Item = u32>) {
 
 #[allow(clippy::too_many_arguments)]
 pub fn calculate(
+    car: vehicle_manager::State,
+    pool: &mut wheel_contacts::Pool,
+    wire: &mut [u8],
+    delta: f32,
+    pair: [usize; 2],
+    gravity: f32,
+    queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<vehicle_manager::Output, Error> {
+    calculate_owned(
+        car, pool, wire, delta, pair, gravity, queries, query, material, false,
+    )
+}
+
+/// Source factory's initial self-rooted group and active-body flag retained.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_registered(
+    car: vehicle_manager::State,
+    pool: &mut wheel_contacts::Pool,
+    wire: &mut [u8],
+    delta: f32,
+    pair: [usize; 2],
+    gravity: f32,
+    queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<vehicle_manager::Output, Error> {
+    calculate_owned(
+        car, pool, wire, delta, pair, gravity, queries, query, material, true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn calculate_owned(
     mut car: vehicle_manager::State,
     pool: &mut wheel_contacts::Pool,
     wire: &mut [u8],
@@ -32,6 +67,7 @@ pub fn calculate(
     queries: Option<&[vehicle_handling::QueryRecord]>,
     mut query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     mut material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    registered: bool,
 ) -> Result<vehicle_manager::Output, Error> {
     if wire.len() != SIZE {
         return Err(Error("invalid vehicle world wire size"));
@@ -44,17 +80,19 @@ pub fn calculate(
         0x30c, 0x318, 0x320, 0x324, 0x328, 0x32c, 0x334, 0x338, 0x33c, 0x340, 0x400,
     ];
     let byte = |o: usize| (physical[o / 4] >> (8 * (o % 4))) as u8;
-    if !(1..=64).contains(&steps)
+    if !(1..=if registered { 4096 } else { 64 }).contains(&steps)
         || delta <= 0.
         || p[0].to_bits() != delta.to_bits()
         || p.iter().any(|x| !x.is_finite())
         || pool.used != 0
         || pool.slots.len() != 4
         || !(1..=512).contains(&pool.shapes)
-        || links.iter().any(|&o| physical[o / 4] != 0)
+        || links
+            .iter()
+            .any(|&o| physical[o / 4] != u32::from(registered && [8, 0xc, 0x18].contains(&o)))
         || [0x2c, 0x2d, 0x412, 0x413, 0x415]
             .iter()
-            .any(|&o| byte(o) != 0)
+            .any(|&o| byte(o) != u8::from(registered && o == 0x2c))
         || physical[0x3b4 / 4] != f32::MAX.to_bits()
         || wire[3368..].iter().any(|&v| v != 0)
         || u(wire, 48) > 32
@@ -104,19 +142,27 @@ pub fn calculate(
         angular: true,
         ..Default::default()
     }));
-    let mut state = vehicle_world::State {
-        world: grouped_physical_frame::Output {
-            groups: contact_groups::Output {
-                bodies: vec![car.owner.physical],
-                contacts: pool.slots.clone(),
-                world: [0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0],
+    let mut state = if registered {
+        // from_registered owns the center rebinding, without resetting groups.
+        car.owner.physical[0x334 / 4] = 0;
+        let mut state = vehicle_world::from_registered(car, manager, pool.shapes)?;
+        state.world.groups.contacts = pool.slots.clone();
+        state
+    } else {
+        vehicle_world::State {
+            world: grouped_physical_frame::Output {
+                groups: contact_groups::Output {
+                    bodies: vec![car.owner.physical],
+                    contacts: pool.slots.clone(),
+                    world: [0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0],
+                },
+                manager,
+                pool_used: 0,
+                visits: Vec::new(),
             },
-            manager,
-            pool_used: 0,
-            visits: Vec::new(),
-        },
-        car,
-        shapes,
+            car,
+            shapes,
+        }
     };
     let mut row_refs = [0u32; 16];
     let mut materials = [None; 4];

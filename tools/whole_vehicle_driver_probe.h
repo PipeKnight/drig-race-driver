@@ -74,11 +74,12 @@ static unsigned source_guard(const unsigned char *b,const unsigned char *v,unsig
     if(get(context,0x5d8)!=4||context[0x70c]||get(context,0x604)||get(context,0x5d4)||get(context,0x608)||get(context,0x60c)||get(b,0x2278))return 66;
     const unsigned ranges[][2]={{0xb20,0xba0},{0x15c0,0x1620},{0x1650,0x1690},{0x2198,0x21c4}};
     for(unsigned i=0;i<4;i++)for(unsigned o=ranges[i][0];o<ranges[i][1];o+=4)if(!isfinite(*(const float *)(b+o)))return 67;
-    const unsigned fields[]={0xac0,0xac4,0xac8,0x12ac,0x11e8,0xfcc,0xfe4,0xe74,0x1160,0x1164,0x1168,0x116c,0x1170,0x1174,0x11f4,0x12a8,0x1354,0x137c,0x1efc,0x1f10,0x1f20,0x1f24,0x1f3c,0x1f64,0x1f8c,0x1f90,0x1fa4,0x1fa8,0x1ffc,0x21f8,0x21fc,0x2200};
+    const unsigned fields[]={0x12ac,0x11e8,0xfcc,0xfe4,0xe74,0x1160,0x1164,0x1168,0x116c,0x1170,0x1174,0x11f4,0x12a8,0x1354,0x137c,0x1efc,0x1f10,0x1f20,0x1f24,0x1f3c,0x1f64,0x1f8c,0x1f90,0x1fa4,0x1fa8,0x1ffc,0x21f8,0x21fc,0x2200};
     for(unsigned i=0;i<sizeof(fields)/sizeof(*fields);i++)if(!isfinite(*(const float *)(b+fields[i])))return 67;
     for(unsigned j=0;j<10;j++)if(!isfinite(*(const float *)(b+0x11fc+j*4)))return 67;
     if(!isfinite(*(const float *)context)||*(const float *)context<=0||*(const float *)(b+0x1f3c)<=0||*(const float *)(b+0x1ffc)<0||*(const float *)(b+0x137c)<0||*(const float *)(b+0x137c)>=1||*(const float *)(b+0xfcc)<=0||*(const float *)(b+0xfcc)>=1||*(const float *)(b+0x1160)==0||*(const float *)(b+0x21f8)==*(const float *)(b+0x21fc)||*(const float *)(b+0x12a8)<0||*(const float *)(b+0x12a8)>4)return 67;
-    for(unsigned j=0;j<3;j++)if(*(const float *)(context+0x6f0+j*4)<=0)return 67;
+    /* Whole 9F1E10 overwrites context6F0..6F8 from already guarded car15A8..B0
+       before use. A freshly constructed source owner legitimately has zeroes. */
     for(unsigned i=0;i<4;i++){
         const unsigned char *c=context+i*0x170,*w=b+0x1990+i*0x150;
         if(get(c,0x178)||get(c,0x17c)||get(w,0xc0)>count||get(w,0x128)>count)return 68;
@@ -119,7 +120,11 @@ static unsigned run_suspension_prepare(unsigned char *image,const wchar_t *reque
 #ifdef GRID_CAR_MANAGER
 #ifdef GRID_WHEEL_PRODUCER
 #ifdef GRID_VEHICLE_WORLD
+#ifdef GRID_SOURCE_VEHICLE_WORLD
+        0x34304654;
+#else
         0x33304654;
+#endif
 #else
         0x32304654;
 #endif
