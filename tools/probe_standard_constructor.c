@@ -14,6 +14,9 @@
 #include "isolated_reference.h"
 typedef void *(__cdecl *Construct)(void *,const void *,float *,const float *,const float *);
 static uintptr_t reference_base;
+#ifdef GRID_OUTER_WHEELS
+#include "outer_wheel_regions_probe.h"
+#endif
 static unsigned get(const void *p,unsigned o){unsigned v;memcpy(&v,(const unsigned char *)p+o,4);return v;}
 static LONG fault(EXCEPTION_POINTERS *e){
     fprintf(stderr,"fault=%08lx original_eip=%08lx access=%lu original_address=%08lx\n",e->ExceptionRecord->ExceptionCode,(DWORD)(e->ContextRecord->Eip-reference_base+0x400000),e->ExceptionRecord->ExceptionInformation[0],(DWORD)(e->ExceptionRecord->ExceptionInformation[1]-reference_base+0x400000));
@@ -28,7 +31,7 @@ int wmain(int argc,wchar_t **argv){
     unsigned char *code_snapshot=malloc(pe->OptionalHeader.SizeOfImage);
     if(!code_snapshot){VirtualFree(image,0,MEM_RELEASE);return 17;}
     memcpy(code_snapshot,image,pe->OptionalHeader.SizeOfImage);
-    unsigned error=0,protected=0,globals_restored=1,mutable_prelude=0;FILE *input=NULL;
+    unsigned error=0,protected=0,globals_restored=1,mutable_prelude=0,outer_wheels=0;FILE *input=NULL;
     __declspec(align(16)) unsigned char request[1732];
     __declspec(align(16)) unsigned char props[0x65c];
     __declspec(align(16)) float points[16],radii[4],widths[4];
@@ -38,7 +41,10 @@ int wmain(int argc,wchar_t **argv){
     unsigned char saved[sizeof(pages)/sizeof(*pages)][4096];DWORD protections[sizeof(pages)/sizeof(*pages)];
     if(_wfopen_s(&input,argv[2],L"rb")||!input){error=5;goto done;}
     int valid=fread(request,1,sizeof(request),input)==sizeof(request)&&fgetc(input)==EOF;fclose(input);input=NULL;
-    mutable_prelude=get(request,0)==0x34304353;
+#ifdef GRID_OUTER_WHEELS
+    outer_wheels=get(request,0)==0x35304353;
+#endif
+    mutable_prelude=get(request,0)==0x34304353||outer_wheels;
     unsigned source_prelude=get(request,0)==0x33304353||mutable_prelude;
     if(!valid||(get(request,0)!=0x32304353&&!source_prelude)){error=6;goto done;}
     memcpy(props,request+8,sizeof(props));memcpy(points,request+8+sizeof(props),sizeof(points));
@@ -68,7 +74,14 @@ int wmain(int argc,wchar_t **argv){
     Construct construct=(Construct)(image+0xa0c9f0-0x400000);void *answer=NULL;
     __try{
         if(mutable_prelude)((void *(__fastcall *)(void *,void *))(image+0x9f3d30-0x400000))(body+0xcdf0,NULL);
-        answer=construct(body,props,points,radii,widths);
+        if(outer_wheels){
+            memcpy(body+0x14e0,points,64);memcpy(body+0x1520,radii,16);memcpy(body+0x1540,widths,16);
+            for(unsigned i=0;i<4;i++){float auxiliary=radii[i]*.800000011920929f;memcpy(body+0x1530+i*4,&auxiliary,4);}
+            answer=construct(body,props,(float *)(body+0x14e0),(float *)(body+0x1520),(float *)(body+0x1530));
+#ifdef GRID_OUTER_WHEELS
+            if(!original_wheel_regions(image,body))error=19;
+#endif
+        }else answer=construct(body,props,points,radii,widths);
     }
     __except(fault(GetExceptionInformation())){error=10;}
     memcpy(&random_state,image+0xe4fcc0-0x400000,4);

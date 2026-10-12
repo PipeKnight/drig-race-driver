@@ -9,12 +9,14 @@ def main():
     p.add_argument('--prefix',default='standard-constructor')
     p.add_argument('--source-prelude',action='store_true')
     p.add_argument('--mutable-prelude',action='store_true')
+    p.add_argument('--outer-wheels',action='store_true')
     p.add_argument('--date',default='20261011');a=p.parse_args()
     assert len(a.date)==8 and a.date.isdecimal()
+    if a.outer_wheels:a.mutable_prelude=True
     if a.mutable_prelude:a.source_prelude=True
     out=a.output.resolve();assert out.is_relative_to((v.ROOT/'local').resolve());out.mkdir(exist_ok=False)
     reports=[];seeds=['200679','0','1','0x80000000','0xffffffff']
-    native=v.ROOT/('local/behavior/mutable-standard-probe.exe' if a.mutable_prelude else 'local/behavior/standard-constructor-probe.exe');image=v.ROOT/'local/compatibility/grid-unpacked.exe'
+    native=v.ROOT/('local/behavior/outer-wheels-standard-probe.exe' if a.outer_wheels else 'local/behavior/mutable-standard-probe.exe' if a.mutable_prelude else 'local/behavior/standard-constructor-probe.exe');image=v.ROOT/'local/compatibility/grid-unpacked.exe'
     assert v.digest(image)=='aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514'
     for profile in ['debug','release']:
         rust=v.ROOT/f'target/{profile}/grid-standard-car.exe'
@@ -24,6 +26,7 @@ def main():
             assert r['profile']==profile and r['random_seed']==int(seed,0)
             assert r.get('source_prelude',False)==a.source_prelude
             assert r.get('mutable_prelude',False)==a.mutable_prelude
+            assert r.get('outer_wheels',False)==a.outer_wheels
             assert r['exe_sha256']==v.digest(native) and r['rust_exe_sha256']==v.digest(rust)
             assert r['properties_report_sha256']==v.digest(Path(r['properties_report']))
             completed=[s for s in r['results'] if s.get('repeat_exact')];assert len(completed)==69
@@ -44,11 +47,12 @@ def main():
                         x,y,z,radius=[f32(float(attrs[0][f'm_{axle}_{c}'])) for c in 'xyzr']
                         for side in [1,-1]:points.extend([x*side,f32(y-bias),z,1]);radii.append(radius)
                         widths.extend(f32(float(attrs[0][f'm_{axle}_{side}_width'])) for side in ['l','r'])
-                    expected=b'SC04'+struct.pack('<I',int(seed,0))+Path(source['properties']).read_bytes()+struct.pack('<24f',*points,*radii,*widths)
+                    expected=(b'SC05' if a.outer_wheels else b'SC04')+struct.pack('<I',int(seed,0))+Path(source['properties']).read_bytes()+struct.pack('<24f',*points,*radii,*widths)
                     assert (root/f'{i:03}-input.bin').read_bytes()==expected
                     random_state=int(seed,0)
                     for _ in range(18):random_state=(random_state*0x41c64e6d+0x40584c0f)&0xffffffff
                     assert all(f'random_state={random_state:08x}' in e['stdout'] for e in source['executions'])
+                    if a.outer_wheels:assert all('original_wheel_region_loop_steps=89 stopped_before_document_call=1 loop_error=0' in e['stdout'] for e in source['executions'][:2])
                 answers=[root/f'{i:03}-{kind}.bin' for kind in ['original','repeat','rust']]
                 assert all(q.stat().st_size==0x21000 and v.digest(q)==source['output_sha256'] for q in answers)
                 assert all(e['exit']==0 and not e['stderr'] for e in source['executions'])
@@ -62,6 +66,14 @@ def main():
                         assert all(struct.unpack_from('<f',b,0xcdf0+at+12)[0]==1 for at in [0x60,0x90,0xc0,0xf0,0x120,0x150,0x180,0x1b0,0x1e0])
                         assert all(struct.unpack_from('<f',b,0xcdf0+at)[0]==1 for at in [0x430,0x434,0x438,0x43c])
                         assert b[0xcdf0+0x442]==1
+                        if a.outer_wheels:
+                            for wheel in range(4):
+                                center=b[0x14e0+wheel*16:0x14f0+wheel*16]
+                                assert b[0xcdf0+0x60+wheel*48:0xcdf0+0x70+wheel*48]==center
+                                assert b[0xcdf0+0x80+wheel*48]==1
+                                radius=struct.unpack_from('<f',b,0x1a70+wheel*0x150)[0]
+                                assert b[0xcdf0+0x70+wheel*48:0xcdf0+0x80+wheel*48]==struct.pack('<4f',widths[wheel],radius,radius,0.)
+                                assert struct.unpack_from('<f',b,0x1a88+wheel*0x150)[0]==f32(radii[wheel]*f32(.8))
                     if a.source_prelude:
                         assert b[0xe78:0x14d4]==Path(source['properties']).read_bytes()
                         assert struct.unpack_from('<f',b,0x1560)[0]==1
@@ -94,22 +106,25 @@ def main():
         for label,source in sources:
             target=out/f'{profile}-{label}-output.bin'
             command=[str(rust),str(source),str(ned),'00030fe7',str(target)]
-            if a.source_prelude:command.append('--mutable-prelude' if a.mutable_prelude else '--source-prelude')
+            if a.source_prelude:command.append('--outer-wheels' if a.outer_wheels else '--mutable-prelude' if a.mutable_prelude else '--source-prelude')
             reject(profile+'-'+label,command,target)
         target=out/f'{profile}-bad-seed-output.bin'
         command=[str(rust),str(v.GAME/'cars/lac/lac.csv'),str(ned),'nothex',str(target)]
-        if a.mutable_prelude:command.append('--mutable-prelude')
+        if a.mutable_prelude:command.append('--outer-wheels' if a.outer_wheels else '--mutable-prelude')
         reject(profile+'-bad-seed',command,target)
     if a.mutable_prelude:
         target=out/'existing.bin';target.write_bytes(b'KEEP');source=out/'existing-input.bin';source.write_bytes(sample)
         commands=[('native',[str(native),str(image),str(source),str(target)])]
-        commands.extend((profile,[str(v.ROOT/f'target/{profile}/grid-standard-car.exe'),str(v.GAME/'cars/lac/lac.csv'),str(ned),'00030fe7',str(target),'--mutable-prelude']) for profile in ['debug','release'])
+        commands.extend((profile,[str(v.ROOT/f'target/{profile}/grid-standard-car.exe'),str(v.GAME/'cars/lac/lac.csv'),str(ned),'00030fe7',str(target),'--outer-wheels' if a.outer_wheels else '--mutable-prelude']) for profile in ['debug','release'])
         for label,command in commands:
             e=subprocess.run(command,cwd=v.ROOT,capture_output=True,text=True,timeout=30);assert e.returncode!=0 and target.read_bytes()==b'KEEP'
             guards.append(dict(label=label+'-existing',exit=e.returncode,stdout=e.stdout,stderr=e.stderr,preserved=True))
     result=dict(passed=True,reports=reports,guards=guards,guard_count=len(guards),source_pairs=43,authored_variations=26,seeds=5,cases_per_profile=345,observable_bytes_per_profile=345*(0x21000-2),limits='Native framing and Rust source guards are distinct; two native padding bytes and explicit address canonicalization are excluded. Cold control NaN is retained; no outer factory/physical owner/driving claim.')
     result['source_prelude']=a.source_prelude
     result['mutable_prelude']=a.mutable_prelude
+    result['outer_wheels']=a.outer_wheels
     result['current_inputs']={str(path):v.digest(path) for path in [native,image,Path(__file__),v.ROOT/'tools/validate_standard_constructor.py',v.ROOT/'tools/probe_standard_constructor.c',v.ROOT/'crates/grid-tools/src/standard_car.rs',v.ROOT/'crates/grid-tools/src/bin/grid-standard-car.rs']}
+    if a.outer_wheels:
+        for name in ['tools/outer_wheel_regions_probe.h','tools/probe_outer_wheels_standard.c']:result['current_inputs'][name]=v.digest(v.ROOT/name)
     (out/'audit.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if k not in ['reports','guards']}))
 if __name__=='__main__':main()
