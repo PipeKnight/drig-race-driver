@@ -2,9 +2,11 @@
 use std::{fs, io::Write, path::Path};
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if !(2..=3).contains(&args.len()) || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 23580 {
+    if !(2..=3).contains(&args.len())
+        || fs::metadata(&args[0])?.len() > 2 * 1024 * 1024 + 44 + 64 * 64 + 22000
+    {
         return Err(
-            "usage: grid-convex-distance PC03_TO_PC07_OR_PC09_INPUT local/OUTPUT [PRIVATE_CD01]"
+            "usage: grid-convex-distance PC03_TO_PC07_OR_PC09_PC10_INPUT local/OUTPUT [PRIVATE_CD01]"
                 .into(),
         );
     }
@@ -12,17 +14,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if b.len() < 44
         || !matches!(
             &b[..4],
-            b"PC03" | b"PC04" | b"PC05" | b"PC06" | b"PC07" | b"PC09"
+            b"PC03" | b"PC04" | b"PC05" | b"PC06" | b"PC07" | b"PC09" | b"PC10"
         )
     {
         return Err("invalid distance framing".into());
     }
     let word = |o| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let float = |o| f32::from_bits(word(o));
-    let sequence = matches!(&b[..4], b"PC05" | b"PC06" | b"PC09");
+    let sequence = matches!(&b[..4], b"PC05" | b"PC06" | b"PC09" | b"PC10");
     let outer = matches!(&b[..4], b"PC03" | b"PC06");
-    let manifold = matches!(&b[..4], b"PC07" | b"PC09");
-    let stride = if manifold { 48 } else { 24 };
+    let manifold = matches!(&b[..4], b"PC07" | b"PC09" | b"PC10");
+    let oriented = &b[..4] == b"PC10";
+    let stride = if oriented {
+        64
+    } else if manifold {
+        48
+    } else {
+        24
+    };
     if args.len() != if outer { 3 } else { 2 } {
         return Err("outer query requires private CD01 sampling data".into());
     }
@@ -218,22 +227,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             [p[0], p[1], p[2], 1.]
         });
         if manifold {
-            let fallback_point = std::array::from_fn(|j| float(fallback + j * 4));
+            let mut fallback_point = std::array::from_fn(|j| float(fallback + j * 4));
             let prior = retained.len();
-            let result = grid_world::contact_manifold::calculate_append(
-                &mut context,
-                mesh,
-                matrix,
-                triangle,
-                &grid_world::contact_manifold::Settings {
-                    margin: float(s + 0x220),
-                    normal: direction,
-                    fallback_point,
-                    fallback_depth: float(fallback + 16),
-                    capacity: word(12) as usize - prior,
-                },
-                &retained,
-            )?;
+            let settings = grid_world::contact_manifold::Settings {
+                margin: float(s + 0x220),
+                normal: direction,
+                fallback_point,
+                fallback_depth: float(fallback + 16),
+                capacity: word(12) as usize - prior,
+            };
+            let mut triangle_witness = None;
+            let result = if oriented {
+                let result = grid_world::contact_manifold::calculate_oriented_append(
+                    &mut context,
+                    mesh,
+                    matrix,
+                    triangle,
+                    &settings,
+                    &retained,
+                    std::array::from_fn(|j| float(fallback + 24 + j * 4)),
+                )?;
+                direction = result.normal;
+                fallback_point = result.witnesses[1];
+                triangle_witness = Some(result.witnesses[0]);
+                result.manifold
+            } else {
+                grid_world::contact_manifold::calculate_append(
+                    &mut context,
+                    mesh,
+                    matrix,
+                    triangle,
+                    &settings,
+                    &retained,
+                )?
+            };
             publication_flags.resize(result.contacts.len(), word(fallback + 20) as u8);
             let mut arena = vec![0u8; 16 * 128];
             let put =
@@ -277,6 +304,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 put(&mut query, 0x10 + j * 4, x.to_bits());
             }
             query[0x20..0x38].copy_from_slice(&b[fallback..fallback + 24]);
+            for (j, x) in fallback_point.into_iter().enumerate() {
+                put(&mut query, 0x20 + j * 4, x.to_bits());
+            }
+            if let Some(witness) = triangle_witness {
+                for (j, x) in witness.into_iter().enumerate() {
+                    put(&mut query, 0x90 + j * 4, x.to_bits());
+                }
+            }
             put(&mut query, 0x40, 0x1000);
             for (j, i) in result.support_vertices.into_iter().enumerate() {
                 put(&mut query, 0x44 + j * 4, 0x30060 + i as u32 * 32);

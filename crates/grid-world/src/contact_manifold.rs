@@ -95,6 +95,105 @@ pub struct Output {
     pub contacts: Vec<Contact>,
 }
 
+/// Reoriented query witnesses alongside the complete retained manifold.
+pub struct OrientedOutput {
+    pub manifold: Output,
+    pub normal: V,
+    pub witnesses: [V; 2],
+}
+
+fn witness_length(square: f32) -> Result<f32, Error> {
+    if square == 0. {
+        return Ok(0.);
+    }
+    let seed = crate::spawn::reference_seed(square, false)?;
+    let product = seed * square;
+    Ok(((1. - product * seed) * product) * 0.5 + product)
+}
+
+fn orient(
+    triangle_anchor: V,
+    mesh_anchor: V,
+    normal: V,
+    witnesses: [V; 2],
+) -> Result<(V, [V; 2]), Error> {
+    if [triangle_anchor, mesh_anchor, witnesses[0], witnesses[1]]
+        .iter()
+        .any(|p| p[3] != 1. || p.iter().any(|x| !x.is_finite() || x.abs() > 1e5))
+        || normal[3] != 0.
+        || normal.iter().any(|x| !x.is_finite() || x.abs() > 10000.)
+    {
+        return Err(Error("invalid manifold orientation controls"));
+    }
+    let a = sub(witnesses[0], triangle_anchor);
+    let b = sub(mesh_anchor, witnesses[1]);
+    let squares = [dot(a, a), dot(b, b)];
+    let lengths = [witness_length(squares[0])?, witness_length(squares[1])?];
+    let score = if lengths.iter().any(|&x| x <= f32::from_bits(0x3727_c5ac)) {
+        dot(normal, if squares[0] < squares[1] { a } else { b })
+    } else {
+        let mut scores = [0.; 2];
+        for (i, v) in [a, b].into_iter().enumerate() {
+            let reciprocal = crate::spawn::reference_seed(lengths[i], true)?;
+            let correction = 1. - reciprocal * lengths[i];
+            let normalized = v.map(|x| {
+                let partial = reciprocal * x;
+                correction * partial + partial
+            });
+            scores[i] = dot(normal, normalized);
+        }
+        if scores[1].abs() < scores[0].abs() {
+            scores[0]
+        } else {
+            scores[1]
+        }
+    };
+    if !score.is_finite() {
+        return Err(Error("nonfinite manifold orientation result"));
+    }
+    if score < 0. {
+        #[allow(clippy::neg_multiply)] // Original multiply preserves signed zeros.
+        let normal = normal.map(|x| -1. * x);
+        Ok((normal, [witnesses[1], witnesses[0]]))
+    } else {
+        Ok((normal, witnesses))
+    }
+}
+
+/// Selected AEE640 -> AE2FA0 composition, retaining the prior manifold.
+/// `triangle_witness` and `s.fallback_point` are the two query witnesses;
+/// normal and depth are caller supplied. The second orientation anchor is the
+/// moving mesh transform origin. Packed normal selection/correction is separate.
+pub fn calculate_oriented_append(
+    context: &mut Context,
+    mesh: &Mesh,
+    matrix: Matrix,
+    triangle: [V; 3],
+    s: &Settings,
+    existing: &[Contact],
+    triangle_witness: V,
+) -> Result<OrientedOutput, Error> {
+    let (normal, witnesses) = orient(
+        triangle[0],
+        matrix[3],
+        s.normal,
+        [triangle_witness, s.fallback_point],
+    )?;
+    let settings = Settings {
+        margin: s.margin,
+        normal,
+        fallback_point: witnesses[1],
+        fallback_depth: s.fallback_depth,
+        capacity: s.capacity,
+    };
+    let manifold = calculate_append(context, mesh, matrix, triangle, &settings, existing)?;
+    Ok(OrientedOutput {
+        manifold,
+        normal,
+        witnesses,
+    })
+}
+
 fn word(b: &[u8], o: usize) -> usize {
     u32::from_le_bytes(b[o..o + 4].try_into().unwrap()) as usize
 }
@@ -344,6 +443,37 @@ pub fn calculate_append(
 mod tests {
     use super::*;
     #[test]
+    fn orientation_swaps_witnesses_and_preserves_signed_normal_lanes() {
+        let anchor = [0., 0., 0., 1.];
+        let normal = [0., 1., 0., 0.];
+        let witnesses = [[1., 1., 0., 1.], [0., 2., 0., 1.]];
+        let (out, points) = orient(anchor, anchor, normal, witnesses).unwrap();
+        assert_eq!(
+            out.map(f32::to_bits),
+            [
+                (-0f32).to_bits(),
+                (-1f32).to_bits(),
+                (-0f32).to_bits(),
+                (-0f32).to_bits()
+            ]
+        );
+        assert_eq!(points, [witnesses[1], witnesses[0]]);
+        let (out, points) = orient(anchor, anchor, normal, [anchor, witnesses[1]]).unwrap();
+        assert_eq!(out, normal);
+        assert_eq!(points, [anchor, witnesses[1]]);
+        // A short displacement selects its unnormalized projection; the long
+        // displacement has the opposite sign and must not override it.
+        let (out, _) = orient(
+            anchor,
+            anchor,
+            normal,
+            [[0., -1e-6, 0., 1.], [0., -1., 0., 1.]],
+        )
+        .unwrap();
+        assert_eq!(out[1], -1.);
+        assert!(orient(anchor, anchor, normal, [[f32::NAN, 0., 0., 1.], anchor]).is_err());
+    }
+    #[test]
     fn retained_count_controls_fallback_and_duplicate_depth() {
         let a = Feature::new(
             [0., 1., 0., 0.],
@@ -448,6 +578,21 @@ mod tests {
             .is_err()
         );
         assert_eq!(context.cached_support(), cache);
+        s.capacity = 15;
+        assert!(
+            calculate_oriented_append(
+                &mut context,
+                &mesh,
+                matrix,
+                [[0., 0., 0., 1.]; 3],
+                &s,
+                &prior,
+                [1., 1., 0., 1.]
+            )
+            .is_err()
+        );
+        assert_eq!(context.cached_support(), cache);
+        assert_eq!(prior, saved);
     }
 
     #[test]
