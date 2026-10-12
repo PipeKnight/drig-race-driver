@@ -52,6 +52,7 @@ fn calculate_carried_geometry(
     manager: &grouped_physical_frame::Manager,
     shapes: &[contact_groups::Shape],
     counts: &[[usize; 2]],
+    provider: bool,
 ) -> Result<grouped_physical_frame::Output, grid_world::Error> {
     contact_groups::validate_with_shapes(input, shapes)?;
     if manager.capacity < input.contacts.len() * 4 {
@@ -78,7 +79,22 @@ fn calculate_carried_geometry(
             }
         }
         let next = if let Some(previous) = &previous {
-            physical_world::advance_with_geometry(previous, &slots, used, shapes, external)?
+            if provider {
+                physical_world::advance_with_geometry_provider(
+                    previous,
+                    &slots,
+                    external,
+                    shapes,
+                    |_, remaining| {
+                        if used - external > remaining {
+                            return Err(grid_world::Error("diagnostic geometry capacity"));
+                        }
+                        Ok(input.contacts[external..used].to_vec())
+                    },
+                )?
+            } else {
+                physical_world::advance_with_geometry(previous, &slots, used, shapes, external)?
+            }
         } else {
             let mut first = input.clone();
             first.contacts = slots[..used].to_vec();
@@ -97,8 +113,11 @@ fn calculate_carried_geometry(
 
 fn run() -> Result<(), Failure> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-physical-tick INPUT.bin local/OUTPUT.bin".into());
+    let provider = args.len() == 3 && args[2] == "--geometry-provider";
+    if args.len() != 2 && !provider {
+        return Err(
+            "usage: grid-physical-tick INPUT.bin local/OUTPUT.bin [--geometry-provider]".into(),
+        );
     }
     if fs::metadata(&args[0])?.len() > 32 * 1024 * 1024 {
         return Err("input exceeds bound".into());
@@ -109,6 +128,9 @@ fn run() -> Result<(), Failure> {
     let count = word(h, 4);
     let world = word(h, 0) == 0x33525750;
     let geometry_sequence = word(h, 0) == 0x32475447;
+    if provider && !geometry_sequence {
+        return Err("provider diagnostic requires GTG2".into());
+    }
     let geometry_tick = word(h, 0) == 0x31475447 || geometry_sequence;
     let reproduced_world = word(h, 0) == 0x36535747;
     let carried_world = word(h, 0) == 0x35535747 || reproduced_world;
@@ -438,7 +460,13 @@ fn run() -> Result<(), Failure> {
                 cached_material: input.step.cached_material,
             };
             let result = if geometry_sequence {
-                calculate_carried_geometry(&group_input, &manager, &shapes, &geometry_counts)
+                calculate_carried_geometry(
+                    &group_input,
+                    &manager,
+                    &shapes,
+                    &geometry_counts,
+                    provider,
+                )
             } else if geometry_tick {
                 grouped_physical_frame::calculate_tick_with_geometry(
                     &group_input,
