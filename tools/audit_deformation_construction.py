@@ -7,10 +7,36 @@ import validate_deformation_volume as volume
 import validate_deformation_initialization as initialization
 
 
+def source_audit(path,report):
+    import validate_source_deformation as source
+    from compare_source_deformation_layout import candidates
+    out=path.parent;rows,identities=source.source_rows();assert identities==report['identities']
+    for name,sha in identities.items():assert layout.digest(Path(name))==sha
+    for name,expected in report['files'].items():
+        p=(out/name).resolve();assert p.parent==out and p.stat().st_size==expected['size'] and layout.digest(p)==expected['sha256']
+    assert (out/'original-input.bin').read_bytes()==initialization.request(rows)
+    original=(out/'original.bin').read_bytes();assert original==(out/'repeat.bin').read_bytes() and len(original)==8+len(rows)*initialization.ANSWER
+    for i,row in enumerate(rows):
+        stem=row['name'].split('-')[0];choices,_=candidates(stem,'highLOD');choice=[c for c in choices if c['name']=='highLOD-LOD1_no-aerial'][0]
+        import struct
+        expected=b'DS01'+struct.pack('<II',len(choice['selected_joints']),len(choice['excluded_joints']))+struct.pack('<8f',*choice['bounds'])+original[8+i*initialization.ANSWER:8+(i+1)*initialization.ANSWER]
+        assert (out/f'{stem}-rust.bin').read_bytes()==expected==(out/f'{stem}-rust-repeat.bin').read_bytes()
+        assert report['observations'][i]==dict(model=stem,complete_bytes=len(expected),selected_joints=len(choice['selected_joints']),excluded_aerials=len(choice['excluded_joints']),exact=True)
+    for kind,run in report['executions'].items():
+        exe=initialization.PROBE if kind in ['original','repeat'] else layout.ROOT/f"target/{report['profile']}/grid-deformation-source.exe"
+        assert run['exit']==0 and layout.digest(exe)==run['executable_sha256']
+    for guard in report['guards']:
+        assert guard['exit']==1
+        if guard['name']=='existing':assert guard['preserved'] and (out/'existing.bin').read_bytes()==b'owned sentinel'
+        else:assert not guard['output_exists'] and not (out/f"guard-{guard['name']}.bin").exists()
+    return dict(path=str(path.relative_to(layout.ROOT)),sha256=layout.digest(path),source_models=len(rows),source_output_bytes=sum(v['complete_bytes'] for v in report['observations']),complete_files=len(report['files']),identities=len(identities),guards=len(report['guards']))
+
+
 def audit(path):
     path=path.resolve();assert path.is_relative_to((layout.ROOT/'local').resolve())
     report=json.loads(path.read_text());out=path.parent
     assert layout.digest(layout.IMAGE)=='aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514'
+    if 'observations' in report:return source_audit(path,report)
     is_init='names' in report;module=initialization if is_init else volume
     binary='grid-deformation-initialization' if is_init else 'grid-deformation-volume'
     rows,identities=module.cases();assert len(rows)==report['cases'] and identities==report['identities']
