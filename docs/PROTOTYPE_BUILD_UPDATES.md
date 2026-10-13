@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **d221dc28f774**, built 13 October at20:36:32 UTC. Ten source-driving and five Bevy checks pass, plus rendered collision and straight-road checks. The Body Contacts launcher enables physical grid/shape/wheel deformation and independently mapped body dents when its private DF01 input exists. Original graphical damage fidelity remains under research.
+Latest verified refresh: **adb7755a141a**, built 13 October at 23:41:33 UTC (14 October locally). The terminal wheel-damage freeze reported by the owner is fixed; physics continues, terminal damage disables driving controls and R resets. Ten source-driving and five Bevy checks pass, along with exact replay of both failing owner runs and a rendered healthy-contact regression. See [damage-freeze findings](PLAYTEST_DAMAGE_FREEZE_2026_10_14.md).
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -11,6 +11,16 @@ Run `powershell -ExecutionPolicy Bypass -File tools/update_prototype.ps1` from t
 Every successful update writes ignored `local/playtest/build-UTCSTAMP/build.json` and logs. `local/playtest/current-build.json` points to the latest successfully checked build and records the full revision, executable hash, tool versions and checks. Rendering and owner laps are separately verified; a successful rebuild alone does not establish them. Game assets and compiled binaries remain private.
 
 Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts, [selected registered body events](BODY_IMPACT_RUNTIME.md), [collision-driven deformation](DEFORMATION_DRIVING_INTEGRATION.md) and [independent body dents](BODY_DEFORMATION_PRESENTATION.md) are available through the body-contact launcher.
+
+## Terminal wheel-damage recovery refresh
+
+Clean revision `adb7755a141a7b0cee7ff3e6c82d5cf241287e1c`, built `2026-10-13T23:41:33.3630106Z`; release SHA `749304d30b2757e1de39a1fbc4a8ecdaaa96287cb4d4dcee92fd5bc7f7fbd99a`. Both existing launchers use this executable. Private build evidence `local/playtest/build-20261013T2341109119757Z/`: ten source and five Bevy checks pass; no owner session was replaced.
+
+Both old owner failure sequences reproduce all 490 successful sampled poses/velocities exactly in debug, release and repeated release, then continue through terminal transitions at ticks 2148 and 2696 and 300 further ticks. The source state disables driving on the following tick; the app reports the affected wheel and R recovery. Full original end-of-race notifications and detached parts remain outside this selected empty-receiver context.
+
+The clean executable also completes a 600-tick collision render with 155 samples and no failures. All 310 logged physical/deformation records are exactly equal to the previous d221 build excluding wall time. Eight body-mesh uploads, first change 165/last 175, remain unchanged. The inspected image shows the Lacetti beside the Donington pit barrier. This healthy-contact render is separate from the critical-state control replay and Bevy recovery checks.
+
+Private render log `local/playtest/damage-terminal-adb7755-20261014.txt` SHA `bdaec421e766ca2c68cf2a025ab0b9663a56f0a097b01689851c4c269aee0ecb`; image SHA `ce25b339e4c8296bb48d35ab021803795e34a9d05d27de8949aacf84f7496ecc`. Read-only replay comparison `local/playtest/damage-terminal-healthy-replay-20261014.json` SHA `0e849518c39da885d3ed987c2943683850f8521ba37649dc4ec7850c9b076aab`. Reconstructed critical control-replay audit `local/playtest/damage-freeze-replay-audit-20261014-final-03.json` SHA `1951c2af8c1147c76cfae82283b4c32ecec606a8bc316fab570250c67ad63ce0` checks eight current identities and all six output files (5,464,578 bytes). No fresh owner playtest of this corrected build is claimed.
 
 ## Body-dent presentation refresh
 
