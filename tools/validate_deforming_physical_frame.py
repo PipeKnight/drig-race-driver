@@ -28,6 +28,7 @@ def constants():
 def cases():
     rows,identities=preparation.cases();defaults=constants()
     for index,row in enumerate(rows):
+        for _,contact in row['contacts']:contact[0xc]=index%2
         s=row['deformation'];stem='lac' if index<128 else 'bmw';path=ROOT/f'local/behavior/deformation-source-debug-20261013-final-01/{stem}-rust.bin';source=path.read_bytes()
         settings=source[44+3*layout.SIZE:];assert len(settings)==0x1054
         owner=bytearray(0xd230);owner[0x2300:0xc800]=s['descriptor']
@@ -84,6 +85,7 @@ def guard_payloads(rows):
         ('null_shape',lambda r:struct.pack_into('<I',r['contacts'][0][1],0x28,0)),
         ('dynamic_contact',lambda r:r['contacts'].__setitem__(0,(1,r['contacts'][0][1]))),
         ('nan_old_cap',lambda r:struct.pack_into('<I',r['contacts'][0][1],0x3c,0x7fc00000)),
+        ('invalid_static_flag',lambda r:r['contacts'][0][1].__setitem__(0xc,2)),
         ('ring',lambda r:edit_owner(r,0xc7ec,10)),('dimension',lambda r:edit_owner(r,0xc714,17)),
         ('nan_node',lambda r:edit_owner(r,0x4880,0x7fc00000)),('edges',lambda r:edit_owner(r,0xc710,1201)),
         ('foreign_lookup',lambda r:edit_owner(r,0xdb0,2)),('foreign_settings',lambda r:edit_owner(r,0xc7f8,1)),

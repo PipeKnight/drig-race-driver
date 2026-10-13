@@ -177,7 +177,11 @@ pub(crate) fn run(deformation: bool, active: bool) -> Result<(), Failure> {
             let mode = word(take(&data, &mut p, 4)?, 0);
             let c = take(&data, &mut p, 128)?;
             if word(c, 0x10) != 0
-                || c[0xc] != if mode != 0 { 0 } else { 1 }
+                || if active && mode == 0 {
+                    c[0xc] > 1 || word(c, 8) != 0
+                } else {
+                    c[0xc] != if mode != 0 { 0 } else { 1 }
+                }
                 || c[0xd] != 0
                 || c[0xf] != 1
                 || mode > 1

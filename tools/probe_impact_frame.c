@@ -95,9 +95,16 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned j=0;!error&&j<h[2];j++){
    unsigned char *c=contacts[j];
    if(!read(input,modes+j,4)||modes[j]>1||!read(input,c,128)||get(c,0x1c)>=h[0]||get(c,0x20)>=h[0]||get(c,4)!=get(c,0x1c)||get(c,8)!=get(c,0x20)||get(c,0x30)>=h[1]||get(c,0x34)>=h[1]||get(c,0x2c)>2||get(c,0x28)>2||c[0xe]>1||c[0x70]||c[0x73]>1||!finite_words(c+0x38,2)||!finite_words(c+0x50,8)){error=8;break;}
-   float previous;memcpy(&previous,c+0x3c,4);if(previous<0||get(c,0x10)||c[0xc]!=(modes[j]?0:1)||c[0xd]||c[0xf]!=1){error=8;break;}
+   unsigned flag_valid=c[0xc]==(modes[j]?0:1);
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+   if(!modes[j]&&c[0xc]<=1&&get(c,8)==0)flag_valid=1;
+#endif
+   float previous;memcpy(&previous,c+0x3c,4);if(previous<0||get(c,0x10)||!flag_valid||c[0xd]||c[0xf]!=1){error=8;break;}
    shape_ids[j][0]=get(c,0x2c);shape_ids[j][1]=get(c,0x28);material_ids[j][0]=get(c,0x30);material_ids[j][1]=get(c,0x34);
    put(c,4,bodyptrs[get(c,0x1c)]);put(c,8,bodyptrs[get(c,0x20)]);
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+   if(!modes[j]&&!c[0xc])put(c,8,0); /* Actual absent static counterpart. */
+#endif
    put(c,0x30,(unsigned)(uintptr_t)materials[material_ids[j][0]]);put(c,0x34,(unsigned)(uintptr_t)materials[material_ids[j][1]]);
    put(c,0x2c,shape_ids[j][0]?(unsigned)(uintptr_t)shapes[shape_ids[j][0]-1]:0);put(c,0x28,shape_ids[j][1]?(unsigned)(uintptr_t)shapes[shape_ids[j][1]-1]:0);
    put(c,0x10,j+1<h[2]?(unsigned)(uintptr_t)contacts[j+1]:0);

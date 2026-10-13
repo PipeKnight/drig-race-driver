@@ -75,7 +75,7 @@ def request(rows):
 
 def mutations():
     base=8+layout.SIZE;contact_at=base+LINKED;param_at=contact_at+144
-    return [('dimension',8+0xa414,17),('ring',8+0xa4ec,10),('nan_window',8+0xa4c4,0x7fc00000),('nan_marker',8+0x25c0,0x7fc00000),('nan_pose',base+0x1d0,0x7fc00000),('nan_response_velocity',base+0x360,0x7fc00000),('foreign_center',base+0x334,1),('zero_mass',base+0x3f0,0),('dynamic_counterpart',contact_at+12,0),('foreign_owner',contact_at+4,1),('nan_point',contact_at+0x50,0x7fc00000),('nan_parameter',param_at,0x7fc00000),('bad_unlimited',param_at+20,0),('bad_disable',param_at+92,2)]
+    return [('dimension',8+0xa414,17),('ring',8+0xa4ec,10),('nan_window',8+0xa4c4,0x7fc00000),('nan_marker',8+0x25c0,0x7fc00000),('nan_pose',base+0x1d0,0x7fc00000),('nan_response_velocity',base+0x360,0x7fc00000),('foreign_center',base+0x334,1),('zero_mass',base+0x3f0,0),('invalid_static_flag',contact_at+12,2),('foreign_owner',contact_at+4,1),('nan_point',contact_at+0x50,0x7fc00000),('nan_parameter',param_at,0x7fc00000),('bad_unlimited',param_at+20,0),('bad_disable',param_at+92,2)]
 
 
 def main():

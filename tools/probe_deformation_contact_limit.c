@@ -8,7 +8,7 @@
 static int cap_admitted(const unsigned char *r){
  const unsigned char *b=r+DESCRIPTOR,*c=b+LINKED,*center=c+0x80,*p=center+16;
  unsigned nx=get(r,0xa414),ny=get(r,0xa418),nz=get(r,0xa41c);
- if(nx<2||nx>16||ny<2||ny>16||nz<2||nz>16||nx*ny*nz>400||get(r,0xa4ec)>=10||!c[0xc]||get(c,4)||get(c,8)||get(b,0x334)||get(p,92)>1||number(p,20)!=FLT_MAX)return 0;
+ if(nx<2||nx>16||ny<2||ny>16||nz<2||nz>16||nx*ny*nz>400||get(r,0xa4ec)>=10||c[0xc]>1||get(c,4)||get(c,8)||get(b,0x334)||get(p,92)>1||number(p,20)!=FLT_MAX)return 0;
  for(unsigned i=0;i<23;i++)if(i!=5&&!range(number(p,i*4),-1e6f,1e6f))return 0;
  const unsigned offsets[]={0x1d0,0x1e0,0x1f0,0x200,0x210,0x220,0x360};
  for(unsigned i=0;i<7;i++)for(unsigned a=0;a<4;a++)if(!range(number(b,offsets[i]+a*4),-1e6f,1e6f))return 0;
