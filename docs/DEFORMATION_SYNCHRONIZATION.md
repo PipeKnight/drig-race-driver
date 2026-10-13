@@ -37,7 +37,7 @@ An ignored purchased-source test runs two independently initialized Lacetti/Doni
 
 A reached invalid rest component then rejects a tick while preserving the checked complete owner/frame/contact buffers, RNG and runtime metadata. Reset removes the supplied grid, returns to the source-created initial car and retains event configuration. The two-runtime test uses an explicit 16 MiB worker stack; this changes no game or app stack setting.
 
-All **190 regular library tests**, **seven purchased-source release driving tests**, formatting and all-target warnings-denied Clippy pass. The active-grid source test also passes in debug. Prototype refresh and its Bevy/render checks are recorded separately below when completed.
+All **190 regular library tests**, **seven purchased-source release driving tests**, formatting and all-target warnings-denied Clippy pass. The active-grid source test also passes in debug. The clean-source prototype refresh passes the same seven source checks and all three Bevy checks; its build and render evidence follow.
 
 ## Evidence, versions and failures
 
@@ -53,6 +53,14 @@ Python 3.12.14, Rust/Cargo 1.99.0, MSVC 14.44.35207, Developer Prompt 17.14.41, 
 Native sync probe SHA-256 `9665ac6f9efcb1c8e866c54a3b02d6f4de1d0f018dee0f2b8e2b4a0cc88846ac`; native job probe `1c02d5d1eac210501f0750aa1c2d9e6646453d776ae1e73e2b6d6cbd8c4b13d8`. Rust sync debug/release are `affbf51fea77fb8dd88c0f0f911e35628294689dcbb5d3dfebcef27867bcebfc` / `074def84f45a50ca9082320be2ad2cfd5ec5c4e87162517e458215a304c55a56`; job diagnostic debug/release are `108a62189a3cb62e0797e07f3d660a6eb9ff7b3369cc8e934a50f2590fe275c7` / `38322d0b0c7178f4bc29c398e1f661f903dc10323d8b3d853dee1450f6ddfb75`.
 
 The first whole-job draft omitted physical storage when packing the new request. Original query guard 35 rejected it before any job completion. The corrected request includes the physical suffix and asserts its exact length; final comparisons pass. The first source regression prepared body geometry only for the baseline runtime, giving it twenty pool slots while the second runtime still had four. Preparing both identically fixed this fixture mismatch. No physics admission rule was relaxed. Failed reports/logs remain under the draft paths; no native execution fault or numerical mismatch occurred.
+
+## Playable refresh
+
+Clean build **f428d0a23ce8** (full revision `f428d0a23ce860734dba2bfebf22f6fbb35f6f67`) was rebuilt at `2026-10-13T09:51:37.7607818Z`, release SHA-256 `e1e50a3aa28fd82890d50ca8ba33aea269cca93426c342223618d066aecb26be`. Both existing launchers use this executable. No active owner session was replaced. The manifest, seven source tests, three Bevy tests and build log are private under `local/playtest/build-20261013T0950549337998Z/`.
+
+The headless 600-tick powered turn with body contacts and events completes normally: 132 sampled records, no recorded simulation failure, 176 total body contacts in the source check, final damage RNG `2a73550a`. The new render was inspected and shows the Lacetti beside the Donington barrier. This run uses normal source-created zero-grid startup; the separately supplied-grid regression above covers the new active branch. No visible deformation or new manual lap is claimed. The known gamepad `80070057` warning recurs without preventing completion.
+
+Private render/telemetry: `local/playtest/active-grid-f428d0a23ce8-20261013.{png,txt,json}`. Log SHA-256 `dd0c75199946b3a48784f2fa73e0dea16ada242a3c2d382e0c992e7fbf38901c`; image SHA-256 `c0dd570f22b35fec81188222e35cc0cfc54570ace0646d96ab4c621403e09981`. Original Steam executable and all 130 traced resources remain unchanged at `2026-10-13T09:54:21.095505Z`, recorded in `local/scene/preservation-20261013-active-grid-sync.json`. The final current-file audit also passes again after rebuilding the app (`active-grid-sync-audit-20261013-final-02.json`).
 
 Several guessed filenames failed to read during initial navigation and were replaced with inventory-based reads. A sandbox CIM process query was unavailable; the existing ordinary process inventory subsequently worked. This was not an automatic approval rejection. Mixed header line endings triggered whitespace checks and were normalized without changing C semantics. No desktop input, original Steam change or user settings/save change was needed.
 

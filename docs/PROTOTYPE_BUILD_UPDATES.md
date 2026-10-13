@@ -1,5 +1,7 @@
 # Playable build updates
 
+Latest verified refresh: **f428d0a23ce8**, built 13 October at 09:51:37 UTC. Seven source-driving and three Bevy checks pass, as does the 600-tick contact/event render. [Active-grid synchronization notes](DEFORMATION_SYNCHRONIZATION.md#playable-refresh) record the exact source revision, executable hash and private evidence. This update prepares deformation integration; visible meshes remain rigid.
+
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
 `tools/update_prototype.ps1` checks the purchased-source driving tests and Bevy input/presentation/recovery tests, then builds the app offline using the existing Rust toolchain. It embeds the source revision in the window title and startup log. A build made with uncommitted changes is marked `dirty`; a plain Cargo build without this variable says `unversioned`.
