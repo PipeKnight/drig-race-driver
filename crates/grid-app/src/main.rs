@@ -1,8 +1,10 @@
 //! Source reference viewer and serial driving prototype.
+mod body_damage;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
     camera::RenderTarget,
+    camera::primitives::{Aabb, MeshAabb},
     image::{
         CompressedImageFormats, ImageAddressMode, ImageSampler, ImageSamplerDescriptor, ImageType,
     },
@@ -152,6 +154,13 @@ struct MovingPart {
     rest: Mat4,
     wheel: Option<usize>,
 }
+#[derive(Component)]
+struct DeformingPart {
+    source: Mesh,
+    raw_bind: Mat4,
+}
+#[derive(Resource, Default)]
+struct DeformationPresentation(Option<Vec<u32>>);
 
 fn wheel_joint(joint: &[u8]) -> Option<usize> {
     let name = std::str::from_utf8(joint).ok()?;
@@ -862,7 +871,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
                 );
                 println!(
-                    "--deformation PRIVATE_DF01: experimental source grid, wheel/shape rebuilding and both physical deformation callbacks. Requires --drive and --body-contacts. Body graphics remain rigid."
+                    "--deformation PRIVATE_DF01: experimental source grid, wheel/shape rebuilding, physical callbacks and independently mapped body dents. Requires --drive and --body-contacts."
                 );
                 return Ok(());
             }
@@ -913,7 +922,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let (limit,bulk)=grid_tools::deformation_parameters::read(&std::fs::read(path)?)?;
                 runtime.enable_deformation(&root,&mut geometry)?;
                 runtime.register_deformation_callbacks(limit,bulk,1)?;
-                println!("drive_deformation enabled=true scope=single-car-static-peers source=player-lod1 wheel-view=source-wheel-anchors crt_seed=00000001 body_graphics=rigid");
+                println!("drive_deformation enabled=true scope=single-car-static-peers source=player-lod1 wheel-view=source-wheel-anchors crt_seed=00000001 body_graphics=independent-grid-projection");
             }
             println!("drive_body_geometry enabled=true pool=20 boundary=cqtc order=boundary-first-then-archive materials=shared damage=owned-rng notifications=guarded");
             Ok(geometry)
@@ -1079,6 +1088,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )))
             .add_systems(FixedUpdate, drive_tick)
             .add_systems(Last, drive_exit_log)
+            .init_resource::<DeformationPresentation>()
             .add_systems(Update, (drive_actions, drive_present).chain());
     }
     let exit = app
@@ -1213,8 +1223,26 @@ fn setup(
                 })
             })
             .clone();
-        let mesh = meshes.add(part.mesh);
+        let deformable = driving
+            .as_ref()
+            .is_some_and(|d| d.runtime.deformation_enabled)
+            && part.material.starts_with("lacetti/")
+            && part.wheel.is_none()
+            && part.material.strip_prefix("lacetti/") != Some("Aerials");
+        let original = deformable.then(|| part.mesh.clone());
+        let initial_bounds = part
+            .mesh
+            .compute_aabb()
+            .expect("validated source mesh bounds");
+        let shared = if deformable {
+            None
+        } else {
+            Some(meshes.add(part.mesh))
+        };
         for matrix in part.matrices {
+            let mesh = shared
+                .clone()
+                .unwrap_or_else(|| meshes.add(original.as_ref().unwrap().clone()));
             let moving = driving.is_some() && part.material.starts_with("lacetti/");
             let transform = if moving {
                 let runtime = &driving.as_ref().unwrap().runtime;
@@ -1230,12 +1258,25 @@ fn setup(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::from_matrix(transform),
+                initial_bounds,
             ));
             if moving {
                 entity.insert(MovingPart {
                     rest: matrix,
                     wheel: part.wheel,
                 });
+                if let Some(source) = &original {
+                    let owner = &driving.as_ref().unwrap().runtime.state.car.owner.vehicle;
+                    let model = Mat4::from_translation(Vec3::new(
+                        f32::from_bits(owner[0x1630 / 4]),
+                        f32::from_bits(owner[0x1634 / 4]) - f32::from_bits(owner[0x1564 / 4]),
+                        f32::from_bits(owner[0x1638 / 4]),
+                    ));
+                    entity.insert(DeformingPart {
+                        source: source.clone(),
+                        raw_bind: model.inverse() * matrix,
+                    });
+                }
             }
         }
     }
@@ -1413,15 +1454,75 @@ fn drive_exit_log(driving: Res<Driving>, mut exits: MessageReader<AppExit>) {
         driving.report("exit", driving.last_controls.unwrap_or_default());
     }
 }
+#[allow(clippy::type_complexity)] // Explicit Bevy component ownership.
 fn drive_present(
-    driving: Res<Driving>,
-    mut parts: Query<(&MovingPart, &mut Transform), Without<ViewerCamera>>,
+    mut driving: ResMut<Driving>,
+    mut parts: Query<
+        (
+            &MovingPart,
+            &mut Transform,
+            Option<&DeformingPart>,
+            &Mesh3d,
+            &mut Aabb,
+        ),
+        Without<ViewerCamera>,
+    >,
     mut camera: Single<&mut Transform, With<ViewerCamera>>,
     mut windows: Query<&mut Window>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut presentation: ResMut<DeformationPresentation>,
 ) {
+    if driving.runtime.deformation_enabled && driving.failure.is_none() {
+        let update = (|| -> Result<(), &'static str> {
+            let field =
+                grid_tools::body_deformation::Field::read(&driving.runtime.state.car.owner.vehicle)
+                    .map_err(|e| e.0)?;
+            let key = field.key();
+            if presentation.0.as_ref() == Some(&key) {
+                return Ok(());
+            }
+            let mut staged: Vec<(Handle<Mesh>, Mesh, Aabb)> = Vec::new();
+            let mut changed = 0;
+            for (_, _, source, handle, _) in &parts {
+                if let Some(source) = source {
+                    if meshes.get(&handle.0).is_none()
+                        || staged.iter().any(|(h, _, _)| h == &handle.0)
+                    {
+                        return Err("body damage mesh ownership differs");
+                    }
+                    let mesh = body_damage::project(&source.source, source.raw_bind, &field)?;
+                    changed += usize::from(
+                        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                            != source.source.attribute(Mesh::ATTRIBUTE_POSITION),
+                    );
+                    let bounds = mesh.compute_aabb().ok_or("invalid projected body bounds")?;
+                    staged.push((handle.0.clone(), mesh, bounds));
+                }
+            }
+            for (handle, mesh, _) in &staged {
+                *meshes.get_mut(handle).expect("staged owned mesh") = mesh.clone();
+            }
+            for (_, _, _, handle, mut bounds) in &mut parts {
+                if let Some((_, _, next)) = staged.iter().find(|(h, _, _)| h == &handle.0) {
+                    *bounds = *next;
+                }
+            }
+            presentation.0 = Some(key);
+            println!(
+                "drive_body_projection event=update tick={} meshes={} changed_meshes={changed} policy=independent-current-minus-rest",
+                driving.runtime.ticks,
+                staged.len()
+            );
+            Ok(())
+        })();
+        if let Err(error) = update {
+            driving.failure = Some(format!("body presentation: {error}; R resets"));
+            driving.report("failure", driving.last_controls.unwrap_or_default());
+        }
+    }
     let pose = Mat4::from_cols_array(&driving.runtime.pose());
     let wheels = driving.runtime.wheels().map(wheel_motion);
-    for (part, mut transform) in &mut parts {
+    for (part, mut transform, _, _, _) in &mut parts {
         let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
         *transform = Transform::from_matrix(pose * motion * part.rest);
     }
@@ -1647,6 +1748,21 @@ mod driving_tests {
                 .unwrap(),
         );
         let initial = runtime.wheels().map(wheel_motion);
+        let car = load(root, "LOD0_", false, false).unwrap();
+        let pristine_field =
+            grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle).unwrap();
+        let selected: Vec<_> = car
+            .parts
+            .iter()
+            .filter(|p| p.wheel.is_none() && p.material != "Aerials")
+            .collect();
+        assert!(!selected.is_empty());
+        for part in &selected {
+            assert_eq!(
+                body_damage::project(&part.mesh, part.matrices[0], &pristine_field).unwrap(),
+                part.mesh
+            );
+        }
         let mut damaged = false;
         for _ in 0..600 {
             runtime
@@ -1677,8 +1793,125 @@ mod driving_tests {
             assert_eq!(runtime.state.car.owner.vehicle, before);
         }
         assert!(damaged);
-        runtime.reset();
-        assert_eq!(runtime.wheels().map(wheel_motion), initial);
+        let before = runtime.state.car.owner.vehicle.clone();
+        let field = grid_tools::body_deformation::Field::read(&before).unwrap();
+        let mut changed = 0;
+        for part in &selected {
+            let mesh = body_damage::project(&part.mesh, part.matrices[0], &field).unwrap();
+            changed += usize::from(
+                mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+                    != part.mesh.attribute(Mesh::ATTRIBUTE_POSITION),
+            );
+            assert_eq!(mesh.indices(), part.mesh.indices());
+            assert_eq!(
+                mesh.attribute(Mesh::ATTRIBUTE_UV_0),
+                part.mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+            );
+            assert!(mesh.compute_aabb().is_some());
+        }
+        assert!(changed > 0);
+        assert_eq!(runtime.state.car.owner.vehicle, before);
+        // Exercise actual asset publication: a bad second bind fails after a
+        // valid first projection, retaining both meshes/bounds and owner state.
+        let mut assets = Assets::<Mesh>::default();
+        let mut entries = Vec::new();
+        for part in selected.iter().take(2) {
+            entries.push((
+                assets.add(part.mesh.clone()),
+                part.mesh.clone(),
+                part.matrices[0],
+            ));
+        }
+        assert_eq!(entries.len(), 2);
+        let mut app = App::new();
+        app.insert_resource(assets)
+            .init_resource::<DeformationPresentation>()
+            .insert_resource(Driving {
+                runtime,
+                geometry: Some(geometry),
+                paused: false,
+                failure: None,
+                scripted_ticks: None,
+                scripted: Default::default(),
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+            })
+            .add_systems(Update, drive_present);
+        app.world_mut().spawn((ViewerCamera, Transform::default()));
+        let mut ids = Vec::new();
+        for (i, (handle, source, bind)) in entries.iter().enumerate() {
+            ids.push(
+                app.world_mut()
+                    .spawn((
+                        MovingPart {
+                            rest: *bind,
+                            wheel: None,
+                        },
+                        Transform::default(),
+                        Mesh3d(handle.clone()),
+                        source.compute_aabb().unwrap(),
+                        DeformingPart {
+                            source: source.clone(),
+                            raw_bind: if i == 1 {
+                                Mat4::from_cols_array(&[f32::NAN; 16])
+                            } else {
+                                *bind
+                            },
+                        },
+                    ))
+                    .id(),
+            );
+        }
+        app.update();
+        assert!(app.world().resource::<Driving>().failure.is_some());
+        for (handle, source, _) in &entries {
+            assert_eq!(
+                app.world().resource::<Assets<Mesh>>().get(handle).unwrap(),
+                source
+            );
+        }
+        assert_eq!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle,
+            before
+        );
+        app.world_mut()
+            .entity_mut(ids[1])
+            .get_mut::<DeformingPart>()
+            .unwrap()
+            .raw_bind = entries[1].2;
+        app.world_mut().resource_mut::<Driving>().failure = None;
+        app.update();
+        assert!(app.world().resource::<Driving>().failure.is_none());
+        assert!(entries.iter().any(|(handle, source, _)| {
+            app.world().resource::<Assets<Mesh>>().get(handle).unwrap() != source
+        }));
+        app.world_mut().resource_mut::<Driving>().runtime.reset();
+        app.update();
+        for (handle, source, _) in &entries {
+            assert_eq!(
+                app.world().resource::<Assets<Mesh>>().get(handle).unwrap(),
+                source
+            );
+        }
+        assert_eq!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .wheels()
+                .map(wheel_motion),
+            initial
+        );
+        eprintln!(
+            "source_body_projection source_parts={} changed_parts={changed} pristine_mesh_exact=1 indices_uv_preserved=1 late_second_mesh_failure_atomic=1 reset_mesh_exact=1 physics_feedback=0",
+            selected.len()
+        );
     }
 
     fn exercise_keyboard_recovery(table: Option<&[u8]>, deformation: bool) {
