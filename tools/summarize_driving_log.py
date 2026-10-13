@@ -36,6 +36,22 @@ def main():
             assert len(row[k]) == n and all(math.isfinite(v) for v in row[k])
         assert row['handbrake'] in ['true', 'false']
         row['handbrake'] = row['handbrake'] == 'true'
+        for key in ['body_geometry', 'body_events', 'damage_rng_owned']:
+            if key in row:
+                assert row[key] in ['true', 'false']
+                row[key] = row[key] == 'true'
+        if 'body_contacts' in row:
+            row['body_contacts'] = int(row['body_contacts'])
+            assert row['body_contacts'] >= 0
+        if 'damage_rng' in row:
+            assert re.fullmatch(r'[0-9a-fA-F]{8}', row['damage_rng'])
+            row['damage_rng'] = int(row['damage_rng'], 16)
+            row['impact_flag'] = int(row['impact_flag'])
+            assert 0 <= row['impact_flag'] <= 255
+            row['suspension_gain'] = float(row['suspension_gain'])
+            row['damage_levels'] = ast.literal_eval(row['damage_levels'])
+            assert math.isfinite(row['suspension_gain'])
+            assert len(row['damage_levels']) == 9 and all(math.isfinite(v) for v in row['damage_levels'])
         row['speed_mps'] = math.sqrt(sum(v*v for v in row['velocity'][:3]))
         rows.append(row)
     assert rows
@@ -51,12 +67,69 @@ def main():
             episode.append(row)
     if episode:
         episodes.append(episode)
+    # Only successful tick records count contacts. Pause/exit/failure records
+    # retain the preceding tick's count and must not add it a second time.
+    ticks = {}
+    for row in rows:
+        if row['event'] == 'tick':
+            key = (row['segment'], row['tick'])
+            assert key not in ticks
+            ticks[key] = row
+    contact_runs = []
+    contact_run = None
+    previous = None
+    sampled_path = 0.
+    for row in ticks.values():
+        if previous and previous['segment'] == row['segment']:
+            assert row['tick'] > previous['tick']
+            sampled_path += math.dist(row['pose'][12:15], previous['pose'][12:15])
+        if row.get('body_contacts', 0):
+            if contact_run and row['segment'] == contact_run['segment'] and row['tick'] == contact_run['last_tick'] + 1:
+                contact_run['last_tick'] = row['tick']
+                contact_run['last_seconds'] = row['seconds']
+                contact_run['ticks'] += 1
+                contact_run['records'] += row['body_contacts']
+                contact_run['maximum_records_per_tick'] = max(contact_run['maximum_records_per_tick'], row['body_contacts'])
+            else:
+                contact_run = dict(segment=row['segment'], first_tick=row['tick'], last_tick=row['tick'],
+                    first_seconds=row['seconds'], last_seconds=row['seconds'], ticks=1,
+                    records=row['body_contacts'], maximum_records_per_tick=row['body_contacts'],
+                    first_post_tick_speed_kmh=row['speed_mps'] * 3.6)
+                contact_runs.append(contact_run)
+        else:
+            contact_run = None
+        previous = row
+    damage_rows = [r for r in ticks.values() if 'damage_rng' in r]
+    damage = None
+    if damage_rows:
+        assert len(damage_rows) == len(ticks), 'Mixed damage telemetry within one log'
+        transitions = [dict(segment=b['segment'], tick=b['tick'], seconds=b['seconds'],
+                       before=f"{a['damage_rng']:08x}", after=f"{b['damage_rng']:08x}")
+                       for a, b in zip(damage_rows, damage_rows[1:])
+                       if a['segment'] == b['segment'] and a['damage_rng'] != b['damage_rng']]
+        damage = dict(first_rng=f"{damage_rows[0]['damage_rng']:08x}",
+            last_rng=f"{damage_rows[-1]['damage_rng']:08x}", observed_rng_transitions=transitions,
+            first_levels=damage_rows[0]['damage_levels'], last_levels=damage_rows[-1]['damage_levels'],
+            maximum_levels=[max(r['damage_levels'][i] for r in damage_rows) for i in range(9)],
+            minimum_suspension_gain=min(r['suspension_gain'] for r in damage_rows),
+            maximum_suspension_gain=max(r['suspension_gain'] for r in damage_rows),
+            limitation='Observed RNG transitions are not draw/impact counts; a retained impact flag is not a new event. No exclusive cause is inferred.')
     result = dict(
         passed=True, source=str(source), source_sha256=hashlib.sha256(raw).hexdigest(),
         script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         samples=len(rows), segments=sorted({r['segment'] for r in rows}),
         first=rows[0], last=rows[-1],
         failures=[r for r in rows if r['event'] == 'failure'],
+        build_revision=next((line.split('revision=', 1)[1] for line in raw.decode('utf-8').splitlines()
+                             if line.startswith('prototype_build revision=')), None),
+        completed_exit=rows[-1]['event'] == 'exit',
+        successful_tick_samples=len(ticks),
+        maximum_sampled_speed_kmh=max(r['speed_mps'] for r in rows)*3.6,
+        sampled_path_length_m=sampled_path,
+        body_contacts=dict(logged_ticks=sum(r.get('body_contacts', 0) > 0 for r in ticks.values()),
+            logged_records=sum(r.get('body_contacts', 0) for r in ticks.values()),
+            runs=contact_runs, limitation='Contiguous logged contact ticks, not independently counted crashes; wheel-prefix callbacks are excluded from this geometry count.'),
+        damage=damage,
         reverse_samples=sum(r['gear'] == 9 for r in rows),
         handbrake_episodes=[dict(samples=len(e), first=e[0], last=e[-1],
             sampled_duration_seconds=e[-1]['seconds']-e[0]['seconds'],
