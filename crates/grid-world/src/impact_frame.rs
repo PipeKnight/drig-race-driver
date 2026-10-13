@@ -1,4 +1,4 @@
-//! Whole outer impact-only frame with no registered callbacks, joints or links.
+//! Whole outer impact-only frame; joints and links remain external.
 //! Includes body preparation and final damping/clamping/pending-shift publication.
 use crate::{
     Error, impact_correction,
@@ -118,9 +118,31 @@ pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     impact_step::validate(&input.step)
 }
 
-#[allow(clippy::assign_op_pattern)] // Preserve original force and damping operand order.
 pub fn calculate(input: &Input) -> Result<Output, Error> {
+    calculate_with_callbacks(input, &NoCallbacks).map(|(out, _)| out)
+}
+
+/// Internal owned callback context. Clone before either phase so a subsequent
+/// solver/publication error cannot commit callback state to the caller.
+pub(crate) trait Callbacks: Clone {
+    fn prepare(&mut self, _step: &mut Step, _bodies: &mut [Body]) -> Result<(), Error> {
+        Ok(())
+    }
+    fn solved(&mut self, _step: &mut StepOutput, _bodies: &mut [Body]) -> Result<(), Error> {
+        Ok(())
+    }
+}
+#[derive(Clone)]
+struct NoCallbacks;
+impl Callbacks for NoCallbacks {}
+
+#[allow(clippy::assign_op_pattern)] // Preserve original force and damping operand order.
+pub(crate) fn calculate_with_callbacks<C: Callbacks>(
+    input: &Input,
+    callbacks: &C,
+) -> Result<(Output, C), Error> {
     validate(input)?;
+    let mut callbacks = callbacks.clone();
     let delta = input.step.parameters[0];
     let s = &input.step;
     let mut out = Output {
@@ -143,7 +165,7 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
         },
     };
     if s.iterations == 0 {
-        return Ok(out);
+        return Ok((out, callbacks));
     }
     let mut sleeping = 0;
     let mut minimum = f32::MAX;
@@ -197,7 +219,7 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     }
     if sleeping == out.bodies.len() {
         out.status = 1;
-        return Ok(out);
+        return Ok((out, callbacks));
     }
     let inverse = 1. / minimum;
     for s in &mut out.step.bodies {
@@ -212,12 +234,14 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     step.parameters[2] = 1.;
     step.parameters[3] = minimum;
     step.parameters[4] = inverse;
+    callbacks.prepare(&mut step, &mut out.bodies)?;
     out.step = impact_step::calculate(&step)?;
     out.started = true;
     if !out.step.success {
         out.status = 1;
-        return Ok(out);
+        return Ok((out, callbacks));
     }
+    callbacks.solved(&mut out.step, &mut out.bodies)?;
     // The file-backed D85A50 threshold is positive zero. Preserve the outer
     // iteration/nonpositive-relaxation guard before entering the optional pass.
     if let Some(c) = input
@@ -398,7 +422,7 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     }) {
         return Err(Error("nonfinite impact frame output"));
     }
-    Ok(out)
+    Ok((out, callbacks))
 }
 
 #[cfg(test)]
@@ -556,6 +580,54 @@ mod tests {
         assert_eq!(o.advanced[0].corrected[3], [0.1, 0., 0., 1.]);
         assert_eq!(o.frame.step.bodies[0].contact.position, [0.1, 0., 0., 1.]);
         assert_eq!(o.frame.step.bodies[0].contact.linear, [1., -1., 0., 0.]);
+    }
+    #[test]
+    fn owned_callbacks_observe_solver_phases_and_roll_back_on_late_publication_failure() {
+        #[derive(Clone)]
+        struct Context {
+            phases: Vec<u8>,
+            overflow: bool,
+        }
+        impl Callbacks for Context {
+            fn prepare(&mut self, step: &mut Step, _: &mut [Body]) -> Result<(), Error> {
+                assert_eq!(step.bodies[0].force, [0., -20., 0., 0.]);
+                assert_eq!(step.bodies[0].contact.linear, [0.; 4]);
+                assert_eq!(step.bodies[0].inverse_mass, 1.);
+                self.phases.push(1);
+                Ok(())
+            }
+            fn solved(&mut self, step: &mut StepOutput, bodies: &mut [Body]) -> Result<(), Error> {
+                assert_eq!(step.bodies[0].contact.linear, [0., -1., 0., 0.]);
+                bodies[0].pending_shift = if self.overflow {
+                    [f32::MAX, 0., 0., 0.]
+                } else {
+                    [0., 0.5, 0., 0.]
+                };
+                bodies[0].shift_active = true;
+                self.phases.push(2);
+                Ok(())
+            }
+        }
+        let context = Context {
+            phases: vec![],
+            overflow: false,
+        };
+        let (out, committed) = calculate_with_callbacks(&input(), &context).unwrap();
+        assert_eq!(committed.phases, vec![1, 2]);
+        assert!(context.phases.is_empty());
+        assert_eq!(out.publications[0].as_ref().unwrap().published[3][1], 0.5);
+        assert!(!out.bodies[0].shift_active);
+        let mut bad = input();
+        bad.bodies[0].basis[3][0] = f32::MAX;
+        bad.step.bodies[0].contact.position[0] = f32::MAX;
+        let context = Context {
+            overflow: true,
+            ..context
+        };
+        assert!(calculate_with_callbacks(&bad, &context).is_err());
+        assert!(context.phases.is_empty());
+        assert_eq!(bad.bodies[0].pending_shift, [0.; 4]);
+        assert_eq!(bad.step.bodies[0].contact.linear, [0.; 4]);
     }
     #[test]
     fn serial_world_reorders_advances_without_reindexing_bodies_or_publishing_failure() {
