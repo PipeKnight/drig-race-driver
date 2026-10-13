@@ -125,9 +125,9 @@ fn sample(
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 4 {
+    if !(4..=5).contains(&args.len()) {
         return Err(
-            "usage: grid-drive-plan GAME_ROOT PRIVATE_CD01 PLAN.txt local/NEW_OUTPUT_DIR".into(),
+            "usage: grid-drive-plan GAME_ROOT PRIVATE_CD01 PLAN.txt local/NEW_OUTPUT_DIR [PRIVATE_BP01]".into(),
         );
     }
     if fs::metadata(&args[2])?.len() > 65536 || fs::metadata(&args[1])?.len() != 712 {
@@ -148,7 +148,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut runtime = Runtime::lacetti(Path::new(&args[0]), "slot_00", 200679)?;
     let geometry = runtime.prepare_body_geometry(Path::new(&args[0]), &fs::read(&args[1])?)?;
+    let event_data = if let Some(path) = args.get(4) {
+        if fs::metadata(path)?.len() != 28 {
+            return Err("invalid private event parameters extent".into());
+        }
+        let bytes = fs::read(path)?;
+        runtime.body_events = Some(grid_tools::body_impact_parameters::read(&bytes)?);
+        Some(bytes)
+    } else {
+        None
+    };
     fs::create_dir(&output)?;
+    if let Some(bytes) = event_data {
+        fs::write(output.join("body-events.bin"), bytes)?;
+    }
     fs::write(output.join("plan.txt"), bytes)?;
     snapshot(&output.join("initial.bin"), &runtime)?;
     let mut report = fs::OpenOptions::new()

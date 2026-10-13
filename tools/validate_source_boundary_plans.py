@@ -73,13 +73,20 @@ def inspect(directory, expected_plan):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('output', type=Path)
+    parser.add_argument('--body-events',type=Path)
     args = parser.parse_args()
     assert args.output.resolve().is_relative_to((ROOT / 'local').resolve())
     args.output.mkdir(exist_ok=False)
     table = ROOT / 'local/body-contact-directions.bin'
+    if args.body_events:
+        args.body_events=args.body_events.resolve()
+        assert args.body_events.is_relative_to((ROOT/'local').resolve())
     pinned = {str(path): digest(path) for path in [table, Path(__file__),
               ROOT / 'crates/grid-tools/src/bin/grid-drive-plan.rs',
               ROOT / 'crates/grid-tools/src/source_vehicle.rs']}
+    if args.body_events:
+        for path in [args.body_events,ROOT/'crates/grid-tools/src/body_impact_parameters.rs',ROOT/'crates/grid-world/src/body_impact.rs',ROOT/'crates/grid-world/src/vehicle_world.rs']:
+            pinned[str(path)]=digest(path)
     outputs = []
     for name, plan in PLANS.items():
         source = args.output / (name + '.txt')
@@ -91,6 +98,7 @@ def main():
             for repeat in range(2):
                 output = args.output / f'{name}-{profile}-{repeat}'
                 command = list(map(str, [exe, GAME, table, source, output]))
+                if args.body_events:command.append(str(args.body_events))
                 execution = subprocess.run(command, capture_output=True, text=True, timeout=120)
                 assert execution.returncode == 0 and not execution.stderr, (command, execution)
                 current = ((output / 'telemetry.tsv').read_bytes(), snapshot(output / 'initial.bin', 0), snapshot(output / 'final.bin', 600))
@@ -99,6 +107,7 @@ def main():
                 else:
                     assert current == baseline, (name, profile, repeat)
                 assert (output / 'plan.txt').read_bytes() == source.read_bytes()
+                if args.body_events:assert (output/'body-events.bin').read_bytes()==args.body_events.read_bytes()
                 metrics = inspect(output, plan)
                 hashes = {str(path): digest(path) for path in sorted(output.iterdir())}
                 outputs.append(dict(name=name, profile=profile, repeat=repeat, command=command,
@@ -125,6 +134,7 @@ def main():
         assert execution.returncode != 0 and marker.read_bytes() == b'KEEP' and len(list(output.iterdir())) == 1
         guards.append(dict(profile=profile, label='existing', exit=execution.returncode, stderr=execution.stderr, preserved=True))
     report = dict(passed=True, cases=len(outputs), ticks=600 * len(outputs), inputs=pinned,
+                  body_events=str(args.body_events) if args.body_events else None,
                   outputs=outputs, guards=guards, guard_count=len(guards),
                   scope='Authored input schedules on source Lacetti/Donington; both profiles/repeats '
                         'match full per-tick TSV and complete selected initial/final buffers. '

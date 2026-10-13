@@ -24,12 +24,17 @@ def main():
     for row in report['outputs']:
         key = (row['name'], row['profile'], row['repeat'])
         assert key not in groups
-        directory = Path(row['command'][-1])
+        directory = Path(row['command'][4])
         assert row['exit'] == 0 and not row['stderr']
         assert row['command'][:3] == [str(ROOT / f'target/{row["profile"]}/grid-drive-plan.exe'), str(GAME), str(ROOT / 'local/body-contact-directions.bin')]
         plan = ''.join(' '.join(map(str, segment)) + '\n' for segment in PLANS[row['name']]).replace('\n', os.linesep).encode()
         assert (directory / 'plan.txt').read_bytes() == plan
-        assert digest(Path(row['command'][-2])) == row['plan_sha256']
+        assert digest(Path(row['command'][3])) == row['plan_sha256']
+        event_parameters=report.get('body_events')
+        assert len(row['command'])==(6 if event_parameters else 5)
+        if event_parameters:
+            assert row['command'][5]==event_parameters
+            assert (directory/'body-events.bin').read_bytes()==Path(event_parameters).read_bytes()
         for path, expected in row['files'].items():
             assert digest(Path(path)) == expected, path
             checked += 1
@@ -39,6 +44,9 @@ def main():
     for name in PLANS:
         assert all(groups[name, profile, repeat] == groups[name, 'debug', 0]
                    for profile in ['debug', 'release'] for repeat in range(2))
+    if report.get('body_events'):
+        assert any(row['metrics']['global_rng_changed'] for row in report['outputs'])
+        assert any(row['metrics']['selected_damage_changed'] for row in report['outputs'])
     assert report['guard_count'] == len(report['guards']) == 14
     for guard in report['guards']:
         directory = args.report.parent / f'guard-{guard["profile"]}-{guard["label"]}'
