@@ -6,6 +6,7 @@ pub mod car_collision;
 pub mod collision;
 pub mod cqtc;
 pub mod damage_boxes;
+pub mod deformation;
 pub mod entities;
 pub mod grid;
 pub mod handling_damage;

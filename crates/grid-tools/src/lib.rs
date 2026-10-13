@@ -5,6 +5,7 @@ pub mod contact_diagnostic;
 pub mod contact_surfaces;
 pub mod cqtc_geometry;
 pub mod impact_diagnostic;
+pub mod source_deformation;
 pub mod source_physical;
 pub mod source_vehicle;
 pub mod standard_car;
