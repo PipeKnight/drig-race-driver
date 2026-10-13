@@ -1,0 +1,19 @@
+# Source deformation startup and staged driving publication
+
+13 October2026, F265. The experimental source runtime can initialize its deformation grid from the purchased NED and player LOD1 PSSG bounds, then consume dirty collision geometry/wheels/views at the car job's actual publication boundary. It is explicitly selected through `enable_deformation` and `tick_with_deforming_body_geometry`; the legacy path keeps its original guards.
+
+`deformation::consumer_settings` reads PARTS light threshold and the distinct FEMS wheel deformation amount/movement level, separately from the proven1054-byte settings prefix. Missing PARTS uses the verified.1 default; FEMS defaults are.25/.8. Duplicate elements/attributes and nonfinite values reject. Purchased Lacetti fields read.1/.001/1. Source initialization operates **over existing Standard descriptor and history**, preserving A480=-1 and290:300, retaining C7F8=D240 and supplying the corresponding owned settings. It does not replace the descriptor with a cold capture.
+
+The source's empty graphical part/light collection remains explicit. Wheel view anchors derive from source-initialized wheel positions relative to the grid center; this is an independent prototype policy, not a whole original graphical-anchor factory proof. Four.1 thresholds retain verified outer defaults. D070 remains the existing source handling configuration.
+
+The registered car job now accepts an explicit caller-owned publication function after driver calculation and before handling effects. Default behavior is unchanged. The source route stages a separate BodyGeometry; publication rebuilds actual contact geometry/wheels/views, and advanced-pose contact queries consume that staged result. It commits geometry only after the complete world and events succeed, together with car/world/cache/tick state. Reset requests a reconstruction before the next contact query, so damage cannot survive in the external shape while the authoritative car is reset.
+
+## Validation and current limits
+
+The source test passes in debug and release:600 driving ticks followed by600 exact replay ticks after reset,318 body contacts in each run. It checks source fields/history/settings roles, explicit legacy-route rejection, a deliberately authored+.1X grid change at tick80, dirty consumption every tick, complete final owner/physical/RNG, frame body/solver, world bodies/contacts/heads/rows/workspace/ends and cache. A late invalid view range fails after driver and staged geometry work while preserving actual contacts, car/physical/world/rows/cache/tick count. The supplied grid change exercises integration; **physical bulk callbacks are still absent** at this milestone.
+
+All nine purchased-source driving tests pass in release, including the previous event, boundary, active-score, geometry and replay checks.200 ordinary libraries (26 formats,4 tools,170 world), formatting and all-target Clippy pass. This is composed integration of previously whole-kernel-verified consumers, not a new claim that the complete original car resource factory/job/world was executed with these selected policies.
+
+Private final source log: `local/behavior/source-deformation-runtime-source-release-20261013-final-01.txt`. Debug600+600 test emitted `body_contacts=318 source_history_preserved=1 late_failure_atomic=1 reset_replay_exact=1 supplied_grid_change=1 physical_bulk_callbacks=0`; it passed in23.38 seconds. Release suite passes9 tests in1.19 seconds. Installed Rust/Cargo1.99.0/Python3.12.14 reused. No install, desktop input, Steam/settings change, owner help or approval rejection.
+
+Next connect the verified physical preparation and bulk callback phases to the carried single-car world, with a separate owned CRT seed, static-role correspondence and rollback. Then enable the integrated option in the app, verify long driving/reset sequences and refresh the playable release. Current **df108f6656a6** remains unchanged meanwhile.
