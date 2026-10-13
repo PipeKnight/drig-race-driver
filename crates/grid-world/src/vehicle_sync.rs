@@ -1,5 +1,6 @@
 //! Whole selected linked-state/mass/control synchronization before the car driver.
-//! Deformation grid dimensions are zero; wheel/manager scheduling is external.
+//! Own bounded deformation nodes as well as linked mass/control state.
+//! Deformation production and wheel/manager scheduling remain external.
 use crate::{Error, spawn::reference_seed};
 pub const VEHICLE_WORDS: usize = 0xd240 / 4;
 pub const PHYSICAL_WORDS: usize = 0x424 / 4;
@@ -23,6 +24,53 @@ fn byte(b: &[u32], o: usize) -> u8 {
 fn put_byte(b: &mut [u32], o: usize, v: u8) {
     let shift = o % 4 * 8;
     b[o / 4] = (b[o / 4] & !(255 << shift)) | ((v as u32) << shift);
+}
+
+fn deformation_dimensions(b: &[u32]) -> Result<[usize; 3], Error> {
+    let dimensions = [b[0xc714 / 4], b[0xc718 / 4], b[0xc71c / 4]];
+    if dimensions == [0; 3] {
+        return Ok([0; 3]);
+    }
+    if dimensions.iter().any(|d| !(2..=16).contains(d)) || dimensions.iter().product::<u32>() > 400
+    {
+        return Err(Error("invalid synchronized deformation dimensions"));
+    }
+    Ok(dimensions.map(|d| d as usize))
+}
+
+/// Whole reached 9A0A70 traversal. The grid is body+2300, its nodes start
+/// at descriptor2580, and the next vec4 in each 80-byte node is the rest point.
+/// Both homogeneous lanes participate; the original uses SQRTSS, not RSQRT.
+fn settled_strain(b: &[u32], dimensions: [usize; 3]) -> Result<[f32; 4], Error> {
+    let [nx, ny, nz] = dimensions;
+    let mut scores = [0f32; 4];
+    for z in 0..nz {
+        for x in 0..nx {
+            let corner = (2 * x) / nx + 2 * ((2 * z) / nz);
+            for y in 0..ny {
+                let at = 0x4880 + ((z * ny + y) * nx + x) * 80;
+                let mut d = [0f32; 4];
+                for (lane, value) in d.iter_mut().enumerate() {
+                    let position = f(b, at + lane * 4);
+                    let rest = f(b, at + 16 + lane * 4);
+                    if [position, rest]
+                        .iter()
+                        .any(|v| !v.is_finite() || v.abs() > 1_000_000.)
+                    {
+                        return Err(Error("invalid synchronized deformation node"));
+                    }
+                    *value = position - rest;
+                }
+                // SIMD rotations first add (y*y+x*x) and (w*w+z*z),
+                // then add the rotated latter pair to the former pair.
+                let squared = (d[3] * d[3] + d[2] * d[2]) + (d[1] * d[1] + d[0] * d[0]);
+                if squared > scores[corner] {
+                    scores[corner] = squared;
+                }
+            }
+        }
+    }
+    Ok(scores.map(f32::sqrt))
 }
 
 /// Diagonal specialization of the observed cofactor inverse. The determinant
@@ -65,7 +113,6 @@ pub fn calculate(input: &State) -> Result<State, Error> {
     if b.len() != VEHICLE_WORDS
         || b[0xdb0 / 4] != 0
         || b[0xc7ec / 4] >= 10
-        || [0xc714, 0xc718, 0xc71c].iter().any(|o| b[o / 4] != 0)
         || input.physical[0x1d0 / 4..0x230 / 4]
             .iter()
             .any(|w| !f32::from_bits(*w).is_finite())
@@ -73,6 +120,7 @@ pub fn calculate(input: &State) -> Result<State, Error> {
     {
         return Err(Error("unsupported vehicle synchronization input"));
     }
+    let dimensions = deformation_dimensions(b)?;
     const COPIES: [(usize, usize); 21] = [
         (0x2264, 0xd198),
         (0x2268, 0xd1ac),
@@ -129,8 +177,11 @@ pub fn calculate(input: &State) -> Result<State, Error> {
     if maximum > 3. {
         put_byte(b, 0xc7b1, 1);
     } else if maximum < 0.5 && byte(b, 0xc7b1) != 0 {
+        let scores = settled_strain(b, dimensions)?;
         put_byte(b, 0xc7b1, 0);
-        b[0xc7b4 / 4..0xc7c4 / 4].fill(0);
+        for (i, score) in scores.into_iter().enumerate() {
+            set(b, 0xc7b4 + 4 * i, score);
+        }
     }
     let p = &mut next.physical;
     set(p, 0x3f0, mass);
@@ -170,6 +221,67 @@ pub fn calculate(input: &State) -> Result<State, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn active_grid() -> State {
+        let mut s = State {
+            vehicle: vec![0; VEHICLE_WORDS],
+            physical: [0; PHYSICAL_WORDS],
+        };
+        for o in [0xfa8, 0xfac, 0xfb0, 0xfb4, 0x1560] {
+            set(&mut s.vehicle, o, 1.);
+        }
+        for (o, n) in [(0xc714, 3), (0xc718, 2), (0xc71c, 3)] {
+            s.vehicle[o / 4] = n;
+        }
+        put_byte(&mut s.vehicle, 0xc7b1, 1);
+        for (node, displacement) in [
+            (0, [3., 4., 0., 0.]),
+            (2, [0., 0., 0., 6.]),
+            (12, [0., 8., 15., 0.]),
+            (14, [1., 2., 2., 0.]),
+        ] {
+            for (i, v) in displacement.into_iter().enumerate() {
+                set(&mut s.vehicle, 0x4880 + node * 80 + 4 * i, v);
+            }
+        }
+        s
+    }
+
+    #[test]
+    fn settling_strain_reads_all_four_corners_and_homogeneous_lane() {
+        let s = active_grid();
+        let result = calculate(&s).unwrap();
+        assert_eq!(byte(&result.vehicle, 0xc7b1), 0);
+        assert_eq!(
+            std::array::from_fn::<_, 4, _>(|i| f(&result.vehicle, 0xc7b4 + 4 * i)),
+            [5., 6., 17., 3.]
+        );
+        assert_eq!(byte(&s.vehicle, 0xc7b1), 1);
+        assert_eq!(
+            result.vehicle[0x4880 / 4..0xc580 / 4],
+            s.vehicle[0x4880 / 4..0xc580 / 4]
+        );
+    }
+
+    #[test]
+    fn invalid_reached_node_rejects_without_mutation_but_skipped_nodes_are_opaque() {
+        let mut s = active_grid();
+        s.vehicle[(0x4880 + 17 * 80 + 28) / 4] = f32::NAN.to_bits();
+        let before = s.vehicle.clone();
+        assert_eq!(
+            calculate(&s).err().unwrap().0,
+            "invalid synchronized deformation node"
+        );
+        assert_eq!(s.vehicle, before);
+        put_byte(&mut s.vehicle, 0xc7b1, 0);
+        assert!(calculate(&s).is_ok());
+        put_byte(&mut s.vehicle, 0xc7b1, 1);
+        set(&mut s.vehicle, 0xc7c4, 0.5);
+        assert!(calculate(&s).is_ok());
+        set(&mut s.vehicle, 0xc7c4, 3.);
+        assert!(calculate(&s).is_ok());
+        set(&mut s.vehicle, 0xc7c4, 3.0001);
+        assert!(calculate(&s).is_ok());
+    }
     #[test]
     fn linked_publication_is_authoritative_and_tiny_cleanup_keeps_w() {
         let mut s = State {
