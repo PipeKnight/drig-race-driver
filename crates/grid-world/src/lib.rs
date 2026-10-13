@@ -21,6 +21,7 @@ pub mod contact_reduction;
 pub mod contact_rows;
 pub mod convex_distance;
 pub mod damage_region;
+pub mod deformation_callback_state;
 pub mod deformation_contact_limit;
 pub mod deformation_grid;
 pub mod deformation_impact;
