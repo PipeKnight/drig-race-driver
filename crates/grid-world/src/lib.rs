@@ -31,6 +31,7 @@ pub mod deformation_physical_frame;
 pub mod deformation_preparation;
 pub mod deformation_settle;
 pub mod deformation_volume;
+pub mod deforming_physical_frame;
 pub mod dynamics;
 pub mod finalize;
 pub mod force_equations;
