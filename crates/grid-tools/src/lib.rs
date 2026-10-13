@@ -4,6 +4,7 @@ pub mod body_impact_parameters;
 pub mod contact_diagnostic;
 pub mod contact_surfaces;
 pub mod cqtc_geometry;
+pub mod deformation_parameters;
 pub mod impact_diagnostic;
 pub mod source_deformation;
 pub mod source_physical;
