@@ -6,6 +6,9 @@ fn word(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
 }
 pub(crate) fn run(deformation: bool) -> Result<(), Box<dyn std::error::Error>> {
+    run_mode(deformation, false)
+}
+pub(crate) fn run_mode(deformation: bool, wheels: bool) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
         return Err("usage: grid-vehicle-publication INPUT.bin local/OUTPUT.bin".into());
@@ -23,7 +26,14 @@ pub(crate) fn run(deformation: bool) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut data = std::fs::read(input)?;
     if data.len() < 8
-        || &data[..4] != if deformation { b"VD01" } else { b"VP01" }
+        || &data[..4]
+            != if wheels {
+                b"VD02"
+            } else if deformation {
+                b"VD01"
+            } else {
+                b"VP01"
+            }
         || !(1..=64).contains(&word(&data, 4))
         || data.len() != 8 + word(&data, 4) as usize * RECORD
     {
@@ -38,7 +48,9 @@ pub(crate) fn run(deformation: bool) -> Result<(), Box<dyn std::error::Error>> {
                 .collect(),
             physical: std::array::from_fn(|i| word(record, 4 + VEHICLE_WORDS * 4 + i * 4)),
         };
-        let next = if deformation {
+        let next = if wheels {
+            grid_world::deformation_publication::after_geometry_rebuild(&state, delta)?
+        } else if deformation {
             grid_world::deformation_publication::calculate(&state, delta)?
         } else {
             vehicle_publication::calculate(&state, delta)?

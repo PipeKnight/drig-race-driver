@@ -12,6 +12,8 @@ from compare_source_deformation_layout import STEAM
 
 ROOT=layout.ROOT;CAR=0x21000;PHYSICAL=0x424;RECORD=4+CAR+PHYSICAL
 PROBE=ROOT/'local/behavior/deformation-publication-probe.exe'
+RUST_BIN='grid-deformation-publication'
+SCOPE='Whole A03220 with supplied post-shape/wheel-rebuild C7F2=0, owned empty graphical collection and authored light/wheel records; no A01960 or live source view construction claim.'
 
 
 def cases():
@@ -50,13 +52,13 @@ def guard_payloads(rows):
     return good,bad
 
 
-def check_answer(row,answer,coverage):
+def check_answer(row,answer,coverage,extra_allowed=frozenset()):
     assert len(answer)==RECORD and answer[:4]==row['record'][:4]
     original=row['record'][4:4+CAR];r=answer[4:4+CAR]
     coverage['light_states_changed']+=sum(r[0xcc10+j*32:0xcc14+j*32]!=original[0xcc10+j*32:0xcc14+j*32] for j in range(12))
     coverage['wheel_colours_changed']+=r[0xcde0:0xcde4]!=original[0xcde0:0xcde4];coverage['mode_one']+=struct.unpack_from('<I',original,0xc7a0)[0]==1
-    assert all(r[at:at+4]==original[at:at+4] for at in range(0x2300,0xc800,4) if at not in [0xc780,0xc784,0xc790,0xc794,0xc798]) and r[0xd240:0xef60]==original[0xd240:0xef60]
-    allowed={0xc780,0xc784,0xc790,0xc794,0xc798,0x15cc,0x15dc,0xcdf4,0xcdfc,0xcde0}|{0xcc10+i*32 for i in range(12)}
+    assert all(r[at:at+4]==original[at:at+4] for at in range(0x2300,0xc800,4) if at not in {0xc780,0xc784,0xc790,0xc794,0xc798}|extra_allowed) and r[0xd240:0xef60]==original[0xd240:0xef60]
+    allowed={0xc780,0xc784,0xc790,0xc794,0xc798,0x15cc,0x15dc,0xcdf4,0xcdfc,0xcde0}|{0xcc10+i*32 for i in range(12)}|extra_allowed
     assert all(r[at:at+4]==original[at:at+4] for at in range(0,CAR,4) if at not in allowed)
     before=row['record'][4+CAR:];after=answer[4+CAR:]
     assert before[:0x210]==after[:0x210] and before[0x230:]==after[0x230:]
@@ -67,7 +69,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('output',type=Path);p.add_argument('--profile',choices=['debug','release'],required=True);p.add_argument('--pilot',action='store_true');args=p.parse_args()
     out=args.output.resolve();assert out.is_relative_to((ROOT/'local').resolve());out.mkdir(exist_ok=False);rows,identities=cases()
     if args.pilot:rows=rows[:32]
-    rust=ROOT/f'target/{args.profile}/grid-deformation-publication.exe';reports=[];coverage=collections.Counter()
+    rust=ROOT/f'target/{args.profile}/{RUST_BIN}.exe';reports=[];coverage=collections.Counter()
     for start in range(0,len(rows),32):
         batch=rows[start:start+32];source=out/f'{start}-input.bin';source.write_bytes(request(batch));runs={};answers={}
         for kind in ['original','repeat','rust']:
@@ -92,7 +94,7 @@ def main():
         source=out/f'guard-existing-{kind}-input.bin';source.write_bytes(good);target=out/f'guard-existing-{kind}.bin';target.write_bytes(b'owned sentinel');exe=rust if kind=='rust' else PROBE
         run=execution.run(exe,([layout.IMAGE] if kind!='rust' else [])+[source,target]);assert run['exit']==(1 if kind=='rust' else 8) and target.read_bytes()==b'owned sentinel';guards.append(dict(name='existing-'+kind,execution=run,preserved=True))
     (out/'guards.json').write_text(json.dumps(guards,indent=2))
-    result=dict(profile=args.profile,cases=len(rows),bytes=sum(r['bytes'] for r in reports),reports=reports,identities=identities,guards=guards,coverage=dict(coverage),files={p.name:dict(size=p.stat().st_size,sha256=layout.digest(p)) for p in sorted(out.iterdir()) if p.is_file()},scope='Whole A03220 with supplied post-shape/wheel-rebuild C7F2=0, owned empty graphical collection and authored light/wheel records; no A01960 or live source view construction claim.')
+    result=dict(profile=args.profile,cases=len(rows),bytes=sum(r['bytes'] for r in reports),reports=reports,identities=identities,guards=guards,coverage=dict(coverage),files={p.name:dict(size=p.stat().st_size,sha256=layout.digest(p)) for p in sorted(out.iterdir()) if p.is_file()},scope=SCOPE)
     (out/'validation.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:result[k] for k in ['profile','cases','bytes','coverage']}))
 
 

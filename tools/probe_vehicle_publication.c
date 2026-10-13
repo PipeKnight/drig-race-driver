@@ -17,10 +17,25 @@ static int finite(const void *p,unsigned n){for(unsigned i=0;i<n;i++)if(!isfinit
 static unsigned guard(const unsigned char *v,float delta){
     if(!isfinite(delta)||delta<0||delta>.1f)return 30;
     unsigned independent=get(v,0x1554)==0;
-    if(get(v,0xdb0)||get(v,0x1620)!=4||get(v,0xdd4)||v[0xc7f2]||get(v,0xba0)!=(independent?2u:1u)||v[0x20fb4]!=independent)return 31;
+    unsigned pending=v[0xc7f2];
+#ifdef GRID_WHEEL_DEFORMATION_PUBLICATION
+    if(pending>1)return 31;
+    if(pending){
+      unsigned nx=get(v,0xc714),ny=get(v,0xc718),nz=get(v,0xc71c);
+      if(v[0xc7ad]>1||nx<2||nx>16||ny<2||ny>16||nz<2||nz>16||nx*ny*nz>400||!finite(v+0xc720,1)||*(const float *)(v+0xc720)<=0||!finite(v+0xc730,4))return 31;
+      for(unsigned i=0;i<nx*ny*nz;i++)if(!finite(v+0x4880+i*80,4))return 31;
+      if(!finite(v+0x1630,4)||!finite(v+0xeefc,1)||!finite(v+0xd070,1)||!finite(v+0xe25c,2)||!finite(v+0x1650,16)||!finite(v+0x1790,4)||!finite(v+0x1690,64)||!finite(v+0x30c,40))return 31;
+      for(unsigned i=0;i<4;i++){unsigned at=0x1990+i*0x150;
+        if(v[0x22e0+i]>1||!finite(v+at,4)||!finite(v+at+0xe0,1)||!finite(v+at+0xf4,2)||*(const float *)(v+at+0xe0)<=0||*(const float *)(v+at+0xf4)<=0||*(const float *)(v+at+0xf8)<=0)return 31;
+      }
+    }
+#else
+    if(pending)return 31;
+#endif
+    if(get(v,0xdb0)||get(v,0x1620)!=4||get(v,0xdd4)||get(v,0xba0)!=(independent?2u:1u)||v[0x20fb4]!=independent)return 31;
 #ifdef GRID_DEFORMATION_PUBLICATION
     if(v[4]>1||get(v,0xc8a4)||get(v,0xd004))return 31;
-    if(v[4]){
+    if(v[4]||pending){
       if(get(v,0xc7f8)!=0xd240||!finite(v+0xee40,1)||fabsf(*(const float *)(v+0xee40))>1000)return 31;
       for(unsigned i=0;i<12;i++)if(get(v,0xcc10+i*32)>2||!finite(v+0xcc20+i*32,4))return 31;
       for(unsigned i=0;i<4;i++)if(!finite(v+0xcd90+i*4,1)||*(const float *)(v+0xcd90+i*4)<=0||!finite(v+0xcda0+i*16,4))return 31;
@@ -54,6 +69,9 @@ int wmain(int argc,wchar_t **argv){
 #ifdef GRID_DEFORMATION_PUBLICATION
     magic=0x31304456;
 #endif
+#ifdef GRID_WHEEL_DEFORMATION_PUBLICATION
+    magic=0x32304456;
+#endif
 #ifdef GRID_HANDLING_PUBLICATION
     magic=0x31304e56;
 #endif
@@ -82,13 +100,21 @@ int wmain(int argc,wchar_t **argv){
         put(wrapper,8,(unsigned)(uintptr_t)physical);put(vehicle,0xdb0,(unsigned)(uintptr_t)wrapper);
 #ifdef GRID_DEFORMATION_PUBLICATION
         unsigned settings_role=get(vehicle,0xc7f8);
-        if(vehicle[4])put(vehicle,0xc7f8,(unsigned)(uintptr_t)(vehicle+0xd240));
+        if(vehicle[4]||vehicle[0xc7f2])put(vehicle,0xc7f8,(unsigned)(uintptr_t)(vehicle+0xd240));
 #endif
         unsigned notify=0;
 #ifdef GRID_HANDLING_PUBLICATION
         notify=1;
 #endif
-        __try{((void (__fastcall *)(void *,void *,float,unsigned))(image+0xa03220-0x400000))(vehicle,NULL,delta,notify);}__except(fault(GetExceptionInformation())){error=20;}
+        __try{
+#ifdef GRID_WHEEL_DEFORMATION_PUBLICATION
+          /* The caller supplies successful geometry reconstruction. A01960 is
+             not executed or stubbed. Prove the reached transition/whole wheels
+             and whole publication with the actual unchanged kernels. */
+          if(vehicle[0xc7f2]){vehicle[0xc7f2]=0;vehicle[4]=1;((void (__fastcall *)(void *,void *))(image+0x9bb1e0-0x400000))(vehicle,NULL);}
+#endif
+          ((void (__fastcall *)(void *,void *,float,unsigned))(image+0xa03220-0x400000))(vehicle,NULL,delta,notify);
+        }__except(fault(GetExceptionInformation())){error=20;}
         if(error)break;
         if(get(vehicle,0xdb0)!=(unsigned)(uintptr_t)wrapper||get(wrapper,8)!=(unsigned)(uintptr_t)physical||get(vehicle,0xc784)!=(unsigned)(uintptr_t)(image+0x9a0c90-0x400000)){error=21;break;}
         put(vehicle,0xdb0,0);put(vehicle,0xc784,0x9a0c90); /* Checked generated code-pointer relocation. */

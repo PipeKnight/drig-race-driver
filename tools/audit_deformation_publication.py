@@ -13,7 +13,7 @@ def audit(path):
     for name,sha in identities.items():assert layout.digest(Path(name))==sha
     for name,expected in report['files'].items():
         p=(out/name).resolve();assert p.parent==out and p.stat().st_size==expected['size'] and layout.digest(p)==expected['sha256']
-    rust=layout.ROOT/f"target/{report['profile']}/grid-deformation-publication.exe";coverage=collections.Counter();seen=0;total=0
+    rust=layout.ROOT/f"target/{report['profile']}/{validation.RUST_BIN}.exe";coverage=collections.Counter();seen=0;total=0
     for item in report['reports']:
         start=item['start'];batch=rows[start:start+32];assert start==seen and item['cases']==len(batch);seen+=len(batch)
         assert (out/f'{start}-input.bin').read_bytes()==validation.request(batch)
