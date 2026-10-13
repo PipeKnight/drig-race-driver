@@ -8,6 +8,42 @@ use crate::{
     scene,
 };
 pub const SETTINGS_WORDS: usize = 0x1054 / 4;
+/// Additional reached wheel/view fields, separate from the proven1054 prefix.
+#[derive(Clone, Copy, Debug)]
+pub struct ConsumerSettings {
+    pub light_cluster_threshold: f32,
+    pub wheel_deformation_amount: f32,
+    pub wheel_movement_level: f32,
+}
+pub fn consumer_settings(document: &Document<'_>) -> Result<ConsumerSettings> {
+    if document.elements.first().is_none_or(|e| e.name != "DAMAGE") {
+        return fail(0, "unsupported deformation consumer root");
+    }
+    let one = |name: &str| -> Result<Option<&Element<'_>>> {
+        let elements: Vec<_> = document
+            .elements
+            .iter()
+            .filter(|e| e.name == name)
+            .collect();
+        if elements.len() > 1 || elements.first().is_some_and(|e| e.parent != Some(0)) {
+            return fail(0, "unsupported deformation consumer element");
+        }
+        Ok(elements.first().copied())
+    };
+    let fems = one("FEMS")?.ok_or(crate::Error {
+        offset: 0,
+        message: "missing deformation consumer FEMS",
+    })?;
+    let parts = one("PARTS")?;
+    Ok(ConsumerSettings {
+        light_cluster_threshold: parts
+            .map(|e| scalar(e, "m_smashLightCluster", 0.1))
+            .transpose()?
+            .unwrap_or(0.1),
+        wheel_deformation_amount: scalar(fems, "m_wheel_deformation_amount", 0.25)?,
+        wheel_movement_level: scalar(fems, "m_wheel_movement_level", 0.8)?,
+    })
+}
 pub struct Bounds {
     pub minimum: [f32; 4],
     pub maximum: [f32; 4],
@@ -299,6 +335,34 @@ mod tests {
                 },
             ],
         }
+    }
+    #[test]
+    fn consumer_fields_keep_distinct_defaults_and_reject_duplicates() {
+        let mut d = document();
+        let s = consumer_settings(&d).unwrap();
+        assert_eq!(
+            [
+                s.light_cluster_threshold,
+                s.wheel_deformation_amount,
+                s.wheel_movement_level
+            ],
+            [0.1, 0.25, 0.8]
+        );
+        d.elements[1].attributes = vec![
+            ("m_wheel_deformation_amount", "0.001"),
+            ("m_wheel_movement_level", "1"),
+        ];
+        let s = consumer_settings(&d).unwrap();
+        assert_eq!(
+            [s.wheel_deformation_amount, s.wheel_movement_level],
+            [0.001, 1.]
+        );
+        d.elements[1]
+            .attributes
+            .push(("m_wheel_movement_level", "2"));
+        assert!(consumer_settings(&d).is_err());
+        d.elements[1].attributes = vec![("m_wheel_movement_level", "NaN")];
+        assert!(consumer_settings(&d).is_err());
     }
     #[test]
     fn defaults_editor_gate_and_normal_map_alias_follow_source_fields() {
