@@ -113,6 +113,38 @@ impl Driving {
             (b[0xba5 / 4] >> 8) & 255,
             f32::from_bits(b[0x3d0 / 4])
         );
+        if let Some(registration) = &self.runtime.deformation_registration {
+            let count = (0..3)
+                .map(|i| b[0xc714 / 4 + i] as usize)
+                .product::<usize>();
+            let moved = (0..count)
+                .filter(|&i| {
+                    (0..3).any(|a| b[0x4880 / 4 + i * 20 + a] != b[0x4890 / 4 + i * 20 + a])
+                })
+                .count();
+            let maximum = (0..count)
+                .map(|i| {
+                    (0..3)
+                        .map(|a| {
+                            let d = f32::from_bits(b[0x4880 / 4 + i * 20 + a])
+                                - f32::from_bits(b[0x4890 / 4 + i * 20 + a]);
+                            d * d
+                        })
+                        .sum::<f32>()
+                        .sqrt()
+                })
+                .fold(0f32, f32::max);
+            println!(
+                "drive_deformation_sample version=1 event={event} segment={} tick={} bulk_calls={} records={} crt_seed={:08x} mode={} pending_geometry={} moved_positions={moved} maximum_displacement={maximum}",
+                self.segment,
+                self.runtime.ticks,
+                registration.bulk_calls,
+                registration.records,
+                registration.random_seed,
+                b[0xc7a0 / 4],
+                b[0xc7f0 / 4] >> 16 & 255
+            );
+        }
     }
 }
 #[derive(Component)]
@@ -139,12 +171,16 @@ fn wheel_joint(joint: &[u8]) -> Option<usize> {
 
 /// Authored presentation composition using source wheel state. Retain each
 /// mesh's bind offset around the shared physics pivot; never animate by input
-/// command or integrate a second wheel clock. Camber/deformation are separate.
+/// command or integrate a second wheel clock. Deformation uses the owned whole
+/// wheel kernel; this render composition remains an independent presentation.
 fn wheel_motion(wheel: grid_tools::source_vehicle::WheelPose) -> Mat4 {
     let anchor = Vec3::from_array(wheel.anchor);
-    let center = anchor + Vec3::from_array(wheel.axis) * wheel.displacement;
+    let center = anchor
+        + Vec3::from_array(wheel.deformation_translation)
+        + Vec3::from_array(wheel.axis) * wheel.displacement;
     let yaw = wheel.steering[1].atan2(wheel.steering[0]);
     Mat4::from_translation(center)
+        * Mat4::from_cols_array_2d(&wheel.deformation_orientation)
         * Mat4::from_rotation_y(yaw)
         * Mat4::from_rotation_x(wheel.phase)
         * Mat4::from_translation(-anchor)
@@ -742,11 +778,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut drive_ticks = None;
     let mut body_contacts = None;
     let mut body_events = None;
+    let mut deformation = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--drive" => drive = true,
+            "--deformation" => {
+                deformation = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--deformation needs a private DF01 path")?,
+                ))
+            }
             "--body-events" => {
                 body_events = Some(PathBuf::from(
                     args.next()
@@ -818,6 +861,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
                 );
+                println!(
+                    "--deformation PRIVATE_DF01: experimental source grid, wheel/shape rebuilding and both physical deformation callbacks. Requires --drive and --body-contacts. Body graphics remain rigid."
+                );
                 return Ok(());
             }
             _ => return Err(format!("unknown argument {arg}").into()),
@@ -828,6 +874,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if (body_contacts.is_some() || body_events.is_some()) && !drive {
         return Err("--body-contacts and --body-events require --drive".into());
+    }
+    if deformation.is_some() && (!drive || body_contacts.is_none()) {
+        return Err("--deformation requires --drive and --body-contacts".into());
     }
     if !scripted.throttle.is_finite()
         || !(0. ..=1.).contains(&scripted.throttle)
@@ -858,7 +907,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("invalid private body sampling extent".into());
             }
             let table = std::fs::read(path)?;
-            let geometry = runtime.prepare_body_geometry(&root, &table)?;
+            let mut geometry = runtime.prepare_body_geometry(&root, &table)?;
+            if let Some(path)=&deformation {
+                if std::fs::metadata(path)?.len()!=252{return Err("invalid private deformation parameter extent".into());}
+                let (limit,bulk)=grid_tools::deformation_parameters::read(&std::fs::read(path)?)?;
+                runtime.enable_deformation(&root,&mut geometry)?;
+                runtime.register_deformation_callbacks(limit,bulk,1)?;
+                println!("drive_deformation enabled=true scope=single-car-static-peers source=player-lod1 wheel-view=source-wheel-anchors crt_seed=00000001 body_graphics=rigid");
+            }
             println!("drive_body_geometry enabled=true pool=20 boundary=cqtc order=boundary-first-then-archive materials=shared damage=owned-rng notifications=guarded");
             Ok(geometry)
         }).transpose()?;
@@ -1293,8 +1349,14 @@ fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
         }
     };
     let driving = &mut *driving;
-    let result = if let Some(geometry) = &driving.geometry {
-        driving.runtime.tick_with_body_geometry(controls, geometry)
+    let result = if let Some(geometry) = &mut driving.geometry {
+        if driving.runtime.deformation_enabled {
+            driving
+                .runtime
+                .tick_with_deforming_body_geometry(controls, geometry)
+        } else {
+            driving.runtime.tick_with_body_geometry(controls, geometry)
+        }
     } else {
         driving.runtime.tick(controls)
     };
@@ -1386,6 +1448,9 @@ fn drive_present(
     };
     if driving.runtime.body_events.is_some() {
         geometry.push_str(" | EVENTS");
+    }
+    if driving.runtime.deformation_enabled {
+        geometry.push_str(" | DAMAGE");
     }
     for mut window in &mut windows {
         window.title = format!(
@@ -1544,22 +1609,84 @@ mod driving_tests {
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn keyboard_pause_reset_and_failure_recovery() {
-        exercise_keyboard_recovery(None);
+        exercise_keyboard_recovery(None, false);
     }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
     fn body_geometry_keyboard_pause_reset_and_failure_recovery() {
         let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
-        exercise_keyboard_recovery(Some(&table));
+        exercise_keyboard_recovery(Some(&table), false);
+    }
+    #[test]
+    #[ignore = "requires purchased sources and private body/deformation inputs"]
+    fn deformation_keyboard_pause_reset_and_failure_recovery() {
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        exercise_keyboard_recovery(Some(&table), true);
+    }
+    #[test]
+    #[ignore = "requires purchased sources and private body/deformation inputs"]
+    fn deformation_wheel_presentation_keeps_pivots_and_reset() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let read_env = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let mut geometry = runtime
+            .prepare_body_geometry(root, &read_env("GRID_CONTACT_DIRECTIONS"))
+            .unwrap();
+        runtime.enable_deformation(root, &mut geometry).unwrap();
+        let (limit, bulk) =
+            grid_tools::deformation_parameters::read(&read_env("GRID_DEFORMATION_PARAMETERS"))
+                .unwrap();
+        runtime
+            .register_deformation_callbacks(limit, bulk, 1)
+            .unwrap();
+        runtime.body_events = Some(
+            grid_tools::body_impact_parameters::read(&read_env("GRID_BODY_EVENT_PARAMETERS"))
+                .unwrap(),
+        );
+        let initial = runtime.wheels().map(wheel_motion);
+        let mut damaged = false;
+        for _ in 0..600 {
+            runtime
+                .tick_with_deforming_body_geometry(
+                    grid_tools::source_vehicle::Controls {
+                        throttle: 1.,
+                        steering: 0.25,
+                        ..Default::default()
+                    },
+                    &mut geometry,
+                )
+                .unwrap();
+            let before = runtime.state.car.owner.vehicle.clone();
+            for wheel in runtime.wheels() {
+                let motion = wheel_motion(wheel);
+                assert!(motion.is_finite());
+                let anchor = Vec3::from_array(wheel.anchor);
+                let center = anchor
+                    + Vec3::from_array(wheel.deformation_translation)
+                    + Vec3::from_array(wheel.axis) * wheel.displacement;
+                assert!((motion.transform_point3(anchor) - center).length() < 1e-5);
+                assert!((motion.determinant() - 1.).abs() < 1e-4);
+                damaged |= wheel
+                    .deformation_translation
+                    .into_iter()
+                    .any(|v| v.abs() > 1e-5);
+            }
+            assert_eq!(runtime.state.car.owner.vehicle, before);
+        }
+        assert!(damaged);
+        runtime.reset();
+        assert_eq!(runtime.wheels().map(wheel_motion), initial);
     }
 
-    fn exercise_keyboard_recovery(table: Option<&[u8]>) {
+    fn exercise_keyboard_recovery(table: Option<&[u8]>, deformation: bool) {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let mut runtime =
             grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
                 .unwrap();
-        let geometry = table.map(|table| {
+        let mut geometry = table.map(|table| {
             runtime
                 .prepare_body_geometry(Path::new(&root), table)
                 .unwrap()
@@ -1569,6 +1696,18 @@ mod driving_tests {
                 std::fs::read(std::env::var_os("GRID_BODY_EVENT_PARAMETERS").unwrap()).unwrap();
             runtime.body_events =
                 Some(grid_tools::body_impact_parameters::read(&parameters).unwrap());
+        }
+        if deformation {
+            let (limit, bulk) = grid_tools::deformation_parameters::read(
+                &std::fs::read(std::env::var_os("GRID_DEFORMATION_PARAMETERS").unwrap()).unwrap(),
+            )
+            .unwrap();
+            runtime
+                .enable_deformation(Path::new(&root), geometry.as_mut().unwrap())
+                .unwrap();
+            runtime
+                .register_deformation_callbacks(limit, bulk, 1)
+                .unwrap();
         }
         let mut app = App::new();
         app.add_message::<AppExit>()

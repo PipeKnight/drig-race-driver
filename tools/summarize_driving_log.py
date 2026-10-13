@@ -21,7 +21,15 @@ def main():
     assert source.is_relative_to(private) and target.is_relative_to(private)
     raw = source.read_bytes()
     rows = []
+    deformation_rows=[]
     for line in raw.decode('utf-8', errors='strict').splitlines():
+        if line.startswith('drive_deformation_sample '):
+            row=dict(FIELDS.findall(line));assert row['version']=='1'
+            for key in ['segment','tick','bulk_calls','records','mode','pending_geometry','moved_positions']:row[key]=int(row[key]);assert row[key]>=0
+            assert row['pending_geometry']<=1 and row['moved_positions']<=400
+            assert re.fullmatch(r'[0-9a-fA-F]{8}',row['crt_seed']);row['crt_seed']=int(row['crt_seed'],16)
+            row['maximum_displacement']=float(row['maximum_displacement']);assert math.isfinite(row['maximum_displacement']) and row['maximum_displacement']>=0
+            deformation_rows.append(row)
         if not line.startswith('drive_sample '):
             continue
         row = dict(FIELDS.findall(line))
@@ -130,6 +138,7 @@ def main():
             logged_records=sum(r.get('body_contacts', 0) for r in ticks.values()),
             runs=contact_runs, limitation='Contiguous logged contact ticks, not independently counted crashes; wheel-prefix callbacks are excluded from this geometry count.'),
         damage=damage,
+        deformation=(dict(samples=len(deformation_rows),first=deformation_rows[0],last=deformation_rows[-1],maximum_moved_positions=max(r['moved_positions'] for r in deformation_rows),maximum_displacement=max(r['maximum_displacement'] for r in deformation_rows),limitation='Sampled grid/phase counters, not crashes, RNG draws or visual body dents; reset starts a new segment.') if deformation_rows else None),
         reverse_samples=sum(r['gear'] == 9 for r in rows),
         handbrake_episodes=[dict(samples=len(e), first=e[0], last=e[-1],
             sampled_duration_seconds=e[-1]['seconds']-e[0]['seconds'],

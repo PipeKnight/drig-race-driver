@@ -41,7 +41,12 @@ if "%~2"=="" (
     "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
   ) else (
     echo Registered body impact events enabled for static barriers.
-    "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" > "%GRID_PLAY_LOG%" 2>&1
+    if "%~4"=="" (
+      "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" > "%GRID_PLAY_LOG%" 2>&1
+    ) else (
+      echo Experimental impact damage enabled.
+      "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" > "%GRID_PLAY_LOG%" 2>&1
+    )
   )
 )
 set "GRID_PLAY_EXIT=%ERRORLEVEL%"

@@ -7,7 +7,11 @@ if not exist "%~dp0local\body-contact-directions.bin" (
   exit /b 2
 )
 if exist "%~dp0local\body-impact-parameters.bin" (
-  call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin" "%~dp0local\body-impact-parameters.bin"
+  if exist "%~dp0local\deformation-parameters.bin" (
+    call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin" "%~dp0local\body-impact-parameters.bin" "%~dp0local\deformation-parameters.bin"
+  ) else (
+    call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin" "%~dp0local\body-impact-parameters.bin"
+  )
 ) else (
   call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin"
 )
