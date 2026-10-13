@@ -17,7 +17,7 @@ ROOT = layout.ROOT
 SETTINGS = 0x1054
 
 
-def configuration():
+def configuration(stem='lac'):
     raw, pe = layout.IMAGE.read_bytes(), inspect_pe(layout.IMAGE)
     def static(address):
         for s in pe['sections']:
@@ -25,7 +25,8 @@ def configuration():
             if 0 <= at <= s['raw_size'] - 4:
                 return struct.unpack_from('<f', raw, s['raw_offset'] + at)[0]
         raise AssertionError(hex(address))
-    path = STEAM / 'cars/lac/lac.ned'
+    assert stem in ['lac', 'bmw']
+    path = STEAM / f'cars/{stem}/{stem}.ned'
     tree = decode(path.read_bytes())[1]
     fems = [e for e in tree.iter() if e.tag == 'FEMS']
     assert len(fems) == 1
