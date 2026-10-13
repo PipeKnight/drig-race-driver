@@ -520,6 +520,37 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires purchased GRID sources and private contact directions"]
+    fn source_driving_deformed_body_geometry() {
+        std::thread::Builder::new().stack_size(16*1024*1024).spawn(|| {
+            let root=std::env::var_os("GRID_GAME_ROOT").unwrap();let root=Path::new(&root);
+            let runtime=Runtime::lacetti(root,"slot_00",200679).unwrap();
+            let table=std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+            let ned=read(root,"cars/lac/lac.ned",16*1024*1024).unwrap();
+            let offset=std::array::from_fn(|j|f32::from_bits(runtime.state.car.owner.vehicle[0x1630/4+j]));
+            let mut geometry=crate::body_geometry::BodyGeometry::read(&ned,offset,&table).unwrap();
+            let prepared=crate::source_deformation::load(root,"lac").unwrap();let d=&prepared.construction.initialized;
+            let dimensions:[usize;3]=std::array::from_fn(|i|d[0xa414/4+i] as usize);
+            let spacing=f32::from_bits(d[0xa420/4]);let minimum=std::array::from_fn(|i|f32::from_bits(d[0xa430/4+i]));
+            let positions:Vec<[f32;4]>=(0..dimensions.iter().product::<usize>()).map(|i|std::array::from_fn(|a|f32::from_bits(d[(0x2580+i*80)/4+a]))).collect();
+            let grid=|positions|grid_world::deformation_grid::Grid{dimensions,spacing,minimum,positions};
+            geometry.rebuild_from_deformation(&grid(&positions)).unwrap();
+            let mut lowered=runtime.state.car.owner.physical;lowered[0x1c4/4]=(f32::from_bits(lowered[0x1c4/4])-0.5).to_bits();
+            let contacts=|geometry:&crate::body_geometry::BodyGeometry|geometry.contacts(&runtime.track,&runtime.surfaces,&[lowered],64).unwrap();
+            let pristine=contacts(&geometry);assert!(!pristine.is_empty());
+            let displaced:Vec<_>=positions.iter().map(|p|[p[0]+0.25,p[1],p[2],p[3]]).collect();
+            geometry.rebuild_from_deformation(&grid(&displaced)).unwrap();
+            let deformed=contacts(&geometry);assert!(!deformed.is_empty());assert_ne!(deformed,pristine);
+            let mut invalid=displaced.clone();invalid.last_mut().unwrap()[0]=f32::NAN;
+            assert!(geometry.rebuild_from_deformation(&grid(&invalid)).is_err());
+            assert_eq!(contacts(&geometry),deformed);
+            geometry.rebuild_from_deformation(&grid(&positions)).unwrap();assert_eq!(contacts(&geometry),pristine);
+            assert_eq!(runtime.ticks,0);
+            eprintln!("deformed_source_geometry pristine_contacts={} deformed_contacts={} failure_preserves_contacts=1 source_rebuild_restores_contacts=1",pristine.len(),deformed.len());
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
     #[ignore = "requires purchased GRID sources and private body parameters"]
     fn source_driving_active_grid() {
         // Two complete owned worlds need more than the default test-thread stack.

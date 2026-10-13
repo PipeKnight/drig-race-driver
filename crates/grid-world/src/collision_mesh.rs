@@ -687,6 +687,60 @@ pub fn build_from_source(
     )
 }
 
+/// Whole selected deformation-active source adjustment. The floor is reduced
+/// from the raw input before sampling, rather than from the deformed vertices.
+pub fn prepare_deformed_points(
+    points: &[[f32; 4]],
+    offset: [f32; 4],
+    vertical_extents: [f32; 2],
+    grid: &crate::deformation_grid::Grid<'_>,
+) -> Result<Vec<[f32; 4]>, Error> {
+    // Reuse the deformation-off input admission without consuming its output.
+    prepare_points(points, offset, vertical_extents)?;
+    let mut floor = points[0][1];
+    for p in &points[1..] {
+        if p[1] < floor {
+            floor = p[1];
+        }
+    }
+    let center = offset[1] + (vertical_extents[1] + vertical_extents[0]) * 0.5;
+    let mut result = Vec::with_capacity(points.len());
+    for point in points {
+        let deformed = grid.sample(*point)?;
+        let y = if deformed[1] < floor {
+            floor
+        } else {
+            deformed[1]
+        };
+        let p = [
+            (offset[0] + deformed[0]) - 0.,
+            (offset[1] + y) - center,
+            (offset[2] + deformed[2]) - 0.,
+            1.,
+        ];
+        if p.iter().any(|x| !x.is_finite() || x.abs() > 100000.) {
+            return Err(Error("deformed collision adjustment exceeds range"));
+        }
+        result.push(p);
+    }
+    Ok(result)
+}
+
+pub fn build_from_deformed_source(
+    points: &[[f32; 4]],
+    triangles: &[[u32; 3]],
+    offset: [f32; 4],
+    vertical_extents: [f32; 2],
+    grid: &crate::deformation_grid::Grid<'_>,
+    fill: u8,
+) -> Result<Mesh, Error> {
+    build(
+        &prepare_deformed_points(points, offset, vertical_extents, grid)?,
+        triangles,
+        fill,
+    )
+}
+
 /// Build complete supplied mesh bytes, preserving the selected zero/CD fill in
 /// untouched padding. Source geometry adjustment, allocation and shape factory
 /// are external. Adjacency order follows source triangle and corner order.
@@ -832,6 +886,39 @@ pub fn build(points: &[[f32; 4]], triangles: &[[u32; 3]], fill: u8) -> Result<Me
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn active_source_floor_is_raw_before_sampling() {
+        let points = [
+            [-1., -1., -1., 1.],
+            [1., -1., -1., 1.],
+            [0., 1., -1., 1.],
+            [0., 0., 1., 1.],
+        ];
+        let mut positions = Vec::new();
+        for z in 0..2 {
+            for y in 0..2 {
+                for x in 0..2 {
+                    positions.push([
+                        x as f32 * 2. - 1.,
+                        y as f32 * 2. - 1.5,
+                        z as f32 * 2. - 1.,
+                        1.,
+                    ]);
+                }
+            }
+        }
+        let grid = crate::deformation_grid::Grid {
+            dimensions: [2; 3],
+            spacing: 2.,
+            minimum: [-1., -1., -1., 1.],
+            positions: &positions,
+        };
+        let adjusted = prepare_deformed_points(&points, [0.; 4], [-1., 1.], &grid).unwrap();
+        assert_eq!(adjusted[0][1], -1.);
+        assert_eq!(adjusted[1][1], -1.);
+        assert!((adjusted[2][1] - 0.5).abs() < 1e-6);
+        assert_eq!(points[2][1], 1.);
+    }
     #[test]
     fn first_attachment_composes_bounds_and_preserves_supplied_inertia_without_waking() {
         let points = [

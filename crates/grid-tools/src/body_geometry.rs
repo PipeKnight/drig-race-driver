@@ -9,6 +9,10 @@ pub struct BodyGeometry {
     shape: collision_mesh::MeshShape,
     local: physical_pose::Matrix,
     query: convex_distance::ContactSettings,
+    source_points: Vec<[f32; 4]>,
+    source_triangles: Vec<[u32; 3]>,
+    source_offset: [f32; 4],
+    vertical_extents: [f32; 2],
 }
 
 impl BodyGeometry {
@@ -75,7 +79,40 @@ impl BodyGeometry {
                 margin: 0.,
                 directions,
             },
+            source_points: points,
+            source_triangles: source.triangles,
+            source_offset: offset,
+            vertical_extents: [source.bounds.min[1], source.bounds.max[1]],
         })
+    }
+
+    /// Stage active grid sampling and a complete new collision mesh/shape.
+    /// Preserve the previous shape, source inputs and query state on failure.
+    /// The caller still owns dirty publication/physical callback scheduling.
+    pub fn rebuild_from_deformation(
+        &mut self,
+        grid: &grid_world::deformation_grid::Grid<'_>,
+    ) -> Result<(), Error> {
+        let mesh = collision_mesh::build_from_deformed_source(
+            &self.source_points,
+            &self.source_triangles,
+            self.source_offset,
+            self.vertical_extents,
+            grid,
+            0,
+        )?;
+        let span = mesh.bytes().len() as u32;
+        let shape = mesh.initialize_shape(
+            collision_mesh::ShapeSettings {
+                span,
+                scalar220: 0.,
+                layer: 0,
+                flag_c0: false,
+            },
+            0,
+        )?;
+        self.shape = shape;
+        Ok(())
     }
 
     pub fn pose(&self, body: &contact_groups::Body) -> Result<physical_pose::Matrix, Error> {

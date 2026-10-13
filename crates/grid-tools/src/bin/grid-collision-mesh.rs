@@ -8,7 +8,7 @@ fn main() {
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 2 || fs::metadata(&args[0])?.len() > 4096 {
+    if args.len() != 2 || fs::metadata(&args[0])?.len() > 64 * 1024 {
         return Err("usage: grid-collision-mesh CM01_OR_CM02_INPUT local/OUTPUT".into());
     }
     let output = Path::new(&args[1]);
@@ -21,15 +21,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("private output required".into());
     }
     let b = fs::read(&args[0])?;
-    if b.len() < 16 || (&b[..4] != b"CM01" && &b[..4] != b"CM02") {
+    if b.len() < 16 || !matches!(&b[..4], b"CM01" | b"CM02" | b"CM06") {
         return Err("invalid header".into());
     }
     let word = |o| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let p = word(4) as usize;
     let t = word(8) as usize;
     let fill = word(12);
-    let adjusted = &b[..4] == b"CM02";
-    let header = if adjusted { 40 } else { 16 };
+    let deformed = &b[..4] == b"CM06";
+    let adjusted = &b[..4] == b"CM02" || deformed;
+    let header = if deformed {
+        40 + 0xa500
+    } else if adjusted {
+        40
+    } else {
+        16
+    };
     if !(4..=80).contains(&p)
         || !(4..=110).contains(&t)
         || ![0, 0xcd].contains(&fill)
@@ -43,7 +50,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let triangles: Vec<[u32; 3]> = (0..t)
         .map(|i| std::array::from_fn(|j| word(header + p * 16 + i * 12 + j * 4)))
         .collect();
-    let mesh = if adjusted {
+    let mesh = if deformed {
+        let dimensions: [usize; 3] = std::array::from_fn(|i| word(40 + 0xa414 + i * 4) as usize);
+        if dimensions.iter().any(|d| !(2..=16).contains(d))
+            || dimensions.iter().product::<usize>() > 400
+        {
+            return Err("invalid deformed mesh dimensions".into());
+        }
+        let positions: Vec<[f32; 4]> = (0..dimensions.iter().product::<usize>())
+            .map(|i| std::array::from_fn(|a| f32::from_bits(word(40 + 0x2580 + i * 80 + a * 4))))
+            .collect();
+        grid_world::collision_mesh::build_from_deformed_source(
+            &points,
+            &triangles,
+            std::array::from_fn(|i| f32::from_bits(word(16 + i * 4))),
+            std::array::from_fn(|i| f32::from_bits(word(32 + i * 4))),
+            &grid_world::deformation_grid::Grid {
+                dimensions,
+                spacing: f32::from_bits(word(40 + 0xa420)),
+                minimum: std::array::from_fn(|a| f32::from_bits(word(40 + 0xa430 + a * 4))),
+                positions: &positions,
+            },
+            fill as u8,
+        )?
+    } else if adjusted {
         grid_world::collision_mesh::build_from_source(
             &points,
             &triangles,
