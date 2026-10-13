@@ -11,8 +11,13 @@
 #include <float.h>
 #include "isolated_reference.h"
 #ifdef GRID_DEFORMATION_FRAME
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+#define FRAME_PAGES 16
+#define FRAME_MAGIC 0x33444650
+#else
 #define FRAME_PAGES 11
 #define FRAME_MAGIC 0x31444650
+#endif
 #define FRAME_SHAPE_SIZE 0x240
 #else
 #define FRAME_PAGES 5
@@ -33,6 +38,9 @@ static void put(void *p,unsigned o,unsigned v){memcpy((unsigned char *)p+o,&v,4)
 static int read(FILE *f,void *p,size_t n){return fread(p,1,n,f)==n;}
 static int finite_words(const void *p,unsigned n){for(unsigned i=0;i<n;i++){float v;memcpy(&v,(const unsigned char *)p+4*i,4);if(!isfinite(v))return 0;}return 1;}
 static int fault(EXCEPTION_POINTERS *p){fprintf(stderr,"impact_frame_fault=%08lx eip=%08lx address=%08lx\n",p->ExceptionRecord->ExceptionCode,p->ContextRecord->Eip,p->ExceptionRecord->NumberParameters>1?(unsigned long)p->ExceptionRecord->ExceptionInformation[1]:0);return EXCEPTION_EXECUTE_HANDLER;}
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+#include "deforming_frame_native.h"
+#endif
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
 #ifdef GRID_DEFORMATION_FRAME
@@ -42,9 +50,15 @@ int wmain(int argc,wchar_t **argv){
  IMAGE_NT_HEADERS32 *pe=(IMAGE_NT_HEADERS32 *)(image+((IMAGE_DOS_HEADER *)image)->e_lfanew);
  IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
  unsigned char *code=malloc(pe->OptionalHeader.SizeOfImage);if(!code)return 4;memcpy(code,image,pe->OptionalHeader.SizeOfImage);
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+ if(!active_initialize(image)){free(code);VirtualFree(image,0,MEM_RELEASE);return 4;}
+#endif
  unsigned pages[FRAME_PAGES]={0xe58000,0xe52000,0xe5a000,0xe5b000,0xe5e000
 #ifdef GRID_DEFORMATION_FRAME
  ,0xcaf000,0xcb0000,0xcb3000,0xe4f000,0xe51000,0xe85000
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+ ,0xe50000,0xe56000,0xe8f000,0xec0000,0xd16000
+#endif
 #endif
  };DWORD protections[FRAME_PAGES]={0};unsigned char saved[FRAME_PAGES][4096];unsigned protected=0,error=0,cases=0;
  for(unsigned i=0;i<FRAME_PAGES;i++){unsigned char *page=image+pages[i]-0x400000;memcpy(saved[i],page,4096);if(!VirtualProtect(page,4096,PAGE_READWRITE,&protections[i])){error=5;break;}++protected;}
@@ -54,6 +68,10 @@ int wmain(int argc,wchar_t **argv){
  if(error)goto finish;
  fwrite(&magic,4,1,output);fwrite(&total,4,1,output);
  for(unsigned i=0;i<total;i++){
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+  ActiveFrame active;
+  for(unsigned page=0;page<protected;page++)memcpy(image+pages[page]-0x400000,saved[page],4096);
+#endif
   unsigned h[6],cache[15],ends[4],modes[64],shape_ids[64][2],material_ids[64][2],bodyptrs[16],all_contacts[64],pool_single[64],pool_two[64],ns=0,nt=0;
   float parameters[11];
   __declspec(align(16)) unsigned char bodies[16][0x430]={0},contacts[64][0x80]={0},shapes[2][FRAME_SHAPE_SIZE]={0},manager[0x240]={0},group[0x90]={0},rows[256][192];
@@ -101,12 +119,20 @@ int wmain(int argc,wchar_t **argv){
   put(bodies[0],0x418,(unsigned)(uintptr_t)(image+0x9a0c90-0x400000));put(bodies[0],0x41c,(unsigned)(uintptr_t)(image+0xa064a0-0x400000));put(bodies[0],0x420,(unsigned)(uintptr_t)d);
   /* Explicit admitted control: preparation still runs, but the original
      B775D0 collector excludes contacts whose first shape230 is set. */
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+  if(!active_prepare(&active,input,image,&d,bodies[0],cap_parameters,disabled)){error=8;break;}
+  put(bodies[0],0x420,(unsigned)(uintptr_t)d);
+#else
   shapes[0][0x230]=1;
+#endif
 #endif
   shapes[1][0x216]=1;
   for(unsigned j=0;j<2;j++)cache[j]=cache[j]==0xffffffff?0:(unsigned)(uintptr_t)materials[cache[j]];
   memcpy(manager+0x20,cache,60);put(manager,0x68,16);put(manager,0x6c,64);memcpy(manager+0x10,parameters+1,16);put(manager,0x70,h[4]);put(manager,0x80,(unsigned)(uintptr_t)workspace);put(manager,0x84,(unsigned)(uintptr_t)inertia);put(manager,0x88,(unsigned)(uintptr_t)mass);put(manager,0x8c,(unsigned)(uintptr_t)rows);put(manager,0x90,(unsigned)(uintptr_t)bodyptrs);put(manager,0x98,(unsigned)(uintptr_t)pool_single);put(manager,0xa0,(unsigned)(uintptr_t)pool_two);put(manager,0xa8,h[0]);put(manager,0xac,ns);put(manager,0xb4,nt);
   put(manager,0xc4,ends[0]);put(manager,0xbc,ends[1]);put(manager,0xc8,ends[2]);put(manager,0xc0,ends[3]);memcpy(manager+0xcc,parameters+5,16);put(manager,0xdc,h[5]);memcpy(image+0xe52f24-0x400000,parameters+9,8);
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+  memcpy(manager+0xe0,active.correction+4,12);memcpy(manager+0xf0,active.correction+16,4);put(manager,0xf4,get(active.correction,0));
+#endif
   memcpy(manager_before,manager,256);
   put(manager,0x94,(unsigned)(uintptr_t)all_contacts);put(manager_before,0x94,(unsigned)(uintptr_t)all_contacts);
   put(group,0,h[2]?(unsigned)(uintptr_t)contacts[0]:0);put(group,8,(unsigned)(uintptr_t)bodies[0]);put(group,0x20,h[0]);put(group,0x24,h[2]);
@@ -117,7 +143,11 @@ int wmain(int argc,wchar_t **argv){
   if(memcmp(manager_before,manager,0x20)||memcmp(manager_before+0x5c,manager+0x5c,0x60)||memcmp(manager_before+0xcc,manager+0xcc,0x34)){error=10;break;}
   ends[0]=get(manager,0xc4);ends[1]=get(manager,0xbc);ends[2]=get(manager,0xc8);ends[3]=get(manager,0xc0);memcpy(cache,manager+0x20,60);
   for(unsigned j=0;j<2;j++){if(!cache[j])cache[j]=0xffffffff;else{unsigned found=0;for(unsigned m=0;m<h[1];m++)if(cache[j]==(unsigned)(uintptr_t)materials[m]){cache[j]=m;found=1;break;}if(!found)error=10;}}
-  if(success==0&&get(manager,0x118)&&h[2])for(unsigned r=ends[1];r<ends[3];r++){
+  unsigned constructed=ends[3];
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+  if(success==0&&get(manager,0x118)&&h[2]){constructed=0;for(unsigned j=0;j<h[2];j++)constructed+=get(contacts[j],0x14);if(constructed>h[3]){error=10;break;}}
+#endif
+  if(success==0&&get(manager,0x118)&&h[2])for(unsigned r=ends[1];r<constructed;r++){
    unsigned offset=get(rows[r],0xa8)-(unsigned)(uintptr_t)rows;
    if(offset%192!=0x98||offset/192>=ends[1]){error=10;break;}put(rows[r],0xa8,offset/192);
   }
@@ -126,6 +156,9 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned j=0;j<32;j++)if(descriptor[j]!=0xcd||descriptor[32+0xa500+j]!=0xcd)error=10;
   for(unsigned j=0;j<h[0];j++)for(unsigned k=0x424;k<0x430;k++)if(bodies[j][k])error=10;
   if(error)break;
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+  if(!active_finish(&active)){error=10;break;}
+#endif
   put(bodies[0],0x418,0);put(bodies[0],0x41c,0);put(bodies[0],0x420,0);
 #endif
   fwrite(&success,4,1,output);unsigned started=get(manager,0x118);fwrite(&started,4,1,output);fwrite(ends,4,4,output);fwrite(cache,4,15,output);
@@ -135,13 +168,20 @@ int wmain(int argc,wchar_t **argv){
   for(unsigned j=0;j<h[2];j++){unsigned char *c=contacts[j];put(c,0x10,0);put(c,4,get(c,0x1c));put(c,8,get(c,0x20));put(c,0x30,material_ids[j][0]);put(c,0x34,material_ids[j][1]);put(c,0x2c,shape_ids[j][0]);put(c,0x28,shape_ids[j][1]);fwrite(c,1,128,output);}
   fwrite(rows,192,h[3],output);
 #ifdef GRID_DEFORMATION_FRAME
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+  fwrite(active.owner+32,1,0xd230,output);fwrite(active.ptd+0x14,1,4,output);
+#else
   fwrite(d,1,0xa500,output);
+#endif
 #endif
   ++cases;
  }
  if(!error&&fgetc(input)!=EOF)error=11;
 finish:
  for(unsigned i=0;i<protected;i++){unsigned char *page=image+pages[i]-0x400000;memcpy(page,saved[i],4096);DWORD ignored;if(!VirtualProtect(page,4096,protections[i],&ignored))error=12;}
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+ if(!active_restore(image))error=12;
+#endif
  for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE){size_t size=sections[i].Misc.VirtualSize>sections[i].SizeOfRawData?sections[i].Misc.VirtualSize:sections[i].SizeOfRawData;if(memcmp(code+sections[i].VirtualAddress,image+sections[i].VirtualAddress,size))error=13;}
 #ifdef GRID_DEFORMATION_FRAME
  if(memcmp(code,image,pe->OptionalHeader.SizeOfImage))error=13;
@@ -152,5 +192,10 @@ finish:
  if(error&&output)_wremove(argv[3]);
 #endif
  free(code);VirtualFree(image,0,MEM_RELEASE);
- printf("impact_frame_cases=%u error=%u code_unchanged=%u no_imports=1\n",cases,error,error!=13);return (int)error;
+#ifdef GRID_ACTIVE_DEFORMATION_FRAME
+ printf("deforming_frame_cases=%u error=%u full_image_unchanged=%u owned_canaries=1 real_imports=7 original_rand=1\n",cases,error,error!=13);
+#else
+ printf("impact_frame_cases=%u error=%u code_unchanged=%u no_imports=1\n",cases,error,error!=13);
+#endif
+ return (int)error;
 }

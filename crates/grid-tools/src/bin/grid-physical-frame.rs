@@ -43,7 +43,7 @@ fn shape(i: u32) -> Result<Option<bool>, Failure> {
         _ => Err("invalid shape".into()),
     }
 }
-pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
+pub(crate) fn run(deformation: bool, active: bool) -> Result<(), Failure> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
         return Err("usage: grid-physical-frame INPUT.bin local/OUTPUT.bin".into());
@@ -55,7 +55,14 @@ pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
     let mut p = 0;
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
-    if word(h, 0) != if deformation { 0x31444650 } else { 0x31524650 }
+    if word(h, 0)
+        != if active {
+            0x33444650
+        } else if deformation {
+            0x31444650
+        } else {
+            0x31524650
+        }
         || !(1..=1024).contains(&count)
     {
         return Err("invalid header".into());
@@ -204,7 +211,7 @@ pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
             .iter()
             .map(|r| std::array::from_fn(|i| word(r, 4 * i)))
             .collect();
-        let input = impact_frame::Input {
+        let mut input = impact_frame::Input {
             correction: None,
             gravity,
             bodies: settings,
@@ -223,6 +230,7 @@ pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
             },
         };
         let mut descriptor = None;
+        let mut deformation_seed = None;
         let frame = if deformation {
             use grid_world::{
                 deformation_contact_limit::Parameters, deformation_layout::WORDS,
@@ -240,40 +248,118 @@ pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
                 .iter()
                 .map(|c| std::array::from_fn(|i| word(c, i * 4)))
                 .collect();
-            let result = deformation_physical_frame::calculate(
-                &input,
-                &d,
-                &body,
-                &contacts,
-                Parameters {
-                    low_mass_threshold: f(0),
-                    low_mass_speed_cap: f(1),
-                    corner_scale: f(2),
-                    velocity_projection: f(3),
-                    stiffness_scale: f(4),
-                    unlimited: f(5),
-                    damage_scale: f(6),
-                    table: std::array::from_fn(|i| f(7 + i)),
-                    global_disabled: word(raw, 92) != 0,
-                },
-                &[
-                    grid_world::contact_groups::Shape {
-                        flag230: true,
-                        ..Default::default()
-                    },
-                    grid_world::contact_groups::Shape {
-                        angular: true,
-                        ..Default::default()
-                    },
-                ],
-            )?;
-            descriptor = Some(result.descriptor);
-            for (wire, raw) in contact_wire.iter_mut().zip(result.prepared_contacts) {
-                for at in [0x3c, 0x40, 0x44] {
-                    put(wire, at, raw[at / 4]);
+            let limit = Parameters {
+                low_mass_threshold: f(0),
+                low_mass_speed_cap: f(1),
+                corner_scale: f(2),
+                velocity_projection: f(3),
+                stiffness_scale: f(4),
+                unlimited: f(5),
+                damage_scale: f(6),
+                table: std::array::from_fn(|i| f(7 + i)),
+                global_disabled: word(raw, 92) != 0,
+            };
+            if active {
+                use grid_world::{
+                    deformation_callback_state::Parameters as Bulk, deforming_physical_frame,
+                };
+                let owner_raw = take(&data, &mut p, 0xd230)?;
+                let owner: Vec<_> = owner_raw
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| u32::from_le_bytes(*c))
+                    .collect();
+                if owner[0x2300 / 4..0xc800 / 4] != d {
+                    return Err("active owner descriptor mismatch".into());
                 }
+                let settings_raw = take(&data, &mut p, 0x1054)?;
+                let settings: Vec<_> = settings_raw
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|c| u32::from_le_bytes(*c))
+                    .collect();
+                let raw = take(&data, &mut p, 156)?;
+                let f = |i| number(raw, i * 4);
+                if [60, 72, 148].iter().any(|at| word(raw, *at) > 1) {
+                    return Err("invalid active deformation booleans".into());
+                }
+                let bulk = Bulk {
+                    generation: std::array::from_fn(&f),
+                    body: std::array::from_fn(|i| f(6 + i)),
+                    grid: std::array::from_fn(|i| f(11 + i)),
+                    grid_iterations: word(raw, 56),
+                    clip_each_iteration: word(raw, 60) != 0,
+                    response_scale: f(16),
+                    correction_gain: f(17),
+                    subtract_baseline: word(raw, 72) != 0,
+                    policy_global_factor: f(19),
+                    policy_scale: f(20),
+                    policy_table: std::array::from_fn(|i| f(21 + i)),
+                    global_disabled: word(raw, 148) != 0,
+                };
+                let random_seed = word(raw, 152);
+                let correction = take(&data, &mut p, 20)?;
+                input.correction = Some(impact_frame::Correction {
+                    iterations: word(correction, 0) as usize,
+                    softness: number(correction, 4),
+                    scale: number(correction, 8),
+                    threshold: number(correction, 12),
+                    relaxation: number(correction, 16),
+                });
+                let result =
+                    deforming_physical_frame::calculate(deforming_physical_frame::Input {
+                        frame: &input,
+                        owner: &owner,
+                        physical: &body,
+                        contacts: &contacts,
+                        settings: &settings,
+                        shapes: &[
+                            grid_world::contact_groups::Shape::default(),
+                            grid_world::contact_groups::Shape {
+                                angular: true,
+                                ..Default::default()
+                            },
+                        ],
+                        limit,
+                        bulk: &bulk,
+                        random_seed,
+                    })?;
+                descriptor = Some(result.owner);
+                deformation_seed = Some(result.random_seed);
+                for (wire, r) in contact_wire.iter_mut().zip(result.contacts) {
+                    for at in [0x38, 0x3c, 0x40, 0x44] {
+                        put(wire, at, r[at / 4]);
+                    }
+                }
+                result.frame
+            } else {
+                let result = deformation_physical_frame::calculate(
+                    &input,
+                    &d,
+                    &body,
+                    &contacts,
+                    limit,
+                    &[
+                        grid_world::contact_groups::Shape {
+                            flag230: true,
+                            ..Default::default()
+                        },
+                        grid_world::contact_groups::Shape {
+                            angular: true,
+                            ..Default::default()
+                        },
+                    ],
+                )?;
+                descriptor = Some(result.descriptor);
+                for (wire, raw) in contact_wire.iter_mut().zip(result.prepared_contacts) {
+                    for at in [0x3c, 0x40, 0x44] {
+                        put(wire, at, raw[at / 4]);
+                    }
+                }
+                result.frame
             }
-            result.frame
         } else {
             impact_frame::calculate(&input)?
         };
@@ -343,6 +429,9 @@ pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
                 output.extend(v.to_le_bytes());
             }
         }
+        if let Some(seed) = deformation_seed {
+            output.extend(seed.to_le_bytes());
+        }
     }
     if p != data.len() {
         return Err("trailing input".into());
@@ -362,7 +451,7 @@ pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
     Ok(())
 }
 fn main() {
-    if let Err(error) = run(false) {
+    if let Err(error) = run(false, false) {
         eprintln!("grid-physical-frame: {error}");
         std::process::exit(1);
     }
