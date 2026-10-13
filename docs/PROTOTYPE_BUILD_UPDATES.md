@@ -8,7 +8,7 @@ Run `powershell -ExecutionPolicy Bypass -File tools/update_prototype.ps1` from t
 
 Every successful update writes ignored `local/playtest/build-UTCSTAMP/build.json` and logs. `local/playtest/current-build.json` points to the latest successfully checked build and records the full revision, executable hash, tool versions and checks. Rendering and owner laps are separately verified; a successful rebuild alone does not establish them. Game assets and compiled binaries remain private.
 
-Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts and selected wheel-impact damage are experimental; the separate body-impact callback remains under research.
+Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts and [selected registered body events](BODY_IMPACT_RUNTIME.md) are available through the body-contact launcher. Visible deformation remains under research.
 
 ## Initial updater validation
 
