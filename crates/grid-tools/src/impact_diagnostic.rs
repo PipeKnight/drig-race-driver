@@ -33,10 +33,13 @@ fn take<'a>(
     Ok(result)
 }
 pub fn run(callback: bool) -> Result<(), Box<dyn std::error::Error>> {
-    run_mode(callback, false)
+    run_mode(callback, false, false)
 }
 pub fn run_serial() -> Result<(), Box<dyn std::error::Error>> {
-    run_mode(true, true)
+    run_mode(true, true, false)
+}
+pub fn run_owned_static() -> Result<(), Box<dyn std::error::Error>> {
+    run_mode(true, true, true)
 }
 fn write_consumption(
     output: &mut Vec<u8>,
@@ -52,7 +55,7 @@ fn write_consumption(
         output.extend(pair.value.to_le_bytes());
     }
 }
-fn run_mode(callback: bool, serial: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn run_mode(callback: bool, serial: bool, owned: bool) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
         return Err("usage: grid-impact-producer INPUT.bin local/OUTPUT.bin".into());
@@ -92,8 +95,10 @@ fn run_mode(callback: bool, serial: bool) -> Result<(), Box<dyn std::error::Erro
         let static_mass = number(take(&data, &mut cursor, 4)?, 0);
         let mut contacts = Vec::with_capacity(count);
         let mut roles = Vec::with_capacity(count);
+        let mut contact_wire = Vec::with_capacity(count);
         for _ in 0..count {
             let c = take(&data, &mut cursor, 0x80)?;
+            contact_wire.push(c.to_vec());
             let has_other = word(take(&data, &mut cursor, 4)?, 0);
             if has_other > 1 {
                 return Err("invalid counterpart flag".into());
@@ -200,6 +205,104 @@ fn run_mode(callback: bool, serial: bool) -> Result<(), Box<dyn std::error::Erro
                     value,
                 });
             }
+        }
+        if owned {
+            use grid_world::deformation_callback_state::{self, Parameters};
+            if roles.iter().any(|&(two, other)| two || other) || !pending.is_empty() {
+                return Err(
+                    "owned diagnostic requires static-first contacts and empty pending".into(),
+                );
+            }
+            let (global_disabled, policy) = preparation.ok_or("missing owned callback policy")?;
+            let mut owner = vec![0u32; 0xd230 / 4];
+            for (at, raw) in [(0x2300, d.as_slice()), (0x290, history)] {
+                for (i, chunk) in raw.as_chunks::<4>().0.iter().enumerate() {
+                    owner[at / 4 + i] = u32::from_le_bytes(*chunk);
+                }
+            }
+            owner[0x1630 / 4..0x1640 / 4].copy_from_slice(&body_offset.map(f32::to_bits));
+            owner[0xb20 / 4..0xb30 / 4].copy_from_slice(&body_b20.map(f32::to_bits));
+            owner[0xc7f8 / 4] = 0;
+            owner[0x2e0 / 4] = history_extra.to_bits();
+            owner[0x15a8 / 4] = mass.to_bits();
+            owner[0xd16c / 4] = policy.body_factor_a.to_bits();
+            owner[0xd22c / 4] = policy.body_factor_b.to_bits();
+            let settings: Vec<_> = s
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| u32::from_le_bytes(*c))
+                .collect();
+            let mut physical: [u32; 0x424 / 4] = std::array::from_fn(|i| word(&linked, i * 4));
+            let original_center: [u32; 4] = physical[0x1c0 / 4..0x1d0 / 4].try_into().unwrap();
+            let original_pointer = physical[0x334 / 4];
+            physical[0x334 / 4] = 0x1c0;
+            physical[0x1c0 / 4..0x1d0 / 4].copy_from_slice(&center.map(f32::to_bits));
+            for at in [0x418, 0x41c, 0x420] {
+                physical[at / 4] = 0;
+            }
+            let wire: Vec<[u32; 32]> = contact_wire
+                .iter()
+                .map(|c| {
+                    let mut r = std::array::from_fn(|i| word(c, i * 4));
+                    r[1] = 0;
+                    r[2] = 0;
+                    r
+                })
+                .collect();
+            let result = deformation_callback_state::calculate(
+                &owner,
+                &physical,
+                &wire,
+                &settings,
+                number(header, 4),
+                &Parameters {
+                    generation: [
+                        corner_scale,
+                        static_mass,
+                        number(globals, 8),
+                        number(globals, 16),
+                        number(globals, 20),
+                        number(globals, 12),
+                    ],
+                    body: std::array::from_fn(|i| number(body_globals, i * 4)),
+                    grid: [
+                        number(solver_globals, 8),
+                        number(solver_globals, 16),
+                        number(solver_globals, 20),
+                    ],
+                    grid_iterations: word(solver_globals, 12),
+                    clip_each_iteration: clip != 0,
+                    response_scale: scale,
+                    correction_gain: number(globals, 0),
+                    subtract_baseline: globals[4] != 0,
+                    policy_global_factor: policy.global_factor,
+                    policy_scale: policy.scale,
+                    policy_table: policy.table,
+                    global_disabled,
+                },
+                seed,
+            )?;
+            let mut physical = result.physical;
+            physical[0x334 / 4] = original_pointer;
+            physical[0x1c0 / 4..0x1d0 / 4].copy_from_slice(&original_center);
+            for at in [0x418, 0x41c, 0x420] {
+                physical[at / 4] = word(&linked, at);
+            }
+            for value in result.owner[0x2300 / 4..0xc800 / 4]
+                .iter()
+                .chain(&physical)
+                .chain(&result.owner[0x290 / 4..0x2b8 / 4])
+            {
+                output.extend(value.to_le_bytes());
+            }
+            output.extend(result.owner[0x2e0 / 4].to_le_bytes());
+            output.extend(result.random_seed.to_le_bytes());
+            for c in result.contacts {
+                output.extend(c[0x38 / 4].to_le_bytes());
+            }
+            output.extend(0u32.to_le_bytes());
+            continue;
         }
         let edge_count = word(&d, 0xa410) as usize;
         if edge_count > 1200 {
