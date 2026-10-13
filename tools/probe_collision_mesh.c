@@ -46,6 +46,9 @@ int wmain(int argc,wchar_t **argv){
  __declspec(align(16)) float points[80][4];unsigned triangles[110][3];
 #ifdef GRID_SOURCE_COLLISION_MESH
  float source_parameters[6];
+#ifdef GRID_DEFORMED_COLLISION_MESH
+ __declspec(align(16)) unsigned char deformation_grid[0xa500];
+#endif
 #ifdef GRID_MESH_SHAPE
  unsigned shape_parameters[4];float shape_scalar;
  #ifdef GRID_MESH_BASE
@@ -77,7 +80,11 @@ int wmain(int argc,wchar_t **argv){
  if(_wfopen_s(&input,argv[2],L"rb")||!input){error=5;goto done;}
  int valid=fread(&tag,4,1,input)==1&&fread(&count,4,1,input)==1&&fread(&faces,4,1,input)==1&&fread(&fill,4,1,input)==1;
  if(!valid||tag!=
-#ifdef GRID_MESH_ATTACH
+#if defined(GRID_DEFORMED_COLLISION_MESH) && defined(GRID_MESH_SHAPE)
+ 0x37304d43
+#elif defined(GRID_DEFORMED_COLLISION_MESH)
+ 0x36304d43
+#elif defined(GRID_MESH_ATTACH)
  0x35304d43
 #elif defined(GRID_MESH_BASE)
  0x34304d43
@@ -94,6 +101,15 @@ int wmain(int argc,wchar_t **argv){
  for(unsigned i=0;i<6;i++)if(!isfinite(source_parameters[i])||fabsf(source_parameters[i])>10000.f)error=22;
  if(source_parameters[3]!=0.f||source_parameters[4]>source_parameters[5])error=22;
  if(error)goto done;
+#ifdef GRID_DEFORMED_COLLISION_MESH
+ if(fread(deformation_grid,1,sizeof(deformation_grid),input)!=sizeof(deformation_grid)){error=6;goto done;}
+ unsigned nx=get(deformation_grid,0xa414),ny=get(deformation_grid,0xa418),nz=get(deformation_grid,0xa41c);
+ if(nx<2||nx>16||ny<2||ny>16||nz<2||nz>16||nx*ny*nz>400){error=36;goto done;}
+ float spacing;memcpy(&spacing,deformation_grid+0xa420,4);if(!isnormal(spacing)||spacing<.0001f||spacing>1000.f){error=36;goto done;}
+ for(unsigned a=0;a<4;a++){float v;memcpy(&v,deformation_grid+0xa430+a*4,4);if(!isfinite(v)||fabsf(v)>10000.f)error=36;}
+ for(unsigned j=0;j<nx*ny*nz;j++)for(unsigned a=0;a<4;a++){float v;memcpy(&v,deformation_grid+0x2580+j*80+a*4,4);if(!isfinite(v)||fabsf(v)>100000.f)error=36;}
+ if(error)goto done;
+#endif
 #ifdef GRID_MESH_SHAPE
 #ifdef GRID_MESH_BASE
  if(fread(base_descriptor,4,33,input)!=33||fread(base_controls,4,5,input)!=5){error=6;goto done;}
@@ -124,7 +140,11 @@ int wmain(int argc,wchar_t **argv){
  if(error)goto done;
  memcpy(raw_points,points,count*16);memcpy(raw_before,raw_points,count*16);
  memset(car_owned,0xcd,sizeof(car_owned));memset(car,0,0x21000);
- memcpy(car+0x1630,source_parameters,16);memcpy(car+0xed68,source_parameters+4,4);memcpy(car+0xed94,source_parameters+5,4);memcpy(car_before,car,0x21000);
+ memcpy(car+0x1630,source_parameters,16);memcpy(car+0xed68,source_parameters+4,4);memcpy(car+0xed94,source_parameters+5,4);
+#ifdef GRID_DEFORMED_COLLISION_MESH
+ memcpy(car+0x2300,deformation_grid,sizeof(deformation_grid));car[0xc7ad]=1;
+#endif
+ memcpy(car_before,car,0x21000);
  __try{((void (__fastcall *)(void *,void *,void *,void *,int))(image+0x9b8b70-0x400000))(car,NULL,points,raw_points,(int)count);}
  __except(EXCEPTION_EXECUTE_HANDLER){fprintf(stderr,"source_adjustment_fault=%08lx\n",GetExceptionCode());error=23;}
  if(memcmp(car,car_before,0x21000)||memcmp(raw_points,raw_before,count*16))error=24;
@@ -276,7 +296,7 @@ done:
  unsigned code_unchanged=1;IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
  for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if((sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE)&&memcmp(image+sections[i].VirtualAddress,snapshot+sections[i].VirtualAddress,sections[i].SizeOfRawData))code_unchanged=0;
  if(!code_unchanged)error=18;
-#ifdef GRID_MESH_ATTACH
+#if defined(GRID_MESH_ATTACH) || defined(GRID_DEFORMED_COLLISION_MESH)
  for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(memcmp(image+sections[i].VirtualAddress,snapshot+sections[i].VirtualAddress,sections[i].SizeOfRawData)){restored=0;error=15;}
 #endif
  if(!error){HANDLE output=CreateFileW(argv[3],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);if(output==INVALID_HANDLE_VALUE)error=19;else{DWORD n=0;
