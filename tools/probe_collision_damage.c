@@ -51,6 +51,7 @@ static int admitted(const unsigned char *r){
 }
 static uintptr_t reference;
 static LONG fault(EXCEPTION_POINTERS *e){fprintf(stderr,"collision_damage_fault=%08lx original_eip=%08lx address=%08lx\n",e->ExceptionRecord->ExceptionCode,(DWORD)(e->ContextRecord->Eip-reference+0x400000),(DWORD)e->ExceptionRecord->ExceptionInformation[1]);return EXCEPTION_EXECUTE_HANDLER;}
+#ifndef GRID_COLLISION_DAMAGE_HELPERS
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
  unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 3;
@@ -95,3 +96,4 @@ int wmain(int argc,wchar_t **argv){
  printf("collision_damage_cases=%u code_unchanged=%u globals_restored=%u code_replacements=0 error=%u\n",count,error!=16,error!=15&&error!=16,error);
  free(snapshot);VirtualFree(image,0,MEM_RELEASE);free(inputs);free(outputs);return error;
 }
+#endif
