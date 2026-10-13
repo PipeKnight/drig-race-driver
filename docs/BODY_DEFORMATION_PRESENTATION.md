@@ -1,5 +1,7 @@
 # Experimental body dents from the source deformation grid
 
+The clean **d221dc28f774** refresh now passes all ten source/five Bevy checks, collision and straight-road renders. Logged physics/deformation matches the prior rigid-graphics build, while81 meshes update only when the grid changes. [Build identities and evidence](PROTOTYPE_BUILD_UPDATES.md#body-dent-presentation-refresh). The later status supersedes the pre-refresh note below.
+
 13 October2026, F268. The prototype can project the physical deformation grid onto source Lacetti body meshes. This is an **independent CPU presentation policy**, not a port or equivalence claim for GRID's original graphical shader/part factory. Wheel meshes retain their separate verified wheel-state presentation; aerials remain rigid. Part detachment, broken glass and original damage materials remain open.
 
 Each source vertex is transformed through its original joint bind into the grid's source coordinate frame. The visual delta is the sampled current position minus the sampled pristine/rest position. That XYZ delta is transformed back into mesh-local coordinates and applied to the immutable original vertex, avoiding accumulated deformation. Pristine fields return the complete original mesh, including signed zeros, normals and unconsumed attributes. Changed meshes retain indices/UVs and recompute finite smooth normals.

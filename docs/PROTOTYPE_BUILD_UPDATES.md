@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **d178b80b77be**, built 13 October at20:10:41 UTC. Ten source-driving and five Bevy checks pass, plus the600-tick damage/contact/event render. Source collision-driven grid deformation, actual shape/wheel/view rebuilding and damaged wheel presentation are enabled by the Body Contacts launcher when its private DF01 input exists. Body panels remain rigid.
+Latest verified refresh: **d221dc28f774**, built 13 October at20:36:32 UTC. Ten source-driving and five Bevy checks pass, plus rendered collision and straight-road checks. The Body Contacts launcher enables physical grid/shape/wheel deformation and independently mapped body dents when its private DF01 input exists. Original graphical damage fidelity remains under research.
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -10,7 +10,17 @@ Run `powershell -ExecutionPolicy Bypass -File tools/update_prototype.ps1` from t
 
 Every successful update writes ignored `local/playtest/build-UTCSTAMP/build.json` and logs. `local/playtest/current-build.json` points to the latest successfully checked build and records the full revision, executable hash, tool versions and checks. Rendering and owner laps are separately verified; a successful rebuild alone does not establish them. Game assets and compiled binaries remain private.
 
-Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts, [selected registered body events](BODY_IMPACT_RUNTIME.md) and [collision-driven deformation](DEFORMATION_DRIVING_INTEGRATION.md) are available through the body-contact launcher. Visible body-panel dents remain under research.
+Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts, [selected registered body events](BODY_IMPACT_RUNTIME.md), [collision-driven deformation](DEFORMATION_DRIVING_INTEGRATION.md) and [independent body dents](BODY_DEFORMATION_PRESENTATION.md) are available through the body-contact launcher.
+
+## Body-dent presentation refresh
+
+Clean revision`d221dc28f77499221544e68ba71c101b4eda995c`, built`2026-10-13T20:36:32.3800787Z`; release SHA`61d9fc4c362512f845df10fe4189c35d6744089dd8fdd76593e87bedbec16b87`. Both launchers current; no active owner session replaced. Private build/checks manifest`local/playtest/build-20261013T2035533384757Z/`; ten source and five Bevy checks pass, including source mesh publication/failure/reset.
+
+The600-tick collision render completes normally/no failures. All310 logged physical/deformation records match the prior rigid-body-graphicsd178 build exactly except wall time.81 source meshes update eight times, initially pristine at tick0; first changes at tick165 and last upload at175, with no unnecessary uploads afterward. First bulk/grid movement coincides with the first geometric body-contact sample at165; this is observed timing, not exclusive attribution to a particular crash. Image inspected; raster differences stay within the car/shadow region (29,239 pixels, bounds536,406..837,676), with normals/geometry/shadow effects not distinguished.
+
+Private`body-dents-d221dc2-20261013.{txt,json,png}` log SHA`8dca61e827c32cf3f81c2659a955c67327cb5bea593e839394f0a020ed6cfdd1`, image SHA`ce25b339e4c8296bb48d35ab021803795e34a9d05d27de8949aacf84f7496ecc`. Reconstructable no-feedback report`body-dents-no-feedback-20261013-final-01.json` SHA`b4001861f5e6c0afa4ddafa0395068ff379db5e2f145a5cc75999028918d5b0d`; `tools/compare_driving_samples.py` checks all logged fields, not every authoritative byte or original rendering equivalence.
+
+A separate300-tick/4.8-second straight-road run completes with21 samples/no failures, zero body contacts/bulk calls/records/grid displacement and unchanged event/CRT RNG. Its inspected image shows the car on the straight. Private`body-dents-straight-d221dc2-20261013` log SHA`144b7a497ef7a692336852d8b12f2ce3b9c88f6ba61afb71181a52c06feca8d5`, image SHA`4f63a0615c1694d78ad93485b7d1eccc824303f0bb7d022f30d28abf68cfd6a9`. This establishes no deformation in this unimpacted source scenario, not complete original-game calibration. Steam130 resources/executable still match at`2026-10-13T20:37:56.127017Z`; private preservation report`local/scene/preservation-20261013-body-dents-build.json`. Existing Pillow12.3.0 supplied read-only raster comparison; its deprecatedgetdata warning did not affect the result.
 
 ## Collision-driven deformation refresh
 
