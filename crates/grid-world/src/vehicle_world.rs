@@ -3,7 +3,7 @@
 //! Selected serial scope; the live asynchronous frame schedule remains external.
 //! Geometry/material queries and source initialization are supplied by the caller.
 use crate::{
-    Error, contact_groups, contact_ray, grouped_physical_frame, physical_world,
+    Error, body_impact, contact_groups, contact_ray, grouped_physical_frame, physical_world,
     suspension_prepare::Contact, vehicle_contact_force::Material, vehicle_handling,
     vehicle_manager, wheel_contacts,
 };
@@ -89,6 +89,31 @@ pub fn calculate(
         query,
         material,
         None,
+        None,
+    )
+}
+
+/// Selected world with the verified body handler on every occupied contact.
+/// Static peers have no registrations; notification slots are explicitly empty.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_events(
+    input: &State,
+    pair: [usize; 2],
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    events: Option<body_impact::Parameters>,
+) -> Result<Output, Error> {
+    calculate_owned(
+        input,
+        pair,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        None,
+        events,
     )
 }
 
@@ -116,9 +141,37 @@ pub fn calculate_with_geometry(
         query,
         material,
         Some(&mut geometry),
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_geometry_events(
+    input: &State,
+    pair: [usize; 2],
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    mut geometry: impl FnMut(
+        &[contact_groups::Body],
+        usize,
+    ) -> Result<Vec<contact_groups::Contact>, Error>,
+    events: Option<body_impact::Parameters>,
+) -> Result<Output, Error> {
+    calculate_owned(
+        input,
+        pair,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        Some(&mut geometry),
+        events,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 fn calculate_owned(
     input: &State,
     pair: [usize; 2],
@@ -127,6 +180,7 @@ fn calculate_owned(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     geometry: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
+    events: Option<body_impact::Parameters>,
 ) -> Result<Output, Error> {
     if input.world.groups.bodies.len() != 1
         || input.car.owner.physical != input.world.groups.bodies[0]
@@ -167,6 +221,7 @@ fn calculate_owned(
     )?;
     let mut previous = input.world.clone();
     previous.groups.bodies[0] = manager.job.state.owner.physical;
+    let mut active_contacts = manager.contacts.used;
     let world = if let Some(geometry) = geometry {
         let mut slots = input.world.groups.contacts.clone();
         slots[..manager.contacts.slots.len()].copy_from_slice(&manager.contacts.slots);
@@ -175,7 +230,11 @@ fn calculate_owned(
             &slots,
             manager.contacts.used,
             &input.shapes,
-            geometry,
+            |bodies, remaining| {
+                let contacts = geometry(bodies, remaining)?;
+                active_contacts += contacts.len();
+                Ok(contacts)
+            },
         )?
     } else {
         physical_world::advance_with_pool(
@@ -187,6 +246,40 @@ fn calculate_owned(
     };
     let mut car = manager.job.state;
     car.owner.physical = world.groups.bodies[0];
+    if let Some(parameters) = events {
+        if active_contacts > world.groups.contacts.len() || handling_queries.is_some() {
+            return Err(Error("unsupported body event pool or query ownership"));
+        }
+        for contact in &world.groups.contacts[..active_contacts] {
+            let side = match [contact[0x28 / 4] == 1, contact[0x2c / 4] == 1] {
+                [true, false] => 0,
+                [false, true] => 1,
+                _ => return Err(Error("unsupported body event registrations")),
+            };
+            let result = body_impact::calculate(
+                &car.owner,
+                body_impact::Event {
+                    point: std::array::from_fn(|j| f32::from_bits(contact[0x50 / 4 + j])),
+                    normal: std::array::from_fn(|j| f32::from_bits(contact[0x60 / 4 + j])),
+                    impact: f32::from_bits(contact[0x3c / 4]),
+                    parameter: world.manager.parameters[0],
+                    other_registration: 0,
+                    other_word: contact[if side == 0 { 0x34 / 4 } else { 0x30 / 4 }],
+                },
+                side,
+                parameters,
+                &[None; 11],
+                car.owner
+                    .damage_random_state
+                    .ok_or(Error("body impact requires owned damage RNG"))?,
+            )?;
+            car.owner = result.state;
+            car.owner.damage_random_state = Some(result.random_state);
+        }
+        car.frame
+            .body
+            .copy_from_slice(&car.owner.vehicle[..crate::vehicle_force::BODY_WORDS]);
+    }
     Ok(Output {
         state: State {
             car,

@@ -37,6 +37,8 @@ pub struct Runtime {
     /// Fresh body records from the last successful tick; diagnostics only.
     /// Failure preserves this count and reset clears it.
     pub last_body_contacts: usize,
+    /// Opt-in owned static-peer event route; parameters are private source data.
+    pub body_events: Option<grid_world::body_impact::Parameters>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -320,6 +322,7 @@ impl Runtime {
             pair,
             ticks: 0,
             last_body_contacts: 0,
+            body_events: None,
         })
     }
 
@@ -453,7 +456,7 @@ impl Runtime {
         let material = |token| self.surfaces.joined(token);
         let mut body_contacts = 0;
         let output = match geometry {
-            Some(Geometry::Callback(geometry)) => vehicle_world::calculate_with_geometry(
+            Some(Geometry::Callback(geometry)) => vehicle_world::calculate_with_geometry_events(
                 &staged,
                 self.pair,
                 GRAVITY,
@@ -465,8 +468,9 @@ impl Runtime {
                     body_contacts = contacts.len();
                     Ok(contacts)
                 },
+                self.body_events,
             )?,
-            Some(Geometry::Source(geometry)) => vehicle_world::calculate_with_geometry(
+            Some(Geometry::Source(geometry)) => vehicle_world::calculate_with_geometry_events(
                 &staged,
                 self.pair,
                 GRAVITY,
@@ -479,8 +483,17 @@ impl Runtime {
                     body_contacts = contacts.len();
                     Ok(contacts)
                 },
+                self.body_events,
             )?,
-            None => vehicle_world::calculate(&staged, self.pair, GRAVITY, None, query, material)?,
+            None => vehicle_world::calculate_with_events(
+                &staged,
+                self.pair,
+                GRAVITY,
+                None,
+                query,
+                material,
+                self.body_events,
+            )?,
         };
         self.state = output.state;
         self.cache = cache;
@@ -505,6 +518,156 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires purchased GRID sources and private body parameters"]
+    fn source_driving_body_events() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let data = std::fs::read(std::env::var_os("GRID_BODY_EVENT_PARAMETERS").unwrap()).unwrap();
+        let parameters = crate::body_impact_parameters::read(&data).unwrap();
+        let mut runtime = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let geometry = runtime.prepare_body_geometry(root, &table).unwrap();
+        runtime.body_events = Some(parameters);
+        let trace = |r: &Runtime| {
+            let mut w = r.state.car.owner.vehicle.clone();
+            w.extend(r.state.car.owner.physical);
+            w.extend(r.state.car.frame.body);
+            w.extend(r.state.car.frame.view);
+            w.extend(r.state.car.frame.solver);
+            for b in &r.state.world.groups.bodies {
+                w.extend(b);
+            }
+            for c in &r.state.world.groups.contacts {
+                w.extend(c);
+            }
+            w.extend(r.state.world.groups.world);
+            for row in &r.state.world.manager.rows {
+                w.extend(row);
+            }
+            for pair in &r.state.world.manager.workspace {
+                w.extend(pair.iter().flatten().map(|v| v.to_bits()));
+            }
+            w.extend([
+                r.state.car.owner.damage_random_state.unwrap_or(0),
+                u32::from(r.state.car.owner.damage_random_state.is_some()),
+                u32::from(r.cache.plane),
+                r.ticks as u32,
+                r.last_body_contacts as u32,
+            ]);
+            w
+        };
+        let initial = trace(&runtime);
+        let mut expected = Vec::new();
+        let mut contacts = 0;
+        for _ in 0..600 {
+            runtime
+                .tick_with_body_geometry(
+                    Controls {
+                        throttle: 1.,
+                        steering: 0.25,
+                        ..Default::default()
+                    },
+                    &geometry,
+                )
+                .unwrap();
+            contacts += runtime.last_body_contacts;
+            expected.push(trace(&runtime));
+        }
+        assert!(contacts > 0);
+        assert!(runtime.pose()[13] > -30.);
+        println!(
+            "body_event_source ticks={} contacts={} rng={:08x} suspension_gain={}",
+            runtime.ticks,
+            contacts,
+            runtime.state.car.owner.damage_random_state.unwrap(),
+            f32::from_bits(runtime.state.car.owner.vehicle[0x3d0 / 4])
+        );
+        runtime.reset();
+        assert_eq!(trace(&runtime), initial);
+        for frame in expected {
+            runtime
+                .tick_with_body_geometry(
+                    Controls {
+                        throttle: 1.,
+                        steering: 0.25,
+                        ..Default::default()
+                    },
+                    &geometry,
+                )
+                .unwrap();
+            assert_eq!(trace(&runtime), frame);
+        }
+        runtime.reset();
+        // Settle before an explicit valid-then-invalid geometric sequence.
+        // A stationary car need not produce transient wheel records.
+        for _ in 0..32 {
+            runtime
+                .tick_with_body_geometry(Controls::default(), &geometry)
+                .unwrap();
+        }
+        runtime.state.car.owner.vehicle[0x1568 / 4] = 1.25f32.to_bits();
+        runtime.state.car.frame.body[0x1568 / 4] = 1.25f32.to_bits();
+        let before = trace(&runtime);
+        let good_point: [f32; 4] = runtime.pose()[12..16].try_into().unwrap();
+        let invalid = |_: &[grid_world::contact_groups::Body], _: usize| {
+            let mut c = [0; 32];
+            c[1] = 1;
+            c[0xc / 4] = 0x01000000;
+            c[0x1c / 4] = u32::MAX;
+            c[0x20 / 4] = u32::MAX;
+            c[0x24 / 4] = 1;
+            c[0x28 / 4] = 1;
+            c[0x2c / 4] = 2;
+            c[0x3c / 4] = f32::MAX.to_bits();
+            c[0x50 / 4..0x60 / 4].copy_from_slice(&[1001f32.to_bits(), 0, 0, 1f32.to_bits()]);
+            c[0x60 / 4] = 1f32.to_bits();
+            c[0x70 / 4] = 1 << 24;
+            let mut good = c;
+            good[0x50 / 4..0x60 / 4].copy_from_slice(&good_point.map(f32::to_bits));
+            Ok(vec![good, c])
+        };
+        let error = runtime
+            .tick_with_geometry(Controls::default(), invalid)
+            .err()
+            .unwrap();
+        assert_eq!(error.0, "unsupported body impact context");
+        assert_eq!(trace(&runtime), before);
+        runtime.body_events = None;
+        runtime
+            .tick_with_geometry(Controls::default(), invalid)
+            .unwrap();
+        let first = &runtime.state.world.groups.contacts[0];
+        println!(
+            "late_event_probe first_point={:?} first_shapes={:?} first_impulse={} velocity={:?}",
+            &first[0x50 / 4..0x60 / 4],
+            &first[0x28 / 4..0x30 / 4],
+            f32::from_bits(first[0x3c / 4]),
+            runtime.velocity()
+        );
+        let early = grid_world::body_impact::calculate(
+            &runtime.state.car.owner,
+            grid_world::body_impact::Event {
+                point: std::array::from_fn(|j| f32::from_bits(first[0x50 / 4 + j])),
+                normal: std::array::from_fn(|j| f32::from_bits(first[0x60 / 4 + j])),
+                impact: f32::from_bits(first[0x3c / 4]),
+                parameter: DELTA,
+                other_registration: 0,
+                other_word: first[0x34 / 4],
+            },
+            0,
+            parameters,
+            &[None; 11],
+            runtime.state.car.owner.damage_random_state.unwrap(),
+        )
+        .unwrap();
+        assert_ne!(
+            early.state.vehicle[0x1568 / 4],
+            runtime.state.car.owner.vehicle[0x1568 / 4]
+        );
+        assert_eq!(early.state.vehicle[0x1568 / 4], 0);
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
