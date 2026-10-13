@@ -29,6 +29,7 @@ pub mod deformation_initialization;
 pub mod deformation_layout;
 pub mod deformation_physical_frame;
 pub mod deformation_preparation;
+pub mod deformation_publication;
 pub mod deformation_settle;
 pub mod deformation_volume;
 pub mod deforming_physical_frame;

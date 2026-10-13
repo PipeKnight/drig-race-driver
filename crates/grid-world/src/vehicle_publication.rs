@@ -41,6 +41,12 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
     {
         return Err(Error("unsupported vehicle publication branch"));
     }
+    Ok(update_without_rebuild(input, delta))
+}
+
+/// Shared numerical publication after the caller validates and handles its
+/// reached resource/view branches. The legacy public API retains all guards.
+pub(crate) fn update_without_rebuild(input: &State, delta: f32) -> State {
     let mut next = input.clone();
     let b = &mut next.vehicle;
     let mut timer = f(b, 0xc798);
@@ -64,7 +70,7 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
         b[car / 4 + 3] = 0;
         next.physical[physical / 4..physical / 4 + 4].copy_from_slice(&b[car / 4..car / 4 + 4]);
     }
-    Ok(next)
+    next
 }
 
 #[cfg(test)]
