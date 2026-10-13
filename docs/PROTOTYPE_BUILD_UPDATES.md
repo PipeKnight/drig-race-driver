@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **f428d0a23ce8**, built 13 October at 09:51:37 UTC. Seven source-driving and three Bevy checks pass, as does the 600-tick contact/event render. [Active-grid synchronization notes](DEFORMATION_SYNCHRONIZATION.md#playable-refresh) record the exact source revision, executable hash and private evidence. This update prepares deformation integration; visible meshes remain rigid.
+Latest verified refresh: **c3696050d8f6**, built 13 October at 16:09:05 UTC. Eight source-driving and three Bevy checks pass, as does the 600-tick contact/event render. This includes source deformation construction and transactional active collision-shape rebuilding; gameplay meshes remain rigid until callback/dirty publication integration.
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -37,3 +37,9 @@ The refreshed executable completed another600-tick source barrier run with132 te
 The rendered screenshot was inspected and shows the Lacetti beside the Donington barrier; it is byte-identical to the earlier bounded image, consistent with no visual-deformation implementation in this change. Files: `local/playtest/body-events-3443c31c8365-20261013.{txt,json,png}`. Log SHA-256 `345de04c133925fbfabc4050e93e291576b815bbf308a115f768d0d49a626ca6`; image SHA-256 `a6e4035fbbb380ede67c844feda9fa5e0ee6ea4ee438486063e3f2c7ffa5ccf0`. The known gamepad80070057 message recurs; the run completes. All130 traced Steam resources and the original executable remain unchanged at`2026-10-13T08:24:30.442921Z` (`local/scene/preservation-20261013-body-event-runtime.json`).
 
 An intermediate clean build`de6a9c6ada7c` also completed the600-tick event-enabled render. It was superseded by the additive telemetry update; both historical manifests and renders are retained. No active owner session was replaced or closed. No manual lap or original-game calibration is inferred from these scripted runs.
+
+## Source deformation and collision-shape preparation refresh
+
+Clean **c3696050d8f6** (full `c3696050d8f6817e75872f3981696bfc3897a042`), built `2026-10-13T16:09:05.0609108Z`, executable SHA `70fdd84c5711bab4e56061e8844bef18bc523178e4d74b374d6ad3a34c45b328`. Private build manifest `local/playtest/build-20261013T1608145415745Z/`. Eight source and three Bevy checks pass; the new source check verifies deformed mesh contacts and rollback. Both launchers still use this executable; no active owner session was replaced.
+
+The 600-tick event/contact render completes normally with 132 telemetry records and no failure. The Lacetti/Donington image was inspected. Damage RNG remains the known sequence `ac7e1d7f -> 2a73550a`; final Y is -14.807243, matching the prior scripted path. Visible deformation is not enabled. Files `local/playtest/deformed-geometry-c3696050d8f6-20261013.{txt,json,png}`; log SHA `ce2302b050eb17fdde433f8d46616f3334beecf3f722ec855f6f9e54e3f14dd7`, image SHA `a6e4035fbbb380ede67c844feda9fa5e0ee6ea4ee438486063e3f2c7ffa5ccf0`. The known gamepad80070057 message recurs without preventing completion. Steam130 resources/executable unchanged at `2026-10-13T16:12:07.617029Z`, private `local/scene/preservation-20261013-deformed-body-build.json`.
