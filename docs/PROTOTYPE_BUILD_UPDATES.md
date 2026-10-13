@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **c3696050d8f6**, built 13 October at 16:09:05 UTC. Eight source-driving and three Bevy checks pass, as does the 600-tick contact/event render. This includes source deformation construction and transactional active collision-shape rebuilding; gameplay meshes remain rigid until callback/dirty publication integration.
+Latest verified refresh: **d178b80b77be**, built 13 October at20:10:41 UTC. Ten source-driving and five Bevy checks pass, plus the600-tick damage/contact/event render. Source collision-driven grid deformation, actual shape/wheel/view rebuilding and damaged wheel presentation are enabled by the Body Contacts launcher when its private DF01 input exists. Body panels remain rigid.
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -10,7 +10,17 @@ Run `powershell -ExecutionPolicy Bypass -File tools/update_prototype.ps1` from t
 
 Every successful update writes ignored `local/playtest/build-UTCSTAMP/build.json` and logs. `local/playtest/current-build.json` points to the latest successfully checked build and records the full revision, executable hash, tool versions and checks. Rendering and owner laps are separately verified; a successful rebuild alone does not establish them. Game assets and compiled binaries remain private.
 
-Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts and [selected registered body events](BODY_IMPACT_RUNTIME.md) are available through the body-contact launcher. Visible deformation remains under research.
+Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts, [selected registered body events](BODY_IMPACT_RUNTIME.md) and [collision-driven deformation](DEFORMATION_DRIVING_INTEGRATION.md) are available through the body-contact launcher. Visible body-panel dents remain under research.
+
+## Collision-driven deformation refresh
+
+Clean revision`d178b80b77be5a27c07012c12c4bbe9b86b3ffca`, built`2026-10-13T20:10:41.6334699Z`; release SHA`0d435e45999f1dc17d57a5deab91418d93a5ffbd5ac9403c7df80ab10138c420`. Both launchers use this executable. No active owner session was replaced. Private manifest/checks/build logs: `local/playtest/build-20261013T2010082098230Z/`. Ten source tests and five Bevy tests pass; DF01 provenance is included in the manifest.
+
+The600-tick rendered powered turn completes normally with155 sampled records/no simulation failures,292 geometric body contacts,124 bulk callbacks/166 records,334 moved XYZ grid positions/max.28555748. CRT seed1 stays unchanged in this run; event RNG endsab049764. The inspected image shows the rigid body beside the Donington barrier; it does not demonstrate visible body-panel dents. Log SHA`5eff162164eedd731b2d0c705858fdc9e0607c6ba92ce5ea638ff0c13e58ae8a`, image SHA`60c8515c522abf776dc61106506e6a396ab780c21f23e6c2e9addf6e25868f17`; ignored`local/playtest/deformation-driving-d178b80-20261013.{txt,json,png}`. Known gamepad80070057 warning remains separate.
+
+Original Steam130 resources/executable still match at`2026-10-13T20:10:37.456794Z`, recorded in`local/scene/preservation-20261013-deformation-driving-build.json`. DF01 re-extraction matches all252 bytes, source address/file/zero-fill extents and SHA`5d48e35d630315b50a7e07450501e6e90d43311a8552bc98367c3e69f9c93292`; the only zero-filled field is the one-byteE85FAD flag. Longer unattended damage stress validation follows separately.
+
+The3600-tick/57.6 simulated-second powered-turn stress also completes normally:2787 sampled records/no failures,2731 bulk calls/171 records,334 moved nodes/max.28555748, CRT1/event RNG2c18a246 at exit. The car reaches the pit barrier and remains blocked while throttle stays held; this is repeated-contact stability, **not a driven lap**. The image was inspected. Private`deformation-stress-d178b80-20261013.{txt,json,png}` log SHA`39ae20b2053f9aba2b8a359d4dd37d6ce2f9d8ad917044947ef051c657e7c9b8`, image SHA`50d5709cf898da2801eb36cec5648d33242a148e18802311470053e9911238e6`.
 
 ## Initial updater validation
 
