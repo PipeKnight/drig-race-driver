@@ -222,6 +222,27 @@ pub fn calculate_with_queries(
     delta: f32,
     queries: Option<&[QueryRecord]>,
 ) -> Result<State, Error> {
+    calculate_owned(input, delta, queries, false)
+}
+
+/// Complete wheel-terminal transition with an owned component whose event
+/// receiver (+84) is absent. The source changes status 7 to 3 and records the
+/// first failing wheel; no external notification callback is discarded.
+pub fn calculate_with_empty_notification_receiver(
+    input: &State,
+    delta: f32,
+    queries: Option<&[QueryRecord]>,
+) -> Result<State, Error> {
+    calculate_owned(input, delta, queries, true)
+}
+
+#[allow(clippy::assign_op_pattern)] // Preserve the original SSE operand order.
+fn calculate_owned(
+    input: &State,
+    delta: f32,
+    queries: Option<&[QueryRecord]>,
+    empty_notification_receiver: bool,
+) -> Result<State, Error> {
     let car = &input.vehicle;
     if car.len() != crate::vehicle_publication::VEHICLE_WORDS
         || !delta.is_finite()
@@ -239,7 +260,8 @@ pub fn calculate_with_queries(
         || byte(car, 0xb14) != 1
         || car[0x22e4 / 4] != 0
         || byte(b, 0x442) > 1
-        || b[0x444 / 4] != 7
+        || !(b[0x444 / 4] == 7 || (empty_notification_receiver && b[0x444 / 4] == 3))
+        || (b[0x444 / 4] == 3 && byte(b, 0x448) > 3)
         || byte(b, 0x440) > 1
         || byte(car, 0xc7ae) > 1
         || car[0x2118 / 4] > 1
@@ -336,10 +358,17 @@ pub fn calculate_with_queries(
             displacement_limit_284: f(&b, 0x284),
         };
         if byte(&b, 0x442) != 0
+            && b[0x444 / 4] == 7
             && wheel_damage::raw_ratio(wheel)?
                 .is_some_and(|ratio| ratio > f(&b, 0x288) * f32::from_bits(0x3c23d70a))
         {
-            return Err(Error("unsupported handling notification event"));
+            if !empty_notification_receiver {
+                return Err(Error("unsupported handling notification event"));
+            }
+            // A14E40 tests car B13/B14, validated above. 9F2F80 commits
+            // status and ordinal before checking the absent component receiver.
+            b[0x444 / 4] = 3;
+            b.store_byte(0x448, i as u8);
         }
         let level = wheel_damage::calculate(wheel)?;
         b.store(0x18 + 4 * i, level);
@@ -434,6 +463,15 @@ pub fn publish_with_queries(
 ) -> Result<State, Error> {
     let published = crate::vehicle_publication::calculate(input, delta)?;
     calculate_with_queries(&published, delta, queries)
+}
+
+pub fn publish_with_empty_notification_receiver(
+    input: &State,
+    delta: f32,
+    queries: Option<&[QueryRecord]>,
+) -> Result<State, Error> {
+    let published = crate::vehicle_publication::calculate(input, delta)?;
+    calculate_with_empty_notification_receiver(&published, delta, queries)
 }
 
 #[cfg(test)]
@@ -596,5 +634,37 @@ mod tests {
         );
         assert_eq!(s.vehicle, before.vehicle);
         assert_eq!(s.physical, before.physical);
+    }
+
+    #[test]
+    fn terminal_wheel_transition_is_once_ordered_and_atomic() {
+        let mut s = fixture();
+        activate_damage(&mut s);
+        s.vehicle.store(MUTABLE + 0x280, 27.);
+        s.vehicle.store(MUTABLE + 0x284, 0.45);
+        s.vehicle.store(MUTABLE + 0x288, 105.);
+        s.vehicle.store_byte(MUTABLE + 0x442, 1);
+        s.vehicle.store(0x1790 + 4, 1.);
+        s.vehicle.store(0x1790 + 8, 2.);
+        let before = s.clone();
+        let terminal = calculate_with_empty_notification_receiver(&s, 0.016, Some(&[])).unwrap();
+        assert_eq!(terminal.vehicle[(MUTABLE + 0x444) / 4], 3);
+        assert_eq!(byte(&terminal.vehicle, MUTABLE + 0x448), 1);
+        assert_eq!(f(&terminal.vehicle, MUTABLE + 0x1c), 1.);
+        assert_ne!(terminal.damage_random_state, s.damage_random_state);
+        let continued =
+            calculate_with_empty_notification_receiver(&terminal, 0.016, Some(&[])).unwrap();
+        assert_eq!(continued.vehicle[(MUTABLE + 0x444) / 4], 3);
+        assert_eq!(byte(&continued.vehicle, MUTABLE + 0x448), 1);
+        assert_eq!(s.vehicle, before.vehicle);
+        assert_eq!(s.damage_random_state, before.damage_random_state);
+        // A later invalid effect cannot commit even an already reached terminal
+        // transition, collision RNG advance or previous wheel updates.
+        s.vehicle.store(MUTABLE + 0x274, 1.);
+        s.vehicle.store(MUTABLE + 0x278, 1.);
+        let before = s.clone();
+        assert!(calculate_with_empty_notification_receiver(&s, 0.016, Some(&[])).is_err());
+        assert_eq!(s.vehicle, before.vehicle);
+        assert_eq!(s.damage_random_state, before.damage_random_state);
     }
 }

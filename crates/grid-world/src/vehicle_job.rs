@@ -27,7 +27,8 @@ pub fn calculate(
     calculate_with_queries(input, pair, delta, gravity, None, query, material)
 }
 
-/// Registered job with owned handling lookup records and healthy notifications.
+/// Registered job with owned handling lookup records and an absent external
+/// component event receiver. Terminal wheel state remains part of the car.
 pub fn calculate_with_queries(
     input: &State,
     pair: [usize; 2],
@@ -115,13 +116,17 @@ pub(crate) fn calculate_owned_with_publication(
         crate::vehicle_step::apply(&mut next.frame, pair, delta, gravity, query, material)?;
     next.owner.vehicle[..vehicle_force::BODY_WORDS].copy_from_slice(&next.frame.body);
     next.owner = if let Some(publication) = publication {
-        vehicle_handling::calculate_with_queries(
+        vehicle_handling::calculate_with_empty_notification_receiver(
             &publication(&next.owner, delta)?,
             delta,
             handling_queries,
         )?
     } else {
-        vehicle_handling::publish_with_queries(&next.owner, delta, handling_queries)?
+        vehicle_handling::publish_with_empty_notification_receiver(
+            &next.owner,
+            delta,
+            handling_queries,
+        )?
     };
     next.frame
         .body

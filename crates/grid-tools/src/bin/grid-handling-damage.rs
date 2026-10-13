@@ -8,7 +8,8 @@ const PREFIX: usize = 16 + 64 * 8;
 const SIZE: usize = PREFIX + (VEHICLE_WORDS + PHYSICAL_WORDS) * 4;
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let a: Vec<_> = std::env::args_os().skip(1).collect();
-    if a.len() != 2 || fs::metadata(&a[0])?.len() > 8 + 64 * SIZE as u64 {
+    let terminal = a.len() == 3 && a[2] == "--empty-notification-receiver";
+    if !(a.len() == 2 || terminal) || fs::metadata(&a[0])?.len() > 8 + 64 * SIZE as u64 {
         return Err("usage: grid-handling-damage VH02_INPUT local/OUTPUT".into());
     }
     let mut raw = fs::read(&a[0])?;
@@ -40,7 +41,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             vehicle: (0..VEHICLE_WORDS).map(|i| u(PREFIX + i * 4)).collect(),
             physical: std::array::from_fn(|i| u(PREFIX + VEHICLE_WORDS * 4 + i * 4)),
         };
-        let next = vehicle_handling::calculate_with_queries(
+        let calculate = if terminal {
+            vehicle_handling::calculate_with_empty_notification_receiver
+        } else {
+            vehicle_handling::calculate_with_queries
+        };
+        let next = calculate(
             &state,
             f32::from_bits(u(0)),
             if u(8) != 0 { Some(&queries) } else { None },
