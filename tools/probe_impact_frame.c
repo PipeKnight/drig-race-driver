@@ -8,7 +8,17 @@
 #include <string.h>
 #include <math.h>
 #include <wchar.h>
+#include <float.h>
 #include "isolated_reference.h"
+#ifdef GRID_DEFORMATION_FRAME
+#define FRAME_PAGES 11
+#define FRAME_MAGIC 0x31444650
+#define FRAME_SHAPE_SIZE 0x240
+#else
+#define FRAME_PAGES 5
+#define FRAME_MAGIC 0x31524650
+#define FRAME_SHAPE_SIZE 0x220
+#endif
 __declspec(noinline) static unsigned invoke(void *function,void *manager,void *group,unsigned delta){
  unsigned result;
  __asm { mov ecx,manager
@@ -25,21 +35,28 @@ static int finite_words(const void *p,unsigned n){for(unsigned i=0;i<n;i++){floa
 static int fault(EXCEPTION_POINTERS *p){fprintf(stderr,"impact_frame_fault=%08lx eip=%08lx address=%08lx\n",p->ExceptionRecord->ExceptionCode,p->ContextRecord->Eip,p->ExceptionRecord->NumberParameters>1?(unsigned long)p->ExceptionRecord->ExceptionInformation[1]:0);return EXCEPTION_EXECUTE_HANDLER;}
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
+#ifdef GRID_DEFORMATION_FRAME
+ unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 2;
+#endif
  unsigned char *image=map_reference(argv[1]);if(!image)return 3;
  IMAGE_NT_HEADERS32 *pe=(IMAGE_NT_HEADERS32 *)(image+((IMAGE_DOS_HEADER *)image)->e_lfanew);
  IMAGE_SECTION_HEADER *sections=IMAGE_FIRST_SECTION(pe);
  unsigned char *code=malloc(pe->OptionalHeader.SizeOfImage);if(!code)return 4;memcpy(code,image,pe->OptionalHeader.SizeOfImage);
- unsigned pages[5]={0xe58000,0xe52000,0xe5a000,0xe5b000,0xe5e000};DWORD protections[5]={0};unsigned char saved[5][4096];unsigned protected=0,error=0,cases=0;
- for(unsigned i=0;i<5;i++){unsigned char *page=image+pages[i]-0x400000;memcpy(saved[i],page,4096);if(!VirtualProtect(page,4096,PAGE_READWRITE,&protections[i])){error=5;break;}++protected;}
+ unsigned pages[FRAME_PAGES]={0xe58000,0xe52000,0xe5a000,0xe5b000,0xe5e000
+#ifdef GRID_DEFORMATION_FRAME
+ ,0xcaf000,0xcb0000,0xcb3000,0xe4f000,0xe51000,0xe85000
+#endif
+ };DWORD protections[FRAME_PAGES]={0};unsigned char saved[FRAME_PAGES][4096];unsigned protected=0,error=0,cases=0;
+ for(unsigned i=0;i<FRAME_PAGES;i++){unsigned char *page=image+pages[i]-0x400000;memcpy(saved[i],page,4096);if(!VirtualProtect(page,4096,PAGE_READWRITE,&protections[i])){error=5;break;}++protected;}
  FILE *input=NULL,*output=NULL;unsigned magic=0,total=0;
  if(!error&&(_wfopen_s(&input,argv[2],L"rb")||!input||_wfopen_s(&output,argv[3],L"wbx")||!output))error=6;
- if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=0x31524650||!read(input,&total,4)||!total||total>1024))error=7;
+ if(!error&&(fseek(input,0,SEEK_END)||ftell(input)>32*1024*1024||fseek(input,0,SEEK_SET)||!read(input,&magic,4)||magic!=FRAME_MAGIC||!read(input,&total,4)||!total||total>1024))error=7;
  if(error)goto finish;
  fwrite(&magic,4,1,output);fwrite(&total,4,1,output);
  for(unsigned i=0;i<total;i++){
   unsigned h[6],cache[15],ends[4],modes[64],shape_ids[64][2],material_ids[64][2],bodyptrs[16],all_contacts[64],pool_single[64],pool_two[64],ns=0,nt=0;
   float parameters[11];
-  __declspec(align(16)) unsigned char bodies[16][0x430]={0},contacts[64][0x80]={0},shapes[2][0x220]={0},manager[0x240]={0},group[0x90]={0},rows[256][192];
+  __declspec(align(16)) unsigned char bodies[16][0x430]={0},contacts[64][0x80]={0},shapes[2][FRAME_SHAPE_SIZE]={0},manager[0x240]={0},group[0x90]={0},rows[256][192];
   __declspec(align(16)) float materials[8][16]={0},inertia[16][16],mass[16],workspace[16][8];
   unsigned char manager_before[0x100];
   if(!read(input,h,24)||!h[0]||h[0]>16||!h[1]||h[1]>8||h[2]>64||!h[3]||h[3]>256||h[4]>h[3]||h[5]>32||!read(input,parameters,44)||!finite_words(parameters,11)||parameters[0]<=0||parameters[0]>.25f||!read(input,ends,16)||!read(input,cache,60)){error=8;break;}
@@ -69,6 +86,23 @@ int wmain(int argc,wchar_t **argv){
    if(modes[j])pool_two[nt++]=(unsigned)(uintptr_t)c;else pool_single[ns++]=(unsigned)(uintptr_t)c;
   }
   if(error||!read(input,rows,h[3]*192)){error=8;break;}
+#ifdef GRID_DEFORMATION_FRAME
+  __declspec(align(16)) unsigned char descriptor[32+0xa500+32];unsigned char *d=descriptor+32;float cap_parameters[23];unsigned disabled;
+  memset(descriptor,0xcd,sizeof(descriptor));
+  if(h[0]!=1||nt||!read(input,d,0xa500)||!read(input,cap_parameters,sizeof(cap_parameters))||!read(input,&disabled,4)||disabled>1||!finite_words(cap_parameters,23)||cap_parameters[5]!=FLT_MAX){error=8;break;}
+  unsigned nx=get(d,0xa414),ny=get(d,0xa418),nz=get(d,0xa41c);
+  if(nx<2||nx>16||ny<2||ny>16||nz<2||nz>16||nx*ny*nz>400||get(d,0xa4ec)>=10||!finite_words(d+0xa490,4)||!finite_words(d+0xa4b4,14)||!finite_words(d+0xa430,4)||!finite_words(d+0xa420,1)||*(float *)(d+0xa420)<=0||!finite_words(bodies[0]+0x1d0,16)||!finite_words(bodies[0]+0x360,4)){error=8;break;}
+  for(unsigned j=0;j<nx*ny*nz;j++)if(!finite_words(d+0x2580+j*80,4)||!finite_words(d+0x25c0+j*80,1))error=8;
+  for(unsigned j=0;j<h[2];j++)if(get(contacts[j],0x1c)||get(contacts[j],0x20)||!shape_ids[j][0]||!shape_ids[j][1])error=8;
+  if(error)break;
+  const unsigned addresses[]={0xcafbdc,0xcb093c,0xe4fc2c,0xe4fc3c,0xcb3ba8,0xe51d40,0xe4fc30};
+  for(unsigned j=0;j<7;j++)memcpy(image+addresses[j]-0x400000,cap_parameters+j,4);
+  memcpy(image+0xe4fc48-0x400000,cap_parameters+7,64);image[0xe85fad-0x400000]=(unsigned char)disabled;
+  put(bodies[0],0x418,(unsigned)(uintptr_t)(image+0x9a0c90-0x400000));put(bodies[0],0x41c,(unsigned)(uintptr_t)(image+0xa064a0-0x400000));put(bodies[0],0x420,(unsigned)(uintptr_t)d);
+  /* Explicit admitted control: preparation still runs, but the original
+     B775D0 collector excludes contacts whose first shape230 is set. */
+  shapes[0][0x230]=1;
+#endif
   shapes[1][0x216]=1;
   for(unsigned j=0;j<2;j++)cache[j]=cache[j]==0xffffffff?0:(unsigned)(uintptr_t)materials[cache[j]];
   memcpy(manager+0x20,cache,60);put(manager,0x68,16);put(manager,0x6c,64);memcpy(manager+0x10,parameters+1,16);put(manager,0x70,h[4]);put(manager,0x80,(unsigned)(uintptr_t)workspace);put(manager,0x84,(unsigned)(uintptr_t)inertia);put(manager,0x88,(unsigned)(uintptr_t)mass);put(manager,0x8c,(unsigned)(uintptr_t)rows);put(manager,0x90,(unsigned)(uintptr_t)bodyptrs);put(manager,0x98,(unsigned)(uintptr_t)pool_single);put(manager,0xa0,(unsigned)(uintptr_t)pool_two);put(manager,0xa8,h[0]);put(manager,0xac,ns);put(manager,0xb4,nt);
@@ -88,19 +122,35 @@ int wmain(int argc,wchar_t **argv){
    if(offset%192!=0x98||offset/192>=ends[1]){error=10;break;}put(rows[r],0xa8,offset/192);
   }
   if(error)break;
+#ifdef GRID_DEFORMATION_FRAME
+  for(unsigned j=0;j<32;j++)if(descriptor[j]!=0xcd||descriptor[32+0xa500+j]!=0xcd)error=10;
+  for(unsigned j=0;j<h[0];j++)for(unsigned k=0x424;k<0x430;k++)if(bodies[j][k])error=10;
+  if(error)break;
+  put(bodies[0],0x418,0);put(bodies[0],0x41c,0);put(bodies[0],0x420,0);
+#endif
   fwrite(&success,4,1,output);unsigned started=get(manager,0x118);fwrite(&started,4,1,output);fwrite(ends,4,4,output);fwrite(cache,4,15,output);
   for(unsigned j=0;j<h[0];j++){fwrite(mass+j,4,1,output);fwrite(inertia[j],4,16,output);}fwrite(workspace,32,h[0],output);
   for(unsigned j=0;j<h[0];j++){put(bodies[j],0x334,0x1c0);put(bodies[j],0x2fc,0);put(bodies[j],0x32c,0);
    for(unsigned k=0;k<3;k++)put(bodies[j],0x338+4*k,0);fwrite(bodies[j],1,0x424,output);}
   for(unsigned j=0;j<h[2];j++){unsigned char *c=contacts[j];put(c,0x10,0);put(c,4,get(c,0x1c));put(c,8,get(c,0x20));put(c,0x30,material_ids[j][0]);put(c,0x34,material_ids[j][1]);put(c,0x2c,shape_ids[j][0]);put(c,0x28,shape_ids[j][1]);fwrite(c,1,128,output);}
-  fwrite(rows,192,h[3],output);++cases;
+  fwrite(rows,192,h[3],output);
+#ifdef GRID_DEFORMATION_FRAME
+  fwrite(d,1,0xa500,output);
+#endif
+  ++cases;
  }
  if(!error&&fgetc(input)!=EOF)error=11;
 finish:
  for(unsigned i=0;i<protected;i++){unsigned char *page=image+pages[i]-0x400000;memcpy(page,saved[i],4096);DWORD ignored;if(!VirtualProtect(page,4096,protections[i],&ignored))error=12;}
  for(unsigned i=0;i<pe->FileHeader.NumberOfSections;i++)if(sections[i].Characteristics&IMAGE_SCN_MEM_EXECUTE){size_t size=sections[i].Misc.VirtualSize>sections[i].SizeOfRawData?sections[i].Misc.VirtualSize:sections[i].SizeOfRawData;if(memcmp(code+sections[i].VirtualAddress,image+sections[i].VirtualAddress,size))error=13;}
+#ifdef GRID_DEFORMATION_FRAME
+ if(memcmp(code,image,pe->OptionalHeader.SizeOfImage))error=13;
+#endif
  if(input&&ferror(input))error=14;if(output&&ferror(output))error=14;
  if(input&&fclose(input))error=14;if(output&&fclose(output))error=14;
+#ifdef GRID_DEFORMATION_FRAME
+ if(error&&output)_wremove(argv[3]);
+#endif
  free(code);VirtualFree(image,0,MEM_RELEASE);
  printf("impact_frame_cases=%u error=%u code_unchanged=%u no_imports=1\n",cases,error,error!=13);return (int)error;
 }

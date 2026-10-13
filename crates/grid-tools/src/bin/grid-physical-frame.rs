@@ -43,7 +43,7 @@ fn shape(i: u32) -> Result<Option<bool>, Failure> {
         _ => Err("invalid shape".into()),
     }
 }
-fn run() -> Result<(), Failure> {
+pub(crate) fn run(deformation: bool) -> Result<(), Failure> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
         return Err("usage: grid-physical-frame INPUT.bin local/OUTPUT.bin".into());
@@ -55,7 +55,9 @@ fn run() -> Result<(), Failure> {
     let mut p = 0;
     let h = take(&data, &mut p, 8)?;
     let count = word(h, 4);
-    if word(h, 0) != 0x31524650 || !(1..=1024).contains(&count) {
+    if word(h, 0) != if deformation { 0x31444650 } else { 0x31524650 }
+        || !(1..=1024).contains(&count)
+    {
         return Err("invalid header".into());
     }
     let mut output = h.to_vec();
@@ -202,7 +204,7 @@ fn run() -> Result<(), Failure> {
             .iter()
             .map(|r| std::array::from_fn(|i| word(r, 4 * i)))
             .collect();
-        let frame = impact_frame::calculate(&impact_frame::Input {
+        let input = impact_frame::Input {
             correction: None,
             gravity,
             bodies: settings,
@@ -219,7 +221,62 @@ fn run() -> Result<(), Failure> {
                 cached_pair,
                 cached_material,
             },
-        })?;
+        };
+        let mut descriptor = None;
+        let frame = if deformation {
+            use grid_world::{
+                deformation_contact_limit::Parameters, deformation_layout::WORDS,
+                deformation_physical_frame,
+            };
+            let raw = take(&data, &mut p, WORDS * 4)?;
+            let d: Vec<_> = (0..WORDS).map(|i| word(raw, i * 4)).collect();
+            let raw = take(&data, &mut p, 96)?;
+            let f = |i| number(raw, i * 4);
+            if nb != 1 || word(raw, 92) > 1 {
+                return Err("invalid deformation frame roles".into());
+            }
+            let body = std::array::from_fn(|i| word(&body_wire[0], i * 4));
+            let contacts: Vec<_> = contact_wire
+                .iter()
+                .map(|c| std::array::from_fn(|i| word(c, i * 4)))
+                .collect();
+            let result = deformation_physical_frame::calculate(
+                &input,
+                &d,
+                &body,
+                &contacts,
+                Parameters {
+                    low_mass_threshold: f(0),
+                    low_mass_speed_cap: f(1),
+                    corner_scale: f(2),
+                    velocity_projection: f(3),
+                    stiffness_scale: f(4),
+                    unlimited: f(5),
+                    damage_scale: f(6),
+                    table: std::array::from_fn(|i| f(7 + i)),
+                    global_disabled: word(raw, 92) != 0,
+                },
+                &[
+                    grid_world::contact_groups::Shape {
+                        flag230: true,
+                        ..Default::default()
+                    },
+                    grid_world::contact_groups::Shape {
+                        angular: true,
+                        ..Default::default()
+                    },
+                ],
+            )?;
+            descriptor = Some(result.descriptor);
+            for (wire, raw) in contact_wire.iter_mut().zip(result.prepared_contacts) {
+                for at in [0x3c, 0x40, 0x44] {
+                    put(wire, at, raw[at / 4]);
+                }
+            }
+            result.frame
+        } else {
+            impact_frame::calculate(&input)?
+        };
         let started = frame.started;
         output.extend(frame.status.to_le_bytes());
         output.extend(u32::from(started).to_le_bytes());
@@ -281,6 +338,11 @@ fn run() -> Result<(), Failure> {
         for w in o.rows.into_iter().flatten() {
             output.extend(w.to_le_bytes());
         }
+        if let Some(d) = descriptor {
+            for v in d {
+                output.extend(v.to_le_bytes());
+            }
+        }
     }
     if p != data.len() {
         return Err("trailing input".into());
@@ -300,7 +362,7 @@ fn run() -> Result<(), Failure> {
     Ok(())
 }
 fn main() {
-    if let Err(error) = run() {
+    if let Err(error) = run(false) {
         eprintln!("grid-physical-frame: {error}");
         std::process::exit(1);
     }
