@@ -1,6 +1,6 @@
 # Deformation initialization boundaries
 
-13 October 2026, follow-up to [active-grid vehicle integration](DEFORMATION_SYNCHRONIZATION.md). This is static research and a concrete implementation backlog. No new constructor has been executed or ported by this checkpoint. The playable build remains `f428d0a23ce8`; its meshes remain rigid.
+13 October 2026, follow-up to [active-grid vehicle integration](DEFORMATION_SYNCHRONIZATION.md). This records the initial static boundary investigation. Subsequent [complete layout proof](DEFORMATION_LAYOUT.md) and [source-derived original initialization baseline](DEFORMATION_SOURCE_INITIALIZATION.md) supersede its earlier unexecuted status. Rust mode-zero cell initialization remains pending. The playable build remains `f428d0a23ce8`; its meshes remain rigid.
 
 ## Separate stages
 
