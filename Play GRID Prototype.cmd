@@ -36,7 +36,7 @@ echo Loading the source track can take a little while...
 if "%~2"=="" (
   "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
 ) else (
-  echo Experimental body contacts enabled. Heavy impacts can pause; R resets.
+  echo Experimental body contacts enabled. Terminal wheel damage disables driving; R resets.
   if "%~3"=="" (
     "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
   ) else (

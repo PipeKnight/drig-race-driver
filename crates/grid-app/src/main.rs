@@ -115,6 +115,22 @@ impl Driving {
             (b[0xba5 / 4] >> 8) & 255,
             f32::from_bits(b[0x3d0 / 4])
         );
+        let m = 0xcdf0;
+        let effects = (0..8)
+            .map(|i| f32::from_bits(b[(m + 0x3a0) / 4 + i]))
+            .collect::<Vec<_>>();
+        let wheel_levels =
+            std::array::from_fn::<_, 4, _>(|i| f32::from_bits(b[(m + 0x18) / 4 + i]));
+        println!(
+            "drive_handling_sample version=1 event={event} segment={} tick={} status={} terminal_wheel={} effects_3a0_3bc={effects:?} wheel_levels={wheel_levels:?} controls_disabled={}",
+            self.segment,
+            self.runtime.ticks,
+            b[0xd234 / 4],
+            self.runtime
+                .terminal_wheel()
+                .map_or_else(|| "none".into(), |i| i.to_string()),
+            f32::from_bits(b[0x226c / 4])
+        );
         if let Some(registration) = &self.runtime.deformation_registration {
             let count = (0..3)
                 .map(|i| b[0xc714 / 4 + i] as usize)
@@ -865,7 +881,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Race rules are not implemented.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Unsupported damage notifications pause driving.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Race rules are not implemented.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
@@ -1553,17 +1569,29 @@ fn drive_present(
     if driving.runtime.deformation_enabled {
         geometry.push_str(" | DAMAGE");
     }
+    let terminal = terminal_damage_message(&driving.runtime);
     for mut window in &mut windows {
         window.title = format!(
             "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry} | tick {} | {}",
             driving.runtime.ticks,
             driving.failure.as_deref().unwrap_or(if driving.paused {
                 "Paused; P resumes; R resets"
+            } else if let Some(message) = terminal.as_deref() {
+                message
             } else {
                 "Arrows drive; Space handbrake; P pause; R reset"
             })
         );
     }
+}
+fn terminal_damage_message(runtime: &grid_tools::source_vehicle::Runtime) -> Option<String> {
+    runtime.terminal_wheel().map(|i| {
+        let wheel = ["rear-left", "rear-right", "front-left", "front-right"]
+            .get(i)
+            .copied()
+            .unwrap_or("unknown");
+        format!("Terminal {wheel} wheel damage; controls disabled; R resets")
+    })
 }
 fn update_orbit(
     input: Res<ButtonInput<KeyCode>>,
@@ -2093,5 +2121,50 @@ mod driving_tests {
         let p = driving.runtime.pose();
         let v = driving.runtime.velocity();
         assert!(v[0] * p[8] + v[1] * p[9] + v[2] * p[10] < -1.);
+        // A terminal car keeps advancing instead of entering the failure pause.
+        // Original terminal production is separately compared against 9F3E80;
+        // here exercise the actual app controls, source sync and reset consumer.
+        {
+            let mut driving = app.world_mut().resource_mut::<Driving>();
+            driving.runtime.state.car.owner.vehicle[0xd234 / 4] = 3;
+            driving.runtime.state.car.owner.vehicle[0xd238 / 4] = 2;
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        let before = app.world().resource::<Driving>().runtime.ticks;
+        for _ in 0..3 {
+            app.update();
+        }
+        let driving = app.world().resource::<Driving>();
+        assert!(driving.failure.is_none());
+        assert_eq!(driving.runtime.ticks, before + 3);
+        assert_eq!(
+            driving.runtime.state.car.owner.vehicle[0x226c / 4],
+            1f32.to_bits()
+        );
+        assert_eq!(
+            driving.runtime.state.car.owner.vehicle[0xe1c / 4],
+            0f32.to_bits()
+        );
+        assert_eq!(
+            terminal_damage_message(&driving.runtime).as_deref(),
+            Some("Terminal front-left wheel damage; controls disabled; R resets")
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        let driving = app.world().resource::<Driving>();
+        assert!(driving.failure.is_none());
+        assert_eq!(driving.runtime.ticks, 1);
+        assert_eq!(driving.runtime.terminal_wheel(), None);
+        assert_eq!(terminal_damage_message(&driving.runtime), None);
     }
 }

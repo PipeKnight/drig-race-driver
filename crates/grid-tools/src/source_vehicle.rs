@@ -91,6 +91,14 @@ fn byte(b: &mut [u32], o: usize, v: u8) {
 }
 
 impl Runtime {
+    /// Source terminal wheel state; ordinal order is rear L/R, front L/R.
+    /// Status 3 disables driving controls on the following synchronization,
+    /// while the physical simulation and reset remain active.
+    pub fn terminal_wheel(&self) -> Option<usize> {
+        let b = &self.state.car.owner.vehicle;
+        (b[0xd234 / 4] == 3).then_some((b[0xd238 / 4] & 255) as usize)
+    }
+
     pub fn wheels(&self) -> [WheelPose; 4] {
         let b = &self.state.car.owner.vehicle;
         let f = |o: usize| f32::from_bits(b[o / 4]);
