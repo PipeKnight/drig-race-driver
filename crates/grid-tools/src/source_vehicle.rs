@@ -1,6 +1,6 @@
 //! Source-only Lacetti/Donington serial driving prototype. No saved native state.
 //! The manager's single shared physical material and serial scheduling are explicit
-//! prototype choices; full factory behavior, damage events and racing remain absent.
+//! prototype choices; body events are opt-in, full factory/deformation/racing external.
 use crate::{contact_surfaces::Surfaces, source_physical, standard_car, track::Track};
 use grid_formats::{
     binxml, car_collision, grid, handling_damage, jpk, pssg, tuning, vehicle, vehicle_properties,
@@ -518,6 +518,142 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires purchased GRID sources and private body parameters"]
+    fn source_driving_active_grid() {
+        // Two complete owned worlds need more than the default test-thread stack.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let table =
+                    std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+                let data =
+                    std::fs::read(std::env::var_os("GRID_BODY_EVENT_PARAMETERS").unwrap()).unwrap();
+                let parameters = crate::body_impact_parameters::read(&data).unwrap();
+                let mut baseline = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+                let mut active = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+                let geometry = baseline.prepare_body_geometry(root, &table).unwrap();
+                let active_geometry = active.prepare_body_geometry(root, &table).unwrap();
+                baseline.body_events = Some(parameters);
+                active.body_events = Some(parameters);
+                // Explicit authored grid: this does not claim source initialization.
+                let owner = &mut active.state.car.owner.vehicle;
+                owner[0x4880 / 4..0xc580 / 4].fill(0);
+                for (node, displacement) in [(0, 0.125f32), (1, 0.25), (4, 0.5), (5, 1.)] {
+                    owner[(0x4880 + node * 80 + 12) / 4] = displacement.to_bits();
+                }
+                owner[0xc714 / 4..0xc720 / 4].fill(2);
+                owner[0xc7c4 / 4..0xc7ec / 4].fill(0);
+                byte(owner, 0xc7b1, 1);
+                let pool = owner[0x4880 / 4..0xc580 / 4].to_vec();
+                let mut contacts = 0;
+                for _ in 0..600 {
+                    let controls = Controls {
+                        throttle: 1.,
+                        steering: 0.25,
+                        ..Default::default()
+                    };
+                    baseline
+                        .tick_with_body_geometry(controls, &geometry)
+                        .unwrap();
+                    active
+                        .tick_with_body_geometry(controls, &active_geometry)
+                        .unwrap();
+                    contacts += active.last_body_contacts;
+                    assert_eq!(
+                        active.state.car.owner.physical,
+                        baseline.state.car.owner.physical
+                    );
+                    assert_eq!(
+                        active.state.car.owner.damage_random_state,
+                        baseline.state.car.owner.damage_random_state
+                    );
+                    assert_eq!(active.state.car.frame.body, baseline.state.car.frame.body);
+                    assert_eq!(active.state.car.frame.view, baseline.state.car.frame.view);
+                    assert_eq!(
+                        active.state.car.frame.solver,
+                        baseline.state.car.frame.solver
+                    );
+                    assert_eq!(
+                        active.state.world.groups.bodies,
+                        baseline.state.world.groups.bodies
+                    );
+                    assert_eq!(
+                        active.state.world.groups.contacts,
+                        baseline.state.world.groups.contacts
+                    );
+                    assert_eq!(active.last_body_contacts, baseline.last_body_contacts);
+                    assert_eq!(active.ticks, baseline.ticks);
+                    assert_eq!(active.cache.plane, baseline.cache.plane);
+                    let mut expected = baseline.state.car.owner.vehicle.clone();
+                    expected[0x4880 / 4..0xc580 / 4].copy_from_slice(&pool);
+                    expected[0xc714 / 4..0xc720 / 4].fill(2);
+                    for (i, value) in [0.125f32, 0.25, 0.5, 1.].into_iter().enumerate() {
+                        expected[0xc7b4 / 4 + i] = value.to_bits();
+                    }
+                    assert_eq!(active.state.car.owner.vehicle, expected);
+                }
+                assert!(contacts > 0);
+                println!(
+                    "active_grid_source ticks={} contacts={} four_corner_scores_verified=1",
+                    active.ticks, contacts
+                );
+                // A reached bad rest point rejects the entire runtime step,
+                // including controls, RNG, frame buffers and metadata.
+                byte(&mut active.state.car.owner.vehicle, 0xc7b1, 1);
+                active.state.car.owner.vehicle[(0x4880 + 7 * 80 + 28) / 4] = f32::NAN.to_bits();
+                let before = active.state.clone();
+                let before_meta = (active.ticks, active.last_body_contacts, active.cache.plane);
+                assert_eq!(
+                    active
+                        .tick_with_body_geometry(Controls::default(), &geometry)
+                        .err()
+                        .unwrap()
+                        .0,
+                    "invalid synchronized deformation node"
+                );
+                assert_eq!(active.state.car.owner.vehicle, before.car.owner.vehicle);
+                assert_eq!(active.state.car.owner.physical, before.car.owner.physical);
+                assert_eq!(
+                    active.state.car.owner.damage_random_state,
+                    before.car.owner.damage_random_state
+                );
+                assert_eq!(active.state.car.frame.body, before.car.frame.body);
+                assert_eq!(active.state.car.frame.view, before.car.frame.view);
+                assert_eq!(active.state.car.frame.solver, before.car.frame.solver);
+                assert_eq!(
+                    active.state.world.groups.contacts,
+                    before.world.groups.contacts
+                );
+                assert_eq!(
+                    (active.ticks, active.last_body_contacts, active.cache.plane),
+                    before_meta
+                );
+                active.reset();
+                baseline.reset();
+                assert_eq!(
+                    active.state.car.owner.vehicle,
+                    baseline.state.car.owner.vehicle
+                );
+                assert_eq!(
+                    active.state.car.owner.physical,
+                    baseline.state.car.owner.physical
+                );
+                assert_eq!(
+                    active.state.car.owner.damage_random_state,
+                    baseline.state.car.owner.damage_random_state
+                );
+                assert_eq!(active.ticks, 0);
+                assert_eq!(active.last_body_contacts, 0);
+                assert!(active.body_events.is_some());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     #[test]
     #[ignore = "requires purchased GRID sources and private body parameters"]
