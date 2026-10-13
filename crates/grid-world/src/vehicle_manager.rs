@@ -88,6 +88,7 @@ pub fn calculate(
         query,
         material,
         false,
+        None,
     )?;
     finish(&mut out.state.owner.vehicle)?;
     out.state
@@ -125,6 +126,7 @@ pub fn calculate_with_contacts(
         query,
         material,
         false,
+        None,
     )
 }
 
@@ -151,6 +153,34 @@ pub fn calculate_with_world_contacts(
         query,
         material,
         true,
+        None,
+    )
+}
+
+/// Same owned world manager with an explicit staged resource publisher.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_world_publication(
+    input: &State,
+    pool: &crate::wheel_contacts::Pool,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    publication: &mut vehicle_job::Publication<'_>,
+) -> Result<ContactOutput, Error> {
+    contacts(
+        input,
+        pool,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        true,
+        Some(publication),
     )
 }
 
@@ -165,6 +195,7 @@ fn contacts(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     world_center: bool,
+    publication: Option<&mut vehicle_job::Publication<'_>>,
 ) -> Result<ContactOutput, Error> {
     crate::wheel_contacts::validate(&input.owner.vehicle, pool)?;
     let mut out = run_job(
@@ -176,6 +207,7 @@ fn contacts(
         query,
         material,
         world_center,
+        publication,
     )?;
     let contacts = crate::wheel_contacts::calculate(
         &out.state.owner.vehicle,
@@ -200,6 +232,7 @@ fn run_job(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     world_center: bool,
+    publication: Option<&mut vehicle_job::Publication<'_>>,
 ) -> Result<Output, Error> {
     let b = &input.owner.vehicle;
     if b.len() != crate::vehicle_publication::VEHICLE_WORDS
@@ -239,7 +272,7 @@ fn run_job(
     next.frame
         .body
         .copy_from_slice(&next.owner.vehicle[..vehicle_force::BODY_WORDS]);
-    vehicle_job::calculate_owned(
+    vehicle_job::calculate_owned_with_publication(
         &next,
         pair,
         delta,
@@ -248,6 +281,7 @@ fn run_job(
         query,
         material,
         world_center,
+        publication,
     )
 }
 

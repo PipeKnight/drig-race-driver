@@ -23,6 +23,7 @@ type GeometryProvider<'a> = dyn FnMut(
 enum Geometry<'a> {
     Callback(&'a mut GeometryProvider<'a>),
     Source(&'a crate::body_geometry::BodyGeometry),
+    Deforming(&'a mut crate::body_geometry::BodyGeometry),
 }
 
 pub struct Runtime {
@@ -39,6 +40,8 @@ pub struct Runtime {
     pub last_body_contacts: usize,
     /// Opt-in owned static-peer event route; parameters are private source data.
     pub body_events: Option<grid_world::body_impact::Parameters>,
+    /// Explicit selected source deformation ownership, never inferred from raw flags.
+    pub deformation_enabled: bool,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -323,6 +326,7 @@ impl Runtime {
             ticks: 0,
             last_body_contacts: 0,
             body_events: None,
+            deformation_enabled: false,
         })
     }
 
@@ -400,11 +404,52 @@ impl Runtime {
         self.tick_owned(controls, Some(Geometry::Source(geometry)))
     }
 
+    /// Selected player LOD1 source initialization and actual startup consumers.
+    /// Retain Standard history/settings roles; no capture is used as state.
+    pub fn enable_deformation(
+        &mut self,
+        root: &Path,
+        geometry: &mut crate::body_geometry::BodyGeometry,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.ticks != 0 || self.deformation_enabled || !self.track.has_boundary() {
+            return Err("invalid source deformation startup boundary".into());
+        }
+        let prepared = crate::source_deformation::load(root, "lac")?;
+        let mut next = self.state.clone();
+        next.car.owner.vehicle =
+            crate::source_deformation::initialize_existing(&prepared, &next.car.owner.vehicle)?;
+        let mut staged_geometry = geometry.clone();
+        next.car.owner = staged_geometry.publish_deformation(&next.car.owner, 0.)?;
+        next.car
+            .frame
+            .body
+            .copy_from_slice(&next.car.owner.vehicle[..vehicle_force::BODY_WORDS]);
+        next.world.groups.bodies[0] = next.car.owner.physical;
+        self.state = next;
+        self.initial = self.state.clone();
+        self.deformation_enabled = true;
+        *geometry = staged_geometry;
+        Ok(())
+    }
+
+    pub fn tick_with_deforming_body_geometry(
+        &mut self,
+        controls: Controls,
+        geometry: &mut crate::body_geometry::BodyGeometry,
+    ) -> Result<(), Error> {
+        self.tick_owned(controls, Some(Geometry::Deforming(geometry)))
+    }
+
     fn tick_owned(
         &mut self,
         controls: Controls,
         geometry: Option<Geometry<'_>>,
     ) -> Result<(), Error> {
+        if self.deformation_enabled != matches!(&geometry, Some(Geometry::Deforming(_))) {
+            return Err(Error(
+                "source deformation requires its owned geometry publication route",
+            ));
+        }
         if [controls.throttle, controls.brake]
             .iter()
             .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
@@ -455,7 +500,35 @@ impl Runtime {
         };
         let material = |token| self.surfaces.joined(token);
         let mut body_contacts = 0;
+        let mut rebuilt_geometry = None;
         let output = match geometry {
+            Some(Geometry::Deforming(geometry)) => {
+                let resource = std::cell::RefCell::new(geometry.clone());
+                let mut publication = |owner: &vehicle_publication::State, delta| {
+                    resource.borrow_mut().publish_deformation(owner, delta)
+                };
+                let output = vehicle_world::calculate_with_geometry_events_publication(
+                    &staged,
+                    self.pair,
+                    GRAVITY,
+                    query,
+                    material,
+                    |bodies, remaining| {
+                        let contacts = resource.borrow().contacts(
+                            &self.track,
+                            &self.surfaces,
+                            bodies,
+                            remaining,
+                        )?;
+                        body_contacts = contacts.len();
+                        Ok(contacts)
+                    },
+                    self.body_events,
+                    &mut publication,
+                )?;
+                rebuilt_geometry = Some((geometry, resource.into_inner()));
+                output
+            }
             Some(Geometry::Callback(geometry)) => vehicle_world::calculate_with_geometry_events(
                 &staged,
                 self.pair,
@@ -495,6 +568,9 @@ impl Runtime {
                 self.body_events,
             )?,
         };
+        if let Some((geometry, next)) = rebuilt_geometry {
+            *geometry = next;
+        }
         self.state = output.state;
         self.cache = cache;
         self.ticks += 1;
@@ -503,6 +579,11 @@ impl Runtime {
     }
     pub fn reset(&mut self) {
         self.state = self.initial.clone();
+        // The external geometry may still carry damage. Reconstruct it at the
+        // next job publication before any advanced-pose contact query.
+        if self.deformation_enabled {
+            byte(&mut self.state.car.owner.vehicle, 0xc7f2, 1);
+        }
         self.cache = self.initial_cache;
         self.ticks = 0;
         self.last_body_contacts = 0;
@@ -518,6 +599,75 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires purchased GRID sources and private contact directions"]
+    fn source_driving_source_deformation() {
+        std::thread::Builder::new().stack_size(16*1024*1024).spawn(||{
+            let root=std::env::var_os("GRID_GAME_ROOT").unwrap();let root=Path::new(&root);
+            let table=std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+            let mut runtime=Runtime::lacetti(root,"slot_00",200679).unwrap();
+            let history=runtime.state.car.owner.vehicle[0x290/4..0x300/4].to_vec();
+            let preserved=runtime.state.car.owner.vehicle[0xc780/4];
+            let mut geometry=runtime.prepare_body_geometry(root,&table).unwrap();
+            runtime.enable_deformation(root,&mut geometry).unwrap();
+            assert_eq!(&runtime.state.car.owner.vehicle[0x290/4..0x300/4],history);
+            assert_eq!(runtime.state.car.owner.vehicle[0xc780/4],preserved);
+            assert_eq!(runtime.state.car.owner.vehicle[0xc7f8/4],0xd240);
+            assert_eq!(f32::from_bits(runtime.state.car.owner.vehicle[0xee40/4]),0.1);
+            assert_eq!(f32::from_bits(runtime.state.car.owner.vehicle[0xeef8/4]),0.001);
+            assert_eq!(f32::from_bits(runtime.state.car.owner.vehicle[0xeefc/4]),1.);
+            let controls=Controls{throttle:1.,steering:0.25,..Default::default()};
+            assert!(runtime.tick_with_body_geometry(controls,&geometry).is_err());
+            // Fail after the driver and staged geometry update, before world
+            // commit. Preserve physical/world/cache and actual query geometry.
+            byte(&mut runtime.state.car.owner.vehicle,0xc7f2,1);
+            runtime.state.car.owner.vehicle[0xcd9c/4]=0;
+            let before=runtime.state.clone();let cache=runtime.cache;
+            let actual=geometry.contacts(&runtime.track,&runtime.surfaces,&before.world.groups.bodies,64).unwrap();
+            assert!(runtime.tick_with_deforming_body_geometry(controls,&mut geometry).is_err());
+            assert_eq!(runtime.state.car.owner.vehicle,before.car.owner.vehicle);
+            assert_eq!(runtime.state.car.owner.physical,before.car.owner.physical);
+            assert_eq!(runtime.state.world.groups.contacts,before.world.groups.contacts);
+            assert_eq!(runtime.state.world.manager.rows,before.world.manager.rows);
+            assert_eq!(runtime.cache.plane,cache.plane);assert_eq!(runtime.ticks,0);
+            assert_eq!(geometry.contacts(&runtime.track,&runtime.surfaces,&before.world.groups.bodies,64).unwrap(),actual);
+            runtime.reset();
+            let drive=|runtime:&mut Runtime,geometry:&mut crate::body_geometry::BodyGeometry|{
+                let mut contacts=0;
+                for tick in 0..600 {
+                    if tick==80 {
+                        // Explicit authored grid displacement to exercise the
+                        // integrated consumer; not a collision-production claim.
+                        let b=&mut runtime.state.car.owner.vehicle;
+                        let count=(0..3).map(|i|b[0xc714/4+i] as usize).product::<usize>();
+                        for i in 0..count{let at=(0x4880+i*80)/4;b[at]=(f32::from_bits(b[at])+0.1).to_bits();}
+                        byte(b,0xc7f2,1);
+                    }
+                    runtime.tick_with_deforming_body_geometry(controls,geometry).unwrap();
+                    contacts+=runtime.last_body_contacts;
+                    assert_eq!(runtime.state.car.owner.vehicle[0xc7f0/4]>>16&255,0);
+                    assert_eq!(runtime.state.car.owner.vehicle[0xc7f8/4],0xd240);
+                }
+                contacts
+            };
+            let contacts=drive(&mut runtime,&mut geometry);assert!(contacts>0);
+            let first=runtime.state.clone();let first_cache=runtime.cache;let last=runtime.last_body_contacts;
+            runtime.reset();let repeated=drive(&mut runtime,&mut geometry);
+            assert_eq!(contacts,repeated);assert_eq!(runtime.state.car.owner.vehicle,first.car.owner.vehicle);
+            assert_eq!(runtime.state.car.owner.physical,first.car.owner.physical);
+            assert_eq!(runtime.state.car.owner.damage_random_state,first.car.owner.damage_random_state);
+            assert_eq!(runtime.state.car.frame.body,first.car.frame.body);assert_eq!(runtime.state.car.frame.solver,first.car.frame.solver);
+            assert_eq!(runtime.state.world.groups.bodies,first.world.groups.bodies);
+            assert_eq!(runtime.state.world.groups.contacts,first.world.groups.contacts);
+            assert_eq!(runtime.state.world.groups.world,first.world.groups.world);
+            assert_eq!(runtime.state.world.manager.rows,first.world.manager.rows);
+            assert_eq!(runtime.state.world.manager.workspace,first.world.manager.workspace);
+            assert_eq!(runtime.state.world.manager.ends,first.world.manager.ends);
+            assert_eq!(runtime.cache.plane,first_cache.plane);assert_eq!(runtime.last_body_contacts,last);assert_eq!(runtime.ticks,600);
+            eprintln!("source_deformation_runtime ticks=600 replay_ticks=600 body_contacts={contacts} source_history_preserved=1 late_failure_atomic=1 reset_replay_exact=1 supplied_grid_change=1 physical_bulk_callbacks=0");
+        }).unwrap().join().unwrap();
+    }
 
     #[test]
     #[ignore = "requires purchased GRID sources and private contact directions"]

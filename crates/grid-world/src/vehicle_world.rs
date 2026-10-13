@@ -90,6 +90,7 @@ pub fn calculate(
         material,
         None,
         None,
+        None,
     )
 }
 
@@ -114,6 +115,7 @@ pub fn calculate_with_events(
         material,
         None,
         events,
+        None,
     )
 }
 
@@ -142,6 +144,7 @@ pub fn calculate_with_geometry(
         material,
         Some(&mut geometry),
         None,
+        None,
     )
 }
 
@@ -168,6 +171,36 @@ pub fn calculate_with_geometry_events(
         material,
         Some(&mut geometry),
         events,
+        None,
+    )
+}
+
+/// Explicit source-resource publication at the original car-job boundary.
+/// External geometry must be staged by the caller until this whole world returns.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_geometry_events_publication(
+    input: &State,
+    pair: [usize; 2],
+    gravity: f32,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    mut geometry: impl FnMut(
+        &[contact_groups::Body],
+        usize,
+    ) -> Result<Vec<contact_groups::Contact>, Error>,
+    events: Option<body_impact::Parameters>,
+    publication: &mut crate::vehicle_job::Publication<'_>,
+) -> Result<Output, Error> {
+    calculate_owned(
+        input,
+        pair,
+        gravity,
+        None,
+        query,
+        material,
+        Some(&mut geometry),
+        events,
+        Some(publication),
     )
 }
 
@@ -181,6 +214,7 @@ fn calculate_owned(
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     geometry: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
     events: Option<body_impact::Parameters>,
+    publication: Option<&mut crate::vehicle_job::Publication<'_>>,
 ) -> Result<Output, Error> {
     if input.world.groups.bodies.len() != 1
         || input.car.owner.physical != input.world.groups.bodies[0]
@@ -209,16 +243,30 @@ fn calculate_owned(
         used: 0,
         shapes: input.shapes.len() - 1,
     };
-    let manager = vehicle_manager::calculate_with_world_contacts(
-        &input.car,
-        &pool,
-        pair,
-        input.world.manager.parameters[0],
-        gravity,
-        handling_queries,
-        query,
-        material,
-    )?;
+    let manager = if let Some(publication) = publication {
+        vehicle_manager::calculate_with_world_publication(
+            &input.car,
+            &pool,
+            pair,
+            input.world.manager.parameters[0],
+            gravity,
+            handling_queries,
+            query,
+            material,
+            publication,
+        )?
+    } else {
+        vehicle_manager::calculate_with_world_contacts(
+            &input.car,
+            &pool,
+            pair,
+            input.world.manager.parameters[0],
+            gravity,
+            handling_queries,
+            query,
+            material,
+        )?
+    };
     let mut previous = input.world.clone();
     previous.groups.bodies[0] = manager.job.state.owner.physical;
     let mut active_contacts = manager.contacts.used;

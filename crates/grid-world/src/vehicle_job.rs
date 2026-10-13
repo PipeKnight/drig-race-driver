@@ -5,6 +5,10 @@ use crate::{
     Error, contact_ray, suspension_prepare::Contact, vehicle_contact_force::Material,
     vehicle_force, vehicle_handling, vehicle_publication, vehicle_sync,
 };
+/// A caller-owned publication consumer. Called exactly after the driver update;
+/// the caller stages external resources until the complete world succeeds.
+pub type Publication<'a> =
+    dyn FnMut(&vehicle_publication::State, f32) -> Result<vehicle_publication::State, Error> + 'a;
 
 /// Preserves complete input on failure, including a late mutable-effect failure.
 pub fn calculate(
@@ -56,6 +60,30 @@ pub(crate) fn calculate_owned(
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     world_center: bool,
 ) -> Result<Output, Error> {
+    calculate_owned_with_publication(
+        input,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        world_center,
+        None,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calculate_owned_with_publication(
+    input: &State,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    world_center: bool,
+    publication: Option<&mut Publication<'_>>,
+) -> Result<Output, Error> {
     if input.owner.vehicle.len() != vehicle_publication::VEHICLE_WORDS
         || input.owner.vehicle[..input.frame.body.len()] != input.frame.body
     {
@@ -86,7 +114,15 @@ pub(crate) fn calculate_owned(
     let materials =
         crate::vehicle_step::apply(&mut next.frame, pair, delta, gravity, query, material)?;
     next.owner.vehicle[..vehicle_force::BODY_WORDS].copy_from_slice(&next.frame.body);
-    next.owner = vehicle_handling::publish_with_queries(&next.owner, delta, handling_queries)?;
+    next.owner = if let Some(publication) = publication {
+        vehicle_handling::calculate_with_queries(
+            &publication(&next.owner, delta)?,
+            delta,
+            handling_queries,
+        )?
+    } else {
+        vehicle_handling::publish_with_queries(&next.owner, delta, handling_queries)?
+    };
     next.frame
         .body
         .copy_from_slice(&next.owner.vehicle[..vehicle_force::BODY_WORDS]);
