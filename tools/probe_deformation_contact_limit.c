@@ -18,6 +18,7 @@ static int cap_admitted(const unsigned char *r){
  for(unsigned i=0;i<nx*ny*nz;i++)for(unsigned a=0;a<5;a++)if(!range(number(r,0x2580+i*80+(a==4?0x40:a*4)),-1e6f,1e6f))return 0;
  return 1;
 }
+#ifndef DEFORMATION_CAP_EMBEDDED
 int wmain(int argc,wchar_t **argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);if(argc!=4)return 2;
  unsigned control;if(_controlfp_s(&control,_PC_53|_RC_NEAR,_MCW_PC|_MCW_RC))return 3;
@@ -56,3 +57,4 @@ int wmain(int argc,wchar_t **argv){
  printf("contact_limit_cases=%u completed=%u owned_canaries=1 full_image_unchanged=%u error=%u\n",count,completed,unchanged,error);
  free(input);free(results);free(saved);VirtualFree(image,0,MEM_RELEASE);return error;
 }
+#endif
