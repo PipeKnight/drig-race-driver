@@ -729,11 +729,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut drive = false;
     let mut drive_ticks = None;
     let mut body_contacts = None;
+    let mut body_events = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--drive" => drive = true,
+            "--body-events" => {
+                body_events = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--body-events needs a private BP01 path")?,
+                ));
+            }
             "--body-contacts" => {
                 body_contacts = Some(PathBuf::from(
                     args.next()
@@ -796,6 +803,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Race rules are not implemented.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Unsupported damage notifications pause driving.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
+                println!(
+                    "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
+                );
                 return Ok(());
             }
             _ => return Err(format!("unknown argument {arg}").into()),
@@ -804,8 +814,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=36000".into());
     }
-    if body_contacts.is_some() && !drive {
-        return Err("--body-contacts requires --drive".into());
+    if (body_contacts.is_some() || body_events.is_some()) && !drive {
+        return Err("--body-contacts and --body-events require --drive".into());
     }
     if !scripted.throttle.is_finite()
         || !(0. ..=1.).contains(&scripted.throttle)
@@ -820,6 +830,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         collision = false;
         start_view = true;
         let mut runtime = grid_tools::source_vehicle::Runtime::lacetti(&root, "slot_00", 200679)?;
+        if let Some(path) = body_events {
+            if std::fs::metadata(&path)?.len() != 28 {
+                return Err("invalid private body event parameter extent".into());
+            }
+            runtime.body_events = Some(grid_tools::body_impact_parameters::read(&std::fs::read(
+                path,
+            )?)?);
+            println!(
+                "drive_body_events enabled=true scope=single-car-static-peers notifications=empty persistent-chains=absent"
+            );
+        }
         let geometry = body_contacts.map(|path| -> Result<_, Box<dyn std::error::Error>> {
             if std::fs::metadata(&path)?.len() != 712 {
                 return Err("invalid private body sampling extent".into());
@@ -1346,11 +1367,14 @@ fn drive_present(
     } else {
         ""
     };
-    let geometry = if driving.geometry.is_some() {
+    let mut geometry = if driving.geometry.is_some() {
         format!(" | BODY {}", driving.runtime.last_body_contacts)
     } else {
         String::new()
     };
+    if driving.runtime.body_events.is_some() {
+        geometry.push_str(" | EVENTS");
+    }
     for mut window in &mut windows {
         window.title = format!(
             "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry} | tick {} | {}",
@@ -1528,6 +1552,12 @@ mod driving_tests {
                 .prepare_body_geometry(Path::new(&root), table)
                 .unwrap()
         });
+        if table.is_some() {
+            let parameters =
+                std::fs::read(std::env::var_os("GRID_BODY_EVENT_PARAMETERS").unwrap()).unwrap();
+            runtime.body_events =
+                Some(grid_tools::body_impact_parameters::read(&parameters).unwrap());
+        }
         let mut app = App::new();
         app.add_message::<AppExit>()
             .insert_resource(ButtonInput::<KeyCode>::default())

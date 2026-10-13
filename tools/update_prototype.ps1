@@ -14,7 +14,7 @@ $taskRustc=if($taskRustcCommand){$taskRustcCommand.Source}else{Join-Path $env:US
 if(!(Test-Path -LiteralPath $taskCargo) -or !(Test-Path -LiteralPath $taskRustc)){
     throw 'The existing Rust toolchain was not found on PATH or in the standard user Cargo directory'
 }
-$taskKeys=@('CARGO_INCREMENTAL','GRID_GAME_ROOT','GRID_CONTACT_DIRECTIONS','GRID_BUILD_REVISION')
+$taskKeys=@('CARGO_INCREMENTAL','GRID_GAME_ROOT','GRID_CONTACT_DIRECTIONS','GRID_BODY_EVENT_PARAMETERS','GRID_BUILD_REVISION')
 $taskPrevious=@{}
 foreach($taskKey in $taskKeys){$taskPrevious[$taskKey]=[Environment]::GetEnvironmentVariable($taskKey,'Process')}
 Push-Location $taskRoot
@@ -27,7 +27,9 @@ try {
     $env:CARGO_INCREMENTAL='0'
     $env:GRID_GAME_ROOT=[IO.Path]::GetFullPath($GameRoot)
     $env:GRID_CONTACT_DIRECTIONS=Join-Path $taskRoot 'local/body-contact-directions.bin'
+    $env:GRID_BODY_EVENT_PARAMETERS=Join-Path $taskRoot 'local/body-impact-parameters.bin'
     if(!(Test-Path -LiteralPath $env:GRID_CONTACT_DIRECTIONS)){throw 'Private body sampling file is required for the complete source checks'}
+    if(!(Test-Path -LiteralPath $env:GRID_BODY_EVENT_PARAMETERS)){throw 'Private BP01 file is required; prepare it with tools/extract_body_impact_parameters.py'}
     $taskStamp=[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ')
     $taskEvidence=Join-Path $taskRoot "local/playtest/build-$taskStamp"
     New-Item -ItemType Directory -Path $taskEvidence | Out-Null
@@ -50,6 +52,7 @@ try {
         bevy_tests='passed'
         game_root=$env:GRID_GAME_ROOT
         contact_directions_sha256=(Get-FileHash -LiteralPath $env:GRID_CONTACT_DIRECTIONS -Algorithm SHA256).Hash.ToLowerInvariant()
+        body_event_parameters_sha256=(Get-FileHash -LiteralPath $env:GRID_BODY_EVENT_PARAMETERS -Algorithm SHA256).Hash.ToLowerInvariant()
         evidence=$taskEvidence
         scope='Source driving and Bevy checks pass; rendering/manual lap require separate evidence.'
     }

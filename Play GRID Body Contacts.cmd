@@ -6,5 +6,9 @@ if not exist "%~dp0local\body-contact-directions.bin" (
   pause
   exit /b 2
 )
-call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin"
+if exist "%~dp0local\body-impact-parameters.bin" (
+  call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin" "%~dp0local\body-impact-parameters.bin"
+) else (
+  call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin"
+)
 exit /b %ERRORLEVEL%

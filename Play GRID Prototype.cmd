@@ -37,7 +37,12 @@ if "%~2"=="" (
   "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
 ) else (
   echo Experimental body contacts enabled. Heavy impacts can pause; R resets.
-  "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
+  if "%~3"=="" (
+    "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
+  ) else (
+    echo Registered body impact events enabled for static barriers.
+    "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" > "%GRID_PLAY_LOG%" 2>&1
+  )
 )
 set "GRID_PLAY_EXIT=%ERRORLEVEL%"
 echo Prototype exited with code %GRID_PLAY_EXIT%.
