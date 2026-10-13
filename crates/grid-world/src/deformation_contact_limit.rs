@@ -66,7 +66,7 @@ pub(crate) fn validate(
     p: Parameters,
 ) -> Result<usize, Error> {
     if descriptor.len() != WORDS
-        || byte(contact, 0xc) == 0
+        || byte(contact, 0xc) > 1
         || contact[1] != 0
         || contact[2] != 0
         || descriptor[0xa4ec / 4] >= 10

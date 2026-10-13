@@ -156,7 +156,7 @@ pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
                 || c.bodies != [0, 0]
                 || r[1] != 0
                 || r[2] != 0
-                || r[3] & 255 == 0
+                || r[3] & 255 > 1
                 || c.accumulated.to_bits() != r[0x38 / 4]
                 || c.previous_impulse.to_bits() != r[0x3c / 4]
                 || (0..4).any(|i| {

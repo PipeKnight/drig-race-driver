@@ -71,7 +71,7 @@ pub fn calculate(
         || byte(physical, 0x390) > 1
         || contacts
             .iter()
-            .any(|c| c[1] != 0 || c[2] != 0 || byte(c, 0xc) == 0)
+            .any(|c| c[1] != 0 || c[2] != 0 || byte(c, 0xc) > 1)
     {
         return Err(Error("invalid owned bulk deformation roles"));
     }
