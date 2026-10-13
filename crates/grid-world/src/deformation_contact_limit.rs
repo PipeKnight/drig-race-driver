@@ -58,14 +58,13 @@ fn lookup(value: f32, p: Parameters) -> f64 {
 }
 /// Pointers are explicit owned roles: first contact body equals this owner,
 /// +0C is nonzero, and no second body, shape graph or wake call is followed.
-#[allow(clippy::assign_op_pattern)] // Retain original SSE/x87 operation order.
-pub fn calculate(
+pub(crate) fn validate(
     descriptor: &[u32],
     body: &[u32; PHYSICAL_WORDS],
     center: [f32; 4],
     contact: &[u32; 32],
     p: Parameters,
-) -> Result<Output, Error> {
+) -> Result<usize, Error> {
     if descriptor.len() != WORDS
         || byte(contact, 0xc) == 0
         || contact[1] != 0
@@ -119,6 +118,19 @@ pub fn calculate(
     {
         return Err(Error("invalid contact limit nodes"));
     }
+    Ok(count)
+}
+
+#[allow(clippy::assign_op_pattern)] // Retain original SSE/x87 operation order.
+pub fn calculate(
+    descriptor: &[u32],
+    body: &[u32; PHYSICAL_WORDS],
+    center: [f32; 4],
+    contact: &[u32; 32],
+    p: Parameters,
+) -> Result<Output, Error> {
+    let count = validate(descriptor, body, center, contact, p)?;
+    let dimensions: [usize; 3] = std::array::from_fn(|i| descriptor[0xa414 / 4 + i] as usize);
     let mut out = Output {
         descriptor: descriptor.to_vec(),
         contact: *contact,

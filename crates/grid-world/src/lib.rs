@@ -26,6 +26,7 @@ pub mod deformation_grid;
 pub mod deformation_impact;
 pub mod deformation_initialization;
 pub mod deformation_layout;
+pub mod deformation_preparation;
 pub mod deformation_settle;
 pub mod deformation_volume;
 pub mod dynamics;
