@@ -1,5 +1,7 @@
 # Registered body impacts in the driving runtime
 
+Follow-up: the [complete original registered pool wrapper](REGISTERED_POOL_WRAPPER.md) now matches 1,800 sequential solved source boundaries. The [owner's collision lap](PLAYTEST_2026_10_13.md) completes without a recorded simulation failure. Neither establishes original-game lap timing or calibrated handling.
+
 The selected body-impact handler is now connected to the Rust driving world. **Play GRID Body Contacts.cmd** enables both physical contacts and the new event path when private BP01 data is present. The window title includes `EVENTS`; the standard launcher retains its existing mode. This adds verified damage/suspension event handling, not visual body deformation or arbitrary crash compatibility.
 
 ## Integration and ownership
