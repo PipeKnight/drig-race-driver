@@ -1,7 +1,15 @@
 /* Conservative whole-outer ownership/setup and shared synchronization guards. */
 static int outer_finite(const void *p,unsigned n){for(unsigned i=0;i<n;i++)if(!isfinite(((const float *)p)[i]))return 0;return 1;}
+#ifdef GRID_ACTIVE_DEFORMATION
+#include "active_deformation_probe.h"
+#endif
 static unsigned outer_sync_guard(const unsigned char *v,const unsigned char *p){
-    if(get(v,0xdb0)||get(v,0xc7ec)>=10||get(v,0xc714)||get(v,0xc718)||get(v,0xc71c)||!outer_finite(p+0x1d0,24)||!outer_finite(v+0xc7c4,10)||!outer_finite(v+0xc7b4,4))return 30;
+    if(get(v,0xdb0)||get(v,0xc7ec)>=10||!outer_finite(p+0x1d0,24)||!outer_finite(v+0xc7c4,10)||!outer_finite(v+0xc7b4,4))return 30;
+#ifdef GRID_ACTIVE_DEFORMATION
+    if(!grid_deformation_guard(v))return 30;
+#else
+    if(get(v,0xc714)||get(v,0xc718)||get(v,0xc71c))return 30;
+#endif
     const unsigned settings[]={0xd198,0xd1ac,0xd1b0,0xce04,0xd1c8,0xd1e0,0xd1f8,0xd210,0xd19c,0xd1c4,0xd1dc,0xd1f4,0xd20c,0xd1bc,0xd1d4,0xd1ec,0xd204,0xd1a8,0xd194,0xd1a0,0xd1a4,0xfa8,0xfac,0xfb0,0xfb4,0x1560};
     for(unsigned i=0;i<sizeof(settings)/sizeof(*settings);i++)if(!outer_finite(v+settings[i],1))return 31;
     const float scale=*(const float *)(v+0x1560),mass=*(const float *)(v+0xfa8)*scale;
