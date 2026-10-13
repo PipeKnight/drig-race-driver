@@ -85,8 +85,10 @@ impl Driving {
         let hits = (0..4)
             .filter(|i| b[(0x1990 + i * 0x150 + 0xc0) / 4] != 0)
             .count();
+        let damage_levels = [0, 4, 8, 0x10, 0x14, 0x28, 0x2c, 0x30, 0x34]
+            .map(|o| f32::from_bits(b[(0xcdf0 + o) / 4]));
         println!(
-            "drive_sample version=1 event={event} segment={} tick={} seconds={:.6} wall_seconds={:.6} throttle={} brake={} steering={} handbrake={} gear={} wheel_hits={hits} pose={:?} velocity={:?} wheel_brakes={brakes:?} body_geometry={} body_contacts={}",
+            "drive_sample version=1 event={event} segment={} tick={} seconds={:.6} wall_seconds={:.6} throttle={} brake={} steering={} handbrake={} gear={} wheel_hits={hits} pose={:?} velocity={:?} wheel_brakes={brakes:?} body_geometry={} body_contacts={} body_events={} damage_rng_owned={} damage_rng={:08x} impact_flag={} suspension_gain={} damage_levels={damage_levels:?}",
             self.segment,
             self.runtime.ticks,
             self.runtime.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
@@ -99,7 +101,17 @@ impl Driving {
             self.runtime.pose(),
             self.runtime.velocity(),
             self.geometry.is_some(),
-            self.runtime.last_body_contacts
+            self.runtime.last_body_contacts,
+            self.runtime.body_events.is_some(),
+            self.runtime.state.car.owner.damage_random_state.is_some(),
+            self.runtime
+                .state
+                .car
+                .owner
+                .damage_random_state
+                .unwrap_or(0),
+            (b[0xba5 / 4] >> 8) & 255,
+            f32::from_bits(b[0x3d0 / 4])
         );
     }
 }
