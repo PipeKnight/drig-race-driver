@@ -5,6 +5,7 @@ use crate::{contact_surfaces::Surfaces, track::Track};
 use grid_formats::{binxml, car_collision};
 use grid_world::{Error, collision_mesh, contact_groups, convex_distance, physical_pose};
 
+#[derive(Clone)]
 pub struct BodyGeometry {
     shape: collision_mesh::MeshShape,
     local: physical_pose::Matrix,
@@ -16,6 +17,45 @@ pub struct BodyGeometry {
 }
 
 impl BodyGeometry {
+    /// Atomically rebuild this actual contact geometry, update owned wheels and
+    /// publish the reached damage view. This selected independent shape owner
+    /// does not emulate the original full car allocator/graphics factory.
+    pub fn publish_deformation(
+        &mut self,
+        state: &grid_world::vehicle_publication::State,
+        delta: f32,
+    ) -> Result<grid_world::vehicle_publication::State, Error> {
+        use grid_world::{
+            deformation_grid::Grid, deformation_publication, vehicle_publication::VEHICLE_WORDS,
+        };
+        let b = &state.vehicle;
+        if b.len() != VEHICLE_WORDS || ((b[0xc7f0 / 4] >> 16) & 255) > 1 {
+            return Err(Error("invalid deformation geometry publication framing"));
+        }
+        if (b[0xc7f0 / 4] >> 16) & 255 == 0 {
+            return deformation_publication::calculate(state, delta);
+        }
+        let dimensions: [usize; 3] = std::array::from_fn(|i| b[0xc714 / 4 + i] as usize);
+        if dimensions.iter().any(|d| !(2..=16).contains(d))
+            || dimensions.iter().product::<usize>() > 400
+        {
+            return Err(Error("invalid deformation geometry publication grid"));
+        }
+        let positions: Vec<_> = (0..dimensions.iter().product::<usize>())
+            .map(|i| std::array::from_fn(|j| f32::from_bits(b[(0x4880 + i * 80) / 4 + j])))
+            .collect();
+        let grid = Grid {
+            dimensions,
+            spacing: f32::from_bits(b[0xc720 / 4]),
+            minimum: std::array::from_fn(|j| f32::from_bits(b[0xc730 / 4 + j])),
+            positions: &positions,
+        };
+        let mut geometry = self.clone();
+        geometry.rebuild_from_deformation(&grid)?;
+        let next = deformation_publication::after_geometry_rebuild(state, delta)?;
+        *self = geometry;
+        Ok(next)
+    }
     /// Source NED, verified owner layout offset, and locally prepared private
     /// CD01 sampling data. Raw source Y bounds define this selected mesh center.
     pub fn read(

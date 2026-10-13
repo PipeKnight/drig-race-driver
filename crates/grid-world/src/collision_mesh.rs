@@ -3,6 +3,7 @@
 //! Supplied geometry is not convexified. Selected first-shape attachment is explicit.
 use crate::{Error, spawn};
 
+#[derive(Clone)]
 pub struct Mesh {
     bytes: Vec<u8>,
     points: usize,
@@ -42,6 +43,7 @@ pub struct ShapeSettings {
 
 /// Complete retained supplied shape storage and its owned mesh.
 /// This update does not perform base construction or physical registration.
+#[derive(Clone)]
 pub struct MeshShape {
     shape: [u8; 0x250],
     mesh: Mesh,

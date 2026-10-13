@@ -499,6 +499,7 @@ struct DistanceOptions {
 
 /// Sampling data supplied privately from the owner's identified installation.
 /// This diagnostic API does not embed original game tables in public source.
+#[derive(Clone)]
 pub struct ContactSettings {
     pub margin: f32,
     pub directions: [V; 44],

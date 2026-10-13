@@ -105,6 +105,7 @@ pub mod wheel_contacts;
 pub mod wheel_coupling;
 pub mod wheel_damage;
 pub mod wheel_deformation;
+pub mod wheel_deformation_state;
 pub mod wheel_frame;
 pub mod wheel_history;
 pub mod wheel_radius;

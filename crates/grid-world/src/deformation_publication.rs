@@ -133,6 +133,25 @@ pub fn calculate(input: &State, delta: f32) -> Result<State, Error> {
     Ok(next)
 }
 
+/// Boundary after the caller has successfully rebuilt the actual collision
+/// geometry. Stage the original dirty flag/body4 transition and whole wheel
+/// update, then the reached publication. This does not implement A01960.
+pub fn after_geometry_rebuild(input: &State, delta: f32) -> Result<State, Error> {
+    if input.vehicle.len() != VEHICLE_WORDS
+        || byte(&input.vehicle, 0xc7f2) > 1
+        || byte(&input.vehicle, 4) > 1
+    {
+        return Err(Error("invalid completed deformation rebuild boundary"));
+    }
+    let mut next = input.clone();
+    if byte(&input.vehicle, 0xc7f2) != 0 {
+        put_byte(&mut next.vehicle, 0xc7f2, 0);
+        put_byte(&mut next.vehicle, 4, 1);
+        next.vehicle = crate::wheel_deformation_state::calculate(&next.vehicle)?;
+    }
+    calculate(&next, delta)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

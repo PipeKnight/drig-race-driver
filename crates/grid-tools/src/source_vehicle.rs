@@ -545,8 +545,40 @@ mod tests {
             assert!(geometry.rebuild_from_deformation(&grid(&invalid)).is_err());
             assert_eq!(contacts(&geometry),deformed);
             geometry.rebuild_from_deformation(&grid(&positions)).unwrap();assert_eq!(contacts(&geometry),pristine);
+            // Actual geometry + complete owned wheel/view publication, including
+            // a failure reached after successful staged shape construction.
+            let mut publication=runtime.state.car.owner.clone();
+            publication.vehicle[0x2300/4..0xc800/4].copy_from_slice(d);
+            publication.vehicle[0xd240/4..0xd240/4+prepared.settings.len()].copy_from_slice(&prepared.settings);
+            publication.vehicle[0xc7f8/4]=0xd240;
+            publication.vehicle[0xee40/4]=0.1f32.to_bits();
+            publication.vehicle[0xeefc/4]=1f32.to_bits();
+            for at in [0xcd90,0xcd94,0xcd98,0xcd9c]{publication.vehicle[at/4]=0.1f32.to_bits();}
+            for i in 0..4 {
+                let anchor: [u32;4]=publication.vehicle[(0x1990+i*0x150)/4..(0x1990+i*0x150)/4+4].try_into().unwrap();
+                publication.vehicle[(0xcda0+i*16)/4..(0xcda0+i*16)/4+4].copy_from_slice(&anchor);
+            }
+            let published=geometry.publish_deformation(&publication,DELTA).unwrap();
+            assert_eq!(contacts(&geometry),pristine);
+            assert_eq!((published.vehicle[0xc7f0/4]>>16)&255,0);
+            assert_eq!(published.vehicle[1]&255,1);
+            let mut pending=published.clone();
+            byte(&mut pending.vehicle,0xc7f2,1);
+            for (i,p) in displaced.iter().enumerate(){pending.vehicle[(0x4880+i*80)/4..(0x4880+i*80)/4+4].copy_from_slice(&p.map(f32::to_bits));}
+            // Invalid view range is checked after geometry and wheel updates.
+            pending.vehicle[0xcd9c/4]=0;
+            let before=pending.clone();
+            assert!(geometry.publish_deformation(&pending,DELTA).is_err());
+            assert_eq!(contacts(&geometry),pristine);
+            assert_eq!(pending.vehicle,before.vehicle);assert_eq!(pending.physical,before.physical);
+            pending.vehicle[0xcd9c/4]=0.1f32.to_bits();
+            let published=geometry.publish_deformation(&pending,DELTA).unwrap();
+            assert_eq!(contacts(&geometry),deformed);
+            assert_ne!(&published.vehicle[0x1650/4..0x1690/4],&before.vehicle[0x1650/4..0x1690/4]);
+            assert_eq!((published.vehicle[0xc7f0/4]>>16)&255,0);
+            assert_eq!(publication.vehicle[0xc7f0/4]>>16&255,1);
             assert_eq!(runtime.ticks,0);
-            eprintln!("deformed_source_geometry pristine_contacts={} deformed_contacts={} failure_preserves_contacts=1 source_rebuild_restores_contacts=1",pristine.len(),deformed.len());
+            eprintln!("deformed_source_geometry pristine_contacts={} deformed_contacts={} failure_preserves_contacts=1 source_rebuild_restores_contacts=1 atomic_geometry_wheels_view=1 late_view_failure_preserves_all=1",pristine.len(),deformed.len());
         }).unwrap().join().unwrap();
     }
 
