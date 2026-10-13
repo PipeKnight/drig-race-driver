@@ -1,6 +1,6 @@
 # Body-impact damage callback connection
 
-Latest progress: [the selected complete handler](BODY_IMPACT_HANDLER.md) now matches whole original execution in both Rust profiles. Its runtime contact-pool connection remains pending. Earlier sections below record the discovery and consumer-only proof chronologically.
+Latest progress: [the selected complete handler](BODY_IMPACT_HANDLER.md) matches whole original execution in both Rust profiles and has a verified [single-car runtime connection](BODY_IMPACT_RUNTIME.md). Earlier sections below record the discovery and consumer-only proof chronologically.
 
 F248's scheduled Donington tests complete with physical body responses but no global damage RNG change. Their sampled wheel-impact operands stay below the wheel threshold. Static original-code research identifies a separate route that must be recovered before claiming general body-impact damage.
 

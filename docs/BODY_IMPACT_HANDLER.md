@@ -1,6 +1,6 @@
 # Selected complete body-impact handler
 
-The missing car handler now has an independently authored Rust implementation, checked against complete original execution. Runtime connection is the next step; this proof alone does not change the playable build.
+The missing car handler now has an independently authored Rust implementation, checked against complete original execution. A subsequent [runtime connection](BODY_IMPACT_RUNTIME.md) joins it to solved contacts; this section records the independent handler proof.
 
 The selected path includes original `9EF360` mode0 and its reached damage dispatcher, physical velocity getter, timer/suspension updates and all eleven notification slots. The owned native probe also executes `A726B0` → `B0CFC0` → registered `A01910` → `A6A1D0` → `9EF360` on the corresponding cases. Notification endpoints are explicit authored observers; no original car-handler code is replaced. The separate dynamic other-car response branch is excluded by the admitted car308=0 context.
 
