@@ -1,5 +1,7 @@
 # Body-impact damage callback connection
 
+Latest progress: [the selected complete handler](BODY_IMPACT_HANDLER.md) now matches whole original execution in both Rust profiles. Its runtime contact-pool connection remains pending. Earlier sections below record the discovery and consumer-only proof chronologically.
+
 F248's scheduled Donington tests complete with physical body responses but no global damage RNG change. Their sampled wheel-impact operands stay below the wheel threshold. Static original-code research identifies a separate route that must be recovered before claiming general body-impact damage.
 
 Observed Ghidra references to damage dispatcher `9E6660` identify two direct callers: handling update `9F3E80` (now integrated) and `9EF360` at `9EF438` (not integrated). The latter is called by `A01910` at `A01951`. An earlier original decompilation and fresh aligned instructions establish that `9EF360` checks event40 against maximum-float sentinel, clears car1568 and BA5, optionally flips all four direction sign bits for side1, and calls `9E6660` with event point10, direction20 and globalE4FC30 times event40. Original data wordE4FC30 is1.0 in the analyzed image; this does not prove its live value or semantic units. The returned byte is stored in BA5.
