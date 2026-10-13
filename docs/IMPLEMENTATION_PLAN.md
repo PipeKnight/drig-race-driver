@@ -1,5 +1,7 @@
 # Current GRID reverse-engineering and implementation plan
 
+Current checkpoint F270: the owner damage-freeze is reproduced and the selected terminal wheel transition is implemented. Whole original/repeat/debug/release handling matches 896 cases; all 490 successful motion samples from the two failing runs replay exactly, then continue through both old stops. Terminal state disables controls while physics and reset stay active. See [damage-freeze findings](PLAYTEST_DAMAGE_FREEZE_2026_10_14.md). F269 lap timing draft remains safely preserved in named local Git stash while this fix is released; resume its validation afterward.
+
 Current checkpoint F199: repeated original contact append→whole serial world→actual pool consumption matches2,772 world calls/profile and5,199 produced contacts on retained storage, including694empty intervals. Fresh manager owners provide initial physical state; subsequent contact decisions are authored. Next repeated complete vehicle jobs against carried world state, authoritative geometry/source initialization and Bevy driving. [Repeated contact world](REPEATED_CONTACT_WORLD.md).
 
 Current checkpoint F198: carried physical ownership matches 5,934 successive original world steps per profile, including64-step runs, with retained dirty/active/group/manager/contact storage. Fresh manager-generated owners feed another2,340 world steps/profile. Contacts are initial-only; next repeat production and vehicle jobs against carried physical state, then source initialization and Bevy driving. [Carried world](CARRIED_PHYSICAL_WORLD.md).
