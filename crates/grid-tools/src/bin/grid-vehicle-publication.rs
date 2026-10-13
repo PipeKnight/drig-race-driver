@@ -5,7 +5,7 @@ const RECORD: usize = 4 + (VEHICLE_WORDS + PHYSICAL_WORDS) * 4;
 fn word(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
 }
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn run(deformation: bool) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.len() != 2 {
         return Err("usage: grid-vehicle-publication INPUT.bin local/OUTPUT.bin".into());
@@ -23,7 +23,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut data = std::fs::read(input)?;
     if data.len() < 8
-        || &data[..4] != b"VP01"
+        || &data[..4] != if deformation { b"VD01" } else { b"VP01" }
         || !(1..=64).contains(&word(&data, 4))
         || data.len() != 8 + word(&data, 4) as usize * RECORD
     {
@@ -38,7 +38,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .collect(),
             physical: std::array::from_fn(|i| word(record, 4 + VEHICLE_WORDS * 4 + i * 4)),
         };
-        let next = vehicle_publication::calculate(&state, delta)?;
+        let next = if deformation {
+            grid_world::deformation_publication::calculate(&state, delta)?
+        } else {
+            vehicle_publication::calculate(&state, delta)?
+        };
         for (i, w) in next.vehicle.iter().chain(next.physical.iter()).enumerate() {
             record[4 + i * 4..8 + i * 4].copy_from_slice(&w.to_le_bytes());
         }
@@ -51,7 +55,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() {
-    if let Err(e) = run() {
+    if let Err(e) = run(false) {
         eprintln!("grid-vehicle-publication: {e}");
         std::process::exit(1);
     }
