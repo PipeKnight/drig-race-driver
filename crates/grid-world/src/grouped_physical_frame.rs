@@ -80,7 +80,15 @@ pub fn calculate_tick_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    tick(input, manager, shapes, None, input.contacts.len(), None)
+    tick(
+        input,
+        manager,
+        shapes,
+        None,
+        input.contacts.len(),
+        None,
+        None,
+    )
 }
 
 /// Advance bodies, then solve an external relative-point prefix followed by
@@ -94,7 +102,7 @@ pub fn calculate_tick_with_geometry(
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    tick(input, manager, shapes, None, external_count, None)
+    tick(input, manager, shapes, None, external_count, None, None)
 }
 
 pub(crate) fn calculate_tick_carried(
@@ -107,7 +115,15 @@ pub(crate) fn calculate_tick_carried(
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    tick(input, manager, shapes, Some(carry), external_count, None)
+    tick(
+        input,
+        manager,
+        shapes,
+        Some(carry),
+        external_count,
+        None,
+        None,
+    )
 }
 
 pub(crate) type GeometryProvider<'a> =
@@ -127,6 +143,25 @@ pub(crate) fn calculate_tick_carried_with_provider(
         Some(carry),
         input.contacts.len(),
         Some(provider),
+        None,
+    )
+}
+pub(crate) fn calculate_tick_carried_deforming(
+    input: &contact_groups::Input,
+    manager: &Manager,
+    shapes: &[contact_groups::Shape],
+    carry: &contact_groups::Carry,
+    provider: &mut GeometryProvider<'_>,
+    registration: &mut crate::deformation_world::Registration,
+) -> Result<Output, Error> {
+    tick(
+        input,
+        manager,
+        shapes,
+        Some(carry),
+        input.contacts.len(),
+        Some(provider),
+        Some(registration),
     )
 }
 
@@ -142,6 +177,7 @@ fn validate(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn tick(
     input: &contact_groups::Input,
     manager: &Manager,
@@ -149,6 +185,7 @@ fn tick(
     carry: Option<&contact_groups::Carry>,
     external_count: usize,
     provider: Option<&mut GeometryProvider<'_>>,
+    registration: Option<&mut crate::deformation_world::Registration>,
 ) -> Result<Output, Error> {
     validate(input, shapes, carry)?;
     let delta = manager.parameters[0];
@@ -202,7 +239,7 @@ fn tick(
         }
         next.contacts.extend(contacts);
     }
-    let mut out = calculate_impl(&next, manager, shapes, carry, external_count)?;
+    let mut out = calculate_impl(&next, manager, shapes, carry, external_count, registration)?;
     for (body, next) in out.groups.bodies.iter_mut().zip(update_next) {
         body[0x318 / 4] = next;
     }
@@ -218,7 +255,7 @@ pub fn calculate_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    calculate_impl(input, manager, shapes, None, input.contacts.len())
+    calculate_impl(input, manager, shapes, None, input.contacts.len(), None)
 }
 
 fn calculate_impl(
@@ -227,8 +264,12 @@ fn calculate_impl(
     shapes: &[contact_groups::Shape],
     carry: Option<&contact_groups::Carry>,
     external_count: usize,
+    mut registration: Option<&mut crate::deformation_world::Registration>,
 ) -> Result<Output, Error> {
     validate(input, shapes, carry)?;
+    if registration.is_some() && input.bodies.len() != 1 {
+        return Err(Error("deformation requires one owned physical body"));
+    }
     if manager.properties.len() != input.bodies.len()
         || manager.workspace.len() != input.bodies.len()
         || manager.rows.is_empty()
@@ -351,7 +392,7 @@ fn calculate_impl(
                 }
             })
             .collect();
-        let frame = impact_frame::calculate(&impact_frame::Input {
+        let frame_input = impact_frame::Input {
             bodies: settings,
             gravity: manager.gravity,
             correction: manager.correction.clone(),
@@ -368,7 +409,26 @@ fn calculate_impl(
                 cached_pair: manager.cached_pair,
                 cached_material: manager.cached_material,
             },
-        })?;
+        };
+        let frame = if let Some(registration) = registration.as_deref_mut() {
+            if ids != [0] {
+                return Err(Error("deformation group differs from owned car"));
+            }
+            let raw: Vec<_> = contact_ids.iter().map(|&i| groups.contacts[i]).collect();
+            let (frame, contacts) = crate::deformation_world::calculate_group(
+                &frame_input,
+                &groups.bodies[0],
+                &raw,
+                shapes,
+                registration,
+            )?;
+            for (&i, c) in contact_ids.iter().zip(contacts) {
+                groups.contacts[i] = c;
+            }
+            frame
+        } else {
+            impact_frame::calculate(&frame_input)?
+        };
         if frame.status != 0 {
             return Err(Error(
                 "unsupported grouped physical sleep or capacity status",

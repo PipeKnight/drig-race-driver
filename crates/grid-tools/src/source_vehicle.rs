@@ -42,6 +42,8 @@ pub struct Runtime {
     pub body_events: Option<grid_world::body_impact::Parameters>,
     /// Explicit selected source deformation ownership, never inferred from raw flags.
     pub deformation_enabled: bool,
+    pub deformation_registration: Option<grid_world::deformation_world::Registration>,
+    initial_deformation_registration: Option<grid_world::deformation_world::Registration>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -62,6 +64,8 @@ pub struct WheelPose {
     pub displacement: f32,
     pub steering: [f32; 2],
     pub phase: f32,
+    pub deformation_translation: [f32; 3],
+    pub deformation_orientation: [[f32; 4]; 4],
 }
 
 fn read(root: &Path, relative: &str, bound: u64) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -99,6 +103,24 @@ impl Runtime {
                 displacement: f(w + 0x40).min(f(w + 0x4c)),
                 steering: [f(w + 0x20), f(w + 0x24)],
                 phase: f(w + 0x110),
+                deformation_translation: std::array::from_fn(|a| {
+                    if self.deformation_enabled {
+                        f(0x1650 + i * 16 + a * 4)
+                    } else {
+                        0.
+                    }
+                }),
+                deformation_orientation: std::array::from_fn(|a| {
+                    std::array::from_fn(|j| {
+                        if self.deformation_enabled {
+                            f(0x1690 + i * 64 + a * 16 + j * 4)
+                        } else if a == j {
+                            1.
+                        } else {
+                            0.
+                        }
+                    })
+                }),
             }
         })
     }
@@ -327,6 +349,8 @@ impl Runtime {
             last_body_contacts: 0,
             body_events: None,
             deformation_enabled: false,
+            deformation_registration: None,
+            initial_deformation_registration: None,
         })
     }
 
@@ -439,6 +463,27 @@ impl Runtime {
     ) -> Result<(), Error> {
         self.tick_owned(controls, Some(Geometry::Deforming(geometry)))
     }
+    pub fn register_deformation_callbacks(
+        &mut self,
+        limit: grid_world::deformation_contact_limit::Parameters,
+        bulk: grid_world::deformation_callback_state::Parameters,
+        random_seed: u32,
+    ) -> Result<(), Error> {
+        if !self.deformation_enabled || self.ticks != 0 || self.deformation_registration.is_some() {
+            return Err(Error("invalid source deformation callback registration"));
+        }
+        let registration = grid_world::deformation_world::Registration {
+            owner: self.state.car.owner.vehicle.clone(),
+            limit,
+            bulk,
+            random_seed,
+            bulk_calls: 0,
+            records: 0,
+        };
+        self.initial_deformation_registration = Some(registration.clone());
+        self.deformation_registration = Some(registration);
+        Ok(())
+    }
 
     fn tick_owned(
         &mut self,
@@ -501,31 +546,49 @@ impl Runtime {
         let material = |token| self.surfaces.joined(token);
         let mut body_contacts = 0;
         let mut rebuilt_geometry = None;
+        let mut next_registration = None;
         let output = match geometry {
             Some(Geometry::Deforming(geometry)) => {
                 let resource = std::cell::RefCell::new(geometry.clone());
                 let mut publication = |owner: &vehicle_publication::State, delta| {
                     resource.borrow_mut().publish_deformation(owner, delta)
                 };
-                let output = vehicle_world::calculate_with_geometry_events_publication(
-                    &staged,
-                    self.pair,
-                    GRAVITY,
-                    query,
-                    material,
-                    |bodies, remaining| {
-                        let contacts = resource.borrow().contacts(
-                            &self.track,
-                            &self.surfaces,
-                            bodies,
-                            remaining,
-                        )?;
-                        body_contacts = contacts.len();
-                        Ok(contacts)
-                    },
-                    self.body_events,
-                    &mut publication,
-                )?;
+                let provider = |bodies: &[grid_world::contact_groups::Body], remaining| {
+                    let contacts = resource.borrow().contacts(
+                        &self.track,
+                        &self.surfaces,
+                        bodies,
+                        remaining,
+                    )?;
+                    body_contacts = contacts.len();
+                    Ok(contacts)
+                };
+                let output = if let Some(registration) = &self.deformation_registration {
+                    let (output, next) = vehicle_world::calculate_with_deformation(
+                        &staged,
+                        self.pair,
+                        GRAVITY,
+                        query,
+                        material,
+                        provider,
+                        self.body_events,
+                        &mut publication,
+                        registration,
+                    )?;
+                    next_registration = Some(next);
+                    output
+                } else {
+                    vehicle_world::calculate_with_geometry_events_publication(
+                        &staged,
+                        self.pair,
+                        GRAVITY,
+                        query,
+                        material,
+                        provider,
+                        self.body_events,
+                        &mut publication,
+                    )?
+                };
                 rebuilt_geometry = Some((geometry, resource.into_inner()));
                 output
             }
@@ -572,6 +635,9 @@ impl Runtime {
             *geometry = next;
         }
         self.state = output.state;
+        if let Some(registration) = next_registration {
+            self.deformation_registration = Some(registration);
+        }
         self.cache = cache;
         self.ticks += 1;
         self.last_body_contacts = body_contacts;
@@ -579,6 +645,7 @@ impl Runtime {
     }
     pub fn reset(&mut self) {
         self.state = self.initial.clone();
+        self.deformation_registration = self.initial_deformation_registration.clone();
         // The external geometry may still carry damage. Reconstruct it at the
         // next job publication before any advanced-pose contact query.
         if self.deformation_enabled {
@@ -599,6 +666,55 @@ impl Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires purchased sources and private contact/event/deformation parameters"]
+    fn source_driving_deformation_callbacks() {
+        std::thread::Builder::new().stack_size(16*1024*1024).spawn(||{
+            let root=std::env::var_os("GRID_GAME_ROOT").unwrap();let root=Path::new(&root);
+            let read_env=|name|std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+            let table=read_env("GRID_CONTACT_DIRECTIONS");
+            let (limit,bulk)=crate::deformation_parameters::read(&read_env("GRID_DEFORMATION_PARAMETERS")).unwrap();
+            let mut runtime=Runtime::lacetti(root,"slot_00",200679).unwrap();
+            let mut geometry=runtime.prepare_body_geometry(root,&table).unwrap();
+            runtime.enable_deformation(root,&mut geometry).unwrap();
+            runtime.body_events=Some(crate::body_impact_parameters::read(&read_env("GRID_BODY_EVENT_PARAMETERS")).unwrap());
+            runtime.register_deformation_callbacks(limit,bulk,1).unwrap();
+            let pristine=runtime.state.car.owner.vehicle[0x4880/4..0xc580/4].to_vec();
+            let controls=Controls{throttle:1.,steering:0.25,..Default::default()};
+            // Inconsistent globals fail inside the physical phase after the
+            // driver/publication/query stage, preserving all committed owners.
+            runtime.deformation_registration.as_mut().unwrap().bulk.generation[0]+=1.;
+            let before=runtime.state.clone();let seed=runtime.deformation_registration.as_ref().unwrap().random_seed;let cache=runtime.cache;
+            let shape_contacts=geometry.contacts(&runtime.track,&runtime.surfaces,&before.world.groups.bodies,64).unwrap();
+            assert!(runtime.tick_with_deforming_body_geometry(controls,&mut geometry).is_err());
+            assert_eq!(runtime.state.car.owner.vehicle,before.car.owner.vehicle);assert_eq!(runtime.state.car.owner.physical,before.car.owner.physical);
+            assert_eq!(runtime.state.world.groups.contacts,before.world.groups.contacts);assert_eq!(runtime.state.world.manager.rows,before.world.manager.rows);
+            assert_eq!(runtime.deformation_registration.as_ref().unwrap().random_seed,seed);assert_eq!(runtime.ticks,0);assert_eq!(runtime.cache.plane,cache.plane);
+            assert_eq!(geometry.contacts(&runtime.track,&runtime.surfaces,&before.world.groups.bodies,64).unwrap(),shape_contacts);
+            runtime.reset();
+            let drive=|runtime:&mut Runtime,geometry:&mut crate::body_geometry::BodyGeometry|{
+                let mut contacts=0;
+                for _ in 0..600 {runtime.tick_with_deforming_body_geometry(controls,geometry).unwrap_or_else(|e|panic!("callback tick {}: {e}",runtime.ticks+1));contacts+=runtime.last_body_contacts;}
+                contacts
+            };
+            let contacts=drive(&mut runtime,&mut geometry);let first=runtime.state.clone();let registration=runtime.deformation_registration.as_ref().unwrap().clone();let first_cache=runtime.cache;
+            assert!(contacts>0);assert!(registration.bulk_calls>0);
+            let changed=runtime.state.car.owner.vehicle[0x4880/4..0xc580/4]!=pristine;
+            let owner=&runtime.state.car.owner.vehicle;
+            let node_count=(0..3).map(|i|owner[0xc714/4+i] as usize).product::<usize>();
+            let moved_positions=(0..node_count).filter(|&i|(0..3).any(|a|owner[0x4880/4+i*20+a]!=pristine[i*20+a])).count();
+            let maximum_displacement=(0..node_count).map(|i|{(0..3).map(|a|{let d=f32::from_bits(owner[0x4880/4+i*20+a])-f32::from_bits(pristine[i*20+a]);d*d}).sum::<f32>().sqrt()}).fold(0f32,f32::max);
+            assert!(moved_positions>0 && maximum_displacement>0.);
+            runtime.reset();let repeated=drive(&mut runtime,&mut geometry);
+            assert_eq!(contacts,repeated);assert_eq!(runtime.state.car.owner.vehicle,first.car.owner.vehicle);assert_eq!(runtime.state.car.owner.physical,first.car.owner.physical);
+            assert_eq!(runtime.state.car.owner.damage_random_state,first.car.owner.damage_random_state);
+            assert_eq!(runtime.state.world.groups.bodies,first.world.groups.bodies);assert_eq!(runtime.state.world.groups.contacts,first.world.groups.contacts);assert_eq!(runtime.state.world.groups.world,first.world.groups.world);
+            assert_eq!(runtime.state.world.manager.rows,first.world.manager.rows);assert_eq!(runtime.state.world.manager.workspace,first.world.manager.workspace);
+            let replay=runtime.deformation_registration.as_ref().unwrap();assert_eq!((replay.random_seed,replay.bulk_calls,replay.records),(registration.random_seed,registration.bulk_calls,registration.records));assert_eq!(runtime.cache.plane,first_cache.plane);
+            eprintln!("source_deformation_callbacks ticks=600 replay_ticks=600 body_contacts={contacts} bulk_calls={} records={} crt_seed={:08x} nodes_changed={changed} moved_positions={moved_positions} maximum_displacement={maximum_displacement} late_physical_failure_atomic=1 reset_replay_exact=1 authored_grid_changes=0",registration.bulk_calls,registration.records,registration.random_seed);
+        }).unwrap().join().unwrap();
+    }
 
     #[test]
     #[ignore = "requires purchased GRID sources and private contact directions"]

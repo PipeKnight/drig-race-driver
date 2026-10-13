@@ -50,7 +50,7 @@ pub fn advance_with_geometry(
     shapes: &[contact_groups::Shape],
     external_count: usize,
 ) -> Result<grouped_physical_frame::Output, Error> {
-    advance_owned(previous, slots, used, shapes, external_count, None)
+    advance_owned(previous, slots, used, shapes, external_count, None, None)
 }
 
 /// Advance poses, then obtain fresh world-space geometry before grouping/solving.
@@ -74,9 +74,29 @@ pub fn advance_with_geometry_provider(
         shapes,
         external_count,
         Some(&mut provider),
+        None,
+    )
+}
+pub(crate) fn advance_with_deformation(
+    previous: &grouped_physical_frame::Output,
+    slots: &[contact_groups::Contact],
+    external_count: usize,
+    shapes: &[contact_groups::Shape],
+    provider: &mut grouped_physical_frame::GeometryProvider<'_>,
+    registration: &mut crate::deformation_world::Registration,
+) -> Result<grouped_physical_frame::Output, Error> {
+    advance_owned(
+        previous,
+        slots,
+        external_count,
+        shapes,
+        external_count,
+        Some(provider),
+        Some(registration),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn advance_owned(
     previous: &grouped_physical_frame::Output,
     slots: &[contact_groups::Contact],
@@ -84,6 +104,7 @@ fn advance_owned(
     shapes: &[contact_groups::Shape],
     external_count: usize,
     provider: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
+    registration: Option<&mut crate::deformation_world::Registration>,
 ) -> Result<grouped_physical_frame::Output, Error> {
     let world = previous.groups.world;
     let selector = world[5];
@@ -129,13 +150,24 @@ fn advance_owned(
         contact_capacity: previous.groups.contacts.len(),
     };
     let mut out = if let Some(provider) = provider {
-        grouped_physical_frame::calculate_tick_carried_with_provider(
-            &input,
-            &previous.manager,
-            shapes,
-            &carry,
-            provider,
-        )?
+        if let Some(registration) = registration {
+            grouped_physical_frame::calculate_tick_carried_deforming(
+                &input,
+                &previous.manager,
+                shapes,
+                &carry,
+                provider,
+                registration,
+            )?
+        } else {
+            grouped_physical_frame::calculate_tick_carried_with_provider(
+                &input,
+                &previous.manager,
+                shapes,
+                &carry,
+                provider,
+            )?
+        }
     } else {
         grouped_physical_frame::calculate_tick_carried(
             &input,

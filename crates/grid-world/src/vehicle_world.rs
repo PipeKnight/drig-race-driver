@@ -91,6 +91,7 @@ pub fn calculate(
         None,
         None,
         None,
+        None,
     )
 }
 
@@ -115,6 +116,7 @@ pub fn calculate_with_events(
         material,
         None,
         events,
+        None,
         None,
     )
 }
@@ -145,6 +147,7 @@ pub fn calculate_with_geometry(
         Some(&mut geometry),
         None,
         None,
+        None,
     )
 }
 
@@ -171,6 +174,7 @@ pub fn calculate_with_geometry_events(
         material,
         Some(&mut geometry),
         events,
+        None,
         None,
     )
 }
@@ -201,7 +205,41 @@ pub fn calculate_with_geometry_events_publication(
         Some(&mut geometry),
         events,
         Some(publication),
+        None,
     )
+}
+
+/// Both physical deformation phases and staged source publication. Registration
+/// is copied and returned only with a successful complete world.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_deformation(
+    input: &State,
+    pair: [usize; 2],
+    gravity: f32,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    mut geometry: impl FnMut(
+        &[contact_groups::Body],
+        usize,
+    ) -> Result<Vec<contact_groups::Contact>, Error>,
+    events: Option<body_impact::Parameters>,
+    publication: &mut crate::vehicle_job::Publication<'_>,
+    registration: &crate::deformation_world::Registration,
+) -> Result<(Output, crate::deformation_world::Registration), Error> {
+    let mut next = registration.clone();
+    let output = calculate_owned(
+        input,
+        pair,
+        gravity,
+        None,
+        query,
+        material,
+        Some(&mut geometry),
+        events,
+        Some(publication),
+        Some(&mut next),
+    )?;
+    Ok((output, next))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -215,6 +253,7 @@ fn calculate_owned(
     geometry: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
     events: Option<body_impact::Parameters>,
     publication: Option<&mut crate::vehicle_job::Publication<'_>>,
+    mut registration: Option<&mut crate::deformation_world::Registration>,
 ) -> Result<Output, Error> {
     if input.world.groups.bodies.len() != 1
         || input.car.owner.physical != input.world.groups.bodies[0]
@@ -269,21 +308,36 @@ fn calculate_owned(
     };
     let mut previous = input.world.clone();
     previous.groups.bodies[0] = manager.job.state.owner.physical;
+    if let Some(registration) = registration.as_deref_mut() {
+        registration.owner = manager.job.state.owner.vehicle.clone();
+    }
     let mut active_contacts = manager.contacts.used;
     let world = if let Some(geometry) = geometry {
         let mut slots = input.world.groups.contacts.clone();
         slots[..manager.contacts.slots.len()].copy_from_slice(&manager.contacts.slots);
-        physical_world::advance_with_geometry_provider(
-            &previous,
-            &slots,
-            manager.contacts.used,
-            &input.shapes,
-            |bodies, remaining| {
-                let contacts = geometry(bodies, remaining)?;
-                active_contacts += contacts.len();
-                Ok(contacts)
-            },
-        )?
+        let mut provider = |bodies: &[contact_groups::Body], remaining| {
+            let contacts = geometry(bodies, remaining)?;
+            active_contacts += contacts.len();
+            Ok(contacts)
+        };
+        if let Some(registration) = registration.as_deref_mut() {
+            physical_world::advance_with_deformation(
+                &previous,
+                &slots,
+                manager.contacts.used,
+                &input.shapes,
+                &mut provider,
+                registration,
+            )?
+        } else {
+            physical_world::advance_with_geometry_provider(
+                &previous,
+                &slots,
+                manager.contacts.used,
+                &input.shapes,
+                provider,
+            )?
+        }
     } else {
         physical_world::advance_with_pool(
             &previous,
@@ -293,6 +347,9 @@ fn calculate_owned(
         )?
     };
     let mut car = manager.job.state;
+    if let Some(registration) = registration.as_deref_mut() {
+        car.owner.vehicle = registration.owner.clone();
+    }
     car.owner.physical = world.groups.bodies[0];
     if let Some(parameters) = events {
         if active_contacts > world.groups.contacts.len() || handling_queries.is_some() {
@@ -327,6 +384,12 @@ fn calculate_owned(
         car.frame
             .body
             .copy_from_slice(&car.owner.vehicle[..crate::vehicle_force::BODY_WORDS]);
+    }
+    if let Some(registration) = registration {
+        car.frame
+            .body
+            .copy_from_slice(&car.owner.vehicle[..crate::vehicle_force::BODY_WORDS]);
+        registration.owner = car.owner.vehicle.clone();
     }
     Ok(Output {
         state: State {
