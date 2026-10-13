@@ -23,6 +23,7 @@ pub mod convex_distance;
 pub mod damage_region;
 pub mod deformation_grid;
 pub mod deformation_impact;
+pub mod deformation_layout;
 pub mod deformation_settle;
 pub mod dynamics;
 pub mod finalize;
