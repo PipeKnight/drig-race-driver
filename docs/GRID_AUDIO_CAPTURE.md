@@ -205,7 +205,7 @@ intervals8.1566..11.8354ms, sequential reads33.6..318.1us and2,981exact controll
 repeats. The unmuted backend interval is14.300074..16.530451seconds relative to
 first audio packet (224observations). All35,988voice0xCC words equal their backend
 volume words exactly. Backend frequencies agree with rounded rate*pitch except
-51of35,988sequential observations; those are retained, not asserted atomic.
+40of35,988sequential observations; those are retained, not asserted atomic.
 
 All four loaded backend voices remain-96.300003dB in this sample. During the
 active interval the greatest engine-bay post-minus-input offset is about-14dB,
