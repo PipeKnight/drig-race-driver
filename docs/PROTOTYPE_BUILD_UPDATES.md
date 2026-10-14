@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **8f73dd1656ce-dirty**, built14 October at01:20:33 UTC. The playable adds experimental RPM/throttle engine sound and M mute. Eleven source-driving and six Bevy checks pass;600-tick render preserves all310 prior physical/deformation records. The owner confirms RPM response but reports a mosquito-like tone unlike GRID: **sound fidelity failed**, and original mixing/processing reconstruction is now the priority. See [audio findings](ENGINE_AUDIO_RESEARCH.md).
+Latest verified refresh: **75fd3ca515c6-dirty**, built14 October at11:57:34 UTC. This corrects the four-byte non-PCM prefix in each engine recording. Eleven source-driving and six Bevy checks pass; the600-tick render preserves all310 previous physical/deformation records and the image exactly. Engine output works, but **sound fidelity remains failed**: this still uses the experimental mixer with M mute. The newly verified original twelve-voice gain/filter path is research code and is not yet the playable audio backend. See [audio findings](ENGINE_AUDIO_RESEARCH.md).
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -12,6 +12,41 @@ Every successful update writes ignored `local/playtest/build-UTCSTAMP/build.json
 
 Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts, [selected registered body events](BODY_IMPACT_RUNTIME.md), [collision-driven deformation](DEFORMATION_DRIVING_INTEGRATION.md) and [independent body dents](BODY_DEFORMATION_PRESENTATION.md) are available through the body-contact launcher.
 
+
+## PCM boundary correction refresh
+
+Revision75fd3ca515c6b8650d047fa339f5cb1c21d033a5, display75fd3ca515c6-dirty,
+built2026-10-14T11:57:34.5763423Z; release executable SHA256
+e10c79c314be27f90d6089aa7ab208cac8acf4f1465c51d7f2031e4d1b4b52b7.
+Private manifest local/playtest/build-20261014T1156520116338Z/;
+eleven purchased-source driving and six Bevy checks pass. Both existing launchers
+use this executable. No owner prototype session was closed or replaced. All GRID
+implementation was committed; unrelated settings-recovery documentation remains
+preserved and accounts for the dirty marker.
+
+The original-loader-confirmed fix removes four metadata bytes from each decoded
+recording. It does not replace the failed granular mixing policy, add the newly
+recovered gain/EFX processing or establish matched sound. M mute remains usable.
+An explicit one-second Windows output check passes; evidence
+local/audio/engine-device-check-75fd3ca-20261014.txt SHA256
+76f856408224eeb43ca82571ddfb0d3aa88e2133a84e6ae5e69ce7a82259591e.
+
+The600-tick collision/deformation render completes with155samples/no failure.
+All310 physical/deformation records match8f73dd1 exactly excluding wall time;
+the image is byte-identical and was visually inspected. Nine mesh-update log
+entries include an unchanged startup record; first changed tick165, last175.
+Private log local/playtest/engine-pcm-prefix-75fd3ca-20261014.txt SHA256
+9c249871f48615d255e9453bbd108dd9d29561db874256217ec2320dd153f189;
+PNG SHA256 f861a5c44e8e366873f891fb1f6831d8c152270746e9e3973139f1d6c172b517;
+comparison engine-pcm-prefix-no-feedback-20261014.json SHA256
+786393621bb39b60179847c6fe8e20dacf21c42b5a88315456b56972cc3c7742.
+
+Original GRID is still running privately for reference capture. The earlier
+minimized/input guard cleared on fresh window selection: observed Race Day state
+was readable and guarded macros navigated to Touring Cars/Lacetti. The optional
+manual-restore request is now unnecessary; no owner action is required by this
+build update. Original Steam130resources/executable remained unchanged at
+2026-10-14T11:51:59.642110UTC.
 
 ## Experimental engine-sound refresh
 
