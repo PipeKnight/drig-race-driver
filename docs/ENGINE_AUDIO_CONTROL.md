@@ -341,3 +341,39 @@ Private audit local/audio/engine-schedule-waiting-20261014-final01/validation.js
 SHA25684771211f0e6a0671d6cf752d0b92673b30de397c6058db735199aa5c8f2428e.
 No whole451770/Chase2/activebackend/PCM fidelity/playable update claim.
 Next actual restart service, then continuous purchased PCM composition.
+
+
+### Restart transition and supplied playback service
+
+engine_audio_restart reconstructs unchanged423210 with actual415460/4153E0
+table helpers. It explicitly supplies two virtual service boundaries: group
+resolution and PCM play/seek replies. Native code is never patched; owned
+vtable objects record arguments and return authored accepted seek values.
+This is not reconstruction of the original virtual backend or OpenAL playback.
+
+Requested seek uses the outgoing bank's length/rate; incoming engine/exhaust
+receive separate accepted microseconds. Positions use x87-53 arithmetic with
+the exact f32 1e-6 constant. Incoming pair toggles, engine position selects
+recorded RPM, and one pitch is carried to both incoming voices. Zero cooldown,
+including negative zero, waits; restart requires a strictly negative value.
+
+1024authored cases compare every controller byte and both command records
+across original/repeat/Rust debug/release:168invoked/856skipped,244backend
+replies differ from requests,851968controller bytes. Full restored image and
+owned canaries/read-only graphs pass;24guard outcomes reject without faults.
+A late logger-domain failure preserves all Rust state.
+
+Failed pilot01 is retained:58cases completed before an authored zero-position
+throttle reply caused original pitch>1.5 and entered an unowned diagnostic
+logger (native access violation). Aligned cb0bc4 is1.5, not an assumed2/10.
+Added an explicit pre-call logger-free guard. Pilot02 rejected case202 because
+the inverse fixture used differing bank lengths/rates; retained as guard
+rejection, not a native fault. Authored fixtures now satisfy the declared
+boundary; bad replies remain a separate rejection test. No logger/helper
+stub was added and no evidence was dropped.
+
+CLI type inference failure fixed with explicit832-byte controller; no runtime
+mismatch. Existing MSVC14.44.35207/Python3.12.14/Rust1.99 reused; rollback test
+and all-target Clippy pass. Audit local/audio/engine-restart-20261014-final01/
+validation.json SHA25674d7f64a7f80eaddd976e61fe8de067cc4bfb051fd01e49b98c9e4a8841ea0ba.
+The playable remains unchanged; continuous PCM integration is still pending.
