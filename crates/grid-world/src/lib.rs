@@ -48,6 +48,7 @@ pub mod impact_generation;
 pub mod impact_producer;
 pub mod impact_response;
 pub mod impact_step;
+pub mod lap_timing;
 pub mod leaf_query;
 pub mod main_contact_response;
 pub mod owner_collection;

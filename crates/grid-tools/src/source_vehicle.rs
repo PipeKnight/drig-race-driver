@@ -44,6 +44,10 @@ pub struct Runtime {
     pub deformation_enabled: bool,
     pub deformation_registration: Option<grid_world::deformation_world::Registration>,
     initial_deformation_registration: Option<grid_world::deformation_world::Registration>,
+    lap_course: Option<std::sync::Arc<grid_world::lap_timing::Course>>,
+    pub lap: Option<grid_world::lap_timing::State>,
+    initial_lap: Option<grid_world::lap_timing::State>,
+    pub lap_events: Vec<grid_world::lap_timing::Event>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -359,6 +363,10 @@ impl Runtime {
             deformation_enabled: false,
             deformation_registration: None,
             initial_deformation_registration: None,
+            lap_course: None,
+            lap: None,
+            initial_lap: None,
+            lap_events: Vec::new(),
         })
     }
 
@@ -366,6 +374,26 @@ impl Runtime {
     /// all authoritative state, including the query cache and tick counter.
     pub fn tick(&mut self, controls: Controls) -> Result<(), Error> {
         self.tick_owned(controls, None)
+    }
+    pub fn enable_lap_timing(&mut self, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        if self.ticks != 0 || self.lap_course.is_some() {
+            return Err("invalid source lap timing startup boundary".into());
+        }
+        let prepared = crate::lap_progress::load(root)?;
+        let position = std::array::from_fn(|i| self.pose()[12 + i]);
+        let lap = grid_world::lap_timing::State::new(&prepared.course, position)?;
+        self.initial_lap = Some(lap.clone());
+        self.lap = Some(lap);
+        self.lap_course = Some(std::sync::Arc::new(prepared.course));
+        Ok(())
+    }
+    pub fn lap_gate_count(&self) -> usize {
+        self.lap_course.as_ref().map_or(0, |c| c.gate_count())
+    }
+    pub fn lap_required_gate_count(&self) -> usize {
+        self.lap_course
+            .as_ref()
+            .map_or(0, |c| c.required_gates().len())
     }
 
     /// Enlarge the initial stable pool and solver rows for a geometry provider.
@@ -639,12 +667,27 @@ impl Runtime {
                 self.body_events,
             )?,
         };
+        let timed = if let (Some(course), Some(lap)) = (&self.lap_course, &self.lap) {
+            let position = std::array::from_fn(|i| {
+                f32::from_bits(output.state.car.owner.physical[0x1d0 / 4 + 12 + i])
+            });
+            Some(lap.advance(course, position, (self.ticks + 1) as f64 * f64::from(DELTA))?)
+        } else if self.lap_course.is_some() || self.lap.is_some() {
+            return Err(Error("inconsistent source lap timing ownership"));
+        } else {
+            None
+        };
         if let Some((geometry, next)) = rebuilt_geometry {
             *geometry = next;
         }
         self.state = output.state;
         if let Some(registration) = next_registration {
             self.deformation_registration = Some(registration);
+        }
+        self.lap_events.clear();
+        if let Some(timed) = timed {
+            self.lap = Some(timed.state);
+            self.lap_events = timed.events;
         }
         self.cache = cache;
         self.ticks += 1;
@@ -654,6 +697,8 @@ impl Runtime {
     pub fn reset(&mut self) {
         self.state = self.initial.clone();
         self.deformation_registration = self.initial_deformation_registration.clone();
+        self.lap = self.initial_lap.clone();
+        self.lap_events.clear();
         // The external geometry may still carry damage. Reconstruct it at the
         // next job publication before any advanced-pose contact query.
         if self.deformation_enabled {
@@ -676,6 +721,43 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires purchased GRID source progress and vehicle resources"]
+    fn source_driving_lap_progress() {
+        std::thread::Builder::new().stack_size(16*1024*1024).spawn(||{
+            use grid_world::lap_timing::{State as Lap,Event};
+            let root=std::env::var_os("GRID_GAME_ROOT").unwrap();let root=Path::new(&root);
+            let prepared=crate::lap_progress::load(root).unwrap();assert_eq!(prepared.course.gate_count(),71);assert_eq!(prepared.progress.points.len(),389);
+            let (center,forward)=prepared.course.gate_frame(0).unwrap();
+            let at=|sign:f64|[(center[0]+sign*2.*forward[0]) as f32,center[1] as f32,(center[2]+sign*2.*forward[1]) as f32];
+            let mut positions=vec![at(1.)];positions.extend(prepared.progress.points.iter().filter(|p|p.distance>2.).map(|p|p.position));positions.push(at(1.));
+            let traverse=||{
+                let mut state=Lap::new(&prepared.course,at(-1.)).unwrap();let mut events=Vec::new();
+                for (i,&position) in positions.iter().enumerate(){let output=state.advance(&prepared.course,position,(i+1) as f64*0.1).unwrap();state=output.state;events.extend(output.events);}
+                (state,events)
+            };
+            let (lap,events)=traverse();assert_eq!((lap.attempts,lap.valid_laps),(1,1));assert!(lap.last_lap.as_ref().unwrap().valid);assert_eq!(lap.last_lap.as_ref().unwrap().sectors.len(),3);assert!(lap.last_lap.as_ref().unwrap().sectors.iter().all(Option::is_some));assert_eq!(events.iter().filter(|e|matches!(e,Event::Checkpoint{..})).count(),2);
+            assert_eq!(traverse(),(lap.clone(),events));
+            let mut reverse=Lap::new(&prepared.course,at(-1.)).unwrap();
+            let mut reversed:Vec<_>=prepared.progress.points.iter().filter(|p|p.distance>2.).rev().map(|p|p.position).collect();reversed.push(at(-1.));
+            for (i,&p) in reversed.iter().enumerate(){reverse=reverse.advance(&prepared.course,p,(i+1) as f64*0.1).unwrap().state;}
+            assert_eq!(reverse.valid_laps,0);assert!(reverse.elapsed().is_none());
+            // Actual car ticks retain all existing vehicle/world behavior.
+            let mut baseline=Runtime::lacetti(root,"slot_00",200679).unwrap();let mut timed=Runtime::lacetti(root,"slot_00",200679).unwrap();timed.enable_lap_timing(root).unwrap();
+            let mut started=0;let controls=Controls{throttle:1.,..Default::default()};
+            for _ in 0..300{
+                baseline.tick(controls).unwrap();timed.tick(controls).unwrap();started+=timed.lap_events.iter().filter(|e|matches!(e,Event::Started{..})).count();
+                assert_eq!(timed.state.car.owner.vehicle,baseline.state.car.owner.vehicle);assert_eq!(timed.state.car.owner.physical,baseline.state.car.owner.physical);assert_eq!(timed.state.world.groups.contacts,baseline.state.world.groups.contacts);assert_eq!(timed.state.world.manager.rows,baseline.state.world.manager.rows);
+            }
+            assert_eq!(started,1);assert_eq!(timed.lap.as_ref().unwrap().valid_laps,0);assert_eq!(timed.lap.as_ref().unwrap().passed_gates(),1);assert_eq!(timed.lap.as_ref().unwrap().next_gate,22);assert!(timed.lap.as_ref().unwrap().elapsed().unwrap()>0.);
+            timed.lap.as_mut().unwrap().next_gate=71;
+            let before=timed.state.clone();let before_lap=timed.lap.clone();let cache=timed.cache;let tick=timed.ticks;
+            assert!(timed.tick(controls).is_err());assert_eq!(timed.state.car.owner.vehicle,before.car.owner.vehicle);assert_eq!(timed.state.car.owner.physical,before.car.owner.physical);assert_eq!(timed.state.world.groups.contacts,before.world.groups.contacts);assert_eq!(timed.state.world.manager.rows,before.world.manager.rows);assert_eq!(timed.lap,before_lap);assert_eq!(timed.cache.plane,cache.plane);assert_eq!(timed.ticks,tick);
+            timed.reset();assert_eq!(timed.ticks,0);assert!(timed.lap.as_ref().unwrap().elapsed().is_none());assert!(timed.lap_events.is_empty());
+            eprintln!("source_lap_progress gates=71 points=389 sectors=3 ordered_kinematic_lap_valid=1 source_path_repeat_exact=1 reverse_path_valid_laps=0 actual_driving_ticks=300 actual_start_events={started} no_vehicle_world_feedback=1 late_timing_failure_atomic=1 reset_waits_for_finish=1");
+        }).unwrap().join().unwrap();
+    }
+
+    #[test]
     #[ignore = "requires purchased sources and private contact/event/deformation parameters"]
     fn source_driving_deformation_callbacks() {
         std::thread::Builder::new().stack_size(16*1024*1024).spawn(||{
@@ -688,6 +770,7 @@ mod tests {
             runtime.enable_deformation(root,&mut geometry).unwrap();
             runtime.body_events=Some(crate::body_impact_parameters::read(&read_env("GRID_BODY_EVENT_PARAMETERS")).unwrap());
             runtime.register_deformation_callbacks(limit,bulk,1).unwrap();
+            runtime.enable_lap_timing(root).unwrap();
             let pristine=runtime.state.car.owner.vehicle[0x4880/4..0xc580/4].to_vec();
             let controls=Controls{throttle:1.,steering:0.25,..Default::default()};
             // Inconsistent globals fail inside the physical phase after the
@@ -703,7 +786,25 @@ mod tests {
             runtime.reset();
             let drive=|runtime:&mut Runtime,geometry:&mut crate::body_geometry::BodyGeometry|{
                 let mut contacts=0;
-                for _ in 0..600 {runtime.tick_with_deforming_body_geometry(controls,geometry).unwrap_or_else(|e|panic!("callback tick {}: {e}",runtime.ticks+1));contacts+=runtime.last_body_contacts;}
+                for _ in 0..600 {
+                    if runtime.ticks==165 {
+                        assert_ne!(runtime.state.car.owner.vehicle[0xc7f0/4]&0xff0000,0);
+                        let good_lap=runtime.lap.clone();
+                        runtime.lap.as_mut().unwrap().next_gate=71;
+                        let before=runtime.state.clone();let before_lap=runtime.lap.clone();let cache=runtime.cache;
+                        let registration=runtime.deformation_registration.as_ref().unwrap().clone();
+                        let shape_contacts=geometry.contacts(&runtime.track,&runtime.surfaces,&before.world.groups.bodies,64).unwrap();
+                        assert_eq!(runtime.tick_with_deforming_body_geometry(controls,geometry).err().unwrap().0,"invalid prototype lap interval");
+                        assert_eq!(runtime.state.car.owner.vehicle,before.car.owner.vehicle);assert_eq!(runtime.state.car.owner.physical,before.car.owner.physical);
+                        assert_eq!(runtime.state.world.groups.contacts,before.world.groups.contacts);assert_eq!(runtime.state.world.manager.rows,before.world.manager.rows);
+                        assert_eq!(runtime.lap,before_lap);assert_eq!(runtime.ticks,165);assert_eq!(runtime.cache.plane,cache.plane);
+                        let after=runtime.deformation_registration.as_ref().unwrap();
+                        assert_eq!((after.random_seed,after.bulk_calls,after.records),(registration.random_seed,registration.bulk_calls,registration.records));
+                        assert_eq!(geometry.contacts(&runtime.track,&runtime.surfaces,&before.world.groups.bodies,64).unwrap(),shape_contacts);
+                        runtime.lap=good_lap;
+                    }
+                    runtime.tick_with_deforming_body_geometry(controls,geometry).unwrap_or_else(|e|panic!("callback tick {}: {e}",runtime.ticks+1));contacts+=runtime.last_body_contacts;
+                }
                 contacts
             };
             let contacts=drive(&mut runtime,&mut geometry);let first=runtime.state.clone();let registration=runtime.deformation_registration.as_ref().unwrap().clone();let first_cache=runtime.cache;
@@ -720,7 +821,7 @@ mod tests {
             assert_eq!(runtime.state.world.groups.bodies,first.world.groups.bodies);assert_eq!(runtime.state.world.groups.contacts,first.world.groups.contacts);assert_eq!(runtime.state.world.groups.world,first.world.groups.world);
             assert_eq!(runtime.state.world.manager.rows,first.world.manager.rows);assert_eq!(runtime.state.world.manager.workspace,first.world.manager.workspace);
             let replay=runtime.deformation_registration.as_ref().unwrap();assert_eq!((replay.random_seed,replay.bulk_calls,replay.records),(registration.random_seed,registration.bulk_calls,registration.records));assert_eq!(runtime.cache.plane,first_cache.plane);
-            eprintln!("source_deformation_callbacks ticks=600 replay_ticks=600 body_contacts={contacts} bulk_calls={} records={} crt_seed={:08x} nodes_changed={changed} moved_positions={moved_positions} maximum_displacement={maximum_displacement} late_physical_failure_atomic=1 reset_replay_exact=1 authored_grid_changes=0",registration.bulk_calls,registration.records,registration.random_seed);
+            eprintln!("source_deformation_callbacks ticks=600 replay_ticks=600 body_contacts={contacts} bulk_calls={} records={} crt_seed={:08x} nodes_changed={changed} moved_positions={moved_positions} maximum_displacement={maximum_displacement} late_physical_failure_atomic=1 late_timing_failure_after_dirty_geometry_atomic=1 reset_replay_exact=1 authored_grid_changes=0",registration.bulk_calls,registration.records,registration.random_seed);
         }).unwrap().join().unwrap();
     }
 

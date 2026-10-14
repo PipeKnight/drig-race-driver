@@ -7,6 +7,7 @@ pub mod contact_surfaces;
 pub mod cqtc_geometry;
 pub mod deformation_parameters;
 pub mod impact_diagnostic;
+pub mod lap_progress;
 pub mod source_deformation;
 pub mod source_physical;
 pub mod source_vehicle;
