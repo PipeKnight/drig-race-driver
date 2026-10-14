@@ -35,6 +35,8 @@ This is perceived improvement, not a1:1sound pass.
 
 ## Following target: first race against one opponent
 
+[Shared-world integration boundaries and concrete sequence](MULTI_CAR_INTEGRATION.md).
+
 Introduce multiple independently owned cars in the same world and actual
 car-to-car contact/damage handling before claiming an opponent race. The current
 playable collision integration is one car against static peers. Start one
