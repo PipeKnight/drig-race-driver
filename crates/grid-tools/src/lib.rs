@@ -9,6 +9,7 @@ pub mod deformation_parameters;
 pub mod engine_audio;
 pub mod engine_audio_control;
 pub mod engine_audio_gain;
+pub mod engine_audio_publication;
 pub mod impact_diagnostic;
 pub mod lap_progress;
 pub mod source_deformation;

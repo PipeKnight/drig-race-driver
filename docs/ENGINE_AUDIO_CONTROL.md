@@ -227,3 +227,76 @@ its production and downstream audible/filter effect are still being traced.
 No matched race audio, player controller snapshot or filter equivalence is
 claimed from this menu-time global capture. Helper surveys remain private under
 local/behavior/20261014T1110191589399Z and 20261014T1113186851269Z.
+
+## Follow-up: whole twelve-voice gain publication
+
+Whole unchanged 42DE60 now executes with twelve owned property objects and the
+observed descriptor kinds/offsets. Its real parameter writers, distance callbacks,
+vector helpers, camera adjustment helper and math helpers run unchanged. The
+admitted route supplies camera mode 3 and all voices present, so no unowned
+camera service or audio device is called. Owned motion inputs are read through
+the original linked-state +210/+220 helpers; source matrices provide emitter
+positions. The native masks the Y component of +210 before its approximate SSE
+length calculation, not W. Positive subnormal squared lengths are explicitly
+excluded from this SSE domain; zero remains supported.
+
+This is whole-function execution, not a stitched crossfade-prefix experiment.
+Only owned pointer relocations and the observed parameter descriptors are
+provided. Lazy vector-cache and descriptor/status data pages are restored after
+each case; the entire mapped image then matches its baseline. Code remains
+unchanged. All other owned inputs, controller canaries, voice canaries and
+opaque voice bytes are checked. No original helper is stubbed.
+
+The Rust `engine_audio_publication` stages the entire controller and twelve
+0x80-byte voice objects. Original/repeat/Rust debug/release agree over 512 varied
+cases (1,212,416 complete controller/voice bytes) and 1,000 source-driving ticks
+(2,368,000 bytes). Source motion, poses, engine/exhaust offsets and trims are
+purchased/physics-backed. Triangular fades, direct supplied throttle, camera 3,
+distance ranges and zero Treble are explicit fixture choices; this does not
+execute whole 451770 or claim its dynamic inputs. All twelve voice objects carry
+between ticks. Paired source worlds retain full previously checked car/physical/
+frame/grouped-body/contact/world-word/solver-row equality.
+
+Ten malformed/domain cases reject across all three profiles (30 outcomes) with
+no native fault and the restored image intact. The Rust API's late-last-pitch
+failure preserves both the controller and all twelve voice records, then resumes
+after repair. All ten ordinary grid-tools tests and all-target Clippy pass.
+An unnecessary-parentheses compiler warning was corrected before final checks.
+
+Audit `local/audio/engine-whole-gain-20261014-final01/validation.json`, SHA256
+`afe80ddb0c9b5f44b783bde67cddbd33e997495beb1c67c2d74243d66e7f9491`.
+Current identities match. Both source runs keep the loaded category at -48;
+deceleration ranges -48 to -7.30917, acceleration -48 to -0.0995688 in these
+supplied inputs. The failed mixer made loaded recordings prominent. This is a
+verified mixing difference, not proof of the complete audible cause. Positive
+authored trims demonstrate other admitted states can raise the loaded category;
+do not generalize its quiet source-fixture result to all possible configurations.
+
+### Treble reaches an EFX filter path
+
+Static trace: 41DE10 produces wrapper A6A4, including camera/player-dependent
+zero routes and distance attenuation. 42DE60 publishes it to each voice's Treble
+property. A233D0 passes that property to A25D90, which stores slot Treble and sets
+its dirty flag. A2C080 processes the flag through A27780; that routine updates a
+filter's parameter 2 and binds source properties 0x20005/0x20006. These match
+AL_LOWPASS_GAINHF, AL_DIRECT_FILTER and AL_AUXILIARY_SEND_FILTER in the primary
+[OpenAL Soft EFX header](https://raw.githubusercontent.com/kcat/openal-soft/master/include/AL/efx.h).
+This identifies an actual filtering path, rather than guessing from an INI name.
+
+Read-only current native menu state has direct filter handle 3, a nonzero filter
+function pointer, feature mask 0x2A60, effect-filter mask 6, sqrt switch 1 and
+Treble scale 0.5. Evidence
+`local/audio/native-reference-20261014-01/audio-descriptors-filter-state.json`,
+SHA256 `4c3c8f2495fc2fdec067ad04c34f867a3e6a32dab5043c8da9f28d5b879332d9`.
+This establishes initialized filter capability on this PC. It does **not** yet
+measure the Lacetti's per-voice Treble/effect masks during a race, the filter's
+audible response or causal contribution to the failed tone. Mode 3 maps some
+producer routes to zero; its user-visible camera name is not established here.
+
+The original backend also rounds sample-rate times pitch to an integer frequency
+and caps it at 96 kHz, before OpenAL publication. Its volume cutoff, Doppler,
+filter implementation and source routing still need matched native observation.
+Private static evidence: local/behavior/20261014T1115574030285Z,
+1116333617689Z,1119418429172Z,1121337580483Z,1132323430986Z and aligned
+local/audio/engine-treble-filter-aligned-20261014.json. No replacement PCM mix,
+device/filter execution proof or updated playable is claimed.

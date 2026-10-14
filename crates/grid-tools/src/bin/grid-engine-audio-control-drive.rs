@@ -120,6 +120,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         request.extend_from_slice(&value.to_bits().to_le_bytes());
     }
     let mut output = request[..8].to_vec();
+    let mut gain_request = b"EG01".to_vec();
+    gain_request.extend_from_slice(&1000_u32.to_le_bytes());
+    let mut gain_output = gain_request.clone();
+    let mut gain_voices = [[0x6b; grid_tools::engine_audio_publication::VOICE_BYTES]; 12];
     for tick in 0_u32..1000 {
         let controls = Controls {
             throttle: if (125..625).contains(&tick) { 1. } else { 0. },
@@ -149,6 +153,69 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             output.extend_from_slice(&query.recorded_rpm_bits.to_le_bytes());
             output.extend_from_slice(&query.seek_microseconds.to_le_bytes());
         }
+        // This fixture supplies ordinary throttle and triangular fades, not 451770.
+        let mut gain_controller = controller;
+        gain_controller[0xd8] = 0;
+        for (at, value) in [
+            (0xcc, controls.throttle),
+            (0x1a0, 0.),
+            (0x2f8, 1.),
+            (0x330, 0.),
+        ] {
+            put(&mut gain_controller, at, value.to_bits());
+        }
+        let phase = ((tick % 250) as f32 / 249.) * 2. - 1.;
+        for category in 0..3 {
+            put(&mut gain_controller, 0x140 + category * 4, phase.to_bits());
+        }
+        let pose = car.pose();
+        for emitter in 0..2 {
+            let point = setup.offsets[emitter];
+            for axis in 0..3 {
+                let position = (pose[12 + axis] + pose[4 + axis] * point[1])
+                    + (pose[axis] * point[0] + pose[8 + axis] * point[2]);
+                put(
+                    &mut gain_controller,
+                    0xe0 + emitter * 16 + axis * 4,
+                    position.to_bits(),
+                );
+            }
+        }
+        let gain_env = grid_tools::engine_audio_publication::Environment {
+            motion_210: std::array::from_fn(|i| f32::from_bits(body[0x210 / 4 + i])),
+            motion_220: std::array::from_fn(|i| f32::from_bits(body[0x220 / 4 + i])),
+            ranges: [[1., 50.], [1., 50.]],
+            trims: [setup.trims[1], setup.trims[2]],
+            treble: 0.,
+            player: true,
+        };
+        gain_request.extend_from_slice(&tick.to_le_bytes());
+        gain_request.extend_from_slice(&gain_controller);
+        for voice in gain_voices {
+            gain_request.extend_from_slice(&voice);
+        }
+        for value in gain_env
+            .motion_210
+            .into_iter()
+            .chain(gain_env.motion_220)
+            .chain(gain_env.ranges.into_iter().flatten())
+            .chain(gain_env.trims)
+            .chain([gain_env.treble])
+        {
+            gain_request.extend_from_slice(&value.to_bits().to_le_bytes());
+        }
+        gain_request.extend_from_slice(&1_u32.to_le_bytes());
+        grid_tools::engine_audio_publication::publish(
+            &mut gain_controller,
+            &mut gain_voices,
+            gain_env,
+        )?;
+        gain_output.extend_from_slice(&tick.to_le_bytes());
+        gain_output.extend_from_slice(&gain_controller);
+        for voice in gain_voices {
+            gain_output.extend_from_slice(&voice);
+        }
+        gain_output.extend_from_slice(&0_u32.to_le_bytes());
         assert_eq!(car.state.car.owner.vehicle, before);
         assert_eq!(car.state.car.owner.physical, body);
         assert_eq!(
@@ -182,8 +249,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir(out)?;
     fs::File::create_new(out.join("source.request.bin"))?.write_all(&request)?;
     fs::File::create_new(out.join("source.expected.bin"))?.write_all(&output)?;
+    fs::File::create_new(out.join("source.gain.request.bin"))?.write_all(&gain_request)?;
+    fs::File::create_new(out.join("source.gain.expected.bin"))?.write_all(&gain_output)?;
     println!(
-        "engine_control_source_ticks=1000 carried_controller=1 car_physical_frame_contacts_rows_exact=1 physics_feedback=0 playback_lengths=purchased_carsetup no_backend=1"
+        "engine_control_source_ticks=1000 carried_controller=1 gain_publication=1 carried_voices=1 car_physical_frame_contacts_rows_exact=1 physics_feedback=0 playback_lengths=purchased_carsetup no_backend=1"
     );
     Ok(())
 }

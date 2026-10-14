@@ -43,8 +43,19 @@ try {
   if([Convert]::ToHexString($taskBytes) -ne [Convert]::ToHexString($taskRepeat)){throw 'Audio descriptor changed during capture'}
   [pscustomobject]@{Global=$taskGlobal.ToString('x');Descriptor=$taskPointer.ToString('x');Initialized=$true;Hex=[Convert]::ToHexString($taskBytes).ToLower();NameOrId=([BitConverter]::ToUInt32($taskBytes,0)).ToString('x');OffsetOrCallback=([BitConverter]::ToUInt32($taskBytes,4)).ToString('x');Flags=[BitConverter]::ToUInt32($taskBytes,20);Kind=[BitConverter]::ToUInt32($taskBytes,24);RepeatedHeaderExact=$true}
  })
- $taskRecord=[pscustomobject]@{CapturedUtc=[DateTime]::UtcNow.ToString('o');Session=$taskSession;CodePrefixesExact=$true;Scope='Fixed read-only audio parameter descriptors; no input, injection or whole mixer claim';Descriptors=$taskRows}
+ $taskBackendBytes=Read-TaskAudio 0xebf420 64
+ $taskBackend=[pscustomobject]@{
+  Address='ebf420';Hex=[Convert]::ToHexString($taskBackendBytes).ToLower();
+  FilterSqrtSwitch=$taskBackendBytes[5];Features=([BitConverter]::ToUInt32($taskBackendBytes,0x18)).ToString('x');
+  EffectFilterMask=([BitConverter]::ToUInt32($taskBackendBytes,0x28)).ToString('x');
+  EffectsDirtyMask=([BitConverter]::ToUInt32($taskBackendBytes,0x2c)).ToString('x');
+  DirectFilterHandle=[BitConverter]::ToUInt32($taskBackendBytes,0x30);
+  FilterFunction=([BitConverter]::ToUInt32((Read-TaskAudio 0xebeeb4 4),0)).ToString('x');
+  TrebleScale=[BitConverter]::ToSingle((Read-TaskAudio 0xe50908 4),0)
+ }
+ $taskRecord=[pscustomobject]@{CapturedUtc=[DateTime]::UtcNow.ToString('o');Session=$taskSession;CodePrefixesExact=$true;Scope='Fixed read-only audio parameter descriptors and backend filter state; no input, injection or whole mixer claim';Descriptors=$taskRows;Backend=$taskBackend}
  $taskStream=[IO.File]::Open($taskOutput,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
  try{$taskData=[Text.Encoding]::UTF8.GetBytes(($taskRecord|ConvertTo-Json -Depth 6));$taskStream.Write($taskData,0,$taskData.Length)}finally{$taskStream.Dispose()}
  $taskRows|Format-Table Global,Initialized,OffsetOrCallback,Flags,Kind
+ $taskBackend|Select-Object FilterSqrtSwitch,Features,EffectFilterMask,DirectFilterHandle,FilterFunction,TrebleScale|Format-List
 }finally{[void][GridAudioDescriptorRead]::CloseHandle($taskHandle)}
