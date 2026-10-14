@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **bc90482b4a37-dirty**, built14 October at17:54:31UTC. The playable now uses all six purchased engine recordings with twelve continuous voices and reconstructed pair scheduling, gains and seeks. Eleven source-driving and six Bevy checks pass; real-device output passes. The600-tick collision render retains all310physical/deformation records and the previous image with matching flags. **New sound fidelity is unverified**; the old granular tone failed owner review, and original full-frame effects/backend/spatial processing remain incomplete. M mutes. See [continuous audio scope](CONTINUOUS_ENGINE_AUDIO.md).
+Latest verified refresh: **0cb4405fc491-dirty**, built15October(client date),14October22:16:17UTC. New **Play GRID Time Trial.cmd** selects three valid laps with countdown, frozen results and private personal bests; the existing launchers keep free practice. Eleven source-driving and seven Bevy checks pass. Three complete diagnostic event traces match across captured debug/release runs; the600-tick render preserves all310 logged physical/deformation records frombc90482. See [time-trial rules, checks and limits](TIME_TRIAL_EVENT.md). Audio is unchanged and remains an approximate original-style implementation, deferred at the owner's request.
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -207,3 +207,12 @@ local/audio/continuous-20261014-release01/fixed-rpm.wav; source-driving audition
 source-drive.wav. Listening is pending. Next reconstruct full-frame load/gear/
 wobble and original postmix/spatial behavior, using feedback to prioritize
 audible differences; avoid claiming a filter cause from the ambient recording.
+
+
+## Finite time-trial refresh
+
+See [F276 build and validation evidence](TIME_TRIAL_EVENT.md#playable-refresh-and-regression-evidence).
+Source 0cb4405fc4916a46d12478adc45168972a2fc50c / executable SHA256 5aa01a5f727a0adbc75956869ac4331ab6b35044a1412ad116cc24a6684591df.
+All three launchers use this release. No owner session was replaced; saved
+bests stay under ignored local/playtest/. Full original handling calibration
+and owner completion/PB observation remain open.

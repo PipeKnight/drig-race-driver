@@ -1,6 +1,6 @@
 # Next playable milestones — 14 October 2026
 
-Current build: bc90482, Lacetti/Donington practice with keyboard controls,
+Current build: 0cb4405, Lacetti/Donington practice and optional finite time trial with keyboard controls,
 reverse/handbrake, static body/barrier contacts, damage/handling effects,
 deformation, practice timing/HUD and continuous engine sound. Owner has driven
 laps and collision-heavy sessions. The first drivable/timed-lap milestone is
@@ -11,7 +11,7 @@ artificial/mechanical than original GRID, and explicitly defers further engine
 sound work. Preserve the current audio and its remaining fidelity gaps.
 This is perceived improvement, not a1:1sound pass.
 
-## Near-term target: a complete single-car three-lap event
+## Near-term target: validate the complete single-car event
 
 1. Validate a bounded set of original-versus-prototype maneuvers: straight
    acceleration/gearing, braking, steady turn/steering release, frontal/glancing
@@ -22,15 +22,15 @@ This is perceived improvement, not a1:1sound pass.
    as calibrated input until verified during the hold. Existing videos/logs,
    autonomous laps and offline original-code probes provide starting evidence.
    Fix demonstrated differences; do not tune merely to an assumed feel.
-2. Add a clear start/countdown, a configurable three-lap practice event, finish
-   state/results and persistent local personal-best records. Keep timing tied
-   to successful simulation ticks; pause, reset and invalid laps must retain
-   explicit rules. Save our settings/results outside Steam. This is an
-   independently authored prototype event, not proof of original race rules.
-3. Release and validate the complete event through the existing launchers,
-   including a full clean run and collision/damage/reset cases. Preserve owner
-   sessions and record revision/hash/checks. No immediate owner capture needed;
-   ask for a specific maneuver only after recording is ready.
+2. Implemented and released: configurable finite event, countdown, finish/results
+   and private PBs, exposed by Play GRID Time Trial.cmd. Three actual-physics
+   diagnostic laps complete and captured debug/release traces match. Existing
+   free practice is retained. See [rules and evidence](TIME_TRIAL_EVENT.md).
+3. Owner completion and saved PB across launches remain to observe; scripted
+   collision/deformation comparison, pause/reset/terminal recovery and finite
+   event checks pass. Original reference input capture currently needs a manual
+   Enter at the title screen after bounded guarded confirms did not advance it.
+   Continue independent shared-world work while awaiting that optional help.
 
 ## Following target: first race against one opponent
 

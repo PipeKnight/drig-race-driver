@@ -90,8 +90,12 @@ maximum lateral route error 3.629247944 m. Times:
 | Lap 3 | 189.446805080 |
 | Event, GO to final crossing | 572.213027077 |
 
-Evidence: local/playtest/time-trial-20261015-release-pilot01.tsv. Debug comparison,
-final release repeat and playable render are still pending at this draft stage.
+Evidence: local/playtest/time-trial-20261015-release-pilot01.tsv. The pilot, captured debug run and current release repeat are byte-identical: all
+647,736 formatted trace bytes and 136,228 complete final car/physical bytes.
+The debug run began before the extra duplicate-start/empty-sector event guards;
+those guards are checked separately by the current debug library tests. No
+claim is made about every intermediate world byte. Final report
+local/playtest/time-trial-20261015-final-validation01.json SHA256 043993184aecd20893ad97a2a35db546935e589ed32fb3c768151ffb26971b2a.
 This is an authored conservative diagnostic driver, not original GRID AI and
 not calibrated handling equivalence. Existing collision/damage/reset checks are
 required in the release update; the three-lap clean run alone tests no impacts.
@@ -110,3 +114,38 @@ under local/driving/native-reference-20261015-01/.
 Reused Rust/Cargo1.99.0, Bevy0.19.1 and Python3.12.14; no installation, original
 Steam modification or audio retuning. Full original/prototype input-and-braking
 comparison remains open independently of the new event implementation.
+
+## Playable refresh and regression evidence
+
+Build 0cb4405fc491-dirty / source 0cb4405fc4916a46d12478adc45168972a2fc50c
+built 2026-10-14T22:16:17.5649546Z; executable SHA256
+5aa01a5f727a0adbc75956869ac4331ab6b35044a1412ad116cc24a6684591df. Build manifest:
+local/playtest/build-20261014T2215520884549Z/build.json.
+All GRID app code was committed; separate diagnostic changes and unrelated
+owner settings notes account for the dirty tag at build time. Later commits
+only adjust diagnostics, documentation and storage tests, not playable behavior.
+Eleven purchased-source driving checks and seven Bevy checks pass, including
+existing body/deformation/terminal-damage recovery and the new finite event.
+Ordinary tests: 178 world +15 tools pass; fmt and all-target Clippy pass.
+The storage test additionally creates its own ignored parent in a fresh checkout
+and verifies improving an already saved best.
+
+Two bounded time-trial collision captures finish normally at 600 physics ticks.
+The steering .6 stress run has 330 bulk calls /295 records /334 moved positions,
+no terminal state/failure. It is a separate scenario, not the old .25 baseline.
+The matching .25 run has all310 logged physical/deformation records exactly
+equal to bc90482, excluding wall time. Nine mesh updates include the unchanged
+startup; first changed tick165, last175. The image is visually inspected:
+car/track, event time, lap target, practice splits and controls are readable.
+UI differs intentionally; no full-image equality claim.
+
+Private comparison local/playtest/time-trial-20261015-no-feedback01.json SHA256 91789baef32f2929235af9c7db08be2b717d9e512dffa51d796296a0dd48a208;
+matched PNG SHA256 d00c51cf0c71eb2e5c7747548a429b9fc2d2447c8bad1e08c0f9411299c16f8e; log SHA256
+6fa7afebc9e38d61d6b8615853fb7ffaa2ee76bf303e620cc98574b099747664.
+Headless captures did not save owner PBs. All130 baseline Steam resources and
+original executable remain unchanged at2026-10-14T22:17:49.231176UTC:
+local/scene/preservation-20261015-time-trial.json.
+
+The release is ready for an owner three-lap run. A full rendered owner event,
+actual PB persistence across owner launches and an original-game input/braking
+comparison remain to observe. No such observations are inferred from tests.
