@@ -314,3 +314,30 @@ prefix skip, not unexplained extra audio frames; see the
 Current prefix-aware source-control and whole-gain audits remain exact. Their
 current identities are recorded in that correction; previous audits remain
 valid historical evidence for their recorded executable/source revisions.
+
+### Whole waiting scheduler (14 October 2026)
+
+engine_audio_schedule::publish_waiting reconstructs whole 4371C0 with all
+twelve owned voices present, camera3, and cooldowns remaining nonnegative
+after decrement. Unchanged original executes real415500 x3,436F90,42DE60
+and423210 x3; the latter returns at its flag/cooldown guard. No virtual
+playback service or original math helper is substituted.
+
+Pair flags select outgoing banks2/0 and incoming0/2. Category-ordered pitches
+carry the C8 clamp. Outgoing pitch <=0.95 or >=1.05 raises restart.
+Fades move +/-16*f32(delta) clamped[-1,1]; cooldowns subtract f32(delta),
+then gains publish. Full fade traversal takes125ms. Actual play/seek/toggle
+is deliberately outside this waiting boundary.
+
+Original/repeat/Rust debug/release agree over1024authored cases and2424832
+complete controller/voice bytes:1501new restart flags,1853saturated fades.
+Canaries/read-only graph/full restored mapped image pass. Eight malformed
+inputs across three implementations reject without native faults(24outcomes).
+Late gain failure and service-required cooldown preserve all Rust state.
+11ordinary tools tests/all-target Clippy pass; source-driving tests skipped.
+
+Existing Rust/Cargo1.99.0/Python3.12.14/MSVC14.44.35207/fp:strict/SSE2 reused.
+Private audit local/audio/engine-schedule-waiting-20261014-final01/validation.json
+SHA25684771211f0e6a0671d6cf752d0b92673b30de397c6058db735199aa5c8f2428e.
+No whole451770/Chase2/activebackend/PCM fidelity/playable update claim.
+Next actual restart service, then continuous purchased PCM composition.
