@@ -15,6 +15,7 @@ def main():
     parser.add_argument("start_filetime", type=int)
     parser.add_argument("existing_wave", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--controller", type=int)
     args = parser.parse_args()
     out = args.output.resolve()
     assert out.is_relative_to((ROOT / "local").resolve()) and not out.exists()
@@ -45,6 +46,17 @@ def main():
         if name != "existing":
             assert not wave.exists() and not Path(str(wave) + ".packets.tsv").exists(), name
         rows.append(dict(name=name, rejected=True, returncode=result.returncode))
+    if args.controller is not None:
+        extra = [("zero_controller", 0), ("unmapped_controller", 0x20000),
+                 ("interior_controller", args.controller + 4), ("large_controller", 0x80000000)]
+        for name, controller in extra:
+            wave = out / (name + ".wav")
+            result = subprocess.run([str(exe), str(args.pid), str(args.start_filetime), "500", str(wave), str(controller)],
+                                    cwd=ROOT, capture_output=True, text=True, timeout=10)
+            (out / f"{name}.txt").write_text(result.stdout + result.stderr)
+            assert result.returncode != 0 and "event=started" not in result.stdout, name
+            assert all(not Path(str(wave) + suffix).exists() for suffix in ("", ".packets.tsv", ".engine.bin"))
+            rows.append(dict(name=name, rejected=True, returncode=result.returncode))
     assert before == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (existing, packet)}
     report = dict(passed=True, cases=rows, existing_preserved=before,
                   executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),

@@ -15,6 +15,8 @@
 #include <cwctype>
 #include <cstdint>
 #include <cstring>
+#include <array>
+#include <memory>
 using Microsoft::WRL::ComPtr;
 using namespace Microsoft::WRL;
 class Activation final : public RuntimeClass<RuntimeClassFlags<ClassicCom>, IActivateAudioInterfaceCompletionHandler, FtmBase> {
@@ -60,17 +62,84 @@ static std::filesystem::path private_path(const wchar_t* text) {
 static void word(std::vector<unsigned char>& header, uint32_t value, int bytes) {
     for(int i=0;i<bytes;i++) header.push_back(static_cast<unsigned char>(value >> (8*i)));
 }
+// Optional ET01 observation: the controller has already been found by the
+// separately identity-checked reader. Reads are sequential, never atomic.
+class EngineTrace {
+    HANDLE process_;
+    uint32_t controller_, root_, component_, vehicle_, physical_, camera_;
+    static uint32_t get(const unsigned char* bytes, size_t offset) {
+        uint32_t value;std::memcpy(&value,bytes+offset,4);return value;
+    }
+    void read(uint32_t address, void* destination, size_t length) {
+        SIZE_T done=0;
+        if(address<0x10000 || uint64_t(address)+length>0x7fff0000 || length>0x340 ||
+           !ReadProcessMemory(process_,reinterpret_cast<const void*>(uintptr_t(address)),destination,length,&done) || done!=length)
+            throw std::runtime_error("bounded engine observation read failed");
+    }
+    uint32_t pointer(uint32_t address) {uint32_t value=0;read(address,&value,4);return value;}
+public:
+    static constexpr uint32_t record_bytes=2440;
+    std::vector<unsigned char> bytes;
+    uint32_t count=0;
+    EngineTrace(HANDLE process,uint32_t controller,uint32_t pid):process_(process),controller_(controller) {
+        std::array<unsigned char,0x340> state{};read(controller_,state.data(),state.size());
+        root_=get(state.data(),0x128);component_=get(state.data(),0x110);
+        if(uint64_t(root_)+0x8f10!=controller_ || get(state.data(),0x118)!=root_+0x1a40 ||
+           pointer(root_+0x20)!=component_ || pointer(component_+0x6c)!=0 ||
+           get(state.data(),0x328)!=477036 || get(state.data(),0x32c)!=319292)
+            throw std::runtime_error("player Lacetti engine ownership mismatch");
+        vehicle_=pointer(component_+0x24);
+        physical_=pointer(pointer(vehicle_+0xdb0)+8);
+        camera_=pointer(get(state.data(),0x114)+0x28);
+        for(char c:std::string("ET01"))bytes.push_back(static_cast<unsigned char>(c));
+        word(bytes,record_bytes,4);word(bytes,0,4);word(bytes,controller_,4);
+        LARGE_INTEGER frequency{};QueryPerformanceFrequency(&frequency);
+        word(bytes,static_cast<uint32_t>(frequency.QuadPart),4);word(bytes,static_cast<uint32_t>(frequency.QuadPart>>32),4);
+        word(bytes,pid,4);word(bytes,0,4);
+        bytes.reserve(32+6500*size_t(record_bytes));
+    }
+    void sample() {
+        if(count>=6500)throw std::runtime_error("engine observation count bound exceeded");
+        std::array<unsigned char,record_bytes> row{};
+        LARGE_INTEGER begin{},end{};QueryPerformanceCounter(&begin);
+        std::memcpy(row.data(),&begin.QuadPart,8);
+        auto state=row.data()+16;
+        read(controller_,state,0x340);
+        if(get(state,0x128)!=root_ || get(state,0x110)!=component_ || get(state,0x118)!=root_+0x1a40 ||
+           pointer(component_+0x24)!=vehicle_ || pointer(pointer(vehicle_+0xdb0)+8)!=physical_ ||
+           pointer(get(state,0x114)+0x28)!=camera_ || get(state,0x328)!=477036 || get(state,0x32c)!=319292)
+            throw std::runtime_error("engine observation ownership changed");
+        size_t at=16+0x340;
+        for(uint32_t offset:{0x1894u,0x17a4u,0x17a8u}) {read(vehicle_+offset,row.data()+at,4);at+=4;}
+        read(camera_+0xc1c,row.data()+at,4);at+=4;
+        read(root_+0xa6a4,row.data()+at,4);at+=4;
+        read(physical_+0x210,row.data()+at,32);at+=32;
+        for(uint32_t i=0;i<12;i++) {read(get(state,0x1ec+i*4),row.data()+at,0x80);at+=0x80;}
+        std::array<unsigned char,0x340> repeat{};read(controller_,repeat.data(),repeat.size());
+        uint32_t exact=std::memcmp(state,repeat.data(),repeat.size())==0?1:0;
+        std::memcpy(row.data()+at,&exact,4);
+        QueryPerformanceCounter(&end);std::memcpy(row.data()+8,&end.QuadPart,8);
+        bytes.insert(bytes.end(),row.begin(),row.end());++count;
+    }
+    void finish() {std::memcpy(bytes.data()+8,&count,4);}
+};
 static int run(int argc, wchar_t** argv) {
-    if(argc!=5) throw std::runtime_error("usage: capture-grid-audio PID START_FILETIME DURATION_MS local/NEW.wav");
+    if(argc!=5 && argc!=6) throw std::runtime_error("usage: capture-grid-audio PID START_FILETIME DURATION_MS local/NEW.wav [PLAYER_CONTROLLER_DECIMAL]");
     auto process_id = number(argv[1]); auto expected_start = number(argv[2]); auto duration = number(argv[3]);
     if(!process_id || process_id>MAXDWORD || duration<500 || duration>60000) throw std::runtime_error("capture argument outside bound");
     auto output = private_path(argv[4]);
     auto metadata = private_path((output.native()+L".packets.tsv").c_str());
-    Handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,static_cast<DWORD>(process_id))};
+    auto controller=argc==6?number(argv[5]):0;
+    if(argc==6 && (controller<0x20000 || controller>0x7ffe0000))throw std::runtime_error("engine controller outside bound");
+    std::filesystem::path engine_output;
+    if(controller)engine_output=private_path((output.native()+L".engine.bin").c_str());
+    Handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE|(controller?PROCESS_VM_READ:0),FALSE,static_cast<DWORD>(process_id))};
     if(!process.value) throw std::runtime_error("target process unavailable");
     wchar_t path[32768]; DWORD size = 32768;
     FILETIME created{}, exited{}, kernel{}, user{};
     if(!QueryFullProcessImageNameW(process.value,0,path,&size) || _wcsicmp(path,L"C:\\Users\\debros\\Tools\\grid-research\\grid-compat\\grid.exe") || !GetProcessTimes(process.value,&created,&exited,&kernel,&user) || filetime(created)!=expected_start) throw std::runtime_error("private GRID process identity mismatch");
+    std::unique_ptr<EngineTrace> engine;
+    if(controller)engine=std::make_unique<EngineTrace>(process.value,static_cast<uint32_t>(controller),static_cast<uint32_t>(process_id));
     check(CoInitializeEx(nullptr,COINIT_MULTITHREADED),"COM initialization");
     struct ComScope { ~ComScope(){CoUninitialize();} } com_scope;
     auto activation = Make<Activation>();
@@ -95,7 +164,10 @@ static int run(int argc, wchar_t** argv) {
     check(activation->client->SetEventHandle(samples.value),"sample event binding");
     Handle wav{CreateFileW(output.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr)};
     Handle packets{CreateFileW(metadata.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr)};
+    Handle engine_file;
+    if(engine)engine_file.value=CreateFileW(engine_output.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(wav.value==INVALID_HANDLE_VALUE || packets.value==INVALID_HANDLE_VALUE) throw std::runtime_error("exclusive private output creation failed");
+    if(engine && engine_file.value==INVALID_HANDLE_VALUE)throw std::runtime_error("exclusive engine observation creation failed");
     std::vector<unsigned char> pcm;pcm.reserve(static_cast<size_t>((duration*48+capacity)*4));
     std::string trace = "packet\tframes\tflags\tdevice_position\tqpc_100ns\n";
     LARGE_INTEGER began{}, frequency{};FILETIME utc{};
@@ -110,6 +182,7 @@ static int run(int argc, wchar_t** argv) {
         HANDLE waits[]{samples.value,process.value};DWORD waited=WaitForMultipleObjects(2,waits,FALSE,1000);
         if(waited==WAIT_OBJECT_0+1) throw std::runtime_error("GRID exited during capture");
         if(waited==WAIT_FAILED) throw std::runtime_error("capture wait failed");
+        if(engine)engine->sample();
         UINT32 available=0;check(capture->GetNextPacketSize(&available),"packet size");
         while(available) {
             BYTE* data=nullptr;UINT32 frames=0;DWORD flags=0;UINT64 position=0,qpc=0;
@@ -131,6 +204,7 @@ static int run(int argc, wchar_t** argv) {
     for(char c:std::string("data")) header.push_back(static_cast<unsigned char>(c));word(header,static_cast<uint32_t>(pcm.size()),4);
     write(wav.value,header.data(),static_cast<DWORD>(header.size()));if(!pcm.empty())write(wav.value,pcm.data(),static_cast<DWORD>(pcm.size()));
     write(packets.value,trace.data(),static_cast<DWORD>(trace.size()));FlushFileBuffers(wav.value);FlushFileBuffers(packets.value);
+    if(engine){engine->finish();write(engine_file.value,engine->bytes.data(),static_cast<DWORD>(engine->bytes.size()));FlushFileBuffers(engine_file.value);std::printf("audio_capture engine_records=%u sequential_reads=1\n",engine->count);}
     std::printf("audio_capture event=completed frames=%zu packets=%u discontinuities=%u timestamp_errors=%u process_tree_only=1\n",pcm.size()/4,count,discontinuities,timestamp_errors);
     if(!count) throw std::runtime_error("capture produced no audio packets");
     return 0;
