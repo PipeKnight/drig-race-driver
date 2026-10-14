@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **adb7755a141a**, built 13 October at 23:41:33 UTC (14 October locally). The terminal wheel-damage freeze reported by the owner is fixed; physics continues, terminal damage disables driving controls and R resets. Ten source-driving and five Bevy checks pass, along with exact replay of both failing owner runs and a rendered healthy-contact regression. See [damage-freeze findings](PLAYTEST_DAMAGE_FREEZE_2026_10_14.md).
+Latest verified refresh: **f80d2be1fc6d-dirty**, built 14 October at 00:02:36 UTC. The playable now shows practice lap/sector progress, last/best lap and terminal-damage status on screen. Eleven source-driving and five Bevy checks pass; a rendered collision run retains all 310 prior physical/deformation samples exactly. The dirty marker records unrelated uncommitted settings-recovery notes in the shared workspace; all GRID implementation files were committed at build time. See [practice timing](PRACTICE_LAP_TIMING.md).
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -11,6 +11,16 @@ Run `powershell -ExecutionPolicy Bypass -File tools/update_prototype.ps1` from t
 Every successful update writes ignored `local/playtest/build-UTCSTAMP/build.json` and logs. `local/playtest/current-build.json` points to the latest successfully checked build and records the full revision, executable hash, tool versions and checks. Rendering and owner laps are separately verified; a successful rebuild alone does not establish them. Game assets and compiled binaries remain private.
 
 Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts, [selected registered body events](BODY_IMPACT_RUNTIME.md), [collision-driven deformation](DEFORMATION_DRIVING_INTEGRATION.md) and [independent body dents](BODY_DEFORMATION_PRESENTATION.md) are available through the body-contact launcher.
+
+## Practice timing and on-screen display refresh
+
+Revision `f80d2be1fc6d536b5395a7ae22b02c4efb3131d8`, displayed `f80d2be1fc6d-dirty`, built `2026-10-14T00:02:36.4792416Z`; executable SHA `343be29637318782c7c7ab5e1e4957270d2d34a120633bc8d926546469b31af7`. Private manifest `local/playtest/build-20261014T0002135803710Z/`; eleven source-driving and five Bevy checks pass. Both launchers use the current executable. No owner session was replaced.
+
+The source implementation was committed; unrelated settings-recovery documentation was preserved uncommitted in the shared workspace, so the helper correctly labels the build dirty. This is not described as a clean build. An independent diagnostic driver was started after this build and is separate from its executable.
+
+A 600-tick collision render exits normally with 155 samples and zero failures. All 310 physical/deformation records match the previous adb7755 release exactly excluding wall time. Nine mesh-upload records include an extra unchanged startup upload; first changed tick165 and last175 remain the same. The inspected screenshot shows legible current-lap/sector/last/best feedback, speed/gear and controls. Private `local/playtest/lap-hud-f80d2be-20261014.txt` SHA `0006703e989c6ddf45f1540934ad509b3d88e6bfb28c6dd2e46b329eb0f27532`; image SHA `349646f3cf08e408e7d3b7e4b9c943700e0966abf0490412d37b65625d894b0b`; comparison `local/playtest/lap-hud-no-physics-feedback-20261014.json` SHA `22afb7b2b945cd56e5c7741437cef9a205b8e57cef59b7a59039b99514f588f4`.
+
+The first new log summary rejected the emitted `running` status because the parser incorrectly expected `valid`; corrected and the actual render summary passes. This was a diagnostic-parser failure, not an app/timer failure. No fresh owner lap is claimed.
 
 ## Terminal wheel-damage recovery refresh
 
