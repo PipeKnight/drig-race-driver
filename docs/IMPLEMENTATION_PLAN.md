@@ -1,6 +1,6 @@
 # Current GRID reverse-engineering and implementation plan
 
-Current checkpoint F275: owner tested8f73dd1 engine-sound build; RPM response correct, timbre mosquito-like/unlike GRID. Audio fidelity FAILED; owner requests1:1 original sound. Preserve playable/Mmute and physics, recover original voice/loop/pitch/blend/processing behavior with matched original output before claiming equivalence. Fresh aligned wrapper43C690 passesowner+8B0 profile andowner+1A40 idle-table block into4223D0; incomplete Ghidra indexing explained missing consumers. [Audio evidence and next actions](ENGINE_AUDIO_RESEARCH.md). No owner help currently required.
+Current checkpoint F275 (14 October2026): playablebc90482 uses six continuous engine recordings/twelve voices with reconstructed pair scheduling. Owner confirms sound is definitely better, but still more artificial/mechanical than original GRID, and defers further engine sound work. Preserve current audio; fidelity remains incomplete. **Next target is a complete single-car three-lap event**, preceded by bounded original-versus-prototype driving/contact/damage checks; then shared-world multi-car contacts and one opponent. The drivable/timed-lap milestone is already achieved. [Current prioritized milestones](NEXT_MILESTONES.md), [current playable](PROTOTYPE_BUILD_UPDATES.md), [audio limits](CONTINUOUS_ENGINE_AUDIO.md). Older checkpoints below retain dependency history.
 
 Current checkpoint F274: selected local Lacetti audio decoded and independently validated; an explicitly independent RPM/throttle mixer joins Bevy through read-only telemetry with pause/reset/M mute.211ordinary library tests/alltarget Clippy and source Bevy audio recovery checks pass;1000paired physical updates and debug/release waves match. [Audio policy/evidence](ENGINE_AUDIO_RESEARCH.md). Playable regression/device/render refresh is next. Owner confirms the raw deceleration decode but is unsure about mixed sound quality; original audio fidelity remains open. Then return to original-versus-prototype driving/damage calibration; full opponents/progression still open.
 
@@ -125,7 +125,7 @@ Readers must validate counts, offsets, lengths and encodings before indexing/all
 
 Use original resources directly from the chosen local installation. Keep caches versioned and keyed by data/build hashes; keep our settings and saves outside the Steam directory. Public parser tests use independently created fixtures; purchased-resource integration checks remain local.
 
-## Immediate backlog
+## Historical immediate backlog — superseded by NEXT_MILESTONES.md
 
 The current priority is the first drivable Lacetti/Donington loop. The selected scene and many scoped components exist; research should now close dependencies required to connect them.
 

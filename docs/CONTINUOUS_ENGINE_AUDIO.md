@@ -54,3 +54,9 @@ Owner listening feedback (2026-10-14T18:02:27.273239+00:00): the new sound is "d
 Perceived improvement is now confirmed; a1:1 match remains unverified.
 This supports replacing the first granular presentation, not attributing the
 old tone to a missing filter or declaring the remaining effects complete.
+
+
+Owner follow-up (2026-10-14T18:08:04.841527+00:00): improved but still more artificial/mechanical than
+original GRID. Owner explicitly defers further engine sound work. Preserve this
+build and the open fidelity gaps; next driving/event milestones are documented
+in NEXT_MILESTONES.md. No further audio experiment is requested now.
