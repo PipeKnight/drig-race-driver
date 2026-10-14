@@ -65,6 +65,8 @@ struct Orbit {
 struct InitialOrbit(Orbit);
 #[derive(Component)]
 struct ViewerCamera;
+#[derive(Component)]
+struct DrivingHud;
 
 #[derive(Resource)]
 struct Driving {
@@ -161,6 +163,33 @@ impl Driving {
                 registration.random_seed,
                 b[0xc7a0 / 4],
                 b[0xc7f0 / 4] >> 16 & 255
+            );
+        }
+        if let Some(lap) = &self.runtime.lap {
+            let elapsed = lap
+                .elapsed()
+                .map_or_else(|| "none".into(), |s| format!("{s:.9}"));
+            let best = lap
+                .best_lap
+                .map_or_else(|| "none".into(), |s| format!("{s:.9}"));
+            let status = if lap.elapsed().is_none() {
+                "waiting"
+            } else if lap.current_valid {
+                "running"
+            } else {
+                "invalid"
+            };
+            println!(
+                "drive_lap_sample version=1 event={event} segment={} tick={} lap={} status={status} elapsed={elapsed} next_gate={} passed_gates={} total_gates={} required_gates={} valid_laps={} attempts={} best={best}",
+                self.segment,
+                self.runtime.ticks,
+                lap.lap_number(),
+                lap.next_gate,
+                lap.passed_gates(),
+                self.runtime.lap_gate_count(),
+                self.runtime.lap_required_gate_count(),
+                lap.valid_laps,
+                lap.attempts
             );
         }
     }
@@ -916,6 +945,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         collision = false;
         start_view = true;
         let mut runtime = grid_tools::source_vehicle::Runtime::lacetti(&root, "slot_00", 200679)?;
+        runtime.enable_lap_timing(&root)?;
+        println!(
+            "drive_lap_timing enabled=true gates={} required_gates={} finish=0 clock=successful-simulation-ticks policy=independent-ordered-route-splits",
+            runtime.lap_gate_count(),
+            runtime.lap_required_gate_count()
+        );
         if let Some(path) = body_events {
             if std::fs::metadata(&path)?.len() != 28 {
                 return Err("invalid private body event parameter extent".into());
@@ -1323,6 +1358,27 @@ fn setup(
     let camera = commands
         .spawn((Camera3d::default(), camera_transform(&orbit), ViewerCamera))
         .id();
+    if driving.is_some() {
+        commands.spawn((
+            DrivingHud,
+            Text::new("Lacetti / Donington\nPreparing practice timer"),
+            TextFont {
+                font_size: FontSize::Px(22.),
+                ..default()
+            },
+            TextColor(Color::srgb(0.93, 0.96, 1.)),
+            BackgroundColor(Color::srgba(0.025, 0.04, 0.065, 0.9)),
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(18.),
+                left: px(18.),
+                width: px(360.),
+                padding: UiRect::all(px(14.)),
+                ..default()
+            },
+            UiTargetCamera(camera),
+        ));
+    }
     if let Some(mut capture) = capture {
         let mut image = Image::new_target_texture(1280, 800, TextureFormat::Rgba8UnormSrgb, None);
         image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
@@ -1423,6 +1479,46 @@ fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
         driving.failure = Some(text);
         driving.report("failure", controls);
     } else {
+        for event in &driving.runtime.lap_events {
+            use grid_tools::lap_progress::Event;
+            let lap = driving.runtime.lap.as_ref().unwrap().lap_number();
+            let segment = driving.segment;
+            let tick = driving.runtime.ticks;
+            match event {
+                Event::Started { when } => {
+                    println!(
+                        "drive_lap_event version=1 segment={segment} tick={tick} type=start lap={lap} when={when:.9}"
+                    )
+                }
+                Event::Checkpoint { gate, when } => println!(
+                    "drive_lap_event version=1 segment={segment} tick={tick} type=checkpoint lap={lap} gate={gate} when={when:.9}"
+                ),
+                Event::Sector { sector, seconds } => println!(
+                    "drive_lap_event version=1 segment={segment} tick={tick} type=sector lap={lap} sector={} seconds={seconds:.9}",
+                    sector + 1
+                ),
+                Event::Finished(result) => println!(
+                    "drive_lap_event version=1 segment={segment} tick={tick} type=finish lap={} seconds={:.9} valid={} missed_gate={} sectors={}",
+                    result.number,
+                    result.seconds,
+                    result.valid,
+                    result
+                        .missed_gate
+                        .map_or_else(|| "none".into(), |g| g.to_string()),
+                    result
+                        .sectors
+                        .iter()
+                        .map(|s| s.map_or_else(|| "none".into(), |s| format!("{s:.9}")))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+                Event::JumpInvalidated => {
+                    println!(
+                        "drive_lap_event version=1 segment={segment} tick={tick} type=position-jump lap={lap}"
+                    )
+                }
+            }
+        }
         if driving.last_controls != Some(controls)
             || driving.runtime.ticks.is_multiple_of(16)
             || driving.runtime.last_body_contacts > 0
@@ -1487,6 +1583,7 @@ fn drive_present(
     mut windows: Query<&mut Window>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut presentation: ResMut<DeformationPresentation>,
+    mut hud: Query<&mut Text, With<DrivingHud>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -1570,9 +1667,88 @@ fn drive_present(
         geometry.push_str(" | DAMAGE");
     }
     let terminal = terminal_damage_message(&driving.runtime);
+
+    let lap = driving
+        .runtime
+        .lap
+        .as_ref()
+        .map_or_else(String::new, |lap| {
+            let time = lap.elapsed().map_or_else(
+                || "Cross start line".into(),
+                |s| {
+                    format!(
+                        "LAP {} {} | SECTOR {}/{}{}",
+                        lap.lap_number(),
+                        lap_time(s),
+                        lap.passed_gates(),
+                        driving.runtime.lap_required_gate_count(),
+                        if lap.current_valid { "" } else { " INVALID" }
+                    )
+                },
+            );
+            format!(
+                " | {time}{}",
+                lap.best_lap
+                    .map_or_else(String::new, |s| format!(" | BEST {}", lap_time(s)))
+            )
+        });
+    let progress = driving
+        .runtime
+        .lap
+        .as_ref()
+        .map_or_else(String::new, |lap| {
+            let current = lap.elapsed().map_or_else(
+                || "Cross the start line".into(),
+                |s| {
+                    format!(
+                        "Lap {}   {}\nSector {}/{}{}",
+                        lap.lap_number(),
+                        lap_time(s),
+                        lap.passed_gates(),
+                        driving.runtime.lap_required_gate_count(),
+                        if lap.current_valid {
+                            ""
+                        } else {
+                            " - invalid lap"
+                        }
+                    )
+                },
+            );
+            let last = lap.last_lap.as_ref().map_or_else(
+                || "Last  --".into(),
+                |s| {
+                    format!(
+                        "Last  {}{}",
+                        lap_time(s.seconds),
+                        if s.valid { "" } else { " (invalid)" }
+                    )
+                },
+            );
+            let best = lap
+                .best_lap
+                .map_or_else(|| "Best  --".into(), |s| format!("Best  {}", lap_time(s)));
+            format!("{current}\n{last}\n{best}")
+        });
+    let status = if driving.failure.is_some() {
+        "Simulation paused after an error. R resets."
+    } else if driving.paused {
+        "Paused - P resumes; R resets"
+    } else {
+        terminal
+            .as_deref()
+            .unwrap_or("Space: handbrake | P: pause | R: reset")
+    };
+    let text = format!(
+        "Lacetti / Donington practice\n{speed:.0} km/h   Gear {gear}{handbrake}\n\n{progress}\n\n{status}"
+    );
+    for mut value in &mut hud {
+        if value.0 != text {
+            value.0.clone_from(&text);
+        }
+    }
     for mut window in &mut windows {
         window.title = format!(
-            "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry} | tick {} | {}",
+            "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry}{lap} | tick {} | {}",
             driving.runtime.ticks,
             driving.failure.as_deref().unwrap_or(if driving.paused {
                 "Paused; P resumes; R resets"
@@ -1592,6 +1768,15 @@ fn terminal_damage_message(runtime: &grid_tools::source_vehicle::Runtime) -> Opt
             .unwrap_or("unknown");
         format!("Terminal {wheel} wheel damage; controls disabled; R resets")
     })
+}
+fn lap_time(seconds: f64) -> String {
+    let milliseconds = (seconds.max(0.) * 1000.).round() as u64;
+    format!(
+        "{}:{:02}.{:03}",
+        milliseconds / 60000,
+        milliseconds / 1000 % 60,
+        milliseconds % 1000
+    )
 }
 fn update_orbit(
     input: Res<ButtonInput<KeyCode>>,
@@ -1947,6 +2132,7 @@ mod driving_tests {
         let mut runtime =
             grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
                 .unwrap();
+        runtime.enable_lap_timing(Path::new(&root)).unwrap();
         let mut geometry = table.map(|table| {
             runtime
                 .prepare_body_geometry(Path::new(&root), table)
@@ -2030,12 +2216,22 @@ mod driving_tests {
                 .vehicle[0xe30 / 4],
             (-1f32).to_bits()
         );
+        let before_pause = app.world().resource::<Driving>().runtime.lap.clone();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyP);
         app.update();
         assert!(app.world().resource::<Driving>().paused);
         assert_eq!(app.world().resource::<Driving>().runtime.ticks, 122);
+        // This minimal test app has no input plugin to clear just-pressed P
+        // between updates; model the release rather than toggling each frame.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        for _ in 0..4 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<Driving>().runtime.lap, before_pause);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();
@@ -2044,6 +2240,26 @@ mod driving_tests {
             .press(KeyCode::KeyR);
         app.update();
         assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        assert!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .lap
+                .as_ref()
+                .unwrap()
+                .elapsed()
+                .is_none()
+        );
+        assert!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .lap
+                .as_ref()
+                .unwrap()
+                .best_lap
+                .is_none()
+        );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();
@@ -2056,9 +2272,15 @@ mod driving_tests {
             .car
             .owner
             .vehicle[0x15a0 / 4] = 0;
+        let before_failure = app.world().resource::<Driving>().runtime.lap.clone();
         app.update();
         assert!(app.world().resource::<Driving>().failure.is_some());
         assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Driving>().runtime.lap,
+            before_failure
+        );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyR);

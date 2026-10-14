@@ -30,7 +30,7 @@ echo Lacetti at Donington - experimental Rust/Bevy driving prototype
 echo Up/W: throttle   Down/S: brake   Left/A and Right/D: steer
 echo Space: handbrake   P: pause/resume   R: reset   Escape: exit
 echo Click the game window once if keyboard input does not respond.
-echo Drive slowly at first. Body/barrier collisions and lap timing are unfinished.
+echo Practice timing starts at the start line. R resets the car and clears lap times.
 echo Private diagnostic log: %GRID_PLAY_LOG%
 echo Loading the source track can take a little while...
 if "%~2"=="" (
