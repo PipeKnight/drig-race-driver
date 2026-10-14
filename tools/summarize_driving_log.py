@@ -31,7 +31,7 @@ def main():
             for key in ['elapsed','best']:
                 row[key] = None if row[key] == 'none' else float(row[key])
                 assert row[key] is None or (math.isfinite(row[key]) and row[key] >= 0)
-            assert row['status'] in ['waiting','valid','invalid']
+            assert row['status'] in ['waiting','running','invalid']
             lap_rows.append(row)
         if line.startswith('drive_lap_event '):
             row = dict(FIELDS.findall(line)); assert row['version'] == '1'
