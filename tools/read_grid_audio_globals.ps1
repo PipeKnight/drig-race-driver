@@ -32,7 +32,7 @@ try {
  $taskSource=Join-Path $taskRoot 'local/compatibility/grid-unpacked.exe'
  if((Get-FileHash -LiteralPath $taskSource).Hash.ToLower() -ne 'aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514'){throw 'Analysis reference changed'}
  $taskRaw=[IO.File]::ReadAllBytes($taskSource)
- foreach($taskEntry in @(0x46a7d0,0x46ab80)){
+ foreach($taskEntry in @(0x46a7d0,0x46ab80,0xa27780,0xa25d90,0xa29820,0xa29330)){
   $taskCode=Read-TaskAudio $taskEntry 32;$taskOffset=$taskEntry-0x400000-0x1000+0x400
   if([Convert]::ToHexString($taskCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskOffset..($taskOffset+31)])){throw 'Live audio parameter code differs'}
  }

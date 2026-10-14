@@ -52,13 +52,15 @@ def main():
         with wave.open(str(first),'rb') as audio:
             assert (audio.getnchannels(),audio.getsampwidth(),audio.getframerate())==(1,2,sample['rate'])
             pcm=audio.readframes(audio.getnframes())
-        assert pcm==data[sample['start']:sample['end']]
+        prefix=data[sample['start']:sample['start']+4]
+        assert prefix==b'\xff'*4
+        assert pcm==data[sample['start']+4:sample['end']]
         with av.open(str(first)) as audio:
             assert audio.streams.audio[0].codec_context.name=='pcm_s16le'
             decoded=b''.join(frame.to_ndarray().astype('<i2',copy=False).tobytes() for frame in audio.decode(audio=0))
         assert decoded==pcm
         values=np.frombuffer(pcm,dtype='<i2').astype(np.float64)/32768
-        rows.append(dict(name=sample['name'],bytes=len(pcm),samples=len(values),rate=sample['rate'],seconds=len(values)/sample['rate'],rms=float(np.sqrt(np.mean(values*values))),peak=float(np.max(np.abs(values))),wav_sha256=sha(first),original_pcm_sha256=hashlib.sha256(pcm).hexdigest(),pyav_decode_word_exact=True))
+        rows.append(dict(name=sample['name'],non_pcm_prefix_hex=prefix.hex(),bytes=len(pcm),samples=len(values),rate=sample['rate'],seconds=len(values)/sample['rate'],rms=float(np.sqrt(np.mean(values*values))),peak=float(np.max(np.abs(values))),wav_sha256=sha(first),original_pcm_sha256=hashlib.sha256(pcm).hexdigest(),pyav_decode_word_exact=True))
     bank_sizes=[]
     for b in banks:
         path=a.game_root/'audio'/f'{b["name"]}.{b["extension"]}'
@@ -66,7 +68,7 @@ def main():
         assert path.exists() and path.stat().st_size==b['bytes'],path
         bank_sizes.append(dict(name=b['name'],bytes=b['bytes'],relative=str(path.relative_to(a.game_root))))
     paths=[Path(__file__),dictionary,bank,ROOT/'crates/grid-formats/src/audio_dictionary.rs',ROOT/'crates/grid-tools/src/bin/grid-audio-bank.rs',ROOT/'target/debug/grid-audio-bank.exe',ROOT/'target/release/grid-audio-bank.exe']
-    report=dict(passed=True,banks=count,samples=sum(len(b['samples']) for b in banks),dictionary_rows=len(expected),all_bank_sizes_agree=True,bank_sizes=bank_sizes,selected_samples=rows,all_pcm_words_exact=True,identities={str(q):sha(q) for q in paths},pyav=av.__version__,ffmpeg_versions=av.library_versions,scope='Selected zero-flag WIP mono PCM16 wrapping and decoded-word identity. No original loader/mixer execution, unknown-channel decoding, original curve mapping or auditory review claimed.')
+    report=dict(passed=True,banks=count,samples=sum(len(b['samples']) for b in banks),dictionary_rows=len(expected),all_bank_sizes_agree=True,bank_sizes=bank_sizes,selected_samples=rows,all_pcm_words_exact=True,native_non_pcm_prefix_bytes=4,identities={str(q):sha(q) for q in paths},pyav=av.__version__,ffmpeg_versions=av.library_versions,scope='Selected zero-flag WIP PCM16 payload after native-loader-confirmed opaque four-byte prefix. Complete remaining PCM bytes and decoded words match source. No whole original loader/mixer execution, unknown-channel decoding or auditory/fidelity review claimed.')
     with a.output.open('x') as file:json.dump(report,file,indent=2)
     print(json.dumps({k:report[k] for k in ['passed','banks','samples','dictionary_rows','all_bank_sizes_agree','all_pcm_words_exact','pyav']}))
 

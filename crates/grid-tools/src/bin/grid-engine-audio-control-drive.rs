@@ -46,6 +46,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if bank.extension != "WIP" || bank.samples.len() != 6 {
         return Err("selected audio bank layout".into());
     }
+    let mut bank_bytes = Vec::new();
+    fs::File::open(
+        root.join("audio")
+            .join(format!("{}.WIP", setup.engine_bank)),
+    )?
+    .take(64 * 1024 * 1024 + 1)
+    .read_to_end(&mut bank_bytes)?;
     let mut rates = [0_u32; 6];
     for (slot, name) in [
         "dn_en",
@@ -58,20 +65,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     .into_iter()
     .enumerate()
     {
-        let sample = bank
+        let sample_index = bank
             .samples
             .iter()
-            .find(|sample| sample.name == name)
+            .position(|sample| sample.name == name)
             .ok_or("selected audio sample absent")?;
+        let sample = &bank.samples[sample_index];
         let frames = if slot % 3 == 0 {
             setup.idle_frames
         } else {
             setup.throttle_frames
         };
-        if sample.flags != 0
-            || !((sample.end - sample.offset).is_multiple_of(2))
-            || frames as usize + 2 != (sample.end - sample.offset) / 2
-        {
+        if bank.mono_pcm16(sample_index, &bank_bytes)?.len() / 2 != frames as usize {
             return Err("selected Lacetti setup/sample extent mismatch".into());
         }
         rates[slot] = u32::from(sample.rate);

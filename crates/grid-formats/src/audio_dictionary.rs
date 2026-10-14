@@ -133,10 +133,21 @@ impl Bank<'_> {
         {
             return fail(sample.offset, "unsupported selected mono PCM16 bank");
         }
-        Ok(&data[range(sample.offset, sample.end - sample.offset, data.len())?])
+        let count = sample.end.checked_sub(sample.offset).ok_or(crate::Error {
+            offset: sample.offset,
+            message: "invalid audio sample extent",
+        })?;
+        let record = &data[range(sample.offset, count, data.len())?];
+        if record.len() < 6 {
+            return fail(sample.offset, "PCM16 sample lacks prefix or payload");
+        }
+        // A29820/A29330 skip one opaque DWORD before WIP PCM16 publication.
+        // It is not two audio samples. Retain it in the original bank bytes.
+        Ok(&record[4..])
     }
     /// A standard independently authored WAV wrapper over exact local bytes;
-    /// no resampling, gain, trimming or original mixing behavior is implied.
+    /// The native four-byte non-PCM prefix is skipped; no PCM resampling, gain,
+    /// trimming or original mixing behavior is implied.
     pub fn mono_pcm16_wav(&self, index: usize, data: &[u8]) -> Result<Vec<u8>> {
         let pcm = self.mono_pcm16(index, data)?;
         let rate = u32::from(self.samples[index].rate);
@@ -170,9 +181,9 @@ mod tests {
             (20, 2),
             (40, 0),
             (44, 32000),
-            (64, 4),
+            (64, 8),
             (68, 32000),
-            (88, 8),
+            (88, 16),
         ] {
             b[at..at + 4].copy_from_slice(&value.to_le_bytes());
         }
@@ -187,11 +198,13 @@ mod tests {
         let bytes = fixture();
         let dict = read(&bytes).unwrap();
         let bank = &dict.banks[0];
-        let data = [0, 128, 255, 127, 255, 255, 0, 0];
+        let data = [
+            255, 255, 255, 255, 0, 128, 255, 127, 0x78, 0x56, 0x34, 0x12, 255, 255, 0, 0,
+        ];
         assert_eq!(bank.samples[0].rate, 32000);
-        assert_eq!(bank.mono_pcm16(0, &data).unwrap(), &data[..4]);
+        assert_eq!(bank.mono_pcm16(0, &data).unwrap(), &data[4..8]);
         let wav = bank.mono_pcm16_wav(1, &data).unwrap();
-        assert_eq!(&wav[44..], &data[4..]);
+        assert_eq!(&wav[44..], &data[12..]);
         assert_eq!(wav.len(), 48);
         assert_eq!(&wav[..4], b"RIFF");
         assert!(bank.mono_pcm16(2, &data).is_err());
@@ -204,6 +217,10 @@ mod tests {
         unknown[92..95].copy_from_slice(b"WIM");
         let dict = read(&unknown).unwrap();
         assert!(dict.banks[0].mono_pcm16(1, &data).is_err());
+        let mut prefix_only = fixture();
+        prefix_only[64..68].copy_from_slice(&4_u32.to_le_bytes());
+        let dict = read(&prefix_only).unwrap();
+        assert!(dict.banks[0].mono_pcm16(0, &data).is_err());
     }
     #[test]
     fn malformed_dictionary_extents_and_aliases_reject_before_audio_access() {
@@ -215,7 +232,7 @@ mod tests {
             (40, 1),
             (44, 0),
             (64, 0),
-            (64, 12),
+            (64, 20),
             (88, 0),
         ] {
             let mut b = good.clone();

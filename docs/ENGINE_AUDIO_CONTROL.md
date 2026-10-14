@@ -300,3 +300,17 @@ Private static evidence: local/behavior/20261014T1115574030285Z,
 1116333617689Z,1119418429172Z,1121337580483Z,1132323430986Z and aligned
 local/audio/engine-treble-filter-aligned-20261014.json. No replacement PCM mix,
 device/filter execution proof or updated playable is claimed.
+
+The filter's type is also confirmed: initialization A24820 creates the direct
+filter, sets AL_FILTER_TYPE (0x8001) to AL_FILTER_LOWPASS (1), and starts both
+gain parameters at1.0. EBEEB4 is obtained as alFilterf. This removes the ambiguity
+of parameter2 alone, which other EFX filter types reuse. Private evidence is
+local/behavior/20261014T1147256882008Z/a24dce.c.txt. The global handle still does
+not prove the Lacetti's per-voice filter response or its effect on this recording.
+
+The source recording lengths are now explained by the native four-byte PCM
+prefix skip, not unexplained extra audio frames; see the
+[decoder correction](ENGINE_AUDIO_RESEARCH.md#f275-pcm-prefix-correction).
+Current prefix-aware source-control and whole-gain audits remain exact. Their
+current identities are recorded in that correction; previous audits remain
+valid historical evidence for their recorded executable/source revisions.

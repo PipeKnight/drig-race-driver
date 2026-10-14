@@ -1,5 +1,12 @@
 # Lacetti engine audio
 
+F275 correction: the original loaders skip four non-PCM bytes at the start of
+each selected recording. Current payload counts are319292/477036 frames.
+F273's initial whole-record WAV wrapping included that prefix and is superseded
+by the [prefix correction below](#f275-pcm-prefix-correction). Original mix/gain
+reconstruction is documented in [engine audio control](ENGINE_AUDIO_CONTROL.md).
+Audible fidelity of the current experimental mixer remains failed.
+
 ## F273: dictionary and PCM validation, 14 October 2026
 
 The installed `audio/CMSamples.dic` is DIC1/version 2.00, 72,576 bytes,
@@ -20,7 +27,7 @@ An initial root-only search missed the eleven music files; they are under
 `be043a1fcfbdbbf33bfee7135ef20ea91954d95e5df9a5f0bcc23db4e8a0d842`.
 Its six zero-flag, 32,000 Hz sample extents cover the entire bank:
 
-| Sample | First byte | End (exclusive) | Mono frames |
+| Sample | First byte | End (exclusive) | Initial halfwords, including prefix |
 |---|---:|---:|---:|
 | dn_en | 0 | 638588 | 319294 |
 | dn_ex | 638588 | 1277176 | 319294 |
@@ -225,3 +232,62 @@ rather than inferring them from INI names. Use the retained original race video
 and fresh controlled native output with matched RPM/load/camera for comparison.
 Playback/physics checks remain valid, but the experimental mixer is not a
 fidelity baseline or completion of the original-audio milestone.
+
+## F275: PCM prefix correction
+
+The original A29820 and A29330 loaders select WIP as PCM16 and explicitly advance
+the data offset by four while subtracting four from its extent. Aligned evidence
+at A29C74–A29C80 and A2952C–A29535 confirms both changes. Private evidence:
+`local/behavior/20261014T1137446815122Z` and
+`local/audio/engine-pcm-prefix-aligned-20261014.json`.
+
+Every selected Lacetti record starts with an opaque DWORD FFFFFFFF. Its meaning
+is not assumed; the original code omits it before PCM publication. This explains
+the exact two-frame difference between the source carsetup lengths and raw
+record sizes. The first decoder wrapped those four bytes as two -1 samples.
+Its byte-roundtrip audit was valid for the chosen bytes, but that did not prove
+the chosen bytes were all audio. The original-loader trace corrects that semantic
+error. This tiny prefix alone is not an established cause of the failed timbre.
+
+The corrected reader keeps the original bank intact and returns the complete
+payload after the prefix, without trimming any PCM samples. It still guards
+unsupported flags/extensions, malformed boundaries and prefix-only records.
+Two deceleration payloads contain319292 frames (9.977875 seconds); four
+acceleration payloads contain477036 frames (14.907375 seconds), all32 kHz mono.
+Together these are2,546,728 PCM words /5,093,456 bytes, excluding24 prefix bytes.
+The source-driving audio fixture now checks decoded payload length directly
+against purchased carsetup instead of assuming a two-frame adjustment.
+
+Current independent Python/wave/PyAV19.0.0 checks reproduce all124 dictionary
+banks /2,858 sample rows and all selected payload bytes exactly in debug and
+release. Audit `local/audio/lacetti-pcm-prefix-validation-20261014-final02.json`,
+SHA256 `84e072c74d32ebb723e35b7cbef8487280584cb119cb073b92f7b804c2a2d3d6`.
+Six CLI negative controls preserve all fourteen existing export files; private
+`pcm-prefix-cli-guards-20261014-final01/validation.json`, SHA256
+`0b71fd8941d135c6efa59a6e4b1ff1d4005d1f41e38581d82314c39f336eae95`.
+The CLI now labels bank input bytes separately from PCM output bytes.
+
+The corrected payload also passes the experimental mixer's repeat/pause/reset/
+zero-speed/paired-physics checks. Fixed and source waveform hashes change as
+expected, while the limited note checks remain62/141/219Hz. This is regression
+validation of the existing experiment, **not newly matched sound**. Audit
+`local/audio/mixer-prefix-validation-20261014-final01.json`, SHA256
+`6c9eb24e015af01069cdc20357db9a885c728c9293c8d007554463ab63015242`.
+
+Fresh current-reference audits still pass coupled RPM/position/pitch/seek control
+and whole owned gain publication, including actual1000-tick source driving:
+`engine-control-prefix-20261014-final01/validation.json` SHA256
+`6fa6b7d1469ce8ba08842665e12e9476a32795bf6631774321f4c19a90eca329`,
+`engine-whole-gain-prefix-20261014-final01/validation.json` SHA256
+`ec1f323cb91ed83e16cb57d8e2f50ab0f1ba9a5f3e913979a38d55c14d045d66`.
+All checked current identities match. Twenty-eight format and ten tools ordinary
+tests plus all-target grid-tools Clippy pass; no audio-to-physics feedback is
+observed in the paired sequence.
+
+The reference remains intact: all130 traced Steam resources and the original
+executable match at2026-10-14T11:51:59.642110UTC, private
+`local/scene/preservation-20261014-audio-reconstruction.json`. The live private
+GRID prefixes for both parameter writers, both PCM loaders and the filter
+publisher match the analysis image. Private capture
+`audio-filter-decoder-code-exact.json`, SHA256
+`9c2810f17b40718c10c74a1b996f48197d81b07fbb22059a2385d5b67b97f2a2`.

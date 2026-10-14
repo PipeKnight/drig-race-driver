@@ -51,6 +51,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let waves: Vec<_> = (0..bank.samples.len())
         .map(|i| bank.mono_pcm16_wav(i, &data))
         .collect::<Result<_, _>>()?;
+    let pcm_bytes: usize = waves.iter().map(|wave| wave.len() - 44).sum();
     let mut text = format!(
         "P\tDIC1\t2.00\t{:08x}\t{}\n",
         dictionary.opaque_id,
@@ -89,7 +90,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .write_all(&wave)?;
     }
     println!(
-        "audio_dictionary banks={} samples={} selected_samples={} pcm_bytes={}",
+        "audio_dictionary banks={} samples={} selected_samples={} bank_bytes={} pcm_bytes={}",
         dictionary.banks.len(),
         dictionary
             .banks
@@ -97,7 +98,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map(|b| b.samples.len())
             .sum::<usize>(),
         bank.samples.len(),
-        data.len()
+        data.len(),
+        pcm_bytes
     );
     Ok(())
 }
