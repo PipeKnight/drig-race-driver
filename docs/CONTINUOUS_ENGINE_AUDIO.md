@@ -48,3 +48,9 @@ Private evidence:
 The full scheduler service proof is documented in ENGINE_AUDIO_CONTROL.md.
 Actual playable/device checks and revision/hash belong in PROTOTYPE_BUILD_UPDATES.md.
 Listening against the original is still needed; do not mark F275 fidelity passed.
+
+
+Owner listening feedback (2026-10-14T18:02:27.273239+00:00): the new sound is "definitely better".
+Perceived improvement is now confirmed; a1:1 match remains unverified.
+This supports replacing the first granular presentation, not attributing the
+old tone to a missing filter or declaring the remaining effects complete.
