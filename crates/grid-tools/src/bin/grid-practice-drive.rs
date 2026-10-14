@@ -5,15 +5,27 @@ use std::{fmt::Write as _, fs, io::Write as _, path::Path};
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if args.len() != 8 {
-        return Err("usage: grid-practice-drive ROOT CD01 BP01 DF01 local/OUTPUT TICKS SPEED_M_S STEERING_GAIN".into());
+    if args.len() != 8 && args.len() != 9 {
+        return Err("usage: grid-practice-drive ROOT CD01 BP01 DF01 local/OUTPUT TICKS SPEED_M_S STEERING_GAIN [TRIAL_LAPS]".into());
     }
     let root = Path::new(&args[0]);
     let output = Path::new(&args[4]);
     let ticks: u64 = args[5].to_str().ok_or("invalid ticks")?.parse()?;
     let maximum_speed: f64 = args[6].to_str().ok_or("invalid speed")?.parse()?;
     let gain: f64 = args[7].to_str().ok_or("invalid gain")?.parse()?;
-    if !(1..=30000).contains(&ticks)
+    let trial_laps = args
+        .get(8)
+        .map(|s| {
+            s.to_str()
+                .ok_or("invalid trial laps")?
+                .parse::<u32>()
+                .map_err(|_| "invalid trial laps")
+        })
+        .transpose()?;
+    if trial_laps.is_some_and(|n| !(1..=9).contains(&n)) {
+        return Err("trial laps must be1..9".into());
+    }
+    if !(1..=100000).contains(&ticks)
         || !(5. ..=40.).contains(&maximum_speed)
         || !(0.1..=4.).contains(&gain)
         || !output
@@ -55,6 +67,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (limit, bulk) = grid_tools::deformation_parameters::read(&fs::read(&args[3])?)?;
     runtime.register_deformation_callbacks(limit, bulk, 1)?;
     runtime.enable_lap_timing(root)?;
+    let mut trial = trial_laps
+        .map(|laps| {
+            grid_tools::time_trial::State::new(
+                laps,
+                f64::from(grid_tools::source_vehicle::DELTA),
+                3.,
+            )
+        })
+        .transpose()?;
+    if let Some(trial) = &mut trial {
+        while matches!(trial.phase(), grid_tools::time_trial::Phase::Countdown(_)) {
+            trial.countdown_tick();
+        }
+        assert_eq!(runtime.ticks, 0);
+    }
     let mut nearest = 0usize;
     let mut text = format!("P\tindependent-pure-pursuit\t{ticks}\t{maximum_speed}\t{gain}\n");
     let mut failure = None;
@@ -131,6 +158,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             failure = Some(format!("tick {}: {e}", runtime.ticks + 1));
             break;
         }
+        if let Some(trial) = &mut trial {
+            trial.finish_tick(runtime.ticks, &runtime.lap_events)?;
+        }
         body_contacts += runtime.last_body_contacts;
         minimum_wheel_hits = minimum_wheel_hits.min(
             (0..4)
@@ -164,7 +194,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         for event in &runtime.lap_events {
             writeln!(text, "E\t{}\t{event:?}", runtime.ticks)?;
         }
-        if lap.valid_laps > 0 || runtime.terminal_wheel().is_some() {
+        if trial.as_ref().map_or(lap.valid_laps > 0, |t| {
+            matches!(t.phase(), grid_tools::time_trial::Phase::Finished(_))
+        }) || runtime.terminal_wheel().is_some()
+        {
             break;
         }
         if text.len() > 16 * 1024 * 1024 {
@@ -184,6 +217,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_or_else(|| "none".into(), |v| v.to_string()),
         failure.as_deref().unwrap_or("none")
     )?;
+    let trial_incomplete = trial
+        .as_ref()
+        .is_some_and(|t| !matches!(t.phase(), grid_tools::time_trial::Phase::Finished(_)));
+    if let Some(trial) = &trial
+        && let grid_tools::time_trial::Phase::Finished(result) = trial.phase()
+    {
+        writeln!(
+            text,
+            "R\t{}\t{:.9}\t{:.9}\t{}",
+            result.laps.len(),
+            result.seconds,
+            result.best_lap(),
+            result.invalid_attempts
+        )?;
+        for lap in &result.laps {
+            writeln!(text, "L\t{}\t{:.9}\t{}", lap.number, lap.seconds, lap.valid)?;
+        }
+    }
     let registration = runtime.deformation_registration.as_ref().unwrap();
     writeln!(
         text,
@@ -210,6 +261,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .create_new(true)
         .open(output)?
         .write_all(text.as_bytes())?;
+    if trial_incomplete {
+        return Err(
+            "time trial did not complete within tick budget; private trace retained".into(),
+        );
+    }
     println!(
         "practice_drive ticks={} valid_laps={} contacts={body_contacts} max_lateral={maximum_lateral:.3} failure={}",
         runtime.ticks,
