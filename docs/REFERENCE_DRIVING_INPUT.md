@@ -129,9 +129,53 @@ General-manager discovery also succeeds: local/behavior/general-vehicle-manager-
 no approval rejection or new installation. Current playable0cb4405 remains
 unchanged: no source behavior change/rebuild was needed for this diagnostic work.
 
-Next capture a real no-input coast after the desktop is available; establish
+At the F277 checkpoint, next capture a real no-input coast; establish
 original elapsed game-time/substep alignment before numeric braking/acceleration
 calibration. Then compare matched source settings/initial state with Rust and
 fix demonstrated differences. Shared-world multi-car ownership/contact/damage
 integration and an opponent follow. Owner event/PB usability observation remains
 valuable independently of these diagnostic comparisons.
+
+## F279: fresh-session acceleration and bounded coast
+
+15 October2026. The owner relaunched GRID and explicitly resumed desktop use.
+Fresh privatePID52444/start2026-10-14T23:09:21.0258569Z has the same pinned
+compatible executable. The expired51496 helper22096 was positively identified
+and replaced by idle guarded server12392/start23:14:06.3581881Z, unchanged AHK
+script SHAfb5e3e2f7b0f62bbd4b671b9883db895b41fb79ffa3a495e76cc4dc85dbd4840.
+Computer Use navigated to Touring Cars/Chevrolet Lacetti/Nevada Autosport,
+Donington Park/Grand Prix Circuit/3laps, Normal/Random. All three assists On and
+Automatic were visually reconfirmed without changing them. Player and12car/job/
+common-world ownership were rediscovered, rather than inferred from old addresses.
+
+Private evidence is under local/driving/native-reference-20261015-03/:
+
+| Capture | Observations | Observed speed m/s | Changed-pose QPC span | Final identical-pose interval |
+| --- | ---: | --- | ---: | ---: |
+| throttle01.tsv |1951|0.004951949->19.735251836|1.850273s|19.4354498s/1265observations |
+| coast01.tsv |1950|19.735251836->16.091978672|1.8482704s|19.5260438s/1270observations |
+
+Both capture all sequential control repeats exactly. Up produces E1C/E3C=1,
+E20/E40=0, gear1->2. Coast has zero pedal/steering input throughout. Both guarded
+2000ms batches log normal key-up, and subsequent screenshots show Continue
+selected in the pause menu. The stored native world/job deltas are approximately
+0.00605..0.00609s. The QPC changed-pose span is an observation envelope, not the
+actual game-time duration; no deceleration constant or handling-fidelity pass is
+inferred. Screenshot calls made immediately after hotkey dispatch can show the
+batch still running; the later state and complete trace establish its ending.
+
+The validator now reports exact pose-byte changes and initial/final identical
+pose intervals. Optional --require-bounded-motion applies an authored acceptance
+policy: all controls repeat, >=0.5s initial/final identical poses, >=10 final
+observations and a changed span <=5s. It still requires separate UI/macro context;
+a stationary car in an unpaused game could also have an unchanged pose. This
+policy accepts both new traces, rejects the prior missed-pause coast02 (missing
+final interval) and paused-only coast01 (no motion). Five additional altered
+report controls reject for their intended policy reason. No game behavior changed.
+
+SHA256: throttle01=f276d1f94b4fa37bcdbf1cabdd5fe92ca3c9595f08ec8b05e355581a774b36a7;
+coast01=e6e0165c953736b054b62023b2a0b5393b39a8fdb3d983b9646351af94026487.
+Reports: throttle01-bounded-validation.json, coast01-bounded-validation.json,
+bounded-motion-guards01.json and bounded-motion-policy-guards01.json. Tools reused:
+PowerShell7.6.5/.NET10.0.11, Python3.12.14, AHK2.0.29. Original remains paused.
+Current playable is unchanged; establish native game-time/substep alignment next.
