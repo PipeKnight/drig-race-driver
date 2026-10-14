@@ -6,6 +6,7 @@ pub mod contact_diagnostic;
 pub mod contact_surfaces;
 pub mod cqtc_geometry;
 pub mod deformation_parameters;
+pub mod engine_audio;
 pub mod impact_diagnostic;
 pub mod lap_progress;
 pub mod source_deformation;
