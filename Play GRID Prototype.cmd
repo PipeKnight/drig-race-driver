@@ -25,27 +25,39 @@ if not exist "local\playtest" (
   pause
   exit /b 4
 )
+set "GRID_TRIAL_ARGS="
+if "%~5"=="3" set "GRID_TRIAL_ARGS=--time-trial-laps 3"
+if not "%~5"=="" if not "%~5"=="3" (
+  echo This launcher supports a three-lap time trial.
+  popd
+  exit /b 5
+)
 set "GRID_PLAY_LOG=local\playtest\manual-%RANDOM%-%RANDOM%.log"
 echo Lacetti at Donington - experimental Rust/Bevy driving prototype
 echo Up/W: throttle   Down/S: brake   Left/A and Right/D: steer
 echo Space: handbrake   P: pause/resume   R: reset   Escape: exit
 echo Click the game window once if keyboard input does not respond.
-echo Practice timing starts at the start line. R resets the car and clears lap times.
+if "%GRID_TRIAL_ARGS%"=="" (
+  echo Practice timing starts at the start line. R resets the car and clears lap times.
+) else (
+  echo Three-lap time trial: wait for GO, complete three valid laps, then view results.
+  echo R restarts the event; personal bests stay saved locally.
+)
 echo Private diagnostic log: %GRID_PLAY_LOG%
 echo Loading the source track can take a little while...
 if "%~2"=="" (
-  "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
+  "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
 ) else (
   echo Experimental body contacts enabled. Terminal wheel damage disables driving; R resets.
   if "%~3"=="" (
-    "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
+    "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
   ) else (
     echo Registered body impact events enabled for static barriers.
     if "%~4"=="" (
-      "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" > "%GRID_PLAY_LOG%" 2>&1
+      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" > "%GRID_PLAY_LOG%" 2>&1
     ) else (
       echo Experimental impact damage enabled.
-      "target\release\grid-app.exe" --drive --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" > "%GRID_PLAY_LOG%" 2>&1
+      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" > "%GRID_PLAY_LOG%" 2>&1
     )
   )
 )

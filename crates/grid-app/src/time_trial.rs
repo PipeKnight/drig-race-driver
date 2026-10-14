@@ -1,0 +1,182 @@
+//! Optional three-lap event presentation; free practice remains available.
+use bevy::prelude::Resource;
+use grid_tools::time_trial::{Key, Mode, Phase, Records, State};
+
+#[derive(Resource)]
+pub(crate) struct Trial {
+    pub state: State,
+    records: Option<Records>,
+    key: Key,
+    save_failed: bool,
+}
+impl Trial {
+    pub fn new(laps: u32, mode: Mode, persist: bool) -> Result<Self, Box<dyn std::error::Error>> {
+        let state = State::new(laps, f64::from(grid_tools::source_vehicle::DELTA), 3.)?;
+        let records = if persist {
+            let load = || -> Result<Records, Box<dyn std::error::Error>> {
+                std::fs::create_dir_all("local/playtest")?;
+                Records::load("local/playtest/time-trial-records.tsv".into())
+            };
+            match load() {
+                Ok(records) => Some(records),
+                Err(error) => {
+                    eprintln!("drive_trial_records event=load_failed error={error}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        println!(
+            "drive_trial_event version=1 type=countdown laps={laps} mode={} persistent={}",
+            mode.name(),
+            records.is_some()
+        );
+        Ok(Self {
+            state,
+            save_failed: persist && records.is_none(),
+            records,
+            key: Key { laps, mode },
+        })
+    }
+    pub fn driving(&self) -> bool {
+        matches!(self.state.phase(), Phase::Running)
+    }
+    pub fn finished(&self) -> bool {
+        matches!(self.state.phase(), Phase::Finished(_))
+    }
+    pub fn countdown(&mut self) {
+        let before = self.state.countdown_label();
+        self.state.countdown_tick();
+        if before != self.state.countdown_label() {
+            println!(
+                "drive_trial_event version=1 type=countdown remaining={}",
+                self.state
+                    .countdown_label()
+                    .map_or_else(|| "GO".into(), |s| s.to_string())
+            );
+        }
+    }
+    pub fn reset(&mut self) {
+        self.state.reset();
+        println!(
+            "drive_trial_event version=1 type=reset laps={}",
+            self.key.laps
+        );
+    }
+    pub fn tick(
+        &mut self,
+        tick: u64,
+        events: &[grid_tools::lap_progress::Event],
+    ) -> Result<(), grid_formats::Error> {
+        let old = self.state.completed_laps();
+        self.state
+            .finish_tick(tick, events)
+            .map_err(|_| grid_formats::Error {
+                offset: 0,
+                message: "time-trial state failed after successful vehicle tick",
+            })?;
+        if self.state.completed_laps() != old {
+            println!(
+                "drive_trial_event version=1 type=lap tick={tick} completed={} target={}",
+                self.state.completed_laps(),
+                self.key.laps
+            );
+        }
+        if let Phase::Finished(result) = self.state.phase() {
+            println!(
+                "drive_trial_event version=1 type=finish tick={tick} laps={} seconds={:.9} best_lap={:.9} invalid_attempts={}",
+                result.laps.len(),
+                result.seconds,
+                result.best_lap(),
+                result.invalid_attempts
+            );
+            if let Some(records) = &mut self.records {
+                match records.record(self.key, result, super::BUILD_REVISION) {
+                    Ok(()) => {
+                        self.save_failed = false;
+                        println!(
+                            "drive_trial_records event=saved mode={} laps={}",
+                            self.key.mode.name(),
+                            self.key.laps
+                        );
+                    }
+                    Err(error) => {
+                        self.save_failed = true;
+                        eprintln!("drive_trial_records event=save_failed error={error}");
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    pub fn hud(&self) -> String {
+        let best = self.records.as_ref().and_then(|r| r.best(self.key));
+        let previous = best.map_or_else(
+            || "Personal best  --".into(),
+            |b| {
+                format!(
+                    "PB lap  {}\nPB event  {}",
+                    super::lap_time(b.lap_ns as f64 / 1e9),
+                    super::lap_time(b.event_ns as f64 / 1e9)
+                )
+            },
+        );
+        let body = match self.state.phase() {
+            Phase::Countdown(_) => format!(
+                "{} laps - ready in {}\nControls unlock at GO",
+                self.key.laps,
+                self.state.countdown_label().unwrap()
+            ),
+            Phase::Running => format!(
+                "{}Lap {}/{}   Event {}",
+                if self.state.elapsed() < 1. {
+                    "GO!\n"
+                } else {
+                    ""
+                },
+                self.state.completed_laps() + 1,
+                self.key.laps,
+                super::lap_time(self.state.elapsed())
+            ),
+            Phase::Finished(result) => {
+                let mut rows = format!("FINISHED\nEvent  {}", super::lap_time(result.seconds));
+                for (i, lap) in result.laps.iter().take(6).enumerate() {
+                    rows.push_str(&format!(
+                        "\nLap {}  {}",
+                        i + 1,
+                        super::lap_time(lap.seconds)
+                    ));
+                }
+                if result.laps.len() > 6 {
+                    rows.push_str(&format!("\n... {} more laps", result.laps.len() - 6));
+                }
+                if result.invalid_attempts > 0 {
+                    rows.push_str(&format!("\nInvalid attempts  {}", result.invalid_attempts));
+                }
+                rows.push_str("\nR: restart event | Escape: exit");
+                rows
+            }
+        };
+        format!(
+            "{body}\n{previous}{}",
+            if self.save_failed {
+                "\nBest times unavailable"
+            } else {
+                ""
+            }
+        )
+    }
+    pub fn title(&self) -> String {
+        match self.state.phase() {
+            Phase::Countdown(_) => format!(" | READY {}", self.state.countdown_label().unwrap()),
+            Phase::Running => format!(
+                " | LAP {}/{} | EVENT {}",
+                self.state.completed_laps() + 1,
+                self.key.laps,
+                super::lap_time(self.state.elapsed())
+            ),
+            Phase::Finished(r) => format!(" | FINISHED {}", super::lap_time(r.seconds)),
+        }
+    }
+}

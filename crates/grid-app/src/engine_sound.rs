@@ -131,6 +131,7 @@ fn update(
     input: Res<ButtonInput<KeyCode>>,
     sinks: Query<&AudioSink, With<AudioPlayer<EngineSource>>>,
     mut started: Local<bool>,
+    trial: Option<Res<super::time_trial::Trial>>,
 ) {
     if sound.failure.swap(0, Ordering::Relaxed) != 0 && !sound.muted {
         sound.muted = true;
@@ -144,9 +145,11 @@ fn update(
         *started = true;
         println!("engine_audio version=2 event=output_started");
     }
-    sound
-        .mailbox
-        .store(sound.control(&driving).pack(), Ordering::Relaxed);
+    let mut control = sound.control(&driving);
+    if trial.is_some_and(|t| !t.driving()) {
+        control.audible = false;
+    }
+    sound.mailbox.store(control.pack(), Ordering::Relaxed);
 }
 
 /// Bounded real-device diagnostic, separate from silent offscreen captures.

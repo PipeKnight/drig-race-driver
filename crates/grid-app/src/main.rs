@@ -1,6 +1,7 @@
 //! Source reference viewer and serial driving prototype.
 mod body_damage;
 mod engine_sound;
+mod time_trial;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -831,6 +832,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut target = None;
     let mut drive = false;
     let mut audio_check = false;
+    let mut trial_laps = None;
     let mut drive_ticks = None;
     let mut body_contacts = None;
     let mut body_events = None;
@@ -841,6 +843,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--drive" => drive = true,
             "--audio-check" => audio_check = true,
+            "--time-trial-laps" => {
+                trial_laps = Some(
+                    args.next()
+                        .ok_or("--time-trial-laps needs 1..99")?
+                        .parse::<u32>()?,
+                )
+            }
             "--deformation" => {
                 deformation = Some(PathBuf::from(
                     args.next()
@@ -913,7 +922,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Race rules are not implemented.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
@@ -932,6 +941,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=36000".into());
     }
+    if trial_laps.is_some_and(|n| !(1..=99).contains(&n)) || (trial_laps.is_some() && !drive) {
+        return Err("time trial requires --drive and 1..99 laps".into());
+    }
     if (body_contacts.is_some() || body_events.is_some()) && !drive {
         return Err("--body-contacts and --body-events require --drive".into());
     }
@@ -945,6 +957,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("invalid scripted controls".into());
     }
+    let trial_mode = {
+        use grid_tools::time_trial::Mode;
+        if deformation.is_some() {
+            Mode::Deformation
+        } else if body_events.is_some() {
+            Mode::Events
+        } else if body_contacts.is_some() {
+            Mode::Body
+        } else {
+            Mode::Wheels
+        }
+    };
     let driving = if drive {
         track = true;
         reference = true;
@@ -1097,6 +1121,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
     let mut app = App::new();
+    if let Some(laps) = trial_laps {
+        app.insert_resource(time_trial::Trial::new(laps, trial_mode, output.is_none())?);
+    }
     if let Some(path) = output {
         app.add_plugins(
             DefaultPlugins
@@ -1454,13 +1481,25 @@ fn capture(
             );
     }
 }
-fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
+fn drive_tick(
+    mut driving: ResMut<Driving>,
+    input: Res<ButtonInput<KeyCode>>,
+    mut trial: Option<ResMut<time_trial::Trial>>,
+) {
     if driving.paused
         || driving.failure.is_some()
         || driving
             .scripted_ticks
             .is_some_and(|n| driving.runtime.ticks >= n)
     {
+        return;
+    }
+    if let Some(trial) = trial.as_mut()
+        && !trial.driving()
+    {
+        if !trial.finished() {
+            trial.countdown();
+        }
         return;
     }
     let controls = if driving.scripted_ticks.is_some() {
@@ -1493,6 +1532,13 @@ fn drive_tick(mut driving: ResMut<Driving>, input: Res<ButtonInput<KeyCode>>) {
         driving.failure = Some(text);
         driving.report("failure", controls);
     } else {
+        if let Some(trial) = trial.as_mut()
+            && let Err(error) = trial.tick(driving.runtime.ticks, &driving.runtime.lap_events)
+        {
+            driving.failure = Some(format!("{error}; R restarts"));
+            driving.report("failure", controls);
+            return;
+        }
         for event in &driving.runtime.lap_events {
             use grid_tools::lap_progress::Event;
             let lap = driving.runtime.lap.as_ref().unwrap().lap_number();
@@ -1555,6 +1601,7 @@ fn drive_actions(
     mut driving: ResMut<Driving>,
     input: Res<ButtonInput<KeyCode>>,
     mut exit: MessageWriter<AppExit>,
+    mut trial: Option<ResMut<time_trial::Trial>>,
 ) {
     if input.just_pressed(KeyCode::KeyR) {
         driving.report("reset", driving.last_controls.unwrap_or_default());
@@ -1563,8 +1610,11 @@ fn drive_actions(
         driving.last_controls = None;
         driving.failure = None;
         driving.paused = false;
+        if let Some(trial) = trial.as_mut() {
+            trial.reset();
+        }
     }
-    if input.just_pressed(KeyCode::KeyP) {
+    if input.just_pressed(KeyCode::KeyP) && !trial.as_ref().is_some_and(|t| t.finished()) {
         driving.paused = !driving.paused;
         driving.report(
             if driving.paused { "pause" } else { "resume" },
@@ -1599,6 +1649,7 @@ fn drive_present(
     mut presentation: ResMut<DeformationPresentation>,
     mut hud: Query<&mut Text, With<DrivingHud>>,
     sound: Option<Res<engine_sound::EngineSound>>,
+    trial: Option<Res<time_trial::Trial>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -1760,14 +1811,30 @@ fn drive_present(
             "\nM: mute engine sound"
         }
     });
+    let heading = if trial.is_some() {
+        "Lacetti / Donington time trial"
+    } else {
+        "Lacetti / Donington practice"
+    };
+    let progress = trial.as_ref().map_or_else(
+        || progress.clone(),
+        |t| {
+            if t.finished() || !t.driving() {
+                t.hud()
+            } else {
+                format!("{}\n\n{progress}", t.hud())
+            }
+        },
+    );
     let text = format!(
-        "Lacetti / Donington practice\n{speed:.0} km/h   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
+        "{heading}\n{speed:.0} km/h   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
     );
     for mut value in &mut hud {
         if value.0 != text {
             value.0.clone_from(&text);
         }
     }
+    let lap = trial.as_ref().map_or(lap.clone(), |t| t.title());
     for mut window in &mut windows {
         window.title = format!(
             "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry}{lap} | tick {} | {}",
@@ -2147,6 +2214,154 @@ mod driving_tests {
             "source_body_projection source_parts={} changed_parts={changed} pristine_mesh_exact=1 indices_uv_preserved=1 late_second_mesh_failure_atomic=1 reset_mesh_exact=1 physics_feedback=0",
             selected.len()
         );
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased source; completion events are authored"]
+    fn trial_countdown_pause_failure_finish_freeze_and_restart() {
+        use grid_tools::time_trial::{Mode, Phase};
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
+                .unwrap();
+        runtime.enable_lap_timing(Path::new(&root)).unwrap();
+        let initial = runtime.pose();
+        let mut app = App::new();
+        app.add_message::<AppExit>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(time_trial::Trial::new(1, Mode::Wheels, false).unwrap())
+            .insert_resource(Driving {
+                runtime,
+                geometry: None,
+                paused: false,
+                failure: None,
+                scripted_ticks: None,
+                scripted: Default::default(),
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+            })
+            .add_systems(Update, (drive_actions, drive_tick).chain());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        app.update();
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        assert_eq!(app.world().resource::<Driving>().runtime.pose(), initial);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyP);
+        app.update();
+        let frozen = app.world().resource::<time_trial::Trial>().state.clone();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<time_trial::Trial>().state, frozen);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyP);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        let mut count = 2;
+        while !app.world().resource::<time_trial::Trial>().driving() {
+            app.update();
+            count += 1;
+            assert!(count <= 188);
+        }
+        assert_eq!(count, 188);
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        app.update();
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        // Successful physics and event clocks advance together. A physics failure
+        // preserves the event clock; R resets both and restores the countdown.
+        app.world_mut()
+            .resource_mut::<Driving>()
+            .runtime
+            .state
+            .car
+            .owner
+            .vehicle[0x15a0 / 4] = 0;
+        let before_failure = app.world().resource::<time_trial::Trial>().state.clone();
+        app.update();
+        assert!(app.world().resource::<Driving>().failure.is_some());
+        assert_eq!(
+            app.world().resource::<time_trial::Trial>().state,
+            before_failure
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        assert!(app.world().resource::<Driving>().failure.is_none());
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        while !app.world().resource::<time_trial::Trial>().driving() {
+            app.update();
+        }
+        // Inject valid authored crossing events only to exercise the Bevy finish
+        // gate. Real three-lap physics is checked separately by the diagnostic.
+        {
+            use grid_tools::lap_progress::Event;
+            let mut trial = app.world_mut().resource_mut::<time_trial::Trial>();
+            trial.tick(1, &[Event::Started { when: 0.008 }]).unwrap();
+            trial
+                .tick(
+                    2,
+                    &[Event::Finished(grid_tools::time_trial::Completed {
+                        number: 1,
+                        seconds: 0.016,
+                        sectors: vec![Some(0.016)],
+                        valid: true,
+                        missed_gate: None,
+                    })],
+                )
+                .unwrap();
+            assert!(matches!(trial.state.phase(), Phase::Finished(_)));
+            assert!(trial.hud().contains("FINISHED"));
+        }
+        let car = app
+            .world()
+            .resource::<Driving>()
+            .runtime
+            .state
+            .car
+            .owner
+            .vehicle
+            .clone();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        for _ in 0..4 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        assert_eq!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle,
+            car
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        assert!(!app.world().resource::<time_trial::Trial>().finished());
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        assert_eq!(app.world().resource::<Driving>().runtime.pose(), initial);
     }
 
     fn exercise_keyboard_recovery(table: Option<&[u8]>, deformation: bool) {
