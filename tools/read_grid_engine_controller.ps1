@@ -66,7 +66,7 @@ try {
  $taskSource=Join-Path $taskRoot 'local/compatibility/grid-unpacked.exe'
  if((Get-FileHash -LiteralPath $taskSource).Hash.ToLower() -ne 'aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514'){throw 'Analysis reference changed'}
  $taskRaw=[IO.File]::ReadAllBytes($taskSource)
- foreach($taskEntry in @(0x4223d0,0x451770,0x42de60)){
+ foreach($taskEntry in @(0x4223d0,0x451770,0x42de60,0xa233d0,0xa25d90,0xa27780)){
   $taskCode=Read-TaskEngine $taskEntry 32;$taskOffset=$taskEntry-0x400000-0x1000+0x400
   if($null -eq $taskCode -or [Convert]::ToHexString($taskCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskOffset..($taskOffset+31)])){throw 'Live audio controller code differs'}
  }
@@ -139,8 +139,22 @@ try {
   }
   for($taskVoice=0;$taskVoice -lt 12;$taskVoice++){
    $taskVoiceAddress=Get-TaskWord $taskControl (0x1ec+$taskVoice*4)
-   if($taskVoiceAddress){$taskBlocks.Add((Get-TaskBlock ('voice_'+$taskVoice) $taskVoiceAddress 0x80))}
+   if($taskVoiceAddress){
+    $taskVoiceBlock=Get-TaskBlock ('voice_'+$taskVoice) $taskVoiceAddress 0xe0
+    $taskBlocks.Add($taskVoiceBlock)
+    $taskVoiceBytes=[Convert]::FromHexString($taskVoiceBlock.Hex)
+    $taskSlot=Get-TaskWord $taskVoiceBytes 0x68
+    $taskSlotLimit=Get-TaskWord (Read-TaskEngine 0xebf434 4) 0
+    if($taskSlot -ne 0xa000001){
+     if($taskSlot -ge $taskSlotLimit -or $taskSlotLimit -gt 4096){throw 'Backend slot outside observed bounded table'}
+     $taskBlocks.Add((Get-TaskBlock ('backend_voice_'+$taskVoice) (0xe9c7f0+$taskSlot*0x370+0x300) 0x70))
+    }
+   }
   }
+  $taskBlocks.Add((Get-TaskBlock 'backend_globals' 0xebf420 64))
+  $taskBlocks.Add((Get-TaskBlock 'group_treble' 0xebee28 36))
+  $taskBlocks.Add((Get-TaskBlock 'group_filters' 0xebedf4 36))
+  $taskBlocks.Add((Get-TaskBlock 'filter_config' 0xe50900 16))
   $taskRepeat=Read-TaskEngine $taskController 0x340
   $taskRows.Add([pscustomobject]@{Controller=$taskController.ToString('x');Root=$taskRootAddress.ToString('x');Vehicle=$taskVehicle.ToString('x');Player=((Get-TaskWord $taskComponentBytes 0x6c) -eq 0);EngineSpeed=$taskSpeed;Maximum=$taskMaximum;Idle=$taskIdle;ThrottleLength=$taskThrottleLength;IdleLength=$taskIdleLength;QpcBegin=$taskBegin;QpcEnd=[Diagnostics.Stopwatch]::GetTimestamp();ControllerRepeatExact=($null -ne $taskRepeat -and [Convert]::ToHexString($taskControl) -eq [Convert]::ToHexString($taskRepeat));Blocks=$taskBlocks})
  }

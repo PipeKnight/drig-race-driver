@@ -22,7 +22,10 @@ def main():
     existing = args.existing_wave.resolve()
     assert existing.is_relative_to((ROOT / "local").resolve()) and existing.is_file()
     packet = Path(str(existing) + ".packets.tsv")
-    before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (existing, packet)}
+    preserved = [existing, packet]
+    if Path(str(existing) + '.engine.bin').exists():
+        preserved.append(Path(str(existing) + '.engine.bin'))
+    before = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in preserved}
     exe = ROOT / "local/audio/capture-grid-audio.exe"
     out.mkdir()
     cases = [
@@ -57,7 +60,7 @@ def main():
             assert result.returncode != 0 and "event=started" not in result.stdout, name
             assert all(not Path(str(wave) + suffix).exists() for suffix in ("", ".packets.tsv", ".engine.bin"))
             rows.append(dict(name=name, rejected=True, returncode=result.returncode))
-    assert before == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (existing, packet)}
+    assert before == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in preserved}
     report = dict(passed=True, cases=rows, existing_preserved=before,
                   executable_sha256=hashlib.sha256(exe.read_bytes()).hexdigest(),
                   scope="All attempts reject before recording; existing capture preserved byte for byte.")

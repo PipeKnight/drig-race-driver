@@ -171,3 +171,61 @@ Next compare telemetry-driven playback of all six purchased PCM recordings with
 this native output, distinguish phase/resampling/mixing/spatial differences, and
 finish original restart scheduling before replacing the playable mixer. Keep
 all WAVs and raw object observations private.
+
+
+### ET02: post-mix and backend observations
+
+The ET01 voice0x14 volume is an input to the mixer, not its backend output.
+Aligned A233D0 passes voice0xCC/0xD0 to A25D90; volume0x14 is not passed directly.
+A paused read shows all twelve0xCC values at-96.300003dB even while the controller's
+input volumes continue to vary. Therefore the first input-gain-only PCM replay
+kept engine sound across paused sections and is not a valid matched mix.
+This does not invalidate the input-gain/controller math proof; it establishes
+an additional downstream stage that the playable has not reconstructed.
+
+The extended reader verifies six code prefixes and captures0xE0voice records,
+then validates each voice0x68 backend slot against the bounded table count.
+It reads only each selected slot's0x300..0x36Ftail, not the whole voice table.
+The table base/stride derive from unchanged A25D90/A2C080:0xE9C7F0/0x370.
+Additional fixed reads cover64backend-global bytes, nine group attenuation/filter
+words and16configuration bytes. Zero backend IDs are not silently substituted;
+only the native0xA000001 stopped sentinel admits an absent tail.
+
+ET02 retains the32-byte header and first900record bytes, expands twelve voice
+records to0xE0, then stores twelve0x70backend tails, u32controller-repeat flag,
+64backend globals,36group-Treble bytes,16filter configuration bytes and36group
+filter bytes. Record size is5088. The inspector retains ET01 compatibility.
+The same source recorder rebuilt with the existing pinned MSVC toolchain passes
+/W4/WX; SHA25669526668909caad3fe9f54597b5e09ad271639895a94cfc69d3ff109c0225b80.
+
+The30s `throttle-backend01` capture includes normal guarded throttle16:51:37..40UTC,
+visible automatic third gear and final macro pause.1,439,520audio frames/2,999packets
+again have no discontinuity/timestamp gaps.2,999engine observations span29.9800296s,
+intervals8.1566..11.8354ms, sequential reads33.6..318.1us and2,981exact controller
+repeats. The unmuted backend interval is14.300074..16.530451seconds relative to
+first audio packet (224observations). All35,988voice0xCC words equal their backend
+volume words exactly. Backend frequencies agree with rounded rate*pitch except
+51of35,988sequential observations; those are retained, not asserted atomic.
+
+All four loaded backend voices remain-96.300003dB in this sample. During the
+active interval the greatest engine-bay post-minus-input offset is about-14dB,
+exhaust about-7dB. Transition/quiet states have larger attenuation. This is an
+observed route-specific offset, not yet a ported universal bus rule. All backend
+masks are0x2003, root/backend Treble0, global filter mask6. The selected group
+attenuation word is0x80000001 (negative subnormal near zero). The traced filter
+formula would round to gainHF1 from these captured values. That inference is not
+an actual OpenAL parameter query and does not establish audible filter response.
+These observations give no support for inventing a strong Chase-view lowpass EQ.
+
+Private evidence under local/audio/native-reference-20261014-02:
+
+- player-backend-paused01.json SHA25627f828f06226755b321237fdc9fab5888f93bec4b90be124f6a040898fd18854.
+- throttle-backend01.wav.engine.bin SHA2561781343d499c6f9415d4d3c2647fdfb193d4507d2f18e5a14d67cefa82cf9cd0.
+- throttle-backend01-engine-validation.json SHA256b823ce2ef2d363009c79a897a74c07a5030afa0e93b4283b080e2994e471998a.
+- throttle-backend01-audio-validation.json SHA25652ab7bddb3d145c5009d041aca6f32b46b541cb79020ab39df60c3611378932b.
+- backend-parameter-summary.json SHA25618077dc2d9e95911532a5a14e6b018ea95f4b5e7e60b0983f65017af76eb8b5b.
+
+Twelve recorder guards pass again and preserve WAV, packet and engine files.
+`local/audio/capture-backend-guards-20261014-final01/validation.json` SHA256
+3dc4f9b262efec3d5e7187baa0815234dda99fa72c35b10d14d71f980b514d8b.
+No new tool installation or playable replacement accompanies this diagnostic.

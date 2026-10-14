@@ -62,7 +62,7 @@ static std::filesystem::path private_path(const wchar_t* text) {
 static void word(std::vector<unsigned char>& header, uint32_t value, int bytes) {
     for(int i=0;i<bytes;i++) header.push_back(static_cast<unsigned char>(value >> (8*i)));
 }
-// Optional ET01 observation: the controller has already been found by the
+// Optional ET02 observation: the controller has already been found by the
 // separately identity-checked reader. Reads are sequential, never atomic.
 class EngineTrace {
     HANDLE process_;
@@ -78,7 +78,7 @@ class EngineTrace {
     }
     uint32_t pointer(uint32_t address) {uint32_t value=0;read(address,&value,4);return value;}
 public:
-    static constexpr uint32_t record_bytes=2440;
+    static constexpr uint32_t record_bytes=5088;
     std::vector<unsigned char> bytes;
     uint32_t count=0;
     EngineTrace(HANDLE process,uint32_t controller,uint32_t pid):process_(process),controller_(controller) {
@@ -91,7 +91,7 @@ public:
         vehicle_=pointer(component_+0x24);
         physical_=pointer(pointer(vehicle_+0xdb0)+8);
         camera_=pointer(get(state.data(),0x114)+0x28);
-        for(char c:std::string("ET01"))bytes.push_back(static_cast<unsigned char>(c));
+        for(char c:std::string("ET02"))bytes.push_back(static_cast<unsigned char>(c));
         word(bytes,record_bytes,4);word(bytes,0,4);word(bytes,controller_,4);
         LARGE_INTEGER frequency{};QueryPerformanceFrequency(&frequency);
         word(bytes,static_cast<uint32_t>(frequency.QuadPart),4);word(bytes,static_cast<uint32_t>(frequency.QuadPart>>32),4);
@@ -114,10 +114,25 @@ public:
         read(camera_+0xc1c,row.data()+at,4);at+=4;
         read(root_+0xa6a4,row.data()+at,4);at+=4;
         read(physical_+0x210,row.data()+at,32);at+=32;
-        for(uint32_t i=0;i<12;i++) {read(get(state,0x1ec+i*4),row.data()+at,0x80);at+=0x80;}
+        constexpr size_t voices_at=900;
+        for(uint32_t i=0;i<12;i++) {read(get(state,0x1ec+i*4),row.data()+at,0xe0);at+=0xe0;}
+        auto slot_limit=pointer(0xebf434);
+        if(slot_limit>4096)throw std::runtime_error("backend voice table outside bound");
+        for(uint32_t i=0;i<12;i++) {
+            auto slot=get(row.data()+voices_at+i*0xe0,0x68);
+            if(slot!=0xa000001) {
+                if(slot>=slot_limit)throw std::runtime_error("backend voice slot outside bound");
+                read(0xe9c7f0+slot*0x370+0x300,row.data()+at,0x70);
+            }
+            at+=0x70;
+        }
         std::array<unsigned char,0x340> repeat{};read(controller_,repeat.data(),repeat.size());
         uint32_t exact=std::memcmp(state,repeat.data(),repeat.size())==0?1:0;
-        std::memcpy(row.data()+at,&exact,4);
+        std::memcpy(row.data()+at,&exact,4);at+=4;
+        read(0xebf420,row.data()+at,64);at+=64;
+        read(0xebee28,row.data()+at,36);at+=36;
+        read(0xe50900,row.data()+at,16);at+=16;
+        read(0xebedf4,row.data()+at,36);
         QueryPerformanceCounter(&end);std::memcpy(row.data()+8,&end.QuadPart,8);
         bytes.insert(bytes.end(),row.begin(),row.end());++count;
     }
