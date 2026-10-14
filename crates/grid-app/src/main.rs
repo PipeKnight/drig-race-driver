@@ -1142,7 +1142,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(driving) = driving {
         // Offscreen captures never open an audio device or play sound.
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
-            match grid_tools::engine_audio::EngineBank::lacetti(&root) {
+            match grid_tools::engine_audio_continuous::Bank::lacetti(&root) {
                 Ok(bank) => engine_sound::install(&mut app, bank),
                 Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
             }

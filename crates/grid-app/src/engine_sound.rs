@@ -3,11 +3,14 @@ use bevy::{
     audio::{AddAudioSource, ChannelCount, SampleRate, Source},
     prelude::*,
 };
-use grid_tools::engine_audio::{Control, EngineBank, Mixer, RATE};
+use grid_tools::{
+    engine_audio::{Control, RATE},
+    engine_audio_continuous::{Bank as EngineBank, Mixer},
+};
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -15,6 +18,7 @@ use std::{
 #[derive(Resource)]
 pub(crate) struct EngineSound {
     mailbox: Arc<AtomicU64>,
+    failure: Arc<AtomicU32>,
     bank: Arc<EngineBank>,
     pub(crate) muted: bool,
 }
@@ -22,6 +26,7 @@ impl EngineSound {
     pub(crate) fn new(bank: Arc<EngineBank>) -> Self {
         Self {
             mailbox: Arc::new(AtomicU64::new(0)),
+            failure: Arc::new(AtomicU32::new(0)),
             bank,
             muted: false,
         }
@@ -43,21 +48,33 @@ impl EngineSound {
 pub(crate) struct EngineSource {
     bank: Arc<EngineBank>,
     mailbox: Arc<AtomicU64>,
+    failure: Arc<AtomicU32>,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
     mailbox: Arc<AtomicU64>,
     control: Control,
     count: usize,
+    failure: Arc<AtomicU32>,
+    reported_failure: bool,
 }
 impl Iterator for Decoder {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
         if self.count.is_multiple_of(64) {
+            let generation = self.control.generation;
             self.control = Control::unpack(self.mailbox.load(Ordering::Relaxed));
+            if generation != self.control.generation {
+                self.reported_failure = false;
+            }
         }
         self.count = self.count.wrapping_add(1);
-        Some(self.mixer.sample(self.control))
+        let value = self.mixer.sample(self.control);
+        if self.mixer.failure.is_some() && !self.reported_failure {
+            self.failure.store(1, Ordering::Relaxed);
+            self.reported_failure = true;
+        }
+        Some(value)
     }
 }
 impl Source for Decoder {
@@ -82,6 +99,8 @@ impl Decodable for EngineSource {
             mailbox: self.mailbox.clone(),
             control: Control::default(),
             count: 0,
+            failure: self.failure.clone(),
+            reported_failure: false,
         }
     }
 }
@@ -99,10 +118,11 @@ fn start(
     let handle = assets.add(EngineSource {
         bank: sound.bank.clone(),
         mailbox: sound.mailbox.clone(),
+        failure: sound.failure.clone(),
     });
     commands.spawn(AudioPlayer(handle));
     println!(
-        "engine_audio version=1 event=queued rate={RATE} layers=dn_ex,up_ex,up_ex_load mixer=independent_granular mute_key=M"
+        "engine_audio version=2 event=queued rate={RATE} layers=dn_en,up_en,up_en_load,dn_ex,up_ex,up_ex_load voices=12 mixer=continuous_pair_scheduler fidelity=experimental mute_key=M"
     );
 }
 fn update(
@@ -112,13 +132,17 @@ fn update(
     sinks: Query<&AudioSink, With<AudioPlayer<EngineSource>>>,
     mut started: Local<bool>,
 ) {
+    if sound.failure.swap(0, Ordering::Relaxed) != 0 && !sound.muted {
+        sound.muted = true;
+        eprintln!("engine_audio version=2 event=decoder_failed muted=true reset_key=R");
+    }
     if input.just_pressed(KeyCode::KeyM) {
         sound.muted = !sound.muted;
-        println!("engine_audio version=1 event=mute muted={}", sound.muted);
+        println!("engine_audio version=2 event=mute muted={}", sound.muted);
     }
     if !*started && !sinks.is_empty() {
         *started = true;
-        println!("engine_audio version=1 event=output_started");
+        println!("engine_audio version=2 event=output_started");
     }
     sound
         .mailbox
@@ -171,7 +195,7 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Box<dyn std::error::Er
         return Err("engine audio output did not start within four seconds".into());
     }
     println!(
-        "engine_audio version=1 event=device_check_passed playing_seconds=1 decoder_rate={RATE}"
+        "engine_audio version=2 event=device_check_passed playing_seconds=1 decoder_rate={RATE}"
     );
     Ok(())
 }
@@ -186,7 +210,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: Arc::new(AtomicU64::new(0)) }.decoder();
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: Arc::new(AtomicU64::new(0)), failure: Arc::new(AtomicU32::new(0)) }.decoder();
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             let mut app = App::new();
