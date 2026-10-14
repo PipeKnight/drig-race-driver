@@ -22,7 +22,39 @@ def main():
     raw = source.read_bytes()
     rows = []
     deformation_rows=[]
+    lap_rows, lap_events, handling_rows = [], [], []
     for line in raw.decode('utf-8', errors='strict').splitlines():
+        if line.startswith('drive_lap_sample '):
+            row = dict(FIELDS.findall(line)); assert row['version'] == '1'
+            for key in ['segment','tick','lap','next_gate','passed_gates','total_gates','required_gates','valid_laps','attempts']:
+                row[key] = int(row[key]); assert row[key] >= 0
+            for key in ['elapsed','best']:
+                row[key] = None if row[key] == 'none' else float(row[key])
+                assert row[key] is None or (math.isfinite(row[key]) and row[key] >= 0)
+            assert row['status'] in ['waiting','valid','invalid']
+            lap_rows.append(row)
+        if line.startswith('drive_lap_event '):
+            row = dict(FIELDS.findall(line)); assert row['version'] == '1'
+            for key in ['segment','tick','lap','gate','sector']:
+                if key in row: row[key] = int(row[key]); assert row[key] >= 0
+            for key in ['when','seconds']:
+                if key in row: row[key] = float(row[key]); assert math.isfinite(row[key]) and row[key] >= 0
+            assert row['type'] in ['start','checkpoint','sector','finish','position-jump']
+            if row['type'] == 'finish':
+                assert row['valid'] in ['true','false']; row['valid'] = row['valid'] == 'true'
+                row['missed_gate'] = None if row['missed_gate'] == 'none' else int(row['missed_gate'])
+                row['sectors'] = [None if s == 'none' else float(s) for s in row['sectors'].split(',')]
+                assert all(s is None or (math.isfinite(s) and s >= 0) for s in row['sectors'])
+            lap_events.append(row)
+        if line.startswith('drive_handling_sample '):
+            row = dict(FIELDS.findall(line)); assert row['version'] == '1'
+            for key in ['segment','tick','status']: row[key] = int(row[key])
+            row['terminal_wheel'] = None if row['terminal_wheel'] == 'none' else int(row['terminal_wheel'])
+            assert row['terminal_wheel'] is None or 0 <= row['terminal_wheel'] <= 3
+            for key, size in [('effects_3a0_3bc',8),('wheel_levels',4)]:
+                row[key] = ast.literal_eval(row[key]); assert len(row[key]) == size and all(math.isfinite(v) for v in row[key])
+            row['controls_disabled'] = float(row['controls_disabled']); assert row['controls_disabled'] in [0.,1.]
+            handling_rows.append(row)
         if line.startswith('drive_deformation_sample '):
             row=dict(FIELDS.findall(line));assert row['version']=='1'
             for key in ['segment','tick','bulk_calls','records','mode','pending_geometry','moved_positions']:row[key]=int(row[key]);assert row[key]>=0
@@ -138,6 +170,12 @@ def main():
             logged_records=sum(r.get('body_contacts', 0) for r in ticks.values()),
             runs=contact_runs, limitation='Contiguous logged contact ticks, not independently counted crashes; wheel-prefix callbacks are excluded from this geometry count.'),
         damage=damage,
+        lap_timing=(dict(samples=len(lap_rows), first=lap_rows[0], last=lap_rows[-1], events=lap_events,
+                        finished=[r for r in lap_events if r['type']=='finish'],
+                        limitation='Emitted independent practice-timing events on successful simulation ticks; no inferred original race rules or original-game clock.') if lap_rows else None),
+        handling=(dict(samples=len(handling_rows), first=handling_rows[0], last=handling_rows[-1],
+                       terminal_samples=[r for r in handling_rows if r['terminal_wheel'] is not None],
+                       limitation='Observed effect parameters and selected terminal state; no exclusive causal attribution.') if handling_rows else None),
         deformation=(dict(samples=len(deformation_rows),first=deformation_rows[0],last=deformation_rows[-1],maximum_moved_positions=max(r['moved_positions'] for r in deformation_rows),maximum_displacement=max(r['maximum_displacement'] for r in deformation_rows),limitation='Sampled grid/phase counters, not crashes, RNG draws or visual body dents; reset starts a new segment.') if deformation_rows else None),
         reverse_samples=sum(r['gear'] == 9 for r in rows),
         handbrake_episodes=[dict(samples=len(e), first=e[0], last=e[-1],
