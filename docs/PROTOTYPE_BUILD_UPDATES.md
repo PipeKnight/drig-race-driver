@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **75fd3ca515c6-dirty**, built14 October at11:57:34 UTC. This corrects the four-byte non-PCM prefix in each engine recording. Eleven source-driving and six Bevy checks pass; the600-tick render preserves all310 previous physical/deformation records and the image exactly. Engine output works, but **sound fidelity remains failed**: this still uses the experimental mixer with M mute. The newly verified original twelve-voice gain/filter path is research code and is not yet the playable audio backend. See [audio findings](ENGINE_AUDIO_RESEARCH.md).
+Latest verified refresh: **bc90482b4a37-dirty**, built14 October at17:54:31UTC. The playable now uses all six purchased engine recordings with twelve continuous voices and reconstructed pair scheduling, gains and seeks. Eleven source-driving and six Bevy checks pass; real-device output passes. The600-tick collision render retains all310physical/deformation records and the previous image with matching flags. **New sound fidelity is unverified**; the old granular tone failed owner review, and original full-frame effects/backend/spatial processing remain incomplete. M mutes. See [continuous audio scope](CONTINUOUS_ENGINE_AUDIO.md).
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -160,3 +160,50 @@ The 600-tick event/contact render completes normally with 132 telemetry records 
 Clean **df108f6656a6** (full `df108f6656a6d306f145665814ca7443b0d562a9`), built `2026-10-13T17:14:51.9710782Z`, release SHA `ae4a1d5facc1934f0f73dbbaff5dc719071f0b7462c318fb8f7b53ef5cf71cbc`. Private manifest `local/playtest/build-20261013T1714245827004Z/`; all eight source and three Bevy checks pass. Both launchers current, no active owner session replaced. The new internal callback phases retain existing driving behavior; active bulk deformation is still pending.
 
 The600-tick event/contact run completes normally with132 telemetry samples/no failure; final Y-14.807243 and RNGac7e1d7f->2a73550a retain the known trajectory. Image inspected: rigid Lacetti beside the barrier. Files `local/playtest/deformation-phase-df108f6-20261013.{txt,json,png}`; log SHA `dc4ffed4c0e4caf4f6975fd6010796fbfa237c65d9c987719c9b8a989c114ad1`, image SHA `c0dd570f22b35fec81188222e35cc0cfc54570ace0646d96ab4c621403e09981`. Known gamepad80070057 recurs without preventing completion. Steam130 resources/executable unchanged `2026-10-13T17:18:16.169694Z`, private `local/scene/preservation-20261013-deformation-phase-build.json`.
+
+
+## Continuous six-recording audio refresh
+
+Sourcebc90482b4a379f7c0fb670c97340b0fd1c6ea90e/displaybc90482b4a37-dirty,
+built2026-10-14T17:54:31.5772117Z; executableSHA256
+8aad8b8532156c56f43cfb9a33b325815d4ad9f7ff0b767d81a9d59422f456b6.
+Manifest local/playtest/build-20261014T1753534341298Z/build.json
+(the canonical pointer is local/playtest/current-build.json). Eleven purchased
+source-driving and six Bevy checks pass. Both existing launchers use the current
+release executable; no owner prototype session was open or closed. All engine
+source was committed; preserved unrelated settings notes explain the dirty tag.
+
+Continuous PCM bank loading, twelve-voice scheduler, source idle/max mapping
+and gain/seek composition replace the first128msgrain policy. The original
+full451770 effects and actual device/bus/spatial/filter implementation remain
+incomplete. Observed routing offsets and independent mono resampling are
+experimental; sound quality needs owner listening, not a1:1claim.
+Decoder failures signal the main thread and mute instead of silently proceeding;
+R reconstructs presentation, M toggles mute.
+
+Explicit Windows device output test passes for one second:
+local/audio/engine-device-check-bc90482-20261014-final01.txt SHA256
+ea7cfb5d3a209f5595ff3ffed6fd98ab2ee3a9edcda4cfab0fbb8de067152fd4.
+The first invocation used unsupported --root and exited before output; retained
+as a command error, corrected to documented --game-root in the accepted run.
+
+600tick render ends normally/155samples/no failures. All310logged physical
+and deformation records equal75fd3ca excluding wall time. Initial image
+comparison failed because this invocation omitted --include-batches:
+365track draws rather than the old413. This was an unmatched experiment,
+not a renderer regression; both first image and rejected comparison are kept.
+Repeating with matching flags gives a byte-identical image, visually inspected
+via the identical output; no rendering implementation changed.
+Accepted matched log SHA256
+6c15099bf392cd26ef81b2c1389c102bfe335056cfd01fe9a573c4996bfe135b;
+PNG SHA256f861a5c44e8e366873f891fb1f6831d8c152270746e9e3973139f1d6c172b517.
+local/playtest/engine-continuous-no-feedback-matched-20261014.json SHA256
+b1669217b513f4eed3543c530918ddc3eff60202ca06ac3e27b1385b51a5f1d8.
+
+Steam130resources+original executable remain unchanged at17:56:17.923002UTC:
+local/scene/preservation-20261014-continuous-audio.json.
+No settings changes/installations/approval rejections. Fixed-RPM audition is
+local/audio/continuous-20261014-release01/fixed-rpm.wav; source-driving audition
+source-drive.wav. Listening is pending. Next reconstruct full-frame load/gear/
+wobble and original postmix/spatial behavior, using feedback to prioritize
+audible differences; avoid claiming a filter cause from the ambient recording.
