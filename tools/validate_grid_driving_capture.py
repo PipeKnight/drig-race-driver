@@ -45,7 +45,8 @@ def inspect(path):
             assert all(math.isfinite(v) and 0 <= v <= 1 for v in schedule[1:])
         records.append(dict(begin=begin, end=end, repeat=r[4] == '1', controls=c,
                             speed=speed, gear=e[1], position=m[12:15],
-                            axis2_speed=sum(m[8+j]*m[20+j] for j in range(3)), schedule=schedule))
+                            axis2_speed=sum(m[8+j]*m[20+j] for j in range(3)), schedule=schedule,
+                            pose=motion[:64]))
     assert int(footer[2]) >= records[-1]['end']
     duration = (int(footer[2]) - records[0]['begin']) / frequency
     assert 0.4 <= duration <= 30.25
@@ -67,6 +68,18 @@ def inspect(path):
             spans[-1].update(last_seconds=when, last_speed_m_s=r['speed'],
                              last_gear=r['gear'],
                              observations=spans[-1]['observations'] + 1)
+    changed = [i for i in range(1, len(records)) if records[i]['pose'] != records[i-1]['pose']]
+    motion_window = None
+    if changed:
+        first, last = changed[0], changed[-1]
+        motion_window = dict(
+            changed_pose_observations=len(changed),
+            leading_unchanged_seconds=(records[first-1]['begin']-records[0]['begin'])/frequency,
+            first_changed_seconds=(records[first]['begin']-records[0]['begin'])/frequency,
+            last_changed_seconds=(records[last]['begin']-records[0]['begin'])/frequency,
+            changed_window_seconds=(records[last]['begin']-records[first]['begin'])/frequency,
+            trailing_unchanged_seconds=(records[-1]['begin']-records[last]['begin'])/frequency,
+            trailing_observations=len(records)-last)
     return dict(path=str(path), sha256=hashlib.sha256(raw).hexdigest(),
                 header=header, records=len(records), duration_seconds=duration,
                 controls_repeat_exact=sum(r['repeat'] for r in records), fields=fields,
@@ -78,19 +91,37 @@ def inspect(path):
                 first_axis2_speed_m_s=records[0]['axis2_speed'],
                 last_axis2_speed_m_s=records[-1]['axis2_speed'],
                 gears=sorted({r['gear'] for r in records}), spans=spans,
+                motion_window=motion_window,
                 schedule=(dict(phases=sorted({r['schedule'][0] for r in records}),
                                world_delta_range=[min(r['schedule'][1] for r in records), max(r['schedule'][1] for r in records)],
                                job_delta_range=[min(r['schedule'][2] for r in records), max(r['schedule'][2] for r in records)]) if scheduled else None),
                 scope='Sequential QPC observations, not atomic/suspended snapshots or original fixed-timestep evidence. Pedal span classification is authored; native key effects require macro/UI context.')
 
 
+def require_bounded_motion(report):
+    """Authored capture acceptance; UI/macro context still required separately."""
+    assert report['controls_repeat_exact'] == report['records'], 'Controls changed during a sequential read'
+    motion = report['motion_window']
+    assert motion is not None, 'No changed pose observed; cannot accept a driving batch'
+    assert motion['leading_unchanged_seconds'] >= .5, 'Missing initial unchanged pose interval'
+    assert motion['trailing_unchanged_seconds'] >= .5, 'Missing final unchanged pose interval; pause unverified'
+    assert motion['trailing_observations'] >= 10, 'Insufficient final unchanged pose observations'
+    assert 0 < motion['changed_window_seconds'] <= 5, 'Changed poses exceed bounded batch window'
+    report['bounded_motion_check'] = dict(
+        accepted=True, policy='Authored QPC envelope: initial/final identical poses >=0.5s, final >=10 observations, changed span <=5s.',
+        scope='Observed pose envelope only; does not prove game pause, continuous sampling, game-time duration or a two-second simulation update.')
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('capture', type=Path)
     p.add_argument('output', type=Path)
+    p.add_argument('--require-bounded-motion', action='store_true')
     a = p.parse_args()
     assert a.output.resolve().is_relative_to((ROOT / 'local').resolve())
     report = inspect(a.capture)
+    if a.require_bounded_motion:
+        require_bounded_motion(report)
     with a.output.open('x', encoding='utf-8') as f:
         json.dump(report, f, indent=2)
     print(json.dumps(report))
