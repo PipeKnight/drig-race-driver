@@ -166,3 +166,64 @@ All current audit identities match. The 28 format and eight tools ordinary
 tests pass, as does all-target grid-tools Clippy. No audible mixer or playable
 change was made. Next priorities are actual gains/restarts/backend behavior and
 matched native capture; source length discovery is no longer a blocker.
+
+## Follow-up: crossfade math contracts
+
+The initial static sine/cosine labels were reversed, and BF4FFC had been
+misinterpreted as absolute value during exploratory reading. Direct execution
+now establishes BF4E44 **sine**, BF523A **cosine**, BF4FFC **log10**. The earlier
+RPM proof excludes gear wobble, so that naming correction does not invalidate
+its numerical results. The wobble helper must use sine when implemented.
+
+The new isolated math probe executes these unchanged helpers with their actual
+XMM0 argument/return contract, preserving the entire mapped image. Across 4,097
+interior phases, original repeat is byte-identical; independent Python sin,
+cos and log10 differ by at most 1.12e-16 in f64. The original gain path rounds
+trigonometric results to f32, converts their log10 results to f32, multiplies by
+20 and clamps at -48. Its native angle constant is 0x3FC90FD8, slightly different
+from standard pi/2. End phases use explicit 0/-48 pairs.
+
+`engine_audio_gain` reconstructs this bounded shaping calculation. Debug and
+release match every original-helper-derived output gain bit. The maximum error
+in the inferred squared-amplitude sum is 1.335e-5, including the -48 floor; this
+is a numeric property, not a measured speaker/backend energy claim. Invalid
+phase and source endpoint policy checks pass; all nine ordinary grid-tools tests
+and all-target Clippy pass. No native numerical mismatch occurred.
+
+Private audit: `local/audio/audio-gain-math-20261014-final01/validation.json`,
+SHA256 `7ef87d4e7c12a6899d06d4a1e032a4baf18a5762f087f5d08b4cf6ddc6950bee`.
+Expected shaped gains SHA256
+`d5ded48c65dc37ec67b3bb2bbebe2e86c3b79cf3d0ecc82c33e0a9c628976d99`.
+This executes the native math helpers and reconstructs a 42DE60 calculation;
+**whole 42DE60, camera/spatial gains, final backend units and audible fidelity
+remain unverified**. No guessed EQ/filter was added and the playable is unchanged.
+
+Fresh backend/camera evidence under local/behavior/20261014T1105204126266Z:
+46A7D0 writes through parameter descriptors, either object offset, callback or
+descriptor storage; actual descriptor kinds are not yet captured. 42DA50 applies
+camera-dependent engine/exhaust adjustment on some routes. These are evidence of
+further mixing behavior, not proof of a missing DSP filter. Next read the live
+audio parameter descriptors without game input, then establish a bounded whole
+gain publication context or continue source-backed voice scheduling.
+
+Read-only live capture now confirms the original parameter descriptors while
+GRID remains at the menu. Both parameter-writer code prefixes match the private
+analysis image; each descriptor is read twice identically. Kind-one destinations
+are Pitch +18, Volume +14, Position +1C, Velocity +2C, Doppler +58, **Treble +5C**
+and LFE +60. Position/Velocity use vector flag 4; scalar parameters use flag 0.
+MinDistance/MaxDistance use the original A23510/A23520 callbacks, which write
+owned object fields +50/+54 and set +78. This provides a route to exercise the
+whole gain publisher with real helpers and owned property objects, rather than
+replacing helpers or invoking an unowned audio device.
+
+Private capture `local/audio/native-reference-20261014-01/audio-descriptors-complete-gain.json`,
+SHA256 `fa31725f52eea60af80af4495255dddf05860d19db04fe958fb9d54f1d1611eb`;
+names independently decoded in native-descriptor-complete-labels-20261014.json.
+The first six-descriptor draft was expanded to include the tail's Treble,
+Velocity and Doppler publication. An exploratory Reverb label for +5C was
+incorrect: its actual native name is **Treble**. 42DE60 publishes car-wrapper
+A6A4 to it on all twelve voices. This proves the parameter exists and is passed;
+its production and downstream audible/filter effect are still being traced.
+No matched race audio, player controller snapshot or filter equivalence is
+claimed from this menu-time global capture. Helper surveys remain private under
+local/behavior/20261014T1110191589399Z and 20261014T1113186851269Z.
