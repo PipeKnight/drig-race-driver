@@ -185,6 +185,11 @@ will separately check all source-driving and Bevy regressions before release.
 
 ## F275: owner rejects tone; recover original behavior
 
+Follow-up results: [coupled original playback-control proof](ENGINE_AUDIO_CONTROL.md)
+and [selected-process reference capture](GRID_AUDIO_CAPTURE.md). The first has
+complete-state numerical agreement; the second currently has a menu pilot only.
+Neither establishes audible fidelity or replaces the failed experimental mixer.
+
 The owner tested the refreshed8f73dd1 build against original GRID and reports
 correct pitch response but a strange mosquito-like timbre. Fidelity is **failed**,
 not merely unconfirmed. The requested target is1:1 original sound. Filters or

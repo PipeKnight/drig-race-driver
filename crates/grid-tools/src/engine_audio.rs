@@ -28,7 +28,7 @@ fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Box<dyn std::error::Err
     }
     Ok(b)
 }
-fn curve(ini: &str, section: &str, key: &str) -> Result<Vec<f32>, &'static str> {
+pub(crate) fn curve(ini: &str, section: &str, key: &str) -> Result<Vec<f32>, &'static str> {
     let mut current = "";
     let mut found = None;
     for line in ini.lines().map(str::trim) {
