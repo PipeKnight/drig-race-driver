@@ -232,6 +232,7 @@ mod tests {
             laps: 1,
             mode: Mode::Deformation,
         };
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut r = Records::load(path.clone()).unwrap();
         r.record(key, &result(61.), "test-a").unwrap();
         r.record(key, &result(62.), "test-b").unwrap();
@@ -249,6 +250,15 @@ mod tests {
                 .unwrap()
                 .event_ns,
             61_000_000_000
+        );
+        loaded.record(key, &result(60.), "test-d").unwrap();
+        assert_eq!(
+            Records::load(path.clone())
+                .unwrap()
+                .best(key)
+                .unwrap()
+                .event_ns,
+            60_000_000_000
         );
         fs::write(&path, b"malformed file stays intact").unwrap();
         assert!(loaded.record(key, &result(49.), "test-d").is_err());
