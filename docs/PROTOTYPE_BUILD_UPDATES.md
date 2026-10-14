@@ -1,6 +1,6 @@
 # Playable build updates
 
-Latest verified refresh: **f80d2be1fc6d-dirty**, built 14 October at 00:02:36 UTC. The playable now shows practice lap/sector progress, last/best lap and terminal-damage status on screen. Eleven source-driving and five Bevy checks pass; a rendered collision run retains all 310 prior physical/deformation samples exactly. The dirty marker records unrelated uncommitted settings-recovery notes in the shared workspace; all GRID implementation files were committed at build time. See [practice timing](PRACTICE_LAP_TIMING.md).
+Latest verified refresh: **8f73dd1656ce-dirty**, built14 October at01:20:33 UTC. The playable adds experimental RPM/throttle engine sound and M mute. Eleven source-driving and six Bevy checks pass;600-tick render preserves all310 prior physical/deformation records. The owner confirms RPM response but reports a mosquito-like tone unlike GRID: **sound fidelity failed**, and original mixing/processing reconstruction is now the priority. See [audio findings](ENGINE_AUDIO_RESEARCH.md).
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
@@ -11,6 +11,42 @@ Run `powershell -ExecutionPolicy Bypass -File tools/update_prototype.ps1` from t
 Every successful update writes ignored `local/playtest/build-UTCSTAMP/build.json` and logs. `local/playtest/current-build.json` points to the latest successfully checked build and records the full revision, executable hash, tool versions and checks. Rendering and owner laps are separately verified; a successful rebuild alone does not establish them. Game assets and compiled binaries remain private.
 
 Use the existing launchers to try the current build. Changes that affect driving or limitations are recorded in `PROJECT_LOG.md` and linked research notes; documentation-only commits need not trigger a rebuild. The current prototype supports the owner-confirmed keyboard lap, reverse and Space handbrake. Optional body contacts, [selected registered body events](BODY_IMPACT_RUNTIME.md), [collision-driven deformation](DEFORMATION_DRIVING_INTEGRATION.md) and [independent body dents](BODY_DEFORMATION_PRESENTATION.md) are available through the body-contact launcher.
+
+
+## Experimental engine-sound refresh
+
+Revision8f73dd1656ceb9e30bfebefd562f27be4fbc89b0, display8f73dd1656ce-dirty,
+built2026-10-14T01:20:33.7224928Z; executable SHA256
+1237ae9e0929d1da26cb5748050de26adf0f0cfc1d6b2683c326f8699726f66d.
+Private manifest local/playtest/build-20261014T0119358871489Z/;
+11source-driving and6Bevy checks pass. Both launchers use this executable;
+no owner session was replaced. GRID code was committed; concurrent unrelated
+settings-recovery notes remain untouched and explain the dirty marker.
+
+The source audio decoder is verified, while the first independent granular
+mixer is an audible experiment. The owner drove3,795ticks in the baseline
+mode with286sampled observations and no simulation failures, confirmed pitch
+response, and rejected the tone as mosquito-like compared with original GRID.
+This is a failed fidelity check; it must not be reported as matched audio.
+The earlier short body-contact session ends in CtrlC before playback-start
+confirmation. M mutes; P fades to silence; R resets sound ownership.
+
+An explicit one-second Windows sink check passes (local/audio/engine-device-check-8f73dd1-20261014.txt),
+and the owner's baseline log independently includes output_started.600-tick
+silent render exits normally/155samples/zero failures, all310 logged physical/
+deformation records match f80d2be exactly. Image inspected: readable practice
+HUD, Lacetti/Donington/pit barrier. Eight mesh uploads/firstchanged165/last175;
+o audio device is opened by offscreen rendering.
+
+Private render log local/playtest/engine-audio-8f73dd1-20261014.txt SHA256
+88e528c5bfe94d0b6bc6d21dee6f7f8ec1542eacad7228d461c45589e4c34416;
+PNG f861a5c44e8e366873f891fb1f6831d8c152270746e9e3973139f1d6c172b517;
+comparison local/playtest/engine-audio-no-physics-feedback-20261014.json
+SHA256 d66465c52748135a3be300fb70bcb17ad805a1e34e2a97c37c69e737475d3d9f.
+Owner-log summary local/playtest/owner-engine-sound-20261014.json SHA256
+c633976eaca0c29626d6fa32e04715a429c4986ceec95defe0ce7150bac29af1.
+Steam130resources/executable still match at2026-10-14T09:42:44.351326UTC;
+local/scene/preservation-20261014-engine-audio.json.
 
 ## Practice timing and on-screen display refresh
 

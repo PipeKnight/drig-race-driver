@@ -182,3 +182,41 @@ sequence with purchased sources and no opened sound device. Final library log
 `engine-audio-libs-20261014-final01.txt`, all-target Clippy log
 `engine-audio-clippy-20261014-final02.txt`, and formatting pass. Playable helper
 will separately check all source-driving and Bevy regressions before release.
+
+## F275: owner rejects tone; recover original behavior
+
+The owner tested the refreshed8f73dd1 build against original GRID and reports
+correct pitch response but a strange mosquito-like timbre. Fidelity is **failed**,
+not merely unconfirmed. The requested target is1:1 original sound. Filters or
+postprocessing are plausible explanations, not verified causes. Short-window
+repetition/phase handling, missing engine-versus-exhaust layers, source-time
+mapping, pitch calibration and native throttle/shift effects also need evidence.
+Do not mask the problem with guessed equalization or claim that RPM matching
+establishes audio fidelity. The current M key provides immediate mute.
+
+Original loader consumer searches initially found only initialization sites.
+A raw relative-call candidate search then found43C6D7 calling4376B0 and467B1B
+calling43EC80; these callers had no Ghidra reference-index entries. Aligned
+instructions show a complete43C690 boundary after INT3 padding. This owner
+passes **owner+8B0** to the profile loader, and owner+1A40 to4223D0 afterward;
+the latter equals profile+1190 (idle tables). Therefore literal-offset searches
+on the unshifted profile cannot locate all actual car-wrapper consumers.
+This is static ownership evidence; runtime use still requires confirmation.
+
+Private new evidence: local/audio/engine-voice-labels-20261014.json shows the
+initial labels are N/A [Idle] and N/A [Throttle], not actual sample names.
+local/behavior/20261014T0941422761431Z/42f880.c.txt identifies gear-profile
+settings; local/behavior/20261014T0942331258862Z/displacement-refs.tsv retains
+all-image unshifted-offset search; local/behavior/20261014T0944059909432Z/
+address-refs.tsv retains incomplete indexed caller refs. Raw relative candidates
+and aligned callers are under local/audio/engine-loader-relative-candidates-20261014.json
+and engine-live-caller-aligned-20261014.*. Initial raw scan treated a JSON hex
+characteristics string as an integer; corrected before producing a report.
+
+Next recover car-wrapper initialization/update, source voice names and blend/
+loop/window/pitch rules; prove bounded original routines against independent
+Rust where feasible. Recover actual downstream filters/spatial/camera gains
+rather than inferring them from INI names. Use the retained original race video
+and fresh controlled native output with matched RPM/load/camera for comparison.
+Playback/physics checks remain valid, but the experimental mixer is not a
+fidelity baseline or completion of the original-audio milestone.
