@@ -1,5 +1,6 @@
 //! Source reference viewer and serial driving prototype.
 mod body_damage;
+mod engine_sound;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -829,6 +830,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut eye = None;
     let mut target = None;
     let mut drive = false;
+    let mut audio_check = false;
     let mut drive_ticks = None;
     let mut body_contacts = None;
     let mut body_events = None;
@@ -838,6 +840,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--drive" => drive = true,
+            "--audio-check" => audio_check = true,
             "--deformation" => {
                 deformation = Some(PathBuf::from(
                     args.next()
@@ -922,6 +925,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => return Err(format!("unknown argument {arg}").into()),
         }
+    }
+    if audio_check {
+        return engine_sound::check(&root);
     }
     if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=36000".into());
@@ -1099,7 +1105,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     exit_condition: ExitCondition::DontExit,
                     ..default()
                 })
-                .disable::<WinitPlugin>(),
+                .disable::<WinitPlugin>()
+                .disable::<bevy::audio::AudioPlugin>(),
         )
         .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
             1.0 / 60.0,
@@ -1133,6 +1140,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if let Some(driving) = driving {
+        // Offscreen captures never open an audio device or play sound.
+        if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
+            match grid_tools::engine_audio::EngineBank::lacetti(&root) {
+                Ok(bank) => engine_sound::install(&mut app, bank),
+                Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
+            }
+        }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
                 grid_tools::source_vehicle::DELTA,
@@ -1566,7 +1580,7 @@ fn drive_exit_log(driving: Res<Driving>, mut exits: MessageReader<AppExit>) {
         driving.report("exit", driving.last_controls.unwrap_or_default());
     }
 }
-#[allow(clippy::type_complexity)] // Explicit Bevy component ownership.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)] // Explicit Bevy resource/component ownership.
 fn drive_present(
     mut driving: ResMut<Driving>,
     mut parts: Query<
@@ -1584,6 +1598,7 @@ fn drive_present(
     mut meshes: ResMut<Assets<Mesh>>,
     mut presentation: ResMut<DeformationPresentation>,
     mut hud: Query<&mut Text, With<DrivingHud>>,
+    sound: Option<Res<engine_sound::EngineSound>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -1738,8 +1753,15 @@ fn drive_present(
             .as_deref()
             .unwrap_or("Space: handbrake | P: pause | R: reset")
     };
+    let audio = sound.map_or("", |s| {
+        if s.muted {
+            "\nSound muted - M enables"
+        } else {
+            "\nM: mute engine sound"
+        }
+    });
     let text = format!(
-        "Lacetti / Donington practice\n{speed:.0} km/h   Gear {gear}{handbrake}\n\n{progress}\n\n{status}"
+        "Lacetti / Donington practice\n{speed:.0} km/h   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
     );
     for mut value in &mut hud {
         if value.0 != text {
