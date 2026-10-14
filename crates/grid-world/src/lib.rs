@@ -79,6 +79,7 @@ pub mod suspension_context;
 pub mod suspension_frame;
 pub mod suspension_prepare;
 pub mod suspension_vehicle;
+pub mod time_trial;
 pub mod triangle;
 pub mod tyre_friction;
 pub mod tyre_grip;
