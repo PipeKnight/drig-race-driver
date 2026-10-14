@@ -155,6 +155,7 @@ try {
   $taskBlocks.Add((Get-TaskBlock 'group_treble' 0xebee28 36))
   $taskBlocks.Add((Get-TaskBlock 'group_filters' 0xebedf4 36))
   $taskBlocks.Add((Get-TaskBlock 'filter_config' 0xe50900 16))
+  $taskBlocks.Add((Get-TaskBlock 'engine_restart_cooldown' 0xe5a414 4))
   $taskRepeat=Read-TaskEngine $taskController 0x340
   $taskRows.Add([pscustomobject]@{Controller=$taskController.ToString('x');Root=$taskRootAddress.ToString('x');Vehicle=$taskVehicle.ToString('x');Player=((Get-TaskWord $taskComponentBytes 0x6c) -eq 0);EngineSpeed=$taskSpeed;Maximum=$taskMaximum;Idle=$taskIdle;ThrottleLength=$taskThrottleLength;IdleLength=$taskIdleLength;QpcBegin=$taskBegin;QpcEnd=[Diagnostics.Stopwatch]::GetTimestamp();ControllerRepeatExact=($null -ne $taskRepeat -and [Convert]::ToHexString($taskControl) -eq [Convert]::ToHexString($taskRepeat));Blocks=$taskBlocks})
  }

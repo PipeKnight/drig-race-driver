@@ -377,3 +377,42 @@ mismatch. Existing MSVC14.44.35207/Python3.12.14/Rust1.99 reused; rollback test
 and all-target Clippy pass. Audit local/audio/engine-restart-20261014-final01/
 validation.json SHA25674d7f64a7f80eaddd976e61fe8de067cc4bfb051fd01e49b98c9e4a8841ea0ba.
 The playable remains unchanged; continuous PCM integration is still pending.
+
+
+### Whole scheduler with restart service and carried source frames
+
+engine_audio_schedule::publish now composes category selection, pitches,
+fade/cooldown updates, whole gain publication and all three restart transitions.
+The isolated original4371C0 executes all real helpers and423210 instructions;
+only virtual group/playback services are explicitly supplied. Those services
+record commands and retain requested seeks. Rates/lengths match across each
+category's four voices, as in purchased Lacetti data. This remains a service
+boundary proof, not original backend/device or whole451770 equivalence.
+
+1024authored cases match original/repeat/Rust debug/release across2424832
+complete controller/voice bytes and all command records;1631pair switches.
+A further1000carried source-driving frames match2368000bytes and208switches.
+Both complete controller and all voices carry between frames. Separate unchanged
+original RPM/phase/pitch probes match the source requests twice. Paired vehicle,
+physical/frame/grouped contacts/world/rows remain exact: no audio feedback.
+Direct throttle, no wobble, camera3, initial voices and emitter environment are
+explicit supplied outer-frame assumptions; no native factory/camera2 claim.
+
+18guard outcomes pass. Late third-service failure preserves all preceding
+staged changes in Rust. All-target Clippy and scheduler units pass. Private
+audit local/audio/engine-playback-20261014-final01/validation.json SHA256157b3a6ee820f4c1ba9c7f261c9c0d08992ea5ca3a9d2ca395cdc879d9d2b326.
+
+A read-only live observation at2026-10-14T17:42:09.1010377Z establishes
+E5A414 word0x3e21cac0 =0.15799999237060547 seconds on this reference. The source
+fixture uses that value, not provisional0.125. The loader/producer rule is
+still unknown;125ms fade traversal and158ms restart cooldown are different
+parameters. Evidence player-restart-cooldown01.json SHA256
+68f729d812c9acd4ae44f181a5c6b0c10c0c183c5bca8011809c85664591ee60 under
+local/audio/native-reference-20261014-02. Reader adds only this fixed four-byte
+block; original process identity/code/ownership guards remain. No live writes.
+
+The first full pilot and final source comparison pass. An atomic patch context
+miss and tool-source syntax error occurred before edits/execution and were
+corrected; no new native fault or numerical mismatch in the combined proof.
+Next continuous six-PCM/twelve-voice backend rendering and audible comparison.
+The playable75fd3ca remains unchanged and owner-rejected for tone.

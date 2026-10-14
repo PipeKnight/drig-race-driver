@@ -24,6 +24,48 @@ pub fn publish_waiting(
     curves: &[f32; CURVE_WORDS],
     delta: f64,
 ) -> Result<(), &'static str> {
+    prepare(controller, voices, environment, curves, delta, true)
+}
+
+/// Full pair scheduling with explicit supplied seek/group service results.
+/// Original backend processing and the surrounding 451770 frame remain separate.
+pub fn publish(
+    controller: &mut [u8; CONTROLLER_BYTES],
+    voices: &mut [[u8; VOICE_BYTES]; 12],
+    environment: Environment,
+    curves: &[f32; CURVE_WORDS],
+    delta: f64,
+    services: [crate::engine_audio_restart::PlaybackService; 3],
+) -> Result<Vec<crate::engine_audio_restart::Command>, &'static str> {
+    let mut next = *controller;
+    let mut next_voices = *voices;
+    prepare(
+        &mut next,
+        &mut next_voices,
+        environment,
+        curves,
+        delta,
+        false,
+    )?;
+    let mut commands = Vec::with_capacity(6);
+    for (category, service) in services.into_iter().enumerate() {
+        commands.extend(crate::engine_audio_restart::restart(
+            &mut next, curves, category, service,
+        )?);
+    }
+    *controller = next;
+    *voices = next_voices;
+    Ok(commands)
+}
+
+fn prepare(
+    controller: &mut [u8; CONTROLLER_BYTES],
+    voices: &mut [[u8; VOICE_BYTES]; 12],
+    environment: Environment,
+    curves: &[f32; CURVE_WORDS],
+    delta: f64,
+    waiting: bool,
+) -> Result<(), &'static str> {
     if !delta.is_finite() || !(0.0..=1.).contains(&delta) {
         return Err("engine scheduler delta domain");
     }
@@ -41,7 +83,8 @@ pub fn publish_waiting(
         let cooldown = f(controller, 0x134 + category * 4);
         let fade = f(controller, 0x140 + category * 4);
         if !cooldown.is_finite()
-            || !(delta..=60.).contains(&cooldown)
+            || cooldown.abs() > 60.
+            || (waiting && cooldown < delta)
             || !fade.is_finite()
             || fade.abs() > 1.
             || controller[0x14c + category] > 1
@@ -113,6 +156,61 @@ pub fn publish_waiting(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn last_restart_service_failure_preserves_all_preceding_staged_switches() {
+        use crate::engine_audio_restart::PlaybackService;
+        let mut controller = [0; CONTROLLER_BYTES];
+        put(&mut controller, 0xc8, 0.5);
+        put(&mut controller, 0x2f8, 1.);
+        controller[0x14c..0x14f].fill(1);
+        for slot in 0..12 {
+            controller[0x2c0 + slot * 4..0x2c4 + slot * 4]
+                .copy_from_slice(&32000_u32.to_le_bytes());
+            controller[0x290 + slot * 4..0x294 + slot * 4]
+                .copy_from_slice(&32000_u32.to_le_bytes());
+        }
+        let mut voices = [[0x6b; VOICE_BYTES]; 12];
+        let env = Environment {
+            motion_210: [0.; 4],
+            motion_220: [0.; 4],
+            ranges: [[1., 50.]; 2],
+            trims: [0.; 2],
+            treble: 0.,
+            player: true,
+        };
+        let service = PlaybackService {
+            accepted_microseconds: [u32::MAX; 2],
+            cooldown: 0.158,
+            resource: 1,
+            groups: [1, 0],
+        };
+        let mut services = [service; 3];
+        services[2].cooldown = f32::NAN;
+        let before = (controller, voices);
+        assert!(
+            publish(
+                &mut controller,
+                &mut voices,
+                env,
+                &[0.5; CURVE_WORDS],
+                0.016,
+                services
+            )
+            .is_err()
+        );
+        assert_eq!((controller, voices), before);
+        let commands = publish(
+            &mut controller,
+            &mut voices,
+            env,
+            &[0.5; CURVE_WORDS],
+            0.016,
+            [service; 3],
+        )
+        .unwrap();
+        assert_eq!(commands.len(), 6);
+        assert_eq!(&controller[0x14f..0x152], &[1, 1, 1]);
+    }
     #[test]
     fn backend_boundary_and_late_publication_failure_are_atomic() {
         let mut controller = [0; CONTROLLER_BYTES];
