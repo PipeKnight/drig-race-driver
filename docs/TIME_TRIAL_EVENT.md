@@ -149,3 +149,8 @@ local/scene/preservation-20261015-time-trial.json.
 The release is ready for an owner three-lap run. A full rendered owner event,
 actual PB persistence across owner launches and an original-game input/braking
 comparison remain to observe. No such observations are inferred from tests.
+
+
+F277 follow-up: the owner cleared the title screen; guarded menu navigation and
+owned Up/Down driving traces now work. See [reference input evidence](REFERENCE_DRIVING_INPUT.md).
+Quantitative handling calibration is still open; the new event build is unchanged.

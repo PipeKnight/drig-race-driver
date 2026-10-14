@@ -18,8 +18,9 @@ This is perceived improvement, not a1:1sound pass.
    barrier contact and damaged-car recovery. Match known settings first
    (reference keyboard, assists On, automatic transmission); measure actual
    pedal/steering state and game-time evidence before comparing trajectories.
-   The original F13brake macro did not demonstrate braking and must not be used
-   as calibrated input until verified during the hold. Existing videos/logs,
+   Fresh [in-hold player telemetry](REFERENCE_DRIVING_INPUT.md) now verifies
+   Down braking/automatic reverse and Up returning to forward. The earlier
+   high-speed F13 result remains unexplained; game-time alignment is still open. Existing videos/logs,
    autonomous laps and offline original-code probes provide starting evidence.
    Fix demonstrated differences; do not tune merely to an assumed feel.
 2. Implemented and released: configurable finite event, countdown, finish/results
@@ -28,9 +29,9 @@ This is perceived improvement, not a1:1sound pass.
    free practice is retained. See [rules and evidence](TIME_TRIAL_EVENT.md).
 3. Owner completion and saved PB across launches remain to observe; scripted
    collision/deformation comparison, pause/reset/terminal recovery and finite
-   event checks pass. Original reference input capture currently needs a manual
-   Enter at the title screen after bounded guarded confirms did not advance it.
-   Continue independent shared-world work while awaiting that optional help.
+   event checks pass. Owner cleared the original title screen; live Up/Down captures now pass.
+   A coast attempt was cancelled before input when GRID was minimized; resume
+   desktop capture only when available and continue offline work meanwhile.
 
 ## Following target: first race against one opponent
 
