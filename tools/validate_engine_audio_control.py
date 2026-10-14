@@ -50,7 +50,7 @@ def fixtures(curves, count=1280):
         put(0xc8, .5)
         put(0x30c, (-1., -.2, 0., .15, 1.)[case % 5])
         for slot in range(12):
-            length = (319294, 477038, 10000000, 1)[(case // 1024 + slot) % 4]
+            length = (319292, 477036, 10000000, 1)[(case // 1024 + slot) % 4]
             rate = (8000, 32000, 44100, 48000, 192000)[(case + slot) % 5]
             struct.pack_into("<I", ctrl, 0x290 + slot * 4, rate)
             struct.pack_into("<I", ctrl, 0x2c0 + slot * 4, length)
@@ -204,6 +204,7 @@ def main():
     if args.source_drive:
         files += [ROOT / f"target/{profile}/grid-engine-audio-control-drive.exe" for profile in ("debug", "release")]
         files += [ROOT / "crates/grid-tools/src/bin/grid-engine-audio-control-drive.rs"]
+        files += [ROOT / "crates/grid-formats/src/audio_car_setup.rs", Path("C:/Program Files (x86)/Steam/steamapps/common/Grid/audio/carsetup.bin"), Path("C:/Program Files (x86)/Steam/steamapps/common/Grid/audio/CMSamples.dic")]
     files += list(out.rglob("*.bin")) + list(out.rglob("*.txt"))
     report = dict(passed=True, groups=rows, source_drive=source_row, guards=guard_rows, identities={str(p): digest(p) for p in files},
                   scope="Coupled unchanged 422A40, 4152A0, 415500 x3, 4153E0/415460 x12, original repeat and Rust debug/release complete output equality. Authored wrapper only; no 451770/backend/gear-wobble/gain/PCM/audio-fidelity equivalence.")

@@ -1,5 +1,5 @@
 //! Source driving feeds the verified control pipeline, with a paired physics run.
-//! Playback lengths here are explicit PCM fixture choices, not native factory proof.
+//! Uses purchased carsetup lengths; no whole native factory/backend claim.
 use grid_tools::{
     engine_audio_control::{self, CONTROLLER_BYTES, VehicleEngine},
     source_vehicle::{Controls, DELTA, Runtime},
@@ -25,8 +25,59 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("new private output required".into());
     }
+    let mut setup_bytes = Vec::new();
+    fs::File::open(root.join("audio/carsetup.bin"))?
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut setup_bytes)?;
+    let setup = grid_formats::audio_car_setup::read(&setup_bytes, "lac")?;
+    if setup.engine_bank != "eng_lac" {
+        return Err("selected engine bank unsupported".into());
+    }
+    let mut dictionary_bytes = Vec::new();
+    fs::File::open(root.join("audio/CMSamples.dic"))?
+        .take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut dictionary_bytes)?;
+    let dictionary = grid_formats::audio_dictionary::read(&dictionary_bytes)?;
+    let bank = dictionary
+        .banks
+        .iter()
+        .find(|bank| bank.name == setup.engine_bank)
+        .ok_or("selected audio bank absent")?;
+    if bank.extension != "WIP" || bank.samples.len() != 6 {
+        return Err("selected audio bank layout".into());
+    }
+    let mut rates = [0_u32; 6];
+    for (slot, name) in [
+        "dn_en",
+        "up_en",
+        "up_en_load",
+        "dn_ex",
+        "up_ex",
+        "up_ex_load",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let sample = bank
+            .samples
+            .iter()
+            .find(|sample| sample.name == name)
+            .ok_or("selected audio sample absent")?;
+        let frames = if slot % 3 == 0 {
+            setup.idle_frames
+        } else {
+            setup.throttle_frames
+        };
+        if sample.flags != 0
+            || !((sample.end - sample.offset).is_multiple_of(2))
+            || frames as usize + 2 != (sample.end - sample.offset) / 2
+        {
+            return Err("selected Lacetti setup/sample extent mismatch".into());
+        }
+        rates[slot] = u32::from(sample.rate);
+    }
     let mut ini = String::new();
-    fs::File::open(root.join("audio/cars/lacengine.ini"))?
+    fs::File::open(root.join(setup.engine_ini))?
         .take(1024 * 1024 + 1)
         .read_to_string(&mut ini)?;
     if ini.len() > 1024 * 1024 {
@@ -51,11 +102,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for slot in 0..12 {
         put(&mut controller, 0x230 + slot * 4, 0);
         put(&mut controller, 0x260 + slot * 4, 1_f32.to_bits());
-        put(&mut controller, 0x290 + slot * 4, 32000);
+        put(&mut controller, 0x290 + slot * 4, rates[slot % 6]);
         put(
             &mut controller,
             0x2c0 + slot * 4,
-            if slot % 3 == 0 { 319294 } else { 477038 },
+            if slot % 3 == 0 {
+                setup.idle_frames
+            } else {
+                setup.throttle_frames
+            },
         );
     }
     let mut request = Vec::new();
@@ -128,7 +183,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     fs::File::create_new(out.join("source.request.bin"))?.write_all(&request)?;
     fs::File::create_new(out.join("source.expected.bin"))?.write_all(&output)?;
     println!(
-        "engine_control_source_ticks=1000 carried_controller=1 car_physical_frame_contacts_rows_exact=1 physics_feedback=0 playback_lengths=explicit_pcm_fixture no_backend=1"
+        "engine_control_source_ticks=1000 carried_controller=1 car_physical_frame_contacts_rows_exact=1 physics_feedback=0 playback_lengths=purchased_carsetup no_backend=1"
     );
     Ok(())
 }

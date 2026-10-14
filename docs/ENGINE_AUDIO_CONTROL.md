@@ -114,3 +114,55 @@ throttle/gear behavior and active backend/spatial processing. Then replace the
 experimental mixer, compare sustained notes and transitions against original
 output, and rebuild the playable after verified integration. Until then M mute
 and the existing playable remain available; no new sound quality is claimed.
+
+## Follow-up: purchased car setup and original length ownership
+
+The lengths are now found in `audio/carsetup.bin`, not inferred from the INI
+Length numbers. Source SHA256 is
+`264f6744ab4566e4b7fc7da708621c8df7b883c9e8fccaf3a51ce92b81debbbe`.
+The existing Rust binary XML reader agrees with independent Python on every
+one of its 2,105 rows (399 strings, 710 elements, 1,395 attributes).
+
+Lacetti is `CarSetup/Cars/Car[name=lac]`, normal type, closed cockpit. EngineBank
+selects eng_lac with throttleLength **477036** and idleLength **319292**. Each
+is two frames shorter than the corresponding decoded PCM recording. The two
+extra frames remain preserved; their purpose has not been established.
+Volume trims are gear -1.0, engine -0.0, exhaust -0.0. EngineBay and GearBox
+offsets are (0,0,4), Exhaust (0,0,-4), Cockpit (0,0,0), in source coordinates.
+These locations are metadata, not yet a verified camera-space rendering path.
+
+Original attribute references CB1958/CB194C lead to 41E2E0 and 4264B0; both
+read throttleLength/idleLength through A67B30 and pass them to constructor
+41E1A0. Aligned constructor stores them at resource C0/C4. The already verified
+43C690 caller supplies those fields to 4223D0, which stores 328/32C; 436990
+copies them into the twelve voice lengths. This is static dataflow confirmation
+of their role, not execution of the whole factory or a live controller snapshot.
+Private evidence: local/behavior/20261014T1050205151280Z and
+20261014T1051321783657Z, plus local/audio/carsetup-constructor-lengths-aligned-20261014.json.
+
+Earlier literal C0/C4 candidates 43CF10 and 464ED0 were unrelated impact-name
+lookup and generic object construction. They did not establish audio resource
+ownership. String references resolved the correct objects. An initial selected
+reader fixture assumed Car directly under CarSetup; actual Cars containment was
+inspected and corrected before validation. The failed draft is retained.
+
+`audio_car_setup` reads selected source paths/banks, lengths, trims, offsets and
+cockpit flag with bounded framing, unique elements, finite values and safe
+relative resource paths. Independent reencoding reproduces all fourteen typed
+rows in debug and release; fourteen valid-framing malformed semantic cases
+reject in both profiles without creating output. Private audit
+`local/audio/carsetup-20261014-final01/validation.json`, SHA256
+`e77debfae1203e56992605ec6d434a80db3d50374d0838aead60a429ab04c245`.
+
+The carried source-driving proof now loads these purchased lengths and the
+six selected dictionary rates, checking the two-frame extent relation for each
+recording. It again matches original/repeat/debug/release completely with no
+physics feedback. Current audit
+`local/audio/engine-control-20261014-carsetup-final01/validation.json`, SHA256
+`1e265cdd4b58bb725abb71eda7e43148d7734313b92203eb367b3cce0da1d112`;
+carried output SHA256
+`81c770984f6f2a5683757578dc7586d5a6d098214a80d96673491c5854267221`.
+All current audit identities match. The 28 format and eight tools ordinary
+tests pass, as does all-target grid-tools Clippy. No audible mixer or playable
+change was made. Next priorities are actual gains/restarts/backend behavior and
+matched native capture; source length discovery is no longer a blocker.
