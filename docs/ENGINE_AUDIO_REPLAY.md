@@ -60,3 +60,14 @@ not a changed capture, dropped mismatch or widened comparison tolerance.
 
 The current playable75fd3ca remains the owner-rejected first granular mixer;
 this diagnostic does not replace either launcher or alter driving physics.
+
+
+Stationary follow-up uses seconds 1..14 of `stationary-idle01`, continuous
+backend frequency and observed post gains. Native RMS 0.0536564985 versus
+replay 0.0467034709 gives comparison-only alignment 1.148876035. Native
+40..125 Hz power fraction is 17.97% versus replay 50.25%; 500..1000 Hz is
+28.73% versus 1.25%. Remaining ambient sources, phase and spatial processing
+prevent attributing this difference to an engine filter. No fidelity pass.
+Private `local/audio/native-stationary-replay-20261014-final01/` contains
+observed-voices.wav SHA256 3ed4963ba17e2ddeabcc859ea57f4bc8a44cf84cb4e1df9997a817d913408d41
+and original-grid.wav SHA256 24eafdffff54f15e2a763e3d0bf2be7d7c2ab78e76f01ee8a4e03f45cb664986.

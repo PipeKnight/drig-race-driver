@@ -229,3 +229,36 @@ Twelve recorder guards pass again and preserve WAV, packet and engine files.
 `local/audio/capture-backend-guards-20261014-final01/validation.json` SHA256
 3dc4f9b262efec3d5e7187baa0815234dda99fa72c35b10d14d71f980b514d8b.
 No new tool installation or playable replacement accompanies this diagnostic.
+
+
+### Stationary reference and bounded coast (14 October 2026)
+
+The original controls page confirms Preset 1: Up accelerates, Down brakes or
+reverses, Space is the handbrake, and A/Z shift. Inspection changed no bindings.
+The new guarded F13 two-second brake batch completed with key-up/pause, but the
+car accelerated from about 81 to 106 mph. This remains an unresolved input
+experiment, not verified braking; paused pedal fields cannot establish what
+happened during the hold. The research race was retired normally and restarted.
+The player controller was found and validated again before reuse.
+
+A fresh no-input race stayed at zero mph. Process-only `stationary-idle01`
+records 719,520 frames / 14.99 seconds / 1,499 packets with no flags or gaps.
+Its 1,499 ET02 observations span 14.9800377 seconds, with sequential read costs
+32.5..301.8 microseconds and 1,486 exact controller repeats. Engine angular
+speed is 232.6573028564453..232.6873016357422, maximum 890.117919921875,
+idle 230.3834686279297. Physical velocity magnitude stays below 0.00501;
+HUD zero mph does not mean mathematically zero velocity. Only the four decel
+voices are active; engine/exhaust post gains peak at -27.01/-20.01 dB.
+Chase camera is 2, Treble is zero, and effect masks remain 0x2003.
+Ambience and other GRID sources remain present; this is not isolated engine audio.
+
+F14 now offers the same guarded two-second paused batch with no held driving
+keys. Its 17:15:06..08 UTC run completed normally, stayed at zero mph and paused.
+Both new batches preserve foreground/process checks, physical stop and duration
+bounds. Existing AutoHotkey 2.0.29 is reused; server 49124 replaces only the
+verified idle prior server. Macro script SHA256
+fb5e3e2f7b0f62bbd4b671b9883db895b41fb79ffa3a495e76cc4dc85dbd4840.
+
+Evidence remains under `local/audio/native-reference-20261014-02/`: fresh-race
+controller search, stationary WAV/ET02/packet audit, and macro completion log.
+ET02 SHA256 2d0c5423ec9f11a8ce11b773ca8f2dcf6309d6fc51bc62607498b6cdefb5a5eb.

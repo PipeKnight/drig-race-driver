@@ -63,6 +63,7 @@ Pulse(name, milliseconds) {
             case "pause": codes := ["sc001"]
             case "throttle_left": codes := ["sc148", "sc14B"]
             case "throttle_right": codes := ["sc148", "sc14D"]
+            case "coast": codes := []
             default: throw Error("Unknown macro")
         }
         if !GridActive()
@@ -128,8 +129,10 @@ if Action = "serve" {
     Hotkey("F10", (*) => Pulse("brake", 300))
     Hotkey("F11", (*) => Pulse("pause", 150))
     Hotkey("F12", Stop)
+    Hotkey("F13", (*) => SampleDrive("brake"))
+    Hotkey("F14", (*) => SampleDrive("coast"))
     Persistent()
-    Log("ready", "serve", 0, 0, "F1 paused 2000ms throttle/left sample; F2 paused 2000ms throttle/right sample; F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop")
+    Log("ready", "serve", 0, 0, "F1 paused 2000ms throttle/left sample; F2 paused 2000ms throttle/right sample; F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop; F13 paused 2000ms brake sample; F14 paused 2000ms no-input coast sample")
 } else {
     Pulse(Action, HoldMs)
     ExitApp()
