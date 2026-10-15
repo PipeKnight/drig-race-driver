@@ -223,6 +223,9 @@ struct DeformingPart {
 }
 #[derive(Resource, Default)]
 struct DeformationPresentation(Option<Vec<u32>>);
+/// Body dents of one opponent part, projected from that car's own field.
+#[derive(Component)]
+struct OpponentDeforming(DeformingPart);
 
 fn wheel_joint(joint: &[u8]) -> Option<usize> {
     let name = std::str::from_utf8(joint).ok()?;
@@ -1441,9 +1444,12 @@ fn setup(
                     let motion = part
                         .wheel
                         .map_or(Mat4::IDENTITY, |i| wheel_motion(runtime.wheels()[i]));
-                    commands.spawn((
+                    // Deforming body parts own their mesh per car; others share it.
+                    let own = original.as_ref().filter(|_| runtime.deformation_enabled);
+                    let opponent_mesh = own.map_or_else(|| mesh.clone(), |m| meshes.add(m.clone()));
+                    let mut opponent = commands.spawn((
                         Name::new(format!("opponent{car} {}", part.name)),
-                        Mesh3d(mesh.clone()),
+                        Mesh3d(opponent_mesh),
                         MeshMaterial3d(material.clone()),
                         Transform::from_matrix(
                             Mat4::from_cols_array(&runtime.pose()) * motion * matrix,
@@ -1455,6 +1461,18 @@ fn setup(
                             wheel: part.wheel,
                         },
                     ));
+                    if let Some(source) = own {
+                        let owner = &runtime.state.car.owner.vehicle;
+                        let model = Mat4::from_translation(Vec3::new(
+                            f32::from_bits(owner[0x1630 / 4]),
+                            f32::from_bits(owner[0x1634 / 4]) - f32::from_bits(owner[0x1564 / 4]),
+                            f32::from_bits(owner[0x1638 / 4]),
+                        ));
+                        opponent.insert(OpponentDeforming(DeformingPart {
+                            source: source.clone(),
+                            raw_bind: model.inverse() * matrix,
+                        }));
+                    }
                 }
             }
         }
@@ -1801,7 +1819,13 @@ fn drive_present(
         Without<ViewerCamera>,
     >,
     mut opponent_parts: Query<
-        (&OpponentPart, &mut Transform),
+        (
+            &OpponentPart,
+            &mut Transform,
+            Option<&OpponentDeforming>,
+            &Mesh3d,
+            &mut Aabb,
+        ),
         (Without<MovingPart>, Without<ViewerCamera>),
     >,
     mut camera: Single<&mut Transform, With<ViewerCamera>>,
@@ -1813,6 +1837,7 @@ fn drive_present(
     trial: Option<Res<time_trial::Trial>>,
     input: Option<Res<ButtonInput<KeyCode>>>,
     mut look_back: Local<Option<bool>>,
+    mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -1880,10 +1905,34 @@ fn drive_present(
                 )
             })
             .collect();
-        for (part, mut transform) in &mut opponent_parts {
+        // Opponent body dents: re-project a car's parts when its field changes.
+        opponent_keys.resize(opponents.multi.cars.len(), None);
+        let mut dirty = Vec::new();
+        for (car, runtime) in opponents.multi.cars.iter().enumerate().skip(1) {
+            if !runtime.deformation_enabled {
+                continue;
+            }
+            if let Ok(field) =
+                grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle)
+                && opponent_keys[car].as_ref() != Some(&field.key())
+            {
+                opponent_keys[car] = Some(field.key());
+                dirty.push((car, field));
+            }
+        }
+        for (part, mut transform, deforming, handle, mut bounds) in &mut opponent_parts {
             let (pose, wheels) = &cars[part.car];
             let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
             *transform = Transform::from_matrix(*pose * motion * part.rest);
+            if let (Some(OpponentDeforming(source)), Some((_, field))) =
+                (deforming, dirty.iter().find(|(car, _)| *car == part.car))
+                && let Ok(mesh) = body_damage::project(&source.source, source.raw_bind, field)
+                && let Some(next) = mesh.compute_aabb()
+                && let Some(mut target) = meshes.get_mut(&handle.0)
+            {
+                *target = mesh;
+                *bounds = next;
+            }
         }
     }
     // C holds a look-back chase view; GRID_LOOK_BACK forces it for scripted renders.

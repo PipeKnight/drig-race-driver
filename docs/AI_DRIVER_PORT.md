@@ -72,3 +72,10 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
 - The owner's manual time trial laps were 90.6/82.2/80.0 s. The original AI's Normal
   lap time has not been captured yet; a live read-only trace of one AI car through a
   braking zone remains the next validation step.
+
+## Opponent body dents
+
+With `--deformation`, each opponent's body parts own their mesh copies and are re-projected
+from that car's own deformation field when it changes. Before this fix the opponents reused
+the player's mesh handles and would have shown the player's dents. Car-to-car impacts still
+produce no dents (several-car contact groups solve without deformation phases).
