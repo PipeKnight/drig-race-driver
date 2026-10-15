@@ -18,6 +18,9 @@ pub struct State {
 pub struct Output {
     pub state: State,
     pub materials: [Option<Material>; 4],
+    /// Occupied transient contact records of this tick (wheel prefix plus
+    /// fresh geometry); records past it in `state.world` are stale pool slots.
+    pub active_contacts: usize,
 }
 
 /// Attach a source factory body to one owned serial world. The factory's initial
@@ -398,5 +401,6 @@ fn calculate_owned(
             shapes: input.shapes.clone(),
         },
         materials: manager.job.materials,
+        active_contacts,
     })
 }

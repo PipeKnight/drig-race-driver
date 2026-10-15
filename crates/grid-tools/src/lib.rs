@@ -3,6 +3,7 @@ pub mod ai_driver;
 pub mod body_deformation;
 pub mod body_geometry;
 pub mod body_impact_parameters;
+pub mod body_impacts;
 pub mod contact_diagnostic;
 pub mod contact_surfaces;
 pub mod cqtc_geometry;

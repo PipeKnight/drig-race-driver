@@ -1,5 +1,6 @@
 //! Source reference viewer and serial driving prototype.
 mod body_damage;
+mod damage_parts;
 mod engine_sound;
 mod free_look;
 mod time_trial;
@@ -47,6 +48,8 @@ struct Car {
 }
 struct Part {
     name: String,
+    /// Source joint (car draws only), e.g. `x0_bonnet`.
+    joint: String,
     material: String,
     mesh: Mesh,
     matrices: Vec<Mat4>,
@@ -425,6 +428,7 @@ fn load(
         }
         parts.push(Part {
             name: String::from_utf8(draw.id.to_vec())?,
+            joint: String::from_utf8(draw.joint.to_vec())?,
             material: String::from_utf8(draw.material.to_vec())?,
             mesh,
             matrices: vec![Mat4::from_cols_array(&draw.transform)],
@@ -589,6 +593,7 @@ fn append_objects(
         triangles += mesh.count_vertices();
         car.parts.push(Part {
             name: String::from_utf8(draw.id.to_vec())?,
+            joint: String::new(),
             material: name,
             mesh,
             matrices,
@@ -776,6 +781,7 @@ fn append_entities(
                     String::from_utf8_lossy(node),
                     String::from_utf8_lossy(draw.id)
                 ),
+                joint: String::new(),
                 material,
                 mesh,
                 matrices,
@@ -846,6 +852,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
             mesh.compute_smooth_normals();
             parts.push(Part {
                 name: format!("collision/{}", String::from_utf8_lossy(entry.name)),
+                joint: String::new(),
                 material,
                 mesh,
                 matrices: vec![Mat4::IDENTITY],
@@ -1480,6 +1487,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 (drive_actions, free_look::update, drive_present).chain(),
             )
             .add_systems(Update, update_start_lights);
+        damage_parts::install(&mut app, &root);
     }
     let exit = app
         .insert_resource(car)
@@ -1662,10 +1670,13 @@ fn setup(
                 initial_bounds,
             ));
             if moving {
-                entity.insert(MovingPart {
-                    rest: matrix,
-                    wheel: part.wheel,
-                });
+                entity.insert((
+                    MovingPart {
+                        rest: matrix,
+                        wheel: part.wheel,
+                    },
+                    damage_parts::Joint::new(&part.joint),
+                ));
                 if let Some(source) = &original {
                     let owner = &driving.as_ref().unwrap().runtime.state.car.owner.vehicle;
                     let model = Mat4::from_translation(Vec3::new(
@@ -1741,6 +1752,7 @@ fn setup(
                             rest: matrix,
                             wheel: part.wheel,
                         },
+                        damage_parts::Joint::new(&part.joint),
                     ));
                     if let Some(source) = own {
                         let owner = &runtime.state.car.owner.vehicle;

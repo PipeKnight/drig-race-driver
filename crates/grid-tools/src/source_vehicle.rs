@@ -42,6 +42,8 @@ pub struct Runtime {
     /// Fresh body records from the last successful tick; diagnostics only.
     /// Failure preserves this count and reset clears it.
     pub last_body_contacts: usize,
+    /// Occupied contact records of the last successful tick; presentation only.
+    pub last_active_contacts: usize,
     /// Opt-in owned static-peer event route; parameters are private source data.
     pub body_events: Option<grid_world::body_impact::Parameters>,
     /// Explicit selected source deformation ownership, never inferred from raw flags.
@@ -386,6 +388,7 @@ impl Runtime {
             pair,
             ticks: 0,
             last_body_contacts: 0,
+            last_active_contacts: 0,
             body_events: None,
             deformation_enabled: false,
             deformation_registration: None,
@@ -724,6 +727,7 @@ impl Runtime {
         if let Some((geometry, next)) = rebuilt_geometry {
             *geometry = next;
         }
+        self.last_active_contacts = output.active_contacts;
         self.state = output.state;
         if let Some(registration) = next_registration {
             self.deformation_registration = Some(registration);
@@ -751,6 +755,16 @@ impl Runtime {
         self.cache = self.initial_cache;
         self.ticks = 0;
         self.last_body_contacts = 0;
+        self.last_active_contacts = 0;
+    }
+    /// Solved contact notifications of the last successful solo tick
+    /// (presentation only; the shared world reports through `MultiRuntime`).
+    pub fn impacts(&self) -> Vec<crate::body_impacts::Impact> {
+        let contacts = &self.state.world.groups.contacts;
+        crate::body_impacts::collect(
+            &contacts[..self.last_active_contacts.min(contacts.len())],
+            1,
+        )
     }
     pub fn pose(&self) -> [f32; 16] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x1d0 / 4 + i]))

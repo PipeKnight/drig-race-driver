@@ -210,6 +210,16 @@ impl MultiRuntime {
             .collect()
     }
 
+    /// Solved contact notifications of car `i` in the last tick (presentation
+    /// only): the same records the body-event loop dispatches for that car.
+    pub fn impacts(&self, i: usize) -> Vec<crate::body_impacts::Impact> {
+        let contacts = &self.world.groups.contacts;
+        crate::body_impacts::collect(
+            &contacts[..self.last_active.min(contacts.len())],
+            self.token(i),
+        )
+    }
+
     /// World shape token (one-based) of car `i`'s body shape.
     fn token(&self, i: usize) -> u32 {
         if i == 0 {
