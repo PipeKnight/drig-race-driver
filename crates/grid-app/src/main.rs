@@ -6,6 +6,7 @@ mod graphics;
 mod graphics_benchmark;
 mod sky;
 mod time_trial;
+mod track_grade;
 mod tyre_sound;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
@@ -934,6 +935,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--grade" => {
+                graphics.track_grade = match args.next().as_deref() {
+                    Some("authored") => false,
+                    Some("track") => true,
+                    _ => return Err("--grade needs authored or track".into()),
+                }
+            }
             "--benchmark-frames" => {
                 let count = args
                     .next()
@@ -1050,6 +1058,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
+                    "--grade authored|track: enhanced color treatment; track reads saved exterior controls, with an authored display-domain mapping (not 1:1 original postprocessing)."
+                );
+                println!(
                     "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
                 );
                 println!(
@@ -1080,6 +1091,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.benchmark_frames.is_some() && output.is_none() {
         return Err("--benchmark-frames requires --render for bounded unattended exit".into());
+    }
+    if graphics.track_grade {
+        if !graphics.enhanced() {
+            return Err("--grade track requires --graphics enhanced".into());
+        }
+        let bytes = read(&root.join("tracks/europe/donington/effects.xml"))?;
+        let grade = grid_formats::graphics_grade::read(&bytes, "Effect_0000")?;
+        println!(
+            "graphics_grade source=donington/effects.xml effect=Effect_0000 mapping=track-inspired-display controls={grade:?}"
+        );
+        graphics.saved_grade = Some(grade);
     }
     if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=36000".into());
@@ -1465,6 +1487,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
+    }
+    if graphics.track_grade {
+        track_grade::install(&mut app);
     }
     let exit = app
         .insert_resource(graphics)

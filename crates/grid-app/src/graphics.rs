@@ -34,6 +34,8 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    pub track_grade: bool,
+    pub saved_grade: Option<grid_formats::graphics_grade::Grade>,
     pub benchmark_frames: Option<u32>,
     pub source_sky: bool,
     pub preset: Preset,
@@ -44,6 +46,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            track_grade: false,
+            saved_grade: None,
             benchmark_frames: None,
             source_sky: true,
             preset: Preset::Baseline,
@@ -154,9 +158,9 @@ pub fn configure(
         // Authored restrained warm grade; original GRID's LUT is not recovered.
         ColorGrading {
             global: ColorGradingGlobal {
-                temperature: 0.012,
-                tint: -0.003,
-                post_saturation: 0.9,
+                temperature: if settings.track_grade { 0.0 } else { 0.012 },
+                tint: if settings.track_grade { 0.0 } else { -0.003 },
+                post_saturation: if settings.track_grade { 1.0 } else { 0.9 },
                 ..default()
             },
             ..default()
@@ -172,4 +176,9 @@ pub fn configure(
         ScreenSpaceAmbientOcclusion::default(),
         ShadowFilteringMethod::Gaussian,
     ));
+    if let Some(grade) = settings.saved_grade {
+        commands
+            .entity(camera)
+            .insert(super::track_grade::TrackGrade::from(grade));
+    }
 }
