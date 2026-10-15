@@ -1112,7 +1112,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 path,
             )?)?);
             println!(
-                "drive_body_events enabled=true scope=single-car-static-peers notifications=empty persistent-chains=absent"
+                "drive_body_events enabled=true scope=static-and-car-peers notifications=empty persistent-chains=absent"
             );
         }
         let geometry = body_contacts.map(|path| -> Result<_, Box<dyn std::error::Error>> {
@@ -1126,7 +1126,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let (limit,bulk)=grid_tools::deformation_parameters::read(&std::fs::read(path)?)?;
                 runtime.enable_deformation(&root,&mut geometry)?;
                 runtime.register_deformation_callbacks(limit,bulk,1)?;
-                println!("drive_deformation enabled=true scope=single-car-static-peers source=player-lod1 wheel-view=source-wheel-anchors crt_seed=00000001 body_graphics=independent-grid-projection");
+                println!("drive_deformation enabled=true scope=static-and-car-peers source=player-lod1 wheel-view=source-wheel-anchors crt_seed=00000001 body_graphics=independent-grid-projection");
             }
             println!("drive_body_geometry enabled=true pool=20 boundary=cqtc order=boundary-first-then-archive materials=shared damage=owned-rng notifications=guarded");
             Ok(geometry)
