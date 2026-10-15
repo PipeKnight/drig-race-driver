@@ -137,3 +137,26 @@ Alongside yield (0x789780 / 0x77B7D0) ported afterwards:
 
 Results: solo unchanged; slowed leader 0 contacts; 8 cars 193 contact records (521 before the
 yield); 4 cars 207.
+
+## Per-driver characteristics (F297)
+
+Read-only capture from the running original (PID 7208, the existing bounded VM_READ dump tool):
+
+- Each AI driver object holds, at `+0x30F4`, a vector of 8 pointers to 0x30-byte characteristic
+  records. The value is at `+8`, and `+0xC` points to a shared type descriptor whose name is at
+  `+0x14`.
+- The names, in order: Aggression, Control, Mistakes, Reaction, Variance, Speed_In, Speed_Out,
+  Virtual_Performance.
+- Driver 0 (the player slot) is all 1.0. The other 11 drivers vary between 0 and 1 (e.g.
+  driver 01: 0.7, 0.8, 0.8, 0.9, 0.5, 0.9, 0.8, 0.8).
+- The table is kept **private** in `local/ai-driver-characteristics.tsv` (game database values).
+  `grid-app --ai-characteristics PATH` (passed by the launcher when the file exists) and
+  `GRID_AI_CHARACTERISTICS` for `grid-opponent-race` feed them into the bilinear mappings.
+  Opponent k uses driver row k.
+
+Effect (headless, 2 laps):
+- 4 cars: flying laps 86.98 / 88.08 / 88.60 / 88.47 s; classification gaps +1.776 / +3.520 /
+  +4.384 s; 102 contact records.
+- 8 cars: gaps to +8.000 s; 243 contact records.
+
+Without the table every car uses 1.0 as before.

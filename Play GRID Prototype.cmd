@@ -35,6 +35,7 @@ if not "%~5"=="" if not "%~5"=="3" (
 set "GRID_OPPONENT_ARGS="
 if defined GRID_PLAY_OPPONENTS set "GRID_OPPONENT_ARGS=--opponents %GRID_PLAY_OPPONENTS%"
 if defined GRID_PLAY_GRID set "GRID_OPPONENT_ARGS=%GRID_OPPONENT_ARGS% --grid-position %GRID_PLAY_GRID%"
+if defined GRID_PLAY_OPPONENTS if exist "local\ai-driver-characteristics.tsv" set "GRID_OPPONENT_ARGS=%GRID_OPPONENT_ARGS% --ai-characteristics local\ai-driver-characteristics.tsv"
 set "GRID_PLAY_LOG=local\playtest\manual-%RANDOM%-%RANDOM%.log"
 echo Lacetti at Donington - experimental Rust/Bevy driving prototype
 echo Up/W: throttle   Down/S: brake   Left/A and Right/D: steer

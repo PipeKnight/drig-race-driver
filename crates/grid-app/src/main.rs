@@ -919,6 +919,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut deformation = None;
     let mut opponents = None;
     let mut grid_position = None;
+    let mut ai_characteristics = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -944,6 +945,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .ok_or("--opponents needs 1..7")?
                         .parse::<usize>()?,
                 )
+            }
+            "--ai-characteristics" => {
+                ai_characteristics = Some(PathBuf::from(
+                    args.next()
+                        .ok_or("--ai-characteristics needs a private TSV path")?,
+                ))
             }
             "--grid-position" => {
                 grid_position = Some(
@@ -1148,9 +1155,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 use grid_tools::ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Parameters};
                 let ai = AiData::load(&root, "tracks/europe/donington/route_0", "touring", "lac")?;
                 let parameters = Parameters::new(&ai, NORMAL_DIFFICULTY, |_| 1.)?;
+                let characteristics = match &ai_characteristics {
+                    Some(path) => grid_tools::ai_driver::read_characteristics(
+                        &std::fs::read_to_string(path)?,
+                    )?,
+                    None => Vec::new(),
+                };
+                // Opponent k uses driver row k (row 0 is the player's slot).
                 let drivers = (0..n)
-                    .map(|i| AiDriver::new(parameters.clone(), 0x5eed + i as u32 + 1))
-                    .collect();
+                    .map(|i| -> Result<AiDriver, String> {
+                        let row = characteristics.get((i + 1) % characteristics.len().max(1));
+                        let p = Parameters::new(&ai, NORMAL_DIFFICULTY, |name| {
+                            row.and_then(|r| r.get(name).copied()).unwrap_or(1.)
+                        })?;
+                        Ok(AiDriver::new(p, 0x5eed + i as u32 + 1))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                if !characteristics.is_empty() {
+                    println!(
+                        "drive_ai_characteristics drivers={} source=private-table",
+                        characteristics.len()
+                    );
+                }
                 println!(
                     "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=original-ai-port difficulty={NORMAL_DIFFICULTY} deformation={}",
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }

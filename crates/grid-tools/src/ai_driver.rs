@@ -33,6 +33,44 @@ use std::{collections::BTreeMap, path::Path};
 /// Live Normal difficulty observed in the original (all 12 driver objects).
 pub const NORMAL_DIFFICULTY: f32 = 0.606;
 
+/// Per-driver characteristic values (aggression, control, mistakes, reaction,
+/// variance, speed_in, speed_out, virtual_performance) from a private TSV
+/// (header row of names, then one row per driver: index then values), as read
+/// from the original's driver objects. Row k drives car k.
+pub fn read_characteristics(
+    text: &str,
+) -> Result<Vec<BTreeMap<String, f32>>, Box<dyn std::error::Error>> {
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let header: Vec<&str> = lines
+        .next()
+        .ok_or("empty characteristic table")?
+        .split('\t')
+        .collect();
+    if header.first() != Some(&"driver") || header.len() < 2 {
+        return Err("invalid characteristic table header".into());
+    }
+    let mut rows = Vec::new();
+    for line in lines {
+        let cells: Vec<&str> = line.split('\t').collect();
+        if cells.len() != header.len() {
+            return Err("characteristic row width differs from header".into());
+        }
+        let mut row = BTreeMap::new();
+        for (name, value) in header[1..].iter().zip(&cells[1..]) {
+            let v: f32 = value.parse()?;
+            if !(0. ..=1.).contains(&v) {
+                return Err("characteristic value outside 0..1".into());
+            }
+            row.insert(name.to_string(), v);
+        }
+        rows.push(row);
+    }
+    if rows.is_empty() {
+        return Err("characteristic table has no drivers".into());
+    }
+    Ok(rows)
+}
+
 fn read_doc(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     Ok(std::fs::read(path)?)
 }
@@ -1457,6 +1495,18 @@ impl AiDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn characteristic_table_rows_and_bounds() {
+        let rows =
+            read_characteristics("driver\taggression\tspeed_in\n00\t1\t1\n01\t0.7\t0.9\n").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1]["aggression"], 0.7);
+        assert_eq!(rows[1]["speed_in"], 0.9);
+        assert!(read_characteristics("driver\taggression\n00\t1.5\n").is_err());
+        assert!(read_characteristics("name\taggression\n00\t1\n").is_err());
+        assert!(read_characteristics("driver\taggression\n00\t1\t2\n").is_err());
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]

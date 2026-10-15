@@ -47,11 +47,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut multi = MultiRuntime::lacetti(root, &slot_refs, &table, events)?;
     let data = AiData::load(root, "tracks/europe/donington/route_0", "touring", "lac")?;
     let progress = grid_tools::lap_progress::load(root)?.progress;
+    // GRID_AI_CHARACTERISTICS=private TSV: per-driver characteristics (row k = car k).
+    let characteristics = match std::env::var_os("GRID_AI_CHARACTERISTICS") {
+        Some(path) => grid_tools::ai_driver::read_characteristics(&std::fs::read_to_string(path)?)?,
+        None => Vec::new(),
+    };
     let mut drivers: Vec<Driver> = (0..cars)
         .map(|i| -> Result<Driver, Box<dyn std::error::Error>> {
             Ok(match kind {
                 "ai" => Driver::Ai(Box::new(AiDriver::new(
-                    Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.)?,
+                    Parameters::new(&data, NORMAL_DIFFICULTY, |name| {
+                        characteristics
+                            .get(i % characteristics.len().max(1))
+                            .and_then(|row| row.get(name).copied())
+                            .unwrap_or(1.)
+                    })?,
                     0x5eed + i as u32,
                 ))),
                 "pursuit" => Driver::Pursuit(PursuitDriver::new(&progress, 18. + i as f64 * 0.5)),
