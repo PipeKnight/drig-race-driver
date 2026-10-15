@@ -44,3 +44,9 @@ driven by the ported GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)). It runs a
   behind slower cars.
 - No grid order or qualifying rules, no penalties, no lapped-car handling.
 - Per-driver characteristics are all 1.0.
+
+## Grid position (F295)
+
+`--grid-position N` (with `--opponents`) puts the player on grid slot N (1 = pole); the
+opponents fill the other slots in order. `Play GRID Race.cmd` starts the player at the back
+(`GRID_PLAY_GRID` overrides). Autopilot check from position 4 of 4: P2 by the last sector of lap 1.

@@ -13,6 +13,8 @@ if not exist "%~dp0local\body-impact-parameters.bin" (
   exit /b 7
 )
 if not defined GRID_PLAY_OPPONENTS set "GRID_PLAY_OPPONENTS=3"
+rem Start from the back of the grid unless GRID_PLAY_GRID chooses a position.
+if not defined GRID_PLAY_GRID set /a GRID_PLAY_GRID=GRID_PLAY_OPPONENTS+1
 if exist "%~dp0local\deformation-parameters.bin" (
   call "%~dp0Play GRID Prototype.cmd" "%~1" "%~dp0local\body-contact-directions.bin" "%~dp0local\body-impact-parameters.bin" "%~dp0local\deformation-parameters.bin" 3
 ) else (

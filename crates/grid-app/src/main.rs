@@ -896,6 +896,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut body_events = None;
     let mut deformation = None;
     let mut opponents = None;
+    let mut grid_position = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -919,6 +920,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 opponents = Some(
                     args.next()
                         .ok_or("--opponents needs 1..7")?
+                        .parse::<usize>()?,
+                )
+            }
+            "--grid-position" => {
+                grid_position = Some(
+                    args.next()
+                        .ok_or("--grid-position needs 1..opponents+1")?
                         .parse::<usize>()?,
                 )
             }
@@ -991,6 +999,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
+                    "--opponents 1..7: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
+                );
+                println!(
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
                 );
                 println!(
@@ -1021,6 +1032,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--opponents 1..7 requires --drive and --body-contacts".into());
     }
+    if let Some(position) = grid_position
+        && !opponents.is_some_and(|n| (1..=n + 1).contains(&position))
+    {
+        return Err("--grid-position needs --opponents and 1..opponents+1".into());
+    }
+    // The player's grid slot; the opponents fill the remaining slots in order.
+    let player_slot = grid_position.map_or(0, |p| p - 1);
     let contacts_path = body_contacts.clone();
     if !scripted.throttle.is_finite()
         || !(0. ..=1.).contains(&scripted.throttle)
@@ -1046,7 +1064,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         reference = true;
         collision = false;
         start_view = true;
-        let mut runtime = grid_tools::source_vehicle::Runtime::lacetti(&root, "slot_00", 200679)?;
+        let mut runtime = grid_tools::source_vehicle::Runtime::lacetti(
+            &root,
+            &format!("slot_{player_slot:02}"),
+            200679,
+        )?;
         runtime.enable_lap_timing(&root)?;
         println!(
             "drive_lap_timing enabled=true gates={} required_gates={} finish=0 clock=successful-simulation-ticks policy=independent-ordered-route-splits",
@@ -1083,7 +1105,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let opponents = opponents
             .map(|n| -> Result<Opponents, Box<dyn std::error::Error>> {
                 let table = std::fs::read(contacts_path.as_ref().ok_or("missing CD01")?)?;
-                let slots: Vec<String> = (0..=n).map(|i| format!("slot_{i:02}")).collect();
+                let slots: Vec<String> = std::iter::once(player_slot)
+                    .chain((0..=n).filter(|&i| i != player_slot))
+                    .map(|i| format!("slot_{i:02}"))
+                    .collect();
                 let refs: Vec<&str> = slots.iter().map(String::as_str).collect();
                 let parameters = deformation
                     .as_ref()
