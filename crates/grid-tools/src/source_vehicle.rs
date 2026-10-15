@@ -313,15 +313,20 @@ impl Runtime {
         physical = bridge.physical;
         let pair =
             std::array::from_fn(|i| ((owner[(0x21cc + 4 * i) / 4] - 0x1990) / 0x150) as usize);
+        // Solver settings captured live from the running original (Lacetti /
+        // Donington race, world +788 block, WORLD_STEPPING_RESEARCH.md): globalCFM 0,
+        // globalERP 0.2, minPenetrationDepth 0.003, quickStepW 1.0, 5 iterations;
+        // first-order correction CFM 0, ERP 1.0, min penetration/constraint error
+        // 0.02, W 1.0, 3 iterations. Indices 9/10 (angular scale/threshold) unchanged.
         let manager = grouped_physical_frame::Manager {
-            parameters: [DELTA, 1., 1., 1., 1., 0.01, 0.2, 0.125, 0.8, 0.2, 0.2],
+            parameters: [DELTA, 1., 1., 1., 1., 0., 0.2, 0.003, 1., 0.2, 0.2],
             gravity: [0., -GRAVITY, 0., 0.],
             correction: Some(impact_frame::Correction {
-                iterations: 4,
-                softness: 0.01,
+                iterations: 3,
+                softness: 0.,
                 scale: 1.,
-                threshold: 0.,
-                relaxation: 0.8,
+                threshold: 0.02,
+                relaxation: 1.,
             }),
             // Same explicit selected material as the whole-world comparison.
             materials: vec![[
@@ -329,7 +334,7 @@ impl Runtime {
             ]],
             rows: vec![[0; 48]; 16],
             capacity: 16,
-            iterations: 4,
+            iterations: 5,
             ends: [0; 4],
             properties: vec![(
                 f32::from_bits(physical[0x3f4 / 4]),
