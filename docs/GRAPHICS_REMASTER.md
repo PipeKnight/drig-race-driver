@@ -30,4 +30,43 @@ Primary API references: [Bevy cascade configuration](https://docs.rs/bevy/0.19.1
 
 ## Initial implementation status
 
-Rendering profile and resolution changes are being validated in the isolated workspace. No visual quality, performance or playable release claim until build and image checks are recorded below. The primary playable release remains owned by the engine workstream.
+The first experimental profile is built and smoke-tested in the isolated workspace. The primary playable release remains owned by the engine workstream.
+
+## G001 validation and first experimental build
+
+Source `b476fe36ef4754c80f0d8fc4fc5d8965a51b0215`; executable `target/release/grid-app.exe`, SHA-256 `7204f4de99a5586c87ed0c7a69e846b5f50c4ff6f12a3977af3290a4cd2c4777`. Every app Rust source file was compared with that revision. Rust 1.99.0 / Bevy 0.19.1; observed adapter RTX 4070 / Vulkan / NVIDIA driver-info 616.92. Clippy `-p grid-app --release --offline --no-deps -- -D warnings` passed. No new tools installed.
+
+Private evidence is under this checkout's `local/graphics/`:
+
+- `baseline-4k-final.png` and `enhanced-4k-final.png`: identical stationary Lacetti/start-line camera, native 3840 x 2160, successful GPU saves and PNG verification; both images inspected. Enhanced has a lit sky, sky ambient/specular response, softer filtered shadows and warmer image formation. It remains visibly provisional: sky is plain, the image somewhat pale, and diffuse-only materials do not reproduce the original material detail. Quality is not rated against the original game yet.
+- `baseline-drive-4k` and `enhanced-drive-4k` PNG/log pairs: 240 ticks, 0.25 throttle, identical complete final pose/velocity line at 3.840 simulation seconds. This is bounded smoke equivalence, not a full-lap or physics validation. Enhanced `wall_seconds` at tick 240 was 7.138276; baseline exit was 5.296601, both include startup/pipeline work. Neither number establishes steady-state FPS.
+- `enhanced-body-4k` PNG/log pair: same bounded 4K drive with the existing private CD01/BP01/DF01 parameters, no render/runtime failure. This is not a crash-damage scenario.
+- `validation01.json`: exact hashes, dimensions, build/source identity, guard results, equivalence statement and tool versions. Invalid zero/oversize/overflow resolution and unknown preset fail before asset loading. Inventory rejects public output paths and existing output files.
+
+First commit attempt failed because the new worktree had no Git author configured. Restored the existing `Codex <codex@local>` identity **only for this worktree**. Initial static captures had a pre-commit build header and are retained as pilots; final captures above were rerun with the correct `b476fe3` header.
+
+Run `Play GRID Graphics.cmd` from this checkout for the separate experimental driving build (default 1920 x 1080; maximize the window as desired). Optional first argument is the purchased game folder; optional second argument is `3840x2160`. It uses private collision/event/deformation parameters when present, logs under `local/graphics/`, and does not replace the primary launchers. Manual driving, audible output and native-window DPI behaviour for this build have not been observed in this run.
+
+Reproduce a 4K comparison:
+
+```powershell
+target/release/grid-app.exe --scene reference --view start --graphics baseline --resolution 3840x2160 --render local/graphics/new-baseline.png
+target/release/grid-app.exe --scene reference --view start --graphics enhanced --resolution 3840x2160 --render local/graphics/new-enhanced.png
+```
+
+## G002 resource inventory and next graphics tasks
+
+`tools/inventory_graphics_resources.py` reuses the installed read-only PSSG survey and saves metadata only under ignored `local/`. `resource-inventory02.json` covers nine actual/catalog/sponsor packages and 860 texture records; 411 meet the current full-chain size/count contract. These counts include duplicate IDs across files and must not be described as 860 distinct loaded textures.
+
+| Package role | Records | Current full mip-chain contract matches |
+| --- | ---: | ---: |
+| Track surfaces | 45 | 30 |
+| Objects catalogue | 391 | 0 (all 4 x 4 single-level placeholders) |
+| Actual object texture patch package | 391 | 359 |
+| Three sponsor packages together | 14 | 14 |
+| Lacetti livery | 6 | 4 |
+| Lacetti generic | 13 | 4 |
+
+The app already replaces catalogue object textures using `patchup_ot.pssg`. The first five-package inventory (`resource-inventory01.json`) omitted that replacement and sponsors; retained as an incomplete pilot, not evidence that the renderer uses 4 x 4 object textures. Single-level images and failed full-chain contracts are different cases. Some rectangular maps have packed sizes differing from a conventional complete BC chain; their mip layout remains unresolved.
+
+Shader definitions include normal/specular/occlusion samplers, and track macro/second diffuse inputs. These names establish available inputs, not verified channel meanings. Prioritize (1) recover original Donington lighting/sky/grade for the owner's GRID atmosphere, (2) resolve useful rectangular/partial mips and classify normal/specular/mask channels, (3) implement the highest-impact material bindings with a same-camera comparison, (4) add local environment reflections, (5) introduce selected higher-resolution local texture overrides. Measure warmed-up frame times/VRAM before calling any profile 4K/60 ready.
