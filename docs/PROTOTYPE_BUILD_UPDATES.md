@@ -1,6 +1,13 @@
 # Playable build updates
 
-Latest verified refresh: **aa072883394a-dirty**, built 15 October 2026 ~08:14 UTC, release SHA256
+Latest verified refresh: **36a44077c083** (clean), built 15 October 2026 ~09:08 UTC, release SHA256
+253e2e898b04408bfb20ae4f2678477400d62f07d3b609330f4b237c5b5a508f, manifest
+local/playtest/build-20261015T0908260359901Z/. Uses the solver settings captured live from the
+running original ([WORLD_STEPPING_RESEARCH.md](WORLD_STEPPING_RESEARCH.md)). Physics still steps
+at a fixed 16 ms, unlike the original's one step per rendered frame. Source driving and Bevy
+checks pass; autonomous three laps unchanged.
+
+Previous refresh: **aa072883394a-dirty**, built 15 October 2026 ~08:14 UTC, release SHA256
 826946ba3d139c9b2dd59bdb6f94e4408e52c468163cfd2beb7aef56dc9df16c, manifest
 local/playtest/build-20261015T0814337412179Z/. Concrete blocks/walls, chain-link fences and
 trackside hoardings (ornaments.bin) are now solid, fixing the owner-reported sinking into
