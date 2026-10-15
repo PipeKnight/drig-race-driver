@@ -1,6 +1,11 @@
 # Playable build updates
 
-Latest verified refresh: **25588defd910** (clean), built 15 October 2026 ~10:03 UTC, release SHA256
+Latest verified refresh: **8391dc48f609** (clean), built 15 October 2026 ~10:06 UTC, release SHA256
+537bb41729c66ae019e1b24c5a2e30d36db1818f372f28aa76e2b5cc8469e122, manifest
+local/playtest/build-20261015T1005376518145Z/. As 25588de, plus opponents keep their own body
+dents (previously they would have mirrored the player's). Source driving and Bevy checks pass.
+
+Previous refresh: **25588defd910** (clean), built 15 October 2026 ~10:03 UTC, release SHA256
 518185161d427b2e4d5cff416123ad5e056aa1ff7a44e6572e516c085ee0df1a, manifest
 local/playtest/build-20261015T1002215607632Z/. Opponents in `Play GRID Race.cmd` are now driven
 by the ported original GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)): racing line, brake
