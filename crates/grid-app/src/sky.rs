@@ -130,7 +130,56 @@ pub fn install(
         PostUpdate,
         follow_camera.before(TransformSystems::Propagate),
     );
+    if source_ibl {
+        use bevy::{
+            pbr::generate,
+            render::{Render, RenderApp, RenderSystems},
+        };
+        app.sub_app_mut(RenderApp).add_systems(
+            Render,
+            environment_dispatch_ready
+                .after(generate::downsampling_system)
+                .after(generate::filtering_system)
+                .before(RenderSystems::Render),
+        );
+    }
     Ok(())
+}
+
+fn environment_dispatch_ready(
+    mut reported: Local<bool>,
+    pipelines: Option<Res<bevy::pbr::generate::GeneratorPipelines>>,
+    cache: Res<bevy::render::render_resource::PipelineCache>,
+    maps: Query<(
+        &bevy::pbr::generate::GeneratorBindGroups,
+        &bevy::pbr::generate::RenderEnvironmentMap,
+    )>,
+) {
+    if *reported {
+        return;
+    }
+    let Some(pipelines) = pipelines else { return };
+    if [
+        pipelines.downsample_first,
+        pipelines.downsample_second,
+        pipelines.copy,
+        pipelines.radiance,
+        pipelines.irradiance,
+    ]
+    .iter()
+    .any(|&id| cache.get_compute_pipeline(id).is_none())
+    {
+        return;
+    }
+    for (_, map) in &maps {
+        println!(
+            "source_sky_ibl gpu_dispatch_ready=true source_size={} diffuse_size={} specular_mips={} scope=pipelines-and-bind-groups-not-readback",
+            map.environment_map.texture_descriptor.size.width,
+            map.diffuse_map.texture_descriptor.size.width,
+            map.specular_map.texture_descriptor.mip_level_count
+        );
+        *reported = true;
+    }
 }
 
 fn setup_environment(
