@@ -3,6 +3,7 @@ mod body_damage;
 mod engine_sound;
 mod free_look;
 mod graphics;
+mod sky;
 mod time_trial;
 mod tyre_sound;
 use bevy::{
@@ -932,6 +933,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--sky" => {
+                graphics.source_sky = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("procedural") => false,
+                    _ => return Err("--sky needs source or procedural".into()),
+                }
+            }
             "--time-trial-laps" => {
                 trial_laps = Some(
                     args.next()
@@ -1030,6 +1038,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--help" => {
+                println!(
+                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural)."
+                );
                 println!(
                     "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
                 );
@@ -1431,6 +1442,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 (drive_actions, free_look::update, drive_present).chain(),
             )
             .add_systems(Update, update_start_lights);
+    }
+    if graphics.enhanced() && graphics.source_sky && track {
+        sky::install(&mut app, &root)?;
     }
     let exit = app
         .insert_resource(graphics)

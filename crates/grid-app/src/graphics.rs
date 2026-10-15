@@ -34,6 +34,7 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    pub source_sky: bool,
     pub preset: Preset,
     pub width: u32,
     pub height: u32,
@@ -42,6 +43,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            source_sky: true,
             preset: Preset::Baseline,
             width: 1280,
             height: 800,
