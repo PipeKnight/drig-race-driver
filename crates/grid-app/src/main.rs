@@ -40,6 +40,8 @@ struct Car {
     center: Vec3,
     radius: f32,
     track: bool,
+    /// Opponent livery textures (car k uses entry k-1), keyed like `textures`.
+    liveries: Vec<BTreeMap<String, Vec<u8>>>,
 }
 struct Part {
     name: String,
@@ -447,6 +449,7 @@ fn load(
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
+        liveries: Vec::new(),
     };
     if track {
         append_objects(root, &mut car)?;
@@ -804,6 +807,7 @@ fn load_collision(root: &Path) -> Result<Car, Box<dyn std::error::Error>> {
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
+        liveries: Vec::new(),
     })
 }
 fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
@@ -853,6 +857,24 @@ fn append_car(
     }
     car.parts.extend(lacetti.parts);
     Ok(())
+}
+/// Lacetti livery package `livery_NN` (shipped 00..09), keyed `lacetti/<texture>`.
+fn load_livery(
+    root: &Path,
+    index: usize,
+) -> Result<BTreeMap<String, Vec<u8>>, Box<dyn std::error::Error>> {
+    let path = format!("cars/lac/livery_{index:02}/textures_high/lac_tex_high_{index:02}.pssg");
+    let bytes = read(&root.join(path))?;
+    let tree = pssg::read_tree(&bytes)?;
+    let mut out = BTreeMap::new();
+    for texture in texture::read_textures(&tree)? {
+        let (dds, _) = texture.validated_dds();
+        out.insert(
+            format!("lacetti/{}", String::from_utf8(texture.id.to_vec())?),
+            dds,
+        );
+    }
+    Ok(out)
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
@@ -1192,6 +1214,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             anchor.unwrap()
         };
         append_car(&root, &lod, &mut car, model)?;
+        // Each opponent wears its own shipped livery (01, 02, ...); the player keeps 00.
+        if let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
+            for k in 1..opponents.multi.cars.len() {
+                car.liveries.push(load_livery(&root, k % 10)?);
+            }
+            println!("drive_opponent_liveries count={}", car.liveries.len());
+        }
     }
     let mut orbit = if track {
         Orbit {
@@ -1378,6 +1407,9 @@ fn setup(
         texture_handles.insert(name.clone(), images.add(image));
     }
     let mut material_handles = BTreeMap::new();
+    let liveries = std::mem::take(&mut car.liveries);
+    let mut livery_images: BTreeMap<(usize, String), Handle<Image>> = BTreeMap::new();
+    let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
     let bindings = car.bindings.clone();
     let track = car.track;
     for part in car.parts.drain(..) {
@@ -1503,10 +1535,50 @@ fn setup(
                     // Deforming body parts own their mesh per car; others share it.
                     let own = original.as_ref().filter(|_| runtime.deformation_enabled);
                     let opponent_mesh = own.map_or_else(|| mesh.clone(), |m| meshes.add(m.clone()));
+                    // Swap in this car's livery texture where the package has it.
+                    let opponent_material = bindings
+                        .get(&part.material)
+                        .and_then(|texture| {
+                            let dds = liveries.get(car - 1)?.get(texture)?;
+                            Some((texture, dds))
+                        })
+                        .map_or_else(
+                            || material.clone(),
+                            |(texture, dds)| {
+                                let image = livery_images
+                                    .entry((car, texture.clone()))
+                                    .or_insert_with(|| {
+                                        images.add(
+                                            Image::from_buffer(
+                                                dds,
+                                                ImageType::Extension("dds"),
+                                                CompressedImageFormats::BC,
+                                                true,
+                                                ImageSampler::Default,
+                                                RenderAssetUsages::MAIN_WORLD
+                                                    | RenderAssetUsages::RENDER_WORLD,
+                                            )
+                                            .expect("validated livery DDS image"),
+                                        )
+                                    })
+                                    .clone();
+                                livery_materials
+                                    .entry((car, part.material.clone()))
+                                    .or_insert_with(|| {
+                                        let mut m = materials
+                                            .get(&material)
+                                            .expect("part material")
+                                            .clone();
+                                        m.base_color_texture = Some(image);
+                                        materials.add(m)
+                                    })
+                                    .clone()
+                            },
+                        );
                     let mut opponent = commands.spawn((
                         Name::new(format!("opponent{car} {}", part.name)),
                         Mesh3d(opponent_mesh),
-                        MeshMaterial3d(material.clone()),
+                        MeshMaterial3d(opponent_material),
                         Transform::from_matrix(
                             Mat4::from_cols_array(&runtime.pose()) * motion * matrix,
                         ),
