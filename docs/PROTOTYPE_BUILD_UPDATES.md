@@ -1,6 +1,11 @@
 # Playable build updates
 
-Latest verified refresh: **143112dab5f0** (clean), built 15 October 2026 ~14:01 UTC, release SHA256
+Latest verified refresh: **37df9b20fd07** (clean), built 15 October 2026 ~14:05 UTC, release SHA256
+ffd58c1ec1eb24230b99852cb18fb3ac3ab778adbcd85f95b8235aac69ba8881, manifest
+local/playtest/build-20261015T1404423733601Z/. AI cars rev their engines on the grid before the lights go out. Source driving
+and Bevy checks pass.
+
+Previous refresh: **143112dab5f0** (clean), built 15 October 2026, release SHA256
 1511025265f477975840708aca8ec22ef545e9da7a0d6d1072ecb4d2eb563a59, manifest
 local/playtest/build-20261015T1400461365693Z/. Opponents drive with the original per-driver characteristics (private table
 local\ai-driver-characteristics.tsv) and yield when squeezed alongside. Source driving and Bevy checks pass.
