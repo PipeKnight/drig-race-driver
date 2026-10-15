@@ -1,6 +1,13 @@
 # Playable build updates
 
-Latest verified refresh: **36a44077c083** (clean), built 15 October 2026 ~09:08 UTC, release SHA256
+Latest verified refresh: **c10349d6cdb6** (clean), built 15 October 2026 ~09:16 UTC, release SHA256
+cc24fb95753eb361b8ffbc82e1c40af341072104b98149eaeacca758422a562b, manifest
+local/playtest/build-20261015T0916053844121Z/. Body contacts use the purchased CAR_ surface
+material (no bounce, no soft springs) with the live original solver settings
+([F286](ROUTE_PROPS_COLLISION.md#f286-original-solver-settings-and-contact-material)).
+Source driving and Bevy checks pass.
+
+Previous refresh: **36a44077c083** (clean), built 15 October 2026 ~09:08 UTC, release SHA256
 253e2e898b04408bfb20ae4f2678477400d62f07d3b609330f4b237c5b5a508f, manifest
 local/playtest/build-20261015T0908260359901Z/. Uses the solver settings captured live from the
 running original ([WORLD_STEPPING_RESEARCH.md](WORLD_STEPPING_RESEARCH.md)). Physics still steps
