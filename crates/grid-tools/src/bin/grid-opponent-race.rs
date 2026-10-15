@@ -1,10 +1,12 @@
 //! Private headless race: N source cars in one shared world. Cars are driven by
 //! the ported original AI driver (`ai`, default) or the authored pursuit
 //! placeholder (`pursuit`). Reports laps, car-to-car contacts, failures and an
-//! optional per-tick TSV of car 0's AI telemetry.
+//! optional per-tick TSV of car 0's AI telemetry. `--route tracks/<region>/<track>/<route>`
+//! (anywhere in the arguments) selects the circuit; Donington route_0 by default.
 use grid_tools::{
     ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Other, Parameters, View},
     pursuit_driver::PursuitDriver,
+    route::Route,
     source_vehicle::{Controls, Runtime, multi::MultiRuntime},
 };
 use std::{io::Write, path::Path};
@@ -15,10 +17,19 @@ enum Driver {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let route = match args.iter().position(|a| a == "--route") {
+        Some(i) if i + 1 < args.len() => {
+            let route = Route::new(&args[i + 1])?;
+            args.drain(i..i + 2);
+            route
+        }
+        Some(_) => return Err("--route needs tracks/<region>/<track>/<route>".into()),
+        None => Route::default(),
+    };
     if !(5..=7).contains(&args.len()) {
         return Err(
-            "usage: grid-opponent-race ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
+            "usage: grid-opponent-race [--route ROUTE] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
                 .into(),
         );
     }
@@ -44,9 +55,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let slots: Vec<String> = (0..cars).map(|i| format!("slot_{i:02}")).collect();
     let slot_refs: Vec<&str> = slots.iter().map(String::as_str).collect();
-    let mut multi = MultiRuntime::lacetti(root, &slot_refs, &table, events)?;
-    let data = AiData::load(root, "tracks/europe/donington/route_0", "touring", "lac")?;
-    let progress = grid_tools::lap_progress::load(root)?.progress;
+    let mut multi = MultiRuntime::lacetti_on(root, &route, &slot_refs, &table, events)?;
+    let data = AiData::load(root, route.path(), "touring", "lac")?;
+    let progress = grid_tools::lap_progress::load_route(root, &route)?.progress;
     // GRID_AI_CHARACTERISTICS=private TSV: per-driver characteristics (row k = car k).
     let characteristics = match std::env::var_os("GRID_AI_CHARACTERISTICS") {
         Some(path) => grid_tools::ai_driver::read_characteristics(&std::fs::read_to_string(path)?)?,
@@ -70,7 +81,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Result<_, _>>()?;
     println!(
-        "driver={kind} maximum_steering_angle={} line_length={}",
+        "route={} driver={kind} maximum_steering_angle={} line_length={}",
+        route.path(),
         multi.cars[0].maximum_steering_angle(),
         data.line.length
     );

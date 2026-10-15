@@ -39,7 +39,8 @@ readable private derivatives already existed in
   shortcut 0, racing_line 1, left_racing_limit 2, right_racing_limit 3,
   left_track_limit 4, right_track_limit 5; racing-line kinds retirement 1,
   optimal 2, overtake 3, left 4, right 5, traffic 6, drift 7 (+`start`).
-  Donington only ships `optimal`.
+  Donington only ships `optimal`; Jarama ships `optimal` and `drift` on every
+  gate (the reader keeps `optimal`, TRACK_GENERALIZATION.md).
 - `links num_links=134`: `link from_gate→to_gate` (closed loop 133→0).
 - `brake_lines num=11`: `brake_line gate_id` + `brake_data min_speed max_speed
   drift_speed distance_modifier` (track defaults; min = 0.75 × max).

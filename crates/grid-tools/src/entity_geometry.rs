@@ -3,6 +3,7 @@
 //! Each box is twelve triangles in a one-leaf decoded tree, queried through the
 //! shared cold body contact path. All placements are infinite-mass in the data;
 //! breakable/dynamic behaviour (physparams.xml thresholds) is not implemented.
+use crate::route::Route;
 use grid_formats::{entities, pssg};
 use grid_world::{Error, packed_query::Mesh};
 use std::{collections::BTreeMap, path::Path};
@@ -74,9 +75,12 @@ impl PropBox {
 /// an authored stand-in. Poles, lights and other ornaments stay non-solid.
 const BARRIER_FAMILIES: [&str; 4] = ["concrete_", "chnfen", "gg_ad_brd_", "don_ad_brd_"];
 
-fn ornament_barriers(root: &Path) -> Result<Vec<PropBox>, Box<dyn std::error::Error>> {
+fn ornament_barriers(
+    root: &Path,
+    route: &Route,
+) -> Result<Vec<PropBox>, Box<dyn std::error::Error>> {
     use grid_formats::{mesh, ornaments, scene};
-    let objects = std::fs::read(root.join("tracks/europe/donington/objects.pssg"))?;
+    let objects = std::fs::read(root.join(route.track_file("objects.pssg")))?;
     let tree = pssg::read_tree(&objects)?;
     let sources = mesh::read_static_meshes(&tree)?;
     let mut extents: BTreeMap<Vec<u8>, ([f32; 3], [f32; 3])> = BTreeMap::new();
@@ -97,7 +101,7 @@ fn ornament_barriers(root: &Path) -> Result<Vec<PropBox>, Box<dyn std::error::Er
         }
     }
     let placement_bytes =
-        std::fs::read(root.join("tracks/europe/donington/route_0/ornaments.bin"))?;
+        std::fs::read(root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     let mut boxes = Vec::new();
     for p in &placements.prototypes {
@@ -126,7 +130,11 @@ fn ornament_barriers(root: &Path) -> Result<Vec<PropBox>, Box<dyn std::error::Er
 }
 
 impl Props {
+    /// The default (Donington) route's props.
     pub fn read(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::read_route(root, &Route::default())
+    }
+    pub fn read_route(root: &Path, route: &Route) -> Result<Self, Box<dyn std::error::Error>> {
         let read = |p: &str| -> Result<Vec<u8>, Box<dyn std::error::Error>> {
             let bytes = std::fs::read(root.join(p))?;
             if bytes.len() > 64 << 20 {
@@ -134,8 +142,8 @@ impl Props {
             }
             Ok(bytes)
         };
-        let placements = read("tracks/europe/donington/route_0/objects.ens")?;
-        let types = read("tracks/europe/donington/objecttypes.pssg")?;
+        let placements = read(&route.file("objects.ens"))?;
+        let types = read(&route.track_file("objecttypes.pssg"))?;
         let placements = pssg::read_tree(&placements)?;
         let types = pssg::read_tree(&types)?;
         let mut boxes = Vec::new();
@@ -172,7 +180,7 @@ impl Props {
                 }
             }
         }
-        boxes.extend(ornament_barriers(root)?);
+        boxes.extend(ornament_barriers(root, route)?);
         if boxes.is_empty() || boxes.len() > 8192 {
             return Err("unsupported entity collision box count".into());
         }

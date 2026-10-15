@@ -79,9 +79,32 @@ impl MultiRuntime {
         Self::lacetti_deforming(root, slots, table, events, None)
     }
 
+    /// As [`Self::lacetti`], on the grid slots of the given route.
+    pub fn lacetti_on(
+        root: &Path,
+        route: &Route,
+        slots: &[&str],
+        table: &[u8],
+        events: Option<body_impact::Parameters>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::lacetti_deforming_on(root, route, slots, table, events, None)
+    }
+
     /// As [`Self::lacetti`], with source deformation and callbacks on every car.
     pub fn lacetti_deforming(
         root: &Path,
+        slots: &[&str],
+        table: &[u8],
+        events: Option<body_impact::Parameters>,
+        deformation: Option<DeformationParameters>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::lacetti_deforming_on(root, &Route::default(), slots, table, events, deformation)
+    }
+
+    /// As [`Self::lacetti_deforming`], on the grid slots of the given route.
+    pub fn lacetti_deforming_on(
+        root: &Path,
+        route: &Route,
         slots: &[&str],
         table: &[u8],
         events: Option<body_impact::Parameters>,
@@ -93,7 +116,7 @@ impl MultiRuntime {
         let mut cars = Vec::new();
         let mut geometry = Vec::new();
         for (i, slot) in slots.iter().enumerate() {
-            let mut car = Runtime::lacetti(root, slot, 200679 + i as u32)?;
+            let mut car = Runtime::lacetti_on(root, route, slot, 200679 + i as u32)?;
             let mut body = car.prepare_body_geometry(root, table)?;
             if let Some((limit, bulk)) = &deformation {
                 car.enable_deformation(root, &mut body)?;

@@ -19,6 +19,7 @@ pub mod impact_diagnostic;
 pub mod lap_progress;
 pub mod pursuit_driver;
 pub mod race;
+pub mod route;
 pub mod source_deformation;
 pub mod source_physical;
 pub mod source_vehicle;

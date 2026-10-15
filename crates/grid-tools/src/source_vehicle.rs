@@ -1,7 +1,9 @@
 //! Source-only Lacetti/Donington serial driving prototype. No saved native state.
 //! The manager's single shared physical material and serial scheduling are explicit
 //! prototype choices; body events are opt-in, full factory/deformation/racing external.
-use crate::{contact_surfaces::Surfaces, source_physical, standard_car, track::Track};
+use crate::{
+    contact_surfaces::Surfaces, route::Route, source_physical, standard_car, track::Track,
+};
 use grid_formats::{
     binxml, car_collision, grid, handling_damage, jpk, pssg, tuning, vehicle, vehicle_properties,
 };
@@ -50,6 +52,8 @@ pub struct Runtime {
     pub lap: Option<grid_world::lap_timing::State>,
     initial_lap: Option<grid_world::lap_timing::State>,
     pub lap_events: Vec<grid_world::lap_timing::Event>,
+    /// Purchased route whose track, grid, boundary, props and gates are used.
+    route: Route,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -143,6 +147,16 @@ impl Runtime {
     /// preferences/readiness and serial manager configuration are supplied here,
     /// rather than pretending to execute the original resource/preferences layer.
     pub fn lacetti(root: &Path, slot: &str, seed: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::lacetti_on(root, &Route::default(), slot, seed)
+    }
+
+    /// As [`Self::lacetti`], on the grid slot of the given route.
+    pub fn lacetti_on(
+        root: &Path,
+        route: &Route,
+        slot: &str,
+        seed: u32,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         if !slot.starts_with("slot_")
             || slot.len() > 32
             || !slot.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
@@ -255,17 +269,9 @@ impl Runtime {
         for o in [0x32c, 0x334, 0x338, 0x33c, 0x340] {
             physical[o / 4] = 0;
         }
-        let track = Track::read(&read(
-            root,
-            "tracks/europe/donington/route_0/track.jpk",
-            256 * 1024 * 1024,
-        )?)?;
+        let track = Track::read(&read(root, &route.file("track.jpk"), 256 * 1024 * 1024)?)?;
         let surfaces = Surfaces::read(&read(root, "surface_materials.xml", 16 * 1024 * 1024)?)?;
-        let grid_bytes = read(
-            root,
-            "tracks/europe/donington/route_0/grids.pssg",
-            256 * 1024 * 1024,
-        )?;
+        let grid_bytes = read(root, &route.file("grids.pssg"), 256 * 1024 * 1024)?;
         let markers = pssg::read_tree(&grid_bytes)?;
         let marker = grid::read(&markers, slot.as_bytes())?;
         let shape = car_collision::read(&ned)?;
@@ -388,6 +394,7 @@ impl Runtime {
             lap: None,
             initial_lap: None,
             lap_events: Vec::new(),
+            route: route.clone(),
         })
     }
 
@@ -400,7 +407,7 @@ impl Runtime {
         if self.ticks != 0 || self.lap_course.is_some() {
             return Err("invalid source lap timing startup boundary".into());
         }
-        let prepared = crate::lap_progress::load(root)?;
+        let prepared = crate::lap_progress::load_route(root, &self.route)?;
         let position = std::array::from_fn(|i| self.pose()[12 + i]);
         let lap = grid_world::lap_timing::State::new(&prepared.course, position)?;
         self.initial_lap = Some(lap.clone());
@@ -447,10 +454,10 @@ impl Runtime {
         let geometry = crate::body_geometry::BodyGeometry::read(&ned, offset, table)?;
         let boundary = crate::cqtc_geometry::Geometry::read(&read(
             root,
-            "tracks/europe/donington/route_0/boundarylines.cqtc",
+            &self.route.file("boundarylines.cqtc"),
             2 * 1024 * 1024,
         )?)?;
-        let props = crate::entity_geometry::Props::read(root)?;
+        let props = crate::entity_geometry::Props::read_route(root, &self.route)?;
         if self.track.has_boundary() || self.state.shapes.len() != self.track.shape_count() + 1 {
             return Err("body boundary already prepared or shape registration differs".into());
         }
@@ -749,6 +756,9 @@ impl Runtime {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x1d0 / 4 + i]))
     }
     /// Read-only collision world (diagnostics and presentation).
+    pub fn route(&self) -> &Route {
+        &self.route
+    }
     pub fn track(&self) -> &Track {
         &self.track
     }

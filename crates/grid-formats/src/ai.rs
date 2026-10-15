@@ -170,12 +170,33 @@ pub fn track(doc: &Document<'_>) -> Result<Track> {
         for w in named(doc, only(doc, gate, "waypoints")?, "waypoint")? {
             let e = &doc.elements[w];
             let kind = attr(e, "type")?;
-            if kind == "racing_line"
-                && named(doc, w, "racing_line")?
+            if kind == "racing_line" {
+                // Racing-line kinds of the executable's enumeration (.rdata
+                // 0xCF7120): the race line is `optimal`; other kinds (Jarama
+                // also ships `drift` on every gate) belong to behaviours not
+                // ported here and are skipped. Mixed or unknown kinds fail.
+                let kinds = named(doc, w, "racing_line")?
                     .iter()
-                    .any(|&r| attr(&doc.elements[r], "type").ok() != Some("optimal"))
-            {
-                return fail(w, "only optimal AI racing lines supported");
+                    .map(|&r| attr(&doc.elements[r], "type"))
+                    .collect::<Result<Vec<_>>>()?;
+                if !kinds.iter().all(|&k| k == "optimal") {
+                    if kinds.iter().all(|k| {
+                        [
+                            "retirement",
+                            "overtake",
+                            "left",
+                            "right",
+                            "traffic",
+                            "drift",
+                            "start",
+                        ]
+                        .contains(k)
+                    }) && !kinds.is_empty()
+                    {
+                        continue;
+                    }
+                    return fail(w, "only optimal AI racing lines supported");
+                }
             }
             if lengths.insert(kind, number(attr(e, "length")?)?).is_some() {
                 return fail(w, "duplicate AI waypoint type");

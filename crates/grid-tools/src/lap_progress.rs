@@ -1,4 +1,5 @@
 //! Purchased ordered circuit gates for the independent practice-lap policy.
+use crate::route::Route;
 use grid_formats::{binxml, progress};
 pub use grid_world::lap_timing::Event;
 use grid_world::lap_timing::{Course, Policy};
@@ -7,9 +8,13 @@ pub struct Prepared {
     pub course: Course,
     pub progress: progress::Progress,
 }
+/// The default (Donington) route's gates.
 pub fn load(root: &Path) -> Result<Prepared, Box<dyn std::error::Error>> {
+    load_route(root, &Route::default())
+}
+pub fn load_route(root: &Path, route: &Route) -> Result<Prepared, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
-    std::fs::File::open(root.join("tracks/europe/donington/route_0/progress_track.xml"))?
+    std::fs::File::open(root.join(route.file("progress_track.xml")))?
         .take(16 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() > 16 * 1024 * 1024 {

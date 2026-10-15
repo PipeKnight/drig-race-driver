@@ -22,6 +22,7 @@ use bevy::{
     winit::WinitPlugin,
 };
 use grid_formats::{collision, entities, jpk, material, mesh, ornaments, pssg, scene, texture};
+use grid_tools::route::Route;
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -333,18 +334,32 @@ fn read(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     }
     Ok(bytes)
 }
+/// HUD name of a route's track folder, e.g. `istanbul_park` -> `Istanbul Park`.
+fn track_label(route: &Route) -> String {
+    route
+        .track_name()
+        .split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map_or_else(String::new, |f| f.to_ascii_uppercase().to_string() + c.as_str())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 fn load(
     root: &Path,
+    route: &Route,
     lod: &str,
     track: bool,
     include_batches: bool,
 ) -> Result<Car, Box<dyn std::error::Error>> {
     let mesh_path = if track {
-        "tracks/europe/donington/tracksplit.pssg"
+        route.track_file("tracksplit.pssg")
     } else {
-        "cars/lac/lac_highLOD.pssg"
+        "cars/lac/lac_highLOD.pssg".into()
     };
-    let bytes = read(&root.join(mesh_path))?;
+    let bytes = read(&root.join(&mesh_path))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_meshes(&tree)?;
     let draws = if track {
@@ -418,7 +433,7 @@ fn load(
     }
     let mut textures = BTreeMap::new();
     let texture_paths = if track {
-        vec![mesh_path]
+        vec![mesh_path.as_str()]
     } else {
         vec![
             "cars/lac/livery_00/textures_high/lac_tex_high_00.pssg",
@@ -475,16 +490,20 @@ fn load(
         liveries: Vec::new(),
     };
     if track {
-        append_objects(root, &mut car)?;
+        append_objects(root, route, &mut car)?;
     }
     Ok(car)
 }
-fn append_objects(root: &Path, car: &mut Car) -> Result<(), Box<dyn std::error::Error>> {
-    let bytes = read(&root.join("tracks/europe/donington/objects.pssg"))?;
+fn append_objects(
+    root: &Path,
+    route: &Route,
+    car: &mut Car,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = read(&root.join(route.track_file("objects.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_static_meshes(&tree)?;
     let draws = scene::read_object_draws(&tree, &sources)?;
-    let placement_bytes = read(&root.join("tracks/europe/donington/route_0/ornaments.bin"))?;
+    let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     let transforms: BTreeMap<_, _> = placements
         .prototypes
@@ -583,21 +602,18 @@ fn append_objects(root: &Path, car: &mut Car) -> Result<(), Box<dyn std::error::
         }
     }
     for (container, path) in [
-        (
-            "objectstextures.pssg",
-            "tracks/europe/donington/patchup_ot.pssg",
-        ),
+        ("objectstextures.pssg", route.track_file("patchup_ot.pssg")),
         (
             "lemans_sponsors.pssg",
-            "tracks/europe/donington/lemans_sponsors.pssg",
+            route.track_file("lemans_sponsors.pssg"),
         ),
         (
             "sponsor_minor.pssg",
-            "track_sponsors/tag_heuer/sponsor_minor.pssg",
+            "track_sponsors/tag_heuer/sponsor_minor.pssg".into(),
         ),
         (
             "sponsor_event.pssg",
-            "track_sponsors/bridgestone/sponsor_event.pssg",
+            "track_sponsors/bridgestone/sponsor_event.pssg".into(),
         ),
     ] {
         let bytes = read(&root.join(path))?;
@@ -637,17 +653,18 @@ fn append_objects(root: &Path, car: &mut Car) -> Result<(), Box<dyn std::error::
         car.textures.len()
     );
     println!("unplaced library prototypes={unplaced:?}");
-    append_entities(root, car, &tree, &sources)?;
+    append_entities(root, route, car, &tree, &sources)?;
     Ok(())
 }
 fn append_entities(
     root: &Path,
+    route: &Route,
     car: &mut Car,
     objects: &pssg::Tree<'_>,
     sources: &[mesh::Mesh<'_>],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let placement_bytes = read(&root.join("tracks/europe/donington/route_0/objects.ens"))?;
-    let type_bytes = read(&root.join("tracks/europe/donington/objecttypes.pssg"))?;
+    let placement_bytes = read(&root.join(route.file("objects.ens")))?;
+    let type_bytes = read(&root.join(route.track_file("objecttypes.pssg")))?;
     let placement_tree = pssg::read_tree(&placement_bytes)?;
     let type_tree = pssg::read_tree(&type_bytes)?;
     let entities = entities::read(&placement_tree, &type_tree)?;
@@ -679,14 +696,27 @@ fn append_entities(
     let mut triangles = 0;
     let closest_lod = scene::read_object_draws(objects, sources)?;
     let mut provisional_lod_instances = 0;
+    let mut omitted_empty = 0;
     for (node, placements) in &placements {
         let mut draws = scene::read_renderable_draws(objects, sources, node)?;
         if draws.is_empty() {
             // Exact startup renderables containing anchors but no mesh.
             // Preview intact closest LOD; runtime substitution remains untraced.
+            // Donington pairs are explicit; other routes try the renderable's
+            // `<stem>_default_NN` stem as `<stem> Root` and otherwise omit it.
+            let parts: Vec<&[u8]> = node.rsplitn(3, |&c| c == b'_').collect();
+            let stem = (parts.len() == 3 && parts[1] == b"default")
+                .then(|| [parts[2], b" Root".as_slice()].concat());
             let prototype: &[u8] = match *node {
                 b"dcushion_green_a01_default_01" => b"cushion_blue Root",
                 b"tyrestack_black_default_01" => b"tyrestack_black Root",
+                _ if !route.is_default() => match &stem {
+                    Some(stem) => stem,
+                    None => {
+                        omitted_empty += placements.len();
+                        continue;
+                    }
+                },
                 _ => {
                     return Err(format!(
                         "empty entity renderable {}",
@@ -700,6 +730,10 @@ fn append_entities(
                 .filter(|d| d.prototype == Some(prototype))
                 .cloned()
                 .collect();
+            if draws.is_empty() && !route.is_default() {
+                omitted_empty += placements.len();
+                continue;
+            }
             if draws.is_empty() {
                 return Err("provisional intact LOD unavailable".into());
             }
@@ -755,6 +789,9 @@ fn append_entities(
         placements.values().map(Vec::len).sum::<usize>(),
         placements.len()
     );
+    if omitted_empty > 0 {
+        println!("entities omitted_empty_renderable_instances={omitted_empty}");
+    }
     Ok(())
 }
 fn main() {
@@ -763,8 +800,8 @@ fn main() {
         std::process::exit(1);
     }
 }
-fn load_collision(root: &Path) -> Result<Car, Box<dyn std::error::Error>> {
-    let bytes = read(&root.join("tracks/europe/donington/route_0/track.jpk"))?;
+fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error::Error>> {
+    let bytes = read(&root.join(route.file("track.jpk")))?;
     let archive = jpk::inspect(&bytes)?;
     let mut parts = Vec::new();
     let mut bounds = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
@@ -847,8 +884,8 @@ fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
     }
     Ok(Vec3::new(coordinates[0], coordinates[1], coordinates[2]))
 }
-fn grid_slot(root: &Path, name: &str) -> Result<Mat4, Box<dyn std::error::Error>> {
-    let bytes = read(&root.join("tracks/europe/donington/route_0/grids.pssg"))?;
+fn grid_slot(root: &Path, route: &Route, name: &str) -> Result<Mat4, Box<dyn std::error::Error>> {
+    let bytes = read(&root.join(route.file("grids.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
     let marker = grid_formats::grid::read(&tree, name.as_bytes())?;
     let transform = marker.horizontal_preview()?;
@@ -864,7 +901,7 @@ fn append_car(
     car: &mut Car,
     anchor: Mat4,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut lacetti = load(root, lod, false, false)?;
+    let mut lacetti = load(root, &Route::default(), lod, false, false)?;
     for part in &mut lacetti.parts {
         part.material = format!("lacetti/{}", part.material);
         for matrix in &mut part.matrices {
@@ -902,6 +939,7 @@ fn load_livery(
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
     let mut root = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Grid");
+    let mut route = Route::default();
     let mut output = None;
     let mut lod = String::from("LOD0_");
     let mut track = false;
@@ -978,6 +1016,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--throttle" => scripted.throttle = args.next().ok_or("missing throttle")?.parse()?,
             "--steering" => scripted.steering = args.next().ok_or("missing steering")?.parse()?,
             "--game-root" => root = args.next().ok_or("--game-root needs a path")?.into(),
+            "--route" => {
+                route = Route::new(
+                    &args
+                        .next()
+                        .ok_or("--route needs tracks/<region>/<track>/<route>")?,
+                )?
+            }
             "--render" => {
                 output = Some(PathBuf::from(
                     args.next().ok_or("--render needs a PNG path")?,
@@ -1026,7 +1071,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                );
+                println!(
+                    "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route only."
                 );
                 println!(
                     "--opponents 1..11: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
@@ -1094,8 +1142,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         reference = true;
         collision = false;
         start_view = true;
-        let mut runtime = grid_tools::source_vehicle::Runtime::lacetti(
+        let mut runtime = grid_tools::source_vehicle::Runtime::lacetti_on(
             &root,
+            &route,
             &format!("slot_{player_slot:02}"),
             200679,
         )?;
@@ -1146,15 +1195,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(grid_tools::deformation_parameters::read(&std::fs::read(path)?)?)
                     })
                     .transpose()?;
-                let multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti_deforming(
+                let multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti_deforming_on(
                     &root,
+                    &route,
                     &refs,
                     &table,
                     runtime.body_events,
                     parameters,
                 )?;
                 use grid_tools::ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Parameters};
-                let ai = AiData::load(&root, "tracks/europe/donington/route_0", "touring", "lac")?;
+                let ai = AiData::load(&root, route.path(), "touring", "lac")?;
                 let parameters = Parameters::new(&ai, NORMAL_DIFFICULTY, |_| 1.)?;
                 let characteristics = match &ai_characteristics {
                     Some(path) => grid_tools::ai_driver::read_characteristics(
@@ -1183,7 +1233,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
                 let start = {
-                    let gate = &grid_tools::lap_progress::load(&root)?.progress.gates[0];
+                    let gate = &grid_tools::lap_progress::load_route(&root, &route)?
+                        .progress
+                        .gates[0];
                     std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
                 };
                 let mut positions = vec![{
@@ -1261,17 +1313,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("provide both --camera and --look-at".into());
     }
     if start_view && !track {
-        return Err("start view requires a Donington scene".into());
+        return Err("start view requires a track scene".into());
     }
     let mut car = if collision {
-        load_collision(&root)?
+        load_collision(&root, &route)?
     } else {
-        load(&root, &lod, track, include_batches)?
+        load(&root, &route, &lod, track, include_batches)?
     };
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))
     } else if reference || start_view {
-        Some(grid_slot(&root, "slot_00")?)
+        Some(grid_slot(&root, &route, "slot_00")?)
     } else {
         None
     };
@@ -1344,7 +1396,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(laps) = trial_laps {
         // Races with opponents never write the solo time-trial best times.
         let race = driving.as_ref().is_some_and(|d| d.opponents.is_some());
-        let mut trial = time_trial::Trial::new(laps, trial_mode, output.is_none() && !race)?;
+        // The private best-time file is keyed to the default route.
+        let mut trial = time_trial::Trial::new(
+            laps,
+            trial_mode,
+            output.is_none() && !race && route.is_default(),
+        )?;
         trial.race = race;
         if race {
             // Races use the shipped start-light sequence time.
@@ -1746,7 +1803,12 @@ fn setup(
     if driving.is_some() {
         commands.spawn((
             DrivingHud,
-            Text::new("Lacetti / Donington\nPreparing practice timer"),
+            Text::new(format!(
+                "Lacetti / {}\nPreparing practice timer",
+                driving
+                    .as_ref()
+                    .map_or_else(String::new, |d| track_label(d.runtime.route()))
+            )),
             TextFont {
                 font_size: FontSize::Px(22.),
                 ..default()
@@ -2348,13 +2410,17 @@ fn drive_present(
             "\nM: mute engine sound"
         }
     });
-    let heading = if trial.as_ref().is_some_and(|t| t.race) {
-        "Lacetti / Donington race"
-    } else if trial.is_some() {
-        "Lacetti / Donington time trial"
-    } else {
-        "Lacetti / Donington practice"
-    };
+    let heading = format!(
+        "Lacetti / {} {}",
+        track_label(driving.runtime.route()),
+        if trial.as_ref().is_some_and(|t| t.race) {
+            "race"
+        } else if trial.is_some() {
+            "time trial"
+        } else {
+            "practice"
+        }
+    );
     // Race position or classification above the event HUD.
     let race = match (&driving.opponents, &trial) {
         (Some(o), Some(t)) if t.finished() => format!(
@@ -2535,7 +2601,7 @@ mod driving_tests {
     fn source_wheel_joints_follow_physics_without_feedback() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let root = Path::new(&root);
-        let car = load(root, "LOD0_", false, false).unwrap();
+        let car = load(root, &Route::default(), "LOD0_", false, false).unwrap();
         let mut runtime =
             grid_tools::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
         let mut counts = [0; 4];
@@ -2644,7 +2710,7 @@ mod driving_tests {
                 .unwrap(),
         );
         let initial = runtime.wheels().map(wheel_motion);
-        let car = load(root, "LOD0_", false, false).unwrap();
+        let car = load(root, &Route::default(), "LOD0_", false, false).unwrap();
         let pristine_field =
             grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle).unwrap();
         let selected: Vec<_> = car
