@@ -1,6 +1,11 @@
 # Playable build updates
 
-Latest verified refresh: **9b2a81858ef7** (clean), built 15 October 2026 ~13:39 UTC, release SHA256
+Latest verified refresh: **196bb3ab86fc** (clean), built 15 October 2026 ~13:47 UTC, release SHA256
+1503441c125b25c12574c71b18954a171e241a70cea8271c253d5baed2a69bee, manifest
+local/playtest/build-20261015T1346488664744Z/. Races start you at the back of the grid, and every opponent has its own engine sound
+(distance-attenuated). Source driving and Bevy checks pass.
+
+Previous refresh: **9b2a81858ef7** (clean), built 15 October 2026 ~13:39 UTC, release SHA256
 5cec944bd85023dd22359a98bc87a41bebf64ed350c9af0cada18f866dc1f704, manifest
 local/playtest/build-20261015T1338596647645Z/. AI opponents now overtake, race side by side and
 brake for the car ahead like the original AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md#traffic-behaviours-f294)),
