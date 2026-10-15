@@ -98,6 +98,8 @@ struct Opponents {
     /// Scripted validation only (GRID_AUTOPILOT=1 with --drive-ticks): the
     /// ported AI drives the player's car.
     autopilot: Option<grid_tools::ai_driver::AiDriver>,
+    /// Last throttle of each opponent (car k at k-1), for engine sound.
+    throttles: Vec<f32>,
 }
 impl Opponents {
     /// Positions of every car; car 0 is the player runtime held outside `multi`.
@@ -1167,6 +1169,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     standings,
                     names,
                     autopilot,
+                    throttles: vec![0.; n],
                 })
             })
             .transpose()?;
@@ -1855,6 +1858,7 @@ fn drive_tick(
                 )
             });
         }
+        opponents.throttles = all[1..].iter().map(|c| c.throttle).collect();
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
         let result = opponents.multi.tick(&all);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);

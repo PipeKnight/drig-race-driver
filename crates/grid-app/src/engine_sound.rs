@@ -44,6 +44,18 @@ impl EngineSound {
         )
     }
 }
+/// One opponent's engine voice set (car index in the shared world).
+#[derive(Component)]
+pub(crate) struct OpponentEngine {
+    car: usize,
+    mailbox: Arc<AtomicU64>,
+}
+/// AUTHORED opponent attenuation (the original 3D audio model is not
+/// recovered): gain relative to the player's engine, full within the
+/// reference distance, then inversely proportional to distance.
+const OPPONENT_GAIN: f32 = 0.6;
+const OPPONENT_REFERENCE: f32 = 10.;
+
 #[derive(Asset, TypePath)]
 pub(crate) struct EngineSource {
     bank: Arc<EngineBank>,
@@ -114,6 +126,7 @@ fn start(
     mut commands: Commands,
     sound: Res<EngineSound>,
     mut assets: ResMut<Assets<EngineSource>>,
+    driving: Option<Res<super::Driving>>,
 ) {
     let handle = assets.add(EngineSource {
         bank: sound.bank.clone(),
@@ -121,6 +134,29 @@ fn start(
         failure: sound.failure.clone(),
     });
     commands.spawn(AudioPlayer(handle));
+    let cars = driving
+        .as_ref()
+        .and_then(|d| d.opponents.as_ref())
+        .map_or(0, |o| o.multi.cars.len());
+    for car in 1..cars {
+        let mailbox = Arc::new(AtomicU64::new(0));
+        let handle = assets.add(EngineSource {
+            bank: sound.bank.clone(),
+            mailbox: mailbox.clone(),
+            failure: sound.failure.clone(),
+        });
+        commands.spawn((
+            AudioPlayer(handle),
+            PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.)),
+            OpponentEngine { car, mailbox },
+        ));
+    }
+    if cars > 1 {
+        println!(
+            "engine_audio version=2 event=opponents count={} attenuation=authored gain={OPPONENT_GAIN} reference_m={OPPONENT_REFERENCE}",
+            cars - 1
+        );
+    }
     println!(
         "engine_audio version=2 event=queued rate={RATE} layers=dn_en,up_en,up_en_load,dn_ex,up_ex,up_ex_load voices=12 mixer=continuous_pair_scheduler fidelity=experimental mute_key=M"
     );
@@ -129,9 +165,10 @@ fn update(
     mut sound: ResMut<EngineSound>,
     driving: Res<super::Driving>,
     input: Res<ButtonInput<KeyCode>>,
-    sinks: Query<&AudioSink, With<AudioPlayer<EngineSource>>>,
+    sinks: Query<&AudioSink, (With<AudioPlayer<EngineSource>>, Without<OpponentEngine>)>,
     mut started: Local<bool>,
     trial: Option<Res<super::time_trial::Trial>>,
+    mut opponent_engines: Query<(&OpponentEngine, Option<&mut AudioSink>)>,
 ) {
     if sound.failure.swap(0, Ordering::Relaxed) != 0 && !sound.muted {
         sound.muted = true;
@@ -148,10 +185,43 @@ fn update(
     let mut control = sound.control(&driving);
     // The engine idles and may be revved during the countdown; the vehicle no
     // longer ticks after the finish.
-    if trial.is_some_and(|t| t.finished()) {
+    let finished = trial.is_some_and(|t| t.finished());
+    if finished {
         control.audible = false;
     }
     sound.mailbox.store(control.pack(), Ordering::Relaxed);
+    if let Some(opponents) = &driving.opponents {
+        let player = driving.runtime.pose();
+        let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;
+        for (engine, sink) in &mut opponent_engines {
+            let car = &opponents.multi.cars[engine.car];
+            let throttle = opponents
+                .throttles
+                .get(engine.car - 1)
+                .copied()
+                .unwrap_or(0.);
+            let control = grid_tools::engine_audio::Control::vehicle(
+                &car.state.car.owner.vehicle,
+                if car.terminal_wheel().is_some() {
+                    0.
+                } else {
+                    throttle
+                },
+                audible,
+                driving.segment as u32,
+            );
+            engine.mailbox.store(control.pack(), Ordering::Relaxed);
+            if let Some(mut sink) = sink {
+                let pose = car.pose();
+                let distance = ((pose[12] - player[12]).powi(2)
+                    + (pose[13] - player[13]).powi(2)
+                    + (pose[14] - player[14]).powi(2))
+                .sqrt();
+                let volume = OPPONENT_GAIN * OPPONENT_REFERENCE / distance.max(OPPONENT_REFERENCE);
+                sink.set_volume(bevy::audio::Volume::Linear(volume));
+            }
+        }
+    }
 }
 
 /// Bounded real-device diagnostic, separate from silent offscreen captures.

@@ -50,3 +50,11 @@ driven by the ported GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)). It runs a
 `--grid-position N` (with `--opponents`) puts the player on grid slot N (1 = pole); the
 opponents fill the other slots in order. `Play GRID Race.cmd` starts the player at the back
 (`GRID_PLAY_GRID` overrides). Autopilot check from position 4 of 4: P2 by the last sector of lap 1.
+
+## Opponent engine sound (F295)
+
+Every opponent runs its own continuous engine mixer (same Lacetti bank as the player), fed
+with that car's engine speed and AI throttle. AUTHORED attenuation (the original 3D audio is not
+recovered): gain 0.6 within 10 m, then inversely proportional to distance, no panning. A first
+windowed run panicked on a Bevy query conflict (two AudioSink queries), fixed with a disjoint
+filter. Windowed 4-car race: output started, no decoder failure, simulation real-time.
