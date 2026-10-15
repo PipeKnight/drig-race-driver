@@ -282,7 +282,7 @@ fn calculate_impl(
     if manager.properties.len() != input.bodies.len()
         || manager.workspace.len() != input.bodies.len()
         || manager.rows.is_empty()
-        || manager.rows.len() > 256
+        || manager.rows.len() > crate::MAX_SOLVER_ROWS
         || manager.capacity > manager.rows.len()
         || manager.capacity < input.contacts.len() * 4
         || manager.iterations == 0

@@ -71,13 +71,13 @@ fn force_update(body: &mut Body, delta: f32) {
 pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     let n = input.contacts.len();
     let delta = input.parameters[0] * input.parameters[1];
-    if n > 64
+    if n > crate::MAX_WORLD_CONTACTS
         || input.bodies.is_empty()
         || input.bodies.len() > 16
         || input.materials.is_empty()
         || input.materials.len() > 8
         || input.rows.is_empty()
-        || input.rows.len() > 256
+        || input.rows.len() > crate::MAX_SOLVER_ROWS
         || input.capacity > input.rows.len()
         || input.iterations > 32
         || input.workspace.len() != input.bodies.len()

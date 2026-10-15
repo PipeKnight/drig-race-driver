@@ -153,7 +153,7 @@ pub fn calculate_shared(input: Shared<'_>) -> Result<(Output, Option<consumer::O
     if !(0xd230 / 4..=0x21000 / 4).contains(&owner.len())
         || settings.len() < 0x1050 / 4
         || settings.len() > 0x2000 / 4
-        || contacts.len() > 64
+        || contacts.len() > crate::MAX_WORLD_CONTACTS
         || !scalar.is_finite()
         || physical[0x334 / 4] != 0x1c0
         || [0x418, 0x41c, 0x420].iter().any(|at| physical[at / 4] != 0)

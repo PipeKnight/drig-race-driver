@@ -416,6 +416,12 @@ impl Mesh {
     }
 }
 
+/// Bounded-domain limit of one physical world's contact pool (shared-world
+/// fields of up to 12 cars); a port guard, not an original value.
+pub const MAX_WORLD_CONTACTS: usize = 256;
+/// Solver row bound matching four rows per pooled contact.
+pub const MAX_SOLVER_ROWS: usize = 4 * MAX_WORLD_CONTACTS;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -114,7 +114,7 @@ fn advance_owned(
     let selector = world[5];
     if selector > 1
         || previous.pool_used != 0
-        || previous.groups.contacts.len() > 64
+        || previous.groups.contacts.len() > crate::MAX_WORLD_CONTACTS
         || slots.len() != previous.groups.contacts.len()
         || used > slots.len()
         || external_count > used

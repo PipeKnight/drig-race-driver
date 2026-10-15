@@ -55,7 +55,7 @@ fn finite(row: &Row) -> bool {
 }
 
 fn validate(input: &Input) -> Result<(), Error> {
-    if input.rows.len() > 256
+    if input.rows.len() > crate::MAX_SOLVER_ROWS
         || input.two_body_rows > input.rows.len()
         || input.body_count > 64
         || input.iterations > 32
@@ -144,7 +144,7 @@ pub(crate) fn iterate(
     body_count: usize,
     iterations: usize,
 ) -> Result<Output, Error> {
-    if rows.len() > 256
+    if rows.len() > crate::MAX_SOLVER_ROWS
         || body_count > 64
         || iterations > 32
         || references.len() != rows.len()

@@ -942,7 +942,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--opponents" => {
                 opponents = Some(
                     args.next()
-                        .ok_or("--opponents needs 1..7")?
+                        .ok_or("--opponents needs 1..11")?
                         .parse::<usize>()?,
                 )
             }
@@ -1028,7 +1028,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
-                    "--opponents 1..7: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
+                    "--opponents 1..11: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
                 );
                 println!(
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
@@ -1056,10 +1056,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if deformation.is_some() && (!drive || body_contacts.is_none()) {
         return Err("--deformation requires --drive and --body-contacts".into());
     }
-    if opponents.is_some_and(|n| !(1..=7).contains(&n))
+    if opponents.is_some_and(|n| !(1..=11).contains(&n))
         || (opponents.is_some() && (!drive || body_contacts.is_none()))
     {
-        return Err("--opponents 1..7 requires --drive and --body-contacts".into());
+        return Err("--opponents 1..11 requires --drive and --body-contacts".into());
     }
     if let Some(position) = grid_position
         && !opponents.is_some_and(|n| (1..=n + 1).contains(&position))

@@ -23,7 +23,11 @@ pub fn calculate(
     mut skip: usize,
     parameters: limit::Parameters,
 ) -> Result<Output, Error> {
-    if contacts.len() > 64 || cursor > contacts.len() || budget > 10000 || skip > 10000 {
+    if contacts.len() > crate::MAX_WORLD_CONTACTS
+        || cursor > contacts.len()
+        || budget > 10000
+        || skip > 10000
+    {
         return Err(Error("invalid deformation preparation bounds"));
     }
     // Validate the descriptor/body even for an empty collection. These owned

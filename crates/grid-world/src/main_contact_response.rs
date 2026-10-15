@@ -68,7 +68,7 @@ pub(crate) fn typed(row: &RawRow) -> Row {
 }
 
 pub fn calculate(input: &Input) -> Result<Output, Error> {
-    if input.rows.len() > 256
+    if input.rows.len() > crate::MAX_SOLVER_ROWS
         || input.bodies.len() > 64
         || input.iterations > 32
         || input.references.len() != input.rows.len()

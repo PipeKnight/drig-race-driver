@@ -29,8 +29,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?)?);
     let cars: usize = args[3].parse()?;
     let ticks: u64 = args[4].parse()?;
-    if !(1..=8).contains(&cars) || ticks > 200_000 {
-        return Err("1..8 cars and at most 200000 ticks".into());
+    if !(1..=12).contains(&cars) || ticks > 200_000 {
+        return Err("1..12 cars and at most 200000 ticks".into());
     }
     let kind = args.get(5).map_or("ai", String::as_str);
     let mut trace = match args.get(6) {

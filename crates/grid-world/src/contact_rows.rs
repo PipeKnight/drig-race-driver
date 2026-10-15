@@ -159,7 +159,7 @@ fn angular(input: &Input, c: &Contact, body: usize, v: [f32; 4], y: f32) -> [f32
 /// References at row+A8 are pool-relative tokens: (normal pool+1)<<24 | byte offset.
 pub fn calculate(input: &Input) -> Result<Output, Error> {
     let n = input.contacts.len().max(1);
-    if input.contacts.len() > 64
+    if input.contacts.len() > crate::MAX_WORLD_CONTACTS
         || input.bodies.is_empty()
         || input.bodies.len() > 16
         || input.materials.is_empty()

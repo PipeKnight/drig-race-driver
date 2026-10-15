@@ -33,7 +33,11 @@ pub struct MultiRuntime {
     last_active: usize,
 }
 
-const POOL: usize = 64;
+/// Contact pool slots for `n` cars: 64 for one or two cars (the single-car
+/// layout), 24 per car above that, up to the world bound.
+fn pool_slots(n: usize) -> usize {
+    (24 * n).clamp(64, grid_world::MAX_WORLD_CONTACTS)
+}
 
 impl MultiRuntime {
     /// Source cars on the named grid slots; `table` is the private CD01 body
@@ -55,7 +59,7 @@ impl MultiRuntime {
         events: Option<body_impact::Parameters>,
         deformation: Option<DeformationParameters>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        if !(1..=8).contains(&slots.len()) {
+        if !(1..=12).contains(&slots.len()) {
             return Err("unsupported shared-world car count".into());
         }
         let mut cars = Vec::new();
@@ -90,9 +94,9 @@ impl MultiRuntime {
             world.groups.bodies[i][0x304 / 4] = i as u32;
         }
         world.groups.world = [0, 0, 0, 0, 0, 0, 1, 1, 0, n as u32, 0];
-        world.groups.contacts.resize(POOL, [0; 32]);
-        world.manager.rows.resize(POOL * 4, [0; 48]);
-        world.manager.capacity = POOL * 4;
+        world.groups.contacts.resize(pool_slots(n), [0; 32]);
+        world.manager.rows.resize(pool_slots(n) * 4, [0; 48]);
+        world.manager.capacity = pool_slots(n) * 4;
         world.manager.properties = cars
             .iter()
             .map(|c| c.state.world.manager.properties[0])
@@ -186,7 +190,7 @@ impl MultiRuntime {
                     .transpose()
             };
             let material = |token| car.surfaces.joined(token);
-            if used + 4 > POOL {
+            if used + 4 > pool_slots(n) {
                 return Err(Error("shared wheel contact pool exhausted"));
             }
             let pool = wheel_contacts::Pool {

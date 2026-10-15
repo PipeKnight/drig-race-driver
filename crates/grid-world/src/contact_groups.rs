@@ -73,7 +73,7 @@ pub(crate) fn validate_carried(
 fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Result<(), Error> {
     let n = input.bodies.len();
     if !(1..=16).contains(&n)
-        || input.contacts.len() > 64
+        || input.contacts.len() > crate::MAX_WORLD_CONTACTS
         || input.selector > 1
         || input.active_order.len() != n
         || shapes.len() > 513
@@ -110,7 +110,7 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
         }
     }
     if let Some(carry) = carry {
-        if carry.contact_capacity > 64
+        if carry.contact_capacity > crate::MAX_WORLD_CONTACTS
             || input.contacts.len() > carry.contact_capacity
             || carry.dirty_head as usize > n
         {

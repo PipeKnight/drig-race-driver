@@ -79,3 +79,19 @@ The prototype's shared world caps at 8 cars: the 64-slot contact pool and 256-ro
 bounded-domain limits of the port, not original values. `Play GRID Race.cmd` now starts 7 AI opponents
 with the player at the back (8th). A windowed 8-car race with damage, eight engine mixers and
 characteristics runs in real time (36.6 s simulated at 38.1 s wall clock, including startup).
+
+## 12-car field (F300)
+
+The contact-pool and solver-row guards now use one bound, `grid_world::MAX_WORLD_CONTACTS`: 256
+contacts and 1,024 rows. They are still port guards, but no longer cap the field at 8. The shared world
+uses 24 contact slots per car, clamped to 64–256, so one- and two-car worlds keep their 64-slot layout
+and the bit-identical tests are unchanged. `MultiRuntime` allows 1–12 cars and `--opponents`
+1–11. `Play GRID Race.cmd` now matches the original's 12-car touring field: 11 AI opponents with the
+player starting 12th.
+
+Checks:
+- headless 12-car 2-lap race with characteristics: all finish, about 8.9 ms per tick, 1,124
+  car-contact records. Two cars lost a lot of time (+23.8 s and +47.2 s), likely through contact
+  and the authored stuck recovery;
+- windowed 12-car race with damage: real time (40.7 s simulated at 42.2 s wall clock);
+- 282 tests and Clippy pass.
