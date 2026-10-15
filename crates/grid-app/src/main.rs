@@ -5,9 +5,15 @@ mod damage_parts;
 mod dynamic_props;
 mod engine_sound;
 mod free_look;
+mod ground_detail;
+mod ground_effect_assets;
+mod particles;
+mod skid_marks;
 mod time_trial;
 mod tyre_smoke;
 mod tyre_sound;
+mod wheel_debris;
+mod wheel_ground;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -1571,6 +1577,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         tyre_smoke::install(&mut app, &root);
+        if ground_effect_assets::enabled() {
+            wheel_ground::install(&mut app);
+            if let Err(error) = skid_marks::install(&mut app, &root) {
+                warn!("Skid marks unavailable; driving continues: {error}");
+            }
+            if let Err(error) = wheel_debris::install(&mut app, &root) {
+                warn!("Wheel debris unavailable; driving continues: {error}");
+            }
+        }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
                 grid_tools::source_vehicle::DELTA,
@@ -1592,6 +1607,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root);
+    }
+    if track
+        && !collision
+        && ground_effect_assets::enabled()
+        && let Err(error) = ground_detail::install(&mut app, &root, &route)
+    {
+        warn!("Ground cover unavailable; continuing: {error}");
     }
     let exit = app
         .insert_resource(car)

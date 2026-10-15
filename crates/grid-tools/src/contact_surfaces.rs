@@ -104,6 +104,11 @@ impl Surfaces {
         self.names.get((token as usize).checked_sub(1)?)?.as_deref()
     }
 
+    /// Four-byte material code for a wheel contact token (wheel+C0, index+1).
+    pub fn code(&self, token: u32) -> Option<[u8; 4]> {
+        self.keys.get((token as usize).checked_sub(1)?).copied()
+    }
+
     /// Select by the source packed-code policy; this does not establish which
     /// resource key a live car shape owns.
     pub fn physical(

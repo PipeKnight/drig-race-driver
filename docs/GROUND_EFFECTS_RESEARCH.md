@@ -10,9 +10,9 @@ functions and dumps; `runs/` with validation logs and renders).
 Labels: **[V]** verified in shipped data or disassembly; **[D]** read from decompiled code;
 **[I]** inference. Port choices that were not recovered are marked **AUTHORED**.
 
-Tyre smoke is a separate presentation (tyre-smoke session). This work skips every emitter that
-uses a smoke texture (`SM33`, `SM33_dark`, `SM38`, `SM41`, `Small_Smoke`, `Small_Wisp`,
-`Smoke08`, `Wisps08_32`, `Wheel_spin`).
+Tyre smoke is a separate presentation (docs/TYRE_SMOKE_RESEARCH.md). Kick-up emitters that use one
+of its `grid_tools::tyre_smoke::SMOKE_TEXTURES` (`SM33`, `SM33_dark`, `SM38`, `Wisps08_32`,
+`Wheel_spin`) are drawn there and skipped here, so the two cover complementary emitters.
 
 ## 1. Skid marks
 
@@ -293,5 +293,5 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
   `finalWidth = -1`.
 - Ground-cover fixed meshes (mode 1, other tracks); the sprite fields 90/0.8/1.0 and the type
   float 16.0; GPU billboarding to avoid CPU mesh rebuilds; terrain-slope shear and fog.
-- Unify `grid_formats::kickup` with the tyre-smoke session's `grid_tools::tyre_smoke` parsers
-  once both are on main.
+- Unify `grid_formats::kickup` with the overlapping `grid_tools::tyre_smoke` parsers (both on
+  main now; the debris module already shares its `SMOKE_TEXTURES`).
