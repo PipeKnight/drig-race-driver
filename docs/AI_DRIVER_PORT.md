@@ -160,3 +160,16 @@ Effect (headless, 2 laps):
 - 8 cars: gaps to +8.000 s; 243 contact records.
 
 Without the table every car uses 1.0 as before.
+
+## Race start (F298)
+
+- `max_lights_reaction_time` is 0.0 at every difficulty and characteristic in the shipped mappings,
+  so the original AI launches at GO without delay; the port already did.
+- Grid revving 0x775BF0 while held:
+  - throttle 1.0 in random on phases and 0 in off phases;
+  - start state 3: on 0.20–0.48 s, off 0.01–0.70 s; state 2: on 0.08–0.18 s, off 0.60–1.15 s
+    (.rdata constants read from the analysis image); other states give 0.
+- AUTHORED/[I]: state 2 in the first half of the countdown and state 3 in the second; authored
+  random stream.
+- Opponents rev on the handbrake and stay on their slots (look-back render at tick 240).
+- Unit test: pulse lengths stay within the shipped ranges.

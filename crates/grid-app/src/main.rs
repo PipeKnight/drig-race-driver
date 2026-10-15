@@ -1908,10 +1908,22 @@ fn drive_tick(
             .enumerate()
             .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
             .collect();
+        // Start state while held [I]: gentle blips first, hard revving in the
+        // second half of the countdown.
+        let rev_state = match trial.as_ref().map(|t| t.state.phase()) {
+            Some(grid_tools::time_trial::Phase::Countdown(left))
+                if f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA)
+                    > START_SEQUENCE_SECONDS / 2. =>
+            {
+                2
+            }
+            _ => 3,
+        };
         for (i, driver) in opponents.drivers.iter_mut().enumerate() {
             let car = &opponents.multi.cars[i + 1];
             all.push(if held {
                 grid_tools::source_vehicle::Controls {
+                    throttle: driver.grid_rev(rev_state, grid_tools::source_vehicle::DELTA),
                     handbrake: true,
                     ..Default::default()
                 }

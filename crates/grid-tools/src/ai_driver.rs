@@ -723,6 +723,8 @@ pub struct AiDriver {
     pid_error: Option<f32>,
     behaviour: Behaviour,
     overtake: Overtake,
+    /// Grid revving (0x775BF0): (state, on phase, timer).
+    rev: (u8, bool, f32),
     attempt_target: Option<u32>,
     alongside_fired: bool,
     /// Authored stuck recovery: (time slow, reverse time left).
@@ -770,6 +772,7 @@ impl AiDriver {
             pid_error: None,
             behaviour: Behaviour::Race,
             overtake: Overtake::default(),
+            rev: (0, false, 0.),
             attempt_target: None,
             alongside_fired: false,
             stuck: 0.,
@@ -800,6 +803,39 @@ impl AiDriver {
             .wrapping_mul(1_664_525)
             .wrapping_add(1_013_904_223);
         (self.random >> 8) as f32 / (1u32 << 24) as f32 * 2. - 1.
+    }
+
+    /// Throttle while held on the grid (0x775BF0): random on/off pulses.
+    /// State 3: on 0.20..0.48 s, off 0.01..0.70 s; state 2: on 0.08..0.18 s,
+    /// off 0.60..1.15 s (.rdata constants); other states give 0. Which start
+    /// state applies when is not recovered; the random stream is authored.
+    pub fn grid_rev(&mut self, state: u8, dt: f32) -> f32 {
+        let ranges = match state {
+            3 => [[0.2, 0.48], [0.01, 0.7]],
+            2 => [[0.08, 0.18], [0.6, 1.15]],
+            _ => {
+                self.rev = (state, false, 0.);
+                return 0.;
+            }
+        };
+        let between =
+            |driver: &mut Self, [a, b]: [f32; 2]| a + (b - a) * (driver.uniform() * 0.5 + 0.5);
+        if self.rev.0 != state {
+            let timer = between(self, ranges[0]);
+            self.rev = (state, true, timer);
+        }
+        self.rev.2 -= dt;
+        if self.rev.2 > 0. {
+            return if self.rev.1 { 1. } else { 0. };
+        }
+        let (next_on, range) = if self.rev.1 {
+            (false, ranges[1])
+        } else {
+            (true, ranges[0])
+        };
+        let timer = between(self, range);
+        self.rev = (state, next_on, timer);
+        0.
     }
 
     /// Look-ahead distance update (0x779A20) from speed and the previous curvature.
@@ -1495,6 +1531,47 @@ impl AiDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grid_rev_pulses_stay_within_shipped_ranges() {
+        let Some(root) = std::env::var_os("GRID_GAME_ROOT") else {
+            return;
+        };
+        let data = AiData::load(
+            Path::new(&root),
+            "tracks/europe/donington/route_0",
+            "touring",
+            "lac",
+        )
+        .unwrap();
+        let mut driver = AiDriver::new(
+            Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.).unwrap(),
+            7,
+        );
+        let dt = 0.016;
+        for (state, on, off) in [
+            (3, [0.2, 0.48], [0.01, 0.7]),
+            (2, [0.08, 0.18], [0.6, 1.15]),
+        ] {
+            let mut runs: Vec<(bool, f32)> = Vec::new();
+            for _ in 0..4000 {
+                let level = driver.grid_rev(state, dt) > 0.;
+                match runs.last_mut() {
+                    Some((l, n)) if *l == level => *n += dt,
+                    _ => runs.push((level, dt)),
+                }
+            }
+            // Skip the first and last (partial) runs.
+            for &(level, length) in &runs[1..runs.len() - 1] {
+                let [a, b] = if level { on } else { off };
+                assert!(
+                    length >= a - 2. * dt && length <= b + 2. * dt,
+                    "{state} {level} {length}"
+                );
+            }
+        }
+        assert_eq!(driver.grid_rev(1, dt), 0.);
+    }
 
     #[test]
     fn characteristic_table_rows_and_bounds() {
