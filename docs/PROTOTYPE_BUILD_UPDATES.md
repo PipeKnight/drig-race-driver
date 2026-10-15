@@ -1,6 +1,13 @@
 # Playable build updates
 
-Latest verified refresh: **c6e78b2fb6e4** (clean), built 15 October 2026 ~09:43 UTC, release SHA256
+Latest verified refresh: **25588defd910** (clean), built 15 October 2026 ~10:03 UTC, release SHA256
+518185161d427b2e4d5cff416123ad5e056aa1ff7a44e6572e516c085ee0df1a, manifest
+local/playtest/build-20261015T1002215607632Z/. Opponents in `Play GRID Race.cmd` are now driven
+by the ported original GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)): racing line, brake
+lines, corner speeds and braking from the shipped AI data at Normal difficulty, following the
+car ahead. No overtaking/avoidance behaviours yet. Source driving and Bevy checks pass.
+
+Previous refresh: **c6e78b2fb6e4** (clean), built 15 October 2026 ~09:43 UTC, release SHA256
 540de548e6079de6b86b80f73c3a1cd7f35c272bdf6ae6e976507de35eb20f6e, manifest
 local/playtest/build-20261015T0942495186847Z/. Adds opponent cars in one shared physical world
 with car-to-car contacts: `Play GRID Race.cmd` starts practice with 3 opponents, and with impact
