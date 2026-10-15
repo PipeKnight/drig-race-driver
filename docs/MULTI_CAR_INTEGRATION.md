@@ -62,3 +62,27 @@ plus the current player/physical/world/job checks in [reference input](REFERENCE
 These are sequential live observations, not a native two-car execution test.
 Existing Rust1.99, native MSVC/Ghidra tools and private reference are sufficient
 to start; no new tool installation is required at this checkpoint.
+
+## F287: shared world implemented (15 October 2026, Claude Code)
+
+`grid_tools::source_vehicle::multi::MultiRuntime` owns N source cars (each a full
+`Runtime` with its own state, wheel query cache and lap timing) and one shared physical
+world. Per tick every car manager runs with its own controls and track queries
+(`vehicle_manager::calculate_with_world_contacts`); its wheel contacts are re-identified
+to its world body (`+4`) and car shape token (`+0x28`); one
+`physical_world::advance_with_geometry_provider` then solves all bodies with track,
+boundary and route-prop body contacts per car plus car-to-car contacts
+(`BodyGeometry::car_contacts`: one hull against the other car's world hull triangles,
+two-body records with `+8` = other body and `+0x2C` = other car token). Shapes are
+`[car0, statics…, car1, …]`; the bodies form one active chain; manager properties and
+workspace are per body; the pool is 64 slots.
+
+Verified: with car 1 idle on slot_01 while car 0 drives 200–300 ticks, car 0's pose,
+velocities and complete vehicle state are bit-identical to the single-car runtime.
+Car 1 steering 0.6 into idle car 0 produces car-to-car contacts from tick 83 (413 in 200
+ticks) and moves car 0 by 1.97 m. Asset test
+`shared_world_is_independent_until_contact_and_pushes_on_contact`; tool `grid-multi-drive`.
+
+Scope limits (not original-verified): body events dispatch per car with no peer
+registration (car-to-car impacts use `other_registration` 0); deformation is not
+enabled in the shared world (single-owner registration); slipstream stays 1.

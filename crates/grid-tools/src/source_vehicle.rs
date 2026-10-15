@@ -11,6 +11,8 @@ use grid_world::{
 };
 use std::path::Path;
 
+pub mod multi;
+
 pub const DELTA: f32 = 0.016;
 pub const GRAVITY: f32 = f32::from_bits(0x411c_f5c3);
 
@@ -549,16 +551,8 @@ impl Runtime {
         Ok(())
     }
 
-    fn tick_owned(
-        &mut self,
-        controls: Controls,
-        geometry: Option<Geometry<'_>>,
-    ) -> Result<(), Error> {
-        if self.deformation_enabled != matches!(&geometry, Some(Geometry::Deforming(_))) {
-            return Err(Error(
-                "source deformation requires its owned geometry publication route",
-            ));
-        }
+    /// Validated controls written to a staged copy of the car state.
+    fn staged_controls(&self, controls: Controls) -> Result<vehicle_world::State, Error> {
         if [controls.throttle, controls.brake]
             .iter()
             .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
@@ -588,6 +582,20 @@ impl Runtime {
             0xe38,
             u8::from(controls.handbrake),
         );
+        Ok(staged)
+    }
+
+    fn tick_owned(
+        &mut self,
+        controls: Controls,
+        geometry: Option<Geometry<'_>>,
+    ) -> Result<(), Error> {
+        if self.deformation_enabled != matches!(&geometry, Some(Geometry::Deforming(_))) {
+            return Err(Error(
+                "source deformation requires its owned geometry publication route",
+            ));
+        }
+        let staged = self.staged_controls(controls)?;
         let mut cache = self.cache;
         let query = |_, ray: grid_world::contact_ray::Ray| {
             self.track

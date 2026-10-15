@@ -185,6 +185,88 @@ impl BodyGeometry {
             .collect())
     }
 
+    /// Current collision hull triangles in world coordinates (source triangle
+    /// order over the mesh points), for another body's car-to-car queries.
+    pub fn hull_world_triangles(
+        &self,
+        body: &contact_groups::Body,
+    ) -> Result<Vec<[[f32; 3]; 3]>, Error> {
+        let points = self.hull_world_points(body)?;
+        if points.len() != self.source_points.len() {
+            return Err(Error("collision hull point order differs from source"));
+        }
+        self.source_triangles
+            .iter()
+            .map(|t| {
+                let mut out = [[0.; 3]; 3];
+                for (slot, &index) in out.iter_mut().zip(t) {
+                    *slot = *points
+                        .get(index as usize)
+                        .ok_or(Error("collision hull triangle index"))?;
+                }
+                Ok(out)
+            })
+            .collect()
+    }
+
+    /// Cold car-to-car contacts: this body's hull against another body's world
+    /// hull triangles, through the shared decoded cold contact path.
+    pub fn car_contacts(
+        &self,
+        body: &contact_groups::Body,
+        other: &[[[f32; 3]; 3]],
+        capacity: usize,
+    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        if other.is_empty() || other.len() > 4096 || capacity == 0 {
+            return Ok(Vec::new());
+        }
+        let matrix = self.pose(body)?;
+        let mut bounds = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
+        let mut vertices = Vec::with_capacity(other.len() * 3);
+        for t in other {
+            for p in t {
+                for j in 0..3 {
+                    bounds[j] = bounds[j].min(p[j]);
+                    bounds[j + 3] = bounds[j + 3].max(p[j]);
+                }
+                vertices.push(*p);
+            }
+        }
+        let car = self.shape.mesh().world_bounds(matrix, self.query.margin)?;
+        if (0..3).any(|j| car[0][j] > bounds[j + 3] || car[1][j] < bounds[j]) {
+            return Ok(Vec::new());
+        }
+        let triangles: Vec<[u16; 3]> = (0..other.len())
+            .map(|i| [i as u16 * 3, i as u16 * 3 + 1, i as u16 * 3 + 2])
+            .collect();
+        let leaves = std::collections::BTreeMap::from([(0, (0..other.len() as u16).collect())]);
+        let materials = vec![0; other.len()];
+        Ok(grid_world::packed_contacts::calculate_decoded(
+            self.shape.mesh(),
+            matrix,
+            &grid_world::packed_query::Mesh {
+                bounds,
+                vertices: &vertices,
+                triangles: &triangles,
+                nodes: &[0x8000],
+                leaves: &leaves,
+            },
+            &materials,
+            &grid_world::packed_contacts::Settings {
+                query: convex_distance::ContactSettings {
+                    margin: self.query.margin,
+                    directions: self.query.directions,
+                },
+                contact_capacity: capacity.min(16),
+                cache_enabled: true,
+                candidate_capacity: 4096,
+                sheet_mask: 0,
+                correction_bounds: [f32::MAX; 4],
+            },
+        )?
+        .contacts)
+    }
+
     /// World points/normals retain the generator's publication orientation.
     /// Material IDs zero select the prototype's explicit shared solver material.
     pub fn contacts(
