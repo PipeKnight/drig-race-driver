@@ -5,6 +5,18 @@ use crate::{Result, fail, pssg::Tree};
 pub enum Format {
     Bc1,
     Bc3,
+    /// `ui8x4`: uncompressed 32-bit texels, B, G, R, A byte order.
+    Bgra8,
+}
+impl Format {
+    /// Bytes of a `width` x `height` level.
+    pub fn level_size(self, width: u32, height: u32) -> usize {
+        match self {
+            Format::Bc1 => width.div_ceil(4) as usize * height.div_ceil(4) as usize * 8,
+            Format::Bc3 => width.div_ceil(4) as usize * height.div_ceil(4) as usize * 16,
+            Format::Bgra8 => width as usize * height as usize * 4,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -28,9 +40,7 @@ impl Texture<'_> {
         let mut size = 0usize;
         let mut levels = 0u32;
         loop {
-            size += width.div_ceil(4) as usize
-                * height.div_ceil(4) as usize
-                * if self.format == Format::Bc1 { 8 } else { 16 };
+            size += self.format.level_size(width, height);
             levels += 1;
             if width == 1 && height == 1 {
                 break;
@@ -47,6 +57,9 @@ impl Texture<'_> {
                 dds[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }
             dds.extend_from_slice(self.remaining_data);
+            if self.format == Format::Bgra8 {
+                dds[8..12].copy_from_slice(&0x0002_100fu32.to_le_bytes());
+            }
             (dds, levels)
         } else {
             (dds, 1)
@@ -68,19 +81,48 @@ impl Texture<'_> {
         ] {
             bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
         }
-        bytes[84..88].copy_from_slice(match self.format {
-            Format::Bc1 => b"DXT1",
-            Format::Bc3 => b"DXT5",
-        });
+        match self.format {
+            Format::Bc1 => bytes[84..88].copy_from_slice(b"DXT1"),
+            Format::Bc3 => bytes[84..88].copy_from_slice(b"DXT5"),
+            Format::Bgra8 => {
+                // Uncompressed A8R8G8B8: pitch flag instead of linear size.
+                for (offset, value) in [
+                    (8, 0x0000_100fu32),
+                    (20, self.width * 4),
+                    (80, 0x41),
+                    (88, 32),
+                    (92, 0x00ff_0000),
+                    (96, 0x0000_ff00),
+                    (100, 0x0000_00ff),
+                    (104, 0xff00_0000),
+                ] {
+                    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+                }
+            }
+        }
         bytes.extend_from_slice(self.base_blocks);
         bytes
     }
 }
 
 pub fn read_textures<'a>(tree: &Tree<'a>) -> Result<Vec<Texture<'a>>> {
+    read_matching(tree, |_| true, false)
+}
+
+/// Only the TEXTURE nodes whose id is listed; others (any format) are skipped.
+/// Uncompressed `ui8x4` texels are accepted here.
+pub fn read_named<'a>(tree: &Tree<'a>, ids: &[&[u8]]) -> Result<Vec<Texture<'a>>> {
+    read_matching(tree, |id| ids.contains(&id), true)
+}
+
+fn read_matching<'a>(
+    tree: &Tree<'a>,
+    wanted: impl Fn(&[u8]) -> bool,
+    uncompressed: bool,
+) -> Result<Vec<Texture<'a>>> {
     let mut textures = Vec::new();
     for i in 0..tree.nodes.len() {
-        if tree.name(i) != b"TEXTURE" {
+        if tree.name(i) != b"TEXTURE" || !wanted(tree.string(i, b"id")?) {
             continue;
         }
         let width = tree.integer(i, b"width")?;
@@ -97,6 +139,7 @@ pub fn read_textures<'a>(tree: &Tree<'a>) -> Result<Vec<Texture<'a>>> {
         let format = match tree.string(i, b"texelFormat")? {
             b"dxt1" => Format::Bc1,
             b"dxt5" => Format::Bc3,
+            b"ui8x4" if uncompressed => Format::Bgra8,
             _ => return fail(tree.nodes[i].offset, "unsupported texture format"),
         };
         if tree.integer(i, b"imageBlockCount")? != 1 {
@@ -126,9 +169,7 @@ pub fn read_textures<'a>(tree: &Tree<'a>) -> Result<Vec<Texture<'a>>> {
         if data.len() != tree.integer(block, b"size")? as usize {
             return fail(tree.nodes[block].offset, "texture data size mismatch");
         }
-        let base_size = (width as usize / 4)
-            * (height as usize / 4)
-            * if format == Format::Bc1 { 8 } else { 16 };
+        let base_size = format.level_size(width, height);
         if base_size > data.len() {
             return fail(tree.nodes[block].offset, "truncated base texture blocks");
         }

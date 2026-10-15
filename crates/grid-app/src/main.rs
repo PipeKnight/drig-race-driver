@@ -5,6 +5,7 @@ mod damage_parts;
 mod engine_sound;
 mod free_look;
 mod time_trial;
+mod tyre_smoke;
 mod tyre_sound;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
@@ -87,6 +88,8 @@ struct Driving {
     failure: Option<String>,
     scripted_ticks: Option<u64>,
     scripted: grid_tools::source_vehicle::Controls,
+    /// Scripted handbrake from this tick on (validation renders).
+    handbrake_from: Option<u64>,
     last_controls: Option<grid_tools::source_vehicle::Controls>,
     segment: u64,
     started: Instant,
@@ -983,6 +986,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut grid_position = None;
     let mut ai_characteristics = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
+    let mut handbrake_from = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -1038,6 +1042,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--throttle" => scripted.throttle = args.next().ok_or("missing throttle")?.parse()?,
             "--steering" => scripted.steering = args.next().ok_or("missing steering")?.parse()?,
+            "--handbrake" => {
+                handbrake_from = Some(args.next().ok_or("--handbrake needs a tick")?.parse()?)
+            }
             "--game-root" => root = args.next().ok_or("--game-root needs a path")?.into(),
             "--assists" => {
                 driver_aids = grid_tools::source_vehicle::assists::Assists::parse(
@@ -1103,7 +1110,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route only."
@@ -1315,6 +1322,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             failure: None,
             scripted_ticks: drive_ticks,
             scripted,
+            handbrake_from,
             last_controls: None,
             segment: 0,
             started: Instant::now(),
@@ -1503,6 +1511,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => warn!("Tyre audio unavailable; driving continues: {error}"),
             }
         }
+        tyre_smoke::install(&mut app, &root);
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
                 grid_tools::source_vehicle::DELTA,
@@ -2007,7 +2016,12 @@ fn drive_tick(
     let mut controls = if let Some(controls) = autopilot {
         controls
     } else if driving.scripted_ticks.is_some() {
-        driving.scripted
+        grid_tools::source_vehicle::Controls {
+            handbrake: driving
+                .handbrake_from
+                .is_some_and(|t| driving.runtime.ticks >= t),
+            ..driving.scripted
+        }
     } else {
         assists::shift_keys(&input, &mut driving.runtime);
         let pressed = |a, b| input.pressed(a) || input.pressed(b);
@@ -2900,6 +2914,7 @@ mod driving_tests {
                 failure: None,
                 scripted_ticks: None,
                 scripted: Default::default(),
+                handbrake_from: None,
                 last_controls: None,
                 segment: 0,
                 started: Instant::now(),
@@ -3003,6 +3018,7 @@ mod driving_tests {
                 failure: None,
                 scripted_ticks: None,
                 scripted: Default::default(),
+                handbrake_from: None,
                 last_controls: None,
                 segment: 0,
                 started: Instant::now(),
@@ -3194,6 +3210,7 @@ mod driving_tests {
                 failure: None,
                 scripted_ticks: None,
                 scripted: Default::default(),
+                handbrake_from: None,
                 last_controls: None,
                 segment: 0,
                 started: Instant::now(),
