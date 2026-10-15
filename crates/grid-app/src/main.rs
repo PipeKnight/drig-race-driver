@@ -2,6 +2,7 @@
 mod body_damage;
 mod engine_sound;
 mod free_look;
+mod graphics;
 mod time_trial;
 mod tyre_sound;
 use bevy::{
@@ -9,9 +10,7 @@ use bevy::{
     asset::RenderAssetUsages,
     camera::RenderTarget,
     camera::primitives::{Aabb, MeshAabb},
-    image::{
-        CompressedImageFormats, ImageAddressMode, ImageSampler, ImageSamplerDescriptor, ImageType,
-    },
+    image::{CompressedImageFormats, ImageType},
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
     render::{
@@ -913,6 +912,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut target = None;
     let mut drive = false;
     let mut audio_check = false;
+    let mut graphics = graphics::Settings::default();
     let mut trial_laps = None;
     let mut drive_ticks = None;
     let mut body_contacts = None;
@@ -927,6 +927,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match arg.as_str() {
             "--drive" => drive = true,
             "--audio-check" => audio_check = true,
+            "--graphics" => {
+                graphics.preset =
+                    graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
+            }
+            "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
             "--time-trial-laps" => {
                 trial_laps = Some(
                     args.next()
@@ -1025,6 +1030,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--help" => {
+                println!(
+                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
+                );
                 println!(
                     "grid-app [--game-root PATH] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
@@ -1388,7 +1396,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "GRID independent static resource viewer"
                     }
                     .into(),
-                    resolution: (1280, 800).into(),
+                    resolution: (graphics.width, graphics.height).into(),
                     ..default()
                 }),
                 ..default()
@@ -1425,6 +1433,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Update, update_start_lights);
     }
     let exit = app
+        .insert_resource(graphics)
         .insert_resource(car)
         .insert_resource(InitialOrbit(orbit.clone()))
         .insert_resource(orbit)
@@ -1458,6 +1467,8 @@ fn setup(
     adapter: Res<bevy::render::renderer::RenderAdapterInfo>,
     device: Res<bevy::render::renderer::RenderDevice>,
     driving: Option<Res<Driving>>,
+    graphics: Res<graphics::Settings>,
+    mut scattering_media: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -1480,15 +1491,7 @@ fn setup(
             ImageType::Extension("dds"),
             CompressedImageFormats::BC,
             true,
-            if car.track {
-                ImageSampler::Descriptor(ImageSamplerDescriptor {
-                    address_mode_u: ImageAddressMode::Repeat,
-                    address_mode_v: ImageAddressMode::Repeat,
-                    ..ImageSamplerDescriptor::linear()
-                })
-            } else {
-                ImageSampler::Default
-            },
+            graphics.sampler(car.track),
             RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
         )
         .expect("validated DDS image");
@@ -1650,7 +1653,7 @@ fn setup(
                                                 ImageType::Extension("dds"),
                                                 CompressedImageFormats::BC,
                                                 true,
-                                                ImageSampler::Default,
+                                                graphics.sampler(false),
                                                 RenderAssetUsages::MAIN_WORLD
                                                     | RenderAssetUsages::RENDER_WORLD,
                                             )
@@ -1729,11 +1732,12 @@ fn setup(
     }
     commands.spawn((
         DirectionalLight {
-            illuminance: 18_000.0,
+            illuminance: graphics.sun_illuminance(),
             shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(-4.0, 8.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        graphics.cascades(),
     ));
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
@@ -1743,6 +1747,7 @@ fn setup(
     let camera = commands
         .spawn((Camera3d::default(), camera_transform(&orbit), ViewerCamera))
         .id();
+    graphics::configure(&mut commands, camera, &graphics, &mut scattering_media);
     if driving.is_some() {
         commands.spawn((
             DrivingHud,
@@ -1765,7 +1770,12 @@ fn setup(
         ));
     }
     if let Some(mut capture) = capture {
-        let mut image = Image::new_target_texture(1280, 800, TextureFormat::Rgba8UnormSrgb, None);
+        let mut image = Image::new_target_texture(
+            graphics.width,
+            graphics.height,
+            TextureFormat::Rgba8UnormSrgb,
+            None,
+        );
         image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
         let target = images.add(image);
         commands
