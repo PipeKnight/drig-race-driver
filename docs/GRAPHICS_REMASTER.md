@@ -1,5 +1,7 @@
 # Lacetti / Donington graphics workstream
 
+Current owner priority (15 October 2026): **image quality first; optimize later**. The ordered Russian roadmap is [GRAPHICS_ROADMAP_RU.md](GRAPHICS_ROADMAP_RU.md). Earlier performance targets below are deferred and do not block visual development. The owner reports heavy background CPU load, so current frame-interval observations cannot isolate rendering cost.
+
 15 October 2026. The owner assigned engine/physics work to another agent and asked this chat to concentrate on a substantially better image, including native 3840 x 2160 output. This is a graphics workstream for the independent Rust/Bevy engine. Advice pasted by the owner is reference material, not evidence about the current renderer or authorization to redistribute GRID assets.
 
 Owner art direction confirmed during this run: preserve GRID 2008's atmosphere while substantially improving detail. The enhanced profile therefore starts with a restrained authored warm grade; it is not the recovered original LUT. Natural lighting must serve that art direction, rather than replacing it with an unrelated neutral showroom look.
