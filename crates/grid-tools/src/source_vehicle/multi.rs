@@ -324,7 +324,13 @@ impl MultiRuntime {
                             normal: std::array::from_fn(|j| f32::from_bits(contact[0x60 / 4 + j])),
                             impact: f32::from_bits(contact[0x3c / 4]),
                             parameter: world.manager.parameters[0],
-                            other_registration: 0,
+                            // Car-to-car: the other car's world body identity
+                            // (A726B0 passes the peer side's registration).
+                            other_registration: if contact[0xc / 4] & 0xff == 0 && contact[2] != 0 {
+                                if side == 0 { contact[2] } else { contact[1] }
+                            } else {
+                                0
+                            },
                             other_word: contact[if side == 0 { 0x34 / 4 } else { 0x30 / 4 }],
                         },
                         side,
@@ -403,6 +409,23 @@ impl MultiRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn wheel_records_are_rear_left_rear_right_front_left_front_right() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let car = Runtime::lacetti(Path::new(&root), "slot_00", 200679).unwrap();
+        let anchors: Vec<[f32; 3]> = car.wheels().iter().map(|w| w.anchor).collect();
+        eprintln!("wheel_anchors={anchors:?}");
+        // Car frame: +X is the car's left (positive steering turns toward it), +Z forward.
+        for (i, (left, front)) in [(true, false), (false, false), (true, true), (false, true)]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(anchors[i][0] > 0., left, "wheel {i} side");
+            assert_eq!(anchors[i][2] > 0., front, "wheel {i} axle");
+        }
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]

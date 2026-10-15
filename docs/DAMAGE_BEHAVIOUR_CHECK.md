@@ -47,3 +47,31 @@ These are the next damage targets; their original behaviour must be recovered be
 implementation.
 
 Private evidence: `local/damage/straight-*.tsv`.
+
+## Owner report 15 October 2026: rear-left crash, "terminal front-left wheel"
+
+Log `local/playtest/manual-8982-16959.log` (build 44d2e88, solo, deformation on).
+Replayed headless with `grid-wheel-damage-trace` (new private diagnostic; DR01 from the log,
+all 167 logged pose/velocity samples bit-exact).
+
+- **Labels are correct.** Wheel records are RL, RR, FL, FR: the Lacetti anchors are
+  (+0.761, −1.365), (−0.761, −1.365), (+0.741, +1.210), (−0.741, +1.210), with +X the car's left
+  and +Z forward. The asset test `wheel_records_are_rear_left_rear_right_front_left_front_right`
+  locks this.
+- **Ticks 619–622: hard front-left impact.** Barrier contacts at x +0.6…+1.5 m and z +0.7…+1.95 m,
+  impulses up to about 6,500. Front-left grid nodes are pushed back 0.3–0.5 m, and the
+  front-left wheel level goes from 0.07 to 0.668.
+- **Ticks 1566–1567: rear-left impact, as reported.** All contacts are at x +0.6…+0.8 m and
+  z −2.0…−2.35 m. The grid nodes that move are at the rear-left (rest z −2.32).
+  - The rear-left wheel level stays at 0.03.
+  - Because the front-left cell is already folded (node 305 sits behind node 275's rest
+    position), the 2–4 cm of grid movement that the hit spreads through the grid shifts the
+    sampled front-left wheel anchor from −0.123 to −0.220 m (angle 0.30 → 0.48).
+  - That raises the front-left level from 0.668 to 1.0 and gives terminal status 3, ordinal 2
+    (front-left).
+- So the terminal wheel is the one damaged earlier, and the final push came from a rear
+  impact through the shared deformation grid. The wheel sampling (9BB1E0) and the bulk
+  phases are each verified against the original. Whether the original couples a rear hit to
+  an already crushed front wheel this strongly is **not yet compared live**.
+- Proposed live check with the original: crush the front-left moderately, then hit a
+  barrier with the rear-left and watch whether the car becomes undriveable.
