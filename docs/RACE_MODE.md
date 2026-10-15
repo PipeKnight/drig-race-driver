@@ -58,3 +58,11 @@ with that car's engine speed and AI throttle. AUTHORED attenuation (the original
 recovered): gain 0.6 within 10 m, then inversely proportional to distance, no panning. A first
 windowed run panicked on a Bevy query conflict (two AudioSink queries), fixed with a disjoint
 filter. Windowed 4-car race: output started, no decoder failure, simulation real-time.
+
+## Start lights (F296)
+
+`tracks/europe/donington/start_lights.xml`: object `startlights_lights_horizontal`, 6 stages over 4.0 s,
+textures `start_lights_1_e` ... `5_e` and `7_e`; the material `start_lights` (object_simple_emissive.fx) has
+diffuse `start_lights_d` and emissive `start_lights_e` (idle). Race countdowns now last 4.0 s; the emissive
+texture shows stages 1..5 across the countdown and stage 6 (texture 7, the green row) for 3 s from GO.
+That mapping is [I]; renders at ~1 s / ~2.9 s / after GO show 1 red, 3 red and the green row.

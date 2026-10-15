@@ -245,6 +245,26 @@ struct DeformingPart {
 }
 #[derive(Resource, Default)]
 struct DeformationPresentation(Option<Vec<u32>>);
+/// Donington start-light board (`start_lights.xml`: object
+/// startlights_lights_horizontal, 6 stages over 4.0 s). The emissive texture
+/// is swapped per stage; `stage` 0 is the idle board.
+#[derive(Resource)]
+struct StartLights {
+    material: Handle<StandardMaterial>,
+    /// Idle, then stages 1..6 (textures 1..5 and 7).
+    textures: Vec<Handle<Image>>,
+    stage: usize,
+}
+const START_LIGHT_TEXTURES: [&str; 7] = [
+    "start_lights_e.tga",
+    "start_lights_1_e.tga",
+    "start_lights_2_e.tga",
+    "start_lights_3_e.tga",
+    "start_lights_4_e.tga",
+    "start_lights_5_e.tga",
+    "start_lights_7_e.tga",
+];
+const START_SEQUENCE_SECONDS: f64 = 4.0;
 /// Body dents of one opponent part, projected from that car's own field.
 #[derive(Component)]
 struct OpponentDeforming(DeformingPart);
@@ -1299,6 +1319,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let race = driving.as_ref().is_some_and(|d| d.opponents.is_some());
         let mut trial = time_trial::Trial::new(laps, trial_mode, output.is_none() && !race)?;
         trial.race = race;
+        if race {
+            // Races use the shipped start-light sequence time.
+            trial.state = grid_tools::time_trial::State::new(
+                laps,
+                f64::from(grid_tools::source_vehicle::DELTA),
+                START_SEQUENCE_SECONDS,
+            )?;
+        }
         app.insert_resource(trial);
     }
     if let Some(path) = output {
@@ -1362,7 +1390,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(FixedUpdate, drive_tick)
             .add_systems(Last, drive_exit_log)
             .init_resource::<DeformationPresentation>()
-            .add_systems(Update, (drive_actions, drive_present).chain());
+            .add_systems(Update, (drive_actions, drive_present).chain())
+            .add_systems(Update, update_start_lights);
     }
     let exit = app
         .insert_resource(car)
@@ -1440,6 +1469,14 @@ fn setup(
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
     let bindings = car.bindings.clone();
     let track = car.track;
+    let start_light_images: Vec<Option<Handle<Image>>> = START_LIGHT_TEXTURES
+        .iter()
+        .map(|name| {
+            texture_handles
+                .get(&format!("objectstextures.pssg#{name}"))
+                .cloned()
+        })
+        .collect();
     for part in car.parts.drain(..) {
         let material = material_handles
             .entry(part.material.clone())
@@ -1632,6 +1669,21 @@ fn setup(
                 }
             }
         }
+    }
+    if let Some(material) = material_handles.get("objects/start_lights").cloned()
+        && start_light_images.iter().all(Option::is_some)
+    {
+        let textures: Vec<Handle<Image>> = start_light_images.into_iter().flatten().collect();
+        if let Some(mut m) = materials.get_mut(&material) {
+            m.emissive = LinearRgba::rgb(3., 3., 3.);
+            m.emissive_texture = Some(textures[0].clone());
+        }
+        commands.insert_resource(StartLights {
+            material,
+            textures,
+            stage: 0,
+        });
+        println!("start_lights enabled=true stages=6 sequence_seconds={START_SEQUENCE_SECONDS}");
     }
     if !track {
         commands.spawn((
@@ -2321,6 +2373,34 @@ fn terminal_damage_message(runtime: &grid_tools::source_vehicle::Runtime) -> Opt
             .unwrap_or("unknown");
         format!("Terminal {wheel} wheel damage; controls disabled; R resets")
     })
+}
+/// Stage of the start-light board: lights 1..5 come on across the race
+/// countdown, stage 6 (texture 7) shows for 3 s from GO, otherwise idle.
+/// Mapping of the shipped "6 stages over 4.0 s" to the countdown is [I].
+fn update_start_lights(
+    trial: Option<Res<time_trial::Trial>>,
+    lights: Option<ResMut<StartLights>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    use grid_tools::time_trial::Phase;
+    let Some(mut lights) = lights else {
+        return;
+    };
+    let stage = match trial.as_ref().map(|t| (t.state.phase(), t.state.elapsed())) {
+        Some((Phase::Countdown(left), _)) => {
+            let remaining = f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA);
+            let elapsed = (START_SEQUENCE_SECONDS - remaining).max(0.);
+            ((elapsed / (START_SEQUENCE_SECONDS / 5.)) as usize + 1).min(5)
+        }
+        Some((Phase::Running, elapsed)) if elapsed < 3. => 6,
+        _ => 0,
+    };
+    if stage != lights.stage {
+        lights.stage = stage;
+        if let Some(mut m) = materials.get_mut(&lights.material) {
+            m.emissive_texture = Some(lights.textures[stage].clone());
+        }
+    }
 }
 fn lap_time(seconds: f64) -> String {
     let milliseconds = (seconds.max(0.) * 1000.).round() as u64;
