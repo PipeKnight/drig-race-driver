@@ -1,6 +1,14 @@
 # Playable build updates
 
-Latest verified refresh: **0cb4405fc491-dirty**, built15October(client date),14October22:16:17UTC. New **Play GRID Time Trial.cmd** selects three valid laps with countdown, frozen results and private personal bests; the existing launchers keep free practice. Eleven source-driving and seven Bevy checks pass. Three complete diagnostic event traces match across captured debug/release runs; the600-tick render preserves all310 logged physical/deformation records frombc90482. See [time-trial rules, checks and limits](TIME_TRIAL_EVENT.md). Audio is unchanged and remains an approximate original-style implementation, deferred at the owner's request.
+Latest verified refresh: **60a59772f965-dirty**, built 15 October 2026 02:16:30 UTC, release SHA256
+b58d6d41ceee6f24eb7b2aac7ca36b844b8553347617326658d0c8e268917a54, manifest
+local/playtest/build-20261015T0216104356687Z/. The engine now idles on the grid and the time-trial
+countdown holds the car on the handbrake so throttle revs it; releasing at GO gives launch wheelspin.
+Source driving and Bevy checks pass; an offscreen 290-tick time-trial launch render was inspected.
+See [standing start and grid hold](LAUNCH_AND_GRID_START.md). Owner launch playtest pending. The helper
+needs `git` on PATH and PowerShell 7 (Windows PowerShell 5.1 treats Cargo's stderr as failure).
+
+Previous refresh: **0cb4405fc491-dirty**, built15October(client date),14October22:16:17UTC. New **Play GRID Time Trial.cmd** selects three valid laps with countdown, frozen results and private personal bests; the existing launchers keep free practice. Eleven source-driving and seven Bevy checks pass. Three complete diagnostic event traces match across captured debug/release runs; the600-tick render preserves all310 logged physical/deformation records frombc90482. See [time-trial rules, checks and limits](TIME_TRIAL_EVENT.md). Audio is unchanged and remains an approximate original-style implementation, deferred at the owner's request.
 
 The owner requested periodic prototype updates on 13 October 2026. After verified driving changes, rebuild the release app and keep **Play GRID Prototype.cmd** and **Play GRID Body Contacts.cmd** using that executable. Preserve an active owner session and continue offline work until the app is closed.
 
