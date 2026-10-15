@@ -12,10 +12,11 @@ pub struct FreeLook {
     pub pitch: f32,
 }
 
-/// Radians per mouse count.
+/// Radians per mouse count, horizontal and vertical (owner: vertical softer).
 const SENSITIVITY: f32 = 0.005;
-/// Pitch range: slightly below the normal height up to a high overhead view.
-const PITCH: [f32; 2] = [-0.2, 1.1];
+const PITCH_SENSITIVITY: f32 = 0.002;
+/// Pitch range: slightly below the normal height up to a raised view.
+const PITCH: [f32; 2] = [-0.15, 0.45];
 /// Exponential return rate (1/s) after the button is released.
 const RETURN_RATE: f32 = 6.;
 
@@ -28,7 +29,8 @@ pub fn step(look: &mut FreeLook, held: bool, motion: Vec2, dt: f32) {
     if held {
         // Mouse right turns the view right: the camera swings to the car's left.
         look.yaw = wrap(look.yaw - motion.x * SENSITIVITY);
-        look.pitch = (look.pitch - motion.y * SENSITIVITY).clamp(PITCH[0], PITCH[1]);
+        // Mouse down raises the camera (owner preference after a playtest).
+        look.pitch = (look.pitch + motion.y * PITCH_SENSITIVITY).clamp(PITCH[0], PITCH[1]);
     } else {
         let keep = (-RETURN_RATE * dt).exp();
         look.yaw = wrap(look.yaw) * keep;
@@ -91,9 +93,11 @@ mod tests {
         }
         assert!(look.yaw.abs() <= std::f32::consts::PI);
         assert_ne!(look.yaw, 0.);
-        // Vertical drag is clamped.
-        step(&mut look, true, Vec2::new(0., -10_000.), 1. / 60.);
+        // Dragging down raises the camera, clamped at the top of the range.
+        step(&mut look, true, Vec2::new(0., 10_000.), 1. / 60.);
         assert_eq!(look.pitch, PITCH[1]);
+        step(&mut look, true, Vec2::new(0., -10_000.), 1. / 60.);
+        assert_eq!(look.pitch, PITCH[0]);
         // Two seconds after release the view is back behind the car.
         for _ in 0..120 {
             step(&mut look, false, Vec2::new(50., 50.), 1. / 60.);
