@@ -546,8 +546,16 @@ mod tests {
                     Some(deformation),
                 )
                 .unwrap();
+                let pristine = multi.cars[0].state.car.owner.vehicle[0x4880 / 4..0xc580 / 4].to_vec();
                 let mut contacts = 0;
+                let mut rammed_dent_tick = None;
                 for tick in 0..600 {
+                    if rammed_dent_tick.is_none()
+                        && tick < 200
+                        && multi.cars[0].state.car.owner.vehicle[0x4880 / 4..0xc580 / 4] != pristine[..]
+                    {
+                        rammed_dent_tick = Some(tick);
+                    }
                     let ram = Controls {
                         throttle: 1.,
                         steering: if tick < 200 { 0.6 } else { 0.25 },
@@ -573,8 +581,13 @@ mod tests {
                     .iter()
                     .map(|c| c.deformation_registration.as_ref().unwrap().random_seed)
                     .collect();
-                eprintln!("shared_world_deformation car_contacts={contacts} bulk_calls={calls:?}");
+                eprintln!(
+                    "shared_world_deformation car_contacts={contacts} bulk_calls={calls:?} rammed_idle_car_dented_at={rammed_dent_tick:?} toggle={}",
+                    multi.cars[0].deformation_registration.as_ref().unwrap().owner_toggle
+                );
                 assert!(contacts > 0);
+                // The idle car is touched only by the other car before tick 200.
+                assert!(rammed_dent_tick.is_some());
                 assert_eq!(seeds[0], seeds[1]);
             })
             .unwrap()

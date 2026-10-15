@@ -33,6 +33,7 @@ pub mod deformation_publication;
 pub mod deformation_settle;
 pub mod deformation_volume;
 pub mod deformation_world;
+mod deforming_group_frame;
 pub mod deforming_physical_frame;
 pub mod dynamics;
 pub mod finalize;

@@ -545,6 +545,7 @@ impl Runtime {
             random_seed,
             bulk_calls: 0,
             records: 0,
+            owner_toggle: false,
         };
         self.initial_deformation_registration = Some(registration.clone());
         self.deformation_registration = Some(registration);

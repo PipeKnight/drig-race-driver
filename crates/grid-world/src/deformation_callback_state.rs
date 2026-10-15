@@ -1,5 +1,7 @@
 //! Owned raw car/physical/contact adapter for the registered bulk callback.
-//! Static first-owner contacts only; physical phase scheduling is external.
+//! `calculate` covers static first-owner contacts; `calculate_shared` takes
+//! per-contact sides, the group's consumer records and pending response pairs
+//! (two-body car contacts). Physical phase scheduling is external.
 use crate::{
     Error, collision_callback, contact_preparation, deformation_impact::Node,
     deformation_settle::Edge, impact_generation, impact_producer as kernel,
@@ -59,6 +61,95 @@ pub fn calculate(
     parameters: &Parameters,
     random_seed: u32,
 ) -> Result<Output, Error> {
+    if contacts.iter().any(|c| c[1] != 0 || c[2] != 0) {
+        return Err(Error("invalid owned bulk deformation roles"));
+    }
+    let consumed: Vec<_> = contacts
+        .iter()
+        .enumerate()
+        .map(|(i, c)| consumer::Contact {
+            identity: 1 + i as u32,
+            first: Some(consumer::Owner {
+                identity: 1,
+                registered: true,
+            }),
+            second: None,
+            second_is_body: false,
+            accumulated: f(c, 0x38),
+        })
+        .collect();
+    let selected: Vec<_> = (0..contacts.len()).collect();
+    let (out, consumed) = calculate_shared(Shared {
+        owner,
+        physical,
+        contacts,
+        roles: &vec![Role::default(); contacts.len()],
+        settings,
+        scalar,
+        parameters,
+        random_seed,
+        identity: 1,
+        consumers: &consumed,
+        selected: &selected,
+        pending: &[],
+    })?;
+    if let Some(consumed) = consumed
+        && !consumed.pending.is_empty()
+    {
+        return Err(Error("unexpected static bulk pending response"));
+    }
+    Ok(out)
+}
+
+/// One selected contact's side for the owner.
+#[derive(Clone, Copy, Default)]
+pub struct Role {
+    /// The owner is the contact's second body: point, direction and normal
+    /// are reversed and the own/other coefficients swap (+44/+40).
+    pub reverse: bool,
+    /// The other body's +360 for two-body contacts.
+    pub counterpart_velocity: Option<[f32; 4]>,
+}
+
+pub struct Shared<'a> {
+    pub owner: &'a [u32],
+    pub physical: &'a [u32; 0x424 / 4],
+    /// Selected raw contacts, in callback order.
+    pub contacts: &'a [[u32; 32]],
+    pub roles: &'a [Role],
+    pub settings: &'a [u32],
+    pub scalar: f32,
+    pub parameters: &'a Parameters,
+    pub random_seed: u32,
+    /// Owner identity in `consumers`.
+    pub identity: u32,
+    /// All consumer records of the group; `selected[i]` corresponds to `contacts[i]`.
+    pub consumers: &'a [consumer::Contact],
+    pub selected: &'a [usize],
+    pub pending: &'a [consumer::Pending],
+}
+
+/// Bulk callback for one owner. The output contacts carry the consumed +38 of
+/// the selected contacts; the consumption result (all group records and
+/// pending pairs) is `None` when the callback declined.
+pub fn calculate_shared(input: Shared<'_>) -> Result<(Output, Option<consumer::Output>), Error> {
+    let Shared {
+        owner,
+        physical,
+        contacts,
+        roles,
+        settings,
+        scalar,
+        parameters,
+        random_seed,
+        identity,
+        consumers,
+        selected,
+        pending,
+    } = input;
+    if roles.len() != contacts.len() || selected.len() != contacts.len() {
+        return Err(Error("invalid shared bulk deformation roles"));
+    }
     if !(0xd230 / 4..=0x21000 / 4).contains(&owner.len())
         || settings.len() < 0x1050 / 4
         || settings.len() > 0x2000 / 4
@@ -69,9 +160,7 @@ pub fn calculate(
         || owner[0xc7f8 / 4] != 0
         || byte(owner, 0xc7af) > 1
         || byte(physical, 0x390) > 1
-        || contacts
-            .iter()
-            .any(|c| c[1] != 0 || c[2] != 0 || byte(c, 0xc) > 1)
+        || contacts.iter().any(|c| byte(c, 0xc) > 1)
     {
         return Err(Error("invalid owned bulk deformation roles"));
     }
@@ -101,39 +190,25 @@ pub fn calculate(
     let flags: Vec<_> = (0..400).map(|i| byte(d, 0xa280 + i)).collect();
     let generated: Vec<_> = contacts
         .iter()
-        .map(|c| impact_generation::Contact {
+        .zip(roles)
+        .map(|(c, role)| impact_generation::Contact {
             enabled: byte(c, 0x73) != 0,
-            reverse: false,
+            reverse: role.reverse,
             point: v(c, 0x50),
             direction: v(c, 0x60),
             value_38: f(c, 0x38),
             value_3c: f(c, 0x3c),
             value_40: f(c, 0x40),
             value_44: f(c, 0x44),
-            counterpart_velocity: None,
+            counterpart_velocity: role.counterpart_velocity,
         })
         .collect();
-    let consumed: Vec<_> = contacts
-        .iter()
-        .enumerate()
-        .map(|(i, c)| consumer::Contact {
-            identity: 1 + i as u32,
-            first: Some(consumer::Owner {
-                identity: 1,
-                registered: true,
-            }),
-            second: None,
-            second_is_body: false,
-            accumulated: f(c, 0x38),
-        })
-        .collect();
-    let selected: Vec<_> = (0..contacts.len()).collect();
     let p = parameters;
     let result = serial_callback::calculate(serial_callback::Input {
-        owner: 1,
-        contacts: &consumed,
-        selected: &selected,
-        pending: &[],
+        owner: identity,
+        contacts: consumers,
+        selected,
+        pending,
         callback: collision_callback::Input {
             intensity: f(d, 0xa494),
             descriptor_disabled: byte(d, 0xa4af) != 0,
@@ -259,15 +334,13 @@ pub fn calculate(
         out.owner[0x2e0 / 4] = r.body.history_extra.to_bits();
         let consumed = result
             .consumption
+            .as_ref()
             .ok_or(Error("bulk callback omitted consumption"))?;
-        if !consumed.pending.is_empty() {
-            return Err(Error("unexpected static bulk pending response"));
-        }
-        for (c, result) in out.contacts.iter_mut().zip(consumed.contacts) {
-            c[0x38 / 4] = result.accumulated.to_bits();
+        for (c, &index) in out.contacts.iter_mut().zip(selected) {
+            c[0x38 / 4] = consumed.contacts[index].accumulated.to_bits();
         }
     }
-    Ok(out)
+    Ok((out, result.consumption))
 }
 
 #[cfg(test)]

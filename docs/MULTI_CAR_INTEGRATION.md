@@ -138,3 +138,35 @@ Asset test `shared_world_deformation_matches_single_car_and_survives_contact`:
 adds the private DF01 file when it is present. Scripted 600-tick wall run with 3
 opponents: 313 bulk calls, no failure. Opponent meshes do not show dents yet (their
 physics geometry deforms).
+
+## F292: car-to-car deformation (15 October 2026, Claude Code)
+
+Implemented from [CAR_TO_CAR_DEFORMATION_RESEARCH.md](CAR_TO_CAR_DEFORMATION_RESEARCH.md).
+A contact group with two or more bodies and at least one deformation registration
+now runs both deformation phases per owner (`grid_world::deforming_group_frame`,
+`deformation_world::calculate_multi_group`):
+
+- owner order B77770 (static contacts by first body, then two-body contacts by first
+  and second body; registered owners only, first occurrence);
+- preparation per owner and side (`deformation_contact_limit::calculate_side`):
+  relative point speed of both bodies, low-mass check on both, owner-oriented normal
+  and `own.360 − peer.360`, lookup speed `|n·(v_own − v_peer)|`, coefficient ×A488
+  (deformable peer, sets contact +0E) or ×A48C (other dynamic body), side-B slot +44,
+  shared `+3C = min`; only static contacts reset +44;
+- bulk per owner (`deformation_callback_state::calculate_shared`): side-B contacts
+  reversed with the peer's +360 as counterpart velocity, one pending response list
+  (first side deferred, second side sums and clamps), owner order reversed on
+  alternate multi-owner invocations (F5E1A4 toggle, carried in every registration
+  like the shared seed), one CRT stream consumed in bulk owner order (serial-branch
+  choice; the live task branch's worker interleaving is unknown);
+- each owner writes only its own body; returned contacts carry +38/+3C/+40/+44/+0E.
+
+Groups with a single body keep the previous path, so the single-car shared-world
+test is still bit-identical (600 ticks incl. barrier dents). Ramming test: the idle,
+rammed car (touched only by the other car) is dented from tick 83, the first car
+contact tick; bulk calls [346, 364] versus [81, 75] before; no failure. Unit test
+covers side slots, the 0.75 peer factor, +0E and the low-mass speed cap. App smoke run
+with deformation and 3 AI opponents: 900 ticks, no failure.
+
+Not yet: body-impact events to both cars (`other_registration` still 0), a native
+two-owner whole-frame comparison, mirrored head-on symmetry test.

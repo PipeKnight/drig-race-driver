@@ -1,5 +1,6 @@
-//! Whole selected 9A0C90 for a registered first body and static counterpart.
-//! The enclosing preparation dispatcher and physical scheduling are separate.
+//! Whole selected 9A0C90 for a registered body and a static or dynamic peer
+//! (docs/CAR_TO_CAR_DEFORMATION_RESEARCH.md). The enclosing preparation
+//! dispatcher and physical scheduling are separate.
 use crate::{Error, contact_inverse, deformation_layout::WORDS};
 pub const PHYSICAL_WORDS: usize = 0x424 / 4;
 #[derive(Clone, Copy)]
@@ -13,6 +14,21 @@ pub struct Parameters {
     pub damage_scale: f32,
     pub table: [f32; 16],
     pub global_disabled: bool,
+}
+/// The other body of a two-body contact.
+#[derive(Clone, Copy)]
+pub struct Peer<'a> {
+    pub body: &'a [u32; PHYSICAL_WORDS],
+    pub center: [f32; 4],
+    /// The peer is itself deformation-registered (A14F10 result equals A484).
+    pub deformable: bool,
+}
+/// The owner's role in the contact: `second` when the contact's second body
+/// (+08, with +0C == 0) is the owner.
+#[derive(Clone, Copy, Default)]
+pub struct Side<'a> {
+    pub second: bool,
+    pub peer: Option<Peer<'a>>,
 }
 pub struct Output {
     pub descriptor: Vec<u32>,
@@ -121,7 +137,6 @@ pub(crate) fn validate(
     Ok(count)
 }
 
-#[allow(clippy::assign_op_pattern)] // Retain original SSE/x87 operation order.
 pub fn calculate(
     descriptor: &[u32],
     body: &[u32; PHYSICAL_WORDS],
@@ -129,7 +144,45 @@ pub fn calculate(
     contact: &[u32; 32],
     p: Parameters,
 ) -> Result<Output, Error> {
-    let count = validate(descriptor, body, center, contact, p)?;
+    calculate_side(descriptor, body, center, contact, p, Side::default())
+}
+
+/// Two-body form: relative point velocity and low-mass check use both bodies,
+/// the penetration term uses the owner-oriented normal and `own.360 - peer.360`,
+/// the coefficient is scaled by A488 (deformable peer, also setting contact
+/// +0E) or A48C, and the side-B coefficient slot is +44.
+#[allow(clippy::assign_op_pattern)] // Retain original SSE/x87 operation order.
+pub fn calculate_side(
+    descriptor: &[u32],
+    body: &[u32; PHYSICAL_WORDS],
+    center: [f32; 4],
+    contact: &[u32; 32],
+    p: Parameters,
+    side: Side<'_>,
+) -> Result<Output, Error> {
+    let mut tokenless = *contact;
+    if side.peer.is_some() || side.second {
+        tokenless[1] = 0;
+        tokenless[2] = 0;
+    }
+    let count = validate(descriptor, body, center, &tokenless, p)?;
+    if let Some(peer) = side.peer
+        && ([0x210, 0x220, 0x360]
+            .iter()
+            .flat_map(|at| vec4(peer.body, *at))
+            .chain(peer.center)
+            .any(|v| !v.is_finite() || v.abs() > 1e6)
+            || !f(peer.body, 0x3f0).is_finite()
+            || [0xa488, 0xa48c]
+                .iter()
+                .any(|at| !f(descriptor, *at).is_finite()))
+    {
+        return Err(Error("invalid deformation contact peer"));
+    }
+    if side.second && side.peer.is_none() {
+        return Err(Error("second-body deformation side requires a peer"));
+    }
+    let slot = if side.second { 0x44 } else { 0x40 };
     let dimensions: [usize; 3] = std::array::from_fn(|i| descriptor[0xa414 / 4 + i] as usize);
     let mut out = Output {
         descriptor: descriptor.to_vec(),
@@ -139,9 +192,19 @@ pub fn calculate(
     let normal = vec4(contact, 0x60);
     let point = vec4(contact, 0x50);
     let point_velocity = velocity(body, center, point);
-    let relative: [f32; 4] = point_velocity.map(|v| 0. - v);
+    let peer_velocity = side.peer.map(|q| velocity(q.body, q.center, point));
+    // |n . (vB - vA)| with A the contact's first body.
+    let relative: [f32; 4] = match peer_velocity {
+        None => point_velocity.map(|v| 0. - v),
+        Some(q) if side.second => std::array::from_fn(|i| point_velocity[i] - q[i]),
+        Some(q) => std::array::from_fn(|i| q[i] - point_velocity[i]),
+    };
     let speed = dot(normal, relative).abs();
-    let speed = if f(body, 0x3f0) < p.low_mass_threshold && speed > p.low_mass_speed_cap {
+    let low_mass = f(body, 0x3f0) < p.low_mass_threshold
+        || side
+            .peer
+            .is_some_and(|q| f(q.body, 0x3f0) < p.low_mass_threshold);
+    let speed = if low_mass && speed > p.low_mass_speed_cap {
         p.low_mass_speed_cap
     } else {
         speed
@@ -158,7 +221,7 @@ pub fn calculate(
         }
     }
     if byte(descriptor, 0xa4b0) == 0 || byte(descriptor, 0xa4af) != 0 || p.global_disabled {
-        out.contact[0x40 / 4] = p.unlimited.to_bits();
+        out.contact[slot / 4] = p.unlimited.to_bits();
         return Ok(out);
     }
     let pose = std::array::from_fn(|i| vec4(body, 0x1d0 + i * 16));
@@ -173,10 +236,22 @@ pub fn calculate(
     let corner = usize::from(half_x < local[0] - f(descriptor, 0xa430))
         + 2 * usize::from(half_z < local[2] - f(descriptor, 0xa438));
     if maximum < f(descriptor, 0xa4b4 + corner * 4) * p.corner_scale {
-        out.contact[0x40 / 4] = p.unlimited.to_bits();
+        out.contact[slot / 4] = p.unlimited.to_bits();
         return Ok(out);
     }
-    let projected = dot(normal, vec4(body, 0x360)) * p.velocity_projection;
+    let own = vec4(body, 0x360);
+    let projected = match side.peer {
+        None => dot(normal, own),
+        Some(q) => {
+            let other = vec4(q.body, 0x360);
+            let oriented = if side.second {
+                normal.map(|v| -v)
+            } else {
+                normal
+            };
+            dot(oriented, std::array::from_fn(|i| own[i] - other[i]))
+        }
+    } * p.velocity_projection;
     let projected = if projected < 0. { 0. } else { projected };
     let penetration = f(contact, 0x38) + projected;
     let radius = spacing * spacing;
@@ -213,11 +288,14 @@ pub fn calculate(
         f64::from(p.unlimited)
     };
     if stiffness == f64::from(p.unlimited) {
-        out.contact[0x40 / 4] = (stiffness as f32).to_bits();
+        out.contact[slot / 4] = (stiffness as f32).to_bits();
         out.cap = stiffness;
         return Ok(out);
     }
-    let velocity = dot(normal, point_velocity).abs();
+    let velocity = match peer_velocity {
+        None => dot(normal, point_velocity).abs(),
+        Some(q) => dot(normal, std::array::from_fn(|i| point_velocity[i] - q[i])).abs(),
+    };
     let level = lookup(velocity, p);
     if f64::from(f(descriptor, 0xa490)) < level {
         out.descriptor[0xa490 / 4] = (level as f32).to_bits();
@@ -225,18 +303,27 @@ pub fn calculate(
         out.descriptor[0xa494 / 4] = velocity.to_bits();
     }
     let level = f(&out.descriptor, 0xa490);
-    let multiplier = if level != 0. {
+    let mut multiplier = if level != 0. {
         (stiffness as f32) / level
     } else {
         p.unlimited
     };
-    out.contact[0x40 / 4] = multiplier.to_bits();
+    if let Some(q) = side.peer
+        && multiplier != p.unlimited
+    {
+        multiplier = multiplier * f(descriptor, if q.deformable { 0xa488 } else { 0xa48c });
+        if q.deformable {
+            // B0CD10(contact, 1): disables the optional correction rows.
+            out.contact[0xc / 4] = (out.contact[0xc / 4] & !0xff_0000) | 0x1_0000;
+        }
+    }
+    out.contact[slot / 4] = multiplier.to_bits();
     out.cap = if multiplier != p.unlimited {
         f64::from(multiplier) * f64::from(penetration)
     } else {
         f64::from(multiplier)
     };
-    if !out.cap.is_finite() || !f(&out.contact, 0x40).is_finite() {
+    if !out.cap.is_finite() || !f(&out.contact, slot).is_finite() {
         return Err(Error("nonfinite static deformation cap"));
     }
     Ok(out)
@@ -320,5 +407,56 @@ mod tests {
         assert_eq!(disabled.descriptor[0xa490 / 4], 0);
         assert_eq!(d[0xa4c4 / 4], 0);
         assert_eq!(c[0x40 / 4], 0);
+
+        // Two-body: a resting deformable peer gives the same speeds, scales the
+        // coefficient by A488, sets +0E and uses the side's own slot.
+        d[0xa488 / 4] = 0.75f32.to_bits();
+        d[0xa48c / 4] = 0.5f32.to_bits();
+        let mut peer = b;
+        peer[0x220 / 4] = 0;
+        c[0x8 / 4] = 2;
+        c[1] = 1;
+        c[0xc / 4] = 0x0100_0000;
+        for (second, slot, other) in [(false, 0x40, 0x44), (true, 0x44, 0x40)] {
+            let side = Side {
+                second,
+                peer: Some(Peer {
+                    body: &peer,
+                    center: [0., 0., 0., 1.],
+                    deformable: true,
+                }),
+            };
+            let r = calculate_side(&d, &b, [0., 0., 0., 1.], &c, p, side).unwrap();
+            assert_eq!(f(&r.contact, slot), 5625.);
+            assert_eq!(r.contact[other / 4], c[other / 4]);
+            assert_eq!(r.cap, 2812.5);
+            assert_eq!(byte(&r.contact, 0xe), 1);
+        }
+        let dynamic = Side {
+            second: false,
+            peer: Some(Peer {
+                body: &peer,
+                center: [0., 0., 0., 1.],
+                deformable: false,
+            }),
+        };
+        let r = calculate_side(&d, &b, [0., 0., 0., 1.], &c, p, dynamic).unwrap();
+        assert_eq!(f(&r.contact, 0x40), 3750.);
+        assert_eq!(byte(&r.contact, 0xe), 0);
+        // A light peer caps the relative speed for the window.
+        let mut light = peer;
+        light[0x3f0 / 4] = 50f32.to_bits();
+        let light_side = Side {
+            second: false,
+            peer: Some(Peer {
+                body: &light,
+                center: [0., 0., 0., 1.],
+                deformable: false,
+            }),
+        };
+        let mut fast = b;
+        fast[0x220 / 4] = (-40f32).to_bits();
+        let r = calculate_side(&d, &fast, [0., 0., 0., 1.], &c, p, light_side).unwrap();
+        assert_eq!(f(&r.descriptor, 0xa4c4), 5.);
     }
 }

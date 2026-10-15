@@ -270,8 +270,15 @@ fn calculate_impl(
     if !registrations.is_empty() && registrations.len() != input.bodies.len() {
         return Err(Error("deformation registrations differ from owned bodies"));
     }
-    // One CRT stream shared by every registered car, consumed in group order.
+    // One CRT stream and one bulk owner-order toggle shared by every
+    // registered car, consumed in group order.
     let mut shared_seed = registrations.iter().flatten().map(|r| r.random_seed).next();
+    let mut shared_toggle = registrations
+        .iter()
+        .flatten()
+        .map(|r| r.owner_toggle)
+        .next()
+        .unwrap_or(false);
     if manager.properties.len() != input.bodies.len()
         || manager.workspace.len() != input.bodies.len()
         || manager.rows.is_empty()
@@ -414,11 +421,39 @@ fn calculate_impl(
         };
         // Selected scope: a registered car alone in its group (static peers) runs
         // both deformation phases; groups of several cars solve without them.
+        let several_registered = ids.len() >= 2
+            && ids
+                .iter()
+                .any(|&i| registrations.get(i).is_some_and(Option::is_some));
         let registered = match ids[..] {
             [only] => registrations.get_mut(only).and_then(|r| r.as_deref_mut()),
             _ => None,
         };
-        let frame = if let Some(registration) = registered {
+        let frame = if several_registered {
+            // Car-to-car contact group: per-owner deformation phases.
+            let mut taken: Vec<_> = ids.iter().map(|&i| registrations[i].take()).collect();
+            let raw: Vec<_> = contact_ids.iter().map(|&i| groups.contacts[i]).collect();
+            let bodies: Vec<_> = ids.iter().map(|&i| &groups.bodies[i]).collect();
+            let result = crate::deformation_world::calculate_multi_group(
+                &frame_input,
+                &bodies,
+                &raw,
+                shapes,
+                &mut taken,
+                shared_seed.expect("registered seed"),
+                shared_toggle,
+            );
+            for (&i, registration) in ids.iter().zip(taken) {
+                registrations[i] = registration;
+            }
+            let (frame, contacts, seed, toggle) = result?;
+            shared_seed = Some(seed);
+            shared_toggle = toggle;
+            for (&i, c) in contact_ids.iter().zip(contacts) {
+                groups.contacts[i] = c;
+            }
+            frame
+        } else if let Some(registration) = registered {
             let body = ids[0];
             let raw: Vec<_> = contact_ids
                 .iter()
@@ -507,6 +542,7 @@ fn calculate_impl(
     if let Some(seed) = shared_seed {
         for registration in registrations.iter_mut().flatten() {
             registration.random_seed = seed;
+            registration.owner_toggle = shared_toggle;
         }
     }
     Ok(Output {
