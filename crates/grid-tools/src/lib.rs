@@ -22,5 +22,6 @@ pub mod standard_car;
 mod standard_car_fields;
 pub mod time_trial;
 pub mod track;
+pub mod tyre_audio;
 pub mod tyre_tables;
 pub mod vehicle_world_diagnostic;

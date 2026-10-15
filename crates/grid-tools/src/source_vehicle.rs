@@ -722,6 +722,10 @@ impl Runtime {
     pub fn pose(&self) -> [f32; 16] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x1d0 / 4 + i]))
     }
+    /// Read-only purchased surface table (presentation such as tyre audio).
+    pub fn surfaces(&self) -> &Surfaces {
+        &self.surfaces
+    }
     pub fn velocity(&self) -> [f32; 4] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x220 / 4 + i]))
     }

@@ -2,6 +2,7 @@
 mod body_damage;
 mod engine_sound;
 mod time_trial;
+mod tyre_sound;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -1172,6 +1173,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             match grid_tools::engine_audio_continuous::Bank::lacetti(&root) {
                 Ok(bank) => engine_sound::install(&mut app, bank),
                 Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
+            }
+            match grid_tools::tyre_audio::Bank::load(&root) {
+                Ok(bank) => tyre_sound::install(&mut app, bank),
+                Err(error) => warn!("Tyre audio unavailable; driving continues: {error}"),
             }
         }
         app.insert_resource(driving)

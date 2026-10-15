@@ -10,6 +10,7 @@ pub struct Surfaces {
     joined: Vec<Option<grid_world::vehicle_contact_force::Material>>,
     physical: Vec<grid_world::contact_rows::Material>,
     sheets: Vec<bool>,
+    names: Vec<Option<String>>,
 }
 
 impl Surfaces {
@@ -20,6 +21,10 @@ impl Surfaces {
         let document = binxml::read(bytes)?;
         let materials = surface::read(&document)?;
         let keys = materials.iter().map(|m| m.code).collect();
+        let names = materials
+            .iter()
+            .map(|m| m.mechanics.as_ref().map(|s| s.name.to_owned()))
+            .collect();
         let sheets = materials.iter().map(|m| m.physical.sheet).collect();
         let physical = materials
             .iter()
@@ -89,7 +94,14 @@ impl Surfaces {
             joined,
             physical,
             sheets,
+            names,
         })
+    }
+
+    /// Mechanics record name for a wheel contact token (wheel+C0, index+1).
+    /// Original 4361C0 matches this name exactly against AudioMaterial names.
+    pub fn mechanics_name(&self, token: u32) -> Option<&str> {
+        self.names.get((token as usize).checked_sub(1)?)?.as_deref()
     }
 
     /// Select by the source packed-code policy; this does not establish which

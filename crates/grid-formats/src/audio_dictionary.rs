@@ -145,6 +145,33 @@ impl Bank<'_> {
         // It is not two audio samples. Retain it in the original bank bytes.
         Ok(&record[4..])
     }
+    /// WIP PCM16 records with or without the loop bit. Descriptor bit 20 (high
+    /// halfword 0x0010) sets AL_LOOPING in A2A14C; the four-byte skip at A29C74
+    /// depends on the WIP format code, not on flags or the prefix value
+    /// (TYRE_AUDIO_RESEARCH.md). Returns the PCM payload and the loop bit.
+    pub fn wip_pcm16<'b>(&self, index: usize, data: &'b [u8]) -> Result<(&'b [u8], bool)> {
+        let sample = self.samples.get(index).ok_or(crate::Error {
+            offset: index,
+            message: "invalid audio sample index",
+        })?;
+        if !matches!(sample.flags, 0 | 0x10) {
+            return fail(sample.offset, "unsupported WIP sample flags");
+        }
+        let looped = sample.flags == 0x10;
+        if looped {
+            let plain = Bank {
+                name: self.name,
+                extension: self.extension,
+                data_bytes: self.data_bytes,
+                samples: vec![Sample {
+                    flags: 0,
+                    ..self.samples[index]
+                }],
+            };
+            return Ok((plain.mono_pcm16(0, data)?, true));
+        }
+        Ok((self.mono_pcm16(index, data)?, false))
+    }
     /// A standard independently authored WAV wrapper over exact local bytes;
     /// The native four-byte non-PCM prefix is skipped; no PCM resampling, gain,
     /// trimming or original mixing behavior is implied.
