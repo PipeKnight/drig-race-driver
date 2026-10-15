@@ -712,9 +712,15 @@ mod tests {
                 };
                 let trace = run();
                 assert_eq!(trace, run());
-                assert!(trace.iter().flatten().flatten().all(|v| v.volume_db.is_finite()
-                    && (-48. ..=0.).contains(&v.volume_db)
-                    && (0.5..=2.).contains(&v.pitch)));
+                assert!(
+                    trace
+                        .iter()
+                        .flatten()
+                        .flatten()
+                        .all(|v| v.volume_db.is_finite()
+                            && (-48. ..=0.).contains(&v.volume_db)
+                            && (0.5..=2.).contains(&v.pitch))
+                );
                 // Clutch dump after the handbrake hold: front-wheel peel is loud.
                 let peel = (100..160)
                     .flat_map(|t| [trace[t][2][PEEL].volume_db, trace[t][3][PEEL].volume_db])
