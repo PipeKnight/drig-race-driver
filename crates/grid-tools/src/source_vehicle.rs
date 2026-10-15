@@ -328,10 +328,13 @@ impl Runtime {
                 threshold: 0.02,
                 relaxation: 1.,
             }),
-            // Same explicit selected material as the whole-world comparison.
-            materials: vec![[
-                0., 0.3, 0.4, 0.01, 0.5, 0.2, 2., 0.5, 3., 0.75, 20., 0., 0.125,
-            ]],
+            // Purchased surface_materials.xml row for the car body (CAR_). Every
+            // barrier/track key it meets on Donington (CONC, PLAS, SIGN, SHTC,
+            // ROCK, FENC, WALL, TARM) has the same solver values: restitution 0,
+            // friction 0.4, cfm 0.01, correction velocity 1, no softness, dynamic
+            // threshold 10, so the mixed pair equals this row. Formerly an authored
+            // restitution-0.3 soft material.
+            materials: vec![surfaces.physical(*b"CAR_")?.1],
             rows: vec![[0; 48]; 16],
             capacity: 16,
             iterations: 5,

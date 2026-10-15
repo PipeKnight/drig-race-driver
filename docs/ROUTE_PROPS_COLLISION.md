@@ -64,6 +64,27 @@ along the face with 0.01–0.07 m overlap. In the owner's session the same impac
 footprint corners about 1 m inside the block region, coming to rest inside it.
 Autonomous three laps still have 0 contacts; 255 default + 20 asset tests and Clippy pass.
 
+## F286: original solver settings and contact material
+
+- Solver: live-captured original values (WORLD_STEPPING_RESEARCH.md) replace the authored
+  ones: CFM 0, min penetration 0.003, W 1.0, 5 iterations; correction CFM 0, threshold
+  0.02, W 1.0, 3 iterations.
+- Material: the authored restitution-0.3 soft material is replaced by the purchased
+  `surface_materials.xml` row for `CAR_`. New `grid-surface-rows` shows CAR_, CONC, PLAS,
+  SIGN, SHTC, ROCK, FENC, WALL and TARM all share restitution 0, friction 0.4, cfm 0.01,
+  correction velocity 1, minimum bounce 0, no softness and dynamic threshold 10, so every
+  car/barrier pair mixes to this row. `physparams.xml` names the prop shape materials
+  (armco/metal SIGN, tyre walls/rubber PLAS, stone ROCK, wood FENC).
+- Stepping decision (owner, 15 October): the prototype keeps a fixed step so behaviour is
+  identical at any display rate; the original steps once per rendered frame, and its
+  reference behaviour is taken at 30–60 fps. The current 16 ms step corresponds to the
+  original at ~62.5 fps. An experiment with 16/3 ms steps changed the drive itself (37.5 vs
+  28.8 m/s at the same record), so the prototype's step-size sensitivity remains to be
+  explained before any change of the fixed step.
+- Owner impact replay: no bounce now; peak hull overlap 0.251 m held for two ticks and
+  removed by ERP 0.2, then sliding contact 0.004–0.036 m. 275 tests, Clippy and the
+  autonomous three laps pass.
+
 ## Remaining (from the research)
 
 The ~0.25 m transient at 27 m/s comes from the 16 ms step (0.43 m of travel per tick)
