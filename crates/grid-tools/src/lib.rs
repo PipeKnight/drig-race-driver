@@ -16,6 +16,7 @@ pub mod engine_audio_schedule;
 pub mod entity_geometry;
 pub mod impact_diagnostic;
 pub mod lap_progress;
+pub mod pursuit_driver;
 pub mod source_deformation;
 pub mod source_physical;
 pub mod source_vehicle;

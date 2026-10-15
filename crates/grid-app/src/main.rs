@@ -82,6 +82,19 @@ struct Driving {
     last_controls: Option<grid_tools::source_vehicle::Controls>,
     segment: u64,
     started: Instant,
+    opponents: Option<Opponents>,
+}
+/// Shared-world opponents. Car 0 of `multi` is a placeholder that is swapped
+/// with the player runtime for each common tick.
+struct Opponents {
+    multi: grid_tools::source_vehicle::multi::MultiRuntime,
+    drivers: Vec<grid_tools::pursuit_driver::PursuitDriver>,
+}
+#[derive(Component)]
+struct OpponentPart {
+    car: usize,
+    rest: Mat4,
+    wheel: Option<usize>,
 }
 impl Driving {
     fn report(&self, event: &str, controls: grid_tools::source_vehicle::Controls) {
@@ -838,6 +851,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut body_contacts = None;
     let mut body_events = None;
     let mut deformation = None;
+    let mut opponents = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -856,6 +870,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next()
                         .ok_or("--deformation needs a private DF01 path")?,
                 ))
+            }
+            "--opponents" => {
+                opponents = Some(
+                    args.next()
+                        .ok_or("--opponents needs 1..7")?
+                        .parse::<usize>()?,
+                )
             }
             "--body-events" => {
                 body_events = Some(PathBuf::from(
@@ -951,6 +972,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if deformation.is_some() && (!drive || body_contacts.is_none()) {
         return Err("--deformation requires --drive and --body-contacts".into());
     }
+    if opponents.is_some_and(|n| !(1..=7).contains(&n))
+        || (opponents.is_some() && (!drive || body_contacts.is_none() || deformation.is_some()))
+    {
+        return Err(
+            "--opponents 1..7 requires --drive and --body-contacts, without --deformation".into(),
+        );
+    }
+    let contacts_path = body_contacts.clone();
     if !scripted.throttle.is_finite()
         || !(0. ..=1.).contains(&scripted.throttle)
         || !scripted.steering.is_finite()
@@ -1009,6 +1038,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("drive_body_geometry enabled=true pool=20 boundary=cqtc order=boundary-first-then-archive materials=shared damage=owned-rng notifications=guarded");
             Ok(geometry)
         }).transpose()?;
+        let opponents = opponents
+            .map(|n| -> Result<Opponents, Box<dyn std::error::Error>> {
+                let table = std::fs::read(contacts_path.as_ref().ok_or("missing CD01")?)?;
+                let slots: Vec<String> = (0..=n).map(|i| format!("slot_{i:02}")).collect();
+                let refs: Vec<&str> = slots.iter().map(String::as_str).collect();
+                let multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti(
+                    &root,
+                    &refs,
+                    &table,
+                    runtime.body_events,
+                )?;
+                let progress = grid_tools::lap_progress::load(&root)?.progress;
+                let drivers = (0..n)
+                    .map(|i| grid_tools::pursuit_driver::PursuitDriver::new(&progress, 18. + i as f64 * 0.25))
+                    .collect();
+                println!(
+                    "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=authored-pursuit-placeholder deformation=disabled"
+                );
+                Ok(Opponents { multi, drivers })
+            })
+            .transpose()?;
         Some(Driving {
             runtime,
             geometry,
@@ -1019,6 +1069,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             last_controls: None,
             segment: 0,
             started: Instant::now(),
+            opponents,
         })
     } else {
         None
@@ -1375,6 +1426,28 @@ fn setup(
                     });
                 }
             }
+            if moving && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
+                for car in 1..opponents.multi.cars.len() {
+                    let runtime = &opponents.multi.cars[car];
+                    let motion = part
+                        .wheel
+                        .map_or(Mat4::IDENTITY, |i| wheel_motion(runtime.wheels()[i]));
+                    commands.spawn((
+                        Name::new(format!("opponent{car} {}", part.name)),
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(material.clone()),
+                        Transform::from_matrix(
+                            Mat4::from_cols_array(&runtime.pose()) * motion * matrix,
+                        ),
+                        initial_bounds,
+                        OpponentPart {
+                            car,
+                            rest: matrix,
+                            wheel: part.wheel,
+                        },
+                    ));
+                }
+            }
         }
     }
     if !track {
@@ -1532,7 +1605,29 @@ fn drive_tick(
         };
     }
     let driving = &mut *driving;
-    let result = if let Some(geometry) = &mut driving.geometry {
+    let result = if let Some(opponents) = &mut driving.opponents {
+        // One common shared-world tick: the player runtime occupies car slot 0.
+        let mut all = vec![controls];
+        for (i, driver) in opponents.drivers.iter_mut().enumerate() {
+            let car = &opponents.multi.cars[i + 1];
+            all.push(if held {
+                grid_tools::source_vehicle::Controls {
+                    handbrake: true,
+                    ..Default::default()
+                }
+            } else {
+                driver.controls(car.pose(), car.velocity())
+            });
+        }
+        std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
+        let result = opponents.multi.tick(&all);
+        std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
+        if result.is_ok() {
+            driving.runtime.last_body_contacts =
+                opponents.multi.last_body_contacts + opponents.multi.last_car_contacts;
+        }
+        result
+    } else if let Some(geometry) = &mut driving.geometry {
         if driving.runtime.deformation_enabled {
             driving
                 .runtime
@@ -1624,6 +1719,12 @@ fn drive_actions(
     if input.just_pressed(KeyCode::KeyR) {
         driving.report("reset", driving.last_controls.unwrap_or_default());
         driving.runtime.reset();
+        if let Some(opponents) = &mut driving.opponents {
+            opponents.multi.reset();
+            for driver in &mut opponents.drivers {
+                driver.reset();
+            }
+        }
         driving.segment += 1;
         driving.last_controls = None;
         driving.failure = None;
@@ -1661,6 +1762,10 @@ fn drive_present(
         ),
         Without<ViewerCamera>,
     >,
+    mut opponent_parts: Query<
+        (&OpponentPart, &mut Transform),
+        (Without<MovingPart>, Without<ViewerCamera>),
+    >,
     mut camera: Single<&mut Transform, With<ViewerCamera>>,
     mut windows: Query<&mut Window>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -1668,6 +1773,8 @@ fn drive_present(
     mut hud: Query<&mut Text, With<DrivingHud>>,
     sound: Option<Res<engine_sound::EngineSound>>,
     trial: Option<Res<time_trial::Trial>>,
+    input: Option<Res<ButtonInput<KeyCode>>>,
+    mut look_back: Local<Option<bool>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -1723,8 +1830,30 @@ fn drive_present(
         let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
         *transform = Transform::from_matrix(pose * motion * part.rest);
     }
+    if let Some(opponents) = &driving.opponents {
+        let cars: Vec<(Mat4, [Mat4; 4])> = opponents
+            .multi
+            .cars
+            .iter()
+            .map(|car| {
+                (
+                    Mat4::from_cols_array(&car.pose()),
+                    car.wheels().map(wheel_motion),
+                )
+            })
+            .collect();
+        for (part, mut transform) in &mut opponent_parts {
+            let (pose, wheels) = &cars[part.car];
+            let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
+            *transform = Transform::from_matrix(*pose * motion * part.rest);
+        }
+    }
+    // C holds a look-back chase view; GRID_LOOK_BACK forces it for scripted renders.
+    let back = input.is_some_and(|i| i.pressed(KeyCode::KeyC))
+        || *look_back.get_or_insert_with(|| std::env::var_os("GRID_LOOK_BACK").is_some());
+    let side = if back { -1. } else { 1. };
     let at = pose.transform_point3(Vec3::new(0., 1., 0.));
-    let eye = pose.transform_point3(Vec3::new(0., 3., -9.));
+    let eye = pose.transform_point3(Vec3::new(0., 3., -9. * side));
     **camera = Transform::from_translation(eye).looking_at(at, Vec3::Y);
     let v = driving.runtime.velocity();
     let speed = Vec3::new(v[0], v[1], v[2]).length() * 3.6;
@@ -1820,7 +1949,7 @@ fn drive_present(
     } else {
         terminal
             .as_deref()
-            .unwrap_or("Space: handbrake | P: pause | R: reset")
+            .unwrap_or("Space: handbrake | C: look back | P: pause | R: reset")
     };
     let audio = sound.map_or("", |s| {
         if s.muted {
@@ -2156,6 +2285,7 @@ mod driving_tests {
                 last_controls: None,
                 segment: 0,
                 started: Instant::now(),
+                opponents: None,
             })
             .add_systems(Update, drive_present);
         app.world_mut().spawn((ViewerCamera, Transform::default()));
@@ -2258,6 +2388,7 @@ mod driving_tests {
                 last_controls: None,
                 segment: 0,
                 started: Instant::now(),
+                opponents: None,
             })
             .add_systems(Update, (drive_actions, drive_tick).chain());
         app.world_mut()
@@ -2448,6 +2579,7 @@ mod driving_tests {
                 last_controls: None,
                 segment: 0,
                 started: Instant::now(),
+                opponents: None,
             })
             .add_systems(Update, (drive_actions, drive_tick).chain());
         app.world_mut()

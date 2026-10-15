@@ -32,10 +32,13 @@ if not "%~5"=="" if not "%~5"=="3" (
   popd
   exit /b 5
 )
+set "GRID_OPPONENT_ARGS="
+if defined GRID_PLAY_OPPONENTS set "GRID_OPPONENT_ARGS=--opponents %GRID_PLAY_OPPONENTS%"
 set "GRID_PLAY_LOG=local\playtest\manual-%RANDOM%-%RANDOM%.log"
 echo Lacetti at Donington - experimental Rust/Bevy driving prototype
 echo Up/W: throttle   Down/S: brake   Left/A and Right/D: steer
-echo Space: handbrake   P: pause/resume   R: reset   Escape: exit
+echo Space: handbrake   C: look back   P: pause/resume   R: reset   Escape: exit
+if defined GRID_PLAY_OPPONENTS echo %GRID_PLAY_OPPONENTS% opponent cars share the track. Their driver is a temporary placeholder, not GRID AI.
 echo Click the game window once if keyboard input does not respond.
 if "%GRID_TRIAL_ARGS%"=="" (
   echo Practice timing starts at the start line. R resets the car and clears lap times.
@@ -50,11 +53,11 @@ if "%~2"=="" (
 ) else (
   echo Experimental body contacts enabled. Terminal wheel damage disables driving; R resets.
   if "%~3"=="" (
-    "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" > "%GRID_PLAY_LOG%" 2>&1
+    "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
   ) else (
     echo Registered body impact events enabled for static barriers.
     if "%~4"=="" (
-      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" > "%GRID_PLAY_LOG%" 2>&1
+      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
     ) else (
       echo Experimental impact damage enabled.
       "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" > "%GRID_PLAY_LOG%" 2>&1

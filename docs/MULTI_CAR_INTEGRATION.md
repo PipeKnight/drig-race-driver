@@ -86,3 +86,30 @@ ticks) and moves car 0 by 1.97 m. Asset test
 Scope limits (not original-verified): body events dispatch per car with no peer
 registration (car-to-car impacts use `other_registration` 0); deformation is not
 enabled in the shared world (single-owner registration); slipstream stays 1.
+
+## F288: opponents in the playable app (15 October 2026, Claude Code)
+
+`grid-app --drive --body-contacts CD01 [--body-events BP01] --opponents N` (N 1..7, no
+`--deformation`) builds a `MultiRuntime` over `slot_00..slot_N`; the player is car 0 and
+the other cars are drawn as copies of the Lacetti parts (body, glass, wheels with spin
+and steer). Each `FixedUpdate` tick swaps the player runtime into the shared world,
+ticks all cars once (opponents on the handbrake during the time-trial countdown hold),
+and swaps back, so the player's HUD, timing, tyre/engine sound and reset logic are
+unchanged. R resets every car and driver. C holds a look-back camera
+(`GRID_LOOK_BACK=1` forces it for scripted renders). `Play GRID Race.cmd` starts
+practice with 3 opponents and the private CD01/BP01 files from `local\`
+(`GRID_PLAY_OPPONENTS` overrides the count).
+
+The opponent driver is `grid_tools::pursuit_driver::PursuitDriver`: an AUTHORED
+placeholder (pure pursuit of the purchased progress centreline, curvature speed
+limit, speed cap 18 + 0.25·i m/s), not GRID AI. It is replaced once the original
+AI driver is recovered (docs/AI_DRIVER_RESEARCH.md).
+
+Checks: `grid-opponent-race ROOT CD01 BP01 CARS TICKS` runs a headless race: 2 cars
+finish a valid lap; 8 cars run 3000 ticks with no failure in 16.6 s (5.5 ms/tick)
+and bunch up (39,136 car-contact records) because the placeholder speed caps are
+close. Offscreen look-back render at tick 20 shows three opponents on the grid
+behind the player. Full workspace tests including asset tests pass; Clippy -D warnings.
+
+Limits: body events per car without peer registrations; no deformation with
+opponents; no race start order, positions or finish results for opponents.
