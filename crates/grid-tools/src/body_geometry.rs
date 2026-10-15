@@ -173,6 +173,18 @@ impl BodyGeometry {
         .shapes[0])
     }
 
+    /// Diagnostic: current collision hull points in world coordinates.
+    pub fn hull_world_points(&self, body: &contact_groups::Body) -> Result<Vec<[f32; 3]>, Error> {
+        let m = self.pose(body)?;
+        let mesh = self.shape.mesh();
+        Ok((0..mesh.point_count())
+            .filter_map(|i| mesh.point(i))
+            .map(|p| {
+                std::array::from_fn(|j| p[0] * m[0][j] + p[1] * m[1][j] + p[2] * m[2][j] + m[3][j])
+            })
+            .collect())
+    }
+
     /// World points/normals retain the generator's publication orientation.
     /// Material IDs zero select the prototype's explicit shared solver material.
     pub fn contacts(

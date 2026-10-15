@@ -37,7 +37,38 @@ could never be touched.
 - Tests: new `donington_route_props_are_solid_boxes` (1,021 boxes, valid bounds); boundary
   test updated for shape 247 and 36 slots; 255 default + 20 asset tests, Clippy pass.
 
+## F284: barrier ornaments (owner playtest of 9998458)
+
+The owner's screenshots (practice log `manual-14843-11973.log`, ticks 1768/3890/6050)
+showed the car resting partly inside white/blue concrete blocks with `BODY 0`. Those
+blocks are not `objects.ens` entities but `ornaments.bin` instances of objects.pssg
+prototypes (`concrete_block_long` 16.0x1.05x0.54 m, `concrete_block_blue/white`,
+`concrete_wall_*_long`), which had no collision at all. Their back face sits on the
+boundary sheet and their front face 0.41–0.49 m in front of it, so the car sank ~0.45 m
+before the sheet stopped it (the third screenshot was a reversing touch with the tail).
+New diagnostic `grid-ornament-reach` lists every ornament prototype protruding in front
+of the boundary: concrete blocks/walls, chain-link fences `chnfen*` and trackside ad
+hoardings `gg_ad_brd_*`/`don_ad_brd_*`.
+
+Change: those four families (`concrete_`, `chnfen`, `gg_ad_brd_`, `don_ad_brd_`) get a
+solid oriented box from each prototype's mesh extent per placement, added to the same
+props shape (1,045 boxes; 2,066 total with the entities). This is an authored stand-in:
+the original's collision for ornament instances is not recovered. Poles, lights and
+other ornaments stay non-solid.
+
+Replay of the owner's own inputs (`grid-replay-contacts`, DR01 from the log) is exact
+for 726 ticks, then diverges at the first barrier impact (27 m/s). With the new boxes
+contacts appear at 0.085 m true hull overlap, the deepest hull penetration into the
+concrete block is 0.254 m for one tick before the car is pushed out, and it then slides
+along the face with 0.01–0.07 m overlap. In the owner's session the same impact left the
+footprint corners about 1 m inside the block region, coming to rest inside it.
+Autonomous three laps still have 0 contacts; 255 default + 20 asset tests and Clippy pass.
+
 ## Remaining (from the research)
+
+The ~0.25 m transient at 27 m/s comes from the 16 ms step (0.43 m of travel per tick)
+and deformation's softened impact response; the original steps at the frame delta
+(about 6 ms on the owner's 165 Hz display).
 
 Deformation's pre-solve contact limit lets the hull crumple 0.35–0.65 m into a wall at
 18 m/s; the prototype steps at 16 ms against the original's frame delta; solver defaults

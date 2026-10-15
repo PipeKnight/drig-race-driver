@@ -111,6 +111,9 @@ impl Track {
     pub(crate) fn attach_props(&mut self, props: crate::entity_geometry::Props) {
         self.props = Some(props);
     }
+    pub fn props(&self) -> Option<&crate::entity_geometry::Props> {
+        self.props.as_ref()
+    }
     pub fn has_props(&self) -> bool {
         self.props.is_some()
     }

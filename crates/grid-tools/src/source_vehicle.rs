@@ -731,6 +731,10 @@ impl Runtime {
     pub fn pose(&self) -> [f32; 16] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x1d0 / 4 + i]))
     }
+    /// Read-only collision world (diagnostics and presentation).
+    pub fn track(&self) -> &Track {
+        &self.track
+    }
     /// Registered static track shapes (packed chunks, boundary, route props).
     pub fn track_shape_count(&self) -> usize {
         self.track.shape_count()
@@ -1389,6 +1393,7 @@ mod tests {
                 && enabled.state.car.owner.physical != legacy.state.car.owner.physical
             {
                 assert!(enabled.last_body_contacts > 0);
+                // Boundary sheet (247) or a visible route barrier/prop (248).
                 assert!(
                     enabled
                         .state
@@ -1396,7 +1401,7 @@ mod tests {
                         .groups
                         .contacts
                         .iter()
-                        .any(|c| c[0x2c / 4] == 247)
+                        .any(|c| matches!(c[0x2c / 4], 247 | 248))
                 );
                 first_difference = Some(tick + 1);
             }
