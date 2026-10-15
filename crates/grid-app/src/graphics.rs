@@ -34,6 +34,7 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    pub smooth_tyres: bool,
     pub track_grade: bool,
     pub saved_grade: Option<grid_formats::graphics_grade::Grade>,
     pub benchmark_frames: Option<u32>,
@@ -46,6 +47,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            smooth_tyres: true,
             track_grade: false,
             saved_grade: None,
             benchmark_frames: None,

@@ -936,6 +936,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--tyre-detail" => {
+                graphics.smooth_tyres = match args.next().as_deref() {
+                    Some("source") => false,
+                    Some("smooth") => true,
+                    _ => return Err("--tyre-detail needs source or smooth".into()),
+                }
+            }
             "--grade" => {
                 graphics.track_grade = match args.next().as_deref() {
                     Some("authored") => false,
@@ -1573,6 +1580,7 @@ fn setup(
         .collect();
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
+            && graphics.smooth_tyres
             && part.wheel.is_some()
             && matches!(
                 part.material
