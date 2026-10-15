@@ -41,9 +41,11 @@ def inventory(path):
         payload_bytes = sum(nodes[k]["payload_size"] for j in blocks for k in children[j]
                             if nodes[k]["name"] == "TEXTUREIMAGEBLOCKDATA")
         levels, packed_bytes, w, h = 0, 0, width, height
+        mip_sizes = []
         if block_bytes is not None and width and height:
             while True:
-                packed_bytes += ((w + 3) // 4) * ((h + 3) // 4) * block_bytes
+                mip_sizes.append(((w + 3) // 4) * ((h + 3) // 4) * block_bytes)
+                packed_bytes += mip_sizes[-1]
                 levels += 1
                 if w == 1 and h == 1:
                     break
@@ -52,10 +54,16 @@ def inventory(path):
         # Mirrors the documented reader's size/count contract, not a decode proof.
         chain_matches = (len(blocks) == 1 and levels > 1 and declared == levels - 1
                          and payload_bytes == packed_bytes)
+        target = declared + 1 if declared is not None else 0
+        declared_bytes = sum(mip_sizes[:target]) if 1 < target <= levels else None
+        declared_matches = len(blocks) == 1 and declared_bytes == payload_bytes
         textures.append(dict(id=attrs.get("id", {}).get("string"), width=width,
                              height=height, format=fmt, declared_tail_levels=declared,
                              payload_bytes=payload_bytes, expected_full_chain_bytes=packed_bytes,
-                             current_chain_contract_matches=chain_matches))
+                             current_chain_contract_matches=chain_matches,
+                             declared_chain_contract_matches=declared_matches,
+                             expected_declared_chain_bytes=declared_bytes,
+                             validated_mip_levels=target if declared_matches else 1))
     return dict(resource=str(path), bytes=source["bytes"], sha256=source["sha256"],
                 textures=textures, texture_sampler_definitions=dict(sorted(samplers.items())))
 
@@ -75,7 +83,10 @@ def main():
     resources = [inventory(args.game_root / relative) for relative in RESOURCES]
     summary = dict(resources=len(resources), textures=sum(len(r["textures"]) for r in resources),
                    chain_matches=sum(t["current_chain_contract_matches"]
-                                     for r in resources for t in r["textures"]))
+                                     for r in resources for t in r["textures"]),
+                   partial_chain_matches=sum(t["declared_chain_contract_matches"]
+                                             and not t["current_chain_contract_matches"]
+                                             for r in resources for t in r["textures"]))
     report = dict(scope="Static resource inventory; sampler names do not prove channel semantics",
                   summary=summary, resources=resources)
     output.parent.mkdir(parents=True, exist_ok=True)
