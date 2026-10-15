@@ -71,3 +71,11 @@ That mapping is [I]; renders at ~1 s / ~2.9 s / after GO show 1 red, 3 red and t
 
 While racing, the HUD shows the time to the car directly ahead and directly behind: the race-distance
 difference along the AI line divided by the player's speed (floor 10 m/s). Authored presentation.
+
+## Field size (F299)
+
+The live original runs 12 AI driver objects (a 12-car touring field), and the route has 20 grid slots.
+The prototype's shared world caps at 8 cars: the 64-slot contact pool and 256-row solver guards are
+bounded-domain limits of the port, not original values. `Play GRID Race.cmd` now starts 7 AI opponents
+with the player at the back (8th). A windowed 8-car race with damage, eight engine mixers and
+characteristics runs in real time (36.6 s simulated at 38.1 s wall clock, including startup).
