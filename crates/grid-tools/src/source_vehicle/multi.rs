@@ -29,6 +29,8 @@ pub struct MultiRuntime {
     /// Track/prop/boundary body records and car-to-car records of the last tick.
     pub last_body_contacts: usize,
     pub last_car_contacts: usize,
+    /// Active contact slots of the last tick (wheel, body and car records).
+    last_active: usize,
 }
 
 const POOL: usize = 64;
@@ -106,7 +108,19 @@ impl MultiRuntime {
             ticks: 0,
             last_body_contacts: 0,
             last_car_contacts: 0,
+            last_active: 0,
         })
+    }
+
+    /// Car index pairs (first, second) of the last tick's car-to-car contacts.
+    pub fn contact_pairs(&self) -> Vec<(usize, usize)> {
+        let n = self.world.groups.bodies.len();
+        self.world.groups.contacts[..self.last_active.min(self.world.groups.contacts.len())]
+            .iter()
+            .filter(|c| c[0xc / 4] & 0xff == 0 && c[2] != 0 && c[1] != 0)
+            .map(|c| (c[1] as usize - 1, c[2] as usize - 1))
+            .filter(|&(a, b)| a < n && b < n)
+            .collect()
     }
 
     /// World shape token (one-based) of car `i`'s body shape.
@@ -124,6 +138,7 @@ impl MultiRuntime {
         }
         self.world = self.initial_world.clone();
         self.ticks = 0;
+        self.last_active = 0;
         self.last_body_contacts = 0;
         self.last_car_contacts = 0;
     }
@@ -402,6 +417,7 @@ impl MultiRuntime {
         self.ticks += 1;
         self.last_body_contacts = body_contacts;
         self.last_car_contacts = car_contacts;
+        self.last_active = active;
         Ok(())
     }
 }

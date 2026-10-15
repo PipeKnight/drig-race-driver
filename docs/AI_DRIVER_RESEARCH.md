@@ -321,3 +321,10 @@ Arbitration by score (0x79A400). Relevant parameters: ov* (overtake: reject
    the PID gating flag; confirm sign conventions of heading error and yaw term.
 4. corner_speed_out_ratio consumer; avoidance 0x788A90; overtake/alongside.
 5. Difficulty provider and driver characteristic source.
+
+## Corrections (from the overtaking research, F294)
+
+- The waypoint type numbers are zero-based: racing_line 0, left_racing_limit 1,
+  right_racing_limit 2, left_track_limit 3, right_track_limit 4.
+- The characteristic numbers start at 0 (aggression 0, …).
+- AI view +0xE0 is the planned (smoothed) offset at the car, not a measured one.

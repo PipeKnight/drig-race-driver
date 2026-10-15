@@ -79,3 +79,51 @@ With `--deformation`, each opponent's body parts own their mesh copies and are r
 from that car's own deformation field when it changes. Before this fix the opponents reused
 the player's mesh handles and would have shown the player's dents. Car-to-car impacts still
 produce no dents (several-car contact groups solve without deformation phases).
+
+## Traffic behaviours (F294)
+
+Ported from [AI_OVERTAKING_RESEARCH.md](AI_OVERTAKING_RESEARCH.md). Each tick:
+
+- **Tests:**
+  - brake_for_vehicle: pass vehicle (clear sideways by brakeBufferZone 1 m and same heading),
+    or a stopping check with the speed-scaled separation, the braking-distance table and
+    prediction ratio 3 → follow distance 100 or sep2;
+  - attempt_overtake: nearest car ahead within 60 m and 12 m sideways; auto-accept 3 m,
+    closing 0.1 m/s with time under 3 s, or a slow car; target kept while closing > −2 m/s;
+  - alongside: overlap within 10 m with on/off margins 1.0/1.2 front and 1.0/2.0 rear;
+    nearest gap per side.
+- **Arbitration:** alongside 8 > overtake 5 (3 s minimum fire) > race 1.
+- **Request:** desired offset, merge rate, desired speed, throttle cap and follow fields.
+  - The race behaviour keeps the random offsets and the throttle_confidence cap.
+  - Overtake and alongside run with cap 1.0.
+- **Overtake drive:** side choice every 0.25 s or on a new target, relative to our planned
+  line and the room to the racing limits. States: 1/2 push the planned offset at 4 m/s
+  (0.5 m/s toward the outside of a bend above 12 m/s), 3/5 hold, 4 follow the target at
+  3 m and its speed.
+- **Alongside drive:** merge 4 m/s; keep 2.5 m from a car on one side and return to the
+  line once the gap is beyond 5 m.
+- **Follow:** follow throttle (0x77A630) and follow brake (0x77A1E0) use the request's follow
+  car and distance. The follow brake is the cap min(+0x78 = 1.0, brFollowSpeedBrake), i.e.
+  full braking. This replaces the earlier authored follow-car choice and closing-speed brake.
+
+AUTHORED or omitted:
+- the path-obstacle scan is a straight corridor (own heading, combined widths
+  + 1.5 m, 50° view cone from the rear point);
+- alongside yield and the far-side squeeze are omitted;
+- cars on both sides hold the planned offset;
+- avoid, block and draft are not ported (block and draft are disabled by default anyway);
+- the bend-direction sign is [I];
+- car geometry uses Lacetti half width 0.9 m and half length 2.24 m.
+
+Checks (headless `grid-opponent-race`; `GRID_SLOW_CAR0=f` scales car 0's throttle,
+`GRID_TRACE_BEHAVIOUR=1` prints behaviour changes and contact pairs):
+- solo laps unchanged, bit-identical (88.42 / 86.28 s);
+- slowed leader (`GRID_SLOW_CAR0=0.6`, 2 cars): passed side by side (alongside ticks
+  81–177) with **0 car contacts**, then lapped the same way;
+- 4 equal cars, 2 laps:
+  - positions change (car 1 wins 2:57.808, gaps 1.39/2.74/4.38 s);
+  - 192 car-contact records in four episodes: three while the pack bunches into the first
+    corners (ticks 663–856), one brief touch at tick ~2608;
+- 8 cars: all finish 2 laps, 521 records;
+- app autopilot race with damage, 1 lap, 3 opponents: You 1:31.018, AI 1 +1.238,
+  AI 3 +2.933, AI 2 +4.161 (est.).

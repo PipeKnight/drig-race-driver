@@ -1751,14 +1751,9 @@ fn drive_tick(
             .multi
             .cars
             .iter()
+            .enumerate()
             .skip(1)
-            .map(|c| {
-                let p = c.pose();
-                Other {
-                    position: [p[12], p[13], p[14]],
-                    velocity: c.velocity(),
-                }
-            })
+            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
             .collect();
         let view = View {
             pose: car.pose(),
@@ -1804,13 +1799,8 @@ fn drive_tick(
         // Car 0 of the shared world is the player runtime, held outside it here.
         let cars: Vec<Other> = std::iter::once(&driving.runtime)
             .chain(opponents.multi.cars.iter().skip(1))
-            .map(|c| {
-                let p = c.pose();
-                Other {
-                    position: [p[12], p[13], p[14]],
-                    velocity: c.velocity(),
-                }
-            })
+            .enumerate()
+            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
             .collect();
         for (i, driver) in opponents.drivers.iter_mut().enumerate() {
             let car = &opponents.multi.cars[i + 1];

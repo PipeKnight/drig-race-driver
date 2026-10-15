@@ -87,6 +87,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut standings =
         grid_tools::race::Standings::new(&data.line, 2, start, &positions_of(&multi));
     let names: Vec<String> = (0..cars).map(|i| format!("car{i}")).collect();
+    // GRID_SLOW_CAR0=f scales car 0's throttle (slowed-leader overtaking check).
+    let slow: f32 = std::env::var("GRID_SLOW_CAR0")
+        .ok()
+        .map(|v| v.parse())
+        .transpose()?
+        .unwrap_or(1.);
+    let mut behaviours = vec![(grid_tools::ai_driver::Behaviour::Race, 0u8); cars];
+    let mut pair_contacts = vec![vec![0usize; cars]; cars];
     let mut car_contacts = 0;
     let mut laps: Vec<Vec<f64>> = vec![Vec::new(); cars];
     let mut maximum_speed = 0f32;
@@ -94,13 +102,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let positions: Vec<Other> = multi
             .cars
             .iter()
-            .map(|c| {
-                let p = c.pose();
-                Other {
-                    position: [p[12], p[13], p[14]],
-                    velocity: c.velocity(),
-                }
-            })
+            .enumerate()
+            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
             .collect();
         let mut controls: Vec<Controls> = Vec::with_capacity(cars);
         for (i, (car, driver)) in multi.cars.iter().zip(&mut drivers).enumerate() {
@@ -123,11 +126,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Driver::Pursuit(p) => p.controls(car.pose(), car.velocity()),
             });
         }
+        controls[0].throttle *= slow;
+        for (i, driver) in drivers.iter().enumerate() {
+            if let Driver::Ai(ai) = driver {
+                let now = (ai.telemetry.behaviour, ai.telemetry.overtake_state);
+                if now != behaviours[i] {
+                    if std::env::var_os("GRID_TRACE_BEHAVIOUR").is_some() {
+                        println!(
+                            "behaviour tick={} car{i} {:?} state={}",
+                            multi.ticks, now.0, now.1
+                        );
+                    }
+                    behaviours[i] = now;
+                }
+            }
+        }
         if let Err(error) = multi.tick(&controls) {
             println!("failure tick={} error={error}", multi.ticks + 1);
             break;
         }
         car_contacts += multi.last_car_contacts;
+        let pairs = multi.contact_pairs();
+        if !pairs.is_empty() && std::env::var_os("GRID_TRACE_BEHAVIOUR").is_some() {
+            println!("contact tick={} pairs={pairs:?}", multi.ticks);
+        }
+        for c in pairs {
+            pair_contacts[c.0][c.1] += 1;
+        }
         standings.update(
             &data.line,
             &positions_of(&multi),
@@ -186,6 +211,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             p[14],
             car.terminal_wheel()
         );
+    }
+    for (i, row) in pair_contacts.iter().enumerate() {
+        if row.iter().any(|&n| n > 0) {
+            println!("contacts car{i} with {row:?}");
+        }
     }
     for line in standings.classification(&names) {
         println!("classification {line}");

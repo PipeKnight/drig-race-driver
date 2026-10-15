@@ -11,14 +11,17 @@
 //! PID vfunc is not decompiled) and its speed-dependent prediction and corner
 //! factor terms are not yet recovered.
 //!
-//! Following uses the recovered follow throttle (0x77A630) and follow brake
-//! (0x77A1E0) with the shipped thFollow* values; the choice of the followed car
-//! and the follow-brake amount are authored (the setting behaviour is not
-//! recovered). A stuck car reverses briefly: AUTHORED stand-in for the
-//! unrecovered recovery behaviour.
+//! Traffic (docs/AI_OVERTAKING_RESEARCH.md): the brake_for_vehicle,
+//! attempt_overtake and alongside tests feed a per-tick request; behaviours
+//! arbitrate by priority (alongside 8 > overtake 5 > race 1); the follow
+//! throttle (0x77A630) and brake (0x77A1E0) consume the request's follow
+//! fields. AUTHORED where not recovered: the path-obstacle scan is a straight
+//! corridor along the own heading, the alongside yield and far-side squeeze
+//! are omitted, cars on both sides hold the planned offset, and a stuck car
+//! reverses briefly (the recovery behaviour is not recovered).
 //!
 //! Selected scope, not recovered or not yet ported: corner-speed scale A/B
-//! (A=1, B=0), alongside/overtake/avoidance behaviours,
+//! (A=1, B=0), avoid/block/draft behaviours,
 //! traction control, AI ABS cap, start-line reaction, choreographed mistakes,
 //! catch-up. The random offset generator is an authored LCG (the original RNG
 //! stream is not identified). Characteristic values default to 1.0 (the live
@@ -323,8 +326,8 @@ pub struct Parameters {
     corner_lift: [f32; 2],
     /// thFollow small/medium throttle, dist big/medium/small, speed small/medium.
     follow: [f32; 7],
-    follow_distance: f32,
     follow_brake: f32,
+    traffic: Traffic,
     deviation_small: f32,
     deviation_large: f32,
 }
@@ -333,6 +336,7 @@ pub struct Parameters {
 /// (docs/AI_DRIVER_RESEARCH.md §4).
 const BRAKE_LINE_CANCEL_FACTOR: f32 = 0.8;
 const SLOW_SPEED: f32 = 3.;
+const MINIMUM_MOVING_SPEED: f32 = 1.;
 const SLIDE_LIFT_MIN_SPEED: f32 = 5.;
 /// Grip input for the speed->distance tables. The AI car-view grip (+0x144)
 /// is not yet traced; the lowest shipped grip is used.
@@ -356,6 +360,7 @@ impl Parameters {
                 .copied()
                 .ok_or(format!("AI vehicle config {k} absent"))
         };
+        let d_or = |k: &str, default: f32| data.driver.get(k).copied().unwrap_or(default);
         let m = |k: &str| {
             data.mappings
                 .get(k)
@@ -430,19 +435,183 @@ impl Parameters {
                 d("thFollowSpeedSmall")?,
                 d("thFollowSpeedMedium")?,
             ],
-            follow_distance: m("follow_distance")?,
             follow_brake: d("brFollowSpeedBrake")?,
+            traffic: Traffic {
+                ov_reject: d_or("ovRejectDistance", 60.),
+                ov_side_reject: d_or("ovSideRejectDistance", 12.),
+                ov_speed_difference: d_or("ovSpeedDifference", 0.1),
+                ov_continue: d_or("ovContinueSpeedDifference", -2.),
+                ov_time: d_or("ovTime", 3.),
+                ov_auto_accept: d_or("ovAutoAcceptDistance", 3.),
+                ov_slow_speed: d_or("ovSlowSpeed", 12.),
+                ov_slow_reject: d_or("ovSlowRejectDistance", 12.),
+                ov_follow: d_or("ovFollowDistance", 3.),
+                ov_decision: d_or("ovDecisionTimeOut", 0.25),
+                ov_safe: d_or("ovSafeSeparationDistance", 1.),
+                ov_desired: d_or("ovDesiredSeparationDistance", 2.5),
+                ov_min_fire: d_or("ovMinFireTime", 3.),
+                ov_merge: d_or("ovOffsetMergeFactor", 4.),
+                ov_merge_corner: d_or("ovOffsetMergeFactorCorner", 0.5),
+                ov_corner: [
+                    d_or("ovMinCornerCurvature", 0.001),
+                    d_or("ovMaxCornerCurvature", 0.04),
+                ],
+                as_reject: d_or("asRejectDistance", 10.),
+                as_merge: d_or("asOffsetMergeFactor", 4.),
+                front_projection: [
+                    m("alongside_front_projection_on_distance")?,
+                    m("alongside_front_projection_off_distance")?,
+                ],
+                rear_projection: [
+                    m("alongside_rear_projection_on_distance")?,
+                    m("alongside_rear_projection_off_distance")?,
+                ],
+                min_space: m("alongside_min_space_to_leave_distance")?,
+                max_space: m("alongside_max_space_to_leave_distance")?,
+                pass_angle: d_or("avPassAngle", 0.15),
+                similar_angle: d_or("avSimilarDirectionMaxAngle", 0.5),
+                pass_slow_speed: d_or("avPassSlowSpeed", 15.),
+                pass_spare_room: d_or("avPassMaxSpareRoom", 4.),
+                pass_side_speed: [
+                    d_or("avPassSideSpeedNear", 2.),
+                    d_or("avPassSideSpeedFar", 10.),
+                ],
+                pass_relative_speed: d_or("avPassMaxRelativeSpeed", 20.),
+                separation_speed: d_or("avSeparationSpeedDiff", 5.),
+                slow_speed: d_or("avSlowSpeed", 40.),
+                pedal_push: d_or("avPercentagePedalPushDistance", 1.2),
+                buffer: v("brakeBufferZone")?,
+                extra_prediction: v("brakeExtraPrediction")?,
+                separation: [
+                    m("safe_separation_distance_small")?,
+                    m("safe_separation_distance_large")?,
+                ],
+                prediction_ratio: m("brake_for_vehicle_prediction_ratio")?,
+                cruise_speed: m("brake_for_vehicle_cruise_speed")?,
+                view_angle: m("driver_view_angle")?,
+            },
             deviation_small: m("deviation_from_racing_line_small")?,
             deviation_large: m("deviation_from_racing_line_large")?,
         })
     }
 }
 
-/// Another car seen by the AI.
+/// Traffic behaviour parameters (shipped config, built-in defaults where absent).
+#[derive(Clone, Debug)]
+pub struct Traffic {
+    ov_reject: f32,
+    ov_side_reject: f32,
+    ov_speed_difference: f32,
+    ov_continue: f32,
+    ov_time: f32,
+    ov_auto_accept: f32,
+    ov_slow_speed: f32,
+    ov_slow_reject: f32,
+    ov_follow: f32,
+    ov_decision: f32,
+    ov_safe: f32,
+    ov_desired: f32,
+    ov_min_fire: f32,
+    ov_merge: f32,
+    ov_merge_corner: f32,
+    ov_corner: [f32; 2],
+    as_reject: f32,
+    as_merge: f32,
+    front_projection: [f32; 2],
+    rear_projection: [f32; 2],
+    min_space: f32,
+    max_space: f32,
+    pass_angle: f32,
+    similar_angle: f32,
+    pass_slow_speed: f32,
+    pass_spare_room: f32,
+    pass_side_speed: [f32; 2],
+    pass_relative_speed: f32,
+    separation_speed: f32,
+    slow_speed: f32,
+    pedal_push: f32,
+    buffer: f32,
+    extra_prediction: f32,
+    separation: [f32; 2],
+    prediction_ratio: f32,
+    cruise_speed: f32,
+    view_angle: f32,
+}
+
+/// Lacetti half width and half length (m) from the body mesh extents; the
+/// front/rear bumper points are the centre +/- forward * half length.
+pub const HALF_WIDTH: f32 = 0.9;
+pub const HALF_LENGTH: f32 = 2.24;
+
+/// Another car seen by the AI (observed record: id, centre, axes, velocity).
 #[derive(Clone, Copy)]
 pub struct Other {
+    pub id: u32,
     pub position: [f32; 3],
     pub velocity: [f32; 4],
+    /// Unit forward and car-left (+X) axes.
+    pub forward: [f32; 3],
+    pub left: [f32; 3],
+}
+
+impl Other {
+    /// From a 4x4 row-major pose (rows 0/2 = left/forward, 12..14 translation).
+    pub fn from_pose(id: u32, pose: [f32; 16], velocity: [f32; 4]) -> Self {
+        Self {
+            id,
+            position: [pose[12], pose[13], pose[14]],
+            velocity,
+            forward: [pose[8], pose[9], pose[10]],
+            left: [pose[0], pose[1], pose[2]],
+        }
+    }
+    fn speed(&self) -> f32 {
+        let v = self.velocity;
+        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+    }
+    fn front(&self) -> [f32; 3] {
+        std::array::from_fn(|k| self.position[k] + self.forward[k] * HALF_LENGTH)
+    }
+    fn rear(&self) -> [f32; 3] {
+        std::array::from_fn(|k| self.position[k] - self.forward[k] * HALF_LENGTH)
+    }
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn horizontal(a: [f32; 3]) -> [f32; 3] {
+    let l = (a[0] * a[0] + a[2] * a[2]).sqrt().max(1e-6);
+    [a[0] / l, 0., a[2] / l]
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Behaviour {
+    #[default]
+    Race,
+    Overtake,
+    Alongside,
+}
+
+/// Overtake behaviour object (+0x30 target, +0x34 state, +0x38 decision timer,
+/// +0x3C minimum-fire timer).
+#[derive(Clone, Copy, Default)]
+struct Overtake {
+    target: Option<u32>,
+    state: u8,
+    decision: f32,
+    min_fire: f32,
+}
+
+/// Per-tick request fields edited by the behaviours.
+struct Request {
+    desired_offset: f32,
+    merge: f32,
+    desired_speed: f32,
+    throttle_cap: f32,
+    /// Followed car and follow distance (+0x70/+0x74); follow-brake cap +0x78.
+    follow: Option<(Other, f32)>,
+    follow_brake_cap: f32,
 }
 
 /// Car state seen by the AI.
@@ -478,6 +647,9 @@ pub struct Telemetry {
     pub line_target: f32,
     pub governor_target: f32,
     pub offset: f32,
+    pub behaviour: Behaviour,
+    pub overtake_state: u8,
+    pub following: bool,
     /// Signed distance of the car from the racing line (positive right).
     pub line_error: f32,
     pub slip: f32,
@@ -498,6 +670,10 @@ pub struct AiDriver {
     /// Lateral PID integral and previous error.
     pid_integral: f32,
     pid_error: Option<f32>,
+    behaviour: Behaviour,
+    overtake: Overtake,
+    attempt_target: Option<u32>,
+    alongside_fired: bool,
     /// Authored stuck recovery: (time slow, reverse time left).
     stuck: f32,
     reversing: f32,
@@ -541,6 +717,10 @@ impl AiDriver {
             alone: false,
             pid_integral: 0.,
             pid_error: None,
+            behaviour: Behaviour::Race,
+            overtake: Overtake::default(),
+            attempt_target: None,
+            alongside_fired: false,
             stuck: 0.,
             reversing: 0.,
             lines: BrakeLineState {
@@ -631,68 +811,353 @@ impl AiDriver {
             0.
         };
 
-        // Followed car (AUTHORED choice): nearest car ahead within a car width
-        // of our path and the follow range.
-        let followed = others
-            .iter()
-            .filter_map(|o| {
-                let d = sub(o.position, position);
-                let ahead = d[0] * forward[0] + d[1] * forward[1] + d[2] * forward[2];
-                let side = d[0] * right[0] + d[1] * right[1] + d[2] * right[2];
-                (ahead > 0. && side.abs() < 2.2 && ahead < p.follow_distance + p.follow[2] + 10.)
-                    .then_some((ahead, o))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, o)| {
-                let d = sub(o.position, position);
-                let w = o.velocity;
-                (
-                    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() - p.follow_distance,
-                    d[0] * forward[0] + d[1] * forward[1] + d[2] * forward[2] - p.follow_distance,
-                    speed - (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt(),
-                )
-            });
-
         // Track view: progress along the racing line (0x79C360).
         let (segment, arc, line_distance) = data.line.project(position, self.segment);
         self.segment = Some(segment);
-        let (_, here, _, _) = data.line.at(arc);
+        let (_, here, _, limits_here) = data.line.at(arc);
+        let tr = p.traffic.clone();
+        let own = Other::from_pose(0, view.pose, view.velocity);
+        let f = horizontal(forward);
+        // Car-right in the original's sense is our -X (car left is +X).
+        let right_vec = [-right[0], -right[1], -right[2]];
+        let (own_front, own_rear) = (own.front(), own.rear());
 
-        // Race behaviour: alone test and random lateral offsets.
+        // brake_for_vehicle (0x78F6F0) on the nearest car in our path. AUTHORED
+        // path scan: a straight corridor along our heading inside the view cone.
+        let mut pass_vehicle = None;
+        let mut brake_follow: Option<(Other, f32)> = None;
+        let cone = (tr.view_angle.to_radians())
+            .clamp(0., std::f32::consts::PI)
+            .cos();
+        if let Some(r) = others
+            .iter()
+            .filter(|r| {
+                let d = sub(r.position, position);
+                let along = dot3(d, f);
+                let lat = dot3(d, right_vec);
+                let to_rear = sub(r.rear(), own_rear);
+                let visible = dot3(horizontal(to_rear), f) >= cone;
+                along > 0.
+                    && along < 200.
+                    && lat.abs() < 2. * HALF_WIDTH + tr.buffer + 0.5
+                    && visible
+            })
+            .min_by(|a, b| {
+                dot3(sub(a.position, position), f).total_cmp(&dot3(sub(b.position, position), f))
+            })
+        {
+            let w = 2. * HALF_WIDTH;
+            let lat = dot3(sub(r.position, position), right_vec);
+            let (gap_r, gap_l) = (lat - w, -lat - w);
+            let same = dot3(f, horizontal(r.forward));
+            let closing = speed - r.speed();
+            if same > tr.pass_angle.cos().abs() && (gap_r > tr.buffer || gap_l > tr.buffer) {
+                let allowed = remap(
+                    gap_r.max(gap_l) - tr.buffer,
+                    0.,
+                    tr.pass_spare_room,
+                    tr.pass_side_speed[0],
+                    tr.pass_side_speed[1],
+                );
+                let side_speed = dot3(
+                    std::array::from_fn(|k| r.velocity[k] - view.velocity[k]),
+                    right_vec,
+                )
+                .abs();
+                if r.speed() < tr.pass_slow_speed
+                    || side_speed < remap(closing, 0., tr.pass_relative_speed, allowed, 0.)
+                {
+                    pass_vehicle = Some(*r);
+                }
+            }
+            if pass_vehicle.is_none() {
+                let similar = same > tr.similar_angle.cos().abs();
+                let dist = if similar {
+                    dot3(sub(r.rear(), own_front), f)
+                } else {
+                    (dot3(sub(r.position, position), sub(r.position, position))).sqrt()
+                        - 2. * HALF_LENGTH
+                };
+                let sep = remap(
+                    closing,
+                    0.,
+                    tr.separation_speed,
+                    tr.separation[0],
+                    tr.separation[1],
+                );
+                let sep2 = remap(speed, 0., tr.slow_speed, 0., sep);
+                let available = (dist.abs() - sep2).max(0.);
+                let multiplier = remap(
+                    speed,
+                    0.,
+                    tr.slow_speed,
+                    1.,
+                    tr.extra_prediction + tr.prediction_ratio,
+                );
+                let safe = closing <= 0.
+                    || available / closing * speed
+                        > (speed / p.brake_on_speed.max(1e-3) * tr.pedal_push
+                            + data.braking_distance(
+                                TABLE_GRIP,
+                                speed,
+                                (speed - closing).clamp(0., speed),
+                            ))
+                            * multiplier;
+                if !safe {
+                    let distance = if similar && closing < tr.cruise_speed {
+                        sep2
+                    } else {
+                        100.
+                    };
+                    brake_follow = Some((*r, distance));
+                }
+            }
+        }
+
+        // attempt_overtake (0x77DB90): nearest qualifying car ahead.
+        let mut best = tr.ov_reject;
+        let mut attempt = None;
+        for r in others {
+            let d = sub(r.rear(), own_front);
+            let along = dot3(d, f);
+            let lat = dot3(d, horizontal(r.left)).abs();
+            let closing = speed - r.speed();
+            if !(0. < along && along < best && lat < tr.ov_side_reject) {
+                continue;
+            }
+            let ok = if Some(r.id) == self.attempt_target {
+                closing > tr.ov_continue
+            } else {
+                along < tr.ov_auto_accept
+                    || (closing > tr.ov_speed_difference && along / closing < tr.ov_time)
+                    || (closing <= tr.ov_speed_difference
+                        && along < tr.ov_slow_reject
+                        && r.speed() < tr.ov_slow_speed)
+            };
+            if ok {
+                best = along;
+                attempt = Some(*r);
+            }
+        }
+        self.attempt_target = attempt.map(|r| r.id);
+
+        // alongside (0x795C00): overlapping cars within asRejectDistance.
+        let margin = usize::from(self.alongside_fired);
+        let (front_m, rear_m) = (tr.front_projection[margin], tr.rear_projection[margin]);
+        let mut slots: [Option<(f32, bool, Other)>; 2] = [None, None];
+        let mut fired = false;
+        for r in others {
+            if dot3(sub(r.position, position), sub(r.position, position)).sqrt() > tr.as_reject {
+                continue;
+            }
+            let front_point: [f32; 3] = std::array::from_fn(|k| own_front[k] + f[k] * front_m);
+            let rear_point: [f32; 3] = std::array::from_fn(|k| own_rear[k] - f[k] * rear_m);
+            let beside = dot3(sub(r.rear(), front_point), f) < 0.
+                && dot3(sub(r.front(), rear_point), f) > 0.;
+            if !beside {
+                continue;
+            }
+            fired = true;
+            let strict =
+                dot3(sub(r.rear(), own_front), f) < 0. && dot3(sub(r.front(), own_rear), f) > 0.;
+            let lat = dot3(sub(r.rear(), own_front), horizontal(right_vec));
+            let gap = (lat.abs() - 2. * HALF_WIDTH).max(0.);
+            let slot = usize::from(lat > 0.);
+            let replace = match slots[slot] {
+                None => true,
+                Some((g, s, _)) => (strict || !s) && gap < g,
+            };
+            if replace {
+                slots[slot] = Some((gap, strict, *r));
+            }
+        }
+        self.alongside_fired = fired;
+
+        // Arbitration (0x79A400): alongside 8 > overtake 5 > race 1.
+        let overtake_target = pass_vehicle.or(attempt);
+        let next = if fired {
+            Behaviour::Alongside
+        } else if overtake_target.is_some() || self.overtake.min_fire > 0. {
+            Behaviour::Overtake
+        } else {
+            Behaviour::Race
+        };
+        if next != self.behaviour {
+            if self.behaviour == Behaviour::Overtake {
+                self.overtake.min_fire = 0.;
+            }
+            if next == Behaviour::Overtake {
+                self.overtake = Overtake {
+                    min_fire: tr.ov_min_fire,
+                    ..Overtake::default()
+                };
+            }
+            if next == Behaviour::Race {
+                // Race reactivation: a fresh random offset at the next update [I].
+                self.offset_timer = p.ra_generate_time;
+            }
+            self.behaviour = next;
+        }
+
+        // Common setup (0x789700) and the race behaviour's offsets.
         let nearest = others
             .iter()
-            .map(|o| {
-                let d = sub(o.position, position);
-                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-            })
+            .map(|o| dot3(sub(o.position, position), sub(o.position, position)).sqrt())
             .fold(f32::INFINITY, f32::min);
         if self.alone && nearest < p.ra_alone_off {
             self.alone = false;
         } else if !self.alone && nearest > p.ra_alone_on {
             self.alone = true;
         }
-        self.offset_timer += dt;
-        if p.ra_generate && self.offset_timer >= p.ra_generate_time {
-            self.offset_timer = 0.;
-            let deviation = if self.alone {
-                p.deviation_small
-            } else {
-                p.deviation_large
-            };
-            self.desired_offset = self.uniform() * deviation;
+        let mut request = Request {
+            desired_offset: self.offset,
+            merge: p.ra_merge,
+            desired_speed: f32::MAX,
+            throttle_cap: 1.,
+            follow: brake_follow,
+            follow_brake_cap: 1.,
+        };
+        let corner =
+            clamp01((self.curvature.abs() - tr.ov_corner[0]) / (tr.ov_corner[1] - tr.ov_corner[0]));
+        match self.behaviour {
+            Behaviour::Race => {
+                self.offset_timer += dt;
+                if p.ra_generate && self.offset_timer >= p.ra_generate_time {
+                    self.offset_timer = 0.;
+                    let deviation = if self.alone {
+                        p.deviation_small
+                    } else {
+                        p.deviation_large
+                    };
+                    self.desired_offset = self.uniform() * deviation;
+                }
+                request.desired_offset = self.desired_offset;
+                request.merge = if self.alone {
+                    p.ra_merge_alone
+                } else if self.curvature.abs() > p.cornering_curvature {
+                    p.ra_merge_cornering
+                } else {
+                    p.ra_merge
+                };
+                request.throttle_cap = p.throttle_confidence;
+            }
+            Behaviour::Overtake => {
+                // Drive 0x78A330: decide a side every ovDecisionTimeOut or on a new target.
+                match overtake_target {
+                    None => self.overtake.state = 5,
+                    Some(target) => {
+                        self.overtake.decision += dt;
+                        if self.overtake.decision > tr.ov_decision
+                            || self.overtake.target != Some(target.id)
+                        {
+                            self.overtake.target = Some(target.id);
+                            self.overtake.decision = 0.;
+                            // Side choice 0x77BD20 relative to our planned line.
+                            let (_, target_arc, target_lat) =
+                                data.line.project(target.position, None);
+                            let _ = target_arc;
+                            let s = target_lat - self.offset;
+                            let dist = s.abs();
+                            let w = 2. * HALF_WIDTH;
+                            let room_l = self.offset - limits_here[0] + s;
+                            let room_r = limits_here[1] - self.offset - s;
+                            let need = w + tr.ov_safe;
+                            self.overtake.state = if dist > w + tr.ov_desired {
+                                3
+                            } else if dist > w + tr.ov_safe {
+                                if s > 0. { 1 } else { 2 }
+                            } else if self.overtake.state == 1 && room_l > need {
+                                1
+                            } else if self.overtake.state == 2 && room_r > need {
+                                2
+                            } else {
+                                match (room_l > need, room_r > need) {
+                                    (true, true) if s > HALF_WIDTH => 1,
+                                    (true, true) if s < -HALF_WIDTH => 2,
+                                    (true, true) => {
+                                        if room_l > room_r {
+                                            1
+                                        } else {
+                                            2
+                                        }
+                                    }
+                                    (true, false) => 1,
+                                    (false, true) => 2,
+                                    (false, false) => 4,
+                                }
+                            };
+                        }
+                        // Execute 0x77C180.
+                        match self.overtake.state {
+                            1 | 2 => {
+                                let toward_negative = self.overtake.state == 1;
+                                request.desired_offset = self.offset
+                                    + if toward_negative { -dt } else { dt } * tr.ov_merge;
+                                // Positive curvature is a left-hand bend here [I]:
+                                // moving left widens a right-hand bend.
+                                let outside = if toward_negative {
+                                    self.curvature < -tr.ov_corner[0]
+                                } else {
+                                    self.curvature > tr.ov_corner[0]
+                                };
+                                let c = if speed > tr.ov_slow_speed && outside {
+                                    corner
+                                } else {
+                                    0.
+                                };
+                                request.merge = (tr.ov_merge
+                                    + (tr.ov_merge_corner - tr.ov_merge) * c)
+                                    .clamp(tr.ov_merge_corner, tr.ov_merge);
+                            }
+                            4 => {
+                                request.desired_speed = target.speed();
+                                if request.follow.is_none() {
+                                    request.follow = Some((target, tr.ov_follow));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                self.overtake.min_fire -= dt;
+            }
+            Behaviour::Alongside => {
+                // Drive 0x799630: keep min space from a car on one side.
+                request.merge = tr.as_merge;
+                match slots {
+                    [Some((g, _, _)), None] | [None, Some((g, _, _))] => {
+                        // Slot 0: car on our left (negative offset side).
+                        let away = if slots[0].is_some() { 1. } else { -1. };
+                        let mut desired = self.offset;
+                        if g < tr.min_space {
+                            desired += away * (tr.min_space - g);
+                        }
+                        if desired * -away > 0. && g > tr.max_space {
+                            desired = 0.;
+                        }
+                        request.desired_offset = desired;
+                    }
+                    _ => request.desired_offset = self.offset,
+                }
+            }
         }
+        // Planned offset moves toward the request at its merge rate.
         if speed < SLOW_SPEED {
             self.offset = line_distance;
         } else {
-            let rate = if self.alone {
-                p.ra_merge_alone
-            } else if self.curvature.abs() > p.cornering_curvature {
-                p.ra_merge_cornering
-            } else {
-                p.ra_merge
-            };
-            self.offset = approach(self.offset, self.desired_offset, rate, rate, dt);
+            self.offset = approach(
+                self.offset,
+                request.desired_offset,
+                request.merge,
+                request.merge,
+                dt,
+            );
         }
+        let followed = request.follow.map(|(r, distance)| {
+            let gap = dot3(sub(r.rear(), own_front), sub(r.rear(), own_front)).sqrt() - distance;
+            let along = dot3(sub(r.rear(), own_front), f) - distance;
+            (gap, along, speed - r.speed())
+        });
 
         // Look-ahead, target point and curvature (0x779A20, 0x798E90).
         self.update_look_ahead(speed);
@@ -786,11 +1251,11 @@ impl AiDriver {
         // Brake (0x78E8A0): line brake, spin; cap 1.
         let mut brake = line_brake;
         // Follow brake (0x77A1E0): inside the follow distance along our heading.
-        if let Some((_, along, closing)) = followed
+        if let Some((_, along, _)) = followed
             && along < 0.
-            && speed > SLOW_SPEED
+            && speed > MINIMUM_MOVING_SPEED
         {
-            brake = brake.max((closing / p.follow[6]).clamp(0., p.follow_brake));
+            brake = brake.max(request.follow_brake_cap.min(p.follow_brake));
         }
         if slip > std::f32::consts::FRAC_PI_2 {
             brake = 1.;
@@ -803,6 +1268,7 @@ impl AiDriver {
             0.
         } else {
             let within_hold = self.lines.passed.is_some_and(|(_, _, hold, t)| t < hold);
+            governor_target = governor_target.min(request.desired_speed);
             if within_hold {
                 governor_target = governor_target.min(self.lines.passed.unwrap().1);
             } else if self.lines.active.is_some() {
@@ -850,7 +1316,9 @@ impl AiDriver {
             ] = p.follow;
             let follow = match followed {
                 Some((gap, _, closing))
-                    if gap <= dist_big && closing >= -speed_medium && speed >= SLOW_SPEED =>
+                    if gap <= dist_big
+                        && closing >= -speed_medium
+                        && speed >= MINIMUM_MOVING_SPEED =>
                 {
                     if closing <= speed_small && gap > dist_medium {
                         medium
@@ -866,7 +1334,7 @@ impl AiDriver {
                 .min(follow)
                 .min(slide)
                 .min(corner)
-                .min(p.throttle_confidence)
+                .min(request.throttle_cap)
         };
 
         // Steering (0x77AC50): heading gain plus yaw-rate damping, normalised by
@@ -914,6 +1382,9 @@ impl AiDriver {
             line_target,
             governor_target,
             offset: self.offset,
+            behaviour: self.behaviour,
+            overtake_state: self.overtake.state,
+            following: followed.is_some(),
             line_error: line_distance,
             slip,
         };
