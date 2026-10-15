@@ -1,6 +1,11 @@
 # Playable build updates
 
-Latest verified refresh: **196bb3ab86fc** (clean), built 15 October 2026 ~13:47 UTC, release SHA256
+Latest verified refresh: **36ec60cd7860** (clean), built 15 October 2026 ~13:51 UTC, release SHA256
+316077bd5ba331e9371098f81323baecbe11b244416e5455b0e4cef12ca1de01, manifest
+local/playtest/build-20261015T1351107039643Z/. Races start on the Donington gantry lights (shipped 4-second sequence).
+Source driving and Bevy checks pass.
+
+Previous refresh: **196bb3ab86fc** (clean), built 15 October 2026 ~13:47 UTC, release SHA256
 1503441c125b25c12574c71b18954a171e241a70cea8271c253d5baed2a69bee, manifest
 local/playtest/build-20261015T1346488664744Z/. Races start you at the back of the grid, and every opponent has its own engine sound
 (distance-attenuated). Source driving and Bevy checks pass.
