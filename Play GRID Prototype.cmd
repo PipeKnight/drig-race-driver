@@ -36,10 +36,16 @@ set "GRID_OPPONENT_ARGS="
 if defined GRID_PLAY_OPPONENTS set "GRID_OPPONENT_ARGS=--opponents %GRID_PLAY_OPPONENTS%"
 if defined GRID_PLAY_GRID set "GRID_OPPONENT_ARGS=%GRID_OPPONENT_ARGS% --grid-position %GRID_PLAY_GRID%"
 if defined GRID_PLAY_OPPONENTS if exist "local\ai-driver-characteristics.tsv" set "GRID_OPPONENT_ARGS=%GRID_OPPONENT_ARGS% --ai-characteristics local\ai-driver-characteristics.tsv"
+rem Driver aids (original options): GRID_PLAY_ASSISTS, e.g. tcs=off,stability=off,braking=on,gearbox=manual,
+rem or a local\assists.txt settings file. Default: every aid on, automatic gearbox, keyboard steering.
+set "GRID_ASSIST_ARGS="
+if exist "local\assists.txt" set "GRID_ASSIST_ARGS=--assists-file local\assists.txt"
+if defined GRID_PLAY_ASSISTS set "GRID_ASSIST_ARGS=--assists "%GRID_PLAY_ASSISTS%""
 set "GRID_PLAY_LOG=local\playtest\manual-%RANDOM%-%RANDOM%.log"
 echo Lacetti at Donington - experimental Rust/Bevy driving prototype
 echo Up/W: throttle   Down/S: brake   Left/A and Right/D: steer
 echo Space: handbrake   C: look back   P: pause/resume   R: reset   Escape: exit
+if defined GRID_ASSIST_ARGS echo Driver aids: %GRID_ASSIST_ARGS%   Manual gearbox: X gear up, Z gear down
 if defined GRID_PLAY_OPPONENTS echo %GRID_PLAY_OPPONENTS% opponent cars share the track, driven by the ported GRID AI (Normal difficulty).
 echo Click the game window once if keyboard input does not respond.
 if "%GRID_TRIAL_ARGS%"=="" (
@@ -56,18 +62,18 @@ if "%GRID_TRIAL_ARGS%"=="" (
 echo Private diagnostic log: %GRID_PLAY_LOG%
 echo Loading the source track can take a little while...
 if "%~2"=="" (
-  "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
+  "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% %GRID_ASSIST_ARGS% --game-root "%GRID_PLAY_ROOT%" > "%GRID_PLAY_LOG%" 2>&1
 ) else (
   echo Experimental body contacts enabled. Terminal wheel damage disables driving; R resets.
   if "%~3"=="" (
-    "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
+    "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% %GRID_ASSIST_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
   ) else (
     echo Registered body impact events enabled for static barriers.
     if "%~4"=="" (
-      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
+      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% %GRID_ASSIST_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
     ) else (
       echo Experimental impact damage enabled.
-      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
+      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% %GRID_ASSIST_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
     )
   )
 )

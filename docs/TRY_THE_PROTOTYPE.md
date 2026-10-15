@@ -19,6 +19,9 @@ The experimental keyboard driving build is available now. On 12 October the owne
 | P | Pause / resume |
 | R | Reset car and simulation to the start |
 | Escape | Close |
+| X / Z | Gear up / down (manual gearbox only) |
+
+**Driver aids** follow the original options ([research](DRIVING_ASSISTS_RESEARCH.md)): Traction Control, Stability Control, Braking Assist and Automatic/Manual transmission, plus keyboard or wheel steering. The default is every aid on, automatic, keyboard. Before launching, set for example `set GRID_PLAY_ASSISTS=tcs=off,stability=off,braking=off,gearbox=manual`, or put the same items in `localssists.txt`. The app takes `--assists SPEC` or `--assists-file PATH` directly. In manual, reverse is Z from neutral; braking does not select reverse.
 
 The window title shows speed, gear, tick number and pause/failure status. **HB** means the simulation received the Space handbrake command; gear **R** means reverse. While reversing, Up/W brakes and selects forward again near rest. Hold Space while releasing throttle to check the rear-wheel handbrake. Its controlled runtime and Bevy keyboard tests pass; the owner subsequently confirmed HB appears and the car slows.
 
