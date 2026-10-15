@@ -213,9 +213,14 @@ was not observed.
 
 Live check (F302, [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md)):
 - The original's exclusion holds on 99.6% of race-traffic frames with ETA < 2 s.
-- 0.36% of those frames leak, for an unexplained reason. Branch B then extends a leak into
-  avoid episodes of up to 3.6 s, so traffic avoid takes about 0.4% of AI frames.
-- The port keeps the documented rule.
+- 0.36% of those frames leak. Branch B then extends a leak into avoid episodes of up to 3.6 s,
+  so traffic avoid takes about 0.4% of AI frames.
+- F306 cause: the original's f32 cosine, with rsqrtps-estimated lengths, drops below −1 when
+  the target heads within about 5·10⁻⁴ rad of the from-gate direction. acos then returns NaN,
+  and NaN fails the `ja` compare, so the car counts as "not racing".
+- The port keeps the documented rule; it clamps the cosine and uses the line direction. A
+  proposal to reproduce the leak (not implemented) is in
+  [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md#port-proposal-not-implemented).
 - Stopped-car avoid matches: target speed 30, clearance 6.05–6.08 m.
 
 ### Arbitration

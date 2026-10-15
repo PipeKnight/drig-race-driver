@@ -95,9 +95,11 @@ of the frames where it could fire.
   - heading dot ≥ 0.92;
   - one containing link at about 180°.
 
-  Neighbouring frames with the same, smoothly varying inputs do not fire. The cause is not
-  identified [I]. Candidates: record or window data being refreshed between the tests and the
-  sample point (0x787620 runs after arbitration), or several AI steps per rendered frame.
+  Neighbouring frames with the same, smoothly varying inputs do not fire. **Cause (F306,
+  below):** the original's f32 cosine uses rsqrtps-based lengths and can fall below −1. The
+  libm acos then returns NaN, and the `ja` compare treats NaN as "not racing normally". This
+  happens only when the target heads within about 5·10⁻⁴ rad of the gate direction. See
+  [The 0.36% leak](#the-036-leak-float-cosine-below-1-gives-acos-nan-f303).
 - **Branch B turns a leak into an episode.** A Branch A fire stores the target (+0x10).
   Branch B tracks it with no racing-normally check while it stays ahead, inside the 50° cone
   and within `along < 2·closing`.
@@ -119,13 +121,182 @@ of the frames where it could fire.
 ### Port impact
 
 None required. The port implements the exclusion that the original applies on 99.6% of
-frames, and it reproduces stopped-car avoid. Reproducing the 0.36% leak would need its unknown
-cause, so the port keeps the documented rule.
+frames, and it reproduces stopped-car avoid. The leak is now identified (F306); reproducing it
+is a separate, unimplemented proposal (see [Port proposal](#port-proposal-not-implemented)).
 
-- **Open**: identify the leak, for example by sampling the record and window together with the
-  game's tick counter.
+- **Closed (F306)**: the leak cause. Still open: a live confirmation with raw record and gate
+  bits (see the F306 "Open" list).
 - The port maps record state 2 to "moving against its nose" [I]. Live records use 1 for racing
   AI and 0 for the stationary player. State 2 was not observed.
+
+## The 0.36% leak: float cosine below −1 gives acos NaN (F306)
+
+15 October 2026, Claude Code. Static work on the hash-guarded analysis image
+`local/compatibility/grid-unpacked.exe` (sha256 `aac46a64…4f34514`). It used
+`local/ai-overtaking/scripts/pe.py` (capstone) and the existing private disassembly
+`local/ai-avoid-recovery/dis/79a530.txt`, plus a reanalysis of `trace-race-03.tsv`.
+There was no new live run and no input to the game. Ghidra was not needed; the earlier
+decompile (`decomp/a1/79a530.c.txt`) already hides the cause, because it drops the acos
+argument and the NaN path.
+
+### Mechanism [V code]
+
+The angle test of the racing-normally exclusion 0x79A530 (0x79A64E–0x79A958), instruction by
+instruction:
+
+1. **xz only.** Both the target's forward vector (record +0x30) and `t` are masked with
+   `0xCAF460 ^ 0xCAF410` = (FFFFFFFF, 0, FFFFFFFF, FFFFFFFF). Lane y is then set to 0.
+   `t = (−n.z, 0, n.x)` from 0x7A2EA0 has w = 0. The heading pre-check at 0x79A55B uses the
+   same masking.
+2. **Dot product.** `dot = t.x·f.x + t.z·f.z` in f32, as a shuffle-based horizontal sum.
+3. **Lengths are estimates, not `sqrtps`.**
+   - `r = rsqrtps(x)` and `s = r·x`.
+   - `len = s + (1 − s·r)·(s·0.5)`, with constants 0xCAF888 = 1.0 and 0xCAF88C = 0.5.
+     Zero inputs are masked to 0.
+   - This is a single Newton step from the 12-bit hardware estimate. The step converges from
+     below, so both lengths come out slightly short (about 1 ulp near 1.0), and |cos| comes out
+     slightly too large.
+4. **Cosine.** `cos = dot / (len_t · len_f)` in f32 (`mulss`, `divss`), then `cvtps2pd` and a
+   call to 0xBF4067.
+5. **0xBF4067 (SSE2 libm acos)** does no clamping and calls no error handler:
+   - exactly ±1 gives 0 or π (0xBF44B3);
+   - a finite |x| > 1 gives `0 · +inf` = NaN (0xBF4499);
+   - a NaN input is returned as NaN (0xBF44FE).
+6. **Compare.** `cvtsd2ss`, `comiss acos, max`, `mov al, 1`, `ja` → return 1.
+   - NaN is unordered: ZF = PF = CF = 1, so `ja` is not taken.
+   - The function returns `bl = 0`, which means **not excluded**.
+   - 0x79A960 Branch A then proceeds to its ETA test and fires.
+
+On Donington, every gate's `t` points against the traffic, so a racing car has cos ≈ −1.
+When the car's horizontal heading lies within about 5·10⁻⁴ rad (0.03°) of a from-gate's
+direction, the f32 cosine can drop below −1. That car then counts as "not racing normally".
+The F302 trace emulation computed the cosine in double precision and clamped it to ±1, so it
+said "excluded" on exactly these frames.
+
+### Evidence
+
+**Trace [V].** `python -I tools/analyze_avoid_leak.py local/ai-avoid-recovery/live/trace-race-03.tsv`
+covers AI drivers with an obstacle ETA < 2 s that the emulation marks excluded: 19,589 rows,
+70 fired. The deviation is π − `ob_angle`, which is quantized to 1·10⁻⁵ rad by the trace's
+6-digit text.
+
+| deviation from antiparallel (rad) | frames | fired | rate | host-rsqrtps MC |
+|---|---|---|---|---|
+| 0 – 1e-4 | 17 | 17 | 1.00 | 0.99 |
+| 1e-4 – 2e-4 | 17 | 17 | 1.00 | 0.98 |
+| 2e-4 – 3e-4 | 19 | 17 | 0.89 | 0.96 |
+| 3e-4 – 4e-4 | 20 | 11 | 0.55 | 0.87 |
+| 4e-4 – 5e-4 | 19 | 7 | 0.37 | 0.62 |
+| 5e-4 – 6e-4 | 26 | 1 | 0.04 | 0.25 |
+| 6e-4 – 7e-4 | 24 | 0 | 0 | 0.03 |
+| ≥ 7e-4 | 19,447 | 0 | 0 | 0 |
+
+- All 70 leak rows lie within 5.1·10⁻⁴ rad of antiparallel (69 within 5·10⁻⁴).
+- None of the 19,447 frames beyond 7·10⁻⁴ rad leaks.
+- That rules out chance.
+- The doc's earlier count of 71 came from the tool's in-run counter. The TSV holds 70 leak
+  rows. The extra counter frame was not investigated.
+
+**Monte Carlo [V on this CPU, I for the input model].** `tools/avoid_leak_rsqrt_mc.rs` runs
+the same f32 pipeline with the host's `_mm_rsqrt_ps`. The host is an i7-12700, the same PC that
+ran PID 7208. Inputs are random gate yaw, unit 3D forward vectors with ±5.7° pitch, and
+deviations per bin. Output: `local/ai-avoid-recovery/leak/mc-host-i7-12700.txt`.
+
+| rsqrt model | P(NaN) per 1e-4 rad bin, 0 … 8e-4 |
+|---|---|
+| host rsqrtps | 0.99 0.98 0.96 0.87 0.62 0.25 0.03 0.00 |
+| exact 1/√x rounded to f32 | 0.36 0.26 0.13 0.03 0.00 0.00 0.00 0.00 |
+| 1/√x truncated to 12 significant bits | 0.73 0.67 0.57 0.46 0.35 0.25 0.16 0.07 |
+| 1/√x truncated to 13 significant bits | 0.55 0.46 0.29 0.12 0.02 0.00 0.00 0.00 |
+
+- Only the hardware estimate gives the observed shape: nearly certain below 2·10⁻⁴ rad and a
+  sharp edge near 5–6·10⁻⁴ rad.
+- The model's edge sits about 1·10⁻⁴ rad further out than the trace. Possible reasons [I]:
+  - the real distribution of |f_xz|² (pitch);
+  - the record's w lane;
+  - the record moving between the test and the sample;
+  - the 1·10⁻⁵ rad quantization of the trace.
+
+**Why single frames.** The heading sweeps through a window only about 10⁻³ rad wide. The
+updater's dt is 0.00606 s (header +0x10), and the trace's median sample spacing is 17.5 ms.
+That is about 2.9 AI steps per sample [I], so a leak is usually seen as one sample. Branch B,
+which has no exclusion, then stretches it into an episode.
+
+### Order of 0x79EE30 [V code]
+
+The per-driver update 0x79EE30 is called from 0x79F06F. It runs:
+
+1. 0xAB87D0 on driver + 0xA00;
+2. 0x79C360 on the view (driver + 0x2DD0; it calls 0x794160, 0x793F60, 0x779A20, 0x798E90,
+   0x7923F0 and 0x792580), so the view is refreshed **before** the tests;
+3. 0x79CAA0, the arbitration and tests (driver + 0x2AA0);
+4. 0x787620 on driver + 0x3100 with the request (+0x2CE0). This is a controller: its only
+   calls are to 0xA683B0, and it does not touch the view or the perception records;
+5. vtable +8 of `*(driver + 0x9F8)`;
+6. 0x79E050 when req+0xB5 is set.
+
+The "stale data" candidate is therefore not needed. Several AI steps per rendered frame do
+happen [I], but they only explain why leaks appear as isolated samples.
+
+### Port proposal (not implemented)
+
+This would go in Branch A's `racing` expression in `crates/grid-tools/src/ai_driver.rs`, which
+currently reads `dot2(horizontal(r.forward), wrong_way).clamp(-1., 1.).acos() > rs.av_max_racing_angle`.
+
+```rust
+/// 0x79A530's angle test as the original evaluates it: xz-only f32 cosine with
+/// rsqrtps + one Newton step lengths; acos is NaN for |cos| > 1 and NaN compares false.
+fn beyond_track_angle(forward: [f32; 3], t: [f32; 3], max: f32) -> bool {
+    let len = |x: f32| {
+        if x == 0. {
+            return 0.;
+        }
+        let r = rsqrt_estimate(x); // _mm_rsqrt_ps on x86/x86_64
+        let s = r * x;
+        (1. - s * r) * (s * 0.5) + s
+    };
+    let c = (t[0] * forward[0] + t[2] * forward[2])
+        / (len(t[0] * t[0] + t[2] * t[2]) * len(forward[0] * forward[0] + forward[2] * forward[2]));
+    ((c as f64).acos() as f32) > max
+}
+```
+
+1. **Pass the raw `r.forward`.** Do not normalize it with `horizontal()`; the original uses the
+   unnormalized xz part of the unit 3D forward vector.
+2. **Use the original's `t`.** That is `(−n.z, 0, n.x)` of the from-gate normal `n` of the
+   target's link (`Line::lateral[i]` for the segment holding `r_arc`, not interpolated).
+   - The port currently uses the negated interpolated line direction. Gate normals deviate from
+     the line by up to 0.25 rad (unit test note), so the 5·10⁻⁴ rad alignment would happen at
+     different places.
+   - The original looks up the nearest containing link in its own 32-link view window.
+     Projecting onto the line is close but not identical [I].
+3. **Choose `rsqrt_estimate`.**
+   - `std::arch` `_mm_rsqrt_ps` on x86/x86_64. On the same CPU, this reproduces the original.
+   - The original itself depends on the CPU here: the SDM only bounds the error at
+     1.5·2⁻¹²; vendors and generations may differ [I].
+   - Fallback for other architectures: exact `1/√x` rounded to f32. With it, leaks happen at
+     about a third of the rate (MC table).
+   - No portable bit-exact Intel table is available.
+4. **Consequences.**
+   - Multi-car headless results change: rare traffic avoid episodes appear, about 0.4% of AI
+     frames in the original.
+   - On x86 those results become CPU-dependent, like the original.
+   - **Solo laps 88.420 / 86.282 s stay bit-identical by construction.** The changed
+     expression runs only inside `if let Some((r, …)) = obstacle`, and `obstacle` is filled only
+     from `for r in others`. Solo runs have no other cars.
+   - After implementing, rerun the solo headless check to confirm.
+
+Whether to adopt this (fidelity, CPU-dependent traffic baselines) or keep the documented rule
+(deterministic) is a project decision. It is not decided here.
+
+### Open
+
+- **Live confirmation.** Extend `tools/trace_grid_ai_avoid_recovery.ps1` to log the raw bits
+  of the target record's +0x30 and the from-gate normal, then replay the f32 pipeline offline
+  with `avoid_leak_rsqrt_mc.rs`-style code on the same CPU.
+  - Windows PowerShell 5.1 has no SSE intrinsics, so the replay has to happen offline.
+  - This needs the owner to unpause a race. It was not done in F306.
+- Whether the i7-12700's P-cores and E-cores return identical `rsqrtps` results [I].
 
 ## Question 2: sign convention of the octant angles
 

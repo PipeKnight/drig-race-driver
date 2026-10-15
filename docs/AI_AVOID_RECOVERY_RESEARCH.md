@@ -151,6 +151,13 @@ At the start of every update: +8 = 0, +0xC = 0, +0x14 = FLT_MAX, +0x18 = 0. On s
    Net rule [V code + D data]: **racing normally ⇔ speed ≥ 4 m/s (XML), state ≠ 2, heading
    within 90° of ours, and not pointing within 45° of the wrong way.** The angle test reads
    like an inverted sign in the original [I]. Port the behaviour, not the intent.
+   F306 numerical detail [V]:
+   - the cosine is xz-only f32;
+   - its lengths come from rsqrtps plus one Newton step, which biases |cos| upward;
+   - |cos| > 1 makes acos return NaN, and NaN makes the function return 0 (not excluded).
+
+   As a result, targets within about 5·10⁻⁴ rad of `t` are not excluded (see
+   [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md#the-036-leak-float-cosine-below-1-gives-acos-nan-f303)).
 2. `v = |obstacle +0x00|` (closing speed), `d = obstacle +0x24`,
    `buf = map[32] braking_buffer_distance`.
    - If `v ≤ avMinSpeedNormal` (cfg+0x89C, XML 0.0): require `buf > d` and
@@ -725,8 +732,10 @@ a 12-car race):
   - The recovery mode choices match the octants.
 - **Q5**:
   - The exclusion holds on 99.6% of traffic frames with ETA < 2 s.
-  - 0.36% of those frames leak for an unidentified reason, and Branch B extends the leaks
-    into short avoid episodes.
+  - 0.36% of those frames leak, and Branch B extends the leaks into short avoid episodes.
+  - F306 identified the leak: when the target heads within about 5·10⁻⁴ rad of `t`, the f32
+    cosine with rsqrtps-estimated lengths falls below −1. acos (0xBF4067) then returns NaN,
+    and `ja` treats NaN as "not excluded". See [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md#the-036-leak-float-cosine-below-1-gives-acos-nan-f303).
   - Avoid fires on every close frame for the stopped player car.
 - Correction to §2.2: 0x798C00 searches only the track view's 32-link window (view+0x14) and
   keeps the nearest containing link.
