@@ -118,9 +118,17 @@ pub fn bake(
     tex: &Texture<'_>,
 ) -> Result<Image, &'static str> {
     if tex.format != Format::Bc1
-        || tex.width == 0 || tex.height == 0 || tex.width > 16384 || tex.height > 16384
-        || tex.base_blocks.len() as u64 != u64::from(tex.width.div_ceil(4))*u64::from(tex.height.div_ceil(4))*8
-        || positions.iter().flatten().chain(uvs.iter().flatten()).any(|v| !v.is_finite())
+        || tex.width == 0
+        || tex.height == 0
+        || tex.width > 16384
+        || tex.height > 16384
+        || tex.base_blocks.len() as u64
+            != u64::from(tex.width.div_ceil(4)) * u64::from(tex.height.div_ceil(4)) * 8
+        || positions
+            .iter()
+            .flatten()
+            .chain(uvs.iter().flatten())
+            .any(|v| !v.is_finite())
         || positions.len() != uvs.len()
         || positions.len() > 4096
         || indices.len() > 6144
