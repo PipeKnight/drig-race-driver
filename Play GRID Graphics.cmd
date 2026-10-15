@@ -18,11 +18,11 @@ if exist "local\body-contact-directions.bin" set "GRID_GRAPHICS_CONTACTS=--body-
 if defined GRID_GRAPHICS_CONTACTS if exist "local\body-impact-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --body-events local\body-impact-parameters.bin"
 if defined GRID_GRAPHICS_CONTACTS if exist "local\deformation-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --deformation local\deformation-parameters.bin"
 set "GRID_GRAPHICS_LOG=local\graphics\manual-%RANDOM%-%RANDOM%.log"
-echo Experimental graphics branch - warm GRID-inspired lighting.
+echo Experimental graphics branch - source sky lighting, layered car materials and smooth tyres.
 echo Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit.
 echo Resolution %GRID_GRAPHICS_RESOLUTION%; maximize the window for your display.
 echo Private log: %GRID_GRAPHICS_LOG%
-"target\release\grid-app.exe" --drive --graphics enhanced --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% > "%GRID_GRAPHICS_LOG%" 2>&1
+"target\release\grid-app.exe" --drive --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"
 echo Exited with code %GRID_GRAPHICS_EXIT%.
 popd

@@ -1,0 +1,13 @@
+# Lacetti material response
+
+15 October 2026, independent graphics profile, source `6404c7091e44`, Bevy0.19.1. Enhanced defaults to layered car materials; `--car-materials legacy` retains the earlier authored material parameters for comparisons. Baseline is unchanged.
+
+Previously most car surfaces used roughness0.7, with paint0.32 and a few metals metallic0.6. New authored responses distinguish dielectric paint with clearcoat, smoother glass, rough rubber, coated white alloy rims and bare metal/brake discs. Paint base roughness0.3/clearcoat1/coat roughness0.12; glass roughness0.08/IOR1.5; tyre wall0.82/tread0.9/reflectance0.3; wheel roughness0.32/metallic0.15/coat0.3; bare/shiny/disc metal0.95 with roughness0.35/0.22/0.48. Cabin/matt/aerial recognized groups remain rough dielectrics.
+
+These are artistic starting values, not conversions of original specular strength/power. Existing diffuse/alpha bindings are retained. Original normal, scratch, damage and specular-mask consumer semantics are still incomplete; no speculative scratch-to-roughness mapping or whole-car damage normal was introduced. No new texture or proprietary data is distributed. Unknown material names retain the previous parameters.
+
+Matched `local/graphics/car-material-legacy01.png` and `car-material-layered01.png`, native3840×2160, source-sky IBL, camera(-187,-10.7,22)/target(-183,-11.3,19.4): both inspected. Layered glass has a sharper sky response and paint/metal/rubber differ, but the car still needs better livery detail, normals, local reflections and art tuning. Paint's environment tint/brightness changes; this comparison does not establish final realistic appearance or fidelity to GRID. No claim that clearcoat alone completes the car.
+
+Release all-target Clippy passed. GPU captures exit normally, source-sky filtering readiness logs256source/32diffuse/9specular mips, no shader errors. A 240-tick/0.25-throttle source-sky/layered-material drive has the same final pose, velocity and handling as the source-tyre control; no physics code changed. Renderer output/manifest verification recorded in private `validation-materials01.json`; the separate graphics launcher now selects source-sky IBL. Original Steam installation and primary engine checkout/executable remain untouched.
+
+Next: original material channel/UV semantics, cockpit/lighting close-ups, detailed texture overrides, local scene reflections and a coherent full-lap visual assessment. Higher-quality rim/disc silhouettes remain open alongside those material tasks. Future DLSS/RTX requirements are in [GRAPHICS_QUALITY_CONTRACT.md](GRAPHICS_QUALITY_CONTRACT.md).
