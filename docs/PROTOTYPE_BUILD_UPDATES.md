@@ -1,6 +1,13 @@
 # Playable build updates
 
-Latest verified refresh: **99984583fe3f-dirty**, built 15 October 2026 ~03:19 UTC, release SHA256
+Latest verified refresh: **aa072883394a-dirty**, built 15 October 2026 ~08:14 UTC, release SHA256
+826946ba3d139c9b2dd59bdb6f94e4408e52c468163cfd2beb7aef56dc9df16c, manifest
+local/playtest/build-20261015T0814337412179Z/. Concrete blocks/walls, chain-link fences and
+trackside hoardings (ornaments.bin) are now solid, fixing the owner-reported sinking into
+white/blue concrete blocks ([F284](ROUTE_PROPS_COLLISION.md#f284-barrier-ornaments-owner-playtest-of-9998458)).
+Source driving and Bevy checks pass; owner re-test pending.
+
+Previous refresh: **99984583fe3f-dirty**, built 15 October 2026 ~03:19 UTC, release SHA256
 3e73714daa56c2e2a681819ec7357e4ea54267a70ae3ab34c09bacd55ac686df, manifest
 local/playtest/build-20261015T0319056811039Z/. Tyre walls, armco, cushions, chicane tyre stacks
 and brake-marker boards are now solid ([route props](ROUTE_PROPS_COLLISION.md)); impacts happen
