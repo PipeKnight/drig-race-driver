@@ -221,6 +221,17 @@ impl Runtime {
         // leaves only idle/drag behavior despite an otherwise exact update.
         owner[0x2fc / 4] = 1f32.to_bits();
         owner[0x188c / 4] = 1f32.to_bits();
+        // Running engine on the grid. The native no-input stationary reference
+        // (F275 stationary-idle01) holds 232.6573..232.6873, the idle governor
+        // target idle*1.01 that the reconstructed post-force stage maintains
+        // once reached. Reset A0C9F0 zeroes RPM; a zero start only cranks after
+        // throttle, delaying a standing start by about one second.
+        let idle = f32::from_bits(owner[0x17a8 / 4]) * f32::from_bits(0x3f81_47ae);
+        if !(idle.is_finite() && idle > 0.) {
+            return Err("invalid source idle engine speed".into());
+        }
+        owner[0x1894 / 4] = idle.to_bits();
+        owner[0x1f00 / 4] = idle.to_bits();
         // The runtime already owns all four wheel records by ordinal. The
         // context initializer's explicit relative owner links are not addresses
         // to retain or follow at this pointer-free contact boundary.
@@ -786,9 +797,12 @@ mod tests {
             runtime.reset();
             let drive=|runtime:&mut Runtime,geometry:&mut crate::body_geometry::BodyGeometry|{
                 let mut contacts=0;
+                // First mid-run tick (>=165) with pending deformed geometry
+                // (C7F2). The idling launch changed its exact timing.
+                let mut checked=None;
                 for _ in 0..600 {
-                    if runtime.ticks==165 {
-                        assert_ne!(runtime.state.car.owner.vehicle[0xc7f0/4]&0xff0000,0);
+                    if checked.is_none() && runtime.ticks>=165 && runtime.state.car.owner.vehicle[0xc7f0/4]&0xff0000!=0 {
+                        let tick=runtime.ticks;checked=Some(tick);
                         let good_lap=runtime.lap.clone();
                         runtime.lap.as_mut().unwrap().next_gate=71;
                         let before=runtime.state.clone();let before_lap=runtime.lap.clone();let cache=runtime.cache;
@@ -797,7 +811,7 @@ mod tests {
                         assert_eq!(runtime.tick_with_deforming_body_geometry(controls,geometry).err().unwrap().0,"invalid prototype lap interval");
                         assert_eq!(runtime.state.car.owner.vehicle,before.car.owner.vehicle);assert_eq!(runtime.state.car.owner.physical,before.car.owner.physical);
                         assert_eq!(runtime.state.world.groups.contacts,before.world.groups.contacts);assert_eq!(runtime.state.world.manager.rows,before.world.manager.rows);
-                        assert_eq!(runtime.lap,before_lap);assert_eq!(runtime.ticks,165);assert_eq!(runtime.cache.plane,cache.plane);
+                        assert_eq!(runtime.lap,before_lap);assert_eq!(runtime.ticks,tick);assert_eq!(runtime.cache.plane,cache.plane);
                         let after=runtime.deformation_registration.as_ref().unwrap();
                         assert_eq!((after.random_seed,after.bulk_calls,after.records),(registration.random_seed,registration.bulk_calls,registration.records));
                         assert_eq!(geometry.contacts(&runtime.track,&runtime.surfaces,&before.world.groups.bodies,64).unwrap(),shape_contacts);
@@ -805,6 +819,8 @@ mod tests {
                     }
                     runtime.tick_with_deforming_body_geometry(controls,geometry).unwrap_or_else(|e|panic!("callback tick {}: {e}",runtime.ticks+1));contacts+=runtime.last_body_contacts;
                 }
+                eprintln!("source_deformation_pending_geometry_check_tick={checked:?}");
+                assert!(checked.is_some());
                 contacts
             };
             let contacts=drive(&mut runtime,&mut geometry);let first=runtime.state.clone();let registration=runtime.deformation_registration.as_ref().unwrap().clone();let first_cache=runtime.cache;
@@ -1878,7 +1894,10 @@ mod tests {
     fn source_driving_handbrake_and_reverse() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let mut runtime = Runtime::lacetti(Path::new(&root), "slot_00", 200679).unwrap();
-        for _ in 0..120 {
+        // About 10 m/s from the idling grid start (formerly 120 ticks from a
+        // zero-RPM crank), so the 60-tick handbrake bound keeps its meaning.
+        const POWERED: u64 = 72;
+        for _ in 0..POWERED {
             runtime
                 .tick(Controls {
                     throttle: 1.,
@@ -1892,7 +1911,7 @@ mod tests {
         for handbrake in [false, true] {
             runtime.state = powered.clone();
             runtime.cache = cache;
-            runtime.ticks = 120;
+            runtime.ticks = POWERED;
             for i in 0..60 {
                 runtime
                     .tick(Controls {
@@ -1942,7 +1961,7 @@ mod tests {
         );
         runtime.state = powered;
         runtime.cache = cache;
-        runtime.ticks = 120;
+        runtime.ticks = POWERED;
         runtime
             .tick(Controls {
                 brake: 1.,
