@@ -66,3 +66,8 @@ textures `start_lights_1_e` ... `5_e` and `7_e`; the material `start_lights` (ob
 diffuse `start_lights_d` and emissive `start_lights_e` (idle). Race countdowns now last 4.0 s; the emissive
 texture shows stages 1..5 across the countdown and stage 6 (texture 7, the green row) for 3 s from GO.
 That mapping is [I]; renders at ~1 s / ~2.9 s / after GO show 1 red, 3 red and the green row.
+
+## Gaps (F299)
+
+While racing, the HUD shows the time to the car directly ahead and directly behind: the race-distance
+difference along the AI line divided by the player's speed (floor 10 m/s). Authored presentation.

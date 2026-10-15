@@ -140,6 +140,23 @@ impl Standings {
         order
     }
 
+    /// Race distance (m) to the car directly ahead and directly behind `car`
+    /// in the running order; `None` at the ends or once either has finished.
+    pub fn neighbour_gaps(&self, car: usize) -> (Option<f64>, Option<f64>) {
+        let order = self.order();
+        let Some(at) = order.iter().position(|&c| c == car) else {
+            return (None, None);
+        };
+        let gap = |other: usize| {
+            let (a, b) = (&self.cars[car], &self.cars[other]);
+            (a.finish.is_none() && b.finish.is_none()).then(|| (b.distance - a.distance).abs())
+        };
+        (
+            at.checked_sub(1).and_then(|i| gap(order[i])),
+            order.get(at + 1).and_then(|&c| gap(c)),
+        )
+    }
+
     /// One-based position of `car`.
     pub fn position(&self, car: usize) -> usize {
         self.order()

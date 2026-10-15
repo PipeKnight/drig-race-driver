@@ -2362,11 +2362,24 @@ fn drive_present(
             "RACE RESULT\n{}\n\n",
             o.standings.classification(&o.names).join("\n")
         ),
-        (Some(o), Some(t)) if t.driving() => format!(
-            "Position {}/{}\n",
-            o.standings.position(0),
-            o.standings.len()
-        ),
+        (Some(o), Some(t)) if t.driving() => {
+            // Gaps as time at the player's speed (floor 10 m/s).
+            let v = driving.runtime.velocity();
+            let speed = f64::from((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()).max(10.);
+            let (ahead, behind) = o.standings.neighbour_gaps(0);
+            let gap = |label: &str, sign: &str, d: Option<f64>| {
+                d.map_or_else(String::new, |d| {
+                    format!("\n{label} {sign}{:.1} s", d / speed)
+                })
+            };
+            format!(
+                "Position {}/{}{}{}\n",
+                o.standings.position(0),
+                o.standings.len(),
+                gap("Ahead ", "-", ahead),
+                gap("Behind", "+", behind)
+            )
+        }
         (Some(o), Some(_)) => format!("Grid {}/{}\n", o.standings.position(0), o.standings.len()),
         _ => String::new(),
     };
