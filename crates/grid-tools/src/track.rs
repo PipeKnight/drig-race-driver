@@ -23,6 +23,7 @@ pub struct Track {
     chunks: Vec<Chunk>,
     triangle_count: usize,
     boundary: Option<crate::cqtc_geometry::Geometry>,
+    props: Option<crate::entity_geometry::Props>,
 }
 
 /// Fresh geometric record and the same one-based packed shape identity used
@@ -80,17 +81,24 @@ impl Track {
             chunks,
             triangle_count,
             boundary: None,
+            props: None,
         })
     }
     pub fn triangle_count(&self) -> usize {
         self.triangle_count
     }
     pub fn shape_count(&self) -> usize {
-        self.chunks.len() + usize::from(self.boundary.is_some())
+        self.chunks.len() + usize::from(self.boundary.is_some()) + usize::from(self.props.is_some())
+    }
+    fn props_shape(&self) -> u32 {
+        (self.chunks.len() + usize::from(self.boundary.is_some()) + 1) as u32
     }
     pub fn shape_name(&self, id: u32) -> Option<&str> {
         if self.boundary.is_some() && id as usize == self.chunks.len() + 1 {
             return Some("boundarylines.cqtc");
+        }
+        if self.props.is_some() && id == self.props_shape() {
+            return Some("objects.ens");
         }
         id.checked_sub(1)
             .and_then(|i| self.chunks.get(i as usize))
@@ -99,6 +107,12 @@ impl Track {
 
     pub(crate) fn attach_boundary(&mut self, boundary: crate::cqtc_geometry::Geometry) {
         self.boundary = Some(boundary);
+    }
+    pub(crate) fn attach_props(&mut self, props: crate::entity_geometry::Props) {
+        self.props = Some(props);
+    }
+    pub fn has_props(&self) -> bool {
+        self.props.is_some()
     }
     pub fn has_boundary(&self) -> bool {
         self.boundary.is_some()
@@ -126,10 +140,23 @@ impl Track {
         }
         let bounds = mesh.world_bounds(matrix, query.margin)?;
         let mut contacts = Vec::new();
+        // Visible route barriers and props first: the car must meet their
+        // surfaces before the invisible boundary sheet behind them.
+        if let Some(props) = &self.props
+            && capacity != 0
+        {
+            let shape = self.props_shape();
+            contacts.extend(
+                props
+                    .contacts(mesh, matrix, query, bounds, capacity.min(16))?
+                    .into_iter()
+                    .map(|contact| BodyContact { shape, contact }),
+            );
+        }
         // Authored boundary-first scheduling keeps packed road contacts from
         // exhausting the selected pool before this separate source shape.
         if let Some(boundary) = &self.boundary
-            && capacity != 0
+            && contacts.len() < capacity
             && (0..3).all(|j| {
                 bounds[0][j] <= boundary.bounds[j + 3] && bounds[1][j] >= boundary.bounds[j]
             })
@@ -146,7 +173,7 @@ impl Track {
                         margin: query.margin,
                         directions: query.directions,
                     },
-                    contact_capacity: capacity.min(16),
+                    contact_capacity: (capacity - contacts.len()).min(16),
                     cache_enabled: true,
                     candidate_capacity: 4096,
                     sheet_mask: mask,

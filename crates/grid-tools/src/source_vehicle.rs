@@ -440,11 +440,20 @@ impl Runtime {
             "tracks/europe/donington/route_0/boundarylines.cqtc",
             2 * 1024 * 1024,
         )?)?;
+        let props = crate::entity_geometry::Props::read(root)?;
         if self.track.has_boundary() || self.state.shapes.len() != self.track.shape_count() + 1 {
             return Err("body boundary already prepared or shape registration differs".into());
         }
-        self.reserve_geometry_pool(20)?;
+        // Four wheel slots, sixteen for route props and sixteen for the boundary.
+        self.reserve_geometry_pool(36)?;
         self.track.attach_boundary(boundary);
+        self.state.shapes.push(grid_world::contact_groups::Shape {
+            angular: true,
+            ..Default::default()
+        });
+        // One registered static shape for all route entity boxes (objects.ens),
+        // after the boundary so packed road and boundary identities are unchanged.
+        self.track.attach_props(props);
         self.state.shapes.push(grid_world::contact_groups::Shape {
             angular: true,
             ..Default::default()
@@ -721,6 +730,10 @@ impl Runtime {
     }
     pub fn pose(&self) -> [f32; 16] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x1d0 / 4 + i]))
+    }
+    /// Registered static track shapes (packed chunks, boundary, route props).
+    pub fn track_shape_count(&self) -> usize {
+        self.track.shape_count()
     }
     /// Read-only purchased surface table (presentation such as tyre audio).
     pub fn surfaces(&self) -> &Surfaces {
@@ -1272,13 +1285,15 @@ mod tests {
         let mut enabled = Runtime::lacetti(root, "slot_00", 200679).unwrap();
         let geometry = enabled.prepare_body_geometry(root, &table).unwrap();
         assert!(enabled.track.has_boundary());
-        assert_eq!(enabled.track.shape_count(), 246);
-        assert_eq!(enabled.state.shapes.len(), 247);
+        assert_eq!(enabled.track.shape_count(), 247);
+        assert_eq!(enabled.state.shapes.len(), 248);
         assert_eq!(enabled.track.shape_name(246), Some("boundarylines.cqtc"));
+        assert_eq!(enabled.track.shape_name(247), Some("objects.ens"));
+        assert!(enabled.track.has_props());
         assert!(enabled.prepare_body_geometry(root, &table).is_err());
         enabled.reset();
-        assert_eq!(enabled.state.shapes.len(), 247);
-        assert_eq!(enabled.state.world.groups.contacts.len(), 20);
+        assert_eq!(enabled.state.shapes.len(), 248);
+        assert_eq!(enabled.state.world.groups.contacts.len(), 36);
         let mut legacy = Runtime::lacetti(root, "slot_00", 200679).unwrap();
         for _ in 0..240 {
             let controls = Controls {

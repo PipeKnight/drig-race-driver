@@ -13,6 +13,7 @@ pub mod engine_audio_gain;
 pub mod engine_audio_publication;
 pub mod engine_audio_restart;
 pub mod engine_audio_schedule;
+pub mod entity_geometry;
 pub mod impact_diagnostic;
 pub mod lap_progress;
 pub mod source_deformation;
