@@ -64,6 +64,13 @@ impl Trial {
             );
         }
     }
+    /// Race time (s from GO) at runtime tick `tick`; keeps counting after the
+    /// player's finish while the opponents race on. `None` before GO.
+    pub fn race_time(&self, tick: u64) -> Option<f64> {
+        self.base.map(|base| {
+            tick.saturating_sub(base) as f64 * f64::from(grid_tools::source_vehicle::DELTA)
+        })
+    }
     pub fn reset(&mut self) {
         self.state.reset();
         self.base = None;

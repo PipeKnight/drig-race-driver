@@ -10,17 +10,18 @@ driven by the ported GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)). It runs a
 - The time-trial event provides the 3-second countdown with every car held on the handbrake,
   the player's lap timing from GO and the frozen finish screen. The heading reads "race" and
   no personal bests are shown or written (`time-trial-records.tsv` is untouched).
-- `grid_tools::race::Standings` (AUTHORED classification; the original race rules and
-  position code are not recovered):
+- `grid_tools::race::Standings` (F293 AUTHORED classification; the original rules were
+  recovered and ported in F308, see "Race rules (F308)" below):
   - every car's race distance is measured along the AI racing line from the start-finish
     line (progress gate 0) and unwrapped tick by tick, so cars behind the line start below
     zero;
   - AI cars finish when they have covered the lap count;
   - the player finishes with the lap-timing finish.
 - The HUD shows `Grid p/n` during the countdown and `Position p/n` while racing. The finish
-  screen shows `RACE RESULT` with the winner's time and gaps. Cars still running when the
+  screen shows `RACE RESULT` with the winner's time and gaps. ~~Cars still running when the
   player finishes get a finish time projected from their remaining distance at their
-  current speed, marked `(est.)`.
+  current speed, marked `(est.)`.~~ Since F308 the opponents race on after the player's
+  finish; estimates only come from F (Finish Race) or terminal damage.
 - R restarts the race and the standings.
 
 ## Checks
@@ -43,7 +44,10 @@ driven by the ported GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)). It runs a
 - ~~No overtaking, side-by-side or avoidance behaviour.~~ Overtake and alongside (F294),
   yield (F297), and avoid, recovery and recover_tbone (F301) are ported; see
   AI_DRIVER_PORT.md. lost_control (choreographed mistakes), drafting and catch-up are not.
-- No grid order or qualifying rules, no penalties, no lapped-car handling.
+- ~~No grid order or qualifying rules, no penalties, no lapped-car handling.~~ Recovered in
+  F308: the original has no penalties or blue flags in a single race, and lapped cars race to
+  the full distance. The random grid placement is ported as `race::grid_slot` but not wired to
+  a launcher option.
 - ~~Per-driver characteristics are all 1.0.~~ The captured table is used when present (F297).
 
 ## Grid position (F295)
@@ -96,3 +100,53 @@ Checks:
   and the authored stuck recovery;
 - windowed 12-car race with damage: real time (40.7 s simulated at 42.2 s wall clock);
 - 282 tests and Clippy pass.
+
+## Race rules (F308)
+
+[RACE_RULES_RESEARCH.md](RACE_RULES_RESEARCH.md) recovers the original race manager. Ported:
+
+- **Finish.** Every car finishes on the line crossing that completes the laps, lapped cars
+  included. A single-player race is over only when every car has finished [V].
+  - After the player's finish the opponents race on and the ported AI drives the player's car
+    ([I]: the original enables AI control of the finished car).
+  - The HUD shows `RACE RESULT - racing on, F: finish race`, updating live. The frozen result
+    appears once every car is finished or out.
+- **F ("Finish Race")** ends the race at once with the original's finalisation:
+  - cars still racing above 5 mph (2.2352 m/s) get an estimated finish time, marked `(est.)` [V];
+  - slower cars are classified `DNF` [V].
+  - The estimate (remaining distance at the car's mean race speed so far) is AUTHORED; the
+    original's per-vehicle lap estimator is not ported.
+- **Classification** [V]: finishers by time, then estimated finishers, then every other car by
+  race distance. Cars out of the race show their completed laps (`DNF, 1 lap`, `Wrecked, 2 laps`).
+- **Terminal damage:**
+  - for the player (the terminal-wheel status that already disables controls) it retires the car
+    as `Wrecked` and ends the race at once; every opponent still racing is estimated, as when the
+    original's wrecked screen retires a human [V];
+  - opponents with terminal damage are retired as `Wrecked` at once (AUTHORED shortcut for the AI
+    retire behaviour).
+- **Chequered flag** appears under the position once the leader is on the last lap within 250 m
+  of the line (rules.xml `end_race` [V]). The original shows it as a marshal flag.
+- **Not in the original, so not added:** corner-cutting or track-limit penalties (the
+  `corner_cutting` rule is an empty stub), false-start rules and blue flags.
+- `grid-opponent-race` retires terminally damaged cars and stops when the race is over. At the
+  tick limit it ends the race by finalisation (`race finalized tick=… reason=tick-limit`).
+- A render capture (`--render` with `--drive-ticks`) also completes once the race is over, since
+  the frozen result stops the tick count.
+
+Checks:
+- 9 race unit tests:
+  - lapped car, finish order, finalisation with the 5 mph rule, unfinished human;
+  - cars out ranked by distance, chequered flag, grid-slot clamping.
+- Headless `grid-opponent-race ROOT CD01 BP01 4 20000 ai` (2 laps):
+  - all finish: car0 2:56.896, car1 +2.608, car2 +4.624, car3 +5.808, tick 11419;
+  - car0's laps 89.064 + 86.242 s plus about 1.59 s from the grid to the line agree with its time.
+- Headless with `GRID_STOP_CAR0=3000` and an 8,000-tick limit, finalised at tick 8000:
+  - car1 2:55.911 (est.), car2 +1.348 (est.), car3 +2.969 (est.);
+  - car0 `DNF, 0 laps` (stopped before completing a lap).
+- App, `GRID_AUTOPILOT=1`, 1 lap, 3 opponents, `--drive-ticks 6600`:
+  - the player finished at tick 6008 (event 1:32.118, lap 1:30.548);
+  - the AI kept driving the player's car, and the race was over at tick 6264;
+  - result: AI 1 1:30.560, You +1.558, AI 2 +3.072, AI 3 +5.664;
+  - render `local/race-rules/app/race-over-4.png` checked (frozen RACE RESULT, player's car at
+    228 km/h under AI control).
+- 304 tests including the asset tests (after the rebase onto F307), and Clippy, pass.

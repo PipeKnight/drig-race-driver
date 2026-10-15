@@ -1,11 +1,13 @@
 //! Private headless race: N source cars in one shared world. Cars are driven by
 //! the ported original AI driver (`ai`, default) or the authored pursuit
-//! placeholder (`pursuit`). Reports laps, car-to-car contacts, failures and an
-//! optional per-tick TSV of car 0's AI telemetry. `--route tracks/<region>/<track>/<route>`
+//! placeholder (`pursuit`). Reports laps, car-to-car contacts, failures, the
+//! classification (race rules in docs/RACE_RULES_RESEARCH.md) and an optional
+//! per-tick TSV of car 0's AI telemetry. `--route tracks/<region>/<track>/<route>`
 //! (anywhere in the arguments) selects the circuit; Donington route_0 by default.
 use grid_tools::{
     ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Other, Parameters, View},
     pursuit_driver::PursuitDriver,
+    race::{Out, Status},
     route::Route,
     source_vehicle::{Controls, Runtime, multi::MultiRuntime},
 };
@@ -220,6 +222,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
             &[],
         );
+        // Terminal damage takes a car out of the race (AUTHORED for AI cars).
+        for (i, car) in multi.cars.iter().enumerate() {
+            if car.terminal_wheel().is_some() && standings.status(i) == Status::Racing {
+                standings.retire(i, Out::Wrecked);
+                println!("retire tick={} car{i} reason=terminal-damage", multi.ticks);
+            }
+        }
         if multi.ticks.is_multiple_of(1500) {
             let order: Vec<usize> = standings.order();
             println!("standings tick={} order={order:?}", multi.ticks);
@@ -258,9 +267,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        if (0..cars).all(|i| standings.finished(i).is_some()) {
+        if standings.over() {
             break;
         }
+    }
+    if !standings.over() {
+        // Tick limit: end the race as the original's finalisation does
+        // (no human car here, so stopped cars are retired).
+        let speeds: Vec<f64> = multi
+            .cars
+            .iter()
+            .map(|c| {
+                let v = c.velocity();
+                f64::from((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
+            })
+            .collect();
+        standings.finalize(
+            &speeds,
+            multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
+            &[],
+        );
+        println!("race finalized tick={} reason=tick-limit", multi.ticks);
     }
     for (i, car) in multi.cars.iter().enumerate() {
         let lap = car.lap.as_ref().unwrap();

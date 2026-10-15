@@ -103,6 +103,9 @@ struct Opponents {
     /// Scripted validation only (GRID_AUTOPILOT=1 with --drive-ticks): the
     /// ported AI drives the player's car.
     autopilot: Option<grid_tools::ai_driver::AiDriver>,
+    /// Drives the player's car after the finish while the opponents race on
+    /// (the original enables AI control of the finished car [I]).
+    after_finish: Option<grid_tools::ai_driver::AiDriver>,
     /// Last throttle of each opponent (car k at k-1), for engine sound.
     throttles: Vec<f32>,
 }
@@ -114,6 +117,16 @@ impl Opponents {
             .map(|c| {
                 let p = c.pose();
                 [p[12], p[13], p[14]]
+            })
+            .collect()
+    }
+    /// Speed (m/s) of every car; car 0 is the player runtime.
+    fn speeds(&self, player: &grid_tools::source_vehicle::Runtime) -> Vec<f64> {
+        std::iter::once(player)
+            .chain(self.multi.cars.iter().skip(1))
+            .map(|c| {
+                let v = c.velocity();
+                f64::from((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
             })
             .collect()
     }
@@ -1275,6 +1288,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     standings,
                     names,
                     autopilot,
+                    after_finish: None,
                     throttles: vec![0.; n],
                 })
             })
@@ -1865,9 +1879,14 @@ fn capture(
             exit.write(AppExit::error());
             return;
         }
+        // A finished race freezes before the scripted tick count.
         if driving
             .scripted_ticks
             .is_some_and(|n| driving.runtime.ticks < n)
+            && !driving
+                .opponents
+                .as_ref()
+                .is_some_and(|o| o.standings.over())
         {
             return;
         }
@@ -1916,7 +1935,20 @@ fn drive_tick(
     // Authored grid hold, not a recovered original race-start rule: the
     // reconstructed controls engage the clutch with the handbrake (1640 ->
     // E34), so the car stays put and releasing it at GO launches with wheelspin.
-    let held = trial.as_ref().is_some_and(|t| !t.driving());
+    // Race over (every car finished or out, or ended with F): frozen result.
+    if trial.is_some()
+        && driving
+            .opponents
+            .as_ref()
+            .is_some_and(|o| o.standings.over())
+    {
+        return;
+    }
+    // After the player's finish the opponents race on until every car has
+    // finished [V: a single-player lap race ends when all cars complete the
+    // laps, docs/RACE_RULES_RESEARCH.md].
+    let cooldown = trial.as_ref().is_some_and(|t| t.finished()) && driving.opponents.is_some();
+    let held = trial.as_ref().is_some_and(|t| !t.driving()) && !cooldown;
     if let Some(trial) = trial.as_mut()
         && held
     {
@@ -1928,8 +1960,15 @@ fn drive_tick(
     let driving = &mut *driving;
     let autopilot = if !held
         && let Some(opponents) = &mut driving.opponents
-        && let Some(pilot) = &mut opponents.autopilot
-    {
+        && let Some(pilot) = match &mut opponents.autopilot {
+            Some(pilot) => Some(pilot),
+            None if cooldown => Some(opponents.after_finish.get_or_insert_with(|| {
+                let mut pilot = opponents.drivers[0].clone();
+                pilot.reset();
+                pilot
+            })),
+            None => None,
+        } {
         use grid_tools::ai_driver::{Other, View};
         let car = &driving.runtime;
         let others: Vec<Other> = opponents
@@ -2045,6 +2084,7 @@ fn drive_tick(
     } else {
         if !held
             && let Some(trial) = trial.as_mut()
+            && trial.driving()
             && let Err(error) = trial.tick(driving.runtime.ticks, &driving.runtime.lap_events)
         {
             driving.failure = Some(format!("{error}; R restarts"));
@@ -2055,24 +2095,32 @@ fn drive_tick(
             && let (Some(trial), Some(opponents)) = (trial.as_ref(), driving.opponents.as_mut())
         {
             let positions = opponents.positions(&driving.runtime);
-            let already = opponents.standings.finished(0).is_some();
+            let time = trial.race_time(driving.runtime.ticks).unwrap_or(0.);
             opponents
                 .standings
-                .update(&opponents.ai.line, &positions, trial.state.elapsed(), &[0]);
-            if let grid_tools::time_trial::Phase::Finished(result) = trial.state.phase()
-                && !already
-            {
+                .update(&opponents.ai.line, &positions, time, &[0]);
+            if let grid_tools::time_trial::Phase::Finished(result) = trial.state.phase() {
                 opponents.standings.finish(0, result.seconds);
-                let speeds: Vec<f64> = std::iter::once(&driving.runtime)
-                    .chain(opponents.multi.cars.iter().skip(1))
-                    .map(|c| {
-                        let v = c.velocity();
-                        f64::from((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
-                    })
-                    .collect();
-                opponents
-                    .standings
-                    .estimate_remaining(&speeds, result.seconds);
+            }
+            // Terminal damage: the player's race is over (the original's
+            // wrecked screen retires and ends the race [V]); opponents are
+            // retired on it (AUTHORED).
+            use grid_tools::race::{Out, Status};
+            if driving.runtime.terminal_wheel().is_some()
+                && opponents.standings.status(0) == Status::Racing
+            {
+                opponents.standings.retire(0, Out::Wrecked);
+                let speeds = opponents.speeds(&driving.runtime);
+                opponents.standings.finalize(&speeds, time, &[0]);
+            }
+            for i in 1..opponents.standings.len() {
+                if opponents.multi.cars[i].terminal_wheel().is_some()
+                    && opponents.standings.status(i) == Status::Racing
+                {
+                    opponents.standings.retire(i, Out::Wrecked);
+                }
+            }
+            if opponents.standings.over() {
                 for line in opponents.standings.classification(&opponents.names) {
                     println!("drive_race_result {line}");
                 }
@@ -2153,6 +2201,7 @@ fn drive_actions(
             }
             let positions = opponents.positions(&driving.runtime);
             opponents.standings.reset(&opponents.ai.line, &positions);
+            opponents.after_finish = None;
         }
         driving.segment += 1;
         driving.last_controls = None;
@@ -2160,6 +2209,24 @@ fn drive_actions(
         driving.paused = false;
         if let Some(trial) = trial.as_mut() {
             trial.reset();
+        }
+    }
+    // F after the player's finish: "Finish Race" ends the race now; cars
+    // still racing are estimated or, below 5 mph, retired [V 0x90FCD0].
+    if input.just_pressed(KeyCode::KeyF)
+        && let Some(trial) = trial.as_ref()
+        && trial.finished()
+    {
+        let driving = &mut *driving;
+        if let Some(opponents) = &mut driving.opponents
+            && !opponents.standings.over()
+        {
+            let speeds = opponents.speeds(&driving.runtime);
+            let time = trial.race_time(driving.runtime.ticks).unwrap_or(0.);
+            opponents.standings.finalize(&speeds, time, &[0]);
+            for line in opponents.standings.classification(&opponents.names) {
+                println!("drive_race_result {line}");
+            }
         }
     }
     if input.just_pressed(KeyCode::KeyP) && !trial.as_ref().is_some_and(|t| t.finished()) {
@@ -2435,8 +2502,13 @@ fn drive_present(
     );
     // Race position or classification above the event HUD.
     let race = match (&driving.opponents, &trial) {
-        (Some(o), Some(t)) if t.finished() => format!(
-            "RACE RESULT\n{}\n\n",
+        (Some(o), Some(t)) if t.finished() || o.standings.over() => format!(
+            "RACE RESULT{}\n{}\n\n",
+            if o.standings.over() {
+                ""
+            } else {
+                " - racing on, F: finish race"
+            },
             o.standings.classification(&o.names).join("\n")
         ),
         (Some(o), Some(t)) if t.driving() => {
@@ -2450,11 +2522,16 @@ fn drive_present(
                 })
             };
             format!(
-                "Position {}/{}{}{}\n",
+                "Position {}/{}{}{}{}\n",
                 o.standings.position(0),
                 o.standings.len(),
                 gap("Ahead ", "-", ahead),
-                gap("Behind", "+", behind)
+                gap("Behind", "+", behind),
+                if o.standings.leader_flag().is_some() {
+                    "\nChequered flag"
+                } else {
+                    ""
+                }
             )
         }
         (Some(o), Some(_)) => format!("Grid {}/{}\n", o.standings.position(0), o.standings.len()),
