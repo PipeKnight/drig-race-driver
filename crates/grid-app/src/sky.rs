@@ -53,9 +53,14 @@ struct SkyDome;
 struct SourceSky {
     mesh: Mesh,
     dds: Vec<u8>,
+    environment: Option<Image>,
 }
 
-pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn install(
+    app: &mut App,
+    root: &Path,
+    source_ibl: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = super::read(&root.join("tracks/europe/donington/sky.pssg"))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_meshes(&tree)?;
@@ -86,6 +91,16 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Err
         .iter()
         .map(|p| scene::transform_point(&draw.transform, *p))
         .collect();
+    let environment = source_ibl
+        .then(|| {
+            super::sky_environment::bake(
+                &positions,
+                &source.texcoords[draw.vertices.clone()],
+                &draw.indices,
+                tex,
+            )
+        })
+        .transpose()?;
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(
         Mesh::ATTRIBUTE_UV_0,
@@ -106,14 +121,39 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Err
     app.insert_resource(SourceSky {
         mesh,
         dds: tex.base_dds(),
+        environment,
     })
     .add_plugins(MaterialPlugin::<SkyMaterial>::default())
     .add_systems(Startup, setup)
+    .add_systems(PostStartup, setup_environment)
     .add_systems(
         PostUpdate,
         follow_camera.before(TransformSystems::Propagate),
     );
     Ok(())
+}
+
+fn setup_environment(
+    mut commands: Commands,
+    source: Res<SourceSky>,
+    camera: Query<Entity, With<super::ViewerCamera>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let Some(environment) = &source.environment else {
+        return;
+    };
+    let Ok(camera) = camera.single() else { return };
+    commands
+        .entity(camera)
+        .remove::<bevy::light::AtmosphereEnvironmentMapLight>()
+        .insert(bevy::light::GeneratedEnvironmentMapLight {
+            environment_map: images.add(environment.clone()),
+            intensity: 8000.,
+            ..default()
+        });
+    println!(
+        "source_sky_ibl requested=true intensity_cd_m2=8000 filtering=Bevy-runtime source=sky-mesh-uv lower=authored-ground"
+    );
 }
 
 fn setup(

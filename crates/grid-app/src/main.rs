@@ -5,6 +5,7 @@ mod free_look;
 mod graphics;
 mod graphics_benchmark;
 mod sky;
+mod sky_environment;
 mod time_trial;
 mod track_grade;
 mod tyre_sound;
@@ -936,6 +937,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--ibl" => {
+                graphics.source_ibl = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("procedural") => false,
+                    _ => return Err("--ibl needs source or procedural".into()),
+                }
+            }
             "--tyre-detail" => {
                 graphics.smooth_tyres = match args.next().as_deref() {
                     Some("source") => false,
@@ -1490,8 +1498,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .add_systems(Update, update_start_lights);
     }
+    if graphics.source_ibl && (!graphics.enhanced() || !graphics.source_sky || !track) {
+        return Err(
+            "--ibl source requires enhanced graphics and a source-sky Donington scene".into(),
+        );
+    }
     if graphics.enhanced() && graphics.source_sky && track {
-        sky::install(&mut app, &root)?;
+        sky::install(&mut app, &root, graphics.source_ibl)?;
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
