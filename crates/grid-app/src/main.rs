@@ -88,7 +88,8 @@ struct Driving {
 /// with the player runtime for each common tick.
 struct Opponents {
     multi: grid_tools::source_vehicle::multi::MultiRuntime,
-    drivers: Vec<grid_tools::pursuit_driver::PursuitDriver>,
+    drivers: Vec<grid_tools::ai_driver::AiDriver>,
+    ai: grid_tools::ai_driver::AiData,
 }
 #[derive(Component)]
 struct OpponentPart {
@@ -1054,15 +1055,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     runtime.body_events,
                     parameters,
                 )?;
-                let progress = grid_tools::lap_progress::load(&root)?.progress;
+                use grid_tools::ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Parameters};
+                let ai = AiData::load(&root, "tracks/europe/donington/route_0", "touring", "lac")?;
+                let parameters = Parameters::new(&ai, NORMAL_DIFFICULTY, |_| 1.)?;
                 let drivers = (0..n)
-                    .map(|i| grid_tools::pursuit_driver::PursuitDriver::new(&progress, 18. + i as f64 * 0.25))
+                    .map(|i| AiDriver::new(parameters.clone(), 0x5eed + i as u32 + 1))
                     .collect();
                 println!(
-                    "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=authored-pursuit-placeholder deformation={}",
+                    "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=original-ai-port difficulty={NORMAL_DIFFICULTY} deformation={}",
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
-                Ok(Opponents { multi, drivers })
+                Ok(Opponents { multi, drivers, ai })
             })
             .transpose()?;
         Some(Driving {
@@ -1613,7 +1616,19 @@ fn drive_tick(
     let driving = &mut *driving;
     let result = if let Some(opponents) = &mut driving.opponents {
         // One common shared-world tick: the player runtime occupies car slot 0.
+        use grid_tools::ai_driver::{Other, View};
         let mut all = vec![controls];
+        // Car 0 of the shared world is the player runtime, held outside it here.
+        let cars: Vec<Other> = std::iter::once(&driving.runtime)
+            .chain(opponents.multi.cars.iter().skip(1))
+            .map(|c| {
+                let p = c.pose();
+                Other {
+                    position: [p[12], p[13], p[14]],
+                    velocity: c.velocity(),
+                }
+            })
+            .collect();
         for (i, driver) in opponents.drivers.iter_mut().enumerate() {
             let car = &opponents.multi.cars[i + 1];
             all.push(if held {
@@ -1622,7 +1637,24 @@ fn drive_tick(
                     ..Default::default()
                 }
             } else {
-                driver.controls(car.pose(), car.velocity())
+                let others: Vec<Other> = cars
+                    .iter()
+                    .enumerate()
+                    .filter(|&(j, _)| j != i + 1)
+                    .map(|(_, o)| *o)
+                    .collect();
+                let view = View {
+                    pose: car.pose(),
+                    velocity: car.velocity(),
+                    angular: car.angular_velocity(),
+                    maximum_steering_angle: car.maximum_steering_angle(),
+                };
+                driver.controls(
+                    &opponents.ai,
+                    &view,
+                    &others,
+                    grid_tools::source_vehicle::DELTA,
+                )
             });
         }
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);

@@ -1,6 +1,7 @@
 //! Read-only readers for verified GRID framing and selected mesh/texture subsets.
 //! Unknown values remain bytes; scene assembly and game behavior are not inferred.
 
+pub mod ai;
 pub mod audio_car_setup;
 pub mod audio_dictionary;
 pub mod binxml;

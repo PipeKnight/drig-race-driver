@@ -762,6 +762,15 @@ impl Runtime {
     pub fn velocity(&self) -> [f32; 4] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x220 / 4 + i]))
     }
+    /// World angular velocity of the physical body (rad/s).
+    pub fn angular_velocity(&self) -> [f32; 4] {
+        std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x210 / 4 + i]))
+    }
+    /// Steering lock (vehicle +E54, radians): the wheel angle of a full
+    /// steering command; used to normalise AI steering.
+    pub fn maximum_steering_angle(&self) -> f32 {
+        f32::from_bits(self.state.car.owner.vehicle[0xe54 / 4])
+    }
 }
 
 #[cfg(test)]
