@@ -1,6 +1,11 @@
 # Playable build updates
 
-Latest verified refresh: **36ec60cd7860** (clean), built 15 October 2026 ~13:51 UTC, release SHA256
+Latest verified refresh: **143112dab5f0** (clean), built 15 October 2026 ~14:01 UTC, release SHA256
+1511025265f477975840708aca8ec22ef545e9da7a0d6d1072ecb4d2eb563a59, manifest
+local/playtest/build-20261015T1400461365693Z/. Opponents drive with the original per-driver characteristics (private table
+local\ai-driver-characteristics.tsv) and yield when squeezed alongside. Source driving and Bevy checks pass.
+
+Previous refresh: **36ec60cd7860** (clean), built 15 October 2026, release SHA256
 316077bd5ba331e9371098f81323baecbe11b244416e5455b0e4cef12ca1de01, manifest
 local/playtest/build-20261015T1351107039643Z/. Races start on the Donington gantry lights (shipped 4-second sequence).
 Source driving and Bevy checks pass.
