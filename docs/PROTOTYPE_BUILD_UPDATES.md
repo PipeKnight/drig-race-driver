@@ -1,6 +1,13 @@
 # Playable build updates
 
-Latest verified refresh: **60a59772f965-dirty**, built 15 October 2026 02:16:30 UTC, release SHA256
+Latest verified refresh: **6ffba7dc15fd-dirty**, built 15 October 2026 ~02:45 UTC, release SHA256
+539082e9fffc7a2583a4701e71a3ec17f6c7201dfc19ab52ca33ba52b29f8717, manifest
+local/playtest/build-20261015T0245060785757Z/. Adds [tyre and surface audio](TYRE_AUDIO.md)
+(roll, wheelspin peel, locking slide, skid, scrub per wheel; M mutes engine and tyres).
+Source driving and Bevy checks pass; offline tyre render peak .337. Not listened to on the
+audio device overnight; owner listening pending.
+
+Previous refresh: **60a59772f965-dirty**, built 15 October 2026 02:16:30 UTC, release SHA256
 b58d6d41ceee6f24eb7b2aac7ca36b844b8553347617326658d0c8e268917a54, manifest
 local/playtest/build-20261015T0216104356687Z/. The engine now idles on the grid and the time-trial
 countdown holds the car on the handbrake so throttle revs it; releasing at GO gives launch wheelspin.
