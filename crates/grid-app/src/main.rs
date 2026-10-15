@@ -1,4 +1,5 @@
 //! Source reference viewer and serial driving prototype.
+mod assists;
 mod body_damage;
 mod damage_parts;
 mod engine_sound;
@@ -357,8 +358,9 @@ fn track_label(route: &Route) -> String {
         .split('_')
         .map(|w| {
             let mut c = w.chars();
-            c.next()
-                .map_or_else(String::new, |f| f.to_ascii_uppercase().to_string() + c.as_str())
+            c.next().map_or_else(String::new, |f| {
+                f.to_ascii_uppercase().to_string() + c.as_str()
+            })
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -960,6 +962,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
     let mut root = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Grid");
     let mut route = Route::default();
+    let mut driver_aids = grid_tools::source_vehicle::assists::Assists::default();
     let mut output = None;
     let mut lod = String::from("LOD0_");
     let mut track = false;
@@ -1036,6 +1039,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--throttle" => scripted.throttle = args.next().ok_or("missing throttle")?.parse()?,
             "--steering" => scripted.steering = args.next().ok_or("missing steering")?.parse()?,
             "--game-root" => root = args.next().ok_or("--game-root needs a path")?.into(),
+            "--assists" => {
+                driver_aids = grid_tools::source_vehicle::assists::Assists::parse(
+                    &args.next().ok_or("--assists needs key=value items")?,
+                )?
+            }
+            "--assists-file" => {
+                driver_aids =
+                    assists::read_file(&args.next().ok_or("--assists-file needs a path")?)?
+            }
             "--route" => {
                 route = Route::new(
                     &args
@@ -1096,6 +1108,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route only."
                 );
+                println!("{}", assists::HELP);
                 println!(
                     "--opponents 1..11: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
                 );
@@ -1168,6 +1181,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             &format!("slot_{player_slot:02}"),
             200679,
         )?;
+        runtime.set_assists(driver_aids)?;
+        println!("drive_assists {driver_aids}");
         runtime.enable_lap_timing(&root)?;
         println!(
             "drive_lap_timing enabled=true gates={} required_gates={} finish=0 clock=successful-simulation-ticks policy=independent-ordered-route-splits",
@@ -1994,6 +2009,7 @@ fn drive_tick(
     } else if driving.scripted_ticks.is_some() {
         driving.scripted
     } else {
+        assists::shift_keys(&input, &mut driving.runtime);
         let pressed = |a, b| input.pressed(a) || input.pressed(b);
         grid_tools::source_vehicle::Controls {
             throttle: f32::from(pressed(KeyCode::ArrowUp, KeyCode::KeyW)),

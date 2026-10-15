@@ -100,8 +100,7 @@ fn ornament_barriers(
             }
         }
     }
-    let placement_bytes =
-        std::fs::read(root.join(route.file("ornaments.bin")))?;
+    let placement_bytes = std::fs::read(root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     let mut boxes = Vec::new();
     for p in &placements.prototypes {

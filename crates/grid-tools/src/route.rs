@@ -73,7 +73,10 @@ mod tests {
         assert!(r.is_default());
         assert_eq!(r.track(), "tracks/europe/donington");
         assert_eq!(r.track_name(), "donington");
-        assert_eq!(r.file("track.jpk"), "tracks/europe/donington/route_0/track.jpk");
+        assert_eq!(
+            r.file("track.jpk"),
+            "tracks/europe/donington/route_0/track.jpk"
+        );
         assert_eq!(
             r.track_file("objects.pssg"),
             "tracks/europe/donington/objects.pssg"
@@ -107,10 +110,18 @@ mod tests {
         car.enable_lap_timing(root).unwrap();
         assert!(car.lap_gate_count() > 0);
         let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
-        assert!((data.line.length - 5038.5).abs() < 1., "{}", data.line.length);
+        assert!(
+            (data.line.length - 5038.5).abs() < 1.,
+            "{}",
+            data.line.length
+        );
         // Jarama ships drift racing lines beside the optimal ones; only the
         // optimal line is read.
         let jarama = AiData::load(root, "tracks/europe/jarama/route_0", "touring", "lac").unwrap();
-        assert!((jarama.line.length - 3830.7).abs() < 1., "{}", jarama.line.length);
+        assert!(
+            (jarama.line.length - 3830.7).abs() < 1.,
+            "{}",
+            jarama.line.length
+        );
     }
 }

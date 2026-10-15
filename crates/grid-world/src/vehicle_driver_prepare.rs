@@ -1,5 +1,6 @@
-//! Selected assisted-automatic driver preparation, including clutch engagement.
-//! Respawn/nitro and neutral/manual operation require separate contracts.
+//! Selected driver preparation with clutch assistance (+1971), automatic or
+//! manual gearbox, neutral included, and clutch engagement. Respawn/nitro and
+//! the manual-clutch branches require separate contracts.
 use crate::{Error, dynamics, spawn, vehicle_force::Frame};
 fn f(b: &[u32], o: usize) -> f32 {
     f32::from_bits(b[o / 4])
@@ -63,8 +64,7 @@ pub fn apply(
         || byte(b, 0xde4) != 0
         || byte(b, 0xdfc) != 0
         || !matches!(b[0x1598 / 4], 1 | 2)
-        || !(1..=9).contains(&b[0x196c / 4])
-        || byte(b, 0x1970) == 0
+        || b[0x196c / 4] > 9
         || byte(b, 0x1971) == 0
         || b[0x3c0 / 4] >= 5
         || b[0x2e0 / 4] >= 10
@@ -112,7 +112,7 @@ pub fn apply(
     if byte(b, 0x1108) != 0 {
         set(b, 0x1884, 1.);
         let gear = b[0x196c / 4];
-        if gear != 9 {
+        if gear != 0 && gear != 9 {
             let mut counts = [0u32; 2];
             let mut sums = [0f32; 2];
             for i in 0..4 {
@@ -269,14 +269,17 @@ pub fn apply(
     *frame = next;
     Ok(())
 }
-// Selected 98E1B0 call: assisted automatic, a non-neutral gear, modes one/two.
+// A03670 mode transition with clutch assistance (+1971): neutral or the idle
+// byte disconnects mode one; mode two in gear without idle calls 98E1B0. The
+// manual-clutch (+1971 clear) branches are rejected by the input guard.
 #[allow(clippy::assign_op_pattern)] // Keep wheel-first sums from the SIMD helper.
 fn clutch(b: &mut [u32], driven: &[usize]) -> Result<(), Error> {
-    if byte(b, 0x1640) != 0 {
+    let idle = byte(b, 0x1640) != 0;
+    let gear = b[0x196c / 4];
+    if b[0x1598 / 4] == 1 && (gear == 0 || idle) {
         b[0x1598 / 4] = 2;
-        return Ok(());
     }
-    if b[0x1598 / 4] == 1 {
+    if b[0x1598 / 4] != 2 || gear == 0 || idle {
         return Ok(());
     }
     let ratio = f(b, 0x18f4 + 4 * b[0x196c / 4] as usize);

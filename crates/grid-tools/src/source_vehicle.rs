@@ -13,6 +13,7 @@ use grid_world::{
 };
 use std::path::Path;
 
+pub mod assists;
 pub mod multi;
 
 pub const DELTA: f32 = 0.016;
@@ -56,6 +57,11 @@ pub struct Runtime {
     pub lap_events: Vec<grid_world::lap_timing::Event>,
     /// Purchased route whose track, grid, boundary, props and gates are used.
     route: Route,
+    /// Player driver aids (see [`assists`]); the default is the earlier
+    /// fixed configuration. Change with [`Runtime::set_assists`].
+    pub assists: assists::Assists,
+    /// Pending one-tick gear request and the tick it belongs to.
+    shift: Option<(u64, assists::Shift)>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -398,6 +404,8 @@ impl Runtime {
             initial_lap: None,
             lap_events: Vec::new(),
             route: route.clone(),
+            assists: assists::Assists::default(),
+            shift: None,
         })
     }
 
@@ -573,12 +581,16 @@ impl Runtime {
             return Err(Error("invalid driving controls"));
         }
         let mut staged = self.state.clone();
+        let steering = self.stage_driver(&mut staged, controls.steering);
+        if !(steering.is_finite() && (-1. ..=1.).contains(&steering)) {
+            return Err(Error("invalid shaped steering command"));
+        }
         for (o, v) in [
             (0xe1c, controls.throttle),
             (0xe20, controls.brake),
             (0xe3c, controls.throttle),
             (0xe40, controls.brake),
-            (0xe30, controls.steering),
+            (0xe30, steering),
         ] {
             staged.car.owner.vehicle[o / 4] = v.to_bits();
             staged.car.frame.body[o / 4] = v.to_bits();
@@ -747,6 +759,7 @@ impl Runtime {
         self.deformation_registration = self.initial_deformation_registration.clone();
         self.lap = self.initial_lap.clone();
         self.lap_events.clear();
+        self.shift = None;
         // The external geometry may still carry damage. Reconstruct it at the
         // next job publication before any advanced-pose contact query.
         if self.deformation_enabled {
