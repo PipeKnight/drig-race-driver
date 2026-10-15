@@ -451,6 +451,9 @@ fn scene_fixture() -> Vec<u8> {
 }
 fn scene_mesh() -> mesh::Mesh<'static> {
     mesh::Mesh {
+        tangents: vec![],
+        binormals: vec![],
+        colors_argb: vec![],
         id: b"triangle",
         positions: vec![[0.; 3]; 6],
         normals: vec![[0., 0., 1.]; 6],

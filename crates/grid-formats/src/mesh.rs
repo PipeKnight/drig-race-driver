@@ -7,6 +7,11 @@ pub struct Mesh<'a> {
     pub id: &'a [u8],
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    /// Saved basis vectors, including nonfinite values for renderer fallback.
+    pub tangents: Vec<[f32; 3]>,
+    pub binormals: Vec<[f32; 3]>,
+    /// Raw saved A,R,G,B bytes; these may control damage, not albedo tint.
+    pub colors_argb: Vec<[u8; 4]>,
     /// Source values are preserved; invalid normals need a renderer fallback.
     pub nonfinite_normals: usize,
     pub texcoords: Vec<[f32; 2]>,
@@ -108,6 +113,23 @@ fn half_pairs(data: &[u8], count: usize, offset: usize, stride: usize) -> Result
     Ok(result)
 }
 
+fn color_words(data: &[u8], count: usize, offset: usize, stride: usize) -> Result<Vec<[u8; 4]>> {
+    if count == 0
+        || count > 1_000_000
+        || offset.checked_add(4).is_none_or(|end| end > stride)
+        || count.checked_mul(stride) != Some(data.len())
+    {
+        return fail(0, "unsupported ARGB color layout");
+    }
+    Ok((0..count)
+        .map(|i| {
+            data[i * stride + offset..i * stride + offset + 4]
+                .try_into()
+                .unwrap()
+        })
+        .collect())
+}
+
 pub fn read_meshes<'a>(tree: &Tree<'a>) -> Result<Vec<Mesh<'a>>> {
     read_meshes_impl(tree, false)
 }
@@ -144,6 +166,9 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
         }
         let mut positions = None;
         let mut normals = None;
+        let mut tangents = None;
+        let mut binormals = None;
+        let mut colors = None;
         let mut texcoords = Vec::new();
         let mut skin_indices = None;
         for stream in streams {
@@ -234,6 +259,31 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
                         );
                     }
                 }
+                (b"Tangent", b"float3") | (b"Binormal", b"float3") => {
+                    let target = if kind == b"Tangent" {
+                        &mut tangents
+                    } else {
+                        &mut binormals
+                    };
+                    if target
+                        .replace(floats(data, count, offset, stride, false)?)
+                        .is_some()
+                    {
+                        return fail(
+                            tree.nodes[stream].offset,
+                            "duplicate tangent/binormal stream",
+                        );
+                    }
+                }
+                (b"Color", b"uint_color_argb") => {
+                    if colors
+                        .replace(color_words(data, count, offset, stride)?)
+                        .is_some()
+                    {
+                        return fail(tree.nodes[stream].offset, "duplicate color stream");
+                    }
+                }
+                // Other optional encodings keep the previous unconsumed behavior.
                 (b"Color", _) | (b"Tangent", _) | (b"Binormal", _) => {}
                 _ => {
                     return fail(
@@ -247,7 +297,13 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
             return fail(tree.nodes[source].offset, "position stream absent");
         };
         let normals = normals.unwrap_or_default();
+        let tangents = tangents.unwrap_or_default();
+        let binormals = binormals.unwrap_or_default();
+        let colors_argb = colors.unwrap_or_default();
         if (!normals.is_empty() && normals.len() != positions.len())
+            || (!tangents.is_empty() && tangents.len() != positions.len())
+            || (!binormals.is_empty() && binormals.len() != positions.len())
+            || (!colors_argb.is_empty() && colors_argb.len() != positions.len())
             || texcoords.iter().any(|uv| uv.len() != positions.len())
         {
             return fail(tree.nodes[source].offset, "mesh stream lengths differ");
@@ -315,6 +371,9 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
             id,
             positions,
             normals,
+            tangents,
+            binormals,
+            colors_argb,
             nonfinite_normals,
             texcoords: texcoords_first,
             additional_texcoords: texcoords,
@@ -323,4 +382,23 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
         });
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn color_layout_preserves_mask_order_and_rejects_bad_ranges() {
+        let data = [
+            1, 2, 3, 4, 0xff, 0x00, 0xff, 0xff, 9, 8, 7, 6, 0xfe, 0xff, 0xff, 0xff,
+        ];
+        assert_eq!(
+            color_words(&data, 2, 4, 8).unwrap(),
+            vec![[255, 0, 255, 255], [254, 255, 255, 255]]
+        );
+        assert!(color_words(&data, 2, 5, 8).is_err());
+        assert!(color_words(&data[..15], 2, 4, 8).is_err());
+        assert!(color_words(&data, 0, 4, 8).is_err());
+        assert!(color_words(&data, 2, usize::MAX, 8).is_err());
+    }
 }
