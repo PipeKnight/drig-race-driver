@@ -1,6 +1,6 @@
 # Visual damage: loose parts, broken glass and smashed lights
 
-15 October 2026 (F302). Static research on how the purchased Lacetti package describes detachable
+15 October 2026 (F307). Static research on how the purchased Lacetti package describes detachable
 parts, glass and lights, and how the original game drives them, plus the presentation-only port
 in `crates/grid-app/src/damage_parts.rs`.
 
@@ -324,9 +324,28 @@ Log lines:
 - `drive_damage_light`;
 - with `GRID_DAMAGE_ZONES=1`, `drive_damage_zones` per tick.
 
-## 4. Validation
+## 4. Validation [V]
 
-See the F302 entry in PROJECT_LOG.md for the runs, renders and checks.
+Renders and logs are private, under `local/visual-damage/` in the main checkout. The `GRID_DAMAGE_CAMERA=car,x,y,z` diagnostic places the render camera at a car-local point.
+
+- **Wheel contacts never feed the zones.** In the solo collision run (throttle 1, steering 0.25), all zones stay zero until the first barrier contact at tick 115.
+  - Tick 116: front-left zone 8 995 against a wing swing threshold of 4 560 (4 × 1140) and a corner swing threshold of 2 280. Both parts go loose; nothing detaches.
+- **Shallow crash** (steering 0.12, 1500 ticks):
+  - corner loose 157, wing loose 438;
+  - front light clusters smashed 656/711 (displacement 0.102/0.168 m);
+  - windscreen cracked 713, then smashed 714;
+  - bonnet loose 1090 (23 186 > 13 680), right corner 1091;
+  - both side windows smashed and both rear clusters smashed at 1092.
+  - Renders `w-s012-760.png` (windscreen gone, interior visible) and `w-s012-1100.png` (bonnet open, side glass gone, shards) checked.
+- **12-car autopilot race** (`GRID_AUTOPILOT=1 --opponents 11 --time-trial-laps 1`, 3000 ticks):
+  - opponent parts go loose and detach;
+  - car 1 loses its front-right corner (2352) and its whole rear bumper (2557, 14 853 > 11 400);
+  - car 6's bonnet goes loose (2557);
+  - several cars crack or smash glass and lights.
+  - The same events recur at the same ticks on replay.
+  - `w-race-car1.png` checked: car 6's bonnet is flipped up, shards are in flight, and car 1's rear bumper is falling away.
+- Glass and light states are evaluated once per rendered frame, when the car's deformation field changes. Their reported tick therefore follows frame pacing: a repeat run of the 1100-tick crash after rebasing logged the windscreen smash at 715 instead of 718. The part decisions run per simulation tick and were identical.
+- These are checks of the port's behaviour only. Magnitudes and appearance are not compared with the original.
 
 ## 5. Open questions
 
