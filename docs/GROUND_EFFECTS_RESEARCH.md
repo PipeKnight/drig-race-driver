@@ -274,13 +274,20 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
   - green tufts on the Donington verges;
   - the first render showed black back-lit tufts from mirrored geometry, fixed by mirroring UVs
     as the original does.
-- **Windowed 12-car race** (11 AI, damage, autopilot, 3,600 ticks = 57.6 s simulated):
-  - effects on: 58.1 s wall clock after a ~11 s startup;
-  - effects off: 61.0 s, run while other sessions kept the CPU busy;
-  - per-frame mean cost with effects on: grass 1.1–1.3 ms, skid mesh 0.03–0.2 ms, debris
-    0.01 ms, per-tick sampling/emission 0.06–0.1 ms;
-  - an earlier build that ray-probed the track for every wheel cost 0.7–2.8 ms per tick and
-    was replaced by the original's wheel-derived contact point.
+- **Windowed 12-car race** (11 AI, damage, autopilot, 3,600 ticks = 57.6 s simulated; rebased
+  on F310, so tyre smoke, damage parts and assists are included; build `CDDA6A28961B43FE…`):
+  - effects on: 57.7 s wall clock after a 4.5 s startup;
+  - effects off (`GRID_GROUND_EFFECTS=0`): 57.6 s;
+  - no stderr errors, about 52 frames/s;
+  - per-frame mean cost: grass 0.6–1.25 ms, skid mesh 0.01–0.2 ms, debris 0.01 ms,
+    per-tick sampling/emission 0.03–0.07 ms.
+- **Failures fixed on the way:**
+  - The first build ray-probed the track for every wheel, costing 0.7–2.8 ms per frame. It now
+    uses the original's wheel-derived point.
+  - Empty dynamic meshes made Bevy's mesh allocator log a slab use-after-free thousands of
+    times per run, which slowed frames. Every effect mesh now keeps one invisible degenerate
+    triangle (`effect_mesh`).
+  - Earlier A/B runs under 100 % CPU from parallel builds varied from 58 to 74 s.
 - Grass load takes about 0.1 s (`.grs` read 9 ms).
 
 ## 6. Open items

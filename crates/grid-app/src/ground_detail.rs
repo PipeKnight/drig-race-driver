@@ -3,11 +3,7 @@
 //! vertices 94FAF0, update 97EDE0). `grass.grs`, `ground_cover.xml` and
 //! `ground_cover.pssg` (sprites and `gc_billboard.tga`) are read from the
 //! purchased installation for the selected route's track. Presentation only.
-use bevy::{
-    asset::RenderAssetUsages,
-    mesh::{Indices, PrimitiveTopology},
-    prelude::*,
-};
+use bevy::prelude::*;
 use grid_formats::{
     binxml,
     ground_cover::{self, CoverType, Distances, Patch},
@@ -324,16 +320,13 @@ fn start(
 }
 
 fn empty() -> Mesh {
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, Vec::<[f32; 3]>::new());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, Vec::<[f32; 3]>::new());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, Vec::<[f32; 2]>::new());
-    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, Vec::<[f32; 4]>::new());
-    mesh.insert_indices(Indices::U32(Vec::new()));
-    mesh
+    super::ground_effect_assets::effect_mesh(
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
 impl GroundDetail {
@@ -385,13 +378,7 @@ impl GroundDetail {
                 }
             }
         }
-        let mut mesh = empty();
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-        mesh.insert_indices(Indices::U32(indices));
-        mesh
+        super::ground_effect_assets::effect_mesh(positions, normals, uvs, colors, indices)
     }
 }
 

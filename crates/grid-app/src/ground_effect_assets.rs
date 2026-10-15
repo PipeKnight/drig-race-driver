@@ -5,6 +5,7 @@ use bevy::{
     image::{
         CompressedImageFormats, ImageAddressMode, ImageSampler, ImageSamplerDescriptor, ImageType,
     },
+    mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
 use grid_formats::{pssg, texture};
@@ -117,4 +118,36 @@ fn report(mut frames: Local<u64>) {
         ms(GRASS),
         ms(TICK)
     );
+}
+
+/// Dynamic effect mesh. Bevy's mesh allocator cannot hold zero-length
+/// buffers (it logs a use-after-free on every update), so an empty mesh
+/// carries one invisible degenerate triangle.
+pub(crate) fn effect_mesh(
+    mut positions: Vec<[f32; 3]>,
+    mut normals: Vec<[f32; 3]>,
+    mut uvs: Vec<[f32; 2]>,
+    mut colors: Vec<[f32; 4]>,
+    mut indices: Vec<u32>,
+) -> Mesh {
+    if indices.is_empty() {
+        let base = positions.len() as u32;
+        for _ in 0..3 {
+            positions.push([0.; 3]);
+            normals.push([0., 1., 0.]);
+            uvs.push([0.; 2]);
+            colors.push([0.; 4]);
+        }
+        indices.extend([base, base, base]);
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
 }

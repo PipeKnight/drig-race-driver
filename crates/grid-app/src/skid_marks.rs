@@ -4,11 +4,7 @@
 //! 4) and the atlas `skidmarks/road_tm.pssg` are read from the purchased
 //! installation. Presentation only; never feeds physics.
 use super::wheel_ground::{Wheel, WheelGround};
-use bevy::{
-    asset::RenderAssetUsages,
-    mesh::{Indices, PrimitiveTopology},
-    prelude::*,
-};
+use bevy::prelude::*;
 use grid_formats::skidmarks::{Layer, Profile};
 use std::path::Path;
 
@@ -312,16 +308,7 @@ impl SkidMarks {
                 indices.extend([a, a + 2, a + 1, a + 1, a + 2, a + 3]);
             }
         }
-        let mut mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        );
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-        mesh.insert_indices(Indices::U32(indices));
-        mesh
+        super::ground_effect_assets::effect_mesh(positions, normals, uvs, colors, indices)
     }
 }
 
