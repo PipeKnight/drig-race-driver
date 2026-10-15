@@ -1,5 +1,6 @@
 //! Source reference viewer and serial driving prototype.
 mod body_damage;
+mod car_materials;
 mod engine_sound;
 mod free_look;
 mod graphics;
@@ -937,6 +938,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--car-materials" => {
+                graphics.layered_car = match args.next().as_deref() {
+                    Some("legacy") => false,
+                    Some("layered") => true,
+                    _ => return Err("--car-materials needs legacy or layered".into()),
+                }
+            }
             "--ibl" => {
                 graphics.source_ibl = match args.next().as_deref() {
                     Some("source") => true,
@@ -1623,7 +1631,7 @@ fn setup(
                     name,
                     "Window Glass" | "Grills Glass" | "Head Lights Glass" | "Rear Lights Glass"
                 );
-                materials.add(StandardMaterial {
+                let mut material = StandardMaterial {
                     base_color_texture: bindings
                         .get(&part.material)
                         .map(|texture| texture_handles[texture].clone()),
@@ -1666,7 +1674,14 @@ fn setup(
                         Some(Face::Back)
                     },
                     ..default()
-                })
+                };
+                if graphics.enhanced()
+                    && graphics.layered_car
+                    && (!track || part.material.starts_with("lacetti/"))
+                {
+                    car_materials::apply(name, &mut material);
+                }
+                materials.add(material)
             })
             .clone();
         let deformable = driving
