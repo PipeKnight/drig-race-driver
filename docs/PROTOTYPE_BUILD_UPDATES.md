@@ -1,6 +1,11 @@
 # Playable build updates
 
-Latest verified refresh: **37df9b20fd07** (clean), built 15 October 2026 ~14:05 UTC, release SHA256
+Latest verified refresh: **e43a04a469b2** (clean), built 15 October 2026 ~14:09 UTC, release SHA256
+118ad703d27581ce6b89699f81f9cea1638a6fd4748be2aa334396f45448aa7a, manifest
+local/playtest/build-20261015T1409272751025Z/. `Play GRID Race.cmd` now races 7 AI opponents from the back of the grid;
+the HUD shows the gap to the cars ahead and behind. Source driving and Bevy checks pass.
+
+Previous refresh: **37df9b2** (clean), built 15 October 2026, release SHA256
 ffd58c1ec1eb24230b99852cb18fb3ac3ab778adbcd85f95b8235aac69ba8881, manifest
 local/playtest/build-20261015T1404423733601Z/. AI cars rev their engines on the grid before the lights go out. Source driving
 and Bevy checks pass.
