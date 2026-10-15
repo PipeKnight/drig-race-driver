@@ -772,6 +772,10 @@ impl Runtime {
     pub fn maximum_steering_angle(&self) -> f32 {
         f32::from_bits(self.state.car.owner.vehicle[0xe54 / 4])
     }
+    /// The assisted automatic gearbox has selected reverse (vehicle +196C = 9).
+    pub fn reverse_gear(&self) -> bool {
+        self.state.car.owner.vehicle[0x196c / 4] == 9
+    }
 }
 
 #[cfg(test)]

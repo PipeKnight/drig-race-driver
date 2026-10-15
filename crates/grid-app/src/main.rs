@@ -1861,12 +1861,7 @@ fn drive_tick(
             .skip(1)
             .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
             .collect();
-        let view = View {
-            pose: car.pose(),
-            velocity: car.velocity(),
-            angular: car.angular_velocity(),
-            maximum_steering_angle: car.maximum_steering_angle(),
-        };
+        let view = View::of(car, opponents.multi.obstruction(0));
         Some(pilot.controls(
             &opponents.ai,
             &view,
@@ -1934,12 +1929,7 @@ fn drive_tick(
                     .filter(|&(j, _)| j != i + 1)
                     .map(|(_, o)| *o)
                     .collect();
-                let view = View {
-                    pose: car.pose(),
-                    velocity: car.velocity(),
-                    angular: car.angular_velocity(),
-                    maximum_steering_angle: car.maximum_steering_angle(),
-                };
+                let view = View::of(car, opponents.multi.obstruction(i + 1));
                 driver.controls(
                     &opponents.ai,
                     &view,

@@ -77,7 +77,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(t) = &mut trace {
         writeln!(
             t,
-            "tick\tspeed\tthrottle\tbrake\tsteering\tarc\tlook_ahead\tcurvature\theading_error\tline_distance\tline_target\toffset\tline_error\tslip"
+            "tick\tspeed\tthrottle\tbrake\tsteering\tarc\tlook_ahead\tcurvature\theading_error\tline_distance\tline_target\toffset\tline_error\tslip\treverse_gear\tbehaviour"
         )?;
     }
     let positions_of = |multi: &MultiRuntime| -> Vec<[f32; 3]> {
@@ -103,7 +103,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|v| v.parse())
         .transpose()?
         .unwrap_or(1.);
-    let mut behaviours = vec![(grid_tools::ai_driver::Behaviour::Race, 0u8); cars];
+    let tick_variable = |name: &str| -> Result<Option<u64>, Box<dyn std::error::Error>> {
+        Ok(std::env::var(name).ok().map(|v| v.parse()).transpose()?)
+    };
+    let stop_car0 = tick_variable("GRID_STOP_CAR0")?;
+    // GRID_SPIN_CAR0=tick[:ticks] (default 60 ticks).
+    let spin_car0 = match std::env::var("GRID_SPIN_CAR0") {
+        Ok(v) => {
+            let (start, length) = v.split_once(':').unwrap_or((&v, "60"));
+            Some((start.parse::<u64>()?, length.parse::<u64>()?))
+        }
+        Err(_) => None,
+    };
+    let mut behaviours = vec![(grid_tools::ai_driver::Behaviour::Race, 0u8, 0u8, false); cars];
     let mut pair_contacts = vec![vec![0usize; cars]; cars];
     let mut car_contacts = 0;
     let mut laps: Vec<Vec<f64>> = vec![Vec::new(); cars];
@@ -125,26 +137,53 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .filter(|&(j, _)| j != i)
                         .map(|(_, p)| *p)
                         .collect();
-                    let view = View {
-                        pose: car.pose(),
-                        velocity: car.velocity(),
-                        angular: car.angular_velocity(),
-                        maximum_steering_angle: car.maximum_steering_angle(),
-                    };
+                    let view = View::of(car, multi.obstruction(i));
                     ai.controls(&data, &view, &others, grid_tools::source_vehicle::DELTA)
                 }
                 Driver::Pursuit(p) => p.controls(car.pose(), car.velocity()),
             });
         }
         controls[0].throttle *= slow;
+        // GRID_STOP_CAR0=tick: car 0 brakes to a stop and stays there (avoid check).
+        if stop_car0.is_some_and(|t| multi.ticks >= t) {
+            controls[0] = Controls {
+                brake: 1.,
+                ..Default::default()
+            };
+        }
+        // GRID_SPIN_CAR0: car 0 gets full lock with the handbrake (spin and
+        // recovery check).
+        if spin_car0.is_some_and(|(t, n)| (t..t + n).contains(&multi.ticks)) {
+            controls[0] = Controls {
+                throttle: 1.,
+                steering: 1.,
+                handbrake: true,
+                ..Default::default()
+            };
+        }
         for (i, driver) in drivers.iter().enumerate() {
             if let Driver::Ai(ai) = driver {
-                let now = (ai.telemetry.behaviour, ai.telemetry.overtake_state);
+                let m = ai.telemetry;
+                let now = (m.behaviour, m.overtake_state, m.recovery_mode, m.reverse);
                 if now != behaviours[i] {
                     if std::env::var_os("GRID_TRACE_BEHAVIOUR").is_some() {
+                        let v = multi.cars[i].velocity();
                         println!(
-                            "behaviour tick={} car{i} {:?} state={}",
-                            multi.ticks, now.0, now.1
+                            "behaviour tick={} car{i} {:?} state={} recovery={} reverse={} octant={} spun={} on_track={} obstruction={}/{} contact={} avoid_side={} eta={:.2} speed={:.2}",
+                            multi.ticks,
+                            now.0,
+                            now.1,
+                            now.2,
+                            now.3,
+                            m.octant,
+                            m.spun,
+                            m.on_track,
+                            m.obstruction,
+                            m.frontal,
+                            m.contact,
+                            m.avoid_side,
+                            m.avoid_eta.min(99.),
+                            (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
                         );
                     }
                     behaviours[i] = now;
@@ -181,7 +220,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let m = ai.telemetry;
             writeln!(
                 t,
-                "{}\t{speed:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.2}\t{:.2}\t{:.5}\t{:.4}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.3}",
+                "{}\t{speed:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.2}\t{:.2}\t{:.5}\t{:.4}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.3}\t{}\t{:?}",
                 multi.ticks,
                 c.throttle,
                 c.brake,
@@ -194,7 +233,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 m.line_target,
                 m.offset,
                 m.line_error,
-                m.slip
+                m.slip,
+                u8::from(multi.cars[0].reverse_gear()),
+                m.behaviour
             )?;
         }
         for (i, car) in multi.cars.iter().enumerate() {

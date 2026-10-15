@@ -54,7 +54,9 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
 - Followed-car choice (nearest car ahead within ±2.2 m of our heading) and follow-brake
   amount (closing speed / thFollowSpeedMedium); the recovered follow throttle uses the
   shipped thFollow* bands.
-- Stuck recovery (slow 2 s under throttle -> brake/reverse with opposite lock 1.5 s).
+- ~~Stuck recovery (slow 2 s under throttle -> brake/reverse with opposite lock 1.5 s).~~
+  Replaced in F301 by the recovered avoid, recovery, recover_tbone and retire-stuck paths
+  (see "Avoid and recovery").
 - Random offsets use an authored LCG; characteristic values are 1.0 for every car
   (the live player-slot set); difficulty is the live Normal 0.606; table grip is 2.0.
 - Not ported: alongside, overtake, block, avoidance, traction control and AI ABS cap,
@@ -173,3 +175,120 @@ Without the table every car uses 1.0 as before.
   random stream.
 - Opponents rev on the handbrake and stay on their slots (look-back render at tick 240).
 - Unit test: pulse lengths stay within the shipped ranges.
+
+## Avoid and recovery (F301)
+
+Port of docs/AI_AVOID_RECOVERY_RESEARCH.md §7. The authored stuck recovery is deleted.
+
+### Inputs
+
+- `View::of(runtime, obstruction)` adds:
+  - the four wheel positions in world space (on_track);
+  - the gearbox reverse state (vehicle +196C = 9);
+  - the obstruction sum from `MultiRuntime::obstruction(i)`.
+- The obstruction sum (collided_obstruction feed, 0x4022F0/0x77B1F0) holds the last tick's car
+  body contacts with static geometry, plus car-to-car contacts with a car slower than 2 m/s.
+  - Each contact adds its normal, oriented to push the car (away from the contact point).
+  - Floor-like normals (y ≥ 0.1) are skipped.
+  - Unit weights stand in for the callback magnitude [I]; the test reads only direction and
+    non-zero length.
+  - With no shared world (autopilot without opponents) the feed is zero.
+- `Line` keeps the ai_track **track** limits (types 3/4) beside the racing limits.
+
+### Tests, in the original's order before arbitration
+
+| Test | Port |
+|---|---|
+| spun 0x77E5B0 | \|heading error to the planned look-ahead point\| > π/2. Held while slip > 0.1π (π − slip when moving backwards), heading error > π/3, or speed < 3 m/s. |
+| on_track 0x79B250 | More than half of the wheels inside the track limits at their projected arc. |
+| collided_obstruction 0x776FE0 | Sum non-zero. Frontal when the angle to our nose exceeds 120°. |
+| contacted_vehicle 0x784650 | Box overlap with contactZone 0.1. Types 1–4 for our corner inside the other box; 5–8 for its corner inside ours, by nearest face. The two-corner length-ratio refinement is not ported. |
+| retire stuck 0x77E3B0 | 20 s within 5 m and no non-reversing car within 100 m. |
+| path obstacle 0x78B560 | AUTHORED corridor, as brake_for_vehicle. Keeps the closing car ahead with the smallest distance / closing speed. Our box is extended by clamp(v/10)·2 m. |
+| avoid 0x79A960 | Branch A: racing-normally exclusion (speed ≥ 4, not reversing, heading within 90°, not within 45° of the *reversed* line direction, as the original). Inert-branch handling is unchanged. Fires on ETA < 2 s. Branch B: the remembered target, ahead beyond the half lengths, inside the 50° cone, `along < 2·closing`; otherwise forgotten. |
+
+The racing-normally state 2 ("not racing") is mapped to a car moving against its nose [I].
+
+### Arbitration
+
+- Scores: retire 23, recover_tbone 18, recovery 11/16/17/19 (n = spun, off track,
+  obstruction while off track, frontal), avoid 15, alongside 8, overtake 5, race 1.
+- The first strictly greatest score wins.
+- Activation semantics:
+  - avoid clears its object but keeps the test's remembered record;
+  - recovery resets mode, latch and timers, but not the reverse toggle;
+  - recover_tbone sets its timer to −1 after scoring, so it needs the contact on two ticks.
+- Common setup now uses tgOffsetMergeFactor (2.5) as the default merge, as 0x7978D0 does.
+  Before, it used raOffsetMergeFactor. This affects only overtake states 3–5.
+
+### Drives
+
+- **avoid**: decides every 0.25 s or on a new target.
+  - Clearance = half length + 2 m + both half widths (6.04 m).
+  - Mode 1 when closing > own speed.
+  - Otherwise the side needing the smaller move from our front's lateral position.
+    - The room check uses the track limit at the predicted position, with w = 3.2 m.
+    - With no room it flips side (avAvoidAlongside, alongside not fired), or falls back to the
+      alongside gaps, or follows at 3 m (mode 0).
+  - The offset is never moved toward the target.
+  - Desired speed with brake-to-speed is set on decision ticks only: 30 (target stopped), 200 or
+    5 (wrong way).
+  - Track-limit clamp, merge 5 m/s.
+- **recovery**:
+  - Offset: off track it drifts 1 m/s toward our side at merge 5; on track it goes to our own
+    lateral position at 2.5.
+  - Octant from the side-mirrored angles `b` (heading error) and `a` (track direction at the
+    planned point), with clockwise-positive angles [I sign; the unit test checks that positive
+    lateral offsets point right].
+  - Mode 2 forward for octants 0–3.
+  - Otherwise full brake until under 0.1 m/s, then latch:
+    - 3–5: reverse at 5 m/s until |a| or |b| < 5°;
+    - 6–8: reverse until 80° < |a| < 90° or |b| < 5°;
+    - then forward.
+  - An obstruction contact toggles reverse/forward for 2 s.
+  - Throttle cap is 1.0 (no throttle_confidence).
+- **recover_tbone**: reverse with no steering while the 1 s timer runs. It is armed by a front
+  contact (types 1, 2, 5) at a T-bone (70–110°, relative < 5 m/s), a slow nose-to-tail (< 30°,
+  both slow) or head-on (> 160°).
+- **retire (stuck)**: force brake and no steering.
+- **Request flags**:
+  - full/force brake → 1;
+  - brake-to-speed → 1 when speed exceeds the desired speed by > 2 m/s;
+  - the slip > π/2 brake is skipped while reversing;
+  - steering is 0 with no-steer and negated while reversing;
+  - the throttle is negated, then published as |throttle| with a reverse flag (0x7929D0).
+
+### AUTHORED reverse boundary
+
+The car-side consumer of the original reverse byte is not traced. The port drives the assisted
+automatic gearbox through the pedals:
+
+| Gear | Request | Throttle slot | Brake slot |
+|---|---|---|---|
+| forward | forward | throttle | brake |
+| forward | reverse | 0 | max(throttle, brake), to select reverse near rest |
+| reverse | reverse | brake | throttle |
+| reverse | forward, rolling back | max(throttle, brake) | 0 |
+| reverse | forward, at rest | throttle | 0 |
+
+Observed: the gearbox selects reverse (id 9) about 10 ticks after the stop, and drops out of
+it on its own when both pedals are released.
+
+### Results (headless)
+
+| Run | Result |
+|---|---|
+| Solo | 88.420 / 86.282 s, bit-identical to before; no new behaviour fired. |
+| Slowed leader (2 cars, ×0.6) | 0 contacts. One 0.25 s off-track recovery (n = 1, forward octant). |
+| Car 0 brakes to a stop at tick 900 or 420 (4 or 3 cars) | Followers pass through overtake: avoid only fires below 4 m/s, and they are already offset more than 4.3 m. No contact after the stop. |
+| Car 0 stalled on pole (4 cars) | Car 2, starting 8 m directly behind, fires avoid (ETA 1.92 s, side 1) but side-swipes car 0 at about 8 m/s (15 records). It cannot gain 6 m of clearance in 8 m. |
+| Forced spin (car 0, full lock and handbrake 2.5 s) | spun → octant 4 → full brake to 0.06 m/s → octant 6 → reverse in gear 9 at ≤ 7.7 m/s; heading error 2.33 → 0.15 rad; forward; back on track and racing 6 s later. |
+| Off-track wall scrape (car 3, stalled-pole run) | Non-frontal obstruction → reverse 2 s → forward → rejoined at tick 1200. |
+| 12 cars, 2 laps, characteristics | All finish within +10.2 s; 579 car-contact records, against 1124 and two cars losing 23.8/47.2 s with the authored recovery (F300). 32 recovery events, almost all n = 1 off-track moments at speed; one wall scrape at 55 m/s reversed for 2 s (faithful toggle). 98.6 s wall for 11,765 ticks. |
+
+Open:
+- avoid never fired in race traffic (overtake/brake_for_vehicle act earlier); a live trace of
+  the original is needed to compare;
+- the octant sign convention;
+- the obstruction body classes and magnitude;
+- lost_control and controlled_stop are not ported.

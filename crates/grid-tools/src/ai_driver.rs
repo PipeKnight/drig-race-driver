@@ -82,6 +82,8 @@ pub struct Line {
     lateral: Vec<[f32; 3]>,
     /// Racing-limit offsets relative to the racing line (left <= 0 <= right).
     limits: Vec<[f32; 2]>,
+    /// Track-limit offsets (ai_track types 3/4) relative to the racing line.
+    track_limits: Vec<[f32; 2]>,
     start: Vec<f32>,
     pub length: f32,
     /// Line index of each AI gate.
@@ -132,6 +134,7 @@ impl Line {
             points: Vec::with_capacity(n),
             lateral: Vec::with_capacity(n),
             limits: Vec::with_capacity(n),
+            track_limits: Vec::with_capacity(n),
             start: Vec::with_capacity(n),
             length: 0.,
             gate_index: vec![0; n],
@@ -146,6 +149,10 @@ impl Line {
             line.limits.push([
                 g_data.left_racing_limit - g_data.racing_line,
                 g_data.right_racing_limit - g_data.racing_line,
+            ]);
+            line.track_limits.push([
+                g_data.left_track_limit - g_data.racing_line,
+                g_data.right_track_limit - g_data.racing_line,
             ]);
         }
         for i in 0..n {
@@ -184,6 +191,16 @@ impl Line {
                 self.limits[i][1] + (self.limits[j][1] - self.limits[i][1]) * t,
             ],
         )
+    }
+
+    /// Track-limit offsets (left <= 0 <= right) at arc length `s`.
+    fn track_limits_at(&self, s: f32) -> [f32; 2] {
+        let s = s.rem_euclid(self.length);
+        let i = self.start.partition_point(|&x| x <= s).saturating_sub(1);
+        let j = (i + 1) % self.points.len();
+        let t = ((s - self.start[i]) / self.segment(i).max(1e-6)).clamp(0., 1.);
+        let [a, b] = [self.track_limits[i], self.track_limits[j]];
+        [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
     }
 
     /// Arc length of the racing-line point nearest to `p` (global search).
@@ -366,9 +383,57 @@ pub struct Parameters {
     follow: [f32; 7],
     follow_brake: f32,
     traffic: Traffic,
+    rescue: Rescue,
     deviation_small: f32,
     deviation_large: f32,
 }
+
+/// Avoid, recovery and retire parameters (docs/AI_AVOID_RECOVERY_RESEARCH.md
+/// §2.4, §3, §4; built-in defaults where the shipped XML is silent).
+#[derive(Clone, Debug)]
+pub struct Rescue {
+    av_eta: f32,
+    av_decision: f32,
+    av_buffer: f32,
+    av_buffer_speed: f32,
+    av_merge: f32,
+    av_min_racing_speed: f32,
+    av_max_racing_angle: f32,
+    av_min_speed_normal: f32,
+    av_min_speed_slow: f32,
+    av_stopped_speed: f32,
+    av_stopped_target: f32,
+    av_normal_target: f32,
+    av_wrong_way_target: f32,
+    av_alongside: bool,
+    av_figure_of_eight: bool,
+    braking_buffer: f32,
+    rc_merge: f32,
+    rc_collision_timeout: f32,
+    rt_stuck_time: f32,
+    rt_stuck_distance_sq: f32,
+    rt_player_distance_sq: f32,
+    tg_merge: f32,
+    target_speed_big: f32,
+    contact_zone: f32,
+}
+
+/// Fire priorities (ai_behaviour_fire.xml, docs/AI_AVOID_RECOVERY_RESEARCH.md §4).
+const AVOID_SCORE: u8 = 15;
+const RECOVERY_SCORES: [u8; 4] = [11, 16, 17, 19];
+const RECOVER_TBONE_SCORE: u8 = 18;
+const RETIRE_STUCK_SCORE: u8 = 23;
+/// Spun-test hysteresis (.data 0xE4D0F0 0.1·π, 0xCF6F08 π/3, 0xE4D0EC 3 m/s).
+const SPUN_HOLD_SLIP: f32 = 0.1 * std::f32::consts::PI;
+const SPUN_HOLD_HEADING: f32 = std::f32::consts::FRAC_PI_3;
+const SPUN_HOLD_SPEED: f32 = 3.;
+/// recover_tbone hold after the last qualifying contact (0x78ACC0).
+const TBONE_TIME: f32 = 1.;
+/// Recovery reverse speed and the stop speed before reversing (0x78EE70).
+const RECOVERY_REVERSE_SPEED: f32 = 5.;
+const RECOVERY_STOPPED_SPEED: f32 = 0.1;
+/// avoid follow distance in side mode 0 (0x799DE0).
+const AVOID_FOLLOW_DISTANCE: f32 = 3.;
 
 /// Built-in defaults for values absent from the shipped XML
 /// (docs/AI_DRIVER_RESEARCH.md §4).
@@ -538,6 +603,32 @@ impl Parameters {
                 cruise_speed: m("brake_for_vehicle_cruise_speed")?,
                 view_angle: m("driver_view_angle")?,
             },
+            rescue: Rescue {
+                av_eta: d_or("avETAReactionTime", 2.),
+                av_decision: d_or("avDecisionTime", 0.25),
+                av_buffer: d_or("avBufferZone", 2.),
+                av_buffer_speed: d_or("avBufferZoneBaseSpeed", 10.),
+                av_merge: d_or("avOffsetMergeFactor", 5.),
+                av_min_racing_speed: d_or("avMinRacingSpeed", 4.),
+                av_max_racing_angle: d_or("avMaxRacingAngleFromTrack", 0.785),
+                av_min_speed_normal: d_or("avMinSpeedNormal", 0.),
+                av_min_speed_slow: d_or("avMinSpeedSlow", 9.),
+                av_stopped_speed: d_or("avStoppedSpeed", 1.),
+                av_stopped_target: d_or("avStoppedTargetSpeed", 30.),
+                av_normal_target: d_or("avNormalTargetSpeed", 200.),
+                av_wrong_way_target: d_or("avWrongWayTargetSpeed", 5.),
+                av_alongside: d_or("avAvoidAlongside", 1.) != 0.,
+                av_figure_of_eight: d_or("avFigureOfEightTrack", 0.) != 0.,
+                braking_buffer: m("braking_buffer_distance")?,
+                rc_merge: d_or("rcMergeFactor", 1.),
+                rc_collision_timeout: d_or("rcCollisionTimeOut", 2.),
+                rt_stuck_time: d_or("rtStuckTime", 20.),
+                rt_stuck_distance_sq: d_or("rtStuckDistanceSq", 25.),
+                rt_player_distance_sq: d_or("rtPlayerDistanceSq", 10000.),
+                tg_merge: d_or("tgOffsetMergeFactor", 2.5),
+                target_speed_big: d_or("brTargetSpeedBig", 2.),
+                contact_zone: d_or("contactZone", 0.1),
+            },
             deviation_small: m("deviation_from_racing_line_small")?,
             deviation_large: m("deviation_from_racing_line_large")?,
         })
@@ -626,6 +717,56 @@ impl Other {
     fn rear(&self) -> [f32; 3] {
         std::array::from_fn(|k| self.position[k] - self.forward[k] * HALF_LENGTH)
     }
+    /// Record state 2 (not racing) when the car moves against its nose [I].
+    fn backwards(&self) -> bool {
+        let v = [self.velocity[0], self.velocity[1], self.velocity[2]];
+        self.speed() > MINIMUM_MOVING_SPEED && dot3(v, self.forward) < 0.
+    }
+    /// Box corners inflated by `margin`, flattened to the car's height:
+    /// front-right, front-left, rear-right, rear-left (0x77B400/0x77F9F0).
+    fn corners(&self, margin: f32) -> [[f32; 3]; 4] {
+        let f = horizontal(self.forward);
+        let right = horizontal(self.left.map(|x| -x));
+        let (l, w) = (HALF_LENGTH + margin, HALF_WIDTH + margin);
+        let at =
+            |a: f32, b: f32| std::array::from_fn(|k| self.position[k] + f[k] * a + right[k] * b);
+        [at(l, w), at(l, -w), at(-l, w), at(-l, -w)]
+    }
+    /// Box-local (forward, right) coordinates of `p`.
+    fn local(&self, p: [f32; 3]) -> (f32, f32) {
+        let d = sub(p, self.position);
+        (
+            dot2(d, horizontal(self.forward)),
+            dot2(d, horizontal(self.left.map(|x| -x))),
+        )
+    }
+    fn contains(&self, p: [f32; 3], margin: f32) -> bool {
+        let (x, y) = self.local(p);
+        x.abs() <= HALF_LENGTH + margin && y.abs() <= HALF_WIDTH + margin
+    }
+}
+
+/// contacted_vehicle (0x784650) contact type of `own` against `other`
+/// (§3.5): 1-4 own corner inside the other box, 5-8 an other corner inside
+/// our box by our nearest face (front, rear, right, left). The two-corner
+/// length-ratio refinement is not ported.
+fn contact_type(own: &Other, other: &Other, margin: f32) -> Option<u8> {
+    if let Some(k) = own
+        .corners(margin)
+        .iter()
+        .position(|&c| other.contains(c, margin))
+    {
+        return Some(k as u8 + 1);
+    }
+    let corner = other
+        .corners(margin)
+        .into_iter()
+        .find(|&c| own.contains(c, margin))?;
+    let (x, y) = own.local(corner);
+    let (l, w) = (HALF_LENGTH + margin, HALF_WIDTH + margin);
+    let faces = [l - x, l + x, w - y, w + y];
+    let nearest = (0..4).min_by(|&a, &b| faces[a].total_cmp(&faces[b]))?;
+    Some(5 + nearest as u8)
 }
 
 fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -642,6 +783,35 @@ pub enum Behaviour {
     Race,
     Overtake,
     Alongside,
+    Avoid,
+    Recovery,
+    RecoverTbone,
+    Retire,
+}
+
+/// avoid test (0x79A960) memory and behaviour object (0x79C600): remembered
+/// record, target id, side mode (0 follow, 1 negative, 2 positive), decision
+/// timer, target speed and desired offset.
+#[derive(Clone, Copy, Default)]
+struct Avoid {
+    remembered: Option<u32>,
+    target: Option<u32>,
+    side: u8,
+    decision: f32,
+    target_speed: f32,
+    offset: f32,
+}
+
+/// recovery behaviour object (0x78EE70): mode, latched-after-stop, the
+/// obstruction reverse toggle (kept across activations), elapsed time and
+/// obstruction timer.
+#[derive(Clone, Copy, Default)]
+struct Recovery {
+    mode: u8,
+    latched: bool,
+    toggle: bool,
+    elapsed: f32,
+    timer: f32,
 }
 
 /// Overtake behaviour object (+0x30 target, +0x34 state, +0x38 decision timer,
@@ -663,6 +833,14 @@ struct Request {
     /// Followed car and follow distance (+0x70/+0x74); follow-brake cap +0x78.
     follow: Option<(Other, f32)>,
     follow_brake_cap: f32,
+    /// Request flags +0xA4 brake to desired speed, +0xA5 force brake, +0xA6
+    /// no steer, +0xB2 full brake, +0xAF reverse; limit types 3/4.
+    brake_to_speed: bool,
+    force_brake: bool,
+    no_steer: bool,
+    full_brake: bool,
+    reverse: bool,
+    track_limits: bool,
 }
 
 /// Car state seen by the AI.
@@ -672,6 +850,57 @@ pub struct View {
     pub velocity: [f32; 4],
     pub angular: [f32; 4],
     pub maximum_steering_angle: f32,
+    /// World wheel positions (on_track test).
+    pub wheels: [[f32; 3]; 4],
+    /// Last tick's obstruction contact sum (collided_obstruction test);
+    /// zero when no contact feed exists.
+    pub obstruction: [f32; 3],
+    /// The car's gearbox is in reverse (selects the pedal mapping of the
+    /// AUTHORED reverse boundary).
+    pub reverse_gear: bool,
+}
+
+impl View {
+    /// View of a source car with its obstruction contact sum.
+    pub fn of(car: &crate::source_vehicle::Runtime, obstruction: [f32; 3]) -> Self {
+        let pose = car.pose();
+        let wheels = car.wheels().map(|w| {
+            std::array::from_fn(|k| {
+                pose[12 + k]
+                    + w.anchor[0] * pose[k]
+                    + w.anchor[1] * pose[4 + k]
+                    + w.anchor[2] * pose[8 + k]
+            })
+        });
+        Self {
+            pose,
+            velocity: car.velocity(),
+            angular: car.angular_velocity(),
+            maximum_steering_angle: car.maximum_steering_angle(),
+            wheels,
+            obstruction,
+            reverse_gear: car.reverse_gear(),
+        }
+    }
+}
+
+/// Recovery octant 0x77C9B0 from the side-mirrored angles in degrees (§4.1).
+fn octant(a: f32, b: f32) -> u8 {
+    let within = |x: f32, lo: f32, hi: f32| lo < x && x < hi;
+    const TABLE: [([f32; 2], [f32; 2]); 8] = [
+        ([0., 90.], [0., 90.]),
+        ([-90., 0.], [0., 90.]),
+        ([-90., 0.], [-90., 0.]),
+        ([-180., -90.], [-90., 0.]),
+        ([-180., -90.], [-180., -90.]),
+        ([90., 180.], [-180., -90.]),
+        ([90., 180.], [90., 180.]),
+        ([0., 90.], [90., 180.]),
+    ];
+    TABLE
+        .iter()
+        .position(|&([b0, b1], [a0, a1])| within(b, b0, b1) && within(a, a0, a1))
+        .map_or(0, |i| i as u8 + 1)
 }
 
 #[derive(Clone, Copy)]
@@ -704,6 +933,19 @@ pub struct Telemetry {
     /// Signed distance of the car from the racing line (positive right).
     pub line_error: f32,
     pub slip: f32,
+    /// Tests: spun, on_track, collided_obstruction (frontal), contacted
+    /// vehicle type, avoid ETA (f32::MAX when not fired).
+    pub spun: bool,
+    pub on_track: bool,
+    pub obstruction: bool,
+    pub frontal: bool,
+    pub contact: u8,
+    pub avoid_eta: f32,
+    /// avoid side mode, recovery mode and octant, reverse request.
+    pub avoid_side: u8,
+    pub recovery_mode: u8,
+    pub octant: u8,
+    pub reverse: bool,
 }
 
 #[derive(Clone)]
@@ -727,9 +969,13 @@ pub struct AiDriver {
     rev: (u8, bool, f32),
     attempt_target: Option<u32>,
     alongside_fired: bool,
-    /// Authored stuck recovery: (time slow, reverse time left).
-    stuck: f32,
-    reversing: f32,
+    avoid: Avoid,
+    spun: bool,
+    recovery: Recovery,
+    /// recover_tbone timer (+0x34).
+    tbone: f32,
+    /// Retire stuck timer: reference position, time and latched flag (0x77E3B0).
+    stuck: Option<([f32; 3], f32, bool)>,
     lines: BrakeLineState,
     /// Published (slewed) packet: throttle, brake, steering.
     throttle: f32,
@@ -775,8 +1021,11 @@ impl AiDriver {
             rev: (0, false, 0.),
             attempt_target: None,
             alongside_fired: false,
-            stuck: 0.,
-            reversing: 0.,
+            avoid: Avoid::default(),
+            spun: false,
+            recovery: Recovery::default(),
+            tbone: -1.,
+            stuck: None,
             lines: BrakeLineState {
                 active: None,
                 target: 0.,
@@ -1060,31 +1309,245 @@ impl AiDriver {
         }
         self.alongside_fired = fired;
 
-        // Arbitration (0x79A400): alongside 8 > overtake 5 > race 1.
-        let overtake_target = pass_vehicle.or(attempt);
-        let next = if fired {
-            Behaviour::Alongside
-        } else if overtake_target.is_some() || self.overtake.min_fire > 0. {
-            Behaviour::Overtake
+        // Track view at the start of the tick (0x798E90, previous planned
+        // offset and look-ahead): planned look-ahead point (+0xD0), racing-line
+        // point and lateral at the car (+0x170/+0x180) and the lateral position
+        // of our front (0x40AE90).
+        let rs = p.rescue.clone();
+        let (here_point, _, here_lateral, _) = data.line.at(arc);
+        let (la_point, _, la_lateral, _) = data.line.at(arc + self.look_ahead);
+        let planned: [f32; 3] = std::array::from_fn(|k| la_point[k] + la_lateral[k] * self.offset);
+        // Angles from our forward, positive clockwise seen from above (toward
+        // the car's right). The original's sign convention is not confirmed;
+        // this one makes the recovery octants reverse away from the near edge [I].
+        let clockwise = |d: [f32; 3]| wrap(heading(forward) - heading(d));
+        let view_heading = clockwise(sub(planned, own_front));
+        let own_lateral = dot2(sub(own_front, here_point), here_lateral);
+
+        // spun (0x77E5B0) with its hysteresis.
+        let moving_back = dot3([v[0], v[1], v[2]], forward) < 0.;
+        let held_slip = if moving_back {
+            std::f32::consts::PI - slip
         } else {
-            Behaviour::Race
+            slip
         };
+        self.spun = view_heading.abs() > std::f32::consts::FRAC_PI_2
+            || (self.spun
+                && (held_slip.abs() > SPUN_HOLD_SLIP
+                    || view_heading.abs() > SPUN_HOLD_HEADING
+                    || speed < SPUN_HOLD_SPEED));
+        // on_track (0x79B250): more than half the wheels inside the track limits.
+        let inside = view
+            .wheels
+            .iter()
+            .filter(|&&w| {
+                let (_, s, lat) = data.line.project(w, Some(segment));
+                let [left_limit, right_limit] = data.line.track_limits_at(s);
+                left_limit <= lat && lat <= right_limit
+            })
+            .count();
+        let on_track = 2 * inside > view.wheels.len();
+        // collided_obstruction (0x776FE0): frontal when the summed normal is
+        // more than 120 degrees from our nose.
+        let o = view.obstruction;
+        let o_length = dot3(o, o).sqrt();
+        let obstruction = o_length > 0.;
+        let o_direction = if o_length < 1e-5 {
+            o
+        } else {
+            o.map(|x| x / o_length)
+        };
+        let frontal = obstruction && dot3(forward, o_direction) < -0.5;
+        // contacted_vehicle (0x784650): first car whose box touches ours.
+        let contact = others
+            .iter()
+            .find_map(|r| contact_type(&own, r, rs.contact_zone).map(|t| (*r, t)));
+        // recover_tbone score (0x78ACC0): front contact at a T-bone, head-on or
+        // slow nose-to-tail angle holds the score for 1 s.
+        if let Some((r, kind)) = contact
+            && matches!(kind, 1 | 2 | 5)
+        {
+            let theta = dot3(f, horizontal(r.forward))
+                .clamp(-1., 1.)
+                .acos()
+                .to_degrees();
+            let relative: [f32; 3] = std::array::from_fn(|k| v[k] - r.velocity[k]);
+            let relative = dot3(relative, relative).sqrt();
+            if (70. < theta && theta < 110. && relative < 5.)
+                || (theta < 30. && relative < 5. && r.speed() < 5.)
+                || theta > 160.
+            {
+                self.tbone = TBONE_TIME;
+            }
+        }
+        // recovery score (0x78AB20).
+        let n = usize::from(self.spun)
+            + usize::from(!on_track)
+            + usize::from(obstruction && !on_track)
+            + usize::from(frontal);
+        let recovery_score = if n == 0 { 0 } else { RECOVERY_SCORES[n - 1] };
+        // retire stuck timer (0x77E3B0): 20 s within 5 m and no racing car
+        // within 100 m.
+        let moved = self.stuck.is_none_or(|(reference, _, _)| {
+            let d = sub(position, reference);
+            dot3(d, d) >= rs.rt_stuck_distance_sq
+        });
+        if moved {
+            self.stuck = Some((position, 0., false));
+        } else if let Some((_, time, latched)) = &mut self.stuck {
+            *time += dt;
+            *latched = *time > rs.rt_stuck_time
+                && !others.iter().any(|o| {
+                    let d = sub(o.position, position);
+                    !o.backwards() && dot3(d, d) < rs.rt_player_distance_sq
+                });
+        }
+        let stuck = self.stuck.is_some_and(|s| s.2);
+
+        // Path obstacle (0x78B560; AUTHORED corridor as brake_for_vehicle):
+        // the car ahead we close on with the smallest time to reach it, our
+        // box extended by the speed-scaled buffer zone.
+        let buffer = clamp01(speed / rs.av_buffer_speed) * rs.av_buffer;
+        let mut obstacle: Option<(Other, f32, f32)> = None;
+        let mut best_time = f32::MAX;
+        for r in others {
+            let d = sub(r.position, position);
+            let along = dot3(d, f);
+            let lat = dot3(d, right_vec);
+            let relative = [v[0] - r.velocity[0], 0., v[2] - r.velocity[2]];
+            if along <= 0.
+                || lat.abs() >= 2. * HALF_WIDTH + tr.buffer + 0.5
+                || dot3(relative, d) <= 0.
+            {
+                continue;
+            }
+            let extent = dot2(horizontal(r.forward), f).abs() * HALF_LENGTH
+                + dot2(horizontal(r.left), f).abs() * HALF_WIDTH;
+            let distance = (along - HALF_LENGTH - extent - buffer).max(0.);
+            let closing = dot3(relative, relative).sqrt();
+            let time = distance / closing.max(1e-6);
+            if time < best_time {
+                best_time = time;
+                obstacle = Some((*r, distance, closing));
+            }
+        }
+        // avoid test (0x79A960): (target, ETA, closing speed).
+        let mut avoid_fire: Option<(Other, f32, f32)> = None;
+        if let Some((r, distance, closing)) = obstacle {
+            // Racing-normally exclusion 0x79A530; the original's angle test
+            // compares with the reversed track direction (§2.2).
+            let (_, r_arc, _) = data.line.project(r.position, None);
+            let (_, r_direction, _, _) = data.line.at(r_arc);
+            let wrong_way = r_direction.map(|x| -x);
+            let racing = r.speed() >= rs.av_min_racing_speed
+                && !r.backwards()
+                && dot2(f, horizontal(r.forward)) >= 0.
+                && dot2(horizontal(r.forward), wrong_way).clamp(-1., 1.).acos()
+                    > rs.av_max_racing_angle;
+            let inert = closing <= rs.av_min_speed_normal
+                && (rs.braking_buffer <= distance || closing >= rs.av_min_speed_slow);
+            if !racing && !inert {
+                if distance / closing < rs.av_eta {
+                    avoid_fire = Some((r, distance / closing, closing));
+                    self.avoid.remembered = Some(r.id);
+                } else {
+                    self.avoid.remembered = None;
+                }
+            }
+        } else if let Some(r) = self
+            .avoid
+            .remembered
+            .and_then(|id| others.iter().find(|o| o.id == id))
+        {
+            let d = [r.position[0] - position[0], 0., r.position[2] - position[2]];
+            let along = dot3(d, f);
+            let relative = [v[0] - r.velocity[0], 0., v[2] - r.velocity[2]];
+            let closing = dot3(relative, relative).sqrt();
+            if along > 2. * HALF_LENGTH
+                && cone < dot3(f, horizontal(d))
+                && along < rs.av_eta * closing
+            {
+                avoid_fire = Some((*r, along.abs() / closing, closing));
+            } else {
+                self.avoid.remembered = None;
+            }
+        } else {
+            self.avoid.remembered = None;
+        }
+
+        // Arbitration (0x79A400): the first strictly greatest score wins.
+        let overtake_target = pass_vehicle.or(attempt);
+        let scores = [
+            (
+                Behaviour::Retire,
+                if stuck { RETIRE_STUCK_SCORE } else { 0 },
+            ),
+            (
+                Behaviour::RecoverTbone,
+                if self.tbone > 0. {
+                    RECOVER_TBONE_SCORE
+                } else {
+                    0
+                },
+            ),
+            (Behaviour::Recovery, recovery_score),
+            (
+                Behaviour::Avoid,
+                if avoid_fire.is_some() { AVOID_SCORE } else { 0 },
+            ),
+            (Behaviour::Alongside, if fired { 8 } else { 0 }),
+            (
+                Behaviour::Overtake,
+                if overtake_target.is_some() || self.overtake.min_fire > 0. {
+                    5
+                } else {
+                    0
+                },
+            ),
+            (Behaviour::Race, 1),
+        ];
+        let next = scores
+            .iter()
+            .fold(
+                (Behaviour::Race, 0),
+                |best, &s| if s.1 > best.1 { s } else { best },
+            )
+            .0;
         if next != self.behaviour {
-            if self.behaviour == Behaviour::Overtake {
-                self.overtake.min_fire = 0.;
+            match self.behaviour {
+                Behaviour::Overtake => self.overtake.min_fire = 0.,
+                Behaviour::Recovery => self.recovery.elapsed = 0.,
+                _ => {}
             }
-            if next == Behaviour::Overtake {
-                self.overtake = Overtake {
-                    min_fire: tr.ov_min_fire,
-                    ..Overtake::default()
-                };
-            }
-            if next == Behaviour::Race {
+            match next {
+                Behaviour::Overtake => {
+                    self.overtake = Overtake {
+                        min_fire: tr.ov_min_fire,
+                        ..Overtake::default()
+                    }
+                }
                 // Race reactivation: a fresh random offset at the next update [I].
-                self.offset_timer = p.ra_generate_time;
+                Behaviour::Race => self.offset_timer = p.ra_generate_time,
+                Behaviour::Avoid => {
+                    self.avoid = Avoid {
+                        remembered: self.avoid.remembered,
+                        ..Avoid::default()
+                    }
+                }
+                Behaviour::Recovery => {
+                    self.recovery = Recovery {
+                        toggle: self.recovery.toggle,
+                        timer: -1.,
+                        ..Recovery::default()
+                    }
+                }
+                // Activation runs after scoring: the first tick does nothing.
+                Behaviour::RecoverTbone => self.tbone = -1.,
+                _ => {}
             }
             self.behaviour = next;
         }
+        let mut octant_index = 0;
 
         // Common setup (0x789700) and the race behaviour's offsets.
         let nearest = others
@@ -1096,13 +1559,20 @@ impl AiDriver {
         } else if !self.alone && nearest > p.ra_alone_on {
             self.alone = true;
         }
+        // Common setup 0x7978D0: request reset, merge tgOffsetMergeFactor.
         let mut request = Request {
             desired_offset: self.offset,
-            merge: p.ra_merge,
+            merge: rs.tg_merge,
             desired_speed: f32::MAX,
             throttle_cap: 1.,
             follow: brake_follow,
             follow_brake_cap: 1.,
+            brake_to_speed: false,
+            force_brake: false,
+            no_steer: false,
+            full_brake: false,
+            reverse: false,
+            track_limits: false,
         };
         let corner =
             clamp01((self.curvature.abs() - tr.ov_corner[0]) / (tr.ov_corner[1] - tr.ov_corner[0]));
@@ -1271,6 +1741,147 @@ impl AiDriver {
                     }
                 }
             }
+            Behaviour::Avoid => {
+                // Drive 0x79C600: decide every avDecisionTime or on a new target.
+                self.avoid.decision -= dt;
+                if let Some((r, eta, closing)) = avoid_fire
+                    && (self.avoid.decision < 0. || self.avoid.target != Some(r.id))
+                {
+                    self.avoid.target = Some(r.id);
+                    // Side choice 0x799B30 and offset 0x799DE0 around the
+                    // target's predicted position.
+                    let clearance = HALF_LENGTH + rs.av_buffer + 2. * HALF_WIDTH;
+                    let predicted: [f32; 3] =
+                        std::array::from_fn(|k| r.position[k] + eta * r.velocity[k]);
+                    let (_, p_arc, lat) = data.line.project(predicted, None);
+                    let x = own_lateral;
+                    self.avoid.side = if closing > speed {
+                        1
+                    } else {
+                        let mut side = if (lat + clearance - x).abs() <= (lat - clearance - x).abs()
+                        {
+                            2
+                        } else {
+                            1
+                        };
+                        // Room check 0x797720 against the chosen track limit.
+                        let w = 3. * HALF_WIDTH + 0.5;
+                        let [left_limit, right_limit] = data.line.track_limits_at(p_arc);
+                        let limit = if side == 1 { left_limit } else { right_limit };
+                        if (lat - limit).abs() < w {
+                            if rs.av_alongside && !fired {
+                                side = 3 - side;
+                            } else {
+                                let gap = |slot: usize| slots[slot].map_or(f32::MAX, |s| s.0);
+                                side = match side {
+                                    1 if w < gap(1) => 2,
+                                    2 if w < gap(0) => 1,
+                                    _ => 0,
+                                };
+                            }
+                        }
+                        side
+                    };
+                    match self.avoid.side {
+                        0 => request.follow = Some((r, AVOID_FOLLOW_DISTANCE)),
+                        // Never move toward the target from where we are.
+                        1 => self.avoid.offset = (lat - clearance).min(x),
+                        _ => self.avoid.offset = (lat + clearance).max(x),
+                    }
+                    // Target speed 0x77B5A0, only on decision ticks.
+                    self.avoid.target_speed = if r.speed() < rs.av_stopped_speed {
+                        rs.av_stopped_target
+                    } else if closing <= speed {
+                        rs.av_normal_target
+                    } else if !rs.av_figure_of_eight {
+                        rs.av_wrong_way_target
+                    } else {
+                        0.
+                    };
+                    if self.avoid.target_speed > 0. {
+                        request.desired_speed = self.avoid.target_speed;
+                        request.brake_to_speed = true;
+                    }
+                    self.avoid.decision = rs.av_decision;
+                }
+                request.track_limits = true;
+                request.desired_offset = self.avoid.offset;
+                request.merge = rs.av_merge;
+            }
+            Behaviour::Recovery => {
+                // Drive 0x78EE70. Offset 0x78ABB0: off track the planned line
+                // drifts toward our side at rcMergeFactor; on track it moves to us.
+                if on_track {
+                    request.desired_offset = own_lateral;
+                } else {
+                    let step = if own_lateral <= 0. { -dt } else { dt };
+                    request.desired_offset = self.offset + step * rs.rc_merge;
+                    request.merge = rs.av_merge;
+                }
+                // Octant 0x77C9B0, mirrored when we are left of the line.
+                let mirror = if own_lateral <= 0. { -1. } else { 1. };
+                let b = (view_heading * mirror).to_degrees();
+                let a = (clockwise(sub(planned, here_point)) * mirror).to_degrees();
+                octant_index = octant(a, b);
+                let rc = &mut self.recovery;
+                if !rc.latched {
+                    rc.mode = if octant_index <= 3 { 2 } else { 1 };
+                }
+                if rc.mode == 1 {
+                    request.full_brake = true;
+                    if speed < RECOVERY_STOPPED_SPEED {
+                        rc.latched = true;
+                        rc.mode = match octant_index {
+                            0..=2 => 2,
+                            3..=5 => 3,
+                            _ => 5,
+                        };
+                    }
+                }
+                match rc.mode {
+                    3 | 5 => {
+                        let done = if rc.mode == 3 {
+                            a.abs() < 5. || b.abs() < 5.
+                        } else {
+                            (80. < a.abs() && a.abs() < 90.) || b.abs() < 5.
+                        };
+                        request.throttle_cap = 1.;
+                        if done {
+                            request.desired_speed = if rc.mode == 3 { f32::MAX } else { 0. };
+                            rc.mode = 2;
+                        } else {
+                            request.reverse = true;
+                            request.desired_speed = RECOVERY_REVERSE_SPEED;
+                        }
+                    }
+                    2 => request.reverse = false,
+                    _ => {}
+                }
+                // Obstruction contacts toggle reverse/forward for rcCollisionTimeOut.
+                if obstruction && rc.timer < 0. {
+                    rc.timer = rs.rc_collision_timeout;
+                    rc.toggle = !rc.toggle;
+                    request.reverse = rc.toggle;
+                } else if rc.timer > 0. {
+                    request.reverse = rc.toggle;
+                    rc.timer -= dt;
+                }
+                // Reset after rcRecoveryTimeOut is disabled by default (rcResetAllowed).
+                rc.elapsed += dt;
+            }
+            Behaviour::RecoverTbone => {
+                // Drive 0x776A00: back straight out.
+                if self.tbone > 0. {
+                    request.reverse = true;
+                    request.no_steer = true;
+                    self.tbone -= dt;
+                }
+            }
+            Behaviour::Retire => {
+                // Drive 0x79C6E0 for a stuck car: stop and hold.
+                request.force_brake = true;
+                request.no_steer = true;
+            }
         }
         // Planned offset moves toward the request at its merge rate.
         if speed < SLOW_SPEED {
@@ -1293,6 +1904,12 @@ impl AiDriver {
         // Look-ahead, target point and curvature (0x779A20, 0x798E90).
         self.update_look_ahead(speed);
         let (point, ahead, lateral, limits) = data.line.at(arc + self.look_ahead);
+        // Limit types 1/2 (racing limits), or 3/4 (track limits) for avoid.
+        let limits = if request.track_limits {
+            data.line.track_limits_at(arc + self.look_ahead)
+        } else {
+            limits
+        };
         self.offset = self.offset.clamp(limits[0], limits[1]);
         self.curvature = wrap(heading(ahead) - heading(here)) / self.look_ahead.max(1e-3);
         // Lateral PID (0x7892E0): error of the car from its desired line offset.
@@ -1388,7 +2005,13 @@ impl AiDriver {
         {
             brake = brake.max(request.follow_brake_cap.min(p.follow_brake));
         }
-        if slip > std::f32::consts::FRAC_PI_2 {
+        if slip > std::f32::consts::FRAC_PI_2 && !request.reverse {
+            brake = 1.;
+        }
+        if request.full_brake
+            || request.force_brake
+            || (request.brake_to_speed && speed - request.desired_speed > rs.target_speed_big)
+        {
             brake = 1.;
         }
         brake = brake.min(1.);
@@ -1471,28 +2094,21 @@ impl AiDriver {
         // Steering (0x77AC50): heading gain plus yaw-rate damping, normalised by
         // the car's maximum steering angle. The yaw term's sign is the damping
         // direction (original sign convention not confirmed).
+        // Zero with no-steer; negated while reversing.
         let yaw = view.angular[0] * up[0] + view.angular[1] * up[1] + view.angular[2] * up[2];
-        let steer = ((p.st_angle_factor * heading_error + p.st_ang_vel_factor * yaw)
-            / view.maximum_steering_angle.max(1e-3))
-        .clamp(-1., 1.);
-
-        // AUTHORED stuck recovery: slow for 2 s with throttle -> brake (the
-        // automatic gearbox selects reverse) with opposite lock for 1.5 s.
-        let (mut throttle, mut brake, mut steer) = (throttle, brake, steer);
-        if self.reversing > 0. {
-            self.reversing -= dt;
-            throttle = 0.;
-            brake = 1.;
-            steer = -heading_error.signum();
-        } else if speed < 1. && throttle > 0.5 {
-            self.stuck += dt;
-            if self.stuck > 2. {
-                self.stuck = 0.;
-                self.reversing = 1.5;
-            }
+        let steer = if request.no_steer {
+            0.
         } else {
-            self.stuck = 0.;
-        }
+            ((p.st_angle_factor * heading_error + p.st_ang_vel_factor * yaw)
+                / view.maximum_steering_angle.max(1e-3))
+            .clamp(-1., 1.)
+        };
+        let steer = if request.reverse { -steer } else { steer };
+        // Reverse negates the throttle (0x783180); 0x7929D0 publishes
+        // |throttle| with the reverse byte +0x1E.
+        let throttle = if request.reverse { -throttle } else { throttle };
+        let reverse = throttle < 0.;
+        let throttle = throttle.abs();
 
         // Output slew (0x779F70).
         self.steering = approach(self.steering, steer, p.steering_speed, p.steering_speed, dt);
@@ -1518,10 +2134,34 @@ impl AiDriver {
             following: followed.is_some(),
             line_error: line_distance,
             slip,
+            spun: self.spun,
+            on_track,
+            obstruction,
+            frontal,
+            contact: contact.map_or(0, |c| c.1),
+            avoid_eta: avoid_fire.map_or(f32::MAX, |a| a.1),
+            avoid_side: self.avoid.side,
+            recovery_mode: self.recovery.mode,
+            octant: octant_index,
+            reverse,
+        };
+        // AUTHORED reverse boundary: the car-side consumer of the reverse
+        // byte is not traced (§5, §7.3). The assisted automatic gearbox
+        // selects reverse when the brake pedal is held near rest and then
+        // swaps the pedal roles, so the request is mapped onto the pedal that
+        // drives the wanted direction in the current gear.
+        let (throttle, brake) = match (view.reverse_gear, reverse) {
+            (false, false) => (self.throttle, self.brake),
+            (false, true) => (0., self.throttle.max(self.brake)),
+            (true, true) => (self.brake, self.throttle),
+            // In reverse gear the throttle pedal brakes a backward roll; at rest
+            // a pure brake request must not select forward drive.
+            (true, false) if moving_back => (self.throttle.max(self.brake), 0.),
+            (true, false) => (self.throttle, 0.),
         };
         Controls {
-            throttle: self.throttle,
-            brake: self.brake,
+            throttle,
+            brake,
             steering: self.steering,
             handbrake: false,
         }
@@ -1627,5 +2267,66 @@ mod tests {
         );
         // Lacetti table: 70.28 m/s -> 132.48 m to stop at grip 2.0.
         assert!((data.braking_distance(2., 70.27765, 0.) - 132.48337).abs() < 1e-3);
+        // Positive lateral offsets point to the driver's right (heading
+        // decreases clockwise) at every gate; the octant mirror relies on it.
+        // Gate normals are not exactly square to the line (up to ~0.25 rad).
+        for i in 0..data.line.points.len() {
+            let s = data.line.start[i] + 0.5 * data.line.segment(i);
+            let (_, direction, lateral, _) = data.line.at(s);
+            let turn = wrap(heading(lateral) - heading(direction));
+            assert!(
+                (turn + std::f32::consts::FRAC_PI_2).abs() < 0.5,
+                "segment {i}: {turn}"
+            );
+            let [left, right] = data.line.track_limits_at(s);
+            assert!(left < 0. && right > 0., "segment {i}: {left} {right}");
+        }
+    }
+
+    #[test]
+    fn recovery_octants_follow_the_table() {
+        assert_eq!(octant(45., 45.), 1);
+        assert_eq!(octant(45., -45.), 2);
+        assert_eq!(octant(-45., -45.), 3);
+        assert_eq!(octant(-45., -135.), 4);
+        assert_eq!(octant(-135., -135.), 5);
+        assert_eq!(octant(-135., 135.), 6);
+        assert_eq!(octant(135., 135.), 7);
+        assert_eq!(octant(135., 45.), 8);
+        // Boundaries and the unlisted combinations give 0.
+        assert_eq!(octant(90., 45.), 0);
+        assert_eq!(octant(-45., 45.), 0);
+    }
+
+    #[test]
+    fn contact_types_classify_corners_and_faces() {
+        let car = |position: [f32; 3], forward: [f32; 3]| Other {
+            id: 1,
+            position,
+            velocity: [0.; 4],
+            forward,
+            // Car-left (+X for a car facing +Z): forward rotated by +90 degrees.
+            left: [forward[2], 0., -forward[0]],
+        };
+        let own = car([0.; 3], [0., 0., 1.]);
+        // Other car's rear overlapping our nose: our front corners are inside.
+        assert!(matches!(
+            contact_type(&own, &car([0., 0., 4.5], [0., 0., 1.]), 0.1),
+            Some(1 | 2)
+        ));
+        // Nose of a car from our right (-X) into our side: right face.
+        assert_eq!(
+            contact_type(&own, &car([-2.5, 0., 0.], [1., 0., 0.]), 0.1),
+            Some(7)
+        );
+        // Same from our left: left face.
+        assert_eq!(
+            contact_type(&own, &car([2.5, 0., 0.], [-1., 0., 0.]), 0.1),
+            Some(8)
+        );
+        assert_eq!(
+            contact_type(&own, &car([10., 0., 0.], [0., 0., 1.]), 0.1),
+            None
+        );
     }
 }

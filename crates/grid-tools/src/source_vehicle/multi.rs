@@ -31,7 +31,35 @@ pub struct MultiRuntime {
     pub last_car_contacts: usize,
     /// Active contact slots of the last tick (wheel, body and car records).
     last_active: usize,
+    /// Per car: summed unit normals (pushing the car) of the last tick's body
+    /// contacts with static geometry, and the car-to-car normals with the
+    /// other car's index (see [`Self::obstruction`]).
+    statics_normals: Vec<[f32; 3]>,
+    car_normals: Vec<(usize, usize, [f32; 3])>,
+    /// Car speeds at the end of the last tick (the app swaps car 0 out
+    /// between ticks).
+    speeds: Vec<f32>,
 }
+
+/// Body centre (translation row of the physical pose).
+fn body_centre(body: &contact_groups::Body) -> [f32; 3] {
+    std::array::from_fn(|k| f32::from_bits(body[0x1d0 / 4 + 12 + k]))
+}
+
+/// Contact normal oriented to push the car away from the contact point.
+fn pushing_normal(contact: &contact_groups::Contact, centre: [f32; 3]) -> [f32; 3] {
+    let point: [f32; 3] = std::array::from_fn(|k| f32::from_bits(contact[0x50 / 4 + k]));
+    let normal: [f32; 3] = std::array::from_fn(|k| f32::from_bits(contact[0x60 / 4 + k]));
+    let toward: f32 = (0..3).map(|k| normal[k] * (centre[k] - point[k])).sum();
+    if toward < 0. {
+        normal.map(|x| -x)
+    } else {
+        normal
+    }
+}
+
+/// Speed below which another car counts as an obstruction (0x4022F0, 2 m/s).
+const OBSTRUCTION_SPEED: f32 = 2.;
 
 /// Contact pool slots for `n` cars: 64 for one or two cars (the single-car
 /// layout), 24 per car above that, up to the world bound.
@@ -113,7 +141,39 @@ impl MultiRuntime {
             last_body_contacts: 0,
             last_car_contacts: 0,
             last_active: 0,
+            statics_normals: vec![[0.; 3]; n],
+            car_normals: Vec::new(),
+            speeds: vec![0.; n],
         })
+    }
+
+    /// Obstruction contact sum of car `i` for the AI's collided_obstruction
+    /// test (callback 0x4022F0 accumulated by 0x77B1F0): the last tick's body
+    /// contacts with static geometry plus contacts with cars slower than
+    /// 2 m/s, as summed unit normals pushing the car. Floor-like normals
+    /// (y >= 0.1) are skipped. Unit weights stand in for the original
+    /// callback magnitude [I]; only the sum's direction and non-zero length
+    /// are read by the test.
+    pub fn obstruction(&self, i: usize) -> [f32; 3] {
+        let mut sum = self.statics_normals.get(i).copied().unwrap_or_default();
+        for &(a, b, normal) in &self.car_normals {
+            let (other, sign) = match (a == i, b == i) {
+                (true, _) => (b, 1.),
+                (_, true) => (a, -1.),
+                _ => continue,
+            };
+            if self
+                .speeds
+                .get(other)
+                .is_some_and(|&s| s < OBSTRUCTION_SPEED)
+                && sign * normal[1] < 0.1
+            {
+                for k in 0..3 {
+                    sum[k] += sign * normal[k];
+                }
+            }
+        }
+        sum
     }
 
     /// Car index pairs (first, second) of the last tick's car-to-car contacts.
@@ -145,6 +205,9 @@ impl MultiRuntime {
         self.last_active = 0;
         self.last_body_contacts = 0;
         self.last_car_contacts = 0;
+        self.statics_normals = vec![[0.; 3]; self.cars.len()];
+        self.car_normals.clear();
+        self.speeds = vec![0.; self.cars.len()];
     }
 
     /// One common timestep for all cars. Every car, the shared world and all
@@ -251,8 +314,12 @@ impl MultiRuntime {
             .map(|(p, g)| p.as_ref().unwrap_or(g))
             .collect();
         let cars = &self.cars;
+        let mut statics_normals = vec![[0f32; 3]; n];
+        let mut car_normals = Vec::new();
         let mut provider = |bodies: &[contact_groups::Body], remaining: usize| {
             let mut out: Vec<contact_groups::Contact> = Vec::new();
+            statics_normals.iter_mut().for_each(|s| *s = [0.; 3]);
+            car_normals.clear();
             for i in 0..bodies.len() {
                 if out.len() >= remaining {
                     break;
@@ -263,9 +330,16 @@ impl MultiRuntime {
                     &bodies[i..=i],
                     (remaining - out.len()).min(32),
                 )?;
+                let centre = body_centre(&bodies[i]);
                 for mut c in fresh {
                     c[1] = i as u32 + 1;
                     c[0x28 / 4] = tokens[i];
+                    let normal = pushing_normal(&c, centre);
+                    if normal[1] < 0.1 {
+                        for k in 0..3 {
+                            statics_normals[i][k] += normal[k];
+                        }
+                    }
                     out.push(c);
                 }
             }
@@ -293,6 +367,7 @@ impl MultiRuntime {
                         c[0x50 / 4..0x60 / 4].copy_from_slice(&hit.point.map(f32::to_bits));
                         c[0x60 / 4..0x70 / 4].copy_from_slice(&hit.normal.map(f32::to_bits));
                         c[0x70 / 4] = (u32::from(hit.flipped) << 8) | (1 << 24);
+                        car_normals.push((i, j, pushing_normal(&c, body_centre(&bodies[i]))));
                         out.push(c);
                         car_contacts += 1;
                     }
@@ -422,6 +497,16 @@ impl MultiRuntime {
         self.last_body_contacts = body_contacts;
         self.last_car_contacts = car_contacts;
         self.last_active = active;
+        self.statics_normals = statics_normals;
+        self.car_normals = car_normals;
+        self.speeds = self
+            .cars
+            .iter()
+            .map(|c| {
+                let v = c.velocity();
+                (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+            })
+            .collect();
         Ok(())
     }
 }
