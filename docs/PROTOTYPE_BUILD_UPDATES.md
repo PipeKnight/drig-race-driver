@@ -1,6 +1,15 @@
 # Playable build updates
 
-Latest verified refresh: **c10349d6cdb6** (clean), built 15 October 2026 ~09:16 UTC, release SHA256
+Latest verified refresh: **c6e78b2fb6e4** (clean), built 15 October 2026 ~09:43 UTC, release SHA256
+540de548e6079de6b86b80f73c3a1cd7f35c272bdf6ae6e976507de35eb20f6e, manifest
+local/playtest/build-20261015T0942495186847Z/. Adds opponent cars in one shared physical world
+with car-to-car contacts: `Play GRID Race.cmd` starts practice with 3 opponents, and with impact
+damage when local\deformation-parameters.bin is present. C holds a look-back camera. Opponents
+use a temporary pursuit driver, not GRID AI
+([F288/F289](MULTI_CAR_INTEGRATION.md#f288-opponents-in-the-playable-app-15-october-2026-claude-code)).
+Source driving and Bevy checks pass.
+
+Previous refresh: **c10349d6cdb6** (clean), built 15 October 2026 ~09:16 UTC, release SHA256
 cc24fb95753eb361b8ffbc82e1c40af341072104b98149eaeacca758422a562b, manifest
 local/playtest/build-20261015T0916053844121Z/. Body contacts use the purchased CAR_ surface
 material (no bounce, no soft springs) with the live original solver settings
