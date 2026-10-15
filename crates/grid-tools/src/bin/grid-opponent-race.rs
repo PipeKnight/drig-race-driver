@@ -134,6 +134,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Ok(std::env::var(name).ok().map(|v| v.parse()).transpose()?)
     };
     let stop_car0 = tick_variable("GRID_STOP_CAR0")?;
+    // GRID_PROP_TARGET=TEMPLATE:INDEX (with GRID_DYNAMIC_PROPS): car 0 runs the
+    // authored validation drive into that breakable while the field races.
+    let mut prop_target = match (std::env::var("GRID_PROP_TARGET"), multi.dynamic_props()) {
+        (Ok(target), Some(props)) => Some(grid_tools::dynamic_props::PropPursuit::new(
+            root,
+            &route,
+            &props.catalog,
+            &target,
+            15.,
+        )?),
+        (Ok(_), None) => return Err("GRID_PROP_TARGET needs GRID_DYNAMIC_PROPS".into()),
+        _ => None,
+    };
     // GRID_SPIN_CAR0=tick[:ticks] (default 60 ticks).
     let spin_car0 = match std::env::var("GRID_SPIN_CAR0") {
         Ok(v) => {
@@ -171,6 +184,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
         controls[0].throttle *= slow;
+        if let Some(pursuit) = &mut prop_target {
+            let broken_at = multi
+                .dynamic_props()
+                .and_then(|p| p.events.first())
+                .map(|e| e.tick);
+            controls[0] = pursuit.controls(
+                multi.cars[0].pose(),
+                multi.cars[0].velocity(),
+                broken_at,
+                multi.ticks,
+            );
+        }
         // GRID_STOP_CAR0=tick: car 0 brakes to a stop and stays there (avoid check).
         if stop_car0.is_some_and(|t| multi.ticks >= t) {
             controls[0] = Controls {

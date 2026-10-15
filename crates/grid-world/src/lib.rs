@@ -416,9 +416,18 @@ impl Mesh {
     }
 }
 
-/// Bounded-domain limit of one physical world's contact pool (shared-world
-/// fields of up to 12 cars); a port guard, not an original value.
-pub const MAX_WORLD_CONTACTS: usize = 256;
+/// Bodies one physical world can hold: the original PHYSICSENGINE
+/// `maxRigidBodies` default (initialiser 0x6195F0, rigid-body pool world+0x24
+/// built by 0xA749A0). No shipped file carries a PHYSICSENGINE node, so the
+/// default applies; `maxBodiesInIsland` defaults to the same 1000, so one
+/// contact group never exceeds the world bound.
+pub const MAX_WORLD_BODIES: usize = 1000;
+/// Shape table bound: the port's 513 registered static shapes plus one shape
+/// per dynamic body (the original `maxGeoms` default is also 1000).
+pub const MAX_WORLD_SHAPES: usize = 513 + MAX_WORLD_BODIES;
+/// Contact pool bound of one physical world: the original PHYSICSENGINE
+/// `maxContacts` default (0x6195F0). Pools are sized by their users below it.
+pub const MAX_WORLD_CONTACTS: usize = 10000;
 /// Solver row bound matching four rows per pooled contact.
 pub const MAX_SOLVER_ROWS: usize = 4 * MAX_WORLD_CONTACTS;
 

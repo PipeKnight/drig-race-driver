@@ -161,7 +161,7 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     let n = input.contacts.len().max(1);
     if input.contacts.len() > crate::MAX_WORLD_CONTACTS
         || input.bodies.is_empty()
-        || input.bodies.len() > 16
+        || input.bodies.len() > crate::MAX_WORLD_BODIES
         || input.materials.is_empty()
         || input.materials.len() > 8
         || input

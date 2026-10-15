@@ -39,9 +39,9 @@ pub struct Output {
 pub fn calculate(input: &Input) -> Result<Output, Error> {
     let split = input.two_body_contacts.len();
     let n = split + input.single_body_contacts.len();
-    if n > 256
+    if n > crate::MAX_WORLD_CONTACTS
         || n != input.rows.len()
-        || input.poses.len() > 64
+        || input.poses.len() > crate::MAX_WORLD_BODIES
         || input.workspace.len() != input.poses.len()
         || input.iterations > 32
         || [

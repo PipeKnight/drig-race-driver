@@ -69,7 +69,7 @@ pub(crate) fn typed(row: &RawRow) -> Row {
 
 pub fn calculate(input: &Input) -> Result<Output, Error> {
     if input.rows.len() > crate::MAX_SOLVER_ROWS
-        || input.bodies.len() > 64
+        || input.bodies.len() > crate::MAX_WORLD_BODIES
         || input.iterations > 32
         || input.references.len() != input.rows.len()
         || input.ends[3] != input.rows.len()

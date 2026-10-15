@@ -65,9 +65,10 @@ fn pushing_normal(contact: &contact_groups::Contact, centre: [f32; 3]) -> [f32; 
 const OBSTRUCTION_SPEED: f32 = 2.;
 
 /// Contact pool slots for `n` cars: 64 for one or two cars (the single-car
-/// layout), 24 per car above that, up to the world bound.
+/// layout), 24 per car above that, up to 256 (AUTHORED budget, below the
+/// original world bound; prop pieces add their own slots).
 fn pool_slots(n: usize) -> usize {
-    (24 * n).clamp(64, grid_world::MAX_WORLD_CONTACTS)
+    (24 * n).clamp(64, 256)
 }
 
 impl MultiRuntime {
@@ -876,6 +877,97 @@ mod tests {
                 // The idle car is touched only by the other car before tick 200.
                 assert!(rammed_dent_tick.is_some());
                 assert_eq!(seeds[0], seeds[1]);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Playtest 7f22c32: a side-swiped board in a 12-car race stopped physics
+    /// ("invalid contact-group counts or selector") because the pieces pushed
+    /// the shared world past the port's old 16-body guard.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn twelve_car_world_keeps_stepping_after_props_break_into_many_pieces() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let names: Vec<String> = (0..12).map(|i| format!("slot_{i:02}")).collect();
+                let slots: Vec<&str> = names.iter().map(String::as_str).collect();
+                let mut multi = MultiRuntime::lacetti(root, &slots, &table, events).unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                // Every tyre stack (12 tyres each) and two boards (2 halves each).
+                let chosen: Vec<usize> = {
+                    let all = &props.catalog.breakables;
+                    let of = |prefix: &str| {
+                        all.iter()
+                            .enumerate()
+                            .filter(|(_, b)| b.template.starts_with(prefix))
+                            .map(|(i, _)| i)
+                            .collect::<Vec<_>>()
+                    };
+                    let mut chosen = of("tyrestack");
+                    chosen.extend(of("gg_brake_marker").into_iter().take(2));
+                    chosen
+                };
+                let pieces: usize = chosen
+                    .iter()
+                    .map(|&b| props.catalog.breakables[b].pieces.len())
+                    .sum();
+                for &b in &chosen {
+                    props.queue_break(b);
+                }
+                let before = multi.bodies().len();
+                let drive = Controls {
+                    throttle: 0.6,
+                    ..Default::default()
+                };
+                let started = std::time::Instant::now();
+                for tick in 0..400 {
+                    multi
+                        .tick(&[drive; 12])
+                        .unwrap_or_else(|e| panic!("12-car tick {}: {e}", tick + 1));
+                }
+                let props = multi.dynamic_props().unwrap();
+                let hash = multi
+                    .bodies()
+                    .iter()
+                    .flatten()
+                    .fold(0xcbf29ce484222325u64, |h, &w| {
+                        (h ^ u64::from(w)).wrapping_mul(0x100000001b3)
+                    });
+                eprintln!(
+                    "twelve_car_props breaks={} pieces={} bodies={}->{} hash={hash:016x} elapsed={:?}",
+                    props.events.len(),
+                    props.pieces.len(),
+                    before,
+                    multi.bodies().len(),
+                    started.elapsed()
+                );
+                assert_eq!(props.events.len(), chosen.len());
+                assert_eq!(props.pieces.len(), pieces);
+                assert!(pieces > 16);
+                assert_eq!(multi.bodies().len(), before + pieces);
+                // Every piece rests near where it spawned (none fell through).
+                for piece in &props.pieces {
+                    let spawn =
+                        props.catalog.breakables[piece.breakable].pieces[piece.spec].pose[3];
+                    let now = crate::dynamic_props::body_pose(&multi.bodies()[piece.body])[3];
+                    assert!(now.iter().all(|v| v.is_finite()));
+                    assert!(
+                        (now[1] - spawn[1]).abs() < 1.5,
+                        "{piece:?} {spawn:?} {now:?}"
+                    );
+                }
             })
             .unwrap()
             .join()

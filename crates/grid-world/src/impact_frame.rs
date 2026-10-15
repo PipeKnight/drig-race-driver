@@ -88,7 +88,7 @@ pub(crate) fn validate(input: &Input) -> Result<(), Error> {
                     .any(|v| !v.is_finite())
         })
         || input.bodies.is_empty()
-        || input.bodies.len() > 16
+        || input.bodies.len() > crate::MAX_WORLD_BODIES
         || !delta.is_finite()
         || delta <= 0.
         || delta > 0.25
@@ -136,12 +136,29 @@ pub(crate) trait Callbacks: Clone {
 struct NoCallbacks;
 impl Callbacks for NoCallbacks {}
 
-#[allow(clippy::assign_op_pattern)] // Preserve original force and damping operand order.
 pub(crate) fn calculate_with_callbacks<C: Callbacks>(
     input: &Input,
     callbacks: &C,
 ) -> Result<(Output, C), Error> {
     validate(input)?;
+    run(input, None, callbacks)
+}
+
+/// [`calculate`] consuming the input, so the shared row buffer moves through
+/// the step instead of being copied (one call per contact group per tick).
+pub(crate) fn calculate_owned(mut input: Input) -> Result<Output, Error> {
+    validate(&input)?;
+    let rows = std::mem::take(&mut input.step.rows);
+    run(&input, Some(rows), &NoCallbacks).map(|(out, _)| out)
+}
+
+/// `rows` replaces `input.step.rows` when the caller gave the buffer away.
+#[allow(clippy::assign_op_pattern)] // Preserve original force and damping operand order.
+fn run<C: Callbacks>(
+    input: &Input,
+    mut rows: Option<Vec<crate::contact_rows::Row>>,
+    callbacks: &C,
+) -> Result<(Output, C), Error> {
     let mut callbacks = callbacks.clone();
     let delta = input.step.parameters[0];
     let s = &input.step;
@@ -158,13 +175,14 @@ pub(crate) fn calculate_with_callbacks<C: Callbacks>(
             bodies: s.bodies.clone(),
             contacts: s.contacts.clone(),
             metadata: vec![[0; 2]; s.contacts.len()],
-            rows: s.rows.clone(),
+            rows: Vec::new(),
             workspace: s.workspace.clone(),
             cached_pair: s.cached_pair,
             cached_material: s.cached_material,
         },
     };
     if s.iterations == 0 {
+        out.step.rows = rows.take().unwrap_or_else(|| s.rows.clone());
         return Ok((out, callbacks));
     }
     let mut sleeping = 0;
@@ -219,6 +237,7 @@ pub(crate) fn calculate_with_callbacks<C: Callbacks>(
     }
     if sleeping == out.bodies.len() {
         out.status = 1;
+        out.step.rows = rows.take().unwrap_or_else(|| s.rows.clone());
         return Ok((out, callbacks));
     }
     let inverse = 1. / minimum;
@@ -228,14 +247,14 @@ pub(crate) fn calculate_with_callbacks<C: Callbacks>(
             *v *= inverse;
         }
     }
-    let mut step = input.step.clone();
+    let mut step = s.with_rows(rows.take().unwrap_or_else(|| s.rows.clone()));
     step.bodies = out.step.bodies;
     step.parameters[1] = 1.;
     step.parameters[2] = 1.;
     step.parameters[3] = minimum;
     step.parameters[4] = inverse;
     callbacks.prepare(&mut step, &mut out.bodies)?;
-    out.step = impact_step::calculate(&step)?;
+    out.step = impact_step::calculate_owned(step)?;
     out.started = true;
     if !out.step.success {
         out.status = 1;

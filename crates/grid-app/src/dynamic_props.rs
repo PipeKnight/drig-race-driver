@@ -162,11 +162,13 @@ fn pose(m: &[[f32; 4]; 4]) -> Mat4 {
     Mat4::from_cols_array(&std::array::from_fn(|i| m[i / 4][i % 4]))
 }
 
-/// Hide broken intact props; place live pieces at their bodies.
+/// Hide broken intact props; place live pieces at their bodies. Each new
+/// break is logged once (playtest evidence).
 pub(crate) fn present(
     driving: Option<Res<Driving>>,
     mut intact: Query<(&IntactProp, &mut Visibility), Without<PropPiece>>,
     mut pieces: Query<(&PropPiece, &mut Transform, &mut Visibility), Without<IntactProp>>,
+    mut logged: Local<usize>,
 ) {
     let Some(driving) = driving else {
         return;
@@ -181,6 +183,20 @@ pub(crate) fn present(
             None => return,
         },
     };
+    // A restart clears the events.
+    *logged = (*logged).min(props.events.len());
+    for event in &props.events[*logged..] {
+        println!(
+            "dynamic_props event=break tick={} breakable={} template={} force={} pieces={} bodies={}",
+            event.tick,
+            event.breakable,
+            event.template,
+            event.force,
+            props.pieces.len(),
+            bodies.len()
+        );
+    }
+    *logged = props.events.len();
     for (prop, mut visibility) in &mut intact {
         let broken = props.broken.get(prop.0).copied().unwrap_or(false);
         visibility.set_if_neq(if broken {

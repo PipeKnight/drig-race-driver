@@ -410,7 +410,9 @@ fn calculate_impl(
                 bodies,
                 contacts,
                 materials: manager.materials.clone(),
-                rows: manager.rows.clone(),
+                // Moved, not copied: the frame hands it back (or the call fails
+                // and this working copy of the manager is discarded).
+                rows: std::mem::take(&mut manager.rows),
                 capacity: manager.capacity,
                 iterations: manager.iterations,
                 initial_ends: manager.ends,
@@ -478,7 +480,7 @@ fn calculate_impl(
             }
             frame
         } else {
-            impact_frame::calculate(&frame_input)?
+            impact_frame::calculate_owned(frame_input)?
         };
         if frame.status != 0 {
             return Err(Error(

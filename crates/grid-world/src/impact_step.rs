@@ -73,7 +73,7 @@ pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     let delta = input.parameters[0] * input.parameters[1];
     if n > crate::MAX_WORLD_CONTACTS
         || input.bodies.is_empty()
-        || input.bodies.len() > 16
+        || input.bodies.len() > crate::MAX_WORLD_BODIES
         || input.materials.is_empty()
         || input.materials.len() > 8
         || input.rows.is_empty()
@@ -132,9 +132,40 @@ pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     }
     Ok(())
 }
-#[allow(clippy::assign_op_pattern)] // Retain original multiply/add operand order.
 pub fn calculate(input: &Input) -> Result<Output, Error> {
     validate(input)?;
+    solve(input, input.rows.clone())
+}
+
+/// [`calculate`] consuming the input, so the row buffer moves instead of
+/// being copied (one call per contact group per tick).
+pub(crate) fn calculate_owned(mut input: Input) -> Result<Output, Error> {
+    validate(&input)?;
+    let rows = std::mem::take(&mut input.rows);
+    solve(&input, rows)
+}
+
+impl Input {
+    /// Every field but the row buffer, which the caller supplies.
+    pub(crate) fn with_rows(&self, rows: Vec<Row>) -> Self {
+        Self {
+            parameters: self.parameters,
+            bodies: self.bodies.clone(),
+            materials: self.materials.clone(),
+            contacts: self.contacts.clone(),
+            rows,
+            capacity: self.capacity,
+            iterations: self.iterations,
+            initial_ends: self.initial_ends,
+            workspace: self.workspace.clone(),
+            cached_pair: self.cached_pair,
+            cached_material: self.cached_material,
+        }
+    }
+}
+
+#[allow(clippy::assign_op_pattern)] // Retain original multiply/add operand order.
+fn solve(input: &Input, rows: Vec<Row>) -> Result<Output, Error> {
     let n = input.contacts.len();
     let delta = input.parameters[0] * input.parameters[1];
     let mut out = Output {
@@ -143,7 +174,7 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
         bodies: input.bodies.clone(),
         contacts: input.contacts.clone(),
         metadata: vec![[0; 2]; n],
-        rows: input.rows.clone(),
+        rows,
         workspace: input.workspace.clone(),
         cached_pair: input.cached_pair,
         cached_material: input.cached_material,

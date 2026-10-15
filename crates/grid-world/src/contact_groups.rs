@@ -72,11 +72,11 @@ pub(crate) fn validate_carried(
 
 fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Result<(), Error> {
     let n = input.bodies.len();
-    if !(1..=16).contains(&n)
+    if !(1..=crate::MAX_WORLD_BODIES).contains(&n)
         || input.contacts.len() > crate::MAX_WORLD_CONTACTS
         || input.selector > 1
         || input.active_order.len() != n
-        || shapes.len() > 513
+        || shapes.len() > crate::MAX_WORLD_SHAPES
     {
         return Err(Error("invalid contact-group counts or selector"));
     }

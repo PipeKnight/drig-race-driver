@@ -28,7 +28,10 @@ pub fn calculate_serial_world(
     active_next: &[Option<usize>],
     active_head: usize,
 ) -> Result<SerialWorldOutput, Error> {
-    if active_next.len() != input.bodies.len() || active_next.is_empty() || active_next.len() > 16 {
+    if active_next.len() != input.bodies.len()
+        || active_next.is_empty()
+        || active_next.len() > crate::MAX_WORLD_BODIES
+    {
         return Err(Error("invalid serial world body list"));
     }
     let mut seen = vec![false; active_next.len()];

@@ -285,7 +285,7 @@ fn calculate_owned(
                 64
             }
         || input.shapes.len() < 2
-        || input.shapes.len() > 513
+        || input.shapes.len() > crate::MAX_WORLD_SHAPES
         || statics == 0
         || input.shapes[0] != dynamic_shape
         || input.shapes[1 + statics..]

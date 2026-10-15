@@ -7,7 +7,9 @@ Current playable0cb4405 remains one car with static peer contacts.
 ## Reusable verified behavior
 
 The solver itself is not limited to one car: contact_groups accepts1..16 owned
-bodies and64 contacts, with explicit active permutations and links. The original
+bodies and64 contacts (validated domain; F317 raised the port's world guards to the
+original PHYSICSENGINE defaults, 1000 bodies and 10000 contacts, see
+[DYNAMIC_PROPS_RESEARCH.md](DYNAMIC_PROPS_RESEARCH.md#pools-and-world-bounds-f317)), with explicit active permutations and links. The original
 [grouped frame/tick comparisons](GROUPED_PHYSICAL_FRAME.md) include357 multi-body
 groups per variant and2749 two-body contacts. [Carried world ownership](CARRIED_PHYSICAL_WORLD.md)
 already preserves selectors, dirty lists, reusable contacts and shared manager

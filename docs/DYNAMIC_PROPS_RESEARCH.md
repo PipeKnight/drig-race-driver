@@ -122,8 +122,107 @@ box/cylinder. Boards 4.8-4.9 kg, tyres 17-56 kg, cushion 996 kg, tyre-wall block
 [D] No timer or distance despawn was found for pieces. The per-entity timer in
 `0x7D64B0` (`+0x15`/+0x10, `0x7BB800`) switches render state of the subentities
 [I], not removal.
-Pieces stay until the pool needs space (`0x7D4940` recycles) or the entity manager is
-reset (`ResetEntityManager`, restart). [I] Resetting on restart.
+Pieces stay until the pool needs space (`0x7D4940` recycles, below) or the entity
+manager is reset (`ResetEntityManager`, restart). [I] Resetting on restart.
+
+## Pools and world bounds (F317)
+
+15 October 2026, Claude Code. Static, Ghidra 12.1.4 headless `-readOnly -noanalysis`
+on a private copy of the dynamic-props project (`local/prop-pool/ghidra-project`),
+same hash-pinned image; pseudocode `local/prop-pool/decomp/b1..b7`. Prompted by the
+owner's playtest of 7f22c32: a side-swiped board in a 12-car race stopped physics
+("tick 2188: invalid contact-group counts or selector",
+`local/playtest/manual-23606-10155.log`).
+
+**Physical world.** [D] `0xA74F00` reads a `PHYSICSENGINE` node over the defaults set
+by `0x6195F0`; `0xA749A0` builds the world from them. Defaults:
+`maxRigidBodies` 1000 (pool world+0x24), `maxFixedObjects` 1000 (+0x20), `maxGeoms` 1000
+(+0x28), `maxConstraints` 1000 (+0x2C), `maxBodiesInIsland` 1000,
+`maxConstraintsInIsland` 1000, `maxDOFConstraintsInIsland` 6000, `maxContacts` 10000,
+`maxExternalContacts` 1000, `maxContactsPerCollision` 20, `maxBroadPhaseCollisions`
+10000, `numQuickStepIterations` 20. Each pool is a free list with capacity +0xC and
+used count +0x10 (`0xAD9220` take, `0xAD9260` give back); a full pool returns no
+object. [V] No file in the Steam install contains `PHYSICSENGINE` or `maxRigidBodies`
+(only `grid.exe`), and the optional `physicsOverride.xml` named at `0x5C704B` is not
+shipped. [I] The defaults apply: one world holds up to 1000 rigid bodies, an island
+(contact group) up to 1000.
+
+**Entity manager.** [D] `0x7BA850` reads an `ENTITYMANAGER` node with defaults
+`maxShapeInstances`, `maxRigidBodyInstances`, `maxTransformableInstances`,
+`maxRenderableInstances`, `maxSubEntityInstances`, `maxConstraintInstances` 1000 each and
+`maxClothInstances` 100 (`0x7BA970` repeats them when no file loads). Pools sit at
+manager +0xBC24..+0xBC38; `0x7B5A70` returns their free counts plus the world's four
+(`0xA72470`). [I] Whether a route overrides these is open (Donington's objects.ens has
+more than 1000 entities in total).
+
+**Pool full on a break.** [D] `0x7D5180` (apply behaviour type) swaps components only
+if `0x7D4940` returns true. `0x7D4940` compares the free counts with the entity's
+needs (`0x7B6F40`/`0x7CF2A0` count the subentities, bodies, shapes and constraints to
+add; `0x7D8520` requires every difference to stay non-negative). If short, `0x7D4770`
+collects up to 1000 other entities (not the breaking one, not flag +0xEB) keyed by
+squared distance to the manager's focus point +0xBC80 (`0x7B5FC0`), sorts them with
+CRT `qsort` (`0xBF7BD0`) and comparator `0x7B6080` (farthest first), and restores the
+first candidate whose reset frees enough (`0x7D6760(1,1)` -> `0x7D5180` with the
+initial flag, i.e. back to the intact static state). It repeats while that succeeds;
+if nothing frees enough the break is skipped and the entity stays intact. `0x5BB5C0`
+writes +0xBC80 from the translation of a game-object matrix (+0x72C -> +0x24) every
+frame [I: the viewed car]. There is still no timer despawn.
+
+**Port bounds before F317.** [V] The port's world guards capped one world at 16 bodies
+(`contact_groups` `1..=16`, `contact_rows`, `impact_frame`, `impact_step`,
+`physical_tick`) and the solver at 64 (`main_contact_response`, `physical_response`,
+`impact_correction`), with 256 contacts and 513 shapes. They were the validated domain
+of the native comparisons (CONTACT_GROUPS.md, GROUPED_PHYSICAL_FRAME.md), not original
+values. Audit: the algorithms use `Vec`s and one-based `u32` tokens; no bitmask, fixed
+array, `u16` field or byte index depends on the body count (the other 16s are manifold
+capacity, deformation grid dimensions and matrix sizes). 12 cars plus one board's two
+halves (14) passed; the first tyre stack or a second board in a full field failed.
+Solo play (1 car) never reached the cap, so F312's solo validation missed it.
+
+**Port (F317).**
+- `grid_world::MAX_WORLD_BODIES` = 1000 (maxRigidBodies; maxBodiesInIsland is the same,
+  so the per-group solver guard uses it too), `MAX_WORLD_CONTACTS` = 10000 (maxContacts),
+  `MAX_WORLD_SHAPES` = 513 + 1000 (the port's static table plus one shape per dynamic
+  body; maxGeoms is 1000). Car contact pools keep their sizes (24 per car up to 256,
+  AUTHORED as before); pieces still add 12 slots each, now beyond 256.
+- `PropWorld::apply` refuses a break whose pieces would push the world past 1000 bodies
+  (the entity stays intact and keeps its threshold). Deviation: the farthest-first
+  restore of other broken entities is not ported. The 190 ported breakables yield at
+  most 312 pieces, so with 12 (or 20) cars the bound cannot be reached.
+- Per-group solve: `impact_frame::calculate_owned` / `impact_step::calculate_owned` move
+  the shared row buffer instead of copying it 4 times per group; piece-piece pairs farther
+  apart than sqrt(3) x (summed hull reach + margin) skip the face-axis test (a box or
+  12-gon prism has an orthonormal triple of face normals, so that test returns nothing
+  there); each piece builds its world hull for the car pair queries once. Results are
+  identical (state hash below).
+
+**Validation (F317).** `twelve_car_world_keeps_stepping_after_props_break_into_many_pieces`
+(Donington, 12 cars at throttle 0.6, every tyre stack and two boards broken = 100
+pieces, 400 ticks): before the fix it failed at tick 2 with the playtest's error; after,
+12 -> 112 bodies, every piece within 1.5 m of its spawn height, final state FNV
+`6e19b665dbf510b1` with and without the pair skip; 62 ms/tick at first, 38 ms with
+cached piece hulls, 9.2 ms with the moved row buffer.
+
+- `grid-opponent-race` (private `local/prop-pool/races/`): 12 cars, 12000 ticks without
+  props: output byte-identical to the same tool built from cf0e72e (11,726 race ticks,
+  140 car contacts). With `GRID_DYNAMIC_PROPS=1` the AI field breaks nothing in 12000
+  ticks. New `GRID_PROP_TARGET=TEMPLATE:INDEX` drives car 0 with the authored
+  `PropPursuit` while the 11 AI cars race: board `gg_brake_marker:0` breaks at tick 5314
+  (force 50.0, as in the solo probe), also with every car deforming; `tyrestack:0`
+  run, 20000 ticks: two stacks and a board break (26 pieces, 38 bodies), no failure.
+- Solo `1 car 11200 ticks`: laps 88.42029812185638 / 86.28228501935392 s, identical with
+  and without `GRID_DYNAMIC_PROPS`, 0 breaks.
+- App, scripted window run with 11 AI opponents, deformation and body events
+  (`GRID_PROP_SCRIPT`, `--drive-ticks`, renders in `local/prop-pool/windowed/`). The app now
+  logs `dynamic_props event=break` per break; the 7f22c32 playtest log has no such line,
+  so which breaks preceded its failure is not recorded. Run 1 (`gg_brake_marker_01_i_right_100m:0`,
+  7000 ticks): the player breaks board #77 at tick 1548 (14 bodies), an AI car (the player is at rest) breaks the
+  same-type board #79 at tick 6628 (16 bodies); one more board would have exceeded the old
+  cap. Run 2 (`tyrestack:0` at 25 m/s, 9000 ticks): two tyre stacks break at ticks
+  8138/8140 (24 pieces, 36 bodies); tyres settle on the road and grass, no pause.
+  [I] Playtest: the failing tick's player position is 1.9 m from board #81
+  (`gg_brake_marker_01_i_right_100m`); 12 cars + 2 halves stay within 16, so at least one
+  earlier break (as AI cars do in run 1) must have been live.
 
 ## Port (F312)
 
@@ -195,5 +294,7 @@ Private evidence `local/dynamic-props/` (probe TSVs, logs, renders).
   sphericalmass 7000, damping 14), post-to-world joint breaking at 10, ENS link
   propagation. The port has no joint rows.
 - Sleeping: the ported grouped frame only admits `turnOffTime = MAX`.
-- The pool limits (`maxSubEntityInstances`, `maxConstraintInstances`) values.
+- Whether routes override the ENTITYMANAGER defaults; the farthest-first restore of
+  broken entities when a pool is full (recovered, not ported, unreachable with the
+  ported catalog).
 - Live confirmation of any of the above.

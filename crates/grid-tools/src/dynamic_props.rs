@@ -725,6 +725,30 @@ impl PropWorld {
                     .ok_or(Error("missing prop piece body"))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        // World hulls once per call, with the largest centre-to-vertex reach.
+        let convexes: Vec<(Convex, f32)> = self
+            .pieces
+            .iter()
+            .zip(&poses)
+            .map(|(p, pose)| {
+                let convex =
+                    Convex::new(&self.catalog.breakables[p.breakable].pieces[p.spec], pose);
+                let reach = convex
+                    .points
+                    .iter()
+                    .map(|q| {
+                        let d = [
+                            q[0] - convex.centre[0],
+                            q[1] - convex.centre[1],
+                            q[2] - convex.centre[2],
+                            0.,
+                        ];
+                        dot3(d, d).sqrt()
+                    })
+                    .fold(0., f32::max);
+                (convex, reach)
+            })
+            .collect();
         for (k, piece) in self.pieces.iter().enumerate() {
             let spec = &self.catalog.breakables[piece.breakable].pieces[piece.spec];
             let query = convex_distance::ContactSettings {
@@ -772,12 +796,23 @@ impl PropWorld {
                     break;
                 }
                 let other_spec = &self.catalog.breakables[other.breakable].pieces[other.spec];
-                for hit in convex_contacts(
-                    &Convex::new(spec, &pose),
-                    &Convex::new(other_spec, &poses[j]),
-                    spec.shell.max(other_spec.shell),
-                    room.min(PAIR_CONTACTS),
-                ) {
+                let margin = spec.shell.max(other_spec.shell);
+                let ((a, a_reach), (b, b_reach)) = (&convexes[k], &convexes[j]);
+                // Each hull's face normals hold an orthonormal triple (box
+                // faces; prism cap and radials 90 degrees apart), so beyond
+                // sqrt(3) x the summed reach one of them already separates
+                // the pair and the face-axis test returns nothing.
+                let d = [
+                    a.centre[0] - b.centre[0],
+                    a.centre[1] - b.centre[1],
+                    a.centre[2] - b.centre[2],
+                    0.,
+                ];
+                let reach = a_reach + b_reach + margin + 0.01;
+                if dot3(d, d) > 3. * reach * reach {
+                    continue;
+                }
+                for hit in convex_contacts(a, b, margin, room.min(PAIR_CONTACTS)) {
                     out.push(pair_record(
                         &hit,
                         [piece.body, other.body],
@@ -785,16 +820,19 @@ impl PropWorld {
                     ));
                 }
             }
-            let triangles = world_triangles(spec, &pose);
+            let mut hull = None;
             for car in cars {
                 let room = remaining - out.len();
                 if room == 0 {
                     break;
                 }
                 let body = bodies.get(car.body).ok_or(Error("missing car body"))?;
+                let hull = hull.get_or_insert_with(|| {
+                    crate::body_geometry::WorldHull::new(&world_triangles(spec, &pose))
+                });
                 for hit in car
                     .geometry
-                    .car_contacts(body, &triangles, room.min(TRACK_CONTACTS))?
+                    .car_contacts_hull(body, hull, room.min(TRACK_CONTACTS))?
                 {
                     out.push(pair_record(
                         &hit,
@@ -852,6 +890,13 @@ impl PropWorld {
         !self.pending.is_empty()
     }
 
+    /// Queue a break at rest, as if a contact had saturated the threshold.
+    #[cfg(test)]
+    pub(crate) fn queue_break(&mut self, breakable: usize) {
+        let threshold = self.catalog.breakables[breakable].threshold;
+        self.pending.push((breakable, [0.; 4], threshold));
+    }
+
     /// Apply queued breaks after the step: append the pieces as dynamic bodies
     /// and return the intact boxes the caller must `disable` in every track.
     /// On failure the caller discards `world`/`shapes`.
@@ -868,6 +913,13 @@ impl PropWorld {
         let mut disabled = Vec::new();
         for (breakable, explosion, force) in std::mem::take(&mut self.pending) {
             let entry = &self.catalog.breakables[breakable];
+            // 0x7D5180 swaps only when 0x7D4940 finds room for the new
+            // components; otherwise the entity stays intact. The original
+            // first restores the farthest broken entities (0x7D4770), which
+            // the port omits: its 312 possible pieces cannot fill the pool.
+            if world.groups.bodies.len() + entry.pieces.len() > grid_world::MAX_WORLD_BODIES {
+                continue;
+            }
             disabled.extend(entry.intact.iter().copied());
             for (spec_index, spec) in entry.pieces.iter().enumerate() {
                 let linear = explosion_velocity(
