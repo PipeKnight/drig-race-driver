@@ -1494,15 +1494,20 @@ fn drive_tick(
     {
         return;
     }
+    // During the countdown the engine keeps running and the player may rev.
+    // Authored grid hold, not a recovered original race-start rule: the
+    // reconstructed controls engage the clutch with the handbrake (1640 ->
+    // E34), so the car stays put and releasing it at GO launches with wheelspin.
+    let held = trial.as_ref().is_some_and(|t| !t.driving());
     if let Some(trial) = trial.as_mut()
-        && !trial.driving()
+        && held
     {
-        if !trial.finished() {
-            trial.countdown();
+        if trial.finished() {
+            return;
         }
-        return;
+        trial.countdown();
     }
-    let controls = if driving.scripted_ticks.is_some() {
+    let mut controls = if driving.scripted_ticks.is_some() {
         driving.scripted
     } else {
         let pressed = |a, b| input.pressed(a) || input.pressed(b);
@@ -1514,6 +1519,13 @@ fn drive_tick(
             handbrake: input.pressed(KeyCode::Space),
         }
     };
+    if held {
+        controls = grid_tools::source_vehicle::Controls {
+            throttle: controls.throttle,
+            handbrake: true,
+            ..Default::default()
+        };
+    }
     let driving = &mut *driving;
     let result = if let Some(geometry) = &mut driving.geometry {
         if driving.runtime.deformation_enabled {
@@ -1532,7 +1544,8 @@ fn drive_tick(
         driving.failure = Some(text);
         driving.report("failure", controls);
     } else {
-        if let Some(trial) = trial.as_mut()
+        if !held
+            && let Some(trial) = trial.as_mut()
             && let Err(error) = trial.tick(driving.runtime.ticks, &driving.runtime.lap_events)
         {
             driving.failure = Some(format!("{error}; R restarts"));
@@ -2246,8 +2259,17 @@ mod driving_tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
         app.update();
-        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
-        assert_eq!(app.world().resource::<Driving>().runtime.pose(), initial);
+        // The countdown ticks the held car: the engine runs and revs, the car
+        // stays on its grid slot and the event clock has not started.
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        let held_distance = |app: &App| {
+            let pose = app.world().resource::<Driving>().runtime.pose();
+            (12..15)
+                .map(|i| (pose[i] - initial[i]).powi(2))
+                .sum::<f32>()
+                .sqrt()
+        };
+        assert!(held_distance(&app) < 0.01);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyP);
@@ -2274,12 +2296,21 @@ mod driving_tests {
             assert!(count <= 188);
         }
         assert_eq!(count, 188);
-        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 188);
+        assert!(held_distance(&app) < 0.01);
+        assert_eq!(
+            app.world().resource::<time_trial::Trial>().state.elapsed(),
+            0.
+        );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
         app.update();
-        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 189);
+        assert_eq!(
+            app.world().resource::<time_trial::Trial>().state.elapsed(),
+            f64::from(grid_tools::source_vehicle::DELTA)
+        );
         // Successful physics and event clocks advance together. A physics failure
         // preserves the event clock; R resets both and restores the countdown.
         app.world_mut()
@@ -2304,7 +2335,9 @@ mod driving_tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();
         assert!(app.world().resource::<Driving>().failure.is_none());
-        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        // The reset frame already performs the first held countdown tick.
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        assert!(held_distance(&app) < 0.01);
         while !app.world().resource::<time_trial::Trial>().driving() {
             app.update();
         }
@@ -2338,13 +2371,17 @@ mod driving_tests {
             .owner
             .vehicle
             .clone();
+        let finished_ticks = app.world().resource::<Driving>().runtime.ticks;
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
         for _ in 0..4 {
             app.update();
         }
-        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
+        assert_eq!(
+            app.world().resource::<Driving>().runtime.ticks,
+            finished_ticks
+        );
         assert_eq!(
             app.world()
                 .resource::<Driving>()
@@ -2360,8 +2397,8 @@ mod driving_tests {
             .press(KeyCode::KeyR);
         app.update();
         assert!(!app.world().resource::<time_trial::Trial>().finished());
-        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 0);
-        assert_eq!(app.world().resource::<Driving>().runtime.pose(), initial);
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
+        assert!(held_distance(&app) < 0.01);
     }
 
     fn exercise_keyboard_recovery(table: Option<&[u8]>, deformation: bool) {
@@ -2548,16 +2585,20 @@ mod driving_tests {
                 .iter()
                 .all(|v| f32::from_bits(*v) > 1000.)
         );
-        for _ in 0..59 {
-            app.update();
-        }
-        assert!(
+        // The idling engine launches immediately, so 120 throttle ticks reach a
+        // higher speed than the former zero-RPM crank; allow a bounded stop.
+        let speed_squared = |app: &App| {
             app.world().resource::<Driving>().runtime.velocity()[..3]
                 .iter()
                 .map(|v| v * v)
                 .sum::<f32>()
-                < 0.01
-        );
+        };
+        let mut stop_ticks = 1;
+        while speed_squared(&app) >= 0.01 {
+            app.update();
+            stop_ticks += 1;
+            assert!(stop_ticks <= 300, "handbrake did not stop the car");
+        }
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();

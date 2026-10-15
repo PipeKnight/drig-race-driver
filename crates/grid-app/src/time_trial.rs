@@ -8,6 +8,9 @@ pub(crate) struct Trial {
     records: Option<Records>,
     key: Key,
     save_failed: bool,
+    /// Runtime tick at GO. The vehicle also ticks during the countdown, while
+    /// the event clock and lap start times count from GO.
+    base: Option<u64>,
 }
 impl Trial {
     pub fn new(laps: u32, mode: Mode, persist: bool) -> Result<Self, Box<dyn std::error::Error>> {
@@ -37,6 +40,7 @@ impl Trial {
             save_failed: persist && records.is_none(),
             records,
             key: Key { laps, mode },
+            base: None,
         })
     }
     pub fn driving(&self) -> bool {
@@ -59,6 +63,7 @@ impl Trial {
     }
     pub fn reset(&mut self) {
         self.state.reset();
+        self.base = None;
         println!(
             "drive_trial_event version=1 type=reset laps={}",
             self.key.laps
@@ -69,13 +74,30 @@ impl Trial {
         tick: u64,
         events: &[grid_tools::lap_progress::Event],
     ) -> Result<(), grid_formats::Error> {
+        use grid_tools::lap_progress::Event;
+        let failed = grid_formats::Error {
+            offset: 0,
+            message: "time-trial state failed after successful vehicle tick",
+        };
+        let base = *self
+            .base
+            .get_or_insert(tick.checked_sub(1).ok_or(failed.clone())?);
+        let shift = base as f64 * f64::from(grid_tools::source_vehicle::DELTA);
+        let events: Vec<_> = events
+            .iter()
+            .map(|event| match event {
+                Event::Started { when } => Event::Started { when: when - shift },
+                Event::Checkpoint { gate, when } => Event::Checkpoint {
+                    gate: *gate,
+                    when: when - shift,
+                },
+                other => other.clone(),
+            })
+            .collect();
         let old = self.state.completed_laps();
         self.state
-            .finish_tick(tick, events)
-            .map_err(|_| grid_formats::Error {
-                offset: 0,
-                message: "time-trial state failed after successful vehicle tick",
-            })?;
+            .finish_tick(tick - base, &events)
+            .map_err(|_| failed)?;
         if self.state.completed_laps() != old {
             println!(
                 "drive_trial_event version=1 type=lap tick={tick} completed={} target={}",
@@ -124,7 +146,7 @@ impl Trial {
         );
         let body = match self.state.phase() {
             Phase::Countdown(_) => format!(
-                "{} laps - ready in {}\nControls unlock at GO",
+                "{} laps - ready in {}\nHeld on the handbrake: hold throttle to rev, launch at GO",
                 self.key.laps,
                 self.state.countdown_label().unwrap()
             ),

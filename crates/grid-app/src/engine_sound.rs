@@ -146,7 +146,9 @@ fn update(
         println!("engine_audio version=2 event=output_started");
     }
     let mut control = sound.control(&driving);
-    if trial.is_some_and(|t| !t.driving()) {
+    // The engine idles and may be revved during the countdown; the vehicle no
+    // longer ticks after the finish.
+    if trial.is_some_and(|t| t.finished()) {
         control.audible = false;
     }
     sound.mailbox.store(control.pack(), Ordering::Relaxed);
@@ -237,8 +239,8 @@ mod tests {
             assert_eq!(control(&app).generation,1);assert!(!control(&app).audible);
             assert!(!app.world().resource::<crate::Driving>().paused);
             press(&mut app,KeyCode::KeyM);app.update();
-            // Reset keeps source angular speed at zero until acceleration.
-            assert!(!control(&app).audible);
+            // Reset restores the running idle engine (native stationary reference).
+            assert!(control(&app).audible);
             press(&mut app,KeyCode::ArrowUp);app.update();assert!(control(&app).audible);
             app.world_mut().resource_mut::<crate::Driving>().failure=Some("test failure".into());
             let before=app.world().resource::<crate::Driving>().runtime.state.car.owner.vehicle.clone();
@@ -246,7 +248,7 @@ mod tests {
             assert!(!control(&app).audible);
             assert_eq!(app.world().resource::<crate::Driving>().runtime.state.car.owner.vehicle,before);
             press(&mut app,KeyCode::KeyR);app.update();
-            assert!(!control(&app).audible);assert_eq!(control(&app).generation,2);
+            assert!(control(&app).audible);assert_eq!(control(&app).generation,2);
             press(&mut app,KeyCode::ArrowUp);app.update();assert!(control(&app).audible);
             eprintln!("source_engine_audio mailbox_pause_mute_reset_failure=1 decoder_silence=1 no_device_opened=1");
         }).unwrap().join().unwrap();
