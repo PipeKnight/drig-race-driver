@@ -1,4 +1,4 @@
-//! Borrowed base-level BC1/BC3 blocks. Remaining mip layout stays opaque.
+//! Borrowed BC1/BC3 blocks with count/size-validated tightly packed mip chains.
 use crate::{Result, fail, pssg::Tree};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,21 +13,28 @@ pub struct Texture<'a> {
     pub width: u32,
     pub height: u32,
     pub format: Format,
-    /// Observed attribute counts levels following the base for square samples.
+    /// Observed attribute counts levels following the base, including partial chains.
     pub declared_mip_levels: u32,
     pub base_blocks: &'a [u8],
     pub remaining_data: &'a [u8],
 }
 
 impl Texture<'_> {
-    /// Use the full chain only when count and tightly packed BC sizes agree.
+    /// Use declared full or partial chains only when tightly packed BC sizes agree.
     /// Unknown padded layouts retain the previously verified base-only image.
     pub fn validated_dds(&self) -> (Vec<u8>, u32) {
+        let mut dds = self.base_dds();
+        let Some(target_levels) = self.declared_mip_levels.checked_add(1) else {
+            return (dds, 1);
+        };
+        if !(2..=32).contains(&target_levels) {
+            return (dds, 1);
+        }
         let mut width = self.width;
         let mut height = self.height;
         let mut size = 0usize;
         let mut levels = 0u32;
-        loop {
+        while levels < target_levels {
             size += width.div_ceil(4) as usize
                 * height.div_ceil(4) as usize
                 * if self.format == Format::Bc1 { 8 } else { 16 };
@@ -38,11 +45,7 @@ impl Texture<'_> {
             width = (width / 2).max(1);
             height = (height / 2).max(1);
         }
-        let mut dds = self.base_dds();
-        if levels > 1
-            && self.declared_mip_levels == levels - 1
-            && self.base_blocks.len() + self.remaining_data.len() == size
-        {
+        if levels == target_levels && self.base_blocks.len() + self.remaining_data.len() == size {
             for (offset, value) in [(8, 0x000a_1007u32), (28, levels), (108, 0x0040_1008)] {
                 dds[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }
