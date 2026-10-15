@@ -208,6 +208,15 @@ Port of docs/AI_AVOID_RECOVERY_RESEARCH.md §7. The authored stuck recovery is d
 | avoid 0x79A960 | Branch A: racing-normally exclusion (speed ≥ 4, not reversing, heading within 90°, not within 45° of the *reversed* line direction, as the original). Inert-branch handling is unchanged. Fires on ETA < 2 s. Branch B: the remembered target, ahead beyond the half lengths, inside the 50° cone, `along < 2·closing`; otherwise forgotten. |
 
 The racing-normally state 2 ("not racing") is mapped to a car moving against its nose [I].
+Live, racing AI records are in state 1 and the stationary player car is in state 0; state 2
+was not observed.
+
+Live check (F302, [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md)):
+- The original's exclusion holds on 99.6% of race-traffic frames with ETA < 2 s.
+- 0.36% of those frames leak, for an unexplained reason. Branch B then extends a leak into
+  avoid episodes of up to 3.6 s, so traffic avoid takes about 0.4% of AI frames.
+- The port keeps the documented rule.
+- Stopped-car avoid matches: target speed 30, clearance 6.05–6.08 m.
 
 ### Arbitration
 
@@ -238,8 +247,10 @@ The racing-normally state 2 ("not racing") is mapped to a car moving against its
   - Offset: off track it drifts 1 m/s toward our side at merge 5; on track it goes to our own
     lateral position at 2.5.
   - Octant from the side-mirrored angles `b` (heading error) and `a` (track direction at the
-    planned point), with clockwise-positive angles [I sign; the unit test checks that positive
-    lateral offsets point right].
+    planned point), with clockwise-positive angles. The sign convention is verified live
+    against the original's recovery mode choices (F302,
+    [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md)); the unit test checks that positive
+    lateral offsets point right.
   - Mode 2 forward for octants 0–3.
   - Otherwise full brake until under 0.1 m/s, then latch:
     - 3–5: reverse at 5 m/s until |a| or |b| < 5°;

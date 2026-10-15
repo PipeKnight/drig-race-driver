@@ -716,6 +716,21 @@ would be an AUTHORED deviation to label.
 8. 0x78B070 (a copy of the recovery offset helper without the on-track branch) has no
    direct caller found.
 
+Live answers (F302, [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md), read-only trace of
+a 12-car race):
+- **Q3**: callback thresholds read live: mass-like value > 700, speed < 2 m/s, floor y ≥ 0.1.
+  A slow car counts statically. No live AI contact with a stopped car was observed.
+- **Q4**: the sign convention is verified.
+  - view+0x64 is positive toward view+0x180, and view+0x180 = −own+0x50.
+  - The recovery mode choices match the octants.
+- **Q5**:
+  - The exclusion holds on 99.6% of traffic frames with ETA < 2 s.
+  - 0.36% of those frames leak for an unidentified reason, and Branch B extends the leaks
+    into short avoid episodes.
+  - Avoid fires on every close frame for the stopped player car.
+- Correction to §2.2: 0x798C00 searches only the track view's 32-link window (view+0x14) and
+  keeps the nearest containing link.
+
 ## 9. Evidence (private)
 
 - Decompilation (Ghidra 12.1.4 headless, `-readOnly`, runner
