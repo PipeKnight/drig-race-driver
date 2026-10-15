@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_meshes(&tree)?;
     let mut report = String::from(
-        "lod\tjoint\tmaterial\tvertices_used\ttriangles\taxis_width\tradius_y\tradius_z\touter_angular_samples\tlargest_outer_gap_deg\tideal_circle_sag_ratio\n",
+        "lod\tjoint\tmaterial\tvertices_used\ttriangles\taxis_width\tradius_y\tradius_z\touter_angular_samples\tlargest_outer_gap_deg\tideal_circle_sag_ratio\tworld_center_x\tworld_center_y\tworld_center_z\n",
     );
     let mut count = 0;
     for lod in [b"LOD0_".as_slice(), b"LOD1_".as_slice()] {
@@ -58,6 +58,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             // approximation, not a recovered physical or artist pivot.
             let cy = (lo[1] + hi[1]) * 0.5;
             let cz = (lo[2] + hi[2]) * 0.5;
+            let center = scene::transform_point(&draw.transform, [(lo[0] + hi[0]) * 0.5, cy, cz]);
             let radius = used
                 .iter()
                 .map(|&i| (positions[i][1] - cy).hypot(positions[i][2] - cz))
@@ -87,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ))
                 .fold(0.0_f32, f32::max);
             report.push_str(&format!(
-                "{}\t{:?}\t{:?}\t{}\t{}\t{:.6}\t{:.6}\t{:.6}\t{}\t{:.5}\t{:.8}\n",
+                "{}\t{:?}\t{:?}\t{}\t{}\t{:.6}\t{:.6}\t{:.6}\t{}\t{:.5}\t{:.8}\t{:.6}\t{:.6}\t{:.6}\n",
                 std::str::from_utf8(lod)?,
                 joint,
                 std::str::from_utf8(draw.material)?,
@@ -98,7 +99,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 (hi[2] - lo[2]) * 0.5,
                 angles.len(),
                 gap.to_degrees(),
-                1.0 - (gap * 0.5).cos()
+                1.0 - (gap * 0.5).cos(), center[0],center[1],center[2]
             ));
             count += 1;
         }
