@@ -62,6 +62,8 @@ pub struct Runtime {
     pub assists: assists::Assists,
     /// Pending one-tick gear request and the tick it belongs to.
     shift: Option<(u64, assists::Shift)>,
+    /// Opt-in breakable route props (`enable_dynamic_props`).
+    props: Option<crate::dynamic_props::PropWorld>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -406,6 +408,7 @@ impl Runtime {
             route: route.clone(),
             assists: assists::Assists::default(),
             shift: None,
+            props: None,
         })
     }
 
@@ -642,6 +645,7 @@ impl Runtime {
         };
         let material = |token| self.surfaces.joined(token);
         let mut body_contacts = 0;
+        let mut recorded = Vec::new();
         let mut rebuilt_geometry = None;
         let mut next_registration = None;
         let output = match geometry {
@@ -651,12 +655,8 @@ impl Runtime {
                     resource.borrow_mut().publish_deformation(owner, delta)
                 };
                 let provider = |bodies: &[grid_world::contact_groups::Body], remaining| {
-                    let contacts = resource.borrow().contacts(
-                        &self.track,
-                        &self.surfaces,
-                        bodies,
-                        remaining,
-                    )?;
+                    let contacts =
+                        self.fresh_contacts(&resource.borrow(), bodies, remaining, &mut recorded)?;
                     body_contacts = contacts.len();
                     Ok(contacts)
                 };
@@ -712,7 +712,7 @@ impl Runtime {
                 material,
                 |bodies, remaining| {
                     let contacts =
-                        geometry.contacts(&self.track, &self.surfaces, bodies, remaining)?;
+                        self.fresh_contacts(geometry, bodies, remaining, &mut recorded)?;
                     body_contacts = contacts.len();
                     Ok(contacts)
                 },
@@ -738,11 +738,29 @@ impl Runtime {
         } else {
             None
         };
+        let mut state = output.state;
+        let mut props = None;
+        if let Some(current) = &self.props {
+            let mut next = current.clone();
+            next.detect(
+                &state.world.groups.contacts,
+                &recorded,
+                &state.world.groups.bodies,
+            );
+            let disabled = next.apply(&mut state.world, &mut state.shapes, self.ticks + 1)?;
+            // Appending links the car body (chain tail) to the first piece.
+            state.car.owner.physical = state.world.groups.bodies[0];
+            props = Some((next, disabled));
+        }
         if let Some((geometry, next)) = rebuilt_geometry {
             *geometry = next;
         }
+        if let Some((next, disabled)) = props {
+            crate::dynamic_props::PropWorld::disable(&mut self.track, &disabled);
+            self.props = Some(next);
+        }
         self.last_active_contacts = output.active_contacts;
-        self.state = output.state;
+        self.state = state;
         if let Some(registration) = next_registration {
             self.deformation_registration = Some(registration);
         }
@@ -771,6 +789,10 @@ impl Runtime {
         self.ticks = 0;
         self.last_body_contacts = 0;
         self.last_active_contacts = 0;
+        if let Some(props) = &mut self.props {
+            // Re-arming only fails without route props, which enabling requires.
+            let _ = props.reset(&mut [&mut self.track]);
+        }
     }
     /// Solved contact notifications of the last successful solo tick
     /// (presentation only; the shared world reports through `MultiRuntime`).
@@ -780,6 +802,91 @@ impl Runtime {
             &contacts[..self.last_active_contacts.min(contacts.len())],
             1,
         )
+    }
+
+    /// Opt in to breakable route props (after `prepare_body_geometry`, before
+    /// the first tick): breakable boxes get their threshold as contact limit
+    /// and break into dynamic pieces (DYNAMIC_PROPS_RESEARCH.md).
+    pub fn enable_dynamic_props(&mut self, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        if self.ticks != 0 || self.props.is_some() {
+            return Err("dynamic props must be enabled once before the first tick".into());
+        }
+        let props = self
+            .track
+            .props()
+            .ok_or("dynamic props require prepared body geometry")?;
+        let catalog = crate::dynamic_props::Catalog::read(root, &self.route, props)?;
+        let world = crate::dynamic_props::PropWorld::new(catalog);
+        world.arm(&mut self.track)?;
+        self.props = Some(world);
+        Ok(())
+    }
+
+    /// Breakable route props, when enabled.
+    pub fn dynamic_props(&self) -> Option<&crate::dynamic_props::PropWorld> {
+        self.props.as_ref()
+    }
+
+    /// Car body contacts plus, with dynamic props, every live piece's contacts.
+    /// Prop contacts are recorded with their pool index for break detection.
+    fn fresh_contacts(
+        &self,
+        geometry: &crate::body_geometry::BodyGeometry,
+        bodies: &[grid_world::contact_groups::Body],
+        remaining: usize,
+        recorded: &mut Vec<(usize, crate::dynamic_props::PropContact)>,
+    ) -> Result<Vec<grid_world::contact_groups::Contact>, Error> {
+        let Some(props) = &self.props else {
+            return geometry.contacts(&self.track, &self.surfaces, bodies, remaining);
+        };
+        let first = self
+            .state
+            .world
+            .groups
+            .contacts
+            .len()
+            .checked_sub(remaining)
+            .ok_or(Error("invalid geometry capacity"))?;
+        let mut out = Vec::new();
+        for (c, prop) in geometry.contacts_with_props(
+            &self.track,
+            &self.surfaces,
+            bodies.get(..1).ok_or(Error("missing car body"))?,
+            // The car's track query is bounded to 64 records.
+            remaining.min(64),
+        )? {
+            if let Some(prop) = prop {
+                recorded.push((
+                    first + out.len(),
+                    crate::dynamic_props::PropContact {
+                        contact: c,
+                        prop,
+                        body: 0,
+                    },
+                ));
+            }
+            out.push(c);
+        }
+        if !props.pieces.is_empty() {
+            let mut local = Vec::new();
+            let more = props.contacts(
+                &self.track,
+                &self.surfaces,
+                bodies,
+                &[crate::dynamic_props::CarHull {
+                    geometry,
+                    body: 0,
+                    token: 1,
+                }],
+                geometry.query(),
+                remaining - out.len(),
+                &mut local,
+            )?;
+            let base = first + out.len();
+            recorded.extend(local.into_iter().map(|(i, r)| (base + i, r)));
+            out.extend(more);
+        }
+        Ok(out)
     }
     pub fn pose(&self) -> [f32; 16] {
         std::array::from_fn(|i| f32::from_bits(self.state.car.owner.physical[0x1d0 / 4 + i]))
@@ -1483,6 +1590,41 @@ mod tests {
             enabled.pose()[13],
             legacy.pose()[13]
         );
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn dynamic_props_leave_an_untouched_drive_identical() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let mut plain = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let plain_geometry = plain.prepare_body_geometry(root, &table).unwrap();
+        let mut armed = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let armed_geometry = armed.prepare_body_geometry(root, &table).unwrap();
+        armed.enable_dynamic_props(root).unwrap();
+        assert!(armed.enable_dynamic_props(root).is_err());
+        let controls = Controls {
+            throttle: 1.,
+            ..Default::default()
+        };
+        for _ in 0..240 {
+            plain
+                .tick_with_body_geometry(controls, &plain_geometry)
+                .unwrap();
+            armed
+                .tick_with_body_geometry(controls, &armed_geometry)
+                .unwrap();
+        }
+        assert_eq!(
+            armed.state.world.groups.bodies,
+            plain.state.world.groups.bodies
+        );
+        assert_eq!(armed.state.car.owner.vehicle, plain.state.car.owner.vehicle);
+        let props = armed.dynamic_props().unwrap();
+        assert!(props.events.is_empty() && props.pieces.is_empty());
+        armed.reset();
+        assert_eq!(armed.state.world.groups.bodies.len(), 1);
     }
 
     #[test]

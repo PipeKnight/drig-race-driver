@@ -50,6 +50,10 @@ pub struct Track {
 pub struct BodyContact {
     pub shape: u32,
     pub contact: grid_world::contact_manifold::Contact,
+    /// Route prop box index for prop contacts.
+    pub prop: Option<usize>,
+    /// Contact impulse limit (contact +0x3C), FLT_MAX unless a breakable prop.
+    pub limit: f32,
 }
 
 impl Track {
@@ -142,6 +146,10 @@ impl Track {
     pub fn props(&self) -> Option<&crate::entity_geometry::Props> {
         self.props.as_ref()
     }
+    /// Mutable route props: breakable limits and broken boxes.
+    pub fn props_mut(&mut self) -> Option<&mut crate::entity_geometry::Props> {
+        self.props.as_mut()
+    }
     pub fn has_props(&self) -> bool {
         self.props.is_some()
     }
@@ -202,7 +210,12 @@ impl Track {
                             }),
                     )?
                     .into_iter()
-                    .map(|contact| BodyContact { shape, contact }),
+                    .map(|(index, contact)| BodyContact {
+                        shape,
+                        contact,
+                        prop: Some(index),
+                        limit: props.boxes[index].limit,
+                    }),
             );
         }
         let settings = |remaining: usize| packed_contacts::Settings {
@@ -236,6 +249,8 @@ impl Track {
                 contacts.extend(generated.into_iter().map(|contact| BodyContact {
                     shape: self.chunks.len() as u32 + 1,
                     contact,
+                    prop: None,
+                    limit: f32::MAX,
                 }));
             }
         }
@@ -270,6 +285,8 @@ impl Track {
             contacts.extend(generated.into_iter().map(|contact| BodyContact {
                 shape: i as u32 + 1,
                 contact,
+                prop: None,
+                limit: f32::MAX,
             }));
         }
         Ok(contacts)

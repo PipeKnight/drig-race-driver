@@ -282,6 +282,22 @@ impl BodyGeometry {
         bodies: &[contact_groups::Body],
         remaining: usize,
     ) -> Result<Vec<contact_groups::Contact>, Error> {
+        Ok(self
+            .contacts_with_props(track, surfaces, bodies, remaining)?
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect())
+    }
+
+    /// As [`Self::contacts`], with the route prop box of each prop contact.
+    /// A breakable prop's threshold is the contact impulse limit (+0x3C).
+    pub fn contacts_with_props(
+        &self,
+        track: &Track,
+        surfaces: &Surfaces,
+        bodies: &[contact_groups::Body],
+        remaining: usize,
+    ) -> Result<Vec<(contact_groups::Contact, Option<usize>)>, Error> {
         if bodies.len() != 1 {
             return Err(Error("body geometry requires one owned vehicle"));
         }
@@ -304,13 +320,18 @@ impl BodyGeometry {
                 c[0x28 / 4] = 1;
                 c[0x2c / 4] = hit.shape + 1;
                 c[0x38 / 4] = hit.contact.penetration.to_bits();
-                c[0x3c / 4] = f32::MAX.to_bits();
+                c[0x3c / 4] = hit.limit.to_bits();
                 c[0x50 / 4..0x60 / 4].copy_from_slice(&hit.contact.point.map(f32::to_bits));
                 c[0x60 / 4..0x70 / 4].copy_from_slice(&hit.contact.normal.map(f32::to_bits));
                 c[0x70 / 4] = (u32::from(hit.contact.flipped) << 8) | (1 << 24);
-                c
+                (c, hit.prop)
             })
             .collect())
+    }
+
+    /// Contact query settings (margin and sampling directions).
+    pub fn query(&self) -> &convex_distance::ContactSettings {
+        &self.query
     }
 }
 

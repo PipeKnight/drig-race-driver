@@ -18,6 +18,7 @@ pub mod jpk;
 pub mod material;
 pub mod mesh;
 pub mod ornaments;
+pub mod physparams;
 pub mod progress;
 pub mod pssg;
 pub mod scene;

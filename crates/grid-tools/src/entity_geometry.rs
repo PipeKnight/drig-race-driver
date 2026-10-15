@@ -1,8 +1,9 @@
 //! Static collision boxes of the purchased route entities (objects.ens with
 //! objecttypes.pssg): tyre walls, cushions, armco, tyre stacks and marker boards.
 //! Each box is twelve triangles in a one-leaf decoded tree, queried through the
-//! shared cold body contact path. All placements are infinite-mass in the data;
-//! breakable/dynamic behaviour (physparams.xml thresholds) is not implemented.
+//! shared cold body contact path. All placements start infinite-mass in the data;
+//! breakable boxes carry a contact limit and are disabled when broken
+//! (`dynamic_props`, DYNAMIC_PROPS_RESEARCH.md).
 use crate::route::Route;
 use grid_formats::{entities, pssg};
 use grid_world::{Error, packed_query::Mesh};
@@ -12,6 +13,13 @@ pub struct PropBox {
     pub template: String,
     pub bounds: [f32; 6],
     pub positions: Vec<[f32; 3]>,
+    /// Entity placement index (objects.ens order) for entity boxes.
+    pub entity: Option<usize>,
+    /// Contact impulse limit written to contact +0x3C: the shape behaviour's
+    /// threshold for an armed breakable box, otherwise FLT_MAX.
+    pub limit: f32,
+    /// Broken boxes no longer collide.
+    pub enabled: bool,
     triangles: Vec<[u16; 3]>,
     nodes: Vec<u16>,
     leaves: BTreeMap<usize, Vec<u16>>,
@@ -72,6 +80,9 @@ impl PropBox {
             template,
             bounds,
             positions,
+            entity: None,
+            limit: f32::MAX,
+            enabled: true,
             triangles: FACES.to_vec(),
             nodes: vec![0x8000],
             leaves: BTreeMap::from([(0, (0..12).collect())]),
@@ -158,7 +169,7 @@ impl Props {
         let placements = pssg::read_tree(&placements)?;
         let types = pssg::read_tree(&types)?;
         let mut boxes = Vec::new();
-        for e in entities::read(&placements, &types)? {
+        for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
             for r in &e.renderables {
                 for s in &r.shapes {
                     let entities::Primitive::Box {
@@ -184,10 +195,10 @@ impl Props {
                             transform(&e.transform, transform(&s.transform, local))
                         })
                         .collect();
-                    boxes.push(PropBox::new(
-                        String::from_utf8_lossy(e.template).into_owned(),
-                        positions,
-                    )?);
+                    let mut b =
+                        PropBox::new(String::from_utf8_lossy(e.template).into_owned(), positions)?;
+                    b.entity = Some(index);
+                    boxes.push(b);
                 }
             }
         }
@@ -230,8 +241,9 @@ impl Props {
         best
     }
 
-    /// Cold contacts against every box whose bounds overlap the car's margin-
-    /// inflated world bounds, in data order, up to `capacity` (<=16 per box).
+    /// Cold contacts against every enabled box whose bounds overlap the car's
+    /// margin-inflated world bounds, in data order, up to `capacity` (<=16 per
+    /// box), each with its box index.
     pub fn contacts(
         &self,
         mesh: &grid_world::collision_mesh::Mesh,
@@ -239,7 +251,7 @@ impl Props {
         query: &grid_world::convex_distance::ContactSettings,
         bounds: [[f32; 4]; 2],
         capacity: usize,
-    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+    ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
         self.contacts_known(mesh, matrix, query, bounds, capacity, None)
     }
 
@@ -262,7 +274,7 @@ impl Props {
         bounds: [[f32; 4]; 2],
         capacity: usize,
         known: Option<KnownBoxes<'_>>,
-    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+    ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
         if known.as_ref().is_some_and(|k| {
             k.checked.len() != self.boxes.len() || k.index.boxes != self.boxes.len()
         }) {
@@ -280,7 +292,9 @@ impl Props {
             if contacts.len() >= capacity {
                 break;
             }
-            if (0..3).any(|j| bounds[0][j] > b.bounds[j + 3] || bounds[1][j] < b.bounds[j]) {
+            if !b.enabled
+                || (0..3).any(|j| bounds[0][j] > b.bounds[j + 3] || bounds[1][j] < b.bounds[j])
+            {
                 continue;
             }
             let settings = grid_world::packed_contacts::Settings {
@@ -316,7 +330,7 @@ impl Props {
                     .contacts
                 }
             };
-            contacts.extend(generated);
+            contacts.extend(generated.into_iter().map(|c| (index, c)));
         }
         Ok(contacts)
     }
@@ -432,6 +446,9 @@ mod tests {
                     template: String::new(),
                     bounds: [x, -1., z, x + w, 2., z + w * 0.5],
                     positions: Vec::new(),
+                    entity: None,
+                    limit: f32::MAX,
+                    enabled: true,
                     triangles: Vec::new(),
                     nodes: Vec::new(),
                     leaves: BTreeMap::new(),

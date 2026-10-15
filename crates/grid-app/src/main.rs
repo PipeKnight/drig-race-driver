@@ -2,6 +2,7 @@
 mod assists;
 mod body_damage;
 mod damage_parts;
+mod dynamic_props;
 mod engine_sound;
 mod free_look;
 mod time_trial;
@@ -691,12 +692,18 @@ fn append_entities(
     let placement_tree = pssg::read_tree(&placement_bytes)?;
     let type_tree = pssg::read_tree(&type_bytes)?;
     let entities = entities::read(&placement_tree, &type_tree)?;
-    let mut placements: BTreeMap<&[u8], Vec<[f32; 16]>> = BTreeMap::new();
+    // Breakable entities draw their intact state as their own parts.
+    let catalog = dynamic_props::catalog(root, route);
+    let breakables = catalog
+        .as_ref()
+        .map(dynamic_props::by_entity)
+        .unwrap_or_default();
+    let mut placements: BTreeMap<&[u8], Vec<dynamic_props::Placement>> = BTreeMap::new();
     let mut cloth = 0;
     let mut boxes = 0;
     let mut cylinders = 0;
     let mut links = 0;
-    for entity in &entities {
+    for (index, entity) in entities.iter().enumerate() {
         cloth += entity.cloth.len();
         links += entity.links;
         for renderable in &entity.renderables {
@@ -706,7 +713,7 @@ fn append_entities(
             placements
                 .entry(renderable.node)
                 .or_default()
-                .push(entity.transform);
+                .push((entity.transform, breakables.get(&index).copied()));
             for shape in &renderable.shapes {
                 match shape.primitive {
                     entities::Primitive::Box { .. } => boxes += 1,
@@ -788,10 +795,32 @@ fn append_entities(
             } else {
                 mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, source.normals.clone());
             }
+            for (placement, breakable) in placements {
+                if let Some(b) = breakable {
+                    draw_count += 1;
+                    car.parts.push(Part {
+                        name: dynamic_props::intact_name(*b, node, draw.id),
+                        material: material.clone(),
+                        mesh: mesh.clone(),
+                        matrices: vec![Mat4::from_cols_array(&scene::compose(
+                            &draw.transform,
+                            placement,
+                        ))],
+                        wheel: None,
+                        joint: String::new(),
+                    });
+                }
+            }
             let matrices = placements
                 .iter()
-                .map(|placement| Mat4::from_cols_array(&scene::compose(&draw.transform, placement)))
+                .filter(|(_, breakable)| breakable.is_none())
+                .map(|(placement, _)| {
+                    Mat4::from_cols_array(&scene::compose(&draw.transform, placement))
+                })
                 .collect::<Vec<_>>();
+            if matrices.is_empty() {
+                continue;
+            }
             draw_count += matrices.len();
             car.parts.push(Part {
                 name: format!(
@@ -815,6 +844,9 @@ fn append_entities(
     );
     if omitted_empty > 0 {
         println!("entities omitted_empty_renderable_instances={omitted_empty}");
+    }
+    if let Some(catalog) = &catalog {
+        dynamic_props::append_pieces(car, catalog, objects, sources)?;
     }
     Ok(())
 }
@@ -1221,6 +1253,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("drive_deformation enabled=true scope=static-and-car-peers source=player-lod1 wheel-view=source-wheel-anchors crt_seed=00000001 body_graphics=independent-grid-projection");
             }
             println!("drive_body_geometry enabled=true pool=20 boundary=cqtc order=boundary-first-then-archive materials=shared damage=owned-rng notifications=guarded");
+            runtime.enable_dynamic_props(&root)?;
+            println!("drive_dynamic_props enabled=true scope=constraint-free-breakables thresholds=physparams pieces=shared-world-bodies");
             Ok(geometry)
         }).transpose()?;
         let opponents = opponents
@@ -1237,7 +1271,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(grid_tools::deformation_parameters::read(&std::fs::read(path)?)?)
                     })
                     .transpose()?;
-                let multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti_deforming_on(
+                let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti_deforming_on(
                     &root,
                     &route,
                     &refs,
@@ -1245,6 +1279,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     runtime.body_events,
                     parameters,
                 )?;
+                multi.enable_dynamic_props(&root)?;
                 use grid_tools::ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Parameters};
                 let ai = AiData::load(&root, route.path(), "touring", "lac")?;
                 let parameters = Parameters::new(&ai, NORMAL_DIFFICULTY, |_| 1.)?;
@@ -1500,6 +1535,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if let Some(driving) = driving {
+        // GRID_PROP_SCRIPT=TEMPLATE:INDEX with --drive-ticks: authored
+        // validation drive into a breakable route prop.
+        if driving.scripted_ticks.is_some()
+            && let Ok(target) = std::env::var("GRID_PROP_SCRIPT")
+        {
+            let catalog = driving
+                .runtime
+                .dynamic_props()
+                .ok_or("GRID_PROP_SCRIPT needs --body-contacts")?
+                .catalog
+                .clone();
+            let pursuit = grid_tools::dynamic_props::PropPursuit::new(
+                &root,
+                &route,
+                &catalog,
+                &target,
+                std::env::var("GRID_PROP_SCRIPT_SPEED")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(15.),
+            )?;
+            println!("drive_prop_script target={target} goal={:?}", pursuit.goal);
+            app.insert_resource(dynamic_props::PropScript(pursuit));
+        }
         // Offscreen captures never open an audio device or play sound.
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
             match grid_tools::engine_audio_continuous::Bank::lacetti(&root) {
@@ -1522,7 +1581,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .init_resource::<free_look::FreeLook>()
             .add_systems(
                 Update,
-                (drive_actions, free_look::update, drive_present).chain(),
+                (
+                    drive_actions,
+                    free_look::update,
+                    drive_present,
+                    dynamic_props::tag,
+                    dynamic_props::present,
+                )
+                    .chain(),
             )
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root);
@@ -1893,7 +1959,14 @@ fn capture(
     driving: Option<Res<Driving>>,
 ) {
     capture.frames += 1;
-    if capture.started.elapsed() > Duration::from_secs(120) {
+    // Scripted drives tick in real time; allow their length plus headroom.
+    let limit = driving
+        .as_ref()
+        .and_then(|d| d.scripted_ticks)
+        .map_or(120., |t| {
+            (t as f64 * f64::from(grid_tools::source_vehicle::DELTA) * 1.5 + 30.).max(120.)
+        });
+    if capture.started.elapsed() > Duration::from_secs_f64(limit) {
         error!("render capture timed out");
         exit.write(AppExit::error());
         return;
@@ -1946,6 +2019,7 @@ fn drive_tick(
     mut driving: ResMut<Driving>,
     input: Res<ButtonInput<KeyCode>>,
     mut trial: Option<ResMut<time_trial::Trial>>,
+    mut prop_script: Option<ResMut<dynamic_props::PropScript>>,
 ) {
     if driving.paused
         || driving.failure.is_some()
@@ -2015,6 +2089,21 @@ fn drive_tick(
     };
     let mut controls = if let Some(controls) = autopilot {
         controls
+    } else if driving.scripted_ticks.is_some()
+        && let Some(script) = prop_script.as_mut()
+    {
+        let broken_at = driving
+            .opponents
+            .as_ref()
+            .map_or(driving.runtime.dynamic_props(), |o| o.multi.dynamic_props())
+            .and_then(|p| p.events.first())
+            .map(|e| e.tick);
+        script.0.controls(
+            driving.runtime.pose(),
+            driving.runtime.velocity(),
+            broken_at,
+            driving.runtime.ticks,
+        )
     } else if driving.scripted_ticks.is_some() {
         grid_tools::source_vehicle::Controls {
             handbrake: driving

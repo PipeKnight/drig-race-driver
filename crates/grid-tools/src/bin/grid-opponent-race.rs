@@ -67,6 +67,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut multi =
         MultiRuntime::lacetti_deforming_on(root, &route, &slot_refs, &table, events, deformation)?;
+    // GRID_DYNAMIC_PROPS=1: breakable route props (DYNAMIC_PROPS_RESEARCH.md).
+    if std::env::var_os("GRID_DYNAMIC_PROPS").is_some() {
+        multi.enable_dynamic_props(root)?;
+    }
     let data = AiData::load(root, route.path(), "touring", "lac")?;
     let progress = grid_tools::lap_progress::load_route(root, &route)?.progress;
     // GRID_AI_CHARACTERISTICS=private TSV: per-driver characteristics (row k = car k).
@@ -337,6 +341,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "race ticks={} car_contacts={car_contacts} car0_max_speed={maximum_speed:.2}",
         multi.ticks
     );
+    if let Some(props) = multi.dynamic_props() {
+        println!(
+            "dynamic_props breaks={} pieces={} events={:?}",
+            props.events.len(),
+            props.pieces.len(),
+            props.events
+        );
+    }
     Ok(())
 }
 

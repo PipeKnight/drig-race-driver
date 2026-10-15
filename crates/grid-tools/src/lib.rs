@@ -8,6 +8,7 @@ pub mod contact_diagnostic;
 pub mod contact_surfaces;
 pub mod cqtc_geometry;
 pub mod deformation_parameters;
+pub mod dynamic_props;
 pub mod engine_audio;
 pub mod engine_audio_continuous;
 pub mod engine_audio_control;

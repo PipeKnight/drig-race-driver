@@ -31,6 +31,23 @@ pub struct Shape<'a> {
     pub shell: f32,
     pub phantom: bool,
     pub properties: &'a [u8],
+    /// Shape-level damage behaviour, when the shape carries one.
+    pub behaviour: Option<ShapeBehaviour<'a>>,
+}
+/// A collision shape's `TEMPLATEBEHAVIOUR`: its threshold properties and the
+/// components its damage behaviour type changes (DYNAMIC_PROPS_RESEARCH.md).
+#[derive(Debug)]
+pub struct ShapeBehaviour<'a> {
+    /// Qualified behaviour properties (`physparams.xml#bXxx`).
+    pub properties: &'a [u8],
+    pub behaviour_type: &'a [u8],
+    /// Subentity component IDs the behaviour type deletes.
+    pub deleted: Vec<&'a [u8]>,
+    /// Subentities the behaviour type adds (their own shape behaviours are
+    /// not resolved).
+    pub added: Vec<Renderable<'a>>,
+    /// Constraint components the behaviour type adds.
+    pub constraints: usize,
 }
 #[derive(Debug)]
 pub enum Primitive {
@@ -227,81 +244,9 @@ pub fn read<'a>(placements: &Tree<'a>, types: &Tree<'a>) -> Result<Vec<Entity<'a
                     "unsupported active component kind",
                 );
             }
-            let transformable = one(types, component, b"TEMPLATETRANSFORMABLE")?;
-            if !types.nodes[transformable].children.is_empty() {
-                return fail(
-                    types.nodes[transformable].offset,
-                    "unhandled transformable child",
-                );
-            }
-            let renderable = local(
-                types,
-                &type_ids,
-                types.string(transformable, b"uri")?,
-                b"TEMPLATERENDERABLE",
-            )?;
-            let uri = types.string(renderable, b"uri")?;
-            let split = uri.iter().position(|&v| v == b'#').ok_or(crate::Error {
-                offset: types.nodes[renderable].offset,
-                message: "unqualified renderable URI",
-            })?;
-            if split == 0 || split + 1 == uri.len() || uri[split + 1..].contains(&b'#') {
-                return fail(types.nodes[renderable].offset, "invalid renderable URI");
-            }
-            let body = one(types, component, b"TEMPLATERIGIDBODY")?;
-            let mut result = Renderable {
-                component: types.string(component, b"id")?,
-                container: &uri[..split],
-                node: &uri[split + 1..],
-                body_node: types.string(transformable, b"sid")?,
-                body: types.string(body, b"id")?,
-                body_properties: types.string(body, b"props")?,
-                infinite_mass: boolean(types, body, b"infMass")?,
-                shapes: Vec::new(),
-            };
-            for &child in &types.nodes[body].children {
-                if types.name(child) == b"TEMPLATELINKPOINT" {
-                    continue;
-                }
-                if types.name(child) != b"TEMPLATERIGIDBODYSHAPE" {
-                    return fail(types.nodes[child].offset, "unsupported rigid-body child");
-                }
-                let uri = types.string(child, b"uri")?;
-                let target = uri
-                    .strip_prefix(b"#")
-                    .and_then(|id| type_ids.get(id))
-                    .copied()
-                    .ok_or(crate::Error {
-                        offset: types.nodes[child].offset,
-                        message: "unresolved collision shape",
-                    })?;
-                let primitive = match types.name(target) {
-                    b"TEMPLATESHAPEBOX" => Primitive::Box {
-                        width: scalar(types, target, b"width", true)?,
-                        height: scalar(types, target, b"height", true)?,
-                        length: scalar(types, target, b"length", true)?,
-                    },
-                    b"TEMPLATESHAPECYLINDER" => Primitive::Cylinder {
-                        radius: scalar(types, target, b"radius", true)?,
-                        height: scalar(types, target, b"height", true)?,
-                    },
-                    _ => {
-                        return fail(
-                            types.nodes[target].offset,
-                            "unsupported collision primitive",
-                        );
-                    }
-                };
-                result.shapes.push(Shape {
-                    id: types.string(target, b"id")?,
-                    primitive,
-                    transform: transform(types, child)?,
-                    shell: scalar(types, target, b"shell", false)?,
-                    phantom: boolean(types, target, b"phantom")?,
-                    properties: types.string(target, b"props")?,
-                });
-            }
-            entity.renderables.push(result);
+            entity
+                .renderables
+                .push(subentity(types, &type_ids, template, component, true)?);
         }
         entities.push(entity);
     }
@@ -309,4 +254,161 @@ pub fn read<'a>(placements: &Tree<'a>, types: &Tree<'a>) -> Result<Vec<Entity<'a
         return fail(0, "no entity placements");
     }
     Ok(entities)
+}
+
+/// One subentity's renderable, rigid body and collision shapes. With
+/// `behaviours`, shape-level damage behaviours are resolved one level deep.
+fn subentity<'a>(
+    types: &Tree<'a>,
+    type_ids: &BTreeMap<&'a [u8], usize>,
+    template: usize,
+    component: usize,
+    behaviours: bool,
+) -> Result<Renderable<'a>> {
+    let transformable = one(types, component, b"TEMPLATETRANSFORMABLE")?;
+    if !types.nodes[transformable].children.is_empty() {
+        return fail(
+            types.nodes[transformable].offset,
+            "unhandled transformable child",
+        );
+    }
+    let renderable = local(
+        types,
+        type_ids,
+        types.string(transformable, b"uri")?,
+        b"TEMPLATERENDERABLE",
+    )?;
+    let uri = types.string(renderable, b"uri")?;
+    let split = uri.iter().position(|&v| v == b'#').ok_or(crate::Error {
+        offset: types.nodes[renderable].offset,
+        message: "unqualified renderable URI",
+    })?;
+    if split == 0 || split + 1 == uri.len() || uri[split + 1..].contains(&b'#') {
+        return fail(types.nodes[renderable].offset, "invalid renderable URI");
+    }
+    let body = one(types, component, b"TEMPLATERIGIDBODY")?;
+    let mut result = Renderable {
+        component: types.string(component, b"id")?,
+        container: &uri[..split],
+        node: &uri[split + 1..],
+        body_node: types.string(transformable, b"sid")?,
+        body: types.string(body, b"id")?,
+        body_properties: types.string(body, b"props")?,
+        infinite_mass: boolean(types, body, b"infMass")?,
+        shapes: Vec::new(),
+    };
+    for &child in &types.nodes[body].children {
+        if types.name(child) == b"TEMPLATELINKPOINT" {
+            continue;
+        }
+        if types.name(child) != b"TEMPLATERIGIDBODYSHAPE" {
+            return fail(types.nodes[child].offset, "unsupported rigid-body child");
+        }
+        let uri = types.string(child, b"uri")?;
+        let target = uri
+            .strip_prefix(b"#")
+            .and_then(|id| type_ids.get(id))
+            .copied()
+            .ok_or(crate::Error {
+                offset: types.nodes[child].offset,
+                message: "unresolved collision shape",
+            })?;
+        let primitive = match types.name(target) {
+            b"TEMPLATESHAPEBOX" => Primitive::Box {
+                width: scalar(types, target, b"width", true)?,
+                height: scalar(types, target, b"height", true)?,
+                length: scalar(types, target, b"length", true)?,
+            },
+            b"TEMPLATESHAPECYLINDER" => Primitive::Cylinder {
+                radius: scalar(types, target, b"radius", true)?,
+                height: scalar(types, target, b"height", true)?,
+            },
+            _ => {
+                return fail(
+                    types.nodes[target].offset,
+                    "unsupported collision primitive",
+                );
+            }
+        };
+        result.shapes.push(Shape {
+            id: types.string(target, b"id")?,
+            primitive,
+            transform: transform(types, child)?,
+            shell: scalar(types, target, b"shell", false)?,
+            phantom: boolean(types, target, b"phantom")?,
+            properties: types.string(target, b"props")?,
+            behaviour: if behaviours {
+                shape_behaviour(types, type_ids, template, child)?
+            } else {
+                None
+            },
+        });
+    }
+    Ok(result)
+}
+
+fn shape_behaviour<'a>(
+    types: &Tree<'a>,
+    type_ids: &BTreeMap<&'a [u8], usize>,
+    template: usize,
+    shape: usize,
+) -> Result<Option<ShapeBehaviour<'a>>> {
+    let nodes: Vec<_> = types.nodes[shape]
+        .children
+        .iter()
+        .copied()
+        .filter(|&i| types.name(i) == b"TEMPLATEBEHAVIOUR")
+        .collect();
+    let node = match nodes[..] {
+        [] => return Ok(None),
+        [node] => node,
+        _ => return fail(types.nodes[shape].offset, "several shape behaviours"),
+    };
+    let behaviour_type = types.string(node, b"typeuri")?;
+    let kind = local(types, type_ids, behaviour_type, b"TEMPLATEBEHAVIOURTYPE")?;
+    let mut result = ShapeBehaviour {
+        properties: types.string(node, b"impulse")?,
+        behaviour_type,
+        deleted: Vec::new(),
+        added: Vec::new(),
+        constraints: 0,
+    };
+    for &change in &types.nodes[kind].children {
+        if types.name(change) != b"TEMPLATECOMPONENTCHANGE" {
+            return fail(types.nodes[change].offset, "unsupported behaviour action");
+        }
+        let id = types
+            .string(change, b"componenturi")?
+            .strip_prefix(b"#")
+            .ok_or(crate::Error {
+                offset: types.nodes[change].offset,
+                message: "unqualified behaviour component",
+            })?;
+        let component = *type_ids.get(id).ok_or(crate::Error {
+            offset: types.nodes[change].offset,
+            message: "unresolved behaviour component",
+        })?;
+        if types.nodes[component].parent != Some(template) {
+            return fail(
+                types.nodes[change].offset,
+                "behaviour component outside template",
+            );
+        }
+        match (types.string(change, b"operation")?, types.name(component)) {
+            (b"delete", _) => result.deleted.push(id),
+            (b"add", b"TEMPLATESUBENTITY") => {
+                result
+                    .added
+                    .push(subentity(types, type_ids, template, component, false)?);
+            }
+            (b"add", b"TEMPLATECONSTRAINT") => result.constraints += 1,
+            _ => {
+                return fail(
+                    types.nodes[change].offset,
+                    "unsupported damage component change",
+                );
+            }
+        }
+    }
+    Ok(Some(result))
 }

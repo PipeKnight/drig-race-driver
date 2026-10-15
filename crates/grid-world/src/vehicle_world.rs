@@ -258,32 +258,46 @@ fn calculate_owned(
     publication: Option<&mut crate::vehicle_job::Publication<'_>>,
     mut registration: Option<&mut crate::deformation_world::Registration>,
 ) -> Result<Output, Error> {
-    if input.world.groups.bodies.len() != 1
+    // Body 0 is the car. With a geometry provider, further dynamic bodies
+    // (broken route props) may follow; their shapes trail the static shapes.
+    let static_shape = contact_groups::Shape {
+        angular: true,
+        ..Default::default()
+    };
+    let dynamic_shape = contact_groups::Shape {
+        flag229: true,
+        ..Default::default()
+    };
+    let statics = input.shapes[1.min(input.shapes.len())..]
+        .iter()
+        .take_while(|s| **s == static_shape)
+        .count();
+    if input.world.groups.bodies.is_empty()
+        || (input.world.groups.bodies.len() > 1 && geometry.is_none())
         || input.car.owner.physical != input.world.groups.bodies[0]
         || input.world.pool_used != 0
-        || input.world.groups.contacts.len() > if geometry.is_some() { 64 } else { 4 }
+        || input.world.groups.contacts.len()
+            > if geometry.is_none() {
+                4
+            } else if input.world.groups.bodies.len() > 1 {
+                crate::MAX_WORLD_CONTACTS
+            } else {
+                64
+            }
         || input.shapes.len() < 2
         || input.shapes.len() > 513
-        || input.shapes[0]
-            != (contact_groups::Shape {
-                angular: false,
-                flag217: false,
-                flag229: true,
-                flag230: false,
-            })
-        || input.shapes[1..].iter().any(|s| {
-            *s != (contact_groups::Shape {
-                angular: true,
-                ..Default::default()
-            })
-        })
+        || statics == 0
+        || input.shapes[0] != dynamic_shape
+        || input.shapes[1 + statics..]
+            .iter()
+            .any(|s| *s != dynamic_shape)
     {
         return Err(Error("inconsistent single-car physical world ownership"));
     }
     let pool = wheel_contacts::Pool {
         slots: input.world.groups.contacts[..input.world.groups.contacts.len().min(4)].to_vec(),
         used: 0,
-        shapes: input.shapes.len() - 1,
+        shapes: statics,
     };
     let manager = if let Some(publication) = publication {
         vehicle_manager::calculate_with_world_publication(
@@ -324,13 +338,16 @@ fn calculate_owned(
             Ok(contacts)
         };
         if let Some(registration) = registration.as_deref_mut() {
+            // One registration slot per body; further bodies do not deform.
+            let mut registrations = vec![Some(registration)];
+            registrations.extend((1..previous.groups.bodies.len()).map(|_| None));
             physical_world::advance_with_deformation(
                 &previous,
                 &slots,
                 manager.contacts.used,
                 &input.shapes,
                 &mut provider,
-                &mut [Some(registration)],
+                &mut registrations,
             )?
         } else {
             physical_world::advance_with_geometry_provider(
@@ -362,6 +379,8 @@ fn calculate_owned(
             let side = match [contact[0x28 / 4] == 1, contact[0x2c / 4] == 1] {
                 [true, false] => 0,
                 [false, true] => 1,
+                // Contacts between other dynamic bodies (broken props).
+                [false, false] if input.world.groups.bodies.len() > 1 => continue,
                 _ => return Err(Error("unsupported body event registrations")),
             };
             let result = body_impact::calculate(

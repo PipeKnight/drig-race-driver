@@ -25,6 +25,9 @@ could never be touched.
   unchanged. The geometric pool grows from 20 to 36 slots (4 wheel + 16 props + 16 boundary).
 - All props are static: data flags them infinite-mass; `physparams.xml` break/topple
   thresholds and prop materials are not yet used (shared solver material as before).
+  F312 update: brake boards, tyre stacks and cushions now break into dynamic pieces at
+  their `physparams.xml` thresholds when dynamic props are enabled; tyre walls and armco
+  stay static pending joints. See [DYNAMIC_PROPS_RESEARCH.md](DYNAMIC_PROPS_RESEARCH.md).
 
 ## Verification
 

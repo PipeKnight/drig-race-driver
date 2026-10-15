@@ -39,6 +39,9 @@ pub struct MultiRuntime {
     /// Car speeds at the end of the last tick (the app swaps car 0 out
     /// between ticks).
     speeds: Vec<f32>,
+    /// Opt-in breakable route props; pieces are bodies after the cars.
+    props: Option<crate::dynamic_props::PropWorld>,
+    initial_shapes: Vec<contact_groups::Shape>,
 }
 
 /// Body centre (translation row of the physical pose).
@@ -158,6 +161,7 @@ impl MultiRuntime {
             geometry,
             initial_world: world.clone(),
             world,
+            initial_shapes: shapes.clone(),
             shapes,
             statics,
             ticks: 0,
@@ -167,7 +171,38 @@ impl MultiRuntime {
             statics_normals: vec![[0.; 3]; n],
             car_normals: Vec::new(),
             speeds: vec![0.; n],
+            props: None,
         })
+    }
+
+    /// Opt in to breakable route props before the first tick (see
+    /// `Runtime::enable_dynamic_props`); every car's track is armed.
+    pub fn enable_dynamic_props(&mut self, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        if self.ticks != 0 || self.props.is_some() {
+            return Err("dynamic props must be enabled once before the first tick".into());
+        }
+        let first = &self.cars[0];
+        let props = first
+            .track
+            .props()
+            .ok_or("dynamic props require prepared body geometry")?;
+        let catalog = crate::dynamic_props::Catalog::read(root, first.route(), props)?;
+        let world = crate::dynamic_props::PropWorld::new(catalog);
+        for car in &mut self.cars {
+            world.arm(&mut car.track)?;
+        }
+        self.props = Some(world);
+        Ok(())
+    }
+
+    /// Breakable route props, when enabled.
+    pub fn dynamic_props(&self) -> Option<&crate::dynamic_props::PropWorld> {
+        self.props.as_ref()
+    }
+
+    /// Shared world bodies: the cars, then live prop pieces.
+    pub fn bodies(&self) -> &[contact_groups::Body] {
+        &self.world.groups.bodies
     }
 
     /// Obstruction contact sum of car `i` for the AI's collided_obstruction
@@ -201,7 +236,7 @@ impl MultiRuntime {
 
     /// Car index pairs (first, second) of the last tick's car-to-car contacts.
     pub fn contact_pairs(&self) -> Vec<(usize, usize)> {
-        let n = self.world.groups.bodies.len();
+        let n = self.cars.len();
         self.world.groups.contacts[..self.last_active.min(self.world.groups.contacts.len())]
             .iter()
             .filter(|c| c[0xc / 4] & 0xff == 0 && c[2] != 0 && c[1] != 0)
@@ -234,6 +269,12 @@ impl MultiRuntime {
             car.reset();
         }
         self.world = self.initial_world.clone();
+        self.shapes = self.initial_shapes.clone();
+        if let Some(props) = &mut self.props {
+            let mut tracks: Vec<&mut Track> = self.cars.iter_mut().map(|c| &mut c.track).collect();
+            // Re-arming only fails without route props, which enabling requires.
+            let _ = props.reset(&mut tracks);
+        }
         self.ticks = 0;
         self.last_active = 0;
         self.last_body_contacts = 0;
@@ -362,24 +403,28 @@ impl MultiRuntime {
             .map(|(p, g)| p.as_ref().unwrap_or(g))
             .collect();
         let cars = &self.cars;
+        let props = self.props.as_ref();
+        let mut recorded = Vec::new();
+        let mut piece_contacts = 0;
         let mut statics_normals = vec![[0f32; 3]; n];
         let mut car_normals = Vec::new();
         let mut provider = |bodies: &[contact_groups::Body], remaining: usize| {
             let mut out: Vec<contact_groups::Contact> = Vec::new();
             statics_normals.iter_mut().for_each(|s| *s = [0.; 3]);
             car_normals.clear();
-            for i in 0..bodies.len() {
+            recorded.clear();
+            for i in 0..n {
                 if out.len() >= remaining {
                     break;
                 }
-                let fresh = geometry[i].contacts(
+                let fresh = geometry[i].contacts_with_props(
                     &cars[i].track,
                     &cars[i].surfaces,
                     &bodies[i..=i],
                     (remaining - out.len()).min(32),
                 )?;
                 let centre = body_centre(&bodies[i]);
-                for mut c in fresh {
+                for (mut c, prop) in fresh {
                     c[1] = i as u32 + 1;
                     c[0x28 / 4] = tokens[i];
                     let normal = pushing_normal(&c, centre);
@@ -388,15 +433,27 @@ impl MultiRuntime {
                             statics_normals[i][k] += normal[k];
                         }
                     }
+                    if let Some(prop) = prop
+                        && props.is_some()
+                    {
+                        recorded.push((
+                            wheel_contacts + out.len(),
+                            crate::dynamic_props::PropContact {
+                                contact: c,
+                                prop,
+                                body: i,
+                            },
+                        ));
+                    }
                     out.push(c);
                 }
             }
             body_contacts = out.len();
             // Each car's world hull is built once, when a pair first needs it.
             let mut hulls: Vec<Option<crate::body_geometry::WorldHull>> =
-                (0..bodies.len()).map(|_| None).collect();
-            for i in 0..bodies.len() {
-                for j in i + 1..bodies.len() {
+                (0..n).map(|_| None).collect();
+            for i in 0..n {
+                for j in i + 1..n {
                     if out.len() >= remaining {
                         break;
                     }
@@ -429,11 +486,37 @@ impl MultiRuntime {
                     }
                 }
             }
+            piece_contacts = 0;
+            if let Some(props) = props.filter(|p| !p.pieces.is_empty()) {
+                let hulls: Vec<_> = (0..n)
+                    .map(|i| crate::dynamic_props::CarHull {
+                        geometry: geometry[i],
+                        body: i,
+                        token: tokens[i],
+                    })
+                    .collect();
+                let mut local = Vec::new();
+                let more = props.contacts(
+                    &cars[0].track,
+                    &cars[0].surfaces,
+                    bodies,
+                    &hulls,
+                    geometry[0].query(),
+                    remaining - out.len(),
+                    &mut local,
+                )?;
+                let base = wheel_contacts + out.len();
+                recorded.extend(local.into_iter().map(|(k, r)| (base + k, r)));
+                piece_contacts = more.len();
+                out.extend(more);
+            }
             Ok(out)
         };
         let world = if registrations.iter().any(Option::is_some) {
             let mut owned: Vec<Option<&mut deformation_world::Registration>> =
                 registrations.iter_mut().map(Option::as_mut).collect();
+            // Prop pieces follow the cars and never deform.
+            owned.resize_with(previous.groups.bodies.len(), || None);
             physical_world::advance_with_deformation(
                 &previous,
                 &slots,
@@ -451,7 +534,20 @@ impl MultiRuntime {
                 provider,
             )?
         };
-        let active = wheel_contacts + body_contacts + car_contacts;
+        let mut world = world;
+        let mut shapes = None;
+        let mut props_next = None;
+        if let Some(current) = &self.props {
+            let mut next = current.clone();
+            next.detect(&world.groups.contacts, &recorded, &world.groups.bodies);
+            let mut changed = self.shapes.clone();
+            let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
+            if !disabled.is_empty() {
+                shapes = Some(changed);
+            }
+            props_next = Some((next, disabled));
+        }
+        let active = wheel_contacts + body_contacts + car_contacts + piece_contacts;
         for (i, state) in staged.iter_mut().enumerate() {
             // The registration's owner is moved into the car and refilled below.
             if let Some(registration) = &mut registrations[i] {
@@ -545,6 +641,15 @@ impl MultiRuntime {
                 car.lap = Some(timed.state);
                 car.lap_events = timed.events;
             }
+        }
+        if let Some((next, disabled)) = props_next {
+            for car in &mut self.cars {
+                crate::dynamic_props::PropWorld::disable(&mut car.track, &disabled);
+            }
+            self.props = Some(next);
+        }
+        if let Some(shapes) = shapes {
+            self.shapes = shapes;
         }
         self.world = world;
         self.ticks += 1;
