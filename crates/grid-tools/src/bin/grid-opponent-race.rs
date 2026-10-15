@@ -70,6 +70,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "tick\tspeed\tthrottle\tbrake\tsteering\tarc\tlook_ahead\tcurvature\theading_error\tline_distance\tline_target\toffset\tline_error\tslip"
         )?;
     }
+    let positions_of = |multi: &MultiRuntime| -> Vec<[f32; 3]> {
+        multi
+            .cars
+            .iter()
+            .map(|c| {
+                let p = c.pose();
+                [p[12], p[13], p[14]]
+            })
+            .collect()
+    };
+    let start = {
+        let gate = &progress.gates[0];
+        std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
+    };
+    let mut standings =
+        grid_tools::race::Standings::new(&data.line, 2, start, &positions_of(&multi));
+    let names: Vec<String> = (0..cars).map(|i| format!("car{i}")).collect();
     let mut car_contacts = 0;
     let mut laps: Vec<Vec<f64>> = vec![Vec::new(); cars];
     let mut maximum_speed = 0f32;
@@ -111,6 +128,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
         car_contacts += multi.last_car_contacts;
+        standings.update(
+            &data.line,
+            &positions_of(&multi),
+            multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
+            &[],
+        );
+        if multi.ticks.is_multiple_of(1500) {
+            let order: Vec<usize> = standings.order();
+            println!("standings tick={} order={order:?}", multi.ticks);
+        }
         let v = multi.cars[0].velocity();
         let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
         maximum_speed = maximum_speed.max(speed);
@@ -143,7 +170,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        if laps.iter().all(|l| l.len() >= 2) {
+        if (0..cars).all(|i| standings.finished(i).is_some()) {
             break;
         }
     }
@@ -159,6 +186,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             p[14],
             car.terminal_wheel()
         );
+    }
+    for line in standings.classification(&names) {
+        println!("classification {line}");
     }
     println!(
         "race ticks={} car_contacts={car_contacts} car0_max_speed={maximum_speed:.2}",

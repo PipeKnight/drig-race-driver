@@ -43,8 +43,13 @@ echo Click the game window once if keyboard input does not respond.
 if "%GRID_TRIAL_ARGS%"=="" (
   echo Practice timing starts at the start line. R resets the car and clears lap times.
 ) else (
-  echo Three-lap time trial: wait for GO, complete three valid laps, then view results.
-  echo R restarts the event; personal bests stay saved locally.
+  if defined GRID_PLAY_OPPONENTS (
+    echo Three-lap race: wait for GO, race the AI cars for three laps, then view the result.
+    echo R restarts the race.
+  ) else (
+    echo Three-lap time trial: wait for GO, complete three valid laps, then view results.
+    echo R restarts the event; personal bests stay saved locally.
+  )
 )
 echo Private diagnostic log: %GRID_PLAY_LOG%
 echo Loading the source track can take a little while...

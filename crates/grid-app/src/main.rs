@@ -90,6 +90,24 @@ struct Opponents {
     multi: grid_tools::source_vehicle::multi::MultiRuntime,
     drivers: Vec<grid_tools::ai_driver::AiDriver>,
     ai: grid_tools::ai_driver::AiData,
+    /// Race positions during a timed event (authored classification).
+    standings: grid_tools::race::Standings,
+    names: Vec<String>,
+    /// Scripted validation only (GRID_AUTOPILOT=1 with --drive-ticks): the
+    /// ported AI drives the player's car.
+    autopilot: Option<grid_tools::ai_driver::AiDriver>,
+}
+impl Opponents {
+    /// Positions of every car; car 0 is the player runtime held outside `multi`.
+    fn positions(&self, player: &grid_tools::source_vehicle::Runtime) -> Vec<[f32; 3]> {
+        std::iter::once(player)
+            .chain(self.multi.cars.iter().skip(1))
+            .map(|c| {
+                let p = c.pose();
+                [p[12], p[13], p[14]]
+            })
+            .collect()
+    }
 }
 #[derive(Component)]
 struct OpponentPart {
@@ -1068,7 +1086,41 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=original-ai-port difficulty={NORMAL_DIFFICULTY} deformation={}",
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
-                Ok(Opponents { multi, drivers, ai })
+                let start = {
+                    let gate = &grid_tools::lap_progress::load(&root)?.progress.gates[0];
+                    std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
+                };
+                let mut positions = vec![{
+                    let p = runtime.pose();
+                    [p[12], p[13], p[14]]
+                }];
+                positions.extend(multi.cars.iter().skip(1).map(|c| {
+                    let p = c.pose();
+                    [p[12], p[13], p[14]]
+                }));
+                let standings = grid_tools::race::Standings::new(
+                    &ai.line,
+                    trial_laps.unwrap_or(1),
+                    start,
+                    &positions,
+                );
+                let names = std::iter::once("You".to_string())
+                    .chain((1..=n).map(|i| format!("AI {i}")))
+                    .collect();
+                let autopilot = (drive_ticks.is_some()
+                    && std::env::var_os("GRID_AUTOPILOT").is_some())
+                .then(|| AiDriver::new(parameters.clone(), 0x5eed));
+                if autopilot.is_some() {
+                    println!("drive_autopilot enabled=true scope=scripted-validation");
+                }
+                Ok(Opponents {
+                    multi,
+                    drivers,
+                    ai,
+                    standings,
+                    names,
+                    autopilot,
+                })
             })
             .transpose()?;
         Some(Driving {
@@ -1186,7 +1238,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut app = App::new();
     if let Some(laps) = trial_laps {
-        app.insert_resource(time_trial::Trial::new(laps, trial_mode, output.is_none())?);
+        // Races with opponents never write the solo time-trial best times.
+        let race = driving.as_ref().is_some_and(|d| d.opponents.is_some());
+        let mut trial = time_trial::Trial::new(laps, trial_mode, output.is_none() && !race)?;
+        trial.race = race;
+        app.insert_resource(trial);
     }
     if let Some(path) = output {
         app.add_plugins(
@@ -1612,7 +1668,44 @@ fn drive_tick(
         }
         trial.countdown();
     }
-    let mut controls = if driving.scripted_ticks.is_some() {
+    let driving = &mut *driving;
+    let autopilot = if !held
+        && let Some(opponents) = &mut driving.opponents
+        && let Some(pilot) = &mut opponents.autopilot
+    {
+        use grid_tools::ai_driver::{Other, View};
+        let car = &driving.runtime;
+        let others: Vec<Other> = opponents
+            .multi
+            .cars
+            .iter()
+            .skip(1)
+            .map(|c| {
+                let p = c.pose();
+                Other {
+                    position: [p[12], p[13], p[14]],
+                    velocity: c.velocity(),
+                }
+            })
+            .collect();
+        let view = View {
+            pose: car.pose(),
+            velocity: car.velocity(),
+            angular: car.angular_velocity(),
+            maximum_steering_angle: car.maximum_steering_angle(),
+        };
+        Some(pilot.controls(
+            &opponents.ai,
+            &view,
+            &others,
+            grid_tools::source_vehicle::DELTA,
+        ))
+    } else {
+        None
+    };
+    let mut controls = if let Some(controls) = autopilot {
+        controls
+    } else if driving.scripted_ticks.is_some() {
         driving.scripted
     } else {
         let pressed = |a, b| input.pressed(a) || input.pressed(b);
@@ -1708,6 +1801,33 @@ fn drive_tick(
             driving.report("failure", controls);
             return;
         }
+        if !held
+            && let (Some(trial), Some(opponents)) = (trial.as_ref(), driving.opponents.as_mut())
+        {
+            let positions = opponents.positions(&driving.runtime);
+            let already = opponents.standings.finished(0).is_some();
+            opponents
+                .standings
+                .update(&opponents.ai.line, &positions, trial.state.elapsed(), &[0]);
+            if let grid_tools::time_trial::Phase::Finished(result) = trial.state.phase()
+                && !already
+            {
+                opponents.standings.finish(0, result.seconds);
+                let speeds: Vec<f64> = std::iter::once(&driving.runtime)
+                    .chain(opponents.multi.cars.iter().skip(1))
+                    .map(|c| {
+                        let v = c.velocity();
+                        f64::from((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt())
+                    })
+                    .collect();
+                opponents
+                    .standings
+                    .estimate_remaining(&speeds, result.seconds);
+                for line in opponents.standings.classification(&opponents.names) {
+                    println!("drive_race_result {line}");
+                }
+            }
+        }
         for event in &driving.runtime.lap_events {
             use grid_tools::lap_progress::Event;
             let lap = driving.runtime.lap.as_ref().unwrap().lap_number();
@@ -1775,11 +1895,14 @@ fn drive_actions(
     if input.just_pressed(KeyCode::KeyR) {
         driving.report("reset", driving.last_controls.unwrap_or_default());
         driving.runtime.reset();
+        let driving = &mut *driving;
         if let Some(opponents) = &mut driving.opponents {
             opponents.multi.reset();
             for driver in &mut opponents.drivers {
                 driver.reset();
             }
+            let positions = opponents.positions(&driving.runtime);
+            opponents.standings.reset(&opponents.ai.line, &positions);
         }
         driving.segment += 1;
         driving.last_controls = None;
@@ -2045,18 +2168,34 @@ fn drive_present(
             "\nM: mute engine sound"
         }
     });
-    let heading = if trial.is_some() {
+    let heading = if trial.as_ref().is_some_and(|t| t.race) {
+        "Lacetti / Donington race"
+    } else if trial.is_some() {
         "Lacetti / Donington time trial"
     } else {
         "Lacetti / Donington practice"
+    };
+    // Race position or classification above the event HUD.
+    let race = match (&driving.opponents, &trial) {
+        (Some(o), Some(t)) if t.finished() => format!(
+            "RACE RESULT\n{}\n\n",
+            o.standings.classification(&o.names).join("\n")
+        ),
+        (Some(o), Some(t)) if t.driving() => format!(
+            "Position {}/{}\n",
+            o.standings.position(0),
+            o.standings.len()
+        ),
+        (Some(o), Some(_)) => format!("Grid {}/{}\n", o.standings.position(0), o.standings.len()),
+        _ => String::new(),
     };
     let progress = trial.as_ref().map_or_else(
         || progress.clone(),
         |t| {
             if t.finished() || !t.driving() {
-                t.hud()
+                format!("{race}{}", t.hud())
             } else {
-                format!("{}\n\n{progress}", t.hud())
+                format!("{race}{}\n\n{progress}", t.hud())
             }
         },
     );

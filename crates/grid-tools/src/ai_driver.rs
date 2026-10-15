@@ -145,6 +145,11 @@ impl Line {
         )
     }
 
+    /// Arc length of the racing-line point nearest to `p` (global search).
+    pub fn arc(&self, p: [f32; 3]) -> f32 {
+        self.project(p, None).1
+    }
+
     /// Projection of `p` near segment `hint` (or globally): segment, arc
     /// length and signed lateral distance (positive toward the right limit).
     fn project(&self, p: [f32; 3], hint: Option<usize>) -> (usize, f32, f32) {

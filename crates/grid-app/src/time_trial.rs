@@ -11,6 +11,8 @@ pub(crate) struct Trial {
     /// Runtime tick at GO. The vehicle also ticks during the countdown, while
     /// the event clock and lap start times count from GO.
     base: Option<u64>,
+    /// Race against opponents: no personal-best presentation.
+    pub race: bool,
 }
 impl Trial {
     pub fn new(laps: u32, mode: Mode, persist: bool) -> Result<Self, Box<dyn std::error::Error>> {
@@ -41,6 +43,7 @@ impl Trial {
             records,
             key: Key { laps, mode },
             base: None,
+            race: false,
         })
     }
     pub fn driving(&self) -> bool {
@@ -180,6 +183,9 @@ impl Trial {
                 rows
             }
         };
+        if self.race {
+            return body;
+        }
         format!(
             "{body}\n{previous}{}",
             if self.save_failed {
