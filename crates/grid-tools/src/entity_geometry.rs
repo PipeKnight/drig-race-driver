@@ -22,6 +22,18 @@ pub struct Props {
     materials: Vec<u8>,
 }
 
+impl PropBox {
+    fn mesh(&self) -> Mesh<'_> {
+        Mesh {
+            bounds: self.bounds,
+            vertices: &self.positions,
+            triangles: &self.triangles,
+            nodes: &self.nodes,
+            leaves: &self.leaves,
+        }
+    }
+}
+
 /// Row-vector placement: translation in elements 12..14.
 fn transform(m: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|j| p[0] * m[j] + p[1] * m[4 + j] + p[2] * m[8 + j] + m[12 + j])
@@ -228,39 +240,76 @@ impl Props {
         bounds: [[f32; 4]; 2],
         capacity: usize,
     ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        self.contacts_known(mesh, matrix, query, bounds, capacity, None)
+    }
+
+    /// Body-query checks of every box, in box order.
+    pub fn checked(&self) -> Vec<grid_world::packed_contacts::Checked> {
+        self.boxes
+            .iter()
+            .map(|b| grid_world::packed_contacts::check(&b.mesh(), &self.materials))
+            .collect()
+    }
+
+    /// [`Self::contacts`] with `known` = ([`Self::checked`] of these unchanged
+    /// boxes, `directions_valid(query)`); `bounds` must then be
+    /// `mesh.world_bounds(matrix, query.margin)`. Identical results.
+    pub fn contacts_known(
+        &self,
+        mesh: &grid_world::collision_mesh::Mesh,
+        matrix: grid_world::physical_pose::Matrix,
+        query: &grid_world::convex_distance::ContactSettings,
+        bounds: [[f32; 4]; 2],
+        capacity: usize,
+        known: Option<(&[grid_world::packed_contacts::Checked], bool)>,
+    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        if known.is_some_and(|(checked, _)| checked.len() != self.boxes.len()) {
+            return Err(Error("prop box checks differ from the boxes"));
+        }
         let mut contacts = Vec::new();
-        for b in &self.boxes {
+        for (index, b) in self.boxes.iter().enumerate() {
             if contacts.len() >= capacity {
                 break;
             }
             if (0..3).any(|j| bounds[0][j] > b.bounds[j + 3] || bounds[1][j] < b.bounds[j]) {
                 continue;
             }
-            let generated = grid_world::packed_contacts::calculate_decoded(
-                mesh,
-                matrix,
-                &Mesh {
-                    bounds: b.bounds,
-                    vertices: &b.positions,
-                    triangles: &b.triangles,
-                    nodes: &b.nodes,
-                    leaves: &b.leaves,
+            let settings = grid_world::packed_contacts::Settings {
+                query: grid_world::convex_distance::ContactSettings {
+                    margin: query.margin,
+                    directions: query.directions,
                 },
-                &self.materials,
-                &grid_world::packed_contacts::Settings {
-                    query: grid_world::convex_distance::ContactSettings {
-                        margin: query.margin,
-                        directions: query.directions,
-                    },
-                    contact_capacity: (capacity - contacts.len()).min(16),
-                    cache_enabled: true,
-                    candidate_capacity: 64,
-                    // Witness normals: solid boxes, not one-sided sheets.
-                    sheet_mask: 0,
-                    correction_bounds: [f32::MAX; 4],
-                },
-            )?;
-            contacts.extend(generated.contacts);
+                contact_capacity: (capacity - contacts.len()).min(16),
+                cache_enabled: true,
+                candidate_capacity: 64,
+                // Witness normals: solid boxes, not one-sided sheets.
+                sheet_mask: 0,
+                correction_bounds: [f32::MAX; 4],
+            };
+            let (track, materials) = (&b.mesh(), &self.materials);
+            let generated = match known {
+                Some((checked, directions)) => {
+                    grid_world::packed_contacts::calculate_decoded_known(
+                        mesh,
+                        matrix,
+                        track,
+                        materials,
+                        &settings,
+                        &grid_world::packed_contacts::Known {
+                            checked: checked[index],
+                            directions,
+                            bounds,
+                        },
+                    )?
+                }
+                None => {
+                    grid_world::packed_contacts::calculate_decoded(
+                        mesh, matrix, track, materials, &settings,
+                    )?
+                    .contacts
+                }
+            };
+            contacts.extend(generated);
         }
         Ok(contacts)
     }

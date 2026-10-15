@@ -97,4 +97,26 @@ impl Geometry {
             settings,
         )
     }
+    /// Body-query checks of the current tree and materials.
+    pub fn checked(&self) -> grid_world::packed_contacts::Checked {
+        grid_world::packed_contacts::check(&self.mesh(), &self.material_indices)
+    }
+    /// The contacts of [`Self::contacts`], reusing values the caller holds for
+    /// this unchanged geometry and pose (see [`grid_world::packed_contacts::Known`]).
+    pub fn contacts_known(
+        &self,
+        mesh: &grid_world::collision_mesh::Mesh,
+        matrix: grid_world::physical_pose::Matrix,
+        settings: &grid_world::packed_contacts::Settings,
+        known: &grid_world::packed_contacts::Known,
+    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        grid_world::packed_contacts::calculate_decoded_known(
+            mesh,
+            matrix,
+            &self.mesh(),
+            &self.material_indices,
+            settings,
+            known,
+        )
+    }
 }

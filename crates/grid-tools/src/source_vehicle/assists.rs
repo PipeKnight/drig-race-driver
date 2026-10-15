@@ -329,7 +329,7 @@ impl Runtime {
     /// Input-record stage of a tick: gear slots and the device's command.
     pub(super) fn stage_driver(
         &self,
-        staged: &mut grid_world::vehicle_world::State,
+        staged: &mut grid_world::vehicle_manager::State,
         steering: f32,
     ) -> f32 {
         let shift = self
@@ -337,8 +337,8 @@ impl Runtime {
             .filter(|(tick, _)| *tick == self.ticks)
             .map(|s| s.1);
         for b in [
-            &mut staged.car.owner.vehicle[..],
-            &mut staged.car.frame.body[..],
+            &mut staged.owner.vehicle[..],
+            &mut staged.frame.body[..],
         ] {
             byte(b, 0xe24, u8::from(shift == Some(Shift::Up)));
             byte(b, 0xe28, u8::from(shift == Some(Shift::Down)));
@@ -350,7 +350,7 @@ impl Runtime {
         match self.assists.input {
             Input::Keyboard => steering,
             Input::Wheel => wheel_command(
-                &staged.car.owner.vehicle,
+                &staged.owner.vehicle,
                 steering,
                 self.assists.wheel_response,
             ),

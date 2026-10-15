@@ -1,7 +1,8 @@
 //! Uncompressed VCQTC archive to source-built, untransformed collision world.
 use grid_formats::{collision, jpk};
 use grid_world::{
-    candidate_grid::Grid, grid_population, packed_query::Mesh, packed_world, rectangle_cull::Cache,
+    candidate_grid::Grid, grid_population, packed_contacts, packed_query::Mesh, packed_world,
+    rectangle_cull::Cache,
 };
 use std::collections::BTreeMap;
 
@@ -16,6 +17,20 @@ struct Chunk {
     nodes: Vec<u16>,
     leaves: BTreeMap<usize, Vec<u16>>,
     first_triangle: usize,
+    /// Body-query checks of this immutable chunk, evaluated once.
+    checked: packed_contacts::Checked,
+}
+
+impl Chunk {
+    fn mesh(&self) -> Mesh<'_> {
+        Mesh {
+            bounds: self.bounds,
+            vertices: &self.positions,
+            triangles: &self.triangles,
+            nodes: &self.nodes,
+            leaves: &self.leaves,
+        }
+    }
 }
 
 pub struct Track {
@@ -24,6 +39,9 @@ pub struct Track {
     triangle_count: usize,
     boundary: Option<crate::cqtc_geometry::Geometry>,
     props: Option<crate::entity_geometry::Props>,
+    /// Body-query checks of the attached boundary and of every prop box.
+    boundary_checked: Option<packed_contacts::Checked>,
+    props_checked: Vec<packed_contacts::Checked>,
 }
 
 /// Fresh geometric record and the same one-based packed shape identity used
@@ -57,7 +75,7 @@ impl Track {
             }
             let first_triangle = triangle_count;
             triangle_count += chunk.triangles.len();
-            chunks.push(Chunk {
+            let mut chunk = Chunk {
                 name: name.to_owned(),
                 bounds: chunk.bounds,
                 positions: chunk.positions,
@@ -72,7 +90,10 @@ impl Track {
                 nodes: chunk.nodes,
                 leaves: chunk.references,
                 first_triangle,
-            });
+                checked: packed_contacts::Checked::default(),
+            };
+            chunk.checked = packed_contacts::check(&chunk.mesh(), &chunk.material_indices);
+            chunks.push(chunk);
         }
         let b = chunks[0].bounds;
         let grid = grid_population::build([b[0], b[2], b[3], b[5]], &entries)?;
@@ -82,6 +103,8 @@ impl Track {
             triangle_count,
             boundary: None,
             props: None,
+            boundary_checked: None,
+            props_checked: Vec::new(),
         })
     }
     pub fn triangle_count(&self) -> usize {
@@ -106,9 +129,11 @@ impl Track {
     }
 
     pub(crate) fn attach_boundary(&mut self, boundary: crate::cqtc_geometry::Geometry) {
+        self.boundary_checked = Some(boundary.checked());
         self.boundary = Some(boundary);
     }
     pub(crate) fn attach_props(&mut self, props: crate::entity_geometry::Props) {
+        self.props_checked = props.checked();
         self.props = Some(props);
     }
     pub fn props(&self) -> Option<&crate::entity_geometry::Props> {
@@ -142,6 +167,13 @@ impl Track {
             ));
         }
         let bounds = mesh.world_bounds(matrix, query.margin)?;
+        // Checks and bounds shared by every pair query of this body.
+        let directions = packed_contacts::directions_valid(query);
+        let known = |checked| packed_contacts::Known {
+            checked,
+            directions,
+            bounds,
+        };
         let mut contacts = Vec::new();
         // Visible route barriers and props first: the car must meet their
         // surfaces before the invisible boundary sheet behind them.
@@ -151,7 +183,14 @@ impl Track {
             let shape = self.props_shape();
             contacts.extend(
                 props
-                    .contacts(mesh, matrix, query, bounds, capacity.min(16))?
+                    .contacts_known(
+                        mesh,
+                        matrix,
+                        query,
+                        bounds,
+                        capacity.min(16),
+                        Some((&self.props_checked, directions)),
+                    )?
                     .into_iter()
                     .map(|contact| BodyContact { shape, contact }),
             );
@@ -168,10 +207,10 @@ impl Track {
             for (j, &key) in boundary.material_keys.iter().enumerate() {
                 mask |= u8::from(sheet(key)?) << j;
             }
-            let generated = boundary.contacts(
+            let generated = boundary.contacts_known(
                 mesh,
                 matrix,
-                &grid_world::packed_contacts::Settings {
+                &packed_contacts::Settings {
                     query: grid_world::convex_distance::ContactSettings {
                         margin: query.margin,
                         directions: query.directions,
@@ -182,8 +221,9 @@ impl Track {
                     sheet_mask: mask,
                     correction_bounds: [f32::MAX; 4],
                 },
+                &known(self.boundary_checked.unwrap_or_else(|| boundary.checked())),
             )?;
-            contacts.extend(generated.contacts.into_iter().map(|contact| BodyContact {
+            contacts.extend(generated.into_iter().map(|contact| BodyContact {
                 shape: self.chunks.len() as u32 + 1,
                 contact,
             }));
@@ -204,18 +244,12 @@ impl Track {
             for (j, &key) in c.material_keys.iter().enumerate() {
                 mask |= u8::from(sheet(key)?) << j;
             }
-            let generated = grid_world::packed_contacts::calculate(
+            let generated = packed_contacts::calculate_known(
                 mesh,
                 matrix,
-                &Mesh {
-                    bounds: c.bounds,
-                    vertices: &c.positions,
-                    triangles: &c.triangles,
-                    nodes: &c.nodes,
-                    leaves: &c.leaves,
-                },
+                &c.mesh(),
                 &c.material_indices,
-                &grid_world::packed_contacts::Settings {
+                &packed_contacts::Settings {
                     query: grid_world::convex_distance::ContactSettings {
                         margin: query.margin,
                         directions: query.directions,
@@ -226,8 +260,9 @@ impl Track {
                     sheet_mask: mask,
                     correction_bounds: [f32::MAX; 4],
                 },
+                &known(c.checked),
             )?;
-            contacts.extend(generated.contacts.into_iter().map(|contact| BodyContact {
+            contacts.extend(generated.into_iter().map(|contact| BodyContact {
                 shape: i as u32 + 1,
                 contact,
             }));

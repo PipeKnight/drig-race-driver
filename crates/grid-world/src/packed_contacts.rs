@@ -45,6 +45,75 @@ pub fn calculate(
     calculate_owned(mesh, matrix, track, materials, settings, false)
 }
 
+/// Checks of one packed mesh and its material indices that do not depend on
+/// the moving body. An immutable track mesh evaluates them once ([`check`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Checked {
+    materials: bool,
+    mesh: bool,
+}
+
+pub fn check(track: &packed_query::Mesh<'_>, materials: &[u8]) -> Checked {
+    Checked {
+        materials: materials_valid(track, materials),
+        mesh: packed_candidates::mesh_valid(track),
+    }
+}
+
+fn materials_valid(track: &packed_query::Mesh<'_>, materials: &[u8]) -> bool {
+    materials.len() == track.triangles.len() && materials.iter().all(|&x| x < 8)
+}
+
+/// Sampling directions accepted by the pair query.
+pub fn directions_valid(query: &convex_distance::ContactSettings) -> bool {
+    !query.directions.iter().any(|d| {
+        d[3] != 0.
+            || d.iter().any(|x| !x.is_finite() || x.abs() > 2.)
+            || !(0.99..=1.01).contains(&dot(*d, *d))
+    })
+}
+
+/// Values the caller already holds for repeated pair queries of one moving
+/// body: [`check`] of this unchanged packed mesh/materials,
+/// [`directions_valid`] of `settings.query`, and the successful
+/// `mesh.world_bounds(matrix, settings.query.margin)`.
+pub struct Known {
+    pub checked: Checked,
+    pub directions: bool,
+    pub bounds: [V; 2],
+}
+
+/// [`calculate`] reusing [`Known`] values: the same contacts, without the
+/// carried direction and candidate stores.
+pub fn calculate_known(
+    mesh: &Mesh,
+    matrix: Matrix,
+    track: &packed_query::Mesh<'_>,
+    materials: &[u8],
+    settings: &Settings,
+    known: &Known,
+) -> Result<Vec<contact_manifold::Contact>, Error> {
+    Ok(
+        generate(mesh, matrix, track, materials, settings, false, Some(known))?
+            .map_or_else(Vec::new, |g| g.contacts),
+    )
+}
+
+/// [`calculate_decoded`] reusing [`Known`] values: the same contacts.
+pub fn calculate_decoded_known(
+    mesh: &Mesh,
+    matrix: Matrix,
+    track: &packed_query::Mesh<'_>,
+    materials: &[u8],
+    settings: &Settings,
+    known: &Known,
+) -> Result<Vec<contact_manifold::Contact>, Error> {
+    Ok(
+        generate(mesh, matrix, track, materials, settings, true, Some(known))?
+            .map_or_else(Vec::new, |g| g.contacts),
+    )
+}
+
 /// Selected source-decoded wider-vertex tree using the shared cold query and
 /// manifold path. The adapter must retain child order and material sheet flags.
 pub fn calculate_decoded(
@@ -65,35 +134,73 @@ fn calculate_owned(
     settings: &Settings,
     decoded: bool,
 ) -> Result<Output, Error> {
+    Ok(
+        match generate(mesh, matrix, track, materials, settings, decoded, None)? {
+            Some(g) => Output {
+                contacts: g.contacts,
+                direction: g.direction,
+                candidates: Some(g.candidates.output()),
+            },
+            None => Output {
+                contacts: Vec::new(),
+                direction: [0.; 4],
+                candidates: None,
+            },
+        },
+    )
+}
+
+struct Generated {
+    contacts: Vec<contact_manifold::Contact>,
+    direction: V,
+    candidates: packed_candidates::Collected,
+}
+
+/// The pair query; `None` when the controls disable generation.
+fn generate(
+    mesh: &Mesh,
+    matrix: Matrix,
+    track: &packed_query::Mesh<'_>,
+    materials: &[u8],
+    settings: &Settings,
+    decoded: bool,
+    known: Option<&Known>,
+) -> Result<Option<Generated>, Error> {
     if settings.contact_capacity > 16
         || settings.candidate_capacity > 32768
         || settings.correction_bounds != [f32::MAX; 4]
-        || materials.len() != track.triangles.len()
-        || materials.iter().any(|&x| x >= 8)
-        || settings.query.directions.iter().any(|d| {
-            d[3] != 0.
-                || d.iter().any(|x| !x.is_finite() || x.abs() > 2.)
-                || !(0.99..=1.01).contains(&dot(*d, *d))
-        })
+        || !known.map_or_else(
+            || materials_valid(track, materials),
+            |k| k.checked.materials,
+        )
+        || !known.map_or_else(|| directions_valid(&settings.query), |k| k.directions)
     {
         return Err(Error("unsupported packed contact controls"));
     }
-    let bounds = mesh.world_bounds(matrix, settings.query.margin)?;
-    let mut result = Output {
-        contacts: Vec::new(),
-        direction: [0.; 4],
-        candidates: None,
+    let bounds = match known {
+        Some(k) => k.bounds,
+        None => mesh.world_bounds(matrix, settings.query.margin)?,
     };
     if settings.contact_capacity == 0 || !settings.cache_enabled {
-        return Ok(result);
+        return Ok(None);
     }
-    let candidates = if decoded {
-        packed_candidates::collect_decoded(track, bounds, settings.candidate_capacity)?
-    } else {
-        packed_candidates::collect(track, bounds, settings.candidate_capacity)?
+    let candidates = packed_candidates::collect_set(
+        track,
+        bounds,
+        settings.candidate_capacity,
+        known.map(|k| k.checked.mesh),
+        decoded,
+    )?;
+    let mut result = Generated {
+        contacts: Vec::new(),
+        direction: [0.; 4],
+        candidates,
     };
+    if result.candidates.accepted.is_empty() {
+        return Ok(Some(result));
+    }
     let mut context = convex_distance::Context::new();
-    for &id in &candidates.accepted {
+    for &id in &result.candidates.accepted {
         let triangle = track.triangles[id].map(|index| {
             let p = track.vertices[index as usize];
             [p[0], p[1], p[2], 1.]
@@ -144,8 +251,8 @@ fn calculate_owned(
             }
         }
     }
-    result.candidates = Some(candidates);
-    Ok(result)
+
+    Ok(Some(result))
 }
 
 #[cfg(test)]

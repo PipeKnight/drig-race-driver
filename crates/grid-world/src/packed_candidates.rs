@@ -70,37 +70,82 @@ pub struct Output {
 }
 /// Cold generation-one candidate order and bounded visited/accepted stores.
 pub fn collect(mesh: &Mesh<'_>, bounds: [V; 2], capacity: usize) -> Result<Output, Error> {
-    if mesh.vertices.len() > 1024 {
-        return Err(Error("packed candidate vertex count exceeds bound"));
-    }
-    collect_decoded(mesh, bounds, capacity)
+    Ok(collect_set(mesh, bounds, capacity, None, false)?.output())
+}
+
+/// Input checks that depend only on the packed mesh (tree, counts, root
+/// bounds and every vertex). Immutable track meshes evaluate them once.
+pub fn mesh_valid(mesh: &Mesh<'_>) -> bool {
+    !(mesh.nodes.is_empty()
+        || mesh.triangles.len() > 32768
+        || mesh.vertices.len() > 65535
+        || mesh
+            .bounds
+            .iter()
+            .chain(mesh.vertices.iter().flatten())
+            .any(|x| !x.is_finite() || x.abs() > 1e6)
+        || (0..3).any(|j| mesh.bounds[j] >= mesh.bounds[j + 3]))
 }
 
 /// The same ordered collector on an independently decoded tree with up to
 /// 65535 vertices. Wider source node encodings must be admitted/transcoded by
 /// the source adapter before calling this selected representation.
 pub fn collect_decoded(mesh: &Mesh<'_>, bounds: [V; 2], capacity: usize) -> Result<Output, Error> {
+    Ok(collect_set(mesh, bounds, capacity, None, true)?.output())
+}
+
+/// Collector result with the stamps of identities below 4096 as a bit set
+/// (the published stamp table holds 1 exactly for those identities).
+pub(crate) struct Collected {
+    pub accepted: Vec<usize>,
+    pub visited: Vec<usize>,
+    seen: [u64; 64],
+}
+
+impl Collected {
+    pub(crate) fn output(self) -> Output {
+        let mut stamps = [0; 4096];
+        for (id, stamp) in stamps.iter_mut().enumerate() {
+            *stamp = u16::from(self.seen[id / 64] >> (id % 64) & 1 != 0);
+        }
+        Output {
+            accepted: self.accepted,
+            visited: self.visited,
+            stamps,
+        }
+    }
+}
+
+/// [`collect`] (`decoded` false) or [`collect_decoded`], with [`mesh_valid`]
+/// already evaluated on this unchanged mesh (`None` evaluates it here).
+pub(crate) fn collect_set(
+    mesh: &Mesh<'_>,
+    bounds: [V; 2],
+    capacity: usize,
+    mesh_checked: Option<bool>,
+    decoded: bool,
+) -> Result<Collected, Error> {
+    if !decoded && mesh.vertices.len() > 1024 {
+        return Err(Error("packed candidate vertex count exceeds bound"));
+    }
+    // All checks share one error, so the order of evaluation is free.
     if capacity > 32768
-        || mesh.nodes.is_empty()
-        || mesh.triangles.len() > 32768
-        || mesh.vertices.len() > 65535
         || bounds
             .iter()
             .flatten()
-            .chain(mesh.bounds.iter())
-            .chain(mesh.vertices.iter().flatten())
             .any(|x| !x.is_finite() || x.abs() > 1e6)
-        || (0..3).any(|j| bounds[0][j] > bounds[1][j] || mesh.bounds[j] >= mesh.bounds[j + 3])
+        || (0..3).any(|j| bounds[0][j] > bounds[1][j])
         || bounds.iter().any(|p| p[3] != 1.)
+        || !mesh_checked.unwrap_or_else(|| mesh_valid(mesh))
     {
         return Err(Error("invalid packed candidate controls"));
     }
     let half: V = std::array::from_fn(|j| 0.5 * (bounds[1][j] - bounds[0][j]));
     let center: V = std::array::from_fn(|j| bounds[0][j] + half[j]);
-    let mut output = Output {
+    let mut output = Collected {
         accepted: Vec::new(),
         visited: Vec::new(),
-        stamps: [0; 4096],
+        seen: [0; 64],
     };
     let mut stack = vec![(
         0usize,
@@ -137,10 +182,11 @@ pub fn collect_decoded(mesh: &Mesh<'_>, bounds: [V; 2], capacity: usize) -> Resu
             for &id in order {
                 let id = id as usize;
                 if id < 4096 {
-                    if output.stamps[id] == 1 {
+                    let (word, bit) = (id / 64, 1u64 << (id % 64));
+                    if output.seen[word] & bit != 0 {
                         continue;
                     }
-                    output.stamps[id] = 1;
+                    output.seen[word] |= bit;
                 } else if output.visited.contains(&id) {
                     continue;
                 }

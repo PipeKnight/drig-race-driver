@@ -37,9 +37,16 @@ pub fn query(
             hit: None,
         });
     }
-    for (i, shape) in shapes.iter().enumerate() {
-        if shape.id == 0 || shapes[..i].iter().any(|s| s.id == shape.id) {
-            return Err(Error("invalid or duplicate packed-world shape ID"));
+    // IDs 1..=n in order are unique and allow direct lookup.
+    let sequential = shapes
+        .iter()
+        .enumerate()
+        .all(|(i, s)| s.id as usize == i + 1);
+    if !sequential {
+        for (i, shape) in shapes.iter().enumerate() {
+            if shape.id == 0 || shapes[..i].iter().any(|s| s.id == shape.id) {
+                return Err(Error("invalid or duplicate packed-world shape ID"));
+            }
         }
     }
     let low = [start[0].min(end[0]), start[2].min(end[2])];
@@ -47,10 +54,12 @@ pub fn query(
     let candidates = grid.candidates(low, high, 25)?;
     let mut hit: Option<Hit> = None;
     for id in &candidates {
-        let shape = shapes
-            .iter()
-            .find(|s| s.id == *id)
-            .ok_or(Error("packed-world candidate absent"))?;
+        let shape = if sequential {
+            (*id as usize).checked_sub(1).and_then(|i| shapes.get(i))
+        } else {
+            shapes.iter().find(|s| s.id == *id)
+        }
+        .ok_or(Error("packed-world candidate absent"))?;
         if let Some(contact) = packed_shape::query(&shape.mesh, shape.materials, start, end, cache)?
             && hit.is_none_or(|old| contact.fraction < old.contact.fraction)
         {

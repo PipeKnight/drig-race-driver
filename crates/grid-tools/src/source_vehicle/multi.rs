@@ -259,13 +259,12 @@ impl MultiRuntime {
         let mut published: Vec<Option<crate::body_geometry::BodyGeometry>> = vec![None; n];
         let mut registrations: Vec<Option<deformation_world::Registration>> = vec![None; n];
         for (i, car) in self.cars.iter().enumerate() {
-            let mut state = car.staged_controls(controls[i])?;
-            state.car.owner.physical = previous.groups.bodies[i];
+            let mut state = car.staged_car(controls[i])?;
+            state.owner.physical = previous.groups.bodies[i];
             state
-                .car
                 .frame
                 .body
-                .copy_from_slice(&state.car.owner.vehicle[..vehicle_force::BODY_WORDS]);
+                .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
             let mut cache = car.cache;
             let query = |_, ray: grid_world::contact_ray::Ray| {
                 car.track
@@ -297,7 +296,7 @@ impl MultiRuntime {
             let manager = if car.deformation_enabled {
                 let mut body = self.geometry[i].clone();
                 let manager = vehicle_manager::calculate_with_world_publication(
-                    &state.car,
+                    &state,
                     &pool,
                     car.pair,
                     previous.manager.parameters[0],
@@ -316,7 +315,7 @@ impl MultiRuntime {
                 manager
             } else {
                 vehicle_manager::calculate_with_world_contacts(
-                    &state.car,
+                    &state,
                     &pool,
                     car.pair,
                     previous.manager.parameters[0],
@@ -334,7 +333,7 @@ impl MultiRuntime {
             }
             used += manager.contacts.used;
             previous.groups.bodies[i] = manager.job.state.owner.physical;
-            state.car = manager.job.state;
+            state = manager.job.state;
             staged.push(state);
             caches.push(cache);
         }
@@ -431,9 +430,9 @@ impl MultiRuntime {
         let active = wheel_contacts + body_contacts + car_contacts;
         for (i, state) in staged.iter_mut().enumerate() {
             if let Some(registration) = &registrations[i] {
-                state.car.owner.vehicle = registration.owner.clone();
+                state.owner.vehicle = registration.owner.clone();
             }
-            state.car.owner.physical = world.groups.bodies[i];
+            state.owner.physical = world.groups.bodies[i];
             if let Some(parameters) = self.cars[i].body_events {
                 for contact in &world.groups.contacts[..active.min(world.groups.contacts.len())] {
                     let side = match [
@@ -445,7 +444,7 @@ impl MultiRuntime {
                         _ => continue,
                     };
                     let result = body_impact::calculate(
-                        &state.car.owner,
+                        &state.owner,
                         body_impact::Event {
                             point: std::array::from_fn(|j| f32::from_bits(contact[0x50 / 4 + j])),
                             normal: std::array::from_fn(|j| f32::from_bits(contact[0x60 / 4 + j])),
@@ -464,27 +463,24 @@ impl MultiRuntime {
                         parameters,
                         &[None; 11],
                         state
-                            .car
                             .owner
                             .damage_random_state
                             .ok_or(Error("body impact requires owned damage RNG"))?,
                     )?;
-                    state.car.owner = result.state;
-                    state.car.owner.damage_random_state = Some(result.random_state);
+                    state.owner = result.state;
+                    state.owner.damage_random_state = Some(result.random_state);
                 }
                 state
-                    .car
                     .frame
                     .body
-                    .copy_from_slice(&state.car.owner.vehicle[..vehicle_force::BODY_WORDS]);
+                    .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
             }
             if let Some(registration) = &mut registrations[i] {
                 state
-                    .car
                     .frame
                     .body
-                    .copy_from_slice(&state.car.owner.vehicle[..vehicle_force::BODY_WORDS]);
-                registration.owner = state.car.owner.vehicle.clone();
+                    .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
+                registration.owner = state.owner.vehicle.clone();
             }
         }
         // Lap timing per car, staged before any commit.
@@ -493,7 +489,7 @@ impl MultiRuntime {
             laps.push(
                 if let (Some(course), Some(lap)) = (&car.lap_course, &car.lap) {
                     let position = std::array::from_fn(|k| {
-                        f32::from_bits(staged[i].car.owner.physical[0x1d0 / 4 + 12 + k])
+                        f32::from_bits(staged[i].owner.physical[0x1d0 / 4 + 12 + k])
                     });
                     Some(lap.advance(
                         course,
@@ -516,7 +512,7 @@ impl MultiRuntime {
             if let Some(registration) = registrations[i].take() {
                 car.deformation_registration = Some(registration);
             }
-            car.state.car = state.car;
+            car.state.car = state;
             car.cache = cache;
             car.ticks += 1;
             car.lap_events.clear();

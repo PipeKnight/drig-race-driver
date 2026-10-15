@@ -572,6 +572,16 @@ impl Runtime {
 
     /// Validated controls written to a staged copy of the car state.
     fn staged_controls(&self, controls: Controls) -> Result<vehicle_world::State, Error> {
+        Ok(vehicle_world::State {
+            car: self.staged_car(controls)?,
+            world: self.state.world.clone(),
+            shapes: self.state.shapes.clone(),
+        })
+    }
+
+    /// [`Self::staged_controls`] for the car alone (the shared world owns
+    /// the bodies in [`multi::MultiRuntime`]).
+    fn staged_car(&self, controls: Controls) -> Result<vehicle_manager::State, Error> {
         if [controls.throttle, controls.brake]
             .iter()
             .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
@@ -580,8 +590,8 @@ impl Runtime {
         {
             return Err(Error("invalid driving controls"));
         }
-        let mut staged = self.state.clone();
-        let steering = self.stage_driver(&mut staged, controls.steering);
+        let mut car = self.state.car.clone();
+        let steering = self.stage_driver(&mut car, controls.steering);
         if !(steering.is_finite() && (-1. ..=1.).contains(&steering)) {
             return Err(Error("invalid shaped steering command"));
         }
@@ -592,20 +602,12 @@ impl Runtime {
             (0xe40, controls.brake),
             (0xe30, steering),
         ] {
-            staged.car.owner.vehicle[o / 4] = v.to_bits();
-            staged.car.frame.body[o / 4] = v.to_bits();
+            car.owner.vehicle[o / 4] = v.to_bits();
+            car.frame.body[o / 4] = v.to_bits();
         }
-        byte(
-            &mut staged.car.owner.vehicle,
-            0xe38,
-            u8::from(controls.handbrake),
-        );
-        byte(
-            &mut staged.car.frame.body,
-            0xe38,
-            u8::from(controls.handbrake),
-        );
-        Ok(staged)
+        byte(&mut car.owner.vehicle, 0xe38, u8::from(controls.handbrake));
+        byte(&mut car.frame.body, 0xe38, u8::from(controls.handbrake));
+        Ok(car)
     }
 
     fn tick_owned(
