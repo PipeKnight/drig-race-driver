@@ -468,6 +468,16 @@ impl Parameters {
                 ],
                 min_space: m("alongside_min_space_to_leave_distance")?,
                 max_space: m("alongside_max_space_to_leave_distance")?,
+                yield_: [
+                    m("alongside_yield_distance")?,
+                    m("alongside_yield_max_brake")?,
+                    m("alongside_yield_min_speed_diff")?,
+                    m("alongside_yield_max_speed_diff")?,
+                    m("alongside_yield_follow_distance")?,
+                    m("alongside_yield_extra_respect_distance")?,
+                    d_or("coYieldMinSpeed", 16.),
+                    d_or("coYieldDistToLimit", 1.),
+                ],
                 pass_angle: d_or("avPassAngle", 0.15),
                 similar_angle: d_or("avSimilarDirectionMaxAngle", 0.5),
                 pass_slow_speed: d_or("avPassSlowSpeed", 15.),
@@ -521,6 +531,9 @@ pub struct Traffic {
     rear_projection: [f32; 2],
     min_space: f32,
     max_space: f32,
+    /// Yield: distance, max brake, min/max speed difference, follow distance,
+    /// extra respect, minimum own speed, room to the limit.
+    yield_: [f32; 8],
     pass_angle: f32,
     similar_angle: f32,
     pass_slow_speed: f32,
@@ -1138,6 +1151,50 @@ impl AiDriver {
                         request.desired_offset = desired;
                     }
                     _ => request.desired_offset = self.offset,
+                }
+                // Yield 0x789780 / 0x77B7D0: follow a car beside us that is mostly
+                // ahead when we cannot move away from it.
+                let [
+                    distance,
+                    max_brake,
+                    min_diff,
+                    max_diff,
+                    follow,
+                    respect,
+                    min_speed,
+                    to_limit,
+                ] = tr.yield_;
+                if distance > 0. && speed > min_speed {
+                    let yields = |slot: &Option<(f32, bool, Other)>| {
+                        slot.filter(|&(g, _, r)| {
+                            let diff = r.speed() - speed;
+                            let respect_point: [f32; 3] = std::array::from_fn(|k| {
+                                r.rear()[k] + (r.front()[k] - r.rear()[k]) * respect
+                            });
+                            g < distance
+                                && min_diff < diff
+                                && diff < max_diff
+                                && dot3(sub(respect_point, own_front), f) > 0.
+                        })
+                    };
+                    let gap = |slot: &Option<(f32, bool, Other)>| slot.map_or(f32::MAX, |s| s.0);
+                    let (left, right) = (yields(&slots[0]), yields(&slots[1]));
+                    let room_l = self.offset - limits_here[0] - HALF_WIDTH;
+                    let room_r = limits_here[1] - self.offset - HALF_WIDTH;
+                    let chosen = match (left, right) {
+                        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+                        (Some(a), None) if distance > gap(&slots[1]) || room_r < to_limit => {
+                            Some(a)
+                        }
+                        (None, Some(b)) if distance > gap(&slots[0]) || room_l < to_limit => {
+                            Some(b)
+                        }
+                        _ => None,
+                    };
+                    if let Some((_, _, r)) = chosen {
+                        request.follow = Some((r, follow));
+                        request.follow_brake_cap = max_brake;
+                    }
                 }
             }
         }

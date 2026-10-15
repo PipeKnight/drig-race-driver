@@ -109,7 +109,7 @@ Ported from [AI_OVERTAKING_RESEARCH.md](AI_OVERTAKING_RESEARCH.md). Each tick:
 AUTHORED or omitted:
 - the path-obstacle scan is a straight corridor (own heading, combined widths
   + 1.5 m, 50° view cone from the rear point);
-- alongside yield and the far-side squeeze are omitted;
+- the far-side squeeze is omitted;
 - cars on both sides hold the planned offset;
 - avoid, block and draft are not ported (block and draft are disabled by default anyway);
 - the bend-direction sign is [I];
@@ -127,3 +127,13 @@ Checks (headless `grid-opponent-race`; `GRID_SLOW_CAR0=f` scales car 0's throttl
 - 8 cars: all finish 2 laps, 521 records;
 - app autopilot race with damage, 1 lap, 3 opponents: You 1:31.018, AI 1 +1.238,
   AI 3 +2.933, AI 2 +4.161 (est.).
+
+Alongside yield (0x789780 / 0x77B7D0) ported afterwards:
+- it requires own speed above 16 m/s and a car beside within 2.18 m, inside the speed window
+  (−13.9 … 6.97 m/s), whose respect point (rear + 1.05 × length) is ahead of our front;
+- a single yielding side applies only when the other side is also tight or there is under 1 m of
+  room toward the opposite limit;
+- the car then follows that car at 0.79 m with the follow brake capped at 0.597.
+
+Results: solo unchanged; slowed leader 0 contacts; 8 cars 193 contact records (521 before the
+yield); 4 cars 207.
