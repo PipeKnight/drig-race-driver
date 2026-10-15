@@ -1,5 +1,14 @@
 # Research toolchain
 
+## Sampling profiler — 15 October 2026
+
+The session is not elevated, so samply, WPR/xperf and other ETW profilers cannot sample, and none of them besides the inbox `wpr.exe` is installed. Nothing was downloaded. Added the independently authored `tools/sample_profile.py`, run with the bundled Python 3.12.14 `-I`. It uses only `ctypes` and the Windows 11 system `dbghelp.dll`:
+- it suspends each target thread about every millisecond and walks the stack with `StackWalkEx`, including inline frames;
+- it symbolizes with `SymFromInlineContextW` / `SymGetLineFromInlineContextW` against the PDB of a `CARGO_PROFILE_RELEASE_DEBUG=limited` release build;
+- it reports self/inclusive shares, call paths and `--lines-in FUNCTION` per-line shares.
+
+Proved by profiling the 12-car `grid-opponent-race` (about 250 samples/s on the race thread). The resulting optimizations and their verification are in [TICK_PERFORMANCE](TICK_PERFORMANCE.md). Known artifact: the statically linked CRT `memcpy`/`memset` shows as `_NLG_Return2`.
+
 ## Video analysis decoder — 9 October 2026
 
 After checking PATH, existing research tools, bundled runtimes and Python modules, no FFmpeg/ffprobe, PyAV or OpenCV decoder was found in those locations. Installed official PyAV **19.0.0** Windows wheel `av-19.0.0-cp312-abi3-win_amd64.whl` only into ignored `local/tools/video-python`, with bundled Python **3.12.14** and no global interpreter change. SHA-256 **96e4c0981ec21cadfef4c0b840d04a5e3c3be821894aa6a7d7a8ee870ba6b727** matches [official PyPI metadata](https://pypi.org/pypi/av/19.0.0/json). Wheel/source record: `local/tools/video-decoder/source.json`. Proved useful operation by decoding all18,021AV1frames and AAC audio in the owner's actual GRID recording and exporting170timestamped samples. [Analysis, versions, evidence and limits](DONINGTON_RACE_VIDEO_2026-10-09.md). This validates local video analysis, not recording-time capture-hook behavior or Rust game compatibility.
