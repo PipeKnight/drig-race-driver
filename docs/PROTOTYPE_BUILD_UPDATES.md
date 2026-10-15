@@ -1,6 +1,12 @@
 # Playable build updates
 
-Latest verified refresh: **44d2e884fde3** (clean), built 15 October 2026 ~10:28 UTC, release SHA256
+Latest verified refresh: **53d9d141847b** (clean), built 15 October 2026 ~13:25 UTC, release SHA256
+f272f137ff18988187d8456e9e6250cbc52e7ef1ee8680f7f4f8c12e9e23835d, manifest
+local/playtest/build-20261015T1324326272094Z/. `Play GRID Race.cmd` now runs a three-lap race
+against 3 AI cars with a countdown, live position and a race result ([RACE_MODE.md](RACE_MODE.md)).
+Includes car-to-car dents (44d2e88). Source driving and Bevy checks pass.
+
+Previous refresh: **44d2e884fde3** (clean), built 15 October 2026 ~10:28 UTC, release SHA256
 c20036c2094e0536a4bb8f42c3e5a276af7f84f5a55ab14a812090f8563aca1c, manifest
 local/playtest/build-20261015T1027595857969Z/. With impact damage enabled, car-to-car collisions
 now dent both cars, following the recovered original deformation callbacks
