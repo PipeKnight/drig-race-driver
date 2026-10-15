@@ -3,6 +3,7 @@ mod body_damage;
 mod engine_sound;
 mod free_look;
 mod graphics;
+mod graphics_benchmark;
 mod sky;
 mod time_trial;
 mod tyre_sound;
@@ -933,6 +934,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--benchmark-frames" => {
+                let count = args
+                    .next()
+                    .ok_or("missing benchmark frame count")?
+                    .parse::<u32>()?;
+                if !(1..=3600).contains(&count) {
+                    return Err("benchmark frame count must be 1..3600".into());
+                }
+                graphics.benchmark_frames = Some(count);
+            }
             "--sky" => {
                 graphics.source_sky = match args.next().as_deref() {
                     Some("source") => true,
@@ -1039,6 +1050,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
+                    "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
+                );
+                println!(
                     "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural)."
                 );
                 println!(
@@ -1063,6 +1077,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if audio_check {
         return engine_sound::check(&root);
+    }
+    if graphics.benchmark_frames.is_some() && output.is_none() {
+        return Err("--benchmark-frames requires --render for bounded unattended exit".into());
     }
     if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=36000".into());
@@ -1446,6 +1463,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if graphics.enhanced() && graphics.source_sky && track {
         sky::install(&mut app, &root)?;
     }
+    if let Some(frames) = graphics.benchmark_frames {
+        graphics_benchmark::install(&mut app, frames);
+    }
     let exit = app
         .insert_resource(graphics)
         .insert_resource(car)
@@ -1803,6 +1823,7 @@ fn capture(
     mut capture: ResMut<Capture>,
     mut exit: MessageWriter<AppExit>,
     driving: Option<Res<Driving>>,
+    benchmark: Option<Res<graphics_benchmark::Benchmark>>,
 ) {
     capture.frames += 1;
     if capture.started.elapsed() > Duration::from_secs(120) {
@@ -1815,12 +1836,16 @@ fn capture(
             exit.write(AppExit::error());
             return;
         }
-        if driving
-            .scripted_ticks
-            .is_some_and(|n| driving.runtime.ticks < n)
+        if benchmark.is_none()
+            && driving
+                .scripted_ticks
+                .is_some_and(|n| driving.runtime.ticks < n)
         {
             return;
         }
+    }
+    if benchmark.as_ref().is_some_and(|b| !b.finished) {
+        return;
     }
     if capture.frames >= 180 && !capture.requested {
         capture.requested = true;
