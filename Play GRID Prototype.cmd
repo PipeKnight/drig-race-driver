@@ -40,7 +40,7 @@ set "GRID_PLAY_LOG=local\playtest\manual-%RANDOM%-%RANDOM%.log"
 echo Lacetti at Donington - experimental Rust/Bevy driving prototype
 echo Up/W: throttle   Down/S: brake   Left/A and Right/D: steer
 echo Space: handbrake   C: look back   P: pause/resume   R: reset   Escape: exit
-if defined GRID_PLAY_OPPONENTS echo %GRID_PLAY_OPPONENTS% opponent cars share the track, driven by the ported GRID AI (Normal difficulty; no overtaking yet).
+if defined GRID_PLAY_OPPONENTS echo %GRID_PLAY_OPPONENTS% opponent cars share the track, driven by the ported GRID AI (Normal difficulty).
 echo Click the game window once if keyboard input does not respond.
 if "%GRID_TRIAL_ARGS%"=="" (
   echo Practice timing starts at the start line. R resets the car and clears lap times.

@@ -40,10 +40,11 @@ driven by the ported GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)). It runs a
 
 ## Not yet
 
-- No overtaking, side-by-side or avoidance behaviour (research running). Opponents queue
-  behind slower cars.
+- ~~No overtaking, side-by-side or avoidance behaviour.~~ Overtake and alongside (F294),
+  yield (F297), and avoid, recovery and recover_tbone (F301) are ported; see
+  AI_DRIVER_PORT.md. lost_control (choreographed mistakes), drafting and catch-up are not.
 - No grid order or qualifying rules, no penalties, no lapped-car handling.
-- Per-driver characteristics are all 1.0.
+- ~~Per-driver characteristics are all 1.0.~~ The captured table is used when present (F297).
 
 ## Grid position (F295)
 
