@@ -4,9 +4,19 @@
 //! re-identified to its world body and car shape, and one common advance solves
 //! all bodies with track, route-prop and car-to-car body contacts together.
 //! Selected scope: body events dispatch per car with no peer registration;
-//! deformation registration is single-owner and not enabled here.
+//! optional per-car deformation runs only for a car alone in its contact group
+//! (static peers); groups of touching cars solve without deformation phases.
 use super::*;
-use grid_world::{body_impact, contact_groups, physical_world, wheel_contacts};
+use grid_world::{
+    body_impact, contact_groups, deformation_callback_state, deformation_contact_limit,
+    deformation_world, physical_world, wheel_contacts,
+};
+
+/// Private deformation parameters shared by every car (DF01).
+pub type DeformationParameters = (
+    deformation_contact_limit::Parameters,
+    deformation_callback_state::Parameters,
+);
 
 pub struct MultiRuntime {
     pub cars: Vec<Runtime>,
@@ -32,6 +42,17 @@ impl MultiRuntime {
         table: &[u8],
         events: Option<body_impact::Parameters>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::lacetti_deforming(root, slots, table, events, None)
+    }
+
+    /// As [`Self::lacetti`], with source deformation and callbacks on every car.
+    pub fn lacetti_deforming(
+        root: &Path,
+        slots: &[&str],
+        table: &[u8],
+        events: Option<body_impact::Parameters>,
+        deformation: Option<DeformationParameters>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         if !(1..=8).contains(&slots.len()) {
             return Err("unsupported shared-world car count".into());
         }
@@ -39,7 +60,12 @@ impl MultiRuntime {
         let mut geometry = Vec::new();
         for (i, slot) in slots.iter().enumerate() {
             let mut car = Runtime::lacetti(root, slot, 200679 + i as u32)?;
-            geometry.push(car.prepare_body_geometry(root, table)?);
+            let mut body = car.prepare_body_geometry(root, table)?;
+            if let Some((limit, bulk)) = &deformation {
+                car.enable_deformation(root, &mut body)?;
+                car.register_deformation_callbacks(*limit, bulk.clone(), 1)?;
+            }
+            geometry.push(body);
             car.body_events = events;
             car.enable_lap_timing(root)?;
             cars.push(car);
@@ -115,6 +141,8 @@ impl MultiRuntime {
         let mut used = 0;
         let mut staged = Vec::with_capacity(n);
         let mut caches = Vec::with_capacity(n);
+        let mut published: Vec<Option<crate::body_geometry::BodyGeometry>> = vec![None; n];
+        let mut registrations: Vec<Option<deformation_world::Registration>> = vec![None; n];
         for (i, car) in self.cars.iter().enumerate() {
             let mut state = car.staged_controls(controls[i])?;
             state.car.owner.physical = previous.groups.bodies[i];
@@ -151,16 +179,38 @@ impl MultiRuntime {
                 used: 0,
                 shapes: self.statics,
             };
-            let manager = vehicle_manager::calculate_with_world_contacts(
-                &state.car,
-                &pool,
-                car.pair,
-                previous.manager.parameters[0],
-                GRAVITY,
-                None,
-                query,
-                material,
-            )?;
+            let manager = if car.deformation_enabled {
+                let mut body = self.geometry[i].clone();
+                let manager = vehicle_manager::calculate_with_world_publication(
+                    &state.car,
+                    &pool,
+                    car.pair,
+                    previous.manager.parameters[0],
+                    GRAVITY,
+                    None,
+                    query,
+                    material,
+                    &mut |owner, delta| body.publish_deformation(owner, delta),
+                )?;
+                published[i] = Some(body);
+                if let Some(registration) = &car.deformation_registration {
+                    let mut next = registration.clone();
+                    next.owner = manager.job.state.owner.vehicle.clone();
+                    registrations[i] = Some(next);
+                }
+                manager
+            } else {
+                vehicle_manager::calculate_with_world_contacts(
+                    &state.car,
+                    &pool,
+                    car.pair,
+                    previous.manager.parameters[0],
+                    GRAVITY,
+                    None,
+                    query,
+                    material,
+                )?
+            };
             for k in 0..manager.contacts.used {
                 let mut c = manager.contacts.slots[k];
                 c[1] = i as u32 + 1;
@@ -176,9 +226,13 @@ impl MultiRuntime {
         let wheel_contacts = used;
         let mut body_contacts = 0;
         let mut car_contacts = 0;
-        let geometry = &self.geometry;
+        let geometry: Vec<&crate::body_geometry::BodyGeometry> = published
+            .iter()
+            .zip(&self.geometry)
+            .map(|(p, g)| p.as_ref().unwrap_or(g))
+            .collect();
         let cars = &self.cars;
-        let provider = |bodies: &[contact_groups::Body], remaining: usize| {
+        let mut provider = |bodies: &[contact_groups::Body], remaining: usize| {
             let mut out: Vec<contact_groups::Contact> = Vec::new();
             for i in 0..bodies.len() {
                 if out.len() >= remaining {
@@ -227,15 +281,31 @@ impl MultiRuntime {
             }
             Ok(out)
         };
-        let world = physical_world::advance_with_geometry_provider(
-            &previous,
-            &slots,
-            wheel_contacts,
-            &self.shapes,
-            provider,
-        )?;
+        let world = if registrations.iter().any(Option::is_some) {
+            let mut owned: Vec<Option<&mut deformation_world::Registration>> =
+                registrations.iter_mut().map(Option::as_mut).collect();
+            physical_world::advance_with_deformation(
+                &previous,
+                &slots,
+                wheel_contacts,
+                &self.shapes,
+                &mut provider,
+                &mut owned,
+            )?
+        } else {
+            physical_world::advance_with_geometry_provider(
+                &previous,
+                &slots,
+                wheel_contacts,
+                &self.shapes,
+                provider,
+            )?
+        };
         let active = wheel_contacts + body_contacts + car_contacts;
         for (i, state) in staged.iter_mut().enumerate() {
+            if let Some(registration) = &registrations[i] {
+                state.car.owner.vehicle = registration.owner.clone();
+            }
             state.car.owner.physical = world.groups.bodies[i];
             if let Some(parameters) = self.cars[i].body_events {
                 for contact in &world.groups.contacts[..active.min(world.groups.contacts.len())] {
@@ -275,6 +345,14 @@ impl MultiRuntime {
                     .body
                     .copy_from_slice(&state.car.owner.vehicle[..vehicle_force::BODY_WORDS]);
             }
+            if let Some(registration) = &mut registrations[i] {
+                state
+                    .car
+                    .frame
+                    .body
+                    .copy_from_slice(&state.car.owner.vehicle[..vehicle_force::BODY_WORDS]);
+                registration.owner = state.car.owner.vehicle.clone();
+            }
         }
         // Lap timing per car, staged before any commit.
         let mut laps = Vec::with_capacity(n);
@@ -294,8 +372,17 @@ impl MultiRuntime {
                 },
             );
         }
+        drop(geometry);
+        for (i, body) in published.into_iter().enumerate() {
+            if let Some(body) = body {
+                self.geometry[i] = body;
+            }
+        }
         for (i, ((state, cache), timed)) in staged.into_iter().zip(caches).zip(laps).enumerate() {
             let car = &mut self.cars[i];
+            if let Some(registration) = registrations[i].take() {
+                car.deformation_registration = Some(registration);
+            }
             car.state.car = state.car;
             car.cache = cache;
             car.ticks += 1;
@@ -375,6 +462,120 @@ mod tests {
                 let moved = ((end[12] - start[12]).powi(2) + (end[14] - start[14]).powi(2)).sqrt();
                 eprintln!("shared_world car_contacts={contacts} car0_moved={moved}");
                 assert!(contacts > 0 && moved > 0.5);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+    fn shared_world_deformation_matches_single_car_and_survives_contact() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let deformation =
+                    crate::deformation_parameters::read(&read("GRID_DEFORMATION_PARAMETERS"))
+                        .unwrap();
+                // One deforming car in the shared world equals the single runtime,
+                // including a barrier impact with dents (same scenario as the
+                // single-car callback test).
+                let mut multi = MultiRuntime::lacetti_deforming(
+                    root,
+                    &["slot_00"],
+                    &table,
+                    events,
+                    Some(deformation.clone()),
+                )
+                .unwrap();
+                let mut single = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+                let mut geometry = single.prepare_body_geometry(root, &table).unwrap();
+                single.enable_deformation(root, &mut geometry).unwrap();
+                single.body_events = events;
+                single
+                    .register_deformation_callbacks(deformation.0, deformation.1.clone(), 1)
+                    .unwrap();
+                single.enable_lap_timing(root).unwrap();
+                let pristine = single.state.car.owner.vehicle[0x4880 / 4..0xc580 / 4].to_vec();
+                let drive = Controls {
+                    throttle: 1.,
+                    steering: 0.25,
+                    ..Default::default()
+                };
+                for _ in 0..600 {
+                    single
+                        .tick_with_deforming_body_geometry(drive, &mut geometry)
+                        .unwrap();
+                    multi.tick(&[drive]).unwrap();
+                    assert_eq!(
+                        single.state.car.owner.physical, multi.cars[0].state.car.owner.physical,
+                        "tick {}",
+                        single.ticks
+                    );
+                    assert_eq!(
+                        single.state.car.owner.vehicle,
+                        multi.cars[0].state.car.owner.vehicle
+                    );
+                }
+                let a = single.deformation_registration.as_ref().unwrap();
+                let b = multi.cars[0].deformation_registration.as_ref().unwrap();
+                assert_eq!(
+                    (a.random_seed, a.bulk_calls, a.records),
+                    (b.random_seed, b.bulk_calls, b.records)
+                );
+                assert!(a.bulk_calls > 0);
+                assert_ne!(
+                    multi.cars[0].state.car.owner.vehicle[0x4880 / 4..0xc580 / 4],
+                    pristine[..]
+                );
+                // Two deforming cars: car 1 rams idle car 0 (several-car group,
+                // no deformation phases), then both keep driving without failure.
+                let mut multi = MultiRuntime::lacetti_deforming(
+                    root,
+                    &["slot_00", "slot_01"],
+                    &table,
+                    events,
+                    Some(deformation),
+                )
+                .unwrap();
+                let mut contacts = 0;
+                for tick in 0..600 {
+                    let ram = Controls {
+                        throttle: 1.,
+                        steering: if tick < 200 { 0.6 } else { 0.25 },
+                        ..Default::default()
+                    };
+                    let first = if tick < 200 {
+                        Controls::default()
+                    } else {
+                        drive
+                    };
+                    multi
+                        .tick(&[first, ram])
+                        .unwrap_or_else(|e| panic!("two-car tick {}: {e}", tick + 1));
+                    contacts += multi.last_car_contacts;
+                }
+                let calls: Vec<u64> = multi
+                    .cars
+                    .iter()
+                    .map(|c| c.deformation_registration.as_ref().unwrap().bulk_calls)
+                    .collect();
+                let seeds: Vec<u32> = multi
+                    .cars
+                    .iter()
+                    .map(|c| c.deformation_registration.as_ref().unwrap().random_seed)
+                    .collect();
+                eprintln!("shared_world_deformation car_contacts={contacts} bulk_calls={calls:?}");
+                assert!(contacts > 0);
+                assert_eq!(seeds[0], seeds[1]);
             })
             .unwrap()
             .join()

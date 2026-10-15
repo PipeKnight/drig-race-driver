@@ -327,7 +327,7 @@ fn calculate_owned(
                 manager.contacts.used,
                 &input.shapes,
                 &mut provider,
-                registration,
+                &mut [Some(registration)],
             )?
         } else {
             physical_world::advance_with_geometry_provider(

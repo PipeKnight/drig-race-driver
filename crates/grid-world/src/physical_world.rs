@@ -50,7 +50,7 @@ pub fn advance_with_geometry(
     shapes: &[contact_groups::Shape],
     external_count: usize,
 ) -> Result<grouped_physical_frame::Output, Error> {
-    advance_owned(previous, slots, used, shapes, external_count, None, None)
+    advance_owned(previous, slots, used, shapes, external_count, None, &mut [])
 }
 
 /// Advance poses, then obtain fresh world-space geometry before grouping/solving.
@@ -74,16 +74,20 @@ pub fn advance_with_geometry_provider(
         shapes,
         external_count,
         Some(&mut provider),
-        None,
+        &mut [],
     )
 }
-pub(crate) fn advance_with_deformation(
+
+/// Geometry-provider advance with one optional deformation registration per
+/// body (shared-world cars). A registered car alone in its contact group runs
+/// both deformation phases; the registrations share one CRT stream.
+pub fn advance_with_deformation(
     previous: &grouped_physical_frame::Output,
     slots: &[contact_groups::Contact],
     external_count: usize,
     shapes: &[contact_groups::Shape],
     provider: &mut grouped_physical_frame::GeometryProvider<'_>,
-    registration: &mut crate::deformation_world::Registration,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<grouped_physical_frame::Output, Error> {
     advance_owned(
         previous,
@@ -92,7 +96,7 @@ pub(crate) fn advance_with_deformation(
         shapes,
         external_count,
         Some(provider),
-        Some(registration),
+        registrations,
     )
 }
 
@@ -104,7 +108,7 @@ fn advance_owned(
     shapes: &[contact_groups::Shape],
     external_count: usize,
     provider: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
-    registration: Option<&mut crate::deformation_world::Registration>,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<grouped_physical_frame::Output, Error> {
     let world = previous.groups.world;
     let selector = world[5];
@@ -150,14 +154,14 @@ fn advance_owned(
         contact_capacity: previous.groups.contacts.len(),
     };
     let mut out = if let Some(provider) = provider {
-        if let Some(registration) = registration {
+        if !registrations.is_empty() {
             grouped_physical_frame::calculate_tick_carried_deforming(
                 &input,
                 &previous.manager,
                 shapes,
                 &carry,
                 provider,
-                registration,
+                registrations,
             )?
         } else {
             grouped_physical_frame::calculate_tick_carried_with_provider(

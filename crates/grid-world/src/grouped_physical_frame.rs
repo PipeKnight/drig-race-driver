@@ -87,7 +87,7 @@ pub fn calculate_tick_with_shapes(
         None,
         input.contacts.len(),
         None,
-        None,
+        &mut [],
     )
 }
 
@@ -102,7 +102,7 @@ pub fn calculate_tick_with_geometry(
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    tick(input, manager, shapes, None, external_count, None, None)
+    tick(input, manager, shapes, None, external_count, None, &mut [])
 }
 
 pub(crate) fn calculate_tick_carried(
@@ -122,7 +122,7 @@ pub(crate) fn calculate_tick_carried(
         Some(carry),
         external_count,
         None,
-        None,
+        &mut [],
     )
 }
 
@@ -143,7 +143,7 @@ pub(crate) fn calculate_tick_carried_with_provider(
         Some(carry),
         input.contacts.len(),
         Some(provider),
-        None,
+        &mut [],
     )
 }
 pub(crate) fn calculate_tick_carried_deforming(
@@ -152,7 +152,7 @@ pub(crate) fn calculate_tick_carried_deforming(
     shapes: &[contact_groups::Shape],
     carry: &contact_groups::Carry,
     provider: &mut GeometryProvider<'_>,
-    registration: &mut crate::deformation_world::Registration,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<Output, Error> {
     tick(
         input,
@@ -161,7 +161,7 @@ pub(crate) fn calculate_tick_carried_deforming(
         Some(carry),
         input.contacts.len(),
         Some(provider),
-        Some(registration),
+        registrations,
     )
 }
 
@@ -185,7 +185,7 @@ fn tick(
     carry: Option<&contact_groups::Carry>,
     external_count: usize,
     provider: Option<&mut GeometryProvider<'_>>,
-    registration: Option<&mut crate::deformation_world::Registration>,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<Output, Error> {
     validate(input, shapes, carry)?;
     let delta = manager.parameters[0];
@@ -239,7 +239,7 @@ fn tick(
         }
         next.contacts.extend(contacts);
     }
-    let mut out = calculate_impl(&next, manager, shapes, carry, external_count, registration)?;
+    let mut out = calculate_impl(&next, manager, shapes, carry, external_count, registrations)?;
     for (body, next) in out.groups.bodies.iter_mut().zip(update_next) {
         body[0x318 / 4] = next;
     }
@@ -255,7 +255,7 @@ pub fn calculate_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    calculate_impl(input, manager, shapes, None, input.contacts.len(), None)
+    calculate_impl(input, manager, shapes, None, input.contacts.len(), &mut [])
 }
 
 fn calculate_impl(
@@ -264,12 +264,14 @@ fn calculate_impl(
     shapes: &[contact_groups::Shape],
     carry: Option<&contact_groups::Carry>,
     external_count: usize,
-    mut registration: Option<&mut crate::deformation_world::Registration>,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<Output, Error> {
     validate(input, shapes, carry)?;
-    if registration.is_some() && input.bodies.len() != 1 {
-        return Err(Error("deformation requires one owned physical body"));
+    if !registrations.is_empty() && registrations.len() != input.bodies.len() {
+        return Err(Error("deformation registrations differ from owned bodies"));
     }
+    // One CRT stream shared by every registered car, consumed in group order.
+    let mut shared_seed = registrations.iter().flatten().map(|r| r.random_seed).next();
     if manager.properties.len() != input.bodies.len()
         || manager.workspace.len() != input.bodies.len()
         || manager.rows.is_empty()
@@ -410,19 +412,33 @@ fn calculate_impl(
                 cached_material: manager.cached_material,
             },
         };
-        let frame = if let Some(registration) = registration.as_deref_mut() {
-            if ids != [0] {
-                return Err(Error("deformation group differs from owned car"));
-            }
-            let raw: Vec<_> = contact_ids.iter().map(|&i| groups.contacts[i]).collect();
+        // Selected scope: a registered car alone in its group (static peers) runs
+        // both deformation phases; groups of several cars solve without them.
+        let registered = match ids[..] {
+            [only] => registrations.get_mut(only).and_then(|r| r.as_deref_mut()),
+            _ => None,
+        };
+        let frame = if let Some(registration) = registered {
+            let body = ids[0];
+            let raw: Vec<_> = contact_ids
+                .iter()
+                .map(|&i| {
+                    let mut c = groups.contacts[i];
+                    c[1] = 1;
+                    c
+                })
+                .collect();
+            registration.random_seed = shared_seed.unwrap_or(registration.random_seed);
             let (frame, contacts) = crate::deformation_world::calculate_group(
                 &frame_input,
-                &groups.bodies[0],
+                &groups.bodies[body],
                 &raw,
                 shapes,
                 registration,
             )?;
-            for (&i, c) in contact_ids.iter().zip(contacts) {
+            shared_seed = Some(registration.random_seed);
+            for (&i, mut c) in contact_ids.iter().zip(contacts) {
+                c[1] = body as u32 + 1;
                 groups.contacts[i] = c;
             }
             frame
@@ -487,6 +503,11 @@ fn calculate_impl(
         manager.rows = frame.step.rows;
         manager.cached_pair = frame.step.cached_pair;
         manager.cached_material = frame.step.cached_material;
+    }
+    if let Some(seed) = shared_seed {
+        for registration in registrations.iter_mut().flatten() {
+            registration.random_seed = seed;
+        }
     }
     Ok(Output {
         groups,

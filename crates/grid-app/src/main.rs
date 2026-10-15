@@ -973,11 +973,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("--deformation requires --drive and --body-contacts".into());
     }
     if opponents.is_some_and(|n| !(1..=7).contains(&n))
-        || (opponents.is_some() && (!drive || body_contacts.is_none() || deformation.is_some()))
+        || (opponents.is_some() && (!drive || body_contacts.is_none()))
     {
-        return Err(
-            "--opponents 1..7 requires --drive and --body-contacts, without --deformation".into(),
-        );
+        return Err("--opponents 1..7 requires --drive and --body-contacts".into());
     }
     let contacts_path = body_contacts.clone();
     if !scripted.throttle.is_finite()
@@ -1043,18 +1041,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let table = std::fs::read(contacts_path.as_ref().ok_or("missing CD01")?)?;
                 let slots: Vec<String> = (0..=n).map(|i| format!("slot_{i:02}")).collect();
                 let refs: Vec<&str> = slots.iter().map(String::as_str).collect();
-                let multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti(
+                let parameters = deformation
+                    .as_ref()
+                    .map(|path| -> Result<_, Box<dyn std::error::Error>> {
+                        Ok(grid_tools::deformation_parameters::read(&std::fs::read(path)?)?)
+                    })
+                    .transpose()?;
+                let multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti_deforming(
                     &root,
                     &refs,
                     &table,
                     runtime.body_events,
+                    parameters,
                 )?;
                 let progress = grid_tools::lap_progress::load(&root)?.progress;
                 let drivers = (0..n)
                     .map(|i| grid_tools::pursuit_driver::PursuitDriver::new(&progress, 18. + i as f64 * 0.25))
                     .collect();
                 println!(
-                    "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=authored-pursuit-placeholder deformation=disabled"
+                    "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=authored-pursuit-placeholder deformation={}",
+                    if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
                 Ok(Opponents { multi, drivers })
             })

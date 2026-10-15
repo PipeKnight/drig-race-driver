@@ -113,3 +113,28 @@ behind the player. Full workspace tests including asset tests pass; Clippy -D wa
 
 Limits: body events per car without peer registrations; no deformation with
 opponents; no race start order, positions or finish results for opponents.
+
+## F289: per-car deformation in the shared world (15 October 2026, Claude Code)
+
+`MultiRuntime::lacetti_deforming(..., Some((limit, bulk)))` enables source deformation
+and callbacks on every car. Each tick a deforming car's manager publishes through its
+own staged `BodyGeometry` (`calculate_with_world_publication`) and its registration
+owner is the manager's vehicle. `physical_world::advance_with_deformation` now takes one
+optional registration per body: a registered car alone in its contact group (static
+peers: track, boundary, props) runs both deformation phases exactly as the single-car
+path. The registrations share one CRT stream, consumed in group order (the original
+CRT `rand` is process-global; the order is the selected group order). A group of
+several touching cars solves without deformation phases. That is a selected gap: the
+original both-side callback behaviour for car-to-car impacts is not yet recovered.
+
+Asset test `shared_world_deformation_matches_single_car_and_survives_contact`:
+- One deforming car in the shared world equals the single deforming runtime over 600
+  ticks (vehicle words incl. the deformation grid, physical body, seed, bulk calls and
+  records), including a barrier impact with dents.
+- Two deforming cars, one ramming the other: 843 car-contact records, no failure, bulk
+  calls [81, 75], shared seed.
+
+`grid-app --opponents N --deformation DF01` is now accepted, and `Play GRID Race.cmd`
+adds the private DF01 file when it is present. Scripted 600-tick wall run with 3
+opponents: 313 bulk calls, no failure. Opponent meshes do not show dents yet (their
+physics geometry deforms).

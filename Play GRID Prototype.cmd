@@ -60,7 +60,7 @@ if "%~2"=="" (
       "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
     ) else (
       echo Experimental impact damage enabled.
-      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" > "%GRID_PLAY_LOG%" 2>&1
+      "target\release\grid-app.exe" --drive %GRID_TRIAL_ARGS% --game-root "%GRID_PLAY_ROOT%" --body-contacts "%~2" --body-events "%~3" --deformation "%~4" %GRID_OPPONENT_ARGS% > "%GRID_PLAY_LOG%" 2>&1
     )
   )
 )
