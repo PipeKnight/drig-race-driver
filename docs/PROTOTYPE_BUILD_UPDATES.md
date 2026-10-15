@@ -1,6 +1,12 @@
 # Playable build updates
 
-Latest verified refresh: **53d9d141847b** (clean), built 15 October 2026 ~13:25 UTC, release SHA256
+Latest verified refresh: **9b2a81858ef7** (clean), built 15 October 2026 ~13:39 UTC, release SHA256
+5cec944bd85023dd22359a98bc87a41bebf64ed350c9af0cada18f866dc1f704, manifest
+local/playtest/build-20261015T1338596647645Z/. AI opponents now overtake, race side by side and
+brake for the car ahead like the original AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md#traffic-behaviours-f294)),
+and each opponent wears its own shipped Lacetti livery. Source driving and Bevy checks pass.
+
+Previous refresh: **53d9d141847b** (clean), built 15 October 2026 ~13:25 UTC, release SHA256
 f272f137ff18988187d8456e9e6250cbc52e7ef1ee8680f7f4f8c12e9e23835d, manifest
 local/playtest/build-20261015T1324326272094Z/. `Play GRID Race.cmd` now runs a three-lap race
 against 3 AI cars with a countdown, live position and a race result ([RACE_MODE.md](RACE_MODE.md)).
