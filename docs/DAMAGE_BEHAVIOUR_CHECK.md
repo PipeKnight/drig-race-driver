@@ -64,8 +64,8 @@ all 167 logged pose/velocity samples bit-exact).
 - **Ticks 1566–1567: rear-left impact, as reported.** All contacts are at x +0.6…+0.8 m and
   z −2.0…−2.35 m. The grid nodes that move are at the rear-left (rest z −2.32).
   - The rear-left wheel level stays at 0.03.
-  - Because the front-left cell is already folded (node 305 sits behind node 275's rest
-    position), the 2–4 cm of grid movement that the hit spreads through the grid shifts the
+  - Because the front-left cells are already heavily compressed (node 305 moved from z 1.91 to
+    1.38 and node 275 from 1.48 to 1.18; compressed, not inverted), the 2–4 cm of grid movement that the hit spreads through the grid shifts the
     sampled front-left wheel anchor from −0.123 to −0.220 m (angle 0.30 → 0.48).
   - That raises the front-left level from 0.668 to 1.0 and gives terminal status 3, ordinal 2
     (front-left).
