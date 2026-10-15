@@ -30,10 +30,10 @@ const AI_FRONT: f32 = 0.75;
 const LOW_SPEED: f32 = 4.;
 const MEDIUM_SPEED: f32 = 10.;
 const HIGH_SPEED: f32 = 15.;
-/// Slip threshold of the tyre-slip term. The original per-axle thresholds
-/// (manager +214..+220) were not recovered; AUTHORED equal to the skid-mark
-/// threshold on the same excess-force / mass quantity.
-const SLIP_THRESHOLD: f32 = 2.0;
+/// Per-axle `lo` of the tyre-slip term, manager constants rear 1.7 / front
+/// 3.5 (docs/TYRE_SMOKE_RESEARCH.md 3.2) [V].
+const REAR_SLIP: f32 = 1.7;
+const FRONT_SLIP: f32 = 3.5;
 /// Drag `influence` 100 % as a linear drag rate (1/s); unit not recovered (AUTHORED).
 const DRAG_RATE: f32 = 1.0;
 const GRAVITY: f32 = 9.81;
@@ -95,7 +95,8 @@ fn load_factor(load: f32) -> f32 {
 /// emitter base values: rate = (B*L + S)*rateMult*F*D, speed = (B + S)*speedMult.
 fn intensity(wheel: &Wheel, kick: &Kick, front_factor: f32, distance_factor: f32) -> (f32, f32) {
     let b = band(wheel.car_speed, kick.multipliers);
-    let s = kick.tyreslip * (wheel.excess - SLIP_THRESHOLD).max(0.);
+    let lo = if wheel.rear { REAR_SLIP } else { FRONT_SLIP };
+    let s = kick.tyreslip * (wheel.excess - lo).max(0.);
     let rate = ((b * load_factor(wheel.load) + s) * kick.rate * front_factor * distance_factor)
         .clamp(0., 5.);
     let speed = ((b + s) * kick.speed).clamp(0., 2.);
@@ -520,12 +521,21 @@ mod tests {
         let wheel = Wheel {
             car_speed: 20.,
             load: 3000.,
-            excess: 3.0,
+            excess: 3.7,
+            rear: true,
             ..Default::default()
         };
+        // Rear lo 1.7: S = 2.0, rate = B*L + S = 1*2 + 2, speed capped at 2.
         let (rate, speed) = intensity(&wheel, &kick, 1., 1.);
-        assert!((rate - 3.0).abs() < 1e-6 && (speed - 2.0).abs() < 1e-6);
+        assert!((rate - 4.0).abs() < 1e-5 && (speed - 2.0).abs() < 1e-6);
         let (rate, _) = intensity(&wheel, &kick, 0.75, 0.2);
-        assert!((rate - 0.45).abs() < 1e-6);
+        assert!((rate - 0.6).abs() < 1e-5);
+        // Front lo 3.5: S = 0.2.
+        let front = Wheel {
+            rear: false,
+            ..wheel
+        };
+        let (rate, speed) = intensity(&front, &kick, 1., 1.);
+        assert!((rate - 2.2).abs() < 1e-5 && (speed - 1.2).abs() < 1e-5);
     }
 }

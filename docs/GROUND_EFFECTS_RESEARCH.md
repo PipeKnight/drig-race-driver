@@ -48,8 +48,8 @@ of its `grid_tools::tyre_smoke::SMOKE_TEXTURES` (`SM33`, `SM33_dark`, `SM38`, `W
 ### Emission (`73F860`, per car, AI included) [D]
 
 - **Skidding test:** wheel `+AC` ÷ body mass `+15A0` > **2.0**.
-  - `+AC` is a 10/s low-pass of `+A4` (`vehicle_propulsion`). [I] It behaves like excess
-    traction force.
+  - `+AC` is a 10/s low-pass of `+A4` (`vehicle_propulsion`), the grip-overflow force
+    (TYRE_SMOKE_RESEARCH.md §3.1).
   - The port's value reaches about 3.9 at launch wheelspin and about 5 in strong understeer,
     and stays near 0 when rolling.
 - **Layer choice:**
@@ -132,7 +132,9 @@ Further rules [D]:
   - player D ≈ 1.
 - **Stop:** no emission when wheel `+C0` is 0.
 - [V] Global limit 12,000 particles (`effects/config.xml`).
-- The per-axle thresholds `lo`/`hi` (manager `+214..+220`) were **not recovered**.
+- The per-axle thresholds `lo`/`hi` (manager `+214..+220`) were not found in this research;
+  the tyre-smoke research recovered them as rear 1.7/9.5 and front 3.5/9.0
+  (docs/TYRE_SMOKE_RESEARCH.md §3.2), and the debris port uses those `lo` values.
 
 ### Debris emitters [V, decoded from the binary XML; parser `8A49A0`: divergence in degrees, force influence in %, frame `frequencies` normalised weights]
 
@@ -231,7 +233,7 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
 | Area | Behaviour | Source |
 |---|---|---|
 | Player/AI variant, AI front-wheel rule, band B, load L, slip S, rate/speed caps, F, D, ignore distance, 12,000 limit | Original rules | [D] |
-| Slip threshold `lo` | 2.0, same as the skid-mark threshold | AUTHORED |
+| Slip threshold `lo` | Rear 1.7, front 3.5 (TYRE_SMOKE_RESEARCH.md §3.2) | [V] |
 | Drag rate for 100 % | 1/s | AUTHORED |
 | Gravity | 9.81 × influence % | [I] |
 | Emitter axis | Up, tilted by the birth pitch, with a random cone of the divergence angle | [I] |
@@ -292,8 +294,10 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
 
 ## 6. Open items
 
-- Wheel `+AC` semantics; the kick-up `lo`/`hi` slip thresholds; the tyre-width settings
-  field `+10A4`.
+- Wheel `+AC` is the 0.1 s low-pass of the grip-overflow force (TYRE_SMOKE_RESEARCH.md §3.1).
+  The kick-up handbrake ×2 and the rear drive-slip term from that section are not in the debris
+  port.
+- The tyre-width settings field `+10A4`.
 - Skid COLOR channel mapping (runtime capture would settle it); skid normal map and two-UV
   crossfade; per-car mark LOD.
 - Emitter direction convention, drag units, birth timelines (`start`/`end`), the meaning of
