@@ -8,6 +8,7 @@ mod sky;
 mod time_trial;
 mod track_grade;
 mod tyre_sound;
+mod tyre_visual;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -1570,7 +1571,25 @@ fn setup(
                 .cloned()
         })
         .collect();
-    for part in car.parts.drain(..) {
+    for mut part in car.parts.drain(..) {
+        if graphics.enhanced()
+            && part.wheel.is_some()
+            && matches!(
+                part.material
+                    .strip_prefix("lacetti/")
+                    .unwrap_or(&part.material)
+                    .trim(),
+                "Tyre Wall" | "Tyre Tread"
+            )
+        {
+            match tyre_visual::refine(&mut part.mesh) {
+                Ok((before, after)) => println!(
+                    "tyre_visual part={:?} triangles={before}->{after} physics=unchanged",
+                    part.name
+                ),
+                Err(error) => eprintln!("tyre_visual skipped part={:?}: {error}", part.name),
+            }
+        }
         let material = material_handles
             .entry(part.material.clone())
             .or_insert_with(|| {
