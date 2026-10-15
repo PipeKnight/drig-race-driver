@@ -25,6 +25,20 @@ impl BodyGeometry {
         state: &grid_world::vehicle_publication::State,
         delta: f32,
     ) -> Result<grid_world::vehicle_publication::State, Error> {
+        let (rebuilt, next) = self.deformation_publication(state, delta)?;
+        if let Some(geometry) = rebuilt {
+            *self = geometry;
+        }
+        Ok(next)
+    }
+
+    /// [`Self::publish_deformation`] without changing this geometry: the
+    /// rebuilt geometry, if the publication rebuilds it, and the next state.
+    pub fn deformation_publication(
+        &self,
+        state: &grid_world::vehicle_publication::State,
+        delta: f32,
+    ) -> Result<(Option<Self>, grid_world::vehicle_publication::State), Error> {
         use grid_world::{
             deformation_grid::Grid, deformation_publication, vehicle_publication::VEHICLE_WORDS,
         };
@@ -33,7 +47,7 @@ impl BodyGeometry {
             return Err(Error("invalid deformation geometry publication framing"));
         }
         if (b[0xc7f0 / 4] >> 16) & 255 == 0 {
-            return deformation_publication::calculate(state, delta);
+            return Ok((None, deformation_publication::calculate(state, delta)?));
         }
         let dimensions: [usize; 3] = std::array::from_fn(|i| b[0xc714 / 4 + i] as usize);
         if dimensions.iter().any(|d| !(2..=16).contains(d))
@@ -53,8 +67,7 @@ impl BodyGeometry {
         let mut geometry = self.clone();
         geometry.rebuild_from_deformation(&grid)?;
         let next = deformation_publication::after_geometry_rebuild(state, delta)?;
-        *self = geometry;
-        Ok(next)
+        Ok((Some(geometry), next))
     }
     /// Source NED, verified owner layout offset, and locally prepared private
     /// CD01 sampling data. Raw source Y bounds define this selected mesh center.
@@ -217,41 +230,30 @@ impl BodyGeometry {
         other: &[[[f32; 3]; 3]],
         capacity: usize,
     ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
-        if other.is_empty() || other.len() > 4096 || capacity == 0 {
+        self.car_contacts_hull(body, &WorldHull::new(other), capacity)
+    }
+
+    /// [`Self::car_contacts`] against a hull prepared once for several queries.
+    pub fn car_contacts_hull(
+        &self,
+        body: &contact_groups::Body,
+        other: &WorldHull,
+        capacity: usize,
+    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        if other.count == 0 || other.count > 4096 || capacity == 0 {
             return Ok(Vec::new());
         }
         let matrix = self.pose(body)?;
-        let mut bounds = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
-        let mut vertices = Vec::with_capacity(other.len() * 3);
-        for t in other {
-            for p in t {
-                for j in 0..3 {
-                    bounds[j] = bounds[j].min(p[j]);
-                    bounds[j + 3] = bounds[j + 3].max(p[j]);
-                }
-                vertices.push(*p);
-            }
-        }
+        let bounds = other.bounds;
         let car = self.shape.mesh().world_bounds(matrix, self.query.margin)?;
         if (0..3).any(|j| car[0][j] > bounds[j + 3] || car[1][j] < bounds[j]) {
             return Ok(Vec::new());
         }
-        let triangles: Vec<[u16; 3]> = (0..other.len())
-            .map(|i| [i as u16 * 3, i as u16 * 3 + 1, i as u16 * 3 + 2])
-            .collect();
-        let leaves = std::collections::BTreeMap::from([(0, (0..other.len() as u16).collect())]);
-        let materials = vec![0; other.len()];
-        Ok(grid_world::packed_contacts::calculate_decoded(
+        grid_world::packed_contacts::calculate_decoded_known(
             self.shape.mesh(),
             matrix,
-            &grid_world::packed_query::Mesh {
-                bounds,
-                vertices: &vertices,
-                triangles: &triangles,
-                nodes: &[0x8000],
-                leaves: &leaves,
-            },
-            &materials,
+            &other.mesh(),
+            &other.materials,
             &grid_world::packed_contacts::Settings {
                 query: convex_distance::ContactSettings {
                     margin: self.query.margin,
@@ -263,8 +265,12 @@ impl BodyGeometry {
                 sheet_mask: 0,
                 correction_bounds: [f32::MAX; 4],
             },
-        )?
-        .contacts)
+            &grid_world::packed_contacts::Known {
+                checked: other.checked,
+                directions: grid_world::packed_contacts::directions_valid(&self.query),
+                bounds: car,
+            },
+        )
     }
 
     /// World points/normals retain the generator's publication orientation.
@@ -305,6 +311,64 @@ impl BodyGeometry {
                 c
             })
             .collect())
+    }
+}
+
+/// Another body's world hull triangles as one packed leaf, prepared once for
+/// several car-to-car queries.
+pub struct WorldHull {
+    count: usize,
+    bounds: [f32; 6],
+    vertices: Vec<[f32; 3]>,
+    triangles: Vec<[u16; 3]>,
+    leaves: std::collections::BTreeMap<usize, Vec<u16>>,
+    materials: Vec<u8>,
+    checked: grid_world::packed_contacts::Checked,
+}
+
+impl WorldHull {
+    pub fn new(other: &[[[f32; 3]; 3]]) -> Self {
+        let mut bounds = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
+        let mut vertices = Vec::with_capacity(other.len() * 3);
+        for t in other {
+            for p in t {
+                for j in 0..3 {
+                    bounds[j] = bounds[j].min(p[j]);
+                    bounds[j + 3] = bounds[j + 3].max(p[j]);
+                }
+                vertices.push(*p);
+            }
+        }
+        let count = other.len();
+        let mut hull = Self {
+            count,
+            bounds,
+            vertices,
+            triangles: Vec::new(),
+            leaves: Default::default(),
+            materials: Vec::new(),
+            checked: Default::default(),
+        };
+        // Queries use only hulls of 1..=4096 triangles.
+        if (1..=4096).contains(&count) {
+            hull.triangles = (0..count)
+                .map(|i| [i as u16 * 3, i as u16 * 3 + 1, i as u16 * 3 + 2])
+                .collect();
+            hull.leaves = std::collections::BTreeMap::from([(0, (0..count as u16).collect())]);
+            hull.materials = vec![0; count];
+            hull.checked = grid_world::packed_contacts::check(&hull.mesh(), &hull.materials);
+        }
+        hull
+    }
+
+    fn mesh(&self) -> grid_world::packed_query::Mesh<'_> {
+        grid_world::packed_query::Mesh {
+            bounds: self.bounds,
+            vertices: &self.vertices,
+            triangles: &self.triangles,
+            nodes: &[0x8000],
+            leaves: &self.leaves,
+        }
     }
 }
 

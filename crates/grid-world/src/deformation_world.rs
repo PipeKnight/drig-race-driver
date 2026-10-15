@@ -33,9 +33,6 @@ pub(crate) fn calculate_group(
     {
         return Err(Error("invalid carried deformation registration"));
     }
-    let settings = owner[0xd240 / 4..(0xd240 + 0x1054) / 4].to_vec();
-    let mut owner = owner.clone();
-    owner[0xc7f8 / 4] = 0;
     let raw: Vec<_> = contacts
         .iter()
         .map(|r| {
@@ -47,17 +44,26 @@ pub(crate) fn calculate_group(
             c
         })
         .collect();
+    // The frame sees the owner with its +C7F8 link cleared; the registration
+    // is restored before any failure returns, so it stays unchanged.
+    registration.owner[0xc7f8 / 4] = 0;
+    let (owner, settings) = (
+        &registration.owner,
+        &registration.owner[0xd240 / 4..(0xd240 + 0x1054) / 4],
+    );
     let result = deforming_physical_frame::calculate(deforming_physical_frame::Input {
         frame,
-        owner: &owner,
+        owner,
         physical,
         contacts: &raw,
-        settings: &settings,
+        settings,
         shapes,
         limit: registration.limit,
         bulk: &registration.bulk,
         random_seed: registration.random_seed,
-    })?;
+    });
+    registration.owner[0xc7f8 / 4] = 0xd240;
+    let result = result?;
     let mut returned = contacts.to_vec();
     for (output, raw) in returned.iter_mut().zip(&result.contacts) {
         for at in [0x38, 0x3c, 0x40, 0x44] {

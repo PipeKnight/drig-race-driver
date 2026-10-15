@@ -57,7 +57,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let slots: Vec<String> = (0..cars).map(|i| format!("slot_{i:02}")).collect();
     let slot_refs: Vec<&str> = slots.iter().map(String::as_str).collect();
-    let mut multi = MultiRuntime::lacetti_on(root, &route, &slot_refs, &table, events)?;
+    // GRID_DEFORMATION_PARAMETERS=private DF01: every car deforms, as in the
+    // windowed race.
+    let deformation = match std::env::var_os("GRID_DEFORMATION_PARAMETERS") {
+        Some(path) => Some(grid_tools::deformation_parameters::read(&std::fs::read(
+            path,
+        )?)?),
+        None => None,
+    };
+    let mut multi =
+        MultiRuntime::lacetti_deforming_on(root, &route, &slot_refs, &table, events, deformation)?;
     let data = AiData::load(root, route.path(), "touring", "lac")?;
     let progress = grid_tools::lap_progress::load_route(root, &route)?.progress;
     // GRID_AI_CHARACTERISTICS=private TSV: per-driver characteristics (row k = car k).
@@ -301,6 +310,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             p[14],
             car.terminal_wheel()
         );
+    }
+    // Final per-car state digest (FNV-1a over vehicle and physical words) for
+    // bit-identity checks.
+    for (i, car) in multi.cars.iter().enumerate() {
+        let owner = &car.state.car.owner;
+        let mut hash = 0xcbf2_9ce4_8422_2325u64;
+        for &word in owner.vehicle.iter().chain(&owner.physical) {
+            hash = (hash ^ u64::from(word)).wrapping_mul(0x100_0000_01b3);
+        }
+        let deformation = car
+            .deformation_registration
+            .as_ref()
+            .map(|r| (r.bulk_calls, r.records));
+        println!("state car{i} hash={hash:016x} deformation={deformation:?}");
     }
     for (i, row) in pair_contacts.iter().enumerate() {
         if row.iter().any(|&n| n > 0) {

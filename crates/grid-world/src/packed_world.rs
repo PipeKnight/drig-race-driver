@@ -49,24 +49,76 @@ pub fn query(
             }
         }
     }
+    query_candidates(
+        grid,
+        |id| {
+            if sequential {
+                (id as usize).checked_sub(1).and_then(|i| shapes.get(i))
+            } else {
+                shapes.iter().find(|s| s.id == id)
+            }
+            .map(|s| Shape {
+                id: s.id,
+                mesh: Mesh { ..s.mesh },
+                materials: s.materials,
+            })
+        },
+        start,
+        end,
+        cache,
+    )
+}
+
+/// [`query`] over `count` shapes with IDs 1..=count, where `shape(i)` builds
+/// the shape with ID i + 1 only when the grid names it.
+pub fn query_sequential<'a>(
+    grid: &Grid,
+    count: usize,
+    shape: impl Fn(usize) -> Shape<'a>,
+    start: [f32; 4],
+    end: [f32; 4],
+    cache: &mut Cache,
+) -> Result<Query, Error> {
+    if start.into_iter().chain(end).any(|v| !v.is_finite()) || count > 512 {
+        return Err(Error("invalid packed-world segment or shape count"));
+    }
+    if !grid.active {
+        return Ok(Query {
+            candidates: Vec::new(),
+            hit: None,
+        });
+    }
+    query_candidates(
+        grid,
+        |id| {
+            (id as usize)
+                .checked_sub(1)
+                .filter(|&i| i < count)
+                .map(&shape)
+        },
+        start,
+        end,
+        cache,
+    )
+}
+
+fn query_candidates<'a>(
+    grid: &Grid,
+    shape: impl Fn(u32) -> Option<Shape<'a>>,
+    start: [f32; 4],
+    end: [f32; 4],
+    cache: &mut Cache,
+) -> Result<Query, Error> {
     let low = [start[0].min(end[0]), start[2].min(end[2])];
     let high = [start[0].max(end[0]), start[2].max(end[2])];
     let candidates = grid.candidates(low, high, 25)?;
     let mut hit: Option<Hit> = None;
-    for id in &candidates {
-        let shape = if sequential {
-            (*id as usize).checked_sub(1).and_then(|i| shapes.get(i))
-        } else {
-            shapes.iter().find(|s| s.id == *id)
-        }
-        .ok_or(Error("packed-world candidate absent"))?;
+    for &id in &candidates {
+        let shape = shape(id).ok_or(Error("packed-world candidate absent"))?;
         if let Some(contact) = packed_shape::query(&shape.mesh, shape.materials, start, end, cache)?
             && hit.is_none_or(|old| contact.fraction < old.contact.fraction)
         {
-            hit = Some(Hit {
-                shape: *id,
-                contact,
-            });
+            hit = Some(Hit { shape: id, contact });
         }
     }
     Ok(Query { candidates, hit })

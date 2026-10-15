@@ -85,6 +85,32 @@ pub(crate) fn calculate_owned_with_publication(
     world_center: bool,
     publication: Option<&mut Publication<'_>>,
 ) -> Result<Output, Error> {
+    calculate_staged(
+        input.clone(),
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        world_center,
+        publication,
+    )
+}
+
+/// [`calculate_owned_with_publication`] on a staged copy the caller gives up.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calculate_staged(
+    input: State,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    world_center: bool,
+    publication: Option<&mut Publication<'_>>,
+) -> Result<Output, Error> {
     if input.owner.vehicle.len() != vehicle_publication::VEHICLE_WORDS
         || input.owner.vehicle[..input.frame.body.len()] != input.frame.body
     {
@@ -106,7 +132,7 @@ pub(crate) fn calculate_owned_with_publication(
         vehicle: input.owner.vehicle[..vehicle_sync::VEHICLE_WORDS].to_vec(),
         physical: input.owner.physical,
     })?;
-    let mut next = input.clone();
+    let mut next = input;
     next.owner.vehicle[..vehicle_sync::VEHICLE_WORDS].copy_from_slice(&synced.vehicle);
     next.owner.physical = synced.physical;
     next.frame

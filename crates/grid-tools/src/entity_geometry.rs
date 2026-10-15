@@ -251,8 +251,8 @@ impl Props {
             .collect()
     }
 
-    /// [`Self::contacts`] with `known` = ([`Self::checked`] of these unchanged
-    /// boxes, `directions_valid(query)`); `bounds` must then be
+    /// [`Self::contacts`] reusing values the caller holds for these unchanged
+    /// boxes ([`KnownBoxes`]); `bounds` must then be
     /// `mesh.world_bounds(matrix, query.margin)`. Identical results.
     pub fn contacts_known(
         &self,
@@ -261,13 +261,22 @@ impl Props {
         query: &grid_world::convex_distance::ContactSettings,
         bounds: [[f32; 4]; 2],
         capacity: usize,
-        known: Option<(&[grid_world::packed_contacts::Checked], bool)>,
+        known: Option<KnownBoxes<'_>>,
     ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
-        if known.is_some_and(|(checked, _)| checked.len() != self.boxes.len()) {
+        if known.as_ref().is_some_and(|k| {
+            k.checked.len() != self.boxes.len() || k.index.boxes != self.boxes.len()
+        }) {
             return Err(Error("prop box checks differ from the boxes"));
         }
+        // Boxes outside the index candidates cannot overlap the bounds and
+        // would be skipped; candidates keep data order.
+        let candidates = match &known {
+            Some(k) => k.index.candidates(bounds),
+            None => (0..self.boxes.len()).collect(),
+        };
         let mut contacts = Vec::new();
-        for (index, b) in self.boxes.iter().enumerate() {
+        for index in candidates {
+            let b = &self.boxes[index];
             if contacts.len() >= capacity {
                 break;
             }
@@ -287,21 +296,19 @@ impl Props {
                 correction_bounds: [f32::MAX; 4],
             };
             let (track, materials) = (&b.mesh(), &self.materials);
-            let generated = match known {
-                Some((checked, directions)) => {
-                    grid_world::packed_contacts::calculate_decoded_known(
-                        mesh,
-                        matrix,
-                        track,
-                        materials,
-                        &settings,
-                        &grid_world::packed_contacts::Known {
-                            checked: checked[index],
-                            directions,
-                            bounds,
-                        },
-                    )?
-                }
+            let generated = match &known {
+                Some(k) => grid_world::packed_contacts::calculate_decoded_known(
+                    mesh,
+                    matrix,
+                    track,
+                    materials,
+                    &settings,
+                    &grid_world::packed_contacts::Known {
+                        checked: k.checked[index],
+                        directions: k.directions,
+                        bounds,
+                    },
+                )?,
                 None => {
                     grid_world::packed_contacts::calculate_decoded(
                         mesh, matrix, track, materials, &settings,
@@ -315,9 +322,143 @@ impl Props {
     }
 }
 
+/// Values a caller holds for repeated body queries of unchanged boxes:
+/// [`Props::checked`], `directions_valid(query)` and a [`BoxIndex`] of them.
+pub struct KnownBoxes<'a> {
+    pub checked: &'a [grid_world::packed_contacts::Checked],
+    pub directions: bool,
+    pub index: &'a BoxIndex,
+}
+
+/// Uniform horizontal grid over box bounds: every box overlapping a query's
+/// x/z bounds is in a cell the query covers.
+pub struct BoxIndex {
+    boxes: usize,
+    origin: [f32; 2],
+    dimensions: [usize; 2],
+    cells: Vec<Vec<u32>>,
+}
+
+const INDEX_CELL: f32 = 16.;
+
+impl BoxIndex {
+    pub fn new(boxes: &[PropBox]) -> Self {
+        let mut low = [f32::MAX; 2];
+        let mut high = [f32::MIN; 2];
+        for b in boxes {
+            for (k, j) in [0, 2].into_iter().enumerate() {
+                low[k] = low[k].min(b.bounds[j]);
+                high[k] = high[k].max(b.bounds[j + 3]);
+            }
+        }
+        let finite = low.iter().chain(&high).all(|x| x.is_finite()) && !boxes.is_empty();
+        let origin = if finite { low } else { [0.; 2] };
+        let dimensions = std::array::from_fn(|k| {
+            if finite {
+                (((high[k] - low[k]) / INDEX_CELL) as usize + 1).min(1024)
+            } else {
+                1
+            }
+        });
+        let mut index = Self {
+            boxes: boxes.len(),
+            origin,
+            dimensions,
+            cells: vec![Vec::new(); dimensions[0] * dimensions[1]],
+        };
+        for (i, b) in boxes.iter().enumerate() {
+            let [x, z] = index.range([b.bounds[0], b.bounds[2]], [b.bounds[3], b.bounds[5]]);
+            for cx in x[0]..=x[1] {
+                for cz in z[0]..=z[1] {
+                    index.cells[cx * dimensions[1] + cz].push(i as u32);
+                }
+            }
+        }
+        index
+    }
+
+    /// Inclusive cell ranges per axis, clamped to the grid; non-finite
+    /// bounds cover the whole grid.
+    fn range(&self, low: [f32; 2], high: [f32; 2]) -> [[usize; 2]; 2] {
+        std::array::from_fn(|k| {
+            let cell = |v: f32| {
+                ((v - self.origin[k]) / INDEX_CELL)
+                    .floor()
+                    .clamp(0., (self.dimensions[k] - 1) as f32) as usize
+            };
+            if low[k].is_finite() && high[k].is_finite() {
+                [cell(low[k]), cell(high[k])]
+            } else {
+                [0, self.dimensions[k] - 1]
+            }
+        })
+    }
+
+    /// Ascending box indices that may overlap `bounds` horizontally.
+    pub fn candidates(&self, bounds: [[f32; 4]; 2]) -> Vec<usize> {
+        let [x, z] = self.range([bounds[0][0], bounds[0][2]], [bounds[1][0], bounds[1][2]]);
+        let mut out: Vec<usize> = Vec::new();
+        for cx in x[0]..=x[1] {
+            for cz in z[0]..=z[1] {
+                out.extend(
+                    self.cells[cx * self.dimensions[1] + cz]
+                        .iter()
+                        .map(|&i| i as usize),
+                );
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn box_index_candidates_cover_every_overlap_in_order() {
+        // Deterministic pseudo-random boxes over a 600 m square, one with NaN bounds.
+        let mut seed = 0x1234_5678u32;
+        let mut next = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1 << 24) as f32
+        };
+        let mut boxes: Vec<PropBox> = (0..400)
+            .map(|_| {
+                let (x, z, w) = (next() * 600. - 300., next() * 600. - 300., next() * 40.);
+                PropBox {
+                    template: String::new(),
+                    bounds: [x, -1., z, x + w, 2., z + w * 0.5],
+                    positions: Vec::new(),
+                    triangles: Vec::new(),
+                    nodes: Vec::new(),
+                    leaves: BTreeMap::new(),
+                }
+            })
+            .collect();
+        boxes[7].bounds[3] = f32::NAN;
+        let index = BoxIndex::new(&boxes);
+        let mut queries: Vec<[[f32; 4]; 2]> = (0..2000)
+            .map(|_| {
+                let (x, z, w) = (next() * 700. - 350., next() * 700. - 350., next() * 30.);
+                [[x, 0., z, 1.], [x + w, 1., z + w, 1.]]
+            })
+            .collect();
+        // Non-finite query bounds are never culled on that axis.
+        queries.push([[f32::NAN, 0., 0., 1.], [0., 0., 0., 1.]]);
+        queries.push([[0., 0., f32::NEG_INFINITY, 1.], [5., 0., 0., 1.]]);
+        for bounds in queries {
+            let candidates = index.candidates(bounds);
+            assert!(candidates.windows(2).all(|p| p[0] < p[1]));
+            for (i, b) in boxes.iter().enumerate() {
+                let culled =
+                    (0..3).any(|j| bounds[0][j] > b.bounds[j + 3] || bounds[1][j] < b.bounds[j]);
+                assert!(culled || candidates.contains(&i), "box {i} missing");
+            }
+        }
+    }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn donington_route_props_are_solid_boxes() {

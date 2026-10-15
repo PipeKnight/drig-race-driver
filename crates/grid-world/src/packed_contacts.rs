@@ -51,14 +51,30 @@ pub fn calculate(
 pub struct Checked {
     materials: bool,
     mesh: bool,
+    /// Within the narrow (undecoded) collector's vertex bound.
+    narrow: bool,
+    /// Vertex bounds of all reachable triangles of a structurally sound tree.
+    reach: Option<[f32; 6]>,
 }
 
 pub fn check(track: &packed_query::Mesh<'_>, materials: &[u8]) -> Checked {
+    let mesh = packed_candidates::mesh_valid(track);
     Checked {
         materials: materials_valid(track, materials),
-        mesh: packed_candidates::mesh_valid(track),
+        mesh,
+        narrow: track.vertices.len() <= 1024,
+        reach: if mesh {
+            packed_candidates::reach(track)
+        } else {
+            None
+        },
     }
 }
+
+/// Distance beyond which a body's bounds cannot reach a triangle through the
+/// collector's centred overlap test despite f32 rounding (coordinates are
+/// bounded by 1e6, where one ulp is 0.0625).
+const REACH_MARGIN: f32 = 4.;
 
 fn materials_valid(track: &packed_query::Mesh<'_>, materials: &[u8]) -> bool {
     materials.len() == track.triangles.len() && materials.iter().all(|&x| x < 8)
@@ -81,6 +97,30 @@ pub struct Known {
     pub checked: Checked,
     pub directions: bool,
     pub bounds: [V; 2],
+}
+
+impl Known {
+    /// True when [`calculate_known`] (`decoded` false) or
+    /// [`calculate_decoded_known`] provably returns no contacts and no
+    /// error with these settings: every check passes and every reachable
+    /// triangle lies more than [`REACH_MARGIN`] beyond the body bounds on
+    /// some axis, so no candidate passes the overlap test.
+    pub fn misses(&self, settings: &Settings, decoded: bool) -> bool {
+        let b = self.bounds;
+        let Some(reach) = self.checked.reach else {
+            return false;
+        };
+        settings.contact_capacity <= 16
+            && settings.candidate_capacity <= 32768
+            && settings.correction_bounds == [f32::MAX; 4]
+            && self.checked.materials
+            && self.directions
+            && self.checked.mesh
+            && (decoded || self.checked.narrow)
+            && packed_candidates::bounds_valid(b)
+            && (0..3)
+                .any(|j| reach[j + 3] < b[0][j] - REACH_MARGIN || reach[j] > b[1][j] + REACH_MARGIN)
+    }
 }
 
 /// [`calculate`] reusing [`Known`] values: the same contacts, without the
@@ -344,5 +384,110 @@ mod tests {
         settings.query.directions[0] = axes[0];
         settings.correction_bounds = [-5., 5., -5., 5.];
         assert!(calculate(shape.mesh(), matrix, &track, &[0], &settings).is_err());
+    }
+
+    #[test]
+    fn known_queries_match_and_misses_are_empty() {
+        let mesh = crate::collision_mesh::build(
+            &[
+                [1., 1., 1., 1.],
+                [-1., -1., 1., 1.],
+                [-1., 1., -1., 1.],
+                [1., -1., -1., 1.],
+            ],
+            &[[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]],
+            0,
+        )
+        .unwrap();
+        let span = mesh.bytes().len() as u32;
+        let shape = mesh
+            .initialize_shape(
+                crate::collision_mesh::ShapeSettings {
+                    span,
+                    scalar220: 0.01,
+                    layer: 0,
+                    flag_c0: false,
+                },
+                0,
+            )
+            .unwrap();
+        // Two quadrant leaves of a 20 m square; the other quadrants are empty.
+        let vertices = [
+            [-10., 0., -10.],
+            [-1., 0., -10.],
+            [-10., 0., -1.],
+            [1., 0., 1.],
+            [10., 0., 1.],
+            [1., 0., 10.],
+        ];
+        let leaves = BTreeMap::from([(0, vec![0]), (1, vec![1])]);
+        let nodes = [1, 0xffff, 0x8001, 0x8000, 0xffff];
+        let track = packed_query::Mesh {
+            bounds: [-10., -5., -10., 10., 5., 10.],
+            vertices: &vertices,
+            triangles: &[[0, 1, 2], [3, 4, 5]],
+            nodes: &nodes,
+            leaves: &leaves,
+        };
+        let axes = [
+            [1., 0., 0., 0.],
+            [-1., 0., 0., 0.],
+            [0., 1., 0., 0.],
+            [0., -1., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., 0., -1., 0.],
+        ];
+        let settings = Settings {
+            query: convex_distance::ContactSettings {
+                margin: 0.01,
+                directions: std::array::from_fn(|i| axes[i % 6]),
+            },
+            contact_capacity: 16,
+            cache_enabled: true,
+            candidate_capacity: 16,
+            sheet_mask: 0,
+            correction_bounds: [f32::MAX; 4],
+        };
+        let checked = check(&track, &[0, 0]);
+        assert_eq!(checked.reach, Some([-10., 0., -10., 10., 0., 10.]));
+        let (mut misses, mut hits) = (0, 0);
+        for x in -16..=16 {
+            for y in [-8, 0, 1, 6] {
+                for z in -16..=16 {
+                    let mut matrix = [
+                        [1., 0., 0., 0.],
+                        [0., 1., 0., 0.],
+                        [0., 0., 1., 0.],
+                        [0., 0., 0., 1.],
+                    ];
+                    matrix[3][..3].copy_from_slice(&[x as f32, y as f32, z as f32]);
+                    let full = calculate(shape.mesh(), matrix, &track, &[0, 0], &settings).unwrap();
+                    let known = Known {
+                        checked,
+                        directions: directions_valid(&settings.query),
+                        bounds: shape.mesh().world_bounds(matrix, 0.01).unwrap(),
+                    };
+                    let contacts =
+                        calculate_known(shape.mesh(), matrix, &track, &[0, 0], &settings, &known)
+                            .unwrap();
+                    assert_eq!(contacts, full.contacts);
+                    if known.misses(&settings, false) {
+                        assert!(
+                            contacts.is_empty() && full.candidates.unwrap().accepted.is_empty()
+                        );
+                        misses += 1;
+                    } else if !contacts.is_empty() {
+                        hits += 1;
+                    }
+                }
+            }
+        }
+        assert!(misses > 0 && hits > 0);
+        // A tree with a missing child is never skipped.
+        let broken = packed_query::Mesh {
+            nodes: &nodes[..3],
+            ..track
+        };
+        assert!(check(&broken, &[0, 0]).reach.is_none());
     }
 }

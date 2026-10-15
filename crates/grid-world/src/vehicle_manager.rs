@@ -80,7 +80,7 @@ pub fn calculate(
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
 ) -> Result<Output, Error> {
     let mut out = run_job(
-        input,
+        input.clone(),
         pair,
         delta,
         gravity,
@@ -117,7 +117,7 @@ pub fn calculate_with_contacts(
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
 ) -> Result<ContactOutput, Error> {
     contacts(
-        input,
+        input.clone(),
         pool,
         pair,
         delta,
@@ -144,6 +144,33 @@ pub fn calculate_with_world_contacts(
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
 ) -> Result<ContactOutput, Error> {
     contacts(
+        input.clone(),
+        pool,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        true,
+        None,
+    )
+}
+
+/// [`calculate_with_world_contacts`] on a staged copy the caller gives up,
+/// saving the copy; on failure the copy is lost, the caller's state is not.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_world_contacts_staged(
+    input: State,
+    pool: &crate::wheel_contacts::Pool,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+) -> Result<ContactOutput, Error> {
+    contacts(
         input,
         pool,
         pair,
@@ -157,10 +184,10 @@ pub fn calculate_with_world_contacts(
     )
 }
 
-/// Same owned world manager with an explicit staged resource publisher.
+/// [`calculate_with_world_publication`] on a staged copy the caller gives up.
 #[allow(clippy::too_many_arguments)]
-pub fn calculate_with_world_publication(
-    input: &State,
+pub fn calculate_with_world_publication_staged(
+    input: State,
     pool: &crate::wheel_contacts::Pool,
     pair: [usize; 2],
     delta: f32,
@@ -184,9 +211,36 @@ pub fn calculate_with_world_publication(
     )
 }
 
+/// Same owned world manager with an explicit staged resource publisher.
+#[allow(clippy::too_many_arguments)]
+pub fn calculate_with_world_publication(
+    input: &State,
+    pool: &crate::wheel_contacts::Pool,
+    pair: [usize; 2],
+    delta: f32,
+    gravity: f32,
+    handling_queries: Option<&[vehicle_handling::QueryRecord]>,
+    query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
+    material: impl FnMut(u32) -> Result<Option<Material>, Error>,
+    publication: &mut vehicle_job::Publication<'_>,
+) -> Result<ContactOutput, Error> {
+    contacts(
+        input.clone(),
+        pool,
+        pair,
+        delta,
+        gravity,
+        handling_queries,
+        query,
+        material,
+        true,
+        Some(publication),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn contacts(
-    input: &State,
+    input: State,
     pool: &crate::wheel_contacts::Pool,
     pair: [usize; 2],
     delta: f32,
@@ -224,7 +278,7 @@ fn contacts(
 
 #[allow(clippy::too_many_arguments)]
 fn run_job(
-    input: &State,
+    input: State,
     pair: [usize; 2],
     delta: f32,
     gravity: f32,
@@ -265,15 +319,15 @@ fn run_job(
     {
         return Err(Error("invalid single-car manager factor"));
     }
-    let mut next = input.clone();
+    let mut next = input;
     // A single registered car has no inter-car slipstream contributions.
     next.owner.vehicle[0x21c4 / 4] = 1f32.to_bits();
     next.owner.vehicle[0x248 / 4] &= 0x00ff_ffff;
     next.frame
         .body
         .copy_from_slice(&next.owner.vehicle[..vehicle_force::BODY_WORDS]);
-    vehicle_job::calculate_owned_with_publication(
-        &next,
+    vehicle_job::calculate_staged(
+        next,
         pair,
         delta,
         gravity,

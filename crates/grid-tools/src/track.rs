@@ -42,6 +42,7 @@ pub struct Track {
     /// Body-query checks of the attached boundary and of every prop box.
     boundary_checked: Option<packed_contacts::Checked>,
     props_checked: Vec<packed_contacts::Checked>,
+    props_index: Option<crate::entity_geometry::BoxIndex>,
 }
 
 /// Fresh geometric record and the same one-based packed shape identity used
@@ -105,6 +106,7 @@ impl Track {
             props: None,
             boundary_checked: None,
             props_checked: Vec::new(),
+            props_index: None,
         })
     }
     pub fn triangle_count(&self) -> usize {
@@ -134,6 +136,7 @@ impl Track {
     }
     pub(crate) fn attach_props(&mut self, props: crate::entity_geometry::Props) {
         self.props_checked = props.checked();
+        self.props_index = Some(crate::entity_geometry::BoxIndex::new(&props.boxes));
         self.props = Some(props);
     }
     pub fn props(&self) -> Option<&crate::entity_geometry::Props> {
@@ -153,6 +156,7 @@ impl Track {
     /// Selected cold pair queries in boundary-first then archive order, with inclusive root AABB
     /// culling and at most 16 contacts per pair / 64 in the returned world pool.
     /// Archive order is authored scheduling, not the original broadphase order.
+    /// `sheet` is consulted only for shapes the body can reach.
     pub fn body_contacts(
         &self,
         mesh: &grid_world::collision_mesh::Mesh,
@@ -189,12 +193,31 @@ impl Track {
                         query,
                         bounds,
                         capacity.min(16),
-                        Some((&self.props_checked, directions)),
+                        self.props_index
+                            .as_ref()
+                            .map(|index| crate::entity_geometry::KnownBoxes {
+                                checked: &self.props_checked,
+                                directions,
+                                index,
+                            }),
                     )?
                     .into_iter()
                     .map(|contact| BodyContact { shape, contact }),
             );
         }
+        let settings = |remaining: usize| packed_contacts::Settings {
+            query: grid_world::convex_distance::ContactSettings {
+                margin: query.margin,
+                directions: query.directions,
+            },
+            contact_capacity: remaining.min(16),
+            cache_enabled: true,
+            candidate_capacity: 4096,
+            sheet_mask: 0,
+            correction_bounds: [f32::MAX; 4],
+        };
+        // Pair queries that provably yield nothing (no reachable triangle
+        // near the body) are skipped before their sheet flags are consulted.
         // Authored boundary-first scheduling keeps packed road contacts from
         // exhausting the selected pool before this separate source shape.
         if let Some(boundary) = &self.boundary
@@ -203,30 +226,18 @@ impl Track {
                 bounds[0][j] <= boundary.bounds[j + 3] && bounds[1][j] >= boundary.bounds[j]
             })
         {
-            let mut mask = 0;
-            for (j, &key) in boundary.material_keys.iter().enumerate() {
-                mask |= u8::from(sheet(key)?) << j;
+            let known = known(self.boundary_checked.unwrap_or_else(|| boundary.checked()));
+            let mut settings = settings(capacity - contacts.len());
+            if !known.misses(&settings, true) {
+                for (j, &key) in boundary.material_keys.iter().enumerate() {
+                    settings.sheet_mask |= u8::from(sheet(key)?) << j;
+                }
+                let generated = boundary.contacts_known(mesh, matrix, &settings, &known)?;
+                contacts.extend(generated.into_iter().map(|contact| BodyContact {
+                    shape: self.chunks.len() as u32 + 1,
+                    contact,
+                }));
             }
-            let generated = boundary.contacts_known(
-                mesh,
-                matrix,
-                &packed_contacts::Settings {
-                    query: grid_world::convex_distance::ContactSettings {
-                        margin: query.margin,
-                        directions: query.directions,
-                    },
-                    contact_capacity: (capacity - contacts.len()).min(16),
-                    cache_enabled: true,
-                    candidate_capacity: 4096,
-                    sheet_mask: mask,
-                    correction_bounds: [f32::MAX; 4],
-                },
-                &known(self.boundary_checked.unwrap_or_else(|| boundary.checked())),
-            )?;
-            contacts.extend(generated.into_iter().map(|contact| BodyContact {
-                shape: self.chunks.len() as u32 + 1,
-                contact,
-            }));
         }
         for (i, c) in self.chunks.iter().enumerate() {
             if contacts.len() == capacity {
@@ -240,27 +251,21 @@ impl Track {
                     "packed body material count exceeds bound",
                 ));
             }
-            let mut mask = 0;
+            let known = known(c.checked);
+            let mut settings = settings(capacity - contacts.len());
+            if known.misses(&settings, false) {
+                continue;
+            }
             for (j, &key) in c.material_keys.iter().enumerate() {
-                mask |= u8::from(sheet(key)?) << j;
+                settings.sheet_mask |= u8::from(sheet(key)?) << j;
             }
             let generated = packed_contacts::calculate_known(
                 mesh,
                 matrix,
                 &c.mesh(),
                 &c.material_indices,
-                &packed_contacts::Settings {
-                    query: grid_world::convex_distance::ContactSettings {
-                        margin: query.margin,
-                        directions: query.directions,
-                    },
-                    contact_capacity: (capacity - contacts.len()).min(16),
-                    cache_enabled: true,
-                    candidate_capacity: 4096,
-                    sheet_mask: mask,
-                    correction_bounds: [f32::MAX; 4],
-                },
-                &known(c.checked),
+                &settings,
+                &known,
             )?;
             contacts.extend(generated.into_iter().map(|contact| BodyContact {
                 shape: i as u32 + 1,
@@ -275,22 +280,20 @@ impl Track {
         end: [f32; 4],
         cache: &mut Cache,
     ) -> Result<packed_world::Query, grid_world::Error> {
-        let shapes: Vec<_> = self
-            .chunks
-            .iter()
-            .enumerate()
-            .map(|(i, c)| packed_world::Shape {
-                id: i as u32 + 1,
-                mesh: Mesh {
-                    bounds: c.bounds,
-                    vertices: &c.positions,
-                    triangles: &c.triangles,
-                    nodes: &c.nodes,
-                    leaves: &c.leaves,
-                },
-                materials: &c.materials,
-            })
-            .collect();
-        packed_world::query(&self.grid, &shapes, start, end, cache)
+        packed_world::query_sequential(
+            &self.grid,
+            self.chunks.len(),
+            |i| {
+                let c = &self.chunks[i];
+                packed_world::Shape {
+                    id: i as u32 + 1,
+                    mesh: c.mesh(),
+                    materials: &c.materials,
+                }
+            },
+            start,
+            end,
+            cache,
+        )
     }
 }

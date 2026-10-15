@@ -73,6 +73,54 @@ pub fn collect(mesh: &Mesh<'_>, bounds: [V; 2], capacity: usize) -> Result<Outpu
     Ok(collect_set(mesh, bounds, capacity, None, false)?.output())
 }
 
+/// Input checks on the query bounds.
+pub(crate) fn bounds_valid(bounds: [V; 2]) -> bool {
+    !(bounds
+        .iter()
+        .flatten()
+        .any(|x| !x.is_finite() || x.abs() > 1e6)
+        || (0..3).any(|j| bounds[0][j] > bounds[1][j])
+        || bounds.iter().any(|p| p[3] != 1.))
+}
+
+/// Vertex bounds of every triangle reachable from the root when a traversal
+/// without rectangle culling meets no structural error, else `None`. A
+/// culled traversal visits a subset of those nodes, triangles and vertices
+/// at the same depths, so it meets no structural error either.
+pub(crate) fn reach(mesh: &Mesh<'_>) -> Option<[f32; 6]> {
+    let mut reach = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
+    let mut stack = vec![(0usize, 0usize)];
+    let mut visits = 0;
+    while let Some((index, depth)) = stack.pop() {
+        visits += 1;
+        if depth > 64 || visits > 1_000_000 {
+            return None;
+        }
+        let node = *mesh.nodes.get(index)?;
+        if node == 0xffff {
+            continue;
+        }
+        if node & 0x8000 != 0 {
+            for &id in mesh.leaves.get(&((node & 0x7fff) as usize))? {
+                for vertex in *mesh.triangles.get(id as usize)? {
+                    let p = mesh.vertices.get(vertex as usize)?;
+                    for j in 0..3 {
+                        reach[j] = reach[j].min(p[j]);
+                        reach[j + 3] = reach[j + 3].max(p[j]);
+                    }
+                }
+            }
+        } else {
+            let child = node as usize;
+            if child + 4 > mesh.nodes.len() {
+                return None;
+            }
+            stack.extend((0..4).map(|i| (child + i, depth + 1)));
+        }
+    }
+    Some(reach)
+}
+
 /// Input checks that depend only on the packed mesh (tree, counts, root
 /// bounds and every vertex). Immutable track meshes evaluate them once.
 pub fn mesh_valid(mesh: &Mesh<'_>) -> bool {
@@ -130,12 +178,7 @@ pub(crate) fn collect_set(
     }
     // All checks share one error, so the order of evaluation is free.
     if capacity > 32768
-        || bounds
-            .iter()
-            .flatten()
-            .any(|x| !x.is_finite() || x.abs() > 1e6)
-        || (0..3).any(|j| bounds[0][j] > bounds[1][j])
-        || bounds.iter().any(|p| p[3] != 1.)
+        || !bounds_valid(bounds)
         || !mesh_checked.unwrap_or_else(|| mesh_valid(mesh))
     {
         return Err(Error("invalid packed candidate controls"));

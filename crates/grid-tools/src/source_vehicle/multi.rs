@@ -294,9 +294,11 @@ impl MultiRuntime {
                 shapes: self.statics,
             };
             let manager = if car.deformation_enabled {
-                let mut body = self.geometry[i].clone();
-                let manager = vehicle_manager::calculate_with_world_publication(
-                    &state,
+                // The body geometry is copied only when a publication rebuilds it.
+                let base = &self.geometry[i];
+                let mut rebuilt: Option<crate::body_geometry::BodyGeometry> = None;
+                let manager = vehicle_manager::calculate_with_world_publication_staged(
+                    state,
                     &pool,
                     car.pair,
                     previous.manager.parameters[0],
@@ -304,18 +306,33 @@ impl MultiRuntime {
                     None,
                     query,
                     material,
-                    &mut |owner, delta| body.publish_deformation(owner, delta),
+                    &mut |owner, delta| {
+                        let (geometry, next) = rebuilt
+                            .as_ref()
+                            .unwrap_or(base)
+                            .deformation_publication(owner, delta)?;
+                        if geometry.is_some() {
+                            rebuilt = geometry;
+                        }
+                        Ok(next)
+                    },
                 )?;
-                published[i] = Some(body);
+                published[i] = rebuilt;
                 if let Some(registration) = &car.deformation_registration {
-                    let mut next = registration.clone();
-                    next.owner = manager.job.state.owner.vehicle.clone();
-                    registrations[i] = Some(next);
+                    registrations[i] = Some(deformation_world::Registration {
+                        owner: manager.job.state.owner.vehicle.clone(),
+                        limit: registration.limit,
+                        bulk: registration.bulk.clone(),
+                        random_seed: registration.random_seed,
+                        bulk_calls: registration.bulk_calls,
+                        records: registration.records,
+                        owner_toggle: registration.owner_toggle,
+                    });
                 }
                 manager
             } else {
-                vehicle_manager::calculate_with_world_contacts(
-                    &state,
+                vehicle_manager::calculate_with_world_contacts_staged(
+                    state,
                     &pool,
                     car.pair,
                     previous.manager.parameters[0],
@@ -333,8 +350,7 @@ impl MultiRuntime {
             }
             used += manager.contacts.used;
             previous.groups.bodies[i] = manager.job.state.owner.physical;
-            state = manager.job.state;
-            staged.push(state);
+            staged.push(manager.job.state);
             caches.push(cache);
         }
         let wheel_contacts = used;
@@ -376,14 +392,22 @@ impl MultiRuntime {
                 }
             }
             body_contacts = out.len();
+            // Each car's world hull is built once, when a pair first needs it.
+            let mut hulls: Vec<Option<crate::body_geometry::WorldHull>> =
+                (0..bodies.len()).map(|_| None).collect();
             for i in 0..bodies.len() {
                 for j in i + 1..bodies.len() {
                     if out.len() >= remaining {
                         break;
                     }
-                    let other = geometry[j].hull_world_triangles(&bodies[j])?;
+                    let other = match &mut hulls[j] {
+                        Some(hull) => hull,
+                        empty => empty.insert(crate::body_geometry::WorldHull::new(
+                            &geometry[j].hull_world_triangles(&bodies[j])?,
+                        )),
+                    };
                     let pair =
-                        geometry[i].car_contacts(&bodies[i], &other, remaining - out.len())?;
+                        geometry[i].car_contacts_hull(&bodies[i], other, remaining - out.len())?;
                     for hit in pair {
                         let mut c = [0; 32];
                         c[1] = i as u32 + 1;
@@ -429,8 +453,9 @@ impl MultiRuntime {
         };
         let active = wheel_contacts + body_contacts + car_contacts;
         for (i, state) in staged.iter_mut().enumerate() {
-            if let Some(registration) = &registrations[i] {
-                state.owner.vehicle = registration.owner.clone();
+            // The registration's owner is moved into the car and refilled below.
+            if let Some(registration) = &mut registrations[i] {
+                std::mem::swap(&mut state.owner.vehicle, &mut registration.owner);
             }
             state.owner.physical = world.groups.bodies[i];
             if let Some(parameters) = self.cars[i].body_events {
@@ -480,7 +505,7 @@ impl MultiRuntime {
                     .frame
                     .body
                     .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
-                registration.owner = state.owner.vehicle.clone();
+                registration.owner.clone_from(&state.owner.vehicle);
             }
         }
         // Lap timing per car, staged before any commit.
