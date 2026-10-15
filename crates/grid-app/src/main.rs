@@ -1,6 +1,7 @@
 //! Source reference viewer and serial driving prototype.
 mod body_damage;
 mod engine_sound;
+mod free_look;
 mod time_trial;
 mod tyre_sound;
 use bevy::{
@@ -1416,7 +1417,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(FixedUpdate, drive_tick)
             .add_systems(Last, drive_exit_log)
             .init_resource::<DeformationPresentation>()
-            .add_systems(Update, (drive_actions, drive_present).chain())
+            .init_resource::<free_look::FreeLook>()
+            .add_systems(
+                Update,
+                (drive_actions, free_look::update, drive_present).chain(),
+            )
             .add_systems(Update, update_start_lights);
     }
     let exit = app
@@ -2132,6 +2137,7 @@ fn drive_present(
     input: Option<Res<ButtonInput<KeyCode>>>,
     mut look_back: Local<Option<bool>>,
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
+    free_look: Option<Res<free_look::FreeLook>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -2233,8 +2239,11 @@ fn drive_present(
     let back = input.is_some_and(|i| i.pressed(KeyCode::KeyC))
         || *look_back.get_or_insert_with(|| std::env::var_os("GRID_LOOK_BACK").is_some());
     let side = if back { -1. } else { 1. };
-    let at = pose.transform_point3(Vec3::new(0., 1., 0.));
-    let eye = pose.transform_point3(Vec3::new(0., 3., -9. * side));
+    // Right mouse button orbits the chase camera (AUTHORED free look).
+    let target = Vec3::new(0., 1., 0.);
+    let offset = free_look::offset(free_look.as_deref(), Vec3::new(0., 2., -9. * side), side);
+    let at = pose.transform_point3(target);
+    let eye = pose.transform_point3(target + offset);
     **camera = Transform::from_translation(eye).looking_at(at, Vec3::Y);
     let v = driving.runtime.velocity();
     let speed = Vec3::new(v[0], v[1], v[2]).length() * 3.6;
@@ -2330,7 +2339,7 @@ fn drive_present(
     } else {
         terminal
             .as_deref()
-            .unwrap_or("Space: handbrake | C: look back | P: pause | R: reset")
+            .unwrap_or("Space: handbrake | C: look back | RMB: look around | P: pause | R: reset")
     };
     let audio = sound.map_or("", |s| {
         if s.muted {
