@@ -47,5 +47,36 @@ manager settings settles the stepping and confirms whether the solver defaults a
 the live values, before any prototype change. `maxContinuousCollisions` indicates the
 original has continuous collision detection, which the prototype lacks entirely.
 
+## Live capture (resolved)
+
+15 October 2026, owner-started research copy `grid-compat\grid.exe` (SHA b1da1b2d…34a6,
+PID 7208), Touring Cars Lacetti / Donington GP race, paused. New read-only tool
+`tools/read_grid_world_settings.ps1` (VM_READ + QUERY_LIMITED only) follows car list
+`0xE85F28` -> `+DB0` -> `+8` physical -> `+32C` world -> `+98` scheduler (back-link `+4`
+verified). Five samples, identical: **maxfps 10000, minfps 0, maxTimesToRun 1**, world
+`+7C4` 0, `+7C8` **0.0060602077 s**. The game overrides the config defaults at runtime:
+the world takes exactly **one step per rendered frame of the real frame delta**, with no
+substeps (6.06 ms at the owner's 165 Hz display).
+
+World `AD8BA0` copies the 15 config words into world `+788`; key order verified against
+`A74F00` (defaults 20 iterations / W 1.3 at indices 6/7). Live values:
+
+| Index | Key | Default | Live |
+| ---: | --- | --- | --- |
+| 0..2 | maxBodies/Constraints/DOFConstraints in island | 1000/1000/6000 | 200/1000/3000 |
+| 3 | globalCFM | 1e-5 | **0** |
+| 4 | globalERP | 0.2 | **0.2** |
+| 5 | minPenetrationDepth | 0.001 | **0.003** |
+| 6 | numQuickStepIterations | 20 | **5** |
+| 7 | quickStepW | 1.3 | **1.0** |
+| 8..9 | firstOrderCFM / ERP | 0 / 1.0 | **0 / 1.0** |
+| 10..11 | firstOrderMinPenetrationDepth / MinConstraintError | 0.02 / 0.02 | **0.02 / 0.02** |
+| 12..13 | firstOrderQuickStepW / iterations | 1.0 / 5 | **1.0 / 3** |
+
+Prototype today: fixed 16 ms steps, CFM 0.01, min penetration 0.125, W 0.8, 4 iterations,
+correction {4 iterations, CFM 0.01, W 0.8, threshold 0}. Evidence private:
+`local/world-settings/paused01.json`. The solver manager object (`B7A9E0`) was not reached
+from direct world pointers; its copy of these words remains unread.
+
 Private evidence: `local/behavior/20261015T0836028049249Z` (A72930/A02B70) and the later
 surveys of A74F00/6195F0/A749A0 and world stores 7C4/7C8 under `local/behavior/`.
