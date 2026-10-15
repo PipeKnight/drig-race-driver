@@ -12,14 +12,18 @@ pub(crate) struct Look {
     pub frames: u32,
     pub columns: u32,
     pub rows: u32,
+    /// `agescale` initial/final width, scale type code (0 = none) and
+    /// `growthPercentage`, as the original particle update 8A9CC0 uses them.
     pub width: [f32; 2],
-    /// Alpha at birth, middle and death; `in_time`/`out_time` are life fractions.
+    pub scale_type: u8,
+    pub growth: f32,
+    /// Alpha at birth, middle and death; `in_time`/`out_time` are seconds.
     pub alpha: [f32; 3],
     pub in_time: f32,
     pub out_time: f32,
     /// Colour at birth and death.
     pub colour: [[f32; 3]; 2],
-    /// Downward acceleration (m/s^2) and linear drag (1/s).
+    /// Downward acceleration (m/s^2) and linear drag rate (1/s).
     pub gravity: f32,
     pub drag: f32,
     /// Fraction of vertical speed kept when hitting the ground (0 = no collision).
@@ -34,6 +38,7 @@ pub(crate) struct Particle {
     pub ground: f32,
     pub age: f32,
     pub life: f32,
+    /// Width factor 1 + v/100 from the scale variance (no scale type only).
     pub scale: f32,
     pub rotation: f32,
     pub spin: f32,
@@ -41,22 +46,38 @@ pub(crate) struct Particle {
 }
 
 impl Particle {
+    /// Original 8A9CC0: start -> middle over `in_time` seconds, middle held,
+    /// middle -> end over the last `out_time` seconds of the varied life.
     fn alpha(&self) -> f32 {
-        let t = (self.age / self.life).clamp(0., 1.);
         let [start, middle, end] = self.look.alpha;
-        let a = self.look.in_time.clamp(0., 1.);
-        let b = (1. - self.look.out_time).clamp(a, 1.);
-        if t < a {
-            start + (middle - start) * t / a.max(1e-6)
-        } else if t <= b {
+        let (fade_in, fade_out) = (self.look.in_time, self.look.out_time);
+        if self.age < fade_in {
+            start + (middle - start) * self.age / fade_in
+        } else if self.age <= self.life - fade_out {
             middle
         } else {
-            middle + (end - middle) * (t - b) / (1. - b).max(1e-6)
+            middle + (end - middle) * ((self.age - (self.life - fade_out)) / fade_out).min(1.)
         }
     }
+    /// Original 8A9CC0 (0x8AB3ED..0x8AB527). Without a scale type the width is
+    /// initial x (1 + v/100) x growth^floor(25 age) and the final width is never
+    /// read; with one it is lerp(initial, final, F(age/life)) without variance.
     fn width(&self) -> f32 {
+        let [initial, last] = self.look.width;
         let t = (self.age / self.life).clamp(0., 1.);
-        (self.look.width[0] + (self.look.width[1] - self.look.width[0]) * t) * self.scale
+        let f = match self.look.scale_type {
+            0 => {
+                let steps = (self.age * 25.).floor() as i32;
+                return initial * self.scale * self.look.growth.powi(steps);
+            }
+            // The names are swapped against their exponents.
+            2 => t * t,
+            3 => 1. - (1. - t) * (1. - t),
+            4 => t * t * t,
+            5 => 1. - (1. - t).powi(3),
+            _ => t,
+        };
+        initial + (last - initial) * f
     }
 }
 
@@ -83,7 +104,9 @@ impl Store {
         for p in &mut self.particles {
             p.age += dt;
             p.velocity.y -= p.look.gravity * dt;
-            p.velocity *= (1. - p.look.drag * dt).max(0.);
+            if p.velocity.length() > 0.01 {
+                p.velocity -= p.velocity * (p.look.drag * dt).min(1.);
+            }
             p.position += p.velocity * dt;
             p.rotation += p.spin * dt;
             if let Some(bounce) = p.look.bounce
@@ -148,6 +171,8 @@ mod tests {
             columns: 2,
             rows: 2,
             width: [0.2, 0.4],
+            scale_type: 1,
+            growth: 1.,
             alpha: [0.0, 1.0, 0.0],
             in_time: 0.25,
             out_time: 0.25,
@@ -187,5 +212,45 @@ mod tests {
             store.step(0.01);
         }
         assert!(store.particles.is_empty());
+    }
+
+    #[test]
+    fn width_follows_the_original_scale_rules() {
+        let mut p = Particle {
+            look: Look {
+                // K_Gravel Large_Stones: 0.015 -> 4.0 without a scale type.
+                width: [0.015, 4.0],
+                scale_type: 0,
+                ..look()
+            },
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            ground: 0.,
+            age: 0.,
+            life: 0.8,
+            scale: 1.5,
+            rotation: 0.,
+            spin: 0.,
+            frame: 0,
+        };
+        for age in [0., 0.4, 0.79] {
+            p.age = age;
+            assert!((p.width() - 0.0225).abs() < 1e-6);
+        }
+        // growthPercentage is a per-1/25 s factor.
+        p.look.growth = 2.;
+        p.age = 0.1;
+        assert!((p.width() - 0.0225 * 4.).abs() < 1e-6);
+        // A scale type lerps initial -> final and ignores the variance.
+        p.look.scale_type = 3;
+        p.look.width = [0.25, 0.05];
+        p.age = 0.4;
+        assert!((p.width() - (0.25 - 0.2 * 0.75)).abs() < 1e-6);
+        // Alpha times are seconds: in 0.25 s, out over the last 0.25 s.
+        p.look.alpha = [0., 1., 0.];
+        p.age = 0.125;
+        assert!((p.alpha() - 0.5).abs() < 1e-6);
+        p.age = 0.675;
+        assert!((p.alpha() - 0.5).abs() < 1e-6);
     }
 }

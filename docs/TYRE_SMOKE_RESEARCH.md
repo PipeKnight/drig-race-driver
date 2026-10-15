@@ -252,6 +252,14 @@ held `0x8A98B0` / `0x8A99C0` (80 slots), re-request `0x8A9AF0`, stop `0x882EC0`,
    `cubicDecelerate` 1 − (1−t)², `quadraticAccelerate` t³, `quadraticDecelerate` 1 − (1−t)³
    (names swapped against exponents). scaleVariance and growthPercentage apply only
    without scaleType. Absent sizes default to 1.
+   Detail recorded on 15 October 2026 (F316, docs/GROUND_EFFECTS_RESEARCH.md §2 "Particle
+   size"). Without a scaleType (code 0):
+   - w = initial × (1 + v/100) × growth^⌊25·age⌋;
+   - v is a whole percent drawn in ±scaleVariance at spawn;
+   - the defaults are growth 1 and scaleVariance 1;
+   - finalWidth/finalHeight are never read, so `-1` or K_Gravel's 4.0 have no effect.
+   This port already follows the rule. Open: the renderer places quad corners at ±size
+   (`0x88B3DB`), so the drawn edge may be 2 × size.
 8. Alpha (seconds against the varied life L): lerp(start, middle) over inTime, hold middle,
    lerp(middle, end) over the last outTime; absent values are 1 / 0 s. Colour: linear from
    start to end over life.

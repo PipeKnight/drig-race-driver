@@ -140,14 +140,70 @@ Further rules [D]:
 
 | System / emitter | Texture (frames) | Rate/s | Life s | Speed, cone, inherit | Gravity / drag % | Collision, bounce | Width | Alpha |
 |---|---|---|---|---|---|---|---|---|
-| K_Grass Dusty mud | mud_grass03 | 48 | 0.2 ±33 % | 2±1, 25.7°, 0.225 | 200/100 | yes, 0.127 | 0.25→0.05 ±50 % | 0.70/0.60/0 |
-| K_Grass Muddy_Bits | mud_grass_bits04 (2×2) | 20 | 4.0 ±12.5 % | 6±2, 16.4°, 0.364 | 200/100 | yes, 0 | 0.06 ±71 % | 0/–/0 (in 0.2, out 0.4) |
-| K_AI_Grass Grassy Clumps, Dusty mud | mud_grass03 (2×2) | 4, 6 | 0.2, 1.0 | 6±2 / 2±1 | 200/100, 80/100 | no / – | 0.25 / 0.2→0.1 | – |
-| K_Gravel Large_Stones | Stones_Single01 (3×3) | 12 | 0.8 ±40 % | 3±1.44, 25.7°, 0.636 | 200/100 | yes, 1.0 | 0.015→4.0 | in 0.1, out 0.6 |
-| K_Pea_Gravel Large_Stones | Stones_Single01 (3×3) | 96 | 1.0 ±80 % | 5±3, 14.7°, 0.106 | 200/100 | yes, 0.623 | 0.02 | 0.75/0.54/0.24 |
-| K_Sand Sand | Sand02 | 24 | 0.3 ±48 % | 3.5±0.19, 18.7°, 0.364 | 150/100 | no | 0.15 | end 0 |
+| K_Grass Dusty mud | mud_grass03 | 48 | 0.2 ±33 % | 2±1, 25.7°, 0.225 | 200/100 | yes, 0.127 | 0.25→0.05 linear | 0.70/0.60/0 |
+| K_Grass Muddy_Bits | mud_grass_bits04 (2×2) | 20 | 4.0 ±12.5 % | 6±2, 16.4°, 0.364 | 200/100 | yes, 0 | 0.06 ±71 %, constant | 0/–/0 (in 0.2, out 0.4) |
+| K_AI_Grass Grassy Clumps, Dusty mud | mud_grass03 (2×2) | 4, 6 | 0.2, 1.0 | 6±2 / 2±1 | 200/100, 80/100 | no / – | 0.25 ±44 % constant / 0.2→0.1 linear | – |
+| K_Gravel Large_Stones | Stones_Single01 (3×3) | 12 | 0.8 ±40 % | 3±1.44, 25.7°, 0.636 | 200/100 | yes, 1.0 | 0.015 ±70 %, constant (finalWidth 4.0 unused) | 1/1/1 (in 0.1, out 0.6) |
+| K_Pea_Gravel Large_Stones | Stones_Single01 (3×3) | 96 | 1.0 ±80 % | 5±3, 14.7°, 0.106 | 200/100 | yes, 0.623 | 0.02→0.02 linear | 0.75/0.54/0.24 |
+| K_Sand Sand | Sand02 | 24 | 0.3 ±48 % | 3.5±0.19, 18.7°, 0.364 | 150/100 | no | 0.15 ±35 %, constant | end 0 |
 
 Births: emitters sit 0.1–0.3 m above the contact, tilted −0.3° to −20° (`relOrientation` x).
+Drag rates (0.003 × influence × rangeX × 0.01 per second, below): K_Grass Dusty mud 6/s,
+Muddy_Bits 2.4/s; K_Gravel Large_Stones 0.6/s; K_Pea_Gravel stones 3/s; K_Sand Sand 0.9/s.
+Alpha `inTime`/`outTime` are seconds (TYRE_SMOKE_RESEARCH.md §4.2).
+
+### Particle size (recorded 15 October 2026, F316)
+
+Static, from the hash-pinned `grid-unpacked.exe` (capstone disassembly and the existing Ghidra
+output in the main checkout's `local/tyre-smoke/`).
+
+- [V] Parser `8A49A0` (`<agescale>` branch at `0x8A5DDE`) stores, in the emitter:
+  - `initialWidth` +0x1AC and `initialHeight` +0x1B0;
+  - `finalWidth` +0x1B4 and `finalHeight` +0x1B8;
+  - `scaleVariance` +0x1BC;
+  - `scaleType` +0x1C4 as a code: linear 1, cubicAccelerate 2, cubicDecelerate 3,
+    quadraticAccelerate 4, quadraticDecelerate 5. Absent or unknown leaves 0.
+  - `<scale growthPercentage>` goes to +0x1C0.
+  - The values are stored raw, with no unit conversion.
+- [V] Emitter defaults `875620`: the five size floats and growth are 1.0; scaleType is 0.
+- [V] Spawn `890A10` (`0x890CB9..0x890D32`):
+  - the particle width/height (+0x20/+0x24) start at the initial values;
+  - a whole percent v = trunc(U(−sv, sv)) is stored as a short at +0x80, where sv is
+    scaleVariance.
+- [V] Particle update `8A9CC0` (`0x8AB3ED..0x8AB527`):
+  - **scaleType 0:** width = initialWidth × (1 + v·0.01) × growth^⌊25·age⌋. The integer power
+    is `8B5320`; age is in seconds. `finalWidth`/`finalHeight` are **never read**.
+  - **scaleType 1–5:** width = initial + (final − initial)·F(t), with t = clamp(age/life, 0, 1)
+    and F = t, t², 1−(1−t)², t³, 1−(1−t)³. v and growth are not used.
+- Consequences [V for the shipped data]:
+  - Every debris emitter whose final size is −1 (Muddy_Bits, Grassy Clumps, Sand) or 4.0
+    (K_Gravel Large_Stones) has no scaleType, so its final size is ignored. The **gravel stones
+    stay 0.015 × (1 ± 0.70)**, about 0.5–2.6 cm, with growth 1.
+  - The F313 port read 0.015→4.0 as a linear lerp in metres. Opaque stone sprites grew to
+    about 4 m (up to 6.8 m with the variance) within 0.8 s. This is the "big flat pictures"
+    on gravel and dirt that the owner reported.
+  - `finalWidth −1` has no meaning in the original: it only appears on emitters that do not
+    read it.
+  - The tyre-smoke port (`grid_tools::tyre_smoke`, `sprites`) already implements this rule.
+    Its only differences: it does not truncate v to a whole percent, and it defaults a
+    missing scaleVariance to 0 instead of 1. No shipped emitter without a scaleType omits
+    scaleVariance, so neither difference has an effect.
+- [V] `frequencies` are per-frame weights. The parser normalises them to sum 1, then
+  accumulates them, so the K_Gravel values (which only look cumulative) give frame 8 about
+  80 %, frame 7 16 % and frame 6 3 %. `grid_formats::kickup` already normalises them the same
+  way.
+- [D, extent open] Renderer `886BD0`: the camera-facing corner code (`0x88B3DB..0x88B7EE`) puts
+  the corners at (±width, ±height) in the particle basis. The basis comes from normalised
+  rotation rows (`0x88AC29` normalise → `4695B0`). [I] If that basis is orthonormal, the
+  drawn quad is 2 × size: a 3 cm stone, and twice the current smoke sizes. Both ports
+  currently draw the size as the full quad edge. This is not adopted until it is confirmed.
+- [D] The other appearance properties match the port's approach:
+  - Large_Stones is `InverseView` (a camera-facing billboard in the original as well);
+  - its particle type `lit` uses shader `pfx_lit` with the lit stream (normal + TEXCOORD1
+    light sample) and no depth/soft variant (`litDepth` is the Pea_Gravel/Muddy_Bits type);
+  - its alpha is opaque (absent start/middle/end = 1), shaped by the texture alpha.
+  The original stones are flat camera-facing sprites too; what made them look like flat
+  pictures in the port was their size.
 
 ## 3. Ground cover (grass)
 
@@ -234,10 +290,11 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
 |---|---|---|
 | Player/AI variant, AI front-wheel rule, band B, load L, slip S, rate/speed caps, F, D, ignore distance, 12,000 limit | Original rules | [D] |
 | Slip threshold `lo` | Rear 1.7, front 3.5 (TYRE_SMOKE_RESEARCH.md §3.2) | [V] |
-| Drag rate for 100 % | 1/s | AUTHORED |
-| Gravity | 9.81 × influence % | [I] |
+| Drag | v −= v·dt·0.003·influence·rangeX·0.01 (F316; was an AUTHORED 1/s) | [V] |
+| Gravity | 9.81 × influence % | [V] |
+| Size | Original rule above: scaleType 0 = initial × (1 + v/100) × growth^⌊25·age⌋, else lerp by F(age/life); quad edge = size (extent open) | [V] (F316) |
+| Alpha | inTime/outTime in seconds of the varied life (F316; were life fractions) | [V] |
 | Emitter axis | Up, tilted by the birth pitch, with a random cone of the divergence angle | [I] |
-| Final width −1 | Keeps the initial width | [I] |
 | Collision | Bounce on the spawn wheel's ground height | AUTHORED |
 | Lighting | Lit/unlit by particle type, alpha blended | AUTHORED |
 
@@ -291,6 +348,25 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
     triangle (`effect_mesh`).
   - Earlier A/B runs under 100 % CPU from parallel builds varied from 58 to 74 s.
 - Grass load takes about 0.1 s (`.grs` read 9 ms).
+- **Gravel size fix (F316)**, renders in the main checkout's `local/ground-effects/gravel-size/`.
+  Before = the F315 playable `7f22c32` (sha256 `c34ffe711fc4…`); after = this change.
+  - **Where the gravel is:** Donington `route_0/track.jpk` has K_Gravel surface LGDR
+    (7,078 triangles) and pea-gravel MPDR (6,217). Strips of both lie beyond the first
+    straight, at about (−490…−600, −15…−75).
+  - **Run:** `--drive --drive-ticks 652/660 --throttle 1 --steering -0.02` crosses LGDR at
+    ticks 636–660, at about 50 m/s.
+  - **Results:**
+    - `lgdr-before-7f22c32.png` (chase camera): brown stone sprites several metres across
+      behind the car.
+    - `lgdr-after.png`: only specks at the wheel.
+    - `lgdr-side-*.png` (`GRID_EFFECTS_CAMERA`): half-metre stone quads at the wheels before; after,
+      only specks (stones of about 0.5–2.6 cm) at this 8 m distance.
+    - Grass (`grass-side-*.png`, throttle 0.5, steering −0.3, tick 272; 400 emitted /
+      169 live in both runs): small mud bits both before and after. They stay visible
+      longer after the change, because the alpha fades are now seconds rather than life
+      fractions.
+  - No runtime capture of the original exists; the claim is "matches the recovered rule".
+    The size convention (half or full extent) remains open.
 
 ## 6. Open items
 
@@ -300,8 +376,11 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
 - The tyre-width settings field `+10A4`.
 - Skid COLOR channel mapping (runtime capture would settle it); skid normal map and two-UV
   crossfade; per-car mark LOD.
-- Emitter direction convention, drag units, birth timelines (`start`/`end`), the meaning of
-  `finalWidth = -1`.
+- Emitter direction convention: the tyre-smoke research has emitters along local +Z of a
+  rearward wheel frame, while the debris port emits along the tilted up axis. Also open: birth
+  timelines (`start`/`end`), spin (`initialRotationVariance` is not parsed).
+- Quad extent: is the stored size the half or the full edge (renderer corners at ±size,
+  section 2)? This affects tyre smoke and debris alike.
 - Ground-cover fixed meshes (mode 1, other tracks); the sprite fields 90/0.8/1.0 and the type
   float 16.0; GPU billboarding to avoid CPU mesh rebuilds; terrain-slope shear and fog.
 - Unify `grid_formats::kickup` with the overlapping `grid_tools::tyre_smoke` parsers (both on

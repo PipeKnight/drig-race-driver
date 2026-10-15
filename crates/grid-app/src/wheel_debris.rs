@@ -34,9 +34,10 @@ const HIGH_SPEED: f32 = 15.;
 /// 3.5 (docs/TYRE_SMOKE_RESEARCH.md 3.2) [V].
 const REAR_SLIP: f32 = 1.7;
 const FRONT_SLIP: f32 = 3.5;
-/// Drag `influence` 100 % as a linear drag rate (1/s); unit not recovered (AUTHORED).
-const DRAG_RATE: f32 = 1.0;
+/// Original particle update 8A9CC0: gravity 0.01*influence*9.81 m/s^2, drag
+/// v -= v*dt*0.003*influence*rangeX*0.01 (docs/TYRE_SMOKE_RESEARCH.md 4.2) [V].
 const GRAVITY: f32 = 9.81;
+const DRAG: f32 = 0.003 * 0.01;
 
 #[derive(Clone, Debug)]
 struct EmitterSpec {
@@ -193,21 +194,15 @@ fn load(root: &Path) -> Result<Loaded, Box<dyn std::error::Error>> {
                     frames: e.frames.max(1),
                     columns: e.columns.max(1),
                     rows: e.rows.max(1),
-                    // A negative final size keeps the initial size [I].
-                    width: [
-                        e.width[0],
-                        if e.width[1] < 0. {
-                            e.width[0]
-                        } else {
-                            e.width[1]
-                        },
-                    ],
+                    width: e.width,
+                    scale_type: e.scale_type,
+                    growth: e.growth,
                     alpha: e.alpha,
                     in_time: e.in_time,
                     out_time: e.out_time,
                     colour: e.colour,
                     gravity: GRAVITY * e.gravity / 100.,
-                    drag: DRAG_RATE * e.drag / 100.,
+                    drag: DRAG * e.drag * e.drag_range,
                     bounce: e.collision.then_some(e.bounce),
                 },
                 rate: e.rate,
@@ -219,7 +214,12 @@ fn load(root: &Path) -> Result<Loaded, Box<dyn std::error::Error>> {
                 inherit: e.inherit,
                 position: Vec3::from_array(birth.position),
                 pitch: birth.orientation[0].to_radians(),
-                scale_variance: e.scale_variance / 100.,
+                // Only emitters without a scale type use the variance [V 8AB3ED].
+                scale_variance: if e.scale_type == 0 {
+                    e.scale_variance
+                } else {
+                    0.
+                },
                 initial_rotation: e.initial_rotation.to_radians(),
                 spin_variance: e.spin_variance.to_radians(),
                 cumulative,
@@ -338,7 +338,8 @@ impl WheelDebris {
                     ground: wheel.point.y,
                     age: 0.,
                     life: (spec.life * (1. + spec.life_variance * r.signed())).max(0.02),
-                    scale: (1. + spec.scale_variance * r.signed()).max(0.05),
+                    // Spawn 890A10 draws a whole percent v in +-scaleVariance.
+                    scale: 1. + (spec.scale_variance * r.signed()).trunc() / 100.,
                     rotation: spec.initial_rotation * r.unit(),
                     spin: spec.spin_variance * r.signed(),
                     frame: frame.min(spec.look.frames - 1),

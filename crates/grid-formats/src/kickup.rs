@@ -152,9 +152,10 @@ pub struct Emitter {
     pub weights: Vec<f32>,
     pub collision: bool,
     pub bounce: f32,
-    /// Gravity and drag `influence` in percent.
+    /// Gravity and drag `influence` in percent; drag `rangeX`.
     pub gravity: f32,
     pub drag: f32,
+    pub drag_range: f32,
     pub rate: f32,
     pub life: f32,
     /// Life variance in percent.
@@ -164,9 +165,16 @@ pub struct Emitter {
     /// Cone half-angle in degrees.
     pub divergence: f32,
     pub inherit: f32,
+    /// `agescale` initial and final width (defaults 1, emitter defaults 875620).
     pub width: [f32; 2],
-    /// Width variance in percent.
+    /// `agescale` scaleType as the original's code (parser 8A49A0): 0 absent,
+    /// 1 linear, 2 cubicAccelerate, 3 cubicDecelerate, 4 quadraticAccelerate,
+    /// 5 quadraticDecelerate.
+    pub scale_type: u8,
+    /// Width variance in percent (default 1); used only without a scale type.
     pub scale_variance: f32,
+    /// `scale` growthPercentage (default 1); used only without a scale type.
+    pub growth: f32,
     pub alpha: [f32; 3],
     pub in_time: f32,
     pub out_time: f32,
@@ -245,6 +253,7 @@ pub fn read_systems(doc: &binxml::Document<'_>) -> Result<(Vec<Emitter>, Vec<Sys
                     bounce: 0.,
                     gravity: 0.,
                     drag: 0.,
+                    drag_range: 0.,
                     rate: 0.,
                     life: 1.,
                     life_variance: 0.,
@@ -252,8 +261,10 @@ pub fn read_systems(doc: &binxml::Document<'_>) -> Result<(Vec<Emitter>, Vec<Sys
                     speed_variation: 0.,
                     divergence: 0.,
                     inherit: 0.,
-                    width: [1., -1.],
-                    scale_variance: 0.,
+                    width: [1., 1.],
+                    scale_type: 0,
+                    scale_variance: 1.,
+                    growth: 1.,
                     alpha: [1., 1., 1.],
                     in_time: 0.,
                     out_time: 0.,
@@ -295,7 +306,10 @@ pub fn read_systems(doc: &binxml::Document<'_>) -> Result<(Vec<Emitter>, Vec<Sys
                             }
                             "force" => match attr(c, "type") {
                                 Some("gravity") => emitter.gravity = float(c, "influence", 0.)?,
-                                Some("drag") => emitter.drag = float(c, "influence", 0.)?,
+                                Some("drag") => {
+                                    emitter.drag = float(c, "influence", 0.)?;
+                                    emitter.drag_range = float(c, "rangeX", 0.)?;
+                                }
                                 _ => {}
                             },
                             "spawn" => emitter.rate = float(c, "rate", 0.)?,
@@ -317,9 +331,18 @@ pub fn read_systems(doc: &binxml::Document<'_>) -> Result<(Vec<Emitter>, Vec<Sys
                             }
                             "agescale" => {
                                 emitter.width =
-                                    [float(c, "initialWidth", 1.)?, float(c, "finalWidth", -1.)?];
-                                emitter.scale_variance = float(c, "scaleVariance", 0.)?;
+                                    [float(c, "initialWidth", 1.)?, float(c, "finalWidth", 1.)?];
+                                emitter.scale_variance = float(c, "scaleVariance", 1.)?;
+                                emitter.scale_type = match attr(c, "scaleType") {
+                                    Some("linear") => 1,
+                                    Some("cubicAccelerate") => 2,
+                                    Some("cubicDecelerate") => 3,
+                                    Some("quadraticAccelerate") => 4,
+                                    Some("quadraticDecelerate") => 5,
+                                    _ => 0,
+                                };
                             }
+                            "scale" => emitter.growth = float(c, "growthPercentage", 1.)?,
                             "alpha" => {
                                 emitter.alpha = [
                                     float(c, "start", 1.)?,
