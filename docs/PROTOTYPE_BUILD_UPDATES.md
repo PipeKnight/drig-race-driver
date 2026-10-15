@@ -1,6 +1,13 @@
 # Playable build updates
 
-Latest verified refresh: **6ffba7dc15fd-dirty**, built 15 October 2026 ~02:45 UTC, release SHA256
+Latest verified refresh: **99984583fe3f-dirty**, built 15 October 2026 ~03:19 UTC, release SHA256
+3e73714daa56c2e2a681819ec7357e4ea54267a70ae3ab34c09bacd55ac686df, manifest
+local/playtest/build-20261015T0319056811039Z/. Tyre walls, armco, cushions, chicane tyre stacks
+and brake-marker boards are now solid ([route props](ROUTE_PROPS_COLLISION.md)); impacts happen
+at the visible barrier instead of the invisible sheet behind it. Includes tyre audio. Source
+driving and Bevy checks pass; autonomous three laps unchanged. Owner crash playtest pending.
+
+Previous refresh: **6ffba7dc15fd-dirty**, built 15 October 2026 ~02:45 UTC, release SHA256
 539082e9fffc7a2583a4701e71a3ec17f6c7201dfc19ab52ca33ba52b29f8717, manifest
 local/playtest/build-20261015T0245060785757Z/. Adds [tyre and surface audio](TYRE_AUDIO.md)
 (roll, wheelspin peel, locking slide, skid, scrub per wheel; M mutes engine and tyres).
