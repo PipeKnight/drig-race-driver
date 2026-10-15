@@ -1,6 +1,13 @@
 # Playable build updates
 
-Latest verified refresh: **8391dc48f609** (clean), built 15 October 2026 ~10:06 UTC, release SHA256
+Latest verified refresh: **44d2e884fde3** (clean), built 15 October 2026 ~10:28 UTC, release SHA256
+c20036c2094e0536a4bb8f42c3e5a276af7f84f5a55ab14a812090f8563aca1c, manifest
+local/playtest/build-20261015T1027595857969Z/. With impact damage enabled, car-to-car collisions
+now dent both cars, following the recovered original deformation callbacks
+([F292](MULTI_CAR_INTEGRATION.md#f292-car-to-car-deformation-15-october-2026-claude-code)).
+Source driving and Bevy checks pass.
+
+Previous refresh: **8391dc48f609** (clean), built 15 October 2026 ~10:06 UTC, release SHA256
 537bb41729c66ae019e1b24c5a2e30d36db1818f372f28aa76e2b5cc8469e122, manifest
 local/playtest/build-20261015T1005376518145Z/. As 25588de, plus opponents keep their own body
 dents (previously they would have mirrored the player's). Source driving and Bevy checks pass.
