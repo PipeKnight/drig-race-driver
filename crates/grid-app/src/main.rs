@@ -2267,8 +2267,6 @@ fn camera_transform(orbit: &Orbit) -> Transform {
     ) * orbit.distance;
     Transform::from_translation(target + offset).looking_at(target, Vec3::Y)
 }
-// Bevy system parameters are separate ECS borrows, not a public call interface.
-#[allow(clippy::too_many_arguments)]
 fn graphics_texture_state(images: Res<Assets<Image>>, mut emitted: Local<bool>) {
     if *emitted {
         return;
@@ -2292,6 +2290,8 @@ fn graphics_texture_state(images: Res<Assets<Image>>, mut emitted: Local<bool>) 
     );
 }
 
+// Bevy system parameters are separate ECS borrows, not a public call interface.
+#[allow(clippy::too_many_arguments)]
 fn setup(
     mut commands: Commands,
     mut car: ResMut<Car>,
