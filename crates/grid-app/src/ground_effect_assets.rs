@@ -2,9 +2,7 @@
 //! installation's PSSG packages (never copied into the repository).
 use bevy::{
     asset::RenderAssetUsages,
-    image::{
-        CompressedImageFormats, ImageAddressMode, ImageSampler, ImageSamplerDescriptor, ImageType,
-    },
+    image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
 };
@@ -39,11 +37,8 @@ pub(crate) fn image(dds: &[u8], repeat: bool) -> Result<Image, Box<dyn std::erro
     } else {
         ImageAddressMode::ClampToEdge
     };
-    Ok(Image::from_buffer(
+    Ok(super::texture_upload::image(
         dds,
-        ImageType::Extension("dds"),
-        CompressedImageFormats::BC,
-        true,
         ImageSampler::Descriptor(ImageSamplerDescriptor {
             address_mode_u: mode,
             address_mode_v: ImageAddressMode::Repeat,

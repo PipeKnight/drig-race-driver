@@ -20,6 +20,7 @@ mod ground_effect_assets;
 mod input;
 mod particles;
 mod skid_marks;
+mod texture_upload;
 mod time_trial;
 mod tyre_smoke;
 mod tyre_sound;
@@ -30,9 +31,7 @@ use bevy::{
     asset::RenderAssetUsages,
     camera::RenderTarget,
     camera::primitives::{Aabb, MeshAabb},
-    image::{
-        CompressedImageFormats, ImageAddressMode, ImageSampler, ImageSamplerDescriptor, ImageType,
-    },
+    image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
     render::{
@@ -1656,6 +1655,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .insert_resource(InitialOrbit(orbit.clone()))
         .insert_resource(orbit)
         .insert_resource(ClearColor(Color::srgb(0.055, 0.07, 0.095)))
+        .add_systems(PreStartup, texture_upload::configure)
         .add_systems(Startup, setup)
         .run();
     if !matches!(exit, AppExit::Success) {
@@ -1694,19 +1694,10 @@ fn setup(
         adapter.driver_info,
         device.features()
     );
-    assert!(
-        device
-            .features()
-            .contains(bevy::render::render_resource::WgpuFeatures::TEXTURE_COMPRESSION_BC),
-        "viewer requires GPU BC texture support"
-    );
     let mut texture_handles = BTreeMap::new();
     for (name, dds) in &car.textures {
-        let image = Image::from_buffer(
+        let image = texture_upload::image(
             dds,
-            ImageType::Extension("dds"),
-            CompressedImageFormats::BC,
-            true,
             if car.track {
                 ImageSampler::Descriptor(ImageSamplerDescriptor {
                     address_mode_u: ImageAddressMode::Repeat,
@@ -1875,11 +1866,8 @@ fn setup(
                                     .entry((car, texture.clone()))
                                     .or_insert_with(|| {
                                         images.add(
-                                            Image::from_buffer(
+                                            texture_upload::image(
                                                 dds,
-                                                ImageType::Extension("dds"),
-                                                CompressedImageFormats::BC,
-                                                true,
                                                 ImageSampler::Default,
                                                 RenderAssetUsages::MAIN_WORLD
                                                     | RenderAssetUsages::RENDER_WORLD,
@@ -2062,6 +2050,7 @@ fn capture(
                     match result {
                         Ok(()) => {
                             println!("saved {}", path.display());
+                            println!("{}", texture_upload::summary());
                             exit.write(AppExit::Success);
                         }
                         Err(e) => {

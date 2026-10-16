@@ -14,12 +14,7 @@
 //! (the original builds physical hinges in 9DB0E0 -> 9AA960), detached-part
 //! flight, glass shards from the lac.ppts points, window anchor layout and the
 //! crack-map materials standing in for the original `_Cracked` shader input.
-use bevy::{
-    asset::RenderAssetUsages,
-    camera::primitives::Aabb,
-    image::{CompressedImageFormats, ImageSampler, ImageType},
-    prelude::*,
-};
+use bevy::{asset::RenderAssetUsages, camera::primitives::Aabb, image::ImageSampler, prelude::*};
 use grid_tools::body_impacts::Impact;
 use std::{collections::BTreeMap, path::Path};
 
@@ -1145,11 +1140,8 @@ fn present(
                 .textures
                 .get(&format!("lacetti/{name}"))
                 .and_then(|dds| {
-                    Image::from_buffer(
+                    crate::texture_upload::image(
                         dds,
-                        ImageType::Extension("dds"),
-                        CompressedImageFormats::BC,
-                        true,
                         ImageSampler::Default,
                         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
                     )

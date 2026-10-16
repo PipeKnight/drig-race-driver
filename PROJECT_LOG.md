@@ -1,5 +1,20 @@
 # GRID engine project log
 
+F329 texture fallback for GPUs without BC (P8) (2026-10-16, Claude Code). Details are in docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.2.
+- grid-app no longer asserts TEXTURE_COMPRESSION_BC. A PreStartup system, texture_upload::configure, reads the RenderDevice features and logs `texture upload: gpu_bc=.. path=..`. All five DDS upload sites (main.rs car/track and liveries, damage_parts, ground_effect_assets, tyre_smoke) call texture_upload::image.
+  - With BC, the image is Bevy's DDS image, exactly as before.
+  - Without BC, or with GRID_TEXTURE_FALLBACK=1, BC1/BC3 levels are decoded to RGBA8 on the CPU by our own decoder (no new crate), keeping the mip chain. BGRA8 images are unchanged.
+- [V] RTX 4070 / Vulkan, headless --render of car, Donington `--scene reference --view start`, and an 11-opponent `--drive` race. Private evidence is in the worktree local/texture-fallback/ (PNGs, logs, runs.txt).
+  - BC path: PNGs byte-identical to the parent commit's exe in all three scenes.
+  - Forced fallback vs BC: 77.8–96.8 % of pixels identical, ≥ 99.4 % within 1 level, max 115 on ≤ 0.005 % of pixels; uniform ±1 rounding noise, no visible difference.
+  - Texel memory: car 9.42 → 53.39 MB; Donington 46.80 → 287.92 MB; 12-car race 91.40 → 593.12 MB (6.5×). The process GPU dedicated counter went 472 → 723 MiB (Donington) and 536–595 → 792 MiB (race); it is a coarse proxy.
+  - Load time: CPU decode 56–91 ms (car), 0.46 s (Donington; 2.8 s under build contention), 1.13 s (race), single-threaded. Wall times were dominated by other sessions' builds and are not compared.
+- Unit tests cover the BC1 3/4-colour modes, the opaque BC3 colour block, 565 expansion, BC3 alpha modes, and mip cropping/truncation.
+- Checks: cargo clippy --workspace --all-targets -D warnings clean; cargo test --workspace --release -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS: 363 passed, 0 failed; cargo/rustc 1.99.0.
+- Design note only, not implemented: an import-time ASTC 6×6/ETC2 KTX2 cache for Android memory (doc 7.2).
+- Not done: no Android or no-BC GPU run; the playable was not rebuilt.
+- Next: P9 Android skeleton; the texture memory budget belongs to P12.
+
 F328 disk-use prevention (2026-10-16, Claude Code): owner approved the docs/DISK_USAGE.md section 7 measures.
 - Machine-wide ~/.cargo/config.toml (outside the repo) now also sets build-dir = "C:/cargo-build/{workspace-path-hash}". Intermediate cargo output leaves OneDrive, one subfolder per worktree path; final binaries stay in target/, so the launchers and tools/update_prototype.ps1 are unchanged. Verified: cargo check -p grid-formats with cargo 1.99.0 created C:/cargo-build/6c... and exited 0. Every checkout rebuilds once.
 - Cargo.toml [profile.dev]: debug = "line-tables-only", and dependencies debug = false. This shrinks debug builds, where .pdb files took over half of target/debug. Generated code and the release/soak profiles are unchanged.

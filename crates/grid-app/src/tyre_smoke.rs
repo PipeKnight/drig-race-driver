@@ -6,7 +6,7 @@
 use bevy::{
     asset::RenderAssetUsages,
     camera::visibility::NoFrustumCulling,
-    image::{CompressedImageFormats, ImageSampler, ImageType},
+    image::ImageSampler,
     light::{NotShadowCaster, NotShadowReceiver},
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
@@ -74,11 +74,8 @@ fn setup(
     };
     for name in library.texture_names() {
         let (dds, _) = &textures[name];
-        let image = match Image::from_buffer(
+        let image = match super::texture_upload::image(
             dds,
-            ImageType::Extension("dds"),
-            CompressedImageFormats::BC,
-            true,
             ImageSampler::linear(),
             RenderAssetUsages::RENDER_WORLD,
         ) {

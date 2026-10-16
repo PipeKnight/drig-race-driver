@@ -135,8 +135,8 @@ The runtime itself never calls Python or anything in `tools/`. Those scripts are
 
 ### 1.5 Renderer [V code, S device data]
 
-- The app asserts the GPU feature `TEXTURE_COMPRESSION_BC` (`main.rs:1661-1666`).
-- Every texture is uploaded as BC1/BC3 DDS, or BGRA8 for a few named ones (`grid-formats/src/texture.rs`; `main.rs:1669`, `:1842`; `ground_effect_assets.rs:42`; `tyre_smoke.rs:77`; `damage_parts.rs:1144`).
+- Until P8 the app asserted the GPU feature `TEXTURE_COMPRESSION_BC`. Since P8 (7.2) it detects BC at start-up and decodes BC1/BC3 to RGBA8 on the CPU when BC is missing.
+- Every texture is a BC1/BC3 DDS, or BGRA8 for a few named ones (`grid-formats/src/texture.rs`). All five upload sites now go through `grid-app/src/texture_upload.rs`.
 - Bevy's DDS loader does **not** decompress on the CPU; it fails with "Format not supported by this GPU".
 - Android support for BC:
   - Vulkan `textureCompressionBC` is reported by about 37.5 % of Android devices, against about 99.9 % for ETC2/ASTC (vulkan.gpuinfo.org).
@@ -515,7 +515,7 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 | **P5** | **Portability groundwork**: `Settings` file replacing env switches and launcher variables (CLI stays as an override), install discovery (Steam `libraryfolders.vdf`) and case-insensitive file index, per-platform data dir for records/logs, Rust port of the BP01/DF01 readers from the user's `grid.exe` | — | 1–2 | the Windows playable runs from the settings file with no env vars; the BP01/DF01 bytes are equal to the Python output |
 | **P6** | **CD01 without the unpacked image** (research): find whether the 44-direction table can be computed from data, or define a documented one-time desktop preparation step | — | 1 | a decision recorded; ideally CD01 bytes reproduced from the Steam `grid.exe` alone |
 | **P7** | **Linux / Steam Deck**: native build, Bevy deps, case-sensitivity run (Donington and Nürburgring), shell launchers; Deck controller via P2 | P5 (P2 for the Deck) | 1–2 | a Linux lap equal to Windows apart from the libm caveat (1.3) |
-| **P8** | **Texture fallback**: remove the BC assert; CPU BC1/BC3 decode when the GPU lacks BC (`bcdec_rs` or our own decoder); optional import-time ASTC/ETC2 cache | — | 1 | the app renders with BC disabled on desktop (forced fallback flag), with a recorded memory delta |
+| **P8** | ✔ (7.2). **Texture fallback**: remove the BC assert; CPU BC1/BC3 decode when the GPU lacks BC (`bcdec_rs` or our own decoder); optional import-time ASTC/ETC2 cache | — | 1 | the app renders with BC disabled on desktop (forced fallback flag), with a recorded memory delta |
 | **P9** | **Android skeleton**: install and record SDK cmdline-tools, NDK r30 LTS, JDK, Gradle/AGP, cargo-ndk 4.1.2; `grid-app` as `cdylib` with `#[bevy_main]`; Gradle project from Bevy's mobile example (GameActivity 4.4.x matching android-activity 0.6.1, minSdk 31 or 26, target 36); landscape, keep-screen-on; lifecycle (suspend/resume) | P5, P8 | 1–2 | an APK under `local/` that starts on the owner's phone and shows the car on Donington from data placed with `adb push` |
 | **P10** | **Android data import**: folder picker (`ACTION_OPEN_DOCUMENT_TREE`) via JNI, copy to app-specific storage, hash manifest, BP01/DF01 import (P5), progress UI | P9 | 1–2 | data copied from `Documents/GRID` on the phone; the race starts with no adb |
 | **P11** | **Android controls**: tilt source (`ndk-sys` sensor, calibration, maxAngle setting), touch HUD, optional Android pad bridge | P1, P9 | 1 | **the fun target**: a lap steering by tilt with on-screen throttle and brake |
@@ -607,6 +607,75 @@ Code: `crates/grid-app/src/input.rs` (action layer, human record, edge queue, ga
 - No rumble.
 - The wheel class has no extrapolation or wheel preset yet (P3).
 - Raw Bevy trigger values are not re-quantised to the original's b/256.
+
+### 7.2 Done: P8 texture fallback
+
+Code: `crates/grid-app/src/texture_upload.rs`, plus one-line changes at the five upload sites (`main.rs` car/track textures and liveries, `damage_parts.rs`, `ground_effect_assets.rs`, which also serves skid marks, debris and ground detail, and `tyre_smoke.rs`). No new dependency.
+
+**Behaviour.**
+
+- A `PreStartup` system, `texture_upload::configure`, reads `RenderDevice::features()` before any `Startup` system creates images.
+  - It logs `texture upload: gpu_bc=<bool> path=bc|rgba8-cpu-decode (...)`.
+  - The hard `TEXTURE_COMPRESSION_BC` assert in `setup` is gone; the adapter/features log line stays.
+- `texture_upload::image(dds, sampler, usage)` always parses the DDS with Bevy's own loader, `Image::from_buffer(.., CompressedImageFormats::BC, is_srgb = true, ..)`, exactly as before.
+  - BC path: that image is returned unchanged.
+  - CPU path: when the format is BC1 or BC3 (sRGB or linear), every mip level is decoded to tightly packed RGBA8, and the format is changed to `Rgba8UnormSrgb`/`Rgba8Unorm`. The mip count is kept. BGRA8 images are left alone. Layered images are refused, but GRID has none.
+- The decoder is our own, about 100 lines, so no new crate or licence is needed:
+  - RGB565 is expanded by bit replication;
+  - BC1 uses four colours when c0 > c1, else three colours plus transparent black;
+  - BC3 colour blocks always use four colours;
+  - BC3 alpha uses the 8- or 6-value palette;
+  - interpolation is rounded integer: (2a+b+1)/3, (a+b+1)/2, (k·a0+j·a1+3)/7 and (+2)/5.
+  - GPUs may round interpolated values differently by 1 level; D3D allows this tolerance.
+- Forced fallback for desktop tests: `GRID_TEXTURE_FALLBACK=1`. This is an environment switch like `GRID_GROUND_EFFECTS`; P5 can move it into the settings file.
+- `texture upload summary: cpu_decode images decoded source_bytes upload_bytes decode_ms` is printed after a `--render` capture.
+
+**Checks [V]** (RTX 4070, driver 616.92, Vulkan; cargo/rustc 1.99.0; private evidence in the worktree `local/texture-fallback/`, `runs.txt`):
+
+- Unit tests (`texture_upload::tests`): both BC1 modes, the opaque BC3 colour block, 565 expansion, both BC3 alpha modes, mip-chain sizes down to 1×1 with cropping, and a truncated level.
+- Three headless `--render` scenes, each with a pre-change exe (the parent commit), the new exe with BC, and the new exe with `GRID_TEXTURE_FALLBACK=1`:
+  - car: the default Lacetti viewer;
+  - Donington: `--scene reference --view start`;
+  - race: `--drive --opponents 11 ... --drive-ticks 400 --throttle 1`, with liveries, ground effects and smoke textures.
+- **BC path unchanged:** the PNGs of the pre-change exe and the new BC path are byte-identical in all three scenes (sha256 `6a4ff6bd…`, `2d56e040…`, `00cc4da2…`).
+- **Fallback vs BC** (1280×800, per-pixel max channel difference):
+
+  | Scene | Identical px | ≤ 1 | ≤ 2 | > 8 | Max | Mean abs |
+  |---|---|---|---|---|---|---|
+  | car | 96.8 % | 99.0 % | 99.9 % | 0 | 6 | 0.022 |
+  | Donington | 77.8 % | 99.8 % | 99.99 % | 0.001 % | 55 | 0.085 |
+  | race | 77.9 % | 99.4 % | 99.97 % | 0.005 % | 115 | 0.091 |
+
+  The difference images show uniform ±1 rounding noise across every textured surface and no structure. The few large pixels are isolated texels on edges, consistent with the 1-level palette rounding difference passing an alpha-test or alpha-to-coverage threshold [I]. There is no visible difference.
+
+- **Memory.**
+
+  | Scene | Images (decoded) | BC texel bytes | RGBA8 texel bytes | Ratio | GPU dedicated, process peak, BC → CPU |
+  |---|---|---|---|---|---|
+  | car | 19 (19) | 9.42 MB | 53.39 MB | 5.7× | 472 → 472 MiB |
+  | Donington | 470 (470) | 46.80 MB | 287.92 MB | 6.15× | 472 → 721–723 MiB |
+  | race, 12 cars | 527 (523) | 91.40 MB | 593.12 MB | 6.5× | 536–595 → 792 MiB |
+
+  - Texel bytes are exact sums of the image data created; the 4 undecoded images are BGRA8.
+  - The GPU column is the Windows `GPU Process Memory(pid_*)\Dedicated Usage` counter, sampled every 250 ms. It is a coarse proxy: it does not move for the car scene, and it is below the texel delta for the race [I: driver pooling or residency; not investigated].
+  - `MAIN_WORLD | RENDER_WORLD` images also keep the same bytes in CPU RAM, so the fallback adds about 500 MB of RAM in a 12-car race too.
+- **Load time:** the decode adds `decode_ms` = 56–91 ms (car), 458 ms (Donington, quiet machine; 2.8 s while other sessions were compiling) and 1.13 s (race), single-threaded in `Startup` on the i7-12700.
+  - Whole-run wall times were dominated by other sessions' builds (34 cargo/rustc processes), so they are not a usable comparison. They are in `runs.txt`.
+  - On a phone, expect roughly 2–4× the decode time [I].
+
+**Consequences for Android [I].**
+
+- The fallback makes the Pixel 6 and an Exynos S22 render at all.
+- About 600 MB of extra GPU plus RAM for a 12-car Donington race is too much for comfort on an 8 GB phone. So item (b) below, or fewer distinct liveries, belongs in P12.
+
+**Design note: import-time ASTC/ETC2 cache (not implemented).**
+
+- When: during P10 data import on the phone, or on first launch for `adb push` data.
+- What: transcode every texture once to ASTC LDR (6×6 for colour, 3.56 bpp; 4×4 for BC3 alpha textures that need it) or ETC2 RGB8/RGBA8 as a fallback for GLES devices without ASTC. Mips are taken from the decoded RGBA8 chain above, not regenerated, so the result matches the original filtering.
+- Format: one KTX2 file per source texture, keyed by the source file's hash plus the texture id. Bevy loads KTX2 with the `ktx2` feature and no CPU decode. The files go in the app-specific cache directory; they are a derivative of the user's own data and never leave the device.
+- Encoder: a native ASTC encoder (astc-encoder, Apache-2.0, via FFI) or an ETC2 encoder. The encode time for about 1,000 textures is minutes, so it runs once, with progress.
+- Upload choice: BC if supported, else ASTC if `TEXTURE_COMPRESSION_ASTC`, else ETC2, else the RGBA8 decode from this step.
+- Expected memory: about BC size (ASTC 6×6 is smaller than BC3, similar to BC1).
 
 ## 8. Open questions and tests that need hardware
 
