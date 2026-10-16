@@ -362,6 +362,21 @@ impl Step {
 pub struct Race {
     pub multi: MultiRuntime,
     pub drivers: Vec<AiDriver>,
+    /// The app's race manager with its default `--ai` settings.
+    pub pacing: crate::ai_pacing::Field,
+}
+
+impl Race {
+    /// Grid/current positions; car 0 is the player runtime held outside `multi`.
+    fn positions(&self, player: &Runtime) -> Vec<[f32; 3]> {
+        std::iter::once(player)
+            .chain(self.multi.cars.iter().skip(1))
+            .map(|c| {
+                let p = c.pose();
+                [p[12], p[13], p[14]]
+            })
+            .collect()
+    }
 }
 
 /// Failure classes the harness reports.
@@ -566,7 +581,38 @@ impl Session {
                     Ok(AiDriver::new(p, 0x5eed + i as u32 + 1))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            Some(Race { multi, drivers })
+            let settings = crate::ai_pacing::Settings::default();
+            let start = {
+                let gate = &crate::lap_progress::load_route(root, &route)?
+                    .progress
+                    .gates[0];
+                std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
+            };
+            let mut race = Race {
+                multi,
+                drivers,
+                pacing: crate::ai_pacing::Field::new(
+                    crate::ai_pacing::Data::load(root, &settings)?,
+                    settings,
+                    &ai.line,
+                    scenario.laps.unwrap_or(1),
+                    start,
+                    &[],
+                    0,
+                    (0..=opponents)
+                        .map(|k| {
+                            characteristics
+                                .get(k % characteristics.len().max(1))
+                                .and_then(|r| r.get("mistakes").copied())
+                                .unwrap_or(1.)
+                        })
+                        .collect(),
+                    0x5eed,
+                ),
+            };
+            let positions = race.positions(&runtime);
+            race.pacing.reset(&ai.line, &positions);
+            Some(race)
         } else {
             None
         };
@@ -645,6 +691,20 @@ impl Session {
                 }
                 _ => 3,
             };
+            // The app's race manager (no standings here: retired cars stop racing).
+            if !held {
+                let racing: Vec<bool> = (0..race.multi.cars.len())
+                    .map(|i| race.multi.retirement(i).is_none())
+                    .collect();
+                race.pacing.tick_with_player(
+                    &self.ai.line,
+                    &self.runtime,
+                    &mut race.multi,
+                    &mut race.drivers,
+                    &racing,
+                    DELTA,
+                );
+            }
             for (i, driver) in race.drivers.iter_mut().enumerate() {
                 let car = &race.multi.cars[i + 1];
                 all.push(if held {
@@ -696,6 +756,8 @@ impl Session {
             for driver in &mut race.drivers {
                 driver.reset();
             }
+            let positions = race.positions(&self.runtime);
+            race.pacing.reset(&self.ai.line, &positions);
         }
         if let Some(c) = &mut self.countdown {
             c.reset();

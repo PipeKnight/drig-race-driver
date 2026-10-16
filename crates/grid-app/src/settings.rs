@@ -204,6 +204,8 @@ pub struct Settings {
     /// `[assists]` and `[input]` text, in the assists-file grammar.
     pub assists: String,
     pub input: String,
+    /// `[ai]` text, in the `--ai` grammar (grid_tools::ai_pacing::Settings).
+    pub ai: String,
     pub diagnostics: Diagnostics,
 }
 
@@ -266,6 +268,7 @@ impl Settings {
                 if ![
                     "assists",
                     "input",
+                    "ai",
                     "game",
                     "drive",
                     "private",
@@ -286,6 +289,11 @@ impl Settings {
                 "input" => {
                     self.input.push_str(raw);
                     self.input.push('\n');
+                    continue;
+                }
+                "ai" => {
+                    self.ai.push_str(raw);
+                    self.ai.push('\n');
                     continue;
                 }
                 _ => {}
@@ -350,6 +358,10 @@ impl Settings {
 
     pub fn assists(&self) -> Result<grid_tools::source_vehicle::assists::Assists, String> {
         grid_tools::source_vehicle::assists::Assists::parse(&self.assists)
+    }
+
+    pub fn ai(&self) -> Result<grid_tools::ai_pacing::Settings, String> {
+        grid_tools::ai_pacing::Settings::parse(&self.ai)
     }
 
     pub fn input(&self) -> Result<crate::input::Settings, String> {

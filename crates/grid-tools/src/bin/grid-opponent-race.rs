@@ -78,11 +78,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => grid_tools::ai_driver::read_characteristics(&std::fs::read_to_string(path)?)?,
         None => Vec::new(),
     };
+    let characteristic = |car: usize, name: &str| {
+        characteristics
+            .get(car % characteristics.len().max(1))
+            .and_then(|row| row.get(name).copied())
+            .unwrap_or(1.)
+    };
+    // GRID_REFERENCE_CAR=k: car k stands in for the human player (it still
+    // drives with the AI and is never paced); the race manager paces the
+    // others with GRID_AI_SETTINGS (grid_tools::ai_pacing::Settings).
+    // Without it nothing is paced, as before.
+    let reference: Option<usize> = std::env::var("GRID_REFERENCE_CAR")
+        .ok()
+        .map(|v| v.parse())
+        .transpose()?
+        .filter(|&k| k < cars);
+    let settings = match std::env::var("GRID_AI_SETTINGS") {
+        Ok(spec) => grid_tools::ai_pacing::Settings::parse(&spec)?,
+        Err(_) => grid_tools::ai_pacing::Settings::default(),
+    };
+    let difficulty = if reference.is_some() {
+        settings.difficulty
+    } else {
+        NORMAL_DIFFICULTY
+    };
     let mut drivers: Vec<Driver> = (0..cars)
         .map(|i| -> Result<Driver, Box<dyn std::error::Error>> {
             Ok(match kind {
                 "ai" => Driver::Ai(Box::new(AiDriver::new(
-                    Parameters::new(&data, NORMAL_DIFFICULTY, |name| {
+                    Parameters::new(&data, difficulty, |name| {
                         characteristics
                             .get(i % characteristics.len().max(1))
                             .and_then(|row| row.get(name).copied())
@@ -121,9 +145,62 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let gate = &progress.gates[0];
         std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
     };
+    // GRID_RACE_LAPS=n (default 2).
+    let race_laps: u32 = std::env::var("GRID_RACE_LAPS")
+        .ok()
+        .map(|v| v.parse())
+        .transpose()?
+        .unwrap_or(2);
     let mut standings =
-        grid_tools::race::Standings::new(&data.line, 2, start, &positions_of(&multi));
+        grid_tools::race::Standings::new(&data.line, race_laps, start, &positions_of(&multi));
     let names: Vec<String> = (0..cars).map(|i| format!("car{i}")).collect();
+    let mut field = match reference {
+        Some(k) => {
+            println!("pacing reference=car{k} settings={settings} laps={race_laps}");
+            Some(grid_tools::ai_pacing::Field::new(
+                grid_tools::ai_pacing::Data::load(root, &settings)?,
+                settings.clone(),
+                &data.line,
+                race_laps,
+                start,
+                &positions_of(&multi),
+                k,
+                (0..cars).map(|i| characteristic(i, "mistakes")).collect(),
+                0x5eed,
+            ))
+        }
+        None => None,
+    };
+    // GRID_BLOW_TYRE=car:tick[:wheel] (with GRID_REFERENCE_CAR): fail a wheel.
+    let blow_tyre: Option<(usize, u64, usize)> = match std::env::var("GRID_BLOW_TYRE") {
+        Ok(v) => {
+            let parts: Vec<&str> = v.split(':').collect();
+            if field.is_none() || !(2..=3).contains(&parts.len()) {
+                return Err("GRID_BLOW_TYRE=car:tick[:wheel] needs GRID_REFERENCE_CAR".into());
+            }
+            Some((
+                parts[0].parse()?,
+                parts[1].parse()?,
+                parts.get(2).map_or(Ok(0), |w| w.parse())?,
+            ))
+        }
+        Err(_) => None,
+    };
+    // GRID_PACING_TRACE=local/X.tsv: per tick and AI car the race-manager state.
+    let mut pacing_trace = match std::env::var("GRID_PACING_TRACE") {
+        Ok(path) => {
+            if !Path::new(&path).starts_with("local") {
+                return Err("trace must stay under local/".into());
+            }
+            let mut t = std::io::BufWriter::new(std::fs::File::create(path)?);
+            writeln!(
+                t,
+                "tick\tcar\tlaps\tplace\tspeed\ta\tb\tbackwards\ttorque\tgrip_rl\tgrip_fl\tarmed\tactive\tbehaviour"
+            )?;
+            Some(t)
+        }
+        Err(_) => None,
+    };
     // GRID_SLOW_CAR0=f scales car 0's throttle (slowed-leader overtaking check).
     let slow: f32 = std::env::var("GRID_SLOW_CAR0")
         .ok()
@@ -204,6 +281,74 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
             .collect();
+        // Race manager before the AI update (0x4095C0).
+        if let Some(field) = &mut field {
+            if let Some((car, _, wheel)) = blow_tyre.filter(|b| b.1 == multi.ticks) {
+                field.blow_tyre(car, wheel);
+                println!(
+                    "pacing tick={} forced blow_tyre car={car} wheel={wheel}",
+                    multi.ticks
+                );
+            }
+            let mut field_cars: Vec<grid_tools::ai_pacing::Car> = multi
+                .cars
+                .iter()
+                .zip(&mut drivers)
+                .enumerate()
+                .map(|(i, (c, d))| {
+                    let p = c.pose();
+                    grid_tools::ai_pacing::Car {
+                        position: [p[12], p[13], p[14]],
+                        velocity: c.velocity(),
+                        racing: standings.status(i) == Status::Racing,
+                        driver: match d {
+                            Driver::Ai(ai) => Some(&mut **ai),
+                            Driver::Pursuit(_) => None,
+                        },
+                    }
+                })
+                .collect();
+            let outputs = field.tick(
+                &data.line,
+                &mut field_cars,
+                grid_tools::source_vehicle::DELTA,
+            );
+            drop(field_cars);
+            for line in &field.log {
+                println!("pacing tick={} {line}", multi.ticks);
+            }
+            for (i, output) in outputs.iter().enumerate() {
+                if let Some(o) = output {
+                    multi.cars[i].set_ai_pacing(o.torque, o.grip);
+                }
+            }
+            if let Some(t) = &mut pacing_trace {
+                let order = standings.order();
+                for (i, (o, d)) in outputs.iter().zip(&drivers).enumerate() {
+                    if let (Some(o), Driver::Ai(ai)) = (o, d) {
+                        let (armed, active) = ai.mistake();
+                        let v = multi.cars[i].velocity();
+                        writeln!(
+                            t,
+                            "{}\t{i}\t{:.4}\t{}\t{:.2}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:?}",
+                            multi.ticks,
+                            standings.laps_covered(i),
+                            order.iter().position(|&c| c == i).unwrap_or(0),
+                            (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
+                            ai.pace.a,
+                            ai.pace.b,
+                            u8::from(ai.pace.backwards),
+                            o.torque,
+                            o.grip[0],
+                            o.grip[2],
+                            armed.map_or(-1, i16::from),
+                            active.map_or(-1, i16::from),
+                            ai.telemetry.behaviour
+                        )?;
+                    }
+                }
+            }
+        }
         let mut controls: Vec<Controls> = Vec::with_capacity(cars);
         for (i, (car, driver)) in multi.cars.iter().zip(&mut drivers).enumerate() {
             controls.push(match driver {
@@ -316,6 +461,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
             &[],
         );
+        // A car stopped by the failure/damage retire drive is out (AUTHORED).
+        for (i, driver) in drivers.iter().enumerate() {
+            if let Driver::Ai(ai) = driver
+                && ai.removal_requested()
+                && standings.status(i) == Status::Racing
+            {
+                standings.retire(i, Out::Wrecked);
+                println!("retire tick={} car{i} reason=ai-failure", multi.ticks);
+            }
+        }
         // Terminal damage takes a car out of the race (AUTHORED for AI cars).
         for (i, car) in multi.cars.iter().enumerate() {
             if car.terminal_wheel().is_some() && standings.status(i) == Status::Racing {

@@ -307,4 +307,167 @@ Open:
   the original is needed to compare;
 - the octant sign convention;
 - the obstruction body classes and magnitude;
-- lost_control and controlled_stop are not ported.
+- ~~lost_control and controlled_stop are not ported.~~ Ported with the race manager; see "Mistakes, failures and race pacing" below.
+
+## Mistakes, failures and race pacing (F336)
+
+16 October 2026, Claude Code. Port of the plan in
+[AI_MISTAKES_PACING_RESEARCH.md](AI_MISTAKES_PACING_RESEARCH.md) §7. The choreographer and
+catch-up details also use the owner's untracked research copy
+`docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md` (main checkout, not committed). Where the two
+documents differ, this port follows the second one for:
+- the conveyor start draws (front third → drop back, back third → push forward);
+- the mistake event states 1/2/3/4;
+- the one-event-at-a-time runner;
+- the brake_lock wheel order.
+
+Not independently re-verified here: no new disassembly was read. Both documents agree on every
+constant used below. The shipped values were re-read from the purchased XML by the asset test
+`shipped_pacing_data`.
+
+Code:
+- `grid_formats::ai`:
+  - `catch_up(doc, user)`: catchup.xml with the reset defaults;
+  - `choreographer(doc, discipline)`: set selection with the `default` fallback, manager,
+    conveyor, events and priority-sorted triggers with the built-in defaults, including
+    `min_distance_ahead` 1, `max_distance_ahead` 100 and `max_events` 1;
+  - quirks kept: `rev_length` is 10 and `min_sleep_distance` is ignored.
+- `grid_tools::ai_pacing` (new): the race manager `Field`, `Settings`, MT19937, and the pure
+  `catch_up_power`, `catch_up_max_distance`, `grip_factor` and `torque_factor`.
+- `grid_tools::ai_driver`: `Pace` inputs, the mistake slot, the failure behaviours and
+  let-pass, in a separate `impl` block.
+- `Runtime::set_ai_pacing(torque, grip)` writes engine +0xE8 (vehicle +1888) and wheel +0x80
+  for AI cars. The ported vehicle already reads both fields; they start at 1.0.
+
+### Race manager, per tick before the AI update
+
+The manager needs a reference car (the human). Without one nothing is computed or written.
+
+1. Race distances along the AI racing line from the start-finish gate (AUTHORED; the original
+   uses the progress track). Places are 0-based by distance.
+2. Choreographer, while the reference races:
+   - reset: power and grip factor 1, B 0, backwards off; A persists;
+   - conveyor (fields of 6 or more): one front-third car sleeps U(0, 1000) m, then has power
+     and A at 0.7 and the backwards flag until it is in the last two places; one back-third
+     car has power and A at 1.1 until it reaches place 2–3; then they swap roles;
+   - events (with `mistakes`);
+   - lapping yield (backwards flag when a car is within 50 m of lapping it);
+   - race start: power 1.05 and B 1 for cars ahead of the player in the first 100 m; grip 1.25
+     below 750 m; after that the off-line assist `1 + clamp(t·m, 0, m)`, t = |lat|/4 m,
+     m = 0.25 inside or 0.5 outside. Which side the original calls inside is [I].
+3. Catch-up (`rd_3_star` by default):
+   - ahead of the reference by more than 50 m: power 1.0 → 0.5 at 200 m;
+   - useLead stretches the maximum to the leader's gap;
+   - behind by more than 50 m: power 1.0 → 1.2 at 400 m;
+   - never below 12 m/s or within the first 500 m.
+4. Application:
+   - engine factor `clamp(catch-up × power, 0.1, 2.0)`;
+   - wheel grip = the driver's request grip of its last update × grip factor;
+   - the player car is never written.
+
+### Choreographer events
+
+Shipped `circuit` set:
+- `mechanical_failures`: blow_tyre_fast, blow_engine_slight/total; from 5000 m and 25 % of
+  the race; 20–150 m ahead;
+- `major_errors`: powerout_spin, brake_spin; windows of 500 m, 20 s apart; 5–250 m ahead;
+  position filters for places 0 and 1;
+- `minor_errors`: brake_lock; windows of 200 m, 5 s apart; 0–200 m ahead.
+
+Mechanics:
+- Candidates are the AI cars with weight `max = 1 − mistakes`, starting at 0.5·max:
+  - an arming draws each candidate `U < cur·chance` and grows `cur` by 0.1·max;
+  - success halves `cur`.
+- With the characteristic default 1.0 (no private table) no car is ever chosen, as in the
+  original.
+- Only one event runs in the field at a time:
+  - a different selection aborts an event still waiting in state 1;
+  - an executing event (state 3) blocks;
+  - the timeout is 30 s.
+- Events:
+  - mistake: arms the driver's slot with a 60 s timeout;
+  - blow_tyre: fails a random wheel;
+  - blow_engine: raises the engine damage, and 2 s later sets the damage gate.
+
+### Driver side
+
+- Corner speed `S = max(A·corner_speed_in_ratio, B)`.
+- Mistake slot (0x787620/0x7799B0):
+  - the armed type activates at its own condition:
+    - late/early: trigger distance × factor, then on reaching it;
+    - heavy/light/brake_lock: once braking for a line;
+    - brake_spin: braking for a line with 8–12 m/s excess;
+    - powerout_spin: in the post-line hold, previous throttle > 0.6 and above 10 m/s;
+  - effects for 3 s (spins) or 5 s:
+    - brake_spin: rear grip 0.2;
+    - powerout_spin: rear grip 0.4 and full throttle;
+    - brake_lock: one wheel 0.2, cleared by the next brake line;
+    - heavy/light: brake floor/cap;
+  - any active mistake ends at or below 10 m/s;
+  - the random generator is ported but off (`generateMistakes` false in the data).
+- lost_control (21): a failed wheel above rtRetirementSpeed + 5 (20 m/s).
+  - Above crashMinSpeed (50): crash mode, full brake, rear grip 0.1.
+  - Otherwise a wobble at 15 m/s with brake cap 0.15 and rear grip 0.3.
+- Retire failure branch (10): failures, or gated damage above damage_retirement_ratio.
+  - It drives to the nearer track limit at 15 m/s, stops there and requests removal; the
+    race then retires the car (`Out::Wrecked`).
+- race_damaged (9): gated damage ≥ 0.5; 50 m/s, throttle cap 0.6, near a track limit.
+- controlled_stop (20): force brake and hold the offset on an external request. Its original
+  triggers (view invalid, AI state names) are not resolved; nothing requests it yet.
+- Let-pass: while the backwards flag is set, throttle cap × 0.8 with a car within 30 m
+  behind.
+
+AUTHORED where not recovered:
+- crash PID, spin/flip angles and the inertia factor +0x21C0 (normal steering, no flip);
+- the wobble amplitude (deviation_from_racing_line_large);
+- the retire point (the nearer track limit);
+- a failed wheel keeps grip 0.1 (stands in for the vehicle's failed-wheel parameter, which
+  the port does not model);
+- engine and radiator damage only drive the AI gate; they do not change the engine. The
+  mechanical-damage work owns that;
+- the spun-and-fast lost_control branch is not ported: the built-in coSpinSpeed is not
+  recovered;
+- visibility_loss is not ported: no smoke value exists in the simulation;
+- block and draft stay off as in the data;
+- the brake_lock wheel and wobble draws use the driver's authored LCG; the choreographer
+  uses its own seeded MT19937.
+
+### Settings
+
+An `[ai]` section in a settings file ([SETTINGS.md](SETTINGS.md); `settings/race.ini` lists
+the defaults), or grid-app `--ai difficulty=0.606,catchup=rd_3_star|on|off,choreographer=on|off,mistakes=on|off`.
+The difficulty feeds the AI parameter mappings. The log line is `drive_ai_pacing`; events
+are logged as `drive_ai_event`.
+
+grid-soak uses the default settings, like the app. Replays of app logs made with other
+`--ai` settings are not exact.
+
+Headless (`grid-opponent-race`):
+- `GRID_REFERENCE_CAR=k`: car k stands in for the player; it is AI-driven and never paced;
+- `GRID_AI_SETTINGS=SPEC`;
+- `GRID_RACE_LAPS=n`;
+- `GRID_PACING_TRACE=local/X.tsv`;
+- `GRID_BLOW_TYRE=car:tick[:wheel]`.
+
+### Validation
+
+Evidence is in the main checkout's `local/ai-pacing/runs/`.
+
+| Check | Result |
+|---|---|
+| Solo `1 11200 ai` | 88.42029812185638 / 86.28228501935392 s; output byte-identical to F324 `solo-after.txt` |
+| 12 cars, deformation, `12 12000 ai`, no reference | byte-identical to F324 `race12-after.txt`, including all 12 state hashes |
+| 3 laps, 12 cars, characteristics: no reference vs reference car 11 with `catchup=off,choreographer=off` | state hashes and classification identical |
+| Same with the defaults, reference car 11 at the back (scenario 7.6.4) | see RACE_MODE.md "AI pacing and mistakes": field held together; mistakes fire on cars 0–250 m ahead; spins go through recovery |
+| Forced blow_tyre, car 0, 59.5 m/s (tick 1995) | lost_control crash mode (rear grip 0.1, full brake), spin, recovery, RetireFailure; spun again on the failed wheel, recovered; stopped and retired at tick 2349 (`Wrecked`) |
+| Forced blow_tyre, car 0, 35.5 m/s (tick 610) | lost_control wobble mode, spin, recovery, RetireFailure, retired at tick 868. Both modes spun the car: with the failed rear wheel at 0.1 and the other rear at 0.3 the wobble is not a controlled slow-down [I compare live] |
+| Unit tests | catch-up tables (rd_3_star 125 m → 0.75, 200 m → 0.5; behind 225 m → 1.1, 400 m → 1.2; useLead; 5–6 star reverse only; clamp 0.1–2.0), off-line assist 2 m inside/outside at κ 0.01 → 1.125/1.25 and race-start 1.25, MT19937 reference stream, settings; asset tests `mistake_slot_windows_and_effects` (activation only for the armed type, 3/5 s, 60 s arm timeout, brake_lock wheel spread and new-line clearing, grips 0.2/0.4/0.2, failed wheel 0.1, A/B, failure scores and the damage gate), `random_mistake_pick_follows_the_live_weights`, `shipped_pacing_data` |
+| `grid-soak quick` | the 6 Donington scenarios pass; the 6 Nürburgring ones fail at set-up with the known "scaled prop piece placement" (F326 finding 1) |
+
+Open:
+- A live trace of the original (§7.6.6) is needed to confirm the conveyor, race-start factors,
+  catch-up powers and choreographed mistakes, and the catch-up config name.
+- About half of the armed mistakes are aborted before they activate (another trigger's
+  selection replaces them). This follows the documented runner rule, but the original's
+  behaviour in that case is not observed.
+- Contact records in a paced 12-car race are about 4.7 times the unpaced count.

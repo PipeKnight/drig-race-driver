@@ -922,6 +922,17 @@ impl Runtime {
     pub fn reverse_gear(&self) -> bool {
         self.state.car.owner.vehicle[0x196c / 4] == 9
     }
+    /// AI race-manager inputs for the next tick (docs/AI_MISTAKES_PACING_RESEARCH.md
+    /// §4): the engine torque factor at engine +0xE8 (vehicle +1888, already
+    /// clamped as 0x98F2D0 does) and each wheel's grip scale at wheel +0x80
+    /// (0x408710), rear L/R, front L/R. Written for AI cars only.
+    pub fn set_ai_pacing(&mut self, torque: f32, grip: [f32; 4]) {
+        let b = &mut self.state.car.owner.vehicle;
+        b[0x1888 / 4] = torque.to_bits();
+        for (i, g) in grip.iter().enumerate() {
+            b[(0x1990 + i * 0x150 + 0x80) / 4] = g.to_bits();
+        }
+    }
 }
 
 #[cfg(test)]

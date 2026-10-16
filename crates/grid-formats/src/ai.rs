@@ -439,3 +439,406 @@ pub fn mappings(doc: &Document<'_>, section: &str) -> Result<BTreeMap<String, Ma
     }
     Ok(out)
 }
+
+fn optional<'a>(e: &Element<'a>, name: &str) -> Option<&'a str> {
+    e.attributes
+        .iter()
+        .find(|(key, _)| *key == name)
+        .map(|(_, value)| *value)
+}
+fn flag(value: &str) -> Result<bool> {
+    match value {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        _ => fail(0, "invalid AI bool"),
+    }
+}
+fn whole<T: std::str::FromStr>(value: &str) -> Result<T> {
+    value.trim().parse().map_err(|_| crate::Error {
+        offset: 0,
+        message: "invalid AI integer",
+    })
+}
+
+/// One `catchup.xml` config (parser 0x90A590; reset defaults where absent,
+/// docs/AI_MISTAKES_PACING_RESEARCH.md §4.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatchUp {
+    pub enabled: bool,
+    pub min_distance: f32,
+    pub max_distance: f32,
+    pub power_at_min_distance: f32,
+    pub power_at_max_distance: f32,
+    pub min_speed: f32,
+    pub min_race_distance: f32,
+    pub player_catchup: bool,
+    pub higher_class: bool,
+    pub use_lead_for_max_distance: bool,
+    pub reverse_enabled: bool,
+    pub reverse_min_distance: f32,
+    pub reverse_max_distance: f32,
+    pub reverse_power_at_min_distance: f32,
+    pub reverse_power_at_max_distance: f32,
+}
+
+impl Default for CatchUp {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_distance: 0.,
+            max_distance: 0.,
+            power_at_min_distance: 1.,
+            power_at_max_distance: 1.,
+            min_speed: 0.,
+            min_race_distance: 0.,
+            player_catchup: false,
+            higher_class: false,
+            use_lead_for_max_distance: false,
+            reverse_enabled: false,
+            reverse_min_distance: 0.,
+            reverse_max_distance: 0.,
+            reverse_power_at_min_distance: 1.,
+            reverse_power_at_max_distance: 1.,
+        }
+    }
+}
+
+/// The first `catch_up` config whose `user name` is `user` (loader 0x90A790);
+/// `None` when no config names it (the original `none`).
+pub fn catch_up(doc: &Document<'_>, user: &str) -> Result<Option<CatchUp>> {
+    if element(doc, 0)?.name != "catch_up" {
+        return fail(0, "unexpected catch-up root");
+    }
+    for c in named(doc, 0, "config")? {
+        let users = named(doc, c, "user")?;
+        if !users
+            .iter()
+            .any(|&u| optional(&doc.elements[u], "name") == Some(user))
+        {
+            continue;
+        }
+        let mut out = CatchUp::default();
+        for p in named(doc, c, "param")? {
+            for &(key, value) in &doc.elements[p].attributes {
+                match key {
+                    "enabled" => out.enabled = flag(value)?,
+                    "minDistance" => out.min_distance = number(value)?,
+                    "maxDistance" => out.max_distance = number(value)?,
+                    "powerAtMinDistance" => out.power_at_min_distance = number(value)?,
+                    "powerAtMaxDistance" => out.power_at_max_distance = number(value)?,
+                    "minSpeed" => out.min_speed = number(value)?,
+                    "minRaceDistance" => out.min_race_distance = number(value)?,
+                    "playerCatchup" => out.player_catchup = flag(value)?,
+                    "higherClass" => out.higher_class = flag(value)?,
+                    "useLeadForMaxDistance" => out.use_lead_for_max_distance = flag(value)?,
+                    "reverseEnabled" => out.reverse_enabled = flag(value)?,
+                    "reverseMinDistance" => out.reverse_min_distance = number(value)?,
+                    "reverseMaxDistance" => out.reverse_max_distance = number(value)?,
+                    "reversePowerAtMinDistance" => {
+                        out.reverse_power_at_min_distance = number(value)?
+                    }
+                    "reversePowerAtMaxDistance" => {
+                        out.reverse_power_at_max_distance = number(value)?
+                    }
+                    // render/renderOnCars are debug drawing only.
+                    _ => {}
+                }
+            }
+        }
+        return Ok(Some(out));
+    }
+    Ok(None)
+}
+
+/// Choreographer manager block (0x401AA0; built-in defaults where absent).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Manager {
+    pub enable: bool,
+    pub remove_unsafe_retires: bool,
+    pub removal_distance_crow: f32,
+    pub removal_distance_track: f32,
+    pub lapping_yield_distance: f32,
+    pub team_mate_yield_distance: f32,
+    pub race_start_distance: [f32; 2],
+    pub race_start_factor: [f32; 2],
+    pub min_distance_offline: f32,
+    pub max_distance_offline: f32,
+    pub max_assist_inside: f32,
+    pub max_assist_outside: f32,
+    pub min_curve_offline: f32,
+    pub fast_higher_classes: bool,
+}
+
+impl Default for Manager {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            remove_unsafe_retires: false,
+            removal_distance_crow: 300.,
+            removal_distance_track: 300.,
+            lapping_yield_distance: 100.,
+            team_mate_yield_distance: 20.,
+            race_start_distance: [0., 0.],
+            race_start_factor: [1., 1.],
+            min_distance_offline: 0.,
+            max_distance_offline: 0.,
+            max_assist_inside: 0.,
+            max_assist_outside: 0.,
+            min_curve_offline: 0.,
+            fast_higher_classes: true,
+        }
+    }
+}
+
+/// Conveyor belt (0x4014B0). `min_sleep_distance` has no parser string and
+/// stays 0 [V].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Conveyor {
+    pub min_grid_size: u32,
+    pub forwards_multiple: f32,
+    pub backwards_multiple: f32,
+    pub max_sleep_distance: f32,
+    pub forwards_place: [u32; 2],
+    pub backwards_place: [u32; 2],
+}
+
+/// Event payload: mistake (id in the 0xCF6F64 table, arm timeout),
+/// blow_tyre, or blow_engine (radiator, engine damage).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum EventKind {
+    Mistake { id: u8, timeout: f32 },
+    BlowTyre,
+    BlowEngine { radiator: f32, engine: f32 },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Event {
+    pub name: String,
+    pub min_speed: f32,
+    pub tyre_smoke: bool,
+    pub max_active_time: f32,
+    pub kind: EventKind,
+}
+
+/// Trigger (0x4067A0) with its event indices and `position` entries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Trigger {
+    pub name: String,
+    pub priority: i32,
+    pub min_distance: f32,
+    pub max_distance: f32,
+    pub min_race_distance: f32,
+    pub min_event_separation: f32,
+    pub min_time: f32,
+    pub min_distance_ahead: f32,
+    pub max_distance_ahead: f32,
+    pub select_closest: bool,
+    pub max_events: u32,
+    pub chance: f32,
+    pub affect_higher_classes: bool,
+    pub use_time_limit: bool,
+    pub events: Vec<usize>,
+    pub positions: Vec<(i32, f32)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Choreographer {
+    pub manager: Manager,
+    /// `intro rev_length`, overwritten with 10 after parsing [V quirk].
+    pub rev_length: f32,
+    pub conveyor: Option<Conveyor>,
+    pub events: Vec<Event>,
+    /// Sorted by priority (stable).
+    pub triggers: Vec<Trigger>,
+}
+
+/// Mistake ids (enum 0xCF6F64); the XML names carry a `mistake_` prefix.
+pub const MISTAKE_NAMES: [&str; 7] = [
+    "brake_heavy",
+    "brake_light",
+    "brake_late",
+    "brake_early",
+    "brake_spin",
+    "powerout_spin",
+    "brake_lock",
+];
+
+/// The `ai_choreographer.xml` set naming `discipline`, else the one naming
+/// `default` (loader 0x409A60).
+pub fn choreographer(doc: &Document<'_>, discipline: &str) -> Result<Choreographer> {
+    if element(doc, 0)?.name != "ai_choreographer" {
+        return fail(0, "unexpected choreographer root");
+    }
+    let sets = named(doc, 0, "set")?;
+    let names = |s: usize| -> Result<Vec<&str>> {
+        named(doc, s, "discipline")?
+            .into_iter()
+            .map(|d| attr(&doc.elements[d], "name"))
+            .collect()
+    };
+    let mut chosen = None;
+    for wanted in [discipline, "default"] {
+        for &s in &sets {
+            if chosen.is_none() && names(s)?.contains(&wanted) {
+                chosen = Some(s);
+            }
+        }
+    }
+    let set = chosen.ok_or(crate::Error {
+        offset: 0,
+        message: "choreographer set absent",
+    })?;
+    let f = |e: &Element<'_>, name: &str, default: f32| -> Result<f32> {
+        optional(e, name).map_or(Ok(default), number)
+    };
+    let b = |e: &Element<'_>, name: &str, default: bool| -> Result<bool> {
+        optional(e, name).map_or(Ok(default), flag)
+    };
+    let u = |e: &Element<'_>, name: &str, default: u32| -> Result<u32> {
+        optional(e, name).map_or(Ok(default), whole)
+    };
+    let d = Manager::default();
+    let manager = match named(doc, set, "manager")?[..] {
+        [m] => {
+            let e = &doc.elements[m];
+            Manager {
+                enable: b(e, "enable", d.enable)?,
+                remove_unsafe_retires: b(e, "remove_unsafe_retires", d.remove_unsafe_retires)?,
+                removal_distance_crow: f(e, "removal_distance_crow", d.removal_distance_crow)?,
+                removal_distance_track: f(e, "removal_distance_track", d.removal_distance_track)?,
+                lapping_yield_distance: f(e, "lapping_yield_distance", d.lapping_yield_distance)?,
+                team_mate_yield_distance: f(
+                    e,
+                    "team_mate_yield_distance",
+                    d.team_mate_yield_distance,
+                )?,
+                race_start_distance: [
+                    f(e, "race_start_distance_1", 0.)?,
+                    f(e, "race_start_distance_2", 0.)?,
+                ],
+                race_start_factor: [
+                    f(e, "race_start_factor_1", 1.)?,
+                    f(e, "race_start_factor_2", 1.)?,
+                ],
+                min_distance_offline: f(e, "min_distance_offline", 0.)?,
+                max_distance_offline: f(e, "max_distance_offline", 0.)?,
+                max_assist_inside: f(e, "max_assist_inside", 0.)?,
+                max_assist_outside: f(e, "max_assist_outside", 0.)?,
+                min_curve_offline: f(e, "min_curve_offline", 0.)?,
+                fast_higher_classes: b(e, "fast_higher_classes", true)?,
+            }
+        }
+        _ => d,
+    };
+    let conveyor = match named(doc, set, "conveyer_belt")?[..] {
+        [c] => {
+            let e = &doc.elements[c];
+            Some(Conveyor {
+                min_grid_size: u(e, "min_grid_size", 20)?,
+                forwards_multiple: f(e, "forwards_multiple", 1.)?,
+                backwards_multiple: f(e, "backwards_multiple", 1.)?,
+                max_sleep_distance: f(e, "max_sleep_distance", 0.)?,
+                forwards_place: [
+                    u(e, "min_forwards_place", 0)?,
+                    u(e, "max_forwards_place", 0)?,
+                ],
+                backwards_place: [
+                    u(e, "min_backwards_place", 0)?,
+                    u(e, "max_backwards_place", 0)?,
+                ],
+            })
+        }
+        _ => None,
+    };
+    let mut events = Vec::new();
+    for ev in named(doc, set, "event")? {
+        let e = &doc.elements[ev];
+        let (mut min_speed, mut tyre_smoke) = (0., false);
+        if let [c] = named(doc, ev, "common")?[..] {
+            let c = &doc.elements[c];
+            min_speed = f(c, "min_speed", 0.)?;
+            tyre_smoke = b(c, "tyre_smoke", false)?;
+        }
+        let kind = match attr(e, "type")? {
+            "mistake" => {
+                let m = &doc.elements[only(doc, ev, "mistake")?];
+                let name = attr(m, "name")?;
+                let id = MISTAKE_NAMES
+                    .iter()
+                    .position(|&n| name.strip_prefix("mistake_") == Some(n))
+                    .ok_or(crate::Error {
+                        offset: ev,
+                        message: "unknown choreographer mistake",
+                    })?;
+                EventKind::Mistake {
+                    id: id as u8,
+                    timeout: f(m, "timeout", 60.)?,
+                }
+            }
+            "blow_tyre" => EventKind::BlowTyre,
+            "blow_engine" => {
+                let (mut radiator, mut engine) = (0., 0.);
+                if let [c] = named(doc, ev, "blow_engine")?[..] {
+                    let c = &doc.elements[c];
+                    radiator = f(c, "radiator_damage", 0.)?;
+                    engine = f(c, "engine_damage", 0.)?;
+                }
+                EventKind::BlowEngine { radiator, engine }
+            }
+            _ => return fail(ev, "unknown choreographer event type"),
+        };
+        events.push(Event {
+            name: attr(e, "name")?.to_string(),
+            min_speed,
+            tyre_smoke,
+            // Not given in shipped data: built-in 30 s (0xCAFDB8).
+            max_active_time: 30.,
+            kind,
+        });
+    }
+    let mut triggers = Vec::new();
+    for t in named(doc, set, "trigger")? {
+        let e = &doc.elements[t];
+        let mut trigger_events = Vec::new();
+        for ev in named(doc, t, "event")? {
+            let name = attr(&doc.elements[ev], "name")?;
+            trigger_events.push(events.iter().position(|x| x.name == name).ok_or(
+                crate::Error {
+                    offset: ev,
+                    message: "trigger names an unknown event",
+                },
+            )?);
+        }
+        let mut positions = Vec::new();
+        for p in named(doc, t, "position")? {
+            let p = &doc.elements[p];
+            positions.push((whole(attr(p, "index")?)?, f(p, "chance", 1.)?));
+        }
+        triggers.push(Trigger {
+            name: attr(e, "name")?.to_string(),
+            priority: optional(e, "priority").map_or(Ok(0), whole)?,
+            min_distance: f(e, "min_distance", 0.)?,
+            max_distance: f(e, "max_distance", 0.)?,
+            min_race_distance: f(e, "min_race_distance", 0.)?,
+            min_event_separation: f(e, "min_event_separation", 0.)?,
+            min_time: f(e, "min_time", 0.)?,
+            min_distance_ahead: f(e, "min_distance_ahead", 1.)?,
+            max_distance_ahead: f(e, "max_distance_ahead", 100.)?,
+            select_closest: b(e, "select_closest", false)?,
+            max_events: u(e, "max_events", 1)?,
+            chance: f(e, "chance", 1.)?,
+            affect_higher_classes: b(e, "affect_higher_classes", false)?,
+            use_time_limit: b(e, "use_time_limit", false)?,
+            events: trigger_events,
+            positions,
+        });
+    }
+    triggers.sort_by_key(|t| t.priority);
+    Ok(Choreographer {
+        manager,
+        rev_length: 10.,
+        conveyor,
+        events,
+        triggers,
+    })
+}

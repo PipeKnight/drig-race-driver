@@ -43,7 +43,7 @@ driven by the ported GRID AI ([AI_DRIVER_PORT.md](AI_DRIVER_PORT.md)). It runs a
 
 - ~~No overtaking, side-by-side or avoidance behaviour.~~ Overtake and alongside (F294),
   yield (F297), and avoid, recovery and recover_tbone (F301) are ported; see
-  AI_DRIVER_PORT.md. lost_control (choreographed mistakes), drafting and catch-up are not.
+  AI_DRIVER_PORT.md. ~~lost_control (choreographed mistakes), drafting and catch-up are not.~~ Mistakes, failures, catch-up and the choreographer are ported (see "AI pacing and mistakes" below); drafting has no effect in the original (test off, no aero bonus).
 - ~~No grid order or qualifying rules, no penalties, no lapped-car handling.~~ Recovered in
   F308: the original has no penalties or blue flags in a single race, and lapped cars race to
   the full distance. The random grid placement is ported as `race::grid_slot` but not wired to
@@ -150,3 +150,43 @@ Checks:
   - render `local/race-rules/app/race-over-4.png` checked (frozen RACE RESULT, player's car at
     228 km/h under AI control).
 - 304 tests including the asset tests (after the rebase onto F307), and Clippy, pass.
+
+## AI pacing and mistakes (F336)
+
+The original race manager now paces the opponents around the player. Details are in
+[AI_DRIVER_PORT.md](AI_DRIVER_PORT.md), "Mistakes, failures and race pacing".
+
+- **Catch-up** (`rd_3_star` by default, AUTHORED until the Normal star level is traced):
+  - opponents more than 50 m ahead of you lose engine torque, down to 50 % at 200 m (or at
+    the leader's gap);
+  - opponents more than 50 m behind gain up to +20 % at 400 m;
+  - not within the first 500 m or below 12 m/s.
+- **Choreographer**:
+  - race start: +5 % torque and full corner speed for cars ahead of you in the first 100 m;
+    +25 % grip for everyone in the first 750 m;
+  - grip assist for cars pushed off the racing line in corners;
+  - conveyor belt: one car from the front third drops to the back two places, and one car
+    from the back third pushes up to 3rd–4th place;
+  - lapped cars ease off for the car behind.
+- **Scripted events** on an AI car 0–250 m ahead of you, weighted by its `mistakes`
+  characteristic, so they need the private characteristic table:
+  - brake locks;
+  - brake and power-out spins;
+  - from 5000 m and a quarter of the race, tyre blow-outs (the car loses control and
+    retires) and engine failures.
+- Settings: `--ai difficulty=…,catchup=rd_N_star|on|off,choreographer=on|off,mistakes=on|off`,
+  or the `[ai]` section of a settings file (`settings/race.ini`). This needs a playable built
+  after this change.
+
+12-car Donington check, 3 laps, characteristics, reference car 11 on the back of the grid
+(headless):
+- without pacing: winner 4:23.552, spread 14.9 s, 874 contact records;
+- with the defaults: winner 4:43.200 (the leaders are held back), spread 3.6 s among the 8
+  finishers when the 18,000-tick limit ended the race, 4120 contact records;
+- 36 choreographer events started (21 brake locks, 8 brake spins, 7 power-out spins): 17 executed
+  and completed, 19 were aborted while still armed (another selection replaced them), 2 timed
+  out; no mechanical failure was drawn in 3 laps;
+- each spin went through recovery and the car rejoined;
+- no failure.
+- The tighter field gives far more contact records; this has not been compared with the
+  original.

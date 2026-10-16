@@ -1,5 +1,67 @@
 # GRID engine project log
 
+F336 AI mistakes, catch-up and the choreographer (2026-10-16, Claude Code). Port of docs/AI_MISTAKES_PACING_RESEARCH.md §7 (F303), using the owner's untracked docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md as input (left uncommitted). The two documents agree on every constant used. The port follows the second document for the conveyor start, the event states and the brake_lock wheel order. No new disassembly was read. Details: docs/AI_DRIVER_PORT.md "Mistakes, failures and race pacing" and docs/RACE_MODE.md "AI pacing and mistakes".
+
+Code:
+- grid_formats::ai: catchup.xml and ai_choreographer.xml readers with the built-in defaults and quirks (rev_length 10, min_sleep_distance ignored).
+- New grid_tools::ai_pacing::Field, the race manager. It runs before the AI update and needs a reference (human) car. It provides:
+  - conveyor belt;
+  - race-start factors 1.05/B=1 (first 100 m) and grip 1.25 (first 750 m);
+  - off-line grip assist;
+  - lapping yield;
+  - choreographer triggers and a single-event runner (MT19937);
+  - catch-up, AUTHORED default rd_3_star.
+- The AI cars' engine +0xE8 and wheel +0x80 are written through the new Runtime::set_ai_pacing.
+- ai_driver, in a separate impl block:
+  - Pace (A, B, backwards, damage gate, failures);
+  - the mistake slot (arming, activation sites, 3/5 s, 60 s timeout, grip/brake/throttle effects, cancel at 10 m/s; random generator ported but off as in the data);
+  - lost_control (crash/wobble);
+  - controlled_stop (hook only);
+  - race_damaged;
+  - the retire failure branch with a removal request;
+  - let-pass;
+  - S = max(A·ratio, B).
+- Settings: [ai] section in the P5 settings files (settings/race.ini lists the defaults) or grid-app --ai difficulty,catchup,choreographer,mistakes. The app logs drive_ai_pacing and drive_ai_event, and retires stopped failed cars as Wrecked.
+- grid-soak mirrors the app with the default settings.
+- grid-opponent-race: GRID_REFERENCE_CAR, GRID_AI_SETTINGS, GRID_RACE_LAPS, GRID_PACING_TRACE, GRID_BLOW_TYRE.
+
+AUTHORED / not ported:
+- crash PID, flip and the inertia factor;
+- wobble amplitude and retire point;
+- failed-wheel grip 0.1 at the vehicle boundary;
+- engine damage only gates the AI;
+- the spun-and-fast lost_control branch (coSpinSpeed default unknown);
+- visibility_loss (no smoke value);
+- block/draft stay off as in the data;
+- race distance along the AI line;
+- unsafe-retire removal and team-mate yield.
+
+Checks [V] (cargo/rustc 1.99.0; evidence main checkout local/ai-pacing/runs/):
+- Release grid-opponent-race on the pre-rebase tree (base 0eb216e), solo `1 11200 ai`: 88.42029812185638 / 86.28228501935392; output byte-identical to F324 solo-after.txt.
+- Same tree, 12 cars with deformation `12 12000 ai`, no reference: byte-identical to F324 race12-after.txt, including all 12 state hashes.
+- 3 laps, 12 cars, characteristics: no reference vs reference car 11 with catchup=off,choreographer=off gives identical state hashes and classification.
+- Same with the defaults, reference car 11 at the back:
+  - winner 4:43.200 vs 4:23.552; spread among finishers 3.6 vs 14.9 s;
+  - 36 events started (21 brake_lock, 8 brake_spin, 7 powerout_spin): 17 completed, 19 aborted while armed, 2 timed out;
+  - each spin went through recovery and the car rejoined;
+  - conveyor cars 10 (forward) and 3 (back, then forward);
+  - 4120 vs 874 contact records.
+- Forced blow_tyre at 59.5 m/s: crash mode → spin → recovery → retire, Wrecked at tick 2349. At 35.5 m/s: wobble → spin → recovery → retire at tick 868. Both modes spin the car.
+- New tests: catch-up tables, assist/race-start grip, MT19937 stream, settings, mistake-slot windows and effects, live weight pick order, shipped data.
+- cargo test --workspace --release -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS: 366 passed, 0 failed (pre-rebase). Clippy -D warnings clean.
+- grid-soak quick: 6 Donington scenarios pass; the 6 Nürburgring ones fail at set-up with the known F326 finding (1).
+- After the rebase onto F334 (a7f7112): solo and 12-car outputs identical to F324 apart from the new laps_covered= field (F331); cargo test --workspace --release -- --include-ignored 387 passed, 0 failed; Clippy clean; grid-soak quick the same 6 pass / 6 known Nürburgring set-up failures.
+
+Failed first:
+- a catch-up unit test put the car below the 500 m minimum race distance (test fixed);
+- a test build raced with a mid-build edit;
+- Clippy collapsible_match;
+- rebase conflicts with P5 in main.rs and the launcher. The launcher was resolved to main; --ai moved into the settings file.
+
+Not done:
+- live trace of the original (§7.6.6);
+- playable not rebuilt (as asked); a playable built after this change is needed to drive against the paced field.
+
 F335 ETC2 texture cache for GPUs without BC (P8 follow-up, owner request) (2026-10-16, Claude Code). Details are in docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.3.
 - Without BC, a GPU with ETC2 now gets textures from a private KTX2 cache instead of the 6.5× RGBA8 decode. Path order: BC, then ETC2, then RGBA8. P5's diagnostics key texture_fallback is now off/on=rgba8/etc2 (legacy GRID_TEXTURE_FALLBACK=1|rgba8|etc2); docs/SETTINGS.md updated.
 - New grid_formats::etc2: our own ETC2 RGB8/RGBA8 (EAC alpha) encoder and decoder covering all five RGB modes (individual, differential, T, H, planar), with steering bits for T/H/planar. No new crate. ETC2 was chosen over ASTC because no maintained pure-Rust ASTC encoder was found (web search 2026-10-16).

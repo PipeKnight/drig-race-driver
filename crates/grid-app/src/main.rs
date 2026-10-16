@@ -134,6 +134,8 @@ struct Opponents {
     after_finish: Option<grid_tools::ai_driver::AiDriver>,
     /// Last throttle of each opponent (car k at k-1), for engine sound.
     throttles: Vec<f32>,
+    /// Original race manager: catch-up and choreographer (`--ai`).
+    pacing: grid_tools::ai_pacing::Field,
 }
 impl Opponents {
     /// Positions of every car; car 0 is the player runtime held outside `multi`.
@@ -1026,6 +1028,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut driver_aids = profile.assists()?;
     let mut input_settings = profile.input()?;
+    let mut ai_settings = profile.ai()?;
     let mut output = None;
     let mut lod = String::from("LOD0_");
     let mut track = false;
@@ -1124,6 +1127,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 input_settings =
                     input::Settings::parse(&args.next().ok_or("--input needs key=value items")?)?
             }
+            "--ai" => {
+                ai_settings = grid_tools::ai_pacing::Settings::parse(
+                    &args.next().ok_or("--ai needs key=value items")?,
+                )?
+            }
             "--route" => {
                 route = Route::new(
                     &args
@@ -1187,6 +1195,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", settings::HELP);
                 println!("{}", assists::HELP);
                 println!("{}", input::HELP);
+                println!("{}", grid_tools::ai_pacing::Settings::HELP);
                 println!(
                     "--opponents 1..11: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
                 );
@@ -1339,9 +1348,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     parameters,
                 )?;
                 multi.enable_dynamic_props(&root)?;
-                use grid_tools::ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Parameters};
+                use grid_tools::ai_driver::{AiData, AiDriver, Parameters};
                 let ai = AiData::load(&root, route.path(), "touring", "lac")?;
-                let parameters = Parameters::new(&ai, NORMAL_DIFFICULTY, |_| 1.)?;
+                let difficulty = ai_settings.difficulty;
+                let parameters = Parameters::new(&ai, difficulty, |_| 1.)?;
                 let characteristics = match &ai_characteristics {
                     Some(path) => grid_tools::ai_driver::read_characteristics(
                         &std::fs::read_to_string(path)?,
@@ -1352,12 +1362,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let drivers = (0..n)
                     .map(|i| -> Result<AiDriver, String> {
                         let row = characteristics.get((i + 1) % characteristics.len().max(1));
-                        let p = Parameters::new(&ai, NORMAL_DIFFICULTY, |name| {
+                        let p = Parameters::new(&ai, difficulty, |name| {
                             row.and_then(|r| r.get(name).copied()).unwrap_or(1.)
                         })?;
                         Ok(AiDriver::new(p, 0x5eed + i as u32 + 1))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                let mistakes = (0..=n)
+                    .map(|k| {
+                        characteristics
+                            .get(k % characteristics.len().max(1))
+                            .and_then(|r| r.get("mistakes").copied())
+                            .unwrap_or(1.)
+                    })
+                    .collect();
                 if !characteristics.is_empty() {
                     println!(
                         "drive_ai_characteristics drivers={} source=private-table",
@@ -1365,9 +1383,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 println!(
-                    "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=original-ai-port difficulty={NORMAL_DIFFICULTY} deformation={}",
+                    "drive_opponents enabled=true count={n} world=shared car_contacts=two-body driver=original-ai-port difficulty={difficulty} deformation={}",
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
+                println!("drive_ai_pacing {ai_settings}");
                 let start = {
                     let gate = &grid_tools::lap_progress::load_route(&root, &route)?
                         .progress
@@ -1388,6 +1407,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     start,
                     &positions,
                 );
+                let pacing = grid_tools::ai_pacing::Field::new(
+                    grid_tools::ai_pacing::Data::load(&root, &ai_settings)?,
+                    ai_settings.clone(),
+                    &ai.line,
+                    trial_laps.unwrap_or(1),
+                    start,
+                    &positions,
+                    0,
+                    mistakes,
+                    0x5eed,
+                );
                 let names = std::iter::once("You".to_string())
                     .chain((1..=n).map(|i| format!("AI {i}")))
                     .collect();
@@ -1406,6 +1436,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     autopilot,
                     after_finish: None,
                     throttles: vec![0.; n],
+                    pacing,
                 })
             })
             .transpose()?;
@@ -2247,6 +2278,31 @@ fn drive_tick(
             }
             _ => 3,
         };
+        // Race manager (catch-up, choreographer) before the AI update.
+        if !held {
+            use grid_tools::race::Status;
+            let racing: Vec<bool> = (0..opponents.standings.len())
+                .map(|i| {
+                    opponents.standings.status(i) == Status::Racing
+                        && opponents.multi.retirement(i).is_none()
+                })
+                .collect();
+            opponents.pacing.tick_with_player(
+                &opponents.ai.line,
+                &driving.runtime,
+                &mut opponents.multi,
+                &mut opponents.drivers,
+                &racing,
+                grid_tools::source_vehicle::DELTA,
+            );
+            for line in &opponents.pacing.log {
+                log_line!(
+                    "drive_ai_event version=1 segment={} tick={} {line}",
+                    driving.segment,
+                    driving.runtime.ticks + 1
+                );
+            }
+        }
         for (i, driver) in opponents.drivers.iter_mut().enumerate() {
             let car = &opponents.multi.cars[i + 1];
             all.push(if held {
@@ -2377,6 +2433,20 @@ fn drive_tick(
                 {
                     opponents.standings.retire(i, Out::Wrecked);
                 }
+                // Stopped by the AI's failure/damage retire drive (AUTHORED).
+                if opponents.drivers[i - 1].removal_requested()
+                    && opponents.standings.status(i) == Status::Racing
+                {
+                    opponents.standings.retire(i, Out::Wrecked);
+                    log_line!(
+                        "drive_ai_event version=1 segment={} tick={} car={i} retired=failure",
+                        driving.segment,
+                        driving.runtime.ticks
+                    );
+                    driving
+                        .notices
+                        .push(format!("{} retired", opponents.names[i]));
+                }
             }
             if opponents.standings.over() {
                 for line in opponents.standings.classification(&opponents.names) {
@@ -2467,6 +2537,7 @@ fn drive_actions(
             }
             let positions = opponents.positions(&driving.runtime);
             opponents.standings.reset(&opponents.ai.line, &positions);
+            opponents.pacing.reset(&opponents.ai.line, &positions);
             opponents.after_finish = None;
         }
         driving.segment += 1;

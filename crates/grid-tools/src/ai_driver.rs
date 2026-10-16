@@ -20,10 +20,15 @@
 //! are omitted, cars on both sides hold the planned offset, and a stuck car
 //! reverses briefly (the recovery behaviour is not recovered).
 //!
-//! Selected scope, not recovered or not yet ported: corner-speed scale A/B
-//! (A=1, B=0), avoid/block/draft behaviours,
-//! traction control, AI ABS cap, start-line reaction, choreographed mistakes,
-//! catch-up. The random offset generator is an authored LCG (the original RNG
+//! The race manager (`crate::ai_pacing`) sets the corner-speed scale A and
+//! floor B, the let-pass flag, failures and engine damage, and arms
+//! choreographed mistakes; the mistake slot, lost_control, controlled_stop,
+//! race_damaged and the retire failure branch are here
+//! (docs/AI_MISTAKES_PACING_RESEARCH.md).
+//!
+//! Selected scope, not recovered or not yet ported: block/draft (data-gated
+//! off), visibility_loss (no smoke value), traction control, AI ABS cap,
+//! start-line reaction. The random offset generator is an authored LCG (the original RNG
 //! stream is not identified). Characteristic values default to 1.0 (the live
 //! player-slot set); the difficulty default is the live Normal value 0.606.
 use crate::source_vehicle::Controls;
@@ -386,6 +391,37 @@ pub struct Parameters {
     rescue: Rescue,
     deviation_small: f32,
     deviation_large: f32,
+    faults: Faults,
+}
+
+/// Mistake, failure and let-pass parameters (docs/AI_MISTAKES_PACING_RESEARCH.md
+/// §2, §4.2, §5; built-in defaults where the shipped XML is silent).
+#[derive(Clone, Debug)]
+pub struct Faults {
+    /// mistake_probability (map 33) and the per-type factors, by mistake id:
+    /// heavy, light, late, early, brake_spin, powerout_spin, brake_lock. The
+    /// brake_lock slot reads holder 49, past the table: 0 live [V].
+    probability: f32,
+    factors: [f32; 7],
+    /// generateMistakes (cfg+0xCAC, built-in false) and
+    /// mkNumBrakeLinesBeforeMistakes (cfg+0xC84, 3).
+    generate: bool,
+    lines_before: u32,
+    /// mistakeEntrySpinRearGrip, mistakePowerSpinRearGrip, mistakeBrakeLockGrip.
+    spin_rear_grip: f32,
+    power_rear_grip: f32,
+    lock_grip: f32,
+    racing_grip: f32,
+    crash_front_grip: f32,
+    crash_rear_grip: f32,
+    crash_min_speed: f32,
+    retirement_speed: f32,
+    /// rtStoppedSpeed (cfg+0x4F0, built-in 0.5).
+    stopped_speed: f32,
+    damage_retirement_ratio: f32,
+    /// coLetPassDistance (built-in 30) and coLetPassThrottleRatio.
+    let_pass_distance: f32,
+    let_pass_throttle: f32,
 }
 
 /// Avoid, recovery and retire parameters (docs/AI_AVOID_RECOVERY_RESEARCH.md
@@ -631,6 +667,32 @@ impl Parameters {
             },
             deviation_small: m("deviation_from_racing_line_small")?,
             deviation_large: m("deviation_from_racing_line_large")?,
+            faults: Faults {
+                probability: m("mistake_probability")?,
+                factors: [
+                    m("mistake_brake_heavy_factor")?,
+                    m("mistake_brake_light_factor")?,
+                    m("mistake_brake_late_factor")?,
+                    m("mistake_brake_early_factor")?,
+                    m("mistake_brake_spin_factor")?,
+                    m("mistake_powerout_spin_factor")?,
+                    0.,
+                ],
+                generate: d_or("generateMistakes", 0.) != 0.,
+                lines_before: d_or("mkNumBrakeLinesBeforeMistakes", 3.) as u32,
+                spin_rear_grip: v("mistakeEntrySpinRearGrip")?,
+                power_rear_grip: v("mistakePowerSpinRearGrip")?,
+                lock_grip: v("mistakeBrakeLockGrip")?,
+                racing_grip: v("racingGripMultiplier")?,
+                crash_front_grip: v("crashFrontGrip")?,
+                crash_rear_grip: v("crashRearGrip")?,
+                crash_min_speed: v("crashMinSpeed")?,
+                retirement_speed: d("rtRetirementSpeed")?,
+                stopped_speed: d_or("rtStoppedSpeed", 0.5),
+                damage_retirement_ratio: m("damage_retirement_ratio")?,
+                let_pass_distance: d_or("coLetPassDistance", 30.),
+                let_pass_throttle: d_or("coLetPassThrottleRatio", 0.8),
+            },
         })
     }
 }
@@ -787,6 +849,97 @@ pub enum Behaviour {
     Recovery,
     RecoverTbone,
     Retire,
+    /// Choreographed failures and stops (docs/AI_MISTAKES_PACING_RESEARCH.md §5):
+    /// lost_control (21), controlled_stop (20), race_damaged (9) and the
+    /// retire behaviour's failure/damage branch (score 10).
+    LostControl,
+    ControlledStop,
+    RaceDamaged,
+    RetireFailure,
+}
+
+/// Per-car inputs from the race manager (choreographer, ctx+0x38 =
+/// drv+0x3150): corner-speed scale A (+0x3154) and floor B (+0x3158), the
+/// backwards/yield flag (+0x316C), the engine-failure damage gate (+0x316D)
+/// with the engine damage value (own+0x11C), the per-wheel failure flags
+/// (car adapter +0x254) and a controlled-stop request.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pace {
+    pub a: f32,
+    pub b: f32,
+    pub backwards: bool,
+    pub damage: f32,
+    pub damage_gate: bool,
+    pub failures: [bool; 4],
+    pub stop: bool,
+}
+
+impl Default for Pace {
+    fn default() -> Self {
+        Self {
+            a: 1.,
+            b: 0.,
+            backwards: false,
+            damage: 0.,
+            damage_gate: false,
+            failures: [false; 4],
+            stop: false,
+        }
+    }
+}
+
+/// Mistake ids (enum 0xCF6F64).
+pub const BRAKE_HEAVY: u8 = 0;
+pub const BRAKE_LIGHT: u8 = 1;
+pub const BRAKE_LATE: u8 = 2;
+pub const BRAKE_EARLY: u8 = 3;
+pub const BRAKE_SPIN: u8 = 4;
+pub const POWEROUT_SPIN: u8 = 5;
+pub const BRAKE_LOCK: u8 = 6;
+
+/// Mistake slot drv+0x3100 (§2.1): armed (pending) type and timeout, active
+/// type and timer, locked wheel, last brake-line id and the brake-line counter.
+#[derive(Clone, Copy, Debug, Default)]
+struct Mistake {
+    pending: Option<(u8, f32)>,
+    active: Option<(u8, f32)>,
+    wheel: usize,
+    line: Option<usize>,
+    counter: u32,
+}
+
+/// Spin and other mistake durations (.rdata 0xCB1790 3 s, 0xCB093C 5 s), the
+/// random arm timeout (0xCAFEC4 60 s), the cancel speed (0xCAFA58 10 m/s), the
+/// brake_spin excess window (0xE4D0C0/0xE4D0BC) and the powerout throttle and
+/// speed thresholds (0xE4D0C8/0xE4D0C4).
+const MISTAKE_SPIN_TIME: f32 = 3.;
+const MISTAKE_TIME: f32 = 5.;
+const MISTAKE_ARM_TIMEOUT: f32 = 60.;
+const MISTAKE_CANCEL_SPEED: f32 = 10.;
+const BRAKE_SPIN_EXCESS: [f32; 2] = [8., 12.];
+const POWEROUT_THROTTLE: f32 = 0.6;
+const POWEROUT_SPEED: f32 = 10.;
+/// lost_control: failed-wheel grip (0x776AB0), wobble rear grip, brake cap
+/// and wobble period (0x77CF10).
+const FAILED_WHEEL_GRIP: f32 = 0.1;
+const WOBBLE_REAR_GRIP: f32 = 0.3;
+const WOBBLE_BRAKE_CAP: f32 = 0.15;
+const WOBBLE_PERIOD: f32 = 1.;
+/// race_damaged: desired speed, throttle cap and side re-choice period (0x799FB0).
+const DAMAGED_SPEED: f32 = 50.;
+const DAMAGED_THROTTLE: f32 = 0.6;
+const DAMAGED_PERIOD: f32 = 1.;
+
+/// lost_control object (0x78B1F0): crash mode or the failed-wheel grip cut,
+/// wobble timer and offset; the side/timer of race_damaged and retire.
+#[derive(Clone, Copy, Default)]
+struct Failure {
+    crash: bool,
+    wobble_timer: f32,
+    wobble_offset: f32,
+    side_timer: f32,
+    side_offset: f32,
+    removal: bool,
 }
 
 /// avoid test (0x79A960) memory and behaviour object (0x79C600): remembered
@@ -841,6 +994,10 @@ struct Request {
     full_brake: bool,
     reverse: bool,
     track_limits: bool,
+    /// Request grip multipliers +0xB8..+0xC4 in wheel order rear L/R, front
+    /// L/R (0x776680), and the brake cap +0xA0.
+    grip: [f32; 4],
+    brake_cap: f32,
 }
 
 /// Car state seen by the AI.
@@ -946,6 +1103,8 @@ pub struct Telemetry {
     pub recovery_mode: u8,
     pub octant: u8,
     pub reverse: bool,
+    /// Signed lateral offset of our front from the racing line (0x40AE90).
+    pub front_lateral: f32,
 }
 
 #[derive(Clone)]
@@ -982,6 +1141,13 @@ pub struct AiDriver {
     brake: f32,
     steering: f32,
     pub telemetry: Telemetry,
+    /// Race-manager inputs, set before each update.
+    pub pace: Pace,
+    mistake: Mistake,
+    failure: Failure,
+    /// Request grip multipliers of the last update (read by the grip
+    /// application 0x408710).
+    grip: [f32; 4],
 }
 
 fn clamp01(x: f32) -> f32 {
@@ -1003,6 +1169,7 @@ fn remap(x: f32, x0: f32, x1: f32, y0: f32, y1: f32) -> f32 {
 
 impl AiDriver {
     pub fn new(parameters: Parameters, seed: u32) -> Self {
+        let grip = [parameters.faults.racing_grip; 4];
         Self {
             look_ahead: parameters.la[0],
             parameters,
@@ -1038,6 +1205,10 @@ impl AiDriver {
             brake: 0.,
             steering: 0.,
             telemetry: Telemetry::default(),
+            pace: Pace::default(),
+            mistake: Mistake::default(),
+            failure: Failure::default(),
+            grip,
         }
     }
 
@@ -1403,6 +1574,7 @@ impl AiDriver {
                 });
         }
         let stuck = self.stuck.is_some_and(|s| s.2);
+        let faults = self.fault_scores(speed);
 
         // Path obstacle (0x78B560; AUTHORED corridor as brake_for_vehicle):
         // the car ahead we close on with the smallest time to reach it, our
@@ -1490,11 +1662,15 @@ impl AiDriver {
                     0
                 },
             ),
+            (Behaviour::LostControl, faults[0]),
+            (Behaviour::ControlledStop, faults[1]),
             (Behaviour::Recovery, recovery_score),
             (
                 Behaviour::Avoid,
                 if avoid_fire.is_some() { AVOID_SCORE } else { 0 },
             ),
+            (Behaviour::RetireFailure, faults[2]),
+            (Behaviour::RaceDamaged, faults[3]),
             (Behaviour::Alongside, if fired { 8 } else { 0 }),
             (
                 Behaviour::Overtake,
@@ -1543,6 +1719,9 @@ impl AiDriver {
                 }
                 // Activation runs after scoring: the first tick does nothing.
                 Behaviour::RecoverTbone => self.tbone = -1.,
+                Behaviour::LostControl | Behaviour::RaceDamaged | Behaviour::RetireFailure => {
+                    self.activate_failure(next, speed)
+                }
                 _ => {}
             }
             self.behaviour = next;
@@ -1573,6 +1752,8 @@ impl AiDriver {
             full_brake: false,
             reverse: false,
             track_limits: false,
+            grip: [p.faults.racing_grip; 4],
+            brake_cap: 1.,
         };
         let corner =
             clamp01((self.curvature.abs() - tr.ov_corner[0]) / (tr.ov_corner[1] - tr.ov_corner[0]));
@@ -1597,6 +1778,9 @@ impl AiDriver {
                     p.ra_merge
                 };
                 request.throttle_cap = p.throttle_confidence;
+                if self.let_pass(others, own_rear, f) {
+                    request.throttle_cap = p.throttle_confidence * p.faults.let_pass_throttle;
+                }
             }
             Behaviour::Overtake => {
                 // Drive 0x78A330: decide a side every ovDecisionTimeOut or on a new target.
@@ -1882,6 +2066,12 @@ impl AiDriver {
                 request.force_brake = true;
                 request.no_steer = true;
             }
+            Behaviour::LostControl
+            | Behaviour::ControlledStop
+            | Behaviour::RaceDamaged
+            | Behaviour::RetireFailure => {
+                self.drive_failure(data, &mut request, arc, speed, dt);
+            }
         }
         // Planned offset moves toward the request at its merge rate.
         if speed < SLOW_SPEED {
@@ -1931,7 +2121,8 @@ impl AiDriver {
         let to_target = sub(target, position);
         let heading_error = dot2(to_target, right).atan2(dot2(to_target, forward));
 
-        // Next brake line ahead and its corner speed (0x792C80, A=1 B=0).
+        // Next brake line ahead and its corner speed (0x792C80) with the
+        // race manager's scale A and floor B.
         let (id, distance) = data
             .brake_lines
             .iter()
@@ -1947,11 +2138,14 @@ impl AiDriver {
             1.,
             p.tg_offset_speed_factor,
         );
-        let s = p.corner_speed_in_ratio;
+        let s = self.corner_speed_ratio(p.corner_speed_in_ratio);
         let line_target = (line.min_speed + (line.max_speed - line.min_speed) * factor * s).clamp(
             line.min_speed.min(line.max_speed),
             line.min_speed.max(line.max_speed),
         );
+
+        // Mistake slot update (0x787620), after the behaviour drive.
+        self.mistake_update(id, dt, &mut request.grip);
 
         // Brake-line state (0x7929D0 timer, 0x7886C0).
         if let Some(passed) = &mut self.lines.passed {
@@ -1983,7 +2177,17 @@ impl AiDriver {
             let reaction = pedal * (1. - previous_brake);
             let mut d = if b <= reaction { b * 2. } else { reaction + b };
             d *= line.distance_modifier;
-            if distance <= p.corner_brake_distance_factor * d {
+            // An armed late/early mistake scales the trigger distance and
+            // activates when it is reached.
+            let trigger = p.corner_brake_distance_factor * d;
+            let trigger = match self.mistake.pending {
+                Some((k @ (BRAKE_LATE | BRAKE_EARLY), _)) => trigger * p.faults.factors[k as usize],
+                _ => trigger,
+            };
+            if distance <= trigger {
+                if self.lines.active != Some(id) {
+                    self.activate_mistake(&[BRAKE_LATE, BRAKE_EARLY]);
+                }
                 self.lines.active = Some(id);
             }
             if self.lines.active == Some(id) {
@@ -1993,11 +2197,26 @@ impl AiDriver {
                     clamp01((distance - b) / (d - b))
                 };
                 line_brake = ratio.powf(p.brake_cruise_exponent);
+                if line_brake > 0. {
+                    self.activate_mistake(&[BRAKE_HEAVY, BRAKE_LIGHT, BRAKE_LOCK]);
+                }
             }
         }
 
-        // Brake (0x78E8A0): line brake, spin; cap 1.
-        let mut brake = line_brake;
+        // Brake (0x78E8A0): line brake, spin; cap 1. An active heavy/light
+        // mistake is a floor/cap on the brake.
+        let mut brake = match self.mistake.active {
+            Some((BRAKE_HEAVY, _)) => line_brake.max(p.faults.factors[0]),
+            Some((BRAKE_LIGHT, _)) => line_brake.min(p.faults.factors[1]),
+            _ => line_brake,
+        };
+        // brake_spin activates while braking for a line with 8..12 m/s excess (0x77A110).
+        if self.lines.active == Some(id) {
+            let excess = speed - line_target;
+            if BRAKE_SPIN_EXCESS[0] < excess && excess < BRAKE_SPIN_EXCESS[1] {
+                self.activate_mistake(&[BRAKE_SPIN]);
+            }
+        }
         // Follow brake (0x77A1E0): inside the follow distance along our heading.
         if let Some((_, along, _)) = followed
             && along < 0.
@@ -2014,7 +2233,7 @@ impl AiDriver {
         {
             brake = 1.;
         }
-        brake = brake.min(1.);
+        brake = brake.min(1.).min(request.brake_cap);
 
         // Throttle (0x783180): governor and limiters; any previous brake -> 0.
         let mut governor_target = f32::MAX;
@@ -2084,11 +2303,20 @@ impl AiDriver {
                 }
                 _ => 1.,
             };
-            governor
+            let limited = governor
                 .min(follow)
                 .min(slide)
                 .min(corner)
-                .min(request.throttle_cap)
+                .min(request.throttle_cap);
+            // powerout_spin (0x77A450): armed, past the brake line, previous
+            // throttle above 0.6 and moving; while active the throttle is full.
+            if within_hold && self.throttle > POWEROUT_THROTTLE && speed > POWEROUT_SPEED {
+                self.activate_mistake(&[POWEROUT_SPIN]);
+            }
+            match self.mistake.active {
+                Some((POWEROUT_SPIN, _)) => limited.max(1.),
+                _ => limited,
+            }
         };
 
         // Steering (0x77AC50): heading gain plus yaw-rate damping, normalised by
@@ -2120,6 +2348,11 @@ impl AiDriver {
             dt,
         );
         self.brake = approach(self.brake, brake, p.brake_on_speed, p.brake_off_speed, dt);
+        // 0x794310 ends any active mistake at low speed.
+        if speed <= MISTAKE_CANCEL_SPEED {
+            self.mistake.active = None;
+        }
+        self.grip = request.grip;
         self.telemetry = Telemetry {
             arc,
             look_ahead: self.look_ahead,
@@ -2144,6 +2377,7 @@ impl AiDriver {
             recovery_mode: self.recovery.mode,
             octant: octant_index,
             reverse,
+            front_lateral: own_lateral,
         };
         // AUTHORED reverse boundary: the car-side consumer of the reverse
         // byte is not traced (§5, §7.3). The assisted automatic gearbox
@@ -2164,6 +2398,272 @@ impl AiDriver {
             brake,
             steering: self.steering,
             handbrake: false,
+        }
+    }
+}
+
+/// brake_lock slot order: drawn index 0..3 -> request +0xC0, +0xC4, +0xB8,
+/// +0xBC, i.e. wheels FL, FR, RL, RR in the rear-first wheel order (§2.4).
+const LOCK_WHEEL: [usize; 4] = [2, 3, 0, 1];
+
+/// Random mistake type (0x787620): the type whose factor is the smallest one
+/// strictly greater than `r`; ties keep the lower id.
+fn pick_mistake(factors: &[f32; 7], r: f32) -> Option<u8> {
+    let mut pick: Option<(usize, f32)> = None;
+    for (k, &w) in factors.iter().enumerate() {
+        if w > r && pick.is_none_or(|(_, best)| w < best) {
+            pick = Some((k, w));
+        }
+    }
+    pick.map(|(k, _)| k as u8)
+}
+
+/// Mistakes, choreographed failures and race-manager inputs
+/// (docs/AI_MISTAKES_PACING_RESEARCH.md §2, §4.3, §5).
+impl AiDriver {
+    /// Arm a mistake (0x779990 SetPending), as the choreographer's mistake
+    /// event does; it activates at its own driving condition.
+    pub fn arm_mistake(&mut self, kind: u8, timeout: f32) {
+        self.mistake.pending = Some((kind, timeout));
+    }
+    /// Disarm (mistake event abort 0x4018D0).
+    pub fn disarm_mistake(&mut self) {
+        self.mistake.pending = None;
+    }
+    /// Armed and active mistake ids.
+    pub fn mistake(&self) -> (Option<u8>, Option<u8>) {
+        (
+            self.mistake.pending.map(|m| m.0),
+            self.mistake.active.map(|m| m.0),
+        )
+    }
+    /// Request grip multipliers of the last update, rear L/R, front L/R.
+    pub fn request_grip(&self) -> [f32; 4] {
+        self.grip
+    }
+    /// The failure/damage retire drive has stopped the car (retire drive
+    /// 0x79C6E0 below rtStoppedSpeed: removal request req+0x38 [I]).
+    pub fn removal_requested(&self) -> bool {
+        self.failure.removal
+    }
+
+    /// Uniform in [0, 1) from the authored driver stream.
+    fn unit(&mut self) -> f32 {
+        self.uniform() * 0.5 + 0.5
+    }
+
+    /// `S = max(A · corner_speed_in_ratio, B)` (0x792C80).
+    fn corner_speed_ratio(&self, ratio: f32) -> f32 {
+        let scaled = self.pace.a * ratio;
+        if scaled > self.pace.b {
+            scaled
+        } else {
+            self.pace.b
+        }
+    }
+
+    /// Scores of lost_control (21), controlled_stop (20), the retire
+    /// failure/damage branch (10) and race_damaged (9). The damage tests run
+    /// only with the engine-failure gate drv+0x316D (§2.8). The spun-and-fast
+    /// lost_control branch is not ported (coSpinSpeed's default is not recovered).
+    fn fault_scores(&self, speed: f32) -> [u8; 4] {
+        let f = &self.parameters.faults;
+        let pace = &self.pace;
+        let failed = pace.failures.iter().any(|&x| x);
+        let lost = failed && speed > f.retirement_speed + 5.;
+        let retire = failed || (pace.damage_gate && pace.damage > f.damage_retirement_ratio);
+        let damaged = pace.damage_gate && pace.damage >= 0.5;
+        [
+            if lost { 21 } else { 0 },
+            if pace.stop { 20 } else { 0 },
+            if retire { 10 } else { 0 },
+            if damaged { 9 } else { 0 },
+        ]
+    }
+
+    /// Activation of lost_control (0x78B1F0: crash mode above crashMinSpeed,
+    /// else the failed-wheel grip cut) and of the side choice of
+    /// race_damaged/retire.
+    fn activate_failure(&mut self, behaviour: Behaviour, speed: f32) {
+        match behaviour {
+            Behaviour::LostControl => {
+                self.failure.crash = speed > self.parameters.faults.crash_min_speed;
+                self.failure.wobble_timer = 0.;
+            }
+            _ => self.failure.side_timer = 0.,
+        }
+    }
+
+    /// The nearer track limit, re-chosen every second (0x797F00 [I]): the
+    /// planned offset keeps the car's half width plus 0.5 m inside it.
+    fn limit_side(&mut self, data: &AiData, arc: f32, dt: f32) -> f32 {
+        self.failure.side_timer -= dt;
+        if self.failure.side_timer <= 0. {
+            self.failure.side_timer = DAMAGED_PERIOD;
+            let [left, right] = data.line.track_limits_at(arc);
+            let margin = HALF_WIDTH + 0.5;
+            self.failure.side_offset = if (self.offset - left).abs() <= (right - self.offset).abs()
+            {
+                left + margin
+            } else {
+                right - margin
+            };
+        }
+        self.failure.side_offset
+    }
+
+    /// Drives of lost_control (0x776B80), controlled_stop (0x78AA90),
+    /// race_damaged (0x799FB0) and the retire failure branch (0x79A090).
+    /// AUTHORED where not recovered: the crash PID, spin/flip angles and
+    /// inertia factor are not ported (normal steering, no flip); the wobble
+    /// amplitude is deviation_from_racing_line_large; the retire point is the
+    /// nearer track limit, where the car stops.
+    fn drive_failure(
+        &mut self,
+        data: &AiData,
+        request: &mut Request,
+        arc: f32,
+        speed: f32,
+        dt: f32,
+    ) {
+        let f = self.parameters.faults.clone();
+        match self.behaviour {
+            Behaviour::LostControl if self.failure.crash => {
+                request.desired_speed = 0.;
+                request.full_brake = true;
+                request.grip = [
+                    f.crash_rear_grip,
+                    f.crash_rear_grip,
+                    f.crash_front_grip,
+                    f.crash_front_grip,
+                ];
+            }
+            Behaviour::LostControl => {
+                request.desired_speed = f.retirement_speed;
+                request.brake_to_speed = true;
+                request.brake_cap = WOBBLE_BRAKE_CAP;
+                self.failure.wobble_timer -= dt;
+                if self.failure.wobble_timer <= 0. {
+                    self.failure.wobble_timer = WOBBLE_PERIOD;
+                    self.failure.wobble_offset = self.uniform() * self.parameters.deviation_large;
+                }
+                request.desired_offset = self.failure.wobble_offset;
+                request.grip[0] = WOBBLE_REAR_GRIP;
+                request.grip[1] = WOBBLE_REAR_GRIP;
+            }
+            Behaviour::ControlledStop => {
+                request.force_brake = true;
+                request.desired_offset = self.offset;
+                request.no_steer = speed < MINIMUM_MOVING_SPEED;
+            }
+            Behaviour::RaceDamaged => {
+                request.desired_speed = DAMAGED_SPEED;
+                request.throttle_cap = DAMAGED_THROTTLE;
+                request.merge = self.parameters.ra_merge;
+                request.desired_offset = self.limit_side(data, arc, dt);
+                request.track_limits = true;
+            }
+            Behaviour::RetireFailure => {
+                let side = self.limit_side(data, arc, dt);
+                request.desired_speed = f.retirement_speed;
+                request.brake_to_speed = true;
+                request.merge = self.parameters.ra_merge;
+                request.desired_offset = side;
+                request.track_limits = true;
+                if (self.offset - side).abs() < 0.5 {
+                    request.force_brake = true;
+                    request.no_steer = speed < MINIMUM_MOVING_SPEED;
+                    if speed < f.stopped_speed {
+                        self.failure.removal = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Let-pass (race drive 0x77C2C0): while the car is dropping back or being
+    /// lapped, a car whose front is behind our rear within coLetPassDistance.
+    fn let_pass(&self, others: &[Other], own_rear: [f32; 3], forward: [f32; 3]) -> bool {
+        let distance = self.parameters.faults.let_pass_distance;
+        self.pace.backwards
+            && others.iter().any(|r| {
+                let d = sub(r.front(), own_rear);
+                dot3(d, forward) < 0. && dot3(d, d) < distance * distance
+            })
+    }
+
+    /// Activation 0x7799B0 of an armed mistake of one of `kinds`.
+    fn activate_mistake(&mut self, kinds: &[u8]) {
+        if self.mistake.active.is_some() {
+            return;
+        }
+        let Some((kind, _)) = self.mistake.pending else {
+            return;
+        };
+        if !kinds.contains(&kind) {
+            return;
+        }
+        self.mistake.pending = None;
+        let time = if kind == BRAKE_SPIN || kind == POWEROUT_SPIN {
+            MISTAKE_SPIN_TIME
+        } else {
+            MISTAKE_TIME
+        };
+        self.mistake.active = Some((kind, time));
+        if kind == BRAKE_LOCK {
+            self.mistake.wheel = LOCK_WHEEL[((self.unit() * 4.) as usize).min(3)];
+        }
+    }
+
+    /// Mistake slot update 0x787620: a new brake line clears active types
+    /// 0-3/6 and may draw a random mistake (only with generateMistakes, false
+    /// in shipped data); timers; then the grip overrides of the active type.
+    /// AUTHORED: a failed wheel (blow_tyre) keeps grip 0.1, standing in for
+    /// the vehicle's failed-wheel parameter, which the port does not model.
+    fn mistake_update(&mut self, line: usize, dt: f32, grip: &mut [f32; 4]) {
+        let f = self.parameters.faults.clone();
+        if self.mistake.line != Some(line) {
+            self.mistake.line = Some(line);
+            if matches!(self.mistake.active, Some((k, _)) if k != BRAKE_SPIN && k != POWEROUT_SPIN)
+            {
+                self.mistake.active = None;
+            }
+            if f.generate && self.mistake.pending.is_none() {
+                self.mistake.counter += 1;
+                if self.mistake.counter > f.lines_before && self.unit() <= f.probability {
+                    let r = self.unit();
+                    if let Some(k) = pick_mistake(&f.factors, r) {
+                        self.mistake.pending = Some((k, MISTAKE_ARM_TIMEOUT));
+                    }
+                }
+            }
+        }
+        if let Some((_, t)) = &mut self.mistake.pending {
+            *t -= dt;
+            if *t <= 0. {
+                self.mistake.pending = None;
+            }
+        }
+        if let Some((_, t)) = &mut self.mistake.active {
+            *t -= dt;
+            if *t <= 0. {
+                self.mistake.active = None;
+            }
+        }
+        match self.mistake.active {
+            Some((BRAKE_SPIN, _)) => *grip = [f.spin_rear_grip, f.spin_rear_grip, 1., 1.],
+            Some((POWEROUT_SPIN, _)) => *grip = [f.power_rear_grip, f.power_rear_grip, 1., 1.],
+            Some((BRAKE_LOCK, _)) => {
+                *grip = [1.; 4];
+                grip[self.mistake.wheel] = f.lock_grip;
+            }
+            _ => {}
+        }
+        for (g, &failed) in grip.iter_mut().zip(&self.pace.failures) {
+            if failed {
+                *g = g.min(FAILED_WHEEL_GRIP);
+            }
         }
     }
 }
@@ -2211,6 +2711,115 @@ mod tests {
             }
         }
         assert_eq!(driver.grid_rev(1, dt), 0.);
+    }
+
+    #[test]
+    fn random_mistake_pick_follows_the_live_weights() {
+        // Live Normal driver 0 (§2.2): heavy, light, late, early, spins, lock.
+        let w = [0.600, 0.956, 0.441, 0.120, 1.0, 1.0, 0.0];
+        let pick = |r| pick_mistake(&w, r);
+        assert_eq!(pick(0.05), Some(BRAKE_EARLY));
+        assert_eq!(pick(0.3), Some(BRAKE_LATE));
+        assert_eq!(pick(0.5), Some(BRAKE_HEAVY));
+        assert_eq!(pick(0.9), Some(BRAKE_LIGHT));
+        // Ties keep the lower id: brake_spin before powerout_spin.
+        assert_eq!(pick(0.97), Some(BRAKE_SPIN));
+        assert_eq!(pick(1.0), None);
+    }
+
+    #[test]
+    fn mistake_slot_windows_and_effects() {
+        let Some(root) = std::env::var_os("GRID_GAME_ROOT") else {
+            return;
+        };
+        let data = AiData::load(
+            Path::new(&root),
+            "tracks/europe/donington/route_0",
+            "touring",
+            "lac",
+        )
+        .unwrap();
+        let mut d = AiDriver::new(
+            Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.).unwrap(),
+            7,
+        );
+        let f = d.parameters.faults.clone();
+        assert!(!f.generate);
+        assert_eq!(
+            (f.spin_rear_grip, f.power_rear_grip, f.lock_grip),
+            (0.2, 0.4, 0.2)
+        );
+        let mut grip = [1.; 4];
+        d.mistake_update(0, 0.016, &mut grip);
+        // Only the armed type activates, and only at its own condition.
+        d.arm_mistake(BRAKE_SPIN, 60.);
+        d.activate_mistake(&[BRAKE_LOCK]);
+        assert_eq!(d.mistake(), (Some(BRAKE_SPIN), None));
+        d.activate_mistake(&[BRAKE_SPIN]);
+        assert_eq!(d.mistake(), (None, Some(BRAKE_SPIN)));
+        // Spins: 3 s, survive a new brake line, rear grip 0.2.
+        let mut grip = [1.; 4];
+        d.mistake_update(1, 2.9, &mut grip);
+        assert_eq!(grip, [0.2, 0.2, 1., 1.]);
+        assert_eq!(d.mistake().1, Some(BRAKE_SPIN));
+        d.mistake_update(1, 0.2, &mut grip);
+        assert_eq!(d.mistake().1, None);
+        // powerout_spin: rear grip 0.4.
+        d.arm_mistake(POWEROUT_SPIN, 60.);
+        d.activate_mistake(&[POWEROUT_SPIN]);
+        let mut grip = [1.; 4];
+        d.mistake_update(1, 0.016, &mut grip);
+        assert_eq!(grip, [0.4, 0.4, 1., 1.]);
+        d.mistake.active = None;
+        // brake_lock: one wheel at 0.2 for 5 s, cleared by the next brake line.
+        let mut line = 1;
+        let mut wheels = [0; 4];
+        for _ in 0..64 {
+            d.arm_mistake(BRAKE_LOCK, 60.);
+            d.activate_mistake(&[BRAKE_HEAVY, BRAKE_LIGHT, BRAKE_LOCK]);
+            let mut grip = [1.; 4];
+            d.mistake_update(line, 0.016, &mut grip);
+            assert_eq!(grip.iter().filter(|&&g| g == 0.2).count(), 1);
+            assert_eq!(grip[d.mistake.wheel], 0.2);
+            wheels[d.mistake.wheel] += 1;
+            line += 1;
+            d.mistake_update(line, 0.016, &mut grip);
+            assert_eq!(d.mistake().1, None);
+        }
+        assert!(wheels.iter().all(|&n| n > 0), "{wheels:?}");
+        d.arm_mistake(BRAKE_LOCK, 60.);
+        d.activate_mistake(&[BRAKE_LOCK]);
+        d.mistake_update(line, 4.9, &mut [1.; 4]);
+        assert_eq!(d.mistake().1, Some(BRAKE_LOCK));
+        d.mistake_update(line, 0.2, &mut [1.; 4]);
+        assert_eq!(d.mistake().1, None);
+        // The arm timeout (60 s) disarms.
+        d.arm_mistake(BRAKE_SPIN, 60.);
+        d.mistake_update(line, 59.9, &mut [1.; 4]);
+        assert_eq!(d.mistake().0, Some(BRAKE_SPIN));
+        d.mistake_update(line, 0.2, &mut [1.; 4]);
+        assert_eq!(d.mistake().0, None);
+        // A failed wheel keeps grip 0.1; corner speed scale and floor.
+        d.pace.failures[3] = true;
+        let mut grip = [1.; 4];
+        d.mistake_update(line, 0.016, &mut grip);
+        assert_eq!(grip, [1., 1., 1., 0.1]);
+        assert_eq!(d.corner_speed_ratio(0.6454), 0.6454);
+        d.pace.a = 1.1;
+        assert_eq!(d.corner_speed_ratio(0.5), 1.1 * 0.5);
+        d.pace.b = 1.;
+        assert_eq!(d.corner_speed_ratio(0.5), 1.);
+        // Failure scores: lost_control above rtRetirementSpeed + 5, retire;
+        // damage only behind the engine-failure gate.
+        assert_eq!(d.fault_scores(25.), [21, 0, 10, 0]);
+        assert_eq!(d.fault_scores(15.), [0, 0, 10, 0]);
+        d.pace.failures = [false; 4];
+        d.pace.damage = 1.;
+        assert_eq!(d.fault_scores(25.), [0, 0, 0, 0]);
+        d.pace.damage_gate = true;
+        assert_eq!(d.fault_scores(25.), [0, 0, 10, 9]);
+        d.pace.damage = 0.5;
+        assert_eq!(d.fault_scores(25.), [0, 0, 0, 9]);
     }
 
     #[test]

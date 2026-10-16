@@ -33,6 +33,7 @@ Grammar:
 | | `deformation` | `derive`, a DF01 path, or `off` | `--deformation PATH\|derive` |
 | `[assists]` | `tcs`, `stability`, `braking`, `gearbox`, `input` | as `--assists` | `--assists`, `--assists-file` |
 | `[input]` | `device`, `*_deadzone`, `*_saturation` | as `--input` | `--input` |
+| `[ai]` | `difficulty` (0..1 or `normal`), `catchup` (`rd_N_star`, `on` = `rd_3_star`, `off`), `choreographer`, `mistakes` (`on`/`off`) | 0.606, `rd_3_star`, on, on (AI_DRIVER_PORT.md, "Mistakes, failures and race pacing") | `--ai` |
 | `[diagnostics]` | `free_look` | `yaw,pitch` | legacy `GRID_FREE_LOOK` |
 | | `effects_camera` | `x,y,z,lx,ly,lz` | `GRID_EFFECTS_CAMERA` |
 | | `ground_effects` | `on`/`off` | `GRID_GROUND_EFFECTS=0` |
