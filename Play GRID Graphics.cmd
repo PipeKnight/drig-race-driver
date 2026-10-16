@@ -18,7 +18,7 @@ if exist "local\body-contact-directions.bin" set "GRID_GRAPHICS_CONTACTS=--body-
 if defined GRID_GRAPHICS_CONTACTS if exist "local\body-impact-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --body-events local\body-impact-parameters.bin"
 if defined GRID_GRAPHICS_CONTACTS if exist "local\deformation-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --deformation local\deformation-parameters.bin"
 set "GRID_GRAPHICS_LOG=local\graphics\manual-%RANDOM%-%RANDOM%.log"
-echo Experimental graphics branch - source sky lighting, layered car materials and smooth tyres.
+echo Experimental graphics branch - source sky lighting, layered car/track materials and smooth tyres.
 echo Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit.
 echo Resolution %GRID_GRAPHICS_RESOLUTION%; maximize the window for your display.
 echo Private log: %GRID_GRAPHICS_LOG%
