@@ -34,6 +34,7 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    pub clearcoat_prepass_fix: bool,
     pub tread_normals: bool,
     pub layered_car: bool,
     pub source_ibl: bool,
@@ -50,6 +51,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            clearcoat_prepass_fix: true,
             tread_normals: true,
             layered_car: true,
             source_ibl: false,

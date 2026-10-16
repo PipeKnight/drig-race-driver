@@ -1,6 +1,7 @@
 //! Source reference viewer and serial driving prototype.
 mod body_damage;
 mod car_materials;
+mod clearcoat_prepass;
 mod engine_sound;
 mod free_look;
 mod graphics;
@@ -945,6 +946,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--clearcoat-prepass" => {
+                graphics.clearcoat_prepass_fix = match args.next().as_deref() {
+                    Some("fixed") => true,
+                    Some("stock") => false,
+                    _ => return Err("--clearcoat-prepass needs fixed or stock".into()),
+                }
+            }
             "--normal-detail" => {
                 graphics.tread_normals = match args.next().as_deref() {
                     Some("off") => false,
@@ -1533,6 +1541,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.track_grade {
         track_grade::install(&mut app);
+    }
+    if graphics.enhanced() && graphics.clearcoat_prepass_fix {
+        clearcoat_prepass::install(&mut app);
     }
     let exit = app
         .insert_resource(graphics)
