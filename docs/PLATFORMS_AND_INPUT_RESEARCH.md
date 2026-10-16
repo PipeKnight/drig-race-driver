@@ -87,6 +87,7 @@ These instructions are vendor-specific approximations. ARM's FRSQRTE/FRECPE give
 
 - The tables describe the owner's Intel CPU. The original game run on an AMD CPU would itself produce different bits. "Faithful" therefore means equal to the reference machine that validated the port.
 - The emulation was verified on x86 against the hardware. It has **not** been executed on an ARM device yet; there is no device here, and no emulator was installed. The code is plain integer and bit manipulation, so no ARM-specific behaviour is expected [I].
+- **Recommendation (owner rule F320: no CPU-dependent results):** the x86 build still executes the hardware instruction, so the port's physics is CPU-dependent today. On an AMD CPU, the same race can give different bits than on the reference Intel. Making the table path the default on every CPU removes that dependence. It is already proven bit-identical to the reference machine (solo and 12-car runs above), so the reference results do not move. This session leaves the desktop default unchanged; the switch is a one-line change of the `cfg` (follow-up P1b in section 7).
 - Approximate RCPPS/RSQRTPS also occur in the original's other paths, such as particles. Future ports of those should call `sse_approx` rather than intrinsics.
 
 ### 1.3 Remaining cross-platform determinism risk: libm [V call sites, I risk]
@@ -495,6 +496,7 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 |---|---|---|---|---|
 | **P0** | ✔ This session: research, plan, SSE table emulation (1.2) | — | done | sim crates build and lint for `aarch64-linux-android`; table path bit-identical on x86 |
 | **P1** | **Input abstraction refactor**, desktop: action layer, calibration, human record, edge queue, device class → `Assists.input`, settings file section `[input]` | — | 1 | keyboard path bit-identical (solo laps 88.42029812/86.28228502; assists matrix unchanged); unit tests for the four calibration types and the max-over-bindings rule; double/lost-shift test |
+| **P1b** | **CPU-independent physics**: make `sse_approx` the default on x86 too (drop the hardware branch or keep it behind a feature), and re-run the solo, 12-car and assists-matrix identity checks | — | <1 | identical results on the reference CPU; no hardware RCPPS/RSQRTPS left in the runtime |
 | **P2** | **Gamepad**: gilrs source, original pad preset from the user's `actionMapPreset4.xml`, Bevy dead zones 0, Advanced Controls dz/sat, rumble from vibration samples (stub until P4) | P1 | 1 | an Xbox-type pad drives a lap; the owner checks feel; the fresh-profile dz question (section 8) recorded |
 | **P3** | **Wheel input**: SDL3 joystick source (tool install recorded), exact-name preset match + AUTHORED generic preset, wheel latency extrapolation port (ring + global history) with unit tests, wheelLinearity option | P1 | 1–2 | wheel steering with unassisted steering and 828670 shaping; extrapolation matches a decompiled-formula unit test |
 | **P4** | **Force feedback**: snapshot-writer research (fields +0x80.., +0x1BC.., +0x1D8..), GameFFB port (caster, lateral, surface/kerb, gear, skid, suspension, wheel damage, collision samples), SDL3 constant force + software damping, pad rumble | P3 (P2 for rumble) | 2 | the owner feels centring, kerbs and impacts on their wheel; numeric unit tests of the caster/friction/sample formulas against the decompiled code |
@@ -508,7 +510,7 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 | **P12** | **Android performance and memory**: on-device profiling, tick time on a big core, grass density/shadows/MSAA settings, texture memory, thermal (ADPF) | P9–P11 | 1–2 | a stable 62.5 Hz tick and an acceptable frame rate on the owner's phone, with measurements recorded |
 | P13 | optional **cross-platform determinism**: one libm for all platforms, then re-run the probe validations | — | 1 | Windows/Linux/Android solo laps bit-identical |
 
-- **Recommended order:** P1 → P2 (immediate desktop value) ∥ P5 ∥ P8 ∥ P6 → P9 → P10 ∥ P11 → P12. P3/P4 follow when the owner wants the wheel; they need the owner's wheel for live checks. P7 any time after P5.
+- **Recommended order:** P1b (cheap, removes CPU dependence now) → P1 → P2 (immediate desktop value) ∥ P5 ∥ P8 ∥ P6 → P9 → P10 ∥ P11 → P12. P3/P4 follow when the owner wants the wheel; they need the owner's wheel for live checks. P7 any time after P5.
 - **Shortest path to the Android tilt build:** P1, P5, P8, P9, P11 (using `adb push` instead of P10), P12. That is about 6–9 sessions.
 
 ## 8. Open questions and tests that need hardware
