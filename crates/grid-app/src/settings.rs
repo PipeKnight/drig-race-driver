@@ -76,6 +76,8 @@ pub struct Diagnostics {
     pub damage_zones: bool,
     /// `car,x,y,z`: damage camera.
     pub damage_camera: Option<String>,
+    /// Decode BC textures on the CPU even when the GPU has BC (P8 checks).
+    pub texture_fallback: bool,
 }
 
 impl Default for Diagnostics {
@@ -91,6 +93,7 @@ impl Default for Diagnostics {
             look_back: false,
             damage_zones: false,
             damage_camera: None,
+            texture_fallback: false,
         }
     }
 }
@@ -112,6 +115,7 @@ impl Diagnostics {
             look_back: set("GRID_LOOK_BACK"),
             damage_zones: set("GRID_DAMAGE_ZONES"),
             damage_camera: text("GRID_DAMAGE_CAMERA"),
+            texture_fallback: text("GRID_TEXTURE_FALLBACK").is_some_and(|v| v == "1"),
         }
     }
 
@@ -130,6 +134,7 @@ impl Diagnostics {
             "look_back" => self.look_back = on(key, value)?,
             "damage_zones" => self.damage_zones = on(key, value)?,
             "damage_camera" => self.damage_camera = text(),
+            "texture_fallback" => self.texture_fallback = on(key, value)?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())

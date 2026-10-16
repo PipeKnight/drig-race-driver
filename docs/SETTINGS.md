@@ -42,6 +42,7 @@ Grammar:
 | | `look_back` | `on`/`off` | `GRID_LOOK_BACK` |
 | | `damage_zones` | `on`/`off` | `GRID_DAMAGE_ZONES` |
 | | `damage_camera` | `car,x,y,z` | `GRID_DAMAGE_CAMERA` |
+| | `texture_fallback` | `on`/`off`: CPU BC decode even with GPU BC (P8) | `GRID_TEXTURE_FALLBACK=1` |
 
 Notes:
 
