@@ -30,6 +30,8 @@ const EV: f32 = 13.;
 struct ProbeCamera(usize);
 #[derive(Component)]
 struct SceneProbe;
+#[derive(Component, Default)]
+struct AuditOnce(bool);
 #[derive(Resource, Clone, ExtractResource)]
 pub struct Cube {
     size: u32,
@@ -362,7 +364,7 @@ fn follow(
     // accumulate another 48 MiB file every few seconds throughout a lap.
     if cube.ready() && *last_audit == 0 && count >= 120 {
         commands
-            .spawn(Readback::texture(cube.cube.clone()))
+            .spawn((Readback::texture(cube.cube.clone()), AuditOnce::default()))
             .observe(audit_readback);
         *last_audit = count;
     }
@@ -424,7 +426,7 @@ fn activate(
         },
     ));
     commands
-        .spawn(Readback::texture(cube.cube.clone()))
+        .spawn((Readback::texture(cube.cube.clone()), AuditOnce::default()))
         .observe(audit_readback);
     *applied = true;
     println!(
@@ -508,7 +510,20 @@ fn half(bits: u16) -> f32 {
     }
 }
 
-fn audit_readback(event: On<ReadbackComplete>, mut commands: Commands, cube: Res<Cube>) {
+fn audit_readback(
+    event: On<ReadbackComplete>,
+    mut commands: Commands,
+    cube: Res<Cube>,
+    mut audits: Query<&mut AuditOnce>,
+) {
+    // Readback is continuous until its deferred despawn reaches the render
+    // world. Multiple completions may already be in flight for this entity.
+    let Ok(mut once) = audits.get_mut(event.entity) else {
+        return;
+    };
+    if std::mem::replace(&mut once.0, true) {
+        return;
+    }
     assert_eq!(event.data.len(), (cube.size * cube.size * 6 * 8) as usize);
     let mut maximum = 0f32;
     let mut above_one = 0;
