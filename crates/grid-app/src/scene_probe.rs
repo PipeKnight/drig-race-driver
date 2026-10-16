@@ -358,7 +358,9 @@ fn follow(
         transform.translation = captured;
     }
     let count = cube.copies.load(Ordering::Acquire);
-    if cube.ready() && count >= *last_audit + 120 {
+    // Two raw audits per run are enough for the initial drift check; don't
+    // accumulate another 48 MiB file every few seconds throughout a lap.
+    if cube.ready() && *last_audit == 0 && count >= 120 {
         commands
             .spawn(Readback::texture(cube.cube.clone()))
             .observe(audit_readback);
@@ -555,6 +557,154 @@ fn audit_readback(event: On<ReadbackComplete>, mut commands: Commands, cube: Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn moving_capture_tracks_reset_without_physics_feedback() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
+                .unwrap();
+        let initial =
+            Mat4::from_cols_array(&runtime.pose()).transform_point3(Vec3::new(0., 1.3, 0.));
+        let mut app = App::new();
+        app.insert_resource(super::super::Driving {
+            runtime,
+            geometry: None,
+            paused: false,
+            failure: None,
+            scripted_ticks: None,
+            scripted: Default::default(),
+            last_controls: None,
+            segment: 0,
+            started: std::time::Instant::now(),
+            opponents: None,
+        })
+        .insert_resource(Cube {
+            size: 256,
+            moving: true,
+            capture_center: initial,
+            captured_center: Arc::new(Mutex::new(initial)),
+            copies: Arc::new(AtomicU64::new(1)),
+            faces: vec![],
+            cube: Handle::default(),
+            copied: Arc::new(AtomicBool::new(true)),
+            read: Arc::new(AtomicBool::new(false)),
+            bound: Arc::new(AtomicBool::new(false)),
+        })
+        .add_systems(Update, follow);
+        let cameras: Vec<_> = (0..6)
+            .map(|face| {
+                app.world_mut()
+                    .spawn((ProbeCamera(face), face_transform(face, initial)))
+                    .id()
+            })
+            .collect();
+        let probe = app
+            .world_mut()
+            .spawn((
+                SceneProbe,
+                Transform::from_translation(initial).with_scale(Vec3::splat(60.)),
+            ))
+            .id();
+        for _ in 0..240 {
+            app.world_mut()
+                .resource_mut::<super::super::Driving>()
+                .runtime
+                .tick(grid_tools::source_vehicle::Controls {
+                    throttle: 0.25,
+                    ..default()
+                })
+                .unwrap();
+        }
+        let before = app
+            .world()
+            .resource::<super::super::Driving>()
+            .runtime
+            .state
+            .car
+            .owner
+            .vehicle
+            .clone();
+        app.update();
+        let moved = app.world().resource::<Cube>().capture_center;
+        assert!((moved - initial).length() > 10.);
+        for &entity in &cameras {
+            assert_eq!(
+                app.world().get::<Transform>(entity).unwrap().translation,
+                moved
+            );
+        }
+        // Never move the parallax box ahead of its last submitted image.
+        assert_eq!(
+            app.world().get::<Transform>(probe).unwrap().translation,
+            initial
+        );
+        assert_eq!(
+            app.world()
+                .resource::<super::super::Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle,
+            before
+        );
+        *app.world()
+            .resource::<Cube>()
+            .captured_center
+            .lock()
+            .unwrap() = moved;
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(probe).unwrap().translation,
+            moved
+        );
+        app.world_mut()
+            .resource_mut::<super::super::Driving>()
+            .runtime
+            .reset();
+        let before = app
+            .world()
+            .resource::<super::super::Driving>()
+            .runtime
+            .state
+            .car
+            .owner
+            .vehicle
+            .clone();
+        app.update();
+        assert_eq!(app.world().resource::<Cube>().capture_center, initial);
+        for (face, &entity) in cameras.iter().enumerate() {
+            assert_eq!(
+                *app.world().get::<Transform>(entity).unwrap(),
+                face_transform(face, initial)
+            );
+        }
+        *app.world()
+            .resource::<Cube>()
+            .captured_center
+            .lock()
+            .unwrap() = initial;
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(probe).unwrap().translation,
+            initial
+        );
+        assert_eq!(
+            app.world()
+                .resource::<super::super::Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle,
+            before
+        );
+        eprintln!(
+            "moving_probe_reset source_runtime=true cameras=6 box_matches_submitted_center=true physics_feedback=0 scope=ECS-not-GPU-history"
+        );
+    }
+
     #[test]
     fn face_basis_and_half_radiance() {
         for face in 0..6 {

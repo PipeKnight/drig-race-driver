@@ -34,7 +34,7 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
-    /// 0: sky IBL, 1: deferred control, 2: SSR, 3: static HDR scene probe.
+    /// 0: sky IBL, 1: deferred control, 2: SSR, 3: local HDR scene probe.
     pub reflection_mode: u8,
     pub probe_size: u32,
     pub moving_probe: bool,
@@ -217,7 +217,11 @@ pub fn configure(
         if settings.reflection_mode == 2 {
             "screen-visible-opaque-only"
         } else if settings.reflection_mode == 3 {
-            "static-local-HDR-probe"
+            if settings.moving_probe {
+                "moving-local-HDR-probe"
+            } else {
+                "static-local-HDR-probe"
+            }
         } else {
             "sky-IBL"
         }
