@@ -1062,6 +1062,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
+            "--ssr-thickness" => {
+                let value: f32 = args
+                    .next()
+                    .ok_or("--ssr-thickness needs 0.005..1")?
+                    .parse()?;
+                if !value.is_finite() || !(0.005..=1.).contains(&value) {
+                    return Err("--ssr-thickness needs a finite value in 0.005..1".into());
+                }
+                graphics.ssr_thickness = value;
+            }
             "--reflections" => {
                 graphics.reflection_mode = match args.next().as_deref() {
                     Some("sky") => 0,

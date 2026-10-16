@@ -36,6 +36,7 @@ impl Preset {
 pub struct Settings {
     /// 0: forward sky IBL, 1: deferred control, 2: deferred + SSR experiment.
     pub reflection_mode: u8,
+    pub ssr_thickness: f32,
     pub layered_track: bool,
     pub clearcoat_prepass_fix: bool,
     pub tread_normals: bool,
@@ -55,6 +56,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             reflection_mode: 0,
+            ssr_thickness: 0.05,
             layered_track: true,
             clearcoat_prepass_fix: true,
             tread_normals: true,
@@ -201,6 +203,7 @@ pub fn configure(
             linear_steps: 32,
             bisection_steps: 8,
             edge_fadeout: 0.02..0.12,
+            thickness: settings.ssr_thickness,
             ..default()
         });
     }
@@ -213,6 +216,12 @@ pub fn configure(
             "sky-IBL"
         }
     );
+    if settings.reflection_mode == 2 {
+        println!(
+            "ssr thickness={} linear_steps=32 bisection_steps=8",
+            settings.ssr_thickness
+        );
+    }
     if let Some(grade) = settings.saved_grade {
         commands
             .entity(camera)
