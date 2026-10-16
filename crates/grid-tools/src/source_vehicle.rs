@@ -1408,7 +1408,8 @@ mod tests {
             c[0x28 / 4] = 1;
             c[0x2c / 4] = 2;
             c[0x3c / 4] = f32::MAX.to_bits();
-            c[0x50 / 4..0x60 / 4].copy_from_slice(&[1001f32.to_bits(), 0, 0, 1f32.to_bits()]);
+            // A homogeneous W other than one is outside the event contract.
+            c[0x50 / 4..0x60 / 4].copy_from_slice(&[0, 0, 0, 0.5f32.to_bits()]);
             c[0x60 / 4] = 1f32.to_bits();
             c[0x70 / 4] = 1 << 24;
             let mut good = c;
@@ -1454,6 +1455,70 @@ mod tests {
             runtime.state.car.owner.vehicle[0x1568 / 4]
         );
         assert_eq!(early.state.vehicle[0x1568 / 4], 0);
+
+        // 9E6660/9EF360 have no coordinate domain. The same car and impact
+        // moved to Le Mans/Haruna distances give the same damage, up to the
+        // f32 rounding of `point - translation`.
+        let shift = [2928f32, 0., -2416., 0.];
+        let point: [f32; 4] = std::array::from_fn(|j| f32::from_bits(first[0x50 / 4 + j]));
+        let mut moved = runtime.state.car.owner.clone();
+        for j in 0..3 {
+            let at = 0x200 / 4 + j;
+            moved.physical[at] = (f32::from_bits(moved.physical[at]) + shift[j]).to_bits();
+        }
+        let moved_point: [f32; 4] = std::array::from_fn(|j| point[j] + shift[j]);
+        let rng = runtime.state.car.owner.damage_random_state.unwrap();
+        let close = |a: &[u32], b: &[u32]| {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(&x, &y)| {
+                    x == y || (f32::from_bits(x) - f32::from_bits(y)).abs() <= 1e-3
+                })
+        };
+        for impact in [0., 1e4, 1e8] {
+            let home = grid_world::collision_damage::calculate(
+                &runtime.state.car.owner,
+                point,
+                impact,
+                false,
+                rng,
+            )
+            .unwrap();
+            let away =
+                grid_world::collision_damage::calculate(&moved, moved_point, impact, false, rng)
+                    .unwrap();
+            println!("far_damage impact={impact} applied={}", home.applied);
+            assert_eq!(home.applied, away.applied);
+            assert_eq!(home.random_state, away.random_state);
+            assert!(close(&home.state.vehicle, &away.state.vehicle));
+        }
+        let event = |point| grid_world::body_impact::Event {
+            point,
+            normal: std::array::from_fn(|j| f32::from_bits(first[0x60 / 4 + j])),
+            impact: f32::from_bits(first[0x3c / 4]),
+            parameter: DELTA,
+            other_registration: 0,
+            other_word: first[0x34 / 4],
+        };
+        let away = grid_world::body_impact::calculate(
+            &moved,
+            event(moved_point),
+            0,
+            parameters,
+            &[None; 11],
+            rng,
+        )
+        .unwrap();
+        assert_eq!(away.random_state, early.random_state);
+        assert!(close(&away.state.vehicle, &early.state.vehicle));
+
+        // A whole tick with a body event 3.8 km from the car no longer pauses.
+        let far = |_: &[grid_world::contact_groups::Body], _: usize| {
+            let mut c = invalid(&[], 0)?;
+            c[1][0x50 / 4..0x60 / 4].copy_from_slice(&[2928f32, 0., -2416., 1.].map(f32::to_bits));
+            Ok(c)
+        };
+        runtime.body_events = Some(parameters);
+        runtime.tick_with_geometry(Controls::default(), far).unwrap();
     }
 
     #[test]

@@ -32,8 +32,10 @@ pub fn calculate_with_queries(
     queries: Option<&[vehicle_handling::QueryRecord]>,
 ) -> Result<Output, Error> {
     let f = |b: &[u32], o: usize| f32::from_bits(b[o / 4]);
+    // 9E6660 bounds neither the world point nor the car translation: it
+    // subtracts and transforms them unchecked, so only finiteness is kept.
     if input.vehicle.len() != crate::vehicle_publication::VEHICLE_WORDS
-        || point.iter().any(|v| !v.is_finite() || v.abs() > 1000.)
+        || point.iter().any(|v| !v.is_finite())
         || !matches!(point[3], 0. | 1.)
         || queries.is_some_and(|rows| rows.len() > 64)
         || !(0. ..=1_000_000_000.).contains(&impact)
@@ -53,7 +55,7 @@ pub fn calculate_with_queries(
         || !(1. ..=1_000_000.).contains(&mass)
         || p[0x1d0 / 4..0x210 / 4]
             .iter()
-            .any(|&v| !f32::from_bits(v).is_finite() || f32::from_bits(v).abs() > 1000.)
+            .any(|&v| !f32::from_bits(v).is_finite())
         || (0..3).any(|j| p[(0x1d0 + j * 16 + 12) / 4] != 0)
         || (0..3).any(|j| (0..3).any(|k| f(p, 0x1d0 + j * 16 + k * 4).abs() > 1.1))
         || f(p, 0x20c) != 1.
@@ -91,9 +93,10 @@ pub fn calculate_with_queries(
         if b[(box_at + 32) / 4] & 255 > 1 {
             return Err(Error("invalid collision damage region enable"));
         }
+        // Settings-only validation; the world point is not a region input.
         damage_region::calculate(damage_region::Input {
             previous: 0.,
-            point: [point[0], point[1], point[2], 1.],
+            point: [0., 0., 0., 1.],
             impact: 0.,
             gain: 1.,
             enabled: false,

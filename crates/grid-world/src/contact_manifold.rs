@@ -406,14 +406,16 @@ pub fn calculate_append(
         || s.normal.iter().any(|x| !x.is_finite() || x.abs() > 10000.)
         || s.normal[3] != 0.
         || (dot(s.normal, s.normal) - 1.).abs() > 0.001
+        // Port guards: AE2FA0/B45310 bound no coordinate. World positions
+        // share the 1e5 domain of the triangle and existing points.
         || s.fallback_point
             .iter()
-            .any(|x| !x.is_finite() || x.abs() > 10000.)
+            .any(|x| !x.is_finite() || x.abs() > 1e5)
         || s.fallback_point[3] != 1.
         || matrix
             .iter()
             .flatten()
-            .any(|x| !x.is_finite() || x.abs() > 10000.)
+            .any(|x| !x.is_finite() || x.abs() > 1e5)
         || triangle
             .iter()
             .flatten()

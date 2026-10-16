@@ -549,6 +549,8 @@ impl Mesh {
         pose: crate::physical_pose::Matrix,
         margin: f32,
     ) -> Result<[[f32; 4]; 2], Error> {
+        // Port guard: B42050 seeds FLT_MAX accumulators and bounds no pose,
+        // so 1e5 (100 km) is a port domain; only a lost body can reach it.
         if !margin.is_finite()
             || !(0. ..=1e6).contains(&margin)
             || pose

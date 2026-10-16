@@ -50,10 +50,12 @@ pub fn calculate(
         || input.vehicle[0xdb0 / 4] != 0
         || byte(&input.vehicle, 0x308) != 0
         || [0xb13, 0xb14].iter().any(|&o| byte(&input.vehicle, o) > 1)
+        // 9EF360 has no point domain (only finiteness is kept); the normal
+        // bound is a port sanity guard on a direction.
+        || event.point.iter().any(|v| !v.is_finite())
         || event
-            .point
+            .normal
             .iter()
-            .chain(event.normal.iter())
             .any(|v| !v.is_finite() || v.abs() > 1000.)
         || event.point[3] != 1.
         || !event.impact.is_finite()
