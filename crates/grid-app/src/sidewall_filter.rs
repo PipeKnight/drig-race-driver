@@ -80,10 +80,24 @@ fn update(
     graphics: Res<super::graphics::Settings>,
     parts: Query<(&Sidewall, &MeshMaterial3d<SidewallMaterial>)>,
     mut materials: ResMut<Assets<SidewallMaterial>>,
+    mut final_report: Local<Option<(u64, u64)>>,
 ) {
     let Some(driving) = driving else {
         return;
     };
+    if driving.scripted_ticks == Some(driving.runtime.ticks)
+        && *final_report != Some((driving.segment, driving.runtime.ticks))
+    {
+        *final_report = Some((driving.segment, driving.runtime.ticks));
+        let speeds: [f32; 4] =
+            std::array::from_fn(|i| super::wheel_presentation::angular_speed(&driving.runtime, i));
+        println!(
+            "sidewall_filter_final tick={} shutter_seconds={} signed_spin_rad_s={speeds:?} exposure_rad={:?}",
+            driving.runtime.ticks,
+            graphics.wheel_shutter_seconds,
+            speeds.map(|s| (s.abs() * graphics.wheel_shutter_seconds).min(std::f32::consts::TAU))
+        );
+    }
     for (part, handle) in &parts {
         let runtime = if part.car == 0 {
             Some(&driving.runtime)

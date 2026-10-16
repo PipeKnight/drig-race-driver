@@ -973,6 +973,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut reflection_calibration = false;
     let mut geometry_pixel = None;
     let mut render_fixed_step = false;
+    let mut render_fps = None;
     let mut capture_orbit_rate = None;
     let mut trial_laps = None;
     let mut drive_ticks = None;
@@ -1110,6 +1111,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--reflection-calibration" => reflection_calibration = true,
             "--render-fixed-step" => render_fixed_step = true,
+            "--render-fps" => {
+                let fps: u32 = args.next().ok_or("missing render FPS")?.parse()?;
+                if !(30..=300).contains(&fps) {
+                    return Err("diagnostic render FPS must be 30..300".into());
+                }
+                render_fps = Some(fps);
+            }
             "--motion-orbit-rate" => {
                 let rate: f32 = args.next().ok_or("missing motion orbit rate")?.parse()?;
                 if !rate.is_finite() || rate.abs() > 3. {
@@ -1598,8 +1606,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         geometry_ray::audit(&car, camera_transform(&orbit), size, pixel);
         return Ok(());
     }
-    if (render_fixed_step || capture_orbit_rate.is_some()) && (!drive || output.is_none()) {
+    if (render_fixed_step || render_fps.is_some() || capture_orbit_rate.is_some())
+        && (!drive || output.is_none())
+    {
         return Err("fixed-step/motion-orbit diagnostics require --drive and --render".into());
+    }
+    if render_fixed_step && render_fps.is_some() {
+        return Err("choose --render-fixed-step or --render-fps, not both".into());
     }
     let mut app = App::new();
     if let Some(rate) = capture_orbit_rate {
@@ -1650,6 +1663,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "capture_fixed_step=true dt={} scope=offscreen-only",
                 grid_tools::source_vehicle::DELTA
             );
+        }
+        if let Some(fps) = render_fps {
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                Duration::from_secs_f64(1. / f64::from(fps)),
+            ));
+            println!("capture_render_clock virtual_fps={fps} measured_display_fps=false");
         }
     } else {
         app.add_plugins(
