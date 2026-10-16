@@ -1,0 +1,8 @@
+# Project cargo aliases (docs/TOOLCHAIN.md, "Build and test cost").
+[alias]
+# Full test run without the ~160 empty test harnesses of the grid-tools probe
+# binaries (none of them has tests): library unit tests, integration tests and
+# the grid-app binary's tests. Add `-- --include-ignored` for the asset tests.
+t = ["test", "--workspace", "--release", "--lib", "--test", "*", "--bin", "grid-app"]
+# The same in the dev profile, for quick iteration on one package: `cargo td -p grid-world`.
+td = ["test", "--lib", "--test", "*"]

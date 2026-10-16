@@ -27,4 +27,9 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
   - for superseded drafts and runs (`draft-NN`, an older `final-NN`) keep only the small summary files (`failure.md`, `validation.json`, logs) and delete raw dumps and copied executables;
   - do not create separate debug/release/native copies of identical captures.
   Intermediate cargo output goes to `C:/cargo-build` through `~/.cargo/config.toml` `build-dir`. Final binaries stay in `target/`.
+- Check levels (docs/TOOLCHAIN.md, "Build and test cost"):
+  - while working: tests of the changed package only (`cargo td -p CRATE`);
+  - before a push: `cargo t -- --include-ignored` with absolute GRID_* paths, `cargo clippy --workspace --all-targets -- -D warnings`, the solo-lap identity check and `grid-soak quick`, all in the release profile;
+  - long soak runs and the separate `soak` profile: only overnight, or when the change targets robustness.
+  Avoid building extra profiles you do not need.
 - Check for existing tools before installing duplicates. Prefer official sources, pin and record versions, verify signatures/hashes where supplied, and prove useful operation against the actual GRID reference.

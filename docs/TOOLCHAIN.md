@@ -1,5 +1,22 @@
 # Research toolchain
 
+## Build and test cost — 16 October 2026
+
+Owner request: parallel sessions build slowly and load the CPU. Findings and changes:
+
+- **Tests are cheap; builds are not.** In a full release run with `--include-ignored` (local/visual-damage/tests-f306.log), all test bodies take about 85 s together; 63 s of that is the grid-tools asset tests. 161 of the 170 test executables are empty: they are the unit-test harnesses of the grid-tools probe binaries, and none of them has a `#[test]`. Plain `cargo test --workspace` still compiles and links every one.
+- **Alias.** Repository `.cargo/config.toml` defines `cargo t`, which is `test --workspace --release --lib --test * --bin grid-app`. Add `-- --include-ignored` for the asset tests. It runs every real test: library unit tests, `grid-formats/tests`, and the grid-app binary tests. It skips the empty probe harnesses. The flag set was checked on a throwaway workspace: a library, an integration test and an app binary ran; the probe binaries were not built as tests. `cargo td -p CRATE` is the dev-profile variant for quick iteration.
+- **sccache v0.18.0, measured and not adopted.**
+  - Source: official GitHub release `sccache-v0.18.0-x86_64-pc-windows-msvc.zip`, SHA-256 `8965c74d…348363d`, matching the published `.sha256`. A first download through Invoke-WebRequest was truncated (5.9 of 9.7 MB) and failed the check. curl gave the full file.
+  - Unpacked at `C:\Users\debros\Tools\sccache-dl-v0.18.0\x\…\sccache.exe`. It is not enabled.
+  - `cargo build --release -p grid-formats` (3 crates):
+    - same build dir after `cargo clean`: 3/3 hits, 22.9 s → 3.7 s;
+    - a different build dir: 0 hits, 17.7 s / 16.3 s. `SCCACHE_BASEDIRS=C:\cargo-build` did not help.
+  - Because every worktree has its own `C:/cargo-build/{workspace-path-hash}` build dir (F328), sccache cannot share dependency builds between sessions. Cargo already covers rebuilds within one directory.
+  - A single shared build dir would serialise parallel sessions on cargo's lock, so it is not used.
+- **Priority.** While many sessions build at once, the coordinator can keep `cargo`/`rustc`/`link` and test processes at BelowNormal priority (a temporary background loop, no system setting), so the desktop stays responsive.
+- **Next (not done):** move the old research probes out of `grid-tools/src/bin` into a separate `grid-probes` crate, so ordinary builds and Clippy skip them. Do this when no session is editing those binaries.
+
 ## Sampling profiler — 15 October 2026
 
 The session is not elevated, so samply, WPR/xperf and other ETW profilers cannot sample, and none of them besides the inbox `wpr.exe` is installed. Nothing was downloaded. Added the independently authored `tools/sample_profile.py`, run with the bundled Python 3.12.14 `-I`. It uses only `ctypes` and the Windows 11 system `dbghelp.dll`:
