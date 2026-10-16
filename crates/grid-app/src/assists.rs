@@ -6,7 +6,7 @@ use grid_tools::source_vehicle::{
     assists::{Assists, Shift, Transmission},
 };
 
-pub const HELP: &str = "--assists SPEC | --assists-file PATH: original driver aids, comma-separated, e.g. tcs=off,stability=off,braking=on,gearbox=manual,input=keyboard|wheel (default: all on, automatic, keyboard). The file may add an [input] section (see --input). Manual gearbox: X gear up, Z gear down (pad: A up, X down).";
+pub const HELP: &str = "--assists SPEC | --assists-file PATH: original driver aids, comma-separated, e.g. tcs=off,stability=off,braking=on,gearbox=manual,input=keyboard|wheel,damage=realistic|normal|off (default: all on, automatic, keyboard, realistic damage as in a fresh original profile). The file may add an [input] section (see --input). Manual gearbox: X gear up, Z gear down (pad: A up, X down).";
 
 /// Settings file: the same `key=value` items, one or more per line, `#`
 /// comments. Lines before any section header and in `[assists]` are driver

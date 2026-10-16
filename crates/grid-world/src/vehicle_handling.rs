@@ -251,6 +251,11 @@ fn calculate_owned(
     {
         return Err(Error("invalid handling framing"));
     }
+    // 9F3EAC..9F3EB7: either activation byte clear returns at once. The damage
+    // option's mode 0 (mechanical_damage::Damage::Off) clears +B14.
+    if byte(car, 0xb13) == 0 || byte(car, 0xb14) == 0 {
+        return Ok(input.clone());
+    }
     let b = &car[MUTABLE / 4..(MUTABLE + 0x460) / 4];
     let p = &input.physical;
     if car[0xdb0 / 4] != 0
@@ -553,6 +558,20 @@ mod tests {
         assert_eq!(s.vehicle, before.vehicle);
         assert_eq!(s.physical, before.physical);
     }
+    #[test]
+    fn inactive_damage_returns_unchanged() {
+        let mut s = fixture();
+        activate_damage(&mut s);
+        s.vehicle[0x196c / 4] = 2;
+        s.vehicle.store_byte(0xb14, 0);
+        let out = calculate_with_queries(&s, 0.016, Some(&[])).unwrap();
+        assert_eq!(out.vehicle, s.vehicle);
+        assert_eq!(out.damage_random_state, s.damage_random_state);
+        s.vehicle.store_byte(0xb14, 1);
+        let active = calculate_with_queries(&s, 0.016, Some(&[])).unwrap();
+        assert_ne!(active.vehicle, s.vehicle);
+    }
+
     #[test]
     fn finite_large_impact_keeps_original_damage_threshold_guard() {
         let mut s = fixture();

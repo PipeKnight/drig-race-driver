@@ -11,6 +11,7 @@ macro_rules! log_line {
 
 mod assists;
 mod body_damage;
+mod damage_hud;
 mod damage_parts;
 mod dynamic_props;
 mod engine_sound;
@@ -1666,6 +1667,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root);
+        damage_hud::install(&mut app);
     }
     if track
         && !collision

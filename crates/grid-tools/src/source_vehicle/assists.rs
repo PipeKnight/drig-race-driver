@@ -3,7 +3,10 @@
 //! consumes every one of them. Defaults reproduce the earlier fixed prototype
 //! configuration bit for bit: every aid on, automatic, keyboard steering.
 use super::{Runtime, byte};
-use grid_world::Error;
+/// The damage option and HUD indicators, for the app (which has no direct
+/// grid-world dependency).
+pub use grid_world::mechanical_damage;
+use grid_world::{Error, mechanical_damage::Damage};
 
 /// Profile option `transmission` (0 automatic, 1 manual). FUN_00606E80 gives
 /// the human controller gearbox mode 4 or 2; FUN_0098F110 maps the mode to
@@ -48,6 +51,9 @@ pub struct Assists {
     /// Wheel response record +14: the constructor's 0.4 unless the
     /// `wheelLinearity` controller option L sets (L - 0.5) * 2.
     pub wheel_response: f32,
+    /// Option `realistic_damage` (on by default in a fresh profile); off is
+    /// the online session's damage-off override.
+    pub damage: Damage,
 }
 
 impl Default for Assists {
@@ -59,6 +65,7 @@ impl Default for Assists {
             transmission: Transmission::Automatic,
             input: Input::Keyboard,
             wheel_response: f32::from_bits(0x3ecc_cccd),
+            damage: Damage::Realistic,
         }
     }
 }
@@ -93,12 +100,13 @@ impl Assists {
         byte(vehicle, 0x1971, clutch);
         byte(vehicle, 0x1972, reverse);
         byte(vehicle, 0xe6c, u8::from(self.input == Input::Keyboard));
+        self.damage.apply(vehicle);
     }
 
     /// `key=value` pairs separated by commas, spaces or new lines; `#` starts a
     /// comment. Keys: tcs/traction, stability, braking/abs, gearbox, input,
     /// linearity (option value 0..1) or response (record value -1..1), all
-    /// (on/off), preset (default/none).
+    /// (on/off), preset (default/none), damage (realistic/normal/off).
     pub fn parse(spec: &str) -> Result<Self, String> {
         let mut assists = Self::default();
         for item in spec
@@ -154,6 +162,14 @@ impl Assists {
                     }
                     assists.wheel_response = r;
                 }
+                "damage" | "realistic_damage" => {
+                    assists.damage = match value.as_str() {
+                        "realistic" | "on" | "2" => Damage::Realistic,
+                        "normal" | "1" => Damage::Normal,
+                        "off" | "none" | "0" => Damage::Off,
+                        _ => return Err("damage needs realistic, normal or off".into()),
+                    }
+                }
                 "all" => {
                     let on = on()?;
                     assists.traction_control = on;
@@ -195,7 +211,15 @@ impl std::fmt::Display for Assists {
         if self.input == Input::Wheel {
             write!(f, ",response={}", self.wheel_response)?;
         }
-        Ok(())
+        write!(
+            f,
+            ",damage={}",
+            match self.damage {
+                Damage::Realistic => "realistic",
+                Damage::Normal => "normal",
+                Damage::Off => "off",
+            }
+        )
     }
 }
 
@@ -379,10 +403,26 @@ mod tests {
         assert_eq!(d.gearbox_mode(), 4);
         assert_eq!(
             d.to_string(),
-            "tcs=on,stability=on,braking=on,gearbox=automatic,input=keyboard"
+            "tcs=on,stability=on,braking=on,gearbox=automatic,input=keyboard,damage=realistic"
         );
         let mut b = vec![0u32; 0x2000 / 4];
         d.apply(&mut b);
+        // FUN_00654C20 damage stores (the body copy has no mutable block).
+        assert_eq!((b[0x155c / 4], b[0xb14 / 4]), (2, 1));
+        for (spec, damage, mode) in [
+            ("damage=normal", Damage::Normal, 1),
+            ("damage=off", Damage::Off, 0),
+            ("realistic_damage=on", Damage::Realistic, 2),
+        ] {
+            let a = Assists::parse(spec).unwrap();
+            assert_eq!(a.damage, damage);
+            assert_eq!(Assists::parse(&a.to_string()).unwrap(), a);
+            let mut c = vec![0u32; 0x2000 / 4];
+            a.apply(&mut c);
+            assert_eq!(c[0x155c / 4], mode);
+            assert_eq!(c[0xb14 / 4], u32::from(mode != 0));
+        }
+        assert!(Assists::parse("damage=cosmetic").is_err());
         // The earlier fixed prototype bytes: 1970/1971/1972 set, aids clear.
         assert_eq!(b[0x1970 / 4], 0x0001_0101);
         assert_eq!(b[0x1558 / 4], 0);
@@ -494,9 +534,18 @@ mod tests {
                     throttle: 1.,
                     ..Default::default()
                 };
-                // Default settings are the earlier fixed configuration, bit for bit.
+                // Default aids with damage=normal are the earlier fixed
+                // configuration bit for bit, apart from the mode word +155C.
                 let mut plain = Runtime::lacetti(root, "slot_00", 200679).unwrap();
-                let mut set = new(Assists::default());
+                plain.state.car.owner.vehicle[0x155c / 4] = 1;
+                plain.state.car.frame.body[0x155c / 4] = 1;
+                let mut set = new(Assists {
+                    damage: Damage::Normal,
+                    ..Assists::default()
+                });
+                // The default Realistic Damage doubles every damage gain; with
+                // nothing hit the driving is unchanged.
+                let mut realistic = new(Assists::default());
                 for tick in 0..300 {
                     let c = Controls {
                         steering: if tick > 150 { 0.4 } else { 0. },
@@ -504,11 +553,16 @@ mod tests {
                     };
                     plain.tick(c).unwrap();
                     set.tick(c).unwrap();
+                    realistic.tick(c).unwrap();
                     assert_eq!(plain.state.car.owner.vehicle, set.state.car.owner.vehicle);
                     assert_eq!(plain.state.car.owner.physical, set.state.car.owner.physical);
                     assert_eq!(
                         plain.state.world.groups.contacts,
                         set.state.world.groups.contacts
+                    );
+                    assert_eq!(
+                        plain.state.car.owner.physical,
+                        realistic.state.car.owner.physical
                     );
                 }
                 assert!(set.set_assists(Assists::none()).is_err());

@@ -50,6 +50,7 @@ pub mod impact_producer;
 pub mod impact_response;
 pub mod impact_step;
 pub mod lap_timing;
+pub mod mechanical_damage;
 pub mod leaf_query;
 pub mod main_contact_response;
 pub mod owner_collection;

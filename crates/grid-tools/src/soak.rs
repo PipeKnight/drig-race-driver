@@ -1306,7 +1306,12 @@ impl AppLog {
                 log.route = field(rest, "route").map(str::to_string);
                 log.grid_position = field(rest, "grid_position").and_then(|v| v.parse().ok());
             } else if let Some(rest) = line.strip_prefix("drive_assists ") {
-                log.assists = Some(Assists::parse(rest.trim())?);
+                let mut assists = Assists::parse(rest.trim())?;
+                // Builds before F333 drove the player at damage gain 1.0.
+                if !rest.contains("damage=") {
+                    assists.damage = grid_world::mechanical_damage::Damage::Normal;
+                }
+                log.assists = Some(assists);
             } else if line.starts_with("drive_opponents enabled=true") {
                 log.opponents = field(line, "count")
                     .and_then(|v| v.parse().ok())

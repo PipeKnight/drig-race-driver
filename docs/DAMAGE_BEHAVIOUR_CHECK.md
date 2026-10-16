@@ -33,7 +33,17 @@ Interpretation:
   reference capture F130), so misalignment cannot steer the car aside.
 - Power is essentially unchanged (≤0.2% speed difference at 8 s).
 
-## Not yet implemented
+## Correction (F333, 16 October 2026)
+
+The paragraph below was wrong about the port. The collision distribution (9E6660, F243), wear and
+engine temperature (9F3E80) and the effects (9C5B90) were already joined to driving, and the owner's
+logs show radiator levels up to 0.958 and engine power factors below 1. For the Lacetti the original
+data (Standard.hdm) gives zero driveshaft, turbo, exhaust and brake loss, so a crash costs engine power
+and cut-outs through the radiator, gearbox damage and wheel damage, not brakes. F333 adds the
+`realistic_damage` option (player gain 1.0 / 2.0, off), the HUD damage icons and a scripted-crash
+check. See [MECHANICAL_DAMAGE.md](MECHANICAL_DAMAGE.md). Detached-spoiler grip loss is still open.
+
+## Not yet implemented (F281 text, superseded by the correction above)
 
 `Standard.hdm` also configures ENGINE (power loss, cut-outs, temperature), GEARBOX,
 DRIVESHAFT, RADIATOR, EXHAUST, TURBO, BRAKE (`maxBrakeLossPercent`), SUSPENSION

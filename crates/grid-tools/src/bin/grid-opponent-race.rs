@@ -164,6 +164,34 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(_) => None,
     };
+    // GRID_DAMAGE_CAR0=realistic|normal|off: the player damage option
+    // (FUN_00654C20) on car 0; AI cars keep the constructor's gain 1.0.
+    if let Ok(v) = std::env::var("GRID_DAMAGE_CAR0") {
+        let damage =
+            grid_tools::source_vehicle::assists::Assists::parse(&format!("damage={v}"))?.damage;
+        let owner = &mut multi.cars[0].state.car;
+        damage.apply(&mut owner.owner.vehicle);
+        damage.apply(&mut owner.frame.body);
+        println!("damage car0 option={v} mode={}", damage.mode());
+    }
+    // GRID_CRASH_CAR0=TICK:IMPULSE:COUNT: before that tick, COUNT frontal hits
+    // of solved impulse IMPULSE at the bumper centre (local 0, 0.3, 2.2) go
+    // through the original 9E6660 dispatcher with the single-player impact
+    // scale 1.0 (global E4FC30), as the body handler 9EF360 would pass them.
+    let crash_car0 = match std::env::var("GRID_CRASH_CAR0") {
+        Ok(v) => {
+            let parts: Vec<&str> = v.split(':').collect();
+            if parts.len() != 3 {
+                return Err("GRID_CRASH_CAR0 needs TICK:IMPULSE:COUNT".into());
+            }
+            Some((
+                parts[0].parse::<u64>()?,
+                parts[1].parse::<f32>()?,
+                parts[2].parse::<u32>()?,
+            ))
+        }
+        Err(_) => None,
+    };
     let mut behaviours = vec![(grid_tools::ai_driver::Behaviour::Race, 0u8, 0u8, false); cars];
     let mut pair_contacts = vec![vec![0usize; cars]; cars];
     let mut car_contacts = 0;
@@ -254,9 +282,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        if let Some((tick, impulse, count)) = crash_car0
+            && multi.ticks == tick
+        {
+            crash(&mut multi.cars[0], impulse, count)?;
+        }
         if let Err(error) = multi.tick(&controls) {
             println!("failure tick={} error={error}", multi.ticks + 1);
             break;
+        }
+        if crash_car0.is_some() && multi.ticks.is_multiple_of(500) {
+            report_damage(&multi.cars[0], multi.ticks);
         }
         car_contacts += multi.last_car_contacts;
         for &i in multi.newly_retired() {
@@ -395,6 +431,52 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             props.events
         );
     }
+    Ok(())
+}
+
+/// Mutable component levels and effects of one car (MECHANICAL_DAMAGE.md).
+fn report_damage(car: &Runtime, tick: u64) {
+    let b = &car.state.car.owner.vehicle;
+    let m = |o: usize| f32::from_bits(b[(0xcdf0 + o) / 4]);
+    let v = car.velocity();
+    println!(
+        "damage tick={tick} speed={:.3} radiator={:.4} engine={:.4} gearbox={:.4} suspension={:?} wheels={:?} power={:.4} cutout={:.4} gearbox_effect={:.4}",
+        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
+        m(8),
+        m(0xc),
+        m(0x14),
+        (0..4).map(|i| m(0x28 + 4 * i)).collect::<Vec<_>>(),
+        (0..4).map(|i| m(0x18 + 4 * i)).collect::<Vec<_>>(),
+        m(0x3a4),
+        m(0x3b8),
+        m(0x3c0)
+    );
+}
+
+fn crash(car: &mut Runtime, impulse: f32, count: u32) -> Result<(), Box<dyn std::error::Error>> {
+    let p = car.pose();
+    let local = [0f32, 0.3, 2.2];
+    let point = std::array::from_fn(|j| {
+        if j == 3 {
+            1.
+        } else {
+            p[12 + j] + local[0] * p[j] + local[1] * p[4 + j] + local[2] * p[8 + j]
+        }
+    });
+    for _ in 0..count {
+        let owner = &mut car.state.car.owner;
+        let random = owner
+            .damage_random_state
+            .ok_or("crash needs the owned damage RNG")?;
+        let out = grid_world::collision_damage::calculate(owner, point, impulse, false, random)?;
+        *owner = out.state;
+        owner.damage_random_state = Some(out.random_state);
+        println!(
+            "crash car0 applied={} rng={:08x}",
+            out.applied, out.random_state
+        );
+    }
+    report_damage(car, car.ticks);
     Ok(())
 }
 
