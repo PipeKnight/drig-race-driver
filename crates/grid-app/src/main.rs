@@ -1065,6 +1065,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ))
             }
             "--reflection-calibration" => reflection_calibration = true,
+            "--probe-size" => {
+                let size = args
+                    .next()
+                    .ok_or("--probe-size needs 256, 512 or 1024")?
+                    .parse()?;
+                if !matches!(size, 256 | 512 | 1024) {
+                    return Err("--probe-size needs 256, 512 or 1024".into());
+                }
+                graphics.probe_size = size;
+            }
             "--ssr-thickness" => {
                 let value: f32 = args
                     .next()

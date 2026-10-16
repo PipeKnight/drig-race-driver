@@ -24,12 +24,12 @@ use std::{
     },
 };
 
-const SIZE: u32 = 256;
 const EV: f32 = 13.;
 #[derive(Component)]
 struct ProbeCamera;
 #[derive(Resource, Clone, ExtractResource)]
 pub struct Cube {
+    size: u32,
     faces: Vec<Handle<Image>>,
     cube: Handle<Image>,
     copied: Arc<AtomicBool>,
@@ -147,6 +147,7 @@ fn setup(
     sun: Query<Entity, With<DirectionalLight>>,
     mut images: ResMut<Assets<Image>>,
     device: Res<RenderDevice>,
+    settings: Res<super::graphics::Settings>,
 ) {
     if existing.is_some() {
         return;
@@ -191,10 +192,11 @@ fn setup(
             .entity(entity)
             .insert(RenderLayers::layer(0).with(1));
     }
+    let size = settings.probe_size;
     let mut cube = Image::new_fill(
         Extent3d {
-            width: SIZE,
-            height: SIZE,
+            width: size,
+            height: size,
             depth_or_array_layers: 6,
         },
         TextureDimension::D2,
@@ -211,7 +213,7 @@ fn setup(
     let cube = images.add(cube);
     let mut faces = Vec::new();
     for face in 0..6 {
-        let mut image = Image::new_target_texture(SIZE, SIZE, TextureFormat::Rgba16Float, None);
+        let mut image = Image::new_target_texture(size, size, TextureFormat::Rgba16Float, None);
         image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
         let target = images.add(image);
         faces.push(target.clone());
@@ -241,6 +243,7 @@ fn setup(
         ));
     }
     commands.insert_resource(Cube {
+        size,
         faces,
         cube,
         copied: Arc::new(AtomicBool::new(false)),
@@ -248,7 +251,7 @@ fn setup(
         bound: Arc::new(AtomicBool::new(false)),
     });
     println!(
-        "scene_probe capture_setup=true size={SIZE} center={:?} excluded_player_parts={excluded} format=Rgba16Float ev100={EV} tonemapping=None static=true",
+        "scene_probe capture_setup=true size={size} center={:?} excluded_player_parts={excluded} format=Rgba16Float ev100={EV} tonemapping=None static=true",
         position.0
     );
 }
@@ -293,8 +296,8 @@ fn copy_faces(
             source.texture.as_image_copy(),
             dst,
             Extent3d {
-                width: SIZE,
-                height: SIZE,
+                width: cube.size,
+                height: cube.size,
                 depth_or_array_layers: 1,
             },
         );
@@ -302,7 +305,8 @@ fn copy_faces(
     queue.submit([encoder.finish()]);
     cube.copied.store(true, Ordering::Release);
     println!(
-        "scene_probe GPU_copy_submitted=true faces=6 size={SIZE} HDR=true scope=queue-submission-not-readback"
+        "scene_probe GPU_copy_submitted=true faces=6 size={} HDR=true scope=queue-submission-not-readback",
+        cube.size
     );
 }
 
@@ -410,7 +414,7 @@ fn audit_readback(event: On<ReadbackComplete>, mut commands: Commands, cube: Res
     if cube.read.swap(true, Ordering::AcqRel) {
         return;
     }
-    assert_eq!(event.data.len(), (SIZE * SIZE * 6 * 8) as usize);
+    assert_eq!(event.data.len(), (cube.size * cube.size * 6 * 8) as usize);
     let mut maximum = 0f32;
     let mut above_one = 0;
     let mut face_nonzero = [0usize; 6];
@@ -424,7 +428,7 @@ fn audit_readback(event: On<ReadbackComplete>, mut commands: Commands, cube: Res
         let brightest = rgb.into_iter().fold(0f32, f32::max);
         maximum = maximum.max(brightest);
         above_one += usize::from(brightest > 1.);
-        face_nonzero[i / (SIZE * SIZE) as usize] += usize::from(brightest > 0.00001);
+        face_nonzero[i / (cube.size * cube.size) as usize] += usize::from(brightest > 0.00001);
     }
     assert!(
         face_nonzero.iter().all(|&n| n > 0),
