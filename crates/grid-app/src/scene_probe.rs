@@ -546,7 +546,9 @@ fn audit_readback(
         "HDR probe contains empty faces"
     );
     use std::io::Write;
-    let path = std::path::PathBuf::from("local/graphics").join(format!(
+    let directory = super::settings::data_dir().join("graphics");
+    std::fs::create_dir_all(&directory).expect("private HDR probe directory");
+    let path = directory.join(format!(
         "scene-probe-{}-{}.rgba16f",
         super::BUILD_REVISION,
         std::time::SystemTime::now()

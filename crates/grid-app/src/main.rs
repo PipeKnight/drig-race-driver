@@ -2240,6 +2240,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if graphics.enhanced() && drive && graphics.wheel_geometry_shutter_seconds > 0. {
         wheel_exposure::install(&mut app);
     }
+    if graphics.enhanced() {
+        app.add_systems(Last, graphics_texture_state);
+    }
     let exit = app
         .insert_resource(field)
         .insert_resource(graphics)
@@ -2266,6 +2269,29 @@ fn camera_transform(orbit: &Orbit) -> Transform {
 }
 // Bevy system parameters are separate ECS borrows, not a public call interface.
 #[allow(clippy::too_many_arguments)]
+fn graphics_texture_state(images: Res<Assets<Image>>, mut emitted: Local<bool>) {
+    if *emitted {
+        return;
+    }
+    *emitted = true;
+    let bc = images
+        .iter()
+        .filter(|(_, image)| {
+            matches!(
+                image.texture_descriptor.format,
+                TextureFormat::Bc1RgbaUnorm
+                    | TextureFormat::Bc1RgbaUnormSrgb
+                    | TextureFormat::Bc3RgbaUnorm
+                    | TextureFormat::Bc3RgbaUnormSrgb
+            )
+        })
+        .count();
+    println!(
+        "graphics_texture_state poststartup=true bc1_bc3_assets={bc} {}",
+        texture_upload::summary()
+    );
+}
+
 fn setup(
     mut commands: Commands,
     mut car: ResMut<Car>,
