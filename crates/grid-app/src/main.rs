@@ -33,6 +33,7 @@ mod sky;
 mod sky_environment;
 mod texture_cache;
 mod texture_upload;
+mod texture_overrides;
 mod time_trial;
 mod track_grade;
 mod track_surface;
@@ -1179,6 +1180,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut render_fps = None;
     let mut capture_orbit_rate = None;
     let mut motion_sequence = None;
+    let mut texture_override_path = None;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut body_contacts = profile.body_contacts.clone();
@@ -1355,6 +1357,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
+            "--texture-overrides" => texture_override_path = Some(PathBuf::from(args.next().ok_or("missing private texture manifest")?)),
             "--motion-capture" => motion_sequence = Some(motion_capture::Config::parse(&args.next().ok_or("missing motion capture window")?)?),
             "--reflection-calibration" => reflection_calibration = true,
             "--render-fixed-step" => render_fixed_step = true,
@@ -1974,6 +1977,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
+    let texture_override_keys = if let Some(path) = texture_override_path {
+        if !graphics.enhanced() { return Err("texture overrides require enhanced graphics".into()); }
+        let used = car.parts.iter().filter(|p| !p.matrices.is_empty() && (!car.track || p.material.starts_with("objects/") || part_model(&p.material).is_some())).filter_map(|p|car.bindings.get(&p.material).cloned()).collect();
+        let applied = texture_overrides::apply(&path, &mut car.textures, &used)?;
+        geometry_ray::describe_texture_usage(&car, &applied);
+        Some(applied)
+    } else { None };
     let mut orbit = if track {
         Orbit {
             yaw: -0.4,
@@ -2034,6 +2044,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("choose --render-fixed-step or --render-fps, not both".into());
     }
     let mut app = App::new();
+    if let Some(keys) = texture_override_keys { app.insert_resource(texture_overrides::Active(keys)); }
     if let Some(rate) = capture_orbit_rate {
         app.insert_resource(free_look::CaptureOrbitRate(rate));
     }
@@ -2316,6 +2327,7 @@ fn setup(
     field: Res<Field>,
     graphics: Res<graphics::Settings>,
     mut scattering_media: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
+    overrides: Option<Res<texture_overrides::Active>>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -2333,6 +2345,9 @@ fn setup(
             RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
         )
         .expect("validated DDS image");
+        if overrides.as_ref().is_some_and(|o| o.0.contains(name)) {
+            println!("texture_override_image key={name:?} format={:?} size={:?} mip_levels={} scope=after-device-selection-shared-helper",image.texture_descriptor.format,image.texture_descriptor.size,image.texture_descriptor.mip_level_count);
+        }
         texture_handles.insert(name.clone(), images.add(image));
     }
     let mut material_handles = BTreeMap::new();

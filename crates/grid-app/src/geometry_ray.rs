@@ -82,3 +82,42 @@ pub fn audit(car: &super::Car, camera: Transform, size: Vec2, pixel: Vec2) {
         );
     }
 }
+
+/// Bounds of affected source geometry for repeatable texture-only viewpoints.
+/// Diagnostics only: no change to any driving or user camera.
+pub fn describe_texture_usage(car: &super::Car, keys: &std::collections::BTreeSet<String>) {
+    let mut reported = 0;
+    for part in &car.parts {
+        let Some(key) = car
+            .bindings
+            .get(&part.material)
+            .filter(|key| keys.contains(*key))
+        else {
+            continue;
+        };
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            part.mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            continue;
+        };
+        for (instance, raw) in part.matrices.iter().enumerate() {
+            if reported >= 12 {
+                return;
+            }
+            let matrix = Transform::from_matrix(*raw).to_matrix();
+            let (mut low, mut high) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+            for p in positions {
+                let p = matrix.transform_point3(Vec3::from_array(*p));
+                low = low.min(p);
+                high = high.max(p);
+            }
+            println!(
+                "texture_override_geometry texture={key:?} material={:?} part={:?} instance={instance} center={:?} bounds={low:?}..{high:?} scope=source-geometry-not-camera-change",
+                part.material,
+                part.name,
+                (low + high) * 0.5
+            );
+            reported += 1;
+        }
+    }
+}
