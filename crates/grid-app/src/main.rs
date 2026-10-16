@@ -413,6 +413,13 @@ fn load(
         } else {
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         }
+        if !track
+            && lod == "LOD0_"
+            && draw.material == b"Tyre Tread"
+            && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+        }
         parts.push(Part {
             name: String::from_utf8(draw.id.to_vec())?,
             material: String::from_utf8(draw.material.to_vec())?,
@@ -938,6 +945,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
             }
             "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--normal-detail" => {
+                graphics.tread_normals = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("tread") => true,
+                    _ => return Err("--normal-detail needs off or tread".into()),
+                }
+            }
             "--car-materials" => {
                 graphics.layered_car = match args.next().as_deref() {
                     Some("legacy") => false,
@@ -1586,6 +1600,31 @@ fn setup(
         texture_handles.insert(name.clone(), images.add(image));
     }
     let mut material_handles = BTreeMap::new();
+    let tread_ready = car
+        .parts
+        .iter()
+        .filter(|p| {
+            p.material
+                .strip_prefix("lacetti/")
+                .unwrap_or(&p.material)
+                .trim()
+                == "Tyre Tread"
+        })
+        .all(|p| p.mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_some());
+    let tread_key = if car.track {
+        "lacetti/lac_tread_tm_nm.tga"
+    } else {
+        "lac_tread_tm_nm.tga"
+    };
+    let tread_normal = if graphics.enhanced() && graphics.tread_normals && tread_ready {
+        car.textures.get(tread_key).map(|dds| {
+            let image=Image::from_buffer(dds,ImageType::Extension("dds"),CompressedImageFormats::BC,false,graphics.sampler(false),RenderAssetUsages::default()).expect("validated linear tread normal DDS");
+            println!("tread_normal active=true srgb=false format={:?} frame=orthonormalized-source approximate=true",image.texture_descriptor.format);
+            images.add(image)
+        })
+    } else {
+        None
+    };
     let liveries = std::mem::take(&mut car.liveries);
     let mut livery_images: BTreeMap<(usize, String), Handle<Image>> = BTreeMap::new();
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
@@ -1680,6 +1719,9 @@ fn setup(
                     && (!track || part.material.starts_with("lacetti/"))
                 {
                     car_materials::apply(name, &mut material);
+                }
+                if name == "Tyre Tread" && (!track || part.material.starts_with("lacetti/")) {
+                    material.normal_map_texture = tread_normal.clone();
                 }
                 materials.add(material)
             })

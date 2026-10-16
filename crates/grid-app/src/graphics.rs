@@ -34,6 +34,7 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    pub tread_normals: bool,
     pub layered_car: bool,
     pub source_ibl: bool,
     pub smooth_tyres: bool,
@@ -49,6 +50,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            tread_normals: true,
             layered_car: true,
             source_ibl: false,
             smooth_tyres: true,

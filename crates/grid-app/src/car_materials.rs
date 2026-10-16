@@ -1,6 +1,30 @@
 //! Authored material responses, not direct mappings of GRID shader constants.
 use bevy::prelude::*;
 
+/// Author an orthonormal Bevy frame from saved vectors. Original skew is not
+/// representable by tangent+sign; this deliberately approximates that basis.
+pub fn tread_tangents(
+    source: &grid_formats::mesh::Mesh<'_>,
+    range: std::ops::Range<usize>,
+) -> Option<Vec<[f32; 4]>> {
+    let mut output = Vec::with_capacity(range.len());
+    for i in range {
+        if *source.colors_argb.get(i)? != [255, 0, 255, 255] {
+            return None;
+        }
+        let n = Vec3::from_array(*source.normals.get(i)?).try_normalize()?;
+        let raw = Vec3::from_array(*source.tangents.get(i)?);
+        let t = (raw - n * raw.dot(n)).try_normalize()?;
+        let b = Vec3::from_array(*source.binormals.get(i)?).try_normalize()?;
+        let alignment = n.cross(t).dot(b);
+        if !alignment.is_finite() || alignment.abs() < 0.95 {
+            return None;
+        }
+        output.push([t.x, t.y, t.z, if alignment < 0. { -1. } else { 1. }]);
+    }
+    Some(output)
+}
+
 pub fn apply(name: &str, material: &mut StandardMaterial) {
     match name {
         "Car Body Paint" => {

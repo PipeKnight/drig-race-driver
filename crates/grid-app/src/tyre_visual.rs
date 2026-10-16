@@ -28,6 +28,22 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
     let mut positions: Vec<Vec3> = source.iter().copied().map(Vec3::from_array).collect();
     let mut normals: Vec<Vec3> = normals.iter().copied().map(Vec3::from_array).collect();
     let mut uvs: Vec<Vec2> = uvs.iter().copied().map(Vec2::from_array).collect();
+    let mut tangents = match mesh.attribute(Mesh::ATTRIBUTE_TANGENT) {
+        None => None,
+        Some(VertexAttributeValues::Float32x4(values))
+            if values.len() == positions.len()
+                && values.iter().flatten().all(|v| v.is_finite()) =>
+        {
+            Some(
+                values
+                    .iter()
+                    .copied()
+                    .map(Vec4::from_array)
+                    .collect::<Vec<_>>(),
+            )
+        }
+        _ => return Err("invalid tyre tangent stream"),
+    };
     if positions.iter().chain(&normals).any(|v| !v.is_finite())
         || uvs.iter().any(|v| !v.is_finite())
     {
@@ -60,6 +76,11 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
         for e in 0..3 {
             let a = positions[tri[e] as usize].yz() - center;
             let b = positions[tri[(e + 1) % 3] as usize].yz() - center;
+            if let Some(tangents) = &tangents
+                && tangents[tri[e] as usize].w * tangents[tri[(e + 1) % 3] as usize].w <= 0.
+            {
+                return Err("tyre triangle crosses tangent handedness seam");
+            }
             if a.length_squared() < 1e-8 || b.length_squared() < 1e-8 || a.dot(b) <= 0.0 {
                 return Err("unsupported tyre edge through axis or over 90 degrees");
             }
@@ -83,10 +104,19 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
                     let p = Vec3::new((pa.x + pb.x) * 0.5, ring.x, ring.y);
                     let n = (normals[a as usize] + normals[b as usize]).normalize_or_zero();
                     let uv = (uvs[a as usize] + uvs[b as usize]) * 0.5;
+                    let tangent = tangents.as_ref().map(|ts| {
+                        let t = ts[a as usize].truncate() + ts[b as usize].truncate();
+                        (t - n * t.dot(n))
+                            .normalize_or_zero()
+                            .extend(ts[a as usize].w)
+                    });
                     let i = positions.len() as u32;
                     positions.push(p);
                     normals.push(n);
                     uvs.push(uv);
+                    if let (Some(ts), Some(t)) = (&mut tangents, tangent) {
+                        ts.push(t)
+                    }
                     i
                 });
             }
@@ -116,6 +146,15 @@ pub fn refine(mesh: &mut Mesh) -> Result<(usize, usize), &'static str> {
         uvs.into_iter().map(|v| v.to_array()).collect::<Vec<_>>(),
     );
     mesh.insert_indices(Indices::U32(indices));
+    if let Some(tangents) = tangents {
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_TANGENT,
+            tangents
+                .into_iter()
+                .map(|v| v.to_array())
+                .collect::<Vec<_>>(),
+        );
+    }
     Ok((before, after))
 }
 
@@ -155,6 +194,33 @@ mod tests {
                 assert_eq!(&refined[..original.len()], original.as_slice());
                 assert_eq!(part.matrices, transform);
                 assert!(refined.iter().flatten().all(|v| v.is_finite()));
+                if part.material == "Tyre Tread" && lod == "LOD0_" {
+                    let VertexAttributeValues::Float32x4(tangents) = part
+                        .mesh
+                        .attribute(Mesh::ATTRIBUTE_TANGENT)
+                        .expect("validated source tread tangent")
+                    else {
+                        panic!()
+                    };
+                    let VertexAttributeValues::Float32x3(normals) =
+                        part.mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap()
+                    else {
+                        panic!()
+                    };
+                    assert_eq!(tangents.len(), refined.len());
+                    for (t, n) in tangents.iter().zip(normals) {
+                        let t = Vec4::from_array(*t);
+                        let n = Vec3::from_array(*n).normalize();
+                        assert!(t.is_finite() && n.dot(t.truncate()).abs() < 1e-5);
+                        assert!((t.truncate().length() - 1.).abs() < 1e-5);
+                        assert!(t.w == 1. || t.w == -1.);
+                    }
+                } else if part.material == "Tyre Tread" {
+                    assert!(
+                        part.mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_none(),
+                        "unvalidated LOD keeps normal-map fallback"
+                    );
+                }
                 count += 1;
             }
             assert_eq!(count, 8);
