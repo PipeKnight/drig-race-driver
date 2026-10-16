@@ -120,7 +120,7 @@ Score = likelihood (H 3, M 2, L 1) × impact. Impact: race freeze or crash 3, wr
 |---|---|---|---|---|---|---|---|
 | R01 | **[Resolved by F317 for pausing; see 2.1]** **Prop pieces exceed the 16-body world bound.** With 12 cars only 4 pieces fit, so the 3rd board, the 5th cushion or any tyre stack (12 tyres) pauses on the tick after the break. A solo run fails at 15 pieces. Pieces never sleep or despawn. | A01, C01, C02, D01, D07 | H (observed) | freeze, recurs after R | 9 | No such cap: 200 bodies per island, 1000 global; pieces sleep; break refused or farthest broken entity recycled | **yes** |
 | R02 | **No failure containment.** One car's or piece's `Err` from any guard freezes all cars, and R discards the whole race. This multiplies every freeze row below. | B amplifier, D01, D07, D09 | — | multiplier | — | Island skipped for one step; the race continues | **yes** |
-| R03 | **Collision damage and body impact reject points or poses beyond ±1000 m.** The first impact past 1 km freezes the race. | B01, B02 | H on 34 routes; None on Donington and Nürburgring | freeze | 9 (route) | No evidence of such a limit (9E6660/999C00/9EF360 to confirm) | **yes** on those routes |
+| R03 | **[Resolved by F322: domain removed; 9E6660/999C00/9EF360 have none, see §5 S4]** **Collision damage and body impact reject points or poses beyond ±1000 m.** The first impact past 1 km freezes the race. | B01, B02 | H on 34 routes; None on Donington and Nürburgring | freeze | 9 (route) | No evidence of such a limit (9E6660/999C00/9EF360 to confirm) | **yes** on those routes |
 | R04 | **[Resolved by F317: all now 1000 / 1513 shapes]** **Caps queued behind R01.** Per-group 16 bodies (`impact_frame`, `impact_step`, `contact_rows`), 513 shapes, 64 bodies per group (`main_contact_response`, `physical_response`, `impact_correction`). A pile-up group with a tyre stack passes 16 at once. | A15, A17, A19, A21–A23, A01 (shapes) | H once R01 is raised | freeze | 9 | 200 bodies per island; refuse at allocation | **yes** |
 | R05 | **Silent contact starvation at 12 cars.** The pool is clamped to 256 (24 × 12 = 288), leaving 208 geometry slots filled in car-index order: later cars lose wall contacts, then all car-car contacts, then piece ground contacts. Nothing is logged. | C04–C07, A50 | M (pile-ups) | wrong physics (tunnelling, sinking pieces) | 4 | 1000 contacts per island, 80 per owner, 20 per collision | **yes** |
 | R06 | **Falling-piece time bomb.** A piece that sinks or tunnels free-falls forever. About 150 s later \|pose\| > 1e5 fails `Mesh::world_bounds` on every tick. | A25 (fed by R05) | M | freeze, recurs | 6 | Pieces sleep after 1 s; original bound unknown (B44E80/B444D0) | **yes** |
@@ -179,9 +179,9 @@ IDs match the per-area work tables. Rows were grouped when several guards share 
 | A22 | `physical_response.rs:65-241` | 64 bodies; singular or non-finite | pause | yes | L | PHYSICAL_RESPONSE.md port bounds |
 | A23 | `impact_correction.rs:71`, `physical_pose.rs:78`, `contact_bias.rs:40,51` | poses > 64; angular correction > 64 rad | pause | yes | L (light piece wedged deep) | port diagnostic bound (original B7B5E0) |
 | A24 | `pose.rs:36-109`, `physical_pose.rs:34-171` | rotation > 64 rad per step (ω > 4000 rad/s), ranges | pause | yes | L | port |
-| A25 | `collision_mesh.rs:552-560,598` (`Mesh::world_bounds`) | **any pose element \|x\| > 1e5** or margin out of range: "invalid mesh bounds controls" | pause, every tick after | yes (every car and piece) | **M** (R06) | port domain guard, undocumented; original B44E80/B444D0 unknown |
+| A25 | `collision_mesh.rs:552-560,598` (`Mesh::world_bounds`) | **any pose element \|x\| > 1e5** or margin out of range: "invalid mesh bounds controls" | pause, every tick after | yes (every car and piece) | **M** (R06) | port domain guard (F322: documented in code). Original has none: B44E80 has no float compares, B444D0 none on coordinates, and the kind-7 bounds reduction B42050 seeds FLT_MAX accumulators with no domain check |
 | A26 | `convex_distance.rs:408-840` | inputs \|x\| > 1e5, no convergence in 256 iterations, zero penetration normal | pause | yes | L | port; original AE8AD0/AE8DB0 |
-| A27 | `contact_manifold.rs:404-423` and others | matrix or point \|x\| > 1e4 (10 km), existing > 16, clip > 20 | pause | yes | None (all routes < 3 km) | undocumented port guard; original AE2FA0/B45310 |
+| A27 | `contact_manifold.rs:404-423` and others | matrix or point \|x\| > 1e4 (10 km), existing > 16, clip > 20 | pause | yes | None (all routes < 3 km) | port guard. F322: matrix and fallback point raised from 1e4 to the file's 1e5 domain; AE2FA0/B45310 bound no coordinate (their compares are value/value and \|dot\| vs 0.99) |
 | A28 | `packed_contacts.rs:210-218` | capacity > 16, candidates > 32768, material index ≥ 8 | pause | yes | None (callers clamp) | port scope |
 | A29 | `packed_contacts.rs:250-266` | rsqrt of a zero-area sheet normal is not checked | silent NaN → A03/A27 | yes | L | port |
 | A30 | `packed_candidates.rs:176-258` | undecoded chunk > 1024 vertices, depth > 64, visits > 1e6, structure | pause | yes | None on Donington; **route** | data sanity |
@@ -210,8 +210,8 @@ IDs match the per-area work tables. Rows were grouped when several guards share 
 
 | ID | File:line | Condition / message | On fire | Per tick | Reachability | Bound provenance |
 |---|---|---|---|---|---|---|
-| B01 | `collision_damage.rs:36-57` | contact point \|x\| > 1000: "invalid collision damage framing"; car pose \|x\| > 1000: "unsupported collision damage owner" | pause | yes (every body event and wheel-impact dispatch) | **H on 34 of 92 routes**; None on Donington and Nürburgring | port domain (BODY_IMPACT_RUNTIME.md "explicit limits"); original 9E6660/999C00 |
-| B02 | `body_impact.rs:47-81` | point or normal \|x\| > 1000; velocity > 1e4; impact ∉ [0, 1e9]: "unsupported body impact context" | pause | yes (with `--body-events`) | as B01 | port (original 9EF360) |
+| B01 | `collision_damage.rs:36-57` | contact point \|x\| > 1000: "invalid collision damage framing"; car pose \|x\| > 1000: "unsupported collision damage owner" | pause | yes (every body event and wheel-impact dispatch) | **H on 34 of 92 routes**; None on Donington and Nürburgring | port domain (BODY_IMPACT_RUNTIME.md "explicit limits"); original 9E6660/999C00. **F322: removed; finiteness only** |
+| B02 | `body_impact.rs:47-81` | point or normal \|x\| > 1000; velocity > 1e4; impact ∉ [0, 1e9]: "unsupported body impact context" | pause | yes (with `--body-events`) | as B01 | port (original 9EF360). **F322: point bound removed (finiteness only); the normal, velocity and impact bounds stay** |
 | B03 | about 120 sites (listed in the work table; see A43 and B-section files) | non-finite, \|x\| > 1e6 | pause | yes | **M** in pile-ups | port validation domain (VEHICLE_DRIVER_PREPARATION.md "explicit unsupported branches") |
 | B04 | `vehicle_step.rs:84-88` | normalized `sideways` ∉ [-1, 1]: "invalid outer angle domain" | pause | yes | **L–M** | port; original A06A90 x87 `asin` |
 | B05 | `vehicle_step.rs:79`, `vehicle_chassis.rs:24` | angle velocity, chassis normalization | pause | yes | None | port |
@@ -393,6 +393,24 @@ The original design notes for this group follow.
 
 ### S4. Coordinate domains for other routes (R03, R11, A27)
 
+*Done in F322 (static check: private `local/runtime-limits-audit/s4/`):*
+- 9E6660 compares only the impact with mass × threshold and clamps the ratio to 1. It subtracts the car translation from the point and transforms the difference with no check. 999C00 works on the car-local point (enable byte, half-extent, radius, attenuation, clamp to 1). 9EF360 checks only the FLT_MAX impact sentinel, the B13/B14 flags, the +15A0 impact gate, the +2E8 timer, the velocity² threshold and the suspension clamp. None of them bounds a coordinate.
+- `collision_damage.rs` and `body_impact.rs` keep only finiteness for the point and the car translation. The settings-only `damage_region` pre-pass now uses the local origin instead of the world point, which removed a hidden 1e4 world domain. The rotation bound (1.1), the normal bound and the impact and velocity bounds remain port guards.
+- `contact_manifold.rs`: the matrix and fallback point were raised from 1e4 to 1e5, the domain the same function already applies to triangles and existing points. AE2FA0/B45310 have no such bound.
+- `Mesh::world_bounds` keeps its 1e5 port guard, now documented in code. B42050 (kind-7 bounds), B44E80 and B444D0 have no domain. Only a lost body can reach 1e5 (R06 and R11, handled by S1 and S3).
+- **Remaining blockers for the large routes:** none of the 34 routes beyond 1 km loads in `grid-opponent-race` today. Each fails at startup, before any tick:
+  - Spa (all 4 routes): "VCQTC packed count limit exceeded";
+  - Le Mans (both routes): "prototype lap timing requires one forward route with finish gate zero";
+  - Haruna (all 10 routes): "collision archive entry count unsupported";
+  - Okutama (all 6 routes): "expected one typed entity child";
+  - Detroit (4 routes): "unsupported collision primitive";
+  - San Francisco (6 routes) and Washington (2 routes): "unsupported mesh stream kind/format".
+
+  These belong with S8.
+
+The original plan for this group follows.
+
+
 - Remove the ±1000 m point and pose bounds in `collision_damage.rs` and `body_impact.rs`, keeping only the finiteness checks. Confirm in grid.exe (9E6660, 999C00, 9EF360) that the original has no such domain. 34 of the 92 shipped routes exceed 1 km, so this blocks most of the route list.
 - Document or relax the 1e4 manifold bound and the 1e5 mesh-bounds guard against the original (AE2FA0, B45310, B44E80). They are safe for every shipped route today (all under 3 km), so this is low priority.
 - For a car out of the world, the original has a respawn path that is not ported (0xde4/0xdfc, B10). Until it is, retire the car (S3) instead of letting the 100 km lap bound pause the race.
@@ -438,4 +456,4 @@ When wheel detachment, respawn, nitro, manual clutch or handling notification re
 - Do the archives override the ENTITYMANAGER instance limits? Only grid.exe contains the key text among the uncompressed install files.
 - Does Donington's packed collision use WARN/RESE/RESD/UNRE/FBND (C13)?
 - Can grid-world return fewer active contacts than it was supplied (C20)?
-- What are the original behaviours at A06A90 (`asin` domain), 9DFC50 (zero-velocity drag), B44E80/B444D0 (mesh-bounds domain) and 9E6660/999C00/9EF360 (damage coordinate domain)?
+- What are the original behaviours at A06A90 (`asin` domain), 9DFC50 (zero-velocity drag), B44E80/B444D0 (mesh-bounds domain; F322: none) and 9E6660/999C00/9EF360 (damage coordinate domain; F322: none)?

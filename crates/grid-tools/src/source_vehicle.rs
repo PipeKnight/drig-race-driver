@@ -1462,17 +1462,16 @@ mod tests {
         let shift = [2928f32, 0., -2416., 0.];
         let point: [f32; 4] = std::array::from_fn(|j| f32::from_bits(first[0x50 / 4 + j]));
         let mut moved = runtime.state.car.owner.clone();
-        for j in 0..3 {
-            let at = 0x200 / 4 + j;
-            moved.physical[at] = (f32::from_bits(moved.physical[at]) + shift[j]).to_bits();
+        for (word, offset) in moved.physical[0x200 / 4..0x20c / 4].iter_mut().zip(shift) {
+            *word = (f32::from_bits(*word) + offset).to_bits();
         }
         let moved_point: [f32; 4] = std::array::from_fn(|j| point[j] + shift[j]);
         let rng = runtime.state.car.owner.damage_random_state.unwrap();
         let close = |a: &[u32], b: &[u32]| {
             a.len() == b.len()
-                && a.iter().zip(b).all(|(&x, &y)| {
-                    x == y || (f32::from_bits(x) - f32::from_bits(y)).abs() <= 1e-3
-                })
+                && a.iter()
+                    .zip(b)
+                    .all(|(&x, &y)| x == y || (f32::from_bits(x) - f32::from_bits(y)).abs() <= 1e-3)
         };
         for impact in [0., 1e4, 1e8] {
             let home = grid_world::collision_damage::calculate(
@@ -1518,7 +1517,9 @@ mod tests {
             Ok(c)
         };
         runtime.body_events = Some(parameters);
-        runtime.tick_with_geometry(Controls::default(), far).unwrap();
+        runtime
+            .tick_with_geometry(Controls::default(), far)
+            .unwrap();
     }
 
     #[test]
