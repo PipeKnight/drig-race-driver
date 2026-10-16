@@ -970,6 +970,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut graphics = graphics::Settings::default();
     let mut reflection_calibration = false;
     let mut geometry_pixel = None;
+    let mut render_fixed_step = false;
+    let mut capture_orbit_rate = None;
     let mut trial_laps = None;
     let mut drive_ticks = None;
     let mut body_contacts = None;
@@ -1105,6 +1107,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ))
             }
             "--reflection-calibration" => reflection_calibration = true,
+            "--render-fixed-step" => render_fixed_step = true,
+            "--motion-orbit-rate" => {
+                let rate: f32 = args.next().ok_or("missing motion orbit rate")?.parse()?;
+                if !rate.is_finite() || rate.abs() > 3. {
+                    return Err("motion orbit rate must be finite, -3..3 rad/s".into());
+                }
+                capture_orbit_rate = Some(rate);
+            }
             "--aa" => {
                 graphics.anti_aliasing = match args.next().as_deref() {
                     Some("taa") => 0,
@@ -1569,7 +1579,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         geometry_ray::audit(&car, camera_transform(&orbit), size, pixel);
         return Ok(());
     }
+    if (render_fixed_step || capture_orbit_rate.is_some()) && (!drive || output.is_none()) {
+        return Err("fixed-step/motion-orbit diagnostics require --drive and --render".into());
+    }
     let mut app = App::new();
+    if let Some(rate) = capture_orbit_rate {
+        app.insert_resource(free_look::CaptureOrbitRate(rate));
+    }
     if let Some(laps) = trial_laps {
         // Races with opponents never write the solo time-trial best times.
         let race = driving.as_ref().is_some_and(|d| d.opponents.is_some());
@@ -1607,6 +1623,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             started: Instant::now(),
         })
         .add_systems(Update, capture);
+        if render_fixed_step {
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                Duration::from_secs_f64(f64::from(grid_tools::source_vehicle::DELTA)),
+            ));
+            println!(
+                "capture_fixed_step=true dt={} scope=offscreen-only",
+                grid_tools::source_vehicle::DELTA
+            );
+        }
     } else {
         app.add_plugins(
             DefaultPlugins.set(WindowPlugin {

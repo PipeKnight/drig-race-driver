@@ -11,6 +11,9 @@ pub struct FreeLook {
     pub yaw: f32,
     pub pitch: f32,
 }
+/// Offscreen diagnosis of temporal trails during the owner's existing orbit gesture.
+#[derive(Resource)]
+pub struct CaptureOrbitRate(pub f32);
 
 /// Radians per mouse count.
 const SENSITIVITY: f32 = 0.005;
@@ -56,7 +59,16 @@ pub fn update(
     time: Res<Time<Real>>,
     mut look: ResMut<FreeLook>,
     mut fixed: Local<Option<Option<FreeLook>>>,
+    orbit_rate: Option<Res<CaptureOrbitRate>>,
 ) {
+    if let Some(rate) = orbit_rate {
+        let base = fixed.get_or_insert_with(scripted).unwrap_or_default();
+        *look = FreeLook {
+            yaw: wrap(base.yaw + rate.0 * time.elapsed_secs()),
+            pitch: base.pitch,
+        };
+        return;
+    }
     if let Some(view) = *fixed.get_or_insert_with(scripted) {
         *look = view;
         return;
