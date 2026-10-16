@@ -352,13 +352,13 @@ struct State {
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct Actions {
     map: ActionMap,
-    /// Whether gamepad sources are read (off for `device=keyboard`).
-    pads: bool,
+    /// Which connected gamepads may drive.
+    pads: Pads,
     state: [State; ACTIONS],
 }
 
 impl Actions {
-    pub fn new(map: ActionMap, pads: bool) -> Self {
+    pub fn new(map: ActionMap, pads: Pads) -> Self {
         Self {
             map,
             pads,
@@ -460,19 +460,67 @@ fn pad_raw(pad: &Gamepad, source: Source) -> Option<f32> {
     }
 }
 
+/// Gamepads the pad preset may read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pads {
+    Off,
+    /// Devices that look like gamepads (see [`recognised`]).
+    Recognised,
+    /// Every connected device (`device=pad`).
+    Any,
+}
+
+/// Marks a connected gamepad accepted for the pad preset.
+#[derive(Component)]
+pub struct PlayerPad;
+
+/// AUTHORED guard. The original binds the XInput pad preset only to XInput
+/// devices that are not wheels, and has no generic fallback (83A130). gilrs
+/// also lists wheels and joysticks, mapping their raw axes by index, so a
+/// wheel's pedals could arrive as triggers. Bevy exposes only the name and
+/// USB ids: a device is taken for a pad when its name says so and neither
+/// the name nor a wheel maker's vendor id says wheel.
+pub fn recognised(name: &str, vendor: Option<u16>) -> Result<(), &'static str> {
+    // Fanatec, Thrustmaster, Moza [I: public USB vendor ids].
+    if matches!(vendor, Some(0x0eb7 | 0x044f | 0x346e)) {
+        return Err("wheel-vendor");
+    }
+    let name = name.to_ascii_lowercase();
+    if [
+        "wheel",
+        "racing",
+        "pedal",
+        "shifter",
+        "fanatec",
+        "momo",
+        "driving force",
+        "joystick",
+    ]
+    .iter()
+    .any(|w| name.contains(w))
+    {
+        return Err("wheel-or-joystick-name");
+    }
+    if ["xbox", "xinput", "controller", "gamepad", "pad"]
+        .iter()
+        .any(|w| name.contains(w))
+    {
+        Ok(())
+    } else {
+        Err("unrecognised-name")
+    }
+}
+
 /// `PreUpdate`, after Bevy's input systems: sample every device once per
 /// frame, update the actions and queue the frame's gear edges.
 pub fn sample(
     keys: Option<Res<ButtonInput<KeyCode>>>,
-    pads: Query<(Entity, &Gamepad)>,
+    pads: Query<(Entity, &Gamepad), With<PlayerPad>>,
     mut actions: ResMut<Actions>,
     mut queue: ResMut<ShiftQueue>,
 ) {
-    // One player device: the first connected pad.
-    let pad = actions
-        .pads
-        .then(|| pads.iter().min_by_key(|(e, _)| *e).map(|(_, p)| p))
-        .flatten();
+    // One player device: the first accepted connected pad.
+    let pad = pads.iter().min_by_key(|(e, _)| *e).map(|(_, p)| p);
     actions.update(|source| match source {
         Source::Key(k) => keys.as_ref().map(|k2| f32::from(k2.pressed(k))),
         Source::Unmapped => None,
@@ -499,12 +547,29 @@ fn passthrough() -> GamepadSettings {
     }
 }
 
-fn connect_pads(mut pads: Query<(Entity, Option<&Name>, &mut GamepadSettings), Added<Gamepad>>) {
-    for (entity, name, mut settings) in &mut pads {
+fn connect_pads(
+    mut commands: Commands,
+    actions: Res<Actions>,
+    mut pads: Query<(Entity, &Gamepad, Option<&Name>, &mut GamepadSettings), Added<Gamepad>>,
+) {
+    for (entity, pad, name, mut settings) in &mut pads {
         *settings = passthrough();
+        let name = name.map(Name::as_str).unwrap_or("");
+        let accepted = match actions.pads {
+            Pads::Off => Err("device-keyboard"),
+            Pads::Recognised => recognised(name, pad.vendor_id()),
+            Pads::Any => Ok(()),
+        };
+        if accepted.is_ok() {
+            commands.entity(entity).insert(PlayerPad);
+        } else {
+            commands.entity(entity).remove::<PlayerPad>();
+        }
         log_line!(
-            "drive_input_pad connected={entity} name={:?} dead_zones=original",
-            name.map(Name::as_str).unwrap_or("")
+            "drive_input_pad connected={entity} name={name:?} vendor={:04x?} product={:04x?} preset4={} dead_zones=original",
+            pad.vendor_id(),
+            pad.product_id(),
+            accepted.map_or_else(|why| format!("ignored({why})"), |()| "used".into())
         );
     }
 }
@@ -594,8 +659,14 @@ impl Settings {
         }
     }
 
-    pub fn pads(&self) -> bool {
-        self.device != Device::Keyboard
+    /// `device=keyboard` reads no pad, `device=pad` any connected gamepad,
+    /// otherwise only recognised gamepads.
+    pub fn pads(&self) -> Pads {
+        match self.device {
+            Device::Keyboard => Pads::Off,
+            Device::Pad => Pads::Any,
+            Device::Auto | Device::Wheel => Pads::Recognised,
+        }
     }
 
     /// 654C20: the Advanced Controls overrides go to every binding of
@@ -642,7 +713,7 @@ impl std::fmt::Display for Settings {
 pub fn load(root: &std::path::Path, settings: &Settings) -> Result<(Actions, String), String> {
     let mut map = ActionMap::keyboard();
     let mut pad = String::from("off");
-    if settings.pads() {
+    if settings.pads() != Pads::Off {
         let path = root.join("ActionMap").join("actionMapPreset4.xml");
         pad = match read_preset(&path) {
             Ok((pad_map, unknown)) => {
@@ -750,7 +821,7 @@ mod tests {
             Source::Key(KeyCode::ArrowLeft),
             Calibration::default(),
         );
-        let mut actions = Actions::new(map, true);
+        let mut actions = Actions::new(map, Pads::Any);
         let run = |actions: &mut Actions, stick: f32, dpad: f32, key: Option<f32>| {
             actions.update(|s| match s {
                 Source::PadAxis(_) => Some(stick),
@@ -795,7 +866,7 @@ mod tests {
                 Calibration::new(UniPositive, 0., 1., 0.5),
             );
         }
-        let mut actions = Actions::new(map, true);
+        let mut actions = Actions::new(map, Pads::Any);
         actions.update(|_| Some(0.5));
         let c = actions.controls();
         assert_eq!(
@@ -811,7 +882,7 @@ mod tests {
             Source::PadAxis(GamepadAxis::LeftStickX),
             Calibration::new(BiUpper, 0.2, 1., 0.5),
         );
-        let mut actions = Actions::new(map, true);
+        let mut actions = Actions::new(map, Pads::Any);
         actions.update(|s| match s {
             Source::Key(k) => Some(f32::from(k == KeyCode::ArrowLeft)),
             _ => Some(0.8),
@@ -834,7 +905,7 @@ mod tests {
             KeyCode::KeyD,
             KeyCode::Space,
         ];
-        let mut actions = Actions::new(ActionMap::keyboard(), true);
+        let mut actions = Actions::new(ActionMap::keyboard(), Pads::Any);
         for mask in 0u32..1 << keys.len() {
             let held = |k: KeyCode| {
                 keys.iter()
@@ -874,7 +945,7 @@ mod tests {
             Source::Key(KeyCode::KeyR),
             Calibration::default(),
         );
-        let mut actions = Actions::new(map, false);
+        let mut actions = Actions::new(map, Pads::Off);
         let press = |actions: &mut Actions, keys: &[KeyCode]| {
             actions.update(|s| match s {
                 Source::Key(k) => Some(f32::from(keys.contains(&k))),
@@ -901,7 +972,7 @@ mod tests {
     /// twice in a two-tick frame and lost a press in a zero-tick frame.
     #[test]
     fn edge_queue_shifts_once_per_press_whatever_the_ticks_per_frame() {
-        let mut actions = Actions::new(ActionMap::keyboard(), false);
+        let mut actions = Actions::new(ActionMap::keyboard(), Pads::Off);
         let mut queue = ShiftQueue::default();
         let frame = |actions: &mut Actions, queue: &mut ShiftQueue, x: bool, ticks: usize| {
             actions.update(|s| match s {
@@ -963,7 +1034,7 @@ mod tests {
             (BiUpper, 0.2, 1.)
         );
         // No pad connected: idle 0.5 on the stick, nothing steers.
-        let mut actions = Actions::new(map.clone(), true);
+        let mut actions = Actions::new(map.clone(), Pads::Any);
         actions.update(|_| None);
         assert_eq!(actions.controls().steering, 0.);
         // A stick at 0.5 + 0.5 * 0.6 = 0.8 with dz 0.2: half lock right.
@@ -984,7 +1055,7 @@ mod tests {
         settings.tune(&mut tuned).unwrap();
         let steer = tuned.bindings(Action::SteerRight)[0].calibration;
         assert_eq!((steer.dead_zone, steer.saturation), (0., 1.));
-        let mut actions = Actions::new(tuned, true);
+        let mut actions = Actions::new(tuned, Pads::Any);
         actions.update(pad(0.6));
         assert!(-actions.controls().steering > 0.5);
         // A dead zone at or above the saturation is refused.
@@ -1020,8 +1091,25 @@ mod tests {
         };
         Settings::default().apply_class(&mut w);
         assert_eq!(w.input, Input::Wheel);
-        assert!(!Settings::parse("device=keyboard").unwrap().pads());
-        assert!(Settings::default().pads());
+        assert_eq!(
+            Settings::parse("device=keyboard").unwrap().pads(),
+            Pads::Off
+        );
+        assert_eq!(Settings::parse("device=pad").unwrap().pads(), Pads::Any);
+        assert_eq!(Settings::default().pads(), Pads::Recognised);
+    }
+
+    #[test]
+    fn only_gamepads_take_the_pad_preset_by_default() {
+        assert!(recognised("Xbox Controller", Some(0x045e)).is_ok());
+        assert!(recognised("Controller (XBOX 360 For Windows)", None).is_ok());
+        assert!(recognised("Wireless Gamepad F710", Some(0x046d)).is_ok());
+        assert!(recognised("FANATEC CSL Elite Wheel Base", Some(0x0eb7)).is_err());
+        assert!(recognised("Pad", Some(0x0eb7)).is_err());
+        assert!(recognised("Logitech G29 Driving Force Racing Wheel", Some(0x046d)).is_err());
+        assert!(recognised("T-Rudder pedals", None).is_err());
+        assert!(recognised("HID-compliant game controller joystick", None).is_err());
+        assert!(recognised("Unknown device", None).is_err());
     }
 
     #[test]
@@ -1037,6 +1125,7 @@ mod tests {
     fn shipped_pad_preset_reads_without_unknown_axes() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let (actions, pad) = load(std::path::Path::new(&root), &Settings::default()).unwrap();
+        assert_eq!(actions.pads, Pads::Recognised);
         assert_eq!(pad, "actionMapPreset4");
         let left = actions.map.bindings(Action::SteerLeft);
         // Keyboard Left/A, then the pad's left stick and D-pad.

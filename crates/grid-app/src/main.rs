@@ -3237,7 +3237,7 @@ mod driving_tests {
                 started: Instant::now(),
                 opponents: None,
             })
-            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), false))
+            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
             .init_resource::<input::ShiftQueue>()
             .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
         app.world_mut()
@@ -3456,7 +3456,7 @@ mod driving_tests {
                 started: Instant::now(),
                 opponents: None,
             })
-            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), false))
+            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
             .init_resource::<input::ShiftQueue>()
             .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
         app.world_mut()
