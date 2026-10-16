@@ -4,9 +4,12 @@
 //! classification (race rules in docs/RACE_RULES_RESEARCH.md) and an optional
 //! per-tick TSV of car 0's AI telemetry. `--route tracks/<region>/<track>/<route>`
 //! (anywhere in the arguments) selects the circuit; Donington route_0 by default.
+//! `--cars STEM[,STEM...]` (anywhere) sets the car model of each grid slot,
+//! cycled over the field (`bmw,lac` alternates); all Lacetti by default.
 use grid_tools::{
     ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Other, Parameters, View},
     pursuit_driver::PursuitDriver,
+    car::Car,
     race::{Out, Status},
     route::Route,
     source_vehicle::{Controls, Runtime, multi::MultiRuntime},
@@ -29,9 +32,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(_) => return Err("--route needs tracks/<region>/<track>/<route>".into()),
         None => Route::default(),
     };
+    let models = match args.iter().position(|a| a == "--cars") {
+        Some(i) if i + 1 < args.len() => {
+            let models = Car::list(&args[i + 1])?;
+            args.drain(i..i + 2);
+            models
+        }
+        Some(_) => return Err("--cars needs STEM[,STEM...]".into()),
+        None => vec![Car::default()],
+    };
     if !(5..=7).contains(&args.len()) {
         return Err(
-            "usage: grid-opponent-race [--route ROUTE] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
+            "usage: grid-opponent-race [--route ROUTE] [--cars STEM,...] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
                 .into(),
         );
     }
@@ -65,13 +77,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?)?),
         None => None,
     };
+    let field: Vec<&Car> = (0..cars).map(|i| &models[i % models.len()]).collect();
+    let entries: Vec<(&str, &Car)> = slot_refs.iter().copied().zip(field.iter().copied()).collect();
     let mut multi =
-        MultiRuntime::lacetti_deforming_on(root, &route, &slot_refs, &table, events, deformation)?;
+        MultiRuntime::load_deforming_on(root, &route, &entries, &table, events, deformation)?;
     // GRID_DYNAMIC_PROPS=1: breakable route props (DYNAMIC_PROPS_RESEARCH.md).
     if std::env::var_os("GRID_DYNAMIC_PROPS").is_some() {
         multi.enable_dynamic_props(root)?;
     }
-    let data = AiData::load(root, route.path(), "touring", "lac")?;
+    // Each car's own AI statistics (brake tables); the class data is shared.
+    let mut by_model = std::collections::BTreeMap::new();
+    for model in &models {
+        by_model.insert(
+            model.clone(),
+            AiData::load(root, route.path(), "touring", model.stem())?,
+        );
+    }
+    let car_data: Vec<&AiData> = field.iter().map(|m| &by_model[*m]).collect();
+    let data = car_data[0];
     let progress = grid_tools::lap_progress::load_route(root, &route)?.progress;
     // GRID_AI_CHARACTERISTICS=private TSV: per-driver characteristics (row k = car k).
     let characteristics = match std::env::var_os("GRID_AI_CHARACTERISTICS") {
@@ -106,7 +129,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|i| -> Result<Driver, Box<dyn std::error::Error>> {
             Ok(match kind {
                 "ai" => Driver::Ai(Box::new(AiDriver::new(
-                    Parameters::new(&data, difficulty, |name| {
+                    Parameters::new(car_data[i], difficulty, |name| {
                         characteristics
                             .get(i % characteristics.len().max(1))
                             .and_then(|row| row.get(name).copied())
@@ -120,8 +143,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect::<Result<_, _>>()?;
     println!(
-        "route={} driver={kind} maximum_steering_angle={} line_length={}",
+        "route={}{} driver={kind} maximum_steering_angle={} line_length={}",
         route.path(),
+        // Absent for the default field, so its output stays byte-identical.
+        if models == [Car::default()] {
+            String::new()
+        } else {
+            let stems: Vec<&str> = field.iter().map(|c| c.stem()).collect();
+            format!(" cars={}", stems.join(","))
+        },
         multi.cars[0].maximum_steering_angle(),
         data.line.length
     );
@@ -360,7 +390,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .map(|(_, p)| *p)
                         .collect();
                     let view = View::of(car, multi.obstruction(i));
-                    ai.controls(&data, &view, &others, grid_tools::source_vehicle::DELTA)
+                    ai.controls(car_data[i], &view, &others, grid_tools::source_vehicle::DELTA)
                 }
                 Driver::Pursuit(p) => p.controls(car.pose(), car.velocity()),
             });

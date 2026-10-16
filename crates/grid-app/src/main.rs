@@ -45,7 +45,7 @@ use bevy::{
     winit::WinitPlugin,
 };
 use grid_formats::{collision, entities, jpk, material, mesh, ornaments, pssg, scene, texture};
-use grid_tools::route::Route;
+use grid_tools::{car::Car as CarModel, route::Route};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -68,6 +68,17 @@ struct Car {
     /// Opponent livery textures (car k uses entry k-1), keyed like `textures`.
     liveries: Vec<BTreeMap<String, Vec<u8>>>,
 }
+/// Material/texture key prefix of the field's car model `m` (0 = the
+/// player's model; `Field::models` order).
+fn model_prefix(m: usize) -> String {
+    format!("car{m}/")
+}
+/// The model index of a prefixed car material, e.g. `car1/Wheel` -> 1.
+fn part_model(material: &str) -> Option<usize> {
+    let rest = material.strip_prefix("car")?;
+    let (index, _) = rest.split_once('/')?;
+    index.parse().ok()
+}
 struct Part {
     name: String,
     /// Source joint (car draws only), e.g. `x0_bonnet`.
@@ -76,6 +87,13 @@ struct Part {
     mesh: Mesh,
     matrices: Vec<Mat4>,
     wheel: Option<usize>,
+}
+/// The field's distinct car models (0 = the player's) and each car's model
+/// index (car 0 is the player, car k opponent k).
+#[derive(Resource)]
+struct Field {
+    models: Vec<CarModel>,
+    car_model: Vec<usize>,
 }
 #[derive(Resource)]
 struct Capture {
@@ -136,6 +154,8 @@ struct Opponents {
     throttles: Vec<f32>,
     /// Original race manager: catch-up and choreographer (`--ai`).
     pacing: grid_tools::ai_pacing::Field,
+    /// Each opponent's AI data with its own car's statistics (car k at k-1).
+    car_ai: Vec<grid_tools::ai_driver::AiData>,
 }
 impl Opponents {
     /// Positions of every car; car 0 is the player runtime held outside `multi`.
@@ -348,21 +368,21 @@ fn wheel_motion(wheel: grid_tools::source_vehicle::WheelPose) -> Mat4 {
         * Mat4::from_translation(-anchor)
 }
 
-// Provisional diffuse bindings recovered from executable static tuples.
-fn diffuse(material: &str) -> Option<&'static str> {
-    match material.trim() {
-        "Car Body Paint" | "Matt" | "Shiny Metal" | "Bare Metal" | "Aerials" => {
-            Some("lac_main.tga")
-        }
-        "Window Glass" | "Grills Glass" => Some("lac_glass.tga"),
-        "Cabin" => Some("lac_cabin.tga"),
-        "Wheel" | "Tyre Wall" => Some("lac_wheel_tm.tga"),
-        "Tyre Tread" => Some("lac_tread_tm.tga"),
-        "Suspension" => Some("lac_susp.tga"),
+// Provisional diffuse bindings recovered from executable static tuples. The
+// texture names are per model (`lac_main.tga`, `bmw_main.tga`, ...).
+fn diffuse(material: &str, model: &CarModel) -> Option<String> {
+    let name = match material.trim() {
+        "Car Body Paint" | "Matt" | "Shiny Metal" | "Bare Metal" | "Aerials" => "main",
+        "Window Glass" | "Grills Glass" => "glass",
+        "Cabin" => "cabin",
+        "Wheel" | "Tyre Wall" => "wheel_tm",
+        "Tyre Tread" => "tread_tm",
+        "Suspension" => "susp",
         "Head Lights Pod" | "Rear Lights Pod" | "Lights Pod Matt" | "Head Lights Glass"
-        | "Rear Lights Glass" | "Discs" | "Grills" => Some("lac_lights.tga"),
-        _ => None,
-    }
+        | "Rear Lights Glass" | "Discs" | "Grills" => "lights",
+        _ => return None,
+    };
+    Some(model.texture(name))
 }
 fn read(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use std::io::Read;
@@ -395,6 +415,7 @@ fn track_label(route: &Route) -> String {
 fn load(
     root: &Path,
     route: &Route,
+    model: &CarModel,
     lod: &str,
     track: bool,
     include_batches: bool,
@@ -402,7 +423,7 @@ fn load(
     let mesh_path = if track {
         route.track_file("tracksplit.pssg")
     } else {
-        "cars/lac/lac_highLOD.pssg".into()
+        model.file("_highLOD.pssg")
     };
     let bytes = read(&root.join(&mesh_path))?;
     let tree = pssg::read_tree(&bytes)?;
@@ -479,12 +500,9 @@ fn load(
     }
     let mut textures = BTreeMap::new();
     let texture_paths = if track {
-        vec![mesh_path.as_str()]
+        vec![mesh_path.clone()]
     } else {
-        vec![
-            "cars/lac/livery_00/textures_high/lac_tex_high_00.pssg",
-            "cars/lac/lac_gen_high.pssg",
-        ]
+        vec![model.livery(0), model.file("_gen_high.pssg")]
     };
     for path in texture_paths {
         let bytes = read(&root.join(path))?;
@@ -505,9 +523,9 @@ fn load(
     }
     for part in &parts {
         if !track {
-            let name = diffuse(&part.material)
+            let name = diffuse(&part.material, model)
                 .ok_or_else(|| format!("unknown car material {:?}", part.material))?;
-            bindings.insert(part.material.clone(), name.to_string());
+            bindings.insert(part.material.clone(), name);
         }
         let Some(name) = bindings.get(&part.material) else {
             if track && part.material == "batchmaterial" {
@@ -975,46 +993,73 @@ fn grid_slot(root: &Path, route: &Route, name: &str) -> Result<Mat4, Box<dyn std
     );
     Ok(Mat4::from_cols_array(&transform))
 }
+/// Append field model `m`'s parts, materials and textures under
+/// [`model_prefix`]; `anchor` places that model's NED coordinates.
 fn append_car(
     root: &Path,
     lod: &str,
     car: &mut Car,
     anchor: Mat4,
+    model: &CarModel,
+    m: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut lacetti = load(root, &Route::default(), lod, false, false)?;
-    for part in &mut lacetti.parts {
-        part.material = format!("lacetti/{}", part.material);
+    let prefix = model_prefix(m);
+    let mut source = load(root, &Route::default(), model, lod, false, false)?;
+    for part in &mut source.parts {
+        part.material = format!("{prefix}{}", part.material);
         for matrix in &mut part.matrices {
             *matrix = anchor * *matrix;
         }
     }
-    for (name, data) in lacetti.textures {
-        car.textures.insert(format!("lacetti/{name}"), data);
+    for (name, data) in source.textures {
+        car.textures.insert(format!("{prefix}{name}"), data);
     }
-    for (name, texture) in lacetti.bindings {
+    for (name, texture) in source.bindings {
         car.bindings
-            .insert(format!("lacetti/{name}"), format!("lacetti/{texture}"));
+            .insert(format!("{prefix}{name}"), format!("{prefix}{texture}"));
     }
-    car.parts.extend(lacetti.parts);
+    car.parts.extend(source.parts);
     Ok(())
 }
-/// Lacetti livery package `livery_NN` (shipped 00..09), keyed `lacetti/<texture>`.
+/// Shipped high-detail liveries `livery_00..` of a model (Lacetti 10, BMW 13).
+fn livery_count(root: &Path, model: &CarModel) -> usize {
+    (0..100)
+        .take_while(|&i| root.join(model.livery(i)).is_file())
+        .count()
+}
+/// Livery package `livery_NN` of field model `m`, keyed like its textures.
 fn load_livery(
     root: &Path,
+    model: &CarModel,
+    m: usize,
     index: usize,
 ) -> Result<BTreeMap<String, Vec<u8>>, Box<dyn std::error::Error>> {
-    let path = format!("cars/lac/livery_{index:02}/textures_high/lac_tex_high_{index:02}.pssg");
-    let bytes = read(&root.join(path))?;
+    let bytes = read(&root.join(model.livery(index)))?;
     let tree = pssg::read_tree(&bytes)?;
     let mut out = BTreeMap::new();
     for texture in texture::read_textures(&tree)? {
         let (dds, _) = texture.validated_dds();
         out.insert(
-            format!("lacetti/{}", String::from_utf8(texture.id.to_vec())?),
+            format!(
+                "{}{}",
+                model_prefix(m),
+                String::from_utf8(texture.id.to_vec())?
+            ),
             dds,
         );
     }
     Ok(out)
+}
+/// NED-to-physical translation of a runtime's car model: model wheel
+/// coordinates are NED coordinates and the constructor shifts them into its
+/// local physical frame.
+fn model_offset(runtime: &grid_tools::source_vehicle::Runtime) -> Mat4 {
+    let owner = &runtime.state.car.owner.vehicle;
+    Mat4::from_translation(Vec3::new(
+        f32::from_bits(owner[0x1630 / 4]),
+        f32::from_bits(owner[0x1634 / 4]) - f32::from_bits(owner[0x1564 / 4]),
+        f32::from_bits(owner[0x1638 / 4]),
+    ))
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
@@ -1026,6 +1071,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => Route::new(path)?,
         None => Route::default(),
     };
+    let mut player_car = match &profile.car {
+        Some(stem) => CarModel::new(stem)?,
+        None => CarModel::default(),
+    };
+    let mut opponent_cars = profile.opponent_cars.as_deref().map(CarModel::list).transpose()?;
     let mut driver_aids = profile.assists()?;
     let mut input_settings = profile.input()?;
     let mut ai_settings = profile.ai()?;
@@ -1132,6 +1182,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &args.next().ok_or("--ai needs key=value items")?,
                 )?
             }
+            "--car" => {
+                player_car = CarModel::new(&args.next().ok_or("--car needs a cars/<stem> name")?)?
+            }
+            "--opponent-cars" => {
+                opponent_cars = Some(CarModel::list(
+                    &args.next().ok_or("--opponent-cars needs STEM[,STEM...]")?,
+                )?)
+            }
             "--route" => {
                 route = Route::new(
                     &args
@@ -1160,9 +1218,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--scene" => {
-                let scene = args.next().ok_or("--scene needs lacetti or donington")?;
+                let scene = args.next().ok_or("--scene needs car or donington")?;
                 track = match scene.as_str() {
-                    "lacetti" => {
+                    "car" | "lacetti" => {
                         collision = false;
                         reference = false;
                         false
@@ -1187,10 +1245,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
-                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--scene lacetti|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source Lacetti/Donington driving prototype. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
-                    "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route only."
+                    "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route and car only."
+                );
+                println!(
+                    "--car STEM: purchased car folder cars/STEM for the player and the car scene (default lac; bmw is the other Touring_cars model). --opponent-cars STEM[,STEM...]: opponent models, cycled over the field (default: the player's car; bmw,lac alternates as in the euro_touring 6+6 roster)."
                 );
                 println!("{}", settings::HELP);
                 println!("{}", assists::HELP);
@@ -1280,12 +1341,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         reference = true;
         collision = false;
         start_view = true;
-        let mut runtime = grid_tools::source_vehicle::Runtime::lacetti_on(
+        let mut runtime = grid_tools::source_vehicle::Runtime::load(
             &root,
             &route,
+            &player_car,
             &format!("slot_{player_slot:02}"),
             200679,
         )?;
+        println!("drive_car car={player_car} label={:?}", player_car.label());
         // The device class decides assisted steering (record +0x33 -> +E6C).
         input_settings.apply_class(&mut driver_aids);
         let (actions, pad) = input::load(&root, &input_settings)?;
@@ -1339,17 +1402,37 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .as_ref()
                     .map(|bytes| grid_tools::deformation_parameters::read(bytes))
                     .transpose()?;
-                let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti_deforming_on(
+                // Car 0 is the player's model; opponent k cycles the list.
+                let field: Vec<CarModel> = std::iter::once(player_car.clone())
+                    .chain((0..n).map(|i| {
+                        opponent_cars.as_ref().map_or_else(
+                            || player_car.clone(),
+                            |list| list[i % list.len()].clone(),
+                        )
+                    }))
+                    .collect();
+                let entries: Vec<(&str, &CarModel)> =
+                    refs.iter().copied().zip(field.iter()).collect();
+                let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::load_deforming_on(
                     &root,
                     &route,
-                    &refs,
+                    &entries,
                     &table,
                     runtime.body_events,
                     parameters,
                 )?;
                 multi.enable_dynamic_props(&root)?;
                 use grid_tools::ai_driver::{AiData, AiDriver, Parameters};
-                let ai = AiData::load(&root, route.path(), "touring", "lac")?;
+                // Every model's own AI statistics; the touring class data is shared.
+                let mut by_model = BTreeMap::new();
+                for model in &field {
+                    if !by_model.contains_key(model) {
+                        let data = AiData::load(&root, route.path(), "touring", model.stem())?;
+                        by_model.insert(model.clone(), data);
+                    }
+                }
+                let ai = by_model[&player_car].clone();
+                let car_ai: Vec<AiData> = field[1..].iter().map(|m| by_model[m].clone()).collect();
                 let difficulty = ai_settings.difficulty;
                 let parameters = Parameters::new(&ai, difficulty, |_| 1.)?;
                 let characteristics = match &ai_characteristics {
@@ -1362,7 +1445,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let drivers = (0..n)
                     .map(|i| -> Result<AiDriver, String> {
                         let row = characteristics.get((i + 1) % characteristics.len().max(1));
-                        let p = Parameters::new(&ai, difficulty, |name| {
+                        let p = Parameters::new(&car_ai[i], difficulty, |name| {
                             row.and_then(|r| r.get(name).copied()).unwrap_or(1.)
                         })?;
                         Ok(AiDriver::new(p, 0x5eed + i as u32 + 1))
@@ -1437,15 +1520,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     after_finish: None,
                     throttles: vec![0.; n],
                     pacing,
+                    car_ai,
                 })
             })
             .transpose()?;
         // Set-up for headless replays of this log (grid-soak replay-log).
         println!(
-            "drive_replay version=1 route={} opponents={} grid_position={}",
+            "drive_replay version=1 route={} opponents={} grid_position={}{}",
             route.path(),
             opponents.as_ref().map_or(0, |o| o.drivers.len()),
-            player_slot + 1
+            player_slot + 1,
+            // Only a non-default field is named, so default logs keep their form.
+            match (&opponent_cars, player_car.is_default()) {
+                (None, true) => String::new(),
+                (list, _) => format!(
+                    " car={player_car} opponent_cars={}",
+                    list.as_ref().map_or(player_car.to_string(), |l| l
+                        .iter()
+                        .map(CarModel::stem)
+                        .collect::<Vec<_>>()
+                        .join(","))
+                ),
+            }
         );
         Some(Driving {
             runtime,
@@ -1495,8 +1591,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut car = if collision {
         load_collision(&root, &route)?
     } else {
-        load(&root, &route, &lod, track, include_batches)?
+        load(&root, &route, &player_car, &lod, track, include_batches)?
     };
+    // Distinct car models of the field (0 = the player's) and each car's model.
+    let mut field = Field {
+        models: vec![player_car.clone()],
+        car_model: vec![0],
+    };
+    if let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
+        for runtime in &opponents.multi.cars[1..] {
+            let m = match field.models.iter().position(|c| c == runtime.car()) {
+                Some(m) => m,
+                None => {
+                    field.models.push(runtime.car().clone());
+                    field.models.len() - 1
+                }
+            };
+            field.car_model.push(m);
+        }
+    }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))
     } else if reference || start_view {
@@ -1506,24 +1619,41 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     if reference {
         let model = if let Some(driving) = &driving {
-            let owner = &driving.runtime.state.car.owner.vehicle;
-            // Model wheel coordinates are NED coordinates; constructor shifts
-            // them into its local physical frame. Apply that same translation.
-            Mat4::from_translation(Vec3::new(
-                f32::from_bits(owner[0x1630 / 4]),
-                f32::from_bits(owner[0x1634 / 4]) - f32::from_bits(owner[0x1564 / 4]),
-                f32::from_bits(owner[0x1638 / 4]),
-            ))
+            model_offset(&driving.runtime)
         } else {
             anchor.unwrap()
         };
-        append_car(&root, &lod, &mut car, model)?;
-        // Each opponent wears its own shipped livery (01, 02, ...); the player keeps 00.
+        append_car(&root, &lod, &mut car, model, &player_car, 0)?;
         if let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
-            for k in 1..opponents.multi.cars.len() {
-                car.liveries.push(load_livery(&root, k % 10)?);
+            // Other models are placed by the first opponent that drives them.
+            for (m, model) in field.models.iter().enumerate().skip(1) {
+                let k = field.car_model.iter().position(|&c| c == m).unwrap();
+                append_car(
+                    &root,
+                    &lod,
+                    &mut car,
+                    model_offset(&opponents.multi.cars[k]),
+                    model,
+                    m,
+                )?;
             }
-            println!("drive_opponent_liveries count={}", car.liveries.len());
+            // Each opponent wears its own shipped livery (01, 02, ...); the player keeps 00.
+            for k in 1..opponents.multi.cars.len() {
+                let m = field.car_model[k];
+                let model = &field.models[m];
+                car.liveries
+                    .push(load_livery(&root, model, m, k % livery_count(&root, model).max(1))?);
+            }
+            println!(
+                "drive_opponent_liveries count={} models={}",
+                car.liveries.len(),
+                field
+                    .models
+                    .iter()
+                    .map(CarModel::stem)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
         }
     }
     let mut orbit = if track {
@@ -1573,11 +1703,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(laps) = trial_laps {
         // Races with opponents never write the solo time-trial best times.
         let race = driving.as_ref().is_some_and(|d| d.opponents.is_some());
-        // The private best-time file is keyed to the default route.
+        // The private best-time file is keyed to the default route and car.
         let mut trial = time_trial::Trial::new(
             laps,
             trial_mode,
-            output.is_none() && !race && route.is_default(),
+            output.is_none() && !race && route.is_default() && player_car.is_default(),
         )?;
         trial.race = race;
         if race {
@@ -1656,8 +1786,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         // Offscreen captures never open an audio device or play sound.
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
-            match grid_tools::engine_audio_continuous::Bank::lacetti(&root) {
-                Ok(bank) => engine_sound::install(&mut app, bank),
+            match field
+                .models
+                .iter()
+                .map(|m| grid_tools::engine_audio_continuous::Bank::load(&root, m))
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(banks) => engine_sound::install(&mut app, banks),
                 Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
             }
             match grid_tools::tyre_audio::Bank::load(&root) {
@@ -1698,7 +1833,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .chain(),
             )
             .add_systems(Update, update_start_lights);
-        damage_parts::install(&mut app, &root);
+        damage_parts::install(&mut app, &root, &field.models, &field.car_model);
         damage_hud::install(&mut app);
     }
     if track
@@ -1709,6 +1844,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         warn!("Ground cover unavailable; continuing: {error}");
     }
     let exit = app
+        .insert_resource(field)
         .insert_resource(car)
         .insert_resource(InitialOrbit(orbit.clone()))
         .insert_resource(orbit)
@@ -1743,6 +1879,7 @@ fn setup(
     adapter: Res<bevy::render::renderer::RenderAdapterInfo>,
     device: Res<bevy::render::renderer::RenderDevice>,
     driving: Option<Res<Driving>>,
+    field: Res<Field>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -1788,11 +1925,11 @@ fn setup(
         let material = material_handles
             .entry(part.material.clone())
             .or_insert_with(|| {
-                let name = part
-                    .material
-                    .strip_prefix("lacetti/")
-                    .unwrap_or(&part.material)
-                    .trim();
+                let name = match part_model(&part.material) {
+                    Some(_) => part.material.split_once('/').unwrap().1,
+                    None => &part.material,
+                }
+                .trim();
                 let glass = matches!(
                     name,
                     "Window Glass" | "Grills Glass" | "Head Lights Glass" | "Rear Lights Glass"
@@ -1843,12 +1980,19 @@ fn setup(
                 })
             })
             .clone();
-        let deformable = driving
-            .as_ref()
-            .is_some_and(|d| d.runtime.deformation_enabled)
-            && part.material.starts_with("lacetti/")
+        let model = part_model(&part.material);
+        // Deforming body parts own their mesh per car (any car of the model).
+        let deformable = driving.as_ref().is_some_and(|d| {
+            d.runtime.deformation_enabled
+                || d.opponents
+                    .as_ref()
+                    .is_some_and(|o| o.multi.cars.iter().any(|c| c.deformation_enabled))
+        }) && model.is_some()
             && part.wheel.is_none()
-            && part.material.strip_prefix("lacetti/") != Some("Aerials");
+            && part.material.split_once('/').map(|x| x.1) != Some("Aerials");
+        // The player's model is drawn on the player; other models only on
+        // the opponents that drive them.
+        let player_part = model.is_none_or(|m| m == 0);
         let original = deformable.then(|| part.mesh.clone());
         let initial_bounds = part
             .mesh
@@ -1863,7 +2007,7 @@ fn setup(
             let mesh = shared
                 .clone()
                 .unwrap_or_else(|| meshes.add(original.as_ref().unwrap().clone()));
-            let moving = driving.is_some() && part.material.starts_with("lacetti/");
+            let moving = driving.is_some() && model.is_some();
             let transform = if moving {
                 let runtime = &driving.as_ref().unwrap().runtime;
                 let motion = part
@@ -1873,14 +2017,21 @@ fn setup(
             } else {
                 matrix
             };
-            let mut entity = commands.spawn((
-                Name::new(part.name.clone()),
-                Mesh3d(mesh.clone()),
-                MeshMaterial3d(material.clone()),
-                Transform::from_matrix(transform),
-                initial_bounds,
-            ));
-            if moving {
+            let player_deforms = driving
+                .as_ref()
+                .is_some_and(|d| d.runtime.deformation_enabled);
+            let mut entity = if player_part {
+                Some(commands.spawn((
+                    Name::new(part.name.clone()),
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_matrix(transform),
+                    initial_bounds,
+                )))
+            } else {
+                None
+            };
+            if moving && let Some(entity) = &mut entity {
                 entity.insert((
                     MovingPart {
                         rest: matrix,
@@ -1888,13 +2039,8 @@ fn setup(
                     },
                     damage_parts::Joint::new(&part.joint),
                 ));
-                if let Some(source) = &original {
-                    let owner = &driving.as_ref().unwrap().runtime.state.car.owner.vehicle;
-                    let model = Mat4::from_translation(Vec3::new(
-                        f32::from_bits(owner[0x1630 / 4]),
-                        f32::from_bits(owner[0x1634 / 4]) - f32::from_bits(owner[0x1564 / 4]),
-                        f32::from_bits(owner[0x1638 / 4]),
-                    ));
+                if let Some(source) = original.as_ref().filter(|_| player_deforms) {
+                    let model = model_offset(&driving.as_ref().unwrap().runtime);
                     entity.insert(DeformingPart {
                         source: source.clone(),
                         raw_bind: model.inverse() * matrix,
@@ -1903,6 +2049,9 @@ fn setup(
             }
             if moving && let Some(opponents) = driving.as_ref().and_then(|d| d.opponents.as_ref()) {
                 for car in 1..opponents.multi.cars.len() {
+                    if model != Some(field.car_model[car]) {
+                        continue;
+                    }
                     let runtime = &opponents.multi.cars[car];
                     let motion = part
                         .wheel
@@ -1963,12 +2112,7 @@ fn setup(
                         damage_parts::Joint::new(&part.joint),
                     ));
                     if let Some(source) = own {
-                        let owner = &runtime.state.car.owner.vehicle;
-                        let model = Mat4::from_translation(Vec3::new(
-                            f32::from_bits(owner[0x1630 / 4]),
-                            f32::from_bits(owner[0x1634 / 4]) - f32::from_bits(owner[0x1564 / 4]),
-                            f32::from_bits(owner[0x1638 / 4]),
-                        ));
+                        let model = model_offset(runtime);
                         opponent.insert(OpponentDeforming(DeformingPart {
                             source: source.clone(),
                             raw_bind: model.inverse() * matrix,
@@ -2024,7 +2168,10 @@ fn setup(
         commands.spawn((
             DrivingHud,
             Text::new(format!(
-                "Lacetti / {}\nPreparing practice timer",
+                "{} / {}\nPreparing practice timer",
+                driving
+                    .as_ref()
+                    .map_or("", |d| d.runtime.car().label()),
                 driving
                     .as_ref()
                     .map_or_else(String::new, |d| track_label(d.runtime.route()))
@@ -2320,7 +2467,7 @@ fn drive_tick(
                     .collect();
                 let view = View::of(car, opponents.multi.obstruction(i + 1));
                 driver.controls(
-                    &opponents.ai,
+                    &opponents.car_ai[i],
                     &view,
                     &others,
                     grid_tools::source_vehicle::DELTA,
@@ -2847,7 +2994,8 @@ fn drive_present(
         }
     });
     let heading = format!(
-        "Lacetti / {} {}",
+        "{} / {} {}",
+        driving.runtime.car().label(),
         track_label(driving.runtime.route()),
         if trial.as_ref().is_some_and(|t| t.race) {
             "race"

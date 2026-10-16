@@ -56,8 +56,8 @@ struct Rule {
     detach: Option<f32>,
 }
 
-/// Lacetti NED `PARTS`, `WINDOW` and `SIDE` values plus collision extents, as
-/// stored by the original description loader 9EFB30.
+/// A car model's NED `PARTS`, `WINDOW` and `SIDE` values plus collision
+/// extents, as stored by the original description loader 9EFB30.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Config {
     disabled: bool,
@@ -91,8 +91,8 @@ pub(crate) struct Config {
 }
 
 impl Config {
-    pub(crate) fn read(root: &Path) -> Result<Self, String> {
-        let bytes = std::fs::read(root.join("cars/lac/lac.ned")).map_err(|e| e.to_string())?;
+    pub(crate) fn read(root: &Path, model: &grid_tools::car::Car) -> Result<Self, String> {
+        let bytes = std::fs::read(root.join(model.file(".ned"))).map_err(|e| e.to_string())?;
         let doc = grid_formats::binxml::read(&bytes).map_err(|e| format!("{e:?}"))?;
         let bounds = grid_formats::car_collision::read(&doc)
             .map_err(|e| format!("{e:?}"))?
@@ -744,17 +744,28 @@ fn hinge(part: &str, (min, max): (Vec3, Vec3), config: &Config) -> Option<Hinge>
     })
 }
 
+/// One field car model's description, glass points, part layout and
+/// damage textures.
+struct ModelDamage {
+    config: Config,
+    /// `<stem>.ppts` window points (model space) and outward normals per window.
+    shards: BTreeMap<String, Vec<(Vec3, Vec3)>>,
+    layout: Option<Layout>,
+    images: Option<(Handle<Image>, Handle<Image>)>,
+    /// Glass and light damage texture names, e.g. `car0/lac_glass_dm.tga`.
+    textures: [String; 2],
+}
+
 #[derive(Resource)]
 pub(crate) struct DamageParts {
-    config: Config,
-    /// lac.ppts window points (model space) and outward normals per window.
-    shards: BTreeMap<String, Vec<(Vec3, Vec3)>>,
+    /// Per field model (`crate::Field::models`).
+    models: Vec<ModelDamage>,
+    /// Each car's model index (car 0 is the player).
+    car_model: Vec<usize>,
     cars: Vec<CarDamage>,
     last_tick: Option<u64>,
-    layout: Option<Layout>,
     reset: bool,
     log_zones: bool,
-    images: Option<(Handle<Image>, Handle<Image>)>,
     cracked: BTreeMap<(AssetId<StandardMaterial>, bool), Handle<StandardMaterial>>,
     shard_assets: Option<(Handle<Mesh>, Handle<StandardMaterial>)>,
     camera: Option<(usize, Vec3)>,
@@ -800,42 +811,67 @@ fn read_ppts(bytes: &[u8]) -> Result<BTreeMap<String, Vec<(Vec3, Vec3)>>, String
     Ok(out)
 }
 
-pub(crate) fn install(app: &mut App, root: &Path) {
-    let config = match Config::read(root) {
-        Ok(config) => config,
-        Err(error) => {
-            warn!("Visual damage parts unavailable; driving continues: {error}");
-            return;
-        }
-    };
-    let shards = std::fs::read(root.join("cars/lac/lac.ppts"))
-        .map_err(|e| e.to_string())
-        .and_then(|b| read_ppts(&b))
-        .unwrap_or_else(|error| {
-            warn!("Glass shard points unavailable: {error}");
-            BTreeMap::new()
+/// `models` are the field's car models (the player's first) and `car_model`
+/// each car's index into them.
+pub(crate) fn install(
+    app: &mut App,
+    root: &Path,
+    models: &[grid_tools::car::Car],
+    car_model: &[usize],
+) {
+    let mut out = Vec::new();
+    for (m, model) in models.iter().enumerate() {
+        let config = match Config::read(root, model) {
+            Ok(config) => config,
+            Err(error) => {
+                warn!("Visual damage parts unavailable; driving continues: {error}");
+                return;
+            }
+        };
+        let shards = std::fs::read(root.join(model.file(".ppts")))
+            .map_err(|e| e.to_string())
+            .and_then(|b| read_ppts(&b))
+            .unwrap_or_else(|error| {
+                warn!("Glass shard points unavailable: {error}");
+                BTreeMap::new()
+            });
+        println!(
+            "drive_damage_parts enabled=true{} scalar={} crack_cos={} smash_cos={} smash_light={} front={} rear={} half_width={} roof={} shard_windows={} policy=recovered-zones-authored-motion",
+            // Only a non-default model is named, so default logs keep their form.
+            if model.is_default() {
+                String::new()
+            } else {
+                format!(" car={model}")
+            },
+            config.scalar,
+            config.crack_cos,
+            config.smash_cos,
+            config.smash_light,
+            config.front,
+            config.rear,
+            config.half_width,
+            config.roof,
+            shards.len()
+        );
+        let prefix = crate::model_prefix(m);
+        out.push(ModelDamage {
+            config,
+            shards,
+            layout: None,
+            images: None,
+            textures: [
+                format!("{prefix}{}", model.texture("glass_dm")),
+                format!("{prefix}{}", model.texture("lights_dm")),
+            ],
         });
-    println!(
-        "drive_damage_parts enabled=true scalar={} crack_cos={} smash_cos={} smash_light={} front={} rear={} half_width={} roof={} shard_windows={} policy=recovered-zones-authored-motion",
-        config.scalar,
-        config.crack_cos,
-        config.smash_cos,
-        config.smash_light,
-        config.front,
-        config.rear,
-        config.half_width,
-        config.roof,
-        shards.len()
-    );
+    }
     app.insert_resource(DamageParts {
-        config,
-        shards,
+        models: out,
+        car_model: car_model.to_vec(),
         cars: Vec::new(),
         last_tick: None,
-        layout: None,
         reset: false,
         log_zones: crate::settings::diagnostics().damage_zones,
-        images: None,
         cracked: BTreeMap::new(),
         shard_assets: None,
         camera: crate::settings::diagnostics().damage_camera.as_deref().and_then(|v| {
@@ -906,15 +942,17 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
     } else {
         vec![reading(&driving.runtime, driving.runtime.impacts())]
     };
-    let Some(layout) = &damage.layout else {
+    if damage.models.iter().any(|m| m.layout.is_none()) {
         return;
-    };
+    }
     damage.cars.resize_with(readings.len(), CarDamage::default);
     let dt = grid_tools::source_vehicle::DELTA;
     for (index, (car, r)) in damage.cars.iter_mut().zip(&readings).enumerate() {
         if !r.mass.is_finite() || r.mass <= 0. {
             continue;
         }
+        let model = &damage.models[damage.car_model.get(index).copied().unwrap_or(0)];
+        let (config, layout) = (&model.config, model.layout.as_ref().unwrap());
         let inverse = r.pose.inverse();
         if let Some(previous) = car.velocity {
             car.acceleration = inverse.transform_vector3((r.velocity - previous) / dt);
@@ -928,7 +966,7 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
                 up_y: r.pose.y_axis.y,
             };
             for impact in &r.impacts {
-                classify(&damage.config, &frame, impact, &mut zones);
+                classify(config, &frame, impact, &mut zones);
             }
         }
         for (total, zone) in car.totals.iter_mut().zip(zones) {
@@ -941,7 +979,7 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
                 r.impacts.len()
             );
         }
-        if !damage.config.disabled {
+        if !config.disabled {
             let parts = &car.parts;
             let present = |part: &str| {
                 layout
@@ -949,7 +987,7 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
                     .contains_key(part)
                     .then(|| parts.get(part).map_or(State::Attached, |p| p.state))
             };
-            let changes = decide(&damage.config, &zones, &car.totals, r.mass, &present);
+            let changes = decide(config, &zones, &car.totals, r.mass, &present);
             for change in changes {
                 let part = car.parts.entry(change.part).or_default();
                 if part.state == State::Detached || part.state == change.state {
@@ -968,7 +1006,7 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
                     // AUTHORED flight: carried along, pushed outward and up.
                     let (min, max) = layout.bounds[change.part];
                     let centre = (min + max) * 0.5;
-                    let hinged = hinge(change.part, (min, max), &damage.config)
+                    let hinged = hinge(change.part, (min, max), config)
                         .map_or(Mat4::IDENTITY, |h| h.matrix(part.angle));
                     let origin = r.pose * hinged;
                     let world = origin.transform_point3(centre);
@@ -1003,7 +1041,7 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
                     let Some(h) = layout
                         .bounds
                         .get(*name)
-                        .and_then(|b| hinge(name, *b, &damage.config))
+                        .and_then(|b| hinge(name, *b, config))
                     else {
                         continue;
                     };
@@ -1045,8 +1083,10 @@ fn present(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let damage = &mut *damage;
-    if damage.layout.is_none() {
-        damage.layout = Some(layout(&parts));
+    for m in 0..damage.models.len() {
+        if damage.models[m].layout.is_none() {
+            damage.models[m].layout = Some(layout(&parts, m, &damage.car_model));
+        }
     }
     if damage.reset {
         damage.reset = false;
@@ -1061,9 +1101,6 @@ fn present(
             commands.entity(entity).despawn();
         }
     }
-    let Some(layout) = &damage.layout else {
-        return;
-    };
     let runtimes: Vec<&grid_tools::source_vehicle::Runtime> = std::iter::once(&driving.runtime)
         .chain(
             driving
@@ -1083,6 +1120,8 @@ fn present(
         else {
             continue;
         };
+        let model = &damage.models[damage.car_model.get(index).copied().unwrap_or(0)];
+        let (config, layout) = (&model.config, model.layout.as_ref().unwrap());
         let key = field.key();
         if car.field_key.as_ref() == Some(&key) {
             continue;
@@ -1103,7 +1142,7 @@ fn present(
             let Some(rest) = anchors else { continue };
             let Some(now) = moved(rest) else { continue };
             let now: [Vec3; 5] = std::array::from_fn(|k| now[k]);
-            let state = glass_state(rest, &now, &damage.config, damage.config.crack_only[w]);
+            let state = glass_state(rest, &now, config, config.crack_only[w]);
             if state > car.windows[w] {
                 car.windows[w] = state;
                 log_line!(
@@ -1123,7 +1162,7 @@ fn present(
             }
             if let Some(now) = moved(&[*anchor]) {
                 let distance = now[0].distance(*anchor);
-                if distance > damage.config.smash_light {
+                if distance > config.smash_light {
                     car.lights[l] = true;
                     log_line!(
                         "drive_damage_light car={index} tick={} cluster={} displacement={distance:.3}",
@@ -1134,11 +1173,18 @@ fn present(
             }
         }
     }
-    let images = damage.images.get_or_insert_with(|| {
+    let images: Vec<(Handle<Image>, Handle<Image>)> = damage
+        .models
+        .iter_mut()
+        .map(|model| {
+            let textures = &model.textures;
+            model
+                .images
+                .get_or_insert_with(|| {
         let mut load = |name: &str| {
             source
                 .textures
-                .get(&format!("lacetti/{name}"))
+                .get(name)
                 .and_then(|dds| {
                     crate::texture_upload::image(
                         dds,
@@ -1149,9 +1195,11 @@ fn present(
                 })
                 .map_or_else(Handle::default, |image| images.add(image))
         };
-        (load("lac_glass_dm.tga"), load("lac_lights_dm.tga"))
-    });
-    let images = images.clone();
+        (load(&textures[0]), load(&textures[1]))
+                })
+                .clone()
+        })
+        .collect();
     let poses: Vec<Mat4> = runtimes
         .iter()
         .map(|r| Mat4::from_cols_array(&r.pose()))
@@ -1176,13 +1224,15 @@ fn present(
         let Some(car) = damage.cars.get(index) else {
             continue;
         };
+        let m = damage.car_model.get(index).copied().unwrap_or(0);
+        let (config, layout) = (&damage.models[m].config, damage.models[m].layout.as_ref().unwrap());
         let name = joint.0.as_str();
         // Windows and mirrors ride on their door while it is loose [I].
         let carrier = match name {
             "window_fl" => Some("door_fl"),
             "window_fr" => Some("door_fr"),
-            "wing_mirror_l" if damage.config.mirror_with_door => Some("door_fl"),
-            "wing_mirror_r" if damage.config.mirror_with_door => Some("door_fr"),
+            "wing_mirror_l" if config.mirror_with_door => Some("door_fl"),
+            "wing_mirror_r" if config.mirror_with_door => Some("door_fr"),
             _ => None,
         };
         let own = car.parts.get(name).filter(|p| p.state != State::Attached);
@@ -1194,12 +1244,12 @@ fn present(
             (Some(part), _) => layout
                 .bounds
                 .get(name)
-                .and_then(|b| hinge(name, *b, &damage.config))
+                .and_then(|b| hinge(name, *b, config))
                 .map(|h| poses[index] * h.matrix(part.angle)),
             (None, Some((door, part))) => layout
                 .bounds
                 .get(door)
-                .and_then(|b| hinge(door, *b, &damage.config))
+                .and_then(|b| hinge(door, *b, config))
                 .map(|h| poses[index] * h.matrix(part.angle)),
             _ => None,
         };
@@ -1226,7 +1276,7 @@ fn present(
                 .any(|((joints, _), smashed)| *smashed && joints.iter().any(|j| j == name));
         if (glass == Glass::Cracked || light) && original.is_none() {
             let base = material.0.clone();
-            let texture = if light { &images.1 } else { &images.0 };
+            let texture = if light { &images[m].1 } else { &images[m].0 };
             if *texture == Handle::default() {
                 continue;
             }
@@ -1267,7 +1317,13 @@ fn present(
         for (index, window) in new_shards {
             let pose = poses[index];
             let velocity = damage.cars[index].velocity.unwrap_or_default();
-            for (k, (point, normal)) in damage.shards.get(window).into_iter().flatten().enumerate()
+            let m = damage.car_model.get(index).copied().unwrap_or(0);
+            for (k, (point, normal)) in damage.models[m]
+                .shards
+                .get(window)
+                .into_iter()
+                .flatten()
+                .enumerate()
             {
                 let spread = ((k * 37 % 11) as f32 / 11.) - 0.5;
                 let v = velocity
@@ -1331,11 +1387,20 @@ type PartQuery<'w, 's> = Query<
 
 /// Joint bounds from the player's draws (mesh bounds through each draw's rest
 /// matrix) and grid-frame glass/light anchors from its source meshes.
-fn layout(parts: &PartQuery) -> Layout {
+/// Field model `m`'s layout, from the player's parts (model 0) or from the
+/// first opponent that drives the model.
+fn layout(parts: &PartQuery, m: usize, car_model: &[usize]) -> Layout {
     let mut bounds: BTreeMap<String, (Vec3, Vec3)> = BTreeMap::new();
     let mut grid: BTreeMap<String, (Vec3, Vec3)> = BTreeMap::new();
-    for (_, joint, moving, _, deforming, _, aabb, ..) in parts {
-        let Some(moving) = moving else { continue };
+    let first = car_model.iter().position(|&c| c == m).unwrap_or(0);
+    for (_, joint, moving, opponent, deforming, opponent_deforming, aabb, ..) in parts {
+        let (rest, deforming) = match (moving, opponent) {
+            (Some(moving), _) if first == 0 => (moving.rest, deforming),
+            (_, Some(o)) if first != 0 && o.car == first => {
+                (o.rest, opponent_deforming.map(|d| &d.0))
+            }
+            _ => continue,
+        };
         let (lo, hi) = (Vec3::from(aabb.min()), Vec3::from(aabb.max()));
         let entry = bounds
             .entry(joint.0.clone())
@@ -1346,7 +1411,7 @@ fn layout(parts: &PartQuery) -> Layout {
                 if k & 2 == 0 { lo.y } else { hi.y },
                 if k & 4 == 0 { lo.z } else { hi.z },
             );
-            let p = moving.rest.transform_point3(corner);
+            let p = rest.transform_point3(corner);
             entry.0 = entry.0.min(p);
             entry.1 = entry.1.max(p);
         }
@@ -1644,7 +1709,7 @@ mod tests {
     #[ignore = "requires GRID_GAME_ROOT"]
     fn lacetti_ned_parts_configuration() {
         let root = std::env::var("GRID_GAME_ROOT").unwrap();
-        let c = Config::read(Path::new(&root)).unwrap();
+        let c = Config::read(Path::new(&root), &grid_tools::car::Car::default()).unwrap();
         assert!(!c.disabled);
         assert!(c.bonnet.is_some() && c.front_doors.is_some());
         assert!(c.rear_doors.is_none() && c.rear_wings == Rule::default());

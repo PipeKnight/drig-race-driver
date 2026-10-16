@@ -20,14 +20,20 @@ pub(crate) struct EngineSound {
     mailbox: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
     bank: Arc<EngineBank>,
+    /// One bank per field car model (`Field::models`); the player's is 0.
+    banks: Vec<Arc<EngineBank>>,
     pub(crate) muted: bool,
 }
 impl EngineSound {
     pub(crate) fn new(bank: Arc<EngineBank>) -> Self {
+        Self::with_models(vec![bank])
+    }
+    pub(crate) fn with_models(banks: Vec<Arc<EngineBank>>) -> Self {
         Self {
             mailbox: Arc::new(AtomicU64::new(0)),
             failure: Arc::new(AtomicU32::new(0)),
-            bank,
+            bank: banks[0].clone(),
+            banks,
             muted: false,
         }
     }
@@ -116,9 +122,10 @@ impl Decodable for EngineSource {
         }
     }
 }
-pub(crate) fn install(app: &mut App, bank: Arc<EngineBank>) {
+/// `banks` holds one bank per field car model, the player's first.
+pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>) {
     app.add_audio_source::<EngineSource>()
-        .insert_resource(EngineSound::new(bank))
+        .insert_resource(EngineSound::with_models(banks))
         .add_systems(Startup, start)
         .add_systems(Update, update.after(super::drive_present));
 }
@@ -127,6 +134,7 @@ fn start(
     sound: Res<EngineSound>,
     mut assets: ResMut<Assets<EngineSource>>,
     driving: Option<Res<super::Driving>>,
+    field: Option<Res<super::Field>>,
 ) {
     let handle = assets.add(EngineSource {
         bank: sound.bank.clone(),
@@ -140,8 +148,13 @@ fn start(
         .map_or(0, |o| o.multi.cars.len());
     for car in 1..cars {
         let mailbox = Arc::new(AtomicU64::new(0));
+        // Each opponent sounds like its own car model.
+        let model = field
+            .as_ref()
+            .and_then(|f| f.car_model.get(car).copied())
+            .unwrap_or(0);
         let handle = assets.add(EngineSource {
-            bank: sound.bank.clone(),
+            bank: sound.banks.get(model).unwrap_or(&sound.bank).clone(),
             mailbox: mailbox.clone(),
             failure: sound.failure.clone(),
         });

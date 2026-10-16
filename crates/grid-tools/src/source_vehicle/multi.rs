@@ -292,13 +292,28 @@ impl MultiRuntime {
         events: Option<body_impact::Parameters>,
         deformation: Option<DeformationParameters>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        if !(1..=12).contains(&slots.len()) {
+        let lacetti = Car::default();
+        let entries: Vec<(&str, &Car)> = slots.iter().map(|s| (*s, &lacetti)).collect();
+        Self::load_deforming_on(root, route, &entries, table, events, deformation)
+    }
+
+    /// Mixed-model field: each entry is a grid slot and the purchased car on
+    /// it (docs/CAR_GENERALIZATION.md). Car `i` keeps seed 200679 + i.
+    pub fn load_deforming_on(
+        root: &Path,
+        route: &Route,
+        entries: &[(&str, &Car)],
+        table: &[u8],
+        events: Option<body_impact::Parameters>,
+        deformation: Option<DeformationParameters>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        if !(1..=12).contains(&entries.len()) {
             return Err("unsupported shared-world car count".into());
         }
         let mut cars = Vec::new();
         let mut geometry = Vec::new();
-        for (i, slot) in slots.iter().enumerate() {
-            let mut car = Runtime::lacetti_on(root, route, slot, 200679 + i as u32)?;
+        for (i, (slot, model)) in entries.iter().enumerate() {
+            let mut car = Runtime::load(root, route, model, slot, 200679 + i as u32)?;
             let mut body = car.prepare_body_geometry(root, table)?;
             if let Some((limit, bulk)) = &deformation {
                 car.enable_deformation(root, &mut body)?;
@@ -910,6 +925,71 @@ mod tests {
             assert_eq!(anchors[i][0] > 0., left, "wheel {i} side");
             assert_eq!(anchors[i][2] > 0., front, "wheel {i} axle");
         }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn mixed_field_bmw_equals_its_single_runtime_until_contact() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let (lac, bmw) = (Car::default(), Car::new(crate::car::BMW).unwrap());
+                let mut multi = MultiRuntime::load_deforming_on(
+                    root,
+                    &Route::default(),
+                    &[("slot_00", &lac), ("slot_01", &bmw)],
+                    &table,
+                    events,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(multi.cars[0].car(), &lac);
+                assert_eq!(multi.cars[1].car(), &bmw);
+                // Each car keeps its own mass properties and wheel geometry.
+                let anchors = |c: &Runtime| -> Vec<[f32; 3]> {
+                    c.wheels().iter().map(|w| w.anchor).collect()
+                };
+                assert_ne!(anchors(&multi.cars[0]), anchors(&multi.cars[1]));
+                assert_ne!(
+                    multi.world.manager.properties[0],
+                    multi.world.manager.properties[1]
+                );
+                for (i, a) in anchors(&multi.cars[1]).iter().enumerate() {
+                    assert_eq!(a[0] > 0., i % 2 == 0, "BMW wheel {i} side");
+                    assert_eq!(a[2] > 0., i >= 2, "BMW wheel {i} axle");
+                }
+                // Car 1 (BMW) drives, car 0 idles: car 1 equals its single runtime.
+                let mut single =
+                    Runtime::load(root, &Route::default(), &bmw, "slot_01", 200680).unwrap();
+                let geometry = single.prepare_body_geometry(root, &table).unwrap();
+                single.body_events = events;
+                single.enable_lap_timing(root).unwrap();
+                let drive = Controls {
+                    throttle: 1.,
+                    ..Default::default()
+                };
+                for _ in 0..200 {
+                    single.tick_with_body_geometry(drive, &geometry).unwrap();
+                    multi.tick(&[Controls::default(), drive]).unwrap();
+                    assert_eq!(
+                        single.state.car.owner.physical[0x1d0 / 4..0x230 / 4],
+                        multi.cars[1].state.car.owner.physical[0x1d0 / 4..0x230 / 4]
+                    );
+                }
+                let v = single.velocity();
+                assert!(v[0] * v[0] + v[2] * v[2] > 8. * 8., "BMW launch {v:?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

@@ -191,6 +191,9 @@ fn platform_data_dir() -> Option<PathBuf> {
 pub struct Settings {
     pub root: Option<PathBuf>,
     pub route: Option<String>,
+    /// `[game] car` / `opponent_cars` (docs/CAR_GENERALIZATION.md).
+    pub car: Option<String>,
+    pub opponent_cars: Option<String>,
     pub drive: bool,
     pub laps: Option<u32>,
     pub opponents: Option<usize>,
@@ -322,6 +325,8 @@ impl Settings {
                     self.root = (!value.eq_ignore_ascii_case("auto")).then(|| value.into())
                 }
                 ("game", "route") => self.route = Some(value.into()),
+                ("game", "car") => self.car = Some(value.into()),
+                ("game", "opponent_cars") => self.opponent_cars = Some(value.into()),
                 ("drive", "enabled") => self.drive = on(&key, value).map_err(at)?,
                 ("drive", "laps") => {
                     let laps = value.parse::<u32>().map_err(|_| at(number(&key)))?;
@@ -423,6 +428,8 @@ mod tests {
 [game]
 root = auto
 route = tracks/europe/donington/route_0
+car = bmw
+opponent_cars = lac,bmw
 [drive]
 enabled = on
 laps = 3
@@ -450,6 +457,8 @@ prop_script_speed = 12.5
         s.apply(RACE, dir).unwrap();
         assert_eq!(s.root, None);
         assert_eq!(s.route.as_deref(), Some("tracks/europe/donington/route_0"));
+        assert_eq!(s.car.as_deref(), Some("bmw"));
+        assert_eq!(s.opponent_cars.as_deref(), Some("lac,bmw"));
         assert!(s.drive && s.grid_back);
         assert_eq!(
             (s.laps, s.opponents, s.grid_position),

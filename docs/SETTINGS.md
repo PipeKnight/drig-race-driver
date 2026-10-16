@@ -23,6 +23,8 @@ Grammar:
 |---|---|---|---|
 | `[game]` | `root` | `auto` (default: search Steam) or a folder | `--game-root` |
 | | `route` | `tracks/<region>/<track>/<route>` | `--route` |
+| | `car` | `cars/<stem>` name, e.g. `lac` (default) or `bmw` | `--car` |
+| | `opponent_cars` | `STEM[,STEM...]`, cycled over the opponents (default: the player's car) | `--opponent-cars` |
 | `[drive]` | `enabled` | `on`/`off` | `--drive` |
 | | `laps` | `0` (free practice) or 1..99 | `--time-trial-laps` |
 | | `opponents` | `0` or 1..11 | `--opponents` |

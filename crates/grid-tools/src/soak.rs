@@ -1367,6 +1367,12 @@ impl AppLog {
             if let Some(rest) = line.strip_prefix("drive_replay ") {
                 log.route = field(rest, "route").map(str::to_string);
                 log.grid_position = field(rest, "grid_position").and_then(|v| v.parse().ok());
+                // The session builds an all-Lacetti field (docs/CAR_GENERALIZATION.md).
+                if field(rest, "car").is_some_and(|c| c != crate::car::LACETTI)
+                    || field(rest, "opponent_cars").is_some_and(|c| c != crate::car::LACETTI)
+                {
+                    return Err("replay of a non-Lacetti field is not supported".into());
+                }
             } else if let Some(rest) = line.strip_prefix("drive_assists ") {
                 let mut assists = Assists::parse(rest.trim())?;
                 // Builds before F333 drove the player at damage gain 1.0.

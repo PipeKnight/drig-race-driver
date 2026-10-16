@@ -1,8 +1,10 @@
-//! Source-only Lacetti/Donington serial driving prototype. No saved native state.
+//! Source-only serial driving prototype of a purchased car (Lacetti by default)
+//! on a purchased route (Donington by default). No saved native state.
 //! The manager's single shared physical material and serial scheduling are explicit
 //! prototype choices; body events are opt-in, full factory/deformation/racing external.
 use crate::{
-    contact_surfaces::Surfaces, route::Route, source_physical, standard_car, track::Track,
+    car::Car, contact_surfaces::Surfaces, route::Route, source_physical, standard_car,
+    track::Track,
 };
 use grid_formats::{
     binxml, car_collision, grid, handling_damage, jpk, pssg, tuning, vehicle, vehicle_properties,
@@ -57,6 +59,8 @@ pub struct Runtime {
     pub lap_events: Vec<grid_world::lap_timing::Event>,
     /// Purchased route whose track, grid, boundary, props and gates are used.
     route: Route,
+    /// Purchased car model whose tuning, description and deformation are used.
+    car: Car,
     /// Player driver aids (see [`assists`]); the default is the earlier
     /// fixed configuration. Change with [`Runtime::set_assists`].
     pub assists: assists::Assists,
@@ -167,19 +171,30 @@ impl Runtime {
         slot: &str,
         seed: u32,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load(root, route, &Car::default(), slot, seed)
+    }
+
+    /// The given purchased car on the grid slot of the given route.
+    pub fn load(
+        root: &Path,
+        route: &Route,
+        model: &Car,
+        slot: &str,
+        seed: u32,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         if !slot.starts_with("slot_")
             || slot.len() > 32
             || !slot.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
         {
             return Err("invalid grid slot".into());
         }
-        let csv_bytes = read(root, "cars/lac/lac.csv", 4 * 1024 * 1024)?;
+        let csv_bytes = read(root, &model.file(".csv"), 4 * 1024 * 1024)?;
         let csv = tuning::read(&csv_bytes)?;
         if csv.rows.len() != 1 {
-            return Err("expected one Lacetti tuning row".into());
+            return Err("expected one car tuning row".into());
         }
         let properties = vehicle_properties::read(&csv.rows[0], 0x2008)?;
-        let ned_bytes = read(root, "cars/lac/lac.ned", 16 * 1024 * 1024)?;
+        let ned_bytes = read(root, &model.file(".ned"), 16 * 1024 * 1024)?;
         let ned = binxml::read(&ned_bytes)?;
         let geometry = vehicle::read_wheel_geometry(&ned)?;
         let widths_node = ned
@@ -406,6 +421,7 @@ impl Runtime {
             initial_lap: None,
             lap_events: Vec::new(),
             route: route.clone(),
+            car: model.clone(),
             assists: assists::Assists::default(),
             shift: None,
             props: None,
@@ -462,7 +478,7 @@ impl Runtime {
         root: &Path,
         table: &[u8],
     ) -> Result<crate::body_geometry::BodyGeometry, Box<dyn std::error::Error>> {
-        let ned = read(root, "cars/lac/lac.ned", 16 * 1024 * 1024)?;
+        let ned = read(root, &self.car.file(".ned"), 16 * 1024 * 1024)?;
         let offset =
             std::array::from_fn(|j| f32::from_bits(self.state.car.owner.vehicle[0x1630 / 4 + j]));
         let geometry = crate::body_geometry::BodyGeometry::read(&ned, offset, table)?;
@@ -525,7 +541,7 @@ impl Runtime {
         if self.ticks != 0 || self.deformation_enabled || !self.track.has_boundary() {
             return Err("invalid source deformation startup boundary".into());
         }
-        let prepared = crate::source_deformation::load(root, "lac")?;
+        let prepared = crate::source_deformation::load(root, self.car.stem())?;
         let mut next = self.state.clone();
         next.car.owner.vehicle =
             crate::source_deformation::initialize_existing(&prepared, &next.car.owner.vehicle)?;
@@ -894,6 +910,10 @@ impl Runtime {
     /// Read-only collision world (diagnostics and presentation).
     pub fn route(&self) -> &Route {
         &self.route
+    }
+    /// The purchased car model this runtime drives.
+    pub fn car(&self) -> &Car {
+        &self.car
     }
     pub fn track(&self) -> &Track {
         &self.track

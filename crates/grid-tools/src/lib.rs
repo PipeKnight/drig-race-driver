@@ -2,6 +2,7 @@
 pub mod ai_driver;
 pub mod ai_pacing;
 pub mod body_deformation;
+pub mod car;
 pub mod body_geometry;
 pub mod body_impact_parameters;
 pub mod body_impacts;

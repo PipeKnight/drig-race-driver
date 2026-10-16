@@ -49,9 +49,16 @@ fn put(b: &mut [u8], at: usize, value: f32) {
 }
 impl Bank {
     pub fn lacetti(root: &Path) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
+        Self::load(root, &crate::car::Car::default())
+    }
+    /// The car's own bank, selected by its `audio/carsetup.bin` row.
+    pub fn load(
+        root: &Path,
+        car: &crate::car::Car,
+    ) -> Result<Arc<Self>, Box<dyn std::error::Error>> {
         let setup_bytes = bounded(&root.join("audio/carsetup.bin"), 4 * 1024 * 1024)?;
-        let setup = audio_car_setup::read(&setup_bytes, "lac")?;
-        if setup.engine_bank != "eng_lac" {
+        let setup = audio_car_setup::read(&setup_bytes, car.stem())?;
+        if setup.engine_bank != format!("eng_{}", car.stem()) {
             return Err("continuous engine bank selection".into());
         }
         let dic = bounded(&root.join("audio/CMSamples.dic"), 16 * 1024 * 1024)?;
@@ -64,7 +71,10 @@ impl Bank {
         if source.extension != "WIP" || source.samples.len() != 6 {
             return Err("continuous bank layout".into());
         }
-        let wip = bounded(&root.join("audio/eng_lac.WIP"), 64 * 1024 * 1024)?;
+        let wip = bounded(
+            &root.join(format!("audio/{}.WIP", setup.engine_bank)),
+            64 * 1024 * 1024,
+        )?;
         let ini = bounded(&root.join(setup.engine_ini), 1024 * 1024)?;
         let curves = engine_audio_control::read_curves(std::str::from_utf8(&ini)?)?;
         let mut layers = Vec::with_capacity(6);
@@ -95,7 +105,7 @@ impl Bank {
                 rate: u32::from(sample.rate),
             });
         }
-        let csv_bytes = bounded(&root.join("cars/lac/lac.csv"), 4 * 1024 * 1024)?;
+        let csv_bytes = bounded(&root.join(car.file(".csv")), 4 * 1024 * 1024)?;
         let csv = tuning::read(&csv_bytes)?;
         if csv.rows.len() != 1 {
             return Err("continuous source tuning row".into());
