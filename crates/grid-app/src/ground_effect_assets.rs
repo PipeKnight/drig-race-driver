@@ -48,14 +48,14 @@ pub(crate) fn image(dds: &[u8], repeat: bool) -> Result<Image, Box<dyn std::erro
     )?)
 }
 
-/// Scripted validation only: diagnostics `effects_camera = x,y,z,lx,ly,lz` holds the
+/// Scripted validation only: `GRID_EFFECTS_CAMERA=x,y,z,lx,ly,lz` holds the
 /// driving camera at a fixed eye/target after the chase camera update.
 pub(crate) fn validation_camera(
     mut camera: Single<&mut Transform, With<super::ViewerCamera>>,
     mut fixed: Local<Option<Option<(Vec3, Vec3)>>>,
 ) {
     let fixed = fixed.get_or_insert_with(|| {
-        let text = crate::settings::diagnostics().effects_camera.clone()?;
+        let text = std::env::var("GRID_EFFECTS_CAMERA").ok()?;
         let v: Vec<f32> = text
             .split(',')
             .filter_map(|x| x.trim().parse().ok())
@@ -67,10 +67,10 @@ pub(crate) fn validation_camera(
     }
 }
 
-/// Diagnostics `ground_effects = off` (legacy `GRID_GROUND_EFFECTS=0`) turns skid marks, wheel debris and ground cover off
+/// `GRID_GROUND_EFFECTS=0` turns skid marks, wheel debris and ground cover off
 /// (A/B performance checks).
 pub(crate) fn enabled() -> bool {
-    crate::settings::diagnostics().ground_effects
+    std::env::var("GRID_GROUND_EFFECTS").map_or(true, |v| v != "0")
 }
 
 /// Accumulated CPU time of the ground-effect systems: skid marks, debris,
@@ -88,10 +88,10 @@ pub(crate) fn charge(slot: usize, start: Instant) {
 #[derive(Resource)]
 struct TimingInstalled;
 
-/// With diagnostics `ground_trace = on`, print the mean per-frame cost every 600 frames.
+/// With `GRID_GROUND_TRACE=1`, print the mean per-frame cost every 600 frames.
 pub(crate) fn install_timing(app: &mut App) {
     if app.world().contains_resource::<TimingInstalled>()
-        || !crate::settings::diagnostics().ground_trace
+        || std::env::var_os("GRID_GROUND_TRACE").is_none()
     {
         return;
     }

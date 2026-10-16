@@ -834,11 +834,11 @@ pub(crate) fn install(app: &mut App, root: &Path) {
         last_tick: None,
         layout: None,
         reset: false,
-        log_zones: crate::settings::diagnostics().damage_zones,
+        log_zones: std::env::var_os("GRID_DAMAGE_ZONES").is_some(),
         images: None,
         cracked: BTreeMap::new(),
         shard_assets: None,
-        camera: crate::settings::diagnostics().damage_camera.as_deref().and_then(|v| {
+        camera: std::env::var("GRID_DAMAGE_CAMERA").ok().and_then(|v| {
             let v: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
             (v.len() == 4 && v[0] >= 0.).then(|| (v[0] as usize, Vec3::new(v[1], v[2], v[3])))
         }),

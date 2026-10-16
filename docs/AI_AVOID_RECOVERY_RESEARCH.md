@@ -706,7 +706,9 @@ would be an AUTHORED deviation to label.
 ## 8. Open questions
 
 1. Car-side consumer of packet byte +0x1E (reverse request) and of +0x20 (reset); the role
-   of packet [9] = 3.
+   of packet [9] = 3. F331: the AI never sets +0x20 (rcResetAllowed is false). The game's reset
+   path is the player-only ResetLinesManager, see
+   [RESET_AND_RESPAWN_RESEARCH.md](RESET_AND_RESPAWN_RESEARCH.md).
 2. Exact semantics of own+0xD4 (slip angle assumed) and own+0xC0 (angular velocity assumed).
 3. Which body classes the obstruction callback 0x4022F0 accepts (0x958310 class check,
    0xA6A1F0, the 700 constant 0xCAFCD0), and whether other cars below 2 m/s count as

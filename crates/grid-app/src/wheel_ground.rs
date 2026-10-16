@@ -141,8 +141,8 @@ pub(crate) fn update(mut ground: ResMut<WheelGround>, driving: Res<super::Drivin
     if let Some(opponents) = &driving.opponents {
         cars.extend(opponents.multi.cars.iter().skip(1).map(sample));
     }
-    // Diagnostics ground_trace: player wheel samples every 16 ticks (validation).
-    if key.1.is_multiple_of(16) && crate::settings::diagnostics().ground_trace {
+    // GRID_GROUND_TRACE=1: player wheel samples every 16 ticks (validation).
+    if key.1.is_multiple_of(16) && std::env::var_os("GRID_GROUND_TRACE").is_some() {
         for (i, w) in cars[0].iter().enumerate() {
             println!(
                 "ground_trace tick={} wheel={i} contact={} surface={} speed={:.2} longitudinal={:.2} lateral={:.2} excess={:.2} side={:.2} width={:.3} point={:.2?}",

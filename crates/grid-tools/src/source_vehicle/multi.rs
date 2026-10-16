@@ -1309,4 +1309,113 @@ mod tests {
             .join()
             .unwrap();
     }
+
+    /// The original never respawns an AI car (rcResetAllowed is false, so
+    /// the reset request req+0xB0 stays 0; docs/RESET_AND_RESPAWN_RESEARCH.md):
+    /// a car that cannot drive on is left standing as an obstacle, and the
+    /// cars behind it get past with their own avoid and recovery behaviours.
+    /// Car 5 is retired and held on the grid at tick 1; car 7 starts right
+    /// behind it and, driven by the ported AI, avoids it and races on.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn twelve_car_ai_field_passes_a_car_held_on_the_grid() {
+        use crate::ai_driver::{
+            AiData, AiDriver, Behaviour, NORMAL_DIFFICULTY, Other, Parameters, View,
+        };
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = crate::route::Route::new("tracks/europe/donington/route_0").unwrap();
+                let names: Vec<String> = (0..12).map(|i| format!("slot_{i:02}")).collect();
+                let slots: Vec<&str> = names.iter().map(String::as_str).collect();
+                let mut multi = MultiRuntime::lacetti(root, &slots, &table, events).unwrap();
+                let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
+                let mut drivers: Vec<AiDriver> = (0..12)
+                    .map(|i| {
+                        let p = Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.).unwrap();
+                        AiDriver::new(p, 0x5eed + i as u32)
+                    })
+                    .collect();
+                let positions = |multi: &MultiRuntime| -> Vec<[f32; 3]> {
+                    multi.cars.iter().map(|c| {
+                        let p = c.pose();
+                        [p[12], p[13], p[14]]
+                    }).collect()
+                };
+                let progress = crate::lap_progress::load_route(root, &route).unwrap().progress;
+                let gate = &progress.gates[0];
+                let start = std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5);
+                let mut standings =
+                    crate::race::Standings::new(&data.line, 2, start, &positions(&multi));
+                let mut avoided = false;
+                let mut contacts_with_held = 0;
+                const TICKS: u64 = 900;
+                for tick in 1..=TICKS {
+                    let others: Vec<Other> = multi
+                        .cars
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+                        .collect();
+                    let mut controls: Vec<Controls> = (0..12)
+                        .map(|i| {
+                            let seen: Vec<Other> = others
+                                .iter()
+                                .enumerate()
+                                .filter(|&(j, _)| j != i)
+                                .map(|(_, o)| *o)
+                                .collect();
+                            let view = View::of(&multi.cars[i], multi.obstruction(i));
+                            drivers[i].controls(&data, &view, &seen, DELTA)
+                        })
+                        .collect();
+                    if tick == 1 {
+                        controls[5].throttle = f32::NAN;
+                    }
+                    avoided |= drivers[7].telemetry.behaviour == Behaviour::Avoid;
+                    multi
+                        .tick(&controls)
+                        .unwrap_or_else(|e| panic!("12-car AI tick {tick}: {e}"));
+                    if tick == 1 {
+                        assert_eq!(multi.newly_retired(), [5]);
+                    }
+                    contacts_with_held += multi
+                        .contact_pairs()
+                        .iter()
+                        .filter(|&&(a, b)| a == 5 || b == 5)
+                        .count();
+                    standings.update(
+                        &data.line,
+                        &positions(&multi),
+                        tick as f64 * f64::from(DELTA),
+                        &[],
+                    );
+                }
+                let covered: Vec<f64> = (0..12).map(|i| standings.laps_covered(i)).collect();
+                eprintln!(
+                    "held_car_on_grid laps_covered={covered:.3?} car7_avoided={avoided} contacts_with_held={contacts_with_held}"
+                );
+                assert!(multi.retirement(5).is_some());
+                assert_eq!(multi.cars[5].velocity(), [0.; 4]);
+                assert!(avoided, "car 7 never chose avoid");
+                // About 80 m of line past the held car for every other car.
+                for (i, &c) in covered.iter().enumerate() {
+                    if i != 5 {
+                        assert!(multi.retirement(i).is_none(), "car {i}");
+                        assert!(c > covered[5] + 0.02, "car {i} at {c:.3} laps, held car at {:.3}", covered[5]);
+                    }
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 }

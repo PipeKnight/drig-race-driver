@@ -18,7 +18,6 @@ mod free_look;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
-mod settings;
 mod particles;
 mod skid_marks;
 mod texture_upload;
@@ -124,7 +123,7 @@ struct Opponents {
     /// Race positions during a timed event (authored classification).
     standings: grid_tools::race::Standings,
     names: Vec<String>,
-    /// Scripted validation only (diagnostics autopilot with --drive-ticks): the
+    /// Scripted validation only (GRID_AUTOPILOT=1 with --drive-ticks): the
     /// ported AI drives the player's car.
     autopilot: Option<grid_tools::ai_driver::AiDriver>,
     /// Drives the player's car after the finish while the opponents race on
@@ -1014,16 +1013,10 @@ fn load_livery(
 }
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    // Settings files first (docs/SETTINGS.md); the flags below override them.
-    let profile = settings::load(&args)?;
-    let mut root = profile.root.clone();
-    let mut route = match &profile.route {
-        Some(path) => Route::new(path)?,
-        None => Route::default(),
-    };
-    let mut driver_aids = profile.assists()?;
-    let mut input_settings = profile.input()?;
+    let mut root = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Grid");
+    let mut route = Route::default();
+    let mut driver_aids = grid_tools::source_vehicle::assists::Assists::default();
+    let mut input_settings = input::Settings::default();
     let mut output = None;
     let mut lod = String::from("LOD0_");
     let mut track = false;
@@ -1033,26 +1026,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut start_view = false;
     let mut eye = None;
     let mut target = None;
-    let mut drive = profile.drive;
+    let mut drive = false;
     let mut audio_check = false;
-    let mut trial_laps = profile.laps;
+    let mut trial_laps = None;
     let mut drive_ticks = None;
-    let mut body_contacts = profile.body_contacts.clone();
-    let mut body_events = profile.body_events.clone();
-    let mut deformation = profile.deformation.clone();
-    let mut opponents = profile.opponents;
-    let mut grid_position = profile.grid_position;
-    // A settings-file table is optional: used when the private file exists.
-    let mut ai_characteristics = profile.ai_characteristics.clone().filter(|p| p.is_file());
+    let mut body_contacts = None;
+    let mut body_events = None;
+    let mut deformation = None;
+    let mut opponents = None;
+    let mut grid_position = None;
+    let mut ai_characteristics = None;
     let mut scripted = grid_tools::source_vehicle::Controls::default();
     let mut handbrake_from = None;
-    let mut args = args.into_iter();
+    let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            // Already read by settings::load.
-            "--settings" | "--data-dir" => {
-                args.next();
-            }
             "--drive" => drive = true,
             "--audio-check" => audio_check = true,
             "--time-trial-laps" => {
@@ -1063,9 +1051,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )
             }
             "--deformation" => {
-                deformation = Some(settings::Private::from_cli(
+                deformation = Some(PathBuf::from(
                     args.next()
-                        .ok_or("--deformation needs a private DF01 path or derive")?,
+                        .ok_or("--deformation needs a private DF01 path")?,
                 ))
             }
             "--opponents" => {
@@ -1089,9 +1077,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )
             }
             "--body-events" => {
-                body_events = Some(settings::Private::from_cli(
+                body_events = Some(PathBuf::from(
                     args.next()
-                        .ok_or("--body-events needs a private BP01 path or derive")?,
+                        .ok_or("--body-events needs a private BP01 path")?,
                 ));
             }
             "--body-contacts" => {
@@ -1108,7 +1096,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--handbrake" => {
                 handbrake_from = Some(args.next().ok_or("--handbrake needs a tick")?.parse()?)
             }
-            "--game-root" => root = Some(args.next().ok_or("--game-root needs a path")?.into()),
+            "--game-root" => root = args.next().ok_or("--game-root needs a path")?.into(),
             "--assists" => {
                 driver_aids = grid_tools::source_vehicle::assists::Assists::parse(
                     &args.next().ok_or("--assists needs key=value items")?,
@@ -1182,7 +1170,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route only."
                 );
-                println!("{}", settings::HELP);
                 println!("{}", assists::HELP);
                 println!("{}", input::HELP);
                 println!(
@@ -1198,20 +1185,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => return Err(format!("unknown argument {arg}").into()),
         }
-    }
-    let root = match root {
-        Some(root) => root,
-        None => grid_tools::install::discover(&grid_tools::install::steam_roots()).map_err(
-            |tried| {
-                format!(
-                    "GRID was not found in the Steam libraries ({tried:?}); set [game] root in the settings file or pass --game-root"
-                )
-            },
-        )?,
-    };
-    println!("game_root path={}", root.display());
-    if profile.grid_back && grid_position.is_none() {
-        grid_position = opponents.map(|n| n + 1);
     }
     if audio_check {
         return engine_sound::check(&root);
@@ -1260,9 +1233,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Mode::Wheels
         }
     };
-    let deformation = deformation
-        .map(|source| source.bytes(&root, "DF01"))
-        .transpose()?;
     let mut drive_input = None;
     let driving = if drive {
         track = true;
@@ -1288,12 +1258,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             runtime.lap_gate_count(),
             runtime.lap_required_gate_count()
         );
-        if let Some(source) = body_events {
-            let bytes = source.bytes(&root, "BP01")?;
-            if bytes.len() != 28 {
+        if let Some(path) = body_events {
+            if std::fs::metadata(&path)?.len() != 28 {
                 return Err("invalid private body event parameter extent".into());
             }
-            runtime.body_events = Some(grid_tools::body_impact_parameters::read(&bytes)?);
+            runtime.body_events = Some(grid_tools::body_impact_parameters::read(&std::fs::read(
+                path,
+            )?)?);
             println!(
                 "drive_body_events enabled=true scope=static-and-car-peers notifications=empty persistent-chains=absent"
             );
@@ -1304,9 +1275,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             let table = std::fs::read(path)?;
             let mut geometry = runtime.prepare_body_geometry(&root, &table)?;
-            if let Some(bytes)=&deformation {
-                if bytes.len()!=252{return Err("invalid private deformation parameter extent".into());}
-                let (limit,bulk)=grid_tools::deformation_parameters::read(bytes)?;
+            if let Some(path)=&deformation {
+                if std::fs::metadata(path)?.len()!=252{return Err("invalid private deformation parameter extent".into());}
+                let (limit,bulk)=grid_tools::deformation_parameters::read(&std::fs::read(path)?)?;
                 runtime.enable_deformation(&root,&mut geometry)?;
                 runtime.register_deformation_callbacks(limit,bulk,1)?;
                 println!("drive_deformation enabled=true scope=static-and-car-peers source=player-lod1 wheel-view=source-wheel-anchors crt_seed=00000001 body_graphics=independent-grid-projection");
@@ -1326,7 +1297,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let refs: Vec<&str> = slots.iter().map(String::as_str).collect();
                 let parameters = deformation
                     .as_ref()
-                    .map(|bytes| grid_tools::deformation_parameters::read(bytes))
+                    .map(|path| -> Result<_, Box<dyn std::error::Error>> {
+                        Ok(grid_tools::deformation_parameters::read(&std::fs::read(path)?)?)
+                    })
                     .transpose()?;
                 let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::lacetti_deforming_on(
                     &root,
@@ -1390,7 +1363,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .chain((1..=n).map(|i| format!("AI {i}")))
                     .collect();
                 let autopilot = (drive_ticks.is_some()
-                    && crate::settings::diagnostics().autopilot)
+                    && std::env::var_os("GRID_AUTOPILOT").is_some())
                 .then(|| AiDriver::new(parameters.clone(), 0x5eed));
                 if autopilot.is_some() {
                     println!("drive_autopilot enabled=true scope=scripted-validation");
@@ -1443,8 +1416,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .parent()
                 .ok_or("output needs a parent directory")?
                 .canonicalize()?;
-            if !parent.starts_with(settings::data_dir().canonicalize()?) {
-                return Err("game-derived renders must stay under the data dir (local/)".into());
+            if !parent.starts_with(Path::new("local").canonicalize()?) {
+                return Err("game-derived renders must stay under local/".into());
             }
             let result = parent.join(path.file_name().ok_or("missing output filename")?);
             if result.exists() {
@@ -1600,15 +1573,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if let Some(driving) = driving {
-        // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
+        // GRID_PROP_SCRIPT=TEMPLATE:INDEX with --drive-ticks: authored
         // validation drive into a breakable route prop.
         if driving.scripted_ticks.is_some()
-            && let Some(target) = crate::settings::diagnostics().prop_script.clone()
+            && let Ok(target) = std::env::var("GRID_PROP_SCRIPT")
         {
             let catalog = driving
                 .runtime
                 .dynamic_props()
-                .ok_or("prop_script needs --body-contacts")?
+                .ok_or("GRID_PROP_SCRIPT needs --body-contacts")?
                 .catalog
                 .clone();
             let pursuit = grid_tools::dynamic_props::PropPursuit::new(
@@ -1616,7 +1589,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &route,
                 &catalog,
                 &target,
-                crate::settings::diagnostics().prop_script_speed.unwrap_or(15.),
+                std::env::var("GRID_PROP_SCRIPT_SPEED")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(15.),
             )?;
             println!("drive_prop_script target={target} goal={:?}", pursuit.goal);
             app.insert_resource(dynamic_props::PropScript(pursuit));
@@ -2651,9 +2627,9 @@ fn drive_present(
             }
         }
     }
-    // Look Back (C, pad Y) holds a chase view; diagnostics look_back forces it for scripted renders.
+    // Look Back (C, pad Y) holds a chase view; GRID_LOOK_BACK forces it for scripted renders.
     let back = actions.is_some_and(|a| a.down(input::Action::LookBack))
-        || *look_back.get_or_insert_with(|| crate::settings::diagnostics().look_back);
+        || *look_back.get_or_insert_with(|| std::env::var_os("GRID_LOOK_BACK").is_some());
     let side = if back { -1. } else { 1. };
     // Right mouse button orbits the chase camera (AUTHORED free look).
     let target = Vec3::new(0., 1., 0.);

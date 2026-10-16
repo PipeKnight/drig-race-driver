@@ -1,20 +1,47 @@
 # GRID engine project log
 
-F331 portability groundwork: settings file, Steam discovery, BP01/DF01 from grid.exe (P5) (2026-10-16, Claude Code). Details in docs/SETTINGS.md and docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.3.
-- Settings file (grid-app settings.rs): sections [game] root/route, [drive] enabled/laps/opponents/grid_position (back)/ai_characteristics (used when present), [private] body_contacts / body_events / deformation (path, derive or off), [assists], [input], [diagnostics]. Order: defaults, DATA_DIR/settings.ini, each --settings FILE, then the other CLI flags (still a full override; --assists/--assists-file still replace wholesale). Relative private paths resolve against the data dir. Unknown sections/keys are refused with the line number.
-- Every GRID_* runtime switch is now a [diagnostics] key (free_look, effects_camera, ground_effects, ground_trace, autopilot, prop_script(_speed), look_back, damage_zones, damage_camera, and P8's texture_fallback). The variables remain only as the desktop fallback in settings::Diagnostics::from_env, so older research commands still work.
-- Data dir: --data-dir, else local/ when the current folder has one (owner's checkout: records stay at local/playtest/time-trial-records.tsv, renders under local/), else %APPDATA%\GRID Reassembly, ~/Library/Application Support/GRID Reassembly or $XDG_DATA_HOME/grid-reassembly; Android is left to P9. Run logs are still the launcher's stdout redirect.
-- Install discovery (grid-tools install.rs): Steam folders, libraryfolders.vdf (current and old forms), appmanifest_12750.acf installdir (owner's manifest: app 12750, "GRID", installdir "Grid"), marker cars/lac/lac.ned in any casing; case-insensitive FileIndex. --game-root/[game] root are optional now. Only grid.exe resolution uses the index; the ~88 root.join reader sites are left for P7.
-- BP01/DF01 (grid-tools private_parameters.rs, bin grid-private-parameters): port of tools/extract_body_impact_parameters.py and extract_deformation_parameters.py with the same SHA-256 build pin (dd7b0933...e48f; built-in FIPS 180-4 SHA-256, checked on the standard vectors), PE section rules and addresses. "derive" computes them in memory at start-up. CD01 is still a prepared file (P6).
-- Profiles settings/{practice,body-contacts,time-trial,race}.ini; the four Play GRID *.cmd launchers are thin wrappers that pass a profile (Prototype.cmd [GAME_FOLDER] [PROFILE]). They still honour local\assists.txt and GRID_PLAY_ASSISTS/INPUT/OPPONENTS/GRID by turning them into flags. Behaviour change: BP01/DF01 are always derived (they were used only when local\*.bin existed); the bytes are equal on this PC.
-Checks [V] (cargo/rustc 1.99.0, Python 3.14.4; evidence in the main checkout local/p5-portability/):
-- Rust BP01/DF01 vs the existing local/*.bin and vs a fresh Python run of both extractors: byte-equal (cmp), sha256 493380e1...946d and 5d48e35d...3292.
-- Release grid-opponent-race solo Donington AI (ROOT CD01 BP01 1 11200 ai): laps 88.42029812185638 / 86.28228501935392, output byte-identical to F324 solo-after.txt (sha256 124acff5...2d9a), before and after the rebase on F330.
-- grid-app.exe --settings settings/race.ini --settings autopilot.ini (scratch [diagnostics] autopilot = on) --data-dir local --drive-ticks 900, with no GRID_* variable set: root discovered, BP01/DF01 derived (same hashes), 11 opponents with characteristics, grid_position 12, 3-lap deformation event, tick 900 at 25.9 s wall, exit 0. The window then stayed open ~9 minutes until it was closed (not by this session); the scripted mode does not exit on its own.
-- 12 new tests (settings 5, install 4 incl. asset discovers_the_installed_game, private_parameters 3 incl. asset derived_parameters_equal_the_python_output). cargo test --workspace --release --no-fail-fast -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS: 375 passed, 0 failed on the rebased tree (371 before the rebase).
-- cargo clippy --workspace --all-targets -D warnings clean after the rebase; rustfmt clean on the new files.
-Failed first: the settings test put " #" inside a path, which the comment rule cuts (test fixed; doc says values cannot contain " #"); a closure lifetime error and an f32/f64 mismatch for prop_script_speed; python -I could not import the extractors' sibling modules; a solo rerun inherited GRID_DEFORMATION_PARAMETERS from the test shell, which enables deformation in grid-opponent-race (laps 88.42039565338798 / 86.26613868180954, deformation=Some), and the clean rerun was identical again.
-Not done: the .cmd launchers were not run interactively (they pause and open a window); no Linux/Android run; case index not routed through the readers (P7); the Windows registry SteamPath is not read. Playable not rebuilt (as asked).
+F331 reset and respawn: the original never respawns AI cars; the field gets past a held car with avoid and recovery (2026-10-16, Claude Code). Details are in docs/RESET_AND_RESPAWN_RESEARCH.md.
+
+Static research (Ghidra 12.1.4 headless, read-only; private decompilation in local/ai-avoid-recovery/decomp/r1..r13):
+- [V] AI cars are never reset. The only AI reset request (recovery timeout, req+0xB0 → packet +0x20) is gated by rcResetAllowed, which is false.
+- [V] A stuck AI car retires: 20 s within 5 m, no racing car within 100 m. It stops with force brake and no steering.
+- [I] The retired car stays in the world: no code was found that removes or ghosts it. req+0x38 is set below 0.5 m/s, but its reader was not found.
+- [V] The game's only reset path is the player-only ResetLinesManager (race+0x22B0, ctor 0x612870, update 0x612C90).
+  - Auto-trigger 0x60D590: |v| + |ω| ≤ 0.8 and up.y ≤ 0.17 for 2 s fires once. The pause menu's reset_car is another requester.
+  - The reset fades out. vehicle+0x2C90 vfunc +0x38 is called with 1 until placement and 0 after.
+  - Placement 0x9145D0 puts the car at the player's track-tracker point, heading along the line, with an upper Y of max(p.y + 1, ground + 1).
+  - It uses the grid-spawn setter 0x9EF040: ground placement 0x9DE4E0, zero linear and angular velocity, wheel spin 0, gear re-chosen.
+  - No separate no-collide period after placement was found.
+- [V] Correction to F323: the "car 7 behind held car 5 moved 0.0 m" observation came from that test's fixed-throttle controls with no AI driver. It is not a missing respawn.
+
+Port decision:
+- No AI respawn.
+- A car retired by F323 stays held as an obstacle, as the original leaves retired and wrecked cars standing. AUTHORED: the hold is instant, with no braking phase.
+- Followers free themselves with the ported F301 avoid and recovery behaviours. MultiRuntime::obstruction already counts cars below 2 m/s, so held cars count.
+- No engine behaviour changed.
+
+Code:
+- New asset regression multi.rs twelve_car_ai_field_passes_a_car_held_on_the_grid. 12 AI cars on Donington; car 5 gets NaN throttle at tick 1, so it is retired and held on the grid. In 900 ticks:
+  - car 7 (right behind it) chooses avoid;
+  - every other car is more than 0.02 laps past car 5;
+  - no other car retires.
+  - Observed: 0 contacts with the held car; laps covered 0.105..0.128 against car 5's −0.013; 11 s release.
+- grid-opponent-race: GRID_RETIRE_CAR=car:tick (NaN controls at that tick), `retire` lines, and laps_covered per car.
+
+Checks [V] (cargo/rustc 1.99.0; runs in local/reset-respawn/):
+- 12-car Donington AI races, 6000 ticks, DF01:
+  - car 5 retired at tick 1: everyone passes it, 0 contacts;
+  - car 3 retired at 60 m/s at tick 1500: car 4 hits it (182 records), recovers off-track from tick 1618 and races again at 2200; 5 more cars touch it and go on;
+  - car 1 retired at tick 2000: two cars touch it and go on.
+- Solo `ROOT CD01 BP01 1 11200 ai`: laps 88.42029812185638 / 86.28228501935392. Output identical to F324's solo-after.txt apart from the new laps_covered field.
+- Clippy --workspace --all-targets -D warnings clean.
+- grid-soak quick (release, local/soak/quick-f331/): 12 scenarios, the same two known F326 groups (6 Nürburgring set-ups "scaled prop piece placement", Donington seed 5 prop piece sinking at tick 1362), no car-retired or world error.
+- cargo test --workspace --release -- --include-ignored with absolute GRID_GAME_ROOT, GRID_CONTACT_DIRECTIONS, GRID_BODY_EVENT_PARAMETERS and GRID_DEFORMATION_PARAMETERS: 360 passed, 0 failed (on 0eb216e + this change; the later F329/F330 commits touch only grid-app textures, .cargo and docs).
+
+Not done:
+- The player auto-reset and placement are not ported (no mid-race re-placement API for one car; next item in the research doc).
+- Open: whether a held car should count as "racing" in the retire-stuck 100 m test. Today a follower pinned within 100 m of a held car never retires.
+- Playable not rebuilt.
 
 F330 build and test cost (2026-10-16, Claude Code): owner request after slow parallel builds. Details in docs/TOOLCHAIN.md "Build and test cost".
 - Measured from an existing full run: the test bodies take about 85 s. 161 of 170 test executables are the empty unit-test harnesses of grid-tools probe binaries, and none has a #[test].

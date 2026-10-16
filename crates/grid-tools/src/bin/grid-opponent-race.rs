@@ -134,6 +134,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Ok(std::env::var(name).ok().map(|v| v.parse()).transpose()?)
     };
     let stop_car0 = tick_variable("GRID_STOP_CAR0")?;
+    // GRID_RETIRE_CAR=car:tick: that car's controls fail at that tick, so the
+    // shared world retires and holds it (F323) in front of the field.
+    let retire_car = match std::env::var("GRID_RETIRE_CAR") {
+        Ok(v) => {
+            let (car, tick) = v.split_once(':').ok_or("GRID_RETIRE_CAR=car:tick")?;
+            Some((car.parse::<usize>()?, tick.parse::<u64>()?))
+        }
+        Err(_) => None,
+    };
     // GRID_PROP_TARGET=TEMPLATE:INDEX (with GRID_DYNAMIC_PROPS): car 0 runs the
     // authored validation drive into that breakable while the field races.
     let mut prop_target = match (std::env::var("GRID_PROP_TARGET"), multi.dynamic_props()) {
@@ -213,6 +222,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ..Default::default()
             };
         }
+        if let Some((car, _)) = retire_car.filter(|&(c, t)| c < cars && multi.ticks + 1 == t) {
+            controls[car].throttle = f32::NAN;
+        }
         for (i, driver) in drivers.iter().enumerate() {
             if let Driver::Ai(ai) = driver {
                 let m = ai.telemetry;
@@ -247,6 +259,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
         car_contacts += multi.last_car_contacts;
+        for &i in multi.newly_retired() {
+            standings.retire(i, Out::Retired);
+            println!(
+                "retire tick={} car{i} reason={}",
+                multi.ticks,
+                multi.retirement(i).map_or("", |r| r.error.0)
+            );
+        }
         let pairs = multi.contact_pairs();
         if !pairs.is_empty() && std::env::var_os("GRID_TRACE_BEHAVIOUR").is_some() {
             println!("contact tick={} pairs={pairs:?}", multi.ticks);
@@ -331,9 +351,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let lap = car.lap.as_ref().unwrap();
         let p = Runtime::pose(car);
         println!(
-            "car{i} valid_laps={} attempts={} lap_times={:?} pos=({:.1},{:.1}) terminal={:?}",
+            "car{i} valid_laps={} attempts={} laps_covered={:.3} lap_times={:?} pos=({:.1},{:.1}) terminal={:?}",
             lap.valid_laps,
             lap.attempts,
+            standings.laps_covered(i),
             laps[i],
             p[12],
             p[14],
