@@ -44,6 +44,56 @@ impl Cube {
 #[derive(Resource)]
 struct Position(Vec3);
 
+#[derive(Resource)]
+struct CalibrationPosition(Vec3);
+
+/// Explicit diagnostic only: a polished sphere makes off-screen scene content
+/// recognizable without changing the Lacetti's authored paint parameters.
+pub fn install_calibration(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let center = super::grid_slot(root, "slot_00")?.transform_point3(Vec3::new(0., 1.3, 0.))
+        + Vec3::new(-3., 0., 0.);
+    app.insert_resource(CalibrationPosition(center))
+        .add_systems(PostStartup, calibration);
+    Ok(())
+}
+
+fn calibration(
+    mut commands: Commands,
+    position: Res<CalibrationPosition>,
+    main: Query<Entity, With<super::ViewerCamera>>,
+    sun: Query<Entity, With<DirectionalLight>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for entity in &main {
+        commands
+            .entity(entity)
+            .insert(RenderLayers::layer(0).with(1));
+    }
+    for entity in &sun {
+        commands
+            .entity(entity)
+            .insert(RenderLayers::layer(0).with(1));
+    }
+    commands.spawn((
+        Name::new("Reflection calibration sphere (diagnostic)"),
+        Mesh3d(meshes.add(Sphere::new(0.65).mesh().uv(128, 64))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.9, 0.9, 0.9),
+            metallic: 1.,
+            perceptual_roughness: 0.02,
+            ..default()
+        })),
+        Transform::from_translation(position.0),
+        RenderLayers::layer(1),
+        bevy::light::NotShadowCaster,
+    ));
+    println!(
+        "reflection_calibration sphere=true center={:?} metallic=1 roughness=0.02 excluded_from_probe=true casts_shadow=false physics=false",
+        position.0
+    );
+}
+
 pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let slot = super::grid_slot(root, "slot_00")?;
     let center = slot.transform_point3(Vec3::new(0., 1.3, 0.));

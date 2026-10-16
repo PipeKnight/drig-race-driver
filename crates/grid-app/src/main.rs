@@ -929,6 +929,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut drive = false;
     let mut audio_check = false;
     let mut graphics = graphics::Settings::default();
+    let mut reflection_calibration = false;
     let mut trial_laps = None;
     let mut drive_ticks = None;
     let mut body_contacts = None;
@@ -1063,6 +1064,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
+            "--reflection-calibration" => reflection_calibration = true,
             "--ssr-thickness" => {
                 let value: f32 = args
                     .next()
@@ -1589,6 +1591,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err("--reflections probe requires enhanced source IBL and a Donington reference/drive scene".into());
         }
         scene_probe::install(&mut app, &root)?;
+    }
+    if reflection_calibration {
+        if !track || collision || !(reference || drive) {
+            return Err("reflection calibration requires Donington reference/drive".into());
+        }
+        scene_probe::install_calibration(&mut app, &root)?;
     }
     if graphics.enhanced() && graphics.clearcoat_prepass_fix {
         clearcoat_prepass::install(&mut app);
