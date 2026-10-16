@@ -1,5 +1,8 @@
 # GRID engine project log
 
+G016 configurable cockpit/camera scope (16 October 2026): docs/CAMERA_COCKPIT_PLAN.md. Owner requests Neck-FX-like flexibility and original GRID sway. Current authored chase/free-look confirmed; read-only Lacetti cameras.xml decoded with existing Python3.12.14 helper:20views, private local/graphics/lacetti-camera-audit01.json/hash. Head config has separate body/head dynamics/highResInterior/head hiding; chase lag/suspension/roll/shake. Formula/FOV convention/runtime activation unverified (Head autoLookAngleInterest0/headBuffetingfalse). Plain-text binary read and wrong search paths corrected; attempted NeckFX raw URL failed, primary wiki succeeded. Detailed phases cover interior audit, per-view saved FOV/pose, six-axis acceleration response, gaze/horizon/manual look, live presets, mirrors/instruments and TAA/DLSS history. No camera code/game/exe changes; source483941155483 remains playable. No owner action needed.
+
+
 G015 upscaler quality qualification (16 October 2026): owner's comparison question answered with explicit uncertainty. No GRID inference/A-B yet; installed 20220424 general x4plus is a baseline, not verified equal to Gigapixel/current Upscayl models. Official Upscayl custom-NCNN and Topaz core-model docs checked; model descriptions do not prove superiority. docs/TEXTURE_UPSCALING.md now requires exact model/settings, matched asphalt/concrete/livery-text/cockpit trials and in-engine motion/mip/tiling inspection, quality-first per-texture selection. No purchase/inference/game or executable changes; graphics release483941155483 retained.
 
 
