@@ -14,6 +14,10 @@ use std::{collections::BTreeMap, path::Path};
 const SHADER: Handle<Shader> = uuid_handle!("ef412ff6-5acc-4977-bdb9-d5f314970b66");
 type SurfaceMaterial = ExtendedMaterial<StandardMaterial, Surface>;
 
+/// IDs are package-local; include the material identity when selecting draws.
+#[derive(Component)]
+pub struct SourcePart(pub String);
+
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 pub struct Surface {
     #[texture(100)]
@@ -248,7 +252,13 @@ fn attach(
     mut commands: Commands,
     source: Res<Source>,
     settings: Res<super::graphics::Settings>,
-    query: Query<(Entity, &Name, &Mesh3d, &MeshMaterial3d<StandardMaterial>)>,
+    query: Query<(
+        Entity,
+        &Name,
+        &SourcePart,
+        &Mesh3d,
+        &MeshMaterial3d<StandardMaterial>,
+    )>,
     mut meshes: ResMut<Assets<Mesh>>,
     standard: Res<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
@@ -293,10 +303,13 @@ fn attach(
         .collect();
     let mut handles = BTreeMap::new();
     let mut attached = 0;
-    for (entity, name, mesh, base) in &query {
+    for (entity, name, identity, mesh, base) in &query {
         let Some(draw) = source.draws.get(name.as_str()) else {
             continue;
         };
+        if draw.material != identity.0 {
+            continue;
+        }
         let mut target = meshes.get_mut(&mesh.0).expect("surface mesh ready");
         assert_eq!(target.count_vertices(), draw.uv.len());
         target.insert_attribute(Mesh::ATTRIBUTE_UV_1, draw.uv.clone());

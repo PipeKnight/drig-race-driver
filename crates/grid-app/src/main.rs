@@ -1785,6 +1785,9 @@ fn setup(
                 Transform::from_matrix(transform),
                 initial_bounds,
             ));
+            if track {
+                entity.insert(track_surface::SourcePart(part.material.clone()));
+            }
             if moving {
                 entity.insert(MovingPart {
                     rest: matrix,
