@@ -21,7 +21,7 @@ which said that a crash could not yet cost power.
 | Damage option `realistic_damage` | FUN_00654C20 | **new** `mechanical_damage::Damage`, `Assists::damage` | F333 |
 | Damage off (mode 0) | B14 = 0 → 9F3E80 returns at once | **new** early return in `vehicle_handling` | F333 |
 | HUD damage icons | FUN_008EEF60 / FUN_008EEB80, `object/dial_damage` | **new** `mechanical_damage::indicators`, grid-app `damage_hud` | F333 |
-| Detached-part queries (exhaust, rear spoiler) | 98BFE0 records from the parts object | not wired (`None`) | open |
+| Detached-part queries (exhaust, rear spoiler) | 98BFE0 records from the parts object | `None`; the spoiler never detaches in single player (F339) | equal to the original |
 
 The owner's playtest logs already show it: `local/playtest/manual-19590-14358.log` ends with radiator
 level 0.958, and `manual-14216-20708.log` shows engine power factor 0.993 and cut-out factor 0.024 [V].
@@ -41,7 +41,7 @@ Field names are the HDM attributes (offsets in `grid_formats::handling_damage_fi
 | Brakes (+38.., per wheel) | wear from brake force > 999 999 | +3D8 = 1 − 0 × … | +2284.. brake force | none (max loss 0) |
 | Suspension (+28.., per wheel) | 0.2312 | +3C8 = 1 − 0.4046 × ramp(level, 1.0) "spring loss" | **no reader** [D] | HUD only |
 | Wheels (+18.., visual) | from deformation (F131) | wobble, rotational resistance, steering caps | prepared frame, steering | **active** (F281) |
-| Rear spoiler | detached part query 0x45/0x46 | +3BC = 1 − 0.1688 | +2268 aerodynamic force | not wired |
+| Rear spoiler | detached part query 0x45/0x46 | +3BC = 1 − 0.1688 | +2268 aerodynamic force | unreachable in single player (F339) |
 | Front spoiler | query present | +3A0 += 0.1948 × 0 | — | none [D: multiplied by zero] |
 
 So on the Lacetti a crash costs **engine power and causes cut-outs through the radiator**, damages the
@@ -124,15 +124,69 @@ Port: `mechanical_damage::indicators` (unit-tested) and grid-app `damage_hud`. A
 a panel with the eight labels coloured by stage (yellow, orange, red), hidden while no icon is lit;
 the original dial geometry and animation are not reproduced.
 
-## 5. Parts that change handling (not wired)
+## 5. Detached parts and driving (F339)
 
-9F3E80/9C5B90 query the parts object (98BFE0) by part id, status 4 or 5 meaning detached. The ids come
-from the name table at E4EF20 [D]: 0x1F = `exhaust` (forces exhaust level to 1; Standard exhaust loss is 0,
-so no effect on the Lacetti), 0x45 = `spoiler_b_2` and 0x46 = `spoiler_b` (rear spoiler gone: +3BC =
-1 − `rearGripPercentLoss` 0.1688, applied to the aerodynamic force through +2268). The port passes no query
-object, so a detached rear spoiler does not yet cost downforce. Doing this needs the part decisions of
-9EC9B0 (today presentation-only in grid-app `damage_parts`) in the simulation, and the spoiler detach rule
-(9AE8F0/9E2AD0/9AEC60), which is not analysed.
+Static research, 16 October 2026 (Ghidra 12.1.4 headless `-readOnly -noanalysis` on `local/phase3/ghidra-project`,
+JAVA_HOME = the Songs of Syx Demo JRE as in `tools/run_ghidra_probe.ps1`; capstone sweeps with
+`tools/scan_code_displacements.py`). Private evidence: `local/detached-parts/` (scan-01..06, dis-01/02,
+ghidra-01..06, `part-names.txt` = the full E4EF20 id table).
+
+**Every reader of a part state.** The lookup 98BFE0 (linear search of the 0x2E0-byte records at parts +8F0
+for record +24C = id; 0 when the part never had a record) has these callers [D, literal sweep + aligned
+disassembly + decompilation]:
+
+| Caller | Ids | Use | Driving? |
+| --- | --- | --- | --- |
+| 9C5B90 effects | 0x1F exhaust; 0x46/0x45 rear spoiler | exhaust drag term; +3BC = 1 − `rearGripPercentLoss` | yes (ported, no query object) |
+| 9C50C0 (exhaust normalise, 9F3E80 chain) and 9F3E80 | 0x1F | exhaust level +10 = 1 | yes (ported) |
+| 9EC9B0 decisions, 9FF4F0 per-tick update | all | the part rules themselves | — |
+| 9DB0E0 hinge builder | 0x0C/0x0D and others | hinge set-up; may queue rear corner 0x0C detach | no |
+| 9E99B0 | 0x58/0x59 mirrors, 0x51 window_f | mirror view flags | no (presentation) |
+| A18460 → +3A38 → 9CB5B0 | 0x0E bumper_bm, state 2 | scene-node lookup of the dangling bumper | no (presentation [I]) |
+| 9F9BA0 | node loop | joint matrices of attached parts | no (rendering) |
+| 920D30/920E90/920F00/920F70/921080, 928680 | stored id | position of a part's debris body (+64) | no (camera/effects [I]) |
+
+No handling, aerodynamic, drag, mass or collision-shape code queries bumpers (12–17), bonnet, boot, wings
+or doors. A detached part becomes its own debris body (record +64); nothing found removes mass from the car
+body or edits its collision hull. **Bumper detachment has no driving cost in the original** [D within this
+caller list; a hidden reader through a copied state would be outside it].
+
+**The rear spoiler never detaches in single player** [D]:
+
+- `m_spoiler_detach_level` (+1C88) is read only by the loader (9F11F8 `lea`); the F307 note that 9AE8F0,
+  9E2AD0 and 9AEC60 read it was a displacement collision (9AE8F0 is a wheel-load split writing car
+  +19E4/+1B34/+1C84/+1DD4 and divides by another object's +1C8C).
+- No damage rule sets 0x45/0x46: the only immediates are in 9C5B90 and a developer bound dump 9A61D0;
+  9EC9B0 has no spoiler rule; `m_spoiler_moves_with_boot`/`m_heirarchy_spoiler` (+1B84/+1B88) are node
+  hierarchy flags.
+- The generic setters cannot reach it: the 9FF4F0 loose timer needs state 2, which the spoiler never gets;
+  the resets 9FF170/9FF3E0 set 4 and then 0 or the old state in the same call; 9D77B0/92E440 apply
+  network state pairs.
+- So the +3BC grip loss and the `SpoilerSeparation`/`SpoilerDangling` sounds (car audio 43CF10 +C4/+C8) are
+  reachable only through network state or the state-5 list below.
+
+**Statuses** [D setter 9DC270, I names]: 0 attached (record freed), 2 loose (hinged), 4 detached (debris body
+created; mirrors on a door with `m_wing_mirror_move_with_door` follow), 5 detached without a transition.
+State 5 is written only by 9EC950, which applies the id list at parts +890 (u32 ids, count at +A0). That
+list is the constructor's third argument, the vehicle wrapper's +14 block, a 0xCC90-byte copy made in
+A100A0 only when a source block is supplied; 9FF170 (full repair) and 9FF3E0 (re-attach) re-apply it.
+[I] it is a restored vehicle snapshot (network or saved state), not race damage. A request queue (9AB790,
+40 entries at +7C10, drained by 9DCFA0 before 9EC9B0) carries network, repair (5EC370) and hinge requests.
+
+**The part that does change driving is the wheel.** 9EC9B0 sets car bytes +22E4..+22E7 when a wheel zone
+exceeds `m_wheel_detach_level` × S (Lacetti 6 × 4560 = 27360 per tick); 996F60 is a second setter and
+5EC370 clears them. The flags are already consumed by the port (`wheel_contacts` skips the wheel,
+`vehicle_sync`/`vehicle_handling`/`vehicle_manager` as in 9BD7F0/9F3E80), and 9E65B0 turns a detached
+wheel into terminal damage (9E64E0(4, wheel)). The producer is not ported: grid-app `damage_parts`
+excludes wheels and is presentation-only, so no port car ever loses a wheel. This is the open follow-up.
+
+Other notes: the exhaust query uses id 0x1F only (`exhaust`); the Lacetti's `exhaust_bl` is 0x65 and its
+exhaust loss is 0, so no Lacetti effect. 9FF4F0 also detaches a loose part after a time while car +1648 is
+above a threshold (constants CB093C/CB51B0/CB0D94; bumper_bm and mirrors use their own pair), and on
+car +C8A0 (windscreen smashed) detaches the wipers 0x5C/0x5F; neither is in grid-app `damage_parts` yet.
+
+Port decision: nothing changed. The handling query stays `None`, which equals the original for every
+single-player car whose `exhaust` (0x1F) part does not detach.
 
 ## 6. Validation
 
@@ -173,7 +227,7 @@ Regression [V]: full workspace tests 380 passed, 0 failed after rebasing on dc2d
 
 ## 7. Not done / open
 
-- Detached rear spoiler → rear downforce loss (section 5) and exhaust detachment queries.
+- Wheel detachment (+22E4 flags from 9EC9B0) is not produced in the simulation (section 5); the exhaust (0x1F) query for cars that have that part.
 - The real dial graphics (`Osd/dial2.pssg` icon animation) and the OSD "Damage Icons" option.
 - Effects at a threshold of exactly 1.0 (gearbox, suspension, brake in Standard.hdm) reach 0/0 when a
   level caps at 1.0; the original also stores NaN there (COLLISION_DAMAGE_DISPATCH.md), while the port

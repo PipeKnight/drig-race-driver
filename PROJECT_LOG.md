@@ -1,5 +1,33 @@
 # GRID engine project log
 
+F339 detached parts and driving: bumpers cost nothing, the rear spoiler never detaches, wheels are the gap (2026-10-16, Claude Code). Static only; details in docs/MECHANICAL_DAMAGE.md section 5 (rewritten) and a correction in VISUAL_DAMAGE_PARTS_RESEARCH.md. Tools: Ghidra 12.1.4 headless, -readOnly -noanalysis on local/phase3/ghidra-project; capstone sweeps with tools/scan_code_displacements.py. Evidence in local/detached-parts/: scan-01..06, dis-01/02, ghidra-01..06, and part-names.txt (the full E4EF20 id table).
+- [D] All callers of the part lookup 98BFE0 were classified. Only 9C5B90 and 9C50C0/9F3E80 affect driving: exhaust 0x1F and rear spoiler 0x46/0x45, both already ported.
+- [D] The remaining readers are rule, hinge or presentation code: 9EC9B0/9FF4F0 rules, 9DB0E0 hinges, 9E99B0 mirrors and windscreen, A18460 → +3A38 → 9CB5B0 (dangling bumper_bm node), 9F9BA0 joint matrices, and 920D30..921080/928680 debris-body positions.
+- [D] No handling, aero, drag, mass or collision-shape code reads bumpers 12–17, the bonnet, boot, wings or doors. Bumper detachment has no driving cost.
+- [D] The rear spoiler cannot detach in single player:
+  - +1C88 is read only by the loader (9F11F8);
+  - no rule pushes 0x45/0x46;
+  - the loose-part timer needs state 2, which the spoiler never gets;
+  - the resets set state 4 then 0 inside the same call.
+  The +3BC grip loss and the SpoilerSeparation/SpoilerDangling sounds are therefore reachable only through network state or the state-5 list. F307's "9AE8F0/9E2AD0/9AEC60 read the spoiler level" was a displacement collision (9AE8F0 is a wheel-load split).
+- Statuses (9DC270) [D/I]:
+  - 0: attached;
+  - 2: loose;
+  - 4: detached, with a debris body at record +64 (mirrors follow a door);
+  - 5: written only by 9EC950 from the parts +890 id list (count at +A0). That list is the vehicle wrapper's +14 block, a 0xCC90-byte copy made by A100A0 when a source is given, and it is re-applied by repair 9FF170 and re-attach 9FF3E0. [I] It restores a vehicle snapshot; it is not race damage.
+  - A 40-entry request queue (9AB790 → 9DCFA0) carries network (9D77B0, 92E440), repair (5EC370) and hinge requests.
+- [D] The driving-relevant detachment is the wheel:
+  - 9EC9B0 sets car +22E4..+22E7 when the zone is above m_wheel_detach_level × S (Lacetti 27360 per tick); 996F60 is a second setter;
+  - the port already consumes the flags (wheel_contacts, vehicle_sync, vehicle_handling, vehicle_manager), and 9E65B0 → 9E64E0(4, wheel) makes a lost wheel terminal damage;
+  - nothing produces the flags in the port (grid-app damage_parts excludes wheels and is presentation-only).
+- Also found, not ported:
+  - 9FF4F0 detaches a loose part after a time at speed (car +1648 against CB093C/CB51B0/CB0D94);
+  - wipers 0x5C/0x5F detach when car +C8A0 is set (windscreen smashed).
+- Decision: no code change. The handling query stays None, which matches the original for every single-player car whose `exhaust` (0x1F) part never detaches; the Lacetti's exhaust is exhaust_bl (0x65). No cargo checks were run: no source changed. Playable not rebuilt; no input was sent to the original.
+- Next:
+  - port the 9EC9B0 zone classifier and wheel rule into grid-world for every car, so the existing +22E4 consumers fire, with grid-app reading the simulation's decisions;
+  - check the BMW 320si (F338) for an `exhaust` 0x1F part with non-zero exhaust loss.
+
 F338 car generalization: the BMW 320si drives, deforms and races alongside the Lacetti (2026-10-16, Claude Code). Details are in docs/CAR_GENERALIZATION.md.
 - New `grid_tools::car::Car` (stem of `cars/<stem>`, default `lac`), used like `Route` (F304): `Runtime::load(root, &route, &car, slot, seed)`, `MultiRuntime::load_deforming_on(root, &route, &[(slot, &car)], ...)`, `engine_audio_continuous::Bank::load(root, &car)`; the `lacetti*` entries delegate with the default car. Tuning CSV, NED (wheels, suspension, damage regions, hull, grid front extent), body geometry and source deformation now come from the runtime's car.
 - `grid-opponent-race --cars STEM[,STEM...]` cycles models over the grid slots, each car with its own AI statistics (`AiData::load(.., "touring", stem)`); `cars=` is printed only for a non-default field.

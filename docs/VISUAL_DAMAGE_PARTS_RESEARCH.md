@@ -203,8 +203,12 @@ The setter is `0x9DC270`. State 2 = loose (swinging), 4 = detached, 0 = attached
 | canopies | ×2.4 total rules (no Lacetti nodes) |
 
 Only the loader reads the bonnet detach level and flag (displacement search over the whole program):
-the bonnet never detaches through this path [D]. The spoiler detach level (+1C88) and the mirror
-swing level (+1C80) are read by `0x9AE8F0`, `0x9E2AD0` and `0x9AEC60`, which were not analysed.
+the bonnet never detaches through this path [D]. Correction (F339): the spoiler detach level (+1C88) is also read
+only by the loader, and no rule sets the spoiler ids 0x45/0x46, so the rear spoiler never detaches in
+single player. 9AE8F0/9E2AD0/9AEC60 were displacement collisions (other objects' +1C8C). Also in the
+original but not in this port: the 9FF4F0 timer that detaches a loose part at speed, the wiper
+detach on a smashed windscreen (car +C8A0) and the wheel detach flags +22E4, which do change driving.
+Details: [MECHANICAL_DAMAGE.md](MECHANICAL_DAMAGE.md) section 5.
 
 ### Loose and detached motion [D partial, I]
 
@@ -354,7 +358,7 @@ Renders and logs are private, under `local/visual-damage/` in the main checkout.
   comparison.
 - The 9AA960 hinge semantics and the original loose-part dynamics. The detached-part physics, its
   lifetime and its collision.
-- `_Cracked` values; light beam/emissive changes (9D1820); spoiler and mirror-swing paths (9AE8F0,
-  9E2AD0, 9AEC60); wiper detachment with the windscreen; light pods attached to bumpers
+- `_Cracked` values; light beam/emissive changes (9D1820); mirror-swing path; wiper detachment with the windscreen
+  (rule found in F339, not ported); the loose-part detach timer (F339); light pods attached to bumpers
   (`m_attach_light_pod_*`, zero for the Lacetti).
 - The car +1554 exhaust swing gate, read here as zero.
