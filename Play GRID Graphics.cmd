@@ -8,6 +8,10 @@ set "GRID_GRAPHICS_RESOLUTION=1920x1080"
 if not "%~2"=="" set "GRID_GRAPHICS_RESOLUTION=%~2"
 set "GRID_GRAPHICS_REFLECTIONS="
 if /I "%~3"=="probe" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe --probe-update moving --probe-size 1024"
+if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe --probe-update moving --probe-size 1024"
+set "GRID_GRAPHICS_WHEELS="
+if /I "%~3"=="wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25"
+if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25"
 if not exist "target\release\grid-app.exe" (
   echo Build this graphics checkout first: cargo build -p grid-app --release --offline
   popd
@@ -24,8 +28,9 @@ echo Experimental graphics branch - source sky lighting, layered car/track mater
 echo Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit.
 echo Resolution %GRID_GRAPHICS_RESOLUTION%; maximize the window for your display.
 if defined GRID_GRAPHICS_REFLECTIONS echo Environment reflections enabled.
+if defined GRID_GRAPHICS_WHEELS echo Experimental wheel filtering enabled; geometry filtering is player-only.
 echo Private log: %GRID_GRAPHICS_LOG%
-"target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% > "%GRID_GRAPHICS_LOG%" 2>&1
+"target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"
 echo Exited with code %GRID_GRAPHICS_EXIT%.
 popd
