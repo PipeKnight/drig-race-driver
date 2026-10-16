@@ -43,6 +43,8 @@ Not done:
 - Open: whether a held car should count as "racing" in the retire-stuck 100 m test. Today a follower pinned within 100 m of a held car never retires.
 - Playable not rebuilt.
 
+Push incident: the first push, 771e6ac, was squashed with `git reset --soft` onto a just-fetched origin/main. Its tree reverted 851492b and b8238da (P5 settings and Steam discovery, the F331 log) for a few minutes. 14aab1b restored every file they changed to b8238da; main now differs from b8238da only by this entry's six files. grid-tools Clippy and the 12-car tests pass on 14aab1b. Lesson: squash before fetching, or rebase the squashed commit.
+
 F331 portability groundwork: settings file, Steam discovery, BP01/DF01 from grid.exe (P5) (2026-10-16, Claude Code). Details in docs/SETTINGS.md and docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.3.
 - Settings file (grid-app settings.rs): sections [game] root/route, [drive] enabled/laps/opponents/grid_position (back)/ai_characteristics (used when present), [private] body_contacts / body_events / deformation (path, derive or off), [assists], [input], [diagnostics]. Order: defaults, DATA_DIR/settings.ini, each --settings FILE, then the other CLI flags (still a full override; --assists/--assists-file still replace wholesale). Relative private paths resolve against the data dir. Unknown sections/keys are refused with the line number.
 - Every GRID_* runtime switch is now a [diagnostics] key (free_look, effects_camera, ground_effects, ground_trace, autopilot, prop_script(_speed), look_back, damage_zones, damage_camera, and P8's texture_fallback). The variables remain only as the desktop fallback in settings::Diagnostics::from_env, so older research commands still work.
