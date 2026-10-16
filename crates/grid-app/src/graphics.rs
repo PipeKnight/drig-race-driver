@@ -37,7 +37,7 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
-    /// 0: TAA (current default), 1: SMAA Ultra, 2: unfiltered diagnostic.
+    /// 0: TAA diagnostic, 1: SMAA Ultra (default), 2: unfiltered diagnostic.
     pub anti_aliasing: u8,
     /// 0: sky IBL, 1: deferred control, 2: SSR, 3: local HDR scene probe.
     pub reflection_mode: u8,
@@ -63,7 +63,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            anti_aliasing: 0,
+            anti_aliasing: 1,
             reflection_mode: 0,
             probe_size: 1024,
             moving_probe: false,
@@ -165,7 +165,7 @@ pub fn configure(
         if settings.enhanced() { 16 } else { 1 },
         settings.enhanced(),
         settings.enhanced(),
-        settings.enhanced(),
+        settings.enhanced() && settings.anti_aliasing == 0,
         if settings.enhanced() {
             "AgX"
         } else {
