@@ -17,6 +17,7 @@ mod engine_sound;
 mod free_look;
 mod ground_detail;
 mod ground_effect_assets;
+mod input;
 mod particles;
 mod skid_marks;
 mod time_trial;
@@ -1016,6 +1017,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut root = PathBuf::from(r"C:\Program Files (x86)\Steam\steamapps\common\Grid");
     let mut route = Route::default();
     let mut driver_aids = grid_tools::source_vehicle::assists::Assists::default();
+    let mut input_settings = input::Settings::default();
     let mut output = None;
     let mut lod = String::from("LOD0_");
     let mut track = false;
@@ -1102,8 +1104,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )?
             }
             "--assists-file" => {
-                driver_aids =
+                (driver_aids, input_settings) =
                     assists::read_file(&args.next().ok_or("--assists-file needs a path")?)?
+            }
+            "--input" => {
+                input_settings =
+                    input::Settings::parse(&args.next().ok_or("--input needs key=value items")?)?
             }
             "--route" => {
                 route = Route::new(
@@ -1166,6 +1172,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route only."
                 );
                 println!("{}", assists::HELP);
+                println!("{}", input::HELP);
                 println!(
                     "--opponents 1..11: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
                 );
@@ -1227,6 +1234,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Mode::Wheels
         }
     };
+    let mut drive_input = None;
     let driving = if drive {
         track = true;
         reference = true;
@@ -1238,6 +1246,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             &format!("slot_{player_slot:02}"),
             200679,
         )?;
+        // The device class decides assisted steering (record +0x33 -> +E6C).
+        input_settings.apply_class(&mut driver_aids);
+        let (actions, pad) = input::load(&root, &input_settings)?;
+        println!("drive_input {input_settings} pad_preset={pad}");
+        drive_input = Some(actions);
         runtime.set_assists(driver_aids)?;
         println!("drive_assists {driver_aids}");
         runtime.enable_lap_timing(&root)?;
@@ -1598,6 +1611,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) = wheel_debris::install(&mut app, &root) {
                 warn!("Wheel debris unavailable; driving continues: {error}");
             }
+        }
+        if let Some(actions) = drive_input.take() {
+            input::install(&mut app, actions);
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
@@ -2052,10 +2068,13 @@ fn capture(
 }
 fn drive_tick(
     mut driving: ResMut<Driving>,
-    input: Res<ButtonInput<KeyCode>>,
+    actions: Res<input::Actions>,
+    mut shifts: ResMut<input::ShiftQueue>,
     mut trial: Option<ResMut<time_trial::Trial>>,
     mut prop_script: Option<ResMut<dynamic_props::PropScript>>,
 ) {
+    // One queued gear edge per fixed tick, dropped when the tick does not run.
+    let shift = shifts.pop();
     if driving.paused
         || driving.failure.is_some()
         || driving
@@ -2147,15 +2166,8 @@ fn drive_tick(
             ..driving.scripted
         }
     } else {
-        assists::shift_keys(&input, &mut driving.runtime);
-        let pressed = |a, b| input.pressed(a) || input.pressed(b);
-        grid_tools::source_vehicle::Controls {
-            throttle: f32::from(pressed(KeyCode::ArrowUp, KeyCode::KeyW)),
-            brake: f32::from(pressed(KeyCode::ArrowDown, KeyCode::KeyS)),
-            steering: f32::from(pressed(KeyCode::ArrowLeft, KeyCode::KeyA))
-                - f32::from(pressed(KeyCode::ArrowRight, KeyCode::KeyD)),
-            handbrake: input.pressed(KeyCode::Space),
-        }
+        assists::request_shift(shift, &mut driving.runtime);
+        actions.controls()
     };
     if held {
         controls = grid_tools::source_vehicle::Controls {
@@ -2391,6 +2403,7 @@ fn drive_tick(
 fn drive_actions(
     mut driving: ResMut<Driving>,
     input: Res<ButtonInput<KeyCode>>,
+    actions: Res<input::Actions>,
     mut exit: MessageWriter<AppExit>,
     mut trial: Option<ResMut<time_trial::Trial>>,
 ) {
@@ -2434,7 +2447,7 @@ fn drive_actions(
             }
         }
     }
-    if input.just_pressed(KeyCode::KeyP) && !trial.as_ref().is_some_and(|t| t.finished()) {
+    if actions.pressed(input::Action::Pause) && !trial.as_ref().is_some_and(|t| t.finished()) {
         driving.paused = !driving.paused;
         driving.report(
             if driving.paused { "pause" } else { "resume" },
@@ -2480,7 +2493,7 @@ fn drive_present(
     mut hud: Query<&mut Text, With<DrivingHud>>,
     sound: Option<Res<engine_sound::EngineSound>>,
     trial: Option<Res<time_trial::Trial>>,
-    input: Option<Res<ButtonInput<KeyCode>>>,
+    actions: Option<Res<input::Actions>>,
     mut look_back: Local<Option<bool>>,
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
     free_look: Option<Res<free_look::FreeLook>>,
@@ -2592,8 +2605,8 @@ fn drive_present(
             }
         }
     }
-    // C holds a look-back chase view; GRID_LOOK_BACK forces it for scripted renders.
-    let back = input.is_some_and(|i| i.pressed(KeyCode::KeyC))
+    // Look Back (C, pad Y) holds a chase view; GRID_LOOK_BACK forces it for scripted renders.
+    let back = actions.is_some_and(|a| a.down(input::Action::LookBack))
         || *look_back.get_or_insert_with(|| std::env::var_os("GRID_LOOK_BACK").is_some());
     let side = if back { -1. } else { 1. };
     // Right mouse button orbits the chase camera (AUTHORED free look).
@@ -3224,7 +3237,9 @@ mod driving_tests {
                 started: Instant::now(),
                 opponents: None,
             })
-            .add_systems(Update, (drive_actions, drive_tick).chain());
+            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), false))
+            .init_resource::<input::ShiftQueue>()
+            .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
@@ -3441,7 +3456,9 @@ mod driving_tests {
                 started: Instant::now(),
                 opponents: None,
             })
-            .add_systems(Update, (drive_actions, drive_tick).chain());
+            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), false))
+            .init_resource::<input::ShiftQueue>()
+            .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
