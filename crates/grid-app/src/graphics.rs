@@ -34,7 +34,7 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
-    /// 0: forward sky IBL, 1: deferred control, 2: deferred + SSR experiment.
+    /// 0: sky IBL, 1: deferred control, 2: SSR, 3: static HDR scene probe.
     pub reflection_mode: u8,
     pub ssr_thickness: f32,
     pub layered_track: bool,
@@ -193,7 +193,7 @@ pub fn configure(
         ScreenSpaceAmbientOcclusion::default(),
         ShadowFilteringMethod::Gaussian,
     ));
-    if settings.reflection_mode != 0 {
+    if matches!(settings.reflection_mode, 1 | 2) {
         commands
             .entity(camera)
             .insert(bevy::core_pipeline::prepass::DeferredPrepass);
@@ -212,6 +212,8 @@ pub fn configure(
         settings.reflection_mode,
         if settings.reflection_mode == 2 {
             "screen-visible-opaque-only"
+        } else if settings.reflection_mode == 3 {
+            "static-local-HDR-probe"
         } else {
             "sky-IBL"
         }

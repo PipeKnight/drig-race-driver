@@ -6,6 +6,7 @@ mod engine_sound;
 mod free_look;
 mod graphics;
 mod graphics_benchmark;
+mod scene_probe;
 mod sky;
 mod sky_environment;
 mod time_trial;
@@ -1077,7 +1078,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Some("sky") => 0,
                     Some("deferred") => 1,
                     Some("ssr") => 2,
-                    _ => return Err("--reflections needs sky, deferred or ssr".into()),
+                    Some("probe") => 3,
+                    _ => return Err("--reflections needs sky, deferred, ssr or probe".into()),
                 };
             }
             "--track-materials" => {
@@ -1568,7 +1570,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if graphics.track_grade {
         track_grade::install(&mut app);
     }
-    if graphics.reflection_mode != 0 {
+    if matches!(graphics.reflection_mode, 1 | 2) {
         if !graphics.enhanced() {
             return Err("deferred/SSR reflections require enhanced graphics".into());
         }
@@ -1576,6 +1578,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.enhanced() && graphics.layered_track && track && !collision {
         track_surface::install(&mut app, &root)?;
+    }
+    if graphics.reflection_mode == 3 {
+        if !graphics.enhanced()
+            || !graphics.source_ibl
+            || !track
+            || collision
+            || !(reference || drive)
+        {
+            return Err("--reflections probe requires enhanced source IBL and a Donington reference/drive scene".into());
+        }
+        scene_probe::install(&mut app, &root)?;
     }
     if graphics.enhanced() && graphics.clearcoat_prepass_fix {
         clearcoat_prepass::install(&mut app);
@@ -1995,11 +2008,25 @@ fn capture(
     mut exit: MessageWriter<AppExit>,
     driving: Option<Res<Driving>>,
     benchmark: Option<Res<graphics_benchmark::Benchmark>>,
+    probe: Option<Res<scene_probe::Cube>>,
+    graphics: Res<graphics::Settings>,
 ) {
     capture.frames += 1;
-    if capture.started.elapsed() > Duration::from_secs(120) {
+    if capture.started.elapsed()
+        > Duration::from_secs(if graphics.reflection_mode == 3 {
+            300
+        } else {
+            120
+        })
+    {
         error!("render capture timed out");
         exit.write(AppExit::error());
+        return;
+    }
+    if graphics.reflection_mode == 3 && probe.as_ref().is_none_or(|p| !p.ready()) {
+        // Keep the normal warm-up after activation as well, so TAA/shadows do
+        // not retain the pre-probe state in the comparison image.
+        capture.frames = 0;
         return;
     }
     if let Some(driving) = &driving {
