@@ -16,6 +16,7 @@ mod track_grade;
 mod track_surface;
 mod tyre_sound;
 mod tyre_visual;
+mod wheel_exposure;
 mod wheel_presentation;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
@@ -1150,6 +1151,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.wheel_shutter_seconds = ms * 0.001;
             }
+            "--wheel-geometry-shutter" => {
+                let ms: f32 = args
+                    .next()
+                    .ok_or("missing geometry shutter milliseconds")?
+                    .parse()?;
+                if !ms.is_finite() || !(0.0..=33.333).contains(&ms) {
+                    return Err("geometry shutter must be finite, 0..33.333 milliseconds".into());
+                }
+                graphics.wheel_geometry_shutter_seconds = ms * 0.001;
+            }
             "--land" => {
                 graphics.source_land = match args.next().as_deref() {
                     Some("source") => true,
@@ -1764,6 +1775,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.enhanced() && graphics.wheel_shutter_seconds > 0. {
         sidewall_filter::install(&mut app);
+    }
+    if graphics.enhanced() && drive && graphics.wheel_geometry_shutter_seconds > 0. {
+        wheel_exposure::install(&mut app);
     }
     let exit = app
         .insert_resource(graphics)

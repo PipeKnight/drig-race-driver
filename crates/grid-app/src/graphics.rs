@@ -37,6 +37,8 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    /// Experimental swept-hull radial scene filter, player only; default off.
+    pub wheel_geometry_shutter_seconds: f32,
     /// Fixed exposure duration, opt-in until wheel filtering is accepted.
     pub wheel_shutter_seconds: f32,
     /// Bounded read-only spin prediction between physical ticks.
@@ -67,6 +69,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            wheel_geometry_shutter_seconds: 0.,
             wheel_shutter_seconds: 0.,
             smooth_wheel_motion: true,
             anti_aliasing: 1,
