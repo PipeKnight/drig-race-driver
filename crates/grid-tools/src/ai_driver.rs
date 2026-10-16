@@ -213,6 +213,25 @@ impl Line {
         self.project(p, None).1
     }
 
+    /// The racing line alone, from the route's `ai_track.xml`.
+    pub fn load(root: &Path, route: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let bytes = read_doc(&root.join(route).join("ai_track.xml"))?;
+        Self::new(&ai::track(&binxml::read(&bytes)?)?)
+    }
+
+    /// Player reset target for a car at `p`: the line point at the car's
+    /// projection and the line's horizontal direction there.
+    ///
+    /// [I] The original takes the player's track-tracker point (0x5EC0E0:
+    /// tracker +0x74/+0x78, possibly replaced by a saved point behind it or
+    /// moved by 0x90C0F0) on the tracker's own line. Neither the saved point,
+    /// the offset nor the tracker's line is ported; this uses the AI racing
+    /// line, as the race progress does.
+    pub fn reset_target(&self, p: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+        let (point, direction, _, _) = self.at(self.arc(p));
+        (point, direction)
+    }
+
     /// Projection of `p` near segment `hint` (or globally): segment, arc
     /// length and signed lateral distance (positive toward the right limit).
     fn project(&self, p: [f32; 3], hint: Option<usize>) -> (usize, f32, f32) {

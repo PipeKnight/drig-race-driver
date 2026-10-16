@@ -501,6 +501,33 @@ impl MultiRuntime {
         self.newly_retired.clear();
     }
 
+    /// [`Runtime::place_at_rest`] for car `i`, on its body in the shared
+    /// world. A retired car is refused: it stays held.
+    pub fn place_at_rest(
+        &mut self,
+        i: usize,
+        point: [f32; 3],
+        heading: [f32; 3],
+    ) -> Result<(), Error> {
+        if i >= self.cars.len() || self.retired[i].is_some() {
+            return Err(Error("no racing car to re-place"));
+        }
+        let placement = self.cars[i].placement(&self.world.groups.bodies[i], point, heading)?;
+        apply_placement(&mut self.world.groups.bodies[i], &placement.physical);
+        self.cars[i].commit_placement(placement);
+        self.speeds[i] = 0.;
+        Ok(())
+    }
+
+    /// Test set-up: put car `i` at `pose` at rest in the shared world.
+    #[cfg(test)]
+    pub(crate) fn set_pose_at_rest(&mut self, i: usize, pose: [f32; 16]) {
+        self.cars[i].set_pose_at_rest(pose);
+        let placed = self.cars[i].state.car.owner.physical;
+        apply_placement(&mut self.world.groups.bodies[i], &placed);
+        self.cars[i].state.car.owner.physical = self.world.groups.bodies[i];
+    }
+
     /// One common timestep for all cars.
     ///
     /// A car whose own stage fails (controls, vehicle manager, its track or

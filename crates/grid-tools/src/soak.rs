@@ -16,6 +16,7 @@ use crate::{
         Controls, DELTA, Runtime,
         assists::{Assists, Input, Shift, Transmission},
         multi::{DeformationParameters, MultiRuntime},
+        player_reset::PlayerReset,
     },
     time_trial::{Phase, State},
 };
@@ -489,6 +490,10 @@ pub struct Session {
     /// Ticks run in the current segment / in the whole session.
     pub total_ticks: u64,
     pub resets: u64,
+    /// The player's auto-reset (grid-app `drive_tick`, F341).
+    pub auto_reset: PlayerReset,
+    /// Auto-resets performed in the whole session.
+    pub auto_resets: u64,
 }
 
 /// Snapshot used by the chaos driver and the failure checks.
@@ -645,6 +650,8 @@ impl Session {
             bounds,
             total_ticks: 0,
             resets: 0,
+            auto_reset: PlayerReset::default(),
+            auto_resets: 0,
         })
     }
 
@@ -744,6 +751,19 @@ impl Session {
         };
         if result.is_ok() {
             self.total_ticks += 1;
+            // The app logs a failed placement and drives on; here it is a
+            // failure to report.
+            if self
+                .auto_reset
+                .update(
+                    &mut self.runtime,
+                    self.race.as_mut().map(|r| &mut r.multi),
+                    &self.ai.line,
+                )?
+                .is_some()
+            {
+                self.auto_resets += 1;
+            }
         }
         result
     }
@@ -762,6 +782,7 @@ impl Session {
         if let Some(c) = &mut self.countdown {
             c.reset();
         }
+        self.auto_reset.reset();
         self.resets += 1;
     }
 

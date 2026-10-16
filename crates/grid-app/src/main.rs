@@ -134,6 +134,10 @@ struct Driving {
     segment: u64,
     started: Instant,
     opponents: Option<Opponents>,
+    /// The player's auto-reset onto the racing line (ResetLinesManager, F341).
+    auto_reset: grid_tools::source_vehicle::player_reset::PlayerReset,
+    /// Its line; None disables it (unit tests).
+    reset_line: Option<grid_tools::ai_driver::Line>,
 }
 /// Shared-world opponents. Car 0 of `multi` is a placeholder that is swapped
 /// with the player runtime for each common tick.
@@ -1556,6 +1560,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             segment: 0,
             started: Instant::now(),
             opponents,
+            auto_reset: Default::default(),
+            reset_line: Some(grid_tools::ai_driver::Line::load(&root, route.path())?),
         })
     } else {
         None
@@ -2533,6 +2539,28 @@ fn drive_tick(
         driving.failure = Some(text);
         driving.report("failure", controls);
     } else {
+        // Nearly still on the side or roof for 2 s: back onto the line. A
+        // failed placement is logged and the car drives on where it is.
+        if let Some(line) = &driving.reset_line {
+            let player = &mut driving.runtime;
+            let shared = driving.opponents.as_mut().map(|o| &mut o.multi);
+            match driving.auto_reset.update(player, shared, line) {
+                Ok(Some(reset)) => log_line!(
+                    "drive_auto_reset version=1 segment={} tick={} point={:?} heading={:?}",
+                    driving.segment,
+                    driving.runtime.ticks,
+                    reset.point,
+                    reset.heading
+                ),
+                Ok(None) => {}
+                Err(error) => log_line!(
+                    "drive_auto_reset version=1 segment={} tick={} error={:?}",
+                    driving.segment,
+                    driving.runtime.ticks,
+                    error.0
+                ),
+            }
+        }
         // Trial bookkeeping never stops physics: a refused tick invalidates
         // the lap and the trial clock runs on.
         if !held
@@ -2677,6 +2705,7 @@ fn drive_actions(
         driving.report("reset", driving.last_controls.unwrap_or_default());
         driving.runtime.reset();
         let driving = &mut *driving;
+        driving.auto_reset.reset();
         if let Some(opponents) = &mut driving.opponents {
             opponents.multi.reset();
             for driver in &mut opponents.drivers {
@@ -3423,6 +3452,8 @@ mod driving_tests {
                 segment: 0,
                 started: Instant::now(),
                 opponents: None,
+                auto_reset: Default::default(),
+                reset_line: None,
             })
             .add_systems(Update, drive_present);
         app.world_mut().spawn((ViewerCamera, Transform::default()));
@@ -3532,6 +3563,8 @@ mod driving_tests {
                 segment: 0,
                 started: Instant::now(),
                 opponents: None,
+                auto_reset: Default::default(),
+                reset_line: None,
             })
             .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
             .init_resource::<input::ShiftQueue>()
@@ -3751,6 +3784,8 @@ mod driving_tests {
                 segment: 0,
                 started: Instant::now(),
                 opponents: None,
+                auto_reset: Default::default(),
+                reset_line: None,
             })
             .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
             .init_resource::<input::ShiftQueue>()

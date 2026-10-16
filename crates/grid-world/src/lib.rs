@@ -66,6 +66,7 @@ pub mod physical_tick;
 pub mod physical_world;
 pub mod pose;
 pub mod rectangle_cull;
+pub mod reset_lines;
 pub mod response_consumption;
 pub mod serial_callback;
 pub mod setup;

@@ -196,6 +196,8 @@ struct Outcome {
     failures: Vec<Failure>,
     ticks: u64,
     resets: u64,
+    /// Player auto-resets onto the line (F341).
+    auto_resets: u64,
     breaks: usize,
     max_bodies: usize,
     seconds: f64,
@@ -287,6 +289,7 @@ impl Run<'_> {
             failures: Vec::new(),
             ticks: 0,
             resets: 0,
+            auto_resets: 0,
             breaks: 0,
             max_bodies: 0,
             seconds: 0.,
@@ -467,6 +470,7 @@ impl Run<'_> {
                 }
             }
             outcome.ticks = session.total_ticks;
+            outcome.auto_resets = session.auto_resets;
             outcome.digest = digest(&session);
             Ok(())
         }));
@@ -576,13 +580,14 @@ impl Run<'_> {
 fn result_line(scenario: &Scenario, outcome: &Outcome) -> String {
     let failure = outcome.failures.first();
     format!(
-        "soak_result seed={} status={} kind={} tick={} ticks={} resets={} breaks={} max_bodies={} seconds={:.1} digest={:016x} cars={} route={} error={}",
+        "soak_result seed={} status={} kind={} tick={} ticks={} resets={} auto_resets={} breaks={} max_bodies={} seconds={:.1} digest={:016x} cars={} route={} error={}",
         scenario.seed,
         if failure.is_some() { "fail" } else { "pass" },
         failure.map_or("-", |f| f.kind.name()),
         failure.map_or(0, |f| f.tick),
         outcome.ticks,
         outcome.resets,
+        outcome.auto_resets,
         outcome.breaks,
         outcome.max_bodies,
         outcome.seconds,
@@ -757,6 +762,7 @@ struct Row {
     seconds: f64,
     error: String,
     digest: String,
+    auto_resets: u64,
 }
 
 fn parse_result(scenario: &Scenario, line: &str) -> Row {
@@ -780,6 +786,7 @@ fn parse_result(scenario: &Scenario, line: &str) -> Row {
             .split_once(" error=")
             .map_or_else(String::new, |(_, e)| e.to_string()),
         digest: field("digest").into(),
+        auto_resets: num("auto_resets"),
     }
 }
 
@@ -795,6 +802,8 @@ fn write_summary(out: &Path, name: &str, rows: &[Row], started: Instant) -> Resu
         ticks as f64 * 0.016 / 60.,
         started.elapsed().as_secs_f64() / 60.
     )?;
+    let auto_resets: u64 = rows.iter().map(|r| r.auto_resets).sum();
+    writeln!(f, "Player auto-resets onto the line (F341): {auto_resets}.\n")?;
     let mut groups: BTreeMap<String, Vec<&Row>> = BTreeMap::new();
     for r in rows.iter().filter(|r| r.status != "pass") {
         let kind = Kind::parse(&r.kind).unwrap_or(Kind::Crash);
@@ -1067,6 +1076,7 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
                             seconds: child.started.elapsed().as_secs_f64(),
                             error,
                             digest: "-".into(),
+                            auto_resets: 0,
                         }
                     }
                 };

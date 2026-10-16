@@ -17,6 +17,7 @@ use std::path::Path;
 
 pub mod assists;
 pub mod multi;
+pub mod player_reset;
 
 pub const DELTA: f32 = 0.016;
 pub const GRAVITY: f32 = f32::from_bits(0x411c_f5c3);
@@ -112,6 +113,45 @@ fn value(b: &[u8], o: usize) -> f32 {
 fn byte(b: &mut [u32], o: usize, v: u8) {
     let shift = o % 4 * 8;
     b[o / 4] = (b[o / 4] & !(255 << shift)) | (u32::from(v) << shift);
+}
+
+/// Ground-placement wheels of 0x9DE4E0: anchor, radius (+E0) and the
+/// current vertical displacement (+40).
+fn placement_wheels(owner: &[u32]) -> [spawn::Wheel; 4] {
+    std::array::from_fn(|i| {
+        let w = (0x1990 + i * 0x150) / 4;
+        spawn::Wheel {
+            position: std::array::from_fn(|j| f32::from_bits(owner[w + j])),
+            radius: f32::from_bits(owner[w + 0xe0 / 4]),
+            vertical_displacement: f32::from_bits(owner[w + 0x40 / 4]),
+        }
+    })
+}
+
+/// Physical body words a re-placement writes (pose setter 0xA696F0 and the
+/// velocity setters): published copy +40, derived +D0/+110, center +190,
+/// published +1D0, angular +210 and linear velocity +220.
+const PLACED_WORDS: [std::ops::Range<usize>; 3] = [
+    0x40 / 4..0x80 / 4,
+    0xd0 / 4..0x150 / 4,
+    0x190 / 4..0x230 / 4,
+];
+
+/// Copy the words a re-placement wrote from `placed` into `body`.
+pub(crate) fn apply_placement(
+    body: &mut grid_world::contact_groups::Body,
+    placed: &grid_world::contact_groups::Body,
+) {
+    for range in PLACED_WORDS {
+        body[range.clone()].copy_from_slice(&placed[range]);
+    }
+}
+
+/// A car re-placed at rest: its car words, physical body and query cache.
+pub(crate) struct Placement {
+    vehicle: Vec<u32>,
+    physical: grid_world::contact_groups::Body,
+    cache: rectangle_cull::Cache,
 }
 
 impl Runtime {
@@ -303,19 +343,11 @@ impl Runtime {
         let front_extent = shape.bounds.max[2] + f32::from_bits(owner[0x1638 / 4]);
         let center = spawn::reference_front_aligned_center(marker.corners, front_extent, 0.)?;
         let heading = std::array::from_fn(|i| marker.corners[0][i] - marker.corners[2][i]);
-        let wheels = std::array::from_fn(|i| {
-            let w = (0x1990 + i * 0x150) / 4;
-            spawn::Wheel {
-                position: std::array::from_fn(|j| f32::from_bits(owner[w + j])),
-                radius: f32::from_bits(owner[w + 0xe0 / 4]),
-                vertical_displacement: f32::from_bits(owner[w + 0x40 / 4]),
-            }
-        });
         let mut cache = rectangle_cull::Cache::default();
         let pose = spawn::align_with_normalization(
             center,
             heading,
-            wheels,
+            placement_wheels(&owner),
             spawn::Normalization::ReferenceSse,
             |x, z, upper, lower| {
                 Ok(track
@@ -810,6 +842,147 @@ impl Runtime {
             let _ = props.reset(&mut [&mut self.track]);
         }
     }
+    /// Mid-race re-placement at rest, the original reset placement 0x9145D0
+    /// with speed 0 (docs/RESET_AND_RESPAWN_RESEARCH.md 3.3):
+    /// - upper limit max(point Y + 1, ground + 1) from an upward vertical cast;
+    /// - grid-spawn setter 0x9EF040: ground placement 0x9DE4E0 below the
+    ///   limit with the current wheel displacements, heading along `heading`;
+    ///   pose set, linear and angular velocity zero, wheel spin 0, gear
+    ///   chosen again for speed 0.
+    ///
+    /// Damage, deformation, suspension and lap state are kept. A failed
+    /// placement (center cast miss, steep ground) changes nothing.
+    pub fn place_at_rest(&mut self, point: [f32; 3], heading: [f32; 3]) -> Result<(), Error> {
+        let placement = self.placement(&self.state.car.owner.physical, point, heading)?;
+        // The solo world's car body follows the car's physical record.
+        let body = self
+            .state
+            .world
+            .groups
+            .bodies
+            .first_mut()
+            .ok_or(Error("missing car body"))?;
+        apply_placement(body, &placement.physical);
+        self.commit_placement(placement);
+        Ok(())
+    }
+
+    /// The placement of [`Self::place_at_rest`] for the physical record
+    /// `physical` (the shared world's body in [`multi::MultiRuntime`]).
+    pub(crate) fn placement(
+        &self,
+        physical: &grid_world::contact_groups::Body,
+        point: [f32; 3],
+        heading: [f32; 3],
+    ) -> Result<Placement, Error> {
+        use grid_world::reset_lines;
+        if point.iter().chain(&heading).any(|v| !v.is_finite()) {
+            return Err(Error("invalid reset placement target"));
+        }
+        let mut cache = self.cache;
+        let [start, end] = reset_lines::limit_cast(point[1]);
+        let fraction = self
+            .track
+            .query(
+                [point[0], start, point[2], 1.],
+                [point[0], end, point[2], 1.],
+                &mut cache,
+            )?
+            .hit
+            .map(|h| h.contact.fraction);
+        let limit = reset_lines::placement_limit(point[1], fraction);
+        let vehicle = self.state.car.owner.vehicle.clone();
+        let pose = spawn::align_below(
+            [point[0], limit, point[2]],
+            heading,
+            placement_wheels(&vehicle),
+            spawn::Normalization::ReferenceSse,
+            limit,
+            |x, z, upper, lower| {
+                Ok(self
+                    .track
+                    .query([x, upper, z, 1.], [x, lower, z, 1.], &mut cache)?
+                    .hit
+                    .map(|h| upper - (upper - lower) * h.contact.fraction))
+            },
+        )?
+        .matrix();
+        let mut placement = Self::posed(physical, vehicle, pose)?;
+        reset_lines::stop_drivetrain(&mut placement.vehicle);
+        placement.cache = cache;
+        Ok(placement)
+    }
+
+    /// The car words and `physical` with `pose` set through the pose setter
+    /// and both velocities zero; the query cache is filled in by the caller.
+    fn posed(
+        physical: &grid_world::contact_groups::Body,
+        mut vehicle: Vec<u32>,
+        pose: [f32; 16],
+    ) -> Result<Placement, Error> {
+        vehicle[0x15e0 / 4..0x1620 / 4].copy_from_slice(&pose.map(f32::to_bits));
+        // Linear +15C0 and angular +15D0: every lane zero (0xA69840/0xA69860).
+        vehicle[0x15c0 / 4..0x15e0 / 4].fill(0);
+        let mut bridged = *physical;
+        // Interface-only zero slots of the bridge (as at construction); only
+        // the pose and velocity words are taken back.
+        for o in [0x328, 0x32c, 0x334, 0x338, 0x33c, 0x340] {
+            bridged[o / 4] = 0;
+        }
+        let written = vehicle_bridge::calculate(
+            &vehicle_bridge::State {
+                physical: bridged,
+                vehicle: suspension_prepare::State {
+                    words: vehicle[..vehicle_force::BODY_WORDS].try_into().unwrap(),
+                },
+                shapes: Vec::new(),
+            },
+            &vehicle_bridge::Settings {
+                notify: true,
+                advance: None,
+                correction: None,
+                group_head: false,
+            },
+        )?
+        .written;
+        vehicle[..vehicle_force::BODY_WORDS].copy_from_slice(&written.vehicle.words);
+        let mut placed = *physical;
+        apply_placement(&mut placed, &written.physical);
+        Ok(Placement {
+            vehicle,
+            physical: placed,
+            cache: rectangle_cull::Cache::default(),
+        })
+    }
+
+    /// Test set-up: put the car at `pose` at rest, keeping everything else.
+    #[cfg(test)]
+    pub(crate) fn set_pose_at_rest(&mut self, pose: [f32; 16]) {
+        let mut placement = Self::posed(
+            &self.state.car.owner.physical,
+            self.state.car.owner.vehicle.clone(),
+            pose,
+        )
+        .unwrap();
+        placement.cache = self.cache;
+        apply_placement(&mut self.state.world.groups.bodies[0], &placement.physical);
+        self.commit_placement(placement);
+    }
+
+    pub(crate) fn commit_placement(&mut self, placement: Placement) {
+        let car = &mut self.state.car;
+        car.frame
+            .body
+            .copy_from_slice(&placement.vehicle[..vehicle_force::BODY_WORDS]);
+        if let Some(registration) = &mut self.deformation_registration {
+            registration.owner.clone_from(&placement.vehicle);
+        }
+        car.owner.vehicle = placement.vehicle;
+        car.owner.physical = placement.physical;
+        self.cache = placement.cache;
+        self.shift = None;
+    }
+
     /// Solved contact notifications of the last successful solo tick
     /// (presentation only; the shared world reports through `MultiRuntime`).
     pub fn impacts(&self) -> Vec<crate::body_impacts::Impact> {

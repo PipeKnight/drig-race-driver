@@ -174,9 +174,30 @@ pub fn align_with_normalization(
     heading: [f32; 3],
     wheels: [Wheel; 4],
     normalization: Normalization,
+    query: impl FnMut(f32, f32, f32, f32) -> Result<Option<f32>, Error>,
+) -> Result<Pose, Error> {
+    align_below(center, heading, wheels, normalization, GRID_LIMIT, query)
+}
+
+/// Upper Y of the grid start's center and corner casts (0x9EF040 limit).
+pub const GRID_LIMIT: f32 = 10000.;
+/// Fixed lower Y of the center and corner casts (0x9DE4E0; 0xD17278 = -2000).
+const CAST_FLOOR: f32 = -2000.;
+
+/// [`align_with_normalization`] with the center and corner casts starting at
+/// `limit` (0x9DE4E0 argument 6). The grid start passes [`GRID_LIMIT`]; the
+/// player reset passes max(line point Y + 1, ground + 1) (0x9145D0).
+pub fn align_below(
+    center: [f32; 3],
+    heading: [f32; 3],
+    wheels: [Wheel; 4],
+    normalization: Normalization,
+    limit: f32,
     mut query: impl FnMut(f32, f32, f32, f32) -> Result<Option<f32>, Error>,
 ) -> Result<Pose, Error> {
     if center.iter().chain(&heading).any(|v| !v.is_finite())
+        || !limit.is_finite()
+        || limit <= CAST_FLOOR
         || wheels.iter().any(|w| {
             w.position.iter().any(|v| !v.is_finite())
                 || !w.radius.is_finite()
@@ -204,7 +225,7 @@ pub fn align_with_normalization(
     {
         return Err(Error("degenerate placement wheel span"));
     }
-    let ground = cast(center[0], center[2], 10000., -2000.)?.ok_or(Error(
+    let ground = cast(center[0], center[2], limit, CAST_FLOOR)?.ok_or(Error(
         "center ground cast missed; fallback is unimplemented",
     ))?;
     let mut heights = [[0.; 2]; 2];
@@ -216,7 +237,7 @@ pub fn align_with_normalization(
             let sample: [f32; 3] = std::array::from_fn(|axis| {
                 (along * horizontal[axis] + center[axis]) + across * transverse[axis]
             });
-            *height = match cast(sample[0], sample[2], 10000., -2000.)? {
+            *height = match cast(sample[0], sample[2], limit, CAST_FLOOR)? {
                 Some(value) => value,
                 None => {
                     corner_misses += 1;

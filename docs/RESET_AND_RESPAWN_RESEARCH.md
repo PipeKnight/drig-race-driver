@@ -172,13 +172,62 @@ Outputs are in `local/reset-respawn/`. The command was `grid-opponent-race ROOT 
 | car 3 at tick 1500, 60 m/s in traffic | frozen on the racing line | car 4 hits it (182 contact records), goes off the track, runs recovery from tick 1618 and races again at tick 2200 (0.924 laps at the end). Cars 6/7/8/9/10 touch it (25..141 records) and go on (0.96..0.98 laps) |
 | car 1 at tick 2000 | in traffic | cars 7 and 10 touch it (63, 85) and go on; every other car covers ≥ 0.969 laps |
 
-## 6. Not ported and open
+## 6. Player auto-reset port (F341)
 
-1. **The player's auto-reset (3.1) and the placement (3.3).** This needs a mid-race
-   re-placement of one car through the spawn ground placement, keeping its damage. Today
-   only construction-time spawn exists. Next work item.
-2. The tracker's target choice and offset (3.2), and what ResetLines' 0x20-byte elements
-   hold.
+Code: `grid_world::reset_lines` (detector, limit, drivetrain tail), `spawn::align_below`,
+`Runtime::place_at_rest`, `MultiRuntime::place_at_rest`, `ai_driver::Line::reset_target`
+and `source_vehicle::player_reset::PlayerReset` (used by grid-app `drive_tick` and the
+soak `Session::step`).
+
+New static facts (read-only, analysis image constants and r9/r10/r12 decompilation):
+- [V] Constants: 0xDB29F0 = 0.8, 0xDB29EC = 0.17, 0xDB29E8 = 2.0, 0xCAFBE8 = 10000,
+  0xCAFBE4 = 20000, 0xD17278 = −2000 (bit-exact nearest f32 values).
+- [V] 0x9DE4E0's center and corner casts start at its argument 6 (the limit) and end at the
+  fixed Y 0xD17278 = −2000. The grid start passes 10000, which gave the earlier fixed
+  10000/−2000 pair. `spawn::align_below` takes the limit; `align_with_normalization`
+  passes `GRID_LIMIT` = 10000, so the grid start is unchanged.
+- [V] 0x9145D0's limit cast runs upward, from p.y + 1 − 10000 to p.y + 1 + 10000; a hit at
+  fraction f gives f·20000 + (p.y + 1 − 10000) + 1, kept if above p.y + 1.
+- [V] 0x9EF040's speed-0 tail: wheel +0x104 = 0 / radius (+0xE0) for +0x1620 wheels; the
+  gear is the first of gears 0..9 with a non-zero ratio and the largest torque-curve value
+  (+0x17AC, 31 nodes, index scale 0xD15028, top 0xD1502C = 1675.5) at the engine speed
+  *(+0x18D8)+0x104 / ratio; +0x1894 = that speed (idle +0x17A8 if the ratio is 0); gear 0
+  becomes 1. [I] +0x18D8 points to a wheel record, so the speed is 0 and the result is
+  gear 1 with engine speed 0.
+- [V] 0x5EC0E0's inline vector length: z² + (y² + x²), RSQRTPS seed s, root = s·sq,
+  ((1 − root·s)·root)·0.5 + root, zero kept. [I] 0x60D590 uses the same inline helper
+  (it was not re-decompiled); `reset_lines::length` takes the seed from the F321 table.
+- [V, structure only] 0x5EC0E0's target: tracker +0x74/+0x78 (current line position);
+  with the job byte set it is moved by 0x90C0F0 by the constant 0xCE3970, otherwise, when
+  tracker-sub +0x18 is set, by manager+0x220 × |record +0x20 − record +0x30|. When +0x18
+  is clear, a saved position (sub +0x44/+0x48) replaces it if 0x90BDE0 finds it behind.
+
+Port decisions:
+- Detector exactly as 3.1 with the frame time 0.016 s; a non-finite state restarts the
+  stretch. It runs after each successful player tick; a retired player (F323) is skipped.
+- [I] Target: the AI racing line point at the car's projection and the line direction
+  there. The tracker's own line, the saved point and the offsets are not ported.
+- Placement: limit cast and `align_below` with ReferenceSse normalization and the current
+  wheel displacements; pose through the verified bridge (B12710 path, F062/F160 bridge
+  code), both velocities zero in every lane, then the drivetrain tail. Damage, deformation,
+  suspension, lap state and the body links in the shared world are kept.
+- AUTHORED: the car is placed on the tick the detector fires. The fade-out, camera hold,
+  vfunc +0x38 collision switch and the pause menu's `reset_car` are not ported.
+- grid-app logs `drive_auto_reset` (point and heading, or the placement error, after
+  which the car drives on). The soak Session counts `auto_resets` and returns a placement
+  error as a failed step. `R` clears the detector.
+
+Checks: `player_reset` asset tests flip car 0 on its roof on the Donington grid, solo and in
+a two-car shared world. Both fire at tick 260, 125 ticks after the car became still and
+tilted (tick 135). Placed: up Y 0.99981, 0 m from the line point, heading · line 0.99981,
+speed 0, gear 1, wheel spins 0, damage words unchanged. After 2 more seconds: up Y 0.99982,
+drift 0.0023 m, speed 1.4e-5 m/s, road 0.39 m below the body origin. With full throttle the
+solo car reaches 32.9 m/s in 4 s.
+
+## 7. Not ported and open
+
+1. The tracker's own line and target choice (3.2, section 6), and what ResetLines'
+   0x20-byte elements hold. The fade timing and the collision switch during it.
 3. The target of vehicle+0x2C90 vfunc +0x38; the reader of req+0x38; the handler
    0x9E64E0(6, 0); and the `ResetCarToTrack`, `VehicleDisqualified` and `EnableAIControl`
    messages (handler 0x401380 → AI 0x79E240).
