@@ -3192,10 +3192,38 @@ mod driving_tests {
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn bmw_wheel_meshes_sit_on_its_source_wheel_anchors() {
+        let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+        let root = Path::new(&root);
+        let bmw = CarModel::new(grid_tools::car::BMW).unwrap();
+        let car = load(root, &Route::default(), &bmw, "LOD0_", false, false).unwrap();
+        let runtime =
+            grid_tools::source_vehicle::Runtime::load(root, &Route::default(), &bmw, "slot_00", 1)
+                .unwrap();
+        let mut counts = [0; 4];
+        for part in &car.parts {
+            if let Some(i) = part.wheel {
+                counts[i] += 1;
+                let pivot = (model_offset(&runtime) * part.matrices[0]).w_axis.truncate();
+                // The BMW meshes sit about 11 mm inboard of the NED wheel
+                // positions (the Lacetti's within 3 mm); height and axle agree.
+                let anchor = Vec3::from_array(runtime.wheels()[i].anchor);
+                let d = pivot - anchor;
+                assert!(d.y.abs() < 0.003 && d.z.abs() < 0.003, "wheel {i} {d}");
+                assert!(pivot.x * anchor.x > 0. && d.x.abs() < 0.015, "wheel {i} {d}");
+            }
+        }
+        assert!(counts.iter().all(|&n| n > 0), "{counts:?}");
+        assert_eq!(livery_count(root, &bmw), 13);
+        assert_eq!(livery_count(root, &CarModel::default()), 10);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn source_wheel_joints_follow_physics_without_feedback() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let root = Path::new(&root);
-        let car = load(root, &Route::default(), "LOD0_", false, false).unwrap();
+        let car = load(root, &Route::default(), &CarModel::default(), "LOD0_", false, false).unwrap();
         let mut runtime =
             grid_tools::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
         let mut counts = [0; 4];
@@ -3304,7 +3332,7 @@ mod driving_tests {
                 .unwrap(),
         );
         let initial = runtime.wheels().map(wheel_motion);
-        let car = load(root, &Route::default(), "LOD0_", false, false).unwrap();
+        let car = load(root, &Route::default(), &CarModel::default(), "LOD0_", false, false).unwrap();
         let pristine_field =
             grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle).unwrap();
         let selected: Vec<_> = car

@@ -1181,21 +1181,21 @@ fn present(
             model
                 .images
                 .get_or_insert_with(|| {
-        let mut load = |name: &str| {
-            source
-                .textures
-                .get(name)
-                .and_then(|dds| {
-                    crate::texture_upload::image(
-                        dds,
-                        ImageSampler::Default,
-                        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-                    )
-                    .ok()
-                })
-                .map_or_else(Handle::default, |image| images.add(image))
-        };
-        (load(&textures[0]), load(&textures[1]))
+                    let mut load = |name: &str| {
+                        source
+                            .textures
+                            .get(name)
+                            .and_then(|dds| {
+                                crate::texture_upload::image(
+                                    dds,
+                                    ImageSampler::Default,
+                                    RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+                                )
+                                .ok()
+                            })
+                            .map_or_else(Handle::default, |image| images.add(image))
+                    };
+                    (load(&textures[0]), load(&textures[1]))
                 })
                 .clone()
         })
@@ -1225,7 +1225,10 @@ fn present(
             continue;
         };
         let m = damage.car_model.get(index).copied().unwrap_or(0);
-        let (config, layout) = (&damage.models[m].config, damage.models[m].layout.as_ref().unwrap());
+        let (config, layout) = (
+            &damage.models[m].config,
+            damage.models[m].layout.as_ref().unwrap(),
+        );
         let name = joint.0.as_str();
         // Windows and mirrors ride on their door while it is loose [I].
         let carrier = match name {

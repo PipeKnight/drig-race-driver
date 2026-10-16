@@ -112,9 +112,38 @@ from the car's own CSV/NED.
 
 ## Validation
 
-Evidence: main checkout `local/car-generalization/` (private).
+Evidence: main checkout `local/car-generalization/` (private). Release
+`grid-opponent-race ROOT CD01 BP01 CARS TICKS ai`, Donington unless noted,
+cargo/rustc 1.99.0.
 
-(filled below)
+| Run | Result |
+|---|---|
+| Lacetti solo, default arguments (`1 11200 ai`) | laps 88.42029812185638 / 86.28228501935392; whole output byte-identical to F324/F325 `solo-after.txt` (SHA-256 `124acff5…2d9a`) [V] |
+| BMW solo, `--cars bmw 1 11200 ai` | 2 valid laps **88.95528864026515 / 86.89961494252937**, no failure, max 67.10 m/s. With `GRID_TRACE_BEHAVIOUR=1`: one change at tick 1560 (arc ~1181 m, 49.9 m/s, line error -2.7 m): `on_track=false` for 4 ticks, i.e. only 2 of 4 wheels inside the track limits (0x79B250 test needs more than half), AI `Recovery` mode 2, back to `Race` at tick 1564. The Lacetti has no behaviour change there (line error -2.1 m). A kerb run, not a departure; both laps stay valid [V] |
+| BMW solo, Nürburgring `--route tracks/europe/nurburgring/route_0 --cars bmw 1 15000 ai` | 2 valid laps **115.06284042385033 / 112.07460729934344**, **no behaviour change** (never off track), max 69.71 m/s [V] (Lacetti F304: 113.857 / 110.669) |
+| Mixed 4 cars, `--cars lac,bmw 4 20000 ai`, private characteristics | every car 2 valid laps; classification car2 (lac) 3:00.560, car0 (lac) +1.216, car1 (bmw) +6.544, car3 (bmw) +18.160; 19 car contacts; 12420 ticks [V] |
+| Mixed 12 cars, `--cars lac,bmw 12 16000 ai`, DF01 + characteristics | race over at tick 12363, **every car 2 valid laps**, 1659 car contacts, every car deforms (BMW car 9: 155 bulk calls / 944 records); winner car0 3:01.584, last car7 (bmw) +16.224 [V] |
+| Asset test `mixed_field_bmw_equals_its_single_runtime_until_contact` | Lacetti slot_00 + BMW slot_01 in one world: models, wheel anchors and mass properties differ; BMW wheel records rear L/R, front L/R; BMW drives 200 ticks bit-equal (pose/velocity words) to a single BMW runtime [V] |
+
+App renders (RTX 4070, Vulkan; `grid-app` release):
+
+- `--car bmw --scene reference --view start --render local/car-generalization/bmw-start.png`:
+  BMW 320si with livery 00 on the slot_00 box (107 draws, 23105 triangles,
+  19 textures; Lacetti 98 draws) [V, checked].
+- `GRID_AUTOPILOT=1 --drive --car bmw --opponents 3 --opponent-cars lac,bmw
+  --body-contacts CD01 --body-events BP01 --deformation DF01
+  --ai-characteristics TSV --time-trial-laps 1 --drive-ticks 420 --render
+  bmw-race-mixed.png`: HUD "BMW 320si / Donington race", 104 km/h at
+  tick 420, Lacetti opponent beside; log `models=bmw,lac`, damage parts read
+  for both models (BMW half width 0.9478 m, roof 1.3497 m; Lacetti 0.9133 /
+  1.4210) [V].
+- `GRID_DAMAGE_CAMERA=1,-3,2.5,-7 --drive --opponents 3 --opponent-cars bmw,lac
+  ... --drive-ticks 60 --render lac-grid-bmw-opponent.png`: an opponent BMW
+  (livery 01) on the grid next to the Lacetti player, wheels on the road at
+  its own model offset [V, checked].
+
+Not checked: windowed play with sound (one engine bank per model is loaded;
+not listened to), BMW damage-part thresholds in a crash, BMW glass shards.
 
 ## Open items
 

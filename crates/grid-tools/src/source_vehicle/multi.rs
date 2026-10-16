@@ -953,12 +953,13 @@ mod tests {
                 .unwrap();
                 assert_eq!(multi.cars[0].car(), &lac);
                 assert_eq!(multi.cars[1].car(), &bmw);
-                // Each car keeps its own mass properties and wheel geometry.
+                // Each car keeps its own wheel geometry. Both CSVs give the
+                // same mass and inertia (docs/BODY_PARAMETERS.md).
                 let anchors = |c: &Runtime| -> Vec<[f32; 3]> {
                     c.wheels().iter().map(|w| w.anchor).collect()
                 };
                 assert_ne!(anchors(&multi.cars[0]), anchors(&multi.cars[1]));
-                assert_ne!(
+                assert_eq!(
                     multi.world.manager.properties[0],
                     multi.world.manager.properties[1]
                 );

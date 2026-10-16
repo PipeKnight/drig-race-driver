@@ -8,8 +8,8 @@
 //! cycled over the field (`bmw,lac` alternates); all Lacetti by default.
 use grid_tools::{
     ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Other, Parameters, View},
-    pursuit_driver::PursuitDriver,
     car::Car,
+    pursuit_driver::PursuitDriver,
     race::{Out, Status},
     route::Route,
     source_vehicle::{Controls, Runtime, multi::MultiRuntime},
@@ -78,7 +78,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         None => None,
     };
     let field: Vec<&Car> = (0..cars).map(|i| &models[i % models.len()]).collect();
-    let entries: Vec<(&str, &Car)> = slot_refs.iter().copied().zip(field.iter().copied()).collect();
+    let entries: Vec<(&str, &Car)> = slot_refs
+        .iter()
+        .copied()
+        .zip(field.iter().copied())
+        .collect();
     let mut multi =
         MultiRuntime::load_deforming_on(root, &route, &entries, &table, events, deformation)?;
     // GRID_DYNAMIC_PROPS=1: breakable route props (DYNAMIC_PROPS_RESEARCH.md).
@@ -390,7 +394,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .map(|(_, p)| *p)
                         .collect();
                     let view = View::of(car, multi.obstruction(i));
-                    ai.controls(car_data[i], &view, &others, grid_tools::source_vehicle::DELTA)
+                    ai.controls(
+                        car_data[i],
+                        &view,
+                        &others,
+                        grid_tools::source_vehicle::DELTA,
+                    )
                 }
                 Driver::Pursuit(p) => p.controls(car.pose(), car.velocity()),
             });

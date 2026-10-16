@@ -27,7 +27,10 @@ impl Car {
     }
     /// A comma-separated list of stems, e.g. `bmw,lac`.
     pub fn list(text: &str) -> Result<Vec<Self>, Box<dyn std::error::Error>> {
-        let cars = text.split(',').map(Self::new).collect::<Result<Vec<_>, _>>()?;
+        let cars = text
+            .split(',')
+            .map(Self::new)
+            .collect::<Result<Vec<_>, _>>()?;
         if cars.is_empty() || cars.len() > 12 {
             return Err("car list needs 1..12 stems".into());
         }
