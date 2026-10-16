@@ -30,8 +30,8 @@ pub fn apply(name: &str, material: &mut StandardMaterial) {
         "Car Body Paint" => {
             material.perceptual_roughness = 0.3;
             material.metallic = 0.0;
-            material.clearcoat = 1.0;
-            material.clearcoat_perceptual_roughness = 0.12;
+            material.clearcoat = 0.2;
+            material.clearcoat_perceptual_roughness = 0.18;
         }
         "Window Glass" | "Head Lights Glass" | "Rear Lights Glass" => {
             material.perceptual_roughness = 0.08;
@@ -48,7 +48,7 @@ pub fn apply(name: &str, material: &mut StandardMaterial) {
             // treating all of its diffuse livery as bare reflective metal.
             material.perceptual_roughness = 0.32;
             material.metallic = 0.15;
-            material.clearcoat = 0.3;
+            material.clearcoat = 0.1;
             material.clearcoat_perceptual_roughness = 0.2;
         }
         "Bare Metal" | "Shiny Metal" | "Discs" => {
