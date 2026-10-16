@@ -1105,6 +1105,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ))
             }
             "--reflection-calibration" => reflection_calibration = true,
+            "--aa" => {
+                graphics.anti_aliasing = match args.next().as_deref() {
+                    Some("taa") => 0,
+                    Some("smaa") => 1,
+                    Some("off") => 2,
+                    _ => return Err("--aa needs taa, smaa or off".into()),
+                };
+            }
             "--land" => {
                 graphics.source_land = match args.next().as_deref() {
                     Some("source") => true,

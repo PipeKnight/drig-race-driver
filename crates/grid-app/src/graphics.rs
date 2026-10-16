@@ -1,6 +1,9 @@
 //! Independently authored rendering presets. Neither is an original GRID renderer.
 use bevy::{
-    anti_alias::taa::TemporalAntiAliasing,
+    anti_alias::{
+        smaa::{Smaa, SmaaPreset},
+        taa::TemporalAntiAliasing,
+    },
     camera::{Exposure, Hdr},
     core_pipeline::tonemapping::Tonemapping,
     image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
@@ -34,6 +37,8 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    /// 0: TAA (current default), 1: SMAA Ultra, 2: unfiltered diagnostic.
+    pub anti_aliasing: u8,
     /// 0: sky IBL, 1: deferred control, 2: SSR, 3: local HDR scene probe.
     pub reflection_mode: u8,
     pub probe_size: u32,
@@ -58,6 +63,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            anti_aliasing: 0,
             reflection_mode: 0,
             probe_size: 1024,
             moving_probe: false,
@@ -195,10 +201,27 @@ pub fn configure(
         AtmosphereSettings::default(),
         AtmosphereEnvironmentMapLight::default(),
         Msaa::Off,
-        TemporalAntiAliasing::default(),
+        bevy::core_pipeline::prepass::MotionVectorPrepass,
         ScreenSpaceAmbientOcclusion::default(),
         ShadowFilteringMethod::Gaussian,
     ));
+    match settings.anti_aliasing {
+        0 => {
+            commands
+                .entity(camera)
+                .insert(TemporalAntiAliasing::default());
+        }
+        1 => {
+            commands.entity(camera).insert(Smaa {
+                preset: SmaaPreset::Ultra,
+            });
+        }
+        _ => {}
+    }
+    println!(
+        "graphics_aa mode={} motion_prepass=true scope=main-view",
+        settings.anti_aliasing
+    );
     if matches!(settings.reflection_mode, 1 | 2) {
         commands
             .entity(camera)
