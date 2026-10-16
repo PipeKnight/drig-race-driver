@@ -26,9 +26,10 @@ lower-case ASCII letters or digits). `Car::default()` is `lac`. Helpers:
 | `grid-opponent-race` | positional arguments unchanged | `--cars STEM[,STEM...]` anywhere, cycled over the grid slots (`lac,bmw` alternates); prints `cars=` only for a non-default field, so default output is byte-identical |
 | `grid-app` | unchanged arguments | `--car STEM` (player car and the `car` scene; `--scene lacetti` stays as an alias), `--opponent-cars STEM[,STEM...]` (cycled over the opponents; default = the player's car) |
 
-Settings: the P5 settings file runs in a parallel session, so only the CLI is
-added here; a `[race] car=`/`opponent_cars=` settings key can map onto these
-two arguments later. The launchers are unchanged (all-Lacetti).
+Settings (P5, docs/SETTINGS.md): `[game] car = bmw` and
+`[game] opponent_cars = lac,bmw` set the same values; the flags override them.
+`opponent_cars` without opponents is ignored. The launchers are unchanged
+(all-Lacetti unless the settings file names a car).
 
 ## Inventory of Lacetti assumptions (before this change)
 
@@ -142,6 +143,31 @@ App renders (RTX 4070, Vulkan; `grid-app` release):
   (livery 01) on the grid next to the Lacetti player, wheels on the road at
   its own model offset [V, checked].
 
+Data observations made by the new tests [D, V]:
+
+- Both CSVs give the **same mass and inverse inertia** (manager properties
+  equal; docs/BODY_PARAMETERS.md already noted that mass/inertia alone cannot
+  tell the two apart). The cars differ in wheel geometry, tuning and drivetrain.
+- The BMW wheel meshes in `bmw_highLOD.pssg` sit a uniform **~11 mm inboard**
+  of the `.ned` wheel positions (|x| 0.784 vs 0.796 m; height and axle within
+  0.1 mm); the Lacetti's are within 3 mm. The render keeps each mesh's bind
+  offset around the physics pivot, as for the Lacetti, so this is shipped
+  authoring, not a placement error.
+
+Checks after rebasing on ae14337 (P5 settings, F331/F332 reset path, F333 damage option, F335 ETC2 cache, F336 AI mistakes and pacing):
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored`
+  with absolute GRID_GAME_ROOT, GRID_CONTACT_DIRECTIONS, GRID_BODY_EVENT_PARAMETERS and
+  GRID_DEFORMATION_PARAMETERS: **402 passed, 0 failed** (the `cargo t` alias of F330 fails
+  in a worktree, see the log).
+- Lacetti solo: same lap times and state hash `a4a35f899a490c36`; the output differs
+  from `solo-after.txt` only by the `laps_covered=2.000` field added upstream (F331/F332).
+  BMW solo and the mixed 4-car race: values identical to the first runs.
+- `grid-soak quick` (all-Lacetti): 6 of 12 fail, all the known F326 Nürburgring set-up
+  "scaled prop piece placement". Before F336 the same run also had Donington seed 5
+  (prop piece out of bounds at tick 1362), exactly as on the F325 and `quick-f331` runs;
+  it passes now because grid-soak mirrors the F336 default AI settings. No new failure.
+
 Not checked: windowed play with sound (one engine bank per model is loaded;
 not listened to), BMW damage-part thresholds in a crash, BMW glass shards.
 
@@ -153,5 +179,5 @@ not listened to), BMW damage-part thresholds in a crash, BMW glass shards.
   `ai_driver.rs`; making them per-car fields is left to a follow-up.
 - Free-race field composition and grid order of the original: not traced.
 - `grid-soak` builds an all-Lacetti field; mixed fields are not soaked.
-- Launchers and the P5 settings file do not expose the car yet.
+- The launchers do not pass a car (the settings file can).
 - Diagnostic binaries and `engine_audio::EngineBank` remain Lacetti-only.
