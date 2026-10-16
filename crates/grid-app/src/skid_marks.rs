@@ -320,13 +320,13 @@ pub(crate) fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::err
     let diffuse = textures
         .get("diffuse.tga")
         .ok_or("skidmark diffuse texture absent")?;
-    let image = super::ground_effect_assets::image(diffuse, true)?;
+    let diffuse = diffuse.clone();
     println!(
         "skid_marks enabled=true profile=road_tm surfaces={} offset={} strips={STRIPS}x{QUADS} cars=all fidelity=experimental",
         profile.surfaces.len(),
         profile.offset
     );
-    app.insert_resource(Pending { profile, image })
+    app.insert_resource(Pending { profile, diffuse })
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, lay.after(super::wheel_ground::update))
         .add_systems(Update, present.after(super::drive_present));
@@ -336,7 +336,7 @@ pub(crate) fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::err
 #[derive(Resource)]
 struct Pending {
     profile: Profile,
-    image: Image,
+    diffuse: Vec<u8>,
 }
 
 fn start(
@@ -347,12 +347,21 @@ fn start(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let Some(pending) = pending else { return };
+    // Device-dependent upload must follow texture_upload::configure (PreStartup).
+    // install() runs before the render device has selected BC/ETC2/RGBA support.
+    let image = match super::ground_effect_assets::image(&pending.diffuse, true) {
+        Ok(image) => image,
+        Err(error) => {
+            warn!("skid mark texture: {error}");
+            return;
+        }
+    };
     let mut marks = SkidMarks::new(pending.profile.clone());
     marks.mesh = meshes.add(marks.build());
     // Alpha blended, no depth write, lit by the ground normal. The original
     // also blends a normal map by the Fade bound; not reproduced (AUTHORED).
     let material = materials.add(StandardMaterial {
-        base_color_texture: Some(images.add(pending.image.clone())),
+        base_color_texture: Some(images.add(image)),
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.9,
         depth_bias: 50.,
