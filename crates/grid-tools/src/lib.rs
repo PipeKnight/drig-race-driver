@@ -24,6 +24,7 @@ pub mod race;
 pub mod route;
 pub mod source_deformation;
 pub mod source_physical;
+pub mod soak;
 pub mod source_vehicle;
 pub mod standard_car;
 mod standard_car_fields;

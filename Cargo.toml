@@ -6,3 +6,10 @@ resolver = "3"
 edition = "2024"
 rust-version = "1.99"
 version = "0.1.0"
+
+# Soak builds: release speed with integer overflow checks and debug assertions
+# (grid-soak, docs/SOAK_TESTING.md).
+[profile.soak]
+inherits = "release"
+overflow-checks = true
+debug-assertions = true

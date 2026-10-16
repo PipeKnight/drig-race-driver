@@ -66,7 +66,7 @@ pub struct Runtime {
     props: Option<crate::dynamic_props::PropWorld>,
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Controls {
     pub throttle: f32,
     pub brake: f32,

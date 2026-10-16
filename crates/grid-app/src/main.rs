@@ -1381,6 +1381,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
             })
             .transpose()?;
+        // Set-up for headless replays of this log (grid-soak replay-log).
+        println!(
+            "drive_replay version=1 route={} opponents={} grid_position={}",
+            route.path(),
+            opponents.as_ref().map_or(0, |o| o.drivers.len()),
+            player_slot + 1
+        );
         Some(Driving {
             runtime,
             geometry,
@@ -2072,6 +2079,8 @@ fn drive_tick(
     mut shifts: ResMut<input::ShiftQueue>,
     mut trial: Option<ResMut<time_trial::Trial>>,
     mut prop_script: Option<ResMut<dynamic_props::PropScript>>,
+    // Last `drive_input` record (segment, controls, hold) for `grid-soak replay-log`.
+    mut recorded: Local<Option<(u64, grid_tools::source_vehicle::Controls, bool)>>,
 ) {
     // One queued gear edge per fixed tick, dropped when the tick does not run.
     let shift = shifts.pop();
@@ -2141,6 +2150,7 @@ fn drive_tick(
     } else {
         None
     };
+    let mut applied = None;
     let mut controls = if let Some(controls) = autopilot {
         controls
     } else if driving.scripted_ticks.is_some()
@@ -2166,6 +2176,13 @@ fn drive_tick(
             ..driving.scripted
         }
     } else {
+        // The request reaches the car only with a manual gearbox; it is
+        // recorded for grid-soak replay-log.
+        if driving.runtime.assists.transmission
+            == grid_tools::source_vehicle::assists::Transmission::Manual
+        {
+            applied = shift;
+        }
         assists::request_shift(shift, &mut driving.runtime);
         actions.controls()
     };
@@ -2175,6 +2192,22 @@ fn drive_tick(
             handbrake: true,
             ..Default::default()
         };
+    }
+    // Player input record: every change, gear request and segment start.
+    let now = (driving.segment, controls, held);
+    if *recorded != Some(now) || applied.is_some() {
+        log_line!(
+            "drive_input version=1 segment={} tick={} throttle={} brake={} steering={} handbrake={} shift={} hold={}",
+            driving.segment,
+            driving.runtime.ticks + 1,
+            controls.throttle,
+            controls.brake,
+            controls.steering,
+            controls.handbrake,
+            grid_tools::soak::shift_name(applied),
+            u8::from(held)
+        );
+        *recorded = Some(now);
     }
     let driving = &mut *driving;
     let result = if let Some(opponents) = &mut driving.opponents {

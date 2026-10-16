@@ -116,6 +116,19 @@ impl Track {
     pub fn triangle_count(&self) -> usize {
         self.triangle_count
     }
+    /// Union of the packed road chunk bounds: min x, y, z, max x, y, z.
+    pub fn bounds(&self) -> [f32; 6] {
+        self.chunks.iter().fold(
+            [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN],
+            |mut b, c| {
+                for k in 0..3 {
+                    b[k] = b[k].min(c.bounds[k]);
+                    b[k + 3] = b[k + 3].max(c.bounds[k + 3]);
+                }
+                b
+            },
+        )
+    }
     pub fn shape_count(&self) -> usize {
         self.chunks.len() + usize::from(self.boundary.is_some()) + usize::from(self.props.is_some())
     }
