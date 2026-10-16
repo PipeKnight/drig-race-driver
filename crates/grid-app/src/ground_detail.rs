@@ -267,6 +267,7 @@ struct PendingDetail(Option<Loaded>);
 fn start(
     mut commands: Commands,
     mut pending: ResMut<PendingDetail>,
+    graphics: Res<super::graphics::Settings>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -290,10 +291,17 @@ fn start(
         buckets.entry(key).or_default().push(i as u32);
     }
     let mesh = meshes.add(empty());
-    // The original draws with alpha-to-coverage, depth writes and no blending.
+    // Original coverage needs MSAA. Enhanced views use SMAA/TAA with MSAA off:
+    // explicit masking keeps colour and Bevy's normal/depth prepasses on the
+    // same cutoff (coverage's prepass otherwise accepts near-transparent texels).
+    let alpha_mode = if graphics.enhanced() {
+        AlphaMode::Mask(0.5)
+    } else {
+        AlphaMode::AlphaToCoverage
+    };
     let material = materials.add(StandardMaterial {
         base_color_texture: Some(image),
-        alpha_mode: AlphaMode::AlphaToCoverage,
+        alpha_mode,
         perceptual_roughness: 1.,
         reflectance: 0.,
         double_sided: false,
