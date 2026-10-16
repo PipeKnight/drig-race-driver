@@ -4,6 +4,7 @@ mod car_materials;
 mod clearcoat_prepass;
 mod engine_sound;
 mod free_look;
+mod geometry_ray;
 mod graphics;
 mod graphics_benchmark;
 mod scene_probe;
@@ -930,6 +931,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut audio_check = false;
     let mut graphics = graphics::Settings::default();
     let mut reflection_calibration = false;
+    let mut geometry_pixel = None;
     let mut trial_laps = None;
     let mut drive_ticks = None;
     let mut body_contacts = None;
@@ -1065,6 +1067,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ))
             }
             "--reflection-calibration" => reflection_calibration = true,
+            "--geometry-ray" => {
+                let value = args.next().ok_or("--geometry-ray needs X,Y")?;
+                let (x, y) = value.split_once(',').ok_or("--geometry-ray needs X,Y")?;
+                let pixel = Vec2::new(x.parse()?, y.parse()?);
+                if !pixel.is_finite() || pixel.min_element() < 0. {
+                    return Err("invalid geometry pixel".into());
+                }
+                geometry_pixel = Some(pixel);
+            }
             "--probe-update" => {
                 graphics.moving_probe = match args.next().as_deref() {
                     Some("static") => false,
@@ -1493,6 +1504,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             target: at,
             scale: (offset.length() / 2.).max(1.),
         };
+    }
+    if let Some(pixel) = geometry_pixel {
+        let size = Vec2::new(graphics.width as f32, graphics.height as f32);
+        if pixel.x >= size.x || pixel.y >= size.y {
+            return Err("geometry pixel exceeds resolution".into());
+        }
+        geometry_ray::audit(&car, camera_transform(&orbit), size, pixel);
+        return Ok(());
     }
     let mut app = App::new();
     if let Some(laps) = trial_laps {
