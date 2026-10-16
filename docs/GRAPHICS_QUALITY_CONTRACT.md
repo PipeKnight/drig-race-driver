@@ -16,7 +16,7 @@ Keep identical camera, exposure, scene state and output size for comparisons. Re
 | Shadows and AO | Stable contact and shape, no strong halos or detached wheels | Wheel arches, barriers and distant cascades |
 | Whole image | Clear detail and GRID atmosphere, no objectionable blur, aliasing or exposure pumping | Fixed comparison views and a complete Donington lap |
 
-Status: acceptance not yet achieved. Current enhanced prototype supplies sky, lighting, shadows, filtering and temporal AA, but materials, texture layers and reflections remain incomplete. Wheel roundness has not yet been quantitatively audited. Temporal AA is not evidence of correct motion vectors for all deformed meshes.
+Status: acceptance not yet achieved. Enhanced now supplies source-sky lighting, layered materials, shadows and source surfaces; local scene reflections are opt-in. Wheel roundness was audited and tyres refined (TYRE_VISUAL_DETAIL.md). Reproduced TAA car trails prompted a SMAA Ultra default; underlying temporal motion data remains unresolved. Wheel rotation must look good at 30, 60, 144 and 300 FPS, with identical physical speeds, acceleration, braking, reverse and standstill. Phase prediction addresses repeated fixed-step poses; rotational exposure filtering is still pending. GRAPHICS_DEFECTS.md tracks evidence and limitations.
 
 ## DLSS preparation
 

@@ -15,6 +15,7 @@ mod track_grade;
 mod track_surface;
 mod tyre_sound;
 mod tyre_visual;
+mod wheel_presentation;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -1121,6 +1122,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Some("smaa") => 1,
                     Some("off") => 2,
                     _ => return Err("--aa needs taa, smaa or off".into()),
+                };
+            }
+            "--wheel-motion" => {
+                graphics.smooth_wheel_motion = match args.next().as_deref() {
+                    Some("smooth") => true,
+                    Some("source") => false,
+                    _ => return Err("--wheel-motion needs smooth or source".into()),
                 };
             }
             "--land" => {
@@ -2516,6 +2524,8 @@ fn drive_present(
     mut look_back: Local<Option<bool>>,
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
     free_look: Option<Res<free_look::FreeLook>>,
+    fixed: Option<Res<Time<Fixed>>>,
+    graphics: Option<Res<graphics::Settings>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -2566,7 +2576,18 @@ fn drive_present(
         }
     }
     let pose = Mat4::from_cols_array(&driving.runtime.pose());
-    let wheels = driving.runtime.wheels().map(wheel_motion);
+    let remainder = if graphics.is_some_and(|g| g.enhanced() && g.smooth_wheel_motion)
+        && !driving.paused
+        && driving.failure.is_none()
+        && !driving
+            .scripted_ticks
+            .is_some_and(|n| driving.runtime.ticks >= n)
+    {
+        fixed.map_or(0., |t| t.overstep().as_secs_f32())
+    } else {
+        0.
+    };
+    let wheels = wheel_presentation::wheels(&driving.runtime, remainder).map(wheel_motion);
     for (part, mut transform, _, _, _) in &mut parts {
         let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
         *transform = Transform::from_matrix(pose * motion * part.rest);
@@ -2579,7 +2600,7 @@ fn drive_present(
             .map(|car| {
                 (
                     Mat4::from_cols_array(&car.pose()),
-                    car.wheels().map(wheel_motion),
+                    wheel_presentation::wheels(car, remainder).map(wheel_motion),
                 )
             })
             .collect();
@@ -2910,6 +2931,101 @@ mod driving_tests {
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn wheel_render_remainder_pause_reset_and_source_control() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
+                .unwrap();
+        for _ in 0..160 {
+            runtime
+                .tick(grid_tools::source_vehicle::Controls {
+                    throttle: 1.,
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let mut fixed = Time::<Fixed>::from_seconds(0.016);
+        fixed.accumulate_overstep(Duration::from_secs_f32(0.008));
+        let mut app = App::new();
+        app.insert_resource(Assets::<Mesh>::default())
+            .insert_resource(fixed)
+            .insert_resource(graphics::Settings {
+                preset: graphics::Preset::Enhanced,
+                ..default()
+            })
+            .init_resource::<DeformationPresentation>()
+            .insert_resource(Driving {
+                runtime,
+                geometry: None,
+                paused: false,
+                failure: None,
+                scripted_ticks: None,
+                scripted: Default::default(),
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+                opponents: None,
+            })
+            .add_systems(Update, drive_present);
+        app.world_mut().spawn((ViewerCamera, Transform::default()));
+        let part = app
+            .world_mut()
+            .spawn((
+                MovingPart {
+                    rest: Mat4::IDENTITY,
+                    wheel: Some(0),
+                },
+                Transform::default(),
+                Mesh3d::default(),
+                Aabb::default(),
+            ))
+            .id();
+        let before = app
+            .world()
+            .resource::<Driving>()
+            .runtime
+            .state
+            .car
+            .owner
+            .vehicle
+            .clone();
+        app.update();
+        let moving = *app.world().get::<Transform>(part).unwrap();
+        assert_eq!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle,
+            before
+        );
+        app.world_mut().resource_mut::<Driving>().paused = true;
+        app.update();
+        let paused = *app.world().get::<Transform>(part).unwrap();
+        assert_ne!(moving, paused);
+        app.update();
+        assert_eq!(*app.world().get::<Transform>(part).unwrap(), paused);
+        app.world_mut().resource_mut::<Driving>().paused = false;
+        app.world_mut()
+            .resource_mut::<graphics::Settings>()
+            .smooth_wheel_motion = false;
+        app.update();
+        assert_eq!(*app.world().get::<Transform>(part).unwrap(), paused);
+        app.world_mut().resource_mut::<Driving>().runtime.reset();
+        app.world_mut()
+            .resource_mut::<graphics::Settings>()
+            .smooth_wheel_motion = true;
+        app.update();
+        let reset = *app.world().get::<Transform>(part).unwrap();
+        assert_ne!(reset, moving);
+        app.update();
+        assert_eq!(*app.world().get::<Transform>(part).unwrap(), reset);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn source_wheel_joints_follow_physics_without_feedback() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let root = Path::new(&root);
@@ -2950,6 +3066,17 @@ mod driving_tests {
                 .unwrap();
             let owner_before = runtime.state.car.owner.vehicle.clone();
             let body_before = runtime.state.car.owner.physical;
+            // Render-time samples must never mutate the source wheel clock,
+            // even with several display frames per physics step.
+            for fps in [30_f32, 60., 144., 300.] {
+                let shown = wheel_presentation::wheels(&runtime, (1. / fps).min(0.016));
+                for (i, wheel) in shown.into_iter().enumerate() {
+                    assert!(wheel_motion(wheel).is_finite());
+                    assert_eq!(wheel.anchor, runtime.wheels()[i].anchor);
+                    assert_eq!(wheel.displacement, runtime.wheels()[i].displacement);
+                    assert_eq!(wheel.steering, runtime.wheels()[i].steering);
+                }
+            }
             for (i, wheel) in runtime.wheels().into_iter().enumerate() {
                 let motion = wheel_motion(wheel);
                 assert!(motion.is_finite());

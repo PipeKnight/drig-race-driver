@@ -37,6 +37,8 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    /// Bounded read-only spin prediction between physical ticks.
+    pub smooth_wheel_motion: bool,
     /// 0: TAA diagnostic, 1: SMAA Ultra (default), 2: unfiltered diagnostic.
     pub anti_aliasing: u8,
     /// 0: sky IBL, 1: deferred control, 2: SSR, 3: local HDR scene probe.
@@ -63,6 +65,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            smooth_wheel_motion: true,
             anti_aliasing: 1,
             reflection_mode: 0,
             probe_size: 1024,
@@ -221,6 +224,10 @@ pub fn configure(
     println!(
         "graphics_aa mode={} motion_prepass=true scope=main-view",
         settings.anti_aliasing
+    );
+    println!(
+        "graphics_wheel_motion smooth={} prediction_bound_seconds=0.016 physics_feedback=false",
+        settings.smooth_wheel_motion
     );
     if matches!(settings.reflection_mode, 1 | 2) {
         commands
