@@ -1,5 +1,5 @@
 //! Source surface-layer reconstruction with authored Bevy lighting.
-//! Only the statically examined track_surface_simple variant is selected.
+//! Only the statically examined surface_simple and infield variants are selected.
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     image::{CompressedImageFormats, ImageType},
@@ -73,18 +73,19 @@ fn read_source(root: &Path) -> Result<Source, Box<dyn std::error::Error>> {
     let bindings = material::read_texture_bindings(&tree)?;
     let mut definitions = BTreeMap::new();
     for i in 0..tree.nodes.len() {
-        if tree.name(i) != b"SHADERINSTANCE"
-            || tree.string(i, b"shaderGroup")? != b"#track_surface_simple.fx"
-        {
+        if tree.name(i) != b"SHADERINSTANCE" {
+            continue;
+        }
+        let group_ref = tree.string(i, b"shaderGroup")?;
+        let skidded = group_ref == b"#track_surface_simple.fx";
+        if !skidded && group_ref != b"#track_infield.fx" {
             continue;
         }
         let id = tree.string(i, b"id")?;
         let group = (0..tree.nodes.len())
             .find(|&j| {
                 tree.name(j) == b"SHADERGROUP"
-                    && tree
-                        .string(j, b"id")
-                        .is_ok_and(|s| s == b"track_surface_simple.fx")
+                    && tree.string(j, b"id").is_ok_and(|s| s == &group_ref[1..])
             })
             .ok_or("surface shader group absent")?;
         let inputs: Vec<_> = tree.nodes[group]
@@ -148,19 +149,27 @@ fn read_source(root: &Path) -> Result<Source, Box<dyn std::error::Error>> {
                 macro_map.clone(),
                 skids.clone().unwrap_or(macro_map),
             ],
-            scales: Vec4::new(
-                scalar(b"Skid_A_Scale")?,
-                scalar(b"Skid_B_Scale")?,
-                scalar(b"Skid_C_Scale")?,
-                scalar(b"A_Offset")?,
-            ),
+            scales: if skidded {
+                Vec4::new(
+                    scalar(b"Skid_A_Scale")?,
+                    scalar(b"Skid_B_Scale")?,
+                    scalar(b"Skid_C_Scale")?,
+                    scalar(b"A_Offset")?,
+                )
+            } else {
+                Vec4::ZERO
+            },
             controls: Vec4::new(
-                scalar(b"B_Offset")?,
-                if skids.is_some() { 1. } else { 0. },
+                if skidded { scalar(b"B_Offset")? } else { 0. },
+                if skidded && skids.is_some() { 1. } else { 0. },
                 1.,
                 0.,
             ),
-            colours: [colour(b"SkidColour")?, colour(b"SkidColour2")?],
+            colours: if skidded {
+                [colour(b"SkidColour")?, colour(b"SkidColour2")?]
+            } else {
+                [Vec4::ZERO; 2]
+            },
         };
         definitions.insert(String::from_utf8(id.to_vec())?, definition);
     }
@@ -368,7 +377,7 @@ mod tests {
             r"C:\Program Files (x86)\Steam\steamapps\common\Grid",
         ))
         .unwrap();
-        assert_eq!(source.definitions.len(), 90);
+        assert_eq!(source.definitions.len(), 94);
         assert!(!source.draws.is_empty());
         assert!(source.draws.values().all(|d| d.uv.len() == d.masks.len()));
         assert!(
