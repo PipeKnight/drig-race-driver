@@ -15,6 +15,13 @@ Owner request: parallel sessions build slowly and load the CPU. Findings and cha
   - Because every worktree has its own `C:/cargo-build/{workspace-path-hash}` build dir (F328), sccache cannot share dependency builds between sessions. Cargo already covers rebuilds within one directory.
   - A single shared build dir would serialise parallel sessions on cargo's lock, so it is not used.
 - **Priority.** While many sessions build at once, the coordinator can keep `cargo`/`rustc`/`link` and test processes at BelowNormal priority (a temporary background loop, no system setting), so the desktop stays responsive.
+- **Build-dir seeding, adopted.** Cargo's fingerprints for registry dependencies depend on neither the build dir nor the workspace path. So a copy of another checkout's build dir makes them Fresh, and only our workspace crates rebuild.
+  - Measured on a throwaway workspace: 1 s instead of 32 s.
+  - Measured on this repository: release `cargo build -p grid-app` in a fresh worktree, with 6 other sessions building:
+    - unseeded: 1607 s, 345 crates compiled;
+    - seeded: 107 s, 4 compiled (grid-formats/world/tools/app), 341 Fresh. The robocopy seed took 2 s for 2.3 GB.
+  - `tools/seed_build_dir.ps1` does this. It skips `incremental`, keeps timestamps, and does nothing if the build dir is non-empty. The default source is `C:\cargo-build\seed`, a release build of main 6301772 kept by the coordinator.
+  - The seed has only the release profile, so dev/check/Clippy artifacts still build once per worktree. If a dependency changes, the stale seed is harmless: that crate simply rebuilds.
 - **Next (not done):** move the old research probes out of `grid-tools/src/bin` into a separate `grid-probes` crate, so ordinary builds and Clippy skip them. Do this when no session is editing those binaries.
 
 ## Sampling profiler — 15 October 2026

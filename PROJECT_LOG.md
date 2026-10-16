@@ -1,5 +1,14 @@
 # GRID engine project log
 
+F337 build-dir seeding (2026-10-16, Claude Code): owner asked for smarter build caching after sccache could not share builds between worktrees (F330).
+- New tools/seed_build_dir.ps1 copies a shared seed build (C:\cargo-build\seed: a release build of main 6301772, 2.3 GB) into a new worktree's empty build dir, using robocopy with timestamps and skipping incremental.
+- Measured on this repository, with a fresh worktree and 6 other sessions building:
+  - unseeded release `cargo build -p grid-app`: 1607 s, 345 crates compiled;
+  - seeded: 107 s, only grid-formats/world/tools/app compiled, 341 Fresh, copy 2 s.
+- AGENTS.md: run the script before the first cargo command in a new worktree. Details in docs/TOOLCHAIN.md "Build and test cost".
+- Cleanup: removed the worktrees of archived P5 and P8 and two temporary measurement worktrees, and deleted their build dirs.
+- Coordinator rule from the owner: at most 4 parallel child sessions. Two sessions that children had started on their own (detached-part handling, player auto-reset) were stopped and queued.
+
 F336 AI mistakes, catch-up and the choreographer (2026-10-16, Claude Code). Port of docs/AI_MISTAKES_PACING_RESEARCH.md §7 (F303), using the owner's untracked docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md as input (left uncommitted). The two documents agree on every constant used. The port follows the second document for the conveyor start, the event states and the brake_lock wheel order. No new disassembly was read. Details: docs/AI_DRIVER_PORT.md "Mistakes, failures and race pacing" and docs/RACE_MODE.md "AI pacing and mistakes".
 
 Code:
