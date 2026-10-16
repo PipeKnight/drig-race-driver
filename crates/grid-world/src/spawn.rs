@@ -58,7 +58,10 @@ impl Pose {
 }
 
 pub(crate) fn reference_seed(value: f32, reciprocal: bool) -> Result<f32, Error> {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        not(feature = "soft-sse")
+    ))]
     {
         #[cfg(target_arch = "x86")]
         use std::arch::x86::{_mm_cvtss_f32, _mm_rcp_ps, _mm_rsqrt_ps, _mm_set1_ps};
@@ -76,10 +79,17 @@ pub(crate) fn reference_seed(value: f32, reciprocal: bool) -> Result<f32, Error>
             })
         })
     }
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    #[cfg(any(
+        not(any(target_arch = "x86", target_arch = "x86_64")),
+        feature = "soft-sse"
+    ))]
     {
-        let _ = (value, reciprocal);
-        Err(Error("reference arithmetic requires x86 SSE"))
+        // Measured RCPPS/RSQRTPS of the validation CPU; equal bits on all 2^32 inputs.
+        Ok(if reciprocal {
+            crate::sse_approx::rcp(value)
+        } else {
+            crate::sse_approx::rsqrt(value)
+        })
     }
 }
 

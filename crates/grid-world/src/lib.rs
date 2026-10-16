@@ -69,6 +69,7 @@ pub mod response_consumption;
 pub mod serial_callback;
 pub mod setup;
 pub mod spawn;
+pub mod sse_approx;
 pub mod steering_coefficients;
 pub mod steering_control;
 pub mod steering_feedback;

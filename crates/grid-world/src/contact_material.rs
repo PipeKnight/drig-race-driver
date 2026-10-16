@@ -62,8 +62,8 @@ fn byte_noise(x: i32, z: i32) -> Result<i32, Error> {
     }
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
     {
-        let _ = squared;
-        Err(Error("reference material noise requires x86 SSE"))
+        // SQRTSS is the correctly rounded IEEE square root, as is f32::sqrt.
+        Ok(((squared.sqrt() * f32::from_bits(0x4971_0d1a)) as i32) & 255)
     }
 }
 

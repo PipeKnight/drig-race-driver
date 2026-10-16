@@ -23,7 +23,10 @@ fn root(value: f32) -> Result<f32, &'static str> {
     if value == 0. {
         return Ok(0.);
     }
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        not(feature = "soft-sse")
+    ))]
     {
         #[cfg(target_arch = "x86")]
         use std::arch::x86::{_mm_cvtss_f32, _mm_rsqrt_ps, _mm_set1_ps};
@@ -37,8 +40,16 @@ fn root(value: f32) -> Result<f32, &'static str> {
         let product = seed * value;
         Ok((1. - product * seed) * (product * 0.5) + product)
     }
-    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-    Err("engine gain requires x86 SSE")
+    #[cfg(any(
+        not(any(target_arch = "x86", target_arch = "x86_64")),
+        feature = "soft-sse"
+    ))]
+    {
+        // Measured RSQRTPS of the validation CPU (grid_world::sse_approx).
+        let seed = grid_world::sse_approx::rsqrt(value);
+        let product = seed * value;
+        Ok((1. - product * seed) * (product * 0.5) + product)
+    }
 }
 
 pub fn publish(
