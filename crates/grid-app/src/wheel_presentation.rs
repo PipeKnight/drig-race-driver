@@ -33,7 +33,13 @@ pub fn angular_speed(runtime: &Runtime, wheel: usize) -> f32 {
 
 /// Fixed box exposure, or an authored Gaussian temporal-filter floor. Seconds,
 /// never a number of frames or subtraction of wrapped phase samples.
-pub fn exposure(speed: f32, shutter: f32, frame_seconds: f32, adaptive: bool) -> (f32, bool) {
+pub fn exposure(
+    speed: f32,
+    shutter: f32,
+    frame_seconds: f32,
+    adaptive: bool,
+    floor: f32,
+) -> (f32, bool) {
     if !speed.is_finite() || !shutter.is_finite() || shutter <= 0. {
         return (0., false);
     }
@@ -45,7 +51,12 @@ pub fn exposure(speed: f32, shutter: f32, frame_seconds: f32, adaptive: bool) ->
         };
         // Same RMS width as the authored box at high FPS; extra filtering at
         // lower FPS. Three standard deviations each side of the centre.
-        6. * (shutter / 12_f32.sqrt()).max(frame * 0.5)
+        let floor = if floor.is_finite() {
+            floor.clamp(0., 0.5)
+        } else {
+            0.5
+        };
+        6. * (shutter / 12_f32.sqrt()).max(frame * floor)
     } else {
         shutter
     };
@@ -111,13 +122,21 @@ mod tests {
             }
             real.hypot(imaginary) / mass
         };
-        let fixed = exposure(15., 0.008333, 1. / 30., false);
-        let adaptive = exposure(15., 0.008333, 1. / 30., true);
+        let fixed = exposure(15., 0.008333, 1. / 30., false, 0.5);
+        let adaptive = exposure(15., 0.008333, 1. / 30., true, 0.5);
         assert!(response(fixed.0, fixed.1) > 0.8);
         assert!(response(adaptive.0, adaptive.1) < 0.01);
-        assert_eq!(exposure(0., 0.008333, 1. / 30., true).0, 0.);
-        assert_eq!(exposure(-15., 0.008333, 1. / 30., true), adaptive);
-        assert_eq!(exposure(15., 0., 1. / 30., true).0, 0.);
-        assert!(exposure(15., 0.008333, 1. / 300., true).0 < adaptive.0);
+        // The gentler art-control deliberately retains some angular detail;
+        // its weaker alias suppression is a visible tradeoff, not the default.
+        let gentle = exposure(15., 0.008333, 1. / 30., true, 0.25);
+        assert!((0.1..0.2).contains(&response(gentle.0, gentle.1)));
+        assert_eq!(
+            exposure(15., 0.008333, 1. / 300., true, 0.25),
+            exposure(15., 0.008333, 1. / 300., true, 0.5)
+        );
+        assert_eq!(exposure(0., 0.008333, 1. / 30., true, 0.5).0, 0.);
+        assert_eq!(exposure(-15., 0.008333, 1. / 30., true, 0.5), adaptive);
+        assert_eq!(exposure(15., 0., 1. / 30., true, 0.5).0, 0.);
+        assert!(exposure(15., 0.008333, 1. / 300., true, 0.5).0 < adaptive.0);
     }
 }

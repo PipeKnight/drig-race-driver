@@ -193,6 +193,7 @@ fn update(
                 graphics.wheel_geometry_shutter_seconds,
                 time.delta_secs(),
                 graphics.adaptive_wheel_exposure,
+                graphics.wheel_filter_floor,
             )
         };
         if let Some(mut material) = materials.get_mut(&handle.0) {

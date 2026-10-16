@@ -102,7 +102,8 @@ fn update(
                 s,
                 graphics.wheel_shutter_seconds,
                 time.delta_secs(),
-                graphics.adaptive_wheel_exposure
+                graphics.adaptive_wheel_exposure,
+                graphics.wheel_filter_floor
             )
             .0),
             graphics.adaptive_wheel_exposure
@@ -125,6 +126,7 @@ fn update(
                     graphics.wheel_shutter_seconds,
                     time.delta_secs(),
                     graphics.adaptive_wheel_exposure,
+                    graphics.wheel_filter_floor,
                 )
             });
         if let Some(mut material) = materials.get_mut(&handle.0)

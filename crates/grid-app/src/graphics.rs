@@ -39,6 +39,8 @@ impl Preset {
 pub struct Settings {
     /// Optional authored Gaussian filtering floor from actual frame duration.
     pub adaptive_wheel_exposure: bool,
+    /// Authored adaptive Gaussian sigma as a fraction of frame duration.
+    pub wheel_filter_floor: f32,
     /// Experimental swept-hull radial scene filter, player only; default off.
     pub wheel_geometry_shutter_seconds: f32,
     /// Fixed exposure duration, opt-in until wheel filtering is accepted.
@@ -72,6 +74,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             adaptive_wheel_exposure: false,
+            wheel_filter_floor: 0.5,
             wheel_geometry_shutter_seconds: 0.,
             wheel_shutter_seconds: 0.,
             smooth_wheel_motion: true,

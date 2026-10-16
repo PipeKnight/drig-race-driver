@@ -1407,6 +1407,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.wheel_geometry_shutter_seconds = ms * 0.001;
             }
+            "--wheel-filter-floor" => {
+                let floor: f32 = args.next().ok_or("missing wheel filter floor")?.parse()?;
+                if !floor.is_finite() || !(0.0..=0.5).contains(&floor) { return Err("wheel filter floor must be0..0.5 of frame seconds".into()); }
+                graphics.wheel_filter_floor = floor;
+                println!("wheel_filter_floor sigma_frame_fraction={floor} scope=adaptive-only authored=true");
+            }
             "--wheel-exposure" => {
                 graphics.adaptive_wheel_exposure = match args.next().as_deref() {
                     Some("fixed") => false,
