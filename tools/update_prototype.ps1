@@ -30,8 +30,8 @@ try {
     $env:GRID_BODY_EVENT_PARAMETERS=Join-Path $taskRoot 'local/body-impact-parameters.bin'
     $env:GRID_DEFORMATION_PARAMETERS=Join-Path $taskRoot 'local/deformation-parameters.bin'
     if(!(Test-Path -LiteralPath $env:GRID_CONTACT_DIRECTIONS)){throw 'Private body sampling file is required for the complete source checks'}
-    if(!(Test-Path -LiteralPath $env:GRID_BODY_EVENT_PARAMETERS)){throw 'Private BP01 file is required; prepare it with tools/extract_body_impact_parameters.py'}
-    if(!(Test-Path -LiteralPath $env:GRID_DEFORMATION_PARAMETERS)){throw 'Private DF01 file is required; prepare it with tools/extract_deformation_parameters.py'}
+    if(!(Test-Path -LiteralPath $env:GRID_BODY_EVENT_PARAMETERS)){throw 'Private BP01 file is required; prepare it with grid-private-parameters (or tools/extract_body_impact_parameters.py)'}
+    if(!(Test-Path -LiteralPath $env:GRID_DEFORMATION_PARAMETERS)){throw 'Private DF01 file is required; prepare it with grid-private-parameters (or tools/extract_deformation_parameters.py)'}
     $taskStamp=[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ')
     $taskEvidence=Join-Path $taskRoot "local/playtest/build-$taskStamp"
     New-Item -ItemType Directory -Path $taskEvidence | Out-Null

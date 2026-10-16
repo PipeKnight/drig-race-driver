@@ -1,6 +1,6 @@
 # Reset and respawn: what the original does with stuck and retired cars
 
-Static research, 16 October 2026 (F331). Ghidra 12.1.4 headless, read-only, on the
+Static research, 16 October 2026 (F332). Ghidra 12.1.4 headless, read-only, on the
 analysis image `local/compatibility/grid-unpacked.exe` (sha256 aac46a64…4514). No input
 was sent to the game. Private decompilation: `local/ai-avoid-recovery/decomp/r1`…`r13`.
 Labels: [V] read from code or data, [I] interpretation, AUTHORED = port decision.
@@ -145,7 +145,7 @@ The call is `0x9145D0(this = race+0x1040 trackers, vehicle, &trackpos, 1, 1, spe
   collision off while the car is invisible].
 - No separate no-collide period after the placement was found.
 
-## 4. What the port does (F331)
+## 4. What the port does (F332)
 
 - **No AI respawn**. This matches the original: AI cars never reset.
 - **A car retired by F323** (its own pipeline failed: a port-only state) stays held at its

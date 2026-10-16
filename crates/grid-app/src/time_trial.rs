@@ -19,8 +19,9 @@ impl Trial {
         let state = State::new(laps, f64::from(grid_tools::source_vehicle::DELTA), 3.)?;
         let records = if persist {
             let load = || -> Result<Records, Box<dyn std::error::Error>> {
-                std::fs::create_dir_all("local/playtest")?;
-                Records::load("local/playtest/time-trial-records.tsv".into())
+                let dir = crate::settings::data_dir().join("playtest");
+                std::fs::create_dir_all(&dir)?;
+                Records::load(dir.join("time-trial-records.tsv"))
             };
             match load() {
                 Ok(records) => Some(records),

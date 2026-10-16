@@ -2,8 +2,8 @@
 //! (P8, docs/PLATFORMS_AND_INPUT_RESEARCH.md 1.5). Most Mali, Xclipse and
 //! PowerVR phones lack `TEXTURE_COMPRESSION_BC`; there the BC1/BC3 levels
 //! are decoded to RGBA8 at load, keeping the mip chain. With BC support the
-//! image is exactly Bevy's DDS image, as before. `GRID_TEXTURE_FALLBACK=1`
-//! forces the CPU path for desktop tests.
+//! image is exactly Bevy's DDS image, as before. Diagnostics `texture_fallback = on`
+//! (legacy `GRID_TEXTURE_FALLBACK=1`) forces the CPU path for desktop tests.
 use bevy::{
     asset::RenderAssetUsages,
     image::{CompressedImageFormats, ImageSampler, ImageType, TextureError},
@@ -26,7 +26,7 @@ static SOURCE_BYTES: AtomicU64 = AtomicU64::new(0);
 static DECODE_NANOS: AtomicU64 = AtomicU64::new(0);
 
 fn forced() -> bool {
-    std::env::var("GRID_TEXTURE_FALLBACK").is_ok_and(|v| v == "1")
+    crate::settings::diagnostics().texture_fallback
 }
 
 /// Chooses the upload path before any Startup system creates images.
@@ -40,7 +40,7 @@ pub(crate) fn configure(device: Res<RenderDevice>) {
         "texture upload: gpu_bc={bc} path={}",
         match (cpu, bc) {
             (false, _) => "bc",
-            (true, true) => "rgba8-cpu-decode (forced by GRID_TEXTURE_FALLBACK=1)",
+            (true, true) => "rgba8-cpu-decode (forced by diagnostics texture_fallback)",
             (true, false) => "rgba8-cpu-decode (no BC support)",
         }
     );

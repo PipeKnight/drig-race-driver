@@ -405,7 +405,7 @@ The original design notes for this group follow.
 - A refused player dent projection keeps the previous mesh and logs one line per refusal kind. The refused field is not projected again until it changes.
 - Reports in a race count only the player's body records (`body_contacts_of(0)`). The after-finish AI's continuous controls no longer trigger a report, and a retired player's contacts do not either.
 - `log_line!` replaces `println!` on the per-tick and per-event paths (reports, lap, trial, race-result, retirement, damage, prop-break and audio events). Startup prints are unchanged.
-- Observed side effect: a car parked directly behind a held car stays blocked (car 7 behind car 5 in the test). F331 correction: that test drives every car with fixed throttle and no AI. With the ported AI the field avoids or recovers past a held car, and the original never respawns AI cars (docs/RESET_AND_RESPAWN_RESEARCH.md).
+- Observed side effect: a car parked directly behind a held car stays blocked (car 7 behind car 5 in the test). F332 correction: that test drives every car with fixed throttle and no AI. With the ported AI the field avoids or recovers past a held car, and the original never respawns AI cars (docs/RESET_AND_RESPAWN_RESEARCH.md).
 - Not done: single-car `Runtime::tick` failures (practice and time trial) still pause, with the message now in the HUD; the R restart is still the only recovery.
 
 ### S4. Coordinate domains for other routes (R03, R11, A27)
@@ -430,7 +430,7 @@ The original plan for this group follows.
 
 - Remove the ±1000 m point and pose bounds in `collision_damage.rs` and `body_impact.rs`, keeping only the finiteness checks. Confirm in grid.exe (9E6660, 999C00, 9EF360) that the original has no such domain. 34 of the 92 shipped routes exceed 1 km, so this blocks most of the route list.
 - Document or relax the 1e4 manifold bound and the 1e5 mesh-bounds guard against the original (AE2FA0, B45310, B44E80). They are safe for every shipped route today (all under 3 km), so this is low priority.
-- For a car out of the world, retire the car (S3) instead of letting the 100 km lap bound pause the race. F331: the original's reset path (ResetLinesManager, docs/RESET_AND_RESPAWN_RESEARCH.md) serves only the local player: upside down and nearly still for 2 s, or the pause menu. It does not write +0xDE4/+0xDFC, whose meaning stays open. AI cars are never reset.
+- For a car out of the world, retire the car (S3) instead of letting the 100 km lap bound pause the race. F332: the original's reset path (ResetLinesManager, docs/RESET_AND_RESPAWN_RESEARCH.md) serves only the local player: upside down and nearly still for 2 s, or the pause menu. It does not write +0xDE4/+0xDFC, whose meaning stays open. AI cars are never reset.
 
 ### S5. Numeric edge guards that the original does not have (R07, R10, R17, R18, R19)
 
