@@ -22,6 +22,7 @@ mod input;
 mod settings;
 mod particles;
 mod skid_marks;
+mod texture_cache;
 mod texture_upload;
 mod time_trial;
 mod tyre_smoke;

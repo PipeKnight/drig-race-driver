@@ -12,6 +12,7 @@ pub mod cqtc;
 pub mod damage_boxes;
 pub mod deformation;
 pub mod entities;
+pub mod etc2;
 pub mod grid;
 pub mod ground_cover;
 pub mod handling_damage;

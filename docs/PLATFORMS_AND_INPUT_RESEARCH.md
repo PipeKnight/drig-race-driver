@@ -135,7 +135,7 @@ The runtime itself never calls Python or anything in `tools/`. Those scripts are
 
 ### 1.5 Renderer [V code, S device data]
 
-- Until P8 the app asserted the GPU feature `TEXTURE_COMPRESSION_BC`. Since P8 (7.2) it detects BC at start-up and decodes BC1/BC3 to RGBA8 on the CPU when BC is missing.
+- Until P8 the app asserted the GPU feature `TEXTURE_COMPRESSION_BC`. Since P8 (7.2, 7.3) it detects BC at start-up. Without BC it uses a private ETC2 cache when the GPU has ETC2, and otherwise decodes BC1/BC3 to RGBA8 on the CPU.
 - Every texture is a BC1/BC3 DDS, or BGRA8 for a few named ones (`grid-formats/src/texture.rs`). All five upload sites now go through `grid-app/src/texture_upload.rs`.
 - Bevy's DDS loader does **not** decompress on the CPU; it fails with "Format not supported by this GPU".
 - Android support for BC:
@@ -515,7 +515,7 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 | **P5** | ✔ (7.3, docs/SETTINGS.md). **Portability groundwork**: `Settings` file replacing env switches and launcher variables (CLI stays as an override), install discovery (Steam `libraryfolders.vdf`) and case-insensitive file index, per-platform data dir for records/logs, Rust port of the BP01/DF01 readers from the user's `grid.exe` | — | 1–2 | the Windows playable runs from the settings file with no env vars; the BP01/DF01 bytes are equal to the Python output |
 | **P6** | **CD01 without the unpacked image** (research): find whether the 44-direction table can be computed from data, or define a documented one-time desktop preparation step | — | 1 | a decision recorded; ideally CD01 bytes reproduced from the Steam `grid.exe` alone |
 | **P7** | **Linux / Steam Deck**: native build, Bevy deps, case-sensitivity run (Donington and Nürburgring), shell launchers; Deck controller via P2 | P5 (P2 for the Deck) | 1–2 | a Linux lap equal to Windows apart from the libm caveat (1.3) |
-| **P8** | ✔ (7.2). **Texture fallback**: remove the BC assert; CPU BC1/BC3 decode when the GPU lacks BC (`bcdec_rs` or our own decoder); optional import-time ASTC/ETC2 cache | — | 1 | the app renders with BC disabled on desktop (forced fallback flag), with a recorded memory delta |
+| **P8** | ✔ (7.2, 7.3). **Texture fallback**: remove the BC assert; CPU BC1/BC3 decode when the GPU lacks BC (`bcdec_rs` or our own decoder); optional import-time ASTC/ETC2 cache | — | 1 | the app renders with BC disabled on desktop (forced fallback flag), with a recorded memory delta |
 | **P9** | **Android skeleton**: install and record SDK cmdline-tools, NDK r30 LTS, JDK, Gradle/AGP, cargo-ndk 4.1.2; `grid-app` as `cdylib` with `#[bevy_main]`; Gradle project from Bevy's mobile example (GameActivity 4.4.x matching android-activity 0.6.1, minSdk 31 or 26, target 36); landscape, keep-screen-on; lifecycle (suspend/resume) | P5, P8 | 1–2 | an APK under `local/` that starts on the owner's phone and shows the car on Donington from data placed with `adb push` |
 | **P10** | **Android data import**: folder picker (`ACTION_OPEN_DOCUMENT_TREE`) via JNI, copy to app-specific storage, hash manifest, BP01/DF01 import (P5), progress UI | P9 | 1–2 | data copied from `Documents/GRID` on the phone; the race starts with no adb |
 | **P11** | **Android controls**: tilt source (`ndk-sys` sensor, calibration, maxAngle setting), touch HUD, optional Android pad bridge | P1, P9 | 1 | **the fun target**: a lap steering by tilt with on-screen throttle and brake |
@@ -627,7 +627,7 @@ Code: `crates/grid-app/src/texture_upload.rs`, plus one-line changes at the five
   - BC3 alpha uses the 8- or 6-value palette;
   - interpolation is rounded integer: (2a+b+1)/3, (a+b+1)/2, (k·a0+j·a1+3)/7 and (+2)/5.
   - GPUs may round interpolated values differently by 1 level; D3D allows this tolerance.
-- Forced fallback for desktop tests: `GRID_TEXTURE_FALLBACK=1`. This is an environment switch like `GRID_GROUND_EFFECTS`; P5 can move it into the settings file.
+- Forced fallback for desktop tests: `GRID_TEXTURE_FALLBACK=1` at the time; since P5 (F331) it is diagnostics `texture_fallback = on` (now also `rgba8` or `etc2`, 7.3).
 - `texture upload summary: cpu_decode images decoded source_bytes upload_bytes decode_ms` is printed after a `--render` capture.
 
 **Checks [V]** (RTX 4070, driver 616.92, Vulkan; cargo/rustc 1.99.0; private evidence in the worktree `local/texture-fallback/`, `runs.txt`):
@@ -663,19 +663,85 @@ Code: `crates/grid-app/src/texture_upload.rs`, plus one-line changes at the five
   - Whole-run wall times were dominated by other sessions' builds (34 cargo/rustc processes), so they are not a usable comparison. They are in `runs.txt`.
   - On a phone, expect roughly 2–4× the decode time [I].
 
-**Consequences for Android [I].**
+**Consequences for Android [I].** The RGBA8 fallback alone makes the Pixel 6 and an Exynos S22 render at all. But about 600 MB of extra GPU memory plus RAM for a 12-car Donington race is too much for an 8 GB phone, so the ETC2 cache in 7.3 was added in the same step.
 
-- The fallback makes the Pixel 6 and an Exynos S22 render at all.
-- About 600 MB of extra GPU plus RAM for a 12-car Donington race is too much for comfort on an 8 GB phone. So item (b) below, or fewer distinct liveries, belongs in P12.
+### 7.3 Done: P8 ETC2 cache (F335)
 
-**Design note: import-time ASTC/ETC2 cache (not implemented).**
+Code:
+- `crates/grid-formats/src/etc2.rs`: our own ETC2 RGB8 and ETC2 RGBA8 (EAC alpha) block encoder and decoder, pure Rust, no new crate;
+- `crates/grid-app/src/texture_cache.rs`: the cache, the KTX2 writer and threaded encoding;
+- `texture_upload.rs`: path choice.
 
-- When: during P10 data import on the phone, or on first launch for `adb push` data.
-- What: transcode every texture once to ASTC LDR (6×6 for colour, 3.56 bpp; 4×4 for BC3 alpha textures that need it) or ETC2 RGB8/RGBA8 as a fallback for GLES devices without ASTC. Mips are taken from the decoded RGBA8 chain above, not regenerated, so the result matches the original filtering.
-- Format: one KTX2 file per source texture, keyed by the source file's hash plus the texture id. Bevy loads KTX2 with the `ktx2` feature and no CPU decode. The files go in the app-specific cache directory; they are a derivative of the user's own data and never leave the device.
-- Encoder: a native ASTC encoder (astc-encoder, Apache-2.0, via FFI) or an ETC2 encoder. The encode time for about 1,000 textures is minutes, so it runs once, with progress.
-- Upload choice: BC if supported, else ASTC if `TEXTURE_COMPRESSION_ASTC`, else ETC2, else the RGBA8 decode from this step.
-- Expected memory: about BC size (ASTC 6×6 is smaller than BC3, similar to BC1).
+**Why ETC2, not ASTC.**
+- ETC2 is mandatory on GLES 3.0 and Vulkan Android devices, so it covers the three target phones; ASTC is near-universal too.
+- ETC2 keeps the memory equal to BC (RGB8 4 bpp like BC1; RGBA8 8 bpp like BC3).
+- A web search on 2026-10-16 found no maintained pure-Rust ASTC encoder, only C++ bindings (`astcenc-sys`/`astcenc-rs`, 2020, Linux-only build) and decoders. ASTC would need the ARM C++ encoder through FFI, built with the NDK. ASTC 6×6 (3.56 bpp) would save a further 11–55 %; that is left as a later option.
+
+**Path choice** (logged as `texture upload: gpu_bc=.. gpu_etc2=.. path=..`):
+1. BC when the GPU has `TEXTURE_COMPRESSION_BC`; unchanged.
+2. Else ETC2 when it has `TEXTURE_COMPRESSION_ETC2`.
+3. Else RGBA8 (7.2).
+- Diagnostics `texture_fallback = etc2` forces ETC2; `on` or `rgba8` forces RGBA8 (docs/SETTINGS.md; legacy `GRID_TEXTURE_FALLBACK=etc2|rgba8|1`). A forced ETC2 on a GPU without it falls back to RGBA8 and says so.
+
+**Cache.**
+- The first load of a BC1/BC3 texture decodes all its levels (7.2), encodes each level with ETC2 and writes one KTX2 file. Later loads read the file, and Bevy's own KTX2 loader (already enabled by the `3d` feature) builds the image.
+- Name: `<FNV-1a 64 of the DDS bytes>-<length>-v<encoder version>.ktx2`. The version is bumped when the encoder output changes.
+- Directory: `<data dir>/texture-cache` from P5's `settings::data_dir()`, which is the ignored `local/texture-cache` in the owner's checkout. On Android it should be the app cache directory (P9/P10).
+- The file is written to a temporary name, then renamed. A failed write only warns.
+- The KTX2 file is standard: vkFormat 148 (`ETC2_R8G8B8_SRGB`) or 152 (`ETC2_R8G8B8A8_SRGB`), a basic DFD (`KHR_DF_MODEL_ETC2`, sRGB, one COLOR sample or ALPHA + COLOR), no supercompression, levels stored smallest first, 8/16-byte aligned.
+- Format per texture: RGBA8 + EAC when any texel of any level is not opaque. This includes BC1 punch-through textures. Otherwise RGB8, so an opaque BC3 texture drops to 4 bpp.
+- Encoding uses all CPU threads, split by block rows. It runs during `Startup` on first use; this is "import on first launch". A separate import tool with progress belongs to P10.
+
+**Encoder.**
+- All five ETC2 RGB modes are used: individual, differential (both flips), T, H and planar. The encoder keeps whichever gives the least squared RGB error.
+  - ETC1 (individual and differential): the sub-block mean is the base colour. The best modifier per texel is exact: it is the one nearest the mean channel difference, falling back to a full comparison where paints clamp.
+  - T/H: the two colours come from a 2-means fit started at the farthest texel pair.
+  - Planar: a least-squares plane fit.
+  - The unused T/H/planar bits are chosen so that the decoder's overflow test selects the intended mode.
+  - Blocks whose planar or ETC1 error is already at most 72 (about 1.2 levels RMS per channel) skip the remaining modes.
+- EAC alpha: all 16 tables, two multipliers around the ideal, three bases around the midpoint. Constant alpha is exact (table 13, modifier 0, multiplier 1).
+
+**Checks [V]** (Intel UHD Graphics 770 iGPU of the i7-12700 on Vulkan, driver 101.7088, selected with `WGPU_ADAPTER_NAME="Intel(R) UHD Graphics 770" WGPU_BACKEND=vulkan`; it exposes BC, ETC2 and ASTC. The RTX 4070 exposes neither ETC2 nor ASTC. The GL backend cannot start headless on Windows. Evidence is in the worktree `local/texture-fallback/etc2/`):
+
+- Unit tests:
+  - grid-formats `etc2::tests`: a hand-built individual block; solid colour; chroma edges choose T/H; a gradient chooses planar; the free-bit steering reaches T/H/planar for 500 random payloads; 2,000 random blocks beat a flat fill; EAC constant, mask, ramp and column-major order; padded 2×1 levels.
+  - grid-app `texture_cache::tests`: Bevy reads our KTX2 (format, mip count, size, level bytes, RGB and RGBA); threaded and single-threaded encodes are identical.
+- Asset test `etc2_quality_on_installed_textures` (ignored, needs `GRID_GAME_ROOT`): base levels of 455 textures from `lac_gen_high`, livery 00, Donington `tracksplit` and `objectstextures`, compared with the decoded BC source.
+  - Overall PSNR 36.49 dB; the worst texture is 28.65 dB (`don_decals_02_n.tga`, a normal map); the asserts are > 35 and > 25 dB.
+  - The weakest textures are normal maps and alpha-blended infield/edge textures.
+  - Single-threaded encode: 9.7–11.9 s over several runs with other sessions compiling.
+- Renders on the Intel iGPU (PSNR of the whole frame against the BC path on the same GPU):
+
+  | Scene | RGBA8 | ETC2 | ≤ 8 levels (ETC2) | Max |
+  |---|---|---|---|---|
+  | car | 79.0 dB | 50.8 dB | 99.7 % | 58 |
+  | Donington start | 74.6 dB | 45.3 dB | 99.87 % | 59 |
+  | 12-car race | 71.4 dB | 43.9 dB | 99.71 % | 119 |
+
+  - Cold and warm cache renders are byte-identical.
+  - For scale, the BC path on Intel against the BC path on NVIDIA is 52.6 dB for the car.
+  - The ×8 difference images show fine texture noise and no block artefacts or wrong colours; the frames look the same.
+
+- **Memory** (exact texel bytes):
+
+  | Scene | BC | ETC2 | RGBA8 |
+  |---|---|---|---|
+  | car | 9.42 MB | 9.29 MB | 53.39 MB |
+  | Donington | 46.80 MB | 46.67 MB | 287.92 MB |
+  | race | 91.40 MB | 92.14 MB | 593.12 MB |
+
+  The race is 0.8 % above BC because BC1 punch-through textures become 8-bpp RGBA8 + EAC. The iGPU's dedicated-memory counter stays at 0 (shared memory).
+
+- **Load time** (`decode_ms` of the app):
+  - car: cold 860 ms (encode 814), warm 20 ms;
+  - Donington: cold 28.4 s while the asset test ran beside it, warm 270 ms;
+  - race (495 encoded files plus 28 repeats, all mips): cold 9.2 s (encode 8.0 s, with 16 other compile processes running), warm 457 ms; RGBA8 1.45 s.
+- The cache for the race is 495 files, 78.4 MB.
+- Forced ETC2 on the RTX 4070 (no ETC2) logs the fallback and renders with RGBA8.
+
+**Not done:**
+- No phone run; no T/H tuning beyond the 2-means fit; no ASTC.
+- Encode quality is measured by PSNR only. The normal maps at 28–32 dB may deserve a two-channel EAC (RG11) path once the renderer uses them; no `normal_map_texture` is bound today, so they do not show yet.
 
 ### 7.3 Done: P5 (docs/SETTINGS.md)
 

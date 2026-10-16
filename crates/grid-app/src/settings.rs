@@ -76,8 +76,9 @@ pub struct Diagnostics {
     pub damage_zones: bool,
     /// `car,x,y,z`: damage camera.
     pub damage_camera: Option<String>,
-    /// Decode BC textures on the CPU even when the GPU has BC (P8 checks).
-    pub texture_fallback: bool,
+    /// Forced texture path for P8 checks: `rgba8` (CPU BC decode) or `etc2`
+    /// (private ETC2 cache); `None` picks BC, ETC2, RGBA8 by GPU support.
+    pub texture_fallback: Option<String>,
 }
 
 impl Default for Diagnostics {
@@ -93,7 +94,7 @@ impl Default for Diagnostics {
             look_back: false,
             damage_zones: false,
             damage_camera: None,
-            texture_fallback: false,
+            texture_fallback: None,
         }
     }
 }
@@ -115,7 +116,8 @@ impl Diagnostics {
             look_back: set("GRID_LOOK_BACK"),
             damage_zones: set("GRID_DAMAGE_ZONES"),
             damage_camera: text("GRID_DAMAGE_CAMERA"),
-            texture_fallback: text("GRID_TEXTURE_FALLBACK").is_some_and(|v| v == "1"),
+            texture_fallback: text("GRID_TEXTURE_FALLBACK")
+                .and_then(|v| texture_path("GRID_TEXTURE_FALLBACK", &v).ok().flatten()),
         }
     }
 
@@ -134,7 +136,7 @@ impl Diagnostics {
             "look_back" => self.look_back = on(key, value)?,
             "damage_zones" => self.damage_zones = on(key, value)?,
             "damage_camera" => self.damage_camera = text(),
-            "texture_fallback" => self.texture_fallback = on(key, value)?,
+            "texture_fallback" => self.texture_fallback = texture_path(key, value)?,
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
@@ -203,6 +205,17 @@ pub struct Settings {
     pub assists: String,
     pub input: String,
     pub diagnostics: Diagnostics,
+}
+
+/// `etc2`, `rgba8`, or on (= rgba8) / off (= automatic).
+fn texture_path(key: &str, value: &str) -> Result<Option<String>, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "etc2" => Ok(Some("etc2".into())),
+        "rgba8" => Ok(Some("rgba8".into())),
+        _ => on(key, value)
+            .map(|on| on.then(|| "rgba8".into()))
+            .map_err(|_| format!("setting `{key}` needs etc2, rgba8, on or off")),
+    }
 }
 
 fn on(key: &str, value: &str) -> Result<bool, String> {

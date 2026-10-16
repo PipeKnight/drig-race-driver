@@ -1,9 +1,14 @@
-//! DDS texture upload with a CPU fallback for GPUs without BC compression
-//! (P8, docs/PLATFORMS_AND_INPUT_RESEARCH.md 1.5). Most Mali, Xclipse and
-//! PowerVR phones lack `TEXTURE_COMPRESSION_BC`; there the BC1/BC3 levels
-//! are decoded to RGBA8 at load, keeping the mip chain. With BC support the
-//! image is exactly Bevy's DDS image, as before. Diagnostics `texture_fallback = on`
-//! (legacy `GRID_TEXTURE_FALLBACK=1`) forces the CPU path for desktop tests.
+//! DDS texture upload for GPUs with and without BC compression (P8,
+//! docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.2). Most Mali, Xclipse and
+//! PowerVR phones lack `TEXTURE_COMPRESSION_BC`. The path is chosen once:
+//! - `bc`: the image is exactly Bevy's DDS image, as before;
+//! - `etc2`: BC1/BC3 textures come from the private ETC2 KTX2 cache
+//!   (`texture_cache`), encoded on first use, same GPU memory as BC;
+//! - `rgba8`: BC1/BC3 levels are decoded to RGBA8 at load (mips kept).
+//!
+//! Without BC the order is ETC2, then RGBA8. Diagnostics `texture_fallback`
+//! `on`/`rgba8` forces RGBA8, `etc2` forces ETC2 (when the GPU has it); the
+//! legacy `GRID_TEXTURE_FALLBACK` takes the same values.
 use bevy::{
     asset::RenderAssetUsages,
     image::{CompressedImageFormats, ImageSampler, ImageType, TextureError},
@@ -14,36 +19,47 @@ use bevy::{
     },
 };
 use std::{
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicU8, AtomicU64, Ordering},
     time::Instant,
 };
 
-static CPU_DECODE: AtomicBool = AtomicBool::new(false);
+const BC: u8 = 0;
+const ETC2: u8 = 1;
+const RGBA8: u8 = 2;
+
+static PATH: AtomicU8 = AtomicU8::new(BC);
 static IMAGES: AtomicU64 = AtomicU64::new(0);
 static DECODED: AtomicU64 = AtomicU64::new(0);
 static UPLOAD_BYTES: AtomicU64 = AtomicU64::new(0);
 static SOURCE_BYTES: AtomicU64 = AtomicU64::new(0);
 static DECODE_NANOS: AtomicU64 = AtomicU64::new(0);
 
-fn forced() -> bool {
-    crate::settings::diagnostics().texture_fallback
+fn choose(bc: bool, etc2: bool, forced: Option<&str>) -> (u8, &'static str) {
+    match forced {
+        Some("rgba8") => (RGBA8, "rgba8-cpu-decode (forced by texture_fallback)"),
+        Some("etc2") if etc2 => (ETC2, "etc2-cache (forced by texture_fallback)"),
+        Some("etc2") => (
+            RGBA8,
+            "rgba8-cpu-decode (etc2 forced but the GPU lacks ETC2)",
+        ),
+        _ if bc => (BC, "bc"),
+        _ if etc2 => (ETC2, "etc2-cache (no BC support)"),
+        _ => (RGBA8, "rgba8-cpu-decode (no BC or ETC2 support)"),
+    }
 }
 
 /// Chooses the upload path before any Startup system creates images.
 pub(crate) fn configure(device: Res<RenderDevice>) {
-    let bc = device
-        .features()
-        .contains(WgpuFeatures::TEXTURE_COMPRESSION_BC);
-    let cpu = forced() || !bc;
-    CPU_DECODE.store(cpu, Ordering::Relaxed);
-    println!(
-        "texture upload: gpu_bc={bc} path={}",
-        match (cpu, bc) {
-            (false, _) => "bc",
-            (true, true) => "rgba8-cpu-decode (forced by diagnostics texture_fallback)",
-            (true, false) => "rgba8-cpu-decode (no BC support)",
-        }
-    );
+    let features = device.features();
+    let bc = features.contains(WgpuFeatures::TEXTURE_COMPRESSION_BC);
+    let etc2 = features.contains(WgpuFeatures::TEXTURE_COMPRESSION_ETC2);
+    let forced = crate::settings::diagnostics().texture_fallback.as_deref();
+    let (path, text) = choose(bc, etc2, forced);
+    PATH.store(path, Ordering::Relaxed);
+    println!("texture upload: gpu_bc={bc} gpu_etc2={etc2} path={text}");
+    if path == ETC2 {
+        println!("texture cache: {}", crate::texture_cache::dir().display());
+    }
 }
 
 /// The sRGB image of one validated DDS (BC1, BC3 or BGRA8, with mips).
@@ -61,9 +77,21 @@ pub(crate) fn image(
         usage,
     )?;
     let source = image.data.as_ref().map_or(0, Vec::len) as u64;
-    if CPU_DECODE.load(Ordering::Relaxed) {
+    let path = PATH.load(Ordering::Relaxed);
+    if path != BC {
         let start = Instant::now();
-        if decode_in_place(&mut image)? {
+        let etc2 = if path == ETC2 {
+            etc2_image(dds, &image).unwrap_or_else(|error| {
+                warn!("ETC2 texture cache failed, using RGBA8: {error}");
+                None
+            })
+        } else {
+            None
+        };
+        if let Some(etc2) = etc2 {
+            image = etc2;
+            DECODED.fetch_add(1, Ordering::Relaxed);
+        } else if decode_in_place(&mut image)? {
             DECODED.fetch_add(1, Ordering::Relaxed);
         }
         DECODE_NANOS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -77,17 +105,49 @@ pub(crate) fn image(
     Ok(image)
 }
 
+/// The ETC2 image of a BC1/BC3 DDS image; `None` for other formats.
+fn etc2_image(dds: &[u8], bc: &Image) -> Result<Option<Image>, String> {
+    let alpha = match bc.texture_descriptor.format {
+        TextureFormat::Bc1RgbaUnormSrgb => false,
+        TextureFormat::Bc3RgbaUnormSrgb => true,
+        _ => return Ok(None),
+    };
+    let size = bc.texture_descriptor.size;
+    if size.depth_or_array_layers != 1 {
+        return Err("ETC2 cache supports single 2D images".into());
+    }
+    let ktx2 = crate::texture_cache::ktx2(
+        dds,
+        bc.data.as_deref().unwrap_or_default(),
+        size.width,
+        size.height,
+        bc.texture_descriptor.mip_level_count,
+        alpha,
+    )?;
+    Image::from_buffer(
+        &ktx2,
+        ImageType::Extension("ktx2"),
+        CompressedImageFormats::ETC2,
+        true,
+        bc.sampler.clone(),
+        bc.asset_usage,
+    )
+    .map(Some)
+    .map_err(|e| e.to_string())
+}
+
 /// One line with the texel bytes created so far (GPU texture memory, and the
 /// same again in the main world for MAIN_WORLD images).
 pub(crate) fn summary() -> String {
     format!(
-        "texture upload summary: cpu_decode={} images={} decoded={} source_bytes={} upload_bytes={} decode_ms={:.1}",
-        CPU_DECODE.load(Ordering::Relaxed),
+        "texture upload summary: path={} images={} decoded={} source_bytes={} upload_bytes={} decode_ms={:.1} {}",
+        ["bc", "etc2", "rgba8"][usize::from(PATH.load(Ordering::Relaxed))],
         IMAGES.load(Ordering::Relaxed),
         DECODED.load(Ordering::Relaxed),
         SOURCE_BYTES.load(Ordering::Relaxed),
         UPLOAD_BYTES.load(Ordering::Relaxed),
-        DECODE_NANOS.load(Ordering::Relaxed) as f64 / 1e6
+        DECODE_NANOS.load(Ordering::Relaxed) as f64 / 1e6,
+        crate::texture_cache::summary()
     )
 }
 
@@ -190,7 +250,12 @@ fn colour_block(bytes: &[u8; 8], opaque: bool) -> [[u8; 4]; 16] {
             mix(|a, b| (a + 2 * b + 1) / 3),
         ]
     } else {
-        [solid(p0), solid(p1), mix(|a, b| (a + b).div_ceil(2)), [0; 4]]
+        [
+            solid(p0),
+            solid(p1),
+            mix(|a, b| (a + b).div_ceil(2)),
+            [0; 4],
+        ]
     };
     let indices = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
     std::array::from_fn(|i| palette[(indices >> (2 * i) & 3) as usize])
@@ -221,6 +286,17 @@ fn alpha_block(bytes: &[u8; 8]) -> [u8; 16] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn path_choice() {
+        assert_eq!(choose(true, true, None).0, BC);
+        assert_eq!(choose(false, true, None).0, ETC2);
+        assert_eq!(choose(false, false, None).0, RGBA8);
+        assert_eq!(choose(true, true, Some("rgba8")).0, RGBA8);
+        assert_eq!(choose(true, true, Some("etc2")).0, ETC2);
+        assert_eq!(choose(true, false, Some("etc2")).0, RGBA8);
+        assert_eq!(choose(true, true, None).0, BC);
+    }
 
     #[test]
     fn bc1_four_and_three_colour_modes() {

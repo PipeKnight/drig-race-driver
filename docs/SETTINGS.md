@@ -42,7 +42,7 @@ Grammar:
 | | `look_back` | `on`/`off` | `GRID_LOOK_BACK` |
 | | `damage_zones` | `on`/`off` | `GRID_DAMAGE_ZONES` |
 | | `damage_camera` | `car,x,y,z` | `GRID_DAMAGE_CAMERA` |
-| | `texture_fallback` | `on`/`off`: CPU BC decode even with GPU BC (P8) | `GRID_TEXTURE_FALLBACK=1` |
+| | `texture_fallback` | `etc2`: private ETC2 cache; `rgba8` or `on`: CPU BC decode; `off`: automatic (BC, ETC2, RGBA8 by GPU support) (P8) | `GRID_TEXTURE_FALLBACK=1`, `rgba8` or `etc2` |
 
 Notes:
 
