@@ -7,6 +7,14 @@ edition = "2024"
 rust-version = "1.99"
 version = "0.1.0"
 
+# Smaller debug builds (docs/DISK_USAGE.md §7): line tables for our crates, no
+# debug info for dependencies. Generated code and determinism are unchanged.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # Soak builds: release speed with integer overflow checks and debug assertions
 # (grid-soak, docs/SOAK_TESTING.md).
 [profile.soak]
