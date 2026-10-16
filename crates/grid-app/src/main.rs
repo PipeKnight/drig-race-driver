@@ -10,6 +10,7 @@ mod sky;
 mod sky_environment;
 mod time_trial;
 mod track_grade;
+mod track_surface;
 mod tyre_sound;
 mod tyre_visual;
 use bevy::{
@@ -1061,6 +1062,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
+            "--track-materials" => {
+                graphics.layered_track = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("single") => false,
+                    _ => return Err("--track-materials needs source or single".into()),
+                };
+            }
             "--lod" => lod = args.next().ok_or("--lod needs LOD0_ or LOD1_")?,
             "--include-batches" => include_batches = true,
             "--camera" => eye = Some(vector(&args.next().ok_or("--camera needs X,Y,Z")?)?),
@@ -1541,6 +1549,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.track_grade {
         track_grade::install(&mut app);
+    }
+    if graphics.enhanced() && graphics.layered_track && track && !collision {
+        track_surface::install(&mut app, &root)?;
     }
     if graphics.enhanced() && graphics.clearcoat_prepass_fix {
         clearcoat_prepass::install(&mut app);
