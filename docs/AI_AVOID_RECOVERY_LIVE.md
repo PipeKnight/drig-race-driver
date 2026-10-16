@@ -286,8 +286,11 @@ fn beyond_track_angle(forward: [f32; 3], t: [f32; 3], max: f32) -> bool {
      from `for r in others`. Solo runs have no other cars.
    - After implementing, rerun the solo headless check to confirm.
 
-Whether to adopt this (fidelity, CPU-dependent traffic baselines) or keep the documented rule
-(deterministic) is a project decision. It is not decided here.
+**Owner decision (16 October 2026): not adopted.** Race results must not depend on the CPU.
+The port keeps the documented rule: a clamped, exact cosine, so the acos-NaN leak never fires.
+Behaviour should stay close to the original but without such bugs and leaks. A deterministic
+fidelity step remains open: item 2 (the from-gate normal `t` instead of the interpolated line
+direction) can be adopted with exact arithmetic, without the rsqrt estimate.
 
 ### Open
 
