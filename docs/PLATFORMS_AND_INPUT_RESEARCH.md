@@ -370,6 +370,8 @@ Static research, all **[D]** unless marked. Full addresses and evidence: `local/
 
 ## 5. Input in the port today [V]
 
+This section describes the state before F325. Section 7.1 has the action layer, edge queue and gamepad that replace it.
+
 - **Bevy resources read:**
   - `ButtonInput<KeyCode>` only: `drive_tick` (`main.rs:2042`), `drive_actions` (`:2330`), `drive_present` (`:2419`), `assists.rs:21`, `engine_sound.rs:167`.
   - Mouse for the free-look camera (`free_look.rs:56`).
@@ -505,9 +507,9 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 | Id | Session | Depends on | Effort | Done when |
 |---|---|---|---|---|
 | **P0** | ✔ This session: research, plan, SSE table emulation (1.2) | — | done | sim crates build and lint for `aarch64-linux-android`; table path bit-identical on x86 |
-| **P1** | **Input abstraction refactor**, desktop: action layer, calibration, human record, edge queue, device class → `Assists.input`, settings file section `[input]` | — | 1 | keyboard path bit-identical (solo laps 88.42029812/86.28228502; assists matrix unchanged); unit tests for the four calibration types and the max-over-bindings rule; double/lost-shift test |
+| **P1** | ✔ F325 (7.1). **Input abstraction refactor**, desktop: action layer, calibration, human record, edge queue, device class → `Assists.input`, settings file section `[input]` | — | 1 | keyboard path bit-identical (solo laps 88.42029812/86.28228502; assists matrix unchanged); unit tests for the four calibration types and the max-over-bindings rule; double/lost-shift test |
 | **P1b** | ✔ F324. **CPU-independent physics**: make `sse_approx` the default on x86 too (drop the hardware branch or keep it behind a feature), and re-run the solo, 12-car and assists-matrix identity checks | — | <1 | identical results on the reference CPU; no hardware RCPPS/RSQRTPS left in the runtime |
-| **P2** | **Gamepad**: gilrs source, original pad preset from the user's `actionMapPreset4.xml`, Bevy dead zones 0, Advanced Controls dz/sat, rumble from vibration samples (stub until P4) | P1 | 1 | an Xbox-type pad drives a lap; the owner checks feel; the fresh-profile dz question (section 8) recorded |
+| **P2** | ✔ F325 (7.1), live pad test open. **Gamepad**: gilrs source, original pad preset from the user's `actionMapPreset4.xml`, Bevy dead zones 0, Advanced Controls dz/sat, rumble from vibration samples (stub until P4) | P1 | 1 | an Xbox-type pad drives a lap; the owner checks feel; the fresh-profile dz question (section 8) recorded |
 | **P3** | **Wheel input**: SDL3 joystick source (tool install recorded), exact-name preset match + AUTHORED generic preset, wheel latency extrapolation port (ring + global history) with unit tests, wheelLinearity option | P1 | 1–2 | wheel steering with unassisted steering and 828670 shaping; extrapolation matches a decompiled-formula unit test |
 | **P4** | **Force feedback**: snapshot-writer research (fields +0x80.., +0x1BC.., +0x1D8..), GameFFB port (caster, lateral, surface/kerb, gear, skid, suspension, wheel damage, collision samples), SDL3 constant force + software damping, pad rumble | P3 (P2 for rumble) | 2 | the owner feels centring, kerbs and impacts on their wheel; numeric unit tests of the caster/friction/sample formulas against the decompiled code |
 | **P5** | **Portability groundwork**: `Settings` file replacing env switches and launcher variables (CLI stays as an override), install discovery (Steam `libraryfolders.vdf`) and case-insensitive file index, per-platform data dir for records/logs, Rust port of the BP01/DF01 readers from the user's `grid.exe` | — | 1–2 | the Windows playable runs from the settings file with no env vars; the BP01/DF01 bytes are equal to the Python output |
@@ -523,10 +525,93 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 - **Recommended order:** P1b (cheap, removes CPU dependence now) → P1 → P2 (immediate desktop value) ∥ P5 ∥ P8 ∥ P6 → P9 → P10 ∥ P11 → P12. P3/P4 follow when the owner wants the wheel; they need the owner's wheel for live checks. P7 any time after P5.
 - **Shortest path to the Android tilt build:** P1, P5, P8, P9, P11 (using `adb push` instead of P10), P12. That is about 6–9 sessions.
 
+### 7.1 Done: P1 and P2 (F325)
+
+Code: `crates/grid-app/src/input.rs` (action layer, human record, edge queue, gamepad source, `[input]` settings), `crates/grid-formats/src/action_map.rs` (preset reader), `crates/grid-app/src/assists.rs` (sectioned settings file, shift request), `main.rs` wiring, `Play GRID Prototype.cmd`.
+
+**Action layer (ORIGINAL).**
+
+- The 23 actions 0..0x16 with their shipped `actionName` strings.
+- Each binding is `{source, calibration}`. The calibration is AD9AD0/AD9A80 in single precision, as in the SSE code:
+  - uniPos: lo = dz, hi = sat;
+  - uniNeg: lo = 1 − sat, hi = 1 − dz, inverted;
+  - biUpper: lo = dz·0.5 + 0.5, hi = sat·0.5 + 0.5;
+  - biLower: lo = (1 − sat)·0.5, hi = (1 − dz)·0.5, inverted;
+  - scale = 1/(hi − lo); v = (clamp(raw) − lo)·scale, or 1 − v when inverted.
+- **[D] Binding defaults** come from the binding constructor `8400B0`: uniPos, dz 0.2 (0xCB870C), sat 0.8 (0xCB0F24), threshold 0.5 (0xCAF88C). A preset attribute overrides each value. That every `Axis` gets a freshly constructed binding is [I].
+- **B7C120:** the action value is the maximum over the bindings, starting at 0. "Down" is any binding with threshold ≤ v. The pressed edge is down now and not down on the previous update. A binding with no live source reads raw 0 (uni types) or 0.5 (bi types), so an `unmapped` uniNeg binding would read 1.0.
+- Keyboard map: the prototype's keys with the preset-0 calibrations. Steering is uniPos dz 0.2, sat 1; the pedals dz 0, sat 1; the rest use the constructor defaults. Every key calibration gives exactly 0.0/1.0 for 0/1 keys (test). WASD are AUTHORED aliases. Gear Up is X (A steers), Look Back is C and Pause is P, as before; the original uses A, End and Escape, and Escape exits the prototype.
+
+**Human record 827D10:**
+
+- throttle = clamp(Accelerate, 0, 1), brake = clamp(Brake, 0, 1), handbrake = Hand Brake > 0.5;
+- steering = SteerL − SteerR, which is −(SteerR − SteerL) in the port's positive-left convention. It is computed as L − R so that a centred command stays +0.0, as before;
+- gear slots: Gear Up and Gear Down pressed edges, then the last pressed of Gear 1..6 and Reverse.
+
+**Timing and the edge queue.**
+
+- `input::sample` runs in `PreUpdate` after Bevy's `InputSystems`, once per frame. Every fixed tick of that frame reads the latched values. Key states only change in `PreUpdate`, so the ticks see the same values as the earlier direct `ButtonInput` reads in `FixedUpdate`.
+- The frame's gear edges go into `ShiftQueue` (AUTHORED bound of 8). `drive_tick` pops one per fixed tick, and the request is dropped when that tick does not drive (paused, held, scripted, autopilot). This fixes the double shift in a two-tick frame and the lost shift in a zero-tick frame (section 5).
+- Pause and Look Back also come from the action layer; R, F, Escape and M stay prototype keys.
+
+**Device class and settings.**
+
+- `[input] device = auto | keyboard | pad | wheel`, from `--input SPEC` or an `[input]` section of the `--assists-file` (lines before any section and in `[assists]` are driver aids, as before).
+- keyboard and pad set `Assists.input = Keyboard`, so +E6C = 1 (assisted). wheel sets `Wheel`. auto keeps the `--assists input=` value, keyboard by default.
+- `+E6C` is fixed before the first tick (`Runtime::set_assists`), so a pad connected mid-race does not change it. Keyboard and pad share the class, so this matters only for wheels (P3).
+- Advanced Controls overrides: `steering_deadzone/saturation`, `accelerate_deadzone/saturation`, `brake_deadzone/saturation`, each 0..1. Through 654C20 and 81CD30, they replace dz and/or sat on every binding of Steer Left/Right, Accelerate or Brake, keyboard ones included, keeping the type and threshold. A dead zone at or above the saturation is refused (the original UI keeps dz ≤ sat; dz = sat would divide by zero). The default is no override, so the pad keeps the preset's 0.2 (open question 2 in section 8 is unchanged).
+- The `drive_input` log line records the settings and the pad preset state.
+
+**Gamepad (P2).**
+
+- Bevy `Gamepad` through bevy_gilrs. gilrs 0.11.2 with gilrs-core 0.6.8 uses Windows.Gaming.Input here, and bevy_gilrs disables gilrs's own filters.
+- On connection, `GamepadSettings` becomes pass-through: axis dead zone 0, livezone ±1, change threshold 0, button-axis low 0, high 1, threshold 0. Bevy's ±0.05 dead zone, 0.01 change threshold and 0.05/0.95 trigger rounding therefore no longer apply. Bevy's `Gamepad::get` returns the raw value in any case.
+- Raw mapping: sticks 0.5 + 0.5·x; triggers and buttons 0..1 directly.
+  - Deviation: the original XInput trigger is b/256, at most 0.99609375, so a full trigger gives throttle 0.996 in the original and 1.0 here. The stick maximum differs by 1/65536 for the same reason.
+- The preset is read at runtime from the user's own `ActionMap/actionMapPreset4.xml` and checked to be `schemeType="xinputScheme"`, the scheme 83A130 picks for a non-wheel XInput device. It is never copied into the repository.
+  - Only the `win_xinput` bindings of the in-game actions are used. The keyboard entries of the pad preset (Escape, B, Return) are left to the prototype's keyboard map.
+  - The `win_con_xi_*` names map onto Bevy's Xbox layout: A/B/X/Y → South/East/West/North, shoulders → LeftTrigger/RightTrigger, triggers → LeftTrigger2/RightTrigger2, sticks, D-pad, Start/Back, stick clicks. With the shipped preset this gives: left stick X (bi, dz 0.2) and D-pad steer, RT accelerate, LT brake, B handbrake, A/X gear up/down, Y look back, Start pause.
+  - Keyboard and pad bindings are merged, so max over bindings lets both drive at once. This is AUTHORED; the original replaces the keyboard preset with the pad's.
+  - A missing or invalid preset leaves the keyboard alone and is logged as `pad_preset=unavailable(...)`.
+- **Device guard (AUTHORED).** gilrs also lists non-gamepad controllers such as wheels. Without an SDL mapping, it maps their axes by index (axis 3/4 → LT2/RT2), so wheel pedals could arrive as triggers.
+  - With `device=auto` or `wheel`, a device is used only when its name contains xbox/xinput/controller/gamepad/pad, the name has no wheel/racing/pedal/shifter/fanatec/momo/driving force/joystick, and the vendor id is not Fanatec 0x0EB7, Thrustmaster 0x044F or Moza 0x346E [I: public ids].
+  - `device=pad` accepts any device; `device=keyboard` reads none.
+  - The first accepted pad (lowest entity) is the player's device.
+  - Every connection is logged as `drive_input_pad ... preset4=used|ignored(reason)`.
+  - This mirrors the original's no-generic-fallback rule. The owner's PC has a Fanatec driver installed (`Fanatec Wheel Virtual Mouse`), but no wheel or pad was attached during this session.
+- Rumble is not sent (stub until P4: GameFFB vibration channels → `GamepadRumbleRequest`, ch0 strong, ch1 weak).
+
+**Checks [V]** (cargo/rustc 1.99.0; evidence in the main checkout's `local/input-p1p2/`):
+
+- Unit tests (grid-app `input::tests`):
+  - all four calibration types, with exact lo/hi/invert, the clamp ends and the idle raw values;
+  - the constructor defaults;
+  - every keyboard calibration gives exact 0/1;
+  - max over bindings (stick, button, key; no-source idle; value below the threshold is not down);
+  - the 827D10 record and sign;
+  - **all 512 combinations of the 9 driving keys give bit-identical `Controls` to the earlier direct key formula**;
+  - gear edges once per press, Gear Down plus last direct gear;
+  - the edge queue with 2, 0 and 1 ticks per frame, two presses before a tick, and the bound;
+  - pad preset parsing, `unmapped` and unknown names, overrides and the dz ≥ sat refusal;
+  - settings parse and round trip, device class to `Assists.input`, pad policy;
+  - the device guard;
+  - pass-through settings.
+- grid-formats `action_map` tests cover spaced attributes, defaults and malformed maps.
+- Asset test `shipped_pad_preset_reads_without_unknown_axes` reads the installed preset with no unknown axis names. Its bindings are the left stick biLower dz 0.2, RT, B and A.
+- Solo Donington AI release `grid-opponent-race ROOT CD01 BP01 1 11200 ai` on the rebased tree (after F324): laps 88.42029812185638 / 86.28228501935392, output byte-identical to F324's `solo-after.txt` (SHA-256 `124acff5…2d9a`). grid-tools is not changed by this work, so the assists matrix test is unchanged and was re-run in the full suite.
+- The existing keyboard app tests (`trial_countdown_pause_failure_finish_freeze_and_restart`, the deformation and body-projection drives, the engine-sound drive) now run through `input::sample` and pass unchanged.
+
+**Not done:**
+
+- No live pad or windowed lap: no gamepad was attached, and the owner's feel check is still needed.
+- No rumble.
+- The wheel class has no extrapolation or wheel preset yet (P3).
+- Raw Bevy trigger values are not re-quantised to the original's b/256.
+
 ## 8. Open questions and tests that need hardware
 
 1. **Android device:** the tables of 1.2 have not been executed on ARM. P9 should run the unit tests (or a small `grid-world` self-test) on the phone.
-2. **Original pad dead zone on a fresh profile:** 0.2 (preset) or 0 (Advanced Controls default). Settle it with a live read of the Advanced Controls screen with a pad attached, or a dump of the binding calibration blocks. Needs the owner's approval to run the original.
+2. **Original pad dead zone on a fresh profile:** 0.2 (preset) or 0 (Advanced Controls default). The port keeps the preset's 0.2 unless `steering_deadzone` is set (F325). Settle it with a live read of the Advanced Controls screen with a pad attached, or a dump of the binding calibration blocks. Needs the owner's approval to run the original.
 3. **Input sampling against physics substeps** in the original: trace the order of `AFDB50`/`827D10`/`828670` against `A03670`.
 4. **FFB snapshot writer:** which physics values fill the per-car snapshot. This is static research and can be done in P4.
 5. **Missing pedal axis behaviour** (uniNegative with no source reads 1.0 [I]), the SetCooperativeLevel flags, and whether the native-friction effect is ever created.

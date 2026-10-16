@@ -422,8 +422,7 @@ impl Actions {
         let direct = [Gear1, Gear2, Gear3, Gear4, Gear5, Gear6, GearReverse]
             .into_iter()
             .zip([1, 2, 3, 4, 5, 6, -1])
-            .filter(|(a, _)| self.pressed(*a))
-            .last()
+            .rfind(|(a, _)| self.pressed(*a))
             .map(|(_, g)| Shift::Gear(g));
         [up, down, direct].into_iter().flatten()
     }
