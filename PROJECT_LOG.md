@@ -1,5 +1,16 @@
 # GRID engine project log
 
+F340 wheel detachment port scoped; the port waits for the weekly reset (2026-10-16, Claude Code). The owner chose to record the scope now and to port after the reset on 19 October. Docs only; no code changed. Scope and order: docs/MECHANICAL_DAMAGE.md section 5, "Wheel detachment port scope".
+- The producer is small: the 98B430 zones plus the 9EC9B0 rule. It sets car +22E4+i when zone +824..+830 exceeds m_wheel_detach_level × mass × scalar, gated by m_disableLooseParts, parts +7BF1 and B13/B14. 996F60 has no direct caller. +7BF1 is set only by game-mode code (70558E/70574E/70D316).
+- A set flag would pause the run today (RUNTIME_LIMITS_AUDIT B11). Before the producer, port the detached-wheel branches in this order:
+  1. 9F1E10 (suspension_vehicle.rs:78);
+  2. A03670 (vehicle_driver_prepare.rs:63);
+  3. 9F3E80 with the terminal check 9E65B0 → 9E64E0(4, wheel) (vehicle_handling.rs:266);
+  4. the wheel update 9FA6E0 (port counterpart not yet identified);
+  5. then check 9F6ED0, 9BAB10 and 7E9D60.
+- wheel_contacts, vehicle_sync, vehicle_controls and vehicle_manager already handle the flag.
+- After the port, grid-app damage_parts reads the simulation's flag. Evidence: local/detached-parts/ scan-07 (+7BF1 and caller sweep). Hand-over note: wheel-detach-scope.md in the coordinating session's shared notes folder.
+
 F339 detached parts and driving: bumpers cost nothing, the rear spoiler never detaches, wheels are the gap (2026-10-16, Claude Code). Static only; details in docs/MECHANICAL_DAMAGE.md section 5 (rewritten) and a correction in VISUAL_DAMAGE_PARTS_RESEARCH.md. Tools: Ghidra 12.1.4 headless, -readOnly -noanalysis on local/phase3/ghidra-project; capstone sweeps with tools/scan_code_displacements.py. Evidence in local/detached-parts/: scan-01..06, dis-01/02, ghidra-01..06, and part-names.txt (the full E4EF20 id table).
 - [D] All callers of the part lookup 98BFE0 were classified. Only 9C5B90 and 9C50C0/9F3E80 affect driving: exhaust 0x1F and rear spoiler 0x46/0x45, both already ported.
 - [D] The remaining readers are rule, hinge or presentation code: 9EC9B0/9FF4F0 rules, 9DB0E0 hinges, 9E99B0 mirrors and windscreen, A18460 → +3A38 → 9CB5B0 (dangling bumper_bm node), 9F9BA0 joint matrices, and 920D30..921080/928680 debris-body positions.

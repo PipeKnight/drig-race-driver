@@ -180,6 +180,49 @@ exceeds `m_wheel_detach_level` × S (Lacetti 6 × 4560 = 27360 per tick); 996F60
 wheel into terminal damage (9E64E0(4, wheel)). The producer is not ported: grid-app `damage_parts`
 excludes wheels and is presentation-only, so no port car ever loses a wheel. This is the open follow-up.
 
+**Wheel detachment port scope (F340).** The owner chose to record the scope now and port it after the
+weekly usage reset on 19 October. No code was changed.
+
+The producer is small:
+
+- the 98B430 zone classifier, today in grid-app `damage_parts::classify`, moves to the simulation;
+- the 9EC9B0 wheel rule: when zone +824..+830 (RL, RR, FL, FR) exceeds +1C3C `m_wheel_detach_level` × S,
+  with S = physical mass × `m_overall_speed_required_scalar`, it sets car byte +22E4 + i once;
+- the rule is gated by `m_disableLooseParts` = 0 (9EC9B0 jumps past every rule), parts +7BF1 = 0 and car
+  B13/B14 non-zero (9A7670 forwards notifications only then);
+- the loader seeds +1C3C with 2 × the bonnet detach level before reading the attribute.
+
+What is not needed:
+
+- 996F60 is a trivial setter with no direct caller;
+- +7BF1 is set only by game-mode code (70558E, 70574E, 70D316) and cleared by repair 9FF170, so it stays 0.
+
+The producer cannot land first. A set flag today pauses the run, because the port refuses a detached
+wheel as an unsupported branch ([RUNTIME_LIMITS_AUDIT.md](RUNTIME_LIMITS_AUDIT.md) B11). The
+detached-wheel branches of these original functions must be recovered and ported first, in this order:
+
+1. `suspension_vehicle` (9F1E10): `suspension_vehicle.rs:78` refuses +2278 ≠ 0.
+2. `vehicle_driver_prepare` (A03670): `vehicle_driver_prepare.rs:63` refuses +2278 ≠ 0.
+3. `vehicle_handling` (9F3E80): `vehicle_handling.rs:266` refuses +22E4 ≠ 0. Also the terminal check
+   9E65B0, called at 9F4246: with status +444 = 7, the first flagged wheel calls 9E64E0(4, wheel). The
+   port only has the 9F2F80 transition to status 3.
+4. The wheel update 9FA6E0: with +22E4 + i set it skips the wheel's normal processing and sets the
+   wheel/tyre parts to state 4. Its port counterpart has not been identified yet.
+5. Check the remaining readers 9F6ED0, 9BAB10 (constraint producer, CAR_MANAGER.md) and 7E9D60.
+
+Already handled in the port: `wheel_contacts.rs:146` skips the wheel, `vehicle_sync.rs:200-203` sets +2270
+and copies +2278, `vehicle_controls.rs:133` gates the brakes, and `vehicle_manager.rs:45` gates the
+constraint check. These cover 9BD7F0 and the wheel contacts.
+
+After the port, grid-app `damage_parts` should read the simulation's flag instead of a rule of its own. The
+validation planned for the port:
+
+- unit tests of the zones and the rule;
+- a scripted heavy corner hit through `grid-opponent-race` that loses a wheel;
+- the solo laps, `grid-soak quick`, Clippy and the full tests.
+
+Evidence: `local/detached-parts/` (ghidra-02..06, scan-01..07).
+
 Other notes: the exhaust query uses id 0x1F only (`exhaust`); the Lacetti's `exhaust_bl` is 0x65 and its
 exhaust loss is 0, so no Lacetti effect. 9FF4F0 also detaches a loose part after a time while car +1648 is
 above a threshold (constants CB093C/CB51B0/CB0D94; bumper_bm and mirrors use their own pair), and on
@@ -227,7 +270,7 @@ Regression [V]: full workspace tests 380 passed, 0 failed after rebasing on dc2d
 
 ## 7. Not done / open
 
-- Wheel detachment (+22E4 flags from 9EC9B0) is not produced in the simulation (section 5); the exhaust (0x1F) query for cars that have that part.
+- Wheel detachment (+22E4 flags from 9EC9B0) is not produced in the simulation; the port order is in section 5 (F340); the exhaust (0x1F) query for cars that have that part.
 - The real dial graphics (`Osd/dial2.pssg` icon animation) and the OSD "Damage Icons" option.
 - Effects at a threshold of exactly 1.0 (gearbox, suspension, brake in Standard.hdm) reach 0/0 when a
   level caps at 1.0; the original also stores NaN there (COLLISION_DAMAGE_DISPATCH.md), while the port
