@@ -71,7 +71,11 @@ struct Source {
 }
 
 fn read_source(root: &Path) -> Result<Source, Box<dyn std::error::Error>> {
-    let bytes = super::read(&root.join("tracks/europe/donington/tracksplit.pssg"))?;
+    read_package(root, "tracksplit.pssg")
+}
+
+fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error::Error>> {
+    let bytes = super::read(&root.join("tracks/europe/donington").join(package))?;
     let tree = pssg::read_tree(&bytes)?;
     let bindings = material::read_texture_bindings(&tree)?;
     let mut definitions = BTreeMap::new();
@@ -239,8 +243,26 @@ fn read_source(root: &Path) -> Result<Source, Box<dyn std::error::Error>> {
     })
 }
 
-pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let source = read_source(root)?;
+pub fn install(app: &mut App, root: &Path, land: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let mut source = read_source(root)?;
+    if land {
+        let land = read_package(root, "land.pssg")?;
+        for (name, mut definition) in land.definitions {
+            for texture in &mut definition.textures {
+                *texture = format!("land/{texture}");
+            }
+            source
+                .definitions
+                .insert(format!("land/{name}"), definition);
+        }
+        for (name, mut draw) in land.draws {
+            draw.material = format!("land/{}", draw.material);
+            source.draws.insert(format!("land/{name}"), draw);
+        }
+        for (name, texture) in land.textures {
+            source.textures.insert(format!("land/{name}"), texture);
+        }
+    }
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
         SHADER.id(),
         Shader::from_wgsl(

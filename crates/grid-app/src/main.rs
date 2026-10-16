@@ -353,6 +353,17 @@ fn load(
     } else {
         "cars/lac/lac_highLOD.pssg"
     };
+    load_package(root, lod, track, include_batches, mesh_path, track)
+}
+
+fn load_package(
+    root: &Path,
+    lod: &str,
+    track: bool,
+    include_batches: bool,
+    mesh_path: &str,
+    objects: bool,
+) -> Result<Car, Box<dyn std::error::Error>> {
     let bytes = read(&root.join(mesh_path))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_meshes(&tree)?;
@@ -490,10 +501,37 @@ fn load(
         track,
         liveries: Vec::new(),
     };
-    if track {
+    if objects {
         append_objects(root, &mut car)?;
     }
     Ok(car)
+}
+fn append_land(root: &Path, car: &mut Car) -> Result<(), Box<dyn std::error::Error>> {
+    let land = load_package(
+        root,
+        "LOD0_",
+        true,
+        false,
+        "tracks/europe/donington/land.pssg",
+        false,
+    )?;
+    let draws = land.parts.len();
+    for mut part in land.parts {
+        part.name = format!("land/{}", part.name);
+        part.material = format!("land/{}", part.material);
+        car.parts.push(part);
+    }
+    for (name, texture) in land.bindings {
+        car.bindings
+            .insert(format!("land/{name}"), format!("land/{texture}"));
+    }
+    for (name, texture) in land.textures {
+        car.textures.insert(format!("land/{name}"), texture);
+    }
+    println!(
+        "source_land appended=true draws={draws} source=land.pssg namespace=land physics=unchanged"
+    );
+    Ok(())
 }
 fn append_objects(root: &Path, car: &mut Car) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = read(&root.join("tracks/europe/donington/objects.pssg"))?;
@@ -1067,6 +1105,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ))
             }
             "--reflection-calibration" => reflection_calibration = true,
+            "--land" => {
+                graphics.source_land = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("off") => false,
+                    _ => return Err("--land needs source or off".into()),
+                };
+            }
             "--geometry-ray" => {
                 let value = args.next().ok_or("--geometry-ray needs X,Y")?;
                 let (x, y) = value.split_once(',').ok_or("--geometry-ray needs X,Y")?;
@@ -1433,6 +1478,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         load(&root, &lod, track, include_batches)?
     };
+    if track && !collision && graphics.enhanced() && graphics.source_land {
+        append_land(&root, &mut car)?;
+    }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))
     } else if reference || start_view {
@@ -1618,7 +1666,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
     }
     if graphics.enhanced() && graphics.layered_track && track && !collision {
-        track_surface::install(&mut app, &root)?;
+        track_surface::install(&mut app, &root, graphics.source_land)?;
     }
     if graphics.reflection_mode == 3 {
         if !graphics.enhanced()
