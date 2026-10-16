@@ -22,9 +22,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var pbr = pbr_input_from_standard_material(in, is_front);
     let a = textureSample(first, first_sampler, in.uv);
     let b = textureSample(second, second_sampler, in.uv);
-    let macro = textureSample(macro_map, macro_sampler, in.uv_b);
+    let macro_sample = textureSample(macro_map, macro_sampler, in.uv_b);
     let layer = mix(a, b, in.color.r);
-    var albedo = mix(layer.rgb, macro.rgb, min(in.color.g, 0.5));
+    // Green was limited at each vertex before interpolation, as in the source VS.
+    var albedo = mix(layer.rgb, macro_sample.rgb, in.color.g);
     let skid_a_uv = vec2(in.uv_b.x * scales.z, in.uv_b.y * scales.x) + scales.w;
     let skid_b_uv = vec2(-in.uv_b.x * scales.z, in.uv_b.y * scales.y) + controls.x;
     let skid_a = textureSample(skids, skid_sampler, skid_a_uv).r * in.color.a * 2.0 * controls.y;
@@ -33,7 +34,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     albedo = mix(albedo, skid_colour2.rgb, skid_b);
     pbr.material.base_color = vec4(albedo, 1.0);
     // Original AO-scale uniform is not recovered; scale=1 is an explicit choice.
-    let ao = mix(1.0, macro.a, controls.z);
+    let ao = mix(1.0, macro_sample.a, controls.z);
     pbr.diffuse_occlusion *= ao;
     pbr.specular_occlusion *= ao;
     var out: FragmentOutput;

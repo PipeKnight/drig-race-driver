@@ -244,7 +244,9 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Err
 
 // uint_color_argb is stored A,R,G,B. It is a linear control, not sRGB albedo.
 fn mask([a, r, g, b]: [u8; 4]) -> [f32; 4] {
-    [r, g, b, a].map(|v| f32::from(v) / 255.)
+    let mut controls = [r, g, b, a].map(|v| f32::from(v) / 255.);
+    controls[1] = controls[1].min(0.5);
+    controls
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -386,6 +388,10 @@ mod tests {
 
     #[test]
     fn mask_channels_are_linear_controls() {
-        assert_eq!(mask([255, 0, 255, 128]), [0., 1., 128. / 255., 1.]);
+        assert_eq!(mask([255, 0, 255, 128]), [0., 0.5, 128. / 255., 1.]);
+        // Clamping after interpolation differs: midpoint of 0 and 255 must be
+        // 0.25, not 0.5. The source clamps in the vertex program.
+        let midpoint = (mask([255, 0, 0, 0])[1] + mask([255, 0, 255, 0])[1]) / 2.;
+        assert_eq!(midpoint, 0.25);
     }
 }
