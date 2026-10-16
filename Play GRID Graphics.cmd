@@ -6,6 +6,8 @@ set "GRID_GRAPHICS_ROOT=C:\Program Files (x86)\Steam\steamapps\common\Grid"
 if not "%~1"=="" set "GRID_GRAPHICS_ROOT=%~1"
 set "GRID_GRAPHICS_RESOLUTION=1920x1080"
 if not "%~2"=="" set "GRID_GRAPHICS_RESOLUTION=%~2"
+set "GRID_GRAPHICS_REFLECTIONS="
+if /I "%~3"=="probe" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe --probe-update moving --probe-size 1024"
 if not exist "target\release\grid-app.exe" (
   echo Build this graphics checkout first: cargo build -p grid-app --release --offline
   popd
@@ -21,8 +23,9 @@ set "GRID_GRAPHICS_LOG=local\graphics\manual-%RANDOM%-%RANDOM%.log"
 echo Experimental graphics branch - source sky lighting, layered car/track materials and smooth tyres.
 echo Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit.
 echo Resolution %GRID_GRAPHICS_RESOLUTION%; maximize the window for your display.
+if defined GRID_GRAPHICS_REFLECTIONS echo Environment reflections enabled.
 echo Private log: %GRID_GRAPHICS_LOG%
-"target\release\grid-app.exe" --drive --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% > "%GRID_GRAPHICS_LOG%" 2>&1
+"target\release\grid-app.exe" --drive --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"
 echo Exited with code %GRID_GRAPHICS_EXIT%.
 popd
