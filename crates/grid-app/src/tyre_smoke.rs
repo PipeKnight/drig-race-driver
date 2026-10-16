@@ -223,9 +223,11 @@ fn draw(
             } else {
                 (right, up, (eye - centre).normalize_or(Vec3::Y))
             };
+            // The original puts the corners at ±size (886BD0, 0x88B3DB): the
+            // stored size is the half extent, so the drawn edge is 2 × size.
             let (sin, cos) = s.rotation.sin_cos();
-            let hx = (axis_x * cos + axis_y * sin) * (0.5 * s.size[0]);
-            let hy = (axis_y * cos - axis_x * sin) * (0.5 * s.size[1]);
+            let hx = (axis_x * cos + axis_y * sin) * s.size[0];
+            let hy = (axis_y * cos - axis_x * sin) * s.size[1];
             let [u0, v0, u1, v1] = library.frame_uv(s.texture, s.frame);
             // Data colours are display-referred; vertex colours are linear.
             let c = Color::srgba(s.colour[0], s.colour[1], s.colour[2], s.colour[3]).to_linear();

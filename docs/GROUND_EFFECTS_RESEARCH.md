@@ -178,7 +178,8 @@ output in the main checkout's `local/tyre-smoke/`).
 - Consequences [V for the shipped data]:
   - Every debris emitter whose final size is −1 (Muddy_Bits, Grassy Clumps, Sand) or 4.0
     (K_Gravel Large_Stones) has no scaleType, so its final size is ignored. The **gravel stones
-    stay 0.015 × (1 ± 0.70)**, about 0.5–2.6 cm, with growth 1.
+    stay 0.015 × (1 ± 0.70)**, about 0.5–2.6 cm, with growth 1 (a half extent: drawn 1–5 cm
+    across, see the quad-extent item below).
   - The F313 port read 0.015→4.0 as a linear lerp in metres. Opaque stone sprites grew to
     about 4 m (up to 6.8 m with the variance) within 0.8 s. This is the "big flat pictures"
     on gravel and dirt that the owner reported.
@@ -192,11 +193,17 @@ output in the main checkout's `local/tyre-smoke/`).
   accumulates them, so the K_Gravel values (which only look cumulative) give frame 8 about
   80 %, frame 7 16 % and frame 6 3 %. `grid_formats::kickup` already normalises them the same
   way.
-- [D, extent open] Renderer `886BD0`: the camera-facing corner code (`0x88B3DB..0x88B7EE`) puts
-  the corners at (±width, ±height) in the particle basis. The basis comes from normalised
-  rotation rows (`0x88AC29` normalise → `4695B0`). [I] If that basis is orthonormal, the
-  drawn quad is 2 × size: a 3 cm stone, and twice the current smoke sizes. Both ports
-  currently draw the size as the full quad edge. This is not adopted until it is confirmed.
+- [V] Quad extent (F319, full evidence in TYRE_SMOKE_RESEARCH.md §4.3): the stored width is
+  the **half** extent.
+  - Renderer `886BD0` puts the corners at (±width, ±height) (`0x88B3DB..0x88B7EE`).
+  - The rows are spin × billboard basis, and both have unit, perpendicular rows:
+    - InverseView uses the camera rows (`0x886FF9`, from `setCamera 0x868D60`);
+    - CameraFacing and HorizonAligned use the look-at frame `4695B0`;
+    - the spin is identity or an axis–angle rotation about a normalised axis.
+  - So the drawn quad is 2 × size. A Large_Stones stone is about 1–5 cm (0.015 ± 70 % half
+    extent).
+  - Both ports drew the size as the full edge until F319; `particles.rs` and `tyre_smoke.rs`
+    now use it as the half extent.
 - [D] The other appearance properties match the port's approach:
   - Large_Stones is `InverseView` (a camera-facing billboard in the original as well);
   - its particle type `lit` uses shader `pfx_lit` with the lit stream (normal + TEXCOORD1
@@ -366,7 +373,7 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
       longer after the change, because the alpha fades are now seconds rather than life
       fractions.
   - No runtime capture of the original exists; the claim is "matches the recovered rule".
-    The size convention (half or full extent) remains open.
+    F319 later settled the size convention: the stored size is the half extent (section 2).
 
 ## 6. Open items
 
@@ -379,8 +386,6 @@ and the textures from `pfx_textures.pssg`. 11 systems; 5 texture/lighting slots.
 - Emitter direction convention: the tyre-smoke research has emitters along local +Z of a
   rearward wheel frame, while the debris port emits along the tilted up axis. Also open: birth
   timelines (`start`/`end`), spin (`initialRotationVariance` is not parsed).
-- Quad extent: is the stored size the half or the full edge (renderer corners at ±size,
-  section 2)? This affects tyre smoke and debris alike.
 - Ground-cover fixed meshes (mode 1, other tracks); the sprite fields 90/0.8/1.0 and the type
   float 16.0; GPU billboarding to avoid CPU mesh rebuilds; terrain-slope shear and fog.
 - Unify `grid_formats::kickup` with the overlapping `grid_tools::tyre_smoke` parsers (both on

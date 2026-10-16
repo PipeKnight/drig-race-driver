@@ -258,15 +258,74 @@ held `0x8A98B0` / `0x8A99C0` (80 slots), re-request `0x8A9AF0`, stop `0x882EC0`,
    - v is a whole percent drawn in ±scaleVariance at spawn;
    - the defaults are growth 1 and scaleVariance 1;
    - finalWidth/finalHeight are never read, so `-1` or K_Gravel's 4.0 have no effect.
-   This port already follows the rule. Open: the renderer places quad corners at ±size
-   (`0x88B3DB`), so the drawn edge may be 2 × size.
+   This port already follows the rule. The stored w/h is the **half** extent: the drawn
+   quad is 2w × 2h (§4.3, F319).
 8. Alpha (seconds against the varied life L): lerp(start, middle) over inTime, hold middle,
    lerp(middle, end) over the last outTime; absent values are 1 / 0 s. Colour: linear from
    start to end over life.
 9. Texture frame: `frequency` atlases choose a frame once at spawn from the cumulative
    frequencies (Wisps08_32: ~97 % frame 3); UV column = frame % widthInBlocks.
-10. Rendering: InverseView billboards from the camera basis; HorizonAligned flat [I];
-    near-camera fade between two unresolved distances; alpha < 0.001 dropped.
+10. Rendering: InverseView billboards from the camera basis, HorizonAligned flat on the
+    ground; corners at ±w, ±h, so the drawn edge is 2 × size (§4.3) [V]. Near-camera fade
+    between two unresolved distances; alpha < 0.001 dropped.
+
+### 4.3 Quad extent (renderer 0x886BD0) [V]
+
+Recorded 15 October 2026 (F319). Static only (capstone on the hash-pinned PE, private dumps
+in `local/particle-extent/disasm/`). The question was whether the stored particle size is the
+full quad edge or the half extent. **It is the half extent: the drawn quad is 2 × width by
+2 × height.**
+
+- **Same struct.** Update `8A9CC0` writes width/height to particle +0x20/+0x24
+  (`0x8AB458`, `0x8AB477`: initial × (1 + v·0.01) × growth^⌊25·age⌋, no factor ½) and the
+  angle to +0x28 (`0x8AB2DF`). The renderer reads the same particle (`[esp+0xA4]`, from the
+  list at `0x8872C3`): angle +0x28 (`0x8875CB`), width/height +0x20/+0x24 at the corners.
+- **Corners.** `0x88B3DB..0x88B7EE` builds each vertex from (±w, ±h, 0, 0) (the sign from
+  −0.0 at `0xCAFE50` minus the size), multiplied by the rows at `esp+0x180/0x190/0x1A0`,
+  plus row `esp+0x1B0`, plus the particle offset. Only rows 0 and 1 matter (z = 0). The
+  result then goes through the inverse of the node transform (3×3 cofactors over `rcpps`
+  of the determinant, `0x88B1D6..0x88B2AB`), which the draw's world matrix cancels.
+- **Rows = spin R × billboard basis B** (`0x88ACDA..0x88AE00`): row i = Rᵢ·B, row 3 =
+  R₃·B + B₃.
+- **Spin R** (`esp+0x220..0x250`):
+  - |angle| < 1e-4 (`0x8875D4..0x8875FC`): identity (`0x887602..0x8876D8`).
+  - Otherwise an axis–angle (Rodrigues) rotation (`0x8876F7..0x887B67`): sin/cos by a minimax
+    polynomial after reduction by 2/π, rows c·eᵢ ± s·[a]× + (1 − c)·aᵢ·a.
+  - Axis a = emitter +0x190, normalised once at parse time (`0x8A5D00..0x8A5D2F`, rsqrt plus
+    one Newton step). +0x188 is `axisType` (random3D 0, WorldSpace 1, ParticleSpace 2,
+    SpeedSpace 3, parser `0x8A5A7C`), not the billboarding type.
+- **Billboard basis B** (emitter +0x84 = `billboardingType`, parser `0x8A4DBC`:
+  InverseView 1, CameraFacing 2, OrientationAligned 3, VelocityAligned 4, HorizonAligned 5,
+  ZAxisAligned 6, VelocityFacing 7, VelocityFacingX 8). Dispatch: jump table `0x88CC34`
+  before the loop, and `cmp [edi+0x84]` at `0x888918`, `0x889233`, `0x8897D0`, `0x889D4E` and
+  `0x88A8D4` inside it.
+  - **InverseView** (all K_Tarmac smoke and K_Gravel Large_Stones): table entry
+    `0x886FF9`: B = the camera rows copied at entry (`0x886C51..0x886CD9`) from manager
+    +0x19F100/+0x19F110/+0x19F120, with zero translation. `setCamera 0x868D60` fills
+    those rows from camera +0x90/+0xA0/+0xB0 (position +0xC0 → +0x19F130).
+  - **CameraFacing** (`0x88AB37..0x88AC59`): d = normalise(camera position − particle),
+    B = `4695B0`(d).
+  - **HorizonAligned** (table `0x886E5F`): B = `4695B0`(world up, optionally through the
+    node rotation `0x868940`).
+  - `4695B0` is an orthonormal look-at frame: up = (0, 1, 0), or (0, 0, 1) when |d·up| > 0.9;
+    row 0 = normalise(d × up), row 1 = normalise(d × row 0), row 2 = d, row 3 = (0, 0, 0, 1).
+    Rows 0 and 1 are unit and perpendicular even if d is not.
+- **Camera rows are unit.** The race camera path `5FA440` builds its matrix from three
+  rsqrt-normalised vectors (`0x5FA826`, `0x5FA959`, `0x5FAA9E`; cross products in between).
+  `864770` only permutes and negates rows: (row 1, row 0, −row 2, row 3). `63A370` then
+  derives the camera matrices with general 4×4 inverses (`rcpps` of the determinant,
+  `0x63A7CD`, `0x63ACC7`) and stores the world rows at camera +0x90..+0xC0 (`0x63ACEF..`).
+  Inverses and row permutations of a rigid matrix stay rigid, so B has unit,
+  perpendicular rows.
+  - [I] Other camera callers of `63A370` (`5BCDCF`, `5C8023`, `5E09BC`, `5F3F09/5F4558`,
+    `63B010`, `6430B7/64311E`) were not traced. A camera with scaled rows would also scale
+    the view-space depth that the near fade and LOD use, so a rigid camera is the only
+    consistent reading.
+
+Consequence: for InverseView, CameraFacing and HorizonAligned billboards, the on-screen
+quad edge is 2 × the stored size. K_Tarmac Smoke (0.4 → 2.0) ends 4 m across; K_Gravel
+stones (0.015 ± 70 %) are about 1–5 cm. Both ports drew the size as the full edge (half the
+original) until F319.
 
 ## 5. Open
 

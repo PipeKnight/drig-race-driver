@@ -128,7 +128,9 @@ impl Store {
         let mut colors = Vec::new();
         let mut indices = Vec::new();
         for p in self.particles.iter().filter(|p| p.look.slot == slot) {
-            let half = 0.5 * p.width();
+            // Corners at ±width, as in the original renderer (886BD0, 0x88B3DB):
+            // the stored width is the half extent.
+            let half = p.width();
             let (s, c) = p.rotation.sin_cos();
             let x = (right * c + up * s) * half;
             let y = (up * c - right * s) * half;
