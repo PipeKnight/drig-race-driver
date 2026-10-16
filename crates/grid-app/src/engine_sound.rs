@@ -176,11 +176,11 @@ fn update(
     }
     if input.just_pressed(KeyCode::KeyM) {
         sound.muted = !sound.muted;
-        println!("engine_audio version=2 event=mute muted={}", sound.muted);
+        log_line!("engine_audio version=2 event=mute muted={}", sound.muted);
     }
     if !*started && !sinks.is_empty() {
         *started = true;
-        println!("engine_audio version=2 event=output_started");
+        log_line!("engine_audio version=2 event=output_started");
     }
     let mut control = sound.control(&driving);
     // The engine idles and may be revved during the countdown; the vehicle no
@@ -291,7 +291,7 @@ mod tests {
             let mut app = App::new();
             app.insert_resource(sound).init_resource::<ButtonInput<KeyCode>>()
                 .add_message::<AppExit>()
-                .insert_resource(crate::Driving { runtime: grid_tools::source_vehicle::Runtime::lacetti(root,"slot_00",200679).unwrap(), geometry: None, paused:false, failure:None, scripted_ticks:None, scripted:Default::default(),handbrake_from:None, last_controls:None, segment:0, started:std::time::Instant::now(), opponents: None })
+                .insert_resource(crate::Driving { runtime: grid_tools::source_vehicle::Runtime::lacetti(root,"slot_00",200679).unwrap(), geometry: None, paused:false, failure:None, notices:Vec::new(), scripted_ticks:None, scripted:Default::default(),handbrake_from:None, last_controls:None, segment:0, started:std::time::Instant::now(), opponents: None })
                 .add_systems(Update,(crate::drive_actions,crate::drive_tick,update).chain());
             let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.load(Ordering::Relaxed));
             let press = |app: &mut App,key| {let mut input=app.world_mut().resource_mut::<ButtonInput<KeyCode>>();input.reset_all();input.press(key);};

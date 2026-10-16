@@ -56,7 +56,7 @@ impl Trial {
         let before = self.state.countdown_label();
         self.state.countdown_tick();
         if before != self.state.countdown_label() {
-            println!(
+            log_line!(
                 "drive_trial_event version=1 type=countdown remaining={}",
                 self.state
                     .countdown_label()
@@ -74,7 +74,7 @@ impl Trial {
     pub fn reset(&mut self) {
         self.state.reset();
         self.base = None;
-        println!(
+        log_line!(
             "drive_trial_event version=1 type=reset laps={}",
             self.key.laps
         );
@@ -109,14 +109,14 @@ impl Trial {
             .finish_tick(tick - base, &events)
             .map_err(|_| failed)?;
         if self.state.completed_laps() != old {
-            println!(
+            log_line!(
                 "drive_trial_event version=1 type=lap tick={tick} completed={} target={}",
                 self.state.completed_laps(),
                 self.key.laps
             );
         }
         if let Phase::Finished(result) = self.state.phase() {
-            println!(
+            log_line!(
                 "drive_trial_event version=1 type=finish tick={tick} laps={} seconds={:.9} best_lap={:.9} invalid_attempts={}",
                 result.laps.len(),
                 result.seconds,
@@ -127,7 +127,7 @@ impl Trial {
                 match records.record(self.key, result, super::BUILD_REVISION) {
                     Ok(()) => {
                         self.save_failed = false;
-                        println!(
+                        log_line!(
                             "drive_trial_records event=saved mode={} laps={}",
                             self.key.mode.name(),
                             self.key.laps
@@ -141,6 +141,24 @@ impl Trial {
             }
         }
         Ok(())
+    }
+    /// After [`Self::tick`] refused `tick`: count the lap as an invalid attempt
+    /// and keep the clock running (see `State::skip_tick`). Returns whether
+    /// the lap now in progress is still timed.
+    pub fn invalidate(&mut self, tick: u64, events: &[grid_tools::lap_progress::Event]) -> bool {
+        use grid_tools::lap_progress::Event;
+        let base = *self.base.get_or_insert(tick.saturating_sub(1));
+        let shift = base as f64 * f64::from(grid_tools::source_vehicle::DELTA);
+        let events: Vec<_> = events
+            .iter()
+            .map(|event| match event {
+                Event::Started { when } => Event::Started { when: when - shift },
+                other => other.clone(),
+            })
+            .collect();
+        let timed = self.state.skip_tick(tick.saturating_sub(base), &events);
+        log_line!("drive_trial_event version=1 type=lap_invalidated tick={tick} timed={timed}");
+        timed
     }
     pub fn hud(&self) -> String {
         let best = self.records.as_ref().and_then(|r| r.best(self.key));

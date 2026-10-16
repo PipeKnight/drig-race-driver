@@ -186,7 +186,7 @@ pub(crate) fn present(
     // A restart clears the events.
     *logged = (*logged).min(props.events.len());
     for event in &props.events[*logged..] {
-        println!(
+        log_line!(
             "dynamic_props event=break tick={} breakable={} template={} force={} pieces={} bodies={}",
             event.tick,
             event.breakable,

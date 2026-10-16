@@ -35,6 +35,8 @@ pub struct MultiRuntime {
     /// contacts with static geometry, and the car-to-car normals with the
     /// other car's index (see [`Self::obstruction`]).
     statics_normals: Vec<[f32; 3]>,
+    /// Per car: track, prop and car body records of the last tick.
+    body_counts: Vec<usize>,
     car_normals: Vec<(usize, usize, [f32; 3])>,
     /// Car speeds at the end of the last tick (the app swaps car 0 out
     /// between ticks).
@@ -42,6 +44,182 @@ pub struct MultiRuntime {
     /// Opt-in breakable route props; pieces are bodies after the cars.
     props: Option<crate::dynamic_props::PropWorld>,
     initial_shapes: Vec<contact_groups::Shape>,
+    /// Per car: why and since when it is out of the shared world.
+    retired: Vec<Option<Retirement>>,
+    /// Cars retired by the last tick.
+    newly_retired: Vec<usize>,
+    #[cfg(test)]
+    fail_lap_timing: Option<(usize, u64)>,
+}
+
+/// A car taken out after its own pipeline failed (see [`MultiRuntime::tick`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Retirement {
+    /// Shared-world tick whose step failed for this car.
+    pub tick: u64,
+    pub error: Error,
+    /// Held body kinematics: the last committed record, velocities zeroed.
+    kinematics: [u32; KINEMATIC_WORDS],
+}
+
+/// Body words 0x1C0..0x230: mass centre, pose, angular and linear velocity.
+const KINEMATICS: usize = 0x1c0 / 4;
+const KINEMATIC_WORDS: usize = (0x230 - 0x1c0) / 4;
+const VELOCITIES: std::ops::Range<usize> = (0x210 - 0x1c0) / 4..KINEMATIC_WORDS;
+
+fn held_kinematics(body: &contact_groups::Body) -> [u32; KINEMATIC_WORDS] {
+    let mut held: [u32; KINEMATIC_WORDS] = std::array::from_fn(|k| body[KINEMATICS + k]);
+    held[VELOCITIES].fill(0);
+    held
+}
+
+fn hold(body: &mut contact_groups::Body, held: &[u32; KINEMATIC_WORDS]) {
+    body[KINEMATICS..KINEMATICS + KINEMATIC_WORDS].copy_from_slice(held);
+}
+
+/// One car's vehicle stage, staged before the common advance.
+struct Staged {
+    state: vehicle_manager::State,
+    cache: rectangle_cull::Cache,
+    contacts: Vec<contact_groups::Contact>,
+    published: Option<crate::body_geometry::BodyGeometry>,
+    registration: Option<deformation_world::Registration>,
+}
+
+/// Controls, track queries and the vehicle manager of one car against its
+/// body record from the previous world.
+fn vehicle_stage(
+    car: &Runtime,
+    base: &crate::body_geometry::BodyGeometry,
+    controls: Controls,
+    physical: contact_groups::Body,
+    delta: f32,
+    pool: &wheel_contacts::Pool,
+) -> Result<Staged, Error> {
+    let mut state = car.staged_car(controls)?;
+    state.owner.physical = physical;
+    state
+        .frame
+        .body
+        .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
+    let mut cache = car.cache;
+    let query = |_, ray: grid_world::contact_ray::Ray| {
+        car.track
+            .query(ray.start, ray.end, &mut cache)?
+            .hit
+            .map(|h| {
+                let (index, material) = car
+                    .surfaces
+                    .contact(h.contact.material)
+                    .map_err(|_| Error("missing source mechanics"))?;
+                Ok(suspension_prepare::Contact {
+                    normal: h.contact.normal,
+                    fraction: h.contact.fraction,
+                    material,
+                    tokens: [index as u32 + 1, h.shape + 1, 1],
+                })
+            })
+            .transpose()
+    };
+    let material = |token| car.surfaces.joined(token);
+    let mut published = None;
+    let mut registration = None;
+    let manager = if car.deformation_enabled {
+        // The body geometry is copied only when a publication rebuilds it.
+        let mut rebuilt: Option<crate::body_geometry::BodyGeometry> = None;
+        let manager = vehicle_manager::calculate_with_world_publication_staged(
+            state,
+            pool,
+            car.pair,
+            delta,
+            GRAVITY,
+            None,
+            query,
+            material,
+            &mut |owner, delta| {
+                let (geometry, next) = rebuilt
+                    .as_ref()
+                    .unwrap_or(base)
+                    .deformation_publication(owner, delta)?;
+                if geometry.is_some() {
+                    rebuilt = geometry;
+                }
+                Ok(next)
+            },
+        )?;
+        published = rebuilt;
+        if let Some(current) = &car.deformation_registration {
+            registration = Some(deformation_world::Registration {
+                owner: manager.job.state.owner.vehicle.clone(),
+                limit: current.limit,
+                bulk: current.bulk.clone(),
+                random_seed: current.random_seed,
+                bulk_calls: current.bulk_calls,
+                records: current.records,
+                owner_toggle: current.owner_toggle,
+            });
+        }
+        manager
+    } else {
+        vehicle_manager::calculate_with_world_contacts_staged(
+            state, pool, car.pair, delta, GRAVITY, None, query, material,
+        )?
+    };
+    Ok(Staged {
+        contacts: manager.contacts.slots[..manager.contacts.used].to_vec(),
+        state: manager.job.state,
+        cache,
+        published,
+        registration,
+    })
+}
+
+/// Body events of one car's solved contacts (owned damage RNG).
+fn body_events(
+    state: &mut vehicle_manager::State,
+    parameters: body_impact::Parameters,
+    contacts: &[contact_groups::Contact],
+    token: u32,
+    parameter: f32,
+) -> Result<(), Error> {
+    for contact in contacts {
+        let side = match [contact[0x28 / 4] == token, contact[0x2c / 4] == token] {
+            [true, false] => 0,
+            [false, true] => 1,
+            _ => continue,
+        };
+        let result = body_impact::calculate(
+            &state.owner,
+            body_impact::Event {
+                point: std::array::from_fn(|j| f32::from_bits(contact[0x50 / 4 + j])),
+                normal: std::array::from_fn(|j| f32::from_bits(contact[0x60 / 4 + j])),
+                impact: f32::from_bits(contact[0x3c / 4]),
+                parameter,
+                // Car-to-car: the other car's world body identity
+                // (A726B0 passes the peer side's registration).
+                other_registration: if contact[0xc / 4] & 0xff == 0 && contact[2] != 0 {
+                    if side == 0 { contact[2] } else { contact[1] }
+                } else {
+                    0
+                },
+                other_word: contact[if side == 0 { 0x34 / 4 } else { 0x30 / 4 }],
+            },
+            side,
+            parameters,
+            &[None; 11],
+            state
+                .owner
+                .damage_random_state
+                .ok_or(Error("body impact requires owned damage RNG"))?,
+        )?;
+        state.owner = result.state;
+        state.owner.damage_random_state = Some(result.random_state);
+    }
+    state
+        .frame
+        .body
+        .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
+    Ok(())
 }
 
 /// Body centre (translation row of the physical pose).
@@ -170,10 +348,30 @@ impl MultiRuntime {
             last_car_contacts: 0,
             last_active: 0,
             statics_normals: vec![[0.; 3]; n],
+            body_counts: vec![0; n],
             car_normals: Vec::new(),
             speeds: vec![0.; n],
             props: None,
+            retired: vec![None; n],
+            newly_retired: Vec::new(),
+            #[cfg(test)]
+            fail_lap_timing: None,
         })
+    }
+
+    /// Why car `i` is out of the shared world, if it is.
+    pub fn retirement(&self, i: usize) -> Option<&Retirement> {
+        self.retired.get(i)?.as_ref()
+    }
+
+    /// Track, prop and car body records of car `i` in the last tick.
+    pub fn body_contacts_of(&self, i: usize) -> usize {
+        self.body_counts.get(i).copied().unwrap_or(0)
+    }
+
+    /// Cars retired by the last tick, in car order.
+    pub fn newly_retired(&self) -> &[usize] {
+        &self.newly_retired
     }
 
     /// Opt in to breakable route props before the first tick (see
@@ -281,12 +479,24 @@ impl MultiRuntime {
         self.last_body_contacts = 0;
         self.last_car_contacts = 0;
         self.statics_normals = vec![[0.; 3]; self.cars.len()];
+        self.body_counts = vec![0; self.cars.len()];
         self.car_normals.clear();
         self.speeds = vec![0.; self.cars.len()];
+        self.retired = vec![None; self.cars.len()];
+        self.newly_retired.clear();
     }
 
-    /// One common timestep for all cars. Every car, the shared world and all
-    /// query caches stay unchanged if any stage fails.
+    /// One common timestep for all cars.
+    ///
+    /// A car whose own stage fails (controls, vehicle manager, its track or
+    /// car contacts, body events, lap timing) keeps its previous state and is
+    /// retired: its body is held at its last committed pose with zero velocity
+    /// from then on, still colliding with the others, and the rest of the
+    /// field steps on. This is the port's nearest equivalent to the original
+    /// skipping an over-limit island for a step (B7B850 status 1) without
+    /// stopping the race; the original has no per-car retirement. Shared
+    /// stages (the world advance, prop pieces) still fail the whole tick, and
+    /// then every car, the shared world and all query caches stay unchanged.
     pub fn tick(&mut self, controls: &[Controls]) -> Result<(), Error> {
         let n = self.cars.len();
         if controls.len() != n {
@@ -296,104 +506,51 @@ impl MultiRuntime {
         let mut previous = self.world.clone();
         let mut slots = self.world.groups.contacts.clone();
         let mut used = 0;
-        let mut staged = Vec::with_capacity(n);
+        let mut failed: Vec<Option<Error>> = vec![None; n];
+        let mut staged: Vec<Option<vehicle_manager::State>> = Vec::with_capacity(n);
         let mut caches = Vec::with_capacity(n);
         let mut published: Vec<Option<crate::body_geometry::BodyGeometry>> = vec![None; n];
         let mut registrations: Vec<Option<deformation_world::Registration>> = vec![None; n];
         for (i, car) in self.cars.iter().enumerate() {
-            let mut state = car.staged_car(controls[i])?;
-            state.owner.physical = previous.groups.bodies[i];
-            state
-                .frame
-                .body
-                .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
-            let mut cache = car.cache;
-            let query = |_, ray: grid_world::contact_ray::Ray| {
-                car.track
-                    .query(ray.start, ray.end, &mut cache)?
-                    .hit
-                    .map(|h| {
-                        let (index, material) = car
-                            .surfaces
-                            .contact(h.contact.material)
-                            .map_err(|_| Error("missing source mechanics"))?;
-                        Ok(suspension_prepare::Contact {
-                            normal: h.contact.normal,
-                            fraction: h.contact.fraction,
-                            material,
-                            tokens: [index as u32 + 1, h.shape + 1, 1],
-                        })
-                    })
-                    .transpose()
-            };
-            let material = |token| car.surfaces.joined(token);
-            if used + 4 > pool_slots(n) {
-                return Err(Error("shared wheel contact pool exhausted"));
-            }
-            let pool = wheel_contacts::Pool {
-                slots: slots[used..used + 4].to_vec(),
-                used: 0,
-                shapes: self.statics,
-            };
-            let manager = if car.deformation_enabled {
-                // The body geometry is copied only when a publication rebuilds it.
-                let base = &self.geometry[i];
-                let mut rebuilt: Option<crate::body_geometry::BodyGeometry> = None;
-                let manager = vehicle_manager::calculate_with_world_publication_staged(
-                    state,
-                    &pool,
-                    car.pair,
-                    previous.manager.parameters[0],
-                    GRAVITY,
-                    None,
-                    query,
-                    material,
-                    &mut |owner, delta| {
-                        let (geometry, next) = rebuilt
-                            .as_ref()
-                            .unwrap_or(base)
-                            .deformation_publication(owner, delta)?;
-                        if geometry.is_some() {
-                            rebuilt = geometry;
-                        }
-                        Ok(next)
-                    },
-                )?;
-                published[i] = rebuilt;
-                if let Some(registration) = &car.deformation_registration {
-                    registrations[i] = Some(deformation_world::Registration {
-                        owner: manager.job.state.owner.vehicle.clone(),
-                        limit: registration.limit,
-                        bulk: registration.bulk.clone(),
-                        random_seed: registration.random_seed,
-                        bulk_calls: registration.bulk_calls,
-                        records: registration.records,
-                        owner_toggle: registration.owner_toggle,
-                    });
+            if self.retired[i].is_none() {
+                if used + 4 > pool_slots(n) {
+                    return Err(Error("shared wheel contact pool exhausted"));
                 }
-                manager
-            } else {
-                vehicle_manager::calculate_with_world_contacts_staged(
-                    state,
-                    &pool,
-                    car.pair,
+                let pool = wheel_contacts::Pool {
+                    slots: slots[used..used + 4].to_vec(),
+                    used: 0,
+                    shapes: self.statics,
+                };
+                match vehicle_stage(
+                    car,
+                    &self.geometry[i],
+                    controls[i],
+                    previous.groups.bodies[i],
                     previous.manager.parameters[0],
-                    GRAVITY,
-                    None,
-                    query,
-                    material,
-                )?
-            };
-            for k in 0..manager.contacts.used {
-                let mut c = manager.contacts.slots[k];
-                c[1] = i as u32 + 1;
-                c[0x28 / 4] = tokens[i];
-                slots[used + k] = c;
+                    &pool,
+                ) {
+                    Ok(stage) => {
+                        for mut c in stage.contacts {
+                            c[1] = i as u32 + 1;
+                            c[0x28 / 4] = tokens[i];
+                            slots[used] = c;
+                            used += 1;
+                        }
+                        previous.groups.bodies[i] = stage.state.owner.physical;
+                        published[i] = stage.published;
+                        registrations[i] = stage.registration;
+                        staged.push(Some(stage.state));
+                        caches.push(stage.cache);
+                        continue;
+                    }
+                    Err(error) => failed[i] = Some(error),
+                }
             }
-            used += manager.contacts.used;
-            previous.groups.bodies[i] = manager.job.state.owner.physical;
-            staged.push(manager.job.state);
-            caches.push(cache);
+            // Retired or failing: the body holds still through the advance.
+            let held = self.held(i);
+            hold(&mut previous.groups.bodies[i], &held);
+            staged.push(None);
+            caches.push(car.cache);
         }
         let wheel_contacts = used;
         let mut body_contacts = 0;
@@ -405,25 +562,40 @@ impl MultiRuntime {
             .collect();
         let cars = &self.cars;
         let props = self.props.as_ref();
+        let moving: Vec<bool> = staged.iter().map(Option::is_some).collect();
         let mut recorded = Vec::new();
         let mut piece_contacts = 0;
         let mut statics_normals = vec![[0f32; 3]; n];
+        let mut body_counts = vec![0; n];
         let mut car_normals = Vec::new();
+        let mut contact_failed: Vec<Option<Error>> = vec![None; n];
         let mut provider = |bodies: &[contact_groups::Body], remaining: usize| {
             let mut out: Vec<contact_groups::Contact> = Vec::new();
             statics_normals.iter_mut().for_each(|s| *s = [0.; 3]);
+            body_counts.iter_mut().for_each(|c| *c = 0);
             car_normals.clear();
             recorded.clear();
             for i in 0..n {
                 if out.len() >= remaining {
                     break;
                 }
-                let fresh = geometry[i].contacts_with_props(
+                // A held body needs no static contacts; the others still hit it.
+                if !moving[i] || contact_failed[i].is_some() {
+                    continue;
+                }
+                let fresh = match geometry[i].contacts_with_props(
                     &cars[i].track,
                     &cars[i].surfaces,
                     &bodies[i..=i],
                     (remaining - out.len()).min(32),
-                )?;
+                ) {
+                    Ok(fresh) => fresh,
+                    Err(error) => {
+                        contact_failed[i] = Some(error);
+                        continue;
+                    }
+                };
+                body_counts[i] += fresh.len();
                 let centre = body_centre(&bodies[i]);
                 for (mut c, prop) in fresh {
                     c[1] = i as u32 + 1;
@@ -455,17 +627,35 @@ impl MultiRuntime {
                 (0..n).map(|_| None).collect();
             for i in 0..n {
                 for j in i + 1..n {
-                    if out.len() >= remaining {
+                    if out.len() >= remaining || contact_failed[i].is_some() {
                         break;
+                    }
+                    if contact_failed[j].is_some() {
+                        continue;
                     }
                     let other = match &mut hulls[j] {
                         Some(hull) => hull,
-                        empty => empty.insert(crate::body_geometry::WorldHull::new(
-                            &geometry[j].hull_world_triangles(&bodies[j])?,
-                        )),
+                        empty => match geometry[j].hull_world_triangles(&bodies[j]) {
+                            Ok(triangles) => {
+                                empty.insert(crate::body_geometry::WorldHull::new(&triangles))
+                            }
+                            Err(error) => {
+                                contact_failed[j] = Some(error);
+                                continue;
+                            }
+                        },
                     };
-                    let pair =
-                        geometry[i].car_contacts_hull(&bodies[i], other, remaining - out.len())?;
+                    let pair = match geometry[i].car_contacts_hull(
+                        &bodies[i],
+                        other,
+                        remaining - out.len(),
+                    ) {
+                        Ok(pair) => pair,
+                        Err(error) => {
+                            contact_failed[i] = Some(error);
+                            break;
+                        }
+                    };
                     for hit in pair {
                         let mut c = [0; 32];
                         c[1] = i as u32 + 1;
@@ -484,6 +674,8 @@ impl MultiRuntime {
                         car_normals.push((i, j, pushing_normal(&c, body_centre(&bodies[i]))));
                         out.push(c);
                         car_contacts += 1;
+                        body_counts[i] += 1;
+                        body_counts[j] += 1;
                     }
                 }
             }
@@ -549,53 +741,35 @@ impl MultiRuntime {
             props_next = Some((next, disabled));
         }
         let active = wheel_contacts + body_contacts + car_contacts + piece_contacts;
-        for (i, state) in staged.iter_mut().enumerate() {
+        for (i, error) in contact_failed.into_iter().enumerate() {
+            if let Some(error) = error
+                && failed[i].is_none()
+            {
+                failed[i] = Some(error);
+                staged[i] = None;
+            }
+        }
+        for (i, slot) in staged.iter_mut().enumerate() {
+            let Some(state) = slot else {
+                continue;
+            };
             // The registration's owner is moved into the car and refilled below.
             if let Some(registration) = &mut registrations[i] {
                 std::mem::swap(&mut state.owner.vehicle, &mut registration.owner);
             }
             state.owner.physical = world.groups.bodies[i];
-            if let Some(parameters) = self.cars[i].body_events {
-                for contact in &world.groups.contacts[..active.min(world.groups.contacts.len())] {
-                    let side = match [
-                        contact[0x28 / 4] == tokens[i],
-                        contact[0x2c / 4] == tokens[i],
-                    ] {
-                        [true, false] => 0,
-                        [false, true] => 1,
-                        _ => continue,
-                    };
-                    let result = body_impact::calculate(
-                        &state.owner,
-                        body_impact::Event {
-                            point: std::array::from_fn(|j| f32::from_bits(contact[0x50 / 4 + j])),
-                            normal: std::array::from_fn(|j| f32::from_bits(contact[0x60 / 4 + j])),
-                            impact: f32::from_bits(contact[0x3c / 4]),
-                            parameter: world.manager.parameters[0],
-                            // Car-to-car: the other car's world body identity
-                            // (A726B0 passes the peer side's registration).
-                            other_registration: if contact[0xc / 4] & 0xff == 0 && contact[2] != 0 {
-                                if side == 0 { contact[2] } else { contact[1] }
-                            } else {
-                                0
-                            },
-                            other_word: contact[if side == 0 { 0x34 / 4 } else { 0x30 / 4 }],
-                        },
-                        side,
-                        parameters,
-                        &[None; 11],
-                        state
-                            .owner
-                            .damage_random_state
-                            .ok_or(Error("body impact requires owned damage RNG"))?,
-                    )?;
-                    state.owner = result.state;
-                    state.owner.damage_random_state = Some(result.random_state);
-                }
-                state
-                    .frame
-                    .body
-                    .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
+            if let Some(parameters) = self.cars[i].body_events
+                && let Err(error) = body_events(
+                    state,
+                    parameters,
+                    &world.groups.contacts[..active.min(world.groups.contacts.len())],
+                    tokens[i],
+                    world.manager.parameters[0],
+                )
+            {
+                failed[i] = Some(error);
+                *slot = None;
+                continue;
             }
             if let Some(registration) = &mut registrations[i] {
                 state
@@ -608,22 +782,44 @@ impl MultiRuntime {
         // Lap timing per car, staged before any commit.
         let mut laps = Vec::with_capacity(n);
         for (i, car) in self.cars.iter().enumerate() {
-            laps.push(
-                if let (Some(course), Some(lap)) = (&car.lap_course, &car.lap) {
+            let timed = match (&staged[i], &car.lap_course, &car.lap) {
+                (Some(state), Some(course), Some(lap)) => {
                     let position = std::array::from_fn(|k| {
-                        f32::from_bits(staged[i].owner.physical[0x1d0 / 4 + 12 + k])
+                        f32::from_bits(state.owner.physical[0x1d0 / 4 + 12 + k])
                     });
-                    Some(lap.advance(
-                        course,
-                        position,
-                        (self.ticks + 1) as f64 * f64::from(DELTA),
-                    )?)
-                } else {
-                    None
-                },
-            );
+                    #[cfg(test)]
+                    let injected = self.fail_lap_timing == Some((i, self.ticks + 1));
+                    #[cfg(not(test))]
+                    let injected = false;
+                    if injected {
+                        Err(Error("injected lap-timing failure"))
+                    } else {
+                        lap.advance(course, position, (self.ticks + 1) as f64 * f64::from(DELTA))
+                            .map(Some)
+                    }
+                }
+                _ => Ok(None),
+            };
+            laps.push(timed.unwrap_or_else(|error| {
+                failed[i] = Some(error);
+                staged[i] = None;
+                None
+            }));
         }
         drop(geometry);
+        // A failing car's body holds still and its staged results are dropped.
+        let mut retiring = Vec::new();
+        for i in 0..n {
+            if staged[i].is_none() {
+                let held = self.held(i);
+                hold(&mut world.groups.bodies[i], &held);
+                published[i] = None;
+                registrations[i] = None;
+                if let Some(error) = failed[i].take() {
+                    retiring.push((i, error, held));
+                }
+            }
+        }
         for (i, body) in published.into_iter().enumerate() {
             if let Some(body) = body {
                 self.geometry[i] = body;
@@ -631,17 +827,31 @@ impl MultiRuntime {
         }
         for (i, ((state, cache), timed)) in staged.into_iter().zip(caches).zip(laps).enumerate() {
             let car = &mut self.cars[i];
+            // A held car's clock still runs with the race.
+            car.ticks += 1;
+            car.lap_events.clear();
+            let Some(state) = state else {
+                continue;
+            };
             if let Some(registration) = registrations[i].take() {
                 car.deformation_registration = Some(registration);
             }
             car.state.car = state;
             car.cache = cache;
-            car.ticks += 1;
-            car.lap_events.clear();
             if let Some(timed) = timed {
                 car.lap = Some(timed.state);
                 car.lap_events = timed.events;
             }
+        }
+        self.newly_retired.clear();
+        for (i, error, kinematics) in retiring {
+            hold(&mut self.cars[i].state.car.owner.physical, &kinematics);
+            self.retired[i] = Some(Retirement {
+                tick: self.ticks + 1,
+                error,
+                kinematics,
+            });
+            self.newly_retired.push(i);
         }
         if let Some((next, disabled)) = props_next {
             for car in &mut self.cars {
@@ -658,6 +868,7 @@ impl MultiRuntime {
         self.last_car_contacts = car_contacts;
         self.last_active = active;
         self.statics_normals = statics_normals;
+        self.body_counts = body_counts;
         self.car_normals = car_normals;
         self.speeds = self
             .cars
@@ -668,6 +879,15 @@ impl MultiRuntime {
             })
             .collect();
         Ok(())
+    }
+
+    /// Held kinematics of car `i`: its retirement's, or the last committed
+    /// world body with zero velocities.
+    fn held(&self, i: usize) -> [u32; KINEMATIC_WORDS] {
+        self.retired[i].as_ref().map_or_else(
+            || held_kinematics(&self.world.groups.bodies[i]),
+            |r| r.kinematics,
+        )
     }
 }
 
@@ -968,6 +1188,122 @@ mod tests {
                         "{piece:?} {spawn:?} {now:?}"
                     );
                 }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// S3 (docs/RUNTIME_LIMITS_AUDIT.md): before containment any one car's
+    /// failure stopped every car. Car 5 fails in its vehicle stage (invalid
+    /// controls) and car 9 after the advance (lap timing); both are held
+    /// and retired while the other ten race on, reproducibly.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn twelve_car_world_retires_failing_cars_and_races_on() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let names: Vec<String> = (0..12).map(|i| format!("slot_{i:02}")).collect();
+                let slots: Vec<&str> = names.iter().map(String::as_str).collect();
+                let hash = |multi: &MultiRuntime| {
+                    let words = multi.bodies().iter().flatten().chain(
+                        multi
+                            .cars
+                            .iter()
+                            .flat_map(|c| c.state.car.owner.vehicle.iter()),
+                    );
+                    words.fold(0xcbf29ce484222325u64, |h, &w| {
+                        (h ^ u64::from(w)).wrapping_mul(0x100000001b3)
+                    })
+                };
+                const TICKS: u64 = 400;
+                // Returns (retirements by tick, poses before and after, final hash).
+                let run = |multi: &mut MultiRuntime| {
+                    multi.fail_lap_timing = Some((9, 200));
+                    let mut retired = Vec::new();
+                    let mut held = Vec::new();
+                    let mut at_200 = Vec::new();
+                    for tick in 1..=TICKS {
+                        let mut controls = [Controls {
+                            throttle: 0.6,
+                            ..Default::default()
+                        }; 12];
+                        if tick == 120 {
+                            controls[5].throttle = f32::NAN;
+                        }
+                        multi
+                            .tick(&controls)
+                            .unwrap_or_else(|e| panic!("12-car tick {tick}: {e}"));
+                        assert_eq!(multi.ticks, tick);
+                        assert!(multi.cars.iter().all(|c| c.ticks == tick));
+                        if !multi.newly_retired().is_empty() {
+                            retired.push((tick, multi.newly_retired().to_vec()));
+                            for &i in multi.newly_retired() {
+                                held.push((i, multi.cars[i].pose()));
+                            }
+                        }
+                        if tick == 200 {
+                            at_200 = multi.cars.iter().map(Runtime::pose).collect();
+                        }
+                    }
+                    (retired, held, at_200, hash(multi))
+                };
+                let mut multi = MultiRuntime::lacetti(root, &slots, &table, events).unwrap();
+                let started = std::time::Instant::now();
+                let (retired, held, at_200, first) = run(&mut multi);
+                let elapsed = started.elapsed();
+                assert_eq!(retired, [(120, vec![5]), (200, vec![9])]);
+                let five = multi.retirement(5).unwrap();
+                assert_eq!((five.tick, five.error.0), (120, "invalid driving controls"));
+                let nine = multi.retirement(9).unwrap();
+                assert_eq!((nine.tick, nine.error.0), (200, "injected lap-timing failure"));
+                // Held cars stay where they failed, at rest, with no lap events;
+                // the shared world body agrees with the car.
+                for (i, pose) in held {
+                    assert_eq!(multi.cars[i].pose(), pose, "car {i}");
+                    assert_eq!(multi.cars[i].velocity(), [0.; 4], "car {i}");
+                    assert_eq!(
+                        multi.bodies()[i][KINEMATICS..KINEMATICS + KINEMATIC_WORDS],
+                        multi.cars[i].state.car.owner.physical
+                            [KINEMATICS..KINEMATICS + KINEMATIC_WORDS]
+                    );
+                    assert!(multi.cars[i].lap_events.is_empty());
+                }
+                // The rest of the field keeps driving after both failures.
+                let moved: Vec<f32> = (0..12)
+                    .map(|i| {
+                        let (a, b) = (at_200[i], multi.cars[i].pose());
+                        ((b[12] - a[12]).powi(2) + (b[14] - a[14]).powi(2)).sqrt()
+                    })
+                    .collect();
+                eprintln!(
+                    "twelve_car_retirement moved_after_200={moved:.1?} hash={first:016x} elapsed={elapsed:?} errors={:?}",
+                    [five.error.0, nine.error.0]
+                );
+                for (i, m) in moved.iter().enumerate() {
+                    if i == 5 || i == 9 {
+                        assert_eq!(*m, 0.);
+                    } else {
+                        assert!(multi.retirement(i).is_none());
+                        assert!(multi.cars[i].pose().iter().all(|v| v.is_finite()));
+                    }
+                }
+                assert!(moved.iter().filter(|&&m| m > 5.).count() >= 8);
+                // Deterministic: a fresh world and a reset world replay it exactly.
+                let mut again = MultiRuntime::lacetti(root, &slots, &table, events).unwrap();
+                assert_eq!(run(&mut again).3, first);
+                multi.reset();
+                assert!((0..12).all(|i| multi.retirement(i).is_none()));
+                assert_eq!(run(&mut multi).3, first);
             })
             .unwrap()
             .join()

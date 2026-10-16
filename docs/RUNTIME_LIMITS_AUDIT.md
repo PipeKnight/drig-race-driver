@@ -391,6 +391,23 @@ The original design notes for this group follow.
 - **Time trial and presentation must not stop physics.** On a trial bookkeeping error, invalidate the lap and log it. On a player dent error, keep the previous mesh as the opponent path does, instead of pausing.
 - **Rate-limit the reports.** Report only player-car contacts, or every 16th tick, plus failures. Write through a buffered, non-panicking writer (`writeln!` with the error ignored).
 
+**Status (F323, implemented):**
+- `MultiRuntime::tick` contains every per-car stage: controls, vehicle manager, the car's own track contacts and car-pair hull contacts (inside the geometry provider), body events and lap timing.
+  - A failing car keeps its previous state. Its world body is held at the last committed kinematics (words 0x1C0..0x230, velocities zeroed) on every later tick. It still collides with the others, and its clock (`Runtime::ticks`) keeps running.
+  - The car is exposed through `retirement(i)` and `newly_retired()`.
+  - The world advance and prop pieces still fail the whole tick atomically, as before.
+  - With no failure the tick is byte-identical to before (12-car props test hash `6e19b665dbf510b1` on both builds).
+- grid-app:
+  - marks the car `Out::Retired` and logs one `drive_car_retired` line;
+  - shows "NAME retired: reason" (or "Your car retired: reason. R restarts") in the HUD while the field races on;
+  - shows the real message for a world-level pause ("Simulation paused: tick N: ...").
+- A refused trial tick logs `type=refused`, and `State::skip_tick` counts the lap as an invalid attempt and keeps the trial clock in step. If no lap is still timed, the runtime's current lap is marked invalid.
+- A refused player dent projection keeps the previous mesh and logs one line per refusal kind. The refused field is not projected again until it changes.
+- Reports in a race count only the player's body records (`body_contacts_of(0)`). The after-finish AI's continuous controls no longer trigger a report, and a retired player's contacts do not either.
+- `log_line!` replaces `println!` on the per-tick and per-event paths (reports, lap, trial, race-result, retirement, damage, prop-break and audio events). Startup prints are unchanged.
+- Observed side effect: a car parked directly behind a held car stays blocked (car 7 behind car 5 in the test). The respawn path (0xde4/0xdfc, S4) is not ported.
+- Not done: single-car `Runtime::tick` failures (practice and time trial) still pause, with the message now in the HUD; the R restart is still the only recovery.
+
 ### S4. Coordinate domains for other routes (R03, R11, A27)
 
 *Done in F322 (static check: private `local/runtime-limits-audit/s4/`):*

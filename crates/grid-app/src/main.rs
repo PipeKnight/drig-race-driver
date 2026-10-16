@@ -1,4 +1,14 @@
 //! Source reference viewer and serial driving prototype.
+
+/// One stdout log line for the per-tick paths. Unlike `println!`, a failed
+/// write (closed pipe, full disk) is dropped instead of panicking.
+macro_rules! log_line {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout().lock(), $($arg)*);
+    }};
+}
+
 mod assists;
 mod body_damage;
 mod damage_parts;
@@ -93,6 +103,8 @@ struct Driving {
     geometry: Option<grid_tools::body_geometry::BodyGeometry>,
     paused: bool,
     failure: Option<String>,
+    /// Cars retired after their own tick stage failed (HUD; cleared by R).
+    notices: Vec<String>,
     scripted_ticks: Option<u64>,
     scripted: grid_tools::source_vehicle::Controls,
     /// Scripted handbrake from this tick on (validation renders).
@@ -159,7 +171,7 @@ impl Driving {
             .count();
         let damage_levels = [0, 4, 8, 0x10, 0x14, 0x28, 0x2c, 0x30, 0x34]
             .map(|o| f32::from_bits(b[(0xcdf0 + o) / 4]));
-        println!(
+        log_line!(
             "drive_sample version=1 event={event} segment={} tick={} seconds={:.6} wall_seconds={:.6} throttle={} brake={} steering={} handbrake={} gear={} wheel_hits={hits} pose={:?} velocity={:?} wheel_brakes={brakes:?} body_geometry={} body_contacts={} body_events={} damage_rng_owned={} damage_rng={:08x} impact_flag={} suspension_gain={} damage_levels={damage_levels:?}",
             self.segment,
             self.runtime.ticks,
@@ -191,7 +203,7 @@ impl Driving {
             .collect::<Vec<_>>();
         let wheel_levels =
             std::array::from_fn::<_, 4, _>(|i| f32::from_bits(b[(m + 0x18) / 4 + i]));
-        println!(
+        log_line!(
             "drive_handling_sample version=1 event={event} segment={} tick={} status={} terminal_wheel={} effects_3a0_3bc={effects:?} wheel_levels={wheel_levels:?} controls_disabled={}",
             self.segment,
             self.runtime.ticks,
@@ -222,7 +234,7 @@ impl Driving {
                         .sqrt()
                 })
                 .fold(0f32, f32::max);
-            println!(
+            log_line!(
                 "drive_deformation_sample version=1 event={event} segment={} tick={} bulk_calls={} records={} crt_seed={:08x} mode={} pending_geometry={} moved_positions={moved} maximum_displacement={maximum}",
                 self.segment,
                 self.runtime.ticks,
@@ -247,7 +259,7 @@ impl Driving {
             } else {
                 "invalid"
             };
-            println!(
+            log_line!(
                 "drive_lap_sample version=1 event={event} segment={} tick={} lap={} status={status} elapsed={elapsed} next_gate={} passed_gates={} total_gates={} required_gates={} valid_laps={} attempts={} best={best}",
                 self.segment,
                 self.runtime.ticks,
@@ -1361,6 +1373,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             geometry,
             paused: false,
             failure: None,
+            notices: Vec::new(),
             scripted_ticks: drive_ticks,
             scripted,
             handbrake_from,
@@ -2197,14 +2210,47 @@ fn drive_tick(
                 )
             });
         }
-        opponents.throttles = all[1..].iter().map(|c| c.throttle).collect();
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
         let result = opponents.multi.tick(&all);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
         if result.is_ok() {
-            driving.runtime.last_body_contacts =
-                opponents.multi.last_body_contacts + opponents.multi.last_car_contacts;
+            // The player's own records: the report follows the player's
+            // contacts, not every contact in the field.
+            driving.runtime.last_body_contacts = opponents.multi.body_contacts_of(0);
+            // A car whose own stage failed is held and out of the race; the
+            // rest of the field races on (S3, docs/RUNTIME_LIMITS_AUDIT.md).
+            for &i in opponents.multi.newly_retired() {
+                let Some(retirement) = opponents.multi.retirement(i) else {
+                    continue;
+                };
+                let name = opponents.names.get(i).map_or("car", String::as_str);
+                log_line!(
+                    "drive_car_retired version=1 segment={} tick={} car={i} name={name:?} error={:?}",
+                    driving.segment,
+                    retirement.tick,
+                    retirement.error.0
+                );
+                opponents
+                    .standings
+                    .retire(i, grid_tools::race::Out::Retired);
+                driving.notices.push(if i == 0 {
+                    format!("Your car retired: {}. R restarts", retirement.error)
+                } else {
+                    format!("{name} retired: {}", retirement.error)
+                });
+            }
         }
+        opponents.throttles = all[1..]
+            .iter()
+            .enumerate()
+            .map(|(k, c)| {
+                if opponents.multi.retirement(k + 1).is_some() {
+                    0.
+                } else {
+                    c.throttle
+                }
+            })
+            .collect();
         result
     } else if let Some(geometry) = &mut driving.geometry {
         if driving.runtime.deformation_enabled {
@@ -2223,14 +2269,24 @@ fn drive_tick(
         driving.failure = Some(text);
         driving.report("failure", controls);
     } else {
+        // Trial bookkeeping never stops physics: a refused tick invalidates
+        // the lap and the trial clock runs on.
         if !held
             && let Some(trial) = trial.as_mut()
             && trial.driving()
             && let Err(error) = trial.tick(driving.runtime.ticks, &driving.runtime.lap_events)
         {
-            driving.failure = Some(format!("{error}; R restarts"));
-            driving.report("failure", controls);
-            return;
+            log_line!(
+                "drive_trial_event version=1 type=refused tick={} error={:?}",
+                driving.runtime.ticks,
+                error.message
+            );
+            if !trial.invalidate(driving.runtime.ticks, &driving.runtime.lap_events)
+                && let Some(lap) = &mut driving.runtime.lap
+                && lap.elapsed().is_some()
+            {
+                lap.current_valid = false;
+            }
         }
         if !held
             && let (Some(trial), Some(opponents)) = (trial.as_ref(), driving.opponents.as_mut())
@@ -2263,7 +2319,7 @@ fn drive_tick(
             }
             if opponents.standings.over() {
                 for line in opponents.standings.classification(&opponents.names) {
-                    println!("drive_race_result {line}");
+                    log_line!("drive_race_result {line}");
                 }
             }
         }
@@ -2274,18 +2330,18 @@ fn drive_tick(
             let tick = driving.runtime.ticks;
             match event {
                 Event::Started { when } => {
-                    println!(
+                    log_line!(
                         "drive_lap_event version=1 segment={segment} tick={tick} type=start lap={lap} when={when:.9}"
                     )
                 }
-                Event::Checkpoint { gate, when } => println!(
+                Event::Checkpoint { gate, when } => log_line!(
                     "drive_lap_event version=1 segment={segment} tick={tick} type=checkpoint lap={lap} gate={gate} when={when:.9}"
                 ),
-                Event::Sector { sector, seconds } => println!(
+                Event::Sector { sector, seconds } => log_line!(
                     "drive_lap_event version=1 segment={segment} tick={tick} type=sector lap={lap} sector={} seconds={seconds:.9}",
                     sector + 1
                 ),
-                Event::Finished(result) => println!(
+                Event::Finished(result) => log_line!(
                     "drive_lap_event version=1 segment={segment} tick={tick} type=finish lap={} seconds={:.9} valid={} missed_gate={} sectors={}",
                     result.number,
                     result.seconds,
@@ -2301,15 +2357,22 @@ fn drive_tick(
                         .join(",")
                 ),
                 Event::JumpInvalidated => {
-                    println!(
+                    log_line!(
                         "drive_lap_event version=1 segment={segment} tick={tick} type=position-jump lap={lap}"
                     )
                 }
             }
         }
-        if driving.last_controls != Some(controls)
+        // Bounded reports: every 16th tick, the player's control changes (not
+        // the after-finish AI's continuous ones) and contacts while still
+        // racing, and the end of a script.
+        let player_out = driving
+            .opponents
+            .as_ref()
+            .is_some_and(|o| o.multi.retirement(0).is_some());
+        if (!cooldown && driving.last_controls != Some(controls))
             || driving.runtime.ticks.is_multiple_of(16)
-            || driving.runtime.last_body_contacts > 0
+            || (!player_out && driving.runtime.last_body_contacts > 0)
             || driving.scripted_ticks == Some(driving.runtime.ticks)
         {
             driving.report("tick", controls);
@@ -2317,7 +2380,7 @@ fn drive_tick(
         driving.last_controls = Some(controls);
     }
     if driving.failure.is_none() && driving.scripted_ticks == Some(driving.runtime.ticks) {
-        println!(
+        log_line!(
             "drive_script_complete ticks={} pose={:?} velocity={:?}",
             driving.runtime.ticks,
             driving.runtime.pose(),
@@ -2347,6 +2410,7 @@ fn drive_actions(
         driving.segment += 1;
         driving.last_controls = None;
         driving.failure = None;
+        driving.notices.clear();
         driving.paused = false;
         if let Some(trial) = trial.as_mut() {
             trial.reset();
@@ -2366,7 +2430,7 @@ fn drive_actions(
             let time = trial.race_time(driving.runtime.ticks).unwrap_or(0.);
             opponents.standings.finalize(&speeds, time, &[0]);
             for line in opponents.standings.classification(&opponents.names) {
-                println!("drive_race_result {line}");
+                log_line!("drive_race_result {line}");
             }
         }
     }
@@ -2388,7 +2452,7 @@ fn drive_exit_log(driving: Res<Driving>, mut exits: MessageReader<AppExit>) {
 }
 #[allow(clippy::type_complexity, clippy::too_many_arguments)] // Explicit Bevy resource/component ownership.
 fn drive_present(
-    mut driving: ResMut<Driving>,
+    driving: Res<Driving>,
     mut parts: Query<
         (
             &MovingPart,
@@ -2420,6 +2484,7 @@ fn drive_present(
     mut look_back: Local<Option<bool>>,
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
     free_look: Option<Res<free_look::FreeLook>>,
+    mut refused: Local<Option<&'static str>>,
 ) {
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
@@ -2430,6 +2495,8 @@ fn drive_present(
             if presentation.0.as_ref() == Some(&key) {
                 return Ok(());
             }
+            // A refused field is not projected again until it changes.
+            presentation.0 = Some(key);
             let mut staged: Vec<(Handle<Mesh>, Mesh, Aabb)> = Vec::new();
             let mut changed = 0;
             for (_, _, source, handle, _) in &parts {
@@ -2456,17 +2523,25 @@ fn drive_present(
                     *bounds = *next;
                 }
             }
-            presentation.0 = Some(key);
-            println!(
+            log_line!(
                 "drive_body_projection event=update tick={} meshes={} changed_meshes={changed} policy=independent-current-minus-rest",
                 driving.runtime.ticks,
                 staged.len()
             );
             Ok(())
         })();
-        if let Err(error) = update {
-            driving.failure = Some(format!("body presentation: {error}; R resets"));
-            driving.report("failure", driving.last_controls.unwrap_or_default());
+        // Presentation never stops physics: a refused field keeps the
+        // previous mesh, as for the opponents, with one log line.
+        match update {
+            Ok(()) => *refused = None,
+            Err(error) if *refused != Some(error) => {
+                *refused = Some(error);
+                log_line!(
+                    "drive_body_projection event=refused tick={} error={error:?} policy=keep-previous-mesh",
+                    driving.runtime.ticks
+                );
+            }
+            Err(_) => {}
         }
     }
     let pose = Mat4::from_cols_array(&driving.runtime.pose());
@@ -2614,15 +2689,23 @@ fn drive_present(
                 .map_or_else(|| "Best  --".into(), |s| format!("Best  {}", lap_time(s)));
             format!("{current}\n{last}\n{best}")
         });
-    let status = if driving.failure.is_some() {
-        "Simulation paused after an error. R resets."
+    let status = if let Some(failure) = &driving.failure {
+        format!("Simulation paused: {failure}")
     } else if driving.paused {
-        "Paused - P resumes; R resets"
+        "Paused - P resumes; R resets".into()
     } else {
         terminal
             .as_deref()
             .unwrap_or("Space: handbrake | C: look back | RMB: look around | P: pause | R: reset")
+            .into()
     };
+    // The latest retirements after a car's own tick stage failed.
+    let skip = driving.notices.len().saturating_sub(3);
+    let status: String = driving.notices[skip..]
+        .iter()
+        .map(|n| format!("{n}\n"))
+        .chain(std::iter::once(status))
+        .collect();
     let audio = sound.map_or("", |s| {
         if s.muted {
             "\nSound muted - M enables"
@@ -3023,6 +3106,7 @@ mod driving_tests {
                 geometry: Some(geometry),
                 paused: false,
                 failure: None,
+                notices: Vec::new(),
                 scripted_ticks: None,
                 scripted: Default::default(),
                 handbrake_from: None,
@@ -3058,7 +3142,10 @@ mod driving_tests {
             );
         }
         app.update();
-        assert!(app.world().resource::<Driving>().failure.is_some());
+        // A refused projection keeps the previous meshes and never pauses
+        // physics (S3); the refused field is not projected again.
+        assert!(app.world().resource::<Driving>().failure.is_none());
+        app.update();
         for (handle, source, _) in &entries {
             assert_eq!(
                 app.world().resource::<Assets<Mesh>>().get(handle).unwrap(),
@@ -3080,7 +3167,8 @@ mod driving_tests {
             .get_mut::<DeformingPart>()
             .unwrap()
             .raw_bind = entries[1].2;
-        app.world_mut().resource_mut::<Driving>().failure = None;
+        // The next field change projects again.
+        app.world_mut().resource_mut::<DeformationPresentation>().0 = None;
         app.update();
         assert!(app.world().resource::<Driving>().failure.is_none());
         assert!(entries.iter().any(|(handle, source, _)| {
@@ -3127,6 +3215,7 @@ mod driving_tests {
                 geometry: None,
                 paused: false,
                 failure: None,
+                notices: Vec::new(),
                 scripted_ticks: None,
                 scripted: Default::default(),
                 handbrake_from: None,
@@ -3280,6 +3369,30 @@ mod driving_tests {
         assert!(!app.world().resource::<time_trial::Trial>().finished());
         assert_eq!(app.world().resource::<Driving>().runtime.ticks, 1);
         assert!(held_distance(&app) < 0.01);
+        // A refused trial tick (here an event clock pushed one tick ahead)
+        // invalidates the lap and never pauses physics (S3).
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        while !app.world().resource::<time_trial::Trial>().driving() {
+            app.update();
+        }
+        app.update();
+        let ticks = app.world().resource::<Driving>().runtime.ticks;
+        app.world_mut()
+            .resource_mut::<time_trial::Trial>()
+            .tick(ticks + 1, &[])
+            .unwrap();
+        app.update();
+        app.update();
+        assert!(app.world().resource::<Driving>().failure.is_none());
+        assert_eq!(app.world().resource::<Driving>().runtime.ticks, ticks + 2);
+        let trial = app.world().resource::<time_trial::Trial>();
+        assert!(trial.driving());
+        assert!((trial.state.elapsed() - trial.race_time(ticks + 2).unwrap()).abs() < 1e-9);
     }
 
     fn exercise_keyboard_recovery(table: Option<&[u8]>, deformation: bool) {
@@ -3319,6 +3432,7 @@ mod driving_tests {
                 geometry,
                 paused: false,
                 failure: None,
+                notices: Vec::new(),
                 scripted_ticks: None,
                 scripted: Default::default(),
                 handbrake_from: None,

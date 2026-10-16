@@ -169,6 +169,32 @@ impl State {
         *self = next;
         Ok(())
     }
+    /// Recovery after [`Self::finish_tick`] refused `tick` (authored; the
+    /// original has no such path): the clock moves on to `tick`, a lap
+    /// finished in it counts as an invalid attempt, and a lap start in it is
+    /// kept only when it is valid. Returns whether a lap is still timed.
+    pub fn skip_tick(&mut self, tick: u64, events: &[Event]) -> bool {
+        if !matches!(self.phase, Phase::Running) {
+            return false;
+        }
+        self.ticks = self.ticks.max(tick);
+        let end = tick as f64 * self.delta;
+        let begin = tick.saturating_sub(1) as f64 * self.delta;
+        for event in events {
+            match event {
+                Event::Started { when } => {
+                    self.start = (when.is_finite() && *when >= begin - 1e-7 && *when <= end + 1e-7)
+                        .then_some(*when);
+                }
+                Event::Finished(lap) => {
+                    self.attempts = self.attempts.max(lap.number);
+                    self.start = None;
+                }
+                _ => {}
+            }
+        }
+        self.start.is_some()
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -233,5 +259,31 @@ mod tests {
         assert_eq!(s, before);
         assert!(s.finish_tick(2, &[lap(2, 0.10, true)]).is_err());
         assert_eq!(s, before);
+    }
+    #[test]
+    fn skipped_tick_invalidates_the_lap_and_timing_resumes() {
+        let mut s = State::new(2, 0.1, 0.).unwrap();
+        s.finish_tick(1, &[Event::Started { when: 0.05 }]).unwrap();
+        // A refused finish (bad start) counts as an invalid attempt; the
+        // valid start after it keeps timing the next lap.
+        let events = [lap(1, 0.10, true), Event::Started { when: f64::NAN }];
+        assert!(s.finish_tick(2, &events).is_err());
+        assert!(!s.skip_tick(2, &events));
+        assert_eq!((s.ticks, s.attempts, s.completed_laps()), (2, 1, 0));
+        // Without a start the next finish is refused and skipped too.
+        assert!(s.finish_tick(3, &[lap(2, 0.2, true)]).is_err());
+        assert!(s.skip_tick(3, &[lap(2, 0.2, true), Event::Started { when: 0.25 }]));
+        s.finish_tick(4, &[lap(3, 0.10, true), Event::Started { when: 0.35 }])
+            .unwrap();
+        s.finish_tick(5, &[lap(4, 0.10, true)]).unwrap();
+        let Phase::Finished(r) = s.phase() else {
+            panic!()
+        };
+        assert_eq!((r.laps.len(), r.invalid_attempts), (2, 2));
+        // A clock gap resynchronises instead of refusing every later tick.
+        let mut s = State::new(2, 0.1, 0.).unwrap();
+        assert!(s.finish_tick(3, &[]).is_err());
+        assert!(!s.skip_tick(3, &[]));
+        s.finish_tick(4, &[Event::Started { when: 0.35 }]).unwrap();
     }
 }

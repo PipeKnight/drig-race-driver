@@ -940,7 +940,7 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
             *total += zone;
         }
         if damage.log_zones && zones.iter().any(|z| *z > 0.) {
-            println!(
+            log_line!(
                 "drive_damage_zones car={index} tick={ticks} mass={} impacts={} zones={zones:?}",
                 r.mass,
                 r.impacts.len()
@@ -960,9 +960,12 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
                 if part.state == State::Detached || part.state == change.state {
                     continue;
                 }
-                println!(
+                log_line!(
                     "drive_damage_part car={index} tick={ticks} part={} state={:?} zone={:.1} threshold={:.1}",
-                    change.part, change.state, change.zone, change.threshold
+                    change.part,
+                    change.state,
+                    change.zone,
+                    change.threshold
                 );
                 if change.state == State::Loose {
                     part.rate = 3.;
@@ -1108,9 +1111,10 @@ fn present(
             let state = glass_state(rest, &now, &damage.config, damage.config.crack_only[w]);
             if state > car.windows[w] {
                 car.windows[w] = state;
-                println!(
+                log_line!(
                     "drive_damage_glass car={index} tick={} window={} state={state:?}",
-                    runtime.ticks, WINDOWS[w].0
+                    runtime.ticks,
+                    WINDOWS[w].0
                 );
                 if state == Glass::Smashed {
                     new_shards.push((index, WINDOWS[w].0));
@@ -1126,7 +1130,7 @@ fn present(
                 let distance = now[0].distance(*anchor);
                 if distance > damage.config.smash_light {
                     car.lights[l] = true;
-                    println!(
+                    log_line!(
                         "drive_damage_light car={index} tick={} cluster={} displacement={distance:.3}",
                         runtime.ticks,
                         joints.first().map_or("", String::as_str)
