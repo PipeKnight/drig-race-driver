@@ -2,7 +2,9 @@
 
 16 October 2026 (Europe/Kiev), owner's question: no Topaz Gigapixel purchase/installation is required to continue. Start with available local tooling and small controlled comparisons; consider a commercial tool only if it demonstrates a useful improvement on our actual textures. Upscaling is not yet validated in the prototype.
 
-## Tools checked and prepared
+Latest status: first three actual GRID RGB inferences completed on RTX4070. Asphalt candidate rejected; masonry candidate selected for a guarded in-engine experiment; cabin mixed/pattern loss. No renderer texture override applied yet. Detailed pilot results below.
+
+## Initial tools checked and prepared (historical)
 
 PATH, registered Windows uninstall entries, Program Files, local Programs, owner Tools/grid-research and the primary local/tools were checked for Topaz, Upscayl, Real-ESRGAN, chaiNNer, ImageMagick, texconv and Compressonator; no matching existing tool was found in those scopes. This is a scoped inventory, not proof of absence anywhere on the disk. Existing Python3.12.14/Pillow/NumPy and the PSSG/DDS readers remain reusable.
 
@@ -30,3 +32,13 @@ No GRID texture inference or A/B comparison has been completed. The installed ge
 Upscayl supports custom NCNN models; compare exact model, version and settings rather than application names. Gigapixel documents specialized Text & Shapes and general/high-fidelity models, but those descriptions are not a comparative benchmark: https://github.com/upscayl/upscayl/wiki/Guide and https://docs.topazlabs.com/topaz-gigapixel/enhancements/ai-models/core-models .
 
 Pilot acceptance: matched original asphalt, concrete, livery/sign text and cockpit samples, identical output dimensions, inspection at 1:1 and in-engine motion. Check faithful lettering, surface structure, repeating edges, mip stability and sharpening artifacts. Preserve all inputs/settings/hashes privately. Select per texture; add a commercial candidate if its demonstrated improvement warrants it. No purchase is needed before this evidence exists, and no commitment to free tooling overrides the owner's quality-first goal.
+
+## First actual pilot,16October2026
+
+Existing portable tool and x4plus.bin/.param hashes rechecked against private provenance, no installation. Real inference succeeds on Vulkan device0 NVIDIA GeForceRTX4070 (IntelUHD770 isdevice1), -s4 -t256 -g0 -j1:1:1, OMP_NUM_THREADS2. First asphalt runtime9.45s. Independently authored grid-formats/examples/export_texture.rs reuses validated_dds, writes only beneath this checkout's canonical ignored local/, refuses overwrites. Actual BC3asphalt/BC1masonry/cabin exports decode with Pillow; formatalltargetClippy passes, overwrite negative check preserves exact original hash.
+
+Pilot source/derived pixels and exact hashes remain local/graphics/texture-pilot01. Asphalt source512x512/10mips has alpha0..105: preserve separately, infer RGB only. x4plus output2048x2048 visibly over-smooths grain and creates smooth blotches; rejected before renderer integration. RGBstandard deviations fall~20to~8; downsampleRMSE18.36 vsLanczos3.48. This is an observed configuration failure, not proof that every neural model/tool fails asphalt, nor isolated model-vs-Vulkan numeric causality.
+
+Masonry source256x256/opaquealpha ->1024x1024: inspected equal-scale crops, sharper mortar/cracks/stone structure; candidate for in-engine evaluation, not yet accepted final quality. Mean RGB shifts~(-5.57,-3.05,+0.72)bytes; preserve source radiometric/color character before judging materials. Wrap64pixel source padding inferred separately and central crop planned to respect repeating UV context. Cabin512x512/opaquealpha ->2048x2048: cleaner panel edges but some carbon/weave pattern lost; do not replace whole atlas without material-specific treatment/text checks. Preserving original patterns and letters takes precedence over output size. No universal upscaler ranking or recovered-ground-truth detail claim.
+
+Next guarded override contract: private versioned TSV maps existing bound diffuse texture key to original-reference DDS and derivative DDS. Compare original reference byte-for-byte against the live purchased-resource DDS (strong exact identity without a new hash dependency); reject mismatches/unused keys/duplicate entries/outside-private paths before mutation. Apply all validated replacements atomically to the CPU texture byte map, then retain the existing texture_upload::image path; never instantiate/upload DDS during pre-device configuration. First derivative envelope is opaque BGRA8 with complete linear-light mip chain. Original/enhanced CLI comparison remains explicit; no Steam writes or published assets.
