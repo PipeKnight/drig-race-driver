@@ -58,10 +58,18 @@ impl Pose {
 }
 
 pub(crate) fn reference_seed(value: f32, reciprocal: bool) -> Result<f32, Error> {
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"),
-        not(feature = "soft-sse")
-    ))]
+    // Measured RCPPS/RSQRTPS of the validation CPU (equal bits on all 2^32 inputs), on every CPU,
+    // so results do not depend on the CPU vendor (F320). Feature hw-sse executes the instruction
+    // instead, for comparison against the hardware only.
+    #[cfg(not(all(feature = "hw-sse", any(target_arch = "x86", target_arch = "x86_64"))))]
+    {
+        Ok(if reciprocal {
+            crate::sse_approx::rcp(value)
+        } else {
+            crate::sse_approx::rsqrt(value)
+        })
+    }
+    #[cfg(all(feature = "hw-sse", any(target_arch = "x86", target_arch = "x86_64")))]
     {
         #[cfg(target_arch = "x86")]
         use std::arch::x86::{_mm_cvtss_f32, _mm_rcp_ps, _mm_rsqrt_ps, _mm_set1_ps};
@@ -77,18 +85,6 @@ pub(crate) fn reference_seed(value: f32, reciprocal: bool) -> Result<f32, Error>
             } else {
                 _mm_rsqrt_ps(_mm_set1_ps(value))
             })
-        })
-    }
-    #[cfg(any(
-        not(any(target_arch = "x86", target_arch = "x86_64")),
-        feature = "soft-sse"
-    ))]
-    {
-        // Measured RCPPS/RSQRTPS of the validation CPU; equal bits on all 2^32 inputs.
-        Ok(if reciprocal {
-            crate::sse_approx::rcp(value)
-        } else {
-            crate::sse_approx::rsqrt(value)
         })
     }
 }

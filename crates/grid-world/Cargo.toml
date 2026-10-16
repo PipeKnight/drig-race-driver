@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [features]
-# Validation only: use the measured RCPPS/RSQRTPS tables (sse_approx) on x86 as well, so the
-# path that ARM builds take can be checked against the hardware results on this machine.
-soft-sse = []
+# Validation only: execute the hardware RCPPS/RSQRTPS on x86 instead of the measured tables
+# (sse_approx, the default on every CPU), to compare a CPU against the validation CPU.
+hw-sse = []
 

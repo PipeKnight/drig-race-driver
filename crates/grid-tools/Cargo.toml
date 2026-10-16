@@ -6,8 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 
 [features]
-# Validation only: the table RCPPS/RSQRTPS path that ARM builds take (grid_world::sse_approx).
-soft-sse = ["grid-world/soft-sse"]
+# Validation only: hardware RCPPS/RSQRTPS on x86 instead of the default grid_world::sse_approx.
+hw-sse = ["grid-world/hw-sse"]
 
 [dependencies]
 grid-formats = { path = "../grid-formats" }

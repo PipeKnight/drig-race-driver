@@ -23,11 +23,12 @@ fn root(value: f32) -> Result<f32, &'static str> {
     if value == 0. {
         return Ok(0.);
     }
-    #[cfg(all(
-        any(target_arch = "x86", target_arch = "x86_64"),
-        not(feature = "soft-sse")
-    ))]
-    {
+    // Measured RSQRTPS of the validation CPU (grid_world::sse_approx) on every CPU (F320);
+    // feature hw-sse executes the instruction instead, for hardware comparison only.
+    #[cfg(not(all(feature = "hw-sse", any(target_arch = "x86", target_arch = "x86_64"))))]
+    let seed = grid_world::sse_approx::rsqrt(value);
+    #[cfg(all(feature = "hw-sse", any(target_arch = "x86", target_arch = "x86_64")))]
+    let seed = {
         #[cfg(target_arch = "x86")]
         use std::arch::x86::{_mm_cvtss_f32, _mm_rsqrt_ps, _mm_set1_ps};
         #[cfg(target_arch = "x86_64")]
@@ -36,20 +37,10 @@ fn root(value: f32) -> Result<f32, &'static str> {
             return Err("engine gain requires SSE");
         }
         // Checked SSE; this intrinsic accesses register values only.
-        let seed = unsafe { _mm_cvtss_f32(_mm_rsqrt_ps(_mm_set1_ps(value))) };
-        let product = seed * value;
-        Ok((1. - product * seed) * (product * 0.5) + product)
-    }
-    #[cfg(any(
-        not(any(target_arch = "x86", target_arch = "x86_64")),
-        feature = "soft-sse"
-    ))]
-    {
-        // Measured RSQRTPS of the validation CPU (grid_world::sse_approx).
-        let seed = grid_world::sse_approx::rsqrt(value);
-        let product = seed * value;
-        Ok((1. - product * seed) * (product * 0.5) + product)
-    }
+        unsafe { _mm_cvtss_f32(_mm_rsqrt_ps(_mm_set1_ps(value))) }
+    };
+    let product = seed * value;
+    Ok((1. - product * seed) * (product * 0.5) + product)
 }
 
 pub fn publish(

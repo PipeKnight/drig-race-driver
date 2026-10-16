@@ -1,5 +1,23 @@
 # GRID engine project log
 
+F324 CPU-independent RCPPS/RSQRTPS on every CPU (P1b, owner rule F320) (2026-10-16, Claude Code). Details are in docs/PLATFORMS_AND_INPUT_RESEARCH.md 1.2 "Default on every CPU (F324)".
+
+Code:
+- grid_world::spawn::reference_seed and grid_tools::engine_audio_publication::root now use the measured F321 tables (grid_world::sse_approx) on every target, x86 included.
+- The hardware instruction is kept only behind the new validation feature hw-sse (grid-world; grid-tools forwards it). It replaces soft-sse, which is removed. hw-sse has no effect off x86.
+- grep of crates/: no other _mm_rcp/_mm_rsqrt use; the only remaining one is the x86_64 unit test sse_approx::tests::tables_match_this_cpu, kept.
+
+Checks [V] (rustc/cargo 1.99.0; runs and executables in local/platforms/sse-default/runs/):
+- Release grid-opponent-race before (f6087f8, hardware default; exe sha256 7efae4f9...b88564) vs after (table default; exe sha256 6272304d...47bdfe):
+  - solo Donington AI, `ROOT CD01 BP01 1 11200 ai`: laps 88.42029812185638 / 86.28228501935392, full output byte-identical (sha256 124acff5...2d9a, as in F321);
+  - 12 cars with GRID_DEFORMATION_PARAMETERS, `12 12000 ai`: ended at tick 11,800 with 827 car contacts, full output byte-identical including all 12 per-car state hashes (sha256 0cf75c0d...7fc7).
+- A --features hw-sse release build gives the same solo output (cmp equal).
+- source_driving_assists_matrix (asset test, release) passes; tables_match_this_cpu passes with and without hw-sse.
+- Clippy -D warnings clean: workspace --all-targets on the host; grid-world + grid-tools --all-targets with hw-sse; grid-formats/grid-world/grid-tools for aarch64-linux-android.
+- rustfmt --check clean on the two touched .rs files. The workspace fmt check still shows the earlier diffs in grid-app wheel_ground.rs and assists.rs, which this change leaves alone.
+
+Not done: no run on an AMD CPU or an ARM device. The tables describe the owner's i7-12700, so results now equal that reference machine on any CPU [I for other CPUs: plain integer code]. Playable not rebuilt.
+
 F323 failure containment: one car's tick failure retires that car, and the race goes on (S3: R02, R16, R09) (2026-10-16, Claude Code). Details are in docs/RUNTIME_LIMITS_AUDIT.md S3 "Status (F323)". Before this change, any Err from one car's stage inside MultiRuntime::tick propagated with `?`. grid-app then paused all 12 cars, and R threw the race away.
 
 Now MultiRuntime::tick contains each car's own stages: controls (staged_car), the vehicle manager, the car's track contacts and car-pair hull contacts inside the geometry provider, body events, and lap timing. A failing car keeps its previous state. From then on its world body is held at the last committed kinematics: body words 0x1C0..0x230 (mass centre, pose, angular and linear velocity), with both velocities zeroed. The held car still collides with the others. Its static contacts are skipped, and its Runtime::ticks clock keeps running. MultiRuntime exposes retirement(i) (tick and error) and newly_retired(). Shared stages (the world advance, prop pieces) still fail the whole tick atomically, as before. This is AUTHORED. The nearest original behaviour is skipping an over-limit island for a step (B7B850 status 1), and the original has no per-car retirement.
