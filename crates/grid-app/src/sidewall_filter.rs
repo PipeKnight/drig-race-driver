@@ -46,6 +46,7 @@ pub fn install(app: &mut App) {
 }
 fn attach(
     mut commands: Commands,
+    graphics: Res<super::graphics::Settings>,
     parts: Query<(Entity, &Sidewall, &MeshMaterial3d<StandardMaterial>)>,
     standard: Res<Assets<StandardMaterial>>,
     mut filtered: ResMut<Assets<SidewallMaterial>>,
@@ -72,12 +73,14 @@ fn attach(
         count += 1;
     }
     println!(
-        "sidewall_filter attached={count} samples=64 scope=Lacetti-sidewall-only shutter=fixed-seconds"
+        "sidewall_filter attached={count} samples=64 scope=Lacetti-sidewall-only adaptive={}",
+        graphics.adaptive_wheel_exposure
     );
 }
 fn update(
     driving: Option<Res<super::Driving>>,
     graphics: Res<super::graphics::Settings>,
+    time: Res<Time<Real>>,
     parts: Query<(&Sidewall, &MeshMaterial3d<SidewallMaterial>)>,
     mut materials: ResMut<Assets<SidewallMaterial>>,
     mut final_report: Local<Option<(u64, u64)>>,
@@ -92,10 +95,17 @@ fn update(
         let speeds: [f32; 4] =
             std::array::from_fn(|i| super::wheel_presentation::angular_speed(&driving.runtime, i));
         println!(
-            "sidewall_filter_final tick={} shutter_seconds={} signed_spin_rad_s={speeds:?} exposure_rad={:?}",
+            "sidewall_filter_final tick={} shutter_seconds={} signed_spin_rad_s={speeds:?} exposure_rad={:?} adaptive={}",
             driving.runtime.ticks,
             graphics.wheel_shutter_seconds,
-            speeds.map(|s| (s.abs() * graphics.wheel_shutter_seconds).min(std::f32::consts::TAU))
+            speeds.map(|s| super::wheel_presentation::exposure(
+                s,
+                graphics.wheel_shutter_seconds,
+                time.delta_secs(),
+                graphics.adaptive_wheel_exposure
+            )
+            .0),
+            graphics.adaptive_wheel_exposure
         );
     }
     for (part, handle) in &parts {
@@ -107,17 +117,22 @@ fn update(
                 .as_ref()
                 .and_then(|o| o.multi.cars.get(part.car))
         };
-        let angle = runtime
+        let (angle, gaussian) = runtime
             .filter(|_| !driving.paused && driving.failure.is_none())
-            .map_or(0., |r| {
-                super::wheel_presentation::angular_speed(r, part.wheel).abs()
-                    * graphics.wheel_shutter_seconds
-            })
-            .min(std::f32::consts::TAU);
+            .map_or((0., false), |r| {
+                super::wheel_presentation::exposure(
+                    super::wheel_presentation::angular_speed(r, part.wheel),
+                    graphics.wheel_shutter_seconds,
+                    time.delta_secs(),
+                    graphics.adaptive_wheel_exposure,
+                )
+            });
         if let Some(mut material) = materials.get_mut(&handle.0)
-            && material.extension.exposure.x != angle
+            && (material.extension.exposure.x != angle
+                || material.extension.exposure.y != f32::from(gaussian))
         {
             material.extension.exposure.x = angle;
+            material.extension.exposure.y = f32::from(gaussian);
         }
     }
 }

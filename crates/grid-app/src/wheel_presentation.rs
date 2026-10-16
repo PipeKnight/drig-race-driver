@@ -31,6 +31,31 @@ pub fn angular_speed(runtime: &Runtime, wheel: usize) -> f32 {
     if speed.is_finite() { speed } else { 0. }
 }
 
+/// Fixed box exposure, or an authored Gaussian temporal-filter floor. Seconds,
+/// never a number of frames or subtraction of wrapped phase samples.
+pub fn exposure(speed: f32, shutter: f32, frame_seconds: f32, adaptive: bool) -> (f32, bool) {
+    if !speed.is_finite() || !shutter.is_finite() || shutter <= 0. {
+        return (0., false);
+    }
+    let width = if adaptive {
+        let frame = if frame_seconds.is_finite() {
+            frame_seconds.clamp(0., 1. / 30.)
+        } else {
+            0.
+        };
+        // Same RMS width as the authored box at high FPS; extra filtering at
+        // lower FPS. Three standard deviations each side of the centre.
+        6. * (shutter / 12_f32.sqrt()).max(frame * 0.5)
+    } else {
+        shutter
+    };
+    let angle = speed.abs() * width;
+    (
+        angle.min(std::f32::consts::TAU),
+        adaptive && angle < std::f32::consts::TAU,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,5 +90,34 @@ mod tests {
         assert_eq!(phase(1., 0., 0.01), 1.);
         assert_eq!(phase(1., f32::NAN, 0.01), 1.);
         assert_eq!(phase(1., 100., f32::NAN), 1.);
+    }
+
+    #[test]
+    fn adaptive_exposure_suppresses_a_low_fps_alias_without_blurring_standstill() {
+        // Independent frequency-domain check of the sampled kernel: a16-fold
+        // pattern at15rad/s aliases to8.2Hz at30FPS with a short box shutter.
+        let response = |angle: f32, gaussian: bool| {
+            let (mut real, mut imaginary, mut mass) = (0_f32, 0_f32, 0_f32);
+            for i in 0..64 {
+                let u = (i as f32 + 0.5) / 64. - 0.5;
+                let w = if gaussian {
+                    (-0.5 * (u * 6.).powi(2)).exp()
+                } else {
+                    1.
+                };
+                real += (16. * angle * u).cos() * w;
+                imaginary += (16. * angle * u).sin() * w;
+                mass += w;
+            }
+            real.hypot(imaginary) / mass
+        };
+        let fixed = exposure(15., 0.008333, 1. / 30., false);
+        let adaptive = exposure(15., 0.008333, 1. / 30., true);
+        assert!(response(fixed.0, fixed.1) > 0.8);
+        assert!(response(adaptive.0, adaptive.1) < 0.01);
+        assert_eq!(exposure(0., 0.008333, 1. / 30., true).0, 0.);
+        assert_eq!(exposure(-15., 0.008333, 1. / 30., true), adaptive);
+        assert_eq!(exposure(15., 0., 1. / 30., true).0, 0.);
+        assert!(exposure(15., 0.008333, 1. / 300., true).0 < adaptive.0);
     }
 }

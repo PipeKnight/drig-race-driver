@@ -1161,6 +1161,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.wheel_geometry_shutter_seconds = ms * 0.001;
             }
+            "--wheel-exposure" => {
+                graphics.adaptive_wheel_exposure = match args.next().as_deref() {
+                    Some("fixed") => false,
+                    Some("adaptive") => true,
+                    _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
+                };
+            }
             "--land" => {
                 graphics.source_land = match args.next().as_deref() {
                     Some("source") => true,

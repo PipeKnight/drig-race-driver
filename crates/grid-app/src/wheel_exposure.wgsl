@@ -31,9 +31,11 @@ fn fragment(input: VertexOutput) -> FragmentOutput {
         // Reversed Z: reject foreground geometry in front of the swept hull.
         if depth > ndc.z + 0.00001 { continue; }
 #endif
+        let u = (f32(i)+0.5)/64.0-0.5;
+        let w = select(1.0,exp(-0.5*(u*6.0)*(u*6.0)),controls.y>0.5);
         sum += textureSampleLevel(mesh_view_bindings::view_transmission_texture,
-            mesh_view_bindings::view_transmission_sampler, uv, 0.0);
-        weight += 1.0;
+            mesh_view_bindings::view_transmission_sampler, uv, 0.0)*w;
+        weight += w;
     }
     var output: FragmentOutput;
     if weight <= 0.0 { discard; }

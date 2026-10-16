@@ -164,6 +164,7 @@ fn attach(
 fn update(
     driving: Res<super::Driving>,
     graphics: Res<super::graphics::Settings>,
+    time: Res<Time<Real>>,
     sources: Query<&Transform, Without<Hull>>,
     mut hulls: Query<(&Hull, &mut Transform, &MeshMaterial3d<HullMaterial>)>,
     mut materials: ResMut<Assets<HullMaterial>>,
@@ -174,17 +175,21 @@ fn update(
         };
         let world = source.to_matrix() * hull.bind;
         *transform = Transform::from_matrix(world);
-        let angle = if driving.paused || driving.failure.is_some() {
-            0.
+        let (angle, gaussian) = if driving.paused || driving.failure.is_some() {
+            (0., false)
         } else {
-            (super::wheel_presentation::angular_speed(&driving.runtime, hull.wheel).abs()
-                * graphics.wheel_geometry_shutter_seconds)
-                .min(std::f32::consts::TAU)
+            super::wheel_presentation::exposure(
+                super::wheel_presentation::angular_speed(&driving.runtime, hull.wheel),
+                graphics.wheel_geometry_shutter_seconds,
+                time.delta_secs(),
+                graphics.adaptive_wheel_exposure,
+            )
         };
         if let Some(mut material) = materials.get_mut(&handle.0) {
             material.extension.world = world;
             material.extension.inverse = world.inverse();
             material.extension.controls.x = angle;
+            material.extension.controls.y = f32::from(gaussian);
         }
     }
 }
