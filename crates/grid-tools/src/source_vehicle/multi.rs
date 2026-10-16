@@ -629,7 +629,7 @@ impl MultiRuntime {
                     &cars[i].track,
                     &cars[i].surfaces,
                     &bodies[i..=i],
-                    (remaining - out.len()).min(32),
+                    remaining - out.len(),
                 ) {
                     Ok(fresh) => fresh,
                     Err(error) => {
@@ -776,6 +776,7 @@ impl MultiRuntime {
             let mut next = current.clone();
             next.detect(&world.groups.contacts, &recorded, &world.groups.bodies);
             let mut changed = self.shapes.clone();
+            next.hold_lost(&mut world.groups.bodies, self.cars[0].track.bounds()[1]);
             let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
             if !disabled.is_empty() {
                 shapes = Some(changed);

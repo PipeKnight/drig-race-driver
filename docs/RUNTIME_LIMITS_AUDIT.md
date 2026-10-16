@@ -83,7 +83,7 @@ F317 changed these limits:
 Effect on this audit:
 - **R01 and R04 are resolved for pause purposes.** 312 ported pieces plus 12 cars cannot reach 1000.
 - **R05 remains:** 208 car geometry slots at 12 cars.
-- **R06 remains:** pieces still never sleep or despawn.
+- **R06 remains:** pieces still never sleep or despawn. *F342:* a piece more than 100 m (AUTHORED) below the lowest road chunk is held (`PropWorld::hold_lost`), so a lost piece can no longer reach the 1e5 domain and pause the world; the tunnelling itself is open (DYNAMIC_PROPS_RESEARCH.md "Soak fixes (F342)").
 - The refusal is a deviation from the original's farthest-first restore, which F317 recorded but did not port.
 
 **Correction to F317's provenance comment.** The `lib.rs` comment says the engine defaults apply because no shipped file carries a PHYSICSENGINE node. That is true of the files, but the game code itself writes the per-island values:
@@ -366,7 +366,7 @@ Every fix either reproduces the original's limit and full behaviour (§2), or, w
 - piece sleeping (turnOffTime 1);
 - the per-island 200/1000/3000 skip behaviour (B7B850) for fidelity;
 - correct the `lib.rs` provenance comment (game-set island limits, not engine defaults);
-- the falling-piece bound (R06).
+- the falling-piece bound (R06): *F342 holds lost pieces; the original bound at B44E80/B444D0 is still unrecovered.*
 
 The original design notes for this group follow.
 

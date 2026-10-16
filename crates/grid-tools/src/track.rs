@@ -178,19 +178,27 @@ impl Track {
     /// culling and at most 16 contacts per pair / 64 in the returned world pool.
     /// Archive order is authored scheduling, not the original broadphase order.
     /// `sheet` is consulted only for shapes the body can reach.
+    /// Contacts of one moving hull with the route props, the boundary sheet
+    /// and every packed road chunk. As in the original, where each shape
+    /// pair's generator fills its own manifold (AEA1F0, capacity per call),
+    /// every one of these sources gets up to `pair_capacity` contacts; only
+    /// the world pool share `pool` bounds the sum, so a wall or prop the body
+    /// leans on can no longer use up the road's slots (F342).
     pub fn body_contacts(
         &self,
         mesh: &grid_world::collision_mesh::Mesh,
         matrix: grid_world::physical_pose::Matrix,
         query: &grid_world::convex_distance::ContactSettings,
-        capacity: usize,
+        pair_capacity: usize,
+        pool: usize,
         mut sheet: impl FnMut([u8; 4]) -> Result<bool, grid_world::Error>,
     ) -> Result<Vec<BodyContact>, grid_world::Error> {
-        if capacity > 64 {
+        if pair_capacity > 16 || pool > grid_world::MAX_WORLD_CONTACTS {
             return Err(grid_world::Error(
                 "body world contact capacity exceeds bound",
             ));
         }
+        let room = |used: usize| pair_capacity.min(pool - used);
         let bounds = mesh.world_bounds(matrix, query.margin)?;
         // Checks and bounds shared by every pair query of this body.
         let directions = packed_contacts::directions_valid(query);
@@ -203,7 +211,7 @@ impl Track {
         // Visible route barriers and props first: the car must meet their
         // surfaces before the invisible boundary sheet behind them.
         if let Some(props) = &self.props
-            && capacity != 0
+            && room(0) != 0
         {
             let shape = self.props_shape();
             contacts.extend(
@@ -213,7 +221,7 @@ impl Track {
                         matrix,
                         query,
                         bounds,
-                        capacity.min(16),
+                        room(0),
                         self.props_index
                             .as_ref()
                             .map(|index| crate::entity_geometry::KnownBoxes {
@@ -247,13 +255,13 @@ impl Track {
         // Authored boundary-first scheduling keeps packed road contacts from
         // exhausting the selected pool before this separate source shape.
         if let Some(boundary) = &self.boundary
-            && contacts.len() < capacity
+            && room(contacts.len()) != 0
             && (0..3).all(|j| {
                 bounds[0][j] <= boundary.bounds[j + 3] && bounds[1][j] >= boundary.bounds[j]
             })
         {
             let known = known(self.boundary_checked.unwrap_or_else(|| boundary.checked()));
-            let mut settings = settings(capacity - contacts.len());
+            let mut settings = settings(room(contacts.len()));
             if !known.misses(&settings, true) {
                 for (j, &key) in boundary.material_keys.iter().enumerate() {
                     settings.sheet_mask |= u8::from(sheet(key)?) << j;
@@ -268,7 +276,7 @@ impl Track {
             }
         }
         for (i, c) in self.chunks.iter().enumerate() {
-            if contacts.len() == capacity {
+            if contacts.len() == pool {
                 break;
             }
             if (0..3).any(|j| bounds[0][j] > c.bounds[j + 3] || bounds[1][j] < c.bounds[j]) {
@@ -280,7 +288,7 @@ impl Track {
                 ));
             }
             let known = known(c.checked);
-            let mut settings = settings(capacity - contacts.len());
+            let mut settings = settings(room(contacts.len()));
             if known.misses(&settings, false) {
                 continue;
             }

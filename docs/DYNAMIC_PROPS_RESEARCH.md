@@ -287,6 +287,96 @@ Private evidence `local/dynamic-props/` (probe TSVs, logs, renders).
   `dynamic_props_leave_an_untouched_drive_identical`: 240 throttle ticks with props
   armed equal the plain run word for word.
 
+## Soak fixes (F342)
+
+16 October 2026, Claude Code. Found by `grid-soak` (F326, docs/SOAK_TESTING.md).
+Static evidence: capstone on the hash-pinned analysis image with the private
+`local/ai-overtaking/scripts/pe.py` and the existing decompilations
+`local/dynamic-props/decomp/a4`, `a8`, `a11`, `a12`; new helper scripts and
+dumps in the main checkout's `local/soak-fixes/`.
+
+### Scaled entity placements (Nuerburgring tyre stacks)
+
+- [V] Nuerburgring `route_0` has 6 `tyrestack_white`/`tyrestack_red` breakables
+  (72 pieces) whose `objects.ens` placement rows all have length 0.9718 (a
+  uniform scale). The port refused them ("scaled prop piece placement"), so no
+  Nuerburgring race with body contacts could start. Other scaled entities there
+  (`armco_square_*`, `tyrewall_white`, scale 1.004-1.46, partly non-uniform) are
+  joint-state breakables the port keeps static, and static boxes already apply
+  the full placement (`entity_geometry.rs`).
+- [D] `0x7D3C40` (add subentity) reads the entity world matrix at +0x40 (or the
+  replaced body's current matrix through `0xA69630` / `0xA7D3C0`) and passes it
+  **unnormalised** to `0x7CE490` -> `0x7CDCD0`, which copies it into the body
+  descriptor (`0xA742E0` -> B11F40 for dynamic bodies, `0xA74190` static). Only
+  the render-component path of `0x7D3C40` normalises each row (RSQRTPS + Newton,
+  `0x4B4440` stores the three lengths) and hands the lengths to `0x7C4FF0` /
+  `0xAD1040` as a separate scale.
+- [I] So a piece body keeps the scaled basis; shapes and contact hulls scale
+  with it, the mass stays density x unscaled template volume, and nothing
+  re-orthonormalises it (only the world's special body, B13E10). The port now
+  does the same: `Catalog::read` keeps the composed pose and rejects only a
+  degenerate (non-positive or non-finite determinant) basis. The face-axis
+  shortcut in the piece pair query assumes an orthogonal triple, which a uniform
+  scale keeps. Test: `nurburgring_scaled_tyre_stacks_keep_their_placement_scale`.
+
+### Track contact budget per shape pair
+
+- [V] A piece (or car) leaning on a static prop box got all its track contacts
+  from the box: `Track::body_contacts` queried props, then the boundary, then
+  the road chunks against one shared capacity (8 per piece, 32 per race car),
+  so the road chunk got nothing and the body slid down through the road (soak
+  quick seed 9, Donington; the 16-contact prop pair plus the 16-contact
+  boundary already filled a race car's 32).
+- [D]/[V] The original generator fills one manifold per shape pair per call
+  (AEA1F0 capacity argument; 20 per pair in the original, 16 in the port, F318
+  A32); only the world pool bounds the sum. The port now gives every source
+  (props, boundary, each road chunk) its own pair capacity, bounded by the pool
+  share (`body_contacts(.., pair_capacity, pool, ..)`); since F317 the solver
+  bounds are world-wide (10 000 contacts, 40 000 rows), so the old per-body
+  totals were only an authored budget. The solo runtime pool grows from 36
+  (4 wheels + props + boundary) to 64 (+ a road pair). Test:
+  `a_hull_against_a_prop_box_keeps_its_road_contacts` (557 Donington prop
+  boxes whose pair fills up; with one shared budget the road gets 0, with
+  per-pair budgets 556 keep road contacts).
+
+### Lost pieces (F318 R06)
+
+A piece that has tunnelled keeps falling; about 150 s later |pose| > 1e5 makes
+`Mesh::world_bounds` fail every tick and the whole world pauses (a race freeze
+the soak never reaches, because it stops at the first fall). The original has
+no coordinate domain there, so its lost piece just falls, out of sight.
+`PropWorld::hold_lost` (both runtimes, after each committed step) holds a piece
+once it is `LOST_DEPTH` (100 m, AUTHORED) below the lowest road chunk: zero
+velocity, fixed pose, until the world is reset. Test:
+`a_piece_lost_below_the_world_is_held_until_reset`.
+
+### Pieces pushed into the ground (mostly orientation)
+
+[V] Most Donington board falls (F326 #4) were the contact orientation flaw of
+CONTACT_REORIENTATION_RESEARCH.md "Degenerate displacement": at |x| 400-550 a
+triangle witness a few ulps from its anchor vertex took the normalised branch
+and flipped a resting or sliding board's ground normal. With the coordinate
+tolerance, 12 of 13 board falls of the pre-fix 37-minute Donington long run,
+16 of 17 Nuerburgring failures of its long run, and long-1 seeds 1044, 1066
+and 1386 pass on replay.
+
+Still open (seeds 1091 and 1304 of long-1, 1067 of the pre-fix Donington long
+run, 1065 of the Nuerburgring one):
+- seed 1091: the lower brake-marker board (0.94 x 0.47 x 0.16, 4.9 kg) spawns
+  1-2 cm above the grass (inside the 0.02 shell, so no ground contact that
+  tick) while the car hits the stack at 16 m/s; in one tick it moves 0.31 m
+  down, turns about 60 degrees and gets -4.4 m/s, 7 rad/s, and lying flat it is
+  embedded deeper than its 0.08 m half thickness;
+- seed 1067: a car at 51 m/s breaks a prop and the piece spawns inside the car;
+  the separation drives it below the ground in its first step (vy -6 m/s).
+[I] The original's AEA1F0 has a backface correction for an oriented normal
+against an up-facing triangle (face y > 0.707 at D11548, vertical ray through
+the chunk B225E0), but it is gated by B1AB30 on shape +0x294..+0x2A0, which only
+the constructor writes (FLT_MAX, 0xB1F938..0xB1F976; no other writer found), so
+it never runs. Whether the original avoids hit tunnelling another way (contact
+scheduling, speculative pairs) is not established. Such pieces are now held
+when lost (above).
+
 ## Not yet established
 
 - Exact constraint (joint) solver, so tyre walls and armco stay static: tyre-wall springs (`cDeformableRubber*`,

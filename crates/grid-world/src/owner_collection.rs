@@ -15,8 +15,8 @@ pub struct Input<'a> {
 }
 pub fn collect(input: Input<'_>) -> Result<Vec<u32>, Error> {
     if input.owners.len() > 64
-        || input.first_pool.len() > 512
-        || input.second_pool.len() > 512
+        || input.first_pool.len() > crate::MAX_WORLD_CONTACTS
+        || input.second_pool.len() > crate::MAX_WORLD_CONTACTS
         || input.owners.iter().enumerate().any(|(i, o)| {
             o.identity == 0 || input.owners[..i].iter().any(|p| p.identity == o.identity)
         })

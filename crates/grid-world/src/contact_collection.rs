@@ -21,8 +21,8 @@ pub fn collect(input: Input<'_>) -> Result<Vec<u32>, Error> {
     if input.owner == 0
         || !(1..=80).contains(&input.capacity)
         || input.initial.len() > input.capacity
-        || input.first_pool.len() > 512
-        || input.second_pool.len() > 512
+        || input.first_pool.len() > crate::MAX_WORLD_CONTACTS
+        || input.second_pool.len() > crate::MAX_WORLD_CONTACTS
         || input
             .first_pool
             .iter()

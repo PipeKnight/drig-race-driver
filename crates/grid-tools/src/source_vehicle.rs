@@ -523,8 +523,10 @@ impl Runtime {
         if self.track.has_boundary() || self.state.shapes.len() != self.track.shape_count() + 1 {
             return Err("body boundary already prepared or shape registration differs".into());
         }
-        // Four wheel slots, sixteen for route props and sixteen for the boundary.
-        self.reserve_geometry_pool(36)?;
+        // Four wheel slots, then sixteen per shape pair: route props, the
+        // boundary and the road chunks under the car (the road pair had no
+        // room once props and boundary were full, F342).
+        self.reserve_geometry_pool(64)?;
         self.track.attach_boundary(boundary);
         self.state.shapes.push(grid_world::contact_groups::Shape {
             angular: true,
@@ -795,6 +797,7 @@ impl Runtime {
                 &recorded,
                 &state.world.groups.bodies,
             );
+            next.hold_lost(&mut state.world.groups.bodies, self.track.bounds()[1]);
             let disabled = next.apply(&mut state.world, &mut state.shapes, self.ticks + 1)?;
             // Appending links the car body (chain tail) to the first piece.
             state.car.owner.physical = state.world.groups.bodies[0];
@@ -1041,8 +1044,7 @@ impl Runtime {
             &self.track,
             &self.surfaces,
             bodies.get(..1).ok_or(Error("missing car body"))?,
-            // The car's track query is bounded to 64 records.
-            remaining.min(64),
+            remaining,
         )? {
             if let Some(prop) = prop {
                 recorded.push((
@@ -1743,7 +1745,7 @@ mod tests {
         assert!(enabled.prepare_body_geometry(root, &table).is_err());
         enabled.reset();
         assert_eq!(enabled.state.shapes.len(), 248);
-        assert_eq!(enabled.state.world.groups.contacts.len(), 36);
+        assert_eq!(enabled.state.world.groups.contacts.len(), 64);
         let mut legacy = Runtime::lacetti(root, "slot_00", 200679).unwrap();
         for _ in 0..240 {
             let controls = Controls {
@@ -1930,9 +1932,15 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        // The share is a world-pool bound now (sixteen per shape pair inside).
         assert!(
             geometry
-                .contacts(&enabled.track, &enabled.surfaces, &[lowered], 65)
+                .contacts(
+                    &enabled.track,
+                    &enabled.surfaces,
+                    &[lowered],
+                    grid_world::MAX_WORLD_CONTACTS + 1
+                )
                 .is_err()
         );
         assert!(

@@ -75,3 +75,30 @@ The HDM files are ASCII text with legacy `<!description>` declarations. A strict
 Wheel setup initializes its local20/24 defaults before optional property reads. Both shipped HDMs omit those two attributes. The similarly named damageToStartSteeringWobble source attribute is not read by the inspected9c48c0 path; do not substitute it for274. Outer constructor9f3d30 clears object218..37F before later setup. Fallback/override behavior beyond this inspected path remains open.
 
 Private aligned evidence: `handling-damage-setup-instructions-20261008.json`, `handling-damage-load-instructions-20261008.json`, `handling-damage-default-constants-20261008.json`, three handling-damage string JSONs. Targeted Ghidra output `20261008T1331402853307Z/`, `20261008T1332309391001Z/`, `20261008T1333040046986Z/`; caller survey `20261008T1336570555821Z/`. Existing tools reused; no installation/game/settings modifications.
+
+## Unit thresholds: 0/0 blend (F342)
+
+16 October 2026, Claude Code. Found by `grid-soak` (long Nuerburgring seed 2177,
+AI car 6 retired "nonfinite handling effects" at segment tick 6559). Static:
+capstone (`local/soak-fixes/disasm/9c5b90.asm`).
+
+- [V] Standard.hdm has suspension threshold +0x354 = 1 (and wheel +0x2F8 and cap
+  +0x254 = 1). Car 6's suspension level +0x14 reached 1.0 (levels clamp to
+  [0, 1]), so +0x3C0 = +0x35C x (1 - 1) / (1 - 1) = 0/0.
+- [D] 9C5B90 computes it at 0x9C5D27..0x9C5D78: `comiss threshold, level; jbe`,
+  `comiss threshold, 1; ja`, then `divss` and a `comiss`/`jbe` clamp. An
+  unordered compare takes both `jbe` branches, so grid.exe stores the NaN too;
+  the 9BD7F0 copier moves it with x87 `fld`/`fstp` (0x9BDC58: +0xD1B0 ->
+  +0x2280). Its only readers, 0x9B2C5A and 0x9B42CD, do `comiss x, [0.8]; jbe
+  skip`, i.e. they treat the NaN as "not above 0.8". The cap readers 0x9B37F7 and
+  0x9B388B (`comiss 1.0, cap; jbe skip`) skip a NaN cap like an uncapped 1. The
+  per-wheel effect (+0x2284.., reader loop 0x9B2F50) is used in arithmetic.
+- Port: `vehicle_handling::fraction` and the steering cap blend return 0 for
+  that 0/0. Every reader then behaves as grid.exe's compare-only readers do with
+  the NaN (multiple-shift off, caps off); for the per-wheel effect the original
+  would spread the NaN into arithmetic, and zero (no reduction) is the
+  recorded deviation. Past a unit threshold x/0 = +inf clamps to 1, as in the
+  original. The authored start == end ramp (not in the HDM) still fails as before.
+  Test: `saturated_damage_at_unit_thresholds_gives_zero_blend`; the replay of
+  seed 2177 on the pre-fix build plus only this change passes all 15 606 ticks.
+

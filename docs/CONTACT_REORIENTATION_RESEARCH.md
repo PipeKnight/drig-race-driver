@@ -76,3 +76,58 @@ policy and legacy descriptor distinction remain documented in
 The research reused installed tools. Ghidra headless analysis successfully
 saved its private project; no approval was rejected. No desktop input, original
 Steam file/settings modification or new installation was needed.
+
+## Degenerate displacement: port deviation (F342)
+
+16 October 2026, Claude Code. Found by `grid-soak` (Nuerburgring quick seeds 6
+and 3; F326 #3). Static: capstone on the hash-pinned image
+(`local/soak-fixes/disasm/aee640.asm`).
+
+- [D] Small branch of AEE640: when either displacement length is at most
+  3727C5AC (1e-5), 0xAEEB40 `CMPLTPS` compares |a|^2 < |b|^2 and 0x4682A0 tests
+  lane 0 of that mask; true selects a (stored at esp+0x40, `param_4 - param_1`),
+  false b (esp+0x50, `param_2 - param_5`). The sign of `dot(normal, chosen)`
+  decides the flip. This is what the port did (byte-exact in F232).
+- [I] The chosen vector is the **smaller** one, so it is always the
+  sub-threshold one: exactly zero when the triangle witness is the anchor vertex
+  (triangle[0]), otherwise a few ulps of rounding (at |x| > ~80 m an ulp is
+  already > 7.6e-6). Observed in the port:
+  - noise: a 2e-6 (one-ulp) witness offset gave dot = -7e-8 and flipped an
+    upward normal; the manifold then published four contacts at the car roof
+    with 1.45 m depth and the car was pushed 1.14 m into the road in one tick
+    (seed 6, car 9 at (-213.6, 607.2, -31.0));
+  - exact zero: a margin contact (hull 2 mm above a kerb vertex, so the witness
+    difference points down) kept its downward normal because a = 0; 1.3 m
+    contacts, the same fall (seed 3, car 1 at (-224.7, 606.5, -80.7));
+  - rounding just above the threshold: a triangle witness 1e-4 from the anchor
+    at y = 612 (one ulp there is 6.1e-5) takes the normalised branch, and that
+    rounding-sized vector's projection (-0.998) outvotes the hull side (+0.6);
+    a resting Nuerburgring tyre was pushed 0.3 m into the ground (long seed
+    1020). The same happens to brake-marker boards at Donington |x| 400-550.
+- [D] AEA1F0's later backface correction (0.707 at D11548, B1AB30 extent test,
+  B225E0 vertical ray) would catch both, but its extents at packed shape
+  +0x294..+0x2A0 are written only by the constructor (FLT_MAX at
+  0xB1F938..0xB1F976; a search for writes of all four offsets found no other
+  writer for this class), so it never runs.
+- **Port deviation (owner rule F320, recorded):** a displacement is
+  degenerate when its length is at most 1e-5 *or* 32 ulps of its largest
+  endpoint coordinate (32 x FLT_EPSILON x scale, AUTHORED; about 2.3 mm at
+  600 m). If one is degenerate the port orients by the other, informative one;
+  if both are, it keeps the normal; otherwise the original normalised branch
+  runs unchanged. Grid.exe's result differs only in these degenerate cases:
+  for noise it was arbitrary; for an exact zero the original kept the normal
+  and the port now lets the mesh side decide. The
+  F232 boundary sequences that place witnesses at or near the threshold are
+  therefore no longer byte-identical by design; the unit test
+  `orientation_swaps_witnesses_and_preserves_signed_normal_lanes` states the
+  new rule. Whether grid.exe avoids these contacts somewhere downstream was not
+  found: contact bias (B0CE10/B0CEC0) has a FLT_MAX upper bound.
+- Unchanged: Donington solo AI laps 88.42029812185638 / 86.28228501935392,
+  output byte-identical to main. Changed: the 12-car Donington race
+  (`12 12000 ai` with DF01) no longer matches F324's reference (main: 11 800
+  ticks, 827 car contacts; now 12 000 ticks, a different order from tick
+  3000). Bisected: with only this file taken from main the race is identical to
+  main again, so the per-pair budgets, lost-piece hold and 0/0 blend do not
+  change it; the orientation deviation does, through degenerate contacts in the
+  field's car-car and car-kerb contacts.
+

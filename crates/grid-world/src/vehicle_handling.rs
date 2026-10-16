@@ -101,13 +101,26 @@ fn normalize(b: &mut [u32], first: usize) {
         b.store(first + 4, inverse * c);
     }
 }
+/// The 9C5B90 damage ramp. At `level == threshold == 1` (the Standard.hdm
+/// suspension, wheel and cap thresholds are 1.0, and damage levels saturate
+/// at 1.0) the original divides 0/0 and its COMISS/JBE clamp passes the NaN
+/// on. Its readers of the suspension effect (+0x3C0 -> +0x2280: 0x9B2C5A,
+/// 0x9B42CD) and of the caps (0x9B37F7, 0x9B388B) compare with JBE and so
+/// treat the NaN as zero blend; the port stores that zero (F342) instead of
+/// retiring the car. The per-wheel effect reader (0x9B2F50) does arithmetic
+/// on it, so there the original would spread the NaN; zero is the deviation.
 fn fraction(level: f32, threshold: f32) -> f32 {
     if level < threshold {
         0.
     } else if threshold > 1. {
         1.
     } else {
-        ((level - threshold) / (1. - threshold)).clamp(0., 1.)
+        let blend = (level - threshold) / (1. - threshold);
+        if blend.is_nan() {
+            0.
+        } else {
+            blend.clamp(0., 1.)
+        }
     }
 }
 fn ramp(level: f32, start: f32, end: f32, low: f32) -> f32 {
@@ -590,6 +603,43 @@ mod tests {
             calculate(&s, 0.001).err().unwrap().0,
             "nonfinite handling wheel impact"
         );
+    }
+
+    #[test]
+    fn saturated_damage_at_unit_thresholds_gives_zero_blend() {
+        // Seed 2177 (long Nuerburgring): suspension level 0x14 reached the
+        // Standard.hdm threshold 0x354 = 1 and 0x3C0 became 0/0.
+        let mut s = fixture();
+        let m = MUTABLE / 4;
+        let b = &mut s.vehicle[m..m + 280];
+        for (o, v) in [
+            (0x14, 1.),
+            (0x354, 1.),
+            (0x35c, 1.),
+            (0x2f8, 1.),
+            (0x2ec, 0.5),
+        ] {
+            b.store(o, v);
+        }
+        for i in 0..4 {
+            b.store(0x28 + 4 * i, 1.);
+            b.store(0x38 + 4 * i, 1.);
+        }
+        b.store(0x254, 1.);
+        b.store(0x24c, 0.4);
+        b.store(0x30, 1.);
+        b.store(0x34, 1.);
+        b.store(0x48, 0.5);
+        b.store(0x4c, 0.5);
+        effects(b, None, true).unwrap();
+        assert_eq!(f(b, 0x3c0), 0.);
+        assert_eq!([f(b, 0x3b0), f(b, 0x3b4)], [1., 1.]);
+        for i in 0..4 {
+            assert_eq!([f(b, 0x3c8 + i * 0x18), f(b, 0x3d8 + i * 0x18)], [1., 1.]);
+        }
+        // Past a unit threshold the original's x/0 = inf clamps to 1.
+        assert_eq!(fraction(1.5, 1.), 1.);
+        assert_eq!(fraction(0.5, 0.25), 0.25f32 / 0.75);
     }
 
     #[test]

@@ -336,6 +336,13 @@ impl Run<'_> {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .filter(|&n| n > 0);
+            let trace_body: Option<(Vec<usize>, u64)> =
+                std::env::var("GRID_SOAK_TRACE_BODY").ok().and_then(|v| {
+                    let (bodies, from) = v.split_once(':').unwrap_or((&v, "0"));
+                    let bodies: Option<Vec<usize>> =
+                        bodies.split(',').map(|b| b.parse::<usize>().ok()).collect();
+                    Some((bodies?, from.parse().ok()?))
+                });
             let mut segment = 0u64;
             let mut skip_segment = false;
             let mut step_index = 0usize;
@@ -461,6 +468,43 @@ impl Run<'_> {
                                 s.breaks,
                                 s.contacts,
                                 s.lowest_piece
+                            );
+                        }
+                        // GRID_SOAK_TRACE_BODY=I,J..[:FROM]: these world bodies every tick from session tick FROM.
+                        for (body, b) in trace_body
+                            .iter()
+                            .filter(|(_, from)| session.total_ticks >= *from)
+                            .flat_map(|(bodies, _)| bodies)
+                            .filter_map(|&i| Some((i, snapshot.bodies.get(i)?)))
+                        {
+                            let w = |o: usize| f32::from_bits(b[o / 4]);
+                            let car = if body < snapshot.cars {
+                                let wheels = session.car(body).wheels().map(|w| w.displacement);
+                                let contacts = session
+                                    .race
+                                    .as_ref()
+                                    .map_or(session.runtime.last_body_contacts, |r| {
+                                        r.multi.body_contacts_of(body)
+                                    });
+                                format!(" contacts={contacts} wheels={wheels:.3?}")
+                            } else {
+                                String::new()
+                            };
+                            println!(
+                                "soak_body tick={} body={body} pos=({:.3},{:.3},{:.3}) v=({:.3},{:.3},{:.3}) w=({:.3},{:.3},{:.3}) up=({:.3},{:.3},{:.3}){car}",
+                                session.total_ticks,
+                                w(0x1d0 + 48),
+                                w(0x1d0 + 52),
+                                w(0x1d0 + 56),
+                                w(0x220),
+                                w(0x224),
+                                w(0x228),
+                                w(0x210),
+                                w(0x214),
+                                w(0x218),
+                                w(0x1d0 + 16),
+                                w(0x1d0 + 20),
+                                w(0x1d0 + 24),
                             );
                         }
                         if self.progress && session.total_ticks.is_multiple_of(PROGRESS_EVERY) {

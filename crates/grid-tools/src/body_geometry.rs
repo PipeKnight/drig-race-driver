@@ -5,6 +5,10 @@ use crate::{contact_surfaces::Surfaces, track::Track};
 use grid_formats::{binxml, car_collision};
 use grid_world::{Error, collision_mesh, contact_groups, convex_distance, physical_pose};
 
+/// Contacts per shape pair (props, boundary sheet, each road chunk): the
+/// port's packed generator bound (the original allows 20, F318 A32).
+const PAIR_CONTACTS: usize = 16;
+
 #[derive(Clone)]
 pub struct BodyGeometry {
     shape: collision_mesh::MeshShape,
@@ -305,6 +309,7 @@ impl BodyGeometry {
             self.shape.mesh(),
             self.pose(&bodies[0])?,
             &self.query,
+            PAIR_CONTACTS,
             remaining,
             |code| surfaces.sheet(code),
         )?;

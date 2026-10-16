@@ -28,11 +28,17 @@ const BREAK_TOLERANCE: f32 = 1.01;
 /// Descriptor +0xEC set by 0x7B8F40 (0x00CB1104).
 const DESCRIPTOR_EC: f32 = 50.;
 /// Authored contact budgets per piece pair (the original's broadphase and
-/// pool sizes are not recovered).
+/// pool sizes are not recovered); a piece gets `TRACK_CONTACTS` from each
+/// track source (props, boundary, every road chunk).
 const TRACK_CONTACTS: usize = 8;
 const PAIR_CONTACTS: usize = 4;
 /// Pool slots added per live piece, up to the world bound.
 const SLOTS_PER_PIECE: usize = 12;
+/// AUTHORED: a piece this far below the lowest road chunk has tunnelled
+/// through the ground and is held (see [`PropWorld::hold_lost`]).
+pub const LOST_DEPTH: f32 = 100.;
+/// Body words 0x1C0..0x230: mass centre, pose, angular and linear velocity.
+const KINEMATICS: std::ops::Range<usize> = 0x1c0 / 4..0x230 / 4;
 const CYLINDER_SIDES: usize = 12;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,6 +120,8 @@ pub struct PropWorld {
     pub events: Vec<BreakEvent>,
     pending: Vec<(usize, [f32; 4], f32)>,
     base_slots: Option<usize>,
+    /// Held kinematics of lost pieces, by piece index.
+    lost: BTreeMap<usize, [u32; KINEMATICS.end - KINEMATICS.start]>,
 }
 
 fn f(b: &[u32], o: usize) -> f32 {
@@ -332,12 +340,18 @@ impl Catalog {
                 if !(mass.is_finite() && mass > 0.) {
                     return Err("invalid prop piece mass".into());
                 }
+                // 0x7D3C40 hands the entity matrix to the body constructor
+                // unnormalised (only the render path splits off the row
+                // lengths), so a scaled placement (Nürburgring tyre stacks,
+                // 0.9718) keeps its scale in the body basis; mass stays the
+                // template's density x unscaled volume.
                 let pose = compose(&matrix(&shape.transform), &placement);
-                for row in &pose[..3] {
-                    let length = dot3(*row, *row).sqrt();
-                    if (length - 1.).abs() > 1e-3 {
-                        return Err("scaled prop piece placement".into());
-                    }
+                let [x, y, z] = [0, 1, 2].map(|i| pose[i]);
+                let determinant = x[0] * (y[1] * z[2] - y[2] * z[1])
+                    - x[1] * (y[0] * z[2] - y[2] * z[0])
+                    + x[2] * (y[0] * z[1] - y[1] * z[0]);
+                if !(determinant.is_finite() && determinant > 1e-3) {
+                    return Err("degenerate prop piece placement".into());
                 }
                 let (points, triangles) = hull(primitive);
                 let hull = collision_mesh::build(&points, &triangles, 0)?;
@@ -679,7 +693,41 @@ impl PropWorld {
             events: Vec::new(),
             pending: Vec::new(),
             base_slots: None,
+            lost: BTreeMap::new(),
         }
+    }
+
+    /// Hold every piece that has fallen more than [`LOST_DEPTH`] below
+    /// `floor` (the lowest road chunk bound): it keeps its position with zero
+    /// velocity from then on. The original lets such a piece fall forever,
+    /// harmlessly, as nothing there bounds coordinates; the port's 1e5
+    /// coordinate domain (`Mesh::world_bounds`) would instead stop the whole
+    /// world about 150 s later (F318 R06). Call after each committed step.
+    pub fn hold_lost(&mut self, bodies: &mut [contact_groups::Body], floor: f32) {
+        for (k, piece) in self.pieces.iter().enumerate() {
+            let Some(body) = bodies.get_mut(piece.body) else {
+                continue;
+            };
+            let held = self.lost.entry(k);
+            let held = match held {
+                std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
+                std::collections::btree_map::Entry::Vacant(e) => {
+                    if f(body, 0x1d0 + 52) >= floor - LOST_DEPTH {
+                        continue;
+                    }
+                    let mut kinematics: [u32; KINEMATICS.end - KINEMATICS.start] =
+                        body[KINEMATICS].try_into().unwrap();
+                    kinematics[(0x210 - 0x1c0) / 4..].fill(0);
+                    e.insert(kinematics)
+                }
+            };
+            body[KINEMATICS].copy_from_slice(held);
+        }
+    }
+
+    /// Whether piece `k` has been lost below the world and is held.
+    pub fn is_lost(&self, k: usize) -> bool {
+        self.lost.contains_key(&k)
     }
 
     /// Arm the intact breakable boxes: their threshold becomes the contact limit.
@@ -761,7 +809,7 @@ impl PropWorld {
                 break;
             }
             for hit in
-                track.body_contacts(&spec.hull, pose, &query, room.min(TRACK_CONTACTS), |code| {
+                track.body_contacts(&spec.hull, pose, &query, TRACK_CONTACTS, room, |code| {
                     surfaces.sheet(code)
                 })?
             {
@@ -1002,6 +1050,7 @@ impl PropWorld {
         self.events.clear();
         self.pending.clear();
         self.base_slots = None;
+        self.lost.clear();
         for track in tracks {
             self.arm(track)?;
         }
@@ -1250,6 +1299,133 @@ mod tests {
             "{}",
             board.mass
         );
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn nurburgring_scaled_tyre_stacks_keep_their_placement_scale() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let route = Route::new("tracks/europe/nurburgring/route_0").unwrap();
+        let props = Props::read_route(root, &route).unwrap();
+        let catalog = Catalog::read(root, &route, &props).unwrap();
+        let mut scaled = BTreeMap::<String, usize>::new();
+        for b in &catalog.breakables {
+            for p in &b.pieces {
+                let lengths = [0, 1, 2].map(|i| dot3(p.pose[i], p.pose[i]).sqrt());
+                if lengths.iter().any(|l| (l - 1.).abs() > 1e-3) {
+                    // Uniform: the entity scale, not a shear.
+                    assert!(lengths.iter().all(|l| (l - lengths[0]).abs() < 1e-4));
+                    assert!((lengths[0] - 0.9718).abs() < 1e-3, "{lengths:?}");
+                    *scaled.entry(b.template.clone()).or_default() += 1;
+                }
+                if b.template.starts_with("tyrestack") {
+                    // sRubber d700 over the unscaled template cylinder.
+                    assert_eq!(p.mass, mass_properties(p.primitive, 700.).0);
+                }
+            }
+        }
+        eprintln!("scaled={scaled:?} unported={:?}", catalog.unported);
+        assert_eq!(scaled["tyrestack_white.max"] % 12, 0);
+        assert!(scaled.contains_key("tyrestack_red.max"));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS (private CD01)"]
+    fn a_hull_against_a_prop_box_keeps_its_road_contacts() {
+        // Soak seed 9 (F342): a board standing against a static prop box got
+        // all its track slots from the box and slid down through the road.
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let mut runtime = crate::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let geometry = runtime.prepare_body_geometry(root, &table).unwrap();
+        let track = runtime.track();
+        let query = convex_distance::ContactSettings {
+            margin: 0.02,
+            directions: geometry.query().directions,
+        };
+        let (points, triangles) = hull(Primitive::Box([0.3, 0.8, 0.3]));
+        let mesh = collision_mesh::build(&points, &triangles, 0).unwrap();
+        let mut cache = grid_world::rectangle_cull::Cache::default();
+        let (mut full, mut with_road) = (0, 0);
+        for b in &track.props().unwrap().boxes {
+            // A hull straddling the box's -x face, 0.1 m into the road under it.
+            let (x, z) = (b.bounds[0], 0.5 * (b.bounds[2] + b.bounds[5]));
+            let (top, bottom) = (b.bounds[4] + 1., b.bounds[1] - 2.);
+            let Some(hit) = track
+                .query([x, top, z, 1.], [x, bottom, z, 1.], &mut cache)
+                .unwrap()
+                .hit
+            else {
+                continue;
+            };
+            let road = top + (bottom - top) * hit.contact.fraction;
+            if (road - b.bounds[1]).abs() > 0.3 || b.bounds[4] - road < 1. {
+                continue;
+            }
+            let mut pose: Matrix =
+                std::array::from_fn(|r| std::array::from_fn(|c| f32::from(r == c)));
+            pose[3] = [x, road + 0.3, z, 1.];
+            let count = |pool| {
+                let hits = track
+                    .body_contacts(&mesh, pose, &query, TRACK_CONTACTS, pool, |code| {
+                        runtime.surfaces().sheet(code)
+                    })
+                    .unwrap();
+                let props = hits.iter().filter(|h| h.prop.is_some()).count();
+                let road = hits
+                    .iter()
+                    .filter(|h| h.prop.is_none() && h.contact.normal[1] > 0.7)
+                    .count();
+                (props, road)
+            };
+            let (props, road) = count(64);
+            if props < TRACK_CONTACTS {
+                continue;
+            }
+            // The prop pair is full. One shared budget of the same size (the
+            // old behaviour) leaves the road nothing; its own pair does not.
+            assert_eq!(count(TRACK_CONTACTS), (TRACK_CONTACTS, 0));
+            full += 1;
+            with_road += usize::from(road > 0);
+        }
+        eprintln!("prop boxes with a full pair: {full}, with road contacts: {with_road}");
+        assert!(full > 100 && with_road * 10 >= full * 9);
+    }
+
+    #[test]
+    fn a_piece_lost_below_the_world_is_held_until_reset() {
+        let mut world = PropWorld::new(Catalog::default());
+        world.pieces = (0..2)
+            .map(|k| Piece {
+                breakable: 0,
+                spec: 0,
+                body: k + 1,
+                token: k as u32 + 2,
+            })
+            .collect();
+        let mut bodies = vec![[0u32; 0x424 / 4]; 3];
+        let at = |b: &mut contact_groups::Body, y: f32, vy: f32| {
+            set(b, 0x1d0 + 52, y);
+            set(b, 0x224, vy);
+            set(b, 0x210, 3.);
+        };
+        at(&mut bodies[1], -20. - LOST_DEPTH - 0.5, -40.);
+        at(&mut bodies[2], -20. - LOST_DEPTH + 0.5, -40.);
+        world.hold_lost(&mut bodies, -20.);
+        assert!(world.is_lost(0) && !world.is_lost(1));
+        assert_eq!(f(&bodies[1], 0x224), 0.);
+        assert_eq!(f(&bodies[1], 0x210), 0.);
+        assert_eq!(f(&bodies[1], 0x1d0 + 52), -20. - LOST_DEPTH - 0.5);
+        assert_eq!(f(&bodies[2], 0x224), -40.);
+        // The next step moves it again; holding puts it back.
+        at(&mut bodies[1], -200., -0.2);
+        world.hold_lost(&mut bodies, -20.);
+        assert_eq!(f(&bodies[1], 0x1d0 + 52), -20. - LOST_DEPTH - 0.5);
+        assert_eq!(f(&bodies[1], 0x224), 0.);
+        world.reset(&mut []).unwrap();
+        assert!(!world.is_lost(0));
     }
 
     #[test]

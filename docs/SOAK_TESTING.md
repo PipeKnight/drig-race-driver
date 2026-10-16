@@ -41,6 +41,11 @@ Options: `--out local/soak/DIR` (must contain a `local` component; default
 overrides `--cars N`, `--route tracks/...`, `--ticks N`, `--grid-position P`,
 `--assists SPEC`, `--chaos MODE`, `--props on|off`, `--keep` (keep the inputs of
 passing runs). `GRID_SOAK_TRACE=N` prints one player sample every N ticks.
+`GRID_SOAK_TRACE_BODY=I,J..[:FROM]` prints world bodies I, J.. (cars first, then
+pieces) every tick from session tick FROM: position, velocity, angular velocity,
+the up row and, for cars, the body-contact count and wheel displacements. A
+one-tick jump in position and orientation with little velocity is the signature of
+a contact with a wrong normal (F342).
 
 Artifacts (all under the ignored `local/soak/`): `summary.md` (distinct failures
 grouped by error text, then one row per scenario), `summary.tsv`, and for each
@@ -166,7 +171,7 @@ grid position then defaults to the race launcher's back of the grid
 
 Evidence: main checkout `local/soak/` (every directory has `summary.md`,
 `summary.tsv`, and per failure `seed-N.failure.md` + `seed-N.inputs.tsv`).
-Nothing here was fixed by this change; the harness only reports.
+The harness change (F326) only reports; the fixes are in "Fixes (F342)" below.
 
 ### The 16-body prop freeze (owner's 12-car race), reproduced
 
@@ -249,12 +254,52 @@ expected yield. Worth adding, in order:
    over a purchased file per reader, `#[ignore]` (asset-dependent), as the
    probe above.
 
+## Fixes (F342, 2026-10-16)
+
+Every fix was first reproduced with the recorded replay (same tick and digest),
+then the replay was rerun on the fixed build. Pre-fix builds came from a scratch
+worktree; evidence is in the main checkout's `local/soak/fix-*` and
+`local/soak-fixes/`.
+
+| # | Cause | Fix | Evidence |
+|---|---|---|---|
+| 1 | Nürburgring tyre stacks have a uniform 0.9718 placement scale; the catalog refused it. 0x7D3C40 gives the body constructor the unnormalised entity matrix (only the render path splits off the scale). | Keep the scaled basis; reject only a degenerate one. | DYNAMIC_PROPS_RESEARCH.md "Soak fixes (F342)"; test `nurburgring_scaled_tyre_stacks_keep_their_placement_scale`; quick seeds 2, 3, 6, 7, 10, 11 start. |
+| 2 | Standard.hdm thresholds are 1.0; a damage level saturating at 1.0 gives the effect ramp 0/0. grid.exe stores the NaN too, but its readers only compare it (JBE) and read it as zero blend; the port's finiteness guard retired the car. | 0/0 blend = 0 in the effects and the steering caps. | HANDLING_DAMAGE.md "Unit thresholds: 0/0 blend (F342)"; test `saturated_damage_at_unit_thresholds_gives_zero_blend`; seed 2177 on the pre-fix build plus this change alone passes all 15 606 ticks. |
+| 3 | Not a mesh gap (ray and brute-force triangle search agree, no holes). The body/road contact orientation (AEE640 small branch) decides by the sub-threshold displacement: a one-ulp witness offset flips the normal by noise (quick seed 6), and an exact vertex-0 witness keeps a margin contact's inverted normal (quick seed 3). A rounding-sized offset just above 1e-5 (one ulp is 6.1e-5 at 600 m) does the same in the normalised branch. Each publishes contacts through the whole car (1.3-1.45 m) and the car is pushed through the kerb in one tick. | A displacement within 1e-5 or 32 ulps of its coordinates is degenerate; orient by the other, informative one (port deviation, F320; recorded). | CONTACT_REORIENTATION_RESEARCH.md "Degenerate displacement"; test `orientation_swaps_witnesses_and_preserves_signed_normal_lanes`; the replays pass. |
+| 4 | Mostly the orientation flaw of #3 (boards at Donington \|x\| 400-550). Also (a) a piece leaning on a static prop box got all its track contacts from the box (props first, one shared budget), so the road chunk got none and it slid through the road (quick seed 9). (b) Lost pieces kept falling toward the 1e5 domain, a later world pause (R06). | (a) Per shape pair capacities, bounded only by the pool (as in the original). (b) Hold a piece 100 m below the road. | DYNAMIC_PROPS_RESEARCH.md; tests `a_hull_against_a_prop_box_keeps_its_road_contacts`, `a_piece_lost_below_the_world_is_held_until_reset`; quick seeds 5 and 9 pass; 12 of 13 board falls of a pre-fix Donington long run and long-1 1044, 1386 pass on replay. |
+| 5 | The same orientation flip and contact budget. | As 3 and 4. | Replays of long-1 seeds 1066, 1097, 1209 and 1345 pass. |
+| - | Nürburgring with props: up to 138 bodies (12 tyres per stack) gave 749 world contacts; the deformation callback chain still had the 512 port bound (F318 A39) and paused the world. | Raised to `MAX_WORLD_CONTACTS` (10 000) like the F317 bounds. | Replays of long Nürburgring seeds 1007 and 1018 pass. |
+| 6 | Unchanged: 12 driver objects, as in the original. | - | - |
+
+Still open (not a harness artefact): a piece driven into the ground by a hard
+hit in one tick (a brake-marker board hovering inside the contact margin hit at
+16 m/s; a piece spawned inside a car at 51 m/s): long-1 1091 and 1304 and two
+pre-fix long-run seeds, see DYNAMIC_PROPS_RESEARCH.md "Pieces pushed into the
+ground". Such pieces are now held below the world instead of growing to the
+1e5 domain, so they no longer threaten a world pause.
+
+### Runs after the fixes
+
+Build ffb71b8 (rebased on F340), grid-soak sha256 a488ae0d...c3e6, main checkout
+`local/soak/fix-quick-final/` and `final-long-*/`:
+
+| Run | Scenarios | Failed | Groups |
+|---|---|---|---|
+| quick (both routes) | 12 | 0 | - |
+| long Donington, props on, 60.7 min wall, 990 min simulated | 227 | 25 (11 %) | 24 prop piece falls (11 at the 150 m brake marker, -406..-413, -16; 4 at -532..-551, -170), 1 car fall (player 24 m off the line at (762, 45), seed 1087) |
+| long Nürburgring, props on, 61.3 min wall, 591 min simulated | 125 | 6 (5 %) | 5 prop piece falls, 1 car fall (player 26 m off the line at (-281, 26), seed 1087) |
+
+For comparison, F326: Donington 73 of 248 long runs failed (62 piece and 11 car
+falls), Nürburgring with props could not start at all, and without props 48 of
+234 runs lost a car. No world error, retirement, panic, set-up failure, crash or
+hang occurred after the fixes.
+
 ## Follow-ups
 
-- Fix #1 (Nürburgring prop placement scale) so Nürburgring races start.
-- Find the non-finite handling effect (#2); `grid-soak replay` of seed 2177
-  reaches it in about 40 s.
-- Find the Nürburgring road gap (#3) and the Donington area where pieces and
-  cars fall through (#4, #5); the replays above reproduce them exactly.
+- The two off-track player falls of seed 1087 (both routes): replay
+  `local/soak/final-long-*/seed-1087.inputs.tsv` and trace body 0 with
+  `GRID_SOAK_TRACE_BODY`.
+- The open board case above; the original's disabled backface correction
+  (AEA1F0 -> B1AB30/B225E0) is the lead.
 - `Session` mirrors `drive_tick` as of F323 (retired cars, the player's own
   contact count). Keep it in step when the app's tick changes.

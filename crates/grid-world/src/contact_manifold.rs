@@ -129,8 +129,36 @@ fn orient(
     let b = sub(mesh_anchor, witnesses[1]);
     let squares = [dot(a, a), dot(b, b)];
     let lengths = [witness_length(squares[0])?, witness_length(squares[1])?];
-    let score = if lengths.iter().any(|&x| x <= f32::from_bits(0x3727_c5ac)) {
-        dot(normal, if squares[0] < squares[1] { a } else { b })
+    // AEE640's 3727C5AC (1e-5) "degenerate" length is below the rounding of
+    // world coordinates on every circuit (one ulp is 6.1e-5 at 600 m), so a
+    // displacement counts as degenerate up to 32 ulps of its largest
+    // endpoint coordinate as well (AUTHORED, F342).
+    let degenerate = |p: V, q: V| {
+        let scale = p.iter().chain(&q).take(7).fold(0f32, |m, v| m.max(v.abs()));
+        f32::from_bits(0x3727_c5ac).max(32. * f32::EPSILON * scale)
+    };
+    let tolerance = [
+        degenerate(witnesses[0], triangle_anchor),
+        degenerate(mesh_anchor, witnesses[1]),
+    ];
+    let score = if lengths[0] <= tolerance[0] || lengths[1] <= tolerance[1] {
+        // AEE640 (0xAEEB40 CMPLTPS, 0x4682A0 lane-0 mask) takes the sign of
+        // `dot(normal, smaller displacement)` here, and the smaller one is
+        // the degenerate one by construction: zero when the triangle witness
+        // is the anchor vertex, else rounding. So the original keeps a margin
+        // contact's inverted witness normal whenever the closest feature is
+        // vertex 0, and flips by noise otherwise, and its normalized branch
+        // trusts a rounding-sized vector just above 1e-5; all of them publish
+        // contacts through the whole car or piece (F342: kerb vertices at
+        // Nuerburgring and Donington). Port the intended rule instead (owner
+        // rule F320; deviation recorded): orient by the other, informative
+        // displacement, and keep the normal only if both are degenerate.
+        let (other, informative) = if lengths[0] <= tolerance[0] {
+            (b, lengths[1] > tolerance[1])
+        } else {
+            (a, true)
+        };
+        if !informative { 0. } else { dot(normal, other) }
     } else {
         let mut scores = [0.; 2];
         for (i, v) in [a, b].into_iter().enumerate() {
@@ -460,16 +488,39 @@ mod tests {
             ]
         );
         assert_eq!(points, [witnesses[1], witnesses[0]]);
+        // A witness exactly at the triangle anchor: the original kept the
+        // normal (zero projection); the mesh side now decides (F342).
         let (out, points) = orient(anchor, anchor, normal, [anchor, witnesses[1]]).unwrap();
+        assert_eq!(out[1], -1.);
+        assert_eq!(points, [witnesses[1], anchor]);
+        let (out, points) = orient(anchor, anchor, normal, [anchor, [0., -2., 0., 1.]]).unwrap();
         assert_eq!(out, normal);
-        assert_eq!(points, [anchor, witnesses[1]]);
-        // A short displacement selects its unnormalized projection; the long
-        // displacement has the opposite sign and must not override it.
+        assert_eq!(points, [anchor, [0., -2., 0., 1.]]);
+        // A sub-threshold displacement (zero or rounding at track
+        // coordinates) carries no orientation: the other one decides, whatever
+        // the short one's sign (F342; the original used the short one).
+        for short in [-1e-6, 0., 1e-6, -9e-6] {
+            for long in [-1f32, 1.] {
+                let w = [[0., short, 0., 1.], [0., long, 0., 1.]];
+                let (out, _) = orient(anchor, anchor, normal, w).unwrap();
+                // b = anchor - w[1] = -long along the normal.
+                assert_eq!(out[1], -long.signum(), "{short} {long}");
+            }
+        }
+        // At track height one ulp is 6e-5: a 1e-4 offset from the anchor is
+        // rounding and no longer outvotes the mesh side (seed 1020, F342).
+        let high = [0., 612., 0., 1.];
+        let w = [[0., 612. - 1e-4, 0., 1.], [0., 611.8, 0., 1.]];
+        assert_eq!(orient(high, high, normal, w).unwrap(), (normal, w));
+        // Both degenerate: unchanged.
+        let w = [[0., -1e-6, 0., 1.], [0., 1e-6, 0., 1.]];
+        assert_eq!(orient(anchor, anchor, normal, w).unwrap(), (normal, w));
+        // Above the threshold both displacements still decide.
         let (out, _) = orient(
             anchor,
             anchor,
             normal,
-            [[0., -1e-6, 0., 1.], [0., -1., 0., 1.]],
+            [[0., -1e-3, 0., 1.], [0., 2., 0., 1.]],
         )
         .unwrap();
         assert_eq!(out[1], -1.);

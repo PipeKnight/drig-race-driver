@@ -42,7 +42,7 @@ pub struct Output {
 
 pub(crate) fn validate(input: &Input<'_>) -> Result<(), Error> {
     if input.owner == 0
-        || input.contacts.len() > 512
+        || input.contacts.len() > crate::MAX_WORLD_CONTACTS
         || input.selected.len() > 80
         || input.selected.len() != input.response.len()
         || input.pending.len() > 240

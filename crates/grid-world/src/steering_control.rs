@@ -165,7 +165,11 @@ pub fn calculate(input: Input) -> Result<Output, Error> {
         } else if threshold > 1. {
             1.
         } else {
-            fraction((level - threshold) / (1. - threshold))
+            // 0/0 at a saturated level and the unit HDM threshold: the
+            // original's cap readers (0x9B37F7, 0x9B388B, JBE) skip a NaN
+            // cap like an uncapped 1, which zero blend gives (F342).
+            let blend = (level - threshold) / (1. - threshold);
+            if blend.is_nan() { 0. } else { fraction(blend) }
         };
         (input.cap_seeds_48_4c[i] - 1.) * blend + 1.
     });
