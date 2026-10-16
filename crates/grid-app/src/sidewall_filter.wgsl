@@ -9,6 +9,22 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var sidewall: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var sidewall_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> exposure: vec4<f32>;
+// Wrapped Gaussian on a circular domain. Narrow kernels use real-space
+// images; wider ones use the equivalent rapidly converging Fourier series.
+fn circular_weight(theta: f32, sigma: f32) -> f32 {
+    if sigma <= 1.0 {
+        let a = theta / sigma;
+        let b = (theta + 6.28318530718) / sigma;
+        let c = (theta - 6.28318530718) / sigma;
+        return exp(-0.5*a*a) + exp(-0.5*b*b) + exp(-0.5*c*c);
+    }
+    var weight = 1.0;
+    for (var n = 1u; n <= 8u; n += 1u) {
+        let k = f32(n);
+        weight += 2.0 * exp(-0.5*k*k*sigma*sigma) * cos(k*theta);
+    }
+    return max(weight, 0.0);
+}
 @fragment
 fn fragment(input: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr = pbr_input_from_standard_material(input, is_front);
@@ -20,12 +36,12 @@ fn fragment(input: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragm
         var colour = vec4(0.0);
         var weight = 0.0;
         for (var i = 0u; i < 64u; i += 1u) {
-            let angle = ((f32(i) + 0.5) / 64.0 - 0.5) * exposure.x;
+            let angle = ((f32(i) + 0.5) / 64.0 - 0.5) * min(exposure.x,6.28318530718);
             let c = cos(angle);
             let s = sin(angle);
             let rotation = mat2x2(vec2(c, s), vec2(-s, c));
-            let u = (f32(i)+0.5)/64.0-0.5;
-            let w = select(1.0,exp(-0.5*(u*6.0)*(u*6.0)),exposure.y>0.5);
+            var w = 1.0;
+            if exposure.y > 0.5 { w = circular_weight(angle,exposure.x/6.0); }
             colour += textureSampleGrad(sidewall, sidewall_sampler,
                 vec2(0.5) + rotation * radial, rotation * dx, rotation * dy)*w;
             weight += w;

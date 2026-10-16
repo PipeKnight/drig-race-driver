@@ -61,10 +61,15 @@ pub fn exposure(
         shutter
     };
     let angle = speed.abs() * width;
-    (
-        angle.min(std::f32::consts::TAU),
-        adaptive && angle < std::f32::consts::TAU,
-    )
+    // A full 3-sigma support is not a uniform circular distribution. Keep the
+    // Gaussian width beyond one turn; shaders integrate a wrapped kernel on
+    // at most one circle. Uniform is accurate once sigma itself reaches TAU
+    // (first angular harmonic <3e-9), avoiding the old visible-policy jump.
+    if adaptive && angle < 6. * std::f32::consts::TAU {
+        (angle, true)
+    } else {
+        (angle.min(std::f32::consts::TAU), false)
+    }
 }
 
 #[cfg(test)]
@@ -107,29 +112,64 @@ mod tests {
     fn adaptive_exposure_suppresses_a_low_fps_alias_without_blurring_standstill() {
         // Independent frequency-domain check of the sampled kernel: a16-fold
         // pattern at15rad/s aliases to8.2Hz at30FPS with a short box shutter.
-        let response = |angle: f32, gaussian: bool| {
-            let (mut real, mut imaginary, mut mass) = (0_f32, 0_f32, 0_f32);
-            for i in 0..64 {
-                let u = (i as f32 + 0.5) / 64. - 0.5;
+        // Independent numerical circular convolution, compared with the
+        // analytical Gaussian angular Fourier response below.
+        let response = |angle: f32, gaussian: bool, mode: f64| {
+            let (mut real, mut imaginary, mut mass) = (0_f64, 0_f64, 0_f64);
+            let domain = f64::from(angle.min(std::f32::consts::TAU));
+            let sigma = f64::from(angle) / 6.;
+            for i in 0..4096 {
+                let theta = ((i as f64 + 0.5) / 4096. - 0.5) * domain;
                 let w = if gaussian {
-                    (-0.5 * (u * 6.).powi(2)).exp()
+                    (-8..=8)
+                        .map(|k| {
+                            (-0.5
+                                * ((theta + f64::from(k) * std::f64::consts::TAU) / sigma).powi(2))
+                            .exp()
+                        })
+                        .sum()
                 } else {
                     1.
                 };
-                real += (16. * angle * u).cos() * w;
-                imaginary += (16. * angle * u).sin() * w;
+                real += (mode * theta).cos() * w;
+                imaginary += (mode * theta).sin() * w;
                 mass += w;
             }
             real.hypot(imaginary) / mass
         };
+        assert!(
+            exposure(
+                (std::f32::consts::TAU + 0.0001) / 0.05,
+                0.008333,
+                1. / 30.,
+                true,
+                0.25
+            )
+            .1
+        );
+        assert!(
+            !exposure(
+                (6. * std::f32::consts::TAU + 0.0001) / 0.05,
+                0.008333,
+                1. / 30.,
+                true,
+                0.25
+            )
+            .1
+        );
+        let before = response(std::f32::consts::TAU - 0.0001, true, 1.);
+        let after = response(std::f32::consts::TAU + 0.0001, true, 1.);
+        assert!((before - after).abs() < 0.0001);
+        assert!((after - (-0.5 * (std::f64::consts::TAU / 6.).powi(2)).exp()).abs() < 0.0001);
+        assert!(response(std::f32::consts::TAU * 6., true, 1.) < 1e-7);
         let fixed = exposure(15., 0.008333, 1. / 30., false, 0.5);
         let adaptive = exposure(15., 0.008333, 1. / 30., true, 0.5);
-        assert!(response(fixed.0, fixed.1) > 0.8);
-        assert!(response(adaptive.0, adaptive.1) < 0.01);
+        assert!(response(fixed.0, fixed.1, 16.) > 0.8);
+        assert!(response(adaptive.0, adaptive.1, 16.) < 0.01);
         // The gentler art-control deliberately retains some angular detail;
         // its weaker alias suppression is a visible tradeoff, not the default.
         let gentle = exposure(15., 0.008333, 1. / 30., true, 0.25);
-        assert!((0.1..0.2).contains(&response(gentle.0, gentle.1)));
+        assert!((0.1..0.2).contains(&response(gentle.0, gentle.1, 16.)));
         assert_eq!(
             exposure(15., 0.008333, 1. / 300., true, 0.25),
             exposure(15., 0.008333, 1. / 300., true, 0.5)
