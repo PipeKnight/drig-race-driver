@@ -11,30 +11,43 @@ macro_rules! log_line {
 
 mod assists;
 mod body_damage;
+mod car_materials;
+mod clearcoat_prepass;
 mod damage_hud;
 mod damage_parts;
 mod dynamic_props;
 mod engine_sound;
 mod free_look;
+mod geometry_ray;
+mod graphics;
+mod graphics_benchmark;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
-mod settings;
 mod particles;
+mod scene_probe;
+mod settings;
+mod sidewall_filter;
 mod skid_marks;
+mod sky;
+mod sky_environment;
 mod texture_cache;
 mod texture_upload;
 mod time_trial;
+mod track_grade;
+mod track_surface;
 mod tyre_smoke;
 mod tyre_sound;
+mod tyre_visual;
 mod wheel_debris;
+mod wheel_exposure;
 mod wheel_ground;
+mod wheel_presentation;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
     camera::RenderTarget,
     camera::primitives::{Aabb, MeshAabb},
-    image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
     mesh::{Indices, PrimitiveTopology},
     prelude::*,
     render::{
@@ -429,7 +442,27 @@ fn load(
     } else {
         model.file("_highLOD.pssg")
     };
-    let bytes = read(&root.join(&mesh_path))?;
+    load_package(
+        root,
+        (route, model),
+        lod,
+        track,
+        include_batches,
+        &mesh_path,
+        track,
+    )
+}
+
+fn load_package(
+    root: &Path,
+    (route, model): (&Route, &CarModel),
+    lod: &str,
+    track: bool,
+    include_batches: bool,
+    mesh_path: &str,
+    objects: bool,
+) -> Result<Car, Box<dyn std::error::Error>> {
+    let bytes = read(&root.join(mesh_path))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_meshes(&tree)?;
     let draws = if track {
@@ -493,6 +526,13 @@ fn load(
         } else {
             mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         }
+        if !track
+            && lod == "LOD0_"
+            && draw.material == b"Tyre Tread"
+            && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
+        }
         parts.push(Part {
             name: String::from_utf8(draw.id.to_vec())?,
             joint: String::from_utf8(draw.joint.to_vec())?,
@@ -504,7 +544,7 @@ fn load(
     }
     let mut textures = BTreeMap::new();
     let texture_paths = if track {
-        vec![mesh_path.clone()]
+        vec![mesh_path.to_owned()]
     } else {
         vec![model.livery(0), model.file("_gen_high.pssg")]
     };
@@ -557,10 +597,43 @@ fn load(
         track,
         liveries: Vec::new(),
     };
-    if track {
+    if objects {
         append_objects(root, route, &mut car)?;
     }
     Ok(car)
+}
+fn append_land(
+    root: &Path,
+    route: &Route,
+    model: &CarModel,
+    car: &mut Car,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let land = load_package(
+        root,
+        (route, model),
+        "LOD0_",
+        true,
+        false,
+        &route.track_file("land.pssg"),
+        false,
+    )?;
+    let draws = land.parts.len();
+    for mut part in land.parts {
+        part.name = format!("land/{}", part.name);
+        part.material = format!("land/{}", part.material);
+        car.parts.push(part);
+    }
+    for (name, texture) in land.bindings {
+        car.bindings
+            .insert(format!("land/{name}"), format!("land/{texture}"));
+    }
+    for (name, texture) in land.textures {
+        car.textures.insert(format!("land/{name}"), texture);
+    }
+    println!(
+        "source_land appended=true draws={draws} source=land.pssg namespace=land physics=unchanged"
+    );
+    Ok(())
 }
 fn append_objects(
     root: &Path,
@@ -1079,7 +1152,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(stem) => CarModel::new(stem)?,
         None => CarModel::default(),
     };
-    let mut opponent_cars = profile.opponent_cars.as_deref().map(CarModel::list).transpose()?;
+    let mut opponent_cars = profile
+        .opponent_cars
+        .as_deref()
+        .map(CarModel::list)
+        .transpose()?;
     let mut driver_aids = profile.assists()?;
     let mut input_settings = profile.input()?;
     let mut ai_settings = profile.ai()?;
@@ -1094,6 +1171,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut target = None;
     let mut drive = profile.drive;
     let mut audio_check = false;
+    let mut graphics = graphics::Settings::default();
+    let mut reflection_calibration = false;
+    let mut geometry_pixel = None;
+    let mut render_fixed_step = false;
+    let mut render_fps = None;
+    let mut capture_orbit_rate = None;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut body_contacts = profile.body_contacts.clone();
@@ -1114,6 +1197,70 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--drive" => drive = true,
             "--audio-check" => audio_check = true,
+            "--graphics" => {
+                graphics.preset =
+                    graphics::Preset::parse(&args.next().ok_or("missing graphics preset")?)?;
+            }
+            "--resolution" => graphics.resolution(&args.next().ok_or("missing resolution")?)?,
+            "--clearcoat-prepass" => {
+                graphics.clearcoat_prepass_fix = match args.next().as_deref() {
+                    Some("fixed") => true,
+                    Some("stock") => false,
+                    _ => return Err("--clearcoat-prepass needs fixed or stock".into()),
+                }
+            }
+            "--normal-detail" => {
+                graphics.tread_normals = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("tread") => true,
+                    _ => return Err("--normal-detail needs off or tread".into()),
+                }
+            }
+            "--car-materials" => {
+                graphics.layered_car = match args.next().as_deref() {
+                    Some("legacy") => false,
+                    Some("layered") => true,
+                    _ => return Err("--car-materials needs legacy or layered".into()),
+                }
+            }
+            "--ibl" => {
+                graphics.source_ibl = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("procedural") => false,
+                    _ => return Err("--ibl needs source or procedural".into()),
+                }
+            }
+            "--tyre-detail" => {
+                graphics.smooth_tyres = match args.next().as_deref() {
+                    Some("source") => false,
+                    Some("smooth") => true,
+                    _ => return Err("--tyre-detail needs source or smooth".into()),
+                }
+            }
+            "--grade" => {
+                graphics.track_grade = match args.next().as_deref() {
+                    Some("authored") => false,
+                    Some("track") => true,
+                    _ => return Err("--grade needs authored or track".into()),
+                }
+            }
+            "--benchmark-frames" => {
+                let count = args
+                    .next()
+                    .ok_or("missing benchmark frame count")?
+                    .parse::<u32>()?;
+                if !(1..=3600).contains(&count) {
+                    return Err("benchmark frame count must be 1..3600".into());
+                }
+                graphics.benchmark_frames = Some(count);
+            }
+            "--sky" => {
+                graphics.source_sky = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("procedural") => false,
+                    _ => return Err("--sky needs source or procedural".into()),
+                }
+            }
             "--time-trial-laps" => {
                 trial_laps = Some(
                     args.next()
@@ -1206,6 +1353,123 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
+            "--reflection-calibration" => reflection_calibration = true,
+            "--render-fixed-step" => render_fixed_step = true,
+            "--render-fps" => {
+                let fps: u32 = args.next().ok_or("missing render FPS")?.parse()?;
+                if !(30..=300).contains(&fps) {
+                    return Err("diagnostic render FPS must be 30..300".into());
+                }
+                render_fps = Some(fps);
+            }
+            "--motion-orbit-rate" => {
+                let rate: f32 = args.next().ok_or("missing motion orbit rate")?.parse()?;
+                if !rate.is_finite() || rate.abs() > 3. {
+                    return Err("motion orbit rate must be finite, -3..3 rad/s".into());
+                }
+                capture_orbit_rate = Some(rate);
+            }
+            "--aa" => {
+                graphics.anti_aliasing = match args.next().as_deref() {
+                    Some("taa") => 0,
+                    Some("smaa") => 1,
+                    Some("off") => 2,
+                    _ => return Err("--aa needs taa, smaa or off".into()),
+                };
+            }
+            "--wheel-motion" => {
+                graphics.smooth_wheel_motion = match args.next().as_deref() {
+                    Some("smooth") => true,
+                    Some("source") => false,
+                    _ => return Err("--wheel-motion needs smooth or source".into()),
+                };
+            }
+            "--wheel-shutter" => {
+                let ms: f32 = args
+                    .next()
+                    .ok_or("missing wheel shutter milliseconds")?
+                    .parse()?;
+                if !ms.is_finite() || !(0.0..=33.333).contains(&ms) {
+                    return Err("wheel shutter must be finite, 0..33.333 milliseconds".into());
+                }
+                graphics.wheel_shutter_seconds = ms * 0.001;
+            }
+            "--wheel-geometry-shutter" => {
+                let ms: f32 = args
+                    .next()
+                    .ok_or("missing geometry shutter milliseconds")?
+                    .parse()?;
+                if !ms.is_finite() || !(0.0..=33.333).contains(&ms) {
+                    return Err("geometry shutter must be finite, 0..33.333 milliseconds".into());
+                }
+                graphics.wheel_geometry_shutter_seconds = ms * 0.001;
+            }
+            "--wheel-exposure" => {
+                graphics.adaptive_wheel_exposure = match args.next().as_deref() {
+                    Some("fixed") => false,
+                    Some("adaptive") => true,
+                    _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
+                };
+            }
+            "--land" => {
+                graphics.source_land = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("off") => false,
+                    _ => return Err("--land needs source or off".into()),
+                };
+            }
+            "--geometry-ray" => {
+                let value = args.next().ok_or("--geometry-ray needs X,Y")?;
+                let (x, y) = value.split_once(',').ok_or("--geometry-ray needs X,Y")?;
+                let pixel = Vec2::new(x.parse()?, y.parse()?);
+                if !pixel.is_finite() || pixel.min_element() < 0. {
+                    return Err("invalid geometry pixel".into());
+                }
+                geometry_pixel = Some(pixel);
+            }
+            "--probe-update" => {
+                graphics.moving_probe = match args.next().as_deref() {
+                    Some("static") => false,
+                    Some("moving") => true,
+                    _ => return Err("--probe-update needs static or moving".into()),
+                };
+            }
+            "--probe-size" => {
+                let size = args
+                    .next()
+                    .ok_or("--probe-size needs 256, 512 or 1024")?
+                    .parse()?;
+                if !matches!(size, 256 | 512 | 1024) {
+                    return Err("--probe-size needs 256, 512 or 1024".into());
+                }
+                graphics.probe_size = size;
+            }
+            "--ssr-thickness" => {
+                let value: f32 = args
+                    .next()
+                    .ok_or("--ssr-thickness needs 0.005..1")?
+                    .parse()?;
+                if !value.is_finite() || !(0.005..=1.).contains(&value) {
+                    return Err("--ssr-thickness needs a finite value in 0.005..1".into());
+                }
+                graphics.ssr_thickness = value;
+            }
+            "--reflections" => {
+                graphics.reflection_mode = match args.next().as_deref() {
+                    Some("sky") => 0,
+                    Some("deferred") => 1,
+                    Some("ssr") => 2,
+                    Some("probe") => 3,
+                    _ => return Err("--reflections needs sky, deferred, ssr or probe".into()),
+                };
+            }
+            "--track-materials" => {
+                graphics.layered_track = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("single") => false,
+                    _ => return Err("--track-materials needs source or single".into()),
+                };
+            }
             "--lod" => lod = args.next().ok_or("--lod needs LOD0_ or LOD1_")?,
             "--include-batches" => include_batches = true,
             "--camera" => eye = Some(vector(&args.next().ok_or("--camera needs X,Y,Z")?)?),
@@ -1249,6 +1513,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
+                    "--grade authored|track: enhanced color treatment; track reads saved exterior controls, with an authored display-domain mapping (not 1:1 original postprocessing)."
+                );
+                println!(
+                    "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
+                );
+                println!(
+                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural)."
+                );
+                println!(
+                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
+                );
+                println!(
+                    "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
+                );
+                println!(
                     "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
@@ -1286,11 +1565,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?,
     };
     println!("game_root path={}", root.display());
+    if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
+        return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
+    }
     if profile.grid_back && grid_position.is_none() {
         grid_position = opponents.map(|n| n + 1);
     }
     if audio_check {
         return engine_sound::check(&root);
+    }
+    if graphics.benchmark_frames.is_some() && output.is_none() {
+        return Err("--benchmark-frames requires --render for bounded unattended exit".into());
+    }
+    if graphics.track_grade {
+        if !graphics.enhanced() {
+            return Err("--grade track requires --graphics enhanced".into());
+        }
+        let bytes = read(&root.join("tracks/europe/donington/effects.xml"))?;
+        let grade = grid_formats::graphics_grade::read(&bytes, "Effect_0000")?;
+        println!(
+            "graphics_grade source=donington/effects.xml effect=Effect_0000 mapping=track-inspired-display controls={grade:?}"
+        );
+        graphics.saved_grade = Some(grade);
     }
     if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
         return Err("scripted ticks require --drive and must be <=36000".into());
@@ -1616,6 +1912,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             field.car_model.push(m);
         }
     }
+    if track && !collision && graphics.enhanced() && graphics.source_land {
+        append_land(&root, &route, &player_car, &mut car)?;
+    }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))
     } else if reference || start_view {
@@ -1647,8 +1946,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             for k in 1..opponents.multi.cars.len() {
                 let m = field.car_model[k];
                 let model = &field.models[m];
-                car.liveries
-                    .push(load_livery(&root, model, m, k % livery_count(&root, model).max(1))?);
+                car.liveries.push(load_livery(
+                    &root,
+                    model,
+                    m,
+                    k % livery_count(&root, model).max(1),
+                )?);
             }
             println!(
                 "drive_opponent_liveries count={} models={}",
@@ -1705,7 +2008,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             scale: (offset.length() / 2.).max(1.),
         };
     }
+    if let Some(pixel) = geometry_pixel {
+        let size = Vec2::new(graphics.width as f32, graphics.height as f32);
+        if pixel.x >= size.x || pixel.y >= size.y {
+            return Err("geometry pixel exceeds resolution".into());
+        }
+        geometry_ray::audit(&car, camera_transform(&orbit), size, pixel);
+        return Ok(());
+    }
+    if (render_fixed_step || render_fps.is_some() || capture_orbit_rate.is_some())
+        && (!drive || output.is_none())
+    {
+        return Err("fixed-step/motion-orbit diagnostics require --drive and --render".into());
+    }
+    if render_fixed_step && render_fps.is_some() {
+        return Err("choose --render-fixed-step or --render-fps, not both".into());
+    }
     let mut app = App::new();
+    if let Some(rate) = capture_orbit_rate {
+        app.insert_resource(free_look::CaptureOrbitRate(rate));
+    }
     if let Some(laps) = trial_laps {
         // Races with opponents never write the solo time-trial best times.
         let race = driving.as_ref().is_some_and(|d| d.opponents.is_some());
@@ -1748,6 +2070,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             started: Instant::now(),
         })
         .add_systems(Update, capture);
+        if render_fixed_step {
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                Duration::from_secs_f64(f64::from(grid_tools::source_vehicle::DELTA)),
+            ));
+            println!(
+                "capture_fixed_step=true dt={} scope=offscreen-only",
+                grid_tools::source_vehicle::DELTA
+            );
+        }
+        if let Some(fps) = render_fps {
+            app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                Duration::from_secs_f64(1. / f64::from(fps)),
+            ));
+            println!("capture_render_clock virtual_fps={fps} measured_display_fps=false");
+        }
     } else {
         app.add_plugins(
             DefaultPlugins.set(WindowPlugin {
@@ -1758,7 +2095,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "GRID independent static resource viewer"
                     }
                     .into(),
-                    resolution: (1280, 800).into(),
+                    resolution: (graphics.width, graphics.height).into(),
                     ..default()
                 }),
                 ..default()
@@ -1785,7 +2122,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 &route,
                 &catalog,
                 &target,
-                crate::settings::diagnostics().prop_script_speed.unwrap_or(15.),
+                crate::settings::diagnostics()
+                    .prop_script_speed
+                    .unwrap_or(15.),
             )?;
             println!("drive_prop_script target={target} goal={:?}", pursuit.goal);
             app.insert_resource(dynamic_props::PropScript(pursuit));
@@ -1849,8 +2188,61 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         warn!("Ground cover unavailable; continuing: {error}");
     }
+    if graphics.source_ibl && (!graphics.enhanced() || !graphics.source_sky || !track) {
+        return Err(
+            "--ibl source requires enhanced graphics and a source-sky Donington scene".into(),
+        );
+    }
+    if graphics.enhanced() && graphics.source_sky && track {
+        sky::install(&mut app, &root, graphics.source_ibl)?;
+    }
+    if let Some(frames) = graphics.benchmark_frames {
+        graphics_benchmark::install(&mut app, frames);
+    }
+    if graphics.track_grade {
+        track_grade::install(&mut app);
+    }
+    if matches!(graphics.reflection_mode, 1 | 2) {
+        if !graphics.enhanced() {
+            return Err("deferred/SSR reflections require enhanced graphics".into());
+        }
+        app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
+    }
+    if graphics.enhanced() && graphics.layered_track && track && !collision {
+        track_surface::install(&mut app, &root, graphics.source_land)?;
+    }
+    if graphics.reflection_mode == 3 {
+        if !graphics.enhanced()
+            || !graphics.source_ibl
+            || !track
+            || collision
+            || !(reference || drive)
+        {
+            return Err("--reflections probe requires enhanced source IBL and a Donington reference/drive scene".into());
+        }
+        scene_probe::install(&mut app, &root)?;
+    }
+    if graphics.moving_probe && graphics.reflection_mode != 3 {
+        return Err("--probe-update moving requires --reflections probe".into());
+    }
+    if reflection_calibration {
+        if !track || collision || !(reference || drive) {
+            return Err("reflection calibration requires Donington reference/drive".into());
+        }
+        scene_probe::install_calibration(&mut app, &root)?;
+    }
+    if graphics.enhanced() && graphics.clearcoat_prepass_fix {
+        clearcoat_prepass::install(&mut app);
+    }
+    if graphics.enhanced() && graphics.wheel_shutter_seconds > 0. {
+        sidewall_filter::install(&mut app);
+    }
+    if graphics.enhanced() && drive && graphics.wheel_geometry_shutter_seconds > 0. {
+        wheel_exposure::install(&mut app);
+    }
     let exit = app
         .insert_resource(field)
+        .insert_resource(graphics)
         .insert_resource(car)
         .insert_resource(InitialOrbit(orbit.clone()))
         .insert_resource(orbit)
@@ -1886,6 +2278,8 @@ fn setup(
     device: Res<bevy::render::renderer::RenderDevice>,
     driving: Option<Res<Driving>>,
     field: Res<Field>,
+    graphics: Res<graphics::Settings>,
+    mut scattering_media: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -1899,21 +2293,38 @@ fn setup(
     for (name, dds) in &car.textures {
         let image = texture_upload::image(
             dds,
-            if car.track {
-                ImageSampler::Descriptor(ImageSamplerDescriptor {
-                    address_mode_u: ImageAddressMode::Repeat,
-                    address_mode_v: ImageAddressMode::Repeat,
-                    ..ImageSamplerDescriptor::linear()
-                })
-            } else {
-                ImageSampler::Default
-            },
+            graphics.sampler(car.track),
             RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
         )
         .expect("validated DDS image");
         texture_handles.insert(name.clone(), images.add(image));
     }
     let mut material_handles = BTreeMap::new();
+    let tread_ready = car
+        .parts
+        .iter()
+        .filter(|p| {
+            p.material
+                .strip_prefix("car0/")
+                .unwrap_or(&p.material)
+                .trim()
+                == "Tyre Tread"
+        })
+        .all(|p| p.mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_some());
+    let tread_key = if car.track {
+        "car0/lac_tread_tm_nm.tga"
+    } else {
+        "lac_tread_tm_nm.tga"
+    };
+    let tread_normal = if graphics.enhanced() && graphics.tread_normals && tread_ready {
+        car.textures.get(tread_key).map(|dds| {
+            let image=texture_upload::image_linear(dds,graphics.sampler(false),RenderAssetUsages::default()).expect("validated linear tread normal DDS");
+            println!("tread_normal active=true srgb=false format={:?} frame=orthonormalized-source approximate=true",image.texture_descriptor.format);
+            images.add(image)
+        })
+    } else {
+        None
+    };
     let liveries = std::mem::take(&mut car.liveries);
     let mut livery_images: BTreeMap<(usize, String), Handle<Image>> = BTreeMap::new();
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
@@ -1927,7 +2338,26 @@ fn setup(
                 .cloned()
         })
         .collect();
-    for part in car.parts.drain(..) {
+    for mut part in car.parts.drain(..) {
+        if graphics.enhanced()
+            && graphics.smooth_tyres
+            && part.wheel.is_some()
+            && matches!(
+                part.material
+                    .strip_prefix("car0/")
+                    .unwrap_or(&part.material)
+                    .trim(),
+                "Tyre Wall" | "Tyre Tread"
+            )
+        {
+            match tyre_visual::refine(&mut part.mesh) {
+                Ok((before, after)) => println!(
+                    "tyre_visual part={:?} triangles={before}->{after} physics=unchanged",
+                    part.name
+                ),
+                Err(error) => eprintln!("tyre_visual skipped part={:?}: {error}", part.name),
+            }
+        }
         let material = material_handles
             .entry(part.material.clone())
             .or_insert_with(|| {
@@ -1940,7 +2370,7 @@ fn setup(
                     name,
                     "Window Glass" | "Grills Glass" | "Head Lights Glass" | "Rear Lights Glass"
                 );
-                materials.add(StandardMaterial {
+                let mut material = StandardMaterial {
                     base_color_texture: bindings
                         .get(&part.material)
                         .map(|texture| texture_handles[texture].clone()),
@@ -1983,7 +2413,17 @@ fn setup(
                         Some(Face::Back)
                     },
                     ..default()
-                })
+                };
+                if graphics.enhanced()
+                    && graphics.layered_car
+                    && (!track || part.material.starts_with("car0/"))
+                {
+                    car_materials::apply(name, &mut material);
+                }
+                if name == "Tyre Tread" && (!track || part.material.starts_with("car0/")) {
+                    material.normal_map_texture = tread_normal.clone();
+                }
+                materials.add(material)
             })
             .clone();
         let model = part_model(&part.material);
@@ -2037,6 +2477,9 @@ fn setup(
             } else {
                 None
             };
+            if track && let Some(entity) = &mut entity {
+                entity.insert(track_surface::SourcePart(part.material.clone()));
+            }
             if moving && let Some(entity) = &mut entity {
                 entity.insert((
                     MovingPart {
@@ -2045,6 +2488,11 @@ fn setup(
                     },
                     damage_parts::Joint::new(&part.joint),
                 ));
+                if part.material == "car0/Tyre Wall"
+                    && let Some(wheel) = part.wheel
+                {
+                    entity.insert(sidewall_filter::Sidewall { car: 0, wheel });
+                }
                 if let Some(source) = original.as_ref().filter(|_| player_deforms) {
                     let model = model_offset(&driving.as_ref().unwrap().runtime);
                     entity.insert(DeformingPart {
@@ -2081,7 +2529,7 @@ fn setup(
                                         images.add(
                                             texture_upload::image(
                                                 dds,
-                                                ImageSampler::Default,
+                                                graphics.sampler(false),
                                                 RenderAssetUsages::MAIN_WORLD
                                                     | RenderAssetUsages::RENDER_WORLD,
                                             )
@@ -2117,6 +2565,11 @@ fn setup(
                         },
                         damage_parts::Joint::new(&part.joint),
                     ));
+                    if part.material == "car0/Tyre Wall"
+                        && let Some(wheel) = part.wheel
+                    {
+                        opponent.insert(sidewall_filter::Sidewall { car, wheel });
+                    }
                     if let Some(source) = own {
                         let model = model_offset(runtime);
                         opponent.insert(OpponentDeforming(DeformingPart {
@@ -2156,11 +2609,12 @@ fn setup(
     }
     commands.spawn((
         DirectionalLight {
-            illuminance: 18_000.0,
+            illuminance: graphics.sun_illuminance(),
             shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(-4.0, 8.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        graphics.cascades(),
     ));
     commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
@@ -2170,14 +2624,13 @@ fn setup(
     let camera = commands
         .spawn((Camera3d::default(), camera_transform(&orbit), ViewerCamera))
         .id();
+    graphics::configure(&mut commands, camera, &graphics, &mut scattering_media);
     if driving.is_some() {
         commands.spawn((
             DrivingHud,
             Text::new(format!(
                 "{} / {}\nPreparing practice timer",
-                driving
-                    .as_ref()
-                    .map_or("", |d| d.runtime.car().label()),
+                driving.as_ref().map_or("", |d| d.runtime.car().label()),
                 driving
                     .as_ref()
                     .map_or_else(String::new, |d| track_label(d.runtime.route()))
@@ -2200,7 +2653,12 @@ fn setup(
         ));
     }
     if let Some(mut capture) = capture {
-        let mut image = Image::new_target_texture(1280, 800, TextureFormat::Rgba8UnormSrgb, None);
+        let mut image = Image::new_target_texture(
+            graphics.width,
+            graphics.height,
+            TextureFormat::Rgba8UnormSrgb,
+            None,
+        );
         image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
         let target = images.add(image);
         commands
@@ -2214,6 +2672,9 @@ fn capture(
     mut capture: ResMut<Capture>,
     mut exit: MessageWriter<AppExit>,
     driving: Option<Res<Driving>>,
+    benchmark: Option<Res<graphics_benchmark::Benchmark>>,
+    probe: Option<Res<scene_probe::Cube>>,
+    graphics: Res<graphics::Settings>,
 ) {
     capture.frames += 1;
     // Scripted drives tick in real time; allow their length plus headroom.
@@ -2223,9 +2684,20 @@ fn capture(
         .map_or(120., |t| {
             (t as f64 * f64::from(grid_tools::source_vehicle::DELTA) * 1.5 + 30.).max(120.)
         });
+    let limit = if graphics.reflection_mode == 3 {
+        limit.max(300.)
+    } else {
+        limit
+    };
     if capture.started.elapsed() > Duration::from_secs_f64(limit) {
         error!("render capture timed out");
         exit.write(AppExit::error());
+        return;
+    }
+    if graphics.reflection_mode == 3 && probe.as_ref().is_none_or(|p| !p.ready()) {
+        // Keep the normal warm-up after activation as well, so TAA/shadows do
+        // not retain the pre-probe state in the comparison image.
+        capture.frames = 0;
         return;
     }
     if let Some(driving) = &driving {
@@ -2234,9 +2706,10 @@ fn capture(
             return;
         }
         // A finished race freezes before the scripted tick count.
-        if driving
-            .scripted_ticks
-            .is_some_and(|n| driving.runtime.ticks < n)
+        if benchmark.is_none()
+            && driving
+                .scripted_ticks
+                .is_some_and(|n| driving.runtime.ticks < n)
             && !driving
                 .opponents
                 .as_ref()
@@ -2244,6 +2717,9 @@ fn capture(
         {
             return;
         }
+    }
+    if benchmark.as_ref().is_some_and(|b| !b.finished) {
+        return;
     }
     if capture.frames >= 180 && !capture.requested {
         capture.requested = true;
@@ -2794,7 +3270,9 @@ fn drive_present(
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
     free_look: Option<Res<free_look::FreeLook>>,
     mut refused: Local<Option<&'static str>>,
+    render_clock: (Option<Res<Time<Fixed>>>, Option<Res<graphics::Settings>>),
 ) {
+    let (fixed, graphics) = render_clock;
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
             let field =
@@ -2854,7 +3332,18 @@ fn drive_present(
         }
     }
     let pose = Mat4::from_cols_array(&driving.runtime.pose());
-    let wheels = driving.runtime.wheels().map(wheel_motion);
+    let remainder = if graphics.is_some_and(|g| g.enhanced() && g.smooth_wheel_motion)
+        && !driving.paused
+        && driving.failure.is_none()
+        && !driving
+            .scripted_ticks
+            .is_some_and(|n| driving.runtime.ticks >= n)
+    {
+        fixed.map_or(0., |t| t.overstep().as_secs_f32())
+    } else {
+        0.
+    };
+    let wheels = wheel_presentation::wheels(&driving.runtime, remainder).map(wheel_motion);
     for (part, mut transform, _, _, _) in &mut parts {
         let motion = part.wheel.map_or(Mat4::IDENTITY, |i| wheels[i]);
         *transform = Transform::from_matrix(pose * motion * part.rest);
@@ -2867,7 +3356,7 @@ fn drive_present(
             .map(|car| {
                 (
                     Mat4::from_cols_array(&car.pose()),
-                    car.wheels().map(wheel_motion),
+                    wheel_presentation::wheels(car, remainder).map(wheel_motion),
                 )
             })
             .collect();
@@ -3233,13 +3722,18 @@ mod driving_tests {
         for part in &car.parts {
             if let Some(i) = part.wheel {
                 counts[i] += 1;
-                let pivot = (model_offset(&runtime) * part.matrices[0]).w_axis.truncate();
+                let pivot = (model_offset(&runtime) * part.matrices[0])
+                    .w_axis
+                    .truncate();
                 // The BMW meshes sit about 11 mm inboard of the NED wheel
                 // positions (the Lacetti's within 3 mm); height and axle agree.
                 let anchor = Vec3::from_array(runtime.wheels()[i].anchor);
                 let d = pivot - anchor;
                 assert!(d.y.abs() < 0.003 && d.z.abs() < 0.003, "wheel {i} {d}");
-                assert!(pivot.x * anchor.x > 0. && d.x.abs() < 0.015, "wheel {i} {d}");
+                assert!(
+                    pivot.x * anchor.x > 0. && d.x.abs() < 0.015,
+                    "wheel {i} {d}"
+                );
             }
         }
         assert!(counts.iter().all(|&n| n > 0), "{counts:?}");
@@ -3249,10 +3743,117 @@ mod driving_tests {
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn wheel_render_remainder_pause_reset_and_source_control() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::lacetti(Path::new(&root), "slot_00", 200679)
+                .unwrap();
+        for _ in 0..160 {
+            runtime
+                .tick(grid_tools::source_vehicle::Controls {
+                    throttle: 1.,
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let mut fixed = Time::<Fixed>::from_seconds(0.016);
+        fixed.accumulate_overstep(Duration::from_secs_f32(0.008));
+        let mut app = App::new();
+        app.insert_resource(Assets::<Mesh>::default())
+            .insert_resource(fixed)
+            .insert_resource(graphics::Settings {
+                preset: graphics::Preset::Enhanced,
+                ..default()
+            })
+            .init_resource::<DeformationPresentation>()
+            .insert_resource(Driving {
+                runtime,
+                geometry: None,
+                paused: false,
+                failure: None,
+                notices: Vec::new(),
+                handbrake_from: None,
+                auto_reset: Default::default(),
+                reset_line: None,
+                scripted_ticks: None,
+                scripted: Default::default(),
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+                opponents: None,
+            })
+            .add_systems(Update, drive_present);
+        app.world_mut().spawn((ViewerCamera, Transform::default()));
+        let part = app
+            .world_mut()
+            .spawn((
+                MovingPart {
+                    rest: Mat4::IDENTITY,
+                    wheel: Some(0),
+                },
+                Transform::default(),
+                Mesh3d::default(),
+                Aabb::default(),
+            ))
+            .id();
+        let before = app
+            .world()
+            .resource::<Driving>()
+            .runtime
+            .state
+            .car
+            .owner
+            .vehicle
+            .clone();
+        app.update();
+        let moving = *app.world().get::<Transform>(part).unwrap();
+        assert_eq!(
+            app.world()
+                .resource::<Driving>()
+                .runtime
+                .state
+                .car
+                .owner
+                .vehicle,
+            before
+        );
+        app.world_mut().resource_mut::<Driving>().paused = true;
+        app.update();
+        let paused = *app.world().get::<Transform>(part).unwrap();
+        assert_ne!(moving, paused);
+        app.update();
+        assert_eq!(*app.world().get::<Transform>(part).unwrap(), paused);
+        app.world_mut().resource_mut::<Driving>().paused = false;
+        app.world_mut()
+            .resource_mut::<graphics::Settings>()
+            .smooth_wheel_motion = false;
+        app.update();
+        assert_eq!(*app.world().get::<Transform>(part).unwrap(), paused);
+        app.world_mut().resource_mut::<Driving>().runtime.reset();
+        app.world_mut()
+            .resource_mut::<graphics::Settings>()
+            .smooth_wheel_motion = true;
+        app.update();
+        let reset = *app.world().get::<Transform>(part).unwrap();
+        assert_ne!(reset, moving);
+        app.update();
+        assert_eq!(*app.world().get::<Transform>(part).unwrap(), reset);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn source_wheel_joints_follow_physics_without_feedback() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
         let root = Path::new(&root);
-        let car = load(root, &Route::default(), &CarModel::default(), "LOD0_", false, false).unwrap();
+        let car = load(
+            root,
+            &Route::default(),
+            &CarModel::default(),
+            "LOD0_",
+            false,
+            false,
+        )
+        .unwrap();
         let mut runtime =
             grid_tools::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
         let mut counts = [0; 4];
@@ -3289,6 +3890,17 @@ mod driving_tests {
                 .unwrap();
             let owner_before = runtime.state.car.owner.vehicle.clone();
             let body_before = runtime.state.car.owner.physical;
+            // Render-time samples must never mutate the source wheel clock,
+            // even with several display frames per physics step.
+            for fps in [30_f32, 60., 144., 300.] {
+                let shown = wheel_presentation::wheels(&runtime, (1. / fps).min(0.016));
+                for (i, wheel) in shown.into_iter().enumerate() {
+                    assert!(wheel_motion(wheel).is_finite());
+                    assert_eq!(wheel.anchor, runtime.wheels()[i].anchor);
+                    assert_eq!(wheel.displacement, runtime.wheels()[i].displacement);
+                    assert_eq!(wheel.steering, runtime.wheels()[i].steering);
+                }
+            }
             for (i, wheel) in runtime.wheels().into_iter().enumerate() {
                 let motion = wheel_motion(wheel);
                 assert!(motion.is_finite());
@@ -3361,7 +3973,15 @@ mod driving_tests {
                 .unwrap(),
         );
         let initial = runtime.wheels().map(wheel_motion);
-        let car = load(root, &Route::default(), &CarModel::default(), "LOD0_", false, false).unwrap();
+        let car = load(
+            root,
+            &Route::default(),
+            &CarModel::default(),
+            "LOD0_",
+            false,
+            false,
+        )
+        .unwrap();
         let pristine_field =
             grid_tools::body_deformation::Field::read(&runtime.state.car.owner.vehicle).unwrap();
         let selected: Vec<_> = car
@@ -3566,7 +4186,10 @@ mod driving_tests {
                 auto_reset: Default::default(),
                 reset_line: None,
             })
-            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
+            .insert_resource(input::Actions::new(
+                input::ActionMap::keyboard(),
+                input::Pads::Off,
+            ))
             .init_resource::<input::ShiftQueue>()
             .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
         app.world_mut()
@@ -3787,7 +4410,10 @@ mod driving_tests {
                 auto_reset: Default::default(),
                 reset_line: None,
             })
-            .insert_resource(input::Actions::new(input::ActionMap::keyboard(), input::Pads::Off))
+            .insert_resource(input::Actions::new(
+                input::ActionMap::keyboard(),
+                input::Pads::Off,
+            ))
             .init_resource::<input::ShiftQueue>()
             .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
         app.world_mut()

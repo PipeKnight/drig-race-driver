@@ -451,6 +451,9 @@ fn scene_fixture() -> Vec<u8> {
 }
 fn scene_mesh() -> mesh::Mesh<'static> {
     mesh::Mesh {
+        tangents: vec![],
+        binormals: vec![],
+        colors_argb: vec![],
         id: b"triangle",
         positions: vec![[0.; 3]; 6],
         normals: vec![[0., 0., 1.]; 6],
@@ -581,6 +584,50 @@ fn accepts_only_count_and_size_validated_complete_bc_chains() {
     texture.declared_mip_levels = 2;
     assert_eq!(texture.validated_dds().1, 1);
 }
+#[test]
+fn preserves_declared_partial_bc_chains_and_rejects_padding_or_impossible_counts() {
+    let base = [0u8; 32];
+    let tail = [17u8; 16];
+    let mut texture = texture::Texture {
+        id: b"partial",
+        width: 8,
+        height: 8,
+        format: texture::Format::Bc1,
+        declared_mip_levels: 2,
+        base_blocks: &base,
+        remaining_data: &tail,
+    };
+    let (dds, levels) = texture.validated_dds();
+    assert_eq!(levels, 3);
+    assert_eq!(u32::from_le_bytes(dds[28..32].try_into().unwrap()), 3);
+    assert_eq!(&dds[128..160], &base);
+    assert_eq!(&dds[160..], &tail);
+    texture.remaining_data = &tail[..15];
+    assert_eq!(texture.validated_dds().1, 1);
+    texture.remaining_data = &tail;
+    texture.declared_mip_levels = u32::MAX;
+    assert_eq!(texture.validated_dds().1, 1);
+    texture.declared_mip_levels = 4; // More levels than 8x8 can contain.
+    assert_eq!(texture.validated_dds().1, 1);
+
+    // Observed Donington edge-map layout: 256x512 BC3 plus three lower levels.
+    let base = vec![0u8; 131_072];
+    let tail = vec![29u8; 43_008];
+    let texture = texture::Texture {
+        id: b"rectangular-partial",
+        width: 256,
+        height: 512,
+        format: texture::Format::Bc3,
+        declared_mip_levels: 3,
+        base_blocks: &base,
+        remaining_data: &tail,
+    };
+    let (dds, levels) = texture.validated_dds();
+    assert_eq!(levels, 4);
+    assert_eq!(dds.len(), 128 + 174_080);
+    assert_eq!(&dds[128 + base.len()..], &tail);
+}
+
 fn material_fixture() -> Vec<u8> {
     let definitions = [
         node(

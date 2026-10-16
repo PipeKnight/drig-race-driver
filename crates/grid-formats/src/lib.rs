@@ -13,6 +13,7 @@ pub mod damage_boxes;
 pub mod deformation;
 pub mod entities;
 pub mod etc2;
+pub mod graphics_grade;
 pub mod grid;
 pub mod ground_cover;
 pub mod handling_damage;

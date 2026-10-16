@@ -68,11 +68,29 @@ pub(crate) fn image(
     sampler: ImageSampler,
     usage: RenderAssetUsages,
 ) -> Result<Image, TextureError> {
+    image_with_color_space(dds, sampler, usage, true)
+}
+
+/// Linear data maps (normals and weights) use the same portable upload path.
+pub(crate) fn image_linear(
+    dds: &[u8],
+    sampler: ImageSampler,
+    usage: RenderAssetUsages,
+) -> Result<Image, TextureError> {
+    image_with_color_space(dds, sampler, usage, false)
+}
+
+fn image_with_color_space(
+    dds: &[u8],
+    sampler: ImageSampler,
+    usage: RenderAssetUsages,
+    srgb: bool,
+) -> Result<Image, TextureError> {
     let mut image = Image::from_buffer(
         dds,
         ImageType::Extension("dds"),
         CompressedImageFormats::BC,
-        true,
+        srgb,
         sampler,
         usage,
     )?;
@@ -286,6 +304,32 @@ fn alpha_block(bytes: &[u8; 8]) -> [u8; 16] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linear_normal_upload_and_rgba_fallback_preserve_mips_and_colour_space() {
+        let block = [0x10, 0x84, 0, 0, 0, 0, 0, 0];
+        let source = grid_formats::texture::Texture {
+            id: b"linear-test",
+            width: 4,
+            height: 4,
+            format: grid_formats::texture::Format::Bc1,
+            declared_mip_levels: 1,
+            base_blocks: &block,
+            remaining_data: &block,
+        };
+        let (dds, levels) = source.validated_dds();
+        assert_eq!(levels, 2);
+        let mut image =
+            image_linear(&dds, ImageSampler::Default, RenderAssetUsages::default()).unwrap();
+        assert_eq!(image.texture_descriptor.format, TextureFormat::Bc1RgbaUnorm);
+        assert!(decode_in_place(&mut image).unwrap());
+        assert_eq!(image.texture_descriptor.format, TextureFormat::Rgba8Unorm);
+        assert_eq!(image.texture_descriptor.mip_level_count, 2);
+        let pixels = image.data.as_ref().unwrap();
+        assert_eq!(pixels.len(), 80);
+        assert_eq!(&pixels[..4], &[132, 130, 132, 255]);
+        assert_eq!(&pixels[64..68], &[132, 130, 132, 255]);
+    }
 
     #[test]
     fn path_choice() {
