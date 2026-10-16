@@ -43,6 +43,7 @@ mod wheel_debris;
 mod wheel_exposure;
 mod wheel_ground;
 mod wheel_presentation;
+mod motion_capture;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -1177,6 +1178,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut render_fixed_step = false;
     let mut render_fps = None;
     let mut capture_orbit_rate = None;
+    let mut motion_sequence = None;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut body_contacts = profile.body_contacts.clone();
@@ -1353,6 +1355,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
+            "--motion-capture" => motion_sequence = Some(motion_capture::Config::parse(&args.next().ok_or("missing motion capture window")?)?),
             "--reflection-calibration" => reflection_calibration = true,
             "--render-fixed-step" => render_fixed_step = true,
             "--render-fps" => {
@@ -2016,7 +2019,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         geometry_ray::audit(&car, camera_transform(&orbit), size, pixel);
         return Ok(());
     }
-    if (render_fixed_step || render_fps.is_some() || capture_orbit_rate.is_some())
+    if (render_fixed_step || render_fps.is_some() || capture_orbit_rate.is_some() || motion_sequence.is_some())
         && (!drive || output.is_none())
     {
         return Err("fixed-step/motion-orbit diagnostics require --drive and --render".into());
@@ -2049,6 +2052,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.insert_resource(trial);
     }
     if let Some(path) = output {
+        if let Some(config) = motion_sequence { motion_capture::install(&mut app, config, &path, render_fps, drive_ticks, (graphics.width,graphics.height))?; }
         app.add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -2693,6 +2697,8 @@ fn setup(
         capture.target = Some(target);
     }
 }
+// Separate ECS borrows for the bounded offscreen capture system.
+#[allow(clippy::too_many_arguments)]
 fn capture(
     mut commands: Commands,
     mut capture: ResMut<Capture>,
@@ -2701,6 +2707,7 @@ fn capture(
     benchmark: Option<Res<graphics_benchmark::Benchmark>>,
     probe: Option<Res<scene_probe::Cube>>,
     graphics: Res<graphics::Settings>,
+    motion: Option<Res<motion_capture::Motion>>,
 ) {
     capture.frames += 1;
     // Scripted drives tick in real time; allow their length plus headroom.
@@ -2747,7 +2754,7 @@ fn capture(
     if benchmark.as_ref().is_some_and(|b| !b.finished) {
         return;
     }
-    if capture.frames >= 180 && !capture.requested {
+    if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished()) {
         capture.requested = true;
         let path = capture.path.clone();
         commands
