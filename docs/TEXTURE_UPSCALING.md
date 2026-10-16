@@ -22,3 +22,11 @@ Official sources checked: [portable implementation and CLI options](https://gith
 6. Add a local override manifest mapping original resource/texture IDs to derivative hashes and settings, with an Original/Enhanced comparison. Test the same native4K viewpoints and driving path. No global game-install replacement and no distribution of original or derived proprietary textures.
 
 Topaz remains an optional later comparison tool. A particular model's advantage cannot be inferred from its marketing, price or output dimensions. First outcome needed: visibly better pilot textures in our renderer, with correct mipmaps and stable edges; then expand to20–30high-impact resources.
+
+## Quality comparison qualification (16 October 2026)
+
+No GRID texture inference or A/B comparison has been completed. The installed general realesrgan-x4plus model from the 20220424 portable package is an initial baseline, not a demonstrated match for current Gigapixel or Upscayl models. Choosing a free, scriptable tool does not establish equal quality.
+
+Upscayl supports custom NCNN models; compare exact model, version and settings rather than application names. Gigapixel documents specialized Text & Shapes and general/high-fidelity models, but those descriptions are not a comparative benchmark: https://github.com/upscayl/upscayl/wiki/Guide and https://docs.topazlabs.com/topaz-gigapixel/enhancements/ai-models/core-models .
+
+Pilot acceptance: matched original asphalt, concrete, livery/sign text and cockpit samples, identical output dimensions, inspection at 1:1 and in-engine motion. Check faithful lettering, surface structure, repeating edges, mip stability and sharpening artifacts. Preserve all inputs/settings/hashes privately. Select per texture; add a commercial candidate if its demonstrated improvement warrants it. No purchase is needed before this evidence exists, and no commitment to free tooling overrides the owner's quality-first goal.
