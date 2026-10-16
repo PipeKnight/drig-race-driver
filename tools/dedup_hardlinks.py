@@ -11,13 +11,18 @@ path missing.
 
 Usage:
   python -I tools/dedup_hardlinks.py local/behavior --report local/disk/dedup-behavior.tsv
-  python -I tools/dedup_hardlinks.py local/behavior --apply --report local/disk/dedup-behavior-applied.tsv
+  python -I tools/dedup_hardlinks.py local/behavior/<my-new-run> --apply
+  python -I tools/dedup_hardlinks.py local/behavior --apply --min-age-minutes 60 --report local/disk/dedup-behavior-applied.tsv
+
+Only files of at least --min-size bytes (64 KiB) are considered. Sizes reported by
+tools/disk_report.ps1 stay logical after linking; free space on the drive shows the gain.
 """
 import argparse
 import filecmp
 import hashlib
 import os
 import sys
+import time
 from collections import defaultdict
 
 NTFS_LINK_LIMIT = 1023  # NTFS allows 1024 names per file; keep one spare.
@@ -38,19 +43,25 @@ def main():
     ap.add_argument("root")
     ap.add_argument("--apply", action="store_true", help="create hard links (default: dry run)")
     ap.add_argument("--min-size", type=int, default=64 * 1024, help="ignore files smaller than this")
+    ap.add_argument("--min-age-minutes", type=float, default=0,
+                    help="skip files modified more recently; use 60 when sweeping folders "
+                         "other running sessions may still be writing")
     ap.add_argument("--report", help="TSV of planned/applied links")
     args = ap.parse_args()
 
     root = os.path.abspath(args.root)
+    newest = time.time() - args.min_age_minutes * 60
     by_size = defaultdict(list)
     for d, _, files in os.walk(root):
         for f in files:
             p = os.path.join(d, f)
+            if p.endswith(".dedup-tmp"):
+                continue
             try:
                 st = os.lstat(p)
             except OSError:
                 continue
-            if st.st_size >= args.min_size and not os.path.islink(p):
+            if st.st_size >= args.min_size and st.st_mtime <= newest and not os.path.islink(p):
                 by_size[st.st_size].append(p)
 
     candidates = sum(len(v) for v in by_size.values() if len(v) > 1)
@@ -95,22 +106,29 @@ def main():
     for keep, dup, size in plan:
         status = "planned"
         if args.apply:
+            tmp = dup + ".dedup-tmp"
             try:
-                if not filecmp.cmp(keep, dup, shallow=False):
+                if os.stat(dup).st_mtime > newest or os.stat(keep).st_mtime > newest:
+                    status = "skipped-recent"
+                elif not filecmp.cmp(keep, dup, shallow=False):
                     status = "skipped-differs"
                 else:
-                    tmp = dup + ".dedup-tmp"
                     if os.path.exists(tmp):
                         os.remove(tmp)
                     os.link(keep, tmp)
-                    # Preserve the duplicate's timestamps on the shared file is impossible
-                    # (one inode); the master's timestamps win. Content is identical.
+                    # The linked paths share one inode, so the master's timestamps win.
+                    # Content is identical.
                     os.replace(tmp, dup)
                     status = "linked"
                     applied += size
             except OSError as e:
                 status = f"error:{e.__class__.__name__}:{e}"
                 failed += 1
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except OSError:
+                    pass
         rows.append((status, size, os.path.relpath(keep, root), os.path.relpath(dup, root)))
 
     if args.report:
