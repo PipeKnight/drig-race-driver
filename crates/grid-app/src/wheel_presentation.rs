@@ -18,11 +18,17 @@ pub fn wheels(runtime: &Runtime, remainder: f32) -> [WheelPose; 4] {
         return wheels;
     }
     for (i, wheel) in wheels.iter_mut().enumerate() {
-        let spin =
-            f32::from_bits(runtime.state.car.owner.vehicle[(0x1990 + i * 0x150 + 0x104) / 4]);
+        let spin = angular_speed(runtime, i);
         wheel.phase = phase(wheel.phase, spin, remainder);
     }
     wheels
+}
+
+pub fn angular_speed(runtime: &Runtime, wheel: usize) -> f32 {
+    assert!(wheel < 4);
+    let speed =
+        f32::from_bits(runtime.state.car.owner.vehicle[(0x1990 + wheel * 0x150 + 0x104) / 4]);
+    if speed.is_finite() { speed } else { 0. }
 }
 
 #[cfg(test)]

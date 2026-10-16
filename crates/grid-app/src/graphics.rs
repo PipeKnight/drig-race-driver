@@ -37,6 +37,8 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    /// Fixed exposure duration, opt-in until wheel filtering is accepted.
+    pub wheel_shutter_seconds: f32,
     /// Bounded read-only spin prediction between physical ticks.
     pub smooth_wheel_motion: bool,
     /// 0: TAA diagnostic, 1: SMAA Ultra (default), 2: unfiltered diagnostic.
@@ -65,6 +67,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            wheel_shutter_seconds: 0.,
             smooth_wheel_motion: true,
             anti_aliasing: 1,
             reflection_mode: 0,

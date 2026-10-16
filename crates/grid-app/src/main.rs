@@ -8,6 +8,7 @@ mod geometry_ray;
 mod graphics;
 mod graphics_benchmark;
 mod scene_probe;
+mod sidewall_filter;
 mod sky;
 mod sky_environment;
 mod time_trial;
@@ -1131,6 +1132,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--wheel-motion needs smooth or source".into()),
                 };
             }
+            "--wheel-shutter" => {
+                let ms: f32 = args
+                    .next()
+                    .ok_or("missing wheel shutter milliseconds")?
+                    .parse()?;
+                if !ms.is_finite() || !(0.0..=33.333).contains(&ms) {
+                    return Err("wheel shutter must be finite, 0..33.333 milliseconds".into());
+                }
+                graphics.wheel_shutter_seconds = ms * 0.001;
+            }
             "--land" => {
                 graphics.source_land = match args.next().as_deref() {
                     Some("source") => true,
@@ -1732,6 +1743,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if graphics.enhanced() && graphics.clearcoat_prepass_fix {
         clearcoat_prepass::install(&mut app);
     }
+    if graphics.enhanced() && graphics.wheel_shutter_seconds > 0. {
+        sidewall_filter::install(&mut app);
+    }
     let exit = app
         .insert_resource(graphics)
         .insert_resource(car)
@@ -1969,6 +1983,11 @@ fn setup(
                     rest: matrix,
                     wheel: part.wheel,
                 });
+                if part.material == "lacetti/Tyre Wall"
+                    && let Some(wheel) = part.wheel
+                {
+                    entity.insert(sidewall_filter::Sidewall { car: 0, wheel });
+                }
                 if let Some(source) = &original {
                     let owner = &driving.as_ref().unwrap().runtime.state.car.owner.vehicle;
                     let model = Mat4::from_translation(Vec3::new(
@@ -2045,6 +2064,11 @@ fn setup(
                             wheel: part.wheel,
                         },
                     ));
+                    if part.material == "lacetti/Tyre Wall"
+                        && let Some(wheel) = part.wheel
+                    {
+                        opponent.insert(sidewall_filter::Sidewall { car, wheel });
+                    }
                     if let Some(source) = own {
                         let owner = &runtime.state.car.owner.vehicle;
                         let model = Mat4::from_translation(Vec3::new(
