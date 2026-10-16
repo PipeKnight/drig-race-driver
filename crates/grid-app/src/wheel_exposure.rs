@@ -57,6 +57,7 @@ pub fn install(app: &mut App) {
 
 fn attach(
     mut commands: Commands,
+    camera: Query<Entity, With<super::ViewerCamera>>,
     source: Query<(
         Entity,
         &super::sidewall_filter::Sidewall,
@@ -66,6 +67,13 @@ fn attach(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<HullMaterial>>,
 ) {
+    // Layer1 is main-car-only when scene probes are enabled; capture views use0.
+    // The ordinary main camera otherwise defaults to0 and would hide the hull.
+    for camera in &camera {
+        commands
+            .entity(camera)
+            .insert(RenderLayers::from_layers(&[0, 1]));
+    }
     let mut staged = Vec::new();
     for (entity, sidewall, mesh, transform) in &source {
         if sidewall.car != 0 {
