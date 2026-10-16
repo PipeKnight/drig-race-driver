@@ -1,4 +1,4 @@
-//! First static HDR scene-reflection experiment. No driving/physics changes.
+//! Local HDR scene-reflection experiments. No driving/physics changes.
 use bevy::{
     asset::RenderAssetUsages,
     camera::{Exposure, Hdr, RenderTarget, visibility::RenderLayers},
@@ -7,6 +7,7 @@ use bevy::{
     prelude::*,
     render::{
         Render, RenderApp, RenderSystems,
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         gpu_readback::{Readback, ReadbackComplete},
         render_asset::RenderAssets,
@@ -19,17 +20,23 @@ use bevy::{
 use std::{
     path::Path,
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
 const EV: f32 = 13.;
+#[derive(Component, Clone, Copy, ExtractComponent)]
+struct ProbeCamera(usize);
 #[derive(Component)]
-struct ProbeCamera;
+struct SceneProbe;
 #[derive(Resource, Clone, ExtractResource)]
 pub struct Cube {
     size: u32,
+    moving: bool,
+    capture_center: Vec3,
+    captured_center: Arc<Mutex<Vec3>>,
+    copies: Arc<AtomicU64>,
     faces: Vec<Handle<Image>>,
     cube: Handle<Image>,
     copied: Arc<AtomicBool>,
@@ -98,8 +105,16 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Err
     let slot = super::grid_slot(root, "slot_00")?;
     let center = slot.transform_point3(Vec3::new(0., 1.3, 0.));
     app.insert_resource(Position(center))
-        .add_plugins(ExtractResourcePlugin::<Cube>::default())
-        .add_systems(Update, (setup, activate).chain());
+        .add_plugins((
+            ExtractResourcePlugin::<Cube>::default(),
+            ExtractComponentPlugin::<ProbeCamera>::default(),
+        ))
+        .add_systems(Update, (setup, activate).chain())
+        .add_systems(
+            PostUpdate,
+            follow.before(bevy::transform::TransformSystems::Propagate),
+        )
+        .add_systems(Last, exit_report);
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
         render.add_systems(
             Render,
@@ -218,7 +233,7 @@ fn setup(
         let target = images.add(image);
         faces.push(target.clone());
         commands.spawn((
-            ProbeCamera,
+            ProbeCamera(face),
             Name::new(format!("HDR probe face {face}")),
             Camera3d::default(),
             Camera {
@@ -244,6 +259,10 @@ fn setup(
     }
     commands.insert_resource(Cube {
         size,
+        moving: settings.moving_probe,
+        capture_center: position.0,
+        captured_center: Arc::new(Mutex::new(position.0)),
+        copies: Arc::new(AtomicU64::new(0)),
         faces,
         cube,
         copied: Arc::new(AtomicBool::new(false)),
@@ -251,8 +270,8 @@ fn setup(
         bound: Arc::new(AtomicBool::new(false)),
     });
     println!(
-        "scene_probe capture_setup=true size={size} center={:?} excluded_player_parts={excluded} format=Rgba16Float ev100={EV} tonemapping=None static=true",
-        position.0
+        "scene_probe capture_setup=true size={size} center={:?} excluded_player_parts={excluded} format=Rgba16Float ev100={EV} tonemapping=None moving={}",
+        position.0, settings.moving_probe
     );
 }
 
@@ -267,7 +286,7 @@ fn copy_faces(
     let Some(cube) = cube else {
         return;
     };
-    if cube.copied.load(Ordering::Acquire) {
+    if cube.copied.load(Ordering::Acquire) && !cube.moving {
         return;
     }
     *frames += 1;
@@ -303,11 +322,63 @@ fn copy_faces(
         );
     }
     queue.submit([encoder.finish()]);
+    *cube.captured_center.lock().expect("probe position lock") = cube.capture_center;
+    let count = cube.copies.fetch_add(1, Ordering::AcqRel) + 1;
     cube.copied.store(true, Ordering::Release);
-    println!(
-        "scene_probe GPU_copy_submitted=true faces=6 size={} HDR=true scope=queue-submission-not-readback",
-        cube.size
-    );
+    if count == 1 || count.is_multiple_of(120) {
+        println!(
+            "scene_probe GPU_copy_submitted=true faces=6 size={} copies={count} center={:?} HDR=true scope=queue-submission-not-readback",
+            cube.size, cube.capture_center
+        );
+    }
+}
+
+fn follow(
+    mut commands: Commands,
+    cube: Option<ResMut<Cube>>,
+    driving: Option<Res<super::Driving>>,
+    mut cameras: Query<(&ProbeCamera, &mut Transform)>,
+    mut probes: Query<&mut Transform, (With<SceneProbe>, Without<ProbeCamera>)>,
+    mut last_audit: Local<u64>,
+) {
+    let Some(mut cube) = cube else { return };
+    if !cube.moving {
+        return;
+    }
+    if let Some(driving) = driving {
+        cube.capture_center =
+            Mat4::from_cols_array(&driving.runtime.pose()).transform_point3(Vec3::new(0., 1.3, 0.));
+    }
+    for (face, mut transform) in &mut cameras {
+        *transform = face_transform(face.0, cube.capture_center);
+    }
+    // Match the already-submitted cube, rather than moving its box ahead of it.
+    let captured = *cube.captured_center.lock().expect("probe position lock");
+    for mut transform in &mut probes {
+        transform.translation = captured;
+    }
+    let count = cube.copies.load(Ordering::Acquire);
+    if cube.ready() && count >= *last_audit + 120 {
+        commands
+            .spawn(Readback::texture(cube.cube.clone()))
+            .observe(audit_readback);
+        *last_audit = count;
+    }
+}
+
+fn exit_report(cube: Option<Res<Cube>>, mut exits: MessageReader<bevy::app::AppExit>) {
+    if exits.read().next().is_none() {
+        return;
+    }
+    if let Some(cube) = cube {
+        println!(
+            "scene_probe exit moving={} copies={} last_capture_center={:?} ready={}",
+            cube.moving,
+            cube.copies.load(Ordering::Acquire),
+            *cube.captured_center.lock().expect("probe position lock"),
+            cube.ready()
+        );
+    }
 }
 
 fn activate(
@@ -323,13 +394,19 @@ fn activate(
     if *applied || !cube.copied.load(Ordering::Acquire) {
         return;
     }
-    // Freeze the snapshot before using it, so capture shading cannot feed back.
-    for entity in &cameras {
-        commands.entity(entity).despawn();
+    // Static mode releases capture views; moving mode isolates illumination by layer.
+    if !cube.moving {
+        for entity in &cameras {
+            commands.entity(entity).despawn();
+        }
     }
     let intensity = 1. / Exposure { ev100: EV }.exposure();
     commands.spawn((
-        Name::new("Static Donington HDR reflection probe"),
+        Name::new("Donington HDR reflection probe"),
+        SceneProbe,
+        // Capture cameras only see layer0: exclude local illumination too,
+        // preventing recursive brightening when the cube is updated.
+        RenderLayers::layer(1),
         LightProbe {
             falloff: Vec3::splat(0.25),
         },
@@ -349,13 +426,17 @@ fn activate(
         .observe(audit_readback);
     *applied = true;
     println!(
-        "scene_probe applied=true static=true influence=60x60x60 parallax_box=60x30x60 transform=isotropic falloff=0.25 sky_fallback=retained intensity={intensity} radiometry=inverse-capture-exposure filtering=Bevy-generator"
+        "scene_probe applied=true moving={} influence=60x60x60 parallax_box=60x30x60 transform=isotropic falloff=0.25 sky_fallback=retained intensity={intensity} radiometry=inverse-capture-exposure filtering=Bevy-generator",
+        cube.moving
     );
 }
 
 fn report_binding(
     cube: Option<Res<Cube>>,
-    views: Query<&bevy::pbr::RenderViewLightProbes<EnvironmentMapLight>>,
+    views: Query<(
+        Option<&ProbeCamera>,
+        &bevy::pbr::RenderViewLightProbes<EnvironmentMapLight>,
+    )>,
     generators: Query<&bevy::pbr::generate::GeneratorBindGroups>,
     pipelines: Option<Res<bevy::pbr::generate::GeneratorPipelines>>,
     cache: Res<PipelineCache>,
@@ -363,7 +444,20 @@ fn report_binding(
     let Some(cube) = cube else {
         return;
     };
-    if cube.bound.load(Ordering::Acquire) || !cube.copied.load(Ordering::Acquire) {
+    if !cube.copied.load(Ordering::Acquire) {
+        return;
+    }
+    let mut capture_views = 0;
+    for (capture, maps) in &views {
+        if capture.is_some() {
+            capture_views += 1;
+            assert!(
+                maps.main_entity_to_render_light_probe_index.is_empty(),
+                "recursive local-probe illumination in a capture view"
+            );
+        }
+    }
+    if cube.bound.load(Ordering::Acquire) || (cube.moving && capture_views != 6) {
         return;
     }
     let Some(p) = pipelines else {
@@ -383,12 +477,14 @@ fn report_binding(
     }
     let bound = views
         .iter()
-        .filter(|v| !v.main_entity_to_render_light_probe_index.is_empty())
+        .filter(|(capture, v)| {
+            capture.is_none() && !v.main_entity_to_render_light_probe_index.is_empty()
+        })
         .count();
     if bound > 0 && generators.iter().count() >= 2 {
         cube.bound.store(true, Ordering::Release);
         println!(
-            "scene_probe render_views_with_local_probe={bound} filter_bind_groups_ready=true sky_fallback=true scope=assignment-and-pipeline-readiness"
+            "scene_probe render_views_with_local_probe={bound} capture_views={capture_views} capture_local_probes=0 filter_bind_groups_ready=true sky_fallback=true scope=assignment-and-pipeline-readiness"
         );
     }
 }
@@ -411,9 +507,6 @@ fn half(bits: u16) -> f32 {
 }
 
 fn audit_readback(event: On<ReadbackComplete>, mut commands: Commands, cube: Res<Cube>) {
-    if cube.read.swap(true, Ordering::AcqRel) {
-        return;
-    }
     assert_eq!(event.data.len(), (cube.size * cube.size * 6 * 8) as usize);
     let mut maximum = 0f32;
     let mut above_one = 0;
@@ -456,6 +549,7 @@ fn audit_readback(event: On<ReadbackComplete>, mut commands: Commands, cube: Res
         path.display()
     );
     commands.entity(event.entity).despawn();
+    cube.read.store(true, Ordering::Release);
 }
 
 #[cfg(test)]

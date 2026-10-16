@@ -37,6 +37,7 @@ pub struct Settings {
     /// 0: sky IBL, 1: deferred control, 2: SSR, 3: static HDR scene probe.
     pub reflection_mode: u8,
     pub probe_size: u32,
+    pub moving_probe: bool,
     pub ssr_thickness: f32,
     pub layered_track: bool,
     pub clearcoat_prepass_fix: bool,
@@ -58,6 +59,7 @@ impl Default for Settings {
         Self {
             reflection_mode: 0,
             probe_size: 1024,
+            moving_probe: false,
             ssr_thickness: 0.05,
             layered_track: true,
             clearcoat_prepass_fix: true,
