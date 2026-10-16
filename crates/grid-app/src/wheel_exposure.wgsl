@@ -36,8 +36,9 @@ fn fragment(input: VertexOutput) -> FragmentOutput {
         weight += 1.0;
     }
     var output: FragmentOutput;
+    if weight <= 0.0 { discard; }
     let filtered = sum / max(weight,1.0);
     let blend = smoothstep(0.01,0.15,controls.x) * smoothstep(0.2,0.4,facing);
-    output.color = vec4(mix(original.rgb, filtered.rgb, blend), select(0.0,1.0,weight>0.0));
+    output.color = vec4(mix(original.rgb, filtered.rgb, blend), 1.0);
     return output;
 }

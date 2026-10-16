@@ -31,6 +31,19 @@ impl MaterialExtension for Exposure {
     fn enable_shadows() -> bool {
         false
     }
+    fn specialize(
+        _: &bevy::pbr::MaterialExtensionPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _: &bevy::mesh::MeshVertexBufferLayoutRef,
+        _: bevy::pbr::MaterialExtensionKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        // Opaque alpha mode selects Bevy's transmissive phase and scene copy;
+        // hull depth must still leave the actual scene depth untouched.
+        if let Some(depth) = descriptor.depth_stencil.as_mut() {
+            depth.depth_write_enabled = Some(false);
+        }
+        Ok(())
+    }
 }
 #[derive(Component)]
 struct Hull {
@@ -118,7 +131,7 @@ fn attach(
     for (source, wheel, bind, world, radius, width) in staged {
         let material = materials.add(HullMaterial {
             base: StandardMaterial {
-                alpha_mode: AlphaMode::Blend,
+                alpha_mode: AlphaMode::Opaque,
                 specular_transmission: 1.,
                 unlit: true,
                 cull_mode: Some(bevy::render::render_resource::Face::Back),
