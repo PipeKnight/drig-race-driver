@@ -41,9 +41,9 @@ pub fn step(look: &mut FreeLook, held: bool, motion: Vec2, dt: f32) {
     }
 }
 
-/// `GRID_FREE_LOOK=yaw,pitch` (radians) holds a fixed view for scripted renders.
+/// Diagnostics `free_look = yaw,pitch` (radians; legacy `GRID_FREE_LOOK`) holds a fixed view for scripted renders.
 fn scripted() -> Option<FreeLook> {
-    let value = std::env::var("GRID_FREE_LOOK").ok()?;
+    let value = crate::settings::diagnostics().free_look.clone()?;
     let (yaw, pitch) = value.split_once(',')?;
     Some(FreeLook {
         yaw: yaw.trim().parse().ok()?,

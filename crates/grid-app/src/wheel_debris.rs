@@ -460,7 +460,7 @@ fn simulate(
     }
     super::ground_effect_assets::charge(super::ground_effect_assets::TICK, start);
     if ground.key.is_some_and(|(_, t)| t.is_multiple_of(16))
-        && std::env::var_os("GRID_GROUND_TRACE").is_some()
+        && crate::settings::diagnostics().ground_trace
     {
         println!(
             "debris_trace tick={} emitted={} live={}",

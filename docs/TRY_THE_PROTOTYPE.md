@@ -21,7 +21,7 @@ The experimental keyboard driving build is available now. On 12 October the owne
 | Escape | Close |
 | X / Z | Gear up / down (manual gearbox only) |
 
-**Driver aids** follow the original options ([research](DRIVING_ASSISTS_RESEARCH.md)): Traction Control, Stability Control, Braking Assist and Automatic/Manual transmission, plus keyboard or wheel steering. The default is every aid on, automatic, keyboard. Before launching, set for example `set GRID_PLAY_ASSISTS=tcs=off,stability=off,braking=off,gearbox=manual`, or put the same items in `localssists.txt`. The app takes `--assists SPEC` or `--assists-file PATH` directly. In manual, reverse is Z from neutral; braking does not select reverse.
+**Driver aids** follow the original options ([research](DRIVING_ASSISTS_RESEARCH.md)): Traction Control, Stability Control, Braking Assist and Automatic/Manual transmission, plus keyboard or wheel steering. The default is every aid on, automatic, keyboard. Put them in an `[assists]` section of `localsettings.ini`, for example `tcs=off stability=off braking=off gearbox=manual` ([settings file](SETTINGS.md)); the older `localssists.txt` and `set GRID_PLAY_ASSISTS=...` still work. The app takes `--assists SPEC` or `--assists-file PATH` directly. In manual, reverse is Z from neutral; braking does not select reverse.
 
 The window title shows speed, gear, tick number and pause/failure status. **HB** means the simulation received the Space handbrake command; gear **R** means reverse. While reversing, Up/W brakes and selects forward again near rest. Hold Space while releasing throttle to check the rear-wheel handbrake. Its controlled runtime and Bevy keyboard tests pass; the owner subsequently confirmed HB appears and the car slows.
 
@@ -40,7 +40,7 @@ unsupported notification events can still pause driving. See the
 [damage integration and current limits](SOURCE_WHEEL_DAMAGE_STARTUP.md). The private
 sampling file is already prepared on the owner's PC; no installation is needed.
 
-Build with `cargo build --release -p grid-app`, then launch with `target\release\grid-app.exe --drive --game-root "YOUR_GRID_FOLDER"`. The launcher accepts a game-folder argument and defaults to `C:\Program Files (x86)\Steam\steamapps\common\Grid`. It reads locally purchased resources; no game assets or compiled toolchain are bundled in the repository.
+Build with `cargo build --release -p grid-app`, then launch with `target\release\grid-app.exe --settings settings\practice.ini` (or `race.ini`, `time-trial.ini`, `body-contacts.ini`). The game folder is found through the Steam libraries; `[game] root` in `local\settings.ini`, a launcher argument or `--game-root` overrides it ([settings file](SETTINGS.md)). It reads locally purchased resources; no game assets or compiled toolchain are bundled in the repository.
 
 Implementation and earlier verification: [source driving prototype](SOURCE_DRIVING.md). New contact-query/manifold research does not become driving behavior until separately integrated and checked.
 
