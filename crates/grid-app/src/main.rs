@@ -1062,6 +1062,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
+            "--reflections" => {
+                graphics.reflection_mode = match args.next().as_deref() {
+                    Some("sky") => 0,
+                    Some("deferred") => 1,
+                    Some("ssr") => 2,
+                    _ => return Err("--reflections needs sky, deferred or ssr".into()),
+                };
+            }
             "--track-materials" => {
                 graphics.layered_track = match args.next().as_deref() {
                     Some("source") => true,
@@ -1549,6 +1557,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.track_grade {
         track_grade::install(&mut app);
+    }
+    if graphics.reflection_mode != 0 {
+        if !graphics.enhanced() {
+            return Err("deferred/SSR reflections require enhanced graphics".into());
+        }
+        app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
     }
     if graphics.enhanced() && graphics.layered_track && track && !collision {
         track_surface::install(&mut app, &root)?;

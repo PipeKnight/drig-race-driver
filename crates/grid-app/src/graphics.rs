@@ -9,7 +9,7 @@ use bevy::{
         DirectionalLightShadowMap, ShadowFilteringMethod, atmosphere::ScatteringMedium,
         light_consts::lux,
     },
-    pbr::{AtmosphereSettings, ScreenSpaceAmbientOcclusion},
+    pbr::{AtmosphereSettings, ScreenSpaceAmbientOcclusion, ScreenSpaceReflections},
     post_process::bloom::Bloom,
     prelude::*,
     render::view::{ColorGrading, ColorGradingGlobal},
@@ -34,6 +34,8 @@ impl Preset {
 
 #[derive(Clone, Copy, Resource)]
 pub struct Settings {
+    /// 0: forward sky IBL, 1: deferred control, 2: deferred + SSR experiment.
+    pub reflection_mode: u8,
     pub layered_track: bool,
     pub clearcoat_prepass_fix: bool,
     pub tread_normals: bool,
@@ -52,6 +54,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            reflection_mode: 0,
             layered_track: true,
             clearcoat_prepass_fix: true,
             tread_normals: true,
@@ -188,6 +191,28 @@ pub fn configure(
         ScreenSpaceAmbientOcclusion::default(),
         ShadowFilteringMethod::Gaussian,
     ));
+    if settings.reflection_mode != 0 {
+        commands
+            .entity(camera)
+            .insert(bevy::core_pipeline::prepass::DeferredPrepass);
+    }
+    if settings.reflection_mode == 2 {
+        commands.entity(camera).insert(ScreenSpaceReflections {
+            linear_steps: 32,
+            bisection_steps: 8,
+            edge_fadeout: 0.02..0.12,
+            ..default()
+        });
+    }
+    println!(
+        "reflections mode={} scope={} glass=forward",
+        settings.reflection_mode,
+        if settings.reflection_mode == 2 {
+            "screen-visible-opaque-only"
+        } else {
+            "sky-IBL"
+        }
+    );
     if let Some(grade) = settings.saved_grade {
         commands
             .entity(camera)

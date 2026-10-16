@@ -1,9 +1,12 @@
 // Independently expressed source layer arithmetic; Bevy provides lighting.
 #import bevy_pbr::{
-    forward_io::{VertexOutput, FragmentOutput},
     pbr_fragment::pbr_input_from_standard_material,
-    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
 }
+#ifdef PREPASS_PIPELINE
+#import bevy_pbr::{prepass_io::{VertexOutput, FragmentOutput}, pbr_deferred_functions::deferred_output}
+#else
+#import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing}}
+#endif
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var first: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var first_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var second: texture_2d<f32>;
@@ -37,8 +40,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let ao = mix(1.0, macro_sample.a, controls.z);
     pbr.diffuse_occlusion *= ao;
     pbr.specular_occlusion *= ao;
+#ifdef PREPASS_PIPELINE
+    return deferred_output(in, pbr);
+#else
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr);
     out.color = main_pass_post_lighting_processing(pbr, out.color);
     return out;
+#endif
 }

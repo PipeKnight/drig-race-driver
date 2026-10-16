@@ -47,6 +47,9 @@ impl MaterialExtension for Surface {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
     }
+    fn deferred_fragment_shader() -> ShaderRef {
+        SHADER.into()
+    }
 }
 
 struct Definition {
