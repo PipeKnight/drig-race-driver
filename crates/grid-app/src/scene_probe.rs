@@ -3,7 +3,7 @@ use bevy::{
     asset::RenderAssetUsages,
     camera::{Exposure, Hdr, RenderTarget, visibility::RenderLayers},
     core_pipeline::tonemapping::Tonemapping,
-    light::{EnvironmentMapLight, GeneratedEnvironmentMapLight, LightProbe},
+    light::{EnvironmentMapLight, GeneratedEnvironmentMapLight, LightProbe, ParallaxCorrection},
     prelude::*,
     render::{
         Render, RenderApp, RenderSystems,
@@ -329,7 +329,11 @@ fn activate(
         LightProbe {
             falloff: Vec3::splat(0.25),
         },
-        Transform::from_translation(position.0).with_scale(Vec3::new(60., 30., 60.)),
+        // Bevy computes the cubemap sample ray in probe space. An anisotropic
+        // transform would stretch the captured world directions (including sky).
+        // Keep the transform isotropic; specify the shorter Y box separately.
+        Transform::from_translation(position.0).with_scale(Vec3::splat(60.)),
+        ParallaxCorrection::Custom(Vec3::new(0.5, 0.25, 0.5)),
         GeneratedEnvironmentMapLight {
             environment_map: cube.cube.clone(),
             intensity,
@@ -341,7 +345,7 @@ fn activate(
         .observe(audit_readback);
     *applied = true;
     println!(
-        "scene_probe applied=true static=true bounds=60x30x60 falloff=0.25 sky_fallback=retained intensity={intensity} radiometry=inverse-capture-exposure filtering=Bevy-generator"
+        "scene_probe applied=true static=true influence=60x60x60 parallax_box=60x30x60 transform=isotropic falloff=0.25 sky_fallback=retained intensity={intensity} radiometry=inverse-capture-exposure filtering=Bevy-generator"
     );
 }
 

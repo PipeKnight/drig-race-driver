@@ -1,5 +1,7 @@
 # GRID engine project log
 
+G023 mirror calibration verified / probe angular repair underway (16 October 2026): docs/SCENE_HDR_PROBE.md. Source09743541a97a native4K probe/control clean: diagnostic mirror shows recognizable offscreen garages/ECSTA ads/road absent from sky-only control; excluded sphere leaves raw HDR stats unchanged. Reverse-sky01 inside car rejected; reverse02 shows blue sky behind garages, so differing sky directions are not proof of colour mismatch. Pinned Bevy shader applies inverse probe transform to sample direction: old60x30x60 scale stretches Y. Draft isotropic60cube influence plus custom60x30x60 parallax box avoids angular stretch; GPU comparison next. No owner help needed; continue step4, no default promotion/physics/Steam/primary changes.
+
 G022 static HDR probe GPU-readback verified (16 October 2026): source5047836be823/exeSHA083bf674416411d126cc939912a0fcb9854a83a892c2c31398010f42583c8c41; docs/SCENE_HDR_PROBE.md. Faceprojection/halfunitpass/alltargetClippy pass; initialexisting-dependencytestcachebuild23m50s thenappbuild46.38s, offline2jobs/no toolduplicates. Compiler-artifact JSONactualexe copiedprivatepilot, Cargotest/metadata target discrepancy recordedwithoutcauseclaim. GPU1280pilot+same-source native4Kprobe/control+240tickdrive clean;98ownparts excluded, mainshadow retained; HDRsixfaces3145728bytes,max3.73046875,6619pixels>1,allfacesnonzero,noRGBnegative/nonfinite. Localprobe assignedoneview/filterresourcesready/source-skyfallback kept. Sixfacefigure inspected: actualgarages/ads/road/sky, owngeometryabsent/shadowpresent. Mainquarterdifference subtle (carboxmeanabs3.854 vs sky0.176), notyetrecognizableoffscreenreflection/fidelity/fullLap proof; calibrationnext. Motion+handlingexactvs316control excludingwallclock. private validation-scene-probe01/currentbuild/verifiedexe updated, normaldefaultskyunchanged. Authored tools/audit_hdr_probe.py syntheticHDR/size/NaNcontrolspass. MatplotlibmissingbothPythons; officialPyPI privatepinned6missingpackagesinstalled(no-deps/noPATH/globalchanges), existingNumPy2.3.5/Pillow12.3.0 reused; realfigureworks/installhashreportprivate. NoSteam/physics/otheragent/inputchanges. Continue reflectioncalibration/detail, don'tendafterthismilestone.
 
 
@@ -1823,3 +1825,4 @@ PID29904 closed after the F133 capture; the guarded follow-up reader refused its
 - `local/phase0/`: private inventory, settings snapshots, crash contexts and dumps.
 - `local/tools/`: private portable tools and dependencies.
 - `local/phase1/`: upcoming static-analysis projects and runtime traces.
+
