@@ -77,7 +77,7 @@ device=pad
 - Windows: `%APPDATA%\GRID Reassembly`; macOS: `~/Library/Application Support/GRID Reassembly`; Linux: `$XDG_DATA_HOME/grid-reassembly` or `~/.local/share/grid-reassembly`;
 - Android: none yet; P9 sets it from `AndroidApp::internal_data_path()` / `external_data_path()`.
 
-It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs are still the launcher's redirect of stdout to `local\playtest\manual-*.log`; on Android stdout goes to logcat (P9).
+It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`), `camera.ini` (the last in-race view, `current_camera = IDENT`, written by the app on exit like the original's profile key; [CAMERA_VIEWS.md](CAMERA_VIEWS.md)) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs are still the launcher's redirect of stdout to `local\playtest\manual-*.log`; on Android stdout goes to logcat (P9).
 
 ## 3. Install discovery and case-insensitive index
 

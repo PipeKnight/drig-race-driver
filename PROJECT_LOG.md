@@ -1,5 +1,34 @@
 # GRID engine project log
 
+F349 in-race camera views ported from each car's cameras.xml (2026-10-17, Claude Code). Details, evidence tags and limits: docs/CAMERA_VIEWS.md.
+- Data [V]: `cars/<stem>/cameras.xml` is binary XML with 20 views. The visible ones in file order are chase_close, chase_far, bumper, bonnet and head-cam; each has a hidden `reverseCamera`. The Lacetti and the BMW differ only in positions, FOVs and pitches. New reader `grid_formats::vehicle_views`; tree dumps with the new `tools/binxml_tree.py`.
+- Static [D] (read-only Ghidra 12.1.4 headless on local/phase3/ghidra-project, hash-pinned grid-unpacked.exe; evidence main checkout local/cameras/):
+  - parameter binders and vtables: Chase 0x7F31B0 / 0xD00278, Mounted 0x7F4BE0 / 0xD00008, Head 0x7F3A70 / 0xD00140; FOV is degrees, converted ×0.0174533;
+  - profile key `current_camera`, default chase_close (0x5F1100): restored at race start, a hidden view falls back to the first visible one (0x582750); saved at race end, a reverse view saves its owner (0x584E70);
+  - chase yaw lag (0x8114B0): integrate yaw, angularLimit 10 rad never binds after the ±π wrap, return rate |θ| · (lagMin + (lagMax − lagMin) · speed / 55.5554 m/s); close-follow height −5 × filtered slope (clamp 0.58, damp 0.08);
+  - Mounted shift (0x822510): Δv / (dt · 30) in the body frame, clamp(−a · axisScale, ±maximumShift), first-order lag at movementSpeed;
+  - shipped presets: keyboard C = Change View, End = Look Back; XInput LB / Y.
+- Not found or not ported: the Change View handler (the order is the file order [I]); FOV convention (taken as vertical [I]); chase tilt, roll, suspension and impact envelopes; Mounted tilt and twist; the head/body dynamics (0x842DD0, 43 KB); transitions (all switch in race).
+- Code: `crates/grid-app/src/camera.rs`. Change View cycles; Look Back holds the reverse view; per-car mount points come from each car's file. Camera time is simulation ticks × 0.016 s, so pause holds still and renders are reproducible. The history resets on R, a view change and backwards ticks. The view persists in `<data dir>/camera.ini` (`current_camera = IDENT`), written on exit. If the car file cannot be read, the old authored chase remains, with `drive_camera event=fallback`.
+- Decision (closest to the original): keyboard C now changes the view and End looks back; before, C looked back. The HUD hint says so.
+- main.rs changes: `mod camera`, one install line, and the camera block of drive_present (cameras share a tuple parameter with free look because of Bevy's 16-parameter limit). The authored free look (F305) still orbits chase views.
+- Renders [V, inspected] in main checkout local/cameras/renders/, release, `--drive --drive-ticks 300 --throttle 1 --steering 0.05`:
+  - Lacetti chase_close, chase_far, bumper, bonnet, head-cam and look-back;
+  - BMW chase_close, bonnet and head-cam;
+  - camera.ini restore and save log lines are correct.
+  - The bonnet view shows no hood (the eye may sit at the hood surface; not compared with the original). Head-cam shows the hood but no interior (int_*.pssg is not loaded).
+- Checks on a44577b (cargo/rustc 1.99.0, release):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 461 passed, 0 failed;
+  - Clippy --workspace --all-targets -D warnings: clean;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai`: byte-identical to F346 (sha256 aad9a07a…e41b; laps 88.42029812185638 / 86.28228501935392);
+  - grid-soak quick: 11/12. The known seed-12 board fall at (-406, -51, -16), tick 3003, is unchanged (local/soak/quick-f348-camera).
+  - After the rebase onto F348 (pause menu; conflicts in the keyboard map and HUD hint resolved): grid-app release tests 69 passed, 0 failed.
+- Failed first:
+  - Ghidra headless received only the first address through PowerShell `-File` argument binding; fixed by passing a comma list;
+  - drive_present exceeded Bevy's 16 system parameters;
+  - two test expectations had arithmetic slips.
+- Not done: the cockpit interior, head dynamics, FOV convention check against the 2026-10-09 recording, the remaining chase effects. The playable is not rebuilt.
+
 F348 the original's in-race pause menu in grid-app (2026-10-17, Claude Code). Details, evidence and decisions: docs/PAUSE_MENU.md.
 - Evidence [D] (static; private copies in the main checkout's local/pause-menu/):
   - the menus are defined in system/states.bin (GRID binary XML), not in the front-end .pssg files;

@@ -541,6 +541,7 @@ Code: `crates/grid-app/src/input.rs` (action layer, human record, edge queue, ga
 - **[D] Binding defaults** come from the binding constructor `8400B0`: uniPos, dz 0.2 (0xCB870C), sat 0.8 (0xCB0F24), threshold 0.5 (0xCAF88C). A preset attribute overrides each value. That every `Axis` gets a freshly constructed binding is [I].
 - **B7C120:** the action value is the maximum over the bindings, starting at 0. "Down" is any binding with threshold ≤ v. The pressed edge is down now and not down on the previous update. A binding with no live source reads raw 0 (uni types) or 0.5 (bi types), so an `unmapped` uniNeg binding would read 1.0.
 - Keyboard map: the prototype's keys with the preset-0 calibrations. Steering is uniPos dz 0.2, sat 1; the pedals dz 0, sat 1; the rest use the constructor defaults. Every key calibration gives exactly 0.0/1.0 for 0/1 keys (test). WASD are AUTHORED aliases. Gear Up is X (A steers), Look Back is C and Pause is P, as before; the original uses A, End and Escape, and Escape exits the prototype.
+  - Update F349: C is now Change View and End is Look Back, as in the original keyboard preset; pad LB/Y come from the shipped preset. See [CAMERA_VIEWS.md](CAMERA_VIEWS.md).
 
 **Human record 827D10:**
 

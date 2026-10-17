@@ -4,6 +4,8 @@
 
 ## Verified starting point
 
+Update 17 October 2026 (F349): the original's five in-race views, look-back and the saved view are ported from each car's cameras.xml; see [CAMERA_VIEWS.md](CAMERA_VIEWS.md). The paragraph below describes the state before that.
+
 Our current driving camera in grid-app/main.rs is an authored chase transform (car-relative target/offset, world-up look-at), right-mouse free look and C look-back. It does not implement original head/body dynamics or cockpit rendering.
 
 Read-only purchased cars/lac/cameras.xml is sectioned binary XML, not plain XML. Existing tools/validate_binxml.py decoded 20 views; private source hash, structural statistics and per-view parameters are in local/graphics/lacetti-camera-audit01.json. First plain-text attempt yielded binary noise; decoded tree is the evidence used here. Earlier search also used a nonexistent drive.rs and a Windows glob; corrected to main.rs and directory searches.

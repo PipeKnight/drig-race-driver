@@ -239,9 +239,10 @@ impl ActionMap {
     /// The prototype's keyboard keys with the calibrations of the original
     /// keyboard preset 0 (steering uniPos dz 0.2 sat 1, pedals dz 0 sat 1,
     /// the rest constructor defaults). WASD are AUTHORED aliases; A steers, so
-    /// Gear Up moves from A to X. C looks back (the original uses End). Pause
-    /// is Escape as in the original, with P kept as before. The menu keys are
-    /// preset 0's: arrows and numpad 4/6/8/2, Enter, Escape, Ctrl (Button3).
+    /// Gear Up moves from A to X. C changes the view and End looks back as in
+    /// the original (F349; C looked back before). Pause is Escape as in the
+    /// original, with P kept as before. The menu keys are preset 0's: arrows
+    /// and numpad 4/6/8/2, Enter, Escape, Ctrl (Button3).
     pub fn keyboard() -> Self {
         use Action::*;
         let pedal = Calibration::new(CalibrationType::UniPositive, 0., 1., 0.5);
@@ -256,7 +257,8 @@ impl ActionMap {
             (SteerRight, &[KeyCode::ArrowRight, KeyCode::KeyD], steer),
             (GearUp, &[KeyCode::KeyX], button),
             (GearDown, &[KeyCode::KeyZ], button),
-            (LookBack, &[KeyCode::KeyC], button),
+            (ChangeView, &[KeyCode::KeyC], button),
+            (LookBack, &[KeyCode::End], button),
             (Pause, &[KeyCode::Escape, KeyCode::KeyP], button),
             (MenuLeft, &[KeyCode::ArrowLeft, KeyCode::Numpad4], button),
             (MenuRight, &[KeyCode::ArrowRight, KeyCode::Numpad6], button),

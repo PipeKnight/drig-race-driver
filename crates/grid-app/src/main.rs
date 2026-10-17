@@ -11,6 +11,7 @@ macro_rules! log_line {
 
 mod assists;
 mod body_damage;
+mod camera;
 mod car_materials;
 mod clearcoat_prepass;
 mod damage_hud;
@@ -2234,6 +2235,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
+        camera::install(&mut app, &root, field.models[0].stem());
         damage_hud::install(&mut app);
     }
     if track
@@ -3351,7 +3353,7 @@ fn drive_present(
         ),
         (Without<MovingPart>, Without<ViewerCamera>),
     >,
-    mut camera: Single<&mut Transform, With<ViewerCamera>>,
+    mut camera: Single<(&mut Transform, Option<&mut Projection>), With<ViewerCamera>>,
     mut windows: Query<&mut Window>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut presentation: ResMut<DeformationPresentation>,
@@ -3361,7 +3363,10 @@ fn drive_present(
     actions: Option<Res<input::Actions>>,
     mut look_back: Local<Option<bool>>,
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
-    free_look: Option<Res<free_look::FreeLook>>,
+    (free_look, mut cameras): (
+        Option<Res<free_look::FreeLook>>,
+        Option<ResMut<camera::Cameras>>,
+    ),
     mut refused: Local<Option<&'static str>>,
     render_clock: (
         Option<Res<Time<Fixed>>>,
@@ -3491,16 +3496,35 @@ fn drive_present(
             }
         }
     }
-    // Look Back (C, pad Y) holds a chase view; diagnostics look_back forces it for scripted renders.
-    let back = actions.is_some_and(|a| a.down(input::Action::LookBack))
+    // Change View (C, pad LB) cycles the car's views; Look Back (End, pad Y)
+    // holds the view's reverse camera; diagnostics look_back forces it.
+    let back = actions.as_ref().is_some_and(|a| a.down(input::Action::LookBack))
         || *look_back.get_or_insert_with(|| crate::settings::diagnostics().look_back);
+    let mut fallback = None;
+    let cameras = match cameras.as_deref_mut() {
+        Some(c) => c,
+        None => fallback.insert(camera::Cameras::new(camera::Views::fallback(), "", None)),
+    };
+    if actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView)) {
+        cameras.change_view();
+        log_line!("drive_camera event=change view={} tick={}", cameras.ident(), driving.runtime.ticks);
+    }
+    let v = driving.runtime.velocity();
+    let sample = camera::Sample {
+        pose,
+        velocity: Vec3::new(v[0], v[1], v[2]),
+        ticks: driving.runtime.ticks,
+        segment: driving.segment,
+    };
+    // Right mouse button orbits a chase view (AUTHORED free look).
     let side = if back { -1. } else { 1. };
-    // Right mouse button orbits the chase camera (AUTHORED free look).
-    let target = Vec3::new(0., 1., 0.);
-    let offset = free_look::offset(free_look.as_deref(), Vec3::new(0., 2., -9. * side), side);
-    let at = pose.transform_point3(target);
-    let eye = pose.transform_point3(target + offset);
-    **camera = Transform::from_translation(eye).looking_at(at, Vec3::Y);
+    let shot = cameras.frame(&sample, back, |o| free_look::offset(free_look.as_deref(), o, side));
+    let (transform, projection) = &mut *camera;
+    **transform = Transform::from_translation(shot.eye).with_rotation(shot.rotation);
+    if let Some(Projection::Perspective(p)) = projection.as_deref_mut() {
+        p.fov = shot.fov;
+        p.near = shot.near.unwrap_or(PerspectiveProjection::default().near);
+    }
     let v = driving.runtime.velocity();
     let speed = Vec3::new(v[0], v[1], v[2]).length() * 3.6;
     let gear = driving.runtime.state.car.owner.vehicle[0x196c / 4];
@@ -3596,7 +3620,7 @@ fn drive_present(
         terminal
             .as_deref()
             .unwrap_or(
-                "Space: handbrake | C: look back | RMB: look around | Esc/P: pause | R: restart",
+                "Space: handbrake | C: view | End: look back | RMB: look around | Esc/P: pause | R: restart",
             )
             .into()
     };
