@@ -2587,6 +2587,7 @@ fn setup(
                     },
                     ..default()
                 };
+                source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
                     && graphics.layered_car
                     && (!track || part.material.starts_with("car0/"))

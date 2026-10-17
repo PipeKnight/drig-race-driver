@@ -1,5 +1,7 @@
 # GRID engine project log
 
+G061 forest normal/backlight lighting draft (17 October2026): G060 main/graphics push verifiedremotea2c61b2523aceca76511f4aa82f591ac340591bd. Continueoptionalforestonly: pinnedBevy double_sided flipsradialnormalonbackfaces; sourceVS hasnoequivalent. Sourceleaf/barkshaderfamiliesnowtagged, noface-normalflip/cullstillnone; authoredPBRdiffusetransmission0.3leaf/roughness1/reflectance0.1. Notoriginalshaderorcolourspacefix; GPUcomparisonpending, mainverified21b0buildunchanged. docs/SOURCE_VEGETATION.md.
+
 G060 forest geometry pilot integrated and playable refreshed (17 October2026): primarycd21873->bc7bc14guardedFF, ownerAIresearchSHA c4d52b9e...unchanged/untrackedpreserved. Source21b0ed70b932/SHA85451fe658c5174ea9b455702c93d380c38895c550a42297a7eb4e814553c6ad atomicallycopiedtoinactive main target/verifiedbackups, accurateplaytest+graphicsmanifestsinboth; no runningprototypeclosed. Defaultforestoff; basegraphicslauncherthirdmodetreesexplicit. Sourcecrates/Cargoidenticalverifiedbuild; laterchangeslauncher/docs. 518tests/Clippy/exactsolo/20of20soak/native4Kfull-lapvalidated, limitsG059remain. Dedupappliedvegetation01/texture-lap01/actualsoakfolder:2duplicatefileslinked/~0.01GiB/0errors/fullcitedevidencekept. Hash-verifiedsupersededsource-land-pilot01.exe deleted(87426048bytes), provenance/capturesretained. Publicationverificationnext; continueleafbacklighting/normalcoverageandfar-wallvisibility, noownerinputrequired.
 
 

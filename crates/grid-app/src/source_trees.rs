@@ -54,6 +54,18 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
         })
         .map(|i| tree.string(i, b"id"))
         .collect::<grid_formats::Result<_>>()?;
+    let leaves: BTreeSet<_> = (0..tree.nodes.len())
+        .filter(|&i| {
+            tree.name(i) == b"SHADERINSTANCE"
+                && tree.string(i, b"shaderGroup").is_ok_and(|s| {
+                    matches!(
+                        s,
+                        b"#facing_foliage.fx" | b"#foliage.fx" | b"#treesheet_foliage.fx"
+                    )
+                })
+        })
+        .map(|i| tree.string(i, b"id"))
+        .collect::<grid_formats::Result<_>>()?;
     let mut diffuse = BTreeMap::new();
     for b in material::read_texture_bindings(&tree)? {
         if b.sampler != b"TDiffuseAlphaMap" {
@@ -86,7 +98,15 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
         let tex = *diffuse
             .get(d.material)
             .ok_or("tree draw lacks diffuse map")?;
-        let name = format!("trees/{}", std::str::from_utf8(d.material)?);
+        let name = format!(
+            "trees/{}{id}",
+            if leaves.contains(d.material) {
+                "leaf/"
+            } else {
+                "bark/"
+            },
+            id = std::str::from_utf8(d.material)?
+        );
         let key = format!("trees/{}", std::str::from_utf8(tex)?);
         bindings.insert(name.clone(), key);
         needed.insert(tex);
@@ -381,4 +401,21 @@ fn present(
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, points);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     }
+}
+
+/// Authored PBR adaptation, not the original wrapped-normal/backlight shader.
+pub fn configure_material(name: &str, material: &mut StandardMaterial) {
+    if !name.starts_with("trees/") {
+        return;
+    }
+    // Original foliage vertex lighting has no front-face normal inversion.
+    // In Bevy, double_sided changes lighting, whereas cull_mode controls visibility.
+    material.double_sided = false;
+    material.perceptual_roughness = 1.;
+    material.reflectance = 0.1;
+    material.diffuse_transmission = if name.starts_with("trees/leaf/") {
+        0.3
+    } else {
+        0.
+    };
 }
