@@ -1441,6 +1441,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--haze needs source or off".into()),
                 };
             }
+            "--ao" | "--grass-shadows" => {
+                let enabled = match args.next().as_deref() {
+                    Some("on") => true,
+                    Some("off") => false,
+                    _ => return Err("--ao/--grass-shadows needs on or off".into()),
+                };
+                if arg == "--ao" {
+                    graphics.ambient_occlusion = enabled;
+                } else {
+                    graphics.grass_receive_shadows = enabled;
+                }
+            }
             "--aa" => {
                 graphics.anti_aliasing = match args.next().as_deref() {
                     Some("taa") => 0,

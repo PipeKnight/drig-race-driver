@@ -1,5 +1,17 @@
 # GRID engine project log
 
+## G072 — Owner prefers coverage foliage; grass defect isolated (17 October 2026)
+
+Owner explicitly prefers right-hand distant foliage (fewer holes); coverage stays the chosen pilot, not a complete foliage fix. Sourcef78b7e0 / SHA38f3753a... four native4K views and BC comparison rendered; 524release tests/0failed/0ignored, workspaceClippy0.84s, exactsolo,20/20quick pass. Two30unique-frame request audits pass; metadata/visual review pending. Rejected conflicting capture-clock flags corrected in retry02, failed log retained.
+
+Owner reports black grass strokes on these crops. Matched native4K with GRID_GROUND_EFFECTS=0 removes them, confirming grass sprites rather than terrain texture/wheelmarks. Original gc_billboard512BC3 atlas inspected: dark thin blades. Root cause within lighting/coverage not yet established. Current ground material already excludes shadow casting, uses terrain normals and Mask0.5 in enhanced mode. Source colour shader adds sun/back/ambient terms; original A2C differs. Added default-preserving --ao and --grass-shadows isolation controls; GPU diagnosis next. Main checked8b9919f unchanged.
+
+
+## G071 — Foliage coverage candidate built (17 October 2026)
+
+f78b7e0f099d / SHA38f3753aef7943f65d797aafd5f584430842d99acad3e91b733ebd1f360aed7e / release1m00s. 2CPU app tests and changed-app all-target Clippy4.47s passed; diagnostic boundary/truncated-DDS checks passed (sandbox temp-write retry recorded). Four matched source/coverage native4K RGBA views in progress. Main playable and verified8b9919f remain unchanged. No acceptance/default/geometry-fix claim.
+
+
 ## G070 — Leaf coverage measured; bounded opt-in draft (17 October 2026)
 
 G069 publication verified: remote main/graphics d967f3591edec6ae8d49fedfe139d182470ebffb; playable source8b9919f remains checked. [Foliage research](docs/SOURCE_VEGETATION.md): source maple/bush/persimmon lose threshold coverage in small mips; birch does not, so no blanket alpha boost. New read-only alpha-mip survey, full-chain fresh exports, Pillow12.3/NumPy2.3.5, no installs. Primary technique references recorded; texel statistics are not screen-space quality proof. Optional --trees coverage draft adapts lower leaf diffuse alpha, bounds scale<=2, retains base/RGB/zeroalpha, routes BGRA8 DDS through common portable uploader. 2CPU release tests pass incl purchased base/RGB/full-mip invariant; initial Rust1.99 Clippy iteration findings corrected, changed-package all-target Clippy4.47s passes. GPU/full checks not yet run; main playable unchanged.

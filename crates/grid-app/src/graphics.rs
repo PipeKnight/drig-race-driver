@@ -60,6 +60,9 @@ pub struct Settings {
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
     pub source_trees: bool,
+    /// Diagnostic isolation of ambient occlusion and grass shadow reception.
+    pub ambient_occlusion: bool,
+    pub grass_receive_shadows: bool,
     /// Optional authored coverage-preserving leaf alpha mips; source remains default.
     pub foliage_coverage: bool,
     pub clearcoat_prepass_fix: bool,
@@ -95,6 +98,8 @@ impl Default for Settings {
             layered_track: true,
             source_land: true,
             source_trees: false,
+            ambient_occlusion: true,
+            grass_receive_shadows: true,
             foliage_coverage: false,
             clearcoat_prepass_fix: true,
             tread_normals: true,
@@ -190,7 +195,7 @@ pub fn configure(
         settings.height,
         if settings.enhanced() { 4096 } else { 2048 },
         if settings.enhanced() { 16 } else { 1 },
-        settings.enhanced(),
+        settings.enhanced() && settings.ambient_occlusion,
         settings.enhanced(),
         settings.enhanced() && settings.anti_aliasing == 0,
         if settings.enhanced() {
@@ -242,9 +247,11 @@ pub fn configure(
         AtmosphereEnvironmentMapLight::default(),
         Msaa::Off,
         bevy::core_pipeline::prepass::MotionVectorPrepass,
-        ScreenSpaceAmbientOcclusion::default(),
         ShadowFilteringMethod::Gaussian,
     ));
+    if settings.ambient_occlusion {
+        commands.entity(camera).insert(ScreenSpaceAmbientOcclusion::default());
+    }
     match settings.anti_aliasing {
         0 => {
             commands

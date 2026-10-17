@@ -308,14 +308,18 @@ fn start(
         cull_mode: None,
         ..default()
     });
-    commands.spawn((
+    let entity = commands.spawn((
         Name::new("ground cover"),
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material),
         Transform::IDENTITY,
         bevy::camera::visibility::NoFrustumCulling,
         bevy::light::NotShadowCaster,
-    ));
+    )).id();
+    if !graphics.grass_receive_shadows {
+        commands.entity(entity).insert(bevy::light::NotShadowReceiver);
+    }
+    println!("ground_detail_shading receive_shadows={} ssao={} cutoff=enhanced-mask05 normals=terrain", graphics.grass_receive_shadows, graphics.ambient_occlusion);
     commands.insert_resource(GroundDetail {
         instances: loaded.instances,
         quads: loaded.quads,
