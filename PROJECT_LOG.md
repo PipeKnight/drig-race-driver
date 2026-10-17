@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G067 — Fog bindings established and linear 4K checked (17 October 2026)
+
+[Atmosphere evidence](docs/DONINGTON_ATMOSPHERE.md). Read-only Ghidra12.1.4/Capstone5.0.6 trace now proves XML-distance reciprocal/cap into fogParams.zw and normalized packed RGB times brightness into fogColour for the examined shader. Linear factor matches source; height/variant/exposure and float-to-byte rounding remain unresolved. Discarded zero-constructor/getter hypotheses recorded. No tools installed/Steam changes. Source8b9919fbf5c6 / SHAc5b98420... build59.27s rendered native4K static and1200tick drive; logs clean except known nilUUID warning, RGBA path, endpoint exactly haze-off. Images inspected: depth fade present, strips persist, default stays off. Private vegetation01/haze-linear-validation01.json and fog-ghidra evidence. Main verified486e7eb untouched pending final checks/integration.
+
+
 ## G066 — Fog distance shape recovered; pilot revised (17 October 2026)
 
 [Atmosphere notes](docs/DONINGTON_ATMOSPHERE.md). Initial73f1a37/SHAbe4c760b... (build1m21s) rendered matched4K static/driving haze off/source pairs without shader errors; physical1200tick endpoints identical. Near road largely preserved, far contrast reduced; strips remain. Fog is opt-in, main verified486e7eb untouched. Source522workspace tests/Clippy17.21s/exactsolo/20of20soak passed for that initial candidate.

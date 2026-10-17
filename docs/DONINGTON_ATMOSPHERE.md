@@ -8,9 +8,9 @@ The enhanced scene has no DistanceFog component. Its source sky is a separate cu
 
 | Saved control | Donington value | Pilot use |
 |---|---|---|
-| fogDistance | 500 | Authored ramp width in metres; uniform binding not recovered |
+| fogDistance | 500 | Ramp width in metres; statically recovered reciprocal uniform |
 | fogDensityCap | 0.4 | Maximum blend through DistanceFog colour alpha |
-| fogColour | 0.68235,0.74510,0.90588 | Assumed linear RGB, not verified original colour space |
+| fogColour | 0.68235,0.74510,0.90588 | Original normalizes packed RGB bytes; pilot uses saved floats directly |
 | fogColourBrightness | 0.5 | Multiplies the pilot RGB |
 | fogBaseLevel / fogTopLevel | 0 / 2000 | Preserved metadata; height formula not applied |
 
@@ -38,3 +38,22 @@ Existing pinned source `local/graphics/shaders/track-infield-pixel01.txt` / meta
 The first exponential source-inspired experiment rendered successfully but is superseded, retaining its images and logs as evidence. The revised pilot uses Bevy linear start30,end30+savedDistance,colour alpha=savedDensityCap: it matches the observed distance shape **if** z=1/savedDistance and w=savedDensityCap. Those bindings and radiometry remain explicit assumptions. The earlier exponential description above documents the initial experiment, not the current implementation. The strong far fade and remaining strips do not justify claiming a geometry repair.
 
 Initial73f1a37 / SHAbe4c760b7c9993728c0a33f37a1870eb6164039f58a534ed5e7264f4b0ccee2f build1m21s: native4K off/source static and1200tick driving pairs inspected; pose/velocity identical, RGBA537/0BC, knownnilUUIDWARNonly. Near-road RGB changeMAE0.319byte vsfar-strip21.84bytes; first sky ROI accidentally included a crown, corrected clear-sky ROI MAE0.0053/max1byte. This is localized atmosphere evidence, not a fidelity/quality score. Original equations/radiometry and height remain open; current linear candidate still needs GPU validation.
+
+
+## Uniform binding recovered and linear pilot checked
+
+Ghidra12.1.4_PUBLIC processed the existing grid-unpacked project with `-readOnly -noanalysis`; no analysis image or Steam file was modified. Private analysis PE SHA256 aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514; Capstone5.0.6 corroborated instruction-aligned stores. Existing installed JRE reused; no tools installed.
+
+The static chain now establishes the bindings for the examined shader:
+
+- Field registration at741520: fogDistance at lighting+0x2c0, fogDensityCap+0x2c4, packed colour bytes+0x2c8..ca and brightness+0xa0.
+- Lighting update730f90, relevant instructions731dfe..731e83: fogParams.z=1/fogDistance and .w=fogDensityCap. SSE masks atcaf420/caf430 select Z/W; numeratorcaf888 is1.0. The same update normalizes packed R/G/B bytes by cb95c4=1/255 into vector+0x80.
+- Uniform dispatcher743220 case0x0f binds fogParams from+0x90; case0x1b binds fogColour from normalized colour+0x80 times brightness+0xa0. No gamma conversion occurs in this examined preparation/dispatch.
+
+Consequently the examined infield pixel shader's factor is `cap * saturate((distance-30)/savedDistance)`. Bevy linear start30/end30+savedDistance and colour alpha=cap reproduce this distance factor. The current diagnostic label still says authored-uniforms; the stronger binding evidence was obtained after that build. This does not establish the runtime-selected variant, every original pass, height handling elsewhere, XML float-to-byte rounding, original exposure, HDR/tonemapping or 1:1 radiometry. The pilot keeps saved float RGB directly instead of reconstructing unverified quantization. Source sky remains unchanged.
+
+Private evidence: fog-ghidra01/{74167d,743483}.c.txt; fog-ghidra03/731dfe.c.txt; fog-uniform-aligned01.txt; fog-lane-masks01.txt; fog-pe-strings01.txt. Broad offset searches also found a zero constructor742dc0 and destructor path744d20/7423a0: neither proves a fog getter, so those hypotheses were discarded. A preliminary disassembly started before a known boundary; only corrected aligned731dfe output is used. The helper length argument is hexadecimal, recorded to avoid interpreting its longer dump as additional code coverage.
+
+Linear source8b9919fbf5c6, release build59.27s, executable SHA256 c5b9842062bfc45f962a62d45d8c826438e95e9937fb9a87ae30ae6d2a55c545: static and1200tick native3840x2160 captures inspected. haze-linear4k01 and haze-linear-drive4k01 render without unexpected WARN/ERROR (only known nil-UUID gilrs warning); forced RGBA8 path, no BC upload. Physical endpoint matches haze-off exactly. The far fade remains strong under the authored PBR lighting, strips remain visible; default haze stays off. Precise localized comparison in haze-linear-validation01.json; no whole-image fidelity score or phone verification claimed. Full test/check provenance is recorded separately before integration.
+
+Optional local preview: `Play GRID Graphics Atmosphere.cmd` launches the source forest plus source distance haze; optional first argument is the purchased game root, second is resolution (for example3840x2160). Ordinary/Wheels/Textures launchers keep haze off. This preview exposes a comparison, not a new default or a claim that vegetation/walls are finished.
