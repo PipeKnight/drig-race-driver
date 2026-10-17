@@ -209,6 +209,9 @@ pub struct Settings {
     /// `grid_position = back`: the last slot, after the opponents.
     pub grid_back: bool,
     pub ai_characteristics: Option<PathBuf>,
+    /// `[drive] discipline`: `race` (default) or `drift_battle`
+    /// (docs/DISCIPLINES.md).
+    pub discipline: Option<String>,
     pub body_contacts: Option<Private>,
     pub body_events: Option<Private>,
     pub deformation: Option<Private>,
@@ -363,6 +366,10 @@ impl Settings {
                         Some(count(value).map_err(at)?)
                     };
                 }
+                ("drive", "discipline") => match value.to_ascii_lowercase().as_str() {
+                    d @ ("race" | "drift_battle") => self.discipline = Some(d.into()),
+                    _ => return Err(at("`discipline` needs race or drift_battle".into())),
+                },
                 ("drive", "ai_characteristics") => {
                     self.ai_characteristics = (!off).then(|| private_path(value))
                 }
@@ -471,6 +478,7 @@ laps = 3
 opponents = 11
 grid_position = back
 ai_characteristics = ai-driver-characteristics.tsv
+discipline = Drift_Battle
 [private]
 body_contacts = body-contact-directions.bin
 body_events = derive
@@ -495,6 +503,7 @@ prop_script_speed = 12.5
         assert_eq!(s.car.as_deref(), Some("bmw"));
         assert_eq!(s.opponent_cars.as_deref(), Some("lac,bmw"));
         assert!(s.drive && s.grid_back);
+        assert_eq!(s.discipline.as_deref(), Some("drift_battle"));
         assert_eq!(
             (s.laps, s.opponents, s.grid_position),
             (Some(3), Some(11), None)
