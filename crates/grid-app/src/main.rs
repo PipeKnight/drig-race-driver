@@ -1441,6 +1441,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--haze needs source or off".into()),
                 };
             }
+            "--shadow-distance" => {
+                graphics.shadow_distance(&args.next().ok_or("--shadow-distance needs metres")?)?;
+            }
             "--capture-timeout" => {
                 graphics.capture_timeout(&args.next().ok_or("--capture-timeout needs seconds")?)?;
             }

@@ -65,6 +65,8 @@ pub struct Settings {
     pub grass_receive_shadows: bool,
     /// Authored enhanced soft coverage; mask remains available for comparison.
     pub grass_soft_alpha: bool,
+    /// Authored enhanced directional-shadow reach; defaults to the verified 250 m.
+    pub shadow_distance_metres: f32,
     /// Optional authored coverage-preserving leaf alpha mips; source remains default.
     pub foliage_coverage: bool,
     pub clearcoat_prepass_fix: bool,
@@ -105,6 +107,7 @@ impl Default for Settings {
             ambient_occlusion: true,
             grass_receive_shadows: true,
             grass_soft_alpha: true,
+            shadow_distance_metres: 250.,
             foliage_coverage: false,
             clearcoat_prepass_fix: true,
             tread_normals: true,
@@ -147,6 +150,15 @@ impl Settings {
         Ok(())
     }
 
+    pub fn shadow_distance(&mut self, value: &str) -> Result<(), &'static str> {
+        let distance = value.parse::<f32>().map_err(|_| "invalid shadow distance")?;
+        if !distance.is_finite() || !(50.0..=2000.0).contains(&distance) {
+            return Err("shadow distance must be finite and 50..2000 metres");
+        }
+        self.shadow_distance_metres = distance;
+        Ok(())
+    }
+
     pub fn capture_timeout(&mut self, value: &str) -> Result<(), &'static str> {
         let seconds = value.parse::<f64>().map_err(|_| "invalid capture timeout")?;
         if !seconds.is_finite() || !(30.0..=3600.0).contains(&seconds) {
@@ -186,7 +198,7 @@ impl Settings {
             CascadeShadowConfigBuilder {
                 num_cascades: 4,
                 first_cascade_far_bound: 18.,
-                maximum_distance: 250.,
+                maximum_distance: self.shadow_distance_metres,
                 overlap_proportion: 0.2,
                 ..default()
             }
@@ -235,6 +247,7 @@ pub fn configure(
         println!("source_haze enabled=true distance={} density_cap={} colour={:?} brightness={} height_bounds=[{},{}] mapping=source-distance-shape-authored-uniforms-linear30 height_applied=false colour_space=assumed-linear source_sky=unchanged",
             fog.distance, fog.density_cap, fog.colour, fog.brightness, fog.base_height, fog.top_height);
     }
+    println!("graphics_shadow_range metres={} cascades=4 first=18 map_size=4096 mapping=authored", settings.shadow_distance_metres);
     commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight::NONE);
     commands.spawn(Atmosphere::earth(
@@ -332,7 +345,7 @@ pub fn configure(
 
 
 #[cfg(test)]
-mod capture_budget_tests {
+mod graphics_settings_tests {
     use super::*;
     #[test]
     fn timeout_extension_is_bounded_finite_and_failed_edits_preserve_the_value() {
@@ -346,4 +359,26 @@ mod capture_budget_tests {
             assert_eq!(settings.capture_timeout_seconds, Some(3600.));
         }
     }
+    #[test]
+    fn shadow_distance_reaches_requested_bound_and_rejects_invalid_limits() {
+        let mut settings = Settings { preset: Preset::Enhanced, ..Default::default() };
+        let original = settings.cascades().bounds;
+        assert!((*original.last().unwrap() - 250.).abs() < 0.001);
+        settings.shadow_distance("1000").unwrap();
+        let bounds = settings.cascades().bounds;
+        assert_eq!(bounds.len(), 4);
+        assert!((bounds[0] - 18.).abs() < 0.001);
+        assert!((*bounds.last().unwrap() - 1000.).abs() < 0.001);
+        assert!(bounds.windows(2).all(|w| w[0].is_finite() && w[0] < w[1]));
+        for value in ["NaN", "inf", "0", "49.9", "2000.1", ""] {
+            assert!(settings.shadow_distance(value).is_err());
+            assert_eq!(settings.shadow_distance_metres, 1000.);
+        }
+        settings.preset = Preset::Baseline;
+        assert_eq!(settings.cascades().bounds, CascadeShadowConfig::default().bounds);
+        settings.preset = Preset::Enhanced;
+        settings.shadow_distance("250").unwrap();
+        assert_eq!(settings.cascades().bounds, original);
+    }
+
 }
