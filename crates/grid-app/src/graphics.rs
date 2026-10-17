@@ -82,6 +82,8 @@ pub struct Settings {
     /// Optional bounded extension for offscreen diagnostics on busy machines.
     pub capture_timeout_seconds: Option<f64>,
     pub source_sky: bool,
+    /// Optional recovered sky scale/exponent applied to background and source IBL.
+    pub source_sky_tone: bool,
     pub preset: Preset,
     pub width: u32,
     pub height: u32,
@@ -120,6 +122,7 @@ impl Default for Settings {
             benchmark_frames: None,
             capture_timeout_seconds: None,
             source_sky: true,
+            source_sky_tone: false,
             preset: Preset::Baseline,
             width: 1280,
             height: 800,

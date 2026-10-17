@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G081 — Source sky scale/exponent recovered; integrated pilot pending (17 October 2026)
+
+[Sky research](docs/SOURCE_SKY_LIGHTING.md). Examined source shader and static XML-to-uniform chain use saved skyscale0.8/skygamma0.7 directly as scale/exponent, despite InvGamma uniform name. Optional --sky-tone source applies the same algebra to background/sourceIBL; raw remains default, linear sampling/original radiometry still unverified. Bounded shared lighting parser3tests including purchased controls and app2tests pass; format/app all-target Clippy18.36s passes. GPU pending. Ghidra project locked: no lock/process modified, used existing private decompilation and installed Capstone/static PE reads. No installs or source-install changes. Main playable917ca5f remains unchanged.
+
 ## G080 — Farther shadows do not repair the distant strips; playable unchanged (17 October 2026)
 
 [Wall/atmosphere research](docs/DONINGTON_ATMOSPHERE.md). Optional bounded --shadow-distance50..2000m stages an enhanced250vs1000m comparison;4cascades/first18m/4096maps and default250/baseline preserved. New test checks actual installed-Bevy cascade bounds and rejects invalid/nonfinite limits. Two focused release tests and app all-target Clippy19.50s pass; Matched native4K250/1000m captures render successfully, known warning only; strip remains visually present in both, so no default change or movement acceptance. Not a claimed fix or a reason to hide geometry. Current main playable source917ca5f/SHA785488a1 remains untouched.

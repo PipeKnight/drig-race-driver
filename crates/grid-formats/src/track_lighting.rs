@@ -13,7 +13,7 @@ pub struct Fog {
     pub brightness: f32,
 }
 
-pub fn read_fog(bytes: &[u8]) -> Result<Fog> {
+fn parameters(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
     if bytes.len() > 1024 * 1024 {
         return fail(0, "lighting XML exceeds bound");
     }
@@ -67,6 +67,11 @@ pub fn read_fog(bytes: &[u8]) -> Result<Fog> {
             _ => return fail(0, "unexpected lighting structure"),
         }
     }
+    Ok(values)
+}
+
+pub fn read_fog(bytes: &[u8]) -> Result<Fog> {
+    let values = parameters(bytes)?;
     let scalar = |name: &str| -> Result<f32> {
         let value = values
             .get(name)
@@ -123,6 +128,39 @@ pub fn read_fog(bytes: &[u8]) -> Result<Fog> {
     Ok(fog)
 }
 
+/// Saved sky shader controls. Despite the uniform name InvGamma, the saved
+/// gamma is uploaded directly as the shader exponent in the examined path.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sky {
+    pub scale: f32,
+    pub exponent: f32,
+}
+
+pub fn read_sky(bytes: &[u8]) -> Result<Sky> {
+    let values = parameters(bytes)?;
+    let scalar = |key: &str| -> Result<f32> {
+        values
+            .get(key)
+            .and_then(|v| v.parse::<f32>().ok())
+            .ok_or(Error {
+                offset: 0,
+                message: "missing or invalid sky scalar",
+            })
+    };
+    let sky = Sky {
+        scale: scalar("skyscale")?,
+        exponent: scalar("skygamma")?,
+    };
+    if !sky.scale.is_finite()
+        || !(0.0..=16.0).contains(&sky.scale)
+        || !sky.exponent.is_finite()
+        || !(0.01..=16.0).contains(&sky.exponent)
+    {
+        return fail(0, "sky controls outside supported range");
+    }
+    Ok(sky)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,6 +196,35 @@ mod tests {
         assert!(read_fog(&vec![b' '; 1024 * 1024 + 1]).is_err());
     }
     #[test]
+    fn sky_exponent_is_saved_value_and_malformed_controls_are_rejected() {
+        let xml = r#"<lighting><param skyscale="0.8"/><param skygamma="0.7"/></lighting>"#;
+        assert_eq!(
+            read_sky(xml.as_bytes()).unwrap(),
+            Sky {
+                scale: 0.8,
+                exponent: 0.7
+            }
+        );
+        for (from, to) in [
+            ("0.8", "NaN"),
+            ("0.8", "-1"),
+            ("0.7", "inf"),
+            ("0.7", "0"),
+            ("0.7", "16.1"),
+            ("skygamma", "missing"),
+        ] {
+            assert!(read_sky(xml.replace(from, to).as_bytes()).is_err());
+        }
+        assert!(
+            read_sky(
+                xml.replace("</lighting>", "<param skygamma=\"1\"/></lighting>")
+                    .as_bytes()
+            )
+            .is_err()
+        );
+        assert!(read_sky(b"<!DOCTYPE lighting><lighting/>").is_err());
+    }
+    #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn purchased_donington_saved_fog_controls() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
@@ -170,5 +237,12 @@ mod tests {
         assert_eq!(fog.base_height, 0.);
         assert_eq!(fog.top_height, 2000.);
         assert_eq!(fog.brightness, 0.5);
+        assert_eq!(
+            read_sky(&bytes).unwrap(),
+            Sky {
+                scale: 0.8,
+                exponent: 0.7
+            }
+        );
     }
 }

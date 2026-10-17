@@ -1309,6 +1309,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.benchmark_frames = Some(count);
             }
+            "--sky-tone" => {
+                graphics.source_sky_tone = match args.next().as_deref() {
+                    Some("raw") => false,
+                    Some("source") => true,
+                    _ => return Err("--sky-tone needs raw or source".into()),
+                };
+            }
             "--sky" => {
                 graphics.source_sky = match args.next().as_deref() {
                     Some("source") => true,
@@ -1639,7 +1646,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
                 );
                 println!(
-                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural)."
+                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural).\n--sky-tone raw|source: optional saved scale/exponent for the sky and source IBL; raw default."
                 );
                 println!(
                     "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
@@ -2374,13 +2381,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         warn!("Ground cover unavailable; continuing: {error}");
     }
+    if graphics.source_sky_tone && (!graphics.enhanced() || !graphics.source_sky || !track) {
+        return Err("--sky-tone source requires enhanced source-sky track rendering".into());
+    }
     if graphics.source_ibl && (!graphics.enhanced() || !graphics.source_sky || !track) {
         return Err(
             "--ibl source requires enhanced graphics and a source-sky Donington scene".into(),
         );
     }
     if graphics.enhanced() && graphics.source_sky && track {
-        sky::install(&mut app, &root, graphics.source_ibl)?;
+        sky::install(&mut app, &root, graphics.source_ibl, graphics.source_sky_tone)?;
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);

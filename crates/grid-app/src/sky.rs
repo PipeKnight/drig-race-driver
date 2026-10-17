@@ -20,6 +20,8 @@ struct SkyMaterial {
     #[texture(0)]
     #[sampler(1)]
     texture: Handle<Image>,
+    #[uniform(2)]
+    tone: Vec4,
 }
 
 impl Material for SkyMaterial {
@@ -52,13 +54,26 @@ struct SourceSky {
     mesh: Mesh,
     dds: Vec<u8>,
     environment: Option<Image>,
+    tone: Vec4,
 }
 
 pub fn install(
     app: &mut App,
     root: &Path,
     source_ibl: bool,
+    source_tone: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let tone = if source_tone {
+        let bytes = super::read(&root.join("tracks/europe/donington/lighting.xml"))?;
+        let saved = grid_formats::track_lighting::read_sky(&bytes)?;
+        Vec4::new(saved.scale, saved.exponent, 0., 0.)
+    } else {
+        Vec4::new(1., 1., 0., 0.)
+    };
+    println!(
+        "source_sky_tone scale={} exponent={} source_controls={} space=linear-adaptation original-sampler-space=unverified",
+        tone.x, tone.y, source_tone
+    );
     let bytes = super::read(&root.join("tracks/europe/donington/sky.pssg"))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_meshes(&tree)?;
@@ -96,6 +111,7 @@ pub fn install(
                 &source.texcoords[draw.vertices.clone()],
                 &draw.indices,
                 tex,
+                [tone.x, tone.y],
             )
         })
         .transpose()?;
@@ -120,6 +136,7 @@ pub fn install(
         mesh,
         dds: tex.base_dds(),
         environment,
+        tone,
     })
     .add_plugins(MaterialPlugin::<SkyMaterial>::default())
     .add_systems(Startup, setup)
@@ -228,6 +245,7 @@ fn setup(
         Mesh3d(meshes.add(source.mesh.clone())),
         MeshMaterial3d(materials.add(SkyMaterial {
             texture: images.add(image),
+            tone: source.tone,
         })),
         Transform::default(),
     ));

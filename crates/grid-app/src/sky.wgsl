@@ -8,6 +8,8 @@ struct SkyOutput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var sky_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var sky_sampler: sampler;
 
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> sky_tone: vec4<f32>;
+
 @vertex
 fn vertex(input: Vertex) -> SkyOutput {
     let model = mesh_functions::get_world_from_local(input.instance_index);
@@ -20,5 +22,6 @@ fn vertex(input: Vertex) -> SkyOutput {
 
 @fragment
 fn fragment(input: SkyOutput) -> @location(0) vec4<f32> {
-    return vec4(textureSample(sky_texture, sky_sampler, input.uv).rgb, 1.0);
+    let colour = textureSample(sky_texture, sky_sampler, input.uv).rgb;
+    return vec4(pow(max(colour * sky_tone.x, vec3(0.0)), vec3(sky_tone.y)), 1.0);
 }

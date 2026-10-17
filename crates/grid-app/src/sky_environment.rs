@@ -85,7 +85,7 @@ fn bc1_pixel(tex: &Texture<'_>, x: u32, y: u32) -> [u8; 3] {
     }
 }
 
-fn sample(tex: &Texture<'_>, uv: Vec2, linear: &[f32; 256]) -> [u8; 3] {
+fn sample(tex: &Texture<'_>, uv: Vec2, linear: &[f32; 256], tone: [f32; 2]) -> [u8; 3] {
     let p = Vec2::new(
         uv.x.rem_euclid(1.) * tex.width as f32 - 0.5,
         uv.y.clamp(0., 1.) * tex.height as f32 - 0.5,
@@ -102,6 +102,7 @@ fn sample(tex: &Texture<'_>, uv: Vec2, linear: &[f32; 256]) -> [u8; 3] {
         .lerp(colors[2].lerp(colors[3], f.x), f.y)
         .to_array()
         .map(|v| {
+            let v = tone_linear(v, tone);
             let s = if v <= 0.0031308 {
                 v * 12.92
             } else {
@@ -111,13 +112,21 @@ fn sample(tex: &Texture<'_>, uv: Vec2, linear: &[f32; 256]) -> [u8; 3] {
         })
 }
 
+fn tone_linear(value: f32, tone: [f32; 2]) -> f32 {
+    (value * tone[0]).max(0.).powf(tone[1])
+}
+
 pub fn bake(
     positions: &[[f32; 3]],
     uvs: &[[f32; 2]],
     indices: &[u16],
     tex: &Texture<'_>,
+    tone: [f32; 2],
 ) -> Result<Image, &'static str> {
-    if tex.format != Format::Bc1
+    if tone.iter().any(|v| !v.is_finite())
+        || !(0.0..=16.).contains(&tone[0])
+        || !(0.01..=16.).contains(&tone[1])
+        || tex.format != Format::Bc1
         || tex.width == 0
         || tex.height == 0
         || tex.width > 16384
@@ -176,7 +185,7 @@ pub fn bake(
                     .min_by(|a, b| a.0.total_cmp(&b.0));
                 let rgb = if let Some((_, uv)) = nearest {
                     hits += 1;
-                    sample(tex, uv, &linear)
+                    sample(tex, uv, &linear, tone)
                 } else {
                     if d.y > 0. {
                         upper_misses += 1;
@@ -215,6 +224,17 @@ pub fn bake(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sky_tone_keeps_raw_identity_and_uses_direct_exponent() {
+        for value in [0., 0.01, 0.18, 0.5, 1.] {
+            assert!((tone_linear(value, [1., 1.]) - value).abs() < 1e-6);
+        }
+        assert_eq!(tone_linear(0., [0.8, 0.7]), 0.);
+        assert_eq!(tone_linear(0.5, [0., 0.7]), 0.);
+        assert!((tone_linear(0.5, [0.8, 0.7]) - 0.5265529).abs() < 1e-6);
+        // A reciprocal exponent would produce a different, darker result.
+        assert!(tone_linear(0.5, [0.8, 0.7]) > 0.5);
+    }
     #[test]
     fn projection_and_bc1_endpoints() {
         assert_eq!(direction(0, 0.5, 0.5), Vec3::X);
