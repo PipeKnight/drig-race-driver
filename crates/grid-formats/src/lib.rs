@@ -29,6 +29,7 @@ pub mod progress;
 pub mod pssg;
 pub mod scene;
 pub mod skidmarks;
+pub mod start_lights;
 pub mod surface;
 pub mod texture;
 pub mod tuning;

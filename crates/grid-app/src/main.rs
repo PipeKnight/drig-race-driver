@@ -336,15 +336,42 @@ struct DeformingPart {
 }
 #[derive(Resource, Default)]
 struct DeformationPresentation(Option<Vec<u32>>);
-/// Donington start-light board (`start_lights.xml`: object
-/// startlights_lights_horizontal, 6 stages over 4.0 s). The emissive texture
-/// is swapped per stage; `stage` 0 is the idle board.
+/// Start-light board of the route's track (`start_lights.xml`). The emissive
+/// texture is swapped per stage; `stage` 0 is the idle board.
 #[derive(Resource)]
 struct StartLights {
     material: Handle<StandardMaterial>,
-    /// Idle, then stages 1..6 (textures 1..5 and 7).
+    /// Idle, then the shipped stages.
     textures: Vec<Handle<Image>>,
     stage: usize,
+}
+/// The route's shipped start-light sequence: stage textures after the idle
+/// board and its time, which is also the race countdown. Defaults to
+/// Donington (startlights_lights_horizontal, 6 stages over 4.0 s); Nürburgring
+/// and Istanbul Park ship 7 stages over 5.0 s.
+#[derive(Resource, Clone, Debug)]
+struct StartSequence {
+    textures: Vec<String>,
+    seconds: f64,
+}
+impl Default for StartSequence {
+    fn default() -> Self {
+        Self {
+            textures: START_LIGHT_TEXTURES.map(String::from).to_vec(),
+            seconds: START_SEQUENCE_SECONDS,
+        }
+    }
+}
+impl StartSequence {
+    fn load(root: &Path, route: &Route) -> Result<Self, Box<dyn std::error::Error>> {
+        let shipped = grid_tools::start_lights::load(root, route)?;
+        Ok(Self {
+            textures: std::iter::once(START_LIGHT_TEXTURES[0].to_owned())
+                .chain(shipped.stages)
+                .collect(),
+            seconds: f64::from(shipped.seconds),
+        })
+    }
 }
 const START_LIGHT_TEXTURES: [&str; 7] = [
     "start_lights_e.tga",
@@ -1599,6 +1626,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?,
     };
     println!("game_root path={}", root.display());
+    let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
     }
@@ -2066,6 +2094,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("choose --render-fixed-step or --render-fps, not both".into());
     }
     let mut app = App::new();
+    app.insert_resource(start_sequence.clone());
     if let Some(keys) = texture_override_keys { app.insert_resource(texture_overrides::Active(keys)); }
     if let Some(rate) = capture_orbit_rate {
         app.insert_resource(free_look::CaptureOrbitRate(rate));
@@ -2085,7 +2114,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             trial.state = grid_tools::time_trial::State::new(
                 laps,
                 f64::from(grid_tools::source_vehicle::DELTA),
-                START_SEQUENCE_SECONDS,
+                start_sequence.seconds,
             )?;
         }
         app.insert_resource(trial);
@@ -2364,6 +2393,7 @@ fn setup(
     graphics: Res<graphics::Settings>,
     mut scattering_media: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
     overrides: Option<Res<texture_overrides::Active>>,
+    start: Option<Res<StartSequence>>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -2417,7 +2447,9 @@ fn setup(
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
     let bindings = car.bindings.clone();
     let track = car.track;
-    let start_light_images: Vec<Option<Handle<Image>>> = START_LIGHT_TEXTURES
+    let start = start.map(|s| s.clone()).unwrap_or_default();
+    let start_light_images: Vec<Option<Handle<Image>>> = start
+        .textures
         .iter()
         .map(|name| {
             texture_handles
@@ -2683,7 +2715,11 @@ fn setup(
             textures,
             stage: 0,
         });
-        println!("start_lights enabled=true stages=6 sequence_seconds={START_SEQUENCE_SECONDS}");
+        println!(
+            "start_lights enabled=true stages={} sequence_seconds={}",
+            start.textures.len() - 1,
+            start.seconds
+        );
     }
     if !track {
         commands.spawn((
@@ -2847,6 +2883,7 @@ fn drive_tick(
     mut shifts: ResMut<input::ShiftQueue>,
     mut trial: Option<ResMut<time_trial::Trial>>,
     mut prop_script: Option<ResMut<dynamic_props::PropScript>>,
+    start: Option<Res<StartSequence>>,
     // Last `drive_input` record (segment, controls, hold) for `grid-soak replay-log`.
     mut recorded: Local<Option<(u64, grid_tools::source_vehicle::Controls, bool)>>,
 ) {
@@ -2993,7 +3030,7 @@ fn drive_tick(
         let rev_state = match trial.as_ref().map(|t| t.state.phase()) {
             Some(grid_tools::time_trial::Phase::Countdown(left))
                 if f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA)
-                    > START_SEQUENCE_SECONDS / 2. =>
+                    > start.as_ref().map_or(START_SEQUENCE_SECONDS, |s| s.seconds) / 2. =>
             {
                 2
             }
@@ -3746,27 +3783,42 @@ fn terminal_damage_message(runtime: &grid_tools::source_vehicle::Runtime) -> Opt
         }
     })
 }
-/// Stage of the start-light board: lights 1..5 come on across the race
-/// countdown, stage 6 (texture 7) shows for 3 s from GO, otherwise idle.
-/// Mapping of the shipped "6 stages over 4.0 s" to the countdown is [I].
+/// Stage of the start-light board: stages 1..n-1 come on across the race
+/// countdown, the last stage (the green row) shows for 3 s from GO, otherwise
+/// idle. Mapping of the shipped "n stages over t s" to the countdown is [I]:
+/// Donington 1..5 then texture 7, Nürburgring and Istanbul Park 1..6 then 7.
+fn start_light_stage(
+    phase: Option<(&grid_tools::time_trial::Phase, f64)>,
+    seconds: f64,
+    stages: usize,
+) -> usize {
+    use grid_tools::time_trial::Phase;
+    let lit = stages.saturating_sub(1).max(1);
+    match phase {
+        Some((Phase::Countdown(left), _)) => {
+            let remaining = f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA);
+            let elapsed = (seconds - remaining).max(0.);
+            ((elapsed / (seconds / lit as f64)) as usize + 1).min(lit)
+        }
+        Some((Phase::Running, elapsed)) if elapsed < 3. => stages,
+        _ => 0,
+    }
+}
 fn update_start_lights(
     trial: Option<Res<time_trial::Trial>>,
     lights: Option<ResMut<StartLights>>,
+    start: Option<Res<StartSequence>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    use grid_tools::time_trial::Phase;
     let Some(mut lights) = lights else {
         return;
     };
-    let stage = match trial.as_ref().map(|t| (t.state.phase(), t.state.elapsed())) {
-        Some((Phase::Countdown(left), _)) => {
-            let remaining = f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA);
-            let elapsed = (START_SEQUENCE_SECONDS - remaining).max(0.);
-            ((elapsed / (START_SEQUENCE_SECONDS / 5.)) as usize + 1).min(5)
-        }
-        Some((Phase::Running, elapsed)) if elapsed < 3. => 6,
-        _ => 0,
-    };
+    let seconds = start.map_or(START_SEQUENCE_SECONDS, |s| s.seconds);
+    let stage = start_light_stage(
+        trial.as_ref().map(|t| (t.state.phase(), t.state.elapsed())),
+        seconds,
+        lights.textures.len() - 1,
+    );
     if stage != lights.stage {
         lights.stage = stage;
         if let Some(mut m) = materials.get_mut(&lights.material) {
@@ -3851,6 +3903,24 @@ fn update_orbit(
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+    #[test]
+    fn start_light_stages_follow_the_shipped_sequence() {
+        use grid_tools::time_trial::Phase;
+        let ticks = |seconds: f64| (seconds / f64::from(grid_tools::source_vehicle::DELTA)) as u32;
+        let at = |left: f64, seconds, stages| {
+            start_light_stage(Some((&Phase::Countdown(ticks(left)), 0.)), seconds, stages)
+        };
+        // Donington: 6 stages over 4.0 s, lights 1..5 across the countdown.
+        assert_eq!([4.0, 3.1, 2.3, 1.5, 0.7, 0.].map(|l| at(l, 4.0, 6)), [1, 2, 3, 4, 5, 5]);
+        // Nürburgring and Istanbul Park: 7 stages over 5.0 s, lights 1..6.
+        assert_eq!([5.0, 4.1, 3.1, 2.1, 1.1, 0.1].map(|l| at(l, 5.0, 7)), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(start_light_stage(Some((&Phase::Running, 1.)), 5.0, 7), 7);
+        assert_eq!(start_light_stage(Some((&Phase::Running, 3.5)), 5.0, 7), 0);
+        assert_eq!(start_light_stage(None, 4.0, 6), 0);
+        let default = StartSequence::default();
+        assert_eq!((default.textures.len(), default.seconds), (7, 4.0));
+    }
+
     #[test]
     fn only_rims_and_tyres_leave_with_a_lost_wheel() {
         assert!(lost_with_wheel("x0_wheel_fl"));

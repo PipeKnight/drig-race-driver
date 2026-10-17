@@ -23,9 +23,9 @@ use crate::{
 };
 use std::{collections::BTreeMap, path::Path};
 
-pub const DONINGTON: &str = "tracks/europe/donington/route_0";
-pub const NURBURGRING: &str = "tracks/europe/nurburgring/route_0";
-/// The app's race start-light sequence (grid-app START_SEQUENCE_SECONDS).
+pub use crate::route::{DONINGTON, ISTANBUL_PARK, NURBURGRING};
+/// Donington's race start-light sequence; every race holds the grid for its
+/// track's shipped sequence time (`start_lights::load`, grid-app StartLights).
 pub const RACE_COUNTDOWN: f64 = 4.0;
 /// The app's solo time-trial countdown (grid-app time_trial::Trial::new).
 pub const TRIAL_COUNTDOWN: f64 = 3.0;
@@ -133,6 +133,8 @@ pub struct Scenario {
 /// Car counts the quick profile cycles through: the owner's 12-car race
 /// first, then solo and mid-size fields.
 const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
+/// Quick seeds 1..=12 keep their F326 routes; 13..=16 run Istanbul Park.
+pub const QUICK_SEEDS: (u64, u64) = (1, 16);
 
 impl Scenario {
     /// Pure function of (seed, profile, availability, max cars).
@@ -147,11 +149,22 @@ impl Scenario {
             Profile::Long => 1 + rng.below(max_cars as u64) as usize,
         };
         let route = match profile {
+            // Quick seeds 13..=16 (2, 12, 9 and 4 cars) on Istanbul Park.
+            Profile::Quick if seed > 12 => ISTANBUL_PARK,
             // Odd quick seeds on Donington; the 12-car seeds 1 and 3 cover both.
             Profile::Quick if seed % 4 == 3 || seed % 4 == 2 => NURBURGRING,
             Profile::Quick => DONINGTON,
             Profile::Long if rng.chance(0.5) => NURBURGRING,
             Profile::Long => DONINGTON,
+        };
+        // A third of the long runs move to Istanbul Park, drawn from their own
+        // stream so every other field of a seed stays as before.
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x157a_0000_0000_0000).chance(1. / 3.)
+        {
+            ISTANBUL_PARK
+        } else {
+            route
         }
         .to_string();
         let mut assists = Assists {
@@ -247,10 +260,11 @@ impl Scenario {
             .collect()
     }
 
-    /// Countdown seconds the app runs before GO (0 without an event).
-    pub fn countdown(&self) -> f64 {
+    /// Countdown seconds the app runs before GO (0 without an event); a race
+    /// holds the grid for the track's start-light sequence `race`.
+    pub fn countdown(&self, race: f64) -> f64 {
         match self.laps {
-            Some(_) if self.cars > 1 => RACE_COUNTDOWN,
+            Some(_) if self.cars > 1 => race,
             Some(_) => TRIAL_COUNTDOWN,
             None => 0.,
         }
@@ -565,6 +579,8 @@ pub struct Session {
     pub race: Option<Race>,
     pub ai: AiData,
     pub countdown: Option<State>,
+    /// The track's start-light sequence seconds (race countdown).
+    pub start_sequence: f64,
     /// Route centreline (distance, position) for the chaos driver.
     pub centreline: Vec<(f32, [f32; 3])>,
     /// Allowed region (min xyz, max xyz).
@@ -598,6 +614,7 @@ impl Session {
             return Err("grid position beyond the field".into());
         }
         let route = Route::new(&scenario.route)?;
+        let start_sequence = f64::from(crate::start_lights::load(root, &route)?.seconds);
         let opponents = scenario.cars - 1;
         if opponents > 0 && !scenario.body_contacts {
             return Err("opponents require body contacts (app --opponents)".into());
@@ -721,7 +738,11 @@ impl Session {
             None
         };
         let countdown = match scenario.laps {
-            Some(laps) => Some(State::new(laps, f64::from(DELTA), scenario.countdown())?),
+            Some(laps) => Some(State::new(
+                laps,
+                f64::from(DELTA),
+                scenario.countdown(start_sequence),
+            )?),
             None => None,
         };
         let progress = crate::lap_progress::load_route(root, &route)?.progress;
@@ -745,6 +766,7 @@ impl Session {
             race,
             ai,
             countdown,
+            start_sequence,
             centreline,
             bounds,
             total_ticks: 0,
@@ -791,7 +813,7 @@ impl Session {
             // Gentle blips first, hard revving in the second half of the countdown.
             let rev_state = match self.countdown.as_ref().map(State::phase) {
                 Some(Phase::Countdown(left))
-                    if f64::from(*left) * f64::from(DELTA) > RACE_COUNTDOWN / 2. =>
+                    if f64::from(*left) * f64::from(DELTA) > self.start_sequence / 2. =>
                 {
                     2
                 }
@@ -1716,6 +1738,31 @@ mod tests {
         assert_eq!(stems(&s), ["bmw", "lac", "bmw", "lac"]);
         assert!(s.header().ends_with(" car=bmw opponent_cars=lac,bmw"));
         assert_eq!(Scenario::parse(&s.header()).unwrap(), s);
+    }
+
+    #[test]
+    fn istanbul_park_joins_without_moving_the_earlier_seeds() {
+        let available = Available {
+            events: true,
+            deformation: true,
+            characteristics: true,
+        };
+        let quick = |seed| Scenario::generate(seed, Profile::Quick, available, 12);
+        // F326 assignment of quick seeds 1..=12.
+        for seed in 1..=12 {
+            let route = if seed % 4 >= 2 { NURBURGRING } else { DONINGTON };
+            assert_eq!(quick(seed).route, route, "{seed}");
+        }
+        let istanbul: Vec<_> = (13..=16).map(quick).collect();
+        assert!(istanbul.iter().all(|s| s.route == ISTANBUL_PARK));
+        assert_eq!(istanbul.iter().map(|s| s.cars).collect::<Vec<_>>(), [2, 12, 9, 4]);
+        assert_eq!(QUICK_SEEDS, (1, 16));
+        // Long runs: about a third on Istanbul (its own stream, so the other
+        // fields of a seed keep their F326 draws).
+        let moved = (1001..1301)
+            .filter(|&seed| Scenario::generate(seed, Profile::Long, available, 12).route == ISTANBUL_PARK)
+            .count();
+        assert!((70..130).contains(&moved), "{moved}");
     }
 
     #[test]
