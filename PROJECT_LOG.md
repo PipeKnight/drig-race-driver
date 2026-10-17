@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G079 — Wall LOD/terrain checks narrow the distant-strip diagnosis (17 October 2026)
+
+G078 publication verified at remote main/graphics `cdfc79023ad9952484ec105c545a67acc2732655`; playable remains checked source917ca5f / SHA785488a1.... [Wall research](docs/DONINGTON_ATMOSPHERE.md): new bounded read-only LOD tool tested on two purchased prototypes, affine convention and missing-root guard. Wall closest/alternative140/160triangles have similar solid XY silhouettes (94.81/95.09%union); no large missing skirt. Corrected secondary ordinary-NODE stage annotation to other, bounds unchanged.
+
+At one identified wall base the source land/trees surface is0.345m above its bottom, and three below-strip rays meet front-facing land before the wall. Literal floating/missing-ground/backface-only explanations are not supported at those samples. Saved normal cull states areCW; no arbitrary two-sided override or wall hiding. Actual shadow reach250m excludes733–899m wall samples; controlled farther-shadow/lighting comparison is next, not a claimed repair. Private vegetation01 reports/previews/rays cited in notes. No renderer changes, new installs or source-install writes in this research stage.
+
+
 ## G078 — Preferred foliage and grass fix integrated; playable updated (17 October 2026)
 
 Primary main fast-forwarded `d967f35` -> `b783147` after exact status/hash guards. Checked source `917ca5f94d5e` / executable SHA256 `785488a18bd7039bfd0d2beee85281c16185be5f8e83cbc793a985766c413275` atomically promoted to inactive primary target and both verified backups. Four playtest/graphics manifests updated; no running prototype replaced/closed, owner AI report c4d52b9e... preserved unchanged. Private promotion-grass.json and pre-promotion manifest snapshot.
