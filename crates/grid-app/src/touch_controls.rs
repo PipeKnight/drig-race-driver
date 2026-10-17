@@ -149,6 +149,21 @@ impl Held {
     }
 }
 
+/// A finger that is down when the layer changes (OK resumes the race, II
+/// pauses it) is ignored until it lifts, so it does not press the zone of the
+/// other layer under it (OK and BACK lie over GAS). AUTHORED.
+pub fn carry_block(blocked: &[u64], active: &[u64], layer_changed: bool) -> Vec<u64> {
+    if layer_changed {
+        active.to_vec()
+    } else {
+        blocked
+            .iter()
+            .copied()
+            .filter(|id| active.contains(id))
+            .collect()
+    }
+}
+
 /// Latest sensor up vector, written by the Android sensor thread.
 #[derive(Resource, Clone, Default)]
 pub struct TiltReading(pub Arc<Mutex<Option<[f32; 3]>>>);
@@ -160,6 +175,8 @@ pub struct Mobile {
     pub manual: bool,
     pub held: Held,
     previous: Held,
+    /// Touches that were down when the layer last changed; ignored until lifted.
+    blocked: Vec<u64>,
     pub tilt: Option<Tilt>,
 }
 
@@ -170,6 +187,7 @@ impl Mobile {
             manual: false,
             held: Held::default(),
             previous: Held::default(),
+            blocked: Vec::new(),
             tilt: tilt.map(Tilt::new),
         }
     }
@@ -199,7 +217,12 @@ fn update(
     let menu = driving.as_ref().is_none_or(|d| d.paused)
         || post.as_ref().is_some_and(|p| p.active())
         || replay.as_ref().is_some_and(|r| r.owns_input());
-    mobile.layer = if menu { Layer::Menu } else { Layer::Drive };
+    let layer = if menu { Layer::Menu } else { Layer::Drive };
+    let ids: Vec<u64> = touches
+        .as_ref()
+        .map_or_else(Vec::new, |t| t.iter().map(|t| t.id()).collect());
+    mobile.blocked = carry_block(&mobile.blocked, &ids, layer != mobile.layer);
+    mobile.layer = layer;
     mobile.manual = driving.as_ref().is_some_and(|d| {
         d.runtime.assists.transmission == grid_tools::source_vehicle::assists::Transmission::Manual
     });
@@ -210,6 +233,7 @@ fn update(
     let points = match (touches.as_ref(), size) {
         (Some(touches), Some(size)) if size.x > 0. && size.y > 0. => touches
             .iter()
+            .filter(|t| !mobile.blocked.contains(&t.id()))
             .map(|t| (t.position().x / size.x, t.position().y / size.y))
             .collect(),
         _ => Vec::new(),
@@ -437,6 +461,15 @@ mod tests {
         let mut touches = vec![(0.5, 0.4); MAX_TOUCHES];
         touches.push((0.95, 0.9));
         assert!(!Held::map(touches, Layer::Drive, false, false).down(Button::Throttle));
+    }
+
+    #[test]
+    fn fingers_down_at_a_layer_change_wait_until_lifted() {
+        // OK held while the race resumes: blocked.
+        assert_eq!(carry_block(&[], &[7, 9], true), vec![7, 9]);
+        // Still down: stays blocked; lifted: released; new touches count.
+        assert_eq!(carry_block(&[7, 9], &[7, 11], false), vec![7]);
+        assert_eq!(carry_block(&[7], &[11], false), Vec::<u64>::new());
     }
 
     #[test]
