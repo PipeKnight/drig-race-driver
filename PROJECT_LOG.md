@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G103 — Body detail option staged privately for primary launcher (18 October 2026)
+
+Runtime reference DDS/candidate/TSV staged under primary local/graphics/materials-livery01; both immutable DDS files hardlink byte-identical data, TSV copied. SHA/source9324de60..., candidatefb02ff6e..., private primary-package-stage01.json. Provenance, candidate metadata, validation and native-pixel comparison also copied into the primary local folder for durable review. Regeneration must use new names/atomic replace, not in-place edits of linked assets. No game assets or neural output enter Git.
+
+Optional Play GRID Graphics Body.cmd routes to the already tested existing override path; generic console texture message now fits both building and body pilots. No Rust/binary change required, current verified source01cbcf8 remains. Static/short-drive/30frame/native4K/forcedRGBA scope is recorded; no body-texture full-lap/phone/monitor-FPS claim. Guarded main publication next. Ordinary graphics, wheel filtering and source-alpha maps unchanged. No owner action needed.
+
 ## G102 — One-atlas Lacetti detail pilot validated at native4K (18 October 2026)
 
 Installed Real-ESRGANx4plus reused/pinned hashes, no install; actual player main2048opaque->8192, compared with source and Lanczos4x. Reference DDS9324de60... matches runtime; candidatefb02ff6e.../357914068bytes/14mips. BGRA8sRGB upload after device selection uses shared helper; forcedRGBA0BCassets. Seven captures/large-logo native-pixel crops inspected: cleaner lettering, no new visible chart seams, tiny neural/carbon details not recovered truth. Approximate mean correction/residuals/clipping reported. Source/neural240tick exits exact;1200tick motion exits match prior control,30unique frames/ticks1102..1162/2.05ns. Native/fallback bumper max1byte/mean0.00198, whole-frame max150/mean0.08887 not parity. Private validation-body8k01.json, full images/logs and provenance.
