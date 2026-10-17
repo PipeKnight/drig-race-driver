@@ -84,6 +84,9 @@ pub struct Contact {
 }
 pub struct Settings {
     pub margin: f32,
+    /// Margin of the static second shape: the triangle's (its packed
+    /// shape's +0x220) or the box's.
+    pub shape_margin: f32,
     pub normal: V,
     pub fallback_point: V,
     pub fallback_depth: f32,
@@ -111,7 +114,7 @@ fn witness_length(square: f32) -> Result<f32, Error> {
     Ok(((1. - product * seed) * product) * 0.5 + product)
 }
 
-fn orient(
+pub(crate) fn orient(
     triangle_anchor: V,
     mesh_anchor: V,
     normal: V,
@@ -209,6 +212,7 @@ pub fn calculate_oriented_append(
     )?;
     let settings = Settings {
         margin: s.margin,
+        shape_margin: s.shape_margin,
         normal,
         fallback_point: witnesses[1],
         fallback_depth: s.fallback_depth,
@@ -233,6 +237,28 @@ fn features(
     triangle: [V; 3],
     s: &Settings,
 ) -> Result<([Feature; 2], [usize; 7]), Error> {
+    let (mesh_feature, cache) = mesh_feature(context, mesh, matrix, s)?;
+    let normal = normalize(cross(
+        sub(triangle[1], triangle[0]),
+        sub(triangle[2], triangle[0]),
+    ))?;
+    let triangle_feature = Feature::new(
+        normal,
+        triangle,
+        f32::from_bits(0x3f7d_70a4) < dot(s.normal, normal).abs(),
+        s.shape_margin,
+    );
+    Ok(([mesh_feature, triangle_feature], cache))
+}
+
+/// B45310: the mesh face incident to its support vertex along `-normal`.
+#[allow(clippy::neg_multiply)] // Match the original SIMD multiply and signed zero.
+pub(crate) fn mesh_feature(
+    context: &mut Context,
+    mesh: &Mesh,
+    matrix: Matrix,
+    s: &Settings,
+) -> Result<(Feature, [usize; 7]), Error> {
     let direction = s.normal.map(|x| -1. * x);
     let local = [
         dot(direction, matrix[0]),
@@ -262,17 +288,7 @@ fn features(
         f32::from_bits(0x3f7d_70a4) < score.abs(),
         s.margin,
     );
-    let normal = normalize(cross(
-        sub(triangle[1], triangle[0]),
-        sub(triangle[2], triangle[0]),
-    ))?;
-    let triangle_feature = Feature::new(
-        normal,
-        triangle,
-        f32::from_bits(0x3f7d_70a4) < dot(s.normal, normal).abs(),
-        0.,
-    );
-    Ok(([mesh_feature, triangle_feature], cache))
+    Ok((mesh_feature, cache))
 }
 
 /// Plane clipping preserves the original rotation of all-inside polygons.
@@ -315,13 +331,43 @@ fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool 
     false
 }
 
-#[allow(clippy::neg_multiply)] // Original margin/sign operations retain -0 lanes.
+/// A polygon feature: unit normal, convex vertices in order, the published
+/// orientation flag and the shape margin.
+pub(crate) struct Face<'a> {
+    pub normal: V,
+    pub vertices: &'a [V],
+    pub oriented: bool,
+    pub margin: f32,
+}
+
+impl Feature {
+    pub(crate) fn face(&self) -> Face<'_> {
+        Face {
+            normal: self.normal,
+            vertices: &self.vertices,
+            oriented: self.oriented,
+            margin: self.margin,
+        }
+    }
+}
+
 fn assemble(
     features: &[Feature; 2],
     s: &Settings,
     existing: &[Contact],
 ) -> Result<Vec<Contact>, Error> {
-    let [a, b] = features;
+    assemble_faces([features[0].face(), features[1].face()], s, existing)
+}
+
+/// Polygon/polygon clipping (AE2FA0's D3AD70 entry for two face features):
+/// `a` belongs to the moving body, `b` to the static shape.
+#[allow(clippy::neg_multiply)] // Original margin/sign operations retain -0 lanes.
+pub(crate) fn assemble_faces(
+    features: [Face<'_>; 2],
+    s: &Settings,
+    existing: &[Contact],
+) -> Result<Vec<Contact>, Error> {
+    let [a, b] = &features;
     let mut contacts = existing.to_vec();
     let limit = contacts.len() + s.capacity;
     if s.capacity == 0 {
@@ -336,21 +382,26 @@ fn assemble(
             normal = normal.map(|x| -1. * x);
         }
         let negative = normal.map(|x| -1. * x);
-        let av = a
+        let av: Vec<V> = a
             .vertices
-            .map(|p| std::array::from_fn(|j| p[j] + a.margin * negative[j]));
-        let bv = b
+            .iter()
+            .map(|p| std::array::from_fn(|j| p[j] + a.margin * negative[j]))
+            .collect();
+        let bv: Vec<V> = b
             .vertices
-            .map(|p| std::array::from_fn(|j| p[j] + b.margin * normal[j]));
+            .iter()
+            .map(|p| std::array::from_fn(|j| p[j] + b.margin * normal[j]))
+            .collect();
         let (reference, incident, plane, feature_normal) = if reference_a {
             (av, bv, normal, normal)
         } else {
             (bv, av, negative, b.normal)
         };
         let mut polygon = clip(&incident, reference[0], plane)?;
-        for i in 0..3 {
-            let next = reference[(i + 1) % 3];
-            let third = reference[(i + 2) % 3];
+        let n = reference.len();
+        for i in 0..n {
+            let next = reference[(i + 1) % n];
+            let third = reference[(i + 2) % n];
             let mut edge = cross(sub(reference[i], next), feature_normal);
             if dot(sub(next, third), edge) > 0. {
                 edge = edge.map(|x| -1. * x);
@@ -429,6 +480,8 @@ pub fn calculate_append(
         })
         || !s.margin.is_finite()
         || !(0. ..=1e6).contains(&s.margin)
+        || !s.shape_margin.is_finite()
+        || !(0. ..=1e6).contains(&s.shape_margin)
         || !s.fallback_depth.is_finite()
         || s.fallback_depth.abs() > 10000.
         || s.normal.iter().any(|x| !x.is_finite() || x.abs() > 10000.)
@@ -550,6 +603,7 @@ mod tests {
             .collect();
         let mut s = Settings {
             margin: 0.,
+            shape_margin: 0.,
             normal: [0., 1., 0., 0.],
             fallback_point: [20., 0., 0., 1.],
             fallback_depth: 0.5,
@@ -599,6 +653,7 @@ mod tests {
         let cache = context.cached_support();
         let mut s = Settings {
             margin: 0.,
+            shape_margin: 0.,
             normal: [0., 1., 0., 0.],
             fallback_point: prior[0].point,
             fallback_depth: 1.,

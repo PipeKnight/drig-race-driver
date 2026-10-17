@@ -2328,6 +2328,7 @@ mod tests {
                                         margin: 0.,
                                         directions,
                                     },
+                                    shape_margin: 0.,
                                     contact_capacity: remaining.min(16),
                                     cache_enabled: true,
                                     candidate_capacity: 4096,

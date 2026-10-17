@@ -19,7 +19,11 @@ fn cross(a: V, b: V) -> V {
     ]
 }
 pub struct Settings {
+    /// The moving mesh's margin and the sampled directions.
     pub query: convex_distance::ContactSettings,
+    /// The packed shape's +0x220 margin, which AEA1F0 gives every candidate
+    /// triangle (B212D0); road chunks have 0.02.
+    pub shape_margin: f32,
     pub contact_capacity: usize,
     pub cache_enabled: bool,
     pub candidate_capacity: usize,
@@ -209,6 +213,7 @@ fn generate(
     if settings.contact_capacity > 16
         || settings.candidate_capacity > 32768
         || settings.correction_bounds != [f32::MAX; 4]
+        || !(0. ..=1.).contains(&settings.shape_margin)
         || !known.map_or_else(
             || materials_valid(track, materials),
             |k| k.checked.materials,
@@ -217,9 +222,10 @@ fn generate(
     {
         return Err(Error("unsupported packed contact controls"));
     }
+    // B212D0 widens the body's bounds by the packed shape's margin.
     let bounds = match known {
         Some(k) => k.bounds,
-        None => mesh.world_bounds(matrix, settings.query.margin)?,
+        None => mesh.world_bounds(matrix, settings.query.margin + settings.shape_margin)?,
     };
     if settings.contact_capacity == 0 || !settings.cache_enabled {
         return Ok(None);
@@ -245,7 +251,14 @@ fn generate(
             let p = track.vertices[index as usize];
             [p[0], p[1], p[2], 1.]
         });
-        let query = context.contact(mesh, matrix, triangle, result.direction, &settings.query)?;
+        let query = context.contact_triangle(
+            mesh,
+            matrix,
+            triangle,
+            settings.shape_margin,
+            result.direction,
+            &settings.query,
+        )?;
         result.direction = query.direction;
         if let Some(witnesses) = query.witnesses {
             let difference = sub(witnesses[0], witnesses[1]);
@@ -277,6 +290,7 @@ fn generate(
                 triangle,
                 &contact_manifold::Settings {
                     margin: settings.query.margin,
+                    shape_margin: settings.shape_margin,
                     normal,
                     fallback_point: witnesses[1],
                     fallback_depth: depth,
@@ -352,6 +366,7 @@ mod tests {
                 margin: 0.01,
                 directions: std::array::from_fn(|i| axes[i % 6]),
             },
+            shape_margin: 0.,
             contact_capacity: 16,
             cache_enabled: true,
             candidate_capacity: 16,
@@ -442,6 +457,7 @@ mod tests {
                 margin: 0.01,
                 directions: std::array::from_fn(|i| axes[i % 6]),
             },
+            shape_margin: 0.,
             contact_capacity: 16,
             cache_enabled: true,
             candidate_capacity: 16,

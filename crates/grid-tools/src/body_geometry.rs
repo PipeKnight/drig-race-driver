@@ -263,6 +263,7 @@ impl BodyGeometry {
                     margin: self.query.margin,
                     directions: self.query.directions,
                 },
+                shape_margin: 0.,
                 contact_capacity: capacity.min(16),
                 cache_enabled: true,
                 candidate_capacity: 4096,
@@ -335,6 +336,11 @@ impl BodyGeometry {
     }
 
     /// Contact query settings (margin and sampling directions).
+    /// The current collision hull in its shape frame (see [`Self::pose`]).
+    pub fn mesh(&self) -> &collision_mesh::Mesh {
+        self.shape.mesh()
+    }
+
     pub fn query(&self) -> &convex_distance::ContactSettings {
         &self.query
     }

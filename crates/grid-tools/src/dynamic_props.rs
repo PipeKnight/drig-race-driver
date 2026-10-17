@@ -1395,6 +1395,56 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]
+    fn every_brake_marker_board_touches_the_ground_when_it_spawns() {
+        // Soak seeds 12, 1012 and 1029 (F345, F350): the lower board of the
+        // 150 m marker at (-406.7, -16.0) stands 2.14 cm above the grass,
+        // just outside its own 2 cm shell. With road triangles of margin 0
+        // it had no ground contact in its first step, a car still inside it
+        // pushed it 0.38 m down and it sank through. The original gives road
+        // triangles their chunk's 0.02 margin (ROAD_MARGIN), so the board
+        // meets the ground from the first step.
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let mut runtime = crate::source_vehicle::Runtime::lacetti(root, "slot_00", 200679).unwrap();
+        let geometry = runtime.prepare_body_geometry(root, &table).unwrap();
+        let track = runtime.track();
+        let catalog = Catalog::read(root, &Route::default(), track.props().unwrap()).unwrap();
+        let mut boards = 0;
+        for (i, b) in catalog.breakables.iter().enumerate() {
+            if !b.template.starts_with("gg_brake_marker") {
+                continue;
+            }
+            let lower = b
+                .pieces
+                .iter()
+                .min_by(|p, q| p.pose[3][1].total_cmp(&q.pose[3][1]))
+                .unwrap();
+            let query = convex_distance::ContactSettings {
+                margin: lower.shell,
+                directions: geometry.query().directions,
+            };
+            let ground = track
+                .body_contacts(
+                    &lower.hull,
+                    lower.pose,
+                    &query,
+                    TRACK_CONTACTS,
+                    64,
+                    |code| runtime.surfaces().sheet(code),
+                )
+                .unwrap()
+                .into_iter()
+                .filter(|h| h.prop.is_none() && h.contact.normal[1] > 0.9)
+                .count();
+            assert!(ground > 0, "breakable {i} at {:?}", lower.pose[3]);
+            boards += 1;
+        }
+        assert_eq!(boards, 34);
+    }
+
+    #[test]
     fn a_piece_lost_below_the_world_is_held_until_reset() {
         let mut world = PropWorld::new(Catalog::default());
         world.pieces = (0..2)

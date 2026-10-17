@@ -475,7 +475,7 @@ impl Context {
         let output = run_query(
             mesh,
             matrix,
-            triangle,
+            &triangle,
             DistanceOptions {
                 margin,
                 witnesses: true,
@@ -495,6 +495,15 @@ impl Context {
 struct DistanceOptions {
     margin: f32,
     witnesses: bool,
+}
+
+/// B7ED10's samples after the search direction and its reverse.
+#[derive(Clone, Copy)]
+pub(crate) enum Extra {
+    /// Kind-13 triangle A against the mesh: the mesh axes and the triangle normal.
+    Triangle,
+    /// Shape B's world axes (AE8AD0 with a box B).
+    Axes([V; 3]),
 }
 
 /// Sampling data supplied privately from the owner's identified installation.
@@ -525,22 +534,23 @@ fn normalize_sample(v: V) -> Result<V, Error> {
     Ok(v.map(|x| inverse * x))
 }
 
-fn triangle_support(triangle: [V; 3], direction: V) -> V {
-    let scores = triangle.map(|p| dot(direction, p));
-    if scores[1] <= scores[0] && scores[2] <= scores[0] {
-        triangle[0]
-    } else if scores[0] <= scores[1] && scores[2] <= scores[1] {
-        triangle[1]
-    } else {
-        triangle[2]
+/// First point of greatest projection: for a triangle, the original's
+/// vertex selection (lower index on ties); for a box, its corners.
+fn points_support(points: &[V], direction: V) -> V {
+    let mut best = 0;
+    for i in 1..points.len() {
+        if dot(direction, points[best]) < dot(direction, points[i]) {
+            best = i;
+        }
     }
+    points[best]
 }
 
 #[allow(clippy::neg_multiply)] // Original triangle batch multiplies by -1.
 fn batch_depth(
     mesh: &Mesh,
     matrix: Matrix,
-    triangle: [V; 3],
+    triangle: &[V],
     directions: &[V],
     cache: &mut [usize; 7],
 ) -> Result<(usize, f32), Error> {
@@ -548,7 +558,7 @@ fn batch_depth(
     let mut selected = None;
     for (i, &direction) in directions.iter().enumerate() {
         let opposite = direction.map(|v| -1. * v);
-        let triangle_min = -0. - dot(opposite, triangle_support(triangle, opposite));
+        let triangle_min = -0. - dot(opposite, points_support(triangle, opposite));
         let point = mesh_support_local(mesh, matrix, direction, cache)?;
         let local = [
             dot(direction, matrix[0]),
@@ -572,7 +582,6 @@ impl Context {
     /// Selected scope: untransformed source triangle, supplied mesh matrix,
     /// zero triangle margin and finite nondegenerate triangle winding.
     /// A failed/invalid operation leaves the context intact.
-    #[allow(clippy::assign_op_pattern)] // Preserve the original operand order.
     pub fn contact(
         &mut self,
         mesh: &Mesh,
@@ -581,7 +590,24 @@ impl Context {
         direction: V,
         settings: &ContactSettings,
     ) -> Result<ContactOutput, Error> {
+        self.contact_triangle(mesh, matrix, triangle, 0., direction, settings)
+    }
+
+    /// [`Self::contact`] with a triangle margin: AEA1F0 gives every
+    /// candidate triangle its packed shape's +0x220 margin (B212D0).
+    #[allow(clippy::assign_op_pattern)] // Preserve the original operand order.
+    pub fn contact_triangle(
+        &mut self,
+        mesh: &Mesh,
+        matrix: Matrix,
+        triangle: [V; 3],
+        margin: f32,
+        direction: V,
+        settings: &ContactSettings,
+    ) -> Result<ContactOutput, Error> {
         if self.cache.iter().any(|&v| v >= mesh.point_count())
+            || !margin.is_finite()
+            || !(0. ..=1e6).contains(&margin)
             || matrix
                 .iter()
                 .flatten()
@@ -600,6 +626,32 @@ impl Context {
         {
             return Err(Error("invalid triangle mesh contact input"));
         }
+        self.contact_points(
+            mesh,
+            matrix,
+            &triangle,
+            margin,
+            Extra::Triangle,
+            direction,
+            settings,
+        )
+    }
+
+    /// B7F740/B7F520 for a convex point set `points` (shape A, margin
+    /// `margin`) against the mesh (shape B, `settings.margin`). `extra` gives
+    /// B7ED10's extra penetration samples after the search direction.
+    #[allow(clippy::assign_op_pattern, clippy::too_many_arguments)]
+    pub(crate) fn contact_points(
+        &mut self,
+        mesh: &Mesh,
+        matrix: Matrix,
+        points: &[V],
+        margin: f32,
+        extra: Extra,
+        direction: V,
+        settings: &ContactSettings,
+    ) -> Result<ContactOutput, Error> {
+        let triangle = points;
         let mut staged = self.clone();
         let mut direction = direction;
         if dot(direction, direction) < EPS {
@@ -608,14 +660,14 @@ impl Context {
         let normal = normalize_sample(direction)?;
         let (_, depth) = batch_depth(mesh, matrix, triangle, &[normal], &mut staged.cache)?;
         let mut witnesses = None;
-        if -0.01 <= (0. + settings.margin) + depth {
+        if -0.01 <= (margin + settings.margin) + depth {
             let previous = direction;
             let result = run_query(
                 mesh,
                 matrix,
                 triangle,
                 DistanceOptions {
-                    margin: settings.margin,
+                    margin: margin + settings.margin,
                     witnesses: false,
                 },
                 direction,
@@ -626,7 +678,7 @@ impl Context {
             if result.flags[0] {
                 let [mut a, mut b] = staged.simplex.witnesses();
                 let inverse = 1. / dot(direction, direction).sqrt();
-                let am = inverse * 0.;
+                let am = inverse * margin;
                 let bm = inverse * settings.margin;
                 for j in 0..4 {
                     a[j] -= am * direction[j];
@@ -635,7 +687,15 @@ impl Context {
                 witnesses = Some([a, b]);
             } else if result.flags[1] {
                 direction = previous;
-                witnesses = staged.penetration(mesh, matrix, triangle, &mut direction, settings)?;
+                witnesses = staged.penetration(
+                    mesh,
+                    matrix,
+                    triangle,
+                    margin,
+                    extra,
+                    &mut direction,
+                    settings,
+                )?;
             }
         }
         let output = ContactOutput {
@@ -657,32 +717,47 @@ impl Context {
         Ok(output)
     }
 
-    #[allow(clippy::assign_op_pattern, clippy::neg_multiply)] // Preserve original operations.
+    // Preserve original operations.
+    #[allow(
+        clippy::assign_op_pattern,
+        clippy::neg_multiply,
+        clippy::too_many_arguments
+    )]
     fn penetration(
         &mut self,
         mesh: &Mesh,
         matrix: Matrix,
-        triangle: [V; 3],
+        triangle: &[V],
+        margin: f32,
+        extra: Extra,
         direction: &mut V,
         settings: &ContactSettings,
     ) -> Result<Option<[V; 2]>, Error> {
         self.extra_directions[0] = normalize_sample(*direction)?;
         self.extra_directions[1] = self.extra_directions[0].map(|v| -v);
-        for (i, row) in matrix.into_iter().take(3).enumerate() {
+        // B7ED10: shape B's axes; a kind-13 triangle A adds its normal.
+        let (axes, count) = match extra {
+            Extra::Triangle => ([matrix[0], matrix[1], matrix[2]], 10),
+            Extra::Axes(axes) => (axes, 8),
+        };
+        for (i, row) in axes.into_iter().enumerate() {
             self.extra_directions[2 + i * 2] = row;
             self.extra_directions[3 + i * 2] = row.map(|v| -v);
         }
-        self.extra_directions[8] = normalize_sample(cross(
-            sub(triangle[0], triangle[1]),
-            sub(triangle[0], triangle[2]),
-        ))?;
-        self.extra_directions[9] = self.extra_directions[8].map(|v| -v);
+        if let Extra::Triangle = extra {
+            self.extra_directions[8] = normalize_sample(cross(
+                sub(triangle[0], triangle[1]),
+                sub(triangle[0], triangle[2]),
+            ))?;
+            self.extra_directions[9] = self.extra_directions[8].map(|v| -v);
+        }
         let mut samples = [[0.; 4]; 54];
         samples[..44].copy_from_slice(&settings.directions);
-        samples[44..].copy_from_slice(&self.extra_directions);
-        let (index, depth) = batch_depth(mesh, matrix, triangle, &samples, &mut self.cache)?;
+        samples[44..44 + count].copy_from_slice(&self.extra_directions[..count]);
+        let samples = &samples[..44 + count];
+        let (index, depth) = batch_depth(mesh, matrix, triangle, samples, &mut self.cache)?;
         let mut axis = samples[index];
-        let depth = (0. + settings.margin) + depth;
+        let depth = (margin + settings.margin) + depth;
         if depth <= 0. {
             *direction = axis;
             return Ok(None);
@@ -708,11 +783,11 @@ impl Context {
         }
         axis = normalize_sample(*direction)?;
         let opposite = axis.map(|v| -1. * v);
-        let a = triangle_support(triangle, opposite);
+        let a = points_support(triangle, opposite);
         let b = mesh_support(mesh, matrix, axis, &mut self.cache)?;
         let difference = sub(b, a);
         let depth = dot(axis, difference);
-        let distance = ((0. + settings.margin) + depth) * 1.05 + 0.02;
+        let distance = ((margin + settings.margin) + depth) * 1.05 + 0.02;
         shifted[3] = std::array::from_fn(|j| matrix[3][j] - distance * axis[j]);
         let second = run_query(
             mesh,
@@ -739,7 +814,7 @@ impl Context {
         });
         let displacement = axis.map(|v| distance * v);
         for j in 0..4 {
-            a[j] -= 0. * normal[j];
+            a[j] -= margin * normal[j];
             b[j] = (settings.margin * normal[j] + b[j]) + displacement[j];
         }
         let along = dot(displacement, normal);
@@ -754,7 +829,7 @@ impl Context {
 fn run_query(
     mesh: &Mesh,
     matrix: Matrix,
-    triangle: [V; 3],
+    triangle: &[V],
     options: DistanceOptions,
     mut direction: V,
     simplex: &mut Simplex,
@@ -782,14 +857,7 @@ fn run_query(
     let mut finished = false;
     for _ in 0..256 {
         let opposite = direction.map(|v| -1. * v);
-        let scores = triangle.map(|v| dot(v, opposite));
-        let a = if scores[1] <= scores[0] && scores[2] <= scores[0] {
-            triangle[0]
-        } else if scores[0] <= scores[1] && scores[2] <= scores[1] {
-            triangle[1]
-        } else {
-            triangle[2]
-        };
+        let a = points_support(triangle, opposite);
         let b = mesh_support(mesh, matrix, direction, cache)?;
         let difference = sub(a, b);
         let projection = dot(direction, difference);

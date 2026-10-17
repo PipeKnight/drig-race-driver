@@ -33,6 +33,12 @@ impl Chunk {
     }
 }
 
+/// The road chunks' shape margin (+0x220): 0.02 in all eight chunk shapes
+/// read from the running original (local/behavior/runtime-collision-*.json,
+/// 6 October 2026). AEA1F0 gives it to every road triangle (B212D0), on top
+/// of the body's own margin (BOX_CONTACTS.md, F350).
+pub const ROAD_MARGIN: f32 = 0.02;
+
 pub struct Track {
     pub grid: Grid,
     chunks: Vec<Chunk>,
@@ -41,7 +47,6 @@ pub struct Track {
     props: Option<crate::entity_geometry::Props>,
     /// Body-query checks of the attached boundary and of every prop box.
     boundary_checked: Option<packed_contacts::Checked>,
-    props_checked: Vec<packed_contacts::Checked>,
     props_index: Option<crate::entity_geometry::BoxIndex>,
 }
 
@@ -109,7 +114,6 @@ impl Track {
             boundary: None,
             props: None,
             boundary_checked: None,
-            props_checked: Vec::new(),
             props_index: None,
         })
     }
@@ -152,7 +156,6 @@ impl Track {
         self.boundary = Some(boundary);
     }
     pub(crate) fn attach_props(&mut self, props: crate::entity_geometry::Props) {
-        self.props_checked = props.checked();
         self.props_index = Some(crate::entity_geometry::BoxIndex::new(&props.boxes));
         self.props = Some(props);
     }
@@ -224,11 +227,7 @@ impl Track {
                         room(0),
                         self.props_index
                             .as_ref()
-                            .map(|index| crate::entity_geometry::KnownBoxes {
-                                checked: &self.props_checked,
-                                directions,
-                                index,
-                            }),
+                            .map(|index| crate::entity_geometry::KnownBoxes { index }),
                     )?
                     .into_iter()
                     .map(|(index, contact)| BodyContact {
@@ -239,11 +238,12 @@ impl Track {
                     }),
             );
         }
-        let settings = |remaining: usize| packed_contacts::Settings {
+        let settings = |remaining: usize, shape_margin: f32| packed_contacts::Settings {
             query: grid_world::convex_distance::ContactSettings {
                 margin: query.margin,
                 directions: query.directions,
             },
+            shape_margin,
             contact_capacity: remaining.min(16),
             cache_enabled: true,
             candidate_capacity: 4096,
@@ -261,7 +261,8 @@ impl Track {
             })
         {
             let known = known(self.boundary_checked.unwrap_or_else(|| boundary.checked()));
-            let mut settings = settings(room(contacts.len()));
+            // The boundary sheet's shape margin is not established; none.
+            let mut settings = settings(room(contacts.len()), 0.);
             if !known.misses(&settings, true) {
                 for (j, &key) in boundary.material_keys.iter().enumerate() {
                     settings.sheet_mask |= u8::from(sheet(key)?) << j;
@@ -275,11 +276,14 @@ impl Track {
                 }));
             }
         }
+        let road_bounds = mesh.world_bounds(matrix, query.margin + ROAD_MARGIN)?;
         for (i, c) in self.chunks.iter().enumerate() {
             if contacts.len() == pool {
                 break;
             }
-            if (0..3).any(|j| bounds[0][j] > c.bounds[j + 3] || bounds[1][j] < c.bounds[j]) {
+            if (0..3)
+                .any(|j| road_bounds[0][j] > c.bounds[j + 3] || road_bounds[1][j] < c.bounds[j])
+            {
                 continue;
             }
             if c.material_keys.len() > 8 {
@@ -287,8 +291,12 @@ impl Track {
                     "packed body material count exceeds bound",
                 ));
             }
-            let known = known(c.checked);
-            let mut settings = settings(room(contacts.len()));
+            let known = packed_contacts::Known {
+                checked: c.checked,
+                directions,
+                bounds: road_bounds,
+            };
+            let mut settings = settings(room(contacts.len()), ROAD_MARGIN);
             if known.misses(&settings, false) {
                 continue;
             }

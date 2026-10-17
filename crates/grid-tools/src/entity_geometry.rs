@@ -1,12 +1,13 @@
 //! Static collision boxes of the purchased route entities (objects.ens with
 //! objecttypes.pssg): tyre walls, cushions, armco, tyre stacks and marker boards.
-//! Each box is twelve triangles in a one-leaf decoded tree, queried through the
-//! shared cold body contact path. All placements start infinite-mass in the data;
-//! breakable boxes carry a contact limit and are disabled when broken
-//! (`dynamic_props`, DYNAMIC_PROPS_RESEARCH.md).
+//! Each box is a box primitive (shape kind 0) queried as a whole against a
+//! body hull, as the original's AE8AD0 does (`grid_world::box_contacts`).
+//! All placements start infinite-mass in the data; breakable boxes carry a
+//! contact limit and are disabled when broken (`dynamic_props`,
+//! DYNAMIC_PROPS_RESEARCH.md).
 use crate::route::Route;
 use grid_formats::{entities, pssg};
-use grid_world::{Error, packed_query::Mesh};
+use grid_world::{Error, box_contacts::BoxShape};
 use std::{collections::BTreeMap, path::Path};
 
 pub struct PropBox {
@@ -20,26 +21,12 @@ pub struct PropBox {
     pub limit: f32,
     /// Broken boxes no longer collide.
     pub enabled: bool,
-    triangles: Vec<[u16; 3]>,
-    nodes: Vec<u16>,
-    leaves: BTreeMap<usize, Vec<u16>>,
+    /// The primitive: axes, centre, half extents and the shape `shell` margin.
+    shape: BoxShape,
 }
 
 pub struct Props {
     pub boxes: Vec<PropBox>,
-    materials: Vec<u8>,
-}
-
-impl PropBox {
-    fn mesh(&self) -> Mesh<'_> {
-        Mesh {
-            bounds: self.bounds,
-            vertices: &self.positions,
-            triangles: &self.triangles,
-            nodes: &self.nodes,
-            leaves: &self.leaves,
-        }
-    }
 }
 
 /// Row-vector placement: translation in elements 12..14.
@@ -47,35 +34,47 @@ fn transform(m: &[f32; 16], p: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|j| p[0] * m[j] + p[1] * m[4 + j] + p[2] * m[8 + j] + m[12 + j])
 }
 
-// Outward faces of the unit cube corners indexed by bits (x, y, z).
-const FACES: [[u16; 3]; 12] = [
-    [0, 2, 3],
-    [0, 3, 1],
-    [4, 5, 7],
-    [4, 7, 6],
-    [0, 1, 5],
-    [0, 5, 4],
-    [2, 6, 7],
-    [2, 7, 3],
-    [0, 4, 6],
-    [0, 6, 2],
-    [1, 3, 7],
-    [1, 7, 5],
-];
-
 impl PropBox {
-    /// Eight world corners indexed by bits (x, y, z) of the local box.
-    fn new(template: String, positions: Vec<[f32; 3]>) -> Result<Self, Box<dyn std::error::Error>> {
-        if positions.len() != 8 || positions.iter().flatten().any(|x| !x.is_finite()) {
+    /// Eight world corners indexed by bits (x, y, z) of the local box, and
+    /// the shape margin; `bounds` include the margin.
+    fn new(
+        template: String,
+        positions: Vec<[f32; 3]>,
+        margin: f32,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        if positions.len() != 8
+            || positions.iter().flatten().any(|x| !x.is_finite())
+            || !(0. ..=1.).contains(&margin)
+        {
             return Err("invalid route collision box".into());
         }
         let mut bounds = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
         for p in &positions {
             for j in 0..3 {
-                bounds[j] = bounds[j].min(p[j]);
-                bounds[j + 3] = bounds[j + 3].max(p[j]);
+                bounds[j] = bounds[j].min(p[j] - margin);
+                bounds[j + 3] = bounds[j + 3].max(p[j] + margin);
             }
         }
+        let o = positions[0];
+        let mut matrix = [[0.; 4]; 4];
+        let mut half = [0.; 3];
+        for k in 0..3 {
+            let p = positions[1 << k];
+            let edge = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            let length = (edge[0] * edge[0] + edge[1] * edge[1] + edge[2] * edge[2]).sqrt();
+            if !(length > 0. && length < 200.) {
+                return Err("invalid route collision box".into());
+            }
+            matrix[k] = [edge[0] / length, edge[1] / length, edge[2] / length, 0.];
+            half[k] = length * 0.5;
+        }
+        let far = positions[7];
+        matrix[3] = [
+            (o[0] + far[0]) * 0.5,
+            (o[1] + far[1]) * 0.5,
+            (o[2] + far[2]) * 0.5,
+            1.,
+        ];
         Ok(Self {
             template,
             bounds,
@@ -83,9 +82,11 @@ impl PropBox {
             entity: None,
             limit: f32::MAX,
             enabled: true,
-            triangles: FACES.to_vec(),
-            nodes: vec![0x8000],
-            leaves: BTreeMap::from([(0, (0..12).collect())]),
+            shape: BoxShape {
+                matrix,
+                half,
+                margin,
+            },
         })
     }
 }
@@ -145,7 +146,7 @@ fn ornament_barriers(
                     scene::transform_point(m, local)
                 })
                 .collect();
-            boxes.push(PropBox::new(name.clone(), positions)?);
+            boxes.push(PropBox::new(name.clone(), positions, 0.)?);
         }
     }
     Ok(boxes)
@@ -195,8 +196,11 @@ impl Props {
                             transform(&e.transform, transform(&s.transform, local))
                         })
                         .collect();
-                    let mut b =
-                        PropBox::new(String::from_utf8_lossy(e.template).into_owned(), positions)?;
+                    let mut b = PropBox::new(
+                        String::from_utf8_lossy(e.template).into_owned(),
+                        positions,
+                        s.shell,
+                    )?;
                     b.entity = Some(index);
                     boxes.push(b);
                 }
@@ -206,10 +210,7 @@ impl Props {
         if boxes.is_empty() || boxes.len() > 8192 {
             return Err("unsupported entity collision box count".into());
         }
-        Ok(Self {
-            boxes,
-            materials: vec![0; 12],
-        })
+        Ok(Self { boxes })
     }
 
     /// Diagnostic: deepest penetration of any point inside any box, as
@@ -241,7 +242,7 @@ impl Props {
         best
     }
 
-    /// Cold contacts against every enabled box whose bounds overlap the car's
+    /// Contacts against every enabled box whose bounds overlap the body's
     /// margin-inflated world bounds, in data order, up to `capacity` (<=16 per
     /// box), each with its box index.
     pub fn contacts(
@@ -255,17 +256,9 @@ impl Props {
         self.contacts_known(mesh, matrix, query, bounds, capacity, None)
     }
 
-    /// Body-query checks of every box, in box order.
-    pub fn checked(&self) -> Vec<grid_world::packed_contacts::Checked> {
-        self.boxes
-            .iter()
-            .map(|b| grid_world::packed_contacts::check(&b.mesh(), &self.materials))
-            .collect()
-    }
-
-    /// [`Self::contacts`] reusing values the caller holds for these unchanged
-    /// boxes ([`KnownBoxes`]); `bounds` must then be
-    /// `mesh.world_bounds(matrix, query.margin)`. Identical results.
+    /// [`Self::contacts`] with a [`BoxIndex`] the caller holds for these
+    /// boxes; `bounds` must be `mesh.world_bounds(matrix, query.margin)`.
+    /// Identical results.
     pub fn contacts_known(
         &self,
         mesh: &grid_world::collision_mesh::Mesh,
@@ -275,10 +268,11 @@ impl Props {
         capacity: usize,
         known: Option<KnownBoxes<'_>>,
     ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
-        if known.as_ref().is_some_and(|k| {
-            k.checked.len() != self.boxes.len() || k.index.boxes != self.boxes.len()
-        }) {
-            return Err(Error("prop box checks differ from the boxes"));
+        if known
+            .as_ref()
+            .is_some_and(|k| k.index.boxes != self.boxes.len())
+        {
+            return Err(Error("prop box index differs from the boxes"));
         }
         // Boxes outside the index candidates cannot overlap the bounds and
         // would be skipped; candidates keep data order.
@@ -297,50 +291,22 @@ impl Props {
             {
                 continue;
             }
-            let settings = grid_world::packed_contacts::Settings {
-                query: grid_world::convex_distance::ContactSettings {
-                    margin: query.margin,
-                    directions: query.directions,
-                },
-                contact_capacity: (capacity - contacts.len()).min(16),
-                cache_enabled: true,
-                candidate_capacity: 64,
-                // Witness normals: solid boxes, not one-sided sheets.
-                sheet_mask: 0,
-                correction_bounds: [f32::MAX; 4],
-            };
-            let (track, materials) = (&b.mesh(), &self.materials);
-            let generated = match &known {
-                Some(k) => grid_world::packed_contacts::calculate_decoded_known(
-                    mesh,
-                    matrix,
-                    track,
-                    materials,
-                    &settings,
-                    &grid_world::packed_contacts::Known {
-                        checked: k.checked[index],
-                        directions: k.directions,
-                        bounds,
-                    },
-                )?,
-                None => {
-                    grid_world::packed_contacts::calculate_decoded(
-                        mesh, matrix, track, materials, &settings,
-                    )?
-                    .contacts
-                }
-            };
+            let generated = grid_world::box_contacts::contacts(
+                mesh,
+                matrix,
+                &b.shape,
+                query,
+                (capacity - contacts.len()).min(16),
+            )?;
             contacts.extend(generated.into_iter().map(|c| (index, c)));
         }
         Ok(contacts)
     }
 }
 
-/// Values a caller holds for repeated body queries of unchanged boxes:
-/// [`Props::checked`], `directions_valid(query)` and a [`BoxIndex`] of them.
+/// Values a caller holds for repeated body queries of unchanged boxes: a
+/// [`BoxIndex`] of them.
 pub struct KnownBoxes<'a> {
-    pub checked: &'a [grid_world::packed_contacts::Checked],
-    pub directions: bool,
     pub index: &'a BoxIndex,
 }
 
@@ -449,9 +415,11 @@ mod tests {
                     entity: None,
                     limit: f32::MAX,
                     enabled: true,
-                    triangles: Vec::new(),
-                    nodes: Vec::new(),
-                    leaves: BTreeMap::new(),
+                    shape: BoxShape {
+                        matrix: [[0.; 4]; 4],
+                        half: [1.; 3],
+                        margin: 0.,
+                    },
                 }
             })
             .collect();
@@ -503,5 +471,67 @@ mod tests {
             !templates.contains_key("tyre_wall"),
             "no duplicated entity walls"
         );
+    }
+
+    /// Soak seed 1087 (F342 build, both routes): the player hit a tyre wall
+    /// at 39-45 m/s 25 m off the line. Queried triangle by triangle, the
+    /// wall's box gave contacts with downward normals (up to 0.9 m deep),
+    /// which pushed the car through the road; it then fell out of the world.
+    /// As one box primitive (AE8AD0) every contact pushes up or sideways.
+    /// The poses are the recorded hull matrices of the failing replays.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]
+    fn a_car_deep_in_a_tyre_wall_is_never_pushed_down() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let cases: [(&str, usize, [[f32; 4]; 4]); 2] = [
+            (
+                // Nuerburgring tyrewall_black_yok, replay tick 2239 (0.9 m deep).
+                "tracks/europe/nurburgring/route_0",
+                1508,
+                [
+                    [-0.093455344, -0.023044754, 0.99535704, 0.0],
+                    [-0.00970464, 0.9997056, 0.022234295, 0.0],
+                    [-0.9955721, -0.007581843, -0.09364965, 0.0],
+                    [-283.1356, 607.23224, 28.229782, 1.0],
+                ],
+            ),
+            (
+                // Donington tyre_wall, an earlier hit of the same run.
+                "tracks/europe/donington/route_0",
+                2,
+                [
+                    [-0.71347827, 0.1078137, 0.69231504, 0.0],
+                    [-0.061344933, 0.97467995, -0.21500538, 0.0],
+                    [-0.69796693, -0.19587311, -0.68880314, 0.0],
+                    [343.10107, -25.791117, -124.746376, 1.0],
+                ],
+            ),
+        ];
+        for (route, wall, pose) in cases {
+            let route = Route::new(route).unwrap();
+            let mut runtime =
+                crate::source_vehicle::Runtime::lacetti_on(root, &route, "slot_00", 200679)
+                    .unwrap();
+            let geometry = runtime.prepare_body_geometry(root, &table).unwrap();
+            let props = runtime.track().props().unwrap();
+            assert!(props.boxes[wall].template.starts_with("tyre"));
+            let bounds = geometry
+                .mesh()
+                .world_bounds(pose, geometry.query().margin)
+                .unwrap();
+            let hits: Vec<_> = props
+                .contacts(geometry.mesh(), pose, geometry.query(), bounds, 64)
+                .unwrap()
+                .into_iter()
+                .filter(|(b, _)| *b == wall)
+                .collect();
+            eprintln!("{route:?} wall {wall}: {hits:?}");
+            assert!(!hits.is_empty());
+            for (_, c) in &hits {
+                assert!(c.normal[1] > -0.1, "{c:?}");
+            }
+        }
     }
 }
