@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G098 — Graphics published to main and both desktop builds refreshed (18 October 2026)
+
+Guarded primary fast-forwardd3ea04f->48a1961 completed, owner untracked report SHA256c4d52b9e... preserved, and main plus graphics pushed to the owner's origin. First promotion attempt stopped BEFORE writes because the other agent advanced main to66d67a7 with a journal-only APK entry; that update was fast-forwarded into graphics, Rust/Cargo source equality to compiled575633f checked, then both inactive desktop executables and both verified backups atomically replaced with SHA256c3ad51f4... . Four graphics/playtest manifests preserve exact source575633fb7639/integrated66d67a7 and distinct602pre-F370 versus7post-F370 settings checks. Private promotion-sun-f370-01.json retains old manifests. Existing primary P11/F370 features retained; original Steam installation untouched.
+
+Graphics launcher now has restored forest and saved sun direction; warm colour/HDR probe remain options. Next focused correction: moving HDR probe must follow the displayed replay snapshot instead of paused live-runtime pose, keeping submitted cube/box synchronization and all physics/replay state read-only. No new camera feature, no owner action needed.
+
 ## G097 — F370 combined source passes a full warm/HDR4K lap (18 October 2026)
 
 Source575633fb7639/SHA256c3ad51f4.../release2m41s: seven focused settings/profile tests pass after F370 merge; workspace Clippy11.18s clean. Full602test P11 graphics baseline precedes the small settings-only change. Combined source-colour +1024moving HDR probe completes6500ticks/native3840x2160, valid lap89.955257484; all four physical/handling/deformation/lap exits exactly match direction-only0ffe4af control except walltime. Final image inspected. Exactly2HDRaudits, finite/nonnegative/nonempty6faces, maxima7.87109375/17.53125,3064cube copies, no errors beyond known nilUUID warning. Private sun-f370-full-validation01.json / sun-warm-probe-full4k01 and probe-warm-full audits.
