@@ -133,10 +133,10 @@ pub struct Scenario {
 /// Car counts the quick profile cycles through: the owner's 12-car race
 /// first, then solo and mid-size fields.
 const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
-/// Quick seeds 1..=12 keep their F326 routes; 13..=16 run Istanbul Park.
-/// Seeds 17..=20 run Long Beach (`--seeds 17..20`); they stay out of the
-/// default set until its tyre-stack falls are fixed (docs/LONG_BEACH.md).
-pub const QUICK_SEEDS: (u64, u64) = (1, 16);
+/// Quick seeds 1..=12 keep their F326 routes; 13..=16 run Istanbul Park and
+/// 17..=20 Long Beach (in the default set since its barrier stand-ins were
+/// fixed, docs/LONG_BEACH.md section 5).
+pub const QUICK_SEEDS: (u64, u64) = (1, 20);
 
 impl Scenario {
     /// Pure function of (seed, profile, availability, max cars).
@@ -1768,7 +1768,7 @@ mod tests {
         let istanbul: Vec<_> = (13..=16).map(quick).collect();
         assert!(istanbul.iter().all(|s| s.route == ISTANBUL_PARK));
         assert_eq!(istanbul.iter().map(|s| s.cars).collect::<Vec<_>>(), [2, 12, 9, 4]);
-        assert_eq!(QUICK_SEEDS, (1, 16));
+        assert_eq!(QUICK_SEEDS, (1, 20));
         let long_beach: Vec<_> = (17..=20).map(quick).collect();
         assert!(long_beach.iter().all(|s| s.route == LONG_BEACH));
         assert_eq!(

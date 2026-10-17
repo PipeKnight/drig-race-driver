@@ -3,9 +3,10 @@
 Status: 2026-10-17, Claude Code (night run). Long Beach, `tracks/usa/long_beach/route_0`,
 is the fourth circuit after Donington, Nürburgring ([TRACK_GENERALIZATION.md](TRACK_GENERALIZATION.md))
 and Istanbul Park ([ISTANBUL_PARK.md](ISTANBUL_PARK.md)). It is the first street circuit. It
-drives solo and races with the 11-car AI field in the app. Its quick soak is run but not in the
-default pre-push set, because tyre stacks fall through the road (section 5). The same session
-also lets lap timing accept routes whose finish is at a later gate (section 6).
+drives solo and races with the 11-car AI field in the app. The same session
+also lets lap timing accept routes whose finish is at a later gate (section 6). Its tyre-stack
+falls were fixed later the same day (F357, section 5.1), and its quick seeds 17..20 are now in
+the default pre-push set.
 
 Evidence (ignored): this worktree's `local/fourth-track/`, copied to the main checkout's
 `local/fourth-track/`.
@@ -70,8 +71,8 @@ stacks has `track.jpk` geometry within 2 m sideways.
 
 - Generator: quick seeds 17..20 (12, 1, 12, 6 cars) run Long Beach; a quarter of the long
   seeds move to Long Beach from their own stream (`seed ^ 0x10b3...`), after the Istanbul draw,
-  so the other fields of a seed are unchanged. **The default quick set stays 1..16**: run the
-  Long Beach quick set with `grid-soak quick --seeds 17..20`.
+  so the other fields of a seed are unchanged. F354 kept the default quick set at 1..16; since
+  F357 (section 5.1) it is 1..20.
 - Forced quick set (`grid-soak quick --route tracks/usa/long_beach/route_0 --seeds 1..12`,
   `soak-quick-forced/`): **5/12 pass, 7 fail**, every failure `out-of-bounds: prop piece falling
   through the world`, mostly at the stacks around (-512, -86), also (-390, 110) and (-369, 42).
@@ -85,6 +86,104 @@ stacks has `track.jpk` geometry within 2 m sideways.
   stacks sit at the edge of the racing surface, so cars run over them far more often than on
   Nürburgring. Not fixed here: it needs solver work in the soak-residuals area. Seeds 17..20
   join the default set once it is fixed.
+  **Superseded by 5.1:** the car was not what pushed the tyres down. The F354 trace showed body
+  positions only; the contact trace of 5.1 shows that the downward contacts came from a static
+  barrier box.
+
+### 5.1 Cause and fix (F357)
+
+17 October 2026, Claude Code. Evidence (ignored): the F357 worktree's `local/lb-tyres/`, copied
+to the main checkout's `local/lb-tyres/` (replays, soak runs, regress outputs, the temporary trace
+build's source `dynamic_props.survey.rs`). Grades as elsewhere: [V] verified by running, [D] read
+from the binary or data, [I] inferred.
+
+**Contacts at the failure [V].** The seed-10 replay with a temporary per-contact trace (since
+removed): at tick 3844 the two bottom tyres of the stack at (-506.4, -83.7) had just spawned.
+Neither had any car contact. Each had three contacts with route prop box 587, normal
+(-0.015, -0.9999, -0.009), 0.33 and 0.50 m deep. One step later the upper tyre was turned about
+90° and both were below the road. Box 587 is not an entity box: it is the authored F284 stand-in
+of a `concrete_fence_white_vara` ornament (ROUTE_PROPS_COLLISION.md, F284). So the solver pushed
+the pieces out of a barrier box they spawned inside, and the shortest way out was down.
+
+**Why the stand-in reached the stacks [V].** Long Beach lines its streets with `concrete_fence_*`
+ornaments (8 prototypes in `objects.pssg`, 7 of them placed 787 times). Each mesh is a 1.0 m concrete wall, 0.42 m thick
+(local z -0.22..0.20), plus a catch fence on top. The fence's posts and panels start on the wall
+at 0.98-1.14 m, run up at z 0.05 and lean out at the top (3.4-4.1 m) to z 0.83, out over the
+track. The F284 stand-in is the oriented box of the whole mesh, so at road level it stood 0.63 m
+in front of the visible concrete face. The boundary sheet runs along the wall's back face
+(the sampled placements have it within 0.15 m of local z -0.22), as it does behind Donington's concrete blocks.
+The tyre stacks stand against the concrete face. A survey of every breakable piece's spawn pose
+against the prop boxes (temporary test, since removed):
+
+| Circuit | Pieces | Pairs inside a barrier stand-in | Deepest | Downward normals |
+|---|---|---|---|---|
+| Donington | 312 | 22 | 0.078 m | 0 |
+| Nürburgring | 11578 | 6 | 0.013 m | 0 |
+| Istanbul Park | 7584 | 1 | 0.274 m | 0 |
+| Long Beach, before | 1632 | 1330 | 0.757 m | 977 |
+| Long Beach, after | 1632 | 16 | 0.121 m | 0 |
+
+**What the original does [D/I].** Static ornaments carry no collision data in the original:
+`ornaments.bin` holds placements and `ornament_attributes.xml` only LOD and instancing
+(COLLISION_GAPS_RESEARCH.md, B). The fence prototypes do have a `default/rigidbody/<name>_physics`
+render node in `objects.pssg`, which points at the same index source as the closest LOD. But
+neither "rigidbody" nor a `_physics` suffix appears among the strings of the analysis image, so
+there is no sign that the game reads it [I]. The original's barrier along these walls is the
+boundary sheet. The stand-in boxes are an authored F284 addition that keeps cars out of the
+visible concrete. A stand-in that pushes pieces out from under a catch fence matches neither
+the original nor what the player sees. In the original these stacks stand and fall in front of
+the wall.
+
+**Fix (authored, in the F284 stand-in).** `entity_geometry::barrier_extent` builds each barrier
+prototype's box from its connected mesh parts (welded at 1 mm). It leaves out the parts that are
+mounted on top of the base (they start within 5 cm of the top of the parts on the ground) and
+reach more than 1 cm past the base across the barrier (along the shorter horizontal axis). For
+the eight Long Beach fences this removes the leaning posts and panels: the box is the concrete
+wall (z -0.22..0.198) up to 3.13 m, the straight part of the fence. No barrier prototype of
+Donington, Nürburgring or Istanbul Park loses a part, so their boxes are bit-identical. The first
+version also tested the barrier's length axis. It cut a 9 mm sliver off the top of Donington's
+`concrete_wall_*_long` (whose ground parts cover only the middle 8 m) and changed Donington's
+quick seeds 4, 5, 9 and 12 (12 then failed), so it was dropped.
+
+**Results [V]** (release, cargo/rustc 1.99.0; outputs under `local/lb-tyres/`):
+
+- Replays of the seven F354 failures (seeds 1, 3, 6, 7, 9, 10, 11): all pass through their
+  recorded ticks.
+- `grid-soak quick --route tracks/usa/long_beach/route_0 --seeds 1..12`: 12/12 (F354: 5/12).
+  `--seeds 17..20`: 4/4 (F354: 2/4).
+- Default quick 1..16: every result line equal to a baseline build of 33292e7 (16/16).
+- Targeted `--cars 1 --chaos prop --ticks 8000 --seeds 1..19` on Long Beach: baseline 19/19
+  fail (18 of them a piece at (-247, 224) near tick 1630, seed 1 the car falling), fix 18/19
+  (seed 13 at tick 6829, not traced).
+- More Long Beach seeds, forced route `--seeds 21..80`: 59/60. Seed 59 is a different mechanism
+  (section 5.2).
+- Solo identity: `grid-opponent-race ROOT CD01 BP01 1 11200 ai` (no DF01) sha256
+  aad9a07a…e41b, unchanged. Long Beach solo (1 car, 11200 ticks, with its car-0 trace):
+  byte-identical to the baseline.
+- 12-car races, 12000 ticks with DF01 and the characteristics, against the baseline:
+  Donington, Nürburgring, Istanbul Park and a Donington `--cars lac,bmw` field byte-identical.
+  Long Beach changes. With a temporary per-tick pose print (since removed), the first divergence
+  is car 3 at tick 962 at (-64.5, 1.89, 153.1). The only prop box within 3 m is
+  `concrete_fence_white_varb` box 718: the car centre is 2.26 m from its new concrete face
+  and 1.63 m from the old box's face, within a car's half-diagonal. So the car touched the old
+  box [I: the contact itself was not printed]. The result: car 8's lap-1 wreck is gone; car 6
+  retires with a lost wheel at tick 4451; winner 2:44.416 (before 2:43.312).
+- Tests: `entity_geometry::tests::a_catch_fence_leaning_out_is_not_part_of_the_stand_in`
+  (synthetic), `only_long_beach_fences_lose_their_leaning_catch_fence` (asset, all four
+  circuits) and `dynamic_props::tests::no_piece_spawns_pressed_down_by_a_barrier_stand_in`
+  (asset, all four circuits). All three fail with the old stand-in.
+
+### 5.2 Residual: a tumbling piece landing through the road (seed 59)
+
+[V] `local/lb-tyres/soak/forced-21-80/seed-59.inputs.tsv` (12 cars, 15 breaks, 192 bodies)
+fails at tick 4053: body 32, a tyre from a stack hit at about tick 3800, flies to 6.9 m and
+lands near the centreline at (-295, 201). At tick 3921 it meets the road at 10 m/s while
+tumbling at 26 rad/s: three road contacts, normal up, 0.10 m deep. At tick 3922 the same road
+triangle (shape 38) gives three contacts with the normal pointing down, 0.20-0.23 m deep, and
+the body moves 0.18 m down with its centre below the road plane. From tick 3923 on it has no
+road contacts and falls. No barrier box is involved. This is the road-triangle orientation
+weakness of a fast-turning thin piece (the F342 AEE640 family; SOAK_TESTING.md), not the
+stand-in problem. Recorded, not fixed.
 
 ## 6. Finish gates other than 0 (multi-route progress item)
 
@@ -113,7 +212,9 @@ These routes are not in grid-soak or the launchers yet; they can be selected wit
 
 ## 7. Open
 
-- Tyre-stack falls under cars (section 5); then add seeds 17..20 to the default quick set.
+- ~~Tyre-stack falls under cars~~: fixed in F357 (section 5.1); seeds 17..20 are in the default quick set.
+- Seed 59 of the forced Long Beach set: a tumbling tyre lands through the road (section 5.2).
+- The barrier stand-ins remain authored; the catch fence above 3.13 m and its leaning top are not solid.
 - Spa: the three blockers of section 1.
 - Le Mans: the lap-1 crash; Jarama route 0: late braking.
 - Istanbul turn-8 and Long Beach ~2.7 km recoveries: a comparison with the running original

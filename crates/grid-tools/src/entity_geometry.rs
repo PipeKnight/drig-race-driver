@@ -98,32 +98,140 @@ impl PropBox {
 /// is not recovered; this solid oriented box of each prototype's mesh extent is
 /// an authored stand-in. Poles, lights and other ornaments stay non-solid.
 const BARRIER_FAMILIES: [&str; 4] = ["concrete_", "chnfen", "gg_ad_brd_", "don_ad_brd_"];
+/// AUTHORED tolerances of [`barrier_extent`]: a part within this height of the
+/// prototype's lowest point stands on the ground; a part starting within it
+/// of the base's top is mounted on the base.
+const BASE_TOLERANCE: f32 = 0.05;
+/// AUTHORED: a mounted part reaching this far past the base footprint leans out.
+const OVERHANG_TOLERANCE: f32 = 0.01;
+
+/// Lowest and highest corner of an axis-aligned extent.
+type Extent = ([f32; 3], [f32; 3]);
+
+/// Mesh points (prototype space, Y up) and triangles of one prototype.
+#[derive(Default)]
+struct PrototypeMesh {
+    points: Vec<[f32; 3]>,
+    triangles: Vec<[usize; 3]>,
+}
+
+/// The stand-in extent of a barrier prototype: its mesh extent without the
+/// parts mounted on top of the base that lean out past the base's footprint.
+/// Long Beach's `concrete_fence_*` carry a catch fence whose posts and panels
+/// start on the 1.0 m concrete wall and lean 0.63 m out over the track at
+/// 3.4-4.1 m; with them the box stood 0.63 m in front of the visible concrete
+/// at road level, where the tyre stacks stand, so their pieces spawned up to
+/// 0.76 m inside it (docs/LONG_BEACH.md section 5). Prototypes without such
+/// parts (every barrier of the other circuits) keep their whole extent.
+fn barrier_extent(mesh: &PrototypeMesh) -> Extent {
+    // Connected parts by welded position (1 mm), across draws.
+    let mut welded = BTreeMap::new();
+    let ids: Vec<usize> = (mesh.points.iter())
+        .map(|p| {
+            let n = welded.len();
+            *welded
+                .entry(p.map(|x| (x * 1000.).round() as i64))
+                .or_insert(n)
+        })
+        .collect();
+    let mut parent: Vec<usize> = (0..welded.len()).collect();
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    for t in &mesh.triangles {
+        let a = find(&mut parent, ids[t[0]]);
+        for &k in &t[1..] {
+            let b = find(&mut parent, ids[k]);
+            parent[b] = a;
+        }
+    }
+    let mut parts: BTreeMap<usize, Extent> = BTreeMap::new();
+    for (i, p) in mesh.points.iter().enumerate() {
+        let e = parts
+            .entry(find(&mut parent, ids[i]))
+            .or_insert(([f32::MAX; 3], [f32::MIN; 3]));
+        *e = (
+            std::array::from_fn(|j| e.0[j].min(p[j])),
+            std::array::from_fn(|j| e.1[j].max(p[j])),
+        );
+    }
+    let union = |keep: &dyn Fn(&Extent) -> bool| {
+        parts
+            .values()
+            .filter(|e| keep(e))
+            .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), e| {
+                (
+                    std::array::from_fn(|j| lo[j].min(e.0[j])),
+                    std::array::from_fn(|j| hi[j].max(e.1[j])),
+                )
+            })
+    };
+    let whole = union(&|_| true);
+    // Across the barrier: the shorter horizontal axis of the whole mesh.
+    let across = if whole.1[0] - whole.0[0] <= whole.1[2] - whole.0[2] {
+        0
+    } else {
+        2
+    };
+    let base = union(&|e| e.0[1] <= whole.0[1] + BASE_TOLERANCE);
+    let mounted_overhang = |e: &Extent| {
+        e.0[1] >= base.1[1] - BASE_TOLERANCE
+            && (e.0[across] < base.0[across] - OVERHANG_TOLERANCE
+                || e.1[across] > base.1[across] + OVERHANG_TOLERANCE)
+    };
+    union(&|e| !mounted_overhang(e))
+}
+
+/// Closest-LOD meshes of the barrier family prototypes, by root node name.
+fn barrier_meshes(
+    root: &Path,
+    route: &Route,
+) -> Result<BTreeMap<Vec<u8>, PrototypeMesh>, Box<dyn std::error::Error>> {
+    use grid_formats::{mesh, scene};
+    let objects = std::fs::read(root.join(route.track_file("objects.pssg")))?;
+    let tree = pssg::read_tree(&objects)?;
+    let sources = mesh::read_static_meshes(&tree)?;
+    let mut meshes: BTreeMap<Vec<u8>, PrototypeMesh> = BTreeMap::new();
+    for d in scene::read_object_draws(&tree, &sources)? {
+        let Some(prototype) = d.prototype else {
+            continue;
+        };
+        if !BARRIER_FAMILIES
+            .iter()
+            .any(|f| prototype.starts_with(f.as_bytes()))
+        {
+            continue;
+        }
+        let source = &sources[d.source];
+        let m = meshes.entry(prototype.to_vec()).or_default();
+        let mut local = BTreeMap::new();
+        let mut index = |i: u16| {
+            *local.entry(i).or_insert_with(|| {
+                m.points.push(scene::transform_point(
+                    &d.transform,
+                    source.positions[i as usize],
+                ));
+                m.points.len() - 1
+            })
+        };
+        let triangles: Vec<[usize; 3]> = (d.indices.as_chunks::<3>().0.iter())
+            .map(|t| [index(t[0]), index(t[1]), index(t[2])])
+            .collect();
+        m.triangles.extend(triangles);
+    }
+    Ok(meshes)
+}
 
 fn ornament_barriers(
     root: &Path,
     route: &Route,
 ) -> Result<Vec<PropBox>, Box<dyn std::error::Error>> {
-    use grid_formats::{mesh, ornaments, scene};
-    let objects = std::fs::read(root.join(route.track_file("objects.pssg")))?;
-    let tree = pssg::read_tree(&objects)?;
-    let sources = mesh::read_static_meshes(&tree)?;
-    let mut extents: BTreeMap<Vec<u8>, ([f32; 3], [f32; 3])> = BTreeMap::new();
-    for d in scene::read_object_draws(&tree, &sources)? {
-        let Some(prototype) = d.prototype else {
-            continue;
-        };
-        let source = &sources[d.source];
-        let e = extents
-            .entry(prototype.to_vec())
-            .or_insert(([f32::MAX; 3], [f32::MIN; 3]));
-        for &i in &d.indices {
-            let p = scene::transform_point(&d.transform, source.positions[i as usize]);
-            for ((low, high), x) in e.0.iter_mut().zip(e.1.iter_mut()).zip(p) {
-                *low = low.min(x);
-                *high = high.max(x);
-            }
-        }
-    }
+    use grid_formats::{ornaments, scene};
+    let meshes = barrier_meshes(root, route)?;
     let placement_bytes = std::fs::read(root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     let mut boxes = Vec::new();
@@ -132,7 +240,10 @@ fn ornament_barriers(
         if !BARRIER_FAMILIES.iter().any(|f| name.starts_with(f)) {
             continue;
         }
-        let Some((lo, hi)) = extents.get(format!("{name} Root").as_bytes()) else {
+        let Some((lo, hi)) = meshes
+            .get(format!("{name} Root").as_bytes())
+            .map(barrier_extent)
+        else {
             continue;
         };
         if (0..3).any(|j| hi[j] <= lo[j] || hi[j] - lo[j] > 100. || !(hi[j] - lo[j]).is_finite()) {
@@ -478,6 +589,77 @@ mod tests {
     /// wall's box gave contacts with downward normals (up to 0.9 m deep),
     /// which pushed the car through the road; it then fell out of the world.
     /// As one box primitive (AE8AD0) every contact pushes up or sideways.
+    /// A wall with a catch fence: a 0.42 m base on the ground, a post on it
+    /// leaning 0.63 m out across the wall, and a fence plane above the base.
+    fn fenced_wall(lean: f32) -> PrototypeMesh {
+        let mut mesh = PrototypeMesh::default();
+        let mut add = |lo: [f32; 3], hi: [f32; 3]| {
+            let base = mesh.points.len();
+            mesh.points.extend(
+                (0..8)
+                    .map(|i| std::array::from_fn(|j| if i >> j & 1 == 0 { lo[j] } else { hi[j] })),
+            );
+            // Two triangles per box connect all eight corners.
+            mesh.triangles
+                .extend([[0, 1, 3], [3, 2, 7], [7, 6, 4], [4, 5, 1]].map(|t| t.map(|k| base + k)));
+        };
+        add([0., 0., -0.22], [4., 1., 0.2]);
+        add([0.1, 0.98, -0.03], [0.2, 4.09, lean]);
+        add([0.2, 1.1, 0.04], [3.9, 3.1, 0.06]);
+        mesh
+    }
+
+    #[test]
+    fn a_catch_fence_leaning_out_is_not_part_of_the_stand_in() {
+        // Long Beach concrete_fence_*: the post leans out across the wall.
+        let (lo, hi) = barrier_extent(&fenced_wall(0.83));
+        assert_eq!((lo, hi), ([0., 0., -0.22], [4., 3.1, 0.2]));
+        // A post that stays over the base is kept, and so is the whole mesh.
+        let (lo, hi) = barrier_extent(&fenced_wall(0.2));
+        assert_eq!((lo, hi), ([0., 0., -0.22], [4., 4.09, 0.2]));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn only_long_beach_fences_lose_their_leaning_catch_fence() {
+        // Long Beach soak seeds 1..12 and 17..20 lost tyre-stack pieces through
+        // the road: with the leaning catch fence the stand-in reached 0.63 m in
+        // front of the concrete, and the pieces spawned inside it.
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        for path in [
+            crate::route::DONINGTON,
+            crate::route::NURBURGRING,
+            crate::route::ISTANBUL_PARK,
+            crate::route::LONG_BEACH,
+        ] {
+            let route = Route::new(path).unwrap();
+            let meshes = barrier_meshes(root, &route).unwrap();
+            assert!(!meshes.is_empty());
+            for (name, mesh) in meshes {
+                let name = String::from_utf8_lossy(&name).into_owned();
+                let whole =
+                    mesh.points
+                        .iter()
+                        .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), p| {
+                            (
+                                std::array::from_fn(|j| lo[j].min(p[j])),
+                                std::array::from_fn(|j| hi[j].max(p[j])),
+                            )
+                        });
+                let (lo, hi) = barrier_extent(&mesh);
+                if path == crate::route::LONG_BEACH && name.starts_with("concrete_fence_") {
+                    // The concrete wall's front face, not the fence top (0.83).
+                    assert!(whole.1[2] > 0.8, "{name}");
+                    assert!((0.19..0.2).contains(&hi[2]), "{name} {hi:?}");
+                    assert_eq!((lo[0], lo[1], hi[0]), (whole.0[0], whole.0[1], whole.1[0]));
+                } else {
+                    assert_eq!((lo, hi), whole, "{path} {name}");
+                }
+            }
+        }
+    }
+
     /// The poses are the recorded hull matrices of the failing replays.
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]

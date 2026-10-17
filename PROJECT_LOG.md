@@ -1,5 +1,35 @@
 # GRID engine project log
 
+F357 Long Beach tyre stacks no longer fall through the road: barrier stand-ins leave out a catch fence that leans over the track (2026-10-17, Claude Code). The F354 finding. Details: docs/LONG_BEACH.md sections 5.1-5.2, docs/SOAK_TESTING.md "Long Beach tyre stacks (F357)", docs/ROUTE_PROPS_COLLISION.md F284 note. Evidence: main checkout's local/lb-tyres/ (replays, soak runs, regress outputs, extents/components surveys, the temporary trace source dynamic_props.survey.rs).
+- Cause [V]:
+  - The seed-10 replay with a temporary per-contact trace: the two bottom tyres had no car contacts at all. Each had three contacts with prop box 587, normal (−0.015, −0.9999, −0.009), 0.33/0.50 m deep, in their first step.
+  - Box 587 is the authored F284 stand-in of a `concrete_fence_white_vara` ornament, not an entity.
+  - Each Long Beach `concrete_fence_*` mesh is a 1.0 m concrete wall (local z −0.22..0.20) with a catch fence whose posts and panels lean out to z 0.83 at 3.4-4.1 m. The whole-mesh box therefore stood 0.63 m in front of the concrete at road level, where the stacks stand.
+  - A spawn-pose survey of every breakable piece: Long Beach 1330 piece/stand-in pairs, up to 0.757 m deep, 977 downward contacts. Other circuits: at most 22 pairs, ≤0.274 m, none downward.
+  - F354's reading (thin pieces crushed under a car) was wrong; it was based on body positions only.
+- Original [D/I]: static ornaments have no collision data (COLLISION_GAPS_RESEARCH.md B). The prototypes' `default/rigidbody/*_physics` nodes reuse the closest LOD's index source, but neither "rigidbody" nor "_physics" is among the analysis image's strings, so there is no sign that the game reads them. The wall here is the boundary sheet at the concrete's back face. The stand-ins stay an authored F284 measure.
+- Fix:
+  - entity_geometry::barrier_extent: connected mesh parts (1 mm weld). A part is dropped when it is mounted on the base (it starts within 5 cm of the top of the ground parts) and reaches more than 1 cm past the base across the barrier (the shorter horizontal axis). Both tolerances are authored.
+  - Only the eight Long Beach fence prototypes change (box z −0.22..0.198, up to 3.13 m). Every other barrier box on the four circuits is bit-identical.
+  - grid-soak: QUICK_SEEDS 1..20, so Long Beach seeds 17..20 join the default set.
+- Failed along the way: a first version also tested the length axis. It cut 9 mm off Donington's `concrete_wall_*_long`, whose ground parts cover only the middle 8 m. Donington quick seeds 4, 5, 9 and 12 then changed, and 12 failed. Dropped. A workspace `cargo fmt` reformatted 18 unrelated files (the tree is not fmt-clean); reverted.
+- Results [V], release, cargo/rustc 1.99.0, against a baseline build of 33292e7:
+  - The seven F354 failure replays pass.
+  - Forced Long Beach seeds: 1..12 12/12 (was 5/12); 17..20 4/4 (was 2/4); 21..80 59/60. Seed 59 is a tumbling tyre that lands through the road: one road step with a downward normal, F342 family, not stand-ins (LONG_BEACH.md 5.2). Recorded, not fixed.
+  - Default quick 1..16: every result line equal to the baseline.
+  - Targeted Long Beach `--cars 1 --chaos prop --ticks 8000 --seeds 1..19`: baseline 19/19 fail (18 a piece at (−247, 224) near tick 1630, seed 1 the car); fix 18/19 (seed 13, tick 6829, not traced).
+  - Final quick 1..20: 20/20 (local/lb-tyres/soak/quick-final). grid-soak sha256 d7992372…f602.
+  - Solo identity: `grid-opponent-race ROOT CD01 BP01 1 11200 ai` (no DF01) sha256 aad9a07a…e41b.
+  - 12-car races, 12000 ticks with DF01 and characteristics: Donington, Nürburgring, Istanbul Park and a Donington lac,bmw field are byte-identical. Long Beach solo is byte-identical.
+  - Long Beach 12-car changes. First divergence: car 3 at tick 962, at (−64.5, 153.1), 1.63 m from the old box 718 face and 2.26 m from the new one; it is the only prop box within 3 m [I: contact not printed]. Car 8's lap-1 wreck is gone; car 6 now retires with a lost wheel at tick 4451.
+  - Tests: `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 513 passed, 0 failed. Clippy --workspace --all-targets --release -D warnings: clean.
+  - New tests, all failing with the old stand-in:
+    - entity_geometry: a_catch_fence_leaning_out_is_not_part_of_the_stand_in;
+    - entity_geometry: only_long_beach_fences_lose_their_leaning_catch_fence (asset);
+    - dynamic_props: no_piece_spawns_pressed_down_by_a_barrier_stand_in (asset).
+- Observed, not investigated: Nürburgring tyre-stack pieces have 102 downward spawn contacts (≤0.50 m) with a neighbouring intact stack's entity box. This is a candidate for the remaining long seed 1085 [I].
+- Not done: the playable is not rebuilt. The stand-ins remain authored (the catch fence above 3.13 m and its leaning top are not solid).
+
 F356 playable ab6acdd28e93 after the night run (2026-10-17, Claude Code): rebuilt with tools/update_prototype.ps1 from main at ab6acdd (101 s). Night run on the owner's request: 8 tasks in two waves of 4. The app refuses start_session on automated turns, so the second wave was given to the same four sessions, unarchived and messaged with their follow-up tasks. New since playable e8d559009897 (F347): F348 in-race pause menu, F349 original camera views, F350 Istanbul Park (third circuit; per-track start lights, Nürburgring countdown now 5.0 s), F351 soak residuals (box contacts, 0.02 road margin; long-soak failures 9->2 Donington, 7->1 Nürburgring), F352 grid-probes crate (158 probes moved), F353 race HUD and post-race results screens (Retire shows results), F354 Long Beach (fourth circuit; its own soak seeds still lose tyre-stack pieces through the road, recorded, not fixed), F355 the lost wheel as a rigid body of the world. Manifest local/playtest/build-20261017T0652484090378Z, built 2026-10-17T06:54:27Z, exe sha256 7539302378bc52dfbf8039910dcbb9a6bd2735a51206827c84e3fa98c86b7ed9, cargo/rustc 1.99.0; source driving and Bevy checks passed. Dirty only through the untracked docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md. Not checked: any of the night's features in a running window.
 
 F355 a lost wheel is a rigid body of the world (2026-10-17, Claude Code, night run). The F346 follow-up. Details: docs/WHEEL_DETACHMENT.md section 5 "Body (F355)", "Port" and section 7 "The wheel body (F355)".

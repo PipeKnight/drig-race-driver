@@ -135,4 +135,6 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
 - Barrier ornament stand-in families: generic `concrete_`, `chnfen`,
   `gg_ad_brd_` match on other tracks; armco/tyre stacks stay non-solid as on
   Donington; per-track barrier keys of the CAR_ material mix not re-checked.
+  Since F357 a stand-in leaves out mounted parts that lean out across the
+  barrier (Long Beach catch fences; LONG_BEACH.md section 5.1).
 - Diagnostic binaries listed above remain Donington-only.

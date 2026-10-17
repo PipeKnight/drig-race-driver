@@ -1598,6 +1598,70 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]
+    fn no_piece_spawns_pressed_down_by_a_barrier_stand_in() {
+        // Long Beach soak seeds 1..12 and 17..20 (F354): the tyre stacks stand
+        // in front of concrete_fence_* walls whose stand-in box reached 0.63 m
+        // past the concrete (the catch fence leans out over the track). Their
+        // pieces spawned up to 0.76 m inside it, the box pushed them down
+        // through the road and they fell out of the world.
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        for path in [
+            crate::route::DONINGTON,
+            crate::route::NURBURGRING,
+            crate::route::ISTANBUL_PARK,
+            crate::route::LONG_BEACH,
+        ] {
+            let route = Route::new(path).unwrap();
+            let mut runtime =
+                crate::source_vehicle::Runtime::lacetti_on(root, &route, "slot_00", 200679)
+                    .unwrap();
+            let geometry = runtime.prepare_body_geometry(root, &table).unwrap();
+            let track = runtime.track();
+            let props = track.props().unwrap();
+            let catalog = Catalog::read(root, &route, props).unwrap();
+            let (mut pieces, mut touching, mut deepest) = (0, 0, 0f32);
+            for b in &catalog.breakables {
+                for p in &b.pieces {
+                    pieces += 1;
+                    let query = convex_distance::ContactSettings {
+                        margin: p.shell,
+                        directions: geometry.query().directions,
+                    };
+                    let hits = track
+                        .body_contacts(&p.hull, p.pose, &query, TRACK_CONTACTS, 4096, |code| {
+                            runtime.surfaces().sheet(code)
+                        })
+                        .unwrap();
+                    for h in hits {
+                        // Ornament stand-ins are the prop boxes without an entity.
+                        if h.prop.is_none_or(|k| props.boxes[k].entity.is_some()) {
+                            continue;
+                        }
+                        touching += 1;
+                        deepest = deepest.max(h.contact.penetration);
+                        assert!(
+                            h.contact.normal[1] > -0.5,
+                            "{path} {} at {:?}: {:?} {}",
+                            b.template,
+                            p.pose[3],
+                            h.contact.normal,
+                            h.contact.penetration
+                        );
+                    }
+                }
+            }
+            println!("{path}: {pieces} pieces, {touching} stand-in contacts, deepest {deepest}");
+            if path == crate::route::LONG_BEACH {
+                // 1330 piece/stand-in pairs up to 0.76 m deep before the fix.
+                assert!(pieces > 1000 && deepest < 0.15, "{deepest}");
+            }
+        }
+    }
+
+    #[test]
     fn a_piece_lost_below_the_world_is_held_until_reset() {
         let mut world = PropWorld::new(Catalog::default());
         world.pieces = (0..2)
