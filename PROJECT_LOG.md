@@ -6,7 +6,7 @@ F345 per-car AI extents as the original takes them; mixed BMW + Lacetti fields s
   - 0x402D20 then grows the box to cover the tyres. The wheel words +0x14E0..+0x154C are written by 0xA0EC80. Front and rear tests are exclusive, and so are the left and right width tests.
   - It stores +0x110 half width, +0x114 length (front − rear) and the bumper points centre + forward · front/rear.
   - Observed records copy these fields (0x777A80). Overtake 0x77BF4C, brake_for_vehicle 0x78F928, avoid clearance 0x799B30 and the avoid room check 0x797720 (own × 2.0 + other + 0.5) use own + other half widths.
-  - Listings: worktree local/car-extents/static/. A first displacement scan with pe.py `disp` mis-decoded overlapping instructions and missed the fstp/movss stores; a scan that tries every start offset (static/scan.py) found them.
+  - Listings: main checkout local/car-extents/static/ (all evidence, soak directories under soak/). A first displacement scan with pe.py `disp` mis-decoded overlapping instructions and missed the fstp/movss stores; a scan that tries every start offset (static/scan.py) found them.
 - Values (asset test, port runtime words):
   - old constants for every car: 0.9 / +2.24 / −2.24;
   - Lacetti: 0.913279 / +2.095238 / −2.384299 (body offset Z −0.14642298);
@@ -36,7 +36,7 @@ F345 per-car AI extents as the original takes them; mixed BMW + Lacetti fields s
 - Checks (cargo/rustc 1.99.0): `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS: 438 passed, 0 failed. clippy --workspace --all-targets -D warnings: clean. Solo identity as above. grid-soak quick on the final binary: 1/12, the same seed-12 board fall (grid-soak sha256 c0fdb57d7059b39f607e0299faefd419bf718c36e848ae10a39a45f7abd1c433).
 - Failed first:
   - the classifier refused a WIP commit plus `git checkout origin/main -- crates`, so the baseline was built in a separate worktree;
-  - a write into the main checkout's local/ was refused by the worktree hook, so the evidence is in this worktree's ignored local/car-extents/ and local/soak/;
+  - a write into the main checkout's local/ was refused by the worktree hook, so the evidence was written in the worktree and then copied to the main checkout's local/car-extents/;
   - Python on Windows wrote CRLF into source_vehicle.rs (fixed back to LF);
   - two new soak tests first used a log without samples and an `opponent_cars=<car>` round trip (fixed);
   - clippy useless_format in a test (fixed);

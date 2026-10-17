@@ -315,8 +315,8 @@ hang occurred after the fixes.
 These runs cover the F345 change: each car now has its own AI traffic extents
 ([CAR_GENERALIZATION.md](CAR_GENERALIZATION.md), "AI car extents"), and mixed
 fields are supported. The baseline is origin/main c09ca82, built in a separate
-worktree. The runs are in the F345 worktree's private `local/soak/quick-*`,
-`long-*` and `local/car-extents/`.
+worktree. The runs are in the main checkout's private `local/car-extents/` (soak
+directories under `soak/`).
 
 | Run | Scenarios | Failed | Groups |
 |---|---|---|---|

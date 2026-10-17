@@ -182,7 +182,7 @@ original. They are now per car (`ai_driver::Extents`, `Runtime::ai_extents()`,
 ### Where the original takes them [V static]
 
 Read-only capstone disassembly of the hash-pinned unpacked image
-(`local/ai-overtaking/scripts/pe.py`; listings in the worktree's private
+(`local/ai-overtaking/scripts/pe.py`; listings in the main checkout's private
 `local/car-extents/static/`):
 
 - **0x402D20** is the AI car-state update. It also writes the centre +0x20,
@@ -257,7 +257,7 @@ changes, Lacetti-only fields included. This is intended (coordinator decision,
 2026-10-17). The solo AI lap has no traffic and stays byte-identical.
 
 Release `grid-opponent-race`, Donington, baseline = origin/main c09ca82 built
-in a separate worktree, private characteristics. Outputs are in the worktree's
+in a separate worktree, private characteristics. Outputs are in the main checkout's
 `local/car-extents/runs/`.
 
 | Run | Before (c09ca82) | After (F345) |
