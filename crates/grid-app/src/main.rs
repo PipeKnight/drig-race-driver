@@ -1565,13 +1565,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--trees" => {
-                let mode = args.next().ok_or("--trees needs source, coverage or off")?;
+                let mode = args.next().ok_or("--trees needs source, coverage, coverage-shaded or off")?;
                 graphics.source_trees = match mode.as_str() {
-                    "source" | "coverage" => true,
+                    "source" | "coverage" | "coverage-shaded" => true,
                     "off" => false,
-                    _ => return Err("--trees needs source, coverage or off".into()),
+                    _ => return Err("--trees needs source, coverage, coverage-shaded or off".into()),
                 };
-                graphics.foliage_coverage = mode == "coverage";
+                graphics.foliage_coverage = matches!(mode.as_str(), "coverage" | "coverage-shaded");
+                graphics.tree_sheet_colours = mode == "coverage-shaded";
             }
             "--land" => {
                 graphics.source_land = match args.next().as_deref() {
@@ -2144,7 +2145,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         append_land(&root, &route, &player_car, &mut car)?;
     }
     if track && !collision && graphics.enhanced() && graphics.source_trees {
-        source_trees::append(&root, &route, &mut car, graphics.foliage_coverage)?;
+        source_trees::append(&root, &route, &mut car, graphics.foliage_coverage, graphics.tree_sheet_colours)?;
     }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))

@@ -33,6 +33,7 @@ pub fn append(
     route: &Route,
     car: &mut Car,
     coverage: bool,
+    sheet_colours: bool,
 ) -> Result<(), Box<dyn Error>> {
     let bytes = read(&root.join(route.track_file("trees.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
@@ -135,6 +136,18 @@ pub fn append(
         );
         geometry.insert_attribute(Mesh::ATTRIBUTE_POSITION, source.positions.clone());
         geometry.insert_indices(Indices::U16(d.indices));
+        // treesheet VS forwards saved v3.rgb; its PS multiplies the lit diffuse
+        // by that RGB. Preserve raw UNORM values (no speculative sRGB transform).
+        // Saved alpha is not the PS alpha source: instance v7.w is, so keep 1.
+        if sheet_colours && sheets.contains(d.material) {
+            if source.colors_argb.len() != source.positions.len() {
+                return Err("treesheet RGB count differs from vertices".into());
+            }
+            let colours: Vec<[f32; 4]> = source.colors_argb.iter()
+                .map(|[_, r, g, b]| [*r as f32 / 255., *g as f32 / 255., *b as f32 / 255., 1.])
+                .collect();
+            geometry.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
+        }
         if source.texcoords.is_empty() {
             return Err("tree geometry has no diffuse UV".into());
         }
@@ -237,7 +250,7 @@ pub fn append(
         .map(|p| p.mesh.indices().unwrap().len() / 3)
         .sum();
     println!(
-        "source_tree_sheets draws={sheet_draws} triangles={sheet_triangles} expansion=cylindrical-world-up orientation=main-camera physics=unchanged"
+        "source_tree_sheets draws={sheet_draws} triangles={sheet_triangles} expansion=cylindrical-world-up orientation=main-camera saved_rgb={sheet_colours} physics=unchanged"
     );
     println!(
         "source_trees enabled=true prototypes={} instances={} library_draws={library_draws} closest_draws={closest_draws} placed_draws={count} triangles={triangles} textures={} bounds={world_min:?}..{world_max:?} lod=source-x0 wind=false physics=unchanged alpha=authored-mask05 sampler=existing-repeat",
@@ -394,7 +407,7 @@ mod tests {
             track: true,
             liveries: Vec::new(),
         };
-        append(Path::new(&root), &Route::default(), &mut car, false).unwrap();
+        append(Path::new(&root), &Route::default(), &mut car, false, true).unwrap();
         assert_eq!(car.parts.len(), 21);
         let facing: Vec<_> = car
             .parts
@@ -410,6 +423,13 @@ mod tests {
         {
             let source = FacingSource::from_mesh(&part.name, &part.mesh).unwrap();
             assert!(source.cylindrical);
+            let Some(VertexAttributeValues::Float32x4(colours)) = part.mesh.attribute(Mesh::ATTRIBUTE_COLOR) else {
+                panic!("saved treesheet gradient absent")
+            };
+            assert_eq!(colours.len(), source.centers.len());
+            assert!(colours.iter().all(|c| c[3] == 1. && c[0] == c[1] && c[1] == c[2]));
+            let levels: BTreeSet<_> = colours.iter().map(|c| (c[0] * 255.).round() as u8).collect();
+            assert_eq!(levels, BTreeSet::from([139, 201]));
             let points: Vec<_> = source
                 .centers
                 .iter()
@@ -479,7 +499,7 @@ mod tests {
                 .values()
                 .all(|key| car.textures.contains_key(key))
         );
-        assert!(append(Path::new(&root), &Route::default(), &mut car, false).is_err());
+        assert!(append(Path::new(&root), &Route::default(), &mut car, false, true).is_err());
         assert_eq!(car.parts.len(), 21);
     }
 }

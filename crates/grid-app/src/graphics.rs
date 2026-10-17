@@ -60,6 +60,8 @@ pub struct Settings {
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
     pub source_trees: bool,
+    /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
+    pub tree_sheet_colours: bool,
     /// Diagnostic isolation of ambient occlusion and grass shadow reception.
     pub ambient_occlusion: bool,
     pub grass_receive_shadows: bool,
@@ -110,6 +112,7 @@ impl Default for Settings {
             layered_track: true,
             source_land: true,
             source_trees: false,
+            tree_sheet_colours: false,
             ambient_occlusion: true,
             grass_receive_shadows: true,
             grass_soft_alpha: true,

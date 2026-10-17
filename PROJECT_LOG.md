@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G104 — Body pilot published; source distant-tree shading gradient isolated (18 October 2026)
+
+Merged observed F371 braking research (journal-only conflict; both records preserved), primary fast-forwarded tofa8546d, main/graphics non-force push succeeded. Owner untracked report hash unchanged. Body launcher/private assets available in primary; current playable remains verified01cbcf8, no app rebuild needed for the asset option.
+
+Read-only source shader/data audit identifies ignored distant-sheet RGB gradient: bottom139/top201 rawUNORM, all3blocks/5844vertices. New optional coverage-shaded adapts this proven RGB factor to PBR, retaining alpha1 and existing source/coverage defaults; no ordinary foliage/physics change. Four purchased/source-tree release tests pass. Shader/data mapping and radiometric limits recorded in SOURCE_VEGETATION.md; paired GPU checks pending. No owner action needed.
+
 ## G103 — Body detail option staged privately for primary launcher (18 October 2026)
 
 Runtime reference DDS/candidate/TSV staged under primary local/graphics/materials-livery01; both immutable DDS files hardlink byte-identical data, TSV copied. SHA/source9324de60..., candidatefb02ff6e..., private primary-package-stage01.json. Provenance, candidate metadata, validation and native-pixel comparison also copied into the primary local folder for durable review. Regeneration must use new names/atomic replace, not in-place edits of linked assets. No game assets or neural output enter Git.
