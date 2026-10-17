@@ -24,17 +24,18 @@ mod graphics_benchmark;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
+mod motion_capture;
 mod particles;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
 mod skid_marks;
 mod sky;
-mod source_trees;
 mod sky_environment;
+mod source_trees;
 mod texture_cache;
-mod texture_upload;
 mod texture_overrides;
+mod texture_upload;
 mod time_trial;
 mod track_grade;
 mod track_surface;
@@ -45,7 +46,6 @@ mod wheel_debris;
 mod wheel_exposure;
 mod wheel_ground;
 mod wheel_presentation;
-mod motion_capture;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     asset::RenderAssetUsages,
@@ -1370,8 +1370,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     args.next().ok_or("--render needs a PNG path")?,
                 ))
             }
-            "--texture-overrides" => texture_override_path = Some(PathBuf::from(args.next().ok_or("missing private texture manifest")?)),
-            "--motion-capture" => motion_sequence = Some(motion_capture::Config::parse(&args.next().ok_or("missing motion capture window")?)?),
+            "--texture-overrides" => {
+                texture_override_path = Some(PathBuf::from(
+                    args.next().ok_or("missing private texture manifest")?,
+                ))
+            }
+            "--motion-capture" => {
+                motion_sequence = Some(motion_capture::Config::parse(
+                    &args.next().ok_or("missing motion capture window")?,
+                )?)
+            }
             "--reflection-calibration" => reflection_calibration = true,
             "--render-fixed-step" => render_fixed_step = true,
             "--render-fps" => {
@@ -2009,8 +2017,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let texture_override_keys = if let Some(path) = texture_override_path {
-        if !graphics.enhanced() { return Err("texture overrides require enhanced graphics".into()); }
-        let used = car.parts.iter().filter(|p| !p.matrices.is_empty() && (!car.track || p.material.starts_with("objects/") || part_model(&p.material).is_some())).filter_map(|p|car.bindings.get(&p.material).cloned()).collect();
+        if !graphics.enhanced() {
+            return Err("texture overrides require enhanced graphics".into());
+        }
+        let used = car
+            .parts
+            .iter()
+            .filter(|p| {
+                !p.matrices.is_empty()
+                    && (!car.track
+                        || p.material.starts_with("objects/")
+                        || part_model(&p.material).is_some())
+            })
+            .filter_map(|p| car.bindings.get(&p.material).cloned())
+            .collect();
         let applied = texture_overrides::apply(&path, &mut car.textures, &used)?;
         geometry_ray::describe_texture_usage(&car, &applied);
         Some(applied)
@@ -2100,7 +2120,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.insert_resource(trial);
     }
     if let Some(path) = output {
-        if let Some(config) = motion_sequence { motion_capture::install(&mut app, config, &path, render_fps, drive_ticks, (graphics.width,graphics.height))?; }
+        if let Some(config) = motion_sequence {
+            motion_capture::install(
+                &mut app,
+                config,
+                &path,
+                render_fps,
+                drive_ticks,
+                (graphics.width, graphics.height),
+            )?;
+        }
         app.add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -2232,6 +2261,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
         damage_hud::install(&mut app);
+    }
+    if track && graphics.source_trees {
+        source_trees::install(&mut app);
     }
     if track
         && !collision
@@ -2522,10 +2554,14 @@ fn setup(
         // the opponents that drive them.
         let player_part = model.is_none_or(|m| m == 0);
         let original = deformable.then(|| part.mesh.clone());
-        let initial_bounds = part
+        let facing = source_trees::FacingSource::from_mesh(&part.name, &part.mesh);
+        let mut initial_bounds = part
             .mesh
             .compute_aabb()
             .expect("validated source mesh bounds");
+        if let Some(source) = &facing {
+            initial_bounds.half_extents += source.radius();
+        }
         let shared = if deformable {
             None
         } else {
@@ -2535,6 +2571,12 @@ fn setup(
             let mesh = shared
                 .clone()
                 .unwrap_or_else(|| meshes.add(original.as_ref().unwrap().clone()));
+            let mesh = if facing.is_some() {
+                let own = meshes.get(&mesh).expect("source foliage mesh").clone();
+                meshes.add(own)
+            } else {
+                mesh
+            };
             let moving = driving.is_some() && model.is_some();
             let transform = if moving {
                 let runtime = &driving.as_ref().unwrap().runtime;
@@ -2559,6 +2601,11 @@ fn setup(
             } else {
                 None
             };
+            if let Some(source) = &facing
+                && let Some(entity) = &mut entity
+            {
+                entity.insert(source.placed(matrix));
+            }
             if track && let Some(entity) = &mut entity {
                 entity.insert(track_surface::SourcePart(part.material.clone()));
             }

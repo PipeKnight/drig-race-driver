@@ -1,5 +1,6 @@
 //! Static closest-LOD source forest. No wind, collision or original shader claim.
 use super::{Car, Part, read};
+use bevy::mesh::VertexAttributeValues;
 use bevy::{
     asset::RenderAssetUsages,
     mesh::{Indices, PrimitiveTopology},
@@ -44,6 +45,15 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
         .iter()
         .map(|p| Ok((format!("{} Root", std::str::from_utf8(p.name)?), p)))
         .collect::<Result<_, std::str::Utf8Error>>()?;
+    let facing: BTreeSet<_> = (0..tree.nodes.len())
+        .filter(|&i| {
+            tree.name(i) == b"SHADERINSTANCE"
+                && tree
+                    .string(i, b"shaderGroup")
+                    .is_ok_and(|s| s == b"#facing_foliage.fx")
+        })
+        .map(|i| tree.string(i, b"id"))
+        .collect::<grid_formats::Result<_>>()?;
     let mut diffuse = BTreeMap::new();
     for b in material::read_texture_bindings(&tree)? {
         if b.sampler != b"TDiffuseAlphaMap" {
@@ -132,7 +142,15 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
         count += matrices.len();
         triangles += geometry.indices().unwrap().len() / 3 * matrices.len();
         parts.push(Part {
-            name: format!("trees/{}", std::str::from_utf8(d.id)?),
+            name: format!(
+                "trees/{}{id}",
+                if facing.contains(d.material) {
+                    "facing/"
+                } else {
+                    ""
+                },
+                id = std::str::from_utf8(d.id)?
+            ),
             joint: String::new(),
             material: name,
             mesh: geometry,
@@ -175,6 +193,29 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
 mod tests {
     use super::*;
     #[test]
+    fn facing_offsets_expand_in_camera_plane_after_scaled_rotated_placement() {
+        let matrix = Mat4::from_scale_rotation_translation(
+            Vec3::splat(1.7),
+            Quat::from_rotation_y(1.2),
+            Vec3::new(10., -3., 20.),
+        );
+        let center = Vec3::new(0.5, 4., -0.7);
+        let camera = Quat::from_euler(EulerRot::YXZ, -0.8, 0.3, 0.1);
+        let right = camera * Vec3::X;
+        let up = camera * Vec3::Y;
+        let offset = Vec2::new(-1.3, 0.8);
+        let actual =
+            matrix.transform_point3(expanded(center, offset, right, up, matrix.inverse(), 1.7));
+        let expected = matrix.transform_point3(center) + (right * offset.x + up * offset.y) * 1.7;
+        assert!(actual.distance(expected) < 0.00001);
+        assert!(
+            (actual - matrix.transform_point3(center))
+                .dot(camera * Vec3::Z)
+                .abs()
+                < 0.00001
+        );
+    }
+    #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn purchased_donington_closest_forest_is_bound_without_billboard_duplicates() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
@@ -189,6 +230,37 @@ mod tests {
         };
         append(Path::new(&root), &Route::default(), &mut car).unwrap();
         assert_eq!(car.parts.len(), 21);
+        let facing: Vec<_> = car
+            .parts
+            .iter()
+            .filter_map(|p| FacingSource::from_mesh(&p.name, &p.mesh))
+            .collect();
+        assert_eq!(facing.len(), 4);
+        for part in car
+            .parts
+            .iter()
+            .filter(|p| p.name.starts_with("trees/facing/"))
+        {
+            for matrix in &part.matrices {
+                let axes = [
+                    matrix.x_axis.truncate(),
+                    matrix.y_axis.truncate(),
+                    matrix.z_axis.truncate(),
+                ];
+                let scales = axes.map(|a| a.length());
+                assert!(
+                    scales[0] > 0.
+                        && (scales[0] - scales[1]).abs() < 0.001
+                        && (scales[0] - scales[2]).abs() < 0.001
+                );
+                assert!(axes[0].dot(axes[1]).abs() < 0.001 && axes[0].dot(axes[2]).abs() < 0.001);
+            }
+        }
+        assert!(
+            facing
+                .iter()
+                .all(|f| f.radius() > 0.1 && f.centers.len() == f.offsets.len())
+        );
         assert!(
             car.parts
                 .iter()
@@ -206,5 +278,107 @@ mod tests {
         );
         assert!(append(Path::new(&root), &Route::default(), &mut car).is_err());
         assert_eq!(car.parts.len(), 21);
+    }
+}
+
+/// Source-facing foliage stores repeated centres and signed offsets in UV1.
+/// The zero-wind original VS expands those offsets along inverse-view X/Y,
+/// after applying the source instance scale. This CPU adaptation uses the main
+/// camera for all passes; shadow/reflection-view orientation is not 1:1 yet.
+#[derive(Clone)]
+pub struct FacingSource {
+    centers: Vec<[f32; 3]>,
+    offsets: Vec<[f32; 2]>,
+}
+impl FacingSource {
+    pub fn from_mesh(name: &str, mesh: &Mesh) -> Option<Self> {
+        if !name.starts_with("trees/facing/") {
+            return None;
+        }
+        let Some(VertexAttributeValues::Float32x3(centers)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            return None;
+        };
+        let Some(VertexAttributeValues::Float32x2(offsets)) = mesh.attribute(Mesh::ATTRIBUTE_UV_1)
+        else {
+            return None;
+        };
+        assert_eq!(centers.len(), offsets.len(), "validated foliage streams");
+        Some(Self {
+            centers: centers.clone(),
+            offsets: offsets.clone(),
+        })
+    }
+    pub fn radius(&self) -> f32 {
+        self.offsets
+            .iter()
+            .map(|v| Vec2::from_array(*v).length())
+            .fold(0., f32::max)
+    }
+    pub fn placed(&self, matrix: Mat4) -> Facing {
+        Facing {
+            source: self.clone(),
+            inverse: matrix.inverse(),
+            scale: matrix.x_axis.truncate().length(),
+        }
+    }
+}
+#[derive(Component)]
+pub struct Facing {
+    source: FacingSource,
+    inverse: Mat4,
+    scale: f32,
+}
+fn expanded(center: Vec3, offset: Vec2, right: Vec3, up: Vec3, inverse: Mat4, scale: f32) -> Vec3 {
+    center + inverse.transform_vector3((right * offset.x + up * offset.y) * scale)
+}
+pub fn install(app: &mut App) {
+    app.add_systems(Update, present.after(super::drive_present));
+}
+fn present(
+    camera: Query<&Transform, With<super::ViewerCamera>>,
+    foliage: Query<(&Facing, &Mesh3d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    for (facing, handle) in &foliage {
+        let Some(mut mesh) = meshes.get_mut(&handle.0) else {
+            continue;
+        };
+        let points: Vec<_> = facing
+            .source
+            .centers
+            .iter()
+            .zip(&facing.source.offsets)
+            .map(|(p, uv)| {
+                expanded(
+                    Vec3::from_array(*p),
+                    Vec2::from_array(*uv),
+                    camera.right().as_vec3(),
+                    camera.up().as_vec3(),
+                    facing.inverse,
+                    facing.scale,
+                )
+                .to_array()
+            })
+            .collect();
+        // Original zero-wind facing VS uses a radial local normal, not the
+        // intentionally nonfinite saved NORMAL stream of collapsed quads.
+        let normals: Vec<_> = facing
+            .source
+            .centers
+            .iter()
+            .map(|p| {
+                Vec3::from_array(*p)
+                    .try_normalize()
+                    .unwrap_or(Vec3::Y)
+                    .to_array()
+            })
+            .collect();
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, points);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
     }
 }
