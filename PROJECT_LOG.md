@@ -1,6 +1,6 @@
 # GRID engine project log
 
-F353 fourth circuit: Long Beach drives solo and races with the AI field; routes finishing at a later gate get lap timing (2026-10-17, Claude Code, night run). Details: docs/LONG_BEACH.md.
+F354 fourth circuit: Long Beach drives solo and races with the AI field; routes finishing at a later gate get lap timing (2026-10-17, Claude Code, night run). Details: docs/LONG_BEACH.md.
 - Choice: from the F350 list, Long Beach route 0 needs no format work. Spa has three blockers, all recorded and none changed:
   - one chunk has 9 materials (the reader caps at 8; the 4-bit field allows 16);
   - a prop mesh has a non-UV half-float stream;
@@ -32,11 +32,12 @@ F353 fourth circuit: Long Beach drives solo and races with the AI field; routes 
   - Clippy --workspace --all-targets -D warnings: clean.
   - Solo identity byte-identical to local/ai-pacing/runs/solo-rebased.txt.
   - Against an 8b8a48b baseline build, byte-identical: Donington, Nürburgring, Istanbul, mixed lac,bmw and Long Beach 12-car races; Nürburgring and Istanbul solos (local/fourth-track/regress/).
-  - grid-soak quick (1..16): 16/16 pass, every result line equal to the baseline's. Repeated after the rebase onto 6d432bb (F352 grid-probes): 493 tests, clippy, solo identity and quick 16/16 with the same lines (grid-soak sha256 a573b7fe…6653, grid-app 4063175c…2e2a).
+  - grid-soak quick (1..16): 16/16 pass, every result line equal to the baseline's. Repeated after the rebase onto 5fe7189 (F352 grid-probes, F353 race HUD): 506 tests, clippy, solo identity and quick 16/16 with the same lines (grid-soak sha256 46c17135…e0aa, grid-app 75b12fca…4fca).
 - Not done:
   - the Istanbul turn-8 and Long Beach recoveries against the original, which needs a live AI trace with input to the game;
   - the re-indexed routes in grid-soak or launchers.
   - Playable not rebuilt.
+
 F353 the original's race HUD layout and post-race results screens in grid-app (2026-10-17, Claude Code, night run). Details, evidence and decisions: docs/RACE_HUD.md. Builds on F348; docs/PAUSE_MENU.md updated.
 - Evidence [D] (static; private files in the main checkout's local/pause-menu/ and local/hud-results/):
   - Osd/sceneconfig.xml is the HUD tree:
