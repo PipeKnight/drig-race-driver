@@ -294,7 +294,9 @@ fn start(
     // Original coverage needs MSAA. Enhanced views use SMAA/TAA with MSAA off:
     // explicit masking keeps colour and Bevy's normal/depth prepasses on the
     // same cutoff (coverage's prepass otherwise accepts near-transparent texels).
-    let alpha_mode = if graphics.enhanced() {
+    let alpha_mode = if graphics.enhanced() && graphics.grass_soft_alpha {
+        AlphaMode::Blend
+    } else if graphics.enhanced() {
         AlphaMode::Mask(0.5)
     } else {
         AlphaMode::AlphaToCoverage
@@ -319,7 +321,7 @@ fn start(
     if !graphics.grass_receive_shadows {
         commands.entity(entity).insert(bevy::light::NotShadowReceiver);
     }
-    println!("ground_detail_shading receive_shadows={} ssao={} cutoff=enhanced-mask05 normals=terrain", graphics.grass_receive_shadows, graphics.ambient_occlusion);
+    println!("ground_detail_shading receive_shadows={} ssao={} alpha={alpha_mode:?} normals=terrain", graphics.grass_receive_shadows, graphics.ambient_occlusion);
     commands.insert_resource(GroundDetail {
         instances: loaded.instances,
         quads: loaded.quads,

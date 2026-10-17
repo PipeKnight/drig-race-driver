@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G073 — Grass shadow/AO hypotheses rejected in reported view (17 October 2026)
+
+[Grass diagnosis](docs/GRASS_RENDERING.md). Source233012c/SHAf3792dcf... release2m35s, independent native4K controls: shadow receptionoff leaves814selected dark grass pixels exact; AOoff meanchange0.518byte. Grass sprites confirmed by effectsoffcontrol. AtlasRGB is dark green/brown and does not become substantially darker in mips; threshold coverage instead falls7.1%base->0.195%32->0%16, meanalpha~8.2%. Hard mask loses thin blades; sourceA2C cannot be restored by toggling AlphaToCoverage with MSAAoff. Optional --grass-alpha blend draft retains texture/RGB/geometry, pendingGPU; masking/defaults unchanged. NewappClippy23.55s passes. Existingcoverage524tests/exactsolo/20soak predate grass toggles; finalfullchecks will be repeated before publication.
+
+
 ## G072 — Owner prefers coverage foliage; grass defect isolated (17 October 2026)
 
 Owner explicitly prefers right-hand distant foliage (fewer holes); coverage stays the chosen pilot, not a complete foliage fix. Sourcef78b7e0 / SHA38f3753a... four native4K views and BC comparison rendered; 524release tests/0failed/0ignored, workspaceClippy0.84s, exactsolo,20/20quick pass. Two30unique-frame request audits pass; metadata/visual review pending. Rejected conflicting capture-clock flags corrected in retry02, failed log retained.

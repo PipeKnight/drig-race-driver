@@ -1441,6 +1441,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--haze needs source or off".into()),
                 };
             }
+            "--grass-alpha" => {
+                graphics.grass_soft_alpha = match args.next().as_deref() {
+                    Some("mask") => false,
+                    Some("blend") => true,
+                    _ => return Err("--grass-alpha needs mask or blend".into()),
+                };
+            }
             "--ao" | "--grass-shadows" => {
                 let enabled = match args.next().as_deref() {
                     Some("on") => true,
