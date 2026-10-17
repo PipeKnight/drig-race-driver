@@ -216,6 +216,8 @@ pub struct Settings {
     pub osd_lap_timer: Option<bool>,
     pub osd_position: Option<bool>,
     pub osd_mph: Option<bool>,
+    pub osd_minimap: Option<bool>,
+    pub osd_dials: Option<bool>,
     pub diagnostics: Diagnostics,
 }
 
@@ -370,6 +372,8 @@ impl Settings {
                 }
                 ("osd", "lap_timer") => self.osd_lap_timer = Some(on(&key, value).map_err(at)?),
                 ("osd", "position") => self.osd_position = Some(on(&key, value).map_err(at)?),
+                ("osd", "minimap") => self.osd_minimap = Some(on(&key, value).map_err(at)?),
+                ("osd", "dials") => self.osd_dials = Some(on(&key, value).map_err(at)?),
                 ("osd", "speed_units") => {
                     self.osd_mph = Some(match value.to_ascii_lowercase().as_str() {
                         "kph" | "km/h" => false,

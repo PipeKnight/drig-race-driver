@@ -92,6 +92,8 @@ pub enum Confirm {
     RetireRace,
     FinishTestDrive,
     ResetCar,
+    /// Results screen Exit (`exit_race_confirm`).
+    Exit,
 }
 
 impl Confirm {
@@ -115,6 +117,7 @@ impl Confirm {
                 "reset_vehicle_confirm_title",
                 "reset_vehicle_confirm_subtitle",
             ),
+            (Self::Exit, _) => ("quit_race_confirm_title", "quit_race_confirm_subtitle"),
         }
     }
 }
@@ -127,9 +130,8 @@ pub enum Screen {
     Setup(Setup),
 }
 
-/// The values the pause options change. Speech and music volume, mini map,
-/// dials, steering linearity and 900 degree mode have no counterpart in the
-/// prototype.
+/// The values the pause options change. Speech and music volume, steering
+/// linearity and 900 degree mode have no counterpart in the prototype.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Options {
     /// `volume_soundfx`, percent: engine and tyre sound.
@@ -140,6 +142,10 @@ pub struct Options {
     pub position: bool,
     /// `imperialunits`: mph instead of km/h.
     pub mph: bool,
+    /// `osd_minimap`: the HUD's minimap.
+    pub minimap: bool,
+    /// `osd_dials`: the HUD's dial (speed, gear, revs).
+    pub dials: bool,
     /// Advanced controls, percent: steering, accelerate and brake dead zone
     /// and saturation.
     pub tunes: [[u8; 2]; 3],
@@ -154,6 +160,8 @@ impl Default for Options {
             lap_timer: true,
             position: true,
             mph: false,
+            minimap: true,
+            dials: true,
             tunes: [[20, 100], [0, 100], [0, 100]],
         }
     }
@@ -372,7 +380,7 @@ impl PauseMenu {
                 Some(match confirm {
                     Confirm::Restart => Command::Restart,
                     Confirm::RetireRace => Command::RetireRace,
-                    Confirm::FinishTestDrive => Command::Exit,
+                    Confirm::FinishTestDrive | Confirm::Exit => Command::Exit,
                     Confirm::ResetCar => Command::ResetCar,
                 })
             }
@@ -435,6 +443,8 @@ fn change(values: &mut Options, field: Field, up: bool) {
         // Combo boxes wrap (`wrap="true"`): left and right both toggle.
         Field::LapTimer => values.lap_timer = !values.lap_timer,
         Field::Position => values.position = !values.position,
+        Field::MiniMap => values.minimap = !values.minimap,
+        Field::Dials => values.dials = !values.dials,
         Field::SpeedUnit => values.mph = !values.mph,
         Field::Tune(group, which) => {
             let [dz, sat] = values.tunes[group];
@@ -447,8 +457,6 @@ fn change(values: &mut Options, field: Field, up: bool) {
         }
         Field::Speech
         | Field::Music
-        | Field::MiniMap
-        | Field::Dials
         | Field::Linearity
         | Field::MultiTurn => {}
     }
@@ -457,7 +465,7 @@ fn change(values: &mut Options, field: Field, up: bool) {
 /// Held direction repeat: first repeat after 0.35 s, then every 0.15 s
 /// (`<RepeatRateSetting delay="0.35" rate="0.15">`) [D].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Repeat {
+pub(crate) struct Repeat {
     held: Option<usize>,
     next: f32,
 }
@@ -488,7 +496,7 @@ impl Repeat {
 }
 
 /// Nav from the input layer's actions (keyboard and pad alike).
-fn nav(actions: &Actions, repeat: &mut Repeat, dt: f32) -> Nav {
+pub(crate) fn nav(actions: &Actions, repeat: &mut Repeat, dt: f32) -> Nav {
     use Action::*;
     let [up, down, left, right] = repeat.update(
         [MenuUp, MenuDown, MenuLeft, MenuRight].map(|a| actions.down(a)),
@@ -625,6 +633,8 @@ impl PauseMenu {
                             Field::Effects => Some(format!("{}%", v.effects)),
                             Field::LapTimer => Some(on(v.lap_timer)),
                             Field::Position => Some(on(v.position)),
+                            Field::MiniMap => Some(on(v.minimap)),
+                            Field::Dials => Some(on(v.dials)),
                             Field::SpeedUnit => Some(l(if v.mph { "mph" } else { "kph" })),
                             Field::Tune(g, w) => Some(format!("{}%", v.tunes[*g][*w])),
                             _ => None,
@@ -660,6 +670,8 @@ pub fn initial_options(settings: &crate::settings::Settings, actions: Option<&Ac
         lap_timer: settings.osd_lap_timer.unwrap_or(base.lap_timer),
         position: settings.osd_position.unwrap_or(base.position),
         mph: settings.osd_mph.unwrap_or(base.mph),
+        minimap: settings.osd_minimap.unwrap_or(base.minimap),
+        dials: settings.osd_dials.unwrap_or(base.dials),
         ..base
     };
     if let Some(actions) = actions {
@@ -714,12 +726,19 @@ pub fn update(
     mut actions: ResMut<Actions>,
     mut shifts: ResMut<ShiftQueue>,
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
-    time: Option<Res<Time<Real>>>,
+    (time, mut post): (
+        Option<Res<Time<Real>>>,
+        Option<ResMut<crate::post_race::PostRace>>,
+    ),
     mut exit: MessageWriter<AppExit>,
 ) {
     // A restart from elsewhere (R) closes the menu.
     if menu.open && !driving.paused {
         menu.close();
+    }
+    // The post-race screens own the input; no pause over them.
+    if post.as_ref().is_some_and(|p| p.active()) {
+        return;
     }
     let dt = time.map_or(0., |t| t.delta_secs());
     let mut repeat = menu.repeat;
@@ -759,7 +778,13 @@ pub fn update(
         Command::RetireRace => {
             log("retire-race");
             retire_player(&mut driving, trial.as_deref());
-            exit.write(AppExit::Success);
+            driving.paused = false;
+            match post.as_mut() {
+                Some(post) => post.on_retire(),
+                None => {
+                    exit.write(AppExit::Success);
+                }
+            }
         }
         Command::Exit => {
             log("finish-test-drive");
@@ -767,11 +792,13 @@ pub fn update(
         }
         Command::Apply(values) => {
             log_line!(
-                "drive_menu version=1 action=apply effects={} lap_timer={} position={} mph={} tunes={:?}",
+                "drive_menu version=1 action=apply effects={} lap_timer={} position={} mph={} minimap={} dials={} tunes={:?}",
                 values.effects,
                 values.lap_timer,
                 values.position,
                 values.mph,
+                values.minimap,
+                values.dials,
                 values.tunes
             );
             apply_tunes(&mut actions, &values);
@@ -814,8 +841,8 @@ fn reset_car(driving: &mut crate::Driving) {
     }
 }
 /// Retire from Race: the player is out (`retire_race`), the race is
-/// classified and logged; the app then returns to the launcher.
-fn retire_player(driving: &mut crate::Driving, trial: Option<&crate::time_trial::Trial>) {
+/// classified and logged; the results screen follows (post_race).
+pub(crate) fn retire_player(driving: &mut crate::Driving, trial: Option<&crate::time_trial::Trial>) {
     driving.report("retire", driving.last_controls.unwrap_or_default());
     if let Some(opponents) = &mut driving.opponents
         && !opponents.standings.over()

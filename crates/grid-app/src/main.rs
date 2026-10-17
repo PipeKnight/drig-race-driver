@@ -27,6 +27,8 @@ mod ground_effect_assets;
 mod input;
 mod particles;
 mod pause_menu;
+mod post_race;
+mod race_hud;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
@@ -2240,8 +2242,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 driving.reset_line.is_some(),
                 pause_menu::initial_options(&profile, Some(&actions)),
             );
+            let variant = menu.variant;
             input::install(&mut app, actions);
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
+            // The original HUD layout and post-race screens (docs/RACE_HUD.md).
+            race_hud::install(&mut app);
+            post_race::install(&mut app, variant);
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
@@ -3409,9 +3415,10 @@ fn drive_present(
         Option<Res<Time<Fixed>>>,
         Option<Res<graphics::Settings>>,
         Option<Res<pause_menu::PauseMenu>>,
+        Option<Res<race_hud::Active>>,
     ),
 ) {
-    let (fixed, graphics, menu) = render_clock;
+    let (fixed, graphics, menu, race_hud) = render_clock;
     // Pause menu Screen Setup (lap timer, race position, speed unit).
     let osd = menu
         .as_ref()
@@ -3747,9 +3754,14 @@ fn drive_present(
     } else {
         (speed, "km/h")
     };
-    let text = format!(
-        "{heading}\n{shown_speed:.0} {unit}   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
-    );
+    // The original-layout HUD shows speed, laps and position itself.
+    let text = if race_hud.is_some() {
+        format!("{heading}{handbrake}\n{status}{audio}")
+    } else {
+        format!(
+            "{heading}\n{shown_speed:.0} {unit}   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
+        )
+    };
     for mut value in &mut hud {
         if value.0 != text {
             value.0.clone_from(&text);

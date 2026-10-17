@@ -16,7 +16,7 @@ The experimental keyboard driving build is available now. On 12 October the owne
 | Down / S | Brake; hold near rest to select reverse and drive backward |
 | Left / A, Right / D | Steer |
 | Space | Handbrake |
-| Escape or P (pad: Start) | Pause menu, as in the original: Continue, Instant Replay (not yet), Restart, Options (sound, screen, wheel controls), Retire from Race / Finish Test Drive (closes the app). Arrows/Enter/Escape and Ctrl (Reset Vehicle); pad D-pad or left stick, A, B and X ([pause menu](PAUSE_MENU.md)) |
+| Escape or P (pad: Start) | Pause menu, as in the original: Continue, Instant Replay (not yet), Restart, Options (sound, screen, wheel controls), Retire from Race (then the results) / Finish Test Drive (closes the app). After a race: the original's stats and results screens, whose Continue or Exit closes the app ([HUD and results](RACE_HUD.md)). Arrows/Enter/Escape and Ctrl (Reset Vehicle); pad D-pad or left stick, A, B and X ([pause menu](PAUSE_MENU.md)) |
 | R | Restart the event from the start |
 | X / Z | Gear up / down (manual gearbox only) |
 

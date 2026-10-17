@@ -94,11 +94,11 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
   - lap timing and the countdown.
 
   The restarted race replays a fresh race bit for bit [V].
-- **Retire from Race**: after Yes, the player is retired (`Out::Retired`), the race is classified,
-  `drive_race_result` lines are logged and the app closes, back to the launcher.
-  - The original goes on to its post-race screens, and from there "Exit" to the front end. The
-    results screens are a separate later task.
-  - Decision: closing the app is the nearest equivalent of returning to where races start [I].
+- **Retire from Race**: after Yes, the player is retired (`Out::Retired`), the race is classified
+  and `drive_race_result` lines are logged. Then the original's results screen follows
+  (docs/RACE_HUD.md). Only its Continue and Exit leave the event, which closes the app.
+  - F348 closed the app here directly, a stopgap until the results screens existed. The F348 entry
+    in PROJECT_LOG.md keeps that history.
 - **Finish Test Drive**: after Yes, the app closes (practice).
 - **Reset Vehicle** (button3, with its confirmation): the player's car is placed at rest on the
   racing line, with the same placement as the auto-reset of F341
@@ -107,17 +107,17 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
 - **Options**: the standard screen, or the wheel screen for `device=wheel`. There is no force
   feedback in the prototype, so the `_ffb` screen is not used.
   - Effects Volume scales the engine and tyre sound (`AudioSink` volume).
-  - Lap & Times and Race Position hide those HUD blocks. Speed Unit switches the HUD between km/h
-    and mph.
+  - Lap & Times, Race Position, Mini Map and Dials hide those HUD groups (docs/RACE_HUD.md). Speed
+    Unit switches the HUD between km/h and mph.
   - Advanced recalibrates every steering, accelerate and brake binding live
     (`ActionMap::calibrate`, the same as `[input] *_deadzone`/`*_saturation`). The dead zone stays
     below the saturation.
   - Changes apply at once. Button3 (Undo) restores the values the screen was entered with.
-  - Starting values come from `[sound] effects` and `[osd] lap_timer`/`position`/`speed_units`
+  - Starting values come from `[sound] effects` and `[osd] lap_timer`/`position`/`minimap`/`dials`/`speed_units`
     (docs/SETTINGS.md) and from the live input calibration.
 - **Shown but not selectable** (dimmed), because the prototype has no counterpart yet:
   - Instant Replay, Ghost Car;
-  - Speech and Music Volume, Mini Map, Dials;
+  - Speech and Music Volume;
   - Steering Linearity, 900 degree wheel.
 - **Gear safety:** pad A is both Menu Select and Gear Up. Every menu action clears the gear queue,
   so a menu press never shifts the car.

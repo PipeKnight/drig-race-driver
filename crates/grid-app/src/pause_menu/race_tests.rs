@@ -8,6 +8,13 @@ const OPPONENTS: usize = 3;
 
 /// A 2-lap race at Donington like `settings/race.ini`, player at the back.
 fn race_app() -> App {
+    race_app_with(grid_tools::route::DONINGTON, &["lac"], 2, false)
+}
+
+/// A race on `route` with `OPPONENTS` AI cars; car models cycle through
+/// `models` (car 0, the player, takes the first), player at the back.
+/// `autopilot`: the ported AI drives the player's car too.
+fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> App {
     use grid_tools::ai_driver::{AiData, AiDriver, Line, Parameters};
     use grid_tools::{car::Car, route::Route};
     let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
@@ -20,14 +27,17 @@ fn race_app() -> App {
     let deformation = Some(
         grid_tools::deformation_parameters::read(&read("GRID_DEFORMATION_PARAMETERS")).unwrap(),
     );
-    let route = Route::default();
-    let car = Car::default();
+    let route = Route::new(route).unwrap();
+    let field: Vec<Car> = (0..=OPPONENTS)
+        .map(|i| Car::new(models[i % models.len()]).unwrap())
+        .collect();
+    let car = field[0].clone();
     let player = OPPONENTS;
     let slots: Vec<String> = std::iter::once(player)
         .chain((0..=OPPONENTS).filter(|&i| i != player))
         .map(|i| format!("slot_{i:02}"))
         .collect();
-    let entries: Vec<(&str, &Car)> = slots.iter().map(|s| (s.as_str(), &car)).collect();
+    let entries: Vec<(&str, &Car)> = slots.iter().map(String::as_str).zip(&field).collect();
     let mut runtime =
         grid_tools::source_vehicle::Runtime::load(root, &route, &car, &slots[0], 200679).unwrap();
     runtime.body_events = events;
@@ -43,15 +53,25 @@ fn race_app() -> App {
     .unwrap();
     multi.enable_dynamic_props(root).unwrap();
     let ai = AiData::load(root, route.path(), "touring", car.stem()).unwrap();
+    let car_ai: Vec<AiData> = field[1..]
+        .iter()
+        .map(|m| AiData::load(root, route.path(), "touring", m.stem()).unwrap())
+        .collect();
     let settings = grid_tools::ai_pacing::Settings::default();
     let drivers = (0..OPPONENTS)
         .map(|i| {
             AiDriver::new(
-                Parameters::new(&ai, settings.difficulty, |_| 1.).unwrap(),
+                Parameters::new(&car_ai[i], settings.difficulty, |_| 1.).unwrap(),
                 0x5eed + i as u32 + 1,
             )
         })
         .collect();
+    let pilot = autopilot.then(|| {
+        AiDriver::new(
+            Parameters::new(&ai, settings.difficulty, |_| 1.).unwrap(),
+            0x5eed,
+        )
+    });
     let start = {
         let gate = &grid_tools::lap_progress::load_route(root, &route)
             .unwrap()
@@ -66,7 +86,6 @@ fn race_app() -> App {
             [p[12], p[13], p[14]]
         })
         .collect();
-    let laps = 2;
     let standings = grid_tools::race::Standings::new(&ai.line, laps, start, &positions);
     let pacing = grid_tools::ai_pacing::Field::new(
         grid_tools::ai_pacing::Data::load(root, &settings).unwrap(),
@@ -82,11 +101,11 @@ fn race_app() -> App {
     let opponents = Opponents {
         multi,
         drivers,
-        car_ai: vec![ai.clone(); OPPONENTS],
+        car_ai,
         ai,
         standings,
         names: (0..=OPPONENTS).map(|i| format!("car {i}")).collect(),
-        autopilot: None,
+        autopilot: pilot,
         after_finish: None,
         throttles: vec![0.; OPPONENTS],
         pacing,
@@ -131,10 +150,12 @@ fn race_app() -> App {
             true,
             Options::default(),
         ))
+        .insert_resource(crate::post_race::PostRace::new(Variant::FreeRace))
         .add_systems(
             Update,
             (
                 input::sample,
+                crate::post_race::update,
                 update,
                 crate::drive_actions,
                 crate::drive_tick,
@@ -354,4 +375,134 @@ fn start_vehicle() -> Vec<u32> {
         .owner
         .vehicle
         .clone()
+}
+
+fn post(app: &App) -> &crate::post_race::PostRace {
+    app.world().resource::<crate::post_race::PostRace>()
+}
+
+fn results(app: &App) -> Vec<crate::post_race::Row> {
+    crate::post_race::table(
+        app.world().resource::<Driving>(),
+        Some(app.world().resource::<time_trial::Trial>()),
+    )
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn retire_from_race_shows_the_results_on_every_circuit() {
+    use crate::post_race::{Cell, Stage};
+    use grid_tools::race::{Out, Status};
+    use grid_tools::route::{DONINGTON, ISTANBUL_PARK, NURBURGRING};
+    big_stack(|| {
+        for (route, models) in [
+            (DONINGTON, &["lac"][..]),
+            (NURBURGRING, &["bmw"][..]),
+            (ISTANBUL_PARK, &["lac", "bmw"][..]),
+        ] {
+            let mut app = race_app_with(route, models, 2, false);
+            keys(&mut app).press(KeyCode::KeyW);
+            while ticks(&app) < 500 {
+                app.update();
+            }
+            keys(&mut app).release(KeyCode::KeyW);
+            tap(&mut app, KeyCode::Escape);
+            // Up wraps to the last button, Retire from Race; Yes by default.
+            tap(&mut app, KeyCode::ArrowUp);
+            tap(&mut app, KeyCode::Enter);
+            tap(&mut app, KeyCode::Enter);
+            assert_eq!(post(&app).stage, Stage::Results, "{route}");
+            assert!(!app.world().resource::<PauseMenu>().open);
+            {
+                let d = app.world().resource::<Driving>();
+                let o = d.opponents.as_ref().unwrap();
+                assert!(o.standings.over(), "{route}");
+                assert_eq!(o.standings.status(0), Status::Out(Out::Retired));
+            }
+            let rows = results(&app);
+            eprintln!("retire_results route={route} rows={rows:?}");
+            assert_eq!(rows.len(), OPPONENTS + 1);
+            assert_eq!(
+                rows.iter().map(|r| r.position).collect::<Vec<_>>(),
+                (1..=OPPONENTS + 1).collect::<Vec<_>>()
+            );
+            let player = rows.iter().find(|r| r.car == 0).unwrap();
+            assert!(matches!(player.time, Cell::Out(Out::Retired, _)));
+            // Every opponent racing on was estimated (the human did not finish).
+            for r in rows.iter().filter(|r| r.car != 0) {
+                assert!(r.estimated || matches!(r.time, Cell::Out(..)), "{route} {r:?}");
+            }
+            let vehicles: Vec<&str> = rows.iter().map(|r| r.vehicle.as_str()).collect();
+            if models.contains(&"bmw") {
+                assert!(vehicles.iter().any(|v| v.contains("BMW")), "{vehicles:?}");
+            }
+            // The race is frozen behind the results.
+            let frozen = digest(&app);
+            for _ in 0..20 {
+                app.update();
+            }
+            assert_eq!(digest(&app), frozen);
+            // Restart Race (the fourth pill) after its confirmation.
+            for _ in 0..3 {
+                tap(&mut app, KeyCode::ArrowRight);
+            }
+            tap(&mut app, KeyCode::Enter);
+            keys(&mut app).press(KeyCode::Enter);
+            app.update();
+            keys(&mut app).release(KeyCode::Enter);
+            assert_eq!(post(&app).stage, Stage::Hidden);
+            let d = app.world().resource::<Driving>();
+            assert_eq!((d.segment, d.runtime.ticks), (1, 1), "{route}");
+            assert!(!d.opponents.as_ref().unwrap().standings.over());
+        }
+    });
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn a_finished_race_goes_through_stats_to_classified_results() {
+    use crate::post_race::{Cell, Stage};
+    big_stack(|| {
+        // One lap at Donington with the ported AI driving the player's car.
+        let mut app = race_app_with(grid_tools::route::DONINGTON, &["lac"], 1, true);
+        while post(&app).stage == Stage::Hidden {
+            app.update();
+            assert!(ticks(&app) < 12_000, "no finish");
+        }
+        assert_eq!(post(&app).stage, Stage::Stats);
+        assert!(app.world().resource::<time_trial::Trial>().finished());
+        let rows = results(&app);
+        let player = rows.iter().find(|r| r.car == 0).unwrap().clone();
+        let view = post(&app).view(&rows, &Labels::default());
+        eprintln!(
+            "finish_stats tick={} position={} best={:?} title={}",
+            ticks(&app),
+            player.position,
+            player.best,
+            view.title
+        );
+        assert!(player.best.is_some());
+        assert!(view.title.starts_with("post_race_stats_position"));
+        // Continue: the race is ended and classified.
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(post(&app).stage, Stage::Results);
+        let d = app.world().resource::<Driving>();
+        assert!(d.opponents.as_ref().unwrap().standings.over());
+        let rows = results(&app);
+        eprintln!("finish_results rows={rows:?}");
+        assert_eq!(rows.len(), OPPONENTS + 1);
+        // Times rise down the table: the winner's total, then growing gaps.
+        let mut last = 0.;
+        for (i, r) in rows.iter().enumerate() {
+            match r.time {
+                Cell::Total(t) => assert!(i == 0 && t > 60.),
+                Cell::Gap(g) => {
+                    assert!(i > 0 && g >= last, "{r:?}");
+                    last = g;
+                }
+                Cell::Out(..) | Cell::Running => {}
+            }
+        }
+        assert!(matches!(rows[0].time, Cell::Total(_)));
+    });
 }

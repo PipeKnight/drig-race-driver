@@ -7,4 +7,5 @@ rust-version.workspace = true
 [dependencies]
 grid-formats = { path = "../grid-formats" }
 grid-tools = { path = "../grid-tools" }
+grid-world = { path = "../grid-world" }
 bevy = { version = "=0.19.1", default-features = false, features = ["3d", "ui_bevy_render", "bevy_audio", "dds", "png"] }

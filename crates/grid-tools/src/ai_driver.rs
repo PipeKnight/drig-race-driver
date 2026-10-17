@@ -208,6 +208,11 @@ impl Line {
         [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
     }
 
+    /// The racing-line points in link order (the HUD's minimap outline).
+    pub fn points(&self) -> &[[f32; 3]] {
+        &self.points
+    }
+
     /// Arc length of the racing-line point nearest to `p` (global search).
     pub fn arc(&self, p: [f32; 3]) -> f32 {
         self.project(p, None).1

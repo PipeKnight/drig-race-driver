@@ -37,7 +37,7 @@ Grammar:
 | `[input]` | `device`, `*_deadzone`, `*_saturation` | as `--input` | `--input` |
 | `[ai]` | `difficulty` (0..1 or `normal`), `catchup` (`rd_N_star`, `on` = `rd_3_star`, `off`), `choreographer`, `mistakes` (`on`/`off`) | 0.606, `rd_3_star`, on, on (AI_DRIVER_PORT.md, "Mistakes, failures and race pacing") | `--ai` |
 | `[sound]` | `effects` | 0..100, percent (default 100): the pause menu's Effects Volume, engine and tyre sound | none |
-| `[osd]` | `lap_timer`, `position` | `on` (default) / `off`: the pause menu's Screen Setup, HUD lap/times and race position blocks | none |
+| `[osd]` | `lap_timer`, `position`, `minimap`, `dials` | `on` (default) / `off`: the pause menu's Screen Setup, the HUD's lap group, race position, minimap and dial (docs/RACE_HUD.md) | none |
 | | `speed_units` | `kph` (default) or `mph` | none |
 | `[diagnostics]` | `free_look` | `yaw,pitch` | legacy `GRID_FREE_LOOK` |
 | | `effects_camera` | `x,y,z,lx,ly,lz` | `GRID_EFFECTS_CAMERA` |

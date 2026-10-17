@@ -2858,6 +2858,7 @@ dependencies = [
  "bevy",
  "grid-formats",
  "grid-tools",
+ "grid-world",
 ]
 
 [[package]]
