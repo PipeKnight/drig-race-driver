@@ -71,8 +71,9 @@ pub struct Zone {
 
 /// Every zone. AUTHORED landscape layout for thumbs: pedals at the bottom
 /// corners (a 6.7-inch phone makes them about 25 x 34 mm), handbrake and
-/// gears next to them, small buttons (at least about 13 x 11 mm) at the top
-/// left and bottom centre. The race HUD (F353) draws on top of the zones.
+/// gears next to them, small buttons (at least about 15 x 9.5 mm) at the top
+/// centre (the driving status panel covers the top left) and bottom centre.
+/// The race HUD (F353) draws on top of the zones.
 /// Menu zones sit at the side edges, clear of the centred pause menu.
 pub const ZONES: [Zone; BUTTONS + 1] = {
     use self::Button::*;
@@ -91,11 +92,11 @@ pub const ZONES: [Zone; BUTTONS + 1] = {
         z(Throttle, Drive, Rect::new(0.83, 0.50, 1.00, 1.00), "GAS"),
         z(GearUp, Drive, Rect::new(0.70, 0.50, 0.82, 0.73), "GEAR +"),
         z(GearDown, Drive, Rect::new(0.70, 0.75, 0.82, 1.00), "GEAR -"),
-        z(Pause, Drive, Rect::new(0.00, 0.00, 0.09, 0.16), "II"),
-        z(Recentre, Drive, Rect::new(0.10, 0.00, 0.19, 0.16), "CENTRE"),
+        z(Pause, Drive, Rect::new(0.45, 0.00, 0.55, 0.14), "II"),
+        z(Recentre, Drive, Rect::new(0.33, 0.00, 0.43, 0.14), "CENTRE"),
         z(ChangeView, Drive, Rect::new(0.39, 0.86, 0.49, 1.00), "VIEW"),
         z(LookBack, Drive, Rect::new(0.51, 0.86, 0.61, 1.00), "LOOK"),
-        z(Pause, Menu, Rect::new(0.00, 0.00, 0.09, 0.16), "II"),
+        z(Pause, Menu, Rect::new(0.45, 0.00, 0.55, 0.14), "II"),
         z(MenuUp, Menu, Rect::new(0.00, 0.28, 0.12, 0.50), "UP"),
         z(MenuDown, Menu, Rect::new(0.00, 0.52, 0.12, 0.74), "DOWN"),
         z(MenuLeft, Menu, Rect::new(0.00, 0.78, 0.12, 1.00), "<"),
@@ -340,9 +341,15 @@ fn present(
 /// owner's phone at its default density, [I]), while the race HUD and the
 /// pause menu are laid out in desktop pixels. In touch mode the UI is scaled
 /// so the window is at least 720 UI pixels high.
-fn ui_scale(window: Query<&Window, With<PrimaryWindow>>, mut scale: ResMut<UiScale>) {
-    if let Some(w) = window.iter().next().filter(|w| w.height() > 0.) {
-        let s = (w.height() / 720.).min(1.);
+fn ui_scale(camera: Query<&Camera, With<crate::ViewerCamera>>, mut scale: ResMut<UiScale>) {
+    // The HUD camera's target: the window, or the image of a --render capture.
+    let height = camera
+        .iter()
+        .next()
+        .and_then(Camera::logical_target_size)
+        .map(|s| s.y);
+    if let Some(h) = height.filter(|h| *h > 0.) {
+        let s = (h / 720.).min(1.);
         if (scale.0 - s).abs() > 1e-3 {
             scale.0 = s;
         }
@@ -406,11 +413,11 @@ mod tests {
         let h = Held::map(gear, Layer::Drive, true, true);
         assert!(h.down(GearUp) && h.down(GearDown));
         // Re-centre only with tilt.
-        assert!(Held::map([(0.15, 0.05)], Layer::Drive, false, true).down(Recentre));
-        assert!(!Held::map([(0.15, 0.05)], Layer::Drive, false, false).down(Recentre));
+        assert!(Held::map([(0.38, 0.05)], Layer::Drive, false, true).down(Recentre));
+        assert!(!Held::map([(0.38, 0.05)], Layer::Drive, false, false).down(Recentre));
         // The menu layer reuses the corners for navigation, and Pause stays.
         let h = Held::map(
-            [(0.05, 0.6), (0.95, 0.9), (0.02, 0.02)],
+            [(0.05, 0.6), (0.95, 0.9), (0.5, 0.02)],
             Layer::Menu,
             true,
             true,

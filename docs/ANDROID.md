@@ -105,8 +105,8 @@ Tilt and touch are not original GRID inputs, so the layout and the defaults are 
 | BRAKE | bottom left, 17 % × 50 % | Brake, held (0 or 1) |
 | HAND | right of BRAKE | Hand Brake, held |
 | GEAR + / GEAR − | left of GAS, only with the manual gearbox | Gear Up / Gear Down, one shift per tap |
-| II | top left | Pause (opens the pause menu; in the menu it goes back one step) |
-| CENTRE | right of II, only with tilt | re-centre the tilt neutral |
+| II | top centre | Pause (opens the pause menu; in the menu it goes back one step) |
+| CENTRE | left of II, only with tilt | re-centre the tilt neutral |
 | VIEW / LOOK | bottom centre | Change View; Look Back while held |
 
 A thin bar above VIEW/LOOK shows the tilt value. While the pause menu, the post-race screens or a replay own the input, the driving zones are hidden and the menu zones appear at the side edges: UP/DOWN and `<`/`>` on the left, OK and BACK on the right (BACK also leaves a replay). A finger can slide from one zone to another; the zone under it counts each frame. At most 8 touches count (Bevy issue #16798).
