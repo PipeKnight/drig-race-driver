@@ -34,6 +34,28 @@ powershell -NoProfile -File tools\build_android.ps1
 
 "Debug" means signed with this PC's Android debug key (`%USERPROFILE%\.android\debug.keystore`, created by AGP on first use). The key differs per machine, so APK hashes differ between machines; the `.so` hash does not depend on it.
 
+## Installing the APK yourself (no adb)
+
+1. Copy the APK to the phone: connect it by USB in "File transfer" mode and copy `grid-<revision>-debug.apk` (from `C:\Dev\Reassembly\local\android\apk\`) into `Download`. Sending it to yourself or using a cloud drive also works.
+2. On the phone, open the file in Files (Xiaomi: File Manager) and tap it. Android asks you to allow that app to "install unknown apps"; allow it once.
+3. If Play Protect warns about an unknown developer, choose "Install anyway". The APK is signed with this PC's debug key.
+4. The app is called **GRID Reassembly**. To update it, install a newer APK over it. That works only while the signing key stays the same (the same PC). Otherwise uninstall first, which also deletes the pushed data.
+
+Requirements: Android 12 (API 31) or newer, a 64-bit ARM phone (all three owner phones qualify).
+
+### What the app needs, and what does not work yet
+
+- **The game data is not in the APK.** The app reads it from its own folder: `Internal storage/Android/data/org.reassembly.grid/files/` (`settings.ini`, `private/`, `Grid/`, listed below).
+- **Without the data the app closes right after start** [I: `main` exits on the error; not seen on a phone]. The cause is logged to logcat (`adb logcat -s grid`), but nothing is shown on screen; an error screen is P10 work.
+- **Getting the data there without adb:** Android 11+ blocks phone file managers from `Android/data`. Copying from Windows Explorer over USB (MTP) into that folder still works on many phones, but Android does not guarantee it [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). Not tested on the owner's phones. Steps:
+  1. install and start the app once, so Android creates the folder;
+  2. stage the data on the PC: `powershell -NoProfile -File tools\push_android_data.ps1 -Stage C:\Temp\grid-phone`;
+  3. copy the **contents** of `C:\Temp\grid-phone` into `Android/data/org.reassembly.grid/files/`.
+  If Explorer does not show `Android/data`, only adb (below) or P10 can place the data.
+- **The reliable path is adb** (below). **P10** (folder picker: copy from `Documents/GRID` inside the app) removes the PC from the process.
+- **No controls:** there is no touch, tilt or on-screen input yet (P11). The pushed `settings.ini` turns the autopilot on, so the car drives itself. A Bluetooth keyboard may work through GameActivity, but this is untested.
+- **Not measured:** frame rate, tick time, thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
+
 ## Game data on the phone (development path; P10 replaces it)
 
 The phone needs a subset of the owner's own installation (about 250 MB) plus the private CD01 table. Nothing of it goes into Git or the APK.
