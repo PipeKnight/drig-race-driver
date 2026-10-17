@@ -63,7 +63,7 @@ def main():
     report.update(pause_silent_after_20_ms=True, reset_exact=True, stopped_engine_silent=True, rpm_note_rises=True, source_telemetry_exact=True, source_ticks=1000)
     report["identities"] = {str(path.relative_to(ROOT)): sha(path) for path in (
         ROOT / "crates/grid-tools/src/engine_audio.rs",
-        ROOT / "crates/grid-tools/src/bin/grid-engine-audio.rs",
+        ROOT / "crates/grid-probes/src/bin/grid-engine-audio.rs",
         ROOT / "crates/grid-app/src/engine_sound.rs",
         ROOT / "crates/grid-app/src/main.rs",
         ROOT / "Cargo.lock",

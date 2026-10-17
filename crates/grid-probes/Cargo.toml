@@ -1,0 +1,813 @@
+[package]
+name = "grid-probes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+# One-off research probes moved out of grid-tools (docs/TOOLCHAIN.md, "Build
+# and test cost"). Same binary names and outputs; not a default member, so
+# `cargo build` and `cargo test` at the root skip them. Build with
+# `cargo build --release -p grid-probes [--bin NAME]`.
+autotests = false
+autobenches = false
+
+[features]
+# Validation only: forwards grid-tools' hardware RCPPS/RSQRTPS switch.
+hw-sse = ["grid-tools/hw-sse"]
+
+[dependencies]
+grid-formats = { path = "../grid-formats" }
+grid-world = { path = "../grid-world" }
+grid-tools = { path = "../grid-tools" }
+
+# Every probe: no unit-test harness (none has a #[test]). A new probe works
+# without an entry here; add one to keep `cargo test --workspace` lean.
+
+[[bin]]
+name = "grid-assisted-steering"
+path = "src/bin/grid-assisted-steering.rs"
+test = false
+
+[[bin]]
+name = "grid-assists-drive"
+path = "src/bin/grid-assists-drive.rs"
+test = false
+
+[[bin]]
+name = "grid-audio-bank"
+path = "src/bin/grid-audio-bank.rs"
+test = false
+
+[[bin]]
+name = "grid-audio-crossfade"
+path = "src/bin/grid-audio-crossfade.rs"
+test = false
+
+[[bin]]
+name = "grid-audio-list"
+path = "src/bin/grid-audio-list.rs"
+test = false
+
+[[bin]]
+name = "grid-audio-setup"
+path = "src/bin/grid-audio-setup.rs"
+test = false
+
+[[bin]]
+name = "grid-binxml"
+path = "src/bin/grid-binxml.rs"
+test = false
+
+[[bin]]
+name = "grid-body-impact"
+path = "src/bin/grid-body-impact.rs"
+test = false
+
+[[bin]]
+name = "grid-body-impulse"
+path = "src/bin/grid-body-impulse.rs"
+test = false
+
+[[bin]]
+name = "grid-body-pool-trace"
+path = "src/bin/grid-body-pool-trace.rs"
+test = false
+
+[[bin]]
+name = "grid-body-tuning"
+path = "src/bin/grid-body-tuning.rs"
+test = false
+
+[[bin]]
+name = "grid-candidate-grid"
+path = "src/bin/grid-candidate-grid.rs"
+test = false
+
+[[bin]]
+name = "grid-car-collision"
+path = "src/bin/grid-car-collision.rs"
+test = false
+
+[[bin]]
+name = "grid-collision-callback"
+path = "src/bin/grid-collision-callback.rs"
+test = false
+
+[[bin]]
+name = "grid-collision-damage"
+path = "src/bin/grid-collision-damage.rs"
+test = false
+
+[[bin]]
+name = "grid-collision-mesh"
+path = "src/bin/grid-collision-mesh.rs"
+test = false
+
+[[bin]]
+name = "grid-collision"
+path = "src/bin/grid-collision.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-bias"
+path = "src/bin/grid-contact-bias.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-collection"
+path = "src/bin/grid-contact-collection.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-groups"
+path = "src/bin/grid-contact-groups.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-inverse"
+path = "src/bin/grid-contact-inverse.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-material"
+path = "src/bin/grid-contact-material.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-preparation"
+path = "src/bin/grid-contact-preparation.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-ray"
+path = "src/bin/grid-contact-ray.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-reduction"
+path = "src/bin/grid-contact-reduction.rs"
+test = false
+
+[[bin]]
+name = "grid-contact-rows"
+path = "src/bin/grid-contact-rows.rs"
+test = false
+
+[[bin]]
+name = "grid-convex-distance"
+path = "src/bin/grid-convex-distance.rs"
+test = false
+
+[[bin]]
+name = "grid-corrected-physical-frame"
+path = "src/bin/grid-corrected-physical-frame.rs"
+test = false
+
+[[bin]]
+name = "grid-cqtc-contacts"
+path = "src/bin/grid-cqtc-contacts.rs"
+test = false
+
+[[bin]]
+name = "grid-cqtc"
+path = "src/bin/grid-cqtc.rs"
+test = false
+
+[[bin]]
+name = "grid-damage-boxes"
+path = "src/bin/grid-damage-boxes.rs"
+test = false
+
+[[bin]]
+name = "grid-damage-region"
+path = "src/bin/grid-damage-region.rs"
+test = false
+
+[[bin]]
+name = "grid-damage-straight"
+path = "src/bin/grid-damage-straight.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-contact-limit"
+path = "src/bin/grid-deformation-contact-limit.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-impact"
+path = "src/bin/grid-deformation-impact.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-initialization"
+path = "src/bin/grid-deformation-initialization.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-layout"
+path = "src/bin/grid-deformation-layout.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-physical-frame"
+path = "src/bin/grid-deformation-physical-frame.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-preparation"
+path = "src/bin/grid-deformation-preparation.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-publication"
+path = "src/bin/grid-deformation-publication.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-sample"
+path = "src/bin/grid-deformation-sample.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-settle"
+path = "src/bin/grid-deformation-settle.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-source"
+path = "src/bin/grid-deformation-source.rs"
+test = false
+
+[[bin]]
+name = "grid-deformation-volume"
+path = "src/bin/grid-deformation-volume.rs"
+test = false
+
+[[bin]]
+name = "grid-deforming-physical-frame"
+path = "src/bin/grid-deforming-physical-frame.rs"
+test = false
+
+[[bin]]
+name = "grid-drive-plan"
+path = "src/bin/grid-drive-plan.rs"
+test = false
+
+[[bin]]
+name = "grid-drive-replay"
+path = "src/bin/grid-drive-replay.rs"
+test = false
+
+[[bin]]
+name = "grid-drive"
+path = "src/bin/grid-drive.rs"
+test = false
+
+[[bin]]
+name = "grid-dynamics-contribution"
+path = "src/bin/grid-dynamics-contribution.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio-control-drive"
+path = "src/bin/grid-engine-audio-control-drive.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio-control"
+path = "src/bin/grid-engine-audio-control.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio-gain"
+path = "src/bin/grid-engine-audio-gain.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio-playback-drive"
+path = "src/bin/grid-engine-audio-playback-drive.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio-playback"
+path = "src/bin/grid-engine-audio-playback.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio-restart"
+path = "src/bin/grid-engine-audio-restart.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio-schedule"
+path = "src/bin/grid-engine-audio-schedule.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-audio"
+path = "src/bin/grid-engine-audio.rs"
+test = false
+
+[[bin]]
+name = "grid-engine-continuous"
+path = "src/bin/grid-engine-continuous.rs"
+test = false
+
+[[bin]]
+name = "grid-entities"
+path = "src/bin/grid-entities.rs"
+test = false
+
+[[bin]]
+name = "grid-finalize"
+path = "src/bin/grid-finalize.rs"
+test = false
+
+[[bin]]
+name = "grid-force-equations"
+path = "src/bin/grid-force-equations.rs"
+test = false
+
+[[bin]]
+name = "grid-force-view"
+path = "src/bin/grid-force-view.rs"
+test = false
+
+[[bin]]
+name = "grid-grip-history"
+path = "src/bin/grid-grip-history.rs"
+test = false
+
+[[bin]]
+name = "grid-ground"
+path = "src/bin/grid-ground.rs"
+test = false
+
+[[bin]]
+name = "grid-handling-configuration"
+path = "src/bin/grid-handling-configuration.rs"
+test = false
+
+[[bin]]
+name = "grid-handling-damage"
+path = "src/bin/grid-handling-damage.rs"
+test = false
+
+[[bin]]
+name = "grid-impact-body"
+path = "src/bin/grid-impact-body.rs"
+test = false
+
+[[bin]]
+name = "grid-impact-correction"
+path = "src/bin/grid-impact-correction.rs"
+test = false
+
+[[bin]]
+name = "grid-impact-frame"
+path = "src/bin/grid-impact-frame.rs"
+test = false
+
+[[bin]]
+name = "grid-impact-generation"
+path = "src/bin/grid-impact-generation.rs"
+test = false
+
+[[bin]]
+name = "grid-impact-producer"
+path = "src/bin/grid-impact-producer.rs"
+test = false
+
+[[bin]]
+name = "grid-impact-response"
+path = "src/bin/grid-impact-response.rs"
+test = false
+
+[[bin]]
+name = "grid-impact-step"
+path = "src/bin/grid-impact-step.rs"
+test = false
+
+[[bin]]
+name = "grid-lap-replay"
+path = "src/bin/grid-lap-replay.rs"
+test = false
+
+[[bin]]
+name = "grid-launch-slip"
+path = "src/bin/grid-launch-slip.rs"
+test = false
+
+[[bin]]
+name = "grid-leaf-query"
+path = "src/bin/grid-leaf-query.rs"
+test = false
+
+[[bin]]
+name = "grid-main-contact-response"
+path = "src/bin/grid-main-contact-response.rs"
+test = false
+
+[[bin]]
+name = "grid-markers"
+path = "src/bin/grid-markers.rs"
+test = false
+
+[[bin]]
+name = "grid-material-key"
+path = "src/bin/grid-material-key.rs"
+test = false
+
+[[bin]]
+name = "grid-mesh-overlap"
+path = "src/bin/grid-mesh-overlap.rs"
+test = false
+
+[[bin]]
+name = "grid-mesh-shape-attach"
+path = "src/bin/grid-mesh-shape-attach.rs"
+test = false
+
+[[bin]]
+name = "grid-mesh-shape-base"
+path = "src/bin/grid-mesh-shape-base.rs"
+test = false
+
+[[bin]]
+name = "grid-mesh-shape"
+path = "src/bin/grid-mesh-shape.rs"
+test = false
+
+[[bin]]
+name = "grid-multi-drive"
+path = "src/bin/grid-multi-drive.rs"
+test = false
+
+[[bin]]
+name = "grid-ornament-reach"
+path = "src/bin/grid-ornament-reach.rs"
+test = false
+
+[[bin]]
+name = "grid-owned-deformation-callback"
+path = "src/bin/grid-owned-deformation-callback.rs"
+test = false
+
+[[bin]]
+name = "grid-owner-collection"
+path = "src/bin/grid-owner-collection.rs"
+test = false
+
+[[bin]]
+name = "grid-packed-candidates"
+path = "src/bin/grid-packed-candidates.rs"
+test = false
+
+[[bin]]
+name = "grid-packed-contacts"
+path = "src/bin/grid-packed-contacts.rs"
+test = false
+
+[[bin]]
+name = "grid-packed-query"
+path = "src/bin/grid-packed-query.rs"
+test = false
+
+[[bin]]
+name = "grid-packed-shape"
+path = "src/bin/grid-packed-shape.rs"
+test = false
+
+[[bin]]
+name = "grid-packed-world"
+path = "src/bin/grid-packed-world.rs"
+test = false
+
+[[bin]]
+name = "grid-physical-constructor"
+path = "src/bin/grid-physical-constructor.rs"
+test = false
+
+[[bin]]
+name = "grid-physical-frame"
+path = "src/bin/grid-physical-frame.rs"
+test = false
+
+[[bin]]
+name = "grid-physical-material"
+path = "src/bin/grid-physical-material.rs"
+test = false
+
+[[bin]]
+name = "grid-physical-pose"
+path = "src/bin/grid-physical-pose.rs"
+test = false
+
+[[bin]]
+name = "grid-physical-response"
+path = "src/bin/grid-physical-response.rs"
+test = false
+
+[[bin]]
+name = "grid-physical-tick"
+path = "src/bin/grid-physical-tick.rs"
+test = false
+
+[[bin]]
+name = "grid-placement-plane"
+path = "src/bin/grid-placement-plane.rs"
+test = false
+
+[[bin]]
+name = "grid-placement-track"
+path = "src/bin/grid-placement-track.rs"
+test = false
+
+[[bin]]
+name = "grid-population"
+path = "src/bin/grid-population.rs"
+test = false
+
+[[bin]]
+name = "grid-pose"
+path = "src/bin/grid-pose.rs"
+test = false
+
+[[bin]]
+name = "grid-practice-drive"
+path = "src/bin/grid-practice-drive.rs"
+test = false
+
+[[bin]]
+name = "grid-preload"
+path = "src/bin/grid-preload.rs"
+test = false
+
+[[bin]]
+name = "grid-progress"
+path = "src/bin/grid-progress.rs"
+test = false
+
+[[bin]]
+name = "grid-prop-probe"
+path = "src/bin/grid-prop-probe.rs"
+test = false
+
+[[bin]]
+name = "grid-rectangle-cull"
+path = "src/bin/grid-rectangle-cull.rs"
+test = false
+
+[[bin]]
+name = "grid-replay-contacts"
+path = "src/bin/grid-replay-contacts.rs"
+test = false
+
+[[bin]]
+name = "grid-response-consumption"
+path = "src/bin/grid-response-consumption.rs"
+test = false
+
+[[bin]]
+name = "grid-serial-callback"
+path = "src/bin/grid-serial-callback.rs"
+test = false
+
+[[bin]]
+name = "grid-serial-collision-dispatch"
+path = "src/bin/grid-serial-collision-dispatch.rs"
+test = false
+
+[[bin]]
+name = "grid-source-physical"
+path = "src/bin/grid-source-physical.rs"
+test = false
+
+[[bin]]
+name = "grid-spawn"
+path = "src/bin/grid-spawn.rs"
+test = false
+
+[[bin]]
+name = "grid-standard-car"
+path = "src/bin/grid-standard-car.rs"
+test = false
+
+[[bin]]
+name = "grid-standard-properties"
+path = "src/bin/grid-standard-properties.rs"
+test = false
+
+[[bin]]
+name = "grid-steering-coefficients"
+path = "src/bin/grid-steering-coefficients.rs"
+test = false
+
+[[bin]]
+name = "grid-steering-control"
+path = "src/bin/grid-steering-control.rs"
+test = false
+
+[[bin]]
+name = "grid-steering-feedback"
+path = "src/bin/grid-steering-feedback.rs"
+test = false
+
+[[bin]]
+name = "grid-steering-geometry"
+path = "src/bin/grid-steering-geometry.rs"
+test = false
+
+[[bin]]
+name = "grid-steering-input"
+path = "src/bin/grid-steering-input.rs"
+test = false
+
+[[bin]]
+name = "grid-steering-reset"
+path = "src/bin/grid-steering-reset.rs"
+test = false
+
+[[bin]]
+name = "grid-surface-drag"
+path = "src/bin/grid-surface-drag.rs"
+test = false
+
+[[bin]]
+name = "grid-surface-mechanics"
+path = "src/bin/grid-surface-mechanics.rs"
+test = false
+
+[[bin]]
+name = "grid-surface-rows"
+path = "src/bin/grid-surface-rows.rs"
+test = false
+
+[[bin]]
+name = "grid-suspension-contact"
+path = "src/bin/grid-suspension-contact.rs"
+test = false
+
+[[bin]]
+name = "grid-suspension-context"
+path = "src/bin/grid-suspension-context.rs"
+test = false
+
+[[bin]]
+name = "grid-suspension-frame"
+path = "src/bin/grid-suspension-frame.rs"
+test = false
+
+[[bin]]
+name = "grid-suspension-prepare"
+path = "src/bin/grid-suspension-prepare.rs"
+test = false
+
+[[bin]]
+name = "grid-suspension-ranges"
+path = "src/bin/grid-suspension-ranges.rs"
+test = false
+
+[[bin]]
+name = "grid-suspension-tuning"
+path = "src/bin/grid-suspension-tuning.rs"
+test = false
+
+[[bin]]
+name = "grid-suspension"
+path = "src/bin/grid-suspension.rs"
+test = false
+
+[[bin]]
+name = "grid-track-contact"
+path = "src/bin/grid-track-contact.rs"
+test = false
+
+[[bin]]
+name = "grid-track-query"
+path = "src/bin/grid-track-query.rs"
+test = false
+
+[[bin]]
+name = "grid-triangle"
+path = "src/bin/grid-triangle.rs"
+test = false
+
+[[bin]]
+name = "grid-tuning"
+path = "src/bin/grid-tuning.rs"
+test = false
+
+[[bin]]
+name = "grid-tyre-audio"
+path = "src/bin/grid-tyre-audio.rs"
+test = false
+
+[[bin]]
+name = "grid-tyre-friction"
+path = "src/bin/grid-tyre-friction.rs"
+test = false
+
+[[bin]]
+name = "grid-tyre-grip"
+path = "src/bin/grid-tyre-grip.rs"
+test = false
+
+[[bin]]
+name = "grid-tyre-table"
+path = "src/bin/grid-tyre-table.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-bridge"
+path = "src/bin/grid-vehicle-bridge.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-chassis"
+path = "src/bin/grid-vehicle-chassis.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-force"
+path = "src/bin/grid-vehicle-force.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-handling-publication"
+path = "src/bin/grid-vehicle-handling-publication.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-handling"
+path = "src/bin/grid-vehicle-handling.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-post-force"
+path = "src/bin/grid-vehicle-post-force.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-publication"
+path = "src/bin/grid-vehicle-publication.rs"
+test = false
+
+[[bin]]
+name = "grid-vehicle-sync"
+path = "src/bin/grid-vehicle-sync.rs"
+test = false
+
+[[bin]]
+name = "grid-wall-probe"
+path = "src/bin/grid-wall-probe.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-coupling"
+path = "src/bin/grid-wheel-coupling.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-damage-trace"
+path = "src/bin/grid-wheel-damage-trace.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-damage"
+path = "src/bin/grid-wheel-damage.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-deformation-publication"
+path = "src/bin/grid-wheel-deformation-publication.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-deformation"
+path = "src/bin/grid-wheel-deformation.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-frame"
+path = "src/bin/grid-wheel-frame.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-history"
+path = "src/bin/grid-wheel-history.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-layout"
+path = "src/bin/grid-wheel-layout.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-radius"
+path = "src/bin/grid-wheel-radius.rs"
+test = false
+
+[[bin]]
+name = "grid-wheel-step"
+path = "src/bin/grid-wheel-step.rs"
+test = false

@@ -2868,6 +2868,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "grid-probes"
+version = "0.1.0"
+dependencies = [
+ "grid-formats",
+ "grid-tools",
+ "grid-world",
+]
+
+[[package]]
 name = "grid-tools"
 version = "0.1.0"
 dependencies = [

@@ -200,10 +200,10 @@ def main():
     source_row = source_drive(out, native) if args.source_drive else None
     files = [native, ROOT / "target/debug/grid-engine-audio-control.exe", ROOT / "target/release/grid-engine-audio-control.exe",
              ROOT / "tools/probe_engine_audio_control.c", ROOT / "tools/build_engine_audio_control_probe.cmd",
-             ROOT / "crates/grid-tools/src/engine_audio_control.rs", ROOT / "crates/grid-tools/src/bin/grid-engine-audio-control.rs", Path(__file__), ini]
+             ROOT / "crates/grid-tools/src/engine_audio_control.rs", ROOT / "crates/grid-probes/src/bin/grid-engine-audio-control.rs", Path(__file__), ini]
     if args.source_drive:
         files += [ROOT / f"target/{profile}/grid-engine-audio-control-drive.exe" for profile in ("debug", "release")]
-        files += [ROOT / "crates/grid-tools/src/bin/grid-engine-audio-control-drive.rs"]
+        files += [ROOT / "crates/grid-probes/src/bin/grid-engine-audio-control-drive.rs"]
         files += [ROOT / "crates/grid-formats/src/audio_car_setup.rs", Path("C:/Program Files (x86)/Steam/steamapps/common/Grid/audio/carsetup.bin"), Path("C:/Program Files (x86)/Steam/steamapps/common/Grid/audio/CMSamples.dic")]
     files += list(out.rglob("*.bin")) + list(out.rglob("*.txt"))
     report = dict(passed=True, groups=rows, source_drive=source_row, guards=guard_rows, identities={str(p): digest(p) for p in files},

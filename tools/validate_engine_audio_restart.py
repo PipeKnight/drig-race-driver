@@ -105,7 +105,7 @@ def main():
     for label,exe,prefix in profiles:
         if label=='native-repeat':continue
         execute(exe,[*prefix,q,out/f'guard-logger-{label}.bin'],out/f'guard-logger-{label}.txt',False);guards.append(dict(name='logger-domain',profile=label,rejected=True))
-    files=[native,profiles[2][1],profiles[3][1],Path(__file__),ROOT/'tools/probe_engine_audio_restart.c',ROOT/'tools/build_engine_audio_restart_probe.cmd',ROOT/'crates/grid-tools/src/engine_audio_restart.rs',ROOT/'crates/grid-tools/src/bin/grid-engine-audio-restart.rs']+list(out.glob('*.bin'))+list(out.glob('*.txt'))
+    files=[native,profiles[2][1],profiles[3][1],Path(__file__),ROOT/'tools/probe_engine_audio_restart.c',ROOT/'tools/build_engine_audio_restart_probe.cmd',ROOT/'crates/grid-tools/src/engine_audio_restart.rs',ROOT/'crates/grid-probes/src/bin/grid-engine-audio-restart.rs']+list(out.glob('*.bin'))+list(out.glob('*.txt'))
     report=dict(passed=True,summary=summary,guards=guards,scope='Whole unchanged 423210 and real table helpers with supplied virtual playback/group services. Commands and accepted seeks compared; not the original backend implementation, real device or audible fidelity.',identities={str(f):sha(f) for f in files})
     (out/'validation.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps({k:v for k,v in report.items() if k!='identities'}))
 if __name__=='__main__':main()

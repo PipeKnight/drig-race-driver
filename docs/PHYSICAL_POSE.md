@@ -26,7 +26,7 @@ Seventeen malformed guards reject ordinarily (exits below256/no native fault): t
 
 ## Reproduction, failures and provenance
 
-- Sources: `tools/probe_physical_pose.c`, `tools/build_physical_pose_probe.cmd`, `tools/validate_physical_pose.py`, `crates/grid-world/src/physical_pose.rs`, `crates/grid-tools/src/bin/grid-physical-pose.rs`.
+- Sources: `tools/probe_physical_pose.c`, `tools/build_physical_pose_probe.cmd`, `tools/validate_physical_pose.py`, `crates/grid-world/src/physical_pose.rs`, `crates/grid-probes/src/bin/grid-physical-pose.rs`.
 - Analysis SHA256 `aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514`.
 - Native SHA256 `879ec96e3bf23787e8c141d0e1518fab28973cfb56107eef2f52fa1a77ec6a6a`.
 - Final request SHA256 `7073f6f1b6873f2f547f7ce033ff1932ad028978d72aaabfd2dc8c5e9cb09521`.

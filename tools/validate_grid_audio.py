@@ -67,7 +67,7 @@ def main():
         if not path.exists():path=a.game_root/'audio/Music'/path.name
         assert path.exists() and path.stat().st_size==b['bytes'],path
         bank_sizes.append(dict(name=b['name'],bytes=b['bytes'],relative=str(path.relative_to(a.game_root))))
-    paths=[Path(__file__),dictionary,bank,ROOT/'crates/grid-formats/src/audio_dictionary.rs',ROOT/'crates/grid-tools/src/bin/grid-audio-bank.rs',ROOT/'target/debug/grid-audio-bank.exe',ROOT/'target/release/grid-audio-bank.exe']
+    paths=[Path(__file__),dictionary,bank,ROOT/'crates/grid-formats/src/audio_dictionary.rs',ROOT/'crates/grid-probes/src/bin/grid-audio-bank.rs',ROOT/'target/debug/grid-audio-bank.exe',ROOT/'target/release/grid-audio-bank.exe']
     report=dict(passed=True,banks=count,samples=sum(len(b['samples']) for b in banks),dictionary_rows=len(expected),all_bank_sizes_agree=True,bank_sizes=bank_sizes,selected_samples=rows,all_pcm_words_exact=True,native_non_pcm_prefix_bytes=4,identities={str(q):sha(q) for q in paths},pyav=av.__version__,ffmpeg_versions=av.library_versions,scope='Selected zero-flag WIP PCM16 payload after native-loader-confirmed opaque four-byte prefix. Complete remaining PCM bytes and decoded words match source. No whole original loader/mixer execution, unknown-channel decoding or auditory/fidelity review claimed.')
     with a.output.open('x') as file:json.dump(report,file,indent=2)
     print(json.dumps({k:report[k] for k in ['passed','banks','samples','dictionary_rows','all_bank_sizes_agree','all_pcm_words_exact','pyav']}))

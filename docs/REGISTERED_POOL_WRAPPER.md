@@ -24,7 +24,7 @@ Eighteen malformed-input, output-preservation and capture-control guards pass. T
 
 Public source:
 
-- `crates/grid-tools/src/bin/grid-body-pool-trace.rs`: bounded source capture and production answers.
+- `crates/grid-probes/src/bin/grid-body-pool-trace.rs`: bounded source capture and production answers.
 - `tools/probe_body_pool_wrapper.c`, `tools/build_body_pool_wrapper_probe.cmd`: unchanged original registered wrapper execution on owned storage.
 - `tools/validate_body_pool_wrapper.py`, `tools/audit_body_pool_wrapper.py`: complete comparison, carrier controls, guards and current-file audit.
 

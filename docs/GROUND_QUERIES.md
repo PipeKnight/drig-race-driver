@@ -23,7 +23,7 @@ Mesh: **119,784 triangles**, **32,767 hierarchy nodes**, zero skipped degenerate
 Initial warnings-denied Clippy found an unnecessary range-index loop; changed it to enumerated iteration. Workspace Clippy subsequently passes. Test/build/lint logs and the complete private source/query comparison live under `local/behavior/ground-*`; `tools/validate_ground_queries.py` preserves evidence using new files only. The diagnostic `grid-ground` refuses output outside `local/` or replacement of an existing report.
 
 ```powershell
-cargo run -p grid-tools --bin grid-ground --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid' local/queries.tsv local/ground-new.tsv
+cargo run -p grid-probes --bin grid-ground --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid' local/queries.tsv local/ground-new.tsv
 ```
 
 Input rows are tab-separated name, start XYZ and end XYZ. Source hashes, all expected/native hits and uncertainty are recorded in `local/behavior/ground-validation/validation.json`.

@@ -1,5 +1,8 @@
 [workspace]
-members = ["crates/grid-formats", "crates/grid-world", "crates/grid-tools", "crates/grid-app"]
+members = ["crates/grid-formats", "crates/grid-world", "crates/grid-tools", "crates/grid-app", "crates/grid-probes"]
+# grid-probes (one-off research probes) builds only when named: `-p grid-probes`
+# or `--workspace` (docs/TOOLCHAIN.md, "Build and test cost").
+default-members = ["crates/grid-formats", "crates/grid-world", "crates/grid-tools", "crates/grid-app"]
 resolver = "3"
 
 [workspace.package]

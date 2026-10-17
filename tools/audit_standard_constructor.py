@@ -123,7 +123,7 @@ def main():
     result['source_prelude']=a.source_prelude
     result['mutable_prelude']=a.mutable_prelude
     result['outer_wheels']=a.outer_wheels
-    result['current_inputs']={str(path):v.digest(path) for path in [native,image,Path(__file__),v.ROOT/'tools/validate_standard_constructor.py',v.ROOT/'tools/probe_standard_constructor.c',v.ROOT/'crates/grid-tools/src/standard_car.rs',v.ROOT/'crates/grid-tools/src/bin/grid-standard-car.rs']}
+    result['current_inputs']={str(path):v.digest(path) for path in [native,image,Path(__file__),v.ROOT/'tools/validate_standard_constructor.py',v.ROOT/'tools/probe_standard_constructor.c',v.ROOT/'crates/grid-tools/src/standard_car.rs',v.ROOT/'crates/grid-probes/src/bin/grid-standard-car.rs']}
     if a.outer_wheels:
         for name in ['tools/outer_wheel_regions_probe.h','tools/probe_outer_wheels_standard.c']:result['current_inputs'][name]=v.digest(v.ROOT/name)
     (out/'audit.json').write_text(json.dumps(result,indent=2));print(json.dumps({k:v for k,v in result.items() if k not in ['reports','guards']}))

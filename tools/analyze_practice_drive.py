@@ -84,7 +84,7 @@ def main():
                                    trace_bytes_exact=True if len(group)>1 else None,
                                    complete_final_words_exact=True if len(group)>1 else None)
     identities = {str(path.relative_to(ROOT)): sha(path) for path in [
-        ROOT/'crates/grid-tools/src/bin/grid-practice-drive.rs', ROOT/'crates/grid-tools/src/source_vehicle.rs',
+        ROOT/'crates/grid-probes/src/bin/grid-practice-drive.rs', ROOT/'crates/grid-tools/src/source_vehicle.rs',
         ROOT/'crates/grid-world/src/lap_timing.rs', ROOT/'crates/grid-world/src/time_trial.rs',
         ROOT/'crates/grid-tools/src/time_trial.rs', ROOT/'local/body-contact-directions.bin',
         ROOT/'local/body-impact-parameters.bin', ROOT/'local/deformation-parameters.bin',

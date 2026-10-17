@@ -34,7 +34,7 @@ The plain `car_loader.xml` is a parameterized loader template, with `%...%` toke
 `grid-formats/src/binxml.rs` is standard-library-only. `grid-binxml` writes create-new private field reports with UTF-8 values encoded as hex for exact comparison. `tools/validate_binxml.py` walks the captured dependency set and its JPK entries, compares all native rows, and reconstructs private readable XML. No selected compressed binary-XML entry was skipped.
 
 ```powershell
-cargo run -p grid-tools --bin grid-binxml --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid\tracks\europe\donington\route_0\progress_track.xml' local/binxml/new-progress-report.tsv
+cargo run -p grid-probes --bin grid-binxml --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid\tracks\europe\donington\route_0\progress_track.xml' local/binxml/new-progress-report.tsv
 ```
 
 Synthetic tests cover multilingual UTF-8, text-ID sentinel versus valid string zero, tree/attribute ownership, truncations, malformed sections/IDs and invalid byte sequences. One test initially treated a different start index on a zero-length child range as invalid; corrected it to a genuinely out-of-bounds range. **30 format tests pass**, and workspace Clippy passes; logs under `local/binxml/` retain failed and corrected results.

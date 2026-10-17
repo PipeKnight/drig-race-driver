@@ -74,7 +74,7 @@ def main():
     parameters = [ROOT/'local/body-contact-directions.bin', ROOT/'local/body-impact-parameters.bin',
                   ROOT/'local/deformation-parameters.bin']
     identities = {str(path): digest(path) for path in
-                  [a.log, Path(__file__), ROOT/'crates/grid-tools/src/bin/grid-drive-replay.rs', *parameters]}
+                  [a.log, Path(__file__), ROOT/'crates/grid-probes/src/bin/grid-drive-replay.rs', *parameters]}
     results = []
     for segment in segments:
         raw, observed, failed_tick = inputs(a.log, segment, a.continuation)

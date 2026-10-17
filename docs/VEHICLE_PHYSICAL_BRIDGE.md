@@ -41,7 +41,7 @@ Fresh shared F154 regression matches **896 cases/3,179 shapes/671,576 words** in
 
 ## Reproduction and provenance
 
-- Sources: `crates/grid-world/src/vehicle_bridge.rs`, shared `physical_pose.rs`, `crates/grid-tools/src/bin/grid-vehicle-bridge.rs`, `tools/probe_vehicle_bridge.c`, `tools/build_vehicle_bridge_probe.cmd`, `tools/validate_vehicle_bridge.py`.
+- Sources: `crates/grid-world/src/vehicle_bridge.rs`, shared `physical_pose.rs`, `crates/grid-probes/src/bin/grid-vehicle-bridge.rs`, `tools/probe_vehicle_bridge.c`, `tools/build_vehicle_bridge_probe.cmd`, `tools/validate_vehicle_bridge.py`.
 - Reports: `local/behavior/vehicle-bridge-20261010-debug-final-02/validation.json`, `vehicle-bridge-20261010-release-final-03/validation.json`. Initial debug01 precedes the added native spin guard; final02/03 include it.
 - Shared regressions: `physical-pose-20261010-bridge-regression-debug-04/validation.json`, `physical-pose-20261010-bridge-regression-release-05/validation.json`.
 - Static evidence: `local/behavior/state-bridge-aligned-20261010.json` and `state-bridge-reset-aligned-20261010.json`; successful Ghidra `20261010T1908489509535Z/` and reset survey path recorded in `state-bridge-reset-survey-20261010.log`. Complete B12710 ends B12908; ABC7B0 ends ABC7C9; B24E70 ends B24EE5; B0F2F0 ends B0F479; B13E10 ends B14264. Adjacent function bytes are excluded.

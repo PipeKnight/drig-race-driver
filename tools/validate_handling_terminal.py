@@ -106,7 +106,7 @@ def main():
              Path('tools/handling_query_probe.h'), Path('tools/validate_handling_damage.py'),
              Path('tools/validate_collision_damage.py'), Path('tools/validate_damage_region.py'),
              Path('crates/grid-world/src/vehicle_handling.rs'),
-             Path('crates/grid-tools/src/bin/grid-handling-damage.rs')]
+             Path('crates/grid-probes/src/bin/grid-handling-damage.rs')]
     identities = {str(path): sha(path) for path in paths}
     items = list(fixtures())
     rows, total, stats = [], 0, {}

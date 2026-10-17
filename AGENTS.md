@@ -29,7 +29,7 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
   Intermediate cargo output goes to `C:/cargo-build` through `~/.cargo/config.toml` `build-dir`. Final binaries stay in `target/`.
 - New worktree: before the first cargo command, run `powershell -NoProfile -File tools\seed_build_dir.ps1`. It copies the shared seed build (C:\cargo-build\seed) into this worktree's empty build dir, so dependencies such as Bevy do not rebuild. Measured: 107 s instead of 1607 s.
 - Check levels (docs/TOOLCHAIN.md, "Build and test cost"):
-  - while working: tests of the changed package only (`cargo td -p CRATE`);
+  - while working: tests of the changed package only (`cargo td -p CRATE`). One-off research probes live in `crates/grid-probes` and build only with `-p grid-probes` or `--workspace`;
   - before a push: `cargo t -- --include-ignored` with absolute GRID_* paths, `cargo clippy --workspace --all-targets -- -D warnings`, the solo-lap identity check and `grid-soak quick`, all in the release profile;
   - long soak runs and the separate `soak` profile: only overnight, or when the change targets robustness.
   Avoid building extra profiles you do not need.

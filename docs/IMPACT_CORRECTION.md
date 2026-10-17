@@ -40,7 +40,7 @@ Twenty-six malformed guards reject ordinarily (exit below256/no fault marker): f
 
 ## Evidence and failures
 
-- Implementation: `crates/grid-world/src/impact_correction.rs`, `crates/grid-tools/src/bin/grid-impact-correction.rs`; probe/build/validator: `tools/probe_impact_correction.c`, `tools/build_impact_correction_probe.cmd`, `tools/validate_impact_correction.py`.
+- Implementation: `crates/grid-world/src/impact_correction.rs`, `crates/grid-probes/src/bin/grid-impact-correction.rs`; probe/build/validator: `tools/probe_impact_correction.c`, `tools/build_impact_correction_probe.cmd`, `tools/validate_impact_correction.py`.
 - Analysis SHA256 `aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4f34514`.
 - Final native SHA256 `b1248de7fa8fb655d3598609da110e805099c88ba18f7762dc9ae36175885f57`.
 - Request SHA256 `4341ffa6b5042c0c4def8f95a95091ca1c99a4c7aed546f6139379ff7c8e1be1`.
