@@ -16,9 +16,8 @@ The experimental keyboard driving build is available now. On 12 October the owne
 | Down / S | Brake; hold near rest to select reverse and drive backward |
 | Left / A, Right / D | Steer |
 | Space | Handbrake |
-| P | Pause / resume |
-| R | Reset car and simulation to the start |
-| Escape | Close |
+| Escape or P (pad: Start) | Pause menu, as in the original: Continue, Instant Replay (not yet), Restart, Options (sound, screen, wheel controls), Retire from Race / Finish Test Drive (closes the app). Arrows/Enter/Escape and Ctrl (Reset Vehicle); pad D-pad or left stick, A, B and X ([pause menu](PAUSE_MENU.md)) |
+| R | Restart the event from the start |
 | X / Z | Gear up / down (manual gearbox only) |
 
 **Driver aids** follow the original options ([research](DRIVING_ASSISTS_RESEARCH.md)): Traction Control, Stability Control, Braking Assist and Automatic/Manual transmission, plus keyboard or wheel steering. The default is every aid on, automatic, keyboard. Put them in an `[assists]` section of `localsettings.ini`, for example `tcs=off stability=off braking=off gearbox=manual` ([settings file](SETTINGS.md)); the older `localssists.txt` and `set GRID_PLAY_ASSISTS=...` still work. The app takes `--assists SPEC` or `--assists-file PATH` directly. In manual, reverse is Z from neutral; braking does not select reverse.

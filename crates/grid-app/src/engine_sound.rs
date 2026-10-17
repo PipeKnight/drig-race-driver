@@ -178,11 +178,19 @@ fn update(
     mut sound: ResMut<EngineSound>,
     driving: Res<super::Driving>,
     input: Res<ButtonInput<KeyCode>>,
-    sinks: Query<&AudioSink, (With<AudioPlayer<EngineSource>>, Without<OpponentEngine>)>,
+    mut sinks: Query<&mut AudioSink, (With<AudioPlayer<EngineSource>>, Without<OpponentEngine>)>,
     mut started: Local<bool>,
     trial: Option<Res<super::time_trial::Trial>>,
     mut opponent_engines: Query<(&OpponentEngine, Option<&mut AudioSink>)>,
+    menu: Option<Res<super::pause_menu::PauseMenu>>,
 ) {
+    // Pause menu Effects Volume.
+    let gain = menu.map_or(1., |m| m.values.gain());
+    for mut sink in &mut sinks {
+        if sink.volume() != bevy::audio::Volume::Linear(gain) {
+            sink.set_volume(bevy::audio::Volume::Linear(gain));
+        }
+    }
     if sound.failure.swap(0, Ordering::Relaxed) != 0 && !sound.muted {
         sound.muted = true;
         eprintln!("engine_audio version=2 event=decoder_failed muted=true reset_key=R");
@@ -230,7 +238,8 @@ fn update(
                     + (pose[13] - player[13]).powi(2)
                     + (pose[14] - player[14]).powi(2))
                 .sqrt();
-                let volume = OPPONENT_GAIN * OPPONENT_REFERENCE / distance.max(OPPONENT_REFERENCE);
+                let volume =
+                    gain * OPPONENT_GAIN * OPPONENT_REFERENCE / distance.max(OPPONENT_REFERENCE);
                 sink.set_volume(bevy::audio::Volume::Linear(volume));
             }
         }

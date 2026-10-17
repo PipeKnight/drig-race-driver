@@ -1,0 +1,357 @@
+//! Whole-race checks with the shared world, the AI field and the race
+//! manager: the menu's pause is bit-identical and Restart Race resets all of it.
+use super::*;
+use crate::{Driving, Opponents, input, time_trial};
+use std::path::Path;
+
+const OPPONENTS: usize = 3;
+
+/// A 2-lap race at Donington like `settings/race.ini`, player at the back.
+fn race_app() -> App {
+    use grid_tools::ai_driver::{AiData, AiDriver, Line, Parameters};
+    use grid_tools::{car::Car, route::Route};
+    let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+    let root = Path::new(&root);
+    let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+    let table = read("GRID_CONTACT_DIRECTIONS");
+    let events = Some(
+        grid_tools::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS")).unwrap(),
+    );
+    let deformation = Some(
+        grid_tools::deformation_parameters::read(&read("GRID_DEFORMATION_PARAMETERS")).unwrap(),
+    );
+    let route = Route::default();
+    let car = Car::default();
+    let player = OPPONENTS;
+    let slots: Vec<String> = std::iter::once(player)
+        .chain((0..=OPPONENTS).filter(|&i| i != player))
+        .map(|i| format!("slot_{i:02}"))
+        .collect();
+    let entries: Vec<(&str, &Car)> = slots.iter().map(|s| (s.as_str(), &car)).collect();
+    let mut runtime =
+        grid_tools::source_vehicle::Runtime::load(root, &route, &car, &slots[0], 200679).unwrap();
+    runtime.body_events = events;
+    runtime.enable_lap_timing(root).unwrap();
+    let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::load_deforming_on(
+        root,
+        &route,
+        &entries,
+        &table,
+        events,
+        deformation,
+    )
+    .unwrap();
+    multi.enable_dynamic_props(root).unwrap();
+    let ai = AiData::load(root, route.path(), "touring", car.stem()).unwrap();
+    let settings = grid_tools::ai_pacing::Settings::default();
+    let drivers = (0..OPPONENTS)
+        .map(|i| {
+            AiDriver::new(
+                Parameters::new(&ai, settings.difficulty, |_| 1.).unwrap(),
+                0x5eed + i as u32 + 1,
+            )
+        })
+        .collect();
+    let start = {
+        let gate = &grid_tools::lap_progress::load_route(root, &route)
+            .unwrap()
+            .progress
+            .gates[0];
+        std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
+    };
+    let positions: Vec<[f32; 3]> = std::iter::once(&runtime)
+        .chain(multi.cars.iter().skip(1))
+        .map(|c| {
+            let p = c.pose();
+            [p[12], p[13], p[14]]
+        })
+        .collect();
+    let laps = 2;
+    let standings = grid_tools::race::Standings::new(&ai.line, laps, start, &positions);
+    let pacing = grid_tools::ai_pacing::Field::new(
+        grid_tools::ai_pacing::Data::load(root, &settings).unwrap(),
+        settings.clone(),
+        &ai.line,
+        laps,
+        start,
+        &positions,
+        0,
+        vec![1.; OPPONENTS + 1],
+        0x5eed,
+    );
+    let opponents = Opponents {
+        multi,
+        drivers,
+        car_ai: vec![ai.clone(); OPPONENTS],
+        ai,
+        standings,
+        names: (0..=OPPONENTS).map(|i| format!("car {i}")).collect(),
+        autopilot: None,
+        after_finish: None,
+        throttles: vec![0.; OPPONENTS],
+        pacing,
+    };
+    let mut trial =
+        time_trial::Trial::new(laps, grid_tools::time_trial::Mode::Events, false).unwrap();
+    trial.race = true;
+    trial.state = grid_tools::time_trial::State::new(
+        laps,
+        f64::from(grid_tools::source_vehicle::DELTA),
+        crate::START_SEQUENCE_SECONDS,
+    )
+    .unwrap();
+    let mut app = App::new();
+    app.add_message::<AppExit>()
+        .insert_resource(ButtonInput::<KeyCode>::default())
+        .insert_resource(trial)
+        .insert_resource(Driving {
+            runtime,
+            geometry: None,
+            paused: false,
+            failure: None,
+            notices: Vec::new(),
+            scripted_ticks: None,
+            scripted: Default::default(),
+            handbrake_from: None,
+            last_controls: None,
+            segment: 0,
+            started: std::time::Instant::now(),
+            opponents: Some(opponents),
+            auto_reset: Default::default(),
+            reset_line: Some(Line::load(root, route.path()).unwrap()),
+        })
+        .insert_resource(input::Actions::new(
+            input::ActionMap::keyboard(),
+            input::Pads::Off,
+        ))
+        .init_resource::<ShiftQueue>()
+        .insert_resource(PauseMenu::new(
+            Variant::FreeRace,
+            false,
+            true,
+            Options::default(),
+        ))
+        .add_systems(
+            Update,
+            (
+                input::sample,
+                update,
+                crate::drive_actions,
+                crate::drive_tick,
+            )
+                .chain(),
+        );
+    app
+}
+
+/// FNV-1a over every car's vehicle and physical words (as grid-opponent-race
+/// prints), plus the lap, event clock, race, props and race manager records.
+fn digest(app: &App) -> (Vec<u64>, String) {
+    let d = app.world().resource::<Driving>();
+    let o = d.opponents.as_ref().unwrap();
+    let cars = std::iter::once(&d.runtime)
+        .chain(o.multi.cars.iter().skip(1))
+        .map(|c| {
+            let owner = &c.state.car.owner;
+            let mut hash = 0xcbf2_9ce4_8422_2325u64;
+            for &word in owner.vehicle.iter().chain(&owner.physical) {
+                hash = (hash ^ u64::from(word)).wrapping_mul(0x100_0000_01b3);
+            }
+            hash
+        })
+        .collect();
+    let props = o.multi.dynamic_props().unwrap();
+    let rest = format!(
+        "ticks={} {} lap={:?} trial={:?} standings={:?} props={} contacts={} retired={:?} pacing={:?} throttles={:?}",
+        d.runtime.ticks,
+        o.multi.ticks,
+        d.runtime.lap,
+        app.world().resource::<time_trial::Trial>().state,
+        o.standings.classification(&o.names),
+        props.events.len(),
+        o.multi.last_car_contacts,
+        (0..=OPPONENTS)
+            .map(|i| o.multi.retirement(i).is_some())
+            .collect::<Vec<_>>(),
+        o.pacing.log,
+        o.throttles,
+    );
+    (cars, rest)
+}
+
+fn ticks(app: &App) -> u64 {
+    app.world().resource::<Driving>().runtime.ticks
+}
+
+fn keys(app: &mut App) -> Mut<'_, ButtonInput<KeyCode>> {
+    app.world_mut().resource_mut::<ButtonInput<KeyCode>>()
+}
+
+/// One menu key press and release (two frames).
+fn tap(app: &mut App, key: KeyCode) {
+    keys(app).press(key);
+    app.update();
+    keys(app).release(key);
+    app.update();
+}
+
+/// Hold W (throttle) and D (right) until the player's tick count.
+fn drive_to(app: &mut App, target: u64) {
+    keys(app).press(KeyCode::KeyW);
+    keys(app).press(KeyCode::KeyD);
+    while ticks(app) < target {
+        app.update();
+    }
+    assert_eq!(ticks(app), target);
+}
+
+fn big_stack(f: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(256 * 1024 * 1024)
+        .spawn(f)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn pause_menu_freezes_the_race_and_resumes_bit_identically() {
+    big_stack(|| {
+        const PAUSE_AT: u64 = 300;
+        const END: u64 = 600;
+        let mut straight = race_app();
+        drive_to(&mut straight, END);
+        let expected = digest(&straight);
+
+        let mut paused = race_app();
+        drive_to(&mut paused, PAUSE_AT);
+        let before = digest(&paused);
+        keys(&mut paused).release(KeyCode::KeyD);
+        tap(&mut paused, KeyCode::Escape);
+        assert!(paused.world().resource::<PauseMenu>().open);
+        assert!(paused.world().resource::<Driving>().paused);
+        // Browse the menu: Options > Sound Setup, change and undo the effects
+        // volume, back out; throttle held, many frames.
+        for key in [KeyCode::ArrowDown; 3] {
+            tap(&mut paused, key);
+        }
+        tap(&mut paused, KeyCode::Enter);
+        tap(&mut paused, KeyCode::Enter);
+        tap(&mut paused, KeyCode::ArrowLeft);
+        assert_eq!(paused.world().resource::<PauseMenu>().values.effects, 90);
+        tap(&mut paused, KeyCode::ControlLeft);
+        assert_eq!(paused.world().resource::<PauseMenu>().values.effects, 100);
+        for _ in 0..50 {
+            paused.update();
+        }
+        tap(&mut paused, KeyCode::Escape);
+        tap(&mut paused, KeyCode::Escape);
+        for key in [KeyCode::ArrowUp; 3] {
+            tap(&mut paused, key);
+        }
+        assert_eq!(paused.world().resource::<PauseMenu>().screen, Screen::Main);
+        assert!(paused.world().resource::<PauseMenu>().open);
+        // Nothing moved while the menu was open.
+        assert_eq!(digest(&paused), before);
+        assert_eq!(ticks(&paused), PAUSE_AT);
+        // Continue, with the steering held as before.
+        keys(&mut paused).press(KeyCode::KeyD);
+        keys(&mut paused).press(KeyCode::Enter);
+        paused.update();
+        keys(&mut paused).release(KeyCode::Enter);
+        assert!(!paused.world().resource::<PauseMenu>().open);
+        assert_eq!(ticks(&paused), PAUSE_AT + 1);
+        drive_to(&mut paused, END);
+        assert_eq!(digest(&paused), expected);
+    });
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn restart_race_resets_cars_damage_ai_timing_and_props() {
+    big_stack(|| {
+        const RUN: u64 = 900;
+        let start = digest(&race_app());
+
+        let mut app = race_app();
+        assert_eq!(digest(&app), start);
+        // A first attempt flat out and straight on from the back of the grid:
+        // into the field and off at the first corner.
+        keys(&mut app).press(KeyCode::KeyW);
+        let mut car_contacts = 0;
+        while ticks(&app) < 2 * RUN {
+            app.update();
+            car_contacts += app
+                .world()
+                .resource::<Driving>()
+                .opponents
+                .as_ref()
+                .unwrap()
+                .multi
+                .last_car_contacts;
+        }
+        {
+            let d = app.world().resource::<Driving>();
+            let o = d.opponents.as_ref().unwrap();
+            let damage = |v: &[u32]| {
+                [0, 4, 8, 0x10, 0x14, 0x28, 0x2c, 0x30, 0x34].map(|k| v[(0xcdf0 + k) / 4])
+            };
+            let pristine = damage(&start_vehicle());
+            let damaged = damage(&d.runtime.state.car.owner.vehicle) != pristine;
+            let props = o.multi.dynamic_props().unwrap().events.len();
+            eprintln!(
+                "restart_before damage_changed={damaged} props={props} car_contacts={car_contacts} lap={:?}",
+                d.runtime.lap.as_ref().map(|l| l.lap_number())
+            );
+            // The attempt really left damage, contacts or broken props behind.
+            assert!(damaged || props > 0 || car_contacts > 0);
+            assert_ne!(digest(&app), start);
+        }
+        keys(&mut app).release(KeyCode::KeyW);
+        keys(&mut app).release(KeyCode::KeyD);
+        tap(&mut app, KeyCode::Escape);
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.world().resource::<PauseMenu>().screen,
+            Screen::Confirm(Confirm::Restart)
+        );
+        // Yes is the default answer.
+        keys(&mut app).press(KeyCode::Enter);
+        app.update();
+        keys(&mut app).release(KeyCode::Enter);
+        {
+            let d = app.world().resource::<Driving>();
+            assert!(!app.world().resource::<PauseMenu>().open);
+            assert!(!d.paused);
+            assert_eq!(d.segment, 1);
+            assert!(d.notices.is_empty() && d.failure.is_none());
+            // The restart frame's own tick already ran (one countdown tick).
+            assert_eq!(d.runtime.ticks, 1);
+        }
+        // A fresh race given the same input: one frame without keys, then
+        // throttle and steering held.
+        let mut fresh = race_app();
+        fresh.update();
+        assert_eq!(digest(&app), digest(&fresh));
+        // And the restarted race replays the fresh one exactly.
+        drive_to(&mut app, RUN);
+        drive_to(&mut fresh, RUN);
+        assert_eq!(digest(&app), digest(&fresh));
+    });
+}
+
+/// The player's vehicle words at the grid, for the damage report.
+fn start_vehicle() -> Vec<u32> {
+    let app = race_app();
+    app.world()
+        .resource::<Driving>()
+        .runtime
+        .state
+        .car
+        .owner
+        .vehicle
+        .clone()
+}

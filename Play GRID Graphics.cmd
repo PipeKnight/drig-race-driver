@@ -35,7 +35,7 @@ if defined GRID_GRAPHICS_CONTACTS if exist "local\body-impact-parameters.bin" se
 if defined GRID_GRAPHICS_CONTACTS if exist "local\deformation-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --deformation local\deformation-parameters.bin"
 set "GRID_GRAPHICS_LOG=local\graphics\manual-%RANDOM%-%RANDOM%.log"
 echo Experimental graphics branch - source sky lighting, layered car/track materials and smooth tyres.
-echo Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit.
+echo Arrows/WASD drive; Space handbrake; Escape/P pause menu; R restart.
 echo Resolution %GRID_GRAPHICS_RESOLUTION%; maximize the window for your display.
 if defined GRID_GRAPHICS_REFLECTIONS echo Environment reflections enabled.
 if defined GRID_GRAPHICS_WHEELS echo Experimental wheel filtering enabled; geometry filtering is player-only.

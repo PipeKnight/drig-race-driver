@@ -6,7 +6,8 @@
 //! AUTHORED: the placement happens on the tick the detector fires. The
 //! original first fades the screen out (`0.9 - clamp(0.02 |v|, 0, 0.4)` s
 //! [I]) and places the car when it is black; the fade, the camera hold and
-//! the pause menu's "reset car" requester are not ported.
+//! the pause menu's confirmation fade are not ported. The pause menu's Reset
+//! Vehicle uses [`place`] (grid-app, docs/PAUSE_MENU.md).
 use super::{Runtime, multi::MultiRuntime};
 use crate::ai_driver::Line;
 use grid_world::{Error, reset_lines::Detector};
@@ -50,23 +51,35 @@ impl PlayerReset {
         ) {
             return Ok(None);
         }
-        let (point, heading) = line.reset_target([pose[12], pose[13], pose[14]]);
-        match shared {
-            Some(multi) => {
-                std::mem::swap(player, &mut multi.cars[0]);
-                let result = multi.place_at_rest(0, point, heading);
-                std::mem::swap(player, &mut multi.cars[0]);
-                result?;
-            }
-            None => player.place_at_rest(point, heading)?,
-        }
-        Ok(Some(Reset { point, heading }))
+        place(player, shared, line).map(Some)
     }
 
     /// `R` restarts the whole event.
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+}
+
+/// The placement itself: the player's car at rest on the line point nearest
+/// its position. Also the pause menu's Reset Vehicle (`c_pause_reset_car`,
+/// the same ResetLinesManager placement [I]). A retired player is refused.
+pub fn place(
+    player: &mut Runtime,
+    shared: Option<&mut MultiRuntime>,
+    line: &Line,
+) -> Result<Reset, Error> {
+    let pose = player.pose();
+    let (point, heading) = line.reset_target([pose[12], pose[13], pose[14]]);
+    match shared {
+        Some(multi) => {
+            std::mem::swap(player, &mut multi.cars[0]);
+            let result = multi.place_at_rest(0, point, heading);
+            std::mem::swap(player, &mut multi.cars[0]);
+            result?;
+        }
+        None => player.place_at_rest(point, heading)?,
+    }
+    Ok(Reset { point, heading })
 }
 
 #[cfg(test)]

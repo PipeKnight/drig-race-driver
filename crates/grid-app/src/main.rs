@@ -25,6 +25,7 @@ mod ground_detail;
 mod ground_effect_assets;
 mod input;
 mod particles;
+mod pause_menu;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
@@ -1560,7 +1561,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
                 );
                 println!(
-                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; Escape/P (pad Start) pause menu: Continue, Restart, Options, Retire from Race (races) or Finish Test Drive (practice); R restarts. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route and car only."
@@ -2197,7 +2198,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(actions) = drive_input.take() {
+            // The original's pause menu (docs/PAUSE_MENU.md): Race Day free
+            // race for timed events, test drive for free practice.
+            let menu = pause_menu::PauseMenu::new(
+                if trial_laps.is_some() {
+                    pause_menu::Variant::FreeRace
+                } else {
+                    pause_menu::Variant::TestDrive
+                },
+                input_settings.device == input::Device::Wheel,
+                driving.reset_line.is_some(),
+                pause_menu::initial_options(&profile, Some(&actions)),
+            );
             input::install(&mut app, actions);
+            pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
@@ -3249,33 +3263,12 @@ fn drive_tick(
 fn drive_actions(
     mut driving: ResMut<Driving>,
     input: Res<ButtonInput<KeyCode>>,
-    actions: Res<input::Actions>,
+    actions: Option<Res<input::Actions>>,
     mut exit: MessageWriter<AppExit>,
     mut trial: Option<ResMut<time_trial::Trial>>,
 ) {
     if input.just_pressed(KeyCode::KeyR) {
-        driving.report("reset", driving.last_controls.unwrap_or_default());
-        driving.runtime.reset();
-        let driving = &mut *driving;
-        driving.auto_reset.reset();
-        if let Some(opponents) = &mut driving.opponents {
-            opponents.multi.reset();
-            for driver in &mut opponents.drivers {
-                driver.reset();
-            }
-            let positions = opponents.positions(&driving.runtime);
-            opponents.standings.reset(&opponents.ai.line, &positions);
-            opponents.pacing.reset(&opponents.ai.line, &positions);
-            opponents.after_finish = None;
-        }
-        driving.segment += 1;
-        driving.last_controls = None;
-        driving.failure = None;
-        driving.notices.clear();
-        driving.paused = false;
-        if let Some(trial) = trial.as_mut() {
-            trial.reset();
-        }
+        restart(&mut driving, trial.as_deref_mut());
     }
     // F after the player's finish: "Finish Race" ends the race now; cars
     // still racing are estimated or, below 5 mph, retired [V 0x90FCD0].
@@ -3295,15 +3288,39 @@ fn drive_actions(
             }
         }
     }
-    if actions.pressed(input::Action::Pause) && !trial.as_ref().is_some_and(|t| t.finished()) {
-        driving.paused = !driving.paused;
-        driving.report(
-            if driving.paused { "pause" } else { "resume" },
-            driving.last_controls.unwrap_or_default(),
-        );
-    }
-    if input.just_pressed(KeyCode::Escape) {
+    // Without the pause menu (no input layer) Escape still exits.
+    if actions.is_none() && input.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
+    }
+}
+/// Restart Race / R: the whole event from its start (`StateRestartRace`):
+/// every car, the shared world with its props, damage, the AI field and
+/// race manager, timing and the countdown.
+fn restart(driving: &mut Driving, trial: Option<&mut time_trial::Trial>) {
+    driving.report("reset", driving.last_controls.unwrap_or_default());
+    driving.runtime.reset();
+    driving.auto_reset.reset();
+    if let Some(opponents) = &mut driving.opponents {
+        opponents.multi.reset();
+        for driver in &mut opponents.drivers {
+            driver.reset();
+        }
+        let positions = opponents.positions(&driving.runtime);
+        opponents.standings.reset(&opponents.ai.line, &positions);
+        opponents.pacing.reset(&opponents.ai.line, &positions);
+        opponents.after_finish = None;
+        if let Some(pilot) = &mut opponents.autopilot {
+            pilot.reset();
+        }
+        opponents.throttles.iter_mut().for_each(|t| *t = 0.);
+    }
+    driving.segment += 1;
+    driving.last_controls = None;
+    driving.failure = None;
+    driving.notices.clear();
+    driving.paused = false;
+    if let Some(trial) = trial {
+        trial.reset();
     }
 }
 fn drive_exit_log(driving: Res<Driving>, mut exits: MessageReader<AppExit>) {
@@ -3346,9 +3363,17 @@ fn drive_present(
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
     free_look: Option<Res<free_look::FreeLook>>,
     mut refused: Local<Option<&'static str>>,
-    render_clock: (Option<Res<Time<Fixed>>>, Option<Res<graphics::Settings>>),
+    render_clock: (
+        Option<Res<Time<Fixed>>>,
+        Option<Res<graphics::Settings>>,
+        Option<Res<pause_menu::PauseMenu>>,
+    ),
 ) {
-    let (fixed, graphics) = render_clock;
+    let (fixed, graphics, menu) = render_clock;
+    // Pause menu Screen Setup (lap timer, race position, speed unit).
+    let osd = menu
+        .as_ref()
+        .map_or_else(pause_menu::Options::default, |m| m.values);
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
             let field =
@@ -3566,11 +3591,13 @@ fn drive_present(
     let status = if let Some(failure) = &driving.failure {
         format!("Simulation paused: {failure}")
     } else if driving.paused {
-        "Paused - P resumes; R resets".into()
+        String::new()
     } else {
         terminal
             .as_deref()
-            .unwrap_or("Space: handbrake | C: look back | RMB: look around | P: pause | R: reset")
+            .unwrap_or(
+                "Space: handbrake | C: look back | RMB: look around | Esc/P: pause | R: restart",
+            )
             .into()
     };
     // The latest retirements after a car's own tick stage failed.
@@ -3610,6 +3637,7 @@ fn drive_present(
             },
             o.standings.classification(&o.names).join("\n")
         ),
+        (Some(_), Some(t)) if !osd.position && t.driving() => String::new(),
         (Some(o), Some(t)) if t.driving() => {
             // Gaps as time at the player's speed (floor 10 m/s).
             let v = driving.runtime.velocity();
@@ -3641,13 +3669,25 @@ fn drive_present(
         |t| {
             if t.finished() || !t.driving() {
                 format!("{race}{}", t.hud())
+            } else if !osd.lap_timer {
+                race
             } else {
                 format!("{race}{}\n\n{progress}", t.hud())
             }
         },
     );
+    let progress = if osd.lap_timer || trial.is_some() {
+        progress
+    } else {
+        String::new()
+    };
+    let (shown_speed, unit) = if osd.mph {
+        (speed / 1.609_344, "mph")
+    } else {
+        (speed, "km/h")
+    };
     let text = format!(
-        "{heading}\n{speed:.0} km/h   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
+        "{heading}\n{shown_speed:.0} {unit}   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
     );
     for mut value in &mut hud {
         if value.0 != text {
@@ -3660,11 +3700,11 @@ fn drive_present(
             "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry}{lap} | tick {} | {}",
             driving.runtime.ticks,
             driving.failure.as_deref().unwrap_or(if driving.paused {
-                "Paused; P resumes; R resets"
+                "Paused"
             } else if let Some(message) = terminal.as_deref() {
                 message
             } else {
-                "Arrows drive; Space handbrake; P pause; R reset"
+                "Arrows drive; Space handbrake; Esc/P pause; R restart"
             })
         );
     }
@@ -4281,7 +4321,16 @@ mod driving_tests {
                 input::Pads::Off,
             ))
             .init_resource::<input::ShiftQueue>()
-            .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
+            .insert_resource(pause_menu::PauseMenu::new(
+                pause_menu::Variant::FreeRace,
+                false,
+                false,
+                Default::default(),
+            ))
+            .add_systems(
+                Update,
+                (input::sample, pause_menu::update, drive_actions, drive_tick).chain(),
+            );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
@@ -4505,7 +4554,16 @@ mod driving_tests {
                 input::Pads::Off,
             ))
             .init_resource::<input::ShiftQueue>()
-            .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
+            .insert_resource(pause_menu::PauseMenu::new(
+                pause_menu::Variant::FreeRace,
+                false,
+                false,
+                Default::default(),
+            ))
+            .add_systems(
+                Update,
+                (input::sample, pause_menu::update, drive_actions, drive_tick).chain(),
+            );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);

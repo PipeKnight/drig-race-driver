@@ -20,7 +20,8 @@ use std::collections::VecDeque;
 
 pub const HELP: &str = "--input SPEC: controller settings, comma-separated: device=auto|keyboard|pad|wheel (keyboard and pad: assisted steering; wheel: unassisted, like the original's input/device_type), steering_deadzone/steering_saturation, accelerate_deadzone/accelerate_saturation, brake_deadzone/brake_saturation 0..1 (original Advanced Controls overrides; default: the preset's values). The same keys go in an [input] section of the --assists-file. A gamepad uses the original XInput pad preset read from ActionMap/actionMapPreset4.xml of the game folder.";
 
-/// The 23 in-game actions of table 0xE4DEE8, in id order.
+/// The 23 in-game actions of table 0xE4DEE8, in id order, then the
+/// original's menu actions used by the pause menu (preset `<!-- Menu Actions -->`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Accelerate,
@@ -46,9 +47,16 @@ pub enum Action {
     Gear5,
     Gear6,
     GearReverse,
+    MenuLeft,
+    MenuRight,
+    MenuUp,
+    MenuDown,
+    MenuSelect,
+    MenuBack,
+    MenuButton3,
 }
 
-pub const ACTIONS: usize = 23;
+pub const ACTIONS: usize = 30;
 
 const ALL: [Action; ACTIONS] = {
     use Action::*;
@@ -76,6 +84,13 @@ const ALL: [Action; ACTIONS] = {
         Gear5,
         Gear6,
         GearReverse,
+        MenuLeft,
+        MenuRight,
+        MenuUp,
+        MenuDown,
+        MenuSelect,
+        MenuBack,
+        MenuButton3,
     ]
 };
 
@@ -104,6 +119,13 @@ const NAMES: [&str; ACTIONS] = [
     "Gear 5",
     "Gear 6",
     "Gear Reverse",
+    "Menu Left",
+    "Menu Right",
+    "Menu Up",
+    "Menu Down",
+    "Menu Select",
+    "Menu Back",
+    "Menu Button3",
 ];
 
 impl Action {
@@ -217,8 +239,9 @@ impl ActionMap {
     /// The prototype's keyboard keys with the calibrations of the original
     /// keyboard preset 0 (steering uniPos dz 0.2 sat 1, pedals dz 0 sat 1,
     /// the rest constructor defaults). WASD are AUTHORED aliases; A steers, so
-    /// Gear Up moves from A to X. C looks back and P pauses as before (the
-    /// original uses End and Escape; Escape exits the prototype).
+    /// Gear Up moves from A to X. C looks back (the original uses End). Pause
+    /// is Escape as in the original, with P kept as before. The menu keys are
+    /// preset 0's: arrows and numpad 4/6/8/2, Enter, Escape, Ctrl (Button3).
     pub fn keyboard() -> Self {
         use Action::*;
         let pedal = Calibration::new(CalibrationType::UniPositive, 0., 1., 0.5);
@@ -234,7 +257,18 @@ impl ActionMap {
             (GearUp, &[KeyCode::KeyX], button),
             (GearDown, &[KeyCode::KeyZ], button),
             (LookBack, &[KeyCode::KeyC], button),
-            (Pause, &[KeyCode::KeyP], button),
+            (Pause, &[KeyCode::Escape, KeyCode::KeyP], button),
+            (MenuLeft, &[KeyCode::ArrowLeft, KeyCode::Numpad4], button),
+            (MenuRight, &[KeyCode::ArrowRight, KeyCode::Numpad6], button),
+            (MenuUp, &[KeyCode::ArrowUp, KeyCode::Numpad8], button),
+            (MenuDown, &[KeyCode::ArrowDown, KeyCode::Numpad2], button),
+            (MenuSelect, &[KeyCode::Enter, KeyCode::NumpadEnter], button),
+            (MenuBack, &[KeyCode::Escape], button),
+            (
+                MenuButton3,
+                &[KeyCode::ControlLeft, KeyCode::ControlRight],
+                button,
+            ),
         ] {
             for key in keys {
                 map.bind(action, Source::Key(*key), calibration);
@@ -244,7 +278,7 @@ impl ActionMap {
     }
 
     /// The pad bindings of a shipped preset: every `Axis` of the preset's own
-    /// device for the 23 in-game actions. Keyboard entries in pad presets
+    /// device for the 23 in-game actions and the menu actions. Keyboard entries in pad presets
     /// (Escape, B, Return) are left to the prototype's keyboard map. Returns
     /// the unknown axis names, which become unmapped bindings.
     pub fn pad(preset: &action_map::ActionMap) -> (Self, Vec<String>) {
@@ -404,6 +438,18 @@ impl Actions {
     /// 827D10 human record: accel and brake clamped to [0, 1], handbrake
     /// above 0.5, steering s = SteerR - SteerL. The port's command is
     /// positive toward the left, so it receives SteerL - SteerR (-s).
+    /// The first binding's calibration of `action` (Advanced Controls).
+    pub fn calibration(&self, action: Action) -> Option<Calibration> {
+        self.map.bindings[action as usize]
+            .first()
+            .map(|b| b.calibration)
+    }
+
+    /// [`ActionMap::calibrate`] on the live map (the pause menu's Advanced).
+    pub fn calibrate(&mut self, action: Action, tune: Tune) -> Result<(), String> {
+        self.map.calibrate(action, tune)
+    }
+
     pub fn controls(&self) -> Controls {
         Controls {
             throttle: self.value(Action::Accelerate).clamp(0., 1.),
@@ -451,9 +497,17 @@ impl ShiftQueue {
 /// Bevy gamepad value onto the original raw range: buttons and triggers
 /// 0..1 directly, sticks -1..1 to 0.5 + 0.5 x. A connected pad's input that
 /// has not reported yet is at rest.
+///
+/// Y thumbs are flipped (1 - v), so stick up reads low like a DirectInput
+/// axis. The original flips them when its device flag +0x94 is set [D]; the
+/// shipped pad preset binds Menu Up and Look Up to biDirectionalLower [D], so
+/// the flip is taken as the default [I] (Bevy's stick Y is positive up).
 fn pad_raw(pad: &Gamepad, source: Source) -> Option<f32> {
     match source {
         Source::PadButton(b) => Some(pad.get(b).unwrap_or(0.).clamp(0., 1.)),
+        Source::PadAxis(a @ (GamepadAxis::LeftStickY | GamepadAxis::RightStickY)) => {
+            Some(0.5 - 0.5 * pad.get(a).unwrap_or(0.))
+        }
         Source::PadAxis(a) => Some(0.5 + 0.5 * pad.get(a).unwrap_or(0.)),
         _ => None,
     }

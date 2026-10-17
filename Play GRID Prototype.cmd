@@ -51,8 +51,8 @@ if defined GRID_PLAY_GRID set "GRID_EXTRA_ARGS=%GRID_EXTRA_ARGS% --grid-position
 set "GRID_PLAY_LOG=local\playtest\manual-%RANDOM%-%RANDOM%.log"
 echo Lacetti at Donington - experimental Rust/Bevy driving prototype
 echo Up/W: throttle   Down/S: brake   Left/A and Right/D: steer
-echo Space: handbrake   C: look back   P: pause/resume   R: reset   Escape: exit
-echo Gamepad: left stick or D-pad steer   RT throttle   LT brake   B handbrake   Y look back   Start pause
+echo Space: handbrake   C: look back   Escape or P: pause menu   R: restart
+echo Gamepad: left stick or D-pad steer   RT throttle   LT brake   B handbrake   Y look back   Start pause menu
 echo Manual gearbox (gearbox=manual in [assists]): X gear up, Z gear down (pad: A up, X down)
 echo Settings profile: settings\%GRID_PLAY_PROFILE%.ini %GRID_EXTRA_ARGS%
 echo Click the game window once if keyboard input does not respond.

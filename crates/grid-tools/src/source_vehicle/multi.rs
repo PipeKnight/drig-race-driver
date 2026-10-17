@@ -1219,6 +1219,77 @@ mod tests {
             .unwrap();
     }
 
+    /// Restart Race (grid-app pause menu, R): broken props are gone, the
+    /// intact boxes are armed again and the world replays a fresh one.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn reset_restores_intact_props_and_replays_a_fresh_world() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let load = || {
+                    let mut multi =
+                        MultiRuntime::lacetti(root, &["slot_00", "slot_01"], &table, events)
+                            .unwrap();
+                    multi.enable_dynamic_props(root).unwrap();
+                    multi
+                };
+                let hash = |multi: &MultiRuntime| {
+                    multi
+                        .bodies()
+                        .iter()
+                        .flatten()
+                        .chain(multi.cars.iter().flat_map(|c| &c.state.car.owner.vehicle))
+                        .fold(0xcbf29ce484222325u64, |h, &w| {
+                            (h ^ u64::from(w)).wrapping_mul(0x100000001b3)
+                        })
+                };
+                let drive = [Controls {
+                    throttle: 0.6,
+                    ..Default::default()
+                }; 2];
+                let mut multi = load();
+                let (start, bodies) = (hash(&multi), multi.bodies().len());
+                let props = multi.props.as_mut().unwrap();
+                let stacks: Vec<usize> = (props.catalog.breakables.iter().enumerate())
+                    .filter(|(_, b)| b.template.starts_with("tyrestack"))
+                    .map(|(i, _)| i)
+                    .take(2)
+                    .collect();
+                for &b in &stacks {
+                    props.queue_break(b);
+                }
+                for _ in 0..200 {
+                    multi.tick(&drive).unwrap();
+                }
+                let props = multi.dynamic_props().unwrap();
+                assert_eq!(props.events.len(), stacks.len());
+                assert!(multi.bodies().len() > bodies);
+                multi.reset();
+                let props = multi.dynamic_props().unwrap();
+                assert!(props.events.is_empty() && props.pieces.is_empty());
+                assert_eq!(multi.bodies().len(), bodies);
+                assert_eq!(hash(&multi), start);
+                let mut fresh = load();
+                for _ in 0..200 {
+                    multi.tick(&drive).unwrap();
+                    fresh.tick(&drive).unwrap();
+                }
+                assert_eq!(hash(&multi), hash(&fresh));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Playtest 7f22c32: a side-swiped board in a 12-car race stopped physics
     /// ("invalid contact-group counts or selector") because the pieces pushed
     /// the shared world past the port's old 16-body guard.

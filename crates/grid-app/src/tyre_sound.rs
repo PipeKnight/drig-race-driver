@@ -147,7 +147,16 @@ fn audibility(
     driving: Res<super::Driving>,
     engine: Option<Res<super::engine_sound::EngineSound>>,
     trial: Option<Res<super::time_trial::Trial>>,
+    menu: Option<Res<super::pause_menu::PauseMenu>>,
+    mut sinks: Query<&mut AudioSink, With<AudioPlayer<TyreSource>>>,
 ) {
+    // Pause menu Effects Volume.
+    let gain = bevy::audio::Volume::Linear(menu.map_or(1., |m| m.values.gain()));
+    for mut sink in &mut sinks {
+        if sink.volume() != gain {
+            sink.set_volume(gain);
+        }
+    }
     let audible = !engine.is_some_and(|e| e.muted)
         && !driving.paused
         && driving.failure.is_none()
