@@ -1,5 +1,17 @@
 # GRID engine project log
 
+## G087 — Restored forest ready for playable promotion (17 October 2026)
+
+Source3d12ef1/SHAf0ce990f.../release2m29s.531workspace release tests, Clippy32.58s, exactsolo statea4a35f899a490c36/11018ticks, fresh20/20quick/100000ticks pass. NativeBC/RGBA4K, side and forward30-frame sequences validated; forward0/15/29 inspected with restored far treeline, physical exits exact prior1200tick control. Limited sequence, no new full-rendered-lap or monitorFPS claim. [Forest evidence](docs/SOURCE_VEGETATION.md); private distant-sheets-gpu-validation01.json. Owner's future background detail/light request recorded. Guarded main FF/promotion/publication next; no owner action required.
+
+## G086 — Merged forest4K checks pass; forward sequence/soak running (17 October 2026)
+
+Source3d12ef1/SHAf0ce990f.../release2m29s. NativeBC4K matches prior corrected-engine view byte-for-byte; RGBA4K inspected/restored forest, common uploader retained. Side30unique-frame audit<=2.05ns/1200tick physical exit exact prior control; images0/15/29 inspected but mainly near foliage, so forward sequence now running rather than claiming distant temporal acceptance.531workspace release tests/0failed/0ignored pass; workspace Clippy and exactsolo completed, quicksoak running. [Evidence](docs/SOURCE_VEGETATION.md). Main playable not replaced; final promotion pending.
+
+## G085 — Owner accepts restored forest; background detail added to roadmap (17 October 2026)
+
+Owner positively reviewed distant-forest-comparison01, requests richer/more dimensional distant lighting/detail later. [Roadmap](docs/GRAPHICS_ROADMAP_RU.md) records lighting/depth, terrain detail, volumetric trees or normal/depth impostors and smooth4KLOD checks; current validation/promotion remains priority. [Inventory](docs/SOURCE_VEGETATION.md): all9treeplacement roots match9library roots,21closest/6lower draws;3missing cylindrical layers=1461quads. Other-container audit retained privately; naming alone is not global completeness proof. Merged renderer build/tests/motion still pending; no new owner action needed.
+
 ## G084 — Distant forest visible in matched4K; upstream P6 preserved (17 October 2026)
 
 [Forest evidence](docs/SOURCE_VEGETATION.md). Sourceafccf08/SHA92538437.../release1m56s restores three missing cylindrical layers in the same native4K view; inspected image has the previously absent distant treeline.3draws/2922triangles, known-warning-only. This is a verified missing vertex-stage correction, not proof of all original LODs/passes. Mainfb32d54 P6 merged as667dd2b, journal conflict resolved retaining both additions. Graphics launcher forest-on candidate staged with no-trees control; merged build/motion/final tests pending. Primary playable unchanged by this work; do not promote old-base candidate.
