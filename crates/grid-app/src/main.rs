@@ -1564,6 +1564,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
                 };
             }
+            "--glass-roughness" => {
+                graphics.glass_roughness(&args.next().ok_or("--glass-roughness needs 0.04..1")?)?;
+            }
             "--exposure" => {
                 graphics.exposure(&args.next().ok_or("--exposure needs EV100")?)?;
             }
@@ -2761,6 +2764,9 @@ fn setup(
                     && (!track || part.material.starts_with("car0/"))
                 {
                     car_materials::apply(name, &mut material);
+                    if name == "Window Glass" {
+                        material.perceptual_roughness = graphics.window_roughness;
+                    }
                 }
                 if name == "Tyre Tread" && (!track || part.material.starts_with("car0/")) {
                     material.normal_map_texture = tread_normal.clone();

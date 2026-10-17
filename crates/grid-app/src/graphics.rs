@@ -62,6 +62,8 @@ pub struct Settings {
     pub source_trees: bool,
     /// Fixed photographic exposure; +1EV halves scene light before tonemapping.
     pub exposure_ev100: f32,
+    /// Window-only material control; light lenses are a separate material.
+    pub window_roughness: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
     /// Diagnostic isolation of ambient occlusion and grass shadow reception.
@@ -115,6 +117,7 @@ impl Default for Settings {
             source_land: true,
             source_trees: false,
             exposure_ev100: 13.,
+            window_roughness: 0.08,
             tree_sheet_colours: false,
             ambient_occlusion: true,
             grass_receive_shadows: true,
@@ -145,6 +148,15 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn glass_roughness(&mut self, value: &str) -> Result<(), &'static str> {
+        let roughness = value.parse::<f32>().map_err(|_| "invalid glass roughness")?;
+        if !roughness.is_finite() || !(0.04..=1.0).contains(&roughness) {
+            return Err("glass roughness must be finite and 0.04..1");
+        }
+        self.window_roughness = roughness;
+        Ok(())
+    }
+
     pub fn exposure(&mut self, value: &str) -> Result<(), &'static str> {
         let ev = value.parse::<f32>().map_err(|_| "invalid exposure EV100")?;
         if !ev.is_finite() || !(6.0..=20.0).contains(&ev) {
@@ -406,6 +418,16 @@ mod graphics_settings_tests {
         for value in ["", "NaN", "inf", "0", "29.99", "-1", "3600.1"] {
             assert!(settings.capture_timeout(value).is_err());
             assert_eq!(settings.capture_timeout_seconds, Some(3600.));
+        }
+    }
+    #[test]
+    fn glass_response_control_is_bounded_without_changing_default() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.window_roughness, 0.08);
+        settings.glass_roughness("0.2").unwrap();
+        for value in ["", "NaN", "inf", "0", "0.039", "1.001"] {
+            assert!(settings.glass_roughness(value).is_err());
+            assert_eq!(settings.window_roughness, 0.2);
         }
     }
     #[test]
