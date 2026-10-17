@@ -60,6 +60,8 @@ pub struct Settings {
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
     pub source_trees: bool,
+    /// Fixed photographic exposure; +1EV halves scene light before tonemapping.
+    pub exposure_ev100: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
     /// Diagnostic isolation of ambient occlusion and grass shadow reception.
@@ -112,6 +114,7 @@ impl Default for Settings {
             layered_track: true,
             source_land: true,
             source_trees: false,
+            exposure_ev100: 13.,
             tree_sheet_colours: false,
             ambient_occlusion: true,
             grass_receive_shadows: true,
@@ -142,6 +145,15 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn exposure(&mut self, value: &str) -> Result<(), &'static str> {
+        let ev = value.parse::<f32>().map_err(|_| "invalid exposure EV100")?;
+        if !ev.is_finite() || !(6.0..=20.0).contains(&ev) {
+            return Err("exposure must be finite and 6..20 EV100");
+        }
+        self.exposure_ev100 = ev;
+        Ok(())
+    }
+
     pub fn resolution(&mut self, value: &str) -> Result<(), &'static str> {
         let (width, height) = value
             .split_once('x')
@@ -284,6 +296,7 @@ pub fn configure(
             fog.distance, fog.density_cap, fog.colour, fog.brightness, fog.base_height, fog.top_height);
     }
     println!("graphics_shadow_range metres={} cascades=4 first=18 map_size=4096 mapping=authored", settings.shadow_distance_metres);
+    println!("graphics_exposure ev100={} mode=fixed tonemapping=AgX", settings.exposure_ev100);
     commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight::NONE);
     commands.spawn(Atmosphere::earth(
@@ -291,7 +304,7 @@ pub fn configure(
     ));
     commands.entity(camera).insert((
         Hdr,
-        Exposure { ev100: 13.0 },
+        Exposure { ev100: settings.exposure_ev100 },
         Tonemapping::AgX,
         // Authored restrained warm grade; original GRID's LUT is not recovered.
         ColorGrading {
@@ -393,6 +406,18 @@ mod graphics_settings_tests {
         for value in ["", "NaN", "inf", "0", "29.99", "-1", "3600.1"] {
             assert!(settings.capture_timeout(value).is_err());
             assert_eq!(settings.capture_timeout_seconds, Some(3600.));
+        }
+    }
+    #[test]
+    fn exposure_is_bounded_and_invalid_values_preserve_previous_setting() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.exposure_ev100, 13.);
+        for value in ["6", "13.5", "20"] {
+            settings.exposure(value).unwrap();
+        }
+        for value in ["", "NaN", "inf", "-inf", "5.99", "20.01"] {
+            assert!(settings.exposure(value).is_err());
+            assert_eq!(settings.exposure_ev100, 20.);
         }
     }
     #[test]

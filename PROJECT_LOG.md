@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G105 — Sheet shading GPU check complete; owner highlight report reproduced (18 October 2026)
+
+b4be86e release1m23s, appClippy7.48s, four tree tests. Same-camera3840x2160 ordinary coverage is pixel-identical to previous verified01cbcf8. Optional savedRGB affects83622pixels/max55byte/wholemean0.032; inspected native-pixel forest comparison, changes darkening more than perceived volume, keep opt-in. Paired1200tick modes produce identical4physics exits; both30frame sequences unique/ticks1102..1162/requesterror2.05ns, first/last forward frames inspected. Known nilUUID warning only. Private sheet-gradient-validation01.json; not a full lap or remaster-tree completion.
+
+Owner reports overly pale/clipped body-neural-moving30 frame0000. Pixel audit confirms selected glassROI has1011fully255white pixels/52000, but white-doorROI max236/232/225, sky204/201/200: local output saturation, not whole-scene white clipping. AgX/fixedEV13, strong authored sun/IBL and glassroughness0.08 need isolation. New bounded exposure comparison control defaults13 unchanged, rejects nonfinite/out-of-range without mutation; paired captures pending. No blanket darkening/default change, no attribution to neural texture proven. Private highlight-audit01.json.
+
 ## G104 — Body pilot published; source distant-tree shading gradient isolated (18 October 2026)
 
 Merged observed F371 braking research (journal-only conflict; both records preserved), primary fast-forwarded tofa8546d, main/graphics non-force push succeeded. Owner untracked report hash unchanged. Body launcher/private assets available in primary; current playable remains verified01cbcf8, no app rebuild needed for the asset option.

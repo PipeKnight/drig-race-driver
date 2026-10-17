@@ -1564,6 +1564,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
                 };
             }
+            "--exposure" => {
+                graphics.exposure(&args.next().ok_or("--exposure needs EV100")?)?;
+            }
             "--trees" => {
                 let mode = args.next().ok_or("--trees needs source, coverage, coverage-shaded or off")?;
                 graphics.source_trees = match mode.as_str() {
