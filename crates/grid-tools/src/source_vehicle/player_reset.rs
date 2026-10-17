@@ -180,6 +180,14 @@ mod tests {
         run(|| flipped_on(crate::route::LONG_BEACH));
     }
 
+    /// Jarama route 1 finishes at a later gate; the reset line is still the
+    /// route's own AI racing line.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_jarama() {
+        run(|| flipped_on(crate::route::JARAMA));
+    }
+
     fn flipped_on(route: &str) {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);

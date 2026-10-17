@@ -79,6 +79,9 @@ pub struct Diagnostics {
     /// Forced texture path for P8 checks: `rgba8` (CPU BC decode) or `etc2`
     /// (private ETC2 cache); `None` picks BC, ETC2, RGBA8 by GPU support.
     pub texture_fallback: Option<String>,
+    /// Seconds: once a scripted drive ends, play an Instant Replay and delay
+    /// the offscreen capture until it has run this long (docs/REPLAY.md).
+    pub replay_capture: Option<f64>,
 }
 
 impl Default for Diagnostics {
@@ -95,6 +98,7 @@ impl Default for Diagnostics {
             damage_zones: false,
             damage_camera: None,
             texture_fallback: None,
+            replay_capture: None,
         }
     }
 }
@@ -118,6 +122,7 @@ impl Diagnostics {
             damage_camera: text("GRID_DAMAGE_CAMERA"),
             texture_fallback: text("GRID_TEXTURE_FALLBACK")
                 .and_then(|v| texture_path("GRID_TEXTURE_FALLBACK", &v).ok().flatten()),
+            replay_capture: text("GRID_REPLAY_CAPTURE").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -137,6 +142,9 @@ impl Diagnostics {
             "damage_zones" => self.damage_zones = on(key, value)?,
             "damage_camera" => self.damage_camera = text(),
             "texture_fallback" => self.texture_fallback = texture_path(key, value)?,
+            "replay_capture" => {
+                self.replay_capture = Some(value.parse().map_err(|_| number(key))?)
+            }
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
@@ -177,13 +185,23 @@ fn platform_data_dir() -> Option<PathBuf> {
     } else if cfg!(target_os = "macos") {
         env("HOME").map(|h| h.join("Library/Application Support/GRID Reassembly"))
     } else if cfg!(target_os = "android") {
-        // App-specific storage comes from the activity (P9).
-        None
+        // App-specific external storage from the activity (P9).
+        android_data_dir()
     } else {
         env("XDG_DATA_HOME")
             .or_else(|| env("HOME").map(|h| h.join(".local/share")))
             .map(|p| p.join("grid-reassembly"))
     }
+}
+
+#[cfg(target_os = "android")]
+fn android_data_dir() -> Option<PathBuf> {
+    crate::android::data_dir()
+}
+
+#[cfg(not(target_os = "android"))]
+fn android_data_dir() -> Option<PathBuf> {
+    None
 }
 
 /// Values from the settings files. `None` keeps the built-in default.
@@ -201,6 +219,9 @@ pub struct Settings {
     /// `grid_position = back`: the last slot, after the opponents.
     pub grid_back: bool,
     pub ai_characteristics: Option<PathBuf>,
+    /// `[drive] discipline`: `race` (default) or `drift_battle`
+    /// (docs/DISCIPLINES.md).
+    pub discipline: Option<String>,
     pub body_contacts: Option<Private>,
     pub body_events: Option<Private>,
     pub deformation: Option<Private>,
@@ -355,6 +376,10 @@ impl Settings {
                         Some(count(value).map_err(at)?)
                     };
                 }
+                ("drive", "discipline") => match value.to_ascii_lowercase().as_str() {
+                    d @ ("race" | "drift_battle") => self.discipline = Some(d.into()),
+                    _ => return Err(at("`discipline` needs race or drift_battle".into())),
+                },
                 ("drive", "ai_characteristics") => {
                     self.ai_characteristics = (!off).then(|| private_path(value))
                 }
@@ -436,7 +461,8 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
             return Err(format!("settings file {} exceeds 64 KiB", file.display()).into());
         }
         settings
-            .apply(&std::fs::read_to_string(file)?, &dir)
+            // A byte-order mark (Windows editors, PowerShell 5) is not a key.
+            .apply(std::fs::read_to_string(file)?.trim_start_matches('\u{feff}'), &dir)
             .map_err(|e| format!("settings file {}: {e}", file.display()))?;
         println!("settings_file path={}", file.display());
     }
@@ -463,6 +489,7 @@ laps = 3
 opponents = 11
 grid_position = back
 ai_characteristics = ai-driver-characteristics.tsv
+discipline = Drift_Battle
 [private]
 body_contacts = body-contact-directions.bin
 body_events = derive
@@ -487,6 +514,7 @@ prop_script_speed = 12.5
         assert_eq!(s.car.as_deref(), Some("bmw"));
         assert_eq!(s.opponent_cars.as_deref(), Some("lac,bmw"));
         assert!(s.drive && s.grid_back);
+        assert_eq!(s.discipline.as_deref(), Some("drift_battle"));
         assert_eq!(
             (s.laps, s.opponents, s.grid_position),
             (Some(3), Some(11), None)

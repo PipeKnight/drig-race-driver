@@ -4,7 +4,7 @@ use super::*;
 use crate::{Driving, Opponents, input, time_trial};
 use std::path::Path;
 
-const OPPONENTS: usize = 3;
+pub(crate) const OPPONENTS: usize = 3;
 
 /// A 2-lap race at Donington like `settings/race.ini`, player at the back.
 fn race_app() -> App {
@@ -14,7 +14,7 @@ fn race_app() -> App {
 /// A race on `route` with `OPPONENTS` AI cars; car models cycle through
 /// `models` (car 0, the player, takes the first), player at the back.
 /// `autopilot`: the ported AI drives the player's car too.
-fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> App {
+pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> App {
     use grid_tools::ai_driver::{AiData, AiDriver, Line, Parameters};
     use grid_tools::{car::Car, route::Route};
     let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
@@ -167,7 +167,7 @@ fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> Ap
 
 /// FNV-1a over every car's vehicle and physical words (as grid-opponent-race
 /// prints), plus the lap, event clock, race, props and race manager records.
-fn digest(app: &App) -> (Vec<u64>, String) {
+pub(crate) fn digest(app: &App) -> (Vec<u64>, String) {
     let d = app.world().resource::<Driving>();
     let o = d.opponents.as_ref().unwrap();
     let cars = std::iter::once(&d.runtime)
@@ -200,16 +200,16 @@ fn digest(app: &App) -> (Vec<u64>, String) {
     (cars, rest)
 }
 
-fn ticks(app: &App) -> u64 {
+pub(crate) fn ticks(app: &App) -> u64 {
     app.world().resource::<Driving>().runtime.ticks
 }
 
-fn keys(app: &mut App) -> Mut<'_, ButtonInput<KeyCode>> {
+pub(crate) fn keys(app: &mut App) -> Mut<'_, ButtonInput<KeyCode>> {
     app.world_mut().resource_mut::<ButtonInput<KeyCode>>()
 }
 
 /// One menu key press and release (two frames).
-fn tap(app: &mut App, key: KeyCode) {
+pub(crate) fn tap(app: &mut App, key: KeyCode) {
     keys(app).press(key);
     app.update();
     keys(app).release(key);
@@ -217,7 +217,7 @@ fn tap(app: &mut App, key: KeyCode) {
 }
 
 /// Hold W (throttle) and D (right) until the player's tick count.
-fn drive_to(app: &mut App, target: u64) {
+pub(crate) fn drive_to(app: &mut App, target: u64) {
     keys(app).press(KeyCode::KeyW);
     keys(app).press(KeyCode::KeyD);
     while ticks(app) < target {
@@ -226,7 +226,7 @@ fn drive_to(app: &mut App, target: u64) {
     assert_eq!(ticks(app), target);
 }
 
-fn big_stack(f: impl FnOnce() + Send + 'static) {
+pub(crate) fn big_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
         .stack_size(256 * 1024 * 1024)
         .spawn(f)
@@ -393,12 +393,14 @@ fn results(app: &App) -> Vec<crate::post_race::Row> {
 fn retire_from_race_shows_the_results_on_every_circuit() {
     use crate::post_race::{Cell, Stage};
     use grid_tools::race::{Out, Status};
-    use grid_tools::route::{DONINGTON, ISTANBUL_PARK, NURBURGRING};
+    use grid_tools::route::{DONINGTON, ISTANBUL_PARK, JARAMA, NURBURGRING};
     big_stack(|| {
         for (route, models) in [
             (DONINGTON, &["lac"][..]),
             (NURBURGRING, &["bmw"][..]),
             (ISTANBUL_PARK, &["lac", "bmw"][..]),
+            // Jarama route 1 finishes at a later gate (docs/JARAMA.md).
+            (JARAMA, &["lac"][..]),
         ] {
             let mut app = race_app_with(route, models, 2, false);
             keys(&mut app).press(KeyCode::KeyW);
@@ -461,48 +463,193 @@ fn retire_from_race_shows_the_results_on_every_circuit() {
 #[test]
 #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
 fn a_finished_race_goes_through_stats_to_classified_results() {
+    big_stack(|| finish_one_lap(grid_tools::route::DONINGTON));
+}
+
+/// Jarama route 1 finishes at gate 67 of its progress file; lap timing re-indexes
+/// it so the finish is gate 0 (docs/JARAMA.md).
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn a_race_finishing_at_a_later_gate_is_classified() {
+    big_stack(|| finish_one_lap(grid_tools::route::JARAMA));
+}
+
+/// One lap with the ported AI driving the player's car, then the stats and the
+/// classified results.
+fn finish_one_lap(route: &str) {
+    use crate::post_race::{Cell, Stage};
+    let mut app = race_app_with(route, &["lac"], 1, true);
+    while post(&app).stage == Stage::Hidden {
+        app.update();
+        assert!(ticks(&app) < 12_000, "no finish");
+    }
+    assert_eq!(post(&app).stage, Stage::Stats);
+    assert!(app.world().resource::<time_trial::Trial>().finished());
+    let rows = results(&app);
+    let player = rows.iter().find(|r| r.car == 0).unwrap().clone();
+    let view = post(&app).view(&rows, &Labels::default());
+    eprintln!(
+        "finish_stats tick={} position={} best={:?} title={}",
+        ticks(&app),
+        player.position,
+        player.best,
+        view.title
+    );
+    assert!(player.best.is_some());
+    assert!(view.title.starts_with("post_race_stats_position"));
+    // Continue: the race is ended and classified.
+    tap(&mut app, KeyCode::Enter);
+    assert_eq!(post(&app).stage, Stage::Results);
+    let d = app.world().resource::<Driving>();
+    assert!(d.opponents.as_ref().unwrap().standings.over());
+    let rows = results(&app);
+    eprintln!("finish_results rows={rows:?}");
+    assert_eq!(rows.len(), OPPONENTS + 1);
+    // Times rise down the table: the winner's total, then growing gaps.
+    let mut last = 0.;
+    for (i, r) in rows.iter().enumerate() {
+        match r.time {
+            Cell::Total(t) => assert!(i == 0 && t > 60.),
+            Cell::Gap(g) => {
+                assert!(i > 0 && g >= last, "{r:?}");
+                last = g;
+            }
+            Cell::Out(..) | Cell::Running => {}
+        }
+    }
+    assert!(matches!(rows[0].time, Cell::Total(_)));
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn a_drift_battle_is_scored_banked_and_classified_by_drift_points() {
+    use crate::drift_event::DriftEvent;
     use crate::post_race::{Cell, Stage};
     big_stack(|| {
-        // One lap at Donington with the ported AI driving the player's car.
-        let mut app = race_app_with(grid_tools::route::DONINGTON, &["lac"], 1, true);
+        // One lap of the Long Beach drift circuit (route_1), BMW field, the
+        // ported AI driving the player's car, as settings/drift-battle.ini.
+        let route = "tracks/usa/long_beach/route_1";
+        let mut app = race_app_with(route, &["bmw"], 1, true);
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let settings = grid_tools::drift::Settings::load(root).unwrap();
+        let flags = grid_tools::drift::close_drift_flags(
+            root,
+            &grid_tools::route::Route::new(route).unwrap(),
+        )
+        .unwrap();
+        assert!(!flags.is_empty());
+        app.insert_resource(DriftEvent::new(settings, flags, OPPONENTS + 1, 1, 1))
+            .add_systems(Update, crate::drift_event::tick.after(crate::drive_tick));
+        app.world_mut()
+            .resource_mut::<crate::post_race::PostRace>()
+            .drift = true;
+        let mut fastest = 0f32;
+        let mut largest_angle = 0f32;
         while post(&app).stage == Stage::Hidden {
             app.update();
+            let e = &app.world().resource::<DriftEvent>().entries[0];
+            fastest = fastest.max(e.detector.speed_mph);
+            largest_angle = largest_angle.max(e.detector.angle);
             assert!(ticks(&app) < 12_000, "no finish");
         }
         assert_eq!(post(&app).stage, Stage::Stats);
-        assert!(app.world().resource::<time_trial::Trial>().finished());
-        let rows = results(&app);
-        let player = rows.iter().find(|r| r.car == 0).unwrap().clone();
-        let view = post(&app).view(&rows, &Labels::default());
+        // The player's entry was banked at its finish (0x65F250).
+        let event = app.world().resource::<DriftEvent>();
+        let player = &event.entries[0];
+        let board = event.board().unwrap();
         eprintln!(
-            "finish_stats tick={} position={} best={:?} title={}",
+            "drift_finish tick={} fastest_mph={fastest} largest_angle={largest_angle} score={} drifts={} board={board:?}",
             ticks(&app),
-            player.position,
-            player.best,
-            view.title
+            player.score(),
+            player.scorer.drifts
         );
-        assert!(player.best.is_some());
-        assert!(view.title.starts_with("post_race_stats_position"));
-        // Continue: the race is ended and classified.
+        assert!(player.done && !player.needs_estimate);
+        assert!(fastest > 50., "the detector sees the car's speed");
+        assert_eq!(board.total, player.score());
+        let view = post(&app).view_with(&[], &Labels::default(), Some(&board));
+        assert_eq!(view.title, "post_race_stats_drift_total_title");
+        // Continue: the race is ended; every entry is banked.
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(post(&app).stage, Stage::Scoreboard);
         tap(&mut app, KeyCode::Enter);
         assert_eq!(post(&app).stage, Stage::Results);
         let d = app.world().resource::<Driving>();
-        assert!(d.opponents.as_ref().unwrap().standings.over());
-        let rows = results(&app);
-        eprintln!("finish_results rows={rows:?}");
+        let o = d.opponents.as_ref().unwrap();
+        assert!(o.standings.over());
+        let event = app.world().resource::<DriftEvent>();
+        assert!(event.entries.iter().all(|e| e.done));
+        let rows = event.results(&o.standings, results(&app));
+        eprintln!("drift_results rows={rows:?}");
         assert_eq!(rows.len(), OPPONENTS + 1);
-        // Times rise down the table: the winner's total, then growing gaps.
-        let mut last = 0.;
-        for (i, r) in rows.iter().enumerate() {
-            match r.time {
-                Cell::Total(t) => assert!(i == 0 && t > 60.),
-                Cell::Gap(g) => {
-                    assert!(i > 0 && g >= last, "{r:?}");
-                    last = g;
-                }
-                Cell::Out(..) | Cell::Running => {}
+        assert_eq!(
+            rows.iter().map(|r| r.position).collect::<Vec<_>>(),
+            (1..=OPPONENTS + 1).collect::<Vec<_>>()
+        );
+        let scores: Vec<i64> = rows.iter().map(|r| r.score.unwrap().0).collect();
+        assert!(scores.windows(2).all(|w| w[0] >= w[1]), "{scores:?}");
+        for r in &rows {
+            assert_eq!(r.score.unwrap().0, event.entries[r.car].score());
+            assert!(!matches!(r.time, Cell::Running));
+        }
+        // Equal scores keep the race order.
+        let order = o.standings.order();
+        for w in rows.windows(2) {
+            if w[0].score.unwrap().0 == w[1].score.unwrap().0 {
+                let at = |car| order.iter().position(|&c| c == car).unwrap();
+                assert!(at(w[0].car) < at(w[1].car));
             }
         }
-        assert!(matches!(rows[0].time, Cell::Total(_)));
+    });
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn a_handbrake_turn_in_the_bmw_scores_drift_points() {
+    use crate::drift_event::DriftEvent;
+    big_stack(|| {
+        let route = "tracks/usa/long_beach/route_1";
+        let mut app = race_app_with(route, &["bmw"], 2, false);
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let settings = grid_tools::drift::Settings::load(root).unwrap();
+        app.insert_resource(DriftEvent::new(settings, Vec::new(), OPPONENTS + 1, 2, 1))
+            .add_systems(Update, crate::drift_event::tick.after(crate::drive_tick));
+        let entry = |app: &App| app.world().resource::<DriftEvent>().entries[0].clone();
+        // Flat out after the countdown, then a handbrake turn to the right
+        // held on the throttle.
+        keys(&mut app).press(KeyCode::KeyW);
+        while ticks(&app) < 900 {
+            app.update();
+        }
+        let mut most = (0f32, 0f32, false);
+        for (hold, keys_down) in [
+            (40, &[KeyCode::KeyW, KeyCode::KeyD, KeyCode::Space][..]),
+            (150, &[KeyCode::KeyW, KeyCode::KeyD][..]),
+        ] {
+            for k in [KeyCode::KeyD, KeyCode::Space] {
+                keys(&mut app).release(k);
+            }
+            for &k in keys_down {
+                keys(&mut app).press(k);
+            }
+            let end = ticks(&app) + hold;
+            while ticks(&app) < end {
+                app.update();
+                let e = entry(&app);
+                most = (
+                    most.0.max(e.detector.angle),
+                    most.1.max(e.detector.speed_mph),
+                    most.2 || e.detector.drifting,
+                );
+            }
+        }
+        let e = entry(&app);
+        eprintln!(
+            "handbrake_turn largest_angle={} fastest_mph={} drifted={} display={} total={} combo={} rating={} drifts={}",
+            most.0, most.1, most.2, e.scorer.display, e.scorer.total, e.scorer.combo, e.scorer.rating, e.scorer.drifts
+        );
+        assert!(most.2, "the BMW slides past 15 degrees above 50 mph");
+        assert!(e.scorer.display > 0. || e.scorer.total > 0.);
     });
 }

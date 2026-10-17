@@ -29,7 +29,7 @@ contacts); BP01, DF01 and the characteristics table are used when present.
 
 | Command | What it does |
 |---|---|
-| `grid-soak quick` | Seeds 1..20 (fixed; 1..12 until 2026-10-17, then 1..16; 13..16 are Istanbul Park, 17..20 Long Beach since F357), 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
+| `grid-soak quick` | Seeds 1..20 (fixed; 1..12 until 2026-10-17, then 1..16; 13..16 are Istanbul Park, 17..20 Long Beach since F357); Jarama seeds 21..24 only with `--seeds 21..24`, 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
 | `grid-soak long --hours 8 --jobs 2` | Seeds from 1001 upwards until the deadline (or `--seeds A..B`), 6000-30000 ticks each. Unattended; the summary is rewritten after every scenario. |
 | `grid-soak run --seed N [--profile quick\|long]` | One scenario in-process (the orchestrator runs each scenario this way in a child process). |
 | `grid-soak replay local/soak/.../seed-N.inputs.tsv` | Exact replay of recorded inputs, independent of later chaos-driver changes. |
@@ -87,6 +87,11 @@ file, so replays never depend on the generator.
   17..20, in the default quick set since F357 (the barrier stand-in fix of
   "Long Beach tyre stacks (F357)" below) and a quarter of the long seeds, from their own stream
   ([LONG_BEACH.md](LONG_BEACH.md) section 5).
+- Jarama (`tracks/europe/jarama/route_1`, the fifth circuit, finishing at a later gate): quick
+  seeds 21..24 and a fifth of the long seeds, from their own stream. Seeds 21..24 are **not** in
+  the default quick set: two of them lose a body through the road (a tyre spawned with its centre
+  below a sloped verge; a loose wheel spawned under an armco rail); run them with
+  `--seeds 21..24` ([JARAMA.md](JARAMA.md) section 5).
 - Car models (F345):
   - quick runs stay all-Lacetti, so their results stay comparable with
     earlier runs; `--car`/`--opponent-cars` mix them;

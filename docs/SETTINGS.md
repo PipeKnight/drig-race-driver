@@ -30,6 +30,7 @@ Grammar:
 | | `opponents` | `0` or 1..11 | `--opponents` |
 | | `grid_position` | `back` (after the opponents), `0` (pole, default) or 1..opponents+1 | `--grid-position` |
 | | `ai_characteristics` | private TSV; **used only when the file exists** | `--ai-characteristics` (must exist) |
+| | `discipline` | `race` (default) or `drift_battle` (needs `laps` and `opponents`; [DISCIPLINES.md](DISCIPLINES.md)) | `--discipline` |
 | `[private]` | `body_contacts` | `derive`, a CD01 path, or `off` | `--body-contacts PATH\|derive` |
 | | `body_events` | `derive`, a BP01 path, or `off` | `--body-events PATH\|derive` |
 | | `deformation` | `derive`, a DF01 path, or `off` | `--deformation PATH\|derive` |
@@ -49,6 +50,7 @@ Grammar:
 | | `damage_zones` | `on`/`off` | `GRID_DAMAGE_ZONES` |
 | | `damage_camera` | `car,x,y,z` | `GRID_DAMAGE_CAMERA` |
 | | `texture_fallback` | `etc2`: private ETC2 cache; `rgba8` or `on`: CPU BC decode; `off`: automatic (BC, ETC2, RGBA8 by GPU support) (P8) | `GRID_TEXTURE_FALLBACK=1`, `rgba8` or `etc2` |
+| | `replay_capture` | seconds: after a scripted drive (`--drive-ticks`), play an Instant Replay and delay `--render` until it has run this long (docs/REPLAY.md) | `GRID_REPLAY_CAPTURE=S` |
 
 Notes:
 
@@ -120,5 +122,6 @@ CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_direct
 | Play GRID Body Contacts.cmd | `settings/body-contacts.ini` | derived CD01/BP01/DF01 |
 | Play GRID Time Trial.cmd | `settings/time-trial.ini` | as above, 3 laps |
 | Play GRID Race.cmd | `settings/race.ini` | 3 laps, 11 opponents, back of the grid, AI characteristics when present |
+| Play GRID Drift Battle.cmd | `settings/drift-battle.ini` | Drift Battle ([DISCIPLINES.md](DISCIPLINES.md)): Long Beach route_1, 2 laps, 7 BMW opponents |
 
 Changes in behaviour: BP01 and DF01 are now always derived from `grid.exe` instead of being used only when `local\*.bin` existed (the bytes are equal on this PC). The game folder argument is optional. `local\assists.txt`, `GRID_PLAY_ASSISTS`, `GRID_PLAY_INPUT`, `GRID_PLAY_OPPONENTS` and `GRID_PLAY_GRID` still work; the launcher turns them into command-line flags. Equivalent without any variables: `target\release\grid-app.exe --settings settings\race.ini`.

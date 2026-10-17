@@ -54,7 +54,8 @@ Links in the free-race flow [D]:
 - `retire_race` → `retire_race_confirm` → `post_race_retire_race_entry`, i.e. the post-race screens.
 - `settings` → `st_pause_options_entry` → `pause_settings_standard`, `_wheel_no_ffb` or `_ffb`, by controller.
 - `reset_car` (button3) → `reset_car_confirm` → fade → `reset_car` (`StateIngameResetToTrack`).
-- `instant_replay` → the 15-second instant replay.
+- `instant_replay` → the instant replay: 10 s back (0xDB4FEC), see docs/REPLAY.md. An earlier
+  version of this page said 15 s without a source.
 
 Confirmations are `ScreenYesNo`: No (`overlay_popup_generic_decline`), then Yes
 (`overlay_popup_generic_accept`). `active_default="0.library.button_1"`, so **Yes is the default**
@@ -115,8 +116,10 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
   - Changes apply at once. Button3 (Undo) restores the values the screen was entered with.
   - Starting values come from `[sound] effects` and `[osd] lap_timer`/`position`/`minimap`/`dials`/`speed_units`
     (docs/SETTINGS.md) and from the live input calibration.
+- **Instant Replay** (F360, docs/REPLAY.md): the last 10 s with the replay controls and cameras;
+  the menu stays open underneath and shows again on Replay Exit.
 - **Shown but not selectable** (dimmed), because the prototype has no counterpart yet:
-  - Instant Replay, Ghost Car;
+  - Ghost Car;
   - Speech and Music Volume;
   - Steering Linearity, 900 degree wheel.
 - **Gear safety:** pad A is both Menu Select and Gear Up. Every menu action clears the gear queue,

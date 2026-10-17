@@ -1,5 +1,90 @@
 # GRID engine project log
 
+F363 P9 Android skeleton: an installable debug APK of the prototype, built from a documented command (2026-10-17, Claude Code). Details: docs/ANDROID.md; docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.5; tools in docs/TOOLCHAIN.md "Android toolchain".
+- Toolchain [V installed, used for the build], all under `C:\Users\debros\Tools`: SDK cmdline-tools 22.0, platform-tools 37.0.1, build-tools 36.1.0, `platforms;android-36`, NDK r30 30.0.16248370, Temurin JDK 21.0.12.1+1, Gradle 9.8.1, AGP 9.4.1, GameActivity 4.4.0, cargo-ndk 4.1.2. SHA-256 of the zips match the published values.
+  - Licences: the owner approved the Android SDK and SDK Preview licences in chat. `yes | sdkmanager --licenses` accepted all eight; the six unapproved ones were deleted again (TOOLCHAIN.md).
+- Code:
+  - `grid-app` gains the `grid_android` cdylib: `src/lib.rs` is `#![cfg(target_os = "android")] include!("main.rs")`, empty on other targets. `main.rs` line 1 is therefore a plain comment, not `//!`.
+  - `#[bevy_main]` on `main`. New `android.rs`: stdout/stderr to logcat (tag `grid`); data dir = `external_data_path()` (P5). The game folder defaults to `<data dir>/Grid`.
+  - The settings loader skips a UTF-8 BOM. File open errors in `main.rs::read` and `source_vehicle::read` name the file.
+- `android/`: Gradle project from Bevy 0.19.1's mobile example (minSdk 31, target 36, arm64-v8a, sensorLandscape, keep-screen-on). `tools/build_android.ps1` builds it.
+- Data: `tools/push_android_data.ps1` pushes 245 MB (19 items of the installation plus settings.ini). With F359, CD01/BP01/DF01 are derived from the pushed `grid.exe`, so no private file goes to the phone. `-Stage DIR` copies the same set to a folder.
+  - [V desktop] The release binary on the staged subset vs the full install, 600 autopilot ticks: the logs match apart from paths, timestamps and the gamepad line. The render differs in 75 pixels (max 18/255); two runs on the full install differ in 19 pixels in the same band (render noise) [I].
+- APK [V built]: `powershell -NoProfile -File tools\build_android.ps1` at source e9fe9f47884c, 601 s incremental. `C:\Dev\Reassembly\local\android\apk\grid-e9fe9f47884c-debug.apk`: 90,159,003 bytes, SHA-256 `9a12e09e48c31ca273fb46183c32dc9570868139c2e91f8af912d2d47598c484`; `libgrid_android.so` SHA-256 `cd36527d5da92962f588160ce3b6fd6d6a45efd2182ad848c611878a3bb55805` (169.8 MB unstripped, stripped by AGP to 82.6 MB in the APK). The APK has no game file in it (checked with `unzip -l`). It is signed with this PC's debug key. At an earlier revision (before the rebases), an unchanged rerun of the command gave the same APK and `.so` hashes; that was not a from-scratch rebuild.
+- Checks [V], release, cargo/rustc 1.99.0, on e9fe9f4 (rebased on origin/main 0648496, F362):
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 565 passed, 0 failed, 0 ignored.
+  - `cargo clippy --workspace --all-targets --release -- -D warnings`: clean. `cargo ndk -t arm64-v8a -P 31 clippy --release --lib -p grid-app -- -D warnings`: clean.
+  - Solo identity `grid-opponent-race ROOT CD01 BP01 1 11200 ai` (no DF01): sha256 `aad9a07a…e41b`, unchanged.
+  - `grid-soak quick`: 20/20. Logs: this worktree's `local/android/checks4/` (earlier runs, before two rebases: `checks/` to `checks3/`, all green).
+  - Failed along the way: the first check run used `cargo t`, which in a worktree doubles its arguments (cargo also reads the main checkout's `.cargo/config.toml`), and ran the solo identity with `GRID_DEFORMATION_PARAMETERS` set (hash fe388185…, with DF01). Both corrected; noted in TOOLCHAIN.md.
+- Not done / open:
+  - **Device test not done**: no phone was connected. The owner later made it optional. Not verified on any phone: startup, the logcat redirect, data discovery, which texture path is picked (BC expected on the Xiaomi 13's Adreno 740), frame and tick time, suspend/resume.
+  - Without adb the data probably cannot reach `Android/data` (Android 11+); MTP from Explorer may work [S]. The real fix is P10. Without data the app exits at start, with no on-screen message [I].
+  - No touch/tilt input (P11): the pushed profile turns the autopilot on. Audio is not paused on suspend.
+  - Cold `cargo ndk` build: 92 min under load (no aarch64 seed). Gradle's first run: 2 min 40 s. AGP incremental packaging left a 172 MB APK with 90 MB of entries; the script now deletes the output folder first.
+
+F362 Race disciplines mapped; Drift Battle ported with the original's drift scorer (2026-10-17, Claude Code). Details, addresses and the order for the rest: docs/DISCIPLINES.md. Evidence: main checkout local/disciplines/ (inventory.py/inventory.txt, Ghidra 12.1.4 read-only pseudocode decomp/d1..d13 on a private copy of the race-rules project, Capstone 5.0.6 dumps, runs/, renders, checks/).
+- Inventory [D/V]:
+  - nine competition formats (database `competition_format` and the enum name table at 0xDB39CC): single_race, single_demolition_race, drift_battle, drift_grand_prix, drift_freestyle, pro_touge, midnight_touge, endurance (no event uses it), head_to_head;
+  - the 18 `discipline` rows are car series: Touring, GT1/GT2, Club GT, Prestige, Pro Tuned, Open Wheel, Pro/Classic Muscle, Prototype and Endurance all run as single_race, so they are circuit races the engine already has;
+  - **no Time Attack format exists**; the nearest are the driver-offer objectives time_trial/top_speed and the test drive;
+  - Le Mans 24 career events are single_race with a 720 s limit and 8 laps on Le Sarthe (race type 3); free race 12 min..24 h; Demolition Derby on the Detroit stadium routes (demolition_derby.xml flipped 5 s, wrong way 50, DQ warning); touge on Haruna, two runs, touge.xml 2 s/10 s penalties;
+  - the original's Drift Battle/Drift GP pools include route_1 of three of our circuits: longbeach_cl, nurburgring_spr, istanbul_int (headless races of all three with the AI field: laps 85-97 s, no failure).
+- Drift scoring [V] (constructor 0x6683D0, parser 0x62FAE0, entries 0x652E30, detector 0x65DD50/0x62FF80, scorer 0x6300B0/0x643BC0/0x630560/0x63C370/0x630490, race end 0x64D940): entries exist for format enum 2..4; Drift Battle alone has the position multiplier (3.0 leader → 1.0 last, constructor defaults); a drift = slip angle ≥ 15° at ≥ 50 mph (30 mph to keep it) for > 0.5 s, progress forwards past the line; every 0.1 s angle×mph/100 × multipliers × a main multiplier that grows 0.1 per step; seven ratings with bonuses; combos ×N banked after 3.5 s; close-drift bonus past `close_drift_flag` entities; a collision above 400 loses the combo; the race end scales a moving unfinished car to the event distance. Constructor defaults, mph conversion 0xA7DE00, DifficultyBias for AI levels.
+- Port:
+  - `grid_tools::drift` (Settings from drift.xml, close-drift flags from objects.ens, Detector, Scorer, Entry, race end, classification);
+  - grid-app `drift_event.rs`: per-car scoring after each fixed tick from the shared world, banking at finish/drop-out and race end, a text HUD panel (score, rating, combo ×N with an 8-segment timer, battle multiplier, close drift, fail);
+  - `post_race.rs`: stats (drift_total) → drift scoreboard → drift results in score order, Retire → scoreboard (flow.bin f_post [D]); View Replay works from the scoreboard (F360);
+  - `[drive] discipline = drift_battle`, `--discipline`; `settings/drift-battle.ini` and `Play GRID Drift Battle.cmd`: longbeach_cl, 2 laps, 7 BMW opponents, back of the grid; main.rs: module, discipline check, install call, HUD heading.
+- Interpretations/authored (recorded in the doc): the impact scalar (+0x3C), detector permission always on, results order with ties in race order, drop-outs banked like finishers, slip-angle sign side, drift count on the stats screen = banked rating counts (0x4D1890 not traced), BMW field and back-of-grid slot, AI drift level from the AI difficulty (0.606 → level 1).
+- Not done: AI drift behaviour (AI cars race the line and score little), the zero-score estimator (shown with `*`), flag touches, smoke and wrong-way, collisionPenalty, Drift GP and freestyle, the original OSD look and sounds; a windowed check by a person.
+- Checks (cargo/rustc 1.99.0, release, outputs main checkout local/disciplines/checks/, on 6eafdaa F361 + this change):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 565 passed, 0 failed, 0 ignored (before the F361 rebase: 562/0/0);
+  - new tests: 11 `grid_tools::drift` unit tests + 2 asset tests (shipped drift.xml = decoded values; flags on the three drift routes, none on Donington GP); `drift_event` 3, `post_race` drift flow 1; release asset tests `a_drift_battle_is_scored_banked_and_classified_by_drift_points` (one autopiloted lap of longbeach_cl, 4 BMWs: stats → scoreboard → results in score order) and `a_handbrake_turn_in_the_bmw_scores_drift_points` (27°, 104 mph peak, scores);
+  - Clippy --workspace --all-targets --release -D warnings: clean;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` without DF01: sha256 aad9a07a…e41b (laps 88.42029812185638 / 86.28228501935392);
+  - 12-car `grid-opponent-race … 12 11200 ai`: byte-identical to origin/main 5307ed1 built in a scratch worktree (sha256 4e34ec60…68c0);
+  - grid-soak quick: 20/20 (local/soak/quick-disciplines, quick-disciplines-rebased).
+- Offscreen app runs with settings/drift-battle.ini, autopilot (local/disciplines/drift-battle-hud.png, drift-battle-stats.png, logs): 8 cars, 17 close-drift flags, HUD panel, heading "drift battle", drift stats screen "Total Score / 1 point" after one lap.
+
+F361 fifth circuit: Jarama route 1 (the circuit run the other way round, finishing at gate 67) drives solo and races with the AI field in the app, with a launcher (2026-10-17, Claude Code). Details: docs/JARAMA.md. Evidence: main checkout local/fifth-track/.
+- Choice: Jarama route 1 needs no format work (it loads, laps since the F354 finish-gate re-indexing, and covers the later-gate finish); Spa needs three reader changes (LONG_BEACH.md section 1); Jarama route 0 still needs AI braking research (F304).
+- Code: `route::JARAMA` and `route::CIRCUITS`; the cross-circuit asset tests run over all five; new tests `route::tests::fifth_circuit_sources_load`, `player_reset::tests::a_flipped_player_car_is_reset_on_jarama`, app `race_tests::a_race_finishing_at_a_later_gate_is_classified` (Jarama also in `retire_from_race_shows_the_results_on_every_circuit`); grid-soak quick seeds 21..24 and a fifth of the long seeds on Jarama (own stream; seeds 1..20 unchanged); `settings/race-jarama.ini` and `Play GRID Race Jarama.cmd`. No engine or format code changed.
+- Data [V]: 68 gates over 3903.32 m, finish re-indexed from gate 67 to 0, splits 24/46; AI line 3829.4 m; 12 grid slots; 2235 prop boxes, 665 breakables (25 brake boards, 640 tyre stacks), 576 static (armco, drift flags); start lights 7 stages over 5.0 s; flipped-car reset fires at tick 196.
+- Results [V], release: solo AI 89.557 / 86.612 s; static start render checked; windowed app race (autopilot, 11 opponents, CD01/BP01/DF01, characteristics): 5.0 s countdown, lap 1 valid 1:31.163, all 12 classified, no failure. 12-car headless race: 8 cars 2 valid laps; cars 5, 6, 7 and 10 wrecked at the first corner (armco) at ticks 790-919, recorded, not investigated further.
+- Soak: forced `--route jarama --seeds 1..12` 12/12; seeds 21..24 2/4, so they stay out of the default quick set (QUICK_SEEDS 1..20). Seed 24: a tyre-stack piece spawns with its centre 3 cm below a sloped verge and is pushed through (F342 road-orientation family; 47 such pieces on Jarama, 28 on the Nürburgring, none elsewhere). Seed 22: a loose wheel spawns inside an armco rail box and is pushed under the rail into the road. Both recorded, not fixed.
+- Other circuits [V]: solo identity aad9a07a…e41b; 12-car Donington, Nürburgring, Istanbul and Long Beach races byte-identical to a fb32d54 baseline.
+- Checks [V] (cargo/rustc 1.99.0, release, rebased on 5307ed1 F360): `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 546 passed, 0 failed; clippy --workspace --all-targets -D warnings clean; solo identity aad9a07a…e41b; grid-soak quick 20/20; `--seeds 21..24` the same 2/4 as above.
+- Open: the two soak failures, the first-corner pile-up (live trace), Jarama route 0 braking, Spa, flat grey road (46 unresolved batches). Playable not rebuilt.
+
+F360 Race replays: the original's snapshot replays with Instant Replay, View Replay and the replay director (2026-10-17, Claude Code). Details: docs/REPLAY.md. Evidence: main checkout local/replay/ (strings, Ghidra 12.1.4 read-only pseudocode decomp/r1..r13 and z1..z3 with the new private helper ghidra/ReplayRefs.java, decoded camera configs, render/, checks/).
+- Research [D] (static, no live process):
+  - the original stores state snapshots, not inputs: every `Recordable` serialises its state into a frame (0x93D000); rigid-body records (template/instance index) are decoded as two matrices, converted to quaternions and slerped on playback (0x92F9E0);
+  - 30 Hz ("@ 30Hz" statistics); REPLAY pool 7.5 MiB; in-memory buffer 0x380000 bytes (seeks clamp to it, 0x91CC00); disk stream `replay.pbf` with limit 0x7D000000;
+  - Instant Replay rewinds 10.0 s (0xDB4FEC). PAUSE_MENU.md's earlier "15 s" was unsourced and is corrected;
+  - shuttle (0x944430/0x944710, checked in Capstone): f = (ff - rw)/0.9, play 3f +/- 1 (+/-4.33x on a key), pause scrub +0xA84 = 1.0, slow 0.1x, frame step 1/60 s; keys F1 pause, F2/F3, F4/F5 lap, F7/F8 camera, F12 jump in, Esc exit;
+  - flow: instant replay rewind -> play -> `loop` / BACK; View Replay begins at the race start and loops;
+  - replay cameras are separate from race cameras: per-route `replay_camera_config.xml` (zoom/static cameras, Bézier paths, activation zones; `grid_formats::replay_cameras`).
+- Port (grid-app `replay.rs` + `replay/`):
+  - recording after each fixed tick at 30 Hz of simulation time (12 samples per 25 ticks): every car's exact 3x4 pose, velocity, wheels, wheel geometry, body deformation, lost wheels; props' broken flags and pieces. Shared state is written on change and referenced otherwise. The newest 0x380000 bytes stay in memory, older 1 MiB chunks spool to `<data dir>/replay-cache/replay.spool` up to 0x7D000000 bytes; without a spool it is a memory ring;
+  - Instant Replay from the pause menu (menu shows again on exit) or with the race key Return / pad Back; View Replay from the results (whole race); the wreck screen's Replay plays the last 10 s (AUTHORED);
+  - playback holds the simulation, interpolates (lerp/slerp) and overwrites the live presentation last; the HUD is hidden; a plain replay panel (AUTHORED);
+  - cameras: the route's replay director (zone crossings logged while recording, so seeking shows the same shots), then the car's replay views, then its race views. Zone `size` are half extents [I: racing line passes 9-11 m below the centres]. Zoom framing factor 3 and "cut starts framed" are AUTHORED (camera behaviour classes not found; params bind at 0x7F7590);
+  - input layer: replay actions from presets 0 and 4; diagnostics `replay_capture` for offscreen renders.
+  - main.rs: module, install line, opponent deformation keys moved into `DeformationPresentation`, R/F ignored during a replay.
+- Tests [V], release, `--include-ignored`, absolute GRID_* paths, rebased on fb32d54 (F359):
+  - 543 passed, 0 failed, 0 ignored (local/replay/checks/tests.log);
+  - `recorded_frames_equal_the_live_race_on_every_circuit`: Donington, Nürburgring, Istanbul Park, Long Beach, Lacetti and BMW, 3 AI, 1600 ticks: every frame decodes bit for bit to the live pose/velocity and the replayed body x wheel matrices equal drive_present's; 769 frames, 0.50-0.71 MB; 6-8 zone entries per circuit;
+  - `instant_replay_leaves_the_race_bit_identical`: Instant Replay at tick 900 with FF, rewind, loop, camera change, exit, continue: digest at 1200 equals a never-recorded race; race-key replay returns to the race;
+  - `view_replay_plays_the_whole_race_from_the_results`;
+  - unit tests for frame encoding, stream ring/spool, shuttle, director;
+  - Clippy --workspace --all-targets --release -D warnings: clean;
+  - solo identity `grid-opponent-race ROOT CD01 BP01 1 11200 ai` (no DF01): sha256 aad9a07a…e41b;
+  - grid-soak quick: 20/20 (local/soak/quick-replay-F360).
+- Offscreen renders (11 AI, autopilot, `replay_capture`): Donington and Long Beach replay frames with HUD hidden and the director active (local/replay/render). The Long Beach dolly camera shows a very close shot (data min = max FOV 20 at 4.7 m) [I].
+- Log prefix `drive_race_replay` (`drive_replay ` is the soak replay-log header).
+- Not done: Flashback (next task; docs/REPLAY.md §5), Replay Save, slow motion, frame step, replay music, terminal-damage replay and TERMINAL cameras, replaying glass/light damage, shards, part swings, particles, skid marks and sound; a windowed check by a person.
+
 ## G088 — Restored forest integrated and playable updated (17 October 2026)
 
 Primary main fast-forwarded fb32d54 ->2fa3db2 after exact status/owner-note hash guards. Verified source3d12ef12ebae0cbf852dbb8c52d9210ada46342e / executable SHA256f0ce990f5a64b5c52ed38305d46d63edd6b61d7d7f3e96d7c562d65f124deb08 atomically promoted to inactive primary target and both verified backups; four graphics/playtest manifests updated. Other checkout's active prototype preserved, no process closed. Owner AI reportc4d52b9e... unchanged. Private promotion-forest01.json/manifests-before01.json.

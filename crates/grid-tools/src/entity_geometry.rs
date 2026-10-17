@@ -627,12 +627,7 @@ mod tests {
         // front of the concrete, and the pieces spawned inside it.
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
-        for path in [
-            crate::route::DONINGTON,
-            crate::route::NURBURGRING,
-            crate::route::ISTANBUL_PARK,
-            crate::route::LONG_BEACH,
-        ] {
+        for path in crate::route::CIRCUITS {
             let route = Route::new(path).unwrap();
             let meshes = barrier_meshes(root, &route).unwrap();
             assert!(!meshes.is_empty());

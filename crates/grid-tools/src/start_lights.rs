@@ -19,7 +19,7 @@ pub fn load(root: &Path, route: &Route) -> Result<Sequence, Box<dyn std::error::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::route::{DONINGTON, ISTANBUL_PARK, LONG_BEACH, NURBURGRING};
+    use crate::route::{DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING};
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
@@ -35,7 +35,7 @@ mod tests {
         assert_eq!(donington.object, "startlights_lights_horizontal");
         assert_eq!(donington.seconds, 4.0);
         assert_eq!(donington.stages, names(&[1, 2, 3, 4, 5, 7]));
-        for path in [NURBURGRING, ISTANBUL_PARK] {
+        for path in [NURBURGRING, ISTANBUL_PARK, JARAMA] {
             let s = load(root, &Route::new(path).unwrap()).unwrap();
             assert_eq!(s.object, "gg_startlights_lights_horiz", "{path}");
             assert_eq!(s.seconds, 5.0);

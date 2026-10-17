@@ -1,4 +1,5 @@
-//! Source reference viewer and serial driving prototype.
+// Source reference viewer and serial driving prototype. A plain comment, not
+// `//!`: src/lib.rs includes this file for the Android library (P9).
 
 /// One stdout log line for the per-tick paths. Unlike `println!`, a failed
 /// write (closed pipe, full disk) is dropped instead of panicking.
@@ -9,6 +10,8 @@ macro_rules! log_line {
     }};
 }
 
+#[cfg(target_os = "android")]
+mod android;
 mod assists;
 mod body_damage;
 mod camera;
@@ -16,6 +19,7 @@ mod car_materials;
 mod clearcoat_prepass;
 mod damage_hud;
 mod damage_parts;
+mod drift_event;
 mod dynamic_props;
 mod engine_sound;
 mod free_look;
@@ -30,6 +34,7 @@ mod particles;
 mod pause_menu;
 mod post_race;
 mod race_hud;
+mod replay;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
@@ -338,8 +343,10 @@ struct DeformingPart {
     source: Mesh,
     raw_bind: Mat4,
 }
+/// The deformation keys drive_present last projected: the player's, then
+/// each opponent's (cleared when a replay hands the meshes back).
 #[derive(Resource, Default)]
-struct DeformationPresentation(Option<Vec<u32>>);
+struct DeformationPresentation(Option<Vec<u32>>, Vec<Option<Vec<u32>>>);
 /// Start-light board of the route's track (`start_lights.xml`). The emissive
 /// texture is swapped per stage; `stage` 0 is the idle board.
 #[derive(Resource)]
@@ -450,7 +457,8 @@ fn diffuse(material: &str, model: &CarModel) -> Option<String> {
 }
 fn read(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use std::io::Read;
-    let file = std::fs::File::open(path)?;
+    // The path in the error: on a phone a missing pushed file must be named.
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let limit = 256 * 1024 * 1024;
     if file.metadata()?.len() > limit {
         return Err("resource exceeds viewer limit".into());
@@ -1020,9 +1028,14 @@ fn append_entities(
     }
     Ok(())
 }
+#[bevy_main]
 fn main() {
+    #[cfg(target_os = "android")]
+    android::init();
     if let Err(error) = run() {
         eprintln!("grid-app: {error}");
+        #[cfg(target_os = "android")]
+        android::log(true, &format!("grid-app: {error}"));
         std::process::exit(1);
     }
 }
@@ -1237,6 +1250,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut body_contacts = profile.body_contacts.clone();
     let mut body_events = profile.body_events.clone();
     let mut deformation = profile.deformation.clone();
+    let mut discipline = profile.discipline.clone();
     let mut opponents = profile.opponents;
     let mut grid_position = profile.grid_position;
     // A settings-file table is optional: used when the private file exists.
@@ -1336,6 +1350,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .ok_or("--deformation needs a private DF01 path or derive")?,
                 ))
             }
+            "--discipline" => discipline = Some(args.next().ok_or("--discipline needs race or drift_battle")?),
             "--opponents" => {
                 opponents = Some(
                     args.next()
@@ -1683,6 +1698,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let root = match root {
         Some(root) => root,
+        // Android: the game data pushed into the app's storage (docs/ANDROID.md).
+        None if cfg!(target_os = "android") => settings::data_dir().join("Grid"),
         None => grid_tools::install::discover(&grid_tools::install::steam_roots()).map_err(
             |tried| {
                 format!(
@@ -1740,6 +1757,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--opponents 1..11 requires --drive and --body-contacts".into());
     }
+    let drift = match discipline.as_deref() {
+        None | Some("race") => false,
+        Some("drift_battle") if trial_laps.is_some() && opponents.is_some() => true,
+        Some("drift_battle") => return Err("drift_battle needs laps and opponents (docs/DISCIPLINES.md)".into()),
+        Some(other) => return Err(format!("unknown discipline {other}: race or drift_battle").into()),
+    };
     if let Some(position) = grid_position
         && !opponents.is_some_and(|n| (1..=n + 1).contains(&position))
     {
@@ -2348,6 +2371,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             race_hud::install(&mut app);
             post_race::install(&mut app, variant);
         }
+        // Drift Battle on top of the race (docs/DISCIPLINES.md).
+        if drift {
+            let cars = driving.opponents.as_ref().map_or(1, |o| o.multi.cars.len());
+            drift_event::install(&mut app, &root, &route, cars, trial_laps.unwrap_or(1), ai_settings.difficulty)?;
+            if let Some(mut post) = app.world_mut().get_resource_mut::<post_race::PostRace>() {
+                post.drift = true;
+            }
+        }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
                 grid_tools::source_vehicle::DELTA,
@@ -2371,6 +2402,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
         camera::install(&mut app, &root, field.models[0].stem());
         damage_hud::install(&mut app);
+        if app.world().contains_resource::<input::Actions>() {
+            replay::install(&mut app, &root, &route);
+        }
     }
     if track && graphics.source_trees {
         source_trees::install(&mut app);
@@ -2930,8 +2964,13 @@ fn capture(
     probe: Option<Res<scene_probe::Cube>>,
     graphics: Res<graphics::Settings>,
     motion: Option<Res<motion_capture::Motion>>,
+    replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
+    // Diagnostics replay_capture: the replay plays first.
+    if replay.is_some_and(|r| r.capture_pending()) {
+        return;
+    }
     // Scripted drives tick in real time; allow their length plus headroom.
     let limit = driving
         .as_ref()
@@ -3438,7 +3477,12 @@ fn drive_actions(
     actions: Option<Res<input::Actions>>,
     mut exit: MessageWriter<AppExit>,
     mut trial: Option<ResMut<time_trial::Trial>>,
+    replay: Option<Res<replay::Replay>>,
 ) {
+    // A replay owns the keys while it plays.
+    if replay.is_some_and(|r| r.owns_input()) {
+        return;
+    }
     if input.just_pressed(KeyCode::KeyR) {
         restart(&mut driving, trial.as_deref_mut());
     }
@@ -3532,7 +3576,6 @@ fn drive_present(
     trial: Option<Res<time_trial::Trial>>,
     actions: Option<Res<input::Actions>>,
     mut look_back: Local<Option<bool>>,
-    mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
     (free_look, mut cameras): (
         Option<Res<free_look::FreeLook>>,
         Option<ResMut<camera::Cameras>>,
@@ -3543,9 +3586,10 @@ fn drive_present(
         Option<Res<graphics::Settings>>,
         Option<Res<pause_menu::PauseMenu>>,
         Option<Res<race_hud::Active>>,
+        Option<Res<drift_event::DriftEvent>>,
     ),
 ) {
-    let (fixed, graphics, menu, race_hud) = render_clock;
+    let (fixed, graphics, menu, race_hud, drift) = render_clock;
     // Pause menu Screen Setup (lap timer, race position, speed unit).
     let osd = menu
         .as_ref()
@@ -3638,6 +3682,7 @@ fn drive_present(
             })
             .collect();
         // Opponent body dents: re-project a car's parts when its field changes.
+        let opponent_keys = &mut presentation.1;
         opponent_keys.resize(opponents.multi.cars.len(), None);
         let mut dirty = Vec::new();
         for (car, runtime) in opponents.multi.cars.iter().enumerate().skip(1) {
@@ -3813,7 +3858,9 @@ fn drive_present(
         "{} / {} {}",
         driving.runtime.car().label(),
         track_label(driving.runtime.route()),
-        if trial.as_ref().is_some_and(|t| t.race) {
+        if drift.is_some() {
+            "drift battle"
+        } else if trial.as_ref().is_some_and(|t| t.race) {
             "race"
         } else if trial.is_some() {
             "time trial"

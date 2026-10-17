@@ -130,8 +130,8 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
 - ~~Start lights per track~~ (done 2026-10-17, ISTANBUL_PARK.md section 3): Nürburgring/Jarama `start_lights.xml` differ
   (object `gg_startlights_lights_horiz`, 7 stages over 5.0 s, textures 1..7);
   the app still uses the Donington sequence constants on every route.
-- Spa VCQTC count limits; Jarama late-braking corner; Istanbul off-track
-  excursions at ~56 m/s.
+- Spa VCQTC count limits; Jarama route 0 late-braking corner (route 1, the other
+  direction, is the fifth circuit: JARAMA.md); Istanbul off-track excursions at ~56 m/s.
 - Barrier ornament stand-in families: generic `concrete_`, `chnfen`,
   `gg_ad_brd_` match on other tracks; armco/tyre stacks stay non-solid as on
   Donington; per-track barrier keys of the CAR_ material mix not re-checked.

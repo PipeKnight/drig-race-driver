@@ -452,6 +452,13 @@ impl LostWheel {
     }
 }
 
+impl DamageParts {
+    /// Where car `car`'s wheel `wheel` is drawn once it has come off (world).
+    pub(crate) fn lost_wheel(&self, car: usize, wheel: usize) -> Option<Mat4> {
+        Some(self.cars.get(car)?.wheels.get(wheel)?.as_ref()?.matrix())
+    }
+}
+
 /// Model-space joint bounds and grid-frame glass/light anchors.
 struct Layout {
     bounds: BTreeMap<String, (Vec3, Vec3)>,
@@ -788,7 +795,7 @@ fn row_pose(m: &[[f32; 4]; 4]) -> Mat4 {
     Mat4::from_cols_array(&std::array::from_fn(|i| m[i / 4][i % 4]))
 }
 
-fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
+pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
     let ticks = driving.runtime.ticks;
     let damage = &mut *damage;
     if damage.last_tick.is_some_and(|last| ticks < last) {
