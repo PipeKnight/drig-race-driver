@@ -2,6 +2,11 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+// Private bundled build only (tools/build_android.ps1 -BundleData,
+// docs/ANDROID.md): a folder under the ignored local/ holding grid-data/ with
+// the owner's game files. Without the property no game data is packaged.
+def gridBundleAssets = project.findProperty('gridBundleAssets')
+
 android {
     namespace 'org.reassembly.grid'
     compileSdk 36
@@ -29,11 +34,19 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    androidResources {
+        // The default pattern drops files starting with '.' and folders
+        // starting with '_'; game files must arrive unchanged.
+        ignoreAssetsPattern = '!.svn:!.git'
+    }
     sourceSets {
         main {
             // cargo ndk -o writes arm64-v8a/libgrid_android.so here
-            // (tools/build_android.ps1). No game data is ever packaged.
+            // (tools/build_android.ps1).
             jniLibs.srcDirs = ['build/rust-jniLibs']
+            if (gridBundleAssets) {
+                assets.srcDirs = [gridBundleAssets]
+            }
         }
     }
 }
@@ -41,4 +54,5 @@ android {
 dependencies {
     implementation libs.appcompat
     implementation libs.games.activity
+    testImplementation libs.junit
 }

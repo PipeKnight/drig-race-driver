@@ -9,8 +9,9 @@
 #   files/Grid/...      the subset of the installation listed below
 #   files/settings.ini  the drive profile (written by this script)
 # CD01/BP01/DF01 are derived in memory from the pushed grid.exe (F359, P5), so
-# no private file is needed. Nothing here is ever put into the repository or
-# the APK. Uninstalling the app deletes the folder.
+# no private file is needed. Nothing here is ever put into the repository; only
+# the private bundled APK (build_android.ps1 -BundleData) packs the -Stage
+# output. Uninstalling the app deletes the folder.
 param(
     [string]$GameRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Grid',
     [string]$Stage = '',

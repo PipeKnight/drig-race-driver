@@ -1035,7 +1035,12 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("grid-app: {error}");
         #[cfg(target_os = "android")]
-        android::log(true, &format!("grid-app: {error}"));
+        {
+            // On screen and in the log file; give the start of the error
+            // screen's process a moment before this one exits.
+            android::fatal(&format!("grid-app: {error}"));
+            std::thread::sleep(Duration::from_millis(500));
+        }
         std::process::exit(1);
     }
 }
@@ -1709,6 +1714,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?,
     };
     println!("game_root path={}", root.display());
+    // The first loader's error names only an OS error; say what is missing.
+    #[cfg(target_os = "android")]
+    if !root.join("tracks").is_dir() {
+        return Err(format!(
+            "no game data in {}: this APK carries none; install the bundled APK or push the data (docs/ANDROID.md)",
+            root.display()
+        )
+        .into());
+    }
     let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());

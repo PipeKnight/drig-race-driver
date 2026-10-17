@@ -24,3 +24,6 @@ path = "src/main.rs"
 [target.'cfg(target_os = "android")'.dependencies]
 bevy = { version = "=0.19.1", default-features = false, features = ["android-game-activity"] }
 libc = "0.2"
+# Calls MainActivity (log file, error screen) from android.rs; the version
+# cpal already uses on Android.
+jni = "0.21"
