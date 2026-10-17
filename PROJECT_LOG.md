@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G065 — Source atmosphere controls and haze pilot (17 October 2026)
+
+[Atmosphere research](docs/DONINGTON_ATMOSPHERE.md). G064 publication verified at remote main/graphics `ae9f6496274f8f25490a00912ee50de19d632def`. Current playable stays source486e7eb / SHAbcf54893.... Source Donington fog distance500/cap0.4/colour/brightness and0..2000height fields were decoded. Parameter-wall outer LOD950m and world cull1500/clip1800 include the733–899m hits; no arbitrary removal. Land macro binding/green limit rechecked against prior shader evidence, no new error established.
+
+Bounded saved-fog XML reader passes2tests including purchased Donington/negative cases. Opt-in --haze source stages an authored Bevy exponential distance-only adaptation; original height/radiometry remain unresolved. App/formats Clippy7.11s passes. GPU comparison is pending; default hazeoff, source sky/physics unchanged. Private evidence in vegetation01, no new tools or source-install edits. One unsupported PowerShell encoding/read-binary-as-text attempt corrected with magic and existing binary-XML tool.
+
+
 ## G064 — Second graphics update integrated (17 October 2026)
 
 Primary `main` fast-forwarded from `a2c61b2` to `aefbbd8` after exact status/hash guards. The owner's untracked AI report remains unchanged. Verified source `486e7ebcd5ed` / executable SHA256 `bcf548936860bdcb97dde0a7a26a23a64f3046635d68f2fd86b391e8b1d79846` was atomically promoted to main and both verified backups; both playtest/graphics manifests are current. No destination prototype was running or closed. Standard graphics now benefits from recovered source mips; the improved forest remains opt-in. Repeated dedup on new captures found no further duplicates/errors. G063 checks and limitations apply. Continue distant-wall/source-land diagnosis; no owner action is required.
