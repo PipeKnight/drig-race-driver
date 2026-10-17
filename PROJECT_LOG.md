@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G078 — Preferred foliage and grass fix integrated; playable updated (17 October 2026)
+
+Primary main fast-forwarded `d967f35` -> `b783147` after exact status/hash guards. Checked source `917ca5f94d5e` / executable SHA256 `785488a18bd7039bfd0d2beee85281c16185be5f8e83cbc793a985766c413275` atomically promoted to inactive primary target and both verified backups. Four playtest/graphics manifests updated; no running prototype replaced/closed, owner AI report c4d52b9e... preserved unchanged. Private promotion-grass.json and pre-promotion manifest snapshot.
+
+Enhanced default grass now has soft alpha; mask remains a comparison, baseline unchanged. Trees/Atmosphere modes use the owner-preferred leaf coverage; ordinary graphics still keeps forest/fog explicit. G077 full checks/native4Klap/nativeBC offtrack/motion evidence apply; transparency sorting, far strips and remaining tree gaps are open. Dedup applied to new vegetation01 captures, full cited evidence retained. Publish both branches next, then compare source wall LOD geometry without altering the accepted renderer.
+
+
 ## G077 — Grass and preferred foliage validated for integration (17 October 2026)
 
 [Grass results and limitations](docs/GRASS_RENDERING.md). Source `917ca5f94d5e1996ff233a55f2701fd0dcad18ba`, executable SHA256 `785488a18bd7039bfd0d2beee85281c16185be5f8e83cbc793a985766c413275`, release build 4m25s. 525 release workspace tests passed (zero failed/ignored), workspace all-target Clippy37.75s, exact solo identity, completed quick20/20/100000ticks (identical headless source/binaries; watchdog-only change) passed.
