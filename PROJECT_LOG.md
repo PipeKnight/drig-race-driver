@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G091 — Recovered sun pilot passes matched4K and drive checks (18 October 2026)
+
+Source53764d51a7b0/SHA25645a87859.../release1m59s:572workspace release tests0failed0ignored; workspace all-target Clippy1m29s clean. Matched native4K authored/source far-track and240tick side-driving captures inspected; source direction changes shadow placement and highlights, not a completed lighting remaster. Old/default far frames are pixel-identical. Paired drive pose/velocity/handling/lap exits equal after walltime removal. First static car-camera pair contained no car, retained honestly as start-wall lighting controls; corrected with actual driving pair. Known nilUUID warning only. Private source-sun-validation01.json, full images/logs under vegetation01. Default sun and primary playable remain unchanged.
+
+Remote main advanced independently through F365 Android packaging, F366 Flashback and F367 drift AI (observed91d56aa). Bring that observed base into graphics before any playable/main promotion; no overwrite of newer engine features. Next lighting work: source sun/sky colour and fill response, then Lacetti/track normal/detail semantics. Existing source angle pilot remains opt-in until broader visual acceptance.
+
 ## G090 — Latest main retained; replay foliage ordering verified (18 October 2026)
 
 Owner confirmed the other agent integrated graphics. Inspected primary b48dc9c/F364: playable ce405a1989d6 SHA256f461a115... includes graphics plus F360-F363. Do not overwrite it with the older forest build. Committed focused ordering fix8f92f46, merged latest local main as84d681d; journal-only conflict resolved retaining both records. Four source_trees release tests pass on latest merged source (0failed/0ignored); app all-target Clippy13.99s passed on preceding replay base. Source84d681d build2m28s, private forest-replay-latest01 render inspected: Instant Replay active after1200ticks; pose/velocity/handling/deformation/lap exit match prior1200tick forest control. This single replay view faces the pits, so it is not a far-forest motion proof. Same-frame final replay camera is covered by the regression. Existing primary playable preserved.
