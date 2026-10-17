@@ -811,3 +811,8 @@ test = false
 name = "grid-wheel-step"
 path = "src/bin/grid-wheel-step.rs"
 test = false
+
+[[bin]]
+name = "grid-braking-replay"
+path = "src/bin/grid-braking-replay.rs"
+test = false

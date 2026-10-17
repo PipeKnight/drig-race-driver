@@ -110,6 +110,20 @@ SampleDrive(name) {
     Log("sample_end", "paused_" name, 2000, 0, "normal sequence ended with pause key-up")
 }
 
+BrakeTest() {
+    ; Straight-line braking test (docs/BRAKING_REFERENCE.md). Invoke only from
+    ; an observed paused race with Continue selected and the car on a
+    ; straight: throttle for 4 x HOLD_MS (at most 8000 ms), then full brake
+    ; for 5000 ms, then pause. Same guards as every pulse.
+    global HoldMs
+    Log("sample_begin", "paused_brake_test", HoldMs * 4)
+    if !Pulse("pause", 150) || !Pulse("throttle", HoldMs * 4) || !Pulse("brake", 5000) || !Pulse("pause", 150) {
+        Log("sample_cancelled", "paused_brake_test", HoldMs * 4)
+        return
+    }
+    Log("sample_end", "paused_brake_test", HoldMs * 4, 0, "normal sequence ended with pause key-up")
+}
+
 if Action = "inspect" {
     Log("inspect", "", 0, 0, "AutoHotkey " A_AhkVersion "; GRID foreground=" GridActive() "; no input sent")
     ExitApp()
@@ -133,6 +147,9 @@ if Action = "serve" {
     Hotkey("F14", (*) => SampleDrive("coast"))
     Persistent()
     Log("ready", "serve", 0, 0, "F1 paused 2000ms throttle/left sample; F2 paused 2000ms throttle/right sample; F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop; F13 paused 2000ms brake sample; F14 paused 2000ms no-input coast sample")
+} else if Action = "brake_test" {
+    BrakeTest()
+    ExitApp()
 } else {
     Pulse(Action, HoldMs)
     ExitApp()
