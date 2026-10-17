@@ -47,6 +47,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'cargo ndk build failed' }
     $so = Join-Path $jni 'arm64-v8a\libgrid_android.so'
     if (!(Test-Path -LiteralPath $so)) { throw "cargo ndk did not produce $so" }
+    # AGP's incremental debug packaging rewrites the old APK in place and can
+    # leave dead space (a 172 MB file holding 90 MB of entries); start fresh.
+    $apkDir = Join-Path $root 'android\app\build\outputs\apk'
+    if (Test-Path -LiteralPath $apkDir) { Remove-Item -LiteralPath $apkDir -Recurse -Force }
     & $gradle -p (Join-Path $root 'android') --no-daemon --console=plain assembleDebug
     if ($LASTEXITCODE -ne 0) { throw 'Gradle assembleDebug failed' }
     $apk = Join-Path $root 'android\app\build\outputs\apk\debug\app-debug.apk'
