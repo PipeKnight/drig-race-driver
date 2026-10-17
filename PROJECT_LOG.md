@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G082 — Isolated original light rotation checked; sun mapping still open (17 October 2026)
+
+[Lighting research](docs/SOURCE_SKY_LIGHTING.md). Installed missing Unicorn2.1.4 privately from official PyPI/pinned SHA256; smoke and actual pinned-PE calculation passed. New bounded read-only probe verifies four synthetic/saved angle cases against Ry(-rotation)*Rx(-height), <=2.0e-7 difference,1275instructions/one explicit environment-getter stub per case. Initial instruction guard stopped safely; corrected only after aligned entry-to-RET decoding. Full private failure/success reports retained. This is not live capture: render-context vector/sign selection remains unproved, so authored Bevy sun unchanged. No original install writes or shared Ghidra lock changes.
+
 ## G081 — Source sky scale/exponent recovered; integrated pilot pending (17 October 2026)
 
 [Sky research](docs/SOURCE_SKY_LIGHTING.md). Examined source shader and static XML-to-uniform chain use saved skyscale0.8/skygamma0.7 directly as scale/exponent, despite InvGamma uniform name. Optional --sky-tone source applies the same algebra to background/sourceIBL; raw remains default, linear sampling/original radiometry still unverified. Bounded shared lighting parser3tests including purchased controls and app2tests pass; format/app all-target Clippy18.36s passes. GPU pending. Ghidra project locked: no lock/process modified, used existing private decompilation and installed Capstone/static PE reads. No installs or source-install changes. Main playable917ca5f remains unchanged.
