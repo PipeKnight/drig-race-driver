@@ -77,6 +77,8 @@ pub struct Settings {
     /// Opt-in distance-only adaptation of saved source fog; height formula unknown.
     pub saved_fog: Option<grid_formats::track_lighting::Fog>,
     pub benchmark_frames: Option<u32>,
+    /// Optional bounded extension for offscreen diagnostics on busy machines.
+    pub capture_timeout_seconds: Option<f64>,
     pub source_sky: bool,
     pub preset: Preset,
     pub width: u32,
@@ -113,6 +115,7 @@ impl Default for Settings {
             saved_grade: None,
             saved_fog: None,
             benchmark_frames: None,
+            capture_timeout_seconds: None,
             source_sky: true,
             preset: Preset::Baseline,
             width: 1280,
@@ -141,6 +144,15 @@ impl Settings {
         }
         self.width = width;
         self.height = height;
+        Ok(())
+    }
+
+    pub fn capture_timeout(&mut self, value: &str) -> Result<(), &'static str> {
+        let seconds = value.parse::<f64>().map_err(|_| "invalid capture timeout")?;
+        if !seconds.is_finite() || !(30.0..=3600.0).contains(&seconds) {
+            return Err("capture timeout must be finite and 30..3600 seconds");
+        }
+        self.capture_timeout_seconds = Some(seconds);
         Ok(())
     }
 
@@ -315,5 +327,23 @@ pub fn configure(
         commands
             .entity(camera)
             .insert(super::track_grade::TrackGrade::from(grade));
+    }
+}
+
+
+#[cfg(test)]
+mod capture_budget_tests {
+    use super::*;
+    #[test]
+    fn timeout_extension_is_bounded_finite_and_failed_edits_preserve_the_value() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.capture_timeout_seconds, None);
+        for value in ["30", "900", "3600"] {
+            settings.capture_timeout(value).unwrap();
+        }
+        for value in ["", "NaN", "inf", "0", "29.99", "-1", "3600.1"] {
+            assert!(settings.capture_timeout(value).is_err());
+            assert_eq!(settings.capture_timeout_seconds, Some(3600.));
+        }
     }
 }

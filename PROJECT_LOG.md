@@ -1,5 +1,17 @@
 # GRID engine project log
 
+## G076 — Full4K validation hit offscreen watchdog; bounded retry prepared (17 October 2026)
+
+f03982e native4K combined6500tick attempt failed at3785ticks/60.56simsec,wall194.87s: explicit render-capture timeout, no PNG/validlap. Physics stilladvancing/4contacts/terminalnone; no shader error before timeout. Fullfailedlog vegetation01/grass-final-lap4k01.log retained; do not claim passed lap. Source524workspace tests andClippy23.40s passed, exactsolo passed; quicksoak stillrunning on busyCPU.
+
+[Grass diagnosis](docs/GRASS_RENDERING.md): add explicit --capture-timeout30..3600seconds, finite/bounded/extend-only/requiresrender; normalplay and defaultwatchdog unchanged. Boundarytest passes; changed-app Clippy26.46s passes; retry900s atsame4K planned. Partialtick3785state exactlymatches priorfull-lapcontrol; slowdowncause CPUcontention/softalphaoverdraw notisolated. Main playable verified8b9919f untouched. Earlier prepass-patch review only initializes clearcoat normal, not basegrassnormal; AOoff capture hasnormal_prepass_views0 and retains marks, so no base-prepass fault established.
+
+
+## G075 — Final vegetation/grass candidate under validation (17 October 2026)
+
+f03982e9cdd9 / SHA256b5773e00d75d554d4018a2557e558bd88da9c1c6fa1439e0c60d41a3a7aeea77 / release2m09s. Enhanced soft grass default, original baseline unchanged; Atmosphere/trees launcher uses owner-preferred leaf coverage. Diagnostic summary labels corrected. Native4K6500tick combined optional-graphics lap and30-frame movement run started alongside final524expected workspace tests/Clippy/solo/quick; not yet claimed passing. Main/playtest verified8b9919f remains untouched; draft graphics manifest accurate.
+
+
 ## G074 — Grass soft-alpha near/far 4K accepted for final validation (17 October 2026)
 
 [Grass result](docs/GRASS_RENDERING.md). Source25570ce / SHAb21a52e7... / release2m07s: native4K mask/blend pairs inspected at owner far view and source-ray-selected near view. Black remnants substantially suppressed, near blades retained; texture/RGB/scatter unchanged. Matched814old dark pixels meanRGB51.7/48.5/39.6 ->154.2/147.1/112.8 via alpha composition. This is not brightness recolouring or full ordering/motion acceptance. Select soft alpha enhanced default; mask remains explicit diagnostic, baseline A2C unchanged. Fix diagnostic preset-summary label order. Atmosphere/trees modes select owner-preferred coverage leaf mips. Final full checks, moving/lap and playable promotion pending; main verified8b9919f remains untouched.

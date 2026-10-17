@@ -1441,6 +1441,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--haze needs source or off".into()),
                 };
             }
+            "--capture-timeout" => {
+                graphics.capture_timeout(&args.next().ok_or("--capture-timeout needs seconds")?)?;
+            }
             "--grass-alpha" => {
                 graphics.grass_soft_alpha = match args.next().as_deref() {
                     Some("mask") => false,
@@ -2164,6 +2167,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         && (!drive || output.is_none())
     {
         return Err("fixed-step/motion-orbit diagnostics require --drive and --render".into());
+    }
+    if graphics.capture_timeout_seconds.is_some() && output.is_none() {
+        return Err("--capture-timeout requires --render".into());
     }
     if render_fixed_step && render_fps.is_some() {
         return Err("choose --render-fixed-step or --render-fps, not both".into());
@@ -2924,6 +2930,12 @@ fn capture(
     } else {
         limit
     };
+    let limit = graphics.capture_timeout_seconds.map_or(limit, |extra| limit.max(extra));
+    if capture.frames == 1
+        && (graphics.reflection_mode != 3 || probe.as_ref().is_some_and(|p| p.ready()))
+    {
+        println!("render_capture_budget seconds={limit} explicit_extension={:?} scope=offscreen-only", graphics.capture_timeout_seconds);
+    }
     if capture.started.elapsed() > Duration::from_secs_f64(limit) {
         error!("render capture timed out");
         exit.write(AppExit::error());
