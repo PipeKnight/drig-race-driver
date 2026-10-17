@@ -1422,6 +1422,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.wheel_geometry_shutter_seconds = ms * 0.001;
             }
+            "--wheel-max-arc" => {
+                let degrees: f32 = args.next().ok_or("missing wheel maximum arc degrees")?.parse()?;
+                if !degrees.is_finite() || !(0.0..=90.0).contains(&degrees) {
+                    return Err("wheel maximum arc must be finite,0..90 degrees".into());
+                }
+                graphics.wheel_max_arc = Some(degrees.to_radians());
+                println!("wheel_max_arc degrees={degrees} scope=sidewall-and-player-hull authored=true tradeoff=detail-over-alias-suppression");
+            }
             "--wheel-filter-floor" => {
                 let floor: f32 = args.next().ok_or("missing wheel filter floor")?.parse()?;
                 if !floor.is_finite() || !(0.0..=0.5).contains(&floor) { return Err("wheel filter floor must be0..0.5 of frame seconds".into()); }

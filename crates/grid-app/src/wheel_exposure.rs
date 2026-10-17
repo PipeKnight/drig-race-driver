@@ -188,12 +188,13 @@ fn update(
         let (angle, gaussian) = if driving.paused || driving.failure.is_some() {
             (0., false)
         } else {
-            super::wheel_presentation::exposure(
+            super::wheel_presentation::limited_exposure(
                 super::wheel_presentation::angular_speed(&driving.runtime, hull.wheel),
                 graphics.wheel_geometry_shutter_seconds,
                 time.delta_secs(),
                 graphics.adaptive_wheel_exposure,
                 graphics.wheel_filter_floor,
+                graphics.wheel_max_arc,
             )
         };
         if let Some(mut material) = materials.get_mut(&handle.0) {

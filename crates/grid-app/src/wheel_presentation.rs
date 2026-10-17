@@ -72,6 +72,33 @@ pub fn exposure(
     }
 }
 
+/// Art-directed bounded blur. The cap preserves angular detail at high speed;
+/// it deliberately gives up the uncapped filter's alias-suppression guarantee.
+/// Phase, spin and the physical clock are unchanged. None is the old policy.
+pub fn limited_exposure(
+    speed: f32,
+    shutter: f32,
+    frame_seconds: f32,
+    adaptive: bool,
+    floor: f32,
+    maximum_arc: Option<f32>,
+) -> (f32, bool) {
+    let original = exposure(speed, shutter, frame_seconds, adaptive, floor);
+    let Some(cap) = maximum_arc.filter(|cap| cap.is_finite() && *cap >= 0.) else {
+        return original;
+    };
+    if cap == 0. || original.0 == 0. {
+        return (0., false);
+    }
+    if original.0 > cap {
+        // An uncapped very wide Gaussian used a uniform-circle approximation;
+        // after capping it is narrow again and must restore Gaussian weights.
+        (cap, adaptive)
+    } else {
+        original
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +123,47 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn detail_cap_retains_structure_without_changing_disabled_or_signed_spin_policy() {
+        let cap = 18_f32.to_radians();
+        for fps in [30., 60., 144., 300.] {
+            for speed in [0., 15., -15., 120., -120., 2000., -2000.] {
+                let original = exposure(speed, 0.008333, 1. / fps, true, 0.25);
+                assert_eq!(
+                    limited_exposure(speed, 0.008333, 1. / fps, true, 0.25, None),
+                    original
+                );
+                let bounded = limited_exposure(speed, 0.008333, 1. / fps, true, 0.25, Some(cap));
+                assert!(bounded.0 <= cap && bounded.0 <= original.0);
+                assert_eq!(
+                    bounded,
+                    limited_exposure(-speed, 0.008333, 1. / fps, true, 0.25, Some(cap))
+                );
+                assert_eq!(
+                    limited_exposure(speed, 0., 1. / fps, true, 0.25, Some(cap)),
+                    (0., false)
+                );
+                assert_eq!(
+                    limited_exposure(speed, 0.008333, 1. / fps, true, 0.25, Some(0.)),
+                    (0., false)
+                );
+            }
+        }
+        assert!(limited_exposure(2000., 0.008333, 1. / 30., true, 0.25, Some(cap)).1);
+        assert!(!limited_exposure(120., 0.008333, 1. / 30., false, 0.25, Some(cap)).1);
+        // Independent quadrature of the actual +/-3sigma support: preserve a
+        // representative16-fold feature (>0.7 amplitude), rather than erase it.
+        let (mut mass, mut mode) = (0_f64, 0_f64);
+        let sigma = f64::from(cap) / 6.;
+        for i in 0..4096 {
+            let a = ((i as f64 + 0.5) / 4096. - 0.5) * f64::from(cap);
+            let w = (-0.5 * (a / sigma).powi(2)).exp();
+            mass += w;
+            mode += (16. * a).cos() * w;
+        }
+        assert!(mode / mass > 0.7 && mode / mass < 0.8);
     }
 
     #[test]

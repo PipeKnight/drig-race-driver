@@ -98,12 +98,13 @@ fn update(
             "sidewall_filter_final tick={} shutter_seconds={} signed_spin_rad_s={speeds:?} exposure_rad={:?} adaptive={}",
             driving.runtime.ticks,
             graphics.wheel_shutter_seconds,
-            speeds.map(|s| super::wheel_presentation::exposure(
+            speeds.map(|s| super::wheel_presentation::limited_exposure(
                 s,
                 graphics.wheel_shutter_seconds,
                 time.delta_secs(),
                 graphics.adaptive_wheel_exposure,
-                graphics.wheel_filter_floor
+                graphics.wheel_filter_floor,
+                graphics.wheel_max_arc
             )
             .0),
             graphics.adaptive_wheel_exposure
@@ -121,12 +122,13 @@ fn update(
         let (angle, gaussian) = runtime
             .filter(|_| !driving.paused && driving.failure.is_none())
             .map_or((0., false), |r| {
-                super::wheel_presentation::exposure(
+                super::wheel_presentation::limited_exposure(
                     super::wheel_presentation::angular_speed(r, part.wheel),
                     graphics.wheel_shutter_seconds,
                     time.delta_secs(),
                     graphics.adaptive_wheel_exposure,
                     graphics.wheel_filter_floor,
+                    graphics.wheel_max_arc,
                 )
             });
         if let Some(mut material) = materials.get_mut(&handle.0)
