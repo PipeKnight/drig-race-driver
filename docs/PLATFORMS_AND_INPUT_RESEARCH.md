@@ -770,7 +770,7 @@ Code:
   - `#[bevy_main]` on `main`; `android.rs` sends stdout/stderr to logcat and gives `external_data_path()` as the data dir (P5). The game folder defaults to `<data dir>/Grid`.
   - The texture path is chosen by P8 from the device features (BC, else ETC2 cache in the data dir, else RGBA8).
 - **Gradle project** `android/` (Bevy 0.19.1 mobile example): minSdk 31, target/compile 36, arm64-v8a, `sensorLandscape`, keep-screen-on, immersive system bars. `tools/build_android.ps1` builds the debug APK into `local/android/apk/` with a hash manifest.
-- **Data** [V on desktop]: `tools/push_android_data.ps1` pushes 245 MB: a 17-item subset of the installation, CD01 and a `settings.ini` (drive on, BP01/DF01 `derive`, autopilot because there are no touch controls yet). The desktop release binary run on the same staged subset gives a log identical to the full install's, apart from timestamps.
+- **Data** [V on desktop]: `tools/push_android_data.ps1` pushes 245 MB: a 19-item subset of the installation and a `settings.ini` (drive on, CD01/BP01/DF01 `derive` from the pushed `grid.exe`, so no private file, autopilot because there are no touch controls yet). The desktop release binary run on the same staged subset gives a log identical to the full install's, apart from timestamps.
 - **Lifecycle**: bevy_winit 0.19.1 creates the surface on resume and drops it on suspend. Audio is not paused on `AppLifecycle::Suspended` yet (the Bevy example does this) [open].
 - **Cold build cost**: the first `cargo ndk` release build compiled about 300 crates in 92 min on this PC, with other sessions building at the same time. The desktop seed (TOOLCHAIN.md) has no aarch64 artifacts. Later builds are incremental. Gradle's first run took 2 min 40 s, including the AGP download.
 

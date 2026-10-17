@@ -45,7 +45,7 @@ Requirements: Android 12 (API 31) or newer, a 64-bit ARM phone (all three owner 
 
 ### What the app needs, and what does not work yet
 
-- **The game data is not in the APK.** The app reads it from its own folder: `Internal storage/Android/data/org.reassembly.grid/files/` (`settings.ini`, `private/`, `Grid/`, listed below).
+- **The game data is not in the APK.** The app reads it from its own folder: `Internal storage/Android/data/org.reassembly.grid/files/` (`settings.ini` and `Grid/`, listed below).
 - **Without the data the app closes right after start** [I: `main` exits on the error; not seen on a phone]. The cause is logged to logcat (`adb logcat -s grid`), but nothing is shown on screen; an error screen is P10 work.
 - **Getting the data there without adb:** Android 11+ blocks phone file managers from `Android/data`. Copying from Windows Explorer over USB (MTP) into that folder still works on many phones, but Android does not guarantee it [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). Not tested on the owner's phones. Steps:
   1. install and start the app once, so Android creates the folder;
@@ -58,7 +58,7 @@ Requirements: Android 12 (API 31) or newer, a 64-bit ARM phone (all three owner 
 
 ## Game data on the phone (development path; P10 replaces it)
 
-The phone needs a subset of the owner's own installation (about 250 MB) plus the private CD01 table. Nothing of it goes into Git or the APK.
+The phone needs a subset of the owner's own installation, about 245 MB. No private table is needed: CD01 (F359), BP01 and DF01 are derived in memory from the pushed `grid.exe`. Nothing of it goes into Git or the APK.
 
 ```
 powershell -NoProfile -File tools\push_android_data.ps1
@@ -69,8 +69,7 @@ It runs `adb push --sync` into `/sdcard/Android/data/org.reassembly.grid/files/`
 | Path on the phone | Source |
 |---|---|
 | `Grid/...` | the items listed in the script, from `C:\Program Files (x86)\Steam\steamapps\common\Grid` (read only) |
-| `private/body-contact-directions.bin` | CD01 from the main checkout's `local/` |
-| `settings.ini` | written by the script: drive on, CD01 path, BP01/DF01 `derive` (computed in memory from the pushed `grid.exe`, P5), `[diagnostics] autopilot = on` because there is no touch or tilt input yet (P11) |
+| `settings.ini` | written by the script: drive on, CD01/BP01/DF01 `derive` (computed in memory from the pushed `grid.exe`), `[diagnostics] autopilot = on` because there is no touch or tilt input yet (P11) |
 
 The app must be installed first: Android creates the folder for the package, and `adb shell` may write to it. Uninstalling the app deletes it.
 

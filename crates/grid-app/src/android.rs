@@ -1,4 +1,4 @@
-//! Android start-up (P9, docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.4).
+//! Android start-up (P9, docs/PLATFORMS_AND_INPUT_RESEARCH.md 7.5).
 //!
 //! The app has no argv, shell or working directory on Android. This module
 //! sends stdout and stderr to logcat (tag `grid`), and provides the
