@@ -22,6 +22,7 @@ which said that a crash could not yet cost power.
 | Damage off (mode 0) | B14 = 0 → 9F3E80 returns at once | **new** early return in `vehicle_handling` | F333 |
 | HUD damage icons | FUN_008EEF60 / FUN_008EEB80, `object/dial_damage` | **new** `mechanical_damage::indicators`, grid-app `damage_hud` | F333 |
 | Detached-part queries (exhaust, rear spoiler) | 98BFE0 records from the parts object | `None`; the spoiler never detaches in single player (F339) | equal to the original |
+| Wheel detachment | 98B430 zones → 9EC9B0 wheel rule → car +22E4; 9C1F60, A00E10, A03670, 9E65B0 branches | **new** `grid_tools::loose_parts`, `Runtime::detach_wheels`, grid-world branches ([WHEEL_DETACHMENT.md](WHEEL_DETACHMENT.md)) | F346 |
 
 The owner's playtest logs already show it: `local/playtest/manual-19590-14358.log` ends with radiator
 level 0.958, and `manual-14216-20708.log` shows engine power factor 0.993 and cut-out factor 0.024 [V].
@@ -179,6 +180,10 @@ exceeds `m_wheel_detach_level` × S (Lacetti 6 × 4560 = 27360 per tick); 996F60
 `vehicle_sync`/`vehicle_handling`/`vehicle_manager` as in 9BD7F0/9F3E80), and 9E65B0 turns a detached
 wheel into terminal damage (9E64E0(4, wheel)). The producer is not ported: grid-app `damage_parts`
 excludes wheels and is presentation-only, so no port car ever loses a wheel. This is the open follow-up.
+**Ported in F346** ([WHEEL_DETACHMENT.md](WHEEL_DETACHMENT.md)): the scope below held, with two corrections.
+9F3E80 itself has no detached-wheel branch apart from the 9E65B0 call (its refusal was a guard), and the
+"wheel update" of step 4 is the presentation function 9FA6E0; the driving branches are the suspension
+substep 9C1F60 (inside 9F1E10) and the grip loop of A00E10.
 
 **Wheel detachment port scope (F340).** The owner chose to record the scope now and port it after the
 weekly usage reset on 19 October. No code was changed.
@@ -270,7 +275,8 @@ Regression [V]: full workspace tests 380 passed, 0 failed after rebasing on dc2d
 
 ## 7. Not done / open
 
-- Wheel detachment (+22E4 flags from 9EC9B0) is not produced in the simulation; the port order is in section 5 (F340); the exhaust (0x1F) query for cars that have that part.
+- Wheel detachment is ported (F346, [WHEEL_DETACHMENT.md](WHEEL_DETACHMENT.md)); the loose wheel is not yet a
+  rigid body. Still open: the exhaust (0x1F) query for cars that have that part.
 - The real dial graphics (`Osd/dial2.pssg` icon animation) and the OSD "Damage Icons" option.
 - Effects at a threshold of exactly 1.0 (gearbox, suspension, brake in Standard.hdm) reach 0/0 when a
   level caps at 1.0; the original also stores NaN there (COLLISION_DAMAGE_DISPATCH.md), while the port

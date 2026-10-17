@@ -143,7 +143,7 @@ Score = likelihood (H 3, M 2, L 1) × impact. Impact: race freeze or crash 3, wr
 | R23 | **Tyre smoke uses 80 system slots:** exactly full at 20 cars × 4 wheels. Whether the original's debris systems share this pool is not established. | C42, D25 | L (20 cars) | cosmetic | 1 | 80, refuse [V] | 20 |
 | R24 | **Race progress uses a global nearest-point projection,** so a car far off the line can jump in progress and an AI can be marked finished early. | C28 | L | wrong result | 2 | — | yes |
 | R25 | **Skid-strip stealing takes the farthest finished strip;** the original takes the farthest active one. | D24 | — | cosmetic divergence | 1 | 73E430 [V] | — |
-| Latent | **Unsupported original states** that would freeze at once when ported: wheel detachment (+22E4/+2278), respawn, nitro, manual clutch, handling notification receivers, pending deformation rebuild or observers. | B10, B11, B13, B25, B29, B30 | None today; H when ported | freeze | — | supported by the original | — |
+| Latent | **Unsupported original states** that would freeze at once when ported: respawn, nitro, manual clutch, handling notification receivers, pending deformation rebuild or observers. | B10, B11, B13, B25, B29, B30 | None today; H when ported | freeze | — | supported by the original | — |
 
 Checked and supported, with no guard firing: car on its roof or side, airborne, reverse gear, neutral, handbrake, stalled engine, terminal wheel damage (no longer a pause since the 14 October fix), deflated tyres, saturated body damage, reverse driving across the finish line, and long races (u64 ticks, f64 lap clock, wrapped phases).
 
@@ -220,7 +220,7 @@ IDs match the per-area work tables. Rows were grouped when several guards share 
 | B08 | `time_trial.rs:113-150` | consecutive ticks, lap start, finish without start, zero sector | pause ("R restarts") | yes (player) | L (pushed across the finish while held; zero-length sector) | authored |
 | B09 | `vehicle_force.rs:509-522` | events > 64, limits > 64 | pause | yes | L | authored (VEHICLE_FORCE_PIPELINE.md); original 9DF540/9B5520 |
 | B10 | `vehicle_driver_prepare.rs:55-80` | disabled-wheel bytes, nitro/respawn, manual clutch, gear > 9 | pause | yes | None today; **latent** | port scope (original A03670) |
-| B11 | `suspension_vehicle.rs:78`, `vehicle_driver_prepare.rs:63`, `vehicle_handling.rs:261` | wheel detached (+22E4/+2278) | pause | yes | None today (never set); **H once detachment is ported** | port scope (9F1E10/A03670/9F3E80) |
+| B11 | (removed in F346) | wheel detached (+22E4/+2278) | — | — | None: the detached-wheel branches are ported (WHEEL_DETACHMENT.md) | done |
 | B12 | `vehicle_handling.rs:255-294` | composite handling branch, bounded fields | pause | yes | L | port scope (9F3E80) |
 | B13 | `vehicle_handling.rs:207,312,365`, `vehicle_job.rs:22` | damage without RNG; notification receivers | pause | 312 yes (RNG always set) | None | port scope; the 14 October freeze path |
 | B14 | `vehicle_handling.rs:316` | wear divisor ≤ 0 | pause | yes | None (data) | data |

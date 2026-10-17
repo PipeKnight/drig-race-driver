@@ -86,6 +86,17 @@ for 2 s (Lacetti 21.5 m/s, BMW 23.8 m/s), then one front-left corner notificatio
 - In the shared world (two Lacettis) car 1 loses a wheel; neither car retires, car 1 stops and car 0
   drives on (44.7 m/s after 5 s).
 
+Real contacts [V] (`grid-opponent-race ROOT CD01 BP01 12 12000 ai` with DF01 and the characteristics table,
+Donington, release):
+
+- on c09ca82 (before F345): **car 8 loses its front-left wheel at tick 1641 and car 10 at tick 6755**, both
+  retired as `reason=lost-wheel wheel=2`; the other ten cars finish (car 4 DNF on 1 lap). The c09ca82 build
+  without this port retires car 8 at tick 1642 by terminal wheel damage (status 3) and nobody else; car
+  contacts 787 → 2067;
+- rebased on F345 (per-car AI extents): no car crashes hard enough, and the output is byte-identical to
+  F345's (`local/car-extents/runs/lac12df.new.txt`: 11 739 ticks, 1604 contacts, no wreck). The mixed
+  `--cars lac,bmw 12 16000 ai` race is byte-identical to F345's too (`mix12df.new.txt`).
+
 [I] The corner does not fall to the ground: the floor stop of 9C1F60 still meets the road at zero
 travel, so the car rests on a stiff point without grip there. This follows the decompiled code; it has not
 been compared with the running game.
@@ -141,7 +152,11 @@ Port (grid-app `damage_parts`):
   grid-app `a_lost_wheel_launches_with_the_axle_partner_spin_and_the_impact_kick`,
   `only_rims_and_tyres_leave_with_a_lost_wheel`.
 - Asset: `source_vehicle::wheel_detach` (section 4) and `damage_off_keeps_every_wheel`.
-- Checks before the push: see PROJECT_LOG F346.
+- Checks before the push (cargo/rustc 1.99.0, release, rebased on d7abbb6): the full test run with
+  `--include-ignored` 449 passed, 0 failed; Clippy clean; the solo lap byte-identical to origin/main
+  (sha256 `aad9a07a…e41b`); `grid-soak quick` 11/12, the one failure (seed 12, board at (-406, -51, -16),
+  tick 3003) byte-identical to F345's origin/main run (`local/car-extents/soak/quick-extents`).
+  Outputs: `local/wheel-detach/checks/`, `local/soak/quick-f346-wheel/`.
 
 ## 8. Not done / open
 
@@ -149,6 +164,6 @@ Port (grid-app `damage_parts`):
   descriptor D17150) in the shared world, colliding with the track and cars. The dynamic-props pieces
   (`grid_tools::dynamic_props`, cylinders as twelve-sided prisms) are the likely route.
 - 7E9D60's per-wheel record (+6C) consumer, and 9B9A90's caller 9BA2B6.
-- No comparison with the running game, and no scripted real crash that loses a wheel through actual
-  contacts: the asset tests inject one notification through the real classifier and frame.
+- No comparison with the running game. Two AI cars in twelve lose a wheel in a two-lap Donington race
+  (section 4); whether the original loses wheels as often is not checked.
 - Ride height of the bare corner (section 4 [I]) against the original.

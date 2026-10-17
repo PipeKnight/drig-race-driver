@@ -207,7 +207,8 @@ the bonnet never detaches through this path [D]. Correction (F339): the spoiler 
 only by the loader, and no rule sets the spoiler ids 0x45/0x46, so the rear spoiler never detaches in
 single player. 9AE8F0/9E2AD0/9AEC60 were displacement collisions (other objects' +1C8C). Also in the
 original but not in this port: the 9FF4F0 timer that detaches a loose part at speed, the wiper
-detach on a smashed windscreen (car +C8A0) and the wheel detach flags +22E4, which do change driving.
+detach on a smashed windscreen (car +C8A0). The wheel detach flags +22E4, which do change driving, are
+ported in the simulation since F346 (WHEEL_DETACHMENT.md).
 Details: [MECHANICAL_DAMAGE.md](MECHANICAL_DAMAGE.md) section 5.
 
 ### Loose and detached motion [D partial, I]
