@@ -1356,9 +1356,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ));
             }
             "--body-contacts" => {
-                body_contacts = Some(PathBuf::from(
+                body_contacts = Some(settings::Private::from_cli(
                     args.next()
-                        .ok_or("--body-contacts needs a private CD01 path")?,
+                        .ok_or("--body-contacts needs a private CD01 path or derive")?,
                 ));
             }
             "--drive-ticks" => {
@@ -1645,7 +1645,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
                 );
                 println!(
-                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; Escape/P (pad Start) pause menu: Continue, Restart, Options, Retire from Race (races) or Finish Test Drive (practice); R restarts. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; Escape/P (pad Start) pause menu: Continue, Restart, Options, Retire from Race (races) or Finish Test Drive (practice); R restarts. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01|derive: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route and car only."
@@ -1737,7 +1737,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     // The player's grid slot; the opponents fill the remaining slots in order.
     let player_slot = grid_position.map_or(0, |p| p - 1);
-    let contacts_path = body_contacts.clone();
+    let contacts = body_contacts
+        .map(|source| source.bytes(&root, "CD01"))
+        .transpose()?;
     if !scripted.throttle.is_finite()
         || !(0. ..=1.).contains(&scripted.throttle)
         || !scripted.steering.is_finite()
@@ -1751,7 +1753,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Mode::Deformation
         } else if body_events.is_some() {
             Mode::Events
-        } else if body_contacts.is_some() {
+        } else if contacts.is_some() {
             Mode::Body
         } else {
             Mode::Wheels
@@ -1797,12 +1799,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "drive_body_events enabled=true scope=static-and-car-peers notifications=empty persistent-chains=absent"
             );
         }
-        let geometry = body_contacts.map(|path| -> Result<_, Box<dyn std::error::Error>> {
-            if std::fs::metadata(&path)?.len() != 712 {
+        let geometry = contacts.as_ref().map(|table| -> Result<_, Box<dyn std::error::Error>> {
+            if table.len() != 712 {
                 return Err("invalid private body sampling extent".into());
             }
-            let table = std::fs::read(path)?;
-            let mut geometry = runtime.prepare_body_geometry(&root, &table)?;
+            let mut geometry = runtime.prepare_body_geometry(&root, table)?;
             if let Some(bytes)=&deformation {
                 if bytes.len()!=252{return Err("invalid private deformation parameter extent".into());}
                 let (limit,bulk)=grid_tools::deformation_parameters::read(bytes)?;
@@ -1817,7 +1818,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }).transpose()?;
         let opponents = opponents
             .map(|n| -> Result<Opponents, Box<dyn std::error::Error>> {
-                let table = std::fs::read(contacts_path.as_ref().ok_or("missing CD01")?)?;
+                let table = contacts.as_deref().ok_or("missing CD01")?;
                 let slots: Vec<String> = std::iter::once(player_slot)
                     .chain((0..=n).filter(|&i| i != player_slot))
                     .map(|i| format!("slot_{i:02}"))
@@ -1842,7 +1843,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &root,
                     &route,
                     &entries,
-                    &table,
+                    table,
                     runtime.body_events,
                     parameters,
                 )?;

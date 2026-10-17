@@ -1,5 +1,32 @@
 # GRID engine project log
 
+F359 P6: CD01 (body-contact sampling directions) comes from the Steam grid.exe alone; no unpacked image or desktop preparation step is needed (2026-10-17, Claude Code). Details: docs/CONTACT_DIRECTIONS.md; docs/PLATFORMS_AND_INPUT_RESEARCH.md section 7.4.
+- Evidence [V]: read-only Capstone 5.0.6 trace of the unpacked image (bundled Python 3.12.14). Main checkout `local/p6-cd01/`: `trace_recipe.py`, `trace.txt`, `recipe.rs.txt`.
+  - The original fills the 44 directions at startup in the `C7DAE0` static initializer and writes them to the zero-filled `.data` at `F5E1B0`. It is 344 instructions of pure data moves: `xorps`, `movss` and `movaps` through a 16-byte stack slot, with no arithmetic.
+  - Each x/y/z lane is one 32-bit word or zero; w is always zero. That gives 119 word lanes and 13 zero lanes, from 55 distinct source words.
+  - All sources are in `.rdata` (`0xC89000..0xDA59A4`), which the Steam file leaves in plain form; SteamStub encrypts only `.text`. The section tables of the Steam and unpacked files are identical.
+- Decision:
+  - (b): the traced instruction stream is kept as a public address recipe, `CD01_SOURCES` (44 × 3 addresses, no game bytes);
+  - (a) rejected: the values are the 6 axes plus icosahedron-family directions, typed as about 6-digit constants with inconsistent rounding (0.309011/0.309013, 0.447216/0.447219/0.44722), so formulas cannot give the same bits;
+  - (c) not needed.
+- Port:
+  - `grid_tools::private_parameters::contact_directions` uses the same build check and the BP01 file-word rule, and checks unit length;
+  - `grid-private-parameters GRID_EXE BP01 DF01 [CD01]`;
+  - app: `body_contacts = derive` / `--body-contacts derive`, with `settings::Private` now covering CD01. A path still works, and `GRID_CONTACT_DIRECTIONS` still feeds the tests and tools.
+  - Shipped profiles (body-contacts, time-trial, race, race-istanbul, race-long-beach) use `derive`. The five launchers no longer require `local\body-contact-directions.bin`.
+- Verified [V]:
+  - the derived CD01 is 712 bytes, SHA-256 `ea8d8bff…79c7`, and `cmp`-identical to `local/body-contact-directions.bin`;
+  - new tests: `contact_directions_equal_the_prepared_file` (byte for byte; skips without `GRID_GAME_ROOT` or the file) and `contact_direction_sources_are_rdata_words`;
+  - scripted app run `--drive --body-contacts derive --body-events derive --drive-ticks 120` prints `drive_private_parameters kind=CD01 source=derived-from-grid.exe sha256=ea8d8bff…` and runs with body geometry (`local/p6-cd01/app-smoke.txt`).
+- Checks before rebase (on d967f35, `local/p6-cd01/first-run/`):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 524 passed, 0 failed, 0 ignored;
+  - Clippy --workspace --all-targets --release -D warnings: clean;
+  - solo identity `grid-opponent-race ROOT CD01 BP01 1 11200 ai` (no DF01): sha256 aad9a07a…e41b;
+  - grid-soak quick: 20/20, 100000 ticks.
+- Checks after rebase onto cdfc790 (`local/p6-cd01/`): release tests 527 passed, 0 failed, 0 ignored; Clippy clean; solo identity aad9a07a…e41b; grid-soak quick 20/20, 100000 ticks (`soak-quick-rebased/`).
+- Tooling note: in a worktree nested under the main checkout, `cargo td` / `cargo t` fail with "'--lib' cannot be used multiple times". Cargo merges the alias arrays from both `.cargo/config.toml` files. Run the expanded command instead. Not fixed here.
+- Not checked: a manual windowed lap. The Android import itself is still P10.
+
 ## G078 — Preferred foliage and grass fix integrated; playable updated (17 October 2026)
 
 Primary main fast-forwarded `d967f35` -> `b783147` after exact status/hash guards. Checked source `917ca5f94d5e` / executable SHA256 `785488a18bd7039bfd0d2beee85281c16185be5f8e83cbc793a985766c413275` atomically promoted to inactive primary target and both verified backups. Four playtest/graphics manifests updated; no running prototype replaced/closed, owner AI report c4d52b9e... preserved unchanged. Private promotion-grass.json and pre-promotion manifest snapshot.

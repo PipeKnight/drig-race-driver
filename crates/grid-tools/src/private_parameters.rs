@@ -1,16 +1,67 @@
-//! BP01 and DF01 from the user's own purchased `grid.exe` (P5). A port of
-//! `tools/extract_body_impact_parameters.py` and
-//! `tools/extract_deformation_parameters.py`: the same build check, the same
+//! BP01, DF01 and CD01 from the user's own purchased `grid.exe` (P5, P6). A
+//! port of `tools/extract_body_impact_parameters.py`,
+//! `tools/extract_deformation_parameters.py` and
+//! `tools/extract_contact_directions.py`: the same build check, the same
 //! file-backed initial data at the same addresses, the same bytes. Read-only;
 //! no code is executed or disassembled. The result is private and stays on
 //! the user's machine (local/ or the app data folder), never in the repository.
-//!
-//! CD01 is not here: it needs the unpacked image (P6).
 
 /// SHA-256 of the supported Steam `grid.exe`.
 pub const STEAM_SHA256: &str = "dd7b0933abf0d421bec3fa6f123319d3d3cc7221e5ef82b7a1201c3d1979e48f";
 
 const BP01_ADDRESSES: [u32; 6] = [0xe4fc30, 0xcb0f28, 0xcafa58, 0xcb870c, 0xd17b10, 0xcb0f1c];
+
+/// CD01 recipe: the 44 startup sampling directions that C7DAE0 stores at
+/// F5E1B0 (docs/CONTACT_DIRECTIONS.md). The initializer only moves scalars, so
+/// each x/y/z lane is one `.rdata` word of the Steam file (0 = the zeroed
+/// lane); w is always zero. Recovered from the analyzed image once; the Steam
+/// code section that holds C7DAE0 is SteamStub-encrypted, its data is not.
+const CD01_SOURCES: [[u32; 3]; 44] = [
+    [0, 0xcafe50, 0xcb0948],
+    [0xcafe50, 0, 0xcaf888],
+    [0, 0xcb0948, 0],
+    [0xcafe50, 0xcaf888, 0xcafe50],
+    [0xcaf888, 0xcafe50, 0],
+    [0xcb0948, 0, 0xcafe50],
+    [0xd42778, 0xd42774, 0xd4277c],
+    [0xd42780, 0xd42770, 0xd4277c],
+    [0xd42768, 0xcafe50, 0xd4276c],
+    [0xd42780, 0xd42760, 0xd42764],
+    [0xd42778, 0xd4275c, 0xd4277c],
+    [0xd42758, 0xd42770, 0xd42754],
+    [0xd42750, 0xd42774, 0xd4274c],
+    [0xd42750, 0xd4275c, 0xd4274c],
+    [0xd42758, 0xd42760, 0xd4274c],
+    [0xd4273c, 0, 0xd42740],
+    [0xd42738, 0xd42744, 0xd42734],
+    [0xd42748, 0xd42730, 0xd42734],
+    [0xd42724, 0xd42728, 0xd4272c],
+    [0xd42738, 0xd42720, 0xd42734],
+    [0xd4271c, 0xcafe50, 0xd42718],
+    [0xd42710, 0xcafe50, 0xd42714],
+    [0xd42708, 0xd4270c, 0xd42718],
+    [0xd42748, 0xd42704, 0xd42734],
+    [0xd42708, 0xd42700, 0xd42718],
+    [0xd42724, 0xd426fc, 0xd4272c],
+    [0xd426f4, 0xd426f8, 0],
+    [0xd426f4, 0xd426f0, 0],
+    [0xd426e8, 0xd426ec, 0],
+    [0xd426e4, 0xd426ec, 0],
+    [0xd426e0, 0xd426f0, 0xcafe50],
+    [0xd426e0, 0xd426f8, 0xcafe50],
+    [0xd426e4, 0xd426dc, 0xcafe50],
+    [0xd426e8, 0xd426dc, 0xcafe50],
+    [0xd426d8, 0xd4270c, 0xd426d4],
+    [0xd426cc, 0xd42728, 0xd426d0],
+    [0xd426c8, 0, 0xd426d4],
+    [0xd426cc, 0xd426fc, 0xd426d0],
+    [0xd426d8, 0xd42700, 0xd426d4],
+    [0xd426bc, 0, 0xd426c0],
+    [0xd426c4, 0xd42730, 0xd426b8],
+    [0xd426b4, 0xd42744, 0xd426b8],
+    [0xd426b4, 0xd42720, 0xd426b8],
+    [0xd426c4, 0xd42704, 0xd426b8],
+];
 
 struct Section {
     rva: u32,
@@ -120,7 +171,7 @@ impl<'a> Pe<'a> {
 fn checked(exe: &[u8]) -> Result<Pe<'_>, String> {
     if hex(&sha256(exe)) != STEAM_SHA256 {
         return Err(
-            "grid.exe is not the supported Steam build (SHA-256 mismatch); BP01/DF01 addresses are build-specific"
+            "grid.exe is not the supported Steam build (SHA-256 mismatch); BP01/DF01/CD01 addresses are build-specific"
                 .into(),
         );
     }
@@ -168,6 +219,30 @@ pub fn deformation(exe: &[u8]) -> Result<Vec<u8>, String> {
     let out = [&b"DF01"[..], &limit, &bulk].concat();
     if out.len() != 252 {
         return Err("DF01 layout is not 252 bytes".into());
+    }
+    Ok(out)
+}
+
+/// CD01 (712 bytes): the 44 unit body-contact sampling directions.
+pub fn contact_directions(exe: &[u8]) -> Result<Vec<u8>, String> {
+    let pe = checked(exe)?;
+    let mut out = b"CD01".to_vec();
+    out.extend(44u32.to_le_bytes());
+    for lanes in CD01_SOURCES {
+        let mut v = [0f32; 3];
+        for (value, address) in v.iter_mut().zip(lanes) {
+            if address != 0 {
+                let word = pe.file_word(address)?;
+                out.extend(word);
+                *value = f32::from_le_bytes(word);
+            } else {
+                out.extend([0; 4]);
+            }
+        }
+        out.extend([0; 4]);
+        if ((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) - 1.).abs() >= 0.001 {
+            return Err("CD01 direction is not a unit vector".into());
+        }
     }
     Ok(out)
 }
@@ -307,5 +382,40 @@ mod tests {
         assert_eq!(df01, read("GRID_DEFORMATION_PARAMETERS"));
         crate::body_impact_parameters::read(&bp01).unwrap();
         crate::deformation_parameters::read(&df01).unwrap();
+    }
+
+    /// CD01 from the Steam file alone equals the file made from the unpacked
+    /// image (tools/extract_contact_directions.py). Skips without the inputs.
+    #[test]
+    fn contact_directions_equal_the_prepared_file() {
+        let Some(root) = std::env::var_os("GRID_GAME_ROOT") else {
+            eprintln!("skipped: GRID_GAME_ROOT is not set");
+            return;
+        };
+        let prepared = std::env::var_os("GRID_CONTACT_DIRECTIONS")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../local/body-contact-directions.bin")
+            });
+        let (Ok(exe), Ok(prepared)) = (
+            std::fs::read(std::path::Path::new(&root).join("grid.exe")),
+            std::fs::read(&prepared),
+        ) else {
+            eprintln!("skipped: grid.exe or the prepared CD01 is absent");
+            return;
+        };
+        let cd01 = contact_directions(&exe).unwrap();
+        assert_eq!(cd01.len(), 712);
+        assert_eq!(cd01, prepared);
+    }
+
+    /// Every recipe lane is an aligned `.rdata` word, never code.
+    #[test]
+    fn contact_direction_sources_are_rdata_words() {
+        for address in CD01_SOURCES.iter().flatten().filter(|&&a| a != 0) {
+            assert!((0xc89000..0xda59a4).contains(address) && address % 4 == 0);
+        }
+        assert_eq!(CD01_SOURCES.iter().flatten().filter(|&&a| a != 0).count(), 119);
     }
 }
