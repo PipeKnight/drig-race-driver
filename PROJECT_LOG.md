@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G092 — F367 integration and source sun GPU checks pass (18 October 2026)
+
+Merged observed origin91d56aa (F365/F366/F367) as0ffe4affccd1; journal-only conflict retained both records.585workspace release tests0failed0ignored, workspace all-target Clippy28.69s, release build2m06s. EXE SHA256c59806b299bf775dc27db85b890560a88563f6ec2e48a93cddd06f13cda9a781. Source-sun native4K far image pixel-identical to pre-Flashback53764d5;30unique virtual30FPS images/ticks1102..1162/<=2.05ns clock error; forward endpoints inspected with restored treeline. Instant Replay with Flashback panel inspected; physical/handling/deformation/lap exits match the pre-Flashback control. Private source-sun-flashback-validation01.json. Graphics branch pushed through0ffe4af; primary subsequently advanced independently toF368/d3b9af5, so its newer files/executable are preserved.
+
+Colour research separately recovered original HDR RGB -> packed8bit+scale normalization; isolated original742B00 checks passed, avoiding double multiplication of saved sun colour/scale. [Evidence](docs/SOURCE_SKY_LIGHTING.md). Still independent Bevy radiometry, not a1:1 original lighting claim.
+
+Before a graphics-launcher lighting default change, run full6500tick/native4K drive. Initial command with a4K motion sequence was rejected by the existing1920x1080 sequence-size guard (sun-full-lap4k01.log retained); corrected02 omits the sequence and retains a native4K final PNG. No guard bypass, no approval rejection. Full run pending; existing30frame1080p sequence already validated. No owner action required.
+
 ## G091 — Recovered sun pilot passes matched4K and drive checks (18 October 2026)
 
 Source53764d51a7b0/SHA25645a87859.../release1m59s:572workspace release tests0failed0ignored; workspace all-target Clippy1m29s clean. Matched native4K authored/source far-track and240tick side-driving captures inspected; source direction changes shadow placement and highlights, not a completed lighting remaster. Old/default far frames are pixel-identical. Paired drive pose/velocity/handling/lap exits equal after walltime removal. First static car-camera pair contained no car, retained honestly as start-wall lighting controls; corrected with actual driving pair. Known nilUUID warning only. Private source-sun-validation01.json, full images/logs under vegetation01. Default sun and primary playable remain unchanged.
