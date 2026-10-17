@@ -1,6 +1,6 @@
 # GRID engine project log
 
-F349 third circuit: Istanbul Park GP drives solo and races with the AI field; per-track start lights (2026-10-17, Claude Code, night run). Details: docs/ISTANBUL_PARK.md.
+F350 third circuit: Istanbul Park GP drives solo and races with the AI field; per-track start lights (2026-10-17, Claude Code, night run). Details: docs/ISTANBUL_PARK.md.
 - Choice: a solo-AI survey of every shipped route with today's readers (local/third-track/solo/). Istanbul Park loads and laps on all four routes. Long Beach also works, but it is a street circuit. Spa, Milan, Detroit and the Japanese tracks fail in readers; Jarama goes off; several routes are refused by lap timing. Selected `tracks/europe/istanbul_park/route_0` (5.34 km GP layout, touring field like the other two).
 - The parked draft claude/second-circuit-03a7ea (7ecd58f) is an unbuilt parallel version of F304's route plumbing, which main already has. Nothing was taken from it; not pushed.
 - Track data [V asset tests]: 12 grid slots with lap timing; 109 gates over 5336.79 m, finish gate 0, sectors at gates 33 and 74; AI line 5226.9 m; 1689 prop boxes, breakable brake boards (6 templates) and 222 double tyre walls, armco and single tyre walls static as on Donington; collision keys mix to the CAR_ row except GRAS (as on all three circuits); the F341 auto-reset puts a flipped car back on Istanbul's line.
@@ -17,7 +17,7 @@ F349 third circuit: Istanbul Park GP drives solo and races with the AI field; pe
   - Windowed app race (autopilot, 11 opponents, CD01/BP01/DF01, characteristics): 5.0 s countdown, lap 1 valid 1:53.376 (39.745 / 36.997 / 36.633), all 12 classified, no failure.
   - grid-soak quick forced onto Istanbul (old seeds 1..12): 12/12 pass.
 - Checks (cargo/rustc 1.99.0, release):
-  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 457 passed, 0 failed; after the final rebase onto 62221a3 (F348 pause menu) 472 passed, and clippy, solo identity and quick soak (same 16 result lines) repeated (grid-soak sha256 01f1c785…b014, grid-app f412e8e9…7de4).
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 457 passed, 0 failed; after the final rebase onto 6cce63a (F348 pause menu, F349 cameras) 484 passed, and clippy, solo identity and quick soak (same 16 result lines) repeated (grid-soak sha256 94d9e17c…1025e, grid-app 55a15fc0…b8c8).
   - Clippy --workspace --all-targets -D warnings: clean.
   - Solo identity: `grid-opponent-race ROOT CD01 BP01 1 14000 ai` byte-identical to local/ai-pacing/runs/solo-rebased.txt (88.42029812185638 / 86.28228501935392, a4a35f899a490c36).
   - Against a 307fe9b baseline build, byte-identical: Nürburgring solo and 12-car, Donington 12-car, mixed lac,bmw 12-car (DF01), Istanbul 12-car (local/third-track/regress/).
@@ -28,6 +28,7 @@ F349 third circuit: Istanbul Park GP drives solo and races with the AI field; pe
   - `cargo fmt -p grid-tools` reformatted unrelated files (main is not rustfmt-clean), reverted; only new or touched files were formatted;
   - Python on Windows wrote CRLF into .rs files, converted back.
 - Open: turn-8 recoveries vs the original; Spa VCQTC limits; Jarama braking; Long Beach as a street circuit; multi-route progress files; Istanbul's 50 unresolved road batches (flat grey road, as Nürburgring); the prototype launcher banner still says Donington. Playable not rebuilt (coordinator).
+
 F349 in-race camera views ported from each car's cameras.xml (2026-10-17, Claude Code). Details, evidence tags and limits: docs/CAMERA_VIEWS.md.
 - Data [V]: `cars/<stem>/cameras.xml` is binary XML with 20 views. The visible ones in file order are chase_close, chase_far, bumper, bonnet and head-cam; each has a hidden `reverseCamera`. The Lacetti and the BMW differ only in positions, FOVs and pitches. New reader `grid_formats::vehicle_views`; tree dumps with the new `tools/binxml_tree.py`.
 - Static [D] (read-only Ghidra 12.1.4 headless on local/phase3/ghidra-project, hash-pinned grid-unpacked.exe; evidence main checkout local/cameras/):
