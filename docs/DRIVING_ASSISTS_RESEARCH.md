@@ -258,7 +258,8 @@ Observations [V for the port; not compared with the original]:
   - BA off: +E74 peaks at 1.98..2.16 s in Automatic and 5.2 s in Manual, with 10..20 ticks of
     locked wheels.
   - Time to rest is 131..143 ticks with BA off and 187..210 with BA on. Locked wheels stop this
-    port's Lacetti sooner. Whether the original does the same needs a live comparison [I].
+    port's Lacetti sooner. The live comparison (F371, BRAKING_REFERENCE.md) confirms this for the
+    original: BA off 53.3 m, BA on 69.7 m from about 49 m/s; the port is 9 % longer with BA on.
   - Automatic holds the brake past rest, selects reverse (gear 9) and backs off to about 16 m/s.
     That is the brake-to-reverse of mode 4. Manual stays in gear 1 at rest.
 - **Stability Control (turn, 70 % throttle, half lock, Automatic/Keyboard).**

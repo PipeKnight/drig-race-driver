@@ -1,5 +1,5 @@
 param(
- [Parameter(Mandatory=$true)][ValidateSet('inspect','serve','menu_down','menu_up','confirm','pause','throttle','brake','left','right','throttle_left','throttle_right')][string]$Action,
+ [Parameter(Mandatory=$true)][ValidateSet('inspect','serve','menu_down','menu_up','confirm','pause','throttle','brake','left','right','throttle_left','throttle_right','brake_test')][string]$Action,
  [ValidateRange(30,2000)][int]$HoldMs=150,
  [ValidateSet('Event','Input')][string]$Mode='Event',
  [string]$SessionJson='local\autosave\persistence-restart\session.json',
@@ -36,7 +36,7 @@ if($Action -eq 'serve') {
  $stdout=Join-Path $out ($stamp+'-'+$Action+'-stdout.txt')
  $stderr=Join-Path $out ($stamp+'-'+$Action+'-stderr.txt')
  $macro=Start-Process -FilePath $ahk -ArgumentList $quoted -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
- if(-not $macro.WaitForExit(10000)) { throw 'Macro did not finish within ten seconds; do not send further input before investigating' }
+ if(-not $macro.WaitForExit($(if($Action -eq 'brake_test'){20000}else{10000}))) { throw 'Macro did not finish in time; do not send further input before investigating' }
  $exitCode=$macro.ExitCode
  Get-Content -LiteralPath $stdout,$stderr
  if($exitCode -ne 0) { throw "Macro failed with exit code $exitCode; inspect $log" }
