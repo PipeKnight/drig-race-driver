@@ -59,6 +59,8 @@ struct Car {
     last_arc: f64,
     finish: Option<f64>,
     status: Status,
+    /// Race time at each completed lap (distance past k line lengths).
+    laps: Vec<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -129,9 +131,37 @@ impl Standings {
                     last_arc: arc,
                     finish: None,
                     status: Status::Racing,
+                    laps: Vec::new(),
                 }
             })
             .collect();
+    }
+
+    /// Standings on an abstract loop of `length` m with the cars at the given
+    /// distances from the line (arc = distance mod length): tests and tools
+    /// that drive [`Self::step_arcs`] directly.
+    pub fn on_loop(laps: u32, length: f64, distances: &[f64]) -> Self {
+        Self {
+            laps,
+            length,
+            start_arc: 0.,
+            cars: distances
+                .iter()
+                .map(|&d| Car {
+                    distance: d,
+                    last_arc: d.rem_euclid(length),
+                    finish: None,
+                    status: Status::Racing,
+                    laps: Vec::new(),
+                })
+                .collect(),
+            finalized: false,
+        }
+    }
+
+    /// [`Self::update`] with the cars' arc positions along the line.
+    pub fn step_arcs(&mut self, arcs: &[f64], time: f64, external: &[usize]) {
+        self.step(arcs, time, external);
     }
 
     pub fn laps(&self) -> u32 {
@@ -164,6 +194,11 @@ impl Standings {
             }
             car.distance += wrap(arc - car.last_arc, self.length);
             car.last_arc = arc;
+            while car.laps.len() < self.laps as usize
+                && car.distance >= (car.laps.len() + 1) as f64 * self.length
+            {
+                car.laps.push(time);
+            }
             if car.distance >= target && !external.contains(&i) {
                 car.finish = Some(time);
                 car.status = Status::Finished;
@@ -239,6 +274,31 @@ impl Standings {
 
     pub fn finished(&self, car: usize) -> Option<f64> {
         self.cars.get(car).and_then(|c| c.finish)
+    }
+
+    /// Completed laps of `car` and their times (s), measured on the race
+    /// progress line from GO (AUTHORED: the original times each car's laps
+    /// with its own track tracker). Estimated laps are not included.
+    pub fn lap_times(&self, car: usize) -> Vec<f64> {
+        let mut previous = 0.;
+        self.cars[car]
+            .laps
+            .iter()
+            .map(|&t| {
+                let lap = t - previous;
+                previous = t;
+                lap
+            })
+            .collect()
+    }
+
+    /// Fastest completed lap of `car`: (seconds, one-based lap number).
+    pub fn best_lap(&self, car: usize) -> Option<(f64, usize)> {
+        self.lap_times(car)
+            .into_iter()
+            .enumerate()
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, t)| (t, i + 1))
     }
 
     /// Completed race distance of `car` in laps (may be negative before the line).
@@ -371,10 +431,43 @@ mod tests {
                     last_arc: d.rem_euclid(1000.),
                     finish: None,
                     status: Status::Racing,
+                    laps: Vec::new(),
                 })
                 .collect(),
             finalized: false,
         }
+    }
+
+    #[test]
+    fn lap_times_and_best_lap_follow_the_line_crossings() {
+        let mut s = standings(3, &[-5., -10.]);
+        s.cars[0].last_arc = 995.;
+        s.cars[1].last_arc = 990.;
+        // Car 0: laps at 60, 115 (55 s) and 175 (60 s); car 1 crosses once, at 70.
+        for (t, a0, a1) in [
+            (10., 245., 230.),
+            (20., 495., 470.),
+            (30., 745., 710.),
+            (40., 995., 950.),
+            (60., 5., 980.),
+            (70., 255., 5.),
+            (80., 505., 255.),
+            (90., 755., 505.),
+            (115., 2., 755.),
+            (125., 252., 800.),
+            (135., 502., 850.),
+            (150., 752., 900.),
+            (175., 3., 950.),
+        ] {
+            s.step(&[a0, a1], t, &[]);
+        }
+        assert_eq!(s.lap_times(0), vec![60., 55., 60.]);
+        assert_eq!(s.best_lap(0), Some((55., 2)));
+        assert_eq!(s.status(0), Status::Finished);
+        assert_eq!(s.finished(0), Some(175.));
+        assert_eq!(s.lap_times(1), vec![70.]);
+        assert_eq!(s.best_lap(1), Some((70., 1)));
+        assert_eq!(standings(2, &[0.]).best_lap(0), None);
     }
     fn names(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("car{i}")).collect()

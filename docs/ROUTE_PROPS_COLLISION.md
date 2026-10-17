@@ -59,6 +59,12 @@ props shape (1,045 boxes; 2,066 total with the entities). This is an authored st
 the original's collision for ornament instances is not recovered. Poles, lights and
 other ornaments stay non-solid.
 
+F357 (17 October): the stand-in no longer covers parts mounted on the base that lean out across
+it. Long Beach's `concrete_fence_*` catch fences lean 0.63 m out over the track at the top, so
+their whole-mesh box stood 0.63 m in front of the concrete at road level and the tyre stacks'
+pieces spawned inside it (LONG_BEACH.md section 5.1). The boxes of every other barrier
+prototype on Donington, Nürburgring and Istanbul Park are unchanged.
+
 Replay of the owner's own inputs (`grid-replay-contacts`, DR01 from the log) is exact
 for 726 ticks, then diverges at the first barrier impact (27 m/s). With the new boxes
 contacts appear at 0.085 m true hull overlap, the deepest hull penetration into the

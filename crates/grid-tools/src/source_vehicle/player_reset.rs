@@ -6,7 +6,8 @@
 //! AUTHORED: the placement happens on the tick the detector fires. The
 //! original first fades the screen out (`0.9 - clamp(0.02 |v|, 0, 0.4)` s
 //! [I]) and places the car when it is black; the fade, the camera hold and
-//! the pause menu's "reset car" requester are not ported.
+//! the pause menu's confirmation fade are not ported. The pause menu's Reset
+//! Vehicle uses [`place`] (grid-app, docs/PAUSE_MENU.md).
 use super::{Runtime, multi::MultiRuntime};
 use crate::ai_driver::Line;
 use grid_world::{Error, reset_lines::Detector};
@@ -50,23 +51,35 @@ impl PlayerReset {
         ) {
             return Ok(None);
         }
-        let (point, heading) = line.reset_target([pose[12], pose[13], pose[14]]);
-        match shared {
-            Some(multi) => {
-                std::mem::swap(player, &mut multi.cars[0]);
-                let result = multi.place_at_rest(0, point, heading);
-                std::mem::swap(player, &mut multi.cars[0]);
-                result?;
-            }
-            None => player.place_at_rest(point, heading)?,
-        }
-        Ok(Some(Reset { point, heading }))
+        place(player, shared, line).map(Some)
     }
 
     /// `R` restarts the whole event.
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+}
+
+/// The placement itself: the player's car at rest on the line point nearest
+/// its position. Also the pause menu's Reset Vehicle (`c_pause_reset_car`,
+/// the same ResetLinesManager placement [I]). A retired player is refused.
+pub fn place(
+    player: &mut Runtime,
+    shared: Option<&mut MultiRuntime>,
+    line: &Line,
+) -> Result<Reset, Error> {
+    let pose = player.pose();
+    let (point, heading) = line.reset_target([pose[12], pose[13], pose[14]]);
+    match shared {
+        Some(multi) => {
+            std::mem::swap(player, &mut multi.cars[0]);
+            let result = multi.place_at_rest(0, point, heading);
+            std::mem::swap(player, &mut multi.cars[0]);
+            result?;
+        }
+        None => player.place_at_rest(point, heading)?,
+    }
+    Ok(Reset { point, heading })
 }
 
 #[cfg(test)]
@@ -151,63 +164,78 @@ mod tests {
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
     fn a_flipped_player_car_is_reset_upright_on_the_road_after_two_seconds() {
-        run(|| {
-            let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
-            let root = Path::new(&root);
-            let table =
-                std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
-            let mut car = Runtime::lacetti(root, "slot_00", 200679).unwrap();
-            let geometry = car.prepare_body_geometry(root, &table).unwrap();
-            let line = Line::load(root, car.route().path()).unwrap();
-            let damage = car.state.car.owner.vehicle[0xcdf0 / 4..0xce30 / 4].to_vec();
-            car.set_pose_at_rest(flipped(car.pose()));
-            let mut reset = PlayerReset::default();
-            let mut still_since = None;
-            let mut fired = None;
-            for tick in 1..=1200u64 {
-                car.tick_with_body_geometry(HOLD, &geometry).unwrap();
-                let (v, w) = (car.velocity(), car.angular_velocity());
-                let tilted = car.pose()[5] <= 0.17
-                    && length([v[0], v[1], v[2]]) + length([w[0], w[1], w[2]]) <= 0.8;
-                if !tilted {
-                    still_since = None;
-                } else if still_since.is_none() {
-                    still_since = Some(tick);
-                }
-                if let Some(r) = reset.update(&mut car, None, &line).unwrap() {
-                    fired = Some((tick, r));
-                    break;
-                }
+        run(|| flipped_on(crate::route::DONINGTON));
+    }
+
+    /// The reset target is the route's own AI racing line.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_istanbul_park() {
+        run(|| flipped_on(crate::route::ISTANBUL_PARK));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_long_beach() {
+        run(|| flipped_on(crate::route::LONG_BEACH));
+    }
+
+    fn flipped_on(route: &str) {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let route = crate::route::Route::new(route).unwrap();
+        let mut car = Runtime::lacetti_on(root, &route, "slot_00", 200679).unwrap();
+        let geometry = car.prepare_body_geometry(root, &table).unwrap();
+        let line = Line::load(root, car.route().path()).unwrap();
+        let damage = car.state.car.owner.vehicle[0xcdf0 / 4..0xce30 / 4].to_vec();
+        car.set_pose_at_rest(flipped(car.pose()));
+        let mut reset = PlayerReset::default();
+        let mut still_since = None;
+        let mut fired = None;
+        for tick in 1..=1200u64 {
+            car.tick_with_body_geometry(HOLD, &geometry).unwrap();
+            let (v, w) = (car.velocity(), car.angular_velocity());
+            let tilted = car.pose()[5] <= 0.17
+                && length([v[0], v[1], v[2]]) + length([w[0], w[1], w[2]]) <= 0.8;
+            if !tilted {
+                still_since = None;
+            } else if still_since.is_none() {
+                still_since = Some(tick);
             }
-            let (tick, placed) = fired.expect("the auto-reset fires");
-            println!("fired at tick {tick}, still and tilted since {still_since:?}");
-            // 2 s of still-and-tilted (125 accumulating ticks), then the firing one.
-            assert!(
-                (125..=127).contains(&(tick - still_since.unwrap())),
-                "{tick} {still_since:?}"
-            );
-            check_placed(&car, &placed, false);
-            // The placement keeps the damage state.
-            assert_eq!(
-                car.state.car.owner.vehicle[0xcdf0 / 4..0xce30 / 4],
-                damage[..]
-            );
-            for _ in 0..125 {
-                car.tick_with_body_geometry(HOLD, &geometry).unwrap();
-                assert_eq!(reset.update(&mut car, None, &line).unwrap(), None);
+            if let Some(r) = reset.update(&mut car, None, &line).unwrap() {
+                fired = Some((tick, r));
+                break;
             }
-            check_placed(&car, &placed, true);
-            // Engine speed 0 after the placement: the car still drives off.
-            let go = Controls {
-                throttle: 1.,
-                ..Default::default()
-            };
-            for _ in 0..250 {
-                car.tick_with_body_geometry(go, &geometry).unwrap();
-            }
-            println!("drive-off speed after 4 s: {}", speed(&car));
-            assert!(speed(&car) > 10., "drives off: {}", speed(&car));
-        });
+        }
+        let (tick, placed) = fired.expect("the auto-reset fires");
+        println!("fired at tick {tick}, still and tilted since {still_since:?}");
+        // 2 s of still-and-tilted (125 accumulating ticks), then the firing one.
+        assert!(
+            (125..=127).contains(&(tick - still_since.unwrap())),
+            "{tick} {still_since:?}"
+        );
+        check_placed(&car, &placed, false);
+        // The placement keeps the damage state.
+        assert_eq!(
+            car.state.car.owner.vehicle[0xcdf0 / 4..0xce30 / 4],
+            damage[..]
+        );
+        for _ in 0..125 {
+            car.tick_with_body_geometry(HOLD, &geometry).unwrap();
+            assert_eq!(reset.update(&mut car, None, &line).unwrap(), None);
+        }
+        check_placed(&car, &placed, true);
+        // Engine speed 0 after the placement: the car still drives off.
+        let go = Controls {
+            throttle: 1.,
+            ..Default::default()
+        };
+        for _ in 0..250 {
+            car.tick_with_body_geometry(go, &geometry).unwrap();
+        }
+        println!("drive-off speed after 4 s: {}", speed(&car));
+        assert!(speed(&car) > 10., "drives off: {}", speed(&car));
     }
 
     /// The same through the shared world: the player runtime is held outside

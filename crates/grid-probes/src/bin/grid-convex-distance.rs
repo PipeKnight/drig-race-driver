@@ -231,6 +231,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let prior = retained.len();
             let settings = grid_world::contact_manifold::Settings {
                 margin: float(s + 0x220),
+                shape_margin: 0.,
                 normal: direction,
                 fallback_point,
                 fallback_depth: float(fallback + 16),

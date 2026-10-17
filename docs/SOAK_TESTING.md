@@ -29,7 +29,7 @@ contacts); BP01, DF01 and the characteristics table are used when present.
 
 | Command | What it does |
 |---|---|
-| `grid-soak quick` | Seeds 1..12 (fixed), 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
+| `grid-soak quick` | Seeds 1..20 (fixed; 1..12 until 2026-10-17, then 1..16; 13..16 are Istanbul Park, 17..20 Long Beach since F357), 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
 | `grid-soak long --hours 8 --jobs 2` | Seeds from 1001 upwards until the deadline (or `--seeds A..B`), 6000-30000 ticks each. Unattended; the summary is rewritten after every scenario. |
 | `grid-soak run --seed N [--profile quick\|long]` | One scenario in-process (the orchestrator runs each scenario this way in a child process). |
 | `grid-soak replay local/soak/.../seed-N.inputs.tsv` | Exact replay of recorded inputs, independent of later chaos-driver changes. |
@@ -77,7 +77,16 @@ file, so replays never depend on the generator.
   13..20 cars are refused at set-up ("unsupported shared-world car count"):
   `MultiRuntime` and the app's `--opponents 1..11` cap the field at 12, matching
   the original's 12 driver objects. `--max-cars 20` exercises that refusal.
-- Routes: Donington GP and Nürburgring GP (`route_0`).
+- Routes: Donington GP, Nürburgring GP and (since 2026-10-17) Istanbul Park GP
+  (`route_0`). Quick seeds 1..12 keep their routes; 13..16 run Istanbul Park.
+  Long runs move about a third of the seeds to Istanbul Park from a separate
+  stream, so the other fields of a seed are unchanged. A race holds the grid for
+  the track's start-light sequence (Donington 4.0 s, Nürburgring and Istanbul
+  5.0 s; [ISTANBUL_PARK.md](ISTANBUL_PARK.md)).
+- Long Beach (`tracks/usa/long_beach/route_0`, the fourth circuit): quick seeds
+  17..20, in the default quick set since F357 (the barrier stand-in fix of
+  "Long Beach tyre stacks (F357)" below) and a quarter of the long seeds, from their own stream
+  ([LONG_BEACH.md](LONG_BEACH.md) section 5).
 - Car models (F345):
   - quick runs stay all-Lacetti, so their results stay comparable with
     earlier runs; `--car`/`--opponent-cars` mix them;
@@ -292,7 +301,8 @@ hit in one tick (a brake-marker board hovering inside the contact margin hit at
 16 m/s; a piece spawned inside a car at 51 m/s): long-1 1091 and 1304 and two
 pre-fix long-run seeds, see DYNAMIC_PROPS_RESEARCH.md "Pieces pushed into the
 ground". Such pieces are now held below the world instead of growing to the
-1e5 domain, so they no longer threaten a world pause.
+1e5 domain, so they no longer threaten a world pause. The board case and the
+two player falls below were fixed in F351 ("Residuals (F351)").
 
 ### Runs after the fixes
 
@@ -331,12 +341,105 @@ Both new failures were replayed exactly with `grid-soak replay`. They belong to
 the open F342 prop-piece residuals, not to a new class. The only cause found is
 that the races now take different paths.
 
+## Residuals (F351)
+
+17 October 2026. Both F342 residuals were port gaps against the original. Details:
+[BOX_CONTACTS.md](BOX_CONTACTS.md). Evidence is in the main checkout's private
+`local/soak-residuals/` (decompilations, `wip/` with the trace and tried patches, the
+binaries compared below in `bin/`, and `runs/` with the soak runs and traces).
+
+| Failure | Cause | Fix |
+|---|---|---|
+| Player falls out of the world after a hard off-track hit (seed 1087, both routes) | Route prop boxes were queried as twelve separate triangles. A tyre wall the car drove 1 m into gave contacts with downward normals (up to 0.9 m deep), which pushed the car through the road. | Prop boxes are box primitives in one AE8AD0 query (`grid_world::box_contacts`), with their shape shell as margin, as in the original. Pieces against static boxes use it too. |
+| Thin boards driven into the ground (seed 12 and the 150 m marker at (-406, -16): seeds 1005, 1012, 1029, 1074) | Road triangles had margin 0. The original gives each its chunk's +0x220 margin, 0.02 in the live game. The marker's lower board stands 2.14 cm above the grass, so it had no ground contact when it spawned inside the breaking car, and the car pushed it under. | `ROAD_MARGIN` 0.02 on road triangles (`packed_contacts::Settings::shape_margin`). The board then rests on the grass. |
+
+Replays: `grid-soak replay local/soak/final-long-{donington,nurburgring}/seed-1087.inputs.tsv`
+(main checkout) fails on the F342 build 4ffec8b and passes with the box change.
+Current main no longer reaches this state: F345 changed the field's paths. Main's own
+failing inputs from the long run below (`local/soak-residuals/runs/soak/long-main-307fe9b-*/`), replayed on
+the fixed build: 15 of 16 pass.
+
+| Route | Main seeds (failure tick's piece) | On the fix |
+|---|---|---|
+| Donington | 1005, 1012, 1074 (the 150 m board, -406/-16); 1042, 1067, 1072, 1078, 1081 (other pieces) | pass; 1005 and 1074 with the same breaks as main |
+| Donington | 1062 | fails at (-386, -54, -12), on another path (6 breaks against 2): the board kicked and spun by the triangle-soup car contacts |
+| Nürburgring | 1001, 1004, 1011, 1035, 1062, 1085, 1099 (pieces) | pass; 1011 with the same breaks as main |
+
+Most inputs take another path on the fix (the break count differs), so a pass there
+shows only that the run survives.
+
+### Runs (F351)
+
+Main 307fe9b and the fix ran side by side on the same seeds, props on, two jobs each
+(`--seeds 1001..1100`). The fix build is grid-soak sha256 9a34103e…12f2. Its code equals the pushed commit before the rebase onto the Istanbul Park and camera work.
+
+| Run | Donington | Nürburgring |
+|---|---|---|
+| main 307fe9b | 9/100: 1005, 1012, 1042, 1062, 1067, 1072, 1074, 1078, 1081 | 7/100: 1001, 1004, 1011, 1035, 1062, 1085, 1099 |
+| this change | 2/100: 1056, 1099 | 1/100: 1085 (a tyre-stack piece at (-335, 569, 64), not traced) |
+
+Every failure in both builds is `prop piece falling through the world`; no car fell,
+and there was no world error, retirement, panic or hang. The fix's runs were made in
+two parts: seeds 1001..1074 / 1001..1049, then the rest. In between, two builds that
+were not adopted ran on the same seeds; see BOX_CONTACTS.md, "Tried and not
+adopted". The fix's two Donington losses:
+- seed 1056: a board of breakable 105 at (-11, -331), spun into the road by the
+  triangle-soup car contacts;
+- seed 1099: the board of breakable 88 settled after its break at tick 1866 and was
+  lost at (-257, -282) at tick 10930, about 170 m away (not traced).
+
+Quick on the rebased build: 16/16 (seeds 13-16 are Istanbul Park), also with
+`--car bmw --opponent-cars lac,bmw` and `--opponent-cars bmw,lac`. Targeted `--cars 1 --chaos prop --ticks 8000`, seeds
+1..80 on Donington: main 1 piece fall, fix 0.
+
+## Long Beach tyre stacks (F357)
+
+17 October 2026. F354 recorded Long Beach's own quick seeds losing tyre-stack pieces through
+the road (forced route `--seeds 1..12` 5/12, `--seeds 17..20` 2/4) and read it as the
+thin-piece-under-a-car weakness. A contact trace shows another cause. Details:
+[LONG_BEACH.md](LONG_BEACH.md) section 5.1; evidence in the main checkout's `local/lb-tyres/`.
+
+| Failure | Cause | Fix |
+|---|---|---|
+| Tyre-stack pieces pushed down through the road as they spawn (forced seeds 1, 3, 6, 7, 9, 10, 11 and seeds 17, 19; seed 10 traced) | The stacks stand against `concrete_fence_*` street walls. The walls' authored F284 stand-in box covered the whole mesh, including the catch fence that leans 0.63 m out over the track at 3.4-4.1 m. At road level the box stood 0.63 m in front of the concrete: at their spawn poses the pieces had 977 downward contacts with such boxes, up to 0.76 m deep. The original has no ornament collision; its wall here is the boundary sheet at the concrete's back face. | `entity_geometry::barrier_extent`: a barrier stand-in leaves out the parts mounted on its base that lean out across it. Only the eight Long Beach fence prototypes change; every other barrier box is bit-identical. |
+
+Runs on the fix (release, cargo/rustc 1.99.0):
+
+| Run | Before (F354) | Fix |
+|---|---|---|
+| Long Beach forced `--seeds 1..12` | 5/12 | 12/12 |
+| `--seeds 17..20` | 2/4 | 4/4 |
+| Long Beach forced `--seeds 21..80` | not run | 59/60 (seed 59, below) |
+| default 1..16 | 16/16 | 16/16, every result line equal to the 33292e7 baseline |
+| Long Beach `--cars 1 --chaos prop --ticks 8000 --seeds 1..19` | baseline 33292e7: 19/19 fail (18 a piece at (-247, 224) near tick 1630; seed 1 the car) | 18/19 (seed 13 at tick 6829, not traced) |
+
+The seven F354 failure inputs replay to the end of their recorded ticks. The default quick set
+is now seeds 1..20 (`QUICK_SEEDS`).
+
+Seed 59 of the forced set is a different mechanism. A tyre tumbling at 26 rad/s lands at
+10 m/s. In its second road step the same triangle gives contacts with a downward normal, and
+the piece's centre ends below the road and gets no further contacts. It belongs to the
+road-orientation family of F342, not to the stand-ins (LONG_BEACH.md section 5.2).
+
+Observed by the same survey and not investigated: on the Nürburgring, tyre-stack pieces at their
+spawn poses have 102 downward contacts, up to 0.50 m deep, with a *neighbouring intact* stack's
+entity box (`tyrestack_red`/`tyrestack_white`). That could be the mechanism of the remaining
+Nürburgring tyre-stack loss (long seed 1085, F351) [I].
+
 ## Follow-ups
 
-- The two off-track player falls of seed 1087 (both routes): replay
-  `local/soak/final-long-*/seed-1087.inputs.tsv` and trace body 0 with
-  `GRID_SOAK_TRACE_BODY`.
-- The open board case above; the original's disabled backface correction
-  (AEA1F0 -> B1AB30/B225E0) is the lead.
+- Car against piece still uses the car-to-car hull-triangle path, and piece against
+  piece the authored separating-axis test with the larger shell. The original uses
+  AE8AD0 for both and sums the margins. Both were tried; at the port's fixed 16 ms
+  step they lose more boards (BOX_CONTACTS.md, "Tried and not adopted"). Revisit
+  them together with the world step: the original steps once per rendered frame.
+- Remaining piece losses on this build: long Donington seeds 1056 (a board spun into
+  the road by the triangle-soup car contacts) and 1099, and Nürburgring 1085 (a
+  tyre-stack piece). The last two are not traced. Long Beach forced seed 59: a tumbling
+  tyre lands through the road (LONG_BEACH.md section 5.2).
+- Nürburgring tyre-stack pieces that spawn inside a neighbouring intact stack's box
+  (section "Long Beach tyre stacks (F357)"); a candidate for seed 1085.
+- The boundary sheet's and the car hull's own shape margins are not established
+  (both 0 in the port).
 - `Session` mirrors `drive_tick` as of F323 (retired cars, the player's own
   contact count). Keep it in step when the app's tick changes.

@@ -123,7 +123,7 @@ def main():
     files = [native, profiles[2][1], profiles[3][1], Path(__file__),
              ROOT / 'tools/probe_engine_audio_schedule.c', ROOT / 'tools/build_engine_audio_schedule_probe.cmd',
              ROOT / 'crates/grid-tools/src/engine_audio_schedule.rs',
-             ROOT / 'crates/grid-tools/src/bin/grid-engine-audio-schedule.rs']
+             ROOT / 'crates/grid-probes/src/bin/grid-engine-audio-schedule.rs']
     files += list(out.glob('*.bin')) + list(out.glob('*.txt'))
     report = dict(passed=True, authored=result, guards=guards,
                   scope='Whole unchanged 4371C0 and actual helpers, all owned voices present, camera3, cooldowns remain nonnegative. Restart backend/play/seek path deliberately excluded; not whole451770, device mixing or audible equivalence.',

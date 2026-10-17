@@ -220,6 +220,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(_) => None,
     };
+    // GRID_LOSE_WHEEL=car:tick[:wheel] (default 2, front left): that car loses
+    // the wheel after the tick, as the loose-part rule would; the wheel
+    // becomes a debris body of the shared world (F353).
+    let lose_wheel: Option<(usize, u64, usize)> = match std::env::var("GRID_LOSE_WHEEL") {
+        Ok(v) => {
+            let parts: Vec<&str> = v.split(':').collect();
+            if !(2..=3).contains(&parts.len()) {
+                return Err("GRID_LOSE_WHEEL=car:tick[:wheel]".into());
+            }
+            Some((
+                parts[0].parse()?,
+                parts[1].parse()?,
+                parts.get(2).map_or(Ok(2), |w| w.parse())?,
+            ))
+        }
+        Err(_) => None,
+    };
     // GRID_PACING_TRACE=local/X.tsv: per tick and AI car the race-manager state.
     let mut pacing_trace = match std::env::var("GRID_PACING_TRACE") {
         Ok(path) => {
@@ -475,6 +492,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("failure tick={} error={error}", multi.ticks + 1);
             break;
         }
+        if let Some((car, _, wheel)) = lose_wheel.filter(|l| l.1 == multi.ticks) {
+            let lost = multi.force_wheel_loss(car, wheel)?;
+            println!(
+                "forced lose_wheel tick={} car={car} wheel={wheel} lost={lost}",
+                multi.ticks
+            );
+        }
         if crash_car0.is_some() && multi.ticks.is_multiple_of(500) {
             report_damage(&multi.cars[0], multi.ticks);
         }
@@ -623,6 +647,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     for line in standings.classification(&names) {
         println!("classification {line}");
+    }
+    if let Some(props) = multi.dynamic_props() {
+        for (car, wheel, start, now) in props.wheel_poses(multi.bodies()) {
+            let moved: f32 = (0..3)
+                .map(|j| (now[3][j] - start[3][j]).powi(2))
+                .sum::<f32>()
+                .sqrt();
+            println!(
+                "wheel_body car={car} wheel={wheel} at=({:.2},{:.2},{:.2}) moved={moved:.2}",
+                now[3][0], now[3][1], now[3][2]
+            );
+        }
     }
     println!(
         "race ticks={} car_contacts={car_contacts} car0_max_speed={maximum_speed:.2}",

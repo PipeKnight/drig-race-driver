@@ -34,8 +34,9 @@ fn spawn(
             DamagePanel,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: px(18.),
-                left: px(18.),
+                // Beside the dial, as `object/dial_damage` sits in `dial_main`.
+                bottom: px(200.),
+                right: px(18.),
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(px(10.)),
                 row_gap: px(2.),

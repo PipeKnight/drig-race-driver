@@ -209,6 +209,15 @@ pub struct Settings {
     pub input: String,
     /// `[ai]` text, in the `--ai` grammar (grid_tools::ai_pacing::Settings).
     pub ai: String,
+    /// `[sound] effects`, percent (the pause menu's Effects Volume).
+    pub sound_effects: Option<u8>,
+    /// `[osd]` Screen Setup of the pause menu: lap timer, race position,
+    /// speed unit mph.
+    pub osd_lap_timer: Option<bool>,
+    pub osd_position: Option<bool>,
+    pub osd_mph: Option<bool>,
+    pub osd_minimap: Option<bool>,
+    pub osd_dials: Option<bool>,
     pub diagnostics: Diagnostics,
 }
 
@@ -275,6 +284,8 @@ impl Settings {
                     "game",
                     "drive",
                     "private",
+                    "sound",
+                    "osd",
                     "diagnostics",
                 ]
                 .contains(&section.as_str())
@@ -352,6 +363,24 @@ impl Settings {
                 }
                 ("private", "body_events") => self.body_events = private(value),
                 ("private", "deformation") => self.deformation = private(value),
+                ("sound", "effects") => {
+                    let v = count(value).map_err(at)?;
+                    if v > 100 {
+                        return Err(at("`effects` must be 0..100".into()));
+                    }
+                    self.sound_effects = Some(v as u8);
+                }
+                ("osd", "lap_timer") => self.osd_lap_timer = Some(on(&key, value).map_err(at)?),
+                ("osd", "position") => self.osd_position = Some(on(&key, value).map_err(at)?),
+                ("osd", "minimap") => self.osd_minimap = Some(on(&key, value).map_err(at)?),
+                ("osd", "dials") => self.osd_dials = Some(on(&key, value).map_err(at)?),
+                ("osd", "speed_units") => {
+                    self.osd_mph = Some(match value.to_ascii_lowercase().as_str() {
+                        "kph" | "km/h" => false,
+                        "mph" => true,
+                        _ => return Err(at("`speed_units` needs kph or mph".into())),
+                    })
+                }
                 ("diagnostics", key) => self.diagnostics.set(key, value).map_err(at)?,
                 (section, key) => {
                     return Err(at(format!("unknown setting `{key}` in [{section}]")));
@@ -506,6 +535,29 @@ prop_script_speed = 12.5
         assert_eq!(s.deformation, Some(Private::Derive));
         // Lines before any header are driver aids, as in the assists file.
         assert!(s.assists().unwrap().traction_control);
+    }
+
+    #[test]
+    fn pause_menu_sound_and_screen_options() {
+        let dir = Path::new("d");
+        let mut s = Settings::default();
+        assert_eq!((s.sound_effects, s.osd_mph), (None, None));
+        s.apply(
+            "[sound]\neffects = 40\n[osd]\nlap_timer = off\nposition = on\nspeed_units = mph\n",
+            dir,
+        )
+        .unwrap();
+        assert_eq!(s.sound_effects, Some(40));
+        assert_eq!(
+            (s.osd_lap_timer, s.osd_position, s.osd_mph),
+            (Some(false), Some(true), Some(true))
+        );
+        let values = crate::pause_menu::initial_options(&s, None);
+        assert_eq!(values.effects, 40);
+        assert!(!values.lap_timer && values.position && values.mph);
+        for text in ["[sound]\neffects = 101\n", "[osd]\nspeed_units = knots\n"] {
+            assert!(Settings::default().apply(text, dir).is_err(), "{text}");
+        }
     }
 
     #[test]

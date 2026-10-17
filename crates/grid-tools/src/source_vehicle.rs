@@ -75,6 +75,9 @@ pub struct Runtime {
     hull: car_collision::Bounds,
     /// The car's NED loose-part levels; the wheel rule changes driving.
     loose_parts: crate::loose_parts::Config,
+    /// Tyre and wheel node bounds of the car model, read with the body
+    /// geometry; a lost wheel becomes a body of these extents.
+    wheel_nodes: Option<std::sync::Arc<crate::loose_wheel::WheelNodes>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -472,6 +475,7 @@ impl Runtime {
             props: None,
             hull: shape.bounds,
             loose_parts,
+            wheel_nodes: None,
         })
     }
 
@@ -535,6 +539,7 @@ impl Runtime {
             2 * 1024 * 1024,
         )?)?;
         let props = crate::entity_geometry::Props::read_route(root, &self.route)?;
+        let wheel_nodes = crate::loose_wheel::WheelNodes::read(root, &self.car)?;
         if self.track.has_boundary() || self.state.shapes.len() != self.track.shape_count() + 1 {
             return Err("body boundary already prepared or shape registration differs".into());
         }
@@ -555,6 +560,7 @@ impl Runtime {
             ..Default::default()
         });
         self.initial = self.state.clone();
+        self.wheel_nodes = Some(std::sync::Arc::new(wheel_nodes));
         Ok(geometry)
     }
 
@@ -839,8 +845,82 @@ impl Runtime {
         self.ticks += 1;
         self.last_body_contacts = body_contacts;
         let impacts = self.impacts();
-        self.detach_wheels(&impacts);
+        let lost = self.detach_wheels(&impacts);
+        self.add_loose_wheels(lost)
+    }
+
+    /// Add the bodies of the wheels `lost` this tick to the world (creating
+    /// an empty prop world if needed).
+    pub(crate) fn add_loose_wheels(&mut self, lost: [bool; 4]) -> Result<(), Error> {
+        let spawns = self.loose_wheels(lost, 0)?;
+        if !spawns.is_empty() {
+            let props = self
+                .props
+                .get_or_insert_with(|| crate::dynamic_props::PropWorld::new(Default::default()));
+            for (wheel, s) in spawns {
+                props.add_wheel(
+                    &mut self.state.world,
+                    &mut self.state.shapes,
+                    0,
+                    wheel,
+                    s.spec,
+                    s.linear,
+                    s.angular,
+                )?;
+            }
+            // Appending links the car body (chain tail) to the wheel.
+            self.state.car.owner.physical = self.state.world.groups.bodies[0];
+        }
         Ok(())
+    }
+
+    /// The debris bodies of the wheels `lost` this tick (9DC270 state 4,
+    /// loose_wheel), by wheel record. `index` is the car's place in its
+    /// world (the authored kick seed). Empty without body geometry.
+    pub(crate) fn loose_wheels(
+        &self,
+        lost: [bool; 4],
+        index: usize,
+    ) -> Result<Vec<(usize, crate::loose_wheel::Spawn)>, Error> {
+        let Some(nodes) = &self.wheel_nodes else {
+            return Ok(Vec::new());
+        };
+        let v = &self.state.car.owner.vehicle;
+        let p = &self.state.car.owner.physical;
+        let f = |o: usize| f32::from_bits(v[o / 4]);
+        let g = |o: usize| -> [f32; 3] { std::array::from_fn(|j| f32::from_bits(p[o / 4 + j])) };
+        let car = crate::loose_wheel::CarMotion {
+            pose: self.pose(),
+            centre: g(0x1c0),
+            velocity: g(0x220),
+            angular: g(0x210),
+            mass: f(0x15a0),
+            offset: [f(0x1630), f(0x1634), f(0x1638)],
+        };
+        // +C754 while a deformation impact is active (+C7A0 = 1).
+        let strength = (v[0xc7a0 / 4] == 1).then(|| f(0xc754));
+        let poses = self.wheels();
+        let mut out = Vec::new();
+        for (i, _) in lost.iter().enumerate().filter(|(_, l)| **l) {
+            // 98C5C0: the lost wheel takes the spin of its axle partner.
+            let partner = [1, 0, 3, 2][i];
+            let spin = f(0x1990 + partner * 0x150 + 0x104);
+            let deflated = (v[(0x22e0 + i) / 4] >> ((0x22e0 + i) % 4 * 8)) & 255 != 0;
+            let seed = (self.ticks as u32) ^ (((index * 4 + i) as u32) << 24);
+            out.push((
+                i,
+                crate::loose_wheel::spawn(
+                    nodes,
+                    i,
+                    deflated,
+                    &car,
+                    &crate::loose_wheel::wheel_motion(&poses[i]),
+                    if spin.is_finite() { spin } else { 0. },
+                    crate::loose_wheel::kick(strength, seed),
+                )?,
+            ));
+        }
+        Ok(out)
     }
 
     /// Wheels lost to the loose-part rule (car +22E4..+22E7, RL, RR, FL, FR).
@@ -886,6 +966,20 @@ impl Runtime {
             }
         }
         new
+    }
+
+    /// Diagnostics: flag `wheel` detached now, as the loose-part rule would
+    /// (+22E4 + wheel), while damage is on and the wheel is still attached.
+    pub(crate) fn force_detach(&mut self, wheel: usize) -> [bool; 4] {
+        let v = &self.state.car.owner.vehicle;
+        let flag = |o: usize| (v[o / 4] >> (o % 4 * 8)) & 255 != 0;
+        let mut lost = [false; 4];
+        if wheel < 4 && flag(0xb13) && flag(0xb14) && !self.detached_wheels()[wheel] {
+            byte(&mut self.state.car.owner.vehicle, 0x22e4 + wheel, 1);
+            byte(&mut self.state.car.frame.body, 0x22e4 + wheel, 1);
+            lost[wheel] = true;
+        }
+        lost
     }
     pub fn reset(&mut self) {
         self.state = self.initial.clone();
@@ -1076,9 +1170,14 @@ impl Runtime {
         Ok(())
     }
 
-    /// Breakable route props, when enabled.
+    /// Breakable route props when enabled, and the bodies of lost wheels.
     pub fn dynamic_props(&self) -> Option<&crate::dynamic_props::PropWorld> {
         self.props.as_ref()
+    }
+
+    /// World bodies: the car, then pieces and lost wheels.
+    pub fn bodies(&self) -> &[grid_world::contact_groups::Body] {
+        &self.state.world.groups.bodies
     }
 
     /// Car body contacts plus, with dynamic props, every live piece's contacts.
@@ -1120,7 +1219,7 @@ impl Runtime {
             }
             out.push(c);
         }
-        if !props.pieces.is_empty() {
+        if props.has_bodies() {
             let mut local = Vec::new();
             let more = props.contacts(
                 &self.track,
@@ -1249,13 +1348,22 @@ mod tests {
                 // collision_main bounds (docs/CAR_COLLISION.md) and body
                 // offset Z (+0x1638) of each car; no tyre reaches past them.
                 for (stem, half_width, max_z, min_z, offset_z) in [
-                    ("lac", 0.913279f32, 2.241661f32, -2.237876f32, -0.14642298f32),
+                    (
+                        "lac",
+                        0.913279f32,
+                        2.241661f32,
+                        -2.237876f32,
+                        -0.14642298f32,
+                    ),
                     ("bmw", 0.947784, 2.258862, -2.237876, -0.1827681),
                 ] {
                     let car = Car::new(stem).unwrap();
                     let runtime =
                         Runtime::load(root, &Route::default(), &car, "slot_01", 200679).unwrap();
-                    assert_eq!(f32::from_bits(runtime.state.car.owner.vehicle[0x1638 / 4]), offset_z);
+                    assert_eq!(
+                        f32::from_bits(runtime.state.car.owner.vehicle[0x1638 / 4]),
+                        offset_z
+                    );
                     let e = runtime.ai_extents();
                     assert_eq!(
                         (e.half_width, e.front, e.rear),
@@ -2328,6 +2436,7 @@ mod tests {
                                         margin: 0.,
                                         directions,
                                     },
+                                    shape_margin: 0.,
                                     contact_capacity: remaining.min(16),
                                     cache_enabled: true,
                                     candidate_capacity: 4096,

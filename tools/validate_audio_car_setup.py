@@ -117,7 +117,7 @@ def main():
             assert result.returncode != 0 and not report.exists(), (name, label)
             guards.append(dict(name=name, profile=label, rejected=True))
     files = [SOURCE, *(p for _, p in profiles), ROOT / "crates/grid-formats/src/audio_car_setup.rs",
-             ROOT / "crates/grid-tools/src/bin/grid-audio-setup.rs", Path(__file__)] + list(out.iterdir())
+             ROOT / "crates/grid-probes/src/bin/grid-audio-setup.rs", Path(__file__)] + list(out.iterdir())
     result = dict(passed=True, source_counts=counts, typed_rows=14, debug_release_source_reencoded_exact=True,
                   guards=guards, identities={str(p): sha(p) for p in files},
                   scope="Selected Lacetti source metadata and valid-framing semantic guards; no live factory/backend/audio equivalence.")

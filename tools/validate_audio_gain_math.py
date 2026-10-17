@@ -65,7 +65,7 @@ def main():
             raise AssertionError((path.name, at, "case", (at - 8) // 12, expected[at:at+8].hex(), actual[at:at+8].hex()))
     files = [native, ROOT / "target/debug/grid-audio-crossfade.exe", ROOT / "target/release/grid-audio-crossfade.exe",
              ROOT / "tools/probe_audio_gain_math.c", ROOT / "tools/build_audio_gain_math_probe.cmd",
-             ROOT / "crates/grid-tools/src/engine_audio_gain.rs", ROOT / "crates/grid-tools/src/bin/grid-audio-crossfade.rs", Path(__file__)]
+             ROOT / "crates/grid-tools/src/engine_audio_gain.rs", ROOT / "crates/grid-probes/src/bin/grid-audio-crossfade.rs", Path(__file__)]
     files += list(out.iterdir())
     report = dict(passed=True, cases=len(rows), original_repeat_exact=True, debug_release_gain_bits_exact=True,
                   maximum_absolute_math_contract_errors=errors, maximum_unit_power_error=maximum_power_error,

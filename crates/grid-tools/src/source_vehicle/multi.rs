@@ -722,7 +722,7 @@ impl MultiRuntime {
                 }
             }
             piece_contacts = 0;
-            if let Some(props) = props.filter(|p| !p.pieces.is_empty()) {
+            if let Some(props) = props.filter(|p| p.has_bodies()) {
                 let hulls: Vec<_> = (0..n)
                     .map(|i| crate::dynamic_props::CarHull {
                         geometry: geometry[i],
@@ -921,12 +921,53 @@ impl MultiRuntime {
                 (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
             })
             .collect();
-        // The loose-part wheel rule of every car still in the world.
+        // The loose-part wheel rule of every car still in the world; a lost
+        // wheel becomes a body of the shared world (loose_wheel).
         for i in 0..n {
             if self.retired[i].is_none() {
                 let impacts = self.impacts(i);
-                self.cars[i].detach_wheels(&impacts);
+                let lost = self.cars[i].detach_wheels(&impacts);
+                self.add_loose_wheels(i, lost)?;
             }
+        }
+        Ok(())
+    }
+
+    /// Diagnostics (grid-opponent-race GRID_LOSE_WHEEL): car `i` loses
+    /// `wheel` now, with its debris body. False when it cannot (damage off,
+    /// already lost, retired).
+    pub fn force_wheel_loss(&mut self, i: usize, wheel: usize) -> Result<bool, Error> {
+        if i >= self.cars.len() || self.retired[i].is_some() {
+            return Ok(false);
+        }
+        let lost = self.cars[i].force_detach(wheel);
+        self.add_loose_wheels(i, lost)?;
+        Ok(lost.iter().any(|l| *l))
+    }
+
+    /// Add car `i`'s wheels `lost` this tick as bodies of the shared world.
+    pub(crate) fn add_loose_wheels(&mut self, i: usize, lost: [bool; 4]) -> Result<(), Error> {
+        let spawns = self.cars[i].loose_wheels(lost, i)?;
+        if spawns.is_empty() {
+            return Ok(());
+        }
+        let props = self
+            .props
+            .get_or_insert_with(|| crate::dynamic_props::PropWorld::new(Default::default()));
+        for (wheel, s) in spawns {
+            props.add_wheel(
+                &mut self.world,
+                &mut self.shapes,
+                i,
+                wheel,
+                s.spec,
+                s.linear,
+                s.angular,
+            )?;
+        }
+        // Appending relinks the chain tail; keep the cars' copies in step.
+        for (j, car) in self.cars.iter_mut().enumerate() {
+            car.state.car.owner.physical[0x300 / 4] = self.world.groups.bodies[j][0x300 / 4];
         }
         Ok(())
     }
@@ -1213,6 +1254,77 @@ mod tests {
                 // The idle car is touched only by the other car before tick 200.
                 assert!(rammed_dent_tick.is_some());
                 assert_eq!(seeds[0], seeds[1]);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Restart Race (grid-app pause menu, R): broken props are gone, the
+    /// intact boxes are armed again and the world replays a fresh one.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn reset_restores_intact_props_and_replays_a_fresh_world() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let load = || {
+                    let mut multi =
+                        MultiRuntime::lacetti(root, &["slot_00", "slot_01"], &table, events)
+                            .unwrap();
+                    multi.enable_dynamic_props(root).unwrap();
+                    multi
+                };
+                let hash = |multi: &MultiRuntime| {
+                    multi
+                        .bodies()
+                        .iter()
+                        .flatten()
+                        .chain(multi.cars.iter().flat_map(|c| &c.state.car.owner.vehicle))
+                        .fold(0xcbf29ce484222325u64, |h, &w| {
+                            (h ^ u64::from(w)).wrapping_mul(0x100000001b3)
+                        })
+                };
+                let drive = [Controls {
+                    throttle: 0.6,
+                    ..Default::default()
+                }; 2];
+                let mut multi = load();
+                let (start, bodies) = (hash(&multi), multi.bodies().len());
+                let props = multi.props.as_mut().unwrap();
+                let stacks: Vec<usize> = (props.catalog.breakables.iter().enumerate())
+                    .filter(|(_, b)| b.template.starts_with("tyrestack"))
+                    .map(|(i, _)| i)
+                    .take(2)
+                    .collect();
+                for &b in &stacks {
+                    props.queue_break(b);
+                }
+                for _ in 0..200 {
+                    multi.tick(&drive).unwrap();
+                }
+                let props = multi.dynamic_props().unwrap();
+                assert_eq!(props.events.len(), stacks.len());
+                assert!(multi.bodies().len() > bodies);
+                multi.reset();
+                let props = multi.dynamic_props().unwrap();
+                assert!(props.events.is_empty() && props.pieces.is_empty());
+                assert_eq!(multi.bodies().len(), bodies);
+                assert_eq!(hash(&multi), start);
+                let mut fresh = load();
+                for _ in 0..200 {
+                    multi.tick(&drive).unwrap();
+                    fresh.tick(&drive).unwrap();
+                }
+                assert_eq!(hash(&multi), hash(&fresh));
             })
             .unwrap()
             .join()

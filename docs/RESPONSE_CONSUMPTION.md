@@ -19,7 +19,7 @@ This routine does not itself update body velocity or pose. Calling `+38` an accu
 
 ## Implementation and supported scope
 
-`crates/grid-world/src/response_consumption.rs` exposes `consume`, with explicit owner/contact identities, registration flags, ordered selection indices, responses and active pending pairs. It returns owned state without modifying caller input. `crates/grid-tools/src/bin/grid-response-consumption.rs` is a private RSC1 diagnostic adapter; it validates and computes the entire request before create-new output under `local/`.
+`crates/grid-world/src/response_consumption.rs` exposes `consume`, with explicit owner/contact identities, registration flags, ordered selection indices, responses and active pending pairs. It returns owned state without modifying caller input. `crates/grid-probes/src/bin/grid-response-consumption.rs` is a private RSC1 diagnostic adapter; it validates and computes the entire request before create-new output under `local/`.
 
 The supported public kernel bounds are 512 unique contacts, 80 selected references and 240 active pairs. The 240 limit is original behavior; the other bounds, nonzero unique identities, consistent owner registrations and finite input/result checks are our supported diagnostic contract. They are stronger than the native routine's assumptions. The CLI additionally bounds owners to 64, passes per case to eight, cases to 1,024 and input to 32 MiB. Unselected supplied contacts are validated too. Overflow and malformed inputs return an error without changing caller state.
 

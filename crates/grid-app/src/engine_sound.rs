@@ -178,11 +178,22 @@ fn update(
     mut sound: ResMut<EngineSound>,
     driving: Res<super::Driving>,
     input: Res<ButtonInput<KeyCode>>,
-    sinks: Query<&AudioSink, (With<AudioPlayer<EngineSource>>, Without<OpponentEngine>)>,
+    mut sinks: Query<&mut AudioSink, (With<AudioPlayer<EngineSource>>, Without<OpponentEngine>)>,
     mut started: Local<bool>,
-    trial: Option<Res<super::time_trial::Trial>>,
+    // The event and the pause menu (Effects Volume).
+    (trial, menu): (
+        Option<Res<super::time_trial::Trial>>,
+        Option<Res<super::pause_menu::PauseMenu>>,
+    ),
     mut opponent_engines: Query<(&OpponentEngine, Option<&mut AudioSink>)>,
 ) {
+    // Pause menu Effects Volume.
+    let gain = menu.map_or(1., |m| m.values.gain());
+    for mut sink in &mut sinks {
+        if sink.volume() != bevy::audio::Volume::Linear(gain) {
+            sink.set_volume(bevy::audio::Volume::Linear(gain));
+        }
+    }
     if sound.failure.swap(0, Ordering::Relaxed) != 0 && !sound.muted {
         sound.muted = true;
         eprintln!("engine_audio version=2 event=decoder_failed muted=true reset_key=R");
@@ -230,7 +241,8 @@ fn update(
                     + (pose[13] - player[13]).powi(2)
                     + (pose[14] - player[14]).powi(2))
                 .sqrt();
-                let volume = OPPONENT_GAIN * OPPONENT_REFERENCE / distance.max(OPPONENT_REFERENCE);
+                let volume =
+                    gain * OPPONENT_GAIN * OPPONENT_REFERENCE / distance.max(OPPONENT_REFERENCE);
                 sink.set_volume(bevy::audio::Volume::Linear(volume));
             }
         }
@@ -305,7 +317,7 @@ mod tests {
             app.insert_resource(sound).init_resource::<ButtonInput<KeyCode>>()
                 .add_message::<AppExit>()
                 .insert_resource(crate::Driving { runtime: grid_tools::source_vehicle::Runtime::lacetti(root,"slot_00",200679).unwrap(), geometry: None, paused:false, failure:None, notices:Vec::new(), scripted_ticks:None, scripted:Default::default(),handbrake_from:None, last_controls:None, segment:0, started:std::time::Instant::now(), opponents: None, auto_reset: Default::default(), reset_line: None })
-                .insert_resource(crate::input::Actions::new(crate::input::ActionMap::keyboard(),crate::input::Pads::Off)).init_resource::<crate::input::ShiftQueue>().add_systems(Update,(crate::input::sample,crate::drive_actions,crate::drive_tick,update).chain());
+                .insert_resource(crate::input::Actions::new(crate::input::ActionMap::keyboard(),crate::input::Pads::Off)).init_resource::<crate::input::ShiftQueue>().insert_resource(crate::pause_menu::PauseMenu::new(crate::pause_menu::Variant::TestDrive,false,false,Default::default())).add_systems(Update,(crate::input::sample,crate::pause_menu::update,crate::drive_actions,crate::drive_tick,update).chain());
             let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.load(Ordering::Relaxed));
             let press = |app: &mut App,key| {let mut input=app.world_mut().resource_mut::<ButtonInput<KeyCode>>();input.reset_all();input.press(key);};
             press(&mut app,KeyCode::ArrowUp);app.update();

@@ -29,7 +29,7 @@ Dimensions are validated as positive finite numbers; shell is nonnegative finite
 `grid-formats/src/entities.rs` owns the bounded reference/state reader. `grid-tools` includes the `grid-entities` diagnostic binary, writing create-new TSV reports beneath canonical `local/`. Names, matrix/dimension hex bit patterns and properties remain private evidence. `tools/validate_entity_descriptors.py` independently walks original bytes and compares report rows as multisets, so presentation order cannot conceal missing/extra records.
 
 ```powershell
-cargo run -p grid-tools --bin grid-entities --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid' local/scene/new-entity-report.tsv
+cargo run -p grid-probes --bin grid-entities --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid' local/scene/new-entity-report.tsv
 ```
 
 Synthetic tests verify explicit add/delete ordering, deleted component exclusion, cloth reporting, transforms, shape fields and rejection of malformed URIs, out-of-template state targets, invalid dimensions and booleans. Tests contain no purchased content.

@@ -22,7 +22,36 @@ Owner request: parallel sessions build slowly and load the CPU. Findings and cha
     - seeded: 107 s, 4 compiled (grid-formats/world/tools/app), 341 Fresh. The robocopy seed took 2 s for 2.3 GB.
   - `tools/seed_build_dir.ps1` does this. It skips `incremental`, keeps timestamps, and does nothing if the build dir is non-empty. The default source is `C:\cargo-build\seed`, a release build of main 6301772 kept by the coordinator.
   - The seed has only the release profile, so dev/check/Clippy artifacts still build once per worktree. If a dependency changes, the stale seed is harmless: that crate simply rebuilds.
-- **Next (not done):** move the old research probes out of `grid-tools/src/bin` into a separate `grid-probes` crate, so ordinary builds and Clippy skip them. Do this when no session is editing those binaries.
+- **Probes moved (17 October 2026, F352).** See "Research probes crate" below.
+
+## Research probes crate — 17 October 2026 (F352)
+
+The 158 one-off research probes moved with `git mv` from `crates/grid-tools/src/bin` to the new workspace crate `crates/grid-probes`. Their names, sources and outputs are unchanged, and they still build to `target/<profile>/<name>.exe`, so the `tools/validate_*.py` scripts that run those executables are unaffected.
+
+- **Kept in grid-tools** (working tools): `grid-tools` itself, `grid-soak`, `grid-opponent-race` and `grid-private-parameters` (`tools/update_prototype.ps1`).
+- **Not a default member.** `cargo build` and `cargo test` at the root skip the probes. Anything with `--workspace` (`cargo t`, the pre-push Clippy) still includes them.
+- **Building a probe:** `cargo build --release -p grid-probes [--bin NAME]`. `cargo build --bin NAME` from the root also works. The `hw-sse` feature is forwarded.
+- **No test harnesses.** Every probe has a `[[bin]] test = false` entry, since none has a test. A new probe works without an entry, and gets a harness until one is added.
+- **References updated:**
+  - `tools/*.py` that hash a probe's source now name `crates/grid-probes/src/bin/…`. Their recorded identity keys change on the next run.
+  - docs reproduction commands now say `-p grid-probes`.
+  - PROJECT_LOG history is left as written.
+
+Measured on this PC: wall clock, release, right after `touch crates/grid-tools/src/lib.rs`, with other sessions building at the same time. "load" is the number of rustc/cargo/link processes running at the start. Logs and tables are in the main checkout's `local/grid-probes/`.
+
+| command | before | after |
+|---|---|---|
+| `cargo build --release` (root) | 101.4 s (load 3) | 56.7 s (load 2) |
+| `cargo test --workspace --release --no-run` | 47.8 s, 173 test executables (load 3) | 29.7 s, 15 (load 0) |
+| `cargo t --no-run` (alias flags) | 27.2 s, 11 (load 3) | 33.1 s, 11 (load 3) |
+| `cargo clippy --workspace --all-targets --release -D warnings` | 14.9 s (load 0) | 18.9 s (load 3) |
+| `cargo build --release -p grid-tools` | 35.9 s (load 0) | 12.5 s (load 4) |
+| `cargo build --release -p grid-probes` | (part of the rows above) | 38.1 s (load 0) |
+
+Reading:
+- Ordinary builds that used to relink all 161 binaries roughly halve (grid-tools alone: about a third).
+- A plain workspace test build no longer compiles 158 empty harnesses.
+- `cargo t` and Clippy cover the same targets as before. Their differences are within the noise of concurrent builds.
 
 ## Sampling profiler — 15 October 2026
 

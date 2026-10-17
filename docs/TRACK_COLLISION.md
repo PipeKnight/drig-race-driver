@@ -36,7 +36,7 @@ At X −183.11911 / Z 19.41256, below max Y −7.147942, an independent vertical
 `grid-formats/src/collision.rs` bounds sections/counts, validates finite quantization, triangle/material indices and leaf references, and preserves unknown flags/node words. Synthetic tests cover nonzero packed index high/low bits, material/flags, quantization, continuation deltas and malformed/truncated inputs. Two fixture mistakes (a mutation that changed no byte and an unrelated scene source ID) were corrected; subsequent **28 format tests**, workspace formatting and warnings-denied Clippy pass.
 
 ```powershell
-cargo run -p grid-tools --bin grid-collision --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid' local/scene/new-collision.tsv
+cargo run -p grid-probes --bin grid-collision --locked -- 'C:\Program Files (x86)\Steam\steamapps\common\Grid' local/scene/new-collision.tsv
 cargo run -p grid-app --locked -- --scene collision --render local/scene/new-collision.png
 cargo run -p grid-app --locked -- --scene collision --view start --render local/scene/new-collision-start.png
 ```

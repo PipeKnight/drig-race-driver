@@ -61,7 +61,7 @@ def main():
     scalars=scalar_record['results']
     assert [r['address'] for r in scalars]==['00e4fc30','00cb0f28','00cafa58','00cb870c','00d17b10','00cb0f1c']
     params=out/'parameters.bin';params.write_bytes(b''.join(bytes.fromhex(r['bytes_hex']) for r in scalars))
-    pins={str(p):sha(p) for p in [image,native,debug,release,SCALARS,Path(__file__),Path('tools/probe_body_impact_handler.c'),Path('tools/probe_collision_damage.c'),Path('tools/isolated_reference.h'),Path('crates/grid-world/src/body_impact.rs'),Path('crates/grid-tools/src/bin/grid-body-impact.rs')]}
+    pins={str(p):sha(p) for p in [image,native,debug,release,SCALARS,Path(__file__),Path('tools/probe_body_impact_handler.c'),Path('tools/probe_collision_damage.c'),Path('tools/isolated_reference.h'),Path('crates/grid-world/src/body_impact.rs'),Path('crates/grid-probes/src/bin/grid-body-impact.rs')]}
     items=list(fixtures());assert len(items)==768
     report=dict(scope='Whole original 9EF360 mode0, and A726B0/B0CFC0/A01910/A6A1D0 '
                 'on explicit owned side graphs, notification observers and no dynamic peer. '

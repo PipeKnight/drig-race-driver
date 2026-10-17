@@ -1,6 +1,9 @@
 # Track generalization (second circuit)
 
-Status: 2026-10-15, Claude Code. Goal: remove the hard-coded Donington
+Status: 2026-10-15, Claude Code. Third circuit (Istanbul Park, 2026-10-17):
+[ISTANBUL_PARK.md](ISTANBUL_PARK.md), which also replaces the start-light open
+item below with per-track sequences. Fourth circuit (Long Beach) and routes whose
+finish is at a later gate: [LONG_BEACH.md](LONG_BEACH.md). Goal: remove the hard-coded Donington
 assumptions so another purchased circuit loads and races end to end, while the
 default (Donington `route_0`) stays bit-identical.
 
@@ -124,7 +127,7 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
 
 ## Open items
 
-- Start lights per track: Nürburgring/Jarama `start_lights.xml` differ
+- ~~Start lights per track~~ (done 2026-10-17, ISTANBUL_PARK.md section 3): Nürburgring/Jarama `start_lights.xml` differ
   (object `gg_startlights_lights_horiz`, 7 stages over 5.0 s, textures 1..7);
   the app still uses the Donington sequence constants on every route.
 - Spa VCQTC count limits; Jarama late-braking corner; Istanbul off-track
@@ -132,4 +135,6 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
 - Barrier ornament stand-in families: generic `concrete_`, `chnfen`,
   `gg_ad_brd_` match on other tracks; armco/tyre stacks stay non-solid as on
   Donington; per-track barrier keys of the CAR_ material mix not re-checked.
+  Since F357 a stand-in leaves out mounted parts that lean out across the
+  barrier (Long Beach catch fences; LONG_BEACH.md section 5.1).
 - Diagnostic binaries listed above remain Donington-only.

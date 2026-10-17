@@ -31,7 +31,7 @@ def main():
     image=ROOT/'local/compatibility/grid-unpacked.exe';native=ROOT/'local/behavior/body-pool-wrapper-probe.exe'
     assert sha(image)==ANALYSIS
     directions=ROOT/'local/body-contact-directions.bin';parameters=ROOT/'local/body-impact-parameters.bin'
-    files=[image,native,directions,parameters,Path(__file__),ROOT/'tools/probe_body_pool_wrapper.c',ROOT/'tools/probe_collision_damage.c',ROOT/'tools/isolated_reference.h',ROOT/'crates/grid-tools/src/bin/grid-body-pool-trace.rs',ROOT/'crates/grid-tools/src/source_vehicle.rs',ROOT/'crates/grid-world/src/body_impact.rs',ROOT/'crates/grid-world/src/vehicle_world.rs',ROOT/'Cargo.lock']
+    files=[image,native,directions,parameters,Path(__file__),ROOT/'tools/probe_body_pool_wrapper.c',ROOT/'tools/probe_collision_damage.c',ROOT/'tools/isolated_reference.h',ROOT/'crates/grid-probes/src/bin/grid-body-pool-trace.rs',ROOT/'crates/grid-tools/src/source_vehicle.rs',ROOT/'crates/grid-world/src/body_impact.rs',ROOT/'crates/grid-world/src/vehicle_world.rs',ROOT/'Cargo.lock']
     for profile in ['debug','release']:files.append(ROOT/f'target/{profile}/grid-body-pool-trace.exe')
     pins={str(p):sha(p) for p in files}
     report=dict(scope='Whole original A727A0 registered dispatch/consumption on sequential '

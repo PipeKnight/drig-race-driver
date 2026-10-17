@@ -32,7 +32,7 @@ def main():
             assert peaks[0]<peaks[1]<peaks[2] and abs(peaks[1]-peaks[3])<25 and peaks[0]==peaks[4]
         else:assert not np.any(v[:125*768])
     assert (a.debug/'telemetry.tsv').read_bytes()==(a.release/'telemetry.tsv').read_bytes()
-    report['identities']={str(f):sha(f) for f in [Path(__file__),ROOT/'crates/grid-tools/src/engine_audio_continuous.rs',ROOT/'crates/grid-tools/src/bin/grid-engine-continuous.rs',ROOT/'target/debug/grid-engine-continuous.exe',ROOT/'target/release/grid-engine-continuous.exe']}
+    report['identities']={str(f):sha(f) for f in [Path(__file__),ROOT/'crates/grid-tools/src/engine_audio_continuous.rs',ROOT/'crates/grid-probes/src/bin/grid-engine-continuous.rs',ROOT/'target/debug/grid-engine-continuous.exe',ROOT/'target/release/grid-engine-continuous.exe']}
     with a.output.open('x') as f:json.dump(report,f,indent=2)
     print(json.dumps({k:v for k,v in report.items() if k!='identities'}))
 if __name__=='__main__':main()

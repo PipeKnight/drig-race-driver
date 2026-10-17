@@ -13,6 +13,317 @@ G055 vegetation source/parser established (17 October2026): docs/SOURCE_VEGETATI
 
 G054 texture full-lap4K verification (17 October2026): sourcef8e5310 currentbinary/native3840x2160, sharedRGBAfallback/two candidates/mildwheels/bodyevents/deformation/currentautopilot+1opponent/6500ticks104simsec,1validlap89.955257484s/terminalnone/4wheelcontacts, logwall58.46snotmonitorFPS. Actualpaired1080passing30frame sequencesaudited/exact800tickendpoint; inspectedviewtargetwallsdistant/partlyoccluded, limitedmovingviewnotcompletemipacceptance. KnownnilUUIDgilrsWARNonly. Private local/graphics/texture-lap01 validation/images/full logs. Continueforest/farstrips withoutchangingphysics ordrivingcameras.
 
+F357 Long Beach tyre stacks no longer fall through the road: barrier stand-ins leave out a catch fence that leans over the track (2026-10-17, Claude Code). The F354 finding. Details: docs/LONG_BEACH.md sections 5.1-5.2, docs/SOAK_TESTING.md "Long Beach tyre stacks (F357)", docs/ROUTE_PROPS_COLLISION.md F284 note. Evidence: main checkout's local/lb-tyres/ (replays, soak runs, regress outputs, extents/components surveys, the temporary trace source dynamic_props.survey.rs).
+- Cause [V]:
+  - The seed-10 replay with a temporary per-contact trace: the two bottom tyres had no car contacts at all. Each had three contacts with prop box 587, normal (−0.015, −0.9999, −0.009), 0.33/0.50 m deep, in their first step.
+  - Box 587 is the authored F284 stand-in of a `concrete_fence_white_vara` ornament, not an entity.
+  - Each Long Beach `concrete_fence_*` mesh is a 1.0 m concrete wall (local z −0.22..0.20) with a catch fence whose posts and panels lean out to z 0.83 at 3.4-4.1 m. The whole-mesh box therefore stood 0.63 m in front of the concrete at road level, where the stacks stand.
+  - A spawn-pose survey of every breakable piece: Long Beach 1330 piece/stand-in pairs, up to 0.757 m deep, 977 downward contacts. Other circuits: at most 22 pairs, ≤0.274 m, none downward.
+  - F354's reading (thin pieces crushed under a car) was wrong; it was based on body positions only.
+- Original [D/I]: static ornaments have no collision data (COLLISION_GAPS_RESEARCH.md B). The prototypes' `default/rigidbody/*_physics` nodes reuse the closest LOD's index source, but neither "rigidbody" nor "_physics" is among the analysis image's strings, so there is no sign that the game reads them. The wall here is the boundary sheet at the concrete's back face. The stand-ins stay an authored F284 measure.
+- Fix:
+  - entity_geometry::barrier_extent: connected mesh parts (1 mm weld). A part is dropped when it is mounted on the base (it starts within 5 cm of the top of the ground parts) and reaches more than 1 cm past the base across the barrier (the shorter horizontal axis). Both tolerances are authored.
+  - Only the eight Long Beach fence prototypes change (box z −0.22..0.198, up to 3.13 m). Every other barrier box on the four circuits is bit-identical.
+  - grid-soak: QUICK_SEEDS 1..20, so Long Beach seeds 17..20 join the default set.
+- Failed along the way: a first version also tested the length axis. It cut 9 mm off Donington's `concrete_wall_*_long`, whose ground parts cover only the middle 8 m. Donington quick seeds 4, 5, 9 and 12 then changed, and 12 failed. Dropped. A workspace `cargo fmt` reformatted 18 unrelated files (the tree is not fmt-clean); reverted.
+- Results [V], release, cargo/rustc 1.99.0, against a baseline build of 33292e7:
+  - The seven F354 failure replays pass.
+  - Forced Long Beach seeds: 1..12 12/12 (was 5/12); 17..20 4/4 (was 2/4); 21..80 59/60. Seed 59 is a tumbling tyre that lands through the road: one road step with a downward normal, F342 family, not stand-ins (LONG_BEACH.md 5.2). Recorded, not fixed.
+  - Default quick 1..16: every result line equal to the baseline.
+  - Targeted Long Beach `--cars 1 --chaos prop --ticks 8000 --seeds 1..19`: baseline 19/19 fail (18 a piece at (−247, 224) near tick 1630, seed 1 the car); fix 18/19 (seed 13, tick 6829, not traced).
+  - Final quick 1..20: 20/20 (local/lb-tyres/soak/quick-final). grid-soak sha256 d7992372…f602.
+  - Solo identity: `grid-opponent-race ROOT CD01 BP01 1 11200 ai` (no DF01) sha256 aad9a07a…e41b.
+  - 12-car races, 12000 ticks with DF01 and characteristics: Donington, Nürburgring, Istanbul Park and a Donington lac,bmw field are byte-identical. Long Beach solo is byte-identical.
+  - Long Beach 12-car changes. First divergence: car 3 at tick 962, at (−64.5, 153.1), 1.63 m from the old box 718 face and 2.26 m from the new one; it is the only prop box within 3 m [I: contact not printed]. Car 8's lap-1 wreck is gone; car 6 now retires with a lost wheel at tick 4451.
+  - Tests: `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 513 passed, 0 failed. Clippy --workspace --all-targets --release -D warnings: clean.
+  - New tests, all failing with the old stand-in:
+    - entity_geometry: a_catch_fence_leaning_out_is_not_part_of_the_stand_in;
+    - entity_geometry: only_long_beach_fences_lose_their_leaning_catch_fence (asset);
+    - dynamic_props: no_piece_spawns_pressed_down_by_a_barrier_stand_in (asset).
+- Observed, not investigated: Nürburgring tyre-stack pieces have 102 downward spawn contacts (≤0.50 m) with a neighbouring intact stack's entity box. This is a candidate for the remaining long seed 1085 [I].
+- Not done: the playable is not rebuilt. The stand-ins remain authored (the catch fence above 3.13 m and its leaning top are not solid).
+
+F356 playable ab6acdd28e93 after the night run (2026-10-17, Claude Code): rebuilt with tools/update_prototype.ps1 from main at ab6acdd (101 s). Night run on the owner's request: 8 tasks in two waves of 4. The app refuses start_session on automated turns, so the second wave was given to the same four sessions, unarchived and messaged with their follow-up tasks. New since playable e8d559009897 (F347): F348 in-race pause menu, F349 original camera views, F350 Istanbul Park (third circuit; per-track start lights, Nürburgring countdown now 5.0 s), F351 soak residuals (box contacts, 0.02 road margin; long-soak failures 9->2 Donington, 7->1 Nürburgring), F352 grid-probes crate (158 probes moved), F353 race HUD and post-race results screens (Retire shows results), F354 Long Beach (fourth circuit; its own soak seeds still lose tyre-stack pieces through the road, recorded, not fixed), F355 the lost wheel as a rigid body of the world. Manifest local/playtest/build-20261017T0652484090378Z, built 2026-10-17T06:54:27Z, exe sha256 7539302378bc52dfbf8039910dcbb9a6bd2735a51206827c84e3fa98c86b7ed9, cargo/rustc 1.99.0; source driving and Bevy checks passed. Dirty only through the untracked docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md. Not checked: any of the night's features in a running window.
+
+F355 a lost wheel is a rigid body of the world (2026-10-17, Claude Code, night run). The F346 follow-up. Details: docs/WHEEL_DETACHMENT.md section 5 "Body (F355)", "Port" and section 7 "The wheel body (F355)".
+- Static evidence [D]: read-only Ghidra 12.1.4 headless on the hash-pinned image. Pseudocode of 9D9F80, 9A8BB0, 9DC270, 7E9D60, 9B9A90 and 9BA2B6 is in the main checkout's private local/soak-residuals/decomp/w1/, 6174F0 in w2/; the earlier 9DB0E0 (local/detached-parts/ghidra-02) and A742E0 (local/dynamic-props/decomp/a12) were reread.
+  - 9DB0E0 with param_5 = 0 (detached): density 600 (CE5C1C); mass = tyre-node box volume × 600, capped at car +15A0 × 0.015 (CB5068). The wheel node is used when the tyre is deflated (+22E0 + i).
+  - 9A8BB0: cylinder of radius (zmax − zmin)/2 and half-length (xmax − xmin)/2, shell 0.02 (CB0934), material D17150 "TYRE".
+  - 9D9F80's descriptor for A742E0: inertia from the shape; stationary thresholds 0.1/0.1; turn-off time 1; angular damping 0.2; air resistance 0.01 × mass; gravity scale 1; maximum velocities FLT_MAX. A697C0 point velocity and A69820 angular velocity of the car, then the 9DC270 kick and the axle partner's spin rotated by the car's rows.
+  - No despawn timer: the body stays until the car is reset.
+- Port:
+  - grid_tools::loose_wheel (new): tyre/wheel node bounds from `<car>_highLOD.pssg`, `spawn`, `kick`.
+  - grid_tools::dynamic_props: `PieceSpec::loose_wheel`, `PropWorld::add_wheel`, `wheels`, `wheel_poses`. The wheel shares the route pieces' world and contact paths (road with its 0.02 margin, prop boxes, pieces, cars). Body settings now take an angular velocity and the 0xEC limit per spec.
+  - Runtime/MultiRuntime `add_loose_wheels` after `detach_wheels`; the prop world is created on demand.
+  - grid-app damage_parts draws the rim and tyre at body(now) × body(at loss)⁻¹ × the wheel's frame at the loss. The authored flight stays only as the fallback without a body.
+  - grid-opponent-race `GRID_LOSE_WHEEL=car:tick[:wheel]` (diagnostic, `MultiRuntime::force_wheel_loss`) and `wheel_body` lines at the end.
+- Interpretations and choices: the kick's random bytes are a seeded LCG for the CRT rand (as in F346). The cylinder is the port's twelve-sided prism. The TYRE material is not used yet (no per-material piece contacts). Calipers (0x33 + i) are not detached; neither shipped car sets m_calipers_come_off_with_wheels.
+- Results [V], release, cargo/rustc 1.99.0 (outputs: worktree local/wheel-body/):
+  - Asset tests, both cars on Donington, Nürburgring, Istanbul Park and Long Beach: the body starts at the hub, stays 0.26-0.35 m (centre) above the road, ends 11-43 m from the car after 4 s. The shared-world car races on.
+  - Solo identity: sha256 aad9a07a…e41b, unchanged.
+  - 12-car races against origin/main 6d432bb (Donington, Nürburgring; with the characteristics also Istanbul Park and a lac/bmw field): all eight byte-identical. No car loses a wheel in them, so no body is made.
+  - Forced wheel loss on all four circuits: the car retires as lost-wheel, the race completes, the wheel body ends 64-254 m away; Donington's run repeats byte-identically.
+  - grid-soak quick: 16/16. Soak's body checks cover the wheel body like a prop piece.
+- Checks, rebased on 50e6634 (F354): `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 510 passed, 0 failed; Clippy --workspace --all-targets -D warnings clean; solo identity aad9a07a…e41b; grid-soak quick 16/16 (local/wheel-body/soak/quick-final).
+- Failed along the way:
+  - The first BMW body started 0.17/0.42 m from the hub: node bounds are car-model coordinates, the anchors are in the physical frame. Fixed with the +1630 offset.
+  - A "does not sink" check against the start height failed on Donington's downhill; it now measures the clearance to the road under the wheel.
+  - F346's bare-corner check failed on the Nürburgring (camber); it stays on Donington.
+- Open: 7E9D60 (+6C consumer) and 9B9A90/9BA2B6 decompiled but not analysed; the TYRE material; a true cylinder; no live comparison of the wheel's flight.
+
+F354 fourth circuit: Long Beach drives solo and races with the AI field; routes finishing at a later gate get lap timing (2026-10-17, Claude Code, night run). Details: docs/LONG_BEACH.md.
+- Choice: from the F350 list, Long Beach route 0 needs no format work. Spa has three blockers, all recorded and none changed:
+  - one chunk has 9 materials (the reader caps at 8; the 4-bit field allows 16);
+  - a prop mesh has a non-UV half-float stream;
+  - the packed body-contact path requires material indices < 8.
+  Jarama route 0 needs AI braking research.
+- Track data [V asset tests]:
+  - 12 grid slots with lap timing; 101 gates over 3655.78 m, sectors at gates 33 and 69; AI line 3580.5 m;
+  - 1325 prop boxes: 124 breakable tyre stacks, 275 static tyre walls;
+  - collision keys mix to the CAR_ row except GRAS (as on every circuit);
+  - start lights: Donington's board object, 7 stages over 5.0 s;
+  - the F341 auto-reset puts a flipped car back on the line.
+- Code:
+  - route::LONG_BEACH and asset tests (route, start_lights, player_reset);
+  - grid-app skips the Le Mans sponsor package when a track lacks it (Long Beach);
+  - grid-soak: quick seeds 17..20 and a quarter of the long seeds on Long Beach (own stream); the default quick set stays 1..16;
+  - settings/race-long-beach.ini and `Play GRID Race Long Beach.cmd`;
+  - lap_progress::start_at_finish re-indexes a circuit whose single forward route finishes at a later gate, so the finish is gate 0. Routes finishing at gate 0 are unchanged.
+- Results [V], release:
+  - Solo AI 81.342 / 78.816 s; two short off-track recoveries at ~2.7 km.
+  - 12-car headless race: 11 cars 2 valid laps; car 8 wrecked on lap 1 by terminal damage.
+  - App static render checked.
+  - Windowed app race (autopilot, 11 opponents, CD01/BP01/DF01, characteristics): 5.0 s countdown, lap 1 valid 1:22.763, all 12 classified, no failure.
+  - Re-indexed routes, solo AI: Donington routes 1-3, Nürburgring route 3 and Jarama route 1 each lap twice validly. Le Mans 0/1: the AI crashes and loses a wheel near the end of lap 1.
+- Finding, recorded and not fixed: `grid-soak quick --route long_beach --seeds 1..12` gives 5/12; `--seeds 17..20` gives 2/4. Every failure is a tyre-stack piece falling through the road.
+  - Replay of seed 10: the pieces spawn 5-10 mm above the road. A car runs over the stack at 34 m/s, and in one tick the 0.15 m bottom tyres are turned ~90° and pushed 0.4-0.7 m under the road.
+  - This is the existing thin-piece-under-a-car weakness of prop contact solving (the F342/F351 family), not a loading error. Seeds 17..20 join the default quick set once it is fixed.
+- Checks (cargo/rustc 1.99.0, release, on 8b8a48b):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 493 passed, 0 failed.
+  - Clippy --workspace --all-targets -D warnings: clean.
+  - Solo identity byte-identical to local/ai-pacing/runs/solo-rebased.txt.
+  - Against an 8b8a48b baseline build, byte-identical: Donington, Nürburgring, Istanbul, mixed lac,bmw and Long Beach 12-car races; Nürburgring and Istanbul solos (local/fourth-track/regress/).
+  - grid-soak quick (1..16): 16/16 pass, every result line equal to the baseline's. Repeated after the rebase onto 5fe7189 (F352 grid-probes, F353 race HUD): 506 tests, clippy, solo identity and quick 16/16 with the same lines (grid-soak sha256 46c17135…e0aa, grid-app 75b12fca…4fca).
+- Not done:
+  - the Istanbul turn-8 and Long Beach recoveries against the original, which needs a live AI trace with input to the game;
+  - the re-indexed routes in grid-soak or launchers.
+  - Playable not rebuilt.
+
+F353 the original's race HUD layout and post-race results screens in grid-app (2026-10-17, Claude Code, night run). Details, evidence and decisions: docs/RACE_HUD.md. Builds on F348; docs/PAUSE_MENU.md updated.
+- Evidence [D] (static; private files in the main checkout's local/pause-menu/ and local/hud-results/):
+  - Osd/sceneconfig.xml is the HUD tree:
+    - right: dial (speedo, odometer, gear, needle, red zone, gear and rev lights, pedal gauges, damage icons) and the position group (4 split pills, n/total);
+    - left: message/countdown box, minimap with flag, lap group (LAP n/total, RACE, LAP, BEST, PB);
+    - top: wrong way and penalty pills.
+  - Osd/config.xml gives:
+    - the four selectable groups;
+    - dial revlimit 0.95 and gearchange 0.90;
+    - rpm ranges 8000/10000/12000, each with a 2000 rpm red line;
+    - split display 5..10 s;
+    - wrong way 4 s / 2 s.
+  - system/flow.bin `f_post` and states.bin give the free-race post-race flow:
+    - finish → stats screen (position, fastest lap) → results;
+    - Retire from Race → results directly;
+    - results pills Continue, View Replay, Exit, Restart Race;
+    - fr_/td_terminal_damage wreck screens after the 1 s flash and 1 s fade.
+  - Results columns from the header set-up at 0x52E4F0..0x52E6A8 (capstone on the hash-pinned image): position, (points in career only), driver, time, car, team.
+- Code:
+  - race_hud.rs: placeholder panels in the original layout, each group switchable from Screen Setup. Mini Map and Dials are now live options, with `[osd] minimap`/`dials`. The old text HUD keeps only the heading and status lines, and the F333 damage icons moved beside the dial.
+  - post_race.rs: stats, results and wreck screens with Yes/No confirmations. Continue and Exit close the app (no front end). Restart restarts. Replays are shown but unavailable.
+  - pause_menu: Retire from Race now shows the results instead of closing the app (this replaces the F348 stopgap); the pause menu is off while a post-race screen is up.
+  - grid_tools::race::Standings: per-car lap times and best lap measured on the race-progress line (AUTHORED), plus `on_loop` and `step_arcs` for tests.
+  - ai_driver::Line::points for the minimap.
+  - grid-app now depends on grid-world.
+- Interpretations and authored choices, all recorded in the doc:
+  - the time cell is the winner's total, then "+gap", with `*` for estimates;
+  - an added best-lap column;
+  - split pills show car ahead / player / car behind for 5 s after each lap;
+  - the dial scale and red zone, and rpm = rad/s × 60/2π;
+  - wrong way means moving against the AI line above 3 m/s;
+  - the wreck screen after 2 s;
+  - no post-race cutscene.
+- Launcher: the `Play GRID Prototype.cmd` banner no longer says Donington (F350 open item; it was in the launcher, not in grid-app).
+- Tests [V], release:
+  - race lap-time test;
+  - post_race unit tests: flow, pills, wreck, rows order/gaps/estimates/out/best laps, ordinals;
+  - race_hud unit tests: dial, wrong way, lap group, minimap;
+  - asset screens_match_the_original_states_file: results pills, both wreck screens, stats types, labels;
+  - pause_menu::race_tests::retire_from_race_shows_the_results_on_every_circuit, 3 AI each: Donington with Lacetti, Nürburgring with BMW, Istanbul Park mixed. Results, finalised race, player retired, opponents estimated, frozen simulation, then Restart from the results;
+  - a_finished_race_goes_through_stats_to_classified_results: one autopiloted lap at Donington. Stats show 4th with best 1:29.993; results: winner 90.736 s, gaps +0.544/+1.248/+1.935, all four finished;
+  - the F348 pause and restart tests still pass.
+- Offscreen renders (worktree local/hud-results/: hud-race.png, finish-stats.png, hud-istanbul.png): the layout appears as designed on Donington and Istanbul Park, and the stats screen ("Podium Finish, 2nd / 4, Fastest Lap 1:29.842") after an autopiloted lap. The first render showed the lap group under the heading text; it was moved down.
+- Pre-push checks (cargo/rustc 1.99.0, release, outputs main checkout local/hud-results/checks/, local/soak/quick-hud-results/) on the rebase onto 6d432bb (F352 grid-probes):
+  - cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS/GRID_AI_CHARACTERISTICS: 502 passed, 0 failed;
+  - clippy --workspace --all-targets --release -D warnings: clean;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` without GRID_DEFORMATION_PARAMETERS: byte-identical, sha256 aad9a07a…e41b, with or without the characteristics table (solo-after-nodf*.txt). With DF01 set the output is the FE38… variant, so the baseline condition is DF01 off;
+  - grid-soak quick: 16/16.
+- Not done:
+  - the original visual style (dial2.pssg glyphs, needle, animations);
+  - the minimap track mask and brake light;
+  - driver name tags; penalty pills;
+  - replays; the post-race cutscene;
+  - the career points column;
+  - the original's exact results time-cell format and split-pill rows;
+  - a windowed check by a person.
+
+F352 research probes moved into a new grid-probes crate (2026-10-17, Claude Code). The next step named by F330. Details and timings: docs/TOOLCHAIN.md "Research probes crate".
+- 158 probes were moved with `git mv` from crates/grid-tools/src/bin to crates/grid-probes/src/bin. Their names, sources and outputs are unchanged, and they still build to target/<profile>/<name>.exe.
+- Kept in grid-tools: grid-tools itself, grid-soak, grid-opponent-race and grid-private-parameters (update_prototype.ps1). A grep of every name found no other test, launcher or build-script use. tools/*.py run the probes from target/, which is unchanged.
+- grid-probes forwards hw-sse and is not in default-members. Each probe has `[[bin]] test = false`; none had a test.
+- References updated: 18 tools/*.py that hash a probe's source (35 paths), and docs build commands now say `-p grid-probes`. AGENTS.md check levels and the .cargo/config.toml comment are updated; the `cargo t`/`td` flags are unchanged. PROJECT_LOG history is left as written.
+- [V] grid-binxml from the new crate gives a TSV byte-identical to the one made before the move (Lacetti cameras.xml).
+- Timings (release, after touching the grid-tools lib, with other sessions building; logs in main checkout local/grid-probes/):
+  - `cargo build --release`: 101.4 s → 56.7 s;
+  - `cargo test --workspace --release --no-run`: 47.8 s, 173 executables → 29.7 s, 15;
+  - `cargo build --release -p grid-tools`: 35.9 s → 12.5 s;
+  - `cargo t --no-run`: 27.2 → 33.1 s, 11 executables both; Clippy workspace: 14.9 → 18.9 s. Both cover the same targets as before; the differences are within the noise of concurrent builds;
+  - building all probes when needed (`-p grid-probes`): 38.1 s.
+- Checks on 4458a31 (cargo/rustc 1.99.0, release):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 489 passed, 0 failed;
+  - Clippy --workspace --all-targets -D warnings: clean;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai`: sha256 aad9a07a…e41b, as in F351;
+  - grid-soak quick: 16/16 (local/soak/quick-f352-probes).
+- Failed first: a Python regex with a backslash character class broke when written through a shell heredoc; the script was then written as a file.
+- Note: the validators' recorded source-identity keys change on their next run (new path).
+
+F351 grid-soak residuals fixed: prop boxes as box primitives, road triangles with their 0.02 margin (2026-10-17, Claude Code). The F342 follow-ups: thin props driven into the ground and players falling out of the world. Details in docs/BOX_CONTACTS.md, docs/SOAK_TESTING.md "Residuals (F351)" and docs/DYNAMIC_PROPS_RESEARCH.md "Pieces pushed into the ground".
+- Static evidence: read-only Ghidra 12.1.4 headless on a copy of the dynamic-props project, plus capstone 5.0.6 through the private pe.py, on the hash-pinned image. Pseudocode, scripts and traces are in the main checkout's private local/soak-residuals/ (decomp/b1..b7, scripts/, bin/ = the compared binaries, wip/ = trace and tried patches, runs/ = the soak runs and traces).
+  - [D] B18E70 builds a 12 × 12 pair matrix. Every pair of convex kinds {0 box, 3 sphere, 4 capsule, 5 cylinder, 6, 7 mesh} goes to AE8AD0; packed road chunks (kind 11) are queried per triangle (AEA1F0).
+  - [D] AE8AD0 = B7F740/B7F520 (B7EA60 distance, B7ED10 sampled penetration with ±direction and B's axes) → AEE640 → AE2FA0. B3D890 box features: the dominant-axis face, oriented above 0.99.
+  - [V] Live original: all eight road chunk shapes in the 6 October read-only captures have +0x220 = 0.02. [D] B212D0 copies it onto AEA1F0's temporary triangle and widens the candidate bounds by it.
+- Causes:
+  - Players falling (seed 1087, both routes; reproduced exactly on the F342 build 4ffec8b): at 39-45 m/s into a tyre wall entity box, the port's per-triangle box query gave normals such as (0.61, -0.79, 0), up to 0.9 m deep. The car was pushed through the road and fell.
+  - Boards into the ground (seed 12; seeds 1005, 1012, 1029, 1074 at the same spot): the 150 m marker's lower board stands 2.14 cm above the grass. Its 2 cm shell plus the port's zero road-triangle margin left it without a ground contact in its first step. A car still inside it (the break comes after the capped step, as in the original) pushed it 0.38 m down. The car's contact direction matches the original: its sampled penetration minimum is straight up.
+  - Not the cause: AEA1F0's backface correction stays disabled in the original (B1AB30 rectangle is FLT_MAX; the only other +0x294 writer, B0AD10, is unreferenced).
+- Port:
+  - grid_world::box_contacts (new): AE8AD0 for a moving mesh against a static box.
+  - convex_distance: distance, batch depth and penetration take a point set; B7ED10's extra axes; contact_triangle with a triangle margin. The triangle path keeps every operation.
+  - contact_manifold: mesh_feature split out; polygons of any size; shape_margin.
+  - packed_contacts: Settings::shape_margin; bounds widened by it.
+  - entity_geometry: a BoxShape per prop box with its shell (ornament stand-ins 0); the packed box data is removed.
+  - track: ROAD_MARGIN = 0.02 for road chunks. The boundary sheet, car-to-car and the diagnostics stay at 0.
+- Tried and not adopted (BOX_CONTACTS.md, "Tried and not adopted"):
+  - AE8AD0 for car against box pieces, with AE2FA0's two-body reference rule [D]; and summed piece-pair margins (B7F520 mA + mB).
+  - They fix two board losses (seed 1056, main's 1062 inputs), but targeted prop chaos (1 car, seeds 1..80) loses 2 and 4 boards against 0 without them. At the port's fixed 16 ms step a car is 0.5-0.85 m into a new piece, and the smallest overlap is often vertical. The original steps once per rendered frame (6 ms at 165 Hz), with about a third of that overlap.
+  - Decision made overnight, the owner's to revisit together with the world step. Patches: local/soak-residuals/wip/v3-commit.patch, v4-uncommitted.patch.
+- Results [V], release, cargo/rustc 1.99.0:
+  - Seed-1087 replays on 4ffec8b plus the box change: Nürburgring passes all 2404 recorded ticks, Donington all 6549. At the recorded Nürburgring pose, wall 1508 now pushes the car up (normal (0.0004, 1.0, -0.004), 1.08 m).
+  - Main's seed-1005 inputs: identical up to the board's spawn at tick 8822. The board then falls to y -50.6 on main and comes to rest at y -15.15 with the margin.
+  - Main's failing long-run inputs replayed on this build: 15 of 16 pass; 1062 fails on another path (6 breaks against 2), a board spun into the road by the triangle-soup car contacts.
+  - Long soaks, seeds 1001..1100, props on, main 307fe9b against this change (the change's runs in two parts after a stop): Donington main 9/100, this change 2/100 (1056, 1099); Nürburgring main 7/100, this change 1/100 (1085, a tyre-stack piece). Every failure is a prop piece; no car fell; no world error, panic or hang. Grid-soak sha256: main 58dd2afa…2caf, this change 9a34103e…12f2.
+  - Targeted `--cars 1 --chaos prop --ticks 8000`, seeds 1..80, Donington: main 1 piece fall, this change 0.
+  - grid-soak quick on the rebased build: 16/16 (seeds 13-16 are Istanbul Park), also `--car bmw --opponent-cars lac,bmw` and `--opponent-cars bmw,lac`.
+  - Solo-lap identity: `grid-opponent-race ROOT CD01 BP01 1 11200 ai` sha256 aad9a07a…e41b, laps 88.42029812185638 / 86.28228501935392, identical to main, on the rebased build.
+  - Race changes, explained by first divergence (temporary per-tick pose prints and a margin toggle, removed):
+    - 12-car Donington (12 12000 ai, DF01): byte-identical with the box change alone. With the road margin it first diverges at tick 2749: car 9's floor comes within 2 cm of the road near (677, -166), a light contact at most 4 mm inside the margin. The order changes at 8/9 and 10/11; car contacts 1604 → 1211; the winner's time is 2:57.968 → 2:58.016.
+    - 12-car Nürburgring (14000 ticks): the box change alone first diverges at tick 3163. Car 10 drives over a flat close_drift_flag.max box and meets its 2 cm shell.
+  - Tests: `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths, rebased tree: 489 passed, 0 failed; clippy --workspace --all-targets -D warnings clean (rebased tree). New tests:
+    - box_contacts (3);
+    - entity_geometry::a_car_deep_in_a_tyre_wall_is_never_pushed_down (recorded hull poses, both routes);
+    - dynamic_props::every_brake_marker_board_touches_the_ground_when_it_spawns (fails on breakable 116 with a zero road margin).
+- Failed along the way:
+  - At first I took the board case for original-equivalent, before reading the live chunk margin.
+  - The first rebase stopped because the worktree has no git identity; finished with -c user.name/user.email.
+  - The project `cargo t` alias still collides with a user-level alias; the full command above was used instead.
+- Open:
+  - car against piece and piece against piece as AE8AD0, together with the world-step question;
+  - the boundary sheet's and the car hull's own shape margins (both 0, not established);
+  - car-to-car as AE8AD0 (kinds 7/7) would change race results;
+  - per-pair direction caches;
+  - the remaining board loss of the long run, seed 1056 (a board spun into the road by the triangle-soup car contacts).
+
+F350 third circuit: Istanbul Park GP drives solo and races with the AI field; per-track start lights (2026-10-17, Claude Code, night run). Details: docs/ISTANBUL_PARK.md.
+- Choice: a solo-AI survey of every shipped route with today's readers (local/third-track/solo/). Istanbul Park loads and laps on all four routes. Long Beach also works, but it is a street circuit. Spa, Milan, Detroit and the Japanese tracks fail in readers; Jarama goes off; several routes are refused by lap timing. Selected `tracks/europe/istanbul_park/route_0` (5.34 km GP layout, touring field like the other two).
+- The parked draft claude/second-circuit-03a7ea (7ecd58f) is an unbuilt parallel version of F304's route plumbing, which main already has. Nothing was taken from it; not pushed.
+- Track data [V asset tests]: 12 grid slots with lap timing; 109 gates over 5336.79 m, finish gate 0, sectors at gates 33 and 74; AI line 5226.9 m; 1689 prop boxes, breakable brake boards (6 templates) and 222 double tyre walls, armco and single tyre walls static as on Donington; collision keys mix to the CAR_ row except GRAS (as on all three circuits); the F341 auto-reset puts a flipped car back on Istanbul's line.
+- New code:
+  - grid_formats::start_lights + grid_tools::start_lights::load: the track's `start_lights.xml`. Istanbul and Nürburgring: `gg_startlights_lights_horiz`, 7 stages over 5.0 s. Donington: 6 stages over 4.0 s.
+  - grid-app `StartSequence`: per-track board textures, race countdown and AI rev threshold; stages 1..n-1 across the countdown, the last from GO (F296 [I] rule, generalised).
+  - grid-soak: the race countdown is the track's sequence time; quick seeds 1..16 (1..12 unchanged, 13..16 Istanbul); long runs move about a third of the seeds to Istanbul from a separate stream.
+  - `route::{NURBURGRING, ISTANBUL_PARK}`; settings/race-istanbul.ini and `Play GRID Race Istanbul.cmd`.
+- Decision (night run, closest to the original): the countdown follows each track's shipped sequence, so Nürburgring races in the app and the soak now count down 5.0 s instead of 4.0 s. Headless grid-opponent-race has no countdown; it is unchanged.
+- Results [V], release:
+  - Solo AI 110.442 / 108.945 s. Two off-track Recovery episodes in turn 8 (line ~2330 m, 56-57 m/s, full throttle, full steer, 8.7 m wide); both laps valid. Open: live comparison.
+  - 12-car headless AI race: every car 2 valid laps, winner 3:42.432, last +10.944 s.
+  - App static render of the start checked (local/third-track/istanbul-start.png).
+  - Windowed app race (autopilot, 11 opponents, CD01/BP01/DF01, characteristics): 5.0 s countdown, lap 1 valid 1:53.376 (39.745 / 36.997 / 36.633), all 12 classified, no failure.
+  - grid-soak quick forced onto Istanbul (old seeds 1..12): 12/12 pass.
+- Checks (cargo/rustc 1.99.0, release):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 457 passed, 0 failed; after the final rebase onto 6cce63a (F348 pause menu, F349 cameras) 484 passed, and clippy, solo identity and quick soak (same 16 result lines) repeated (grid-soak sha256 94d9e17c…1025e, grid-app 55a15fc0…b8c8).
+  - Clippy --workspace --all-targets -D warnings: clean.
+  - Solo identity: `grid-opponent-race ROOT CD01 BP01 1 14000 ai` byte-identical to local/ai-pacing/runs/solo-rebased.txt (88.42029812185638 / 86.28228501935392, a4a35f899a490c36).
+  - Against a 307fe9b baseline build, byte-identical: Nürburgring solo and 12-car, Donington 12-car, mixed lac,bmw 12-car (DF01), Istanbul 12-car (local/third-track/regress/).
+  - grid-soak quick: 15/16. The one failure is the known Donington seed-12 board fall (tick 3003), as on F346/F347. Istanbul seeds 13..16 pass. Against the 307fe9b baseline (11/12, same seed 12) the Donington seeds give the same result lines; Nürburgring races 6, 7, 11 differ (5.0 s hold), all pass.
+- Failed first:
+  - the seed script needed `-ExecutionPolicy Bypass` and cargo on PATH;
+  - grid-soak needs the GRID_* private paths;
+  - `cargo fmt -p grid-tools` reformatted unrelated files (main is not rustfmt-clean), reverted; only new or touched files were formatted;
+  - Python on Windows wrote CRLF into .rs files, converted back.
+- Open: turn-8 recoveries vs the original; Spa VCQTC limits; Jarama braking; Long Beach as a street circuit; multi-route progress files; Istanbul's 50 unresolved road batches (flat grey road, as Nürburgring); the prototype launcher banner still says Donington. Playable not rebuilt (coordinator).
+
+F349 in-race camera views ported from each car's cameras.xml (2026-10-17, Claude Code). Details, evidence tags and limits: docs/CAMERA_VIEWS.md.
+- Data [V]: `cars/<stem>/cameras.xml` is binary XML with 20 views. The visible ones in file order are chase_close, chase_far, bumper, bonnet and head-cam; each has a hidden `reverseCamera`. The Lacetti and the BMW differ only in positions, FOVs and pitches. New reader `grid_formats::vehicle_views`; tree dumps with the new `tools/binxml_tree.py`.
+- Static [D] (read-only Ghidra 12.1.4 headless on local/phase3/ghidra-project, hash-pinned grid-unpacked.exe; evidence main checkout local/cameras/):
+  - parameter binders and vtables: Chase 0x7F31B0 / 0xD00278, Mounted 0x7F4BE0 / 0xD00008, Head 0x7F3A70 / 0xD00140; FOV is degrees, converted ×0.0174533;
+  - profile key `current_camera`, default chase_close (0x5F1100): restored at race start, a hidden view falls back to the first visible one (0x582750); saved at race end, a reverse view saves its owner (0x584E70);
+  - chase yaw lag (0x8114B0): integrate yaw, angularLimit 10 rad never binds after the ±π wrap, return rate |θ| · (lagMin + (lagMax − lagMin) · speed / 55.5554 m/s); close-follow height −5 × filtered slope (clamp 0.58, damp 0.08);
+  - Mounted shift (0x822510): Δv / (dt · 30) in the body frame, clamp(−a · axisScale, ±maximumShift), first-order lag at movementSpeed;
+  - shipped presets: keyboard C = Change View, End = Look Back; XInput LB / Y.
+- Not found or not ported: the Change View handler (the order is the file order [I]); FOV convention (taken as vertical [I]); chase tilt, roll, suspension and impact envelopes; Mounted tilt and twist; the head/body dynamics (0x842DD0, 43 KB); transitions (all switch in race).
+- Code: `crates/grid-app/src/camera.rs`. Change View cycles; Look Back holds the reverse view; per-car mount points come from each car's file. Camera time is simulation ticks × 0.016 s, so pause holds still and renders are reproducible. The history resets on R, a view change and backwards ticks. The view persists in `<data dir>/camera.ini` (`current_camera = IDENT`), written on exit. If the car file cannot be read, the old authored chase remains, with `drive_camera event=fallback`.
+- Decision (closest to the original): keyboard C now changes the view and End looks back; before, C looked back. The HUD hint says so.
+- main.rs changes: `mod camera`, one install line, and the camera block of drive_present (cameras share a tuple parameter with free look because of Bevy's 16-parameter limit). The authored free look (F305) still orbits chase views.
+- Renders [V, inspected] in main checkout local/cameras/renders/, release, `--drive --drive-ticks 300 --throttle 1 --steering 0.05`:
+  - Lacetti chase_close, chase_far, bumper, bonnet, head-cam and look-back;
+  - BMW chase_close, bonnet and head-cam;
+  - camera.ini restore and save log lines are correct.
+  - The bonnet view shows no hood (the eye may sit at the hood surface; not compared with the original). Head-cam shows the hood but no interior (int_*.pssg is not loaded).
+- Checks on a44577b (cargo/rustc 1.99.0, release):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 461 passed, 0 failed;
+  - Clippy --workspace --all-targets -D warnings: clean;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai`: byte-identical to F346 (sha256 aad9a07a…e41b; laps 88.42029812185638 / 86.28228501935392);
+  - grid-soak quick: 11/12. The known seed-12 board fall at (-406, -51, -16), tick 3003, is unchanged (local/soak/quick-f348-camera).
+  - After the rebase onto F348 (pause menu; conflicts in the keyboard map and HUD hint resolved): grid-app release tests 69 passed, 0 failed.
+- Failed first:
+  - Ghidra headless received only the first address through PowerShell `-File` argument binding; fixed by passing a comma list;
+  - drive_present exceeded Bevy's 16 system parameters;
+  - two test expectations had arithmetic slips.
+- Not done: the cockpit interior, head dynamics, FOV convention check against the 2026-10-09 recording, the remaining chase effects. The playable is not rebuilt.
+
+F348 the original's in-race pause menu in grid-app (2026-10-17, Claude Code). Details, evidence and decisions: docs/PAUSE_MENU.md.
+- Evidence [D] (static; private copies in the main checkout's local/pause-menu/):
+  - the menus are defined in system/states.bin (GRID binary XML), not in the front-end .pssg files;
+  - system/flow.bin is the state graph: it picks the menu per event type and says where each link goes;
+  - labels are ids in language/language_eng.lng; the new grid_formats::language reads that table (LNGT/HSHS/HSHT/SIDA/SIDB/LNGB);
+  - menu keys and repeat timing come from ActionMap presets 0 (keyboard) and 4 (XInput) and repeatSettings.xml.
+- Menus ported, in the original's order:
+  - races (Race Day flow `f_`, pause_mainmenu_free_race): Continue, Instant Replay, Restart Race, Options, Retire from Race;
+  - free practice (test drive, pause_mainmenu_test_drive): Continue, Instant Replay, Restart Test Drive, Options, Finish Test Drive, Ghost Car;
+  - overlay: Back (= Continue) and button3 Reset Vehicle; Yes/No confirmations with Yes as the default ([D] active_default);
+  - Options: Sound Setup, Screen Setup, plus Advanced for wheels, with each screen's rows. Effects volume, lap timer/position HUD blocks, km/h or mph and the controls' dead zones/saturations work; the other rows are shown dimmed.
+- Behaviour:
+  - Escape/P (pad Start) opens the menu and holds every fixed tick (`Driving::paused`). Escape no longer closes the app; it is the original keyboard Pause key.
+  - Restart (menu or R) is one function covering every car, damage, the shared world and props, AI drivers, race manager, standings, timing and the countdown.
+  - Retire from Race and Finish Test Drive close the app, back to the launcher. Decision [I]: the original goes to its post-race screens and from there to the front end; the results screens are a later task and the app has no front end.
+  - Reset Vehicle uses the F341 placement, through the new `player_reset::place`.
+  - Menu presses clear the gear queue (pad A is also Gear Up).
+  - Pad Y thumbs are now read flipped, as the original's +0x94 flag does and its biDirectionalLower menu/look bindings need [I]; nothing else read stick Y.
+  - New settings keys: `[sound] effects`, `[osd] lap_timer`/`position`/`speed_units` (docs/SETTINGS.md). Menu changes are not persisted (the original autosaves its profile).
+- Code: crates/grid-app/src/pause_menu.rs (state machine, UI panel, race actions) and pause_menu/race_tests.rs; small changes in main.rs (install, restart function, drive_actions, HUD options), input.rs (7 menu actions), settings.rs, engine_sound.rs, tyre_sound.rs; grid-tools player_reset::place; grid-formats language.rs; tools/scan_strings.py.
+- Tests [V], release:
+  - menu unit tests;
+  - asset test menus_match_the_original_states_file: both main menus, both options screens, the f_/t_ sound/screen/advanced rows and four confirmations equal states.bin; every label is in the English table;
+  - pause_menu_freezes_the_race_and_resumes_bit_identically (3 AI, shared world, deformation): pause at tick 300, browse and change options, 50 idle frames, Continue. The state is unchanged during the pause, and at tick 600 it equals an unpaused run (FNV of every car's words plus lap, clock, standings, props, contacts, race manager, AI throttles);
+  - restart_race_resets_cars_damage_ai_timing_and_props: 1800 ticks flat out (player damage changed, 115 car-contact ticks), then Restart from the menu. The state equals a fresh race, and 900 replayed ticks equal a fresh race given the same input;
+  - grid-tools reset_restores_intact_props_and_replays_a_fresh_world: two broken tyre stacks are gone after reset and the world replays a fresh one.
+- Failed first: the restart test compared against a fresh run whose first countdown tick had throttle, while the restarted one had none (test input, not state); cargo fmt also reformatted unrelated files, which were reverted.
+- Pre-push checks (cargo/rustc 1.99.0, release, outputs main checkout local/pause-menu/checks/, local/soak/quick-pause-menu/) on 0a13bbf + this change (the later upstream commits change only docs and launchers):
+  - cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS/GRID_AI_CHARACTERISTICS: 464 passed, 0 failed (after fixing the engine-sound test, whose chain had no menu: 463 + 1 failed first; grid-app then 77/77);
+  - clippy --workspace --all-targets --release -D warnings: clean (first run: engine_sound::update had 8 arguments);
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` without GRID_DEFORMATION_PARAMETERS, as the baseline is run: byte-identical, sha256 aad9a07a…e41b, laps 88.42029812185638 / 86.28228501935392. With DF01 set the output differs (88.42039565 / 86.26613868, deformation=Some); that run is kept as solo-after.txt. Correction (F353): this line first blamed GRID_AI_CHARACTERISTICS; F353 showed the table makes no difference and DF01 does.
+  - grid-soak quick: 11/12. Seed 12 is the known Donington board piece fall at (-406, -51, -16), tick 3003, as in F345/F346.
+- Not done: a windowed check of the menu in the app; the original's visual style (animated glyphs, blur, paused-world camera); Instant Replay and Ghost Car; profile autosave; the post-race results screen after Retire.
+
 
 G053 optional texture pilot integrated (17 October2026): main0a13bbf->66d330cFF after exacthead/status/ownerresearchSHAguards. PlayGRIDGraphicsTextures.cmd nowavailablemain+graphics; private2map44.74MBpackageinstalledignoredinboth, sourceSteamuntouched, maindata-dirCPUbindingverified. Originalnormal/Wheels textures stayunchanged; purelauncher/docschange, compiledsource remainsf8e5310 andexehashf9192a...unchanged/verified inbothmanifests. Assetpackmetadata addedatomically; no runningexe replaced/closed. Full450tests/Clippy/exactsolo andknownbaselinequick1/12 applyunchangedsource; extra2material4KRGBA andcombineddrivingsmoke verified. Privatepilot02/mainpackage dedup0duplicates/0errors, allcitedfullcaptureskept. Nextroadmap: moving-mip/full-lap texturequality, furtherprominentmaterials withoutAItextdamage, sourcevegetation/farstrips, physicalmaterialrelief/reflections; ownerwheelmonitorfeedbackoptional, no currentrequiredhelp. No newtools/camera/engine changes.
 
@@ -2418,6 +2729,7 @@ PID29904 closed after the F133 capture; the guarded follow-up reader refused its
 
 
 - [Current reverse-engineering and implementation plan](docs/IMPLEMENTATION_PLAN.md)
+- [Second circuit and route parameter](docs/TRACK_GENERALIZATION.md); [Istanbul Park, the third circuit](docs/ISTANBUL_PARK.md); [Long Beach, the fourth circuit](docs/LONG_BEACH.md)
 - [Deformation grid sampler and wheel geometry investigation](docs/DEFORMATION_GRID.md)
 - [Contact-to-grid record generation and actual Rust pipeline](docs/IMPACT_GENERATION.md)
 - [First Rust resource readers and format specification](docs/RESOURCE_FORMATS.md)

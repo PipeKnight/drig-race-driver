@@ -36,6 +36,9 @@ Grammar:
 | `[assists]` | `tcs`, `stability`, `braking`, `gearbox`, `input` | as `--assists` | `--assists`, `--assists-file` |
 | `[input]` | `device`, `*_deadzone`, `*_saturation` | as `--input` | `--input` |
 | `[ai]` | `difficulty` (0..1 or `normal`), `catchup` (`rd_N_star`, `on` = `rd_3_star`, `off`), `choreographer`, `mistakes` (`on`/`off`) | 0.606, `rd_3_star`, on, on (AI_DRIVER_PORT.md, "Mistakes, failures and race pacing") | `--ai` |
+| `[sound]` | `effects` | 0..100, percent (default 100): the pause menu's Effects Volume, engine and tyre sound | none |
+| `[osd]` | `lap_timer`, `position`, `minimap`, `dials` | `on` (default) / `off`: the pause menu's Screen Setup, the HUD's lap group, race position, minimap and dial (docs/RACE_HUD.md) | none |
+| | `speed_units` | `kph` (default) or `mph` | none |
 | `[diagnostics]` | `free_look` | `yaw,pitch` | legacy `GRID_FREE_LOOK` |
 | | `effects_camera` | `x,y,z,lx,ly,lz` | `GRID_EFFECTS_CAMERA` |
 | | `ground_effects` | `on`/`off` | `GRID_GROUND_EFFECTS=0` |
@@ -52,6 +55,8 @@ Notes:
 - `--assists-file` and `--assists` still **replace** the aids (and `--assists-file` the input settings) wholesale, as before; they do not merge with the settings files.
 - The `GRID_*` diagnostic variables are still read on desktop as the base that `[diagnostics]` overrides, so the research commands recorded in other docs keep working. No runtime code reads environment variables any more except through `settings::Diagnostics::from_env` (tests still use `GRID_GAME_ROOT` and the private-file variables).
 - The run log records `settings_file path=…` for every file read, `data_dir path=…`, `game_root path=…` and `drive_private_parameters kind=… source=file|derived-from-grid.exe sha256=…`.
+
+The pause menu (Escape/P, pad Start; [PAUSE_MENU.md](PAUSE_MENU.md)) starts from the `[sound]`, `[osd]` and `[input]` values and changes them for the session only; the original's profile autosave is not ported.
 
 Example `local/settings.ini`:
 
@@ -72,7 +77,7 @@ device=pad
 - Windows: `%APPDATA%\GRID Reassembly`; macOS: `~/Library/Application Support/GRID Reassembly`; Linux: `$XDG_DATA_HOME/grid-reassembly` or `~/.local/share/grid-reassembly`;
 - Android: none yet; P9 sets it from `AndroidApp::internal_data_path()` / `external_data_path()`.
 
-It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs are still the launcher's redirect of stdout to `local\playtest\manual-*.log`; on Android stdout goes to logcat (P9).
+It holds `settings.ini`, the time-trial records (`playtest/time-trial-records.tsv`), `camera.ini` (the last in-race view, `current_camera = IDENT`, written by the app on exit like the original's profile key; [CAMERA_VIEWS.md](CAMERA_VIEWS.md)) and private files named by relative paths. `--render` output must be under it (it was `local/`). Run logs are still the launcher's redirect of stdout to `local\playtest\manual-*.log`; on Android stdout goes to logcat (P9).
 
 ## 3. Install discovery and case-insensitive index
 

@@ -961,7 +961,7 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
     let deadline = (options.profile == Profile::Long)
         .then(|| started + Duration::from_secs_f64(options.hours * 3600.));
     let (first, last) = options.seeds.unwrap_or(match options.profile {
-        Profile::Quick => (1, 12),
+        Profile::Quick => grid_tools::soak::QUICK_SEEDS,
         Profile::Long => (1001, u64::MAX),
     });
     println!(

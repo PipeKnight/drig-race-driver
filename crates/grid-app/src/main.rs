@@ -11,6 +11,7 @@ macro_rules! log_line {
 
 mod assists;
 mod body_damage;
+mod camera;
 mod car_materials;
 mod clearcoat_prepass;
 mod damage_hud;
@@ -26,6 +27,9 @@ mod ground_effect_assets;
 mod input;
 mod motion_capture;
 mod particles;
+mod pause_menu;
+mod post_race;
+mod race_hud;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
@@ -335,15 +339,42 @@ struct DeformingPart {
 }
 #[derive(Resource, Default)]
 struct DeformationPresentation(Option<Vec<u32>>);
-/// Donington start-light board (`start_lights.xml`: object
-/// startlights_lights_horizontal, 6 stages over 4.0 s). The emissive texture
-/// is swapped per stage; `stage` 0 is the idle board.
+/// Start-light board of the route's track (`start_lights.xml`). The emissive
+/// texture is swapped per stage; `stage` 0 is the idle board.
 #[derive(Resource)]
 struct StartLights {
     material: Handle<StandardMaterial>,
-    /// Idle, then stages 1..6 (textures 1..5 and 7).
+    /// Idle, then the shipped stages.
     textures: Vec<Handle<Image>>,
     stage: usize,
+}
+/// The route's shipped start-light sequence: stage textures after the idle
+/// board and its time, which is also the race countdown. Defaults to
+/// Donington (startlights_lights_horizontal, 6 stages over 4.0 s); Nürburgring
+/// and Istanbul Park ship 7 stages over 5.0 s.
+#[derive(Resource, Clone, Debug)]
+struct StartSequence {
+    textures: Vec<String>,
+    seconds: f64,
+}
+impl Default for StartSequence {
+    fn default() -> Self {
+        Self {
+            textures: START_LIGHT_TEXTURES.map(String::from).to_vec(),
+            seconds: START_SEQUENCE_SECONDS,
+        }
+    }
+}
+impl StartSequence {
+    fn load(root: &Path, route: &Route) -> Result<Self, Box<dyn std::error::Error>> {
+        let shipped = grid_tools::start_lights::load(root, route)?;
+        Ok(Self {
+            textures: std::iter::once(START_LIGHT_TEXTURES[0].to_owned())
+                .chain(shipped.stages)
+                .collect(),
+            seconds: f64::from(shipped.seconds),
+        })
+    }
 }
 const START_LIGHT_TEXTURES: [&str; 7] = [
     "start_lights_e.tga",
@@ -773,6 +804,11 @@ fn append_objects(
             "track_sponsors/bridgestone/sponsor_event.pssg".into(),
         ),
     ] {
+        // Not every track ships the Le Mans sponsor package (Long Beach has
+        // none); a binding that needs it still fails as unresolved below.
+        if container == "lemans_sponsors.pssg" && !root.join(&path).is_file() {
+            continue;
+        }
         let bytes = read(&root.join(path))?;
         let tree = pssg::read_tree(&bytes)?;
         for texture in texture::read_textures(&tree)? {
@@ -1576,7 +1612,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
                 );
                 println!(
-                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; P pause; R reset; Escape exit. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; Escape/P (pad Start) pause menu: Continue, Restart, Options, Retire from Race (races) or Finish Test Drive (practice); R restarts. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route and car only."
@@ -1613,6 +1649,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?,
     };
     println!("game_root path={}", root.display());
+    let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
     }
@@ -2095,6 +2132,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("choose --render-fixed-step or --render-fps, not both".into());
     }
     let mut app = App::new();
+    app.insert_resource(start_sequence.clone());
     if let Some(keys) = texture_override_keys { app.insert_resource(texture_overrides::Active(keys)); }
     if let Some(rate) = capture_orbit_rate {
         app.insert_resource(free_look::CaptureOrbitRate(rate));
@@ -2114,7 +2152,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             trial.state = grid_tools::time_trial::State::new(
                 laps,
                 f64::from(grid_tools::source_vehicle::DELTA),
-                START_SEQUENCE_SECONDS,
+                start_sequence.seconds,
             )?;
         }
         app.insert_resource(trial);
@@ -2237,7 +2275,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if let Some(actions) = drive_input.take() {
+            // The original's pause menu (docs/PAUSE_MENU.md): Race Day free
+            // race for timed events, test drive for free practice.
+            let menu = pause_menu::PauseMenu::new(
+                if trial_laps.is_some() {
+                    pause_menu::Variant::FreeRace
+                } else {
+                    pause_menu::Variant::TestDrive
+                },
+                input_settings.device == input::Device::Wheel,
+                driving.reset_line.is_some(),
+                pause_menu::initial_options(&profile, Some(&actions)),
+            );
+            let variant = menu.variant;
             input::install(&mut app, actions);
+            pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
+            // The original HUD layout and post-race screens (docs/RACE_HUD.md).
+            race_hud::install(&mut app);
+            post_race::install(&mut app, variant);
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
@@ -2260,6 +2315,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
+        camera::install(&mut app, &root, field.models[0].stem());
         damage_hud::install(&mut app);
     }
     if track && graphics.source_trees {
@@ -2391,6 +2447,7 @@ fn setup(
     graphics: Res<graphics::Settings>,
     mut scattering_media: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
     overrides: Option<Res<texture_overrides::Active>>,
+    start: Option<Res<StartSequence>>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -2444,7 +2501,9 @@ fn setup(
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
     let bindings = car.bindings.clone();
     let track = car.track;
-    let start_light_images: Vec<Option<Handle<Image>>> = START_LIGHT_TEXTURES
+    let start = start.map(|s| s.clone()).unwrap_or_default();
+    let start_light_images: Vec<Option<Handle<Image>>> = start
+        .textures
         .iter()
         .map(|name| {
             texture_handles
@@ -2725,7 +2784,11 @@ fn setup(
             textures,
             stage: 0,
         });
-        println!("start_lights enabled=true stages=6 sequence_seconds={START_SEQUENCE_SECONDS}");
+        println!(
+            "start_lights enabled=true stages={} sequence_seconds={}",
+            start.textures.len() - 1,
+            start.seconds
+        );
     }
     if !track {
         commands.spawn((
@@ -2889,6 +2952,7 @@ fn drive_tick(
     mut shifts: ResMut<input::ShiftQueue>,
     mut trial: Option<ResMut<time_trial::Trial>>,
     mut prop_script: Option<ResMut<dynamic_props::PropScript>>,
+    start: Option<Res<StartSequence>>,
     // Last `drive_input` record (segment, controls, hold) for `grid-soak replay-log`.
     mut recorded: Local<Option<(u64, grid_tools::source_vehicle::Controls, bool)>>,
 ) {
@@ -3035,7 +3099,7 @@ fn drive_tick(
         let rev_state = match trial.as_ref().map(|t| t.state.phase()) {
             Some(grid_tools::time_trial::Phase::Countdown(left))
                 if f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA)
-                    > START_SEQUENCE_SECONDS / 2. =>
+                    > start.as_ref().map_or(START_SEQUENCE_SECONDS, |s| s.seconds) / 2. =>
             {
                 2
             }
@@ -3307,33 +3371,12 @@ fn drive_tick(
 fn drive_actions(
     mut driving: ResMut<Driving>,
     input: Res<ButtonInput<KeyCode>>,
-    actions: Res<input::Actions>,
+    actions: Option<Res<input::Actions>>,
     mut exit: MessageWriter<AppExit>,
     mut trial: Option<ResMut<time_trial::Trial>>,
 ) {
     if input.just_pressed(KeyCode::KeyR) {
-        driving.report("reset", driving.last_controls.unwrap_or_default());
-        driving.runtime.reset();
-        let driving = &mut *driving;
-        driving.auto_reset.reset();
-        if let Some(opponents) = &mut driving.opponents {
-            opponents.multi.reset();
-            for driver in &mut opponents.drivers {
-                driver.reset();
-            }
-            let positions = opponents.positions(&driving.runtime);
-            opponents.standings.reset(&opponents.ai.line, &positions);
-            opponents.pacing.reset(&opponents.ai.line, &positions);
-            opponents.after_finish = None;
-        }
-        driving.segment += 1;
-        driving.last_controls = None;
-        driving.failure = None;
-        driving.notices.clear();
-        driving.paused = false;
-        if let Some(trial) = trial.as_mut() {
-            trial.reset();
-        }
+        restart(&mut driving, trial.as_deref_mut());
     }
     // F after the player's finish: "Finish Race" ends the race now; cars
     // still racing are estimated or, below 5 mph, retired [V 0x90FCD0].
@@ -3353,15 +3396,39 @@ fn drive_actions(
             }
         }
     }
-    if actions.pressed(input::Action::Pause) && !trial.as_ref().is_some_and(|t| t.finished()) {
-        driving.paused = !driving.paused;
-        driving.report(
-            if driving.paused { "pause" } else { "resume" },
-            driving.last_controls.unwrap_or_default(),
-        );
-    }
-    if input.just_pressed(KeyCode::Escape) {
+    // Without the pause menu (no input layer) Escape still exits.
+    if actions.is_none() && input.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
+    }
+}
+/// Restart Race / R: the whole event from its start (`StateRestartRace`):
+/// every car, the shared world with its props, damage, the AI field and
+/// race manager, timing and the countdown.
+fn restart(driving: &mut Driving, trial: Option<&mut time_trial::Trial>) {
+    driving.report("reset", driving.last_controls.unwrap_or_default());
+    driving.runtime.reset();
+    driving.auto_reset.reset();
+    if let Some(opponents) = &mut driving.opponents {
+        opponents.multi.reset();
+        for driver in &mut opponents.drivers {
+            driver.reset();
+        }
+        let positions = opponents.positions(&driving.runtime);
+        opponents.standings.reset(&opponents.ai.line, &positions);
+        opponents.pacing.reset(&opponents.ai.line, &positions);
+        opponents.after_finish = None;
+        if let Some(pilot) = &mut opponents.autopilot {
+            pilot.reset();
+        }
+        opponents.throttles.iter_mut().for_each(|t| *t = 0.);
+    }
+    driving.segment += 1;
+    driving.last_controls = None;
+    driving.failure = None;
+    driving.notices.clear();
+    driving.paused = false;
+    if let Some(trial) = trial {
+        trial.reset();
     }
 }
 fn drive_exit_log(driving: Res<Driving>, mut exits: MessageReader<AppExit>) {
@@ -3392,7 +3459,7 @@ fn drive_present(
         ),
         (Without<MovingPart>, Without<ViewerCamera>),
     >,
-    mut camera: Single<&mut Transform, With<ViewerCamera>>,
+    mut camera: Single<(&mut Transform, Option<&mut Projection>), With<ViewerCamera>>,
     mut windows: Query<&mut Window>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut presentation: ResMut<DeformationPresentation>,
@@ -3402,11 +3469,23 @@ fn drive_present(
     actions: Option<Res<input::Actions>>,
     mut look_back: Local<Option<bool>>,
     mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
-    free_look: Option<Res<free_look::FreeLook>>,
+    (free_look, mut cameras): (
+        Option<Res<free_look::FreeLook>>,
+        Option<ResMut<camera::Cameras>>,
+    ),
     mut refused: Local<Option<&'static str>>,
-    render_clock: (Option<Res<Time<Fixed>>>, Option<Res<graphics::Settings>>),
+    render_clock: (
+        Option<Res<Time<Fixed>>>,
+        Option<Res<graphics::Settings>>,
+        Option<Res<pause_menu::PauseMenu>>,
+        Option<Res<race_hud::Active>>,
+    ),
 ) {
-    let (fixed, graphics) = render_clock;
+    let (fixed, graphics, menu, race_hud) = render_clock;
+    // Pause menu Screen Setup (lap timer, race position, speed unit).
+    let osd = menu
+        .as_ref()
+        .map_or_else(pause_menu::Options::default, |m| m.values);
     if driving.runtime.deformation_enabled && driving.failure.is_none() {
         let update = (|| -> Result<(), &'static str> {
             let field =
@@ -3524,16 +3603,35 @@ fn drive_present(
             }
         }
     }
-    // Look Back (C, pad Y) holds a chase view; diagnostics look_back forces it for scripted renders.
-    let back = actions.is_some_and(|a| a.down(input::Action::LookBack))
+    // Change View (C, pad LB) cycles the car's views; Look Back (End, pad Y)
+    // holds the view's reverse camera; diagnostics look_back forces it.
+    let back = actions.as_ref().is_some_and(|a| a.down(input::Action::LookBack))
         || *look_back.get_or_insert_with(|| crate::settings::diagnostics().look_back);
+    let mut fallback = None;
+    let cameras = match cameras.as_deref_mut() {
+        Some(c) => c,
+        None => fallback.insert(camera::Cameras::new(camera::Views::fallback(), "", None)),
+    };
+    if actions.as_ref().is_some_and(|a| a.pressed(input::Action::ChangeView)) {
+        cameras.change_view();
+        log_line!("drive_camera event=change view={} tick={}", cameras.ident(), driving.runtime.ticks);
+    }
+    let v = driving.runtime.velocity();
+    let sample = camera::Sample {
+        pose,
+        velocity: Vec3::new(v[0], v[1], v[2]),
+        ticks: driving.runtime.ticks,
+        segment: driving.segment,
+    };
+    // Right mouse button orbits a chase view (AUTHORED free look).
     let side = if back { -1. } else { 1. };
-    // Right mouse button orbits the chase camera (AUTHORED free look).
-    let target = Vec3::new(0., 1., 0.);
-    let offset = free_look::offset(free_look.as_deref(), Vec3::new(0., 2., -9. * side), side);
-    let at = pose.transform_point3(target);
-    let eye = pose.transform_point3(target + offset);
-    **camera = Transform::from_translation(eye).looking_at(at, Vec3::Y);
+    let shot = cameras.frame(&sample, back, |o| free_look::offset(free_look.as_deref(), o, side));
+    let (transform, projection) = &mut *camera;
+    **transform = Transform::from_translation(shot.eye).with_rotation(shot.rotation);
+    if let Some(Projection::Perspective(p)) = projection.as_deref_mut() {
+        p.fov = shot.fov;
+        p.near = shot.near.unwrap_or(PerspectiveProjection::default().near);
+    }
     let v = driving.runtime.velocity();
     let speed = Vec3::new(v[0], v[1], v[2]).length() * 3.6;
     let gear = driving.runtime.state.car.owner.vehicle[0x196c / 4];
@@ -3624,11 +3722,13 @@ fn drive_present(
     let status = if let Some(failure) = &driving.failure {
         format!("Simulation paused: {failure}")
     } else if driving.paused {
-        "Paused - P resumes; R resets".into()
+        String::new()
     } else {
         terminal
             .as_deref()
-            .unwrap_or("Space: handbrake | C: look back | RMB: look around | P: pause | R: reset")
+            .unwrap_or(
+                "Space: handbrake | C: view | End: look back | RMB: look around | Esc/P: pause | R: restart",
+            )
             .into()
     };
     // The latest retirements after a car's own tick stage failed.
@@ -3668,6 +3768,7 @@ fn drive_present(
             },
             o.standings.classification(&o.names).join("\n")
         ),
+        (Some(_), Some(t)) if !osd.position && t.driving() => String::new(),
         (Some(o), Some(t)) if t.driving() => {
             // Gaps as time at the player's speed (floor 10 m/s).
             let v = driving.runtime.velocity();
@@ -3699,14 +3800,31 @@ fn drive_present(
         |t| {
             if t.finished() || !t.driving() {
                 format!("{race}{}", t.hud())
+            } else if !osd.lap_timer {
+                race
             } else {
                 format!("{race}{}\n\n{progress}", t.hud())
             }
         },
     );
-    let text = format!(
-        "{heading}\n{speed:.0} km/h   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
-    );
+    let progress = if osd.lap_timer || trial.is_some() {
+        progress
+    } else {
+        String::new()
+    };
+    let (shown_speed, unit) = if osd.mph {
+        (speed / 1.609_344, "mph")
+    } else {
+        (speed, "km/h")
+    };
+    // The original-layout HUD shows speed, laps and position itself.
+    let text = if race_hud.is_some() {
+        format!("{heading}{handbrake}\n{status}{audio}")
+    } else {
+        format!(
+            "{heading}\n{shown_speed:.0} {unit}   Gear {gear}{handbrake}\n\n{progress}\n\n{status}{audio}"
+        )
+    };
     for mut value in &mut hud {
         if value.0 != text {
             value.0.clone_from(&text);
@@ -3718,11 +3836,11 @@ fn drive_present(
             "GRID prototype {BUILD_REVISION} | {speed:.1} km/h | gear {gear}{handbrake}{geometry}{lap} | tick {} | {}",
             driving.runtime.ticks,
             driving.failure.as_deref().unwrap_or(if driving.paused {
-                "Paused; P resumes; R resets"
+                "Paused"
             } else if let Some(message) = terminal.as_deref() {
                 message
             } else {
-                "Arrows drive; Space handbrake; P pause; R reset"
+                "Arrows drive; Space handbrake; Esc/P pause; R restart"
             })
         );
     }
@@ -3740,27 +3858,42 @@ fn terminal_damage_message(runtime: &grid_tools::source_vehicle::Runtime) -> Opt
         }
     })
 }
-/// Stage of the start-light board: lights 1..5 come on across the race
-/// countdown, stage 6 (texture 7) shows for 3 s from GO, otherwise idle.
-/// Mapping of the shipped "6 stages over 4.0 s" to the countdown is [I].
+/// Stage of the start-light board: stages 1..n-1 come on across the race
+/// countdown, the last stage (the green row) shows for 3 s from GO, otherwise
+/// idle. Mapping of the shipped "n stages over t s" to the countdown is [I]:
+/// Donington 1..5 then texture 7, Nürburgring and Istanbul Park 1..6 then 7.
+fn start_light_stage(
+    phase: Option<(&grid_tools::time_trial::Phase, f64)>,
+    seconds: f64,
+    stages: usize,
+) -> usize {
+    use grid_tools::time_trial::Phase;
+    let lit = stages.saturating_sub(1).max(1);
+    match phase {
+        Some((Phase::Countdown(left), _)) => {
+            let remaining = f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA);
+            let elapsed = (seconds - remaining).max(0.);
+            ((elapsed / (seconds / lit as f64)) as usize + 1).min(lit)
+        }
+        Some((Phase::Running, elapsed)) if elapsed < 3. => stages,
+        _ => 0,
+    }
+}
 fn update_start_lights(
     trial: Option<Res<time_trial::Trial>>,
     lights: Option<ResMut<StartLights>>,
+    start: Option<Res<StartSequence>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    use grid_tools::time_trial::Phase;
     let Some(mut lights) = lights else {
         return;
     };
-    let stage = match trial.as_ref().map(|t| (t.state.phase(), t.state.elapsed())) {
-        Some((Phase::Countdown(left), _)) => {
-            let remaining = f64::from(*left) * f64::from(grid_tools::source_vehicle::DELTA);
-            let elapsed = (START_SEQUENCE_SECONDS - remaining).max(0.);
-            ((elapsed / (START_SEQUENCE_SECONDS / 5.)) as usize + 1).min(5)
-        }
-        Some((Phase::Running, elapsed)) if elapsed < 3. => 6,
-        _ => 0,
-    };
+    let seconds = start.map_or(START_SEQUENCE_SECONDS, |s| s.seconds);
+    let stage = start_light_stage(
+        trial.as_ref().map(|t| (t.state.phase(), t.state.elapsed())),
+        seconds,
+        lights.textures.len() - 1,
+    );
     if stage != lights.stage {
         lights.stage = stage;
         if let Some(mut m) = materials.get_mut(&lights.material) {
@@ -3845,6 +3978,24 @@ fn update_orbit(
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+    #[test]
+    fn start_light_stages_follow_the_shipped_sequence() {
+        use grid_tools::time_trial::Phase;
+        let ticks = |seconds: f64| (seconds / f64::from(grid_tools::source_vehicle::DELTA)) as u32;
+        let at = |left: f64, seconds, stages| {
+            start_light_stage(Some((&Phase::Countdown(ticks(left)), 0.)), seconds, stages)
+        };
+        // Donington: 6 stages over 4.0 s, lights 1..5 across the countdown.
+        assert_eq!([4.0, 3.1, 2.3, 1.5, 0.7, 0.].map(|l| at(l, 4.0, 6)), [1, 2, 3, 4, 5, 5]);
+        // Nürburgring and Istanbul Park: 7 stages over 5.0 s, lights 1..6.
+        assert_eq!([5.0, 4.1, 3.1, 2.1, 1.1, 0.1].map(|l| at(l, 5.0, 7)), [1, 2, 3, 4, 5, 6]);
+        assert_eq!(start_light_stage(Some((&Phase::Running, 1.)), 5.0, 7), 7);
+        assert_eq!(start_light_stage(Some((&Phase::Running, 3.5)), 5.0, 7), 0);
+        assert_eq!(start_light_stage(None, 4.0, 6), 0);
+        let default = StartSequence::default();
+        assert_eq!((default.textures.len(), default.seconds), (7, 4.0));
+    }
+
     #[test]
     fn only_rims_and_tyres_leave_with_a_lost_wheel() {
         assert!(lost_with_wheel("x0_wheel_fl"));
@@ -4339,7 +4490,16 @@ mod driving_tests {
                 input::Pads::Off,
             ))
             .init_resource::<input::ShiftQueue>()
-            .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
+            .insert_resource(pause_menu::PauseMenu::new(
+                pause_menu::Variant::FreeRace,
+                false,
+                false,
+                Default::default(),
+            ))
+            .add_systems(
+                Update,
+                (input::sample, pause_menu::update, drive_actions, drive_tick).chain(),
+            );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);
@@ -4563,7 +4723,16 @@ mod driving_tests {
                 input::Pads::Off,
             ))
             .init_resource::<input::ShiftQueue>()
-            .add_systems(Update, (input::sample, drive_actions, drive_tick).chain());
+            .insert_resource(pause_menu::PauseMenu::new(
+                pause_menu::Variant::FreeRace,
+                false,
+                false,
+                Default::default(),
+            ))
+            .add_systems(
+                Update,
+                (input::sample, pause_menu::update, drive_actions, drive_tick).chain(),
+            );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::ArrowUp);

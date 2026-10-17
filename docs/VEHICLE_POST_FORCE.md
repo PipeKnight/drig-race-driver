@@ -59,6 +59,6 @@ Reference PE SHA-256 `aac46a6449522e26ddd1f8b0cf1a6075852e4aeecd97b7d121453c5ce4
 
 Installed tools reused: Rust/Cargo 1.99.0, Python 3.12.14, MSVC 14.44.35207, Developer Prompt 17.14.41, Windows SDK 10.0.26100.0, Ghidra 12.1.4/JDK 21.0.9, Capstone 5.0.6. Native `/W4 /WX /O2 /MT /std:c17 /fp:strict /arch:SSE2`; Bevy remains pinned at 0.19.1. No installation, desktop input or game/settings edits; expired overnight automation remains paused.
 
-Reproduce using existing build scripts, `cargo build -p grid-tools --bin grid-vehicle-force --bin grid-vehicle-post-force --locked` (and `--release`), then the corresponding `validate_vehicle_post_force.py`, `validate_vehicle_contact_assists.py` and prior `validate_vehicle_contact_update.py` with new private output directories and explicit `--profile debug|release`.
+Reproduce using existing build scripts, `cargo build -p grid-probes --bin grid-vehicle-force --bin grid-vehicle-post-force --locked` (and `--release`), then the corresponding `validate_vehicle_post_force.py`, `validate_vehicle_contact_assists.py` and prior `validate_vehicle_contact_update.py` with new private output directories and explicit `--profile debug|release`.
 
 Next recover whole `9BE1E0 -> 9BDF30` chassis-motion publication and its matrix dependency, then the missing earlier `A03670` setup/source vehicle initialization and physical-world connection needed for Bevy driving.

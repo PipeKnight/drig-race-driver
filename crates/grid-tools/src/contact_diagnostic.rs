@@ -132,6 +132,7 @@ pub fn run(cqtc: bool) -> Result<(), Box<dyn std::error::Error>> {
             margin: f(s + 0x220),
             directions,
         },
+        shape_margin: 0.,
         contact_capacity: u(12) as usize,
         cache_enabled: u(16) != 0,
         candidate_capacity: capacity,

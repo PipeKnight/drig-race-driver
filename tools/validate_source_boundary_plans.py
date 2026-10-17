@@ -82,7 +82,7 @@ def main():
         args.body_events=args.body_events.resolve()
         assert args.body_events.is_relative_to((ROOT/'local').resolve())
     pinned = {str(path): digest(path) for path in [table, Path(__file__),
-              ROOT / 'crates/grid-tools/src/bin/grid-drive-plan.rs',
+              ROOT / 'crates/grid-probes/src/bin/grid-drive-plan.rs',
               ROOT / 'crates/grid-tools/src/source_vehicle.rs']}
     if args.body_events:
         for path in [args.body_events,ROOT/'crates/grid-tools/src/body_impact_parameters.rs',ROOT/'crates/grid-world/src/body_impact.rs',ROOT/'crates/grid-world/src/vehicle_world.rs']:

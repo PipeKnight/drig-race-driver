@@ -377,6 +377,21 @@ it never runs. Whether the original avoids hit tunnelling another way (contact
 scheduling, speculative pairs) is not established. Such pieces are now held
 when lost (above).
 
+[V] F351 found how the original avoids it ([BOX_CONTACTS.md](BOX_CONTACTS.md)).
+Road triangles carry their chunk's 0.02 margin: every chunk read from the running
+original has +0x220 = 0.02, and B212D0 copies it onto AEA1F0's temporary triangle.
+The port used 0. The hot-spot board (the 150 m marker at (-406.7, -16.0), 2.14 cm
+above the grass) therefore had no ground contact in its first step, and a car still
+inside it pushed it under. With `ROAD_MARGIN` it rests on the grass. For example,
+main's seed-1005 inputs are identical up to the spawn at tick 8822; the board then
+falls to y -50.6 on main and stops at y -15.15 with the margin. The car contacts
+still push it down (the original's sampled penetration takes the same vertical
+axis); the ground contact now holds it. The car-at-51-m/s case (seed 1067) is not
+re-examined. Static route prop boxes are now queried as box primitives (AE8AD0),
+pieces against them included. Car against piece keeps the hull-triangle path: the
+original's AE8AD0 pairing for it was tried and lost more boards at the port's fixed
+16 ms step (BOX_CONTACTS.md, "Tried and not adopted").
+
 ## Not yet established
 
 - Exact constraint (joint) solver, so tyre walls and armco stay static: tyre-wall springs (`cDeformableRubber*`,

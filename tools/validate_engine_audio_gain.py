@@ -178,8 +178,8 @@ def main():
     files = [native, ROOT / "target/debug/grid-engine-audio-gain.exe", ROOT / "target/release/grid-engine-audio-gain.exe",
              ROOT / "target/debug/grid-engine-audio-control-drive.exe", ROOT / "target/release/grid-engine-audio-control-drive.exe",
              ROOT / "tools/probe_engine_audio_gain.c", ROOT / "tools/build_engine_audio_gain_probe.cmd",
-             ROOT / "crates/grid-tools/src/engine_audio_publication.rs", ROOT / "crates/grid-tools/src/bin/grid-engine-audio-gain.rs",
-             ROOT / "crates/grid-tools/src/bin/grid-engine-audio-control-drive.rs", Path(__file__)]
+             ROOT / "crates/grid-tools/src/engine_audio_publication.rs", ROOT / "crates/grid-probes/src/bin/grid-engine-audio-gain.rs",
+             ROOT / "crates/grid-probes/src/bin/grid-engine-audio-control-drive.rs", Path(__file__)]
     files += list(out.rglob("*.bin")) + list(out.rglob("*.txt"))
     report = dict(passed=True, authored=authored, source=source, guards=guard_rows,
                   identities={str(p): sha(p) for p in files},

@@ -430,7 +430,26 @@ struct CarDamage {
     shards: Vec<&'static str>,
     /// Wheels the simulation has detached (car +22E4..+22E7) and their flight.
     lost: [bool; 4],
-    wheels: [Option<Debris>; 4],
+    wheels: [Option<LostWheel>; 4],
+}
+
+/// A lost wheel: its world frame at the loss and where it is drawn now.
+#[derive(Clone, Copy)]
+struct LostWheel {
+    origin: Mat4,
+    /// The debris body's pose at the loss and now (grid_tools::loose_wheel),
+    /// when the world simulates it.
+    body: Option<(Mat4, Mat4)>,
+    /// AUTHORED fallback flight without body geometry.
+    flight: Debris,
+}
+impl LostWheel {
+    fn matrix(&self) -> Mat4 {
+        match self.body {
+            Some((start, now)) => now * start.inverse() * self.origin,
+            None => self.flight.matrix(),
+        }
+    }
 }
 
 /// Model-space joint bounds and grid-frame glass/light anchors.
@@ -660,10 +679,13 @@ pub(crate) fn install(
         log_zones: crate::settings::diagnostics().damage_zones,
         cracked: BTreeMap::new(),
         shard_assets: None,
-        camera: crate::settings::diagnostics().damage_camera.as_deref().and_then(|v| {
-            let v: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            (v.len() == 4 && v[0] >= 0.).then(|| (v[0] as usize, Vec3::new(v[1], v[2], v[3])))
-        }),
+        camera: crate::settings::diagnostics()
+            .damage_camera
+            .as_deref()
+            .and_then(|v| {
+                let v: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                (v.len() == 4 && v[0] >= 0.).then(|| (v[0] as usize, Vec3::new(v[1], v[2], v[3])))
+            }),
     })
     .add_systems(FixedUpdate, tick.after(crate::drive_tick))
     .add_systems(Update, present.after(crate::drive_present))
@@ -728,8 +750,9 @@ const SPIN_RECORD: [usize; 4] = [1, 0, 3, 2];
 /// (|r - 127.5|, r - 127.5, r - 127.5) / 637.5, and the spin about the axle
 /// (part X). [I] the kick is a car-frame velocity added to the car's; the
 /// original hands both to its debris-body builder 9DB0E0/9D9F80.
-/// AUTHORED: the random bytes (a seeded LCG for the CRT rand) and the flight
-/// (`Debris::step`); the original debris is a rigid body in its world.
+/// AUTHORED: the random bytes (a seeded LCG for the CRT rand). The world
+/// simulates the wheel as a body (grid_tools::loose_wheel); this flight
+/// (`Debris::step`) is only the fallback without body geometry.
 fn launch(r: &Reading, i: usize, seed: u32) -> Debris {
     let mut state = seed;
     let mut random = || {
@@ -758,6 +781,11 @@ fn launch(r: &Reading, i: usize, seed: u32) -> Debris {
         spin: r.pose.x_axis.truncate() * r.spins[SPIN_RECORD[i]],
         ground: r.hubs[i].y,
     }
+}
+
+/// A row-vector body pose as a column-vector transform.
+fn row_pose(m: &[[f32; 4]; 4]) -> Mat4 {
+    Mat4::from_cols_array(&std::array::from_fn(|i| m[i / 4][i % 4]))
 }
 
 fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
@@ -792,19 +820,37 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
     };
     damage.cars.resize_with(readings.len(), CarDamage::default);
     let dt = grid_tools::source_vehicle::DELTA;
+    // Simulated debris bodies of lost wheels, by (car, wheel).
+    let (props, bodies) = match &driving.opponents {
+        Some(o) => (o.multi.dynamic_props(), o.multi.bodies()),
+        None => (driving.runtime.dynamic_props(), driving.runtime.bodies()),
+    };
+    let bodies: BTreeMap<(usize, usize), (Mat4, Mat4)> = props
+        .map(|p| p.wheel_poses(bodies))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(car, wheel, start, now)| ((car, wheel), (row_pose(&start), row_pose(&now))))
+        .collect();
     for (index, (car, r)) in damage.cars.iter_mut().zip(&readings).enumerate() {
         for i in 0..4 {
             if r.detached[i] && !car.lost[i] {
                 car.lost[i] = true;
                 let seed = (ticks as u32) ^ (((index * 4 + i) as u32) << 24);
-                car.wheels[i] = Some(launch(r, i, seed));
+                car.wheels[i] = Some(LostWheel {
+                    origin: r.wheel_frames[i],
+                    body: None,
+                    flight: launch(r, i, seed),
+                });
                 log_line!(
                     "drive_wheel_detached car={index} tick={ticks} wheel={i} impact_strength={:?}",
                     r.strength
                 );
             }
             if let Some(wheel) = &mut car.wheels[i] {
-                wheel.step(dt);
+                wheel.body = bodies.get(&(index, i)).copied();
+                if wheel.body.is_none() {
+                    wheel.flight.step(dt);
+                }
             }
         }
     }
@@ -1336,7 +1382,7 @@ fn layout(parts: &PartQuery, m: usize, car_model: &[usize]) -> Layout {
     }
 }
 
-/// Draw a lost wheel (and its tyre) at its flight pose instead of on the car;
+/// Draw a lost wheel (and its tyre) at its debris body instead of on the car;
 /// the disc and the caliper stay (`m_calipers_come_off_with_wheels` is 0 on
 /// both cars).
 fn present_lost_wheels(
@@ -1345,8 +1391,8 @@ fn present_lost_wheels(
     mut opponents: Query<(&crate::OpponentPart, &mut Transform), Without<crate::MovingPart>>,
 ) {
     let flight = |car: usize, wheel: Option<usize>, flies: bool| {
-        let debris = damage.cars.get(car)?.wheels[wheel?].as_ref()?;
-        flies.then(|| debris.matrix())
+        let lost = damage.cars.get(car)?.wheels[wheel?].as_ref()?;
+        flies.then(|| lost.matrix())
     };
     for (part, mut transform) in &mut parts {
         if let Some(matrix) = flight(0, part.wheel, part.lost_with_wheel) {
@@ -1570,6 +1616,34 @@ mod tests {
         let hard = launch(&r, 2, 7);
         let ratio = (hard.velocity - r.velocity).length() / (kicked.velocity - r.velocity).length();
         assert!((ratio - 4. / 1.75).abs() < 1e-4, "{ratio}");
+    }
+
+    #[test]
+    fn a_lost_wheel_is_drawn_at_its_body_and_falls_back_to_the_flight() {
+        let origin = Mat4::from_translation(Vec3::new(1., 0.3, 2.)) * Mat4::from_rotation_y(0.5);
+        let flight = Debris {
+            origin,
+            centre: Vec3::ZERO,
+            position: Vec3::ZERO,
+            velocity: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+            spin: Vec3::ZERO,
+            ground: 0.,
+        };
+        let start = Mat4::from_translation(Vec3::new(1., 0.3, 2.)) * Mat4::from_rotation_z(1.);
+        let mut wheel = LostWheel {
+            origin,
+            body: Some((start, start)),
+            flight,
+        };
+        // At the loss the body leaves the wheel where it was drawn.
+        assert!(wheel.matrix().abs_diff_eq(origin, 1e-5));
+        // The body's motion since the loss carries the wheel with it.
+        let moved = Mat4::from_translation(Vec3::new(0., 0., 5.)) * Mat4::from_rotation_x(0.7);
+        wheel.body = Some((start, moved * start));
+        assert!(wheel.matrix().abs_diff_eq(moved * origin, 1e-5));
+        wheel.body = None;
+        assert_eq!(wheel.matrix(), flight.matrix());
     }
 
     #[test]
