@@ -202,6 +202,37 @@ pub fn read_sun(bytes: &[u8]) -> Result<Sun> {
     })
 }
 
+/// Preserve the saved HDR colour ratios while keeping its peak scale out of
+/// the independently authored renderer's lux setting. No gamma conversion is
+/// inferred from these values; the renderer must label its interpretation.
+pub fn read_sun_colour(bytes: &[u8]) -> Result<[f32; 3]> {
+    let values = parameters(bytes)?;
+    let text = values.get("backlight_suncolour").ok_or(Error {
+        offset: 0,
+        message: "sun colour absent",
+    })?;
+    let components = text
+        .split_whitespace()
+        .map(str::parse::<f32>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| Error {
+            offset: 0,
+            message: "invalid sun colour",
+        })?;
+    let rgb: [f32; 3] = components.try_into().map_err(|_| Error {
+        offset: 0,
+        message: "sun colour needs three components",
+    })?;
+    if rgb
+        .iter()
+        .any(|v| !v.is_finite() || !(0.0..=32.0).contains(v))
+    {
+        return fail(0, "sun colour outside supported range");
+    }
+    let peak = rgb.into_iter().fold(1.0_f32, f32::max);
+    Ok(rgb.map(|v| v / peak))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +266,29 @@ mod tests {
             read_sun(
                 xml.replace("</lighting>", "<param heightangle=\"1\"/></lighting>")
                     .as_bytes()
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn hdr_sun_colour_is_not_scaled_twice_and_invalid_rgb_is_rejected() {
+        let xml = r#"<lighting><param backlight_suncolour="2 1 0.5"/><param backlight_sunscale="2"/></lighting>"#;
+        assert_eq!(read_sun_colour(xml.as_bytes()).unwrap(), [1., 0.5, 0.25]);
+        // A stored scalar is not an additional multiplier in this adaptation.
+        assert_eq!(
+            read_sun_colour(xml.replace("sunscale=\"2", "sunscale=\"3").as_bytes()).unwrap(),
+            [1., 0.5, 0.25]
+        );
+        for value in ["1 2", "1 2 3 4", "NaN 1 1", "1 inf 1", "1 -1 1", "33 1 1"] {
+            assert!(read_sun_colour(xml.replace("2 1 0.5", value).as_bytes()).is_err());
+        }
+        assert!(
+            read_sun_colour(
+                xml.replace(
+                    "</lighting>",
+                    "<param backlight_suncolour=\"1 1 1\"/></lighting>"
+                )
+                .as_bytes()
             )
             .is_err()
         );

@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G094 — Graphics playable refreshed; optional warm-sun ratio draft (18 October 2026)
+
+Atomically promoted verified source0ffe4affccd1/SHA256c59806b2... to this worktree target/release/grid-app.exe and local/graphics/verified-grid-app.exe; both local manifests record full4K/585tests/motion/replay acceptance. Private promotion-source-sun01.json preserves old manifests. No active grid-app process found; primaryF368 executable/files untouched. Graphics launcher uses verified source direction, source colour unchanged. Full6500tick physical exits also exactly equal grass-final-lap4k02 after walltime removal.
+
+Next optional --sun source-colour adds saved HDR colour ratios to that direction while keeping authored lux and source IBL unchanged. Finite bounded3component parser, no double scale; RGB interpreted linear only as an explicit Bevy adaptation. Five track_lighting tests and two source-sun renderer tests pass; workspace all-target Clippy26.37s clean. The585-test merged checkpoint precedes this colour draft; do not claim a new full-suite count. Source-colour GPU comparison is pending; existing verified executable does not include this draft. No owner action needed.
+
 ## G093 — Source sun completes a native4K lap; select it for graphics launcher (18 October 2026)
 
 Source0ffe4affccd1/SHA256c59806b2... completes6500ticks/native3840x2160 render; valid lap89.955257484 at tick5721, matching previous full-lap timing, no terminal wheel and334deformed positions/max0.022137083. Final image inspected; known nilUUID warning only. Private source-sun-full-lap-validation01.json and sun-full-lap4k02.png/log. Initial4K sequence rejection retained in01.log; no guard bypass. Existing30frame1080p clock/image checks complement the full4K final frame, not a monitor-FPS test.

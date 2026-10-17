@@ -85,6 +85,8 @@ pub struct Settings {
     /// Optional recovered sky scale/exponent applied to background and source IBL.
     pub source_sky_tone: bool,
     pub source_sun: bool,
+    pub source_sun_colour: bool,
+    pub saved_sun_colour: Option<[f32; 3]>,
     pub saved_sun: Option<grid_formats::track_lighting::Sun>,
     pub preset: Preset,
     pub width: u32,
@@ -126,6 +128,8 @@ impl Default for Settings {
             source_sky: true,
             source_sky_tone: false,
             source_sun: false,
+            source_sun_colour: false,
+            saved_sun_colour: None,
             saved_sun: None,
             preset: Preset::Baseline,
             width: 1280,
@@ -205,6 +209,13 @@ impl Settings {
             return Transform::from_translation(direction).looking_at(Vec3::ZERO, up);
         }
         Transform::from_xyz(-4., 8., 5.).looking_at(Vec3::ZERO, Vec3::Y)
+    }
+
+    pub fn sun_colour(&self) -> Color {
+        if self.enhanced() && let Some(rgb) = self.saved_sun_colour {
+            return Color::linear_rgb(rgb[0], rgb[1], rgb[2]);
+        }
+        Color::WHITE
     }
 
     pub fn sun_illuminance(&self) -> f32 {
@@ -404,6 +415,17 @@ mod graphics_settings_tests {
         }
         settings.preset = Preset::Baseline;
         assert_eq!(settings.sun_transform(), authored);
+    }
+    #[test]
+    fn source_sun_colour_keeps_baseline_white_and_lux_unchanged() {
+        let mut settings = Settings { preset: Preset::Enhanced, ..Default::default() };
+        let lux = settings.sun_illuminance();
+        assert_eq!(settings.sun_colour(), Color::WHITE);
+        settings.saved_sun_colour = Some([1., 0.5, 0.25]);
+        assert_eq!(settings.sun_colour(), Color::linear_rgb(1., 0.5, 0.25));
+        assert_eq!(settings.sun_illuminance(), lux);
+        settings.preset = Preset::Baseline;
+        assert_eq!(settings.sun_colour(), Color::WHITE);
     }
     #[test]
     fn shadow_distance_reaches_requested_bound_and_rejects_invalid_limits() {
