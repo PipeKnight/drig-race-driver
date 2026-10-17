@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G066 — Fog distance shape recovered; pilot revised (17 October 2026)
+
+[Atmosphere notes](docs/DONINGTON_ATMOSPHERE.md). Initial73f1a37/SHAbe4c760b... (build1m21s) rendered matched4K static/driving haze off/source pairs without shader errors; physical1200tick endpoints identical. Near road largely preserved, far contrast reduced; strips remain. Fog is opt-in, main verified486e7eb untouched. Source522workspace tests/Clippy17.21s/exactsolo/20of20soak passed for that initial candidate.
+
+Re-read the already pinned original infield pixel program: distance blend is `saturate((length(P-eye)-30)*fogParams.z)*fogParams.w`, then colour interpolation. No height term in that examined variant. Corrected the pilot's exponential shape to linear start30/end30+savedDistance; XML-to-uniform scale/cap/colour mapping still assumed. Prior exponential images/logs retained as superseded evidence; linear GPU acceptance pending. No geometry hidden, no source-install or physics changes.
+
+
 ## G065 — Source atmosphere controls and haze pilot (17 October 2026)
 
 [Atmosphere research](docs/DONINGTON_ATMOSPHERE.md). G064 publication verified at remote main/graphics `ae9f6496274f8f25490a00912ee50de19d632def`. Current playable stays source486e7eb / SHAbcf54893.... Source Donington fog distance500/cap0.4/colour/brightness and0..2000height fields were decoded. Parameter-wall outer LOD950m and world cull1500/clip1800 include the733–899m hits; no arbitrary removal. Land macro binding/green limit rechecked against prior shader evidence, no new error established.

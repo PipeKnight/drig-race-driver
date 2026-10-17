@@ -206,10 +206,10 @@ pub fn configure(
             color: Color::linear_rgba(fog.colour[0] * fog.brightness,
                 fog.colour[1] * fog.brightness, fog.colour[2] * fog.brightness, fog.density_cap),
             directional_light_color: Color::NONE,
-            falloff: FogFalloff::Exponential { density: fog.distance.recip() },
+            falloff: FogFalloff::Linear { start: 30., end: 30. + fog.distance },
             ..default()
         });
-        println!("source_haze enabled=true distance={} density_cap={} colour={:?} brightness={} height_bounds=[{},{}] mapping=authored-distance-exponential height_applied=false colour_space=assumed-linear source_sky=unchanged",
+        println!("source_haze enabled=true distance={} density_cap={} colour={:?} brightness={} height_bounds=[{},{}] mapping=source-distance-shape-authored-uniforms-linear30 height_applied=false colour_space=assumed-linear source_sky=unchanged",
             fog.distance, fog.density_cap, fog.colour, fog.brightness, fog.base_height, fog.top_height);
     }
     commands.insert_resource(DirectionalLightShadowMap { size: 4096 });

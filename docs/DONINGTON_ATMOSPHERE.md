@@ -8,7 +8,7 @@ The enhanced scene has no DistanceFog component. Its source sky is a separate cu
 
 | Saved control | Donington value | Pilot use |
 |---|---|---|
-| fogDistance | 500 | Authored exponential e-fold distance in metres |
+| fogDistance | 500 | Authored ramp width in metres; uniform binding not recovered |
 | fogDensityCap | 0.4 | Maximum blend through DistanceFog colour alpha |
 | fogColour | 0.68235,0.74510,0.90588 | Assumed linear RGB, not verified original colour space |
 | fogColourBrightness | 0.5 | Multiplies the pilot RGB |
@@ -29,3 +29,12 @@ Private evidence: local/graphics/vegetation01/source-lighting.txt, ornament-attr
 Explicit --haze source (defaultoff / --haze off) reads the selected track's source controls and requires enhanced track rendering. The renderer uses Bevy0.19.1 DistanceFog, exponential density1/fogDistance and colour alpha=fogDensityCap. Thus the authored blend is cap*(1-exp(-distance/distance_parameter)), about0.253at500m and0.318at790m. This is an adaptation, not the recovered original equation. The source height bounds, original sky gamma/scale and directional fog scattering are not applied. The source sky remains unchanged; reflection-probe/deferred combinations have not been accepted.
 
 Pinned Bevy source applies distance fog after exposed PBR lighting and before HDR tonemapping. Existing track/car extended fragments call that common post-lighting helper; diffuse texture upload remains through texture_upload::image. Colour-space/radiometric assumptions are explicit. Native4K same-camera off/source comparisons must establish whether depth improves without washing out nearby car/road detail. No wall or object is removed. GPU acceptance is pending.
+
+
+## Static fog shape recovered before promotion
+
+Existing pinned source `local/graphics/shaders/track-infield-pixel01.txt` / metadata (`track_infield.cg.fp`, shaderpack SHA b6b29b80397d12def9c90f5afcff9ea8f335d07da3dc81e293273b468c9029a6) computes `f = saturate((length(position-eye)-30) * fogParams.z) * fogParams.w`, then mixes the lit/AO-modulated colour toward fogColour. The associated vertex stage passes world position. Only fogParams.zw are consumed in this examined variant; no per-fragment height term occurs here. That does not establish all shader variants or the CPU upload's mapping from XML to z/w/colour.
+
+The first exponential source-inspired experiment rendered successfully but is superseded, retaining its images and logs as evidence. The revised pilot uses Bevy linear start30,end30+savedDistance,colour alpha=savedDensityCap: it matches the observed distance shape **if** z=1/savedDistance and w=savedDensityCap. Those bindings and radiometry remain explicit assumptions. The earlier exponential description above documents the initial experiment, not the current implementation. The strong far fade and remaining strips do not justify claiming a geometry repair.
+
+Initial73f1a37 / SHAbe4c760b7c9993728c0a33f37a1870eb6164039f58a534ed5e7264f4b0ccee2f build1m21s: native4K off/source static and1200tick driving pairs inspected; pose/velocity identical, RGBA537/0BC, knownnilUUIDWARNonly. Near-road RGB changeMAE0.319byte vsfar-strip21.84bytes; first sky ROI accidentally included a crown, corrected clear-sky ROI MAE0.0053/max1byte. This is localized atmosphere evidence, not a fidelity/quality score. Original equations/radiometry and height remain open; current linear candidate still needs GPU validation.
