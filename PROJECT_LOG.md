@@ -1,8 +1,8 @@
 # GRID engine project log
 
-## G080 — Farther-shadow comparison staged, verified playable unchanged (17 October 2026)
+## G080 — Farther shadows do not repair the distant strips; playable unchanged (17 October 2026)
 
-[Wall/atmosphere research](docs/DONINGTON_ATMOSPHERE.md). Optional bounded --shadow-distance50..2000m stages an enhanced250vs1000m comparison;4cascades/first18m/4096maps and default250/baseline preserved. New test checks actual installed-Bevy cascade bounds and rejects invalid/nonfinite limits. Two focused release tests and app all-target Clippy19.50s pass; GPU acceptance pending; not a claimed fix or a reason to hide geometry. Current main playable source917ca5f/SHA785488a1 remains untouched.
+[Wall/atmosphere research](docs/DONINGTON_ATMOSPHERE.md). Optional bounded --shadow-distance50..2000m stages an enhanced250vs1000m comparison;4cascades/first18m/4096maps and default250/baseline preserved. New test checks actual installed-Bevy cascade bounds and rejects invalid/nonfinite limits. Two focused release tests and app all-target Clippy19.50s pass; Matched native4K250/1000m captures render successfully, known warning only; strip remains visually present in both, so no default change or movement acceptance. Not a claimed fix or a reason to hide geometry. Current main playable source917ca5f/SHA785488a1 remains untouched.
 
 
 ## G079 — Wall LOD/terrain checks narrow the distant-strip diagnosis (17 October 2026)
@@ -2921,4 +2921,4 @@ PID29904 closed after the F133 capture; the guarded follow-up reader refused its
 - `local/tools/`: private portable tools and dependencies.
 - `local/phase1/`: upcoming static-analysis projects and runtime traces.
 
-G080 test note: initial endpoint assertion failed because Bevy computed 250.00006 m; corrected assertion tolerance to 1 mm, without changing renderer behaviour. Failed log retained; retry in progress. Rust1.99.0/Bevy0.19.1, two Cargo jobs, no new tools.
+G080 test note: initial endpoint assertion failed because Bevy computed 250.00006 m; corrected assertion tolerance to 1 mm, without changing renderer behaviour. Failed log retained; retry passed. Rust1.99.0/Bevy0.19.1, two Cargo jobs, no new tools.
