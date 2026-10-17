@@ -49,3 +49,5 @@ Validation completed:
 - Six current GPU logs have no unexpected WARN/ERROR; only the known nil-UUID gilrs warning. Forced RGBA8 path has zero BC assets. Earlier source/coverage native-BC 4K control also rendered successfully; no phone acceptance is claimed.
 
 Private `grass-final-validation02.json`, `grass-final-lap4k02` and `grass-final-moving30-02` captures/logs/audit retain the successful result; the earlier timed-out attempt remains explicitly failed. Sorting of the single transparent grass mesh, original radiometry and future detailed grass geometry remain limitations. This improves the reported strokes without claiming a finished vegetation remaster.
+
+Current native-BC acceptance: source917ca5f, grass-final-offtrack-bc4k01 native4K/272ticks, 3body contacts/deformation/debris rendered and inspected. Grass remains visible around the car; no unexpected shader log messages. Uploader reports277BC assets and0upload decodes; this excludes selected leaf-mip CPU preparation, not a claim of no CPU decoding anywhere. Single tested body/grass view, not exhaustive transparency sorting proof.
