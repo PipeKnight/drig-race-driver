@@ -219,6 +219,7 @@ fn a_lost_wheel_rolls_off_on_the_other_circuits() {
         crate::route::NURBURGRING,
         crate::route::ISTANBUL_PARK,
         crate::route::LONG_BEACH,
+        crate::route::JARAMA,
     ] {
         for stem in ["lac", "bmw"] {
             run(move || lose_front_left(stem, route));

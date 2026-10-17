@@ -393,12 +393,14 @@ fn results(app: &App) -> Vec<crate::post_race::Row> {
 fn retire_from_race_shows_the_results_on_every_circuit() {
     use crate::post_race::{Cell, Stage};
     use grid_tools::race::{Out, Status};
-    use grid_tools::route::{DONINGTON, ISTANBUL_PARK, NURBURGRING};
+    use grid_tools::route::{DONINGTON, ISTANBUL_PARK, JARAMA, NURBURGRING};
     big_stack(|| {
         for (route, models) in [
             (DONINGTON, &["lac"][..]),
             (NURBURGRING, &["bmw"][..]),
             (ISTANBUL_PARK, &["lac", "bmw"][..]),
+            // Jarama route 1 finishes at a later gate (docs/JARAMA.md).
+            (JARAMA, &["lac"][..]),
         ] {
             let mut app = race_app_with(route, models, 2, false);
             keys(&mut app).press(KeyCode::KeyW);
@@ -461,48 +463,59 @@ fn retire_from_race_shows_the_results_on_every_circuit() {
 #[test]
 #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
 fn a_finished_race_goes_through_stats_to_classified_results() {
+    big_stack(|| finish_one_lap(grid_tools::route::DONINGTON));
+}
+
+/// Jarama route 1 finishes at gate 67 of its progress file; lap timing re-indexes
+/// it so the finish is gate 0 (docs/JARAMA.md).
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn a_race_finishing_at_a_later_gate_is_classified() {
+    big_stack(|| finish_one_lap(grid_tools::route::JARAMA));
+}
+
+/// One lap with the ported AI driving the player's car, then the stats and the
+/// classified results.
+fn finish_one_lap(route: &str) {
     use crate::post_race::{Cell, Stage};
-    big_stack(|| {
-        // One lap at Donington with the ported AI driving the player's car.
-        let mut app = race_app_with(grid_tools::route::DONINGTON, &["lac"], 1, true);
-        while post(&app).stage == Stage::Hidden {
-            app.update();
-            assert!(ticks(&app) < 12_000, "no finish");
-        }
-        assert_eq!(post(&app).stage, Stage::Stats);
-        assert!(app.world().resource::<time_trial::Trial>().finished());
-        let rows = results(&app);
-        let player = rows.iter().find(|r| r.car == 0).unwrap().clone();
-        let view = post(&app).view(&rows, &Labels::default());
-        eprintln!(
-            "finish_stats tick={} position={} best={:?} title={}",
-            ticks(&app),
-            player.position,
-            player.best,
-            view.title
-        );
-        assert!(player.best.is_some());
-        assert!(view.title.starts_with("post_race_stats_position"));
-        // Continue: the race is ended and classified.
-        tap(&mut app, KeyCode::Enter);
-        assert_eq!(post(&app).stage, Stage::Results);
-        let d = app.world().resource::<Driving>();
-        assert!(d.opponents.as_ref().unwrap().standings.over());
-        let rows = results(&app);
-        eprintln!("finish_results rows={rows:?}");
-        assert_eq!(rows.len(), OPPONENTS + 1);
-        // Times rise down the table: the winner's total, then growing gaps.
-        let mut last = 0.;
-        for (i, r) in rows.iter().enumerate() {
-            match r.time {
-                Cell::Total(t) => assert!(i == 0 && t > 60.),
-                Cell::Gap(g) => {
-                    assert!(i > 0 && g >= last, "{r:?}");
-                    last = g;
-                }
-                Cell::Out(..) | Cell::Running => {}
+    let mut app = race_app_with(route, &["lac"], 1, true);
+    while post(&app).stage == Stage::Hidden {
+        app.update();
+        assert!(ticks(&app) < 12_000, "no finish");
+    }
+    assert_eq!(post(&app).stage, Stage::Stats);
+    assert!(app.world().resource::<time_trial::Trial>().finished());
+    let rows = results(&app);
+    let player = rows.iter().find(|r| r.car == 0).unwrap().clone();
+    let view = post(&app).view(&rows, &Labels::default());
+    eprintln!(
+        "finish_stats tick={} position={} best={:?} title={}",
+        ticks(&app),
+        player.position,
+        player.best,
+        view.title
+    );
+    assert!(player.best.is_some());
+    assert!(view.title.starts_with("post_race_stats_position"));
+    // Continue: the race is ended and classified.
+    tap(&mut app, KeyCode::Enter);
+    assert_eq!(post(&app).stage, Stage::Results);
+    let d = app.world().resource::<Driving>();
+    assert!(d.opponents.as_ref().unwrap().standings.over());
+    let rows = results(&app);
+    eprintln!("finish_results rows={rows:?}");
+    assert_eq!(rows.len(), OPPONENTS + 1);
+    // Times rise down the table: the winner's total, then growing gaps.
+    let mut last = 0.;
+    for (i, r) in rows.iter().enumerate() {
+        match r.time {
+            Cell::Total(t) => assert!(i == 0 && t > 60.),
+            Cell::Gap(g) => {
+                assert!(i > 0 && g >= last, "{r:?}");
+                last = g;
             }
+            Cell::Out(..) | Cell::Running => {}
         }
-        assert!(matches!(rows[0].time, Cell::Total(_)));
-    });
+    }
+    assert!(matches!(rows[0].time, Cell::Total(_)));
 }

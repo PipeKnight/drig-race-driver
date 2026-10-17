@@ -1608,12 +1608,7 @@ mod tests {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
         let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
-        for path in [
-            crate::route::DONINGTON,
-            crate::route::NURBURGRING,
-            crate::route::ISTANBUL_PARK,
-            crate::route::LONG_BEACH,
-        ] {
+        for path in crate::route::CIRCUITS {
             let route = Route::new(path).unwrap();
             let mut runtime =
                 crate::source_vehicle::Runtime::lacetti_on(root, &route, "slot_00", 200679)
