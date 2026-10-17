@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G093 — Source sun completes a native4K lap; select it for graphics launcher (18 October 2026)
+
+Source0ffe4affccd1/SHA256c59806b2... completes6500ticks/native3840x2160 render; valid lap89.955257484 at tick5721, matching previous full-lap timing, no terminal wheel and334deformed positions/max0.022137083. Final image inspected; known nilUUID warning only. Private source-sun-full-lap-validation01.json and sun-full-lap4k02.png/log. Initial4K sequence rejection retained in01.log; no guard bypass. Existing30frame1080p clock/image checks complement the full4K final frame, not a monitor-FPS test.
+
+Graphics launcher now selects recovered Donington direction via --sun source; third argument sun-authored retains the former direction control. CLI/baseline default unchanged, source colour not selected. Update only this graphics worktree's playable from the verified0ffe source; primaryF368 files/build stay intact. Next draft is an optional source-colour ratio adaptation, not part of this verified executable. No owner action required.
+
 ## G092 — F367 integration and source sun GPU checks pass (18 October 2026)
 
 Merged observed origin91d56aa (F365/F366/F367) as0ffe4affccd1; journal-only conflict retained both records.585workspace release tests0failed0ignored, workspace all-target Clippy28.69s, release build2m06s. EXE SHA256c59806b299bf775dc27db85b890560a88563f6ec2e48a93cddd06f13cda9a781. Source-sun native4K far image pixel-identical to pre-Flashback53764d5;30unique virtual30FPS images/ticks1102..1162/<=2.05ns clock error; forward endpoints inspected with restored treeline. Instant Replay with Flashback panel inspected; physical/handling/deformation/lap exits match the pre-Flashback control. Private source-sun-flashback-validation01.json. Graphics branch pushed through0ffe4af; primary subsequently advanced independently toF368/d3b9af5, so its newer files/executable are preserved.

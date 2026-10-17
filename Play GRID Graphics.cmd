@@ -12,6 +12,8 @@ if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe -
 set "GRID_GRAPHICS_WHEELS="
 if /I "%~3"=="wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
 if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
+set "GRID_GRAPHICS_SUN=--sun source"
+if /I "%~3"=="sun-authored" set "GRID_GRAPHICS_SUN=--sun authored"
 set "GRID_GRAPHICS_TREES=--trees coverage"
 if /I "%~3"=="no-trees" set "GRID_GRAPHICS_TREES="
 if /I "%~3"=="trees" set "GRID_GRAPHICS_TREES=--trees coverage"
@@ -51,7 +53,7 @@ if defined GRID_GRAPHICS_TREES echo Experimental source forest enabled; wind and
 if defined GRID_GRAPHICS_HAZE echo Experimental source distance haze enabled.
 if defined GRID_GRAPHICS_TEXTURES echo Two experimental high-resolution building textures enabled.
 echo Private log: %GRID_GRAPHICS_LOG%
-"target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% > "%GRID_GRAPHICS_LOG%" 2>&1
+"target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"
 echo Exited with code %GRID_GRAPHICS_EXIT%.
 popd

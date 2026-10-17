@@ -65,3 +65,6 @@ Private sun-colour-refs01.json, light-colour-parser01.txt, light-colour-xml-cont
 
 
 F367 integration checkpoint: source0ffe4affccd1 / SHA256c59806b299bf775dc27db85b890560a88563f6ec2e48a93cddd06f13cda9a781, release2m06s,585workspace tests and Clippy28.69s pass. Private source-sun-flashback-validation01.json: matched native4K source-sun far image remains pixel-identical, forward30frame sequence has30unique images/<=2.05ns request error, replay with Flashback panel inspected. All1200tick physical exits equal earlier control. Full native4K6500tick driving acceptance is pending; first4K sequence request hit the existing1080p sequence guard and was corrected without bypassing it. Primary has independently advanced toF368, not overwritten by this older checkpoint.
+
+
+Full native4K acceptance: source0ffe4affccd1 renders6500ticks and completes valid89.955257484s lap (tick5721), final image inspected, no terminal wheel, known nilUUID warning only. Private source-sun-full-lap-validation01.json. This validates the recovered direction on a full offscreen lap; it does not validate monitor FPS, source radiometry or original per-pass vegetation. Graphics launcher now chooses --sun source, with third argument sun-authored for the old direction. Generic CLI/baseline and colour defaults stay unchanged. Source-colour ratio draft is a separate subsequent experiment.
