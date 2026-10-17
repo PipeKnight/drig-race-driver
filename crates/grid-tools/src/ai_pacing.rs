@@ -136,6 +136,16 @@ pub struct Data {
 
 impl Data {
     pub fn load(root: &Path, settings: &Settings) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_for(root, settings, "circuit")
+    }
+
+    /// [`Self::load`] with the choreographer set of `discipline` (e.g.
+    /// `drift_battle`: manager on, no conveyor, events or race-start factors).
+    pub fn load_for(
+        root: &Path,
+        settings: &Settings,
+        discipline: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let catch_up = match &settings.catch_up {
             Some(user) => {
                 let bytes = std::fs::read(root.join("ai/catchup.xml"))?;
@@ -147,7 +157,7 @@ impl Data {
             None => None,
         };
         let bytes = std::fs::read(root.join("ai/ai_choreographer.xml"))?;
-        let choreographer = ai::choreographer(&binxml::read(&bytes)?, "circuit")?;
+        let choreographer = ai::choreographer(&binxml::read(&bytes)?, discipline)?;
         Ok(Self {
             catch_up,
             choreographer,

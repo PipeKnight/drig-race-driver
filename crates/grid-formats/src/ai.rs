@@ -150,8 +150,17 @@ fn brake_data(e: &Element<'_>) -> Result<BrakeData> {
     })
 }
 
-/// `tracks/<track>/route_0/ai_track.xml`, track `default`.
+/// `tracks/<track>/route_0/ai_track.xml`, track `default`, on the `optimal`
+/// racing line.
 pub fn track(doc: &Document<'_>) -> Result<Track> {
+    track_on(doc, "optimal")
+}
+
+/// [`track`] on the racing line of `kind` (the executable's kinds, .rdata
+/// 0xCF7128: retirement 0, optimal 1, overtake 2, left 3, right 4, traffic 5,
+/// drift 6, start 7). A gate without that kind keeps its `optimal` line, as
+/// the line choice 0x794870 falls back to kind 1 where the wanted one is absent.
+pub fn track_on(doc: &Document<'_>, wanted: &str) -> Result<Track> {
     let root = element(doc, 0)?;
     if root.name != "ai_track_data" || attr(root, "version_major")? != "3" {
         return fail(0, "unsupported AI track data");
@@ -167,14 +176,27 @@ pub fn track(doc: &Document<'_>) -> Result<Track> {
     };
     for gate in records(doc, only(doc, track, "gates")?, "num_gates", "gate")? {
         let mut lengths = BTreeMap::new();
+        let mut chosen = None;
         for w in named(doc, only(doc, gate, "waypoints")?, "waypoint")? {
             let e = &doc.elements[w];
             let kind = attr(e, "type")?;
+            if kind == "racing_line" && wanted != "optimal" {
+                let kinds = named(doc, w, "racing_line")?
+                    .iter()
+                    .map(|&r| attr(&doc.elements[r], "type"))
+                    .collect::<Result<Vec<_>>>()?;
+                if kinds == [wanted] {
+                    if chosen.replace(number(attr(e, "length")?)?).is_some() {
+                        return fail(w, "duplicate AI racing line kind");
+                    }
+                    continue;
+                }
+            }
             if kind == "racing_line" {
                 // Racing-line kinds of the executable's enumeration (.rdata
-                // 0xCF7120): the race line is `optimal`; other kinds (Jarama
-                // also ships `drift` on every gate) belong to behaviours not
-                // ported here and are skipped. Mixed or unknown kinds fail.
+                // 0xCF7120): the race line is `optimal`; other kinds (the drift
+                // routes ship `drift` on every gate) are skipped here and read
+                // by `track_on`. Mixed or unknown kinds fail.
                 let kinds = named(doc, w, "racing_line")?
                     .iter()
                     .map(|&r| attr(&doc.elements[r], "type"))
@@ -211,7 +233,10 @@ pub fn track(doc: &Document<'_>) -> Result<Track> {
         out.gates.push(Gate {
             position: vector(doc, only(doc, gate, "position")?)?,
             normal: vector(doc, only(doc, gate, "normal")?)?,
-            racing_line: get("racing_line")?,
+            racing_line: match chosen {
+                Some(length) => length,
+                None => get("racing_line")?,
+            },
             left_track_limit: get("left_track_limit")?,
             right_track_limit: get("right_track_limit")?,
             left_racing_limit: get("left_racing_limit")?,

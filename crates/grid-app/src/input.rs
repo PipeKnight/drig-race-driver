@@ -63,9 +63,10 @@ pub enum Action {
     ReplayNextLap,
     ReplayPreviousLap,
     ReplayExit,
+    ReplayJumpIn,
 }
 
-pub const ACTIONS: usize = 38;
+pub const ACTIONS: usize = 39;
 
 const ALL: [Action; ACTIONS] = {
     use Action::*;
@@ -108,6 +109,7 @@ const ALL: [Action; ACTIONS] = {
         ReplayNextLap,
         ReplayPreviousLap,
         ReplayExit,
+        ReplayJumpIn,
     ]
 };
 
@@ -151,6 +153,7 @@ const NAMES: [&str; ACTIONS] = [
     "Replay Next Lap",
     "Replay Previous Lap",
     "Replay Exit",
+    "Replay Jump In",
 ];
 
 impl Action {
@@ -300,8 +303,8 @@ impl ActionMap {
             (MenuSelect, &[KeyCode::Enter, KeyCode::NumpadEnter], button),
             (MenuBack, &[KeyCode::Escape], button),
             // Preset 0's Instant Replay and `<!-- Replay Actions -->` keys
-            // (docs/REPLAY.md); Replay Jump In (F12) and Save (S) are not
-            // ported yet.
+            // (docs/REPLAY.md); Replay Jump In is Flashback
+            // (docs/FLASHBACK.md). Replay Save (S) is not ported.
             (InstantReplay, &[KeyCode::Enter], button),
             (ReplayRewind, &[KeyCode::F2], button),
             (ReplayFastForward, &[KeyCode::F3], button),
@@ -311,6 +314,7 @@ impl ActionMap {
             (ReplayNextLap, &[KeyCode::F5], button),
             (ReplayPreviousLap, &[KeyCode::F4], button),
             (ReplayExit, &[KeyCode::Escape], button),
+            (ReplayJumpIn, &[KeyCode::F12], button),
             (
                 MenuButton3,
                 &[KeyCode::ControlLeft, KeyCode::ControlRight],

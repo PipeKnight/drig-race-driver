@@ -270,6 +270,14 @@ impl PostRace {
         }
     }
 
+    /// A Flashback from the wreck screen's replay: the race goes on.
+    pub fn resume_race(&mut self) {
+        if matches!(self.stage, Stage::Wreck | Stage::Confirm(_, Return::Wreck)) {
+            self.stage = Stage::Hidden;
+        }
+        self.wreck_timer = 0.;
+    }
+
     pub fn reset(&mut self, segment: u64) {
         let (repeat, drift) = (self.repeat, self.drift);
         *self = Self::new(self.variant);

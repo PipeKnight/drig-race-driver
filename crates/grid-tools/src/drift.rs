@@ -303,6 +303,70 @@ pub struct Sample {
     pub impact: f32,
 }
 
+impl Sample {
+    /// Sample of a source car with its race progress (laps), 0-based race
+    /// position, field size and largest solved contact impact this tick.
+    pub fn of(
+        car: &crate::source_vehicle::Runtime,
+        progress: f32,
+        position: usize,
+        cars: usize,
+        impact: f32,
+    ) -> Self {
+        let pose = car.pose();
+        let v = car.velocity();
+        let wheels = car.wheels().map(|w| {
+            std::array::from_fn(|k| {
+                pose[12 + k]
+                    + w.anchor[0] * pose[k]
+                    + w.anchor[1] * pose[4 + k]
+                    + w.anchor[2] * pose[8 + k]
+            })
+        });
+        Self {
+            velocity: [v[0], v[1], v[2]],
+            forward: [pose[8], pose[9], pose[10]],
+            left: [pose[0], pose[1], pose[2]],
+            wheels,
+            progress,
+            position,
+            cars,
+            impact,
+        }
+    }
+}
+
+/// A car's contacts of one tick split into the collision impact the drift
+/// detector reads and whether a `close_drift_flag` box (`flags`) was touched.
+/// - 0x62FFE0 leaves the combo alone when the other body's callback is the
+///   car body-impact dispatcher 0xA01910 [V]: contact with another car is no
+///   collision [I: 0xA01910 serves car bodies only].
+/// - The original's flags are jointed entities whose touch the listener
+///   0x64D840 reports through 0x64D7E0; the port keeps them as static boxes
+///   (no joint rows, F284), so their contact is a flag touch only [I].
+pub fn split_contacts(
+    contacts: &[(f32, crate::source_vehicle::multi::Contacted)],
+    flags: &[usize],
+) -> (f32, bool) {
+    use crate::source_vehicle::multi::Contacted;
+    let mut impact = 0f32;
+    let mut touched = false;
+    for &(value, other) in contacts {
+        match other {
+            Contacted::Prop(p) if flags.contains(&p) => touched = true,
+            Contacted::Car(_) => {}
+            _ => impact = impact.max(value),
+        }
+    }
+    (impact, touched)
+}
+
+/// The drift `DifficultyBias` level of an AI difficulty: the nearest star
+/// level (`crate::flashback::star_level`) [I: 0x40B700 returns the star level].
+pub fn ai_level(difficulty: f32) -> usize {
+    crate::flashback::star_level(difficulty)
+}
+
 /// The drift detector of one car [V 0x65DD50, 0x62FF80, 0x62FFE0].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Detector {
@@ -892,6 +956,27 @@ mod tests {
     use super::*;
 
     const DT: f32 = 1. / 60.;
+
+    #[test]
+    fn flags_are_touched_and_cars_are_no_collision() {
+        use crate::source_vehicle::multi::Contacted::{Car, Prop, Static};
+        let flags = [7, 9];
+        // A flag box is a touch, never a collision; another car is neither.
+        assert_eq!(
+            split_contacts(&[(900., Prop(7)), (700., Car(2))], &flags),
+            (0., true)
+        );
+        // Walls, other props and the road are collisions; the largest counts.
+        assert_eq!(
+            split_contacts(&[(450., Static), (300., Prop(3)), (90., Prop(9))], &flags),
+            (450., true)
+        );
+        assert_eq!(split_contacts(&[], &flags), (0., false));
+        // A touch disarms the close-drift bonus like the original's clock.
+        let mut d = Detector::default();
+        d.touch_flag();
+        assert_eq!(d.since_flag_touch, 0.);
+    }
 
     fn shipped() -> Settings {
         // gameconfig/drift.xml values [D] (local/race-rules/data).

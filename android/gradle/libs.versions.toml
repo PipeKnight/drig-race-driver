@@ -5,10 +5,12 @@ appcompat = "1.7.1"
 # Must match the GameActivity C sources bundled in the android-activity crate
 # (0.6.1 bundles 4.4.0; its README names androidx.games:games-activity:4.4.0).
 gamesActivity = "4.4.0"
+junit = "4.13.2"
 
 [libraries]
 appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 games-activity = { group = "androidx.games", name = "games-activity", version.ref = "gamesActivity" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

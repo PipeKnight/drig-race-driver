@@ -82,6 +82,9 @@ pub struct Diagnostics {
     /// Seconds: once a scripted drive ends, play an Instant Replay and delay
     /// the offscreen capture until it has run this long (docs/REPLAY.md).
     pub replay_capture: Option<f64>,
+    /// Seconds: in that Instant Replay, Jump In (Flashback) once it has run
+    /// this long; the drive goes on from there (docs/FLASHBACK.md).
+    pub flashback_capture: Option<f64>,
 }
 
 impl Default for Diagnostics {
@@ -99,6 +102,7 @@ impl Default for Diagnostics {
             damage_camera: None,
             texture_fallback: None,
             replay_capture: None,
+            flashback_capture: None,
         }
     }
 }
@@ -123,6 +127,7 @@ impl Diagnostics {
             texture_fallback: text("GRID_TEXTURE_FALLBACK")
                 .and_then(|v| texture_path("GRID_TEXTURE_FALLBACK", &v).ok().flatten()),
             replay_capture: text("GRID_REPLAY_CAPTURE").and_then(|v| v.parse().ok()),
+            flashback_capture: text("GRID_FLASHBACK_CAPTURE").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -144,6 +149,9 @@ impl Diagnostics {
             "texture_fallback" => self.texture_fallback = texture_path(key, value)?,
             "replay_capture" => {
                 self.replay_capture = Some(value.parse().map_err(|_| number(key))?)
+            }
+            "flashback_capture" => {
+                self.flashback_capture = Some(value.parse().map_err(|_| number(key))?)
             }
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }

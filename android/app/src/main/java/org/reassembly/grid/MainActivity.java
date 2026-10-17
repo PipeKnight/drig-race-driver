@@ -1,6 +1,9 @@
 package org.reassembly.grid;
 
+import android.content.Intent;
 import android.os.Bundle;
+import android.os.Process;
+import android.util.Log;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -12,6 +15,8 @@ public class MainActivity extends GameActivity {
     static {
         System.loadLibrary("grid_android");
     }
+
+    private volatile String logPath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,5 +36,44 @@ public class MainActivity extends GameActivity {
                         WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             }
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // The native library (winit, Bevy) cannot start twice in one process;
+        // end the process so the next start is a fresh one.
+        if (isFinishing()) {
+            Process.killProcess(Process.myPid());
+        }
+    }
+
+    /**
+     * Called by android.rs at start-up: a new log file in
+     * Download/GRID-Reassembly; returns its file descriptor (now owned by the
+     * caller) or -1.
+     */
+    public int openLogFile() {
+        CrashLog.LogFile file = CrashLog.create(this, "log");
+        if (file == null) {
+            return -1;
+        }
+        logPath = file.shownPath;
+        return file.descriptor.detachFd();
+    }
+
+    /**
+     * Called by android.rs, from any thread, when the game stops on a
+     * start-up error or a panic: shows the message in ErrorActivity, which
+     * runs in its own process and outlives this one.
+     */
+    public void showFatal(String message) {
+        Log.e("grid", "fatal: " + message);
+        Intent intent = new Intent(this, ErrorActivity.class)
+                .putExtra(ErrorActivity.EXTRA_MESSAGE, message)
+                .putExtra(ErrorActivity.EXTRA_LOG, logPath)
+                .putExtra(ErrorActivity.EXTRA_PID, Process.myPid())
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
     }
 }

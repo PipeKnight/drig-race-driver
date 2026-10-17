@@ -22,6 +22,7 @@ mod damage_parts;
 mod drift_event;
 mod dynamic_props;
 mod engine_sound;
+mod flashback;
 mod free_look;
 mod geometry_ray;
 mod graphics;
@@ -1035,7 +1036,12 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("grid-app: {error}");
         #[cfg(target_os = "android")]
-        android::log(true, &format!("grid-app: {error}"));
+        {
+            // On screen and in the log file; give the start of the error
+            // screen's process a moment before this one exits.
+            android::fatal(&format!("grid-app: {error}"));
+            std::thread::sleep(Duration::from_millis(500));
+        }
         std::process::exit(1);
     }
 }
@@ -1716,6 +1722,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?,
     };
     println!("game_root path={}", root.display());
+    // The first loader's error names only an OS error; say what is missing.
+    #[cfg(target_os = "android")]
+    if !root.join("tracks").is_dir() {
+        return Err(format!(
+            "no game data in {}: this APK carries none; install the bundled APK or push the data (docs/ANDROID.md)",
+            root.display()
+        )
+        .into());
+    }
     let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
@@ -1902,7 +1917,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let mut by_model = BTreeMap::new();
                 for model in &field {
                     if !by_model.contains_key(model) {
-                        let data = AiData::load(&root, route.path(), "touring", model.stem())?;
+                        // A Drift Battle reads the drift_battle AI config (docs/DISCIPLINES.md).
+                        let data = AiData::load_for(
+                            &root,
+                            route.path(),
+                            "touring",
+                            model.stem(),
+                            drift.then_some("drift_battle"),
+                        )?;
                         by_model.insert(model.clone(), data);
                     }
                 }
@@ -1966,7 +1988,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &positions,
                 );
                 let pacing = grid_tools::ai_pacing::Field::new(
-                    grid_tools::ai_pacing::Data::load(&root, &ai_settings)?,
+                    grid_tools::ai_pacing::Data::load_for(
+                        &root,
+                        &ai_settings,
+                        if drift { "drift_battle" } else { "circuit" },
+                    )?,
                     ai_settings.clone(),
                     &ai.line,
                     trial_laps.unwrap_or(1),
@@ -2420,6 +2446,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);
+            flashback::install(&mut app, ai_settings.difficulty);
         }
     }
     if track && graphics.source_trees {
@@ -3065,6 +3092,7 @@ fn capture(
             );
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn drive_tick(
     mut driving: ResMut<Driving>,
     actions: Res<input::Actions>,
@@ -3074,6 +3102,8 @@ fn drive_tick(
     start: Option<Res<StartSequence>>,
     // Last `drive_input` record (segment, controls, hold) for `grid-soak replay-log`.
     mut recorded: Local<Option<(u64, grid_tools::source_vehicle::Controls, bool)>>,
+    // The player's inputs for Flashback (logged, or given back when ticks run again).
+    mut inputs: Option<ResMut<flashback::Inputs>>,
 ) {
     // One queued gear edge per fixed tick, dropped when the tick does not run.
     let shift = shifts.pop();
@@ -3134,6 +3164,11 @@ fn drive_tick(
             .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         let view = View::of(car, opponents.multi.obstruction(0));
+        pilot.race = grid_tools::ai_driver::RaceView {
+            place: opponents.standings.position(0).saturating_sub(1) as u32,
+            cars: opponents.standings.len() as u32,
+            progress: opponents.standings.laps_covered(0) as f32,
+        };
         Some(pilot.controls(
             &opponents.ai,
             &view,
@@ -3169,6 +3204,12 @@ fn drive_tick(
             ..driving.scripted
         }
     } else {
+        let (controls, shift) = flashback::player(
+            inputs.as_deref_mut(),
+            driving.runtime.ticks + 1,
+            actions.controls(),
+            shift,
+        );
         // The request reaches the car only with a manual gearbox; it is
         // recorded for grid-soak replay-log.
         if driving.runtime.assists.transmission
@@ -3177,7 +3218,7 @@ fn drive_tick(
             applied = shift;
         }
         assists::request_shift(shift, &mut driving.runtime);
-        actions.controls()
+        controls
     };
     if held {
         controls = grid_tools::source_vehicle::Controls {
@@ -3265,6 +3306,12 @@ fn drive_tick(
                     .map(|(_, o)| *o)
                     .collect();
                 let view = View::of(car, opponents.multi.obstruction(i + 1));
+                // Race place for the drift test (read only in drift events).
+                driver.race = grid_tools::ai_driver::RaceView {
+                    place: opponents.standings.position(i + 1).saturating_sub(1) as u32,
+                    cars: opponents.standings.len() as u32,
+                    progress: opponents.standings.laps_covered(i + 1) as f32,
+                };
                 driver.controls(
                     &opponents.car_ai[i],
                     &view,

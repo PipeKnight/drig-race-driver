@@ -872,10 +872,10 @@ impl PropWorld {
         let props = track
             .props_mut()
             .ok_or(Error("dynamic props require route props"))?;
+        let boxes = std::sync::Arc::make_mut(&mut props.boxes);
         for (i, b) in self.catalog.breakables.iter().enumerate() {
             for &k in &b.intact {
-                let prop = props
-                    .boxes
+                let prop = boxes
                     .get_mut(k)
                     .ok_or(Error("breakable prop box out of range"))?;
                 prop.limit = b.threshold;
@@ -1186,8 +1186,9 @@ impl PropWorld {
     /// Stop the broken intact boxes colliding in a track.
     pub fn disable(track: &mut Track, boxes: &[usize]) {
         if let Some(props) = track.props_mut() {
+            let all = std::sync::Arc::make_mut(&mut props.boxes);
             for &k in boxes {
-                if let Some(b) = props.boxes.get_mut(k) {
+                if let Some(b) = all.get_mut(k) {
                     b.enabled = false;
                 }
             }
@@ -1502,7 +1503,7 @@ mod tests {
         let mesh = collision_mesh::build(&points, &triangles, 0).unwrap();
         let mut cache = grid_world::rectangle_cull::Cache::default();
         let (mut full, mut with_road) = (0, 0);
-        for b in &track.props().unwrap().boxes {
+        for b in track.props().unwrap().boxes.iter() {
             // A hull straddling the box's -x face, 0.1 m into the road under it.
             let (x, z) = (b.bounds[0], 0.5 * (b.bounds[2] + b.bounds[5]));
             let (top, bottom) = (b.bounds[4] + 1., b.bounds[1] - 2.);

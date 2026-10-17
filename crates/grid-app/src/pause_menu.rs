@@ -311,7 +311,7 @@ impl PauseMenu {
         }
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.open = false;
         self.screen = Screen::Main;
     }

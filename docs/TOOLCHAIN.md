@@ -15,6 +15,7 @@ Checked first: no Android SDK, NDK, adb, Gradle, `JAVA_HOME` or `ANDROID_HOME` e
 | Gradle | 9.8.1 (`gradle-9.8.1-bin.zip`) | `Tools\gradle\gradle-9.8.1` | https://services.gradle.org; SHA-256 `dce76f55f8e251a3a1f130eb120f30b3d271de2b76c9b0729d316b5a1b6dc01f` matches the published `.sha256`. AGP 9.4 needs Gradle 9.6.0 or newer (https://developer.android.com/build/releases/about-agp) |
 | Android Gradle Plugin | 9.4.1 | Gradle cache `Tools\gradle-home` | pinned in `android/gradle/libs.versions.toml`, from Google Maven at build time. No Gradle wrapper, so no binary jar in Git: the script calls the pinned Gradle |
 | GameActivity | `androidx.games:games-activity:4.4.0` | Gradle cache | android-activity 0.6.1 bundles the 4.4.0 C sources and names 4.4.0 in its README. 4.4.1 and 4.4.2 exist but are not used |
+| JUnit (F365) | `junit:junit:4.13.2` (testImplementation) | Gradle cache, from Maven Central | desktop unit tests of the first-run copy, `gradle -p android testDebugUnitTest` |
 | cargo-ndk | 4.1.2 | `Tools\cargo-ndk-4.1.2\bin` | `cargo install cargo-ndk --version 4.1.2 --locked --root ...` from crates.io (cargo checks the registry checksums) |
 | Rust target | `aarch64-linux-android` for rustc 1.99.0 | rustup | already installed in P0 (PLATFORMS_AND_INPUT_RESEARCH.md 1.1) |
 

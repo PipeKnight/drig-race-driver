@@ -10,6 +10,7 @@ use grid_formats::{entities, pssg};
 use grid_world::{Error, box_contacts::BoxShape};
 use std::{collections::BTreeMap, path::Path};
 
+#[derive(Clone)]
 pub struct PropBox {
     pub template: String,
     pub bounds: [f32; 6],
@@ -25,8 +26,10 @@ pub struct PropBox {
     shape: BoxShape,
 }
 
+/// Shared between clones until one changes a box (`Arc::make_mut`).
+#[derive(Clone)]
 pub struct Props {
-    pub boxes: Vec<PropBox>,
+    pub boxes: std::sync::Arc<Vec<PropBox>>,
 }
 
 /// Row-vector placement: translation in elements 12..14.
@@ -321,7 +324,9 @@ impl Props {
         if boxes.is_empty() || boxes.len() > 8192 {
             return Err("unsupported entity collision box count".into());
         }
-        Ok(Self { boxes })
+        Ok(Self {
+            boxes: std::sync::Arc::new(boxes),
+        })
     }
 
     /// Diagnostic: deepest penetration of any point inside any box, as
@@ -561,7 +566,7 @@ mod tests {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let props = Props::read(Path::new(&root)).unwrap();
         let mut templates = BTreeMap::<&str, usize>::new();
-        for b in &props.boxes {
+        for b in props.boxes.iter() {
             *templates.entry(b.template.as_str()).or_default() += 1;
             assert!((0..3).all(|j| b.bounds[j] < b.bounds[j + 3]));
         }

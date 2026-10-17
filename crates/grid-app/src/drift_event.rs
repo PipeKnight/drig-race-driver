@@ -21,25 +21,19 @@ pub(crate) struct DriftEvent {
     pub flags: Vec<[f32; 3]>,
     pub entries: Vec<Entry>,
     pub laps: u32,
+    /// Route prop boxes of the close-drift flags (found at the first tick).
+    flag_boxes: Option<Vec<usize>>,
     /// AI difficulty level for the drift bias (`DifficultyBias`).
     ai_level: usize,
     segment: u64,
     last_tick: u64,
 }
 
-/// `difficulty` rows of database.bin for career rank 2 (ai_ratio by star
-/// level 0..5) [D]; the AI difficulty setting picks the nearest level, which
-/// selects the `DifficultyBias` row [I: 0x40B700 returns the star level].
-const AI_RATIOS: [f32; 6] = [0.506, 0.606, 0.706, 0.8, 0.9, 1.];
-
+/// The AI difficulty setting picks the nearest `difficulty` row of career
+/// rank 2 (`grid_tools::flashback::AI_RATIOS`) [D], which selects the
+/// `DifficultyBias` row [I: 0x40B700 returns the star level].
 pub(crate) fn ai_level(difficulty: f32) -> usize {
-    (0..AI_RATIOS.len())
-        .min_by(|&a, &b| {
-            (AI_RATIOS[a] - difficulty)
-                .abs()
-                .total_cmp(&(AI_RATIOS[b] - difficulty).abs())
-        })
-        .unwrap()
+    grid_tools::flashback::star_level(difficulty)
 }
 
 impl DriftEvent {
@@ -55,6 +49,7 @@ impl DriftEvent {
             flags,
             entries: Vec::new(),
             laps,
+            flag_boxes: None,
             ai_level,
             segment: 0,
             last_tick: 0,
@@ -76,6 +71,16 @@ impl DriftEvent {
             .collect();
         self.segment = segment;
         self.last_tick = tick;
+    }
+
+    /// Scorers for a Flashback checkpoint (docs/FLASHBACK.md).
+    pub fn checkpoint(&self) -> (Vec<Entry>, u64, u64) {
+        (self.entries.clone(), self.segment, self.last_tick)
+    }
+    pub fn restore(&mut self, (entries, segment, last_tick): &(Vec<Entry>, u64, u64)) {
+        self.entries = entries.clone();
+        self.segment = *segment;
+        self.last_tick = *last_tick;
     }
 
     /// Car indices in drift results order.
@@ -131,32 +136,27 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut event: ResMut<DriftEvent>) 
     event.last_tick = driving.runtime.ticks;
     if advanced && !o.standings.over() {
         for (i, car) in cars.iter().enumerate() {
-            let pose = car.pose();
-            let v = car.velocity();
-            let wheels = car.wheels().map(|w| {
-                std::array::from_fn(|k| {
-                    pose[12 + k]
-                        + w.anchor[0] * pose[k]
-                        + w.anchor[1] * pose[4 + k]
-                        + w.anchor[2] * pose[8 + k]
-                })
-            });
-            let sample = Sample {
-                velocity: [v[0], v[1], v[2]],
-                forward: [pose[8], pose[9], pose[10]],
-                left: [pose[0], pose[1], pose[2]],
-                wheels,
-                progress: o.standings.laps_covered(i) as f32,
-                position: o.standings.position(i).saturating_sub(1),
-                cars: cars.len(),
-                impact: o
-                    .multi
-                    .impacts(i)
-                    .iter()
-                    .map(|x| x.impact)
-                    .fold(0., f32::max),
-            };
+            let contacts: Vec<_> = o
+                .multi
+                .contact_impacts(i)
+                .iter()
+                .map(|(x, other)| (x.impact, *other))
+                .collect();
+            let flags = event
+                .flag_boxes
+                .get_or_insert_with(|| o.multi.close_drift_flag_boxes());
+            let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flags);
+            let sample = Sample::of(
+                car,
+                o.standings.laps_covered(i) as f32,
+                o.standings.position(i).saturating_sub(1),
+                cars.len(),
+                impact,
+            );
             let entry = &mut event.entries[i];
+            if touched {
+                entry.detector.touch_flag();
+            }
             let before = (
                 entry.scorer.combo,
                 entry.scorer.rating,

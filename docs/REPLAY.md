@@ -214,7 +214,8 @@ The replay camera set is separate from the race cameras (F349):
 - Controls: [`player.rs`](../crates/grid-app/src/replay/player.rs) ports §2.4: play/pause, the
   ±4.33× shuttle, scrub while paused, clamping at the window's start. Next/Previous Lap jump to the
   player's lap starts (AUTHORED: next marker after now, previous more than 1 s before now). Not
-  ported: slow motion (no keyboard key), frame step, Replay Save, Jump In (Flashback, next task).
+  ported: slow motion (no keyboard key), frame step, Replay Save. Replay Jump In (F12, pad X) is
+  Flashback, docs/FLASHBACK.md.
 - The simulation is held for the replay. The live presentation still runs every frame, and the
   replay then overwrites it in `PostUpdate`:
   - car bodies and wheels; lost wheels at their recorded frames;
@@ -285,34 +286,15 @@ The replay camera set is separate from the race cameras (F349):
     View Replay from the first frame, laps, Replay Exit back to the results, the race unchanged.
 - Results: see the F entry in PROJECT_LOG.md.
 
-## 5. What Flashback can build on
+## 5. Flashback
 
-Flashback (`Replay Jump In`, F12 / pad X, the `jump_in` link → `replay_jump_in_prepare` →
-`flashback_flash1..3` → `replay_jump_in` with `frameDelay="2"`) resumes the race from a replay
-time. The original keeps snapshots, so it restores state from the replay stream rather than
-re-simulating [I]. The port has:
-
-- the replay window, time control, the loop and the `jump_in`-ready session (`replay::Session`,
-  `Origin`);
-- the 10 s rewind constant and the 0x63EBC0 seek path, which also handles the flashback case
-  (`t − 10.0` with 0xDB4FE4) [D];
-- frame lookup by tick (`Stream::at_or_before`) and resolved snapshots (`Replay::snapshot`).
-
-Missing:
-
-- The snapshots hold presentation state only. A jump-in needs the full simulation state at that
-  tick. With the deterministic simulation, two routes are open:
-  - keep periodic full-state checkpoints (cloned `Runtime`s/`MultiRuntime`, AI drivers, race
-    manager, standings, trial) in a bounded ring, and re-simulate from the checkpoint before the
-    target tick with the recorded inputs of every car (the AI is deterministic given the state);
-  - or serialise the full state per sample like the original's recordables.
-
-  The first fits the port best and keeps memory bounded. `drive_input` already logs the
-  player's controls.
-- The original's flashback count, award and limits: `flashback_manager_maximum`, `_max_award`,
-  `_used`, `available_flashbacks`, `flashback_bonus` [D strings, not traced].
-- The transition states' effects: `IG_whiteout`, `FlashbackFX_01`, 1.0 s each, samples
-  `flashback_shot_1/2`, `flashback_zoomup` [D states.bin].
+Ported on top of this replay system: docs/FLASHBACK.md. In short, the original restores every
+recordable from the replay frame at or before the replay time and cuts the stream there
+(0x93DDA0) [D]; the port reaches the same state exactly with full-simulation checkpoints, the
+player's logged inputs and a re-run of the ticks up to that frame, then cuts the stream
+(`Replay::cut`, `Stream::truncate`) and holds the session through the transition
+(`Replay::freeze`, `Replay::finish`). The original's jump-in rules and the 10 s rewind constants
+used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 
 ## 6. Open items
 

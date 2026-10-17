@@ -10,7 +10,7 @@ use std::time::Duration;
 
 /// The race harness plus the recorder after each tick and the replay
 /// controls before the menus; real time advances 1/60 s per frame.
-fn with_replay(mut app: App, route: &str) -> App {
+pub(crate) fn with_replay(mut app: App, route: &str) -> App {
     let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
     let director =
         director::Director::load(std::path::Path::new(&root), &Route::new(route).unwrap()).unwrap();
@@ -31,14 +31,14 @@ fn with_replay(mut app: App, route: &str) -> App {
     app
 }
 
-fn frame(app: &mut App) {
+pub(crate) fn frame(app: &mut App) {
     app.world_mut()
         .resource_mut::<Time<Real>>()
         .update_with_duration(Duration::from_secs_f64(1. / 60.));
     app.update();
 }
 
-fn replay(app: &App) -> &Replay {
+pub(crate) fn replay(app: &App) -> &Replay {
     app.world().resource::<Replay>()
 }
 

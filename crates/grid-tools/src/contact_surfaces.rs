@@ -2,6 +2,7 @@
 use grid_formats::{binxml, surface};
 use grid_world::{contact_material, surface_drag, wheel_history};
 
+#[derive(Clone)]
 pub struct Surfaces {
     keys: Vec<[u8; 4]>,
     mechanics: Vec<Option<contact_material::Material>>,

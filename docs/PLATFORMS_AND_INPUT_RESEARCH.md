@@ -774,6 +774,17 @@ Code:
 - **Lifecycle**: bevy_winit 0.19.1 creates the surface on resume and drops it on suspend. Audio is not paused on `AppLifecycle::Suspended` yet (the Bevy example does this) [open].
 - **Cold build cost**: the first `cargo ndk` release build compiled about 300 crates in 92 min on this PC, with other sessions building at the same time. The desktop seed (TOOLCHAIN.md) has no aarch64 artifacts. Later builds are incremental. Gradle's first run took 2 min 40 s, including the AGP download.
 
+### 7.6 Private bundled APK, first-run copy, error screen (F365, docs/ANDROID.md)
+
+The owner installed the P9 APK by copying it; it closed at once (no game data on the phone [I], no logcat captured). This step makes an APK that runs with no PC step after installing. It does not replace P10: the bundled APK is a **private build for the owner's own phone** and must never be shared.
+
+- **Bundle** [V]: `tools/build_android.ps1 -BundleData` stages the adb subset into the ignored `local/android/bundle/` and packs it as `assets/grid-data/` with `bundle.txt` (file list and a SHA-256 version). 382 files, 245 MiB, compressed to 143 MB; APK about 233 MB. The default build still packs no data.
+- **First-run copy** [V desktop]: a new launcher activity (`LauncherActivity`, Java) copies the assets into `Android/data/org.reassembly.grid/files/` with a progress bar before the native library loads, and writes a version marker; it copies again only when the version changes. `settings.ini` is written only when missing. Done in Java rather than in Rust because the GameActivity glue blocks the UI thread in `onNativeWindowCreated` until the native thread polls its events, so a Rust copy before the Bevy loop could show no progress. 7 JUnit tests on the desktop JVM; the real APK unpacked by the same class on the desktop is byte-identical to the staged data, and the desktop binary on it gives the full-install log.
+- **Errors** [V builds; N on a phone]: `android.rs` installs a panic hook and calls `MainActivity.showFatal` (JNI, `jni` 0.21) on a start-up error or a panic; `ErrorActivity` runs in its own process and shows the message and the log path. Every start writes `Download/GRID-Reassembly/log-<time>.txt` through MediaStore (no permission on Android 10+), with stdout, stderr and panics; logcat keeps them too. `MainActivity` ends its process when it finishes, because winit and Bevy cannot start twice in one process.
+- **Gamepad** [S, code read]: not cheap. gilrs-core 0.6.8 has no Android backend, and winit 0.30.13 maps Android pad buttons to `Key::Unidentified` and drops joystick axes. A pad needs a bridge from android-activity input events into the P1 input layer; that is input code, left to P11 ("optional Android pad bridge").
+- **Controls:** the owner wants only a tilt/touch APK, so the bundled `settings.ini` forces no autopilot (`push_android_data.ps1 -NoAutopilot`) and the APK uses the code's default profile; it is to be built after P11 lands (`tools\build_android.ps1 -BundleData`).
+- **Not done:** a run on a phone, Donington-only trimming (about 23 MB, under 10 %).
+
 ## 8. Open questions and tests that need hardware
 
 1. **Android device:** the tables of 1.2 have not been executed on ARM. P9 should run the unit tests (or a small `grid-world` self-test) on the phone.
@@ -781,7 +792,7 @@ Code:
 3. **Input sampling against physics substeps** in the original: trace the order of `AFDB50`/`827D10`/`828670` against `A03670`.
 4. **FFB snapshot writer:** which physics values fill the per-car snapshot. This is static research and can be done in P4.
 5. **Missing pedal axis behaviour** (uniNegative with no source reads 1.0 [I]), the SetCooperativeLevel flags, and whether the native-friction effect is ever created.
-6. **GameActivity joystick forwarding** and MTP access to `Android/data` on the owner's phone.
+6. **GameActivity joystick forwarding** and MTP access to `Android/data` on the owner's phone. Code reading (7.6): GameActivity delivers pad events, but neither gilrs (no Android backend) nor winit 0.30 (buttons as `Key::Unidentified`, no axes) passes them to Bevy.
 7. **Vulkan vs GLES stability** on the owner's phone GPU (Mali/Adreno/Xclipse), and whether it supports BC.
 8. **SDL3 alongside gilrs and Logitech G HUB** on Windows.
 9. **libm differences** between platforms (1.3): measure in P7 or P13 before promising identical ghosts or replays across platforms.

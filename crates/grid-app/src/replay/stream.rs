@@ -139,6 +139,29 @@ impl Stream {
         }
     }
 
+    /// Keeps frames up to and including `last` and forgets the later ones,
+    /// so recording continues after `last` (a Flashback jump-in, the
+    /// original's 0x93DDA0 cuts its stream there). `last` must be in memory.
+    pub fn truncate(&mut self, last: usize) -> bool {
+        if last < self.memory_start() || last >= self.index.len() {
+            return false;
+        }
+        let keep = self.index[last];
+        self.index.truncate(last + 1);
+        while self.chunks.back().is_some_and(|c| c.number > keep.chunk) {
+            self.chunks.pop_back();
+        }
+        if let Some(chunk) = self.chunks.back_mut()
+            && let Some(data) = chunk.data.as_mut()
+        {
+            data.truncate((keep.offset + keep.len) as usize);
+            chunk.len = data.len();
+        }
+        self.full = false;
+        self.cache = None;
+        true
+    }
+
     /// Number of the next frame.
     pub fn next(&self) -> u32 {
         self.index.len() as u32
@@ -314,6 +337,35 @@ mod tests {
         assert_eq!(s.at_or_before(0), None);
         assert_eq!(s.at_or_before(199), Some(99));
         assert_eq!(s.at_or_before(frames.start as u64 * 2 + 1), Some(frames.start));
+    }
+
+    #[test]
+    fn a_jump_in_cut_keeps_the_frames_up_to_it_and_records_on() {
+        let limits = Limits {
+            memory: 1000,
+            chunk: 300,
+            spool: 0,
+        };
+        let mut s = Stream::new(limits, None);
+        for n in 0..100u64 {
+            s.push(n * 2, &bytes(n, 50));
+        }
+        let start = s.frames().start;
+        assert!(!s.truncate(start - 1), "before the memory window");
+        assert!(!s.truncate(100));
+        assert!(s.truncate(95));
+        assert_eq!(s.frames(), start..96);
+        assert_eq!(s.at_or_before(1000), Some(95));
+        assert_eq!(s.read(95).unwrap(), bytes(95, 50));
+        // Recording continues from the cut with new frames.
+        for n in 96..100u64 {
+            assert!(s.push(n * 2 + 1, &bytes(n + 7, 50)));
+        }
+        for f in s.frames() {
+            let n = f as u64;
+            assert_eq!(s.read(f).unwrap(), bytes(if n > 95 { n + 7 } else { n }, 50));
+        }
+        assert_eq!(s.tick(96), 193);
     }
 
     #[test]
