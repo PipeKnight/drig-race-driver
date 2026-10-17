@@ -32,7 +32,7 @@ F353 fourth circuit: Long Beach drives solo and races with the AI field; routes 
   - Clippy --workspace --all-targets -D warnings: clean.
   - Solo identity byte-identical to local/ai-pacing/runs/solo-rebased.txt.
   - Against an 8b8a48b baseline build, byte-identical: Donington, Nürburgring, Istanbul, mixed lac,bmw and Long Beach 12-car races; Nürburgring and Istanbul solos (local/fourth-track/regress/).
-  - grid-soak quick (1..16): 16/16 pass, every result line equal to the baseline's.
+  - grid-soak quick (1..16): 16/16 pass, every result line equal to the baseline's. Repeated after the rebase onto 6d432bb (F352 grid-probes): 493 tests, clippy, solo identity and quick 16/16 with the same lines (grid-soak sha256 a573b7fe…6653, grid-app 4063175c…2e2a).
 - Not done:
   - the Istanbul turn-8 and Long Beach recoveries against the original, which needs a live AI trace with input to the game;
   - the re-indexed routes in grid-soak or launchers.
