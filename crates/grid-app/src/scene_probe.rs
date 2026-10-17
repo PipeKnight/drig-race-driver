@@ -115,7 +115,9 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Err
         .add_systems(Update, (setup, activate).chain())
         .add_systems(
             PostUpdate,
-            follow.before(bevy::transform::TransformSystems::Propagate),
+            follow
+                .after(crate::replay::present)
+                .before(bevy::transform::TransformSystems::Propagate),
         )
         .add_systems(Last, exit_report);
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
@@ -340,6 +342,7 @@ fn follow(
     mut commands: Commands,
     cube: Option<ResMut<Cube>>,
     driving: Option<Res<super::Driving>>,
+    replay: Option<Res<crate::replay::Replay>>,
     mut cameras: Query<(&ProbeCamera, &mut Transform)>,
     mut probes: Query<&mut Transform, (With<SceneProbe>, Without<ProbeCamera>)>,
     mut last_audit: Local<u64>,
@@ -348,9 +351,15 @@ fn follow(
     if !cube.moving {
         return;
     }
-    if let Some(driving) = driving {
-        cube.capture_center =
-            Mat4::from_cols_array(&driving.runtime.pose()).transform_point3(Vec3::new(0., 1.3, 0.));
+    // A replay presents snapshot poses while the live runtime is paused.
+    let pose = replay.as_deref()
+        .and_then(|r| r.session.as_ref())
+        .and_then(|s| s.shown.as_ref())
+        .and_then(|s| s.cars.first())
+        .map(|car| car.pose.to_mat4())
+        .or_else(|| driving.as_deref().map(|d| Mat4::from_cols_array(&d.runtime.pose())));
+    if let Some(pose) = pose {
+        cube.capture_center = pose.transform_point3(Vec3::new(0., 1.3, 0.));
     }
     for (face, mut transform) in &mut cameras {
         *transform = face_transform(face.0, cube.capture_center);
@@ -371,11 +380,23 @@ fn follow(
     }
 }
 
-fn exit_report(cube: Option<Res<Cube>>, mut exits: MessageReader<bevy::app::AppExit>) {
+fn exit_report(
+    cube: Option<Res<Cube>>,
+    replay: Option<Res<crate::replay::Replay>>,
+    mut exits: MessageReader<bevy::app::AppExit>,
+) {
     if exits.read().next().is_none() {
         return;
     }
     if let Some(cube) = cube {
+        if let Some(snapshot) = replay.as_deref()
+            .and_then(|r| r.session.as_ref())
+            .and_then(|s| s.shown.as_ref())
+            && let Some(car) = snapshot.cars.first()
+        {
+            println!("scene_probe replay_exit shown_tick={} shown_center={:?} capture_center={:?} scope=shown-snapshot-not-runtime",
+                snapshot.tick, car.pose.to_mat4().transform_point3(Vec3::new(0., 1.3, 0.)), cube.capture_center);
+        }
         println!(
             "scene_probe exit moving={} copies={} last_capture_center={:?} ready={}",
             cube.moving,
@@ -722,6 +743,56 @@ mod tests {
                 .vehicle,
             before
         );
+        // A replay displays an earlier pose while the live simulation stays
+        // paused elsewhere. The capture must follow the displayed player.
+        use crate::replay::{self, frame, stream};
+        let replay_pose = frame::Pose::from_mat4(Mat4::from_rotation_translation(
+            Quat::from_rotation_z(0.2), Vec3::new(20., 4., 30.),
+        ));
+        let mut snapshot = frame::Snapshot {
+            tick: 0,
+            cars: vec![frame::Car {
+                pose: replay_pose,
+                velocity: Vec3::X * 10.,
+                wheels: [frame::Wheel::default(); 4],
+                geometry: [frame::WheelGeometry {
+                    anchor: [0.; 3], axis: [0., 1., 0.],
+                    deformation_translation: [0.; 3],
+                    deformation_orientation: Mat4::IDENTITY.to_cols_array_2d(),
+                }; 4],
+                deformation: None, lost: [None; 4],
+            }],
+            props: None,
+        };
+        let mut encoder = frame::Encoder::default();
+        let mut stream = stream::Stream::new(stream::Limits::default(), None);
+        for (number, tick) in [0, 2].into_iter().enumerate() {
+            snapshot.tick = tick;
+            stream.push(tick, &encoder.encode(&snapshot, number as u32));
+        }
+        let mut replay = replay::Replay::new(stream, None);
+        assert!(replay.start(replay::Kind::Full, replay::Origin::PauseMenu, false,
+            &crate::camera::Views::fallback()));
+        replay.session.as_mut().unwrap().shown = Some(snapshot);
+        app.insert_resource(replay);
+        app.world_mut().resource_mut::<crate::Driving>().paused = true;
+        app.update();
+        let replay_center = replay_pose.to_mat4().transform_point3(Vec3::new(0., 1.3, 0.));
+        assert_eq!(app.world().resource::<Cube>().capture_center, replay_center);
+        for (face, &entity) in cameras.iter().enumerate() {
+            assert_eq!(*app.world().get::<Transform>(entity).unwrap(), face_transform(face, replay_center));
+        }
+        // The probe box still belongs to the submitted image until publication.
+        assert_eq!(app.world().get::<Transform>(probe).unwrap().translation, initial);
+        *app.world().resource::<Cube>().captured_center.lock().unwrap() = replay_center;
+        app.update();
+        assert_eq!(app.world().get::<Transform>(probe).unwrap().translation, replay_center);
+        assert_eq!(app.world().resource::<crate::Driving>().runtime.state.car.owner.vehicle, before);
+        assert_eq!(app.world().resource::<replay::Replay>().session.as_ref().unwrap()
+            .shown.as_ref().unwrap().cars[0].pose, replay_pose);
+        app.world_mut().resource_mut::<replay::Replay>().finish();
+        app.update();
+        assert_eq!(app.world().resource::<Cube>().capture_center, initial);
         eprintln!(
             "moving_probe_reset source_runtime=true cameras=6 box_matches_submitted_center=true physics_feedback=0 scope=ECS-not-GPU-history"
         );

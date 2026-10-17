@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G099 — Replay probe anchoring reproduced and corrected in ECS (18 October 2026)
+
+Extended the existing asset-backed probe/reset test with an actual two-frame Replay session. Old code fails with capture centre(-182.06895,-10.536222,19.616879) while the displayed snapshot needs(19.74173,5.2740865,30). Failed tests-probe-replay-repro01.log retained. Draft follow() now reads the shown player snapshot while replay is active, otherwise live pose; PostUpdate explicitly follows replay::present. Submitted-cube/parallax-box synchronization unchanged. Test checks all6camera transforms, box publication delay, unchanged live vehicle bytes and replay pose, then return to live pose after exit. Both scene_probe tests pass; app all-target Clippy10.38s clean.
+
+A single exit diagnostic records shown snapshot tick/centre versus capture centre for the coming GPU acceptance. Old verified575633f moving-probe/Instant Replay capture running as a before control; source-stamped fixed build and paired GPU checks next. Stable published main/build unchanged by this draft; no camera feature or physics/replay writes added. No owner action needed.
+
 ## G098 — Graphics published to main and both desktop builds refreshed (18 October 2026)
 
 Guarded primary fast-forwardd3ea04f->48a1961 completed, owner untracked report SHA256c4d52b9e... preserved, and main plus graphics pushed to the owner's origin. First promotion attempt stopped BEFORE writes because the other agent advanced main to66d67a7 with a journal-only APK entry; that update was fast-forwarded into graphics, Rust/Cargo source equality to compiled575633f checked, then both inactive desktop executables and both verified backups atomically replaced with SHA256c3ad51f4... . Four graphics/playtest manifests preserve exact source575633fb7639/integrated66d67a7 and distinct602pre-F370 versus7post-F370 settings checks. Private promotion-sun-f370-01.json retains old manifests. Existing primary P11/F370 features retained; original Steam installation untouched.
