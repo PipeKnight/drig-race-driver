@@ -36,12 +36,15 @@ enum Geometry<'a> {
     Deforming(&'a mut crate::body_geometry::BodyGeometry),
 }
 
+/// Cloning copies the live state; the start state for [`Runtime::reset`] and
+/// the track geometry are shared (flashback checkpoints, docs/FLASHBACK.md).
+#[derive(Clone)]
 pub struct Runtime {
     pub state: vehicle_world::State,
-    initial: vehicle_world::State,
+    initial: std::sync::Arc<vehicle_world::State>,
     initial_cache: rectangle_cull::Cache,
     track: Track,
-    surfaces: Surfaces,
+    surfaces: std::sync::Arc<Surfaces>,
     cache: rectangle_cull::Cache,
     pair: [usize; 2],
     pub ticks: u64,
@@ -55,7 +58,7 @@ pub struct Runtime {
     /// Explicit selected source deformation ownership, never inferred from raw flags.
     pub deformation_enabled: bool,
     pub deformation_registration: Option<grid_world::deformation_world::Registration>,
-    initial_deformation_registration: Option<grid_world::deformation_world::Registration>,
+    initial_deformation_registration: Option<std::sync::Arc<grid_world::deformation_world::Registration>>,
     lap_course: Option<std::sync::Arc<grid_world::lap_timing::Course>>,
     pub lap: Option<grid_world::lap_timing::State>,
     initial_lap: Option<grid_world::lap_timing::State>,
@@ -450,11 +453,11 @@ impl Runtime {
             track.shape_count(),
         )?;
         Ok(Self {
-            initial: state.clone(),
+            initial: std::sync::Arc::new(state.clone()),
             initial_cache: cache,
             state,
             track,
-            surfaces,
+            surfaces: std::sync::Arc::new(surfaces),
             cache,
             pair,
             ticks: 0,
@@ -518,7 +521,7 @@ impl Runtime {
         self.state.world.groups.contacts.resize(capacity, [0; 32]);
         self.state.world.manager.rows.resize(capacity * 4, [0; 48]);
         self.state.world.manager.capacity = capacity * 4;
-        self.initial = self.state.clone();
+        self.initial = std::sync::Arc::new(self.state.clone());
         Ok(())
     }
 
@@ -559,7 +562,7 @@ impl Runtime {
             angular: true,
             ..Default::default()
         });
-        self.initial = self.state.clone();
+        self.initial = std::sync::Arc::new(self.state.clone());
         self.wheel_nodes = Some(std::sync::Arc::new(wheel_nodes));
         Ok(geometry)
     }
@@ -608,7 +611,7 @@ impl Runtime {
             .copy_from_slice(&next.car.owner.vehicle[..vehicle_force::BODY_WORDS]);
         next.world.groups.bodies[0] = next.car.owner.physical;
         self.state = next;
-        self.initial = self.state.clone();
+        self.initial = std::sync::Arc::new(self.state.clone());
         self.deformation_enabled = true;
         *geometry = staged_geometry;
         Ok(())
@@ -639,7 +642,7 @@ impl Runtime {
             records: 0,
             owner_toggle: false,
         };
-        self.initial_deformation_registration = Some(registration.clone());
+        self.initial_deformation_registration = Some(std::sync::Arc::new(registration.clone()));
         self.deformation_registration = Some(registration);
         Ok(())
     }
@@ -982,8 +985,8 @@ impl Runtime {
         lost
     }
     pub fn reset(&mut self) {
-        self.state = self.initial.clone();
-        self.deformation_registration = self.initial_deformation_registration.clone();
+        self.state = (*self.initial).clone();
+        self.deformation_registration = self.initial_deformation_registration.as_deref().cloned();
         self.lap = self.initial_lap.clone();
         self.lap_events.clear();
         self.shift = None;

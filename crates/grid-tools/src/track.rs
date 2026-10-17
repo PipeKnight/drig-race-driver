@@ -4,7 +4,7 @@ use grid_world::{
     candidate_grid::Grid, grid_population, packed_contacts, packed_query::Mesh, packed_world,
     rectangle_cull::Cache,
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 struct Chunk {
     name: String,
@@ -39,15 +39,18 @@ impl Chunk {
 /// of the body's own margin (BOX_CONTACTS.md, F351).
 pub const ROAD_MARGIN: f32 = 0.02;
 
+/// Cloning shares the immutable geometry; only the route props' state
+/// (breakable limits, broken boxes) is per clone (copy on write).
+#[derive(Clone)]
 pub struct Track {
-    pub grid: Grid,
-    chunks: Vec<Chunk>,
+    pub grid: Arc<Grid>,
+    chunks: Arc<Vec<Chunk>>,
     triangle_count: usize,
-    boundary: Option<crate::cqtc_geometry::Geometry>,
+    boundary: Option<Arc<crate::cqtc_geometry::Geometry>>,
     props: Option<crate::entity_geometry::Props>,
     /// Body-query checks of the attached boundary and of every prop box.
     boundary_checked: Option<packed_contacts::Checked>,
-    props_index: Option<crate::entity_geometry::BoxIndex>,
+    props_index: Option<Arc<crate::entity_geometry::BoxIndex>>,
 }
 
 /// Fresh geometric record and the same one-based packed shape identity used
@@ -108,8 +111,8 @@ impl Track {
         let b = chunks[0].bounds;
         let grid = grid_population::build([b[0], b[2], b[3], b[5]], &entries)?;
         Ok(Self {
-            grid,
-            chunks,
+            grid: Arc::new(grid),
+            chunks: Arc::new(chunks),
             triangle_count,
             boundary: None,
             props: None,
@@ -153,10 +156,10 @@ impl Track {
 
     pub(crate) fn attach_boundary(&mut self, boundary: crate::cqtc_geometry::Geometry) {
         self.boundary_checked = Some(boundary.checked());
-        self.boundary = Some(boundary);
+        self.boundary = Some(Arc::new(boundary));
     }
     pub(crate) fn attach_props(&mut self, props: crate::entity_geometry::Props) {
-        self.props_index = Some(crate::entity_geometry::BoxIndex::new(&props.boxes));
+        self.props_index = Some(Arc::new(crate::entity_geometry::BoxIndex::new(&props.boxes)));
         self.props = Some(props);
     }
     pub fn props(&self) -> Option<&crate::entity_geometry::Props> {

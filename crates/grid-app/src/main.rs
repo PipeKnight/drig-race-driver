@@ -22,6 +22,7 @@ mod damage_parts;
 mod drift_event;
 mod dynamic_props;
 mod engine_sound;
+mod flashback;
 mod free_look;
 mod geometry_ray;
 mod graphics;
@@ -2418,6 +2419,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);
+            flashback::install(&mut app, ai_settings.difficulty);
         }
     }
     if track && graphics.source_trees {
@@ -3063,6 +3065,7 @@ fn capture(
             );
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn drive_tick(
     mut driving: ResMut<Driving>,
     actions: Res<input::Actions>,
@@ -3072,6 +3075,8 @@ fn drive_tick(
     start: Option<Res<StartSequence>>,
     // Last `drive_input` record (segment, controls, hold) for `grid-soak replay-log`.
     mut recorded: Local<Option<(u64, grid_tools::source_vehicle::Controls, bool)>>,
+    // The player's inputs for Flashback (logged, or given back when ticks run again).
+    mut inputs: Option<ResMut<flashback::Inputs>>,
 ) {
     // One queued gear edge per fixed tick, dropped when the tick does not run.
     let shift = shifts.pop();
@@ -3167,6 +3172,12 @@ fn drive_tick(
             ..driving.scripted
         }
     } else {
+        let (controls, shift) = flashback::player(
+            inputs.as_deref_mut(),
+            driving.runtime.ticks + 1,
+            actions.controls(),
+            shift,
+        );
         // The request reaches the car only with a manual gearbox; it is
         // recorded for grid-soak replay-log.
         if driving.runtime.assists.transmission
@@ -3175,7 +3186,7 @@ fn drive_tick(
             applied = shift;
         }
         assists::request_shift(shift, &mut driving.runtime);
-        actions.controls()
+        controls
     };
     if held {
         controls = grid_tools::source_vehicle::Controls {

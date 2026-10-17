@@ -7,6 +7,7 @@
 //! optional per-car deformation runs only for a car alone in its contact group
 //! (static peers); groups of touching cars solve without deformation phases.
 use super::*;
+use std::sync::Arc;
 use grid_world::{
     body_impact, contact_groups, deformation_callback_state, deformation_contact_limit,
     deformation_world, physical_world, wheel_contacts,
@@ -18,13 +19,16 @@ pub type DeformationParameters = (
     deformation_callback_state::Parameters,
 );
 
+/// Cloning copies the live world; the start world and each car's body
+/// geometry (replaced whole when a publication rebuilds it) are shared.
+#[derive(Clone)]
 pub struct MultiRuntime {
     pub cars: Vec<Runtime>,
-    geometry: Vec<crate::body_geometry::BodyGeometry>,
+    geometry: Vec<Arc<crate::body_geometry::BodyGeometry>>,
     world: grouped_physical_frame::Output,
     shapes: Vec<contact_groups::Shape>,
     statics: usize,
-    initial_world: grouped_physical_frame::Output,
+    initial_world: Arc<grouped_physical_frame::Output>,
     pub ticks: u64,
     /// Track/prop/boundary body records and car-to-car records of the last tick.
     pub last_body_contacts: usize,
@@ -43,7 +47,7 @@ pub struct MultiRuntime {
     speeds: Vec<f32>,
     /// Opt-in breakable route props; pieces are bodies after the cars.
     props: Option<crate::dynamic_props::PropWorld>,
-    initial_shapes: Vec<contact_groups::Shape>,
+    initial_shapes: Arc<Vec<contact_groups::Shape>>,
     /// Per car: why and since when it is out of the shared world.
     retired: Vec<Option<Retirement>>,
     /// Cars retired by the last tick.
@@ -319,7 +323,7 @@ impl MultiRuntime {
                 car.enable_deformation(root, &mut body)?;
                 car.register_deformation_callbacks(*limit, bulk.clone(), 1)?;
             }
-            geometry.push(body);
+            geometry.push(Arc::new(body));
             car.body_events = events;
             car.enable_lap_timing(root)?;
             cars.push(car);
@@ -353,9 +357,9 @@ impl MultiRuntime {
         Ok(Self {
             cars,
             geometry,
-            initial_world: world.clone(),
+            initial_world: Arc::new(world.clone()),
             world,
-            initial_shapes: shapes.clone(),
+            initial_shapes: Arc::new(shapes.clone()),
             shapes,
             statics,
             ticks: 0,
@@ -482,8 +486,8 @@ impl MultiRuntime {
         for car in &mut self.cars {
             car.reset();
         }
-        self.world = self.initial_world.clone();
-        self.shapes = self.initial_shapes.clone();
+        self.world = (*self.initial_world).clone();
+        self.shapes = (*self.initial_shapes).clone();
         if let Some(props) = &mut self.props {
             let mut tracks: Vec<&mut Track> = self.cars.iter_mut().map(|c| &mut c.track).collect();
             // Re-arming only fails without route props, which enabling requires.
@@ -865,7 +869,7 @@ impl MultiRuntime {
         }
         for (i, body) in published.into_iter().enumerate() {
             if let Some(body) = body {
-                self.geometry[i] = body;
+                self.geometry[i] = Arc::new(body);
             }
         }
         for (i, ((state, cache), timed)) in staged.into_iter().zip(caches).zip(laps).enumerate() {

@@ -47,6 +47,15 @@ impl Trial {
             race: false,
         })
     }
+    /// The clock for a Flashback checkpoint (docs/FLASHBACK.md); the
+    /// records file is not part of it.
+    pub fn checkpoint(&self) -> (State, Option<u64>) {
+        (self.state.clone(), self.base)
+    }
+    pub fn restore(&mut self, (state, base): &(State, Option<u64>)) {
+        self.state = state.clone();
+        self.base = *base;
+    }
     pub fn driving(&self) -> bool {
         matches!(self.state.phase(), Phase::Running)
     }

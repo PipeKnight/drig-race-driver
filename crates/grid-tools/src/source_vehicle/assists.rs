@@ -325,7 +325,7 @@ impl Runtime {
         if self.ticks != 0 || !assists.wheel_response.is_finite() {
             return Err(Error("driver aids change only before the first tick"));
         }
-        for state in [&mut self.state, &mut self.initial] {
+        for state in [&mut self.state, std::sync::Arc::make_mut(&mut self.initial)] {
             assists.apply(&mut state.car.owner.vehicle);
             assists.apply(&mut state.car.frame.body);
         }

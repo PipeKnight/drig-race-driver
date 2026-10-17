@@ -15,6 +15,9 @@
 //!   next/previous lap, exit.
 //! - Cameras: the route's replay director ([`director`]), then the car's
 //!   replay views of `cameras.xml`, then its race views.
+//! - Replay Jump In (Flashback) from an Instant Replay: `crate::flashback`
+//!   cuts the stream at the chosen frame ([`Replay::cut`]) and holds the
+//!   session ([`Replay::freeze`]) through the transition.
 //!
 //! While a replay plays the simulation is held (`Driving::paused`), the live
 //! presentation keeps computing and the replay overwrites it last, so
@@ -24,7 +27,7 @@ pub mod frame;
 pub mod player;
 pub mod stream;
 #[cfg(test)]
-mod race_tests;
+pub(crate) mod race_tests;
 
 use crate::input::{Action, Actions};
 use bevy::{
@@ -116,6 +119,19 @@ pub struct Replay {
     pub exited: bool,
     /// What the ended replay hid, for `present` to show again.
     ending: Option<Vec<(Entity, Visibility)>>,
+    /// Flashback state for the panel (`crate::flashback`).
+    pub flashback: Option<FlashbackStatus>,
+    /// A jump-in holds the session: no replay input.
+    frozen: bool,
+}
+
+/// What the replay panel shows of Flashback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FlashbackStatus {
+    pub remaining: u32,
+    /// A jump-in is possible at the replay time (the original's icon test,
+    /// 0x542A00: 0x937150 and 0x4CAD80).
+    pub possible: bool,
 }
 
 impl Replay {
@@ -133,6 +149,8 @@ impl Replay {
             request: None,
             exited: false,
             ending: None,
+            flashback: None,
+            frozen: false,
         }
     }
 
@@ -145,6 +163,50 @@ impl Replay {
         self.session
             .as_ref()
             .is_none_or(|s| s.player.time - s.player.loop_from < seconds)
+    }
+
+    /// Flashback jump-in at `tick`, a recorded sample in memory: the later
+    /// frames, laps and director entries are forgotten and recording goes on
+    /// from it [D 0x93DDA0 cuts the stream at the frame at or before the
+    /// replay time].
+    pub fn cut(&mut self, segment: u64, tick: u64) -> bool {
+        let Some(frame) = self.stream.at_or_before(tick) else {
+            return false;
+        };
+        if self.stream.tick(frame) != tick || !self.stream.truncate(frame) {
+            return false;
+        }
+        // Shared items are written inline again.
+        self.encoder = Encoder::default();
+        self.recorded = Some((segment, tick));
+        self.seen = Some((segment, tick));
+        self.laps.retain(|&t| t <= tick);
+        self.entries.retain(|&(t, _)| t <= tick);
+        self.last_target = self
+            .snapshot(frame)
+            .and_then(|s| s.cars.first().map(|c| c.pose.translation()));
+        true
+    }
+
+    /// Holds the session paused at `time` (the jump-in frame) with no input.
+    pub fn freeze(&mut self, time: f64) {
+        if let Some(session) = &mut self.session {
+            session.player.time = time.clamp(session.player.start, session.player.end);
+            session.player.mode = player::Mode::Pause;
+            session.player.shuttle = 1.;
+            session.idle = INTERFACE_TIMEOUT;
+            self.frozen = true;
+        }
+    }
+
+    /// Ends the session as Replay Exit does, without its key; the live view
+    /// and HUD come back in `present`.
+    pub fn finish(&mut self) -> Option<Origin> {
+        self.frozen = false;
+        let session = self.session.take()?;
+        self.ending = Some(session.hidden);
+        self.exited = true;
+        Some(session.origin)
     }
 
     /// The menus leave the input alone while this is true.
@@ -596,6 +658,9 @@ pub fn control(
         return;
     };
     *shifts = crate::input::ShiftQueue::default();
+    if replay.frozen {
+        return;
+    }
     if actions.pressed(Action::ReplayExit) {
         let origin = session.origin;
         driving.paused = session.resume_paused;
@@ -863,6 +928,16 @@ pub fn present(
     );
     if session.idle < INTERFACE_TIMEOUT {
         text.push_str("\nF1 pause   F2/F3 hold: rewind/forward   F7/F8 camera   F4/F5 lap   Esc exit");
+    }
+    // The Flashback icon and count show while a jump-in is possible.
+    if let Some(f) = replay.flashback
+        && f.possible
+        && session.kind == Kind::Instant
+    {
+        let label = labels
+            .as_ref()
+            .map_or("FLASHBACKS AVAILABLE:", |l| l.get("flashbacks_available"));
+        text.push_str(&format!("\nF12 flashback   {label} {}", f.remaining));
     }
     for (mut t, mut v) in &mut panel {
         if t.0 != text {

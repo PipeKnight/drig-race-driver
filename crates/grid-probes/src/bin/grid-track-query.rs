@@ -43,7 +43,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if words[8] > 3 || words[9] > 1 {
             return Err("invalid cache or active flag".into());
         }
-        track.grid.active = words[9] != 0;
+        std::sync::Arc::make_mut(&mut track.grid).active = words[9] != 0;
         let mut cache = Cache {
             plane: words[8] as u8,
         };

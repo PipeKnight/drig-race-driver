@@ -27,19 +27,11 @@ pub(crate) struct DriftEvent {
     last_tick: u64,
 }
 
-/// `difficulty` rows of database.bin for career rank 2 (ai_ratio by star
-/// level 0..5) [D]; the AI difficulty setting picks the nearest level, which
-/// selects the `DifficultyBias` row [I: 0x40B700 returns the star level].
-const AI_RATIOS: [f32; 6] = [0.506, 0.606, 0.706, 0.8, 0.9, 1.];
-
+/// The AI difficulty setting picks the nearest `difficulty` row of career
+/// rank 2 (`grid_tools::flashback::AI_RATIOS`) [D], which selects the
+/// `DifficultyBias` row [I: 0x40B700 returns the star level].
 pub(crate) fn ai_level(difficulty: f32) -> usize {
-    (0..AI_RATIOS.len())
-        .min_by(|&a, &b| {
-            (AI_RATIOS[a] - difficulty)
-                .abs()
-                .total_cmp(&(AI_RATIOS[b] - difficulty).abs())
-        })
-        .unwrap()
+    grid_tools::flashback::star_level(difficulty)
 }
 
 impl DriftEvent {
@@ -76,6 +68,16 @@ impl DriftEvent {
             .collect();
         self.segment = segment;
         self.last_tick = tick;
+    }
+
+    /// Scorers for a Flashback checkpoint (docs/FLASHBACK.md).
+    pub fn checkpoint(&self) -> (Vec<Entry>, u64, u64) {
+        (self.entries.clone(), self.segment, self.last_tick)
+    }
+    pub fn restore(&mut self, (entries, segment, last_tick): &(Vec<Entry>, u64, u64)) {
+        self.entries = entries.clone();
+        self.segment = *segment;
+        self.last_tick = *last_tick;
     }
 
     /// Car indices in drift results order.

@@ -410,7 +410,7 @@ impl Debris {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Part {
     state: State,
     angle: f32,
@@ -418,7 +418,7 @@ struct Part {
     debris: Option<Debris>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct CarDamage {
     totals: [f32; ZONES],
     parts: BTreeMap<&'static str, Part>,
@@ -452,7 +452,34 @@ impl LostWheel {
     }
 }
 
+/// The damage parts of a Flashback checkpoint (docs/FLASHBACK.md).
+#[derive(Clone)]
+pub(crate) struct Saved {
+    cars: Vec<CarDamage>,
+    last_tick: Option<u64>,
+}
+
 impl DamageParts {
+    pub(crate) fn checkpoint(&self) -> Saved {
+        Saved {
+            cars: self.cars.clone(),
+            last_tick: self.last_tick,
+        }
+    }
+    /// Back to a checkpoint: parts, swing and lost wheels as saved; glass and
+    /// lights are drawn intact again and found anew from the restored
+    /// deformation (`present`), shards are removed.
+    pub(crate) fn restore(&mut self, saved: &Saved) {
+        self.cars = saved.cars.clone();
+        for car in &mut self.cars {
+            car.windows = Default::default();
+            car.lights.clear();
+            car.field_key = None;
+        }
+        self.last_tick = saved.last_tick;
+        self.reset = true;
+    }
+
     /// Where car `car`'s wheel `wheel` is drawn once it has come off (world).
     pub(crate) fn lost_wheel(&self, car: usize, wheel: usize) -> Option<Mat4> {
         Some(self.cars.get(car)?.wheels.get(wheel)?.as_ref()?.matrix())

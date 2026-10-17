@@ -20,6 +20,7 @@ pub mod engine_audio_publication;
 pub mod engine_audio_restart;
 pub mod engine_audio_schedule;
 pub mod entity_geometry;
+pub mod flashback;
 pub mod impact_diagnostic;
 pub mod install;
 pub mod lap_progress;
