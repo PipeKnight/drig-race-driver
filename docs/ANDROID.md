@@ -109,7 +109,7 @@ Tilt and touch are not original GRID inputs, so the layout and the defaults are 
 | CENTRE | left of II, only with tilt | re-centre the tilt neutral |
 | VIEW / LOOK | bottom centre | Change View; Look Back while held |
 
-A thin bar above VIEW/LOOK shows the tilt value. While the pause menu, the post-race screens or a replay own the input, the driving zones are hidden and the menu zones appear at the side edges: UP/DOWN and `<`/`>` on the left, OK and BACK on the right (BACK also leaves a replay). A finger can slide from one zone to another; the zone under it counts each frame. At most 8 touches count (Bevy issue #16798).
+A thin bar above VIEW/LOOK shows the tilt value. While the pause menu, the post-race screens or a replay own the input, the driving zones are hidden and the menu zones appear at the side edges: UP/DOWN and `<`/`>` on the left, OK and BACK on the right (BACK also leaves a replay). A finger can slide from one zone to another; the zone under it counts each frame. A finger that is down when the layer changes (OK resumes the race, II pauses it) is ignored until lifted, so OK does not turn into GAS. At most 8 touches count (Bevy issue #16798).
 
 **Settings** (`[input]` section of `settings.ini`, docs/SETTINGS.md):
 
