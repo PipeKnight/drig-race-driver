@@ -16,7 +16,7 @@ The returned direction is the original closest vector; callers must not assume i
 
 The resulting44 W0 approximately unit vectors occupy704 bytes. All704 match the independently captured whole original startup table. The private CD01 configuration contains magic/count and those vectors, totaling712 bytes. Table SHA-256: `14d6823a677259f013e1318d2952a14df37bb95f1f013ea66ac4e7482f931f48`; configuration: `ea8d8bff5270d5b75410f822c3e784a66399b7aae4e39365f8f54747639179c7`. Evidence: `local/behavior/contact-directions-source-20261012-final-02/validation.json`.
 
-This preparation still depends on the private analyzed initializer. It is not an installation-only engine startup loader. Exact independent construction from geometric formulas has not been proved; the source values contain rounding that must not be replaced with idealized values without validation. Original sampling data remains ignored under `local/` and is supplied explicitly to the public Rust API; no original table is embedded in public source.
+This preparation still depends on the private analyzed initializer. It is not an installation-only engine startup loader. Since F359 the port has an installation-only loader: `private_parameters::contact_directions` reads the same 55 source words from the Steam file through a recorded address recipe (docs/CONTACT_DIRECTIONS.md). Exact independent construction from geometric formulas has not been proved; the source values contain rounding that must not be replaced with idealized values without validation. Original sampling data remains ignored under `local/` and is supplied explicitly to the public Rust API; no original table is embedded in public source.
 
 ## Native boundary and diagnostic framing
 

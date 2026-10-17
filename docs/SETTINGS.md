@@ -30,7 +30,7 @@ Grammar:
 | | `opponents` | `0` or 1..11 | `--opponents` |
 | | `grid_position` | `back` (after the opponents), `0` (pole, default) or 1..opponents+1 | `--grid-position` |
 | | `ai_characteristics` | private TSV; **used only when the file exists** | `--ai-characteristics` (must exist) |
-| `[private]` | `body_contacts` | CD01 path or `off` | `--body-contacts` |
+| `[private]` | `body_contacts` | `derive`, a CD01 path, or `off` | `--body-contacts PATH\|derive` |
 | | `body_events` | `derive`, a BP01 path, or `off` | `--body-events PATH\|derive` |
 | | `deformation` | `derive`, a DF01 path, or `off` | `--deformation PATH\|derive` |
 | `[assists]` | `tcs`, `stability`, `braking`, `gearbox`, `input` | as `--assists` | `--assists`, `--assists-file` |
@@ -108,16 +108,16 @@ Verified [V] on 2026-10-16 (evidence `local/p5-portability/` in the main checkou
 - A fresh Python 3.14.4 run of both extractors into `local/p5-portability/python/`: byte-equal to the Rust output.
 - Asset test `private_parameters::tests::derived_parameters_equal_the_python_output` compares the derived bytes with `GRID_BODY_EVENT_PARAMETERS` / `GRID_DEFORMATION_PARAMETERS`.
 
-CD01 is not derived: it needs the Steamless-unpacked image (P6). The profiles still name the prepared `local/body-contact-directions.bin`.
+CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_directions` reads 119 `.rdata` words named by an address recipe that was traced once from the `C7DAE0` initializer. Its output is byte-identical to the prepared `local/body-contact-directions.bin`. The profiles say `body_contacts = derive`. `grid-private-parameters GRID_EXE BP01_OUT DF01_OUT [CD01_OUT]` writes all three files.
 
 ## 5. Launchers
 
-`Play GRID Prototype.cmd [GAME_FOLDER] [PROFILE]` runs `grid-app --settings settings\PROFILE.ini` (default `practice`). The other launchers are thin wrappers that check for the private CD01 and pass a profile:
+`Play GRID Prototype.cmd [GAME_FOLDER] [PROFILE]` runs `grid-app --settings settings\PROFILE.ini` (default `practice`). The other launchers are thin wrappers that pass a profile; since F359 none needs a prepared private file:
 
 | Launcher | Profile | Contents |
 |---|---|---|
 | Play GRID Prototype.cmd | `settings/practice.ini` | free practice |
-| Play GRID Body Contacts.cmd | `settings/body-contacts.ini` | CD01 + derived BP01/DF01 |
+| Play GRID Body Contacts.cmd | `settings/body-contacts.ini` | derived CD01/BP01/DF01 |
 | Play GRID Time Trial.cmd | `settings/time-trial.ini` | as above, 3 laps |
 | Play GRID Race.cmd | `settings/race.ini` | 3 laps, 11 opponents, back of the grid, AI characteristics when present |
 

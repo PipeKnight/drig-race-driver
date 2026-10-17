@@ -29,7 +29,7 @@ This document is research and a plan. The only code change is the proof of conce
   1. The physics used x86-only approximate SSE instructions. **Solved in this session** (1.2): the reference arithmetic now runs on ARM with bit-identical results.
   2. The renderer requires BC (DXT) texture compression. About 63 % of Android Vulkan devices lack it, including all Mali and Xclipse GPUs. A CPU decode or transcode path is needed (1.5).
   3. The app is configured through command-line flags, environment variables, `.cmd` launchers and a hard-coded Windows install path. Android has none of these (1.4).
-  4. The game data must come from the user's own purchased copy. The design is in section 3. One private parameter table (CD01) currently needs a Steamless-unpacked executable, which an ordinary user does not have (1.4).
+  4. The game data must come from the user's own purchased copy. The design is in section 3. All three private parameter tables (CD01, BP01, DF01) are now read from the user's own Steam `grid.exe`; CD01 no longer needs an unpacked executable (P6, 7.4).
   5. There is no Android project yet: NDK, Gradle/GameActivity wrapper, landscape lock, sensor and touch input.
 - **Linux and Steam Deck are the cheapest new platforms**, about 1–2 sessions each. **macOS** is moderate. **Consoles** are not realistic: Bevy has no public console support and the SDKs are under NDA.
 - **Input:** today the port has only digital keyboard input. Bevy already compiles in gilrs (gamepads). Wheels and force feedback need SDL3 or DirectInput/evdev. Phone tilt is not an original GRID input, so tilt is AUTHORED. Section 6 gives one abstraction that lets every device feed the original per-device filtering and the same simulation path. The assists keep working in any combination.
@@ -127,7 +127,7 @@ Consequence: each platform is deterministic for itself, but an Android lap is **
 | Environment switches `GRID_FREE_LOOK`, `GRID_EFFECTS_CAMERA`, `GRID_GROUND_EFFECTS`, `GRID_GROUND_TRACE`, `GRID_AUTOPILOT`, `GRID_PROP_SCRIPT(_SPEED)`, `GRID_LOOK_BACK`, `GRID_DAMAGE_ZONES`, `GRID_DAMAGE_CAMERA` | `free_look.rs:46`, `ground_effect_assets.rs:63,78,99`, `main.rs:1342,1547,1560,2522`, `damage_parts.rs:842,846` | Android (no shell) | diagnostics fields in the same settings file |
 | Launchers `Play GRID *.cmd` (cmd.exe; `GRID_PLAY_*` variables, `local\assists.txt`, logs in `local\playtest\`) | repo root | all non-Windows | shell scripts on Linux/macOS; the settings file on Android |
 | CWD-relative writes: `local/playtest/time-trial-records.tsv`; renders forced under `local/` | `time_trial.rs:22`, `main.rs:1387` | Android (read-only CWD) | per-platform data dir (`AndroidApp::internal_data_path()`, XDG, `%APPDATA%`) |
-| Private parameter files CD01 (712 B), BP01 (28 B), DF01 (252 B) for body contacts, opponents/race and damage | `main.rs:1238-1255`; produced by `tools/extract_*.py` (Python + Capstone) | any user other than the owner | BP01 and DF01 read plain data from the purchased `grid.exe` (SHA-256 `dd7b0933…`): port the readers to Rust and run them at import. **CD01** interprets an initializer in the *Steamless-unpacked* image; the Steam `grid.exe` code section is SteamStub 2.1 encrypted (docs/COMPATIBILITY_MEMORY_PATCHES.md). Needs its own research: compute the table without the unpacked image, or require a documented desktop preparation step |
+| Private parameter files CD01 (712 B), BP01 (28 B), DF01 (252 B) for body contacts, opponents/race and damage | `main.rs:1238-1255`; produced by `tools/extract_*.py` (Python + Capstone) | any user other than the owner | BP01 and DF01 read plain data from the purchased `grid.exe` (SHA-256 `dd7b0933…`): port the readers to Rust and run them at import. **CD01** was made by interpreting an initializer in the *Steamless-unpacked* image, because the Steam `grid.exe` code section is SteamStub 2.1 encrypted (docs/COMPATIBILITY_MEMORY_PATCHES.md). ✔ P6 (7.4, docs/CONTACT_DIRECTIONS.md): the initializer only copies `.rdata` words, so an address recipe reads CD01 from the Steam file too |
 | Whole-file `std::fs` reads from a real directory tree | `main.rs:350-363`, `source_vehicle.rs:91`, `dynamic_props.rs:250` | fine on Android **inside the app's own directories**; not for SAF `content://` URIs | import into app-specific storage first (section 3) |
 | File-name case | literals verified to match the install's casing; names derived from data (`effects/particle_systems/{name}.xml` from XML, the engine ini path from `carsetup.bin`) are unchecked | Linux/Android/macOS (case-sensitive filesystems) | case-insensitive resolver built once from a directory listing (one index per install) |
 
@@ -193,7 +193,7 @@ The runtime itself never calls Python or anything in `tools/`. Those scripts are
 | **Linux (x86-64)** | Low | install discovery and case-insensitive lookup (1.4); `.cmd` launchers; untested Wayland/X11 and ALSA builds | 1–2 | Same x86 SSE path, so physics is bit-identical apart from libm (1.3). Bevy deps: `libx11-dev libasound2-dev libudev-dev libxkbcommon-x11-0`, plus Wayland. BC textures are supported on desktop GPUs |
 | **Steam Deck** | Low after Linux | controller input (P2); the 1280×800 window already matches; settings without a shell | +1 | Native build inside Steam Linux Runtime 3.0, or the Windows exe under Proton (untested). For "Verified": a default controller config and an on-screen keyboard. Steam Input can map the Deck controls to a virtual pad that gilrs sees |
 | **macOS (Apple Silicon)** | Medium | ARM (solved in 1.2); BC textures are supported on Apple Silicon Metal [I]; signing and notarization ($99/yr) | 1–2 | wgpu/Metal. libm differences apply |
-| **Android (ARM64)** | Medium–high | BC textures (1.5); settings, paths and launchers (1.4); asset import (3); CD01 (1.4); NDK/Gradle/GameActivity wrapper; touch and tilt input; performance and thermal | 8–11 | Section 7 plan. gilrs does not support Android, so pads there need an android-activity input bridge |
+| **Android (ARM64)** | Medium–high | BC textures (1.5); settings, paths and launchers (1.4); asset import (3); NDK/Gradle/GameActivity wrapper; touch and tilt input; performance and thermal | 8–11 | Section 7 plan. gilrs does not support Android, so pads there need an android-activity input bridge |
 | **iOS** | High | as Android, plus Apple distribution: no sideloading without a developer account, and store review of a game that needs user-supplied data | — | CoreMotion via `objc2-core-motion`. Not recommended |
 | **Consoles** | Not realistic | NDA SDKs, no public Bevy support (bevy#8161 open), certification | — | — |
 
@@ -214,7 +214,7 @@ The runtime itself never calls Python or anything in `tools/`. Those scripts are
 4. **Optionally, the importer derives** private caches in the same app directory:
    - transcoded textures (ASTC/ETC2);
    - BP01 and DF01 from the user's `grid.exe` (ported to Rust);
-   - later CD01 (open, see 1.4).
+   - CD01 the same way (P6, 7.4).
 5. **The game reads** only from app-specific storage. Uninstalling the app removes the copy (Android deletes the app-specific directory).
 
 ### Alternatives
@@ -513,7 +513,7 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 | **P3** | **Wheel input**: SDL3 joystick source (tool install recorded), exact-name preset match + AUTHORED generic preset, wheel latency extrapolation port (ring + global history) with unit tests, wheelLinearity option | P1 | 1–2 | wheel steering with unassisted steering and 828670 shaping; extrapolation matches a decompiled-formula unit test |
 | **P4** | **Force feedback**: snapshot-writer research (fields +0x80.., +0x1BC.., +0x1D8..), GameFFB port (caster, lateral, surface/kerb, gear, skid, suspension, wheel damage, collision samples), SDL3 constant force + software damping, pad rumble | P3 (P2 for rumble) | 2 | the owner feels centring, kerbs and impacts on their wheel; numeric unit tests of the caster/friction/sample formulas against the decompiled code |
 | **P5** | ✔ (7.3, docs/SETTINGS.md). **Portability groundwork**: `Settings` file replacing env switches and launcher variables (CLI stays as an override), install discovery (Steam `libraryfolders.vdf`) and case-insensitive file index, per-platform data dir for records/logs, Rust port of the BP01/DF01 readers from the user's `grid.exe` | — | 1–2 | the Windows playable runs from the settings file with no env vars; the BP01/DF01 bytes are equal to the Python output |
-| **P6** | **CD01 without the unpacked image** (research): find whether the 44-direction table can be computed from data, or define a documented one-time desktop preparation step | — | 1 | a decision recorded; ideally CD01 bytes reproduced from the Steam `grid.exe` alone |
+| **P6** | ✔ (7.4, docs/CONTACT_DIRECTIONS.md). **CD01 without the unpacked image** (research): find whether the 44-direction table can be computed from data, or define a documented one-time desktop preparation step | — | 1 | a decision recorded; ideally CD01 bytes reproduced from the Steam `grid.exe` alone |
 | **P7** | **Linux / Steam Deck**: native build, Bevy deps, case-sensitivity run (Donington and Nürburgring), shell launchers; Deck controller via P2 | P5 (P2 for the Deck) | 1–2 | a Linux lap equal to Windows apart from the libm caveat (1.3) |
 | **P8** | ✔ (7.2, 7.3). **Texture fallback**: remove the BC assert; CPU BC1/BC3 decode when the GPU lacks BC (`bcdec_rs` or our own decoder); optional import-time ASTC/ETC2 cache | — | 1 | the app renders with BC disabled on desktop (forced fallback flag), with a recorded memory delta |
 | **P9** | **Android skeleton**: install and record SDK cmdline-tools, NDK r30 LTS, JDK, Gradle/AGP, cargo-ndk 4.1.2; `grid-app` as `cdylib` with `#[bevy_main]`; Gradle project from Bevy's mobile example (GameActivity 4.4.x matching android-activity 0.6.1, minSdk 31 or 26, target 36); landscape, keep-screen-on; lifecycle (suspend/resume) | P5, P8 | 1–2 | an APK under `local/` that starts on the owner's phone and shows the car on Donington from data placed with `adb push` |
@@ -750,6 +750,17 @@ Code:
 - **Data dir**: `--data-dir`, else `local/` in the owner's checkout, else `%APPDATA%\GRID Reassembly`, `~/Library/Application Support/GRID Reassembly` or `$XDG_DATA_HOME/grid-reassembly`. Records and renders moved there. Android: P9 sets it.
 - **Install discovery** (`grid-tools/src/install.rs`): Steam folders → `libraryfolders.vdf` → `appmanifest_12750.acf` `installdir`; case-insensitive `FileIndex`. Only `grid.exe` resolution uses the index so far; routing the other `root.join` sites is P7.
 - **BP01/DF01** (`grid-tools/src/private_parameters.rs`, `grid-private-parameters`): byte-equal to the Python tools; `derive` computes them in memory at start-up. CD01 stays a prepared file (P6).
+
+### 7.4 Done: P6 (F359, docs/CONTACT_DIRECTIONS.md)
+
+- **Decision: (b).** CD01 is reproduced from the Steam `grid.exe` alone. The original builds the 44 directions at startup in the `C7DAE0` initializer (`.text`, encrypted in the Steam file). That initializer only moves scalars, so each x/y/z lane is one `.rdata` word or zero; `.rdata` is plain in the Steam file. The once-traced instruction stream is kept as an address recipe (44 × 3 addresses, 119 non-zero, 55 distinct). It holds no game bytes.
+- **(a) rejected.** The values are icosahedron-family directions typed as about 6-digit constants with inconsistent rounding, so formulas would not give the same bits.
+- **(c) not needed.** There is no desktop preparation step. P10 imports `grid.exe` with the other files and derives CD01 on the phone, like BP01/DF01.
+- **Port:**
+  - `private_parameters::contact_directions`;
+  - `grid-private-parameters … [CD01_OUTPUT]`;
+  - `body_contacts = derive` / `--body-contacts derive`. A path still works. The shipped profiles use `derive`, and the launchers no longer require `localody-contact-directions.bin`.
+- **Verified:** the derived CD01 is byte-identical to `local/body-contact-directions.bin` (SHA-256 `ea8d8bff…79c7`). Test `contact_directions_equal_the_prepared_file`, which skips without inputs. The pre-push checks are in PROJECT_LOG.md F359.
 
 ## 8. Open questions and tests that need hardware
 

@@ -27,7 +27,7 @@ impl Private {
         }
     }
 
-    /// The table bytes; `kind` is "BP01" or "DF01".
+    /// The table bytes; `kind` is "BP01", "DF01" or "CD01".
     pub fn bytes(&self, root: &Path, kind: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         use grid_tools::private_parameters as p;
         let bytes = match self {
@@ -38,10 +38,10 @@ impl Private {
                     let index = grid_tools::install::FileIndex::build(root)?;
                     std::fs::read(index.resolve("grid.exe"))
                 })?;
-                if kind == "BP01" {
-                    p::body_impact(&exe)?
-                } else {
-                    p::deformation(&exe)?
+                match kind {
+                    "BP01" => p::body_impact(&exe)?,
+                    "CD01" => p::contact_directions(&exe)?,
+                    _ => p::deformation(&exe)?,
                 }
             }
         };
@@ -201,7 +201,7 @@ pub struct Settings {
     /// `grid_position = back`: the last slot, after the opponents.
     pub grid_back: bool,
     pub ai_characteristics: Option<PathBuf>,
-    pub body_contacts: Option<PathBuf>,
+    pub body_contacts: Option<Private>,
     pub body_events: Option<Private>,
     pub deformation: Option<Private>,
     /// `[assists]` and `[input]` text, in the assists-file grammar.
@@ -358,9 +358,7 @@ impl Settings {
                 ("drive", "ai_characteristics") => {
                     self.ai_characteristics = (!off).then(|| private_path(value))
                 }
-                ("private", "body_contacts") => {
-                    self.body_contacts = (!off).then(|| private_path(value))
-                }
+                ("private", "body_contacts") => self.body_contacts = private(value),
                 ("private", "body_events") => self.body_events = private(value),
                 ("private", "deformation") => self.deformation = private(value),
                 ("sound", "effects") => {
@@ -495,7 +493,7 @@ prop_script_speed = 12.5
         );
         assert_eq!(
             s.body_contacts,
-            Some(dir.join("body-contact-directions.bin"))
+            Some(Private::File(dir.join("body-contact-directions.bin")))
         );
         assert_eq!(s.body_events, Some(Private::Derive));
         let df01 = if cfg!(windows) {
@@ -521,7 +519,7 @@ prop_script_speed = 12.5
         let mut s = Settings::default();
         s.apply(RACE, dir).unwrap();
         s.apply(
-            "tcs=on\n[game]\nroot = D:\\Games\\Grid\n[drive]\nlaps = 0\nopponents = 0\ngrid_position = 2\n[private]\nbody_events = off\ndeformation = derive\n",
+            "tcs=on\n[game]\nroot = D:\\Games\\Grid\n[drive]\nlaps = 0\nopponents = 0\ngrid_position = 2\n[private]\nbody_contacts = derive\nbody_events = off\ndeformation = derive\n",
             dir,
         )
         .unwrap();
@@ -531,6 +529,7 @@ prop_script_speed = 12.5
             (None, None, Some(2))
         );
         assert!(!s.grid_back);
+        assert_eq!(s.body_contacts, Some(Private::Derive));
         assert_eq!(s.body_events, None);
         assert_eq!(s.deformation, Some(Private::Derive));
         // Lines before any header are driver aids, as in the assists file.
