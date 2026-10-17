@@ -131,7 +131,13 @@ comparable tick for tick.
   separate stream (`seed ^ 0x157a...`), so every other field of a seed keeps its
   draw. Scenario files carry the route, so replays do not depend on the generator.
   Unit test `istanbul_park_joins_without_moving_the_earlier_seeds`.
-- Final quick run on the pushed build: see SOAK_TESTING.md "Runs with Istanbul Park".
+- Quick run on this build (`soak-quick-final/`): 15/16. Istanbul seeds 13..16
+  pass (2, 12, 9, 4 cars). The one failure is the known Donington seed-12 board
+  fall (tick 3003, prop piece through the road at x -406), as on F346/F347.
+  Against the 307fe9b baseline (`soak-quick-baseline/`, 11/12, the same seed 12):
+  every Donington seed and the solo Nürburgring seeds give the same result line;
+  the Nürburgring races 6, 7 and 11 differ in breaks and body counts because they
+  now hold the grid 5.0 s (all pass).
 
 ## 6. Open
 
