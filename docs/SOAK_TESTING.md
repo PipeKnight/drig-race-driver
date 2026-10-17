@@ -297,7 +297,8 @@ hit in one tick (a brake-marker board hovering inside the contact margin hit at
 16 m/s; a piece spawned inside a car at 51 m/s): long-1 1091 and 1304 and two
 pre-fix long-run seeds, see DYNAMIC_PROPS_RESEARCH.md "Pieces pushed into the
 ground". Such pieces are now held below the world instead of growing to the
-1e5 domain, so they no longer threaten a world pause.
+1e5 domain, so they no longer threaten a world pause. The board case and the
+two player falls below were fixed in F351 ("Residuals (F351)").
 
 ### Runs after the fixes
 
@@ -336,12 +337,45 @@ Both new failures were replayed exactly with `grid-soak replay`. They belong to
 the open F342 prop-piece residuals, not to a new class. The only cause found is
 that the races now take different paths.
 
+## Residuals (F351)
+
+17 October 2026. Both F342 residuals were port gaps against the original. Details:
+[BOX_CONTACTS.md](BOX_CONTACTS.md). Evidence is in the main checkout's private
+`local/soak-residuals/` (decompilations, the F342 scratch worktree `wt-f342`, the
+binaries compared below in `bin/`) and this worktree's `local/soak/`.
+
+| Failure | Cause | Fix |
+|---|---|---|
+| Player falls out of the world after a hard off-track hit (seed 1087, both routes) | Route prop boxes were queried as twelve separate triangles. A tyre wall the car drove 1 m into gave contacts with downward normals (up to 0.9 m deep), which pushed the car through the road. | Prop boxes are box primitives in one AE8AD0 query (`grid_world::box_contacts`), with their shape shell as margin, as in the original. Pieces against static boxes use it too. |
+| Thin boards driven into the ground (seed 12 and the 150 m marker at (-406, -16): seeds 1005, 1012, 1029, 1074) | Road triangles had margin 0. The original gives each its chunk's +0x220 margin, 0.02 in the live game. The marker's lower board stands 2.14 cm above the grass, so it had no ground contact when it spawned inside the breaking car, and the car pushed it under. | `ROAD_MARGIN` 0.02 on road triangles (`packed_contacts::Settings::shape_margin`). The board then rests on the grass. |
+
+Replays: `grid-soak replay local/soak/final-long-{donington,nurburgring}/seed-1087.inputs.tsv`
+(main checkout) fails on the F342 build 4ffec8b and passes with the box change.
+Current main no longer reaches this state: F345 changed the field's paths. Main's own
+failing inputs from the long run below (`local/soak/long-main-307fe9b-*/`), replayed on
+the fixed build: REPLAY_TABLE
+
+### Runs (F351)
+
+Main 307fe9b and the fix ran side by side on the same seeds, props on, two jobs each
+(`--seeds 1001..1100`). The fix build is grid-soak sha256 FIX_SHA.
+
+LONG_TABLE
+
+Quick: 12/12 on both routes for the fix, also with `--car bmw --opponent-cars lac,bmw`
+and `--opponent-cars bmw,lac`. Targeted `--cars 1 --chaos prop --ticks 8000`, seeds
+1..80 on Donington: main 1 piece fall, fix 0.
+
 ## Follow-ups
 
-- The two off-track player falls of seed 1087 (both routes): replay
-  `local/soak/final-long-*/seed-1087.inputs.tsv` and trace body 0 with
-  `GRID_SOAK_TRACE_BODY`.
-- The open board case above; the original's disabled backface correction
-  (AEA1F0 -> B1AB30/B225E0) is the lead.
+- Car against piece still uses the car-to-car hull-triangle path, and piece against
+  piece the authored separating-axis test with the larger shell. The original uses
+  AE8AD0 for both and sums the margins. Both were tried; at the port's fixed 16 ms
+  step they lose more boards (BOX_CONTACTS.md, "Tried and not adopted"). Revisit
+  them together with the world step: the original steps once per rendered frame.
+- Remaining piece losses on this build: long Donington seed 1056 (a board spun into
+  the road by the triangle-soup car contacts).
+- The boundary sheet's and the car hull's own shape margins are not established
+  (both 0 in the port).
 - `Session` mirrors `drive_tick` as of F323 (retired cars, the player's own
   contact count). Keep it in step when the app's tick changes.

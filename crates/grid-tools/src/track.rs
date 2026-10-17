@@ -36,7 +36,7 @@ impl Chunk {
 /// The road chunks' shape margin (+0x220): 0.02 in all eight chunk shapes
 /// read from the running original (local/behavior/runtime-collision-*.json,
 /// 6 October 2026). AEA1F0 gives it to every road triangle (B212D0), on top
-/// of the body's own margin (BOX_CONTACTS.md, F350).
+/// of the body's own margin (BOX_CONTACTS.md, F351).
 pub const ROAD_MARGIN: f32 = 0.02;
 
 pub struct Track {

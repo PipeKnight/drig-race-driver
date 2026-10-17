@@ -1397,7 +1397,7 @@ mod tests {
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]
     fn every_brake_marker_board_touches_the_ground_when_it_spawns() {
-        // Soak seeds 12, 1012 and 1029 (F345, F350): the lower board of the
+        // Soak seeds 12, 1012 and 1029 (F345, F351): the lower board of the
         // 150 m marker at (-406.7, -16.0) stands 2.14 cm above the grass,
         // just outside its own 2 cm shell. With road triangles of margin 0
         // it had no ground contact in its first step, a car still inside it
