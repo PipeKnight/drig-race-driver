@@ -1,0 +1,5 @@
+# Gradle and AGP output, including build/rust-jniLibs (the Rust library).
+.gradle/
+build/
+app/build/
+local.properties

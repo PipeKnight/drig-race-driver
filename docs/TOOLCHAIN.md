@@ -1,11 +1,32 @@
 # Research toolchain
 
+## Android toolchain — 17 October 2026 (P9)
+
+Checked first: no Android SDK, NDK, adb, Gradle, `JAVA_HOME` or `ANDROID_HOME` existed on PATH, in `%LOCALAPPDATA%\Android` or in `C:\Users\debros\Tools`. The only JDK found is the 21.0.9 runtime bundled with the Songs of Syx Demo game (Phase 0). A game's private runtime can change with that game's updates, so a separate JDK was installed. Everything is under `C:\Users\debros\Tools` (not the repository, not OneDrive), and the downloads are kept in `Tools\downloads\`. Used by `tools/build_android.ps1` ([ANDROID.md](ANDROID.md)).
+
+| Component | Version | Location | Source and verification |
+|---|---|---|---|
+| Android SDK Command-line Tools | 22.0 (`commandlinetools-win-15859902_latest.zip`) | `Tools\android-sdk\cmdline-tools\latest` | https://developer.android.com/studio "Command line tools only"; SHA-256 `90ae805d20434428bffcb699c290860f19bb5f66a67e6b330067e3de801fb04a` matches the page |
+| Platform-Tools (adb) | 37.0.1 (adb 1.0.41, 37.0.1-15733141) | `Tools\android-sdk\platform-tools` | `sdkmanager` from Google's repository; sdkmanager checks each archive against the checksum in the repository manifest |
+| Build-Tools | 36.1.0 | `Tools\android-sdk\build-tools\36.1.0` | sdkmanager |
+| SDK Platform | `platforms;android-36` revision 2 | `Tools\android-sdk\platforms\android-36` | sdkmanager; the plan's targetSdk 36 |
+| NDK | r30 LTS, 30.0.16248370 | `Tools\android-sdk\ndk\30.0.16248370` | sdkmanager (`ndk;30.0.16248370`); the version listed on https://developer.android.com/ndk/downloads |
+| JDK | Eclipse Temurin 21.0.12.1+1 LTS (`OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip`) | `Tools\jdk\jdk-21.0.12.1+1` | Adoptium API / GitHub release; SHA-256 `f9d6e191ab098c0d416e7d588a24420a8621cd2f4720dab2459b8b7b2d2d8b4e` matches the published `.sha256.txt` |
+| Gradle | 9.8.1 (`gradle-9.8.1-bin.zip`) | `Tools\gradle\gradle-9.8.1` | https://services.gradle.org; SHA-256 `dce76f55f8e251a3a1f130eb120f30b3d271de2b76c9b0729d316b5a1b6dc01f` matches the published `.sha256`. AGP 9.4 needs Gradle 9.6.0 or newer (https://developer.android.com/build/releases/about-agp) |
+| Android Gradle Plugin | 9.4.1 | Gradle cache `Tools\gradle-home` | pinned in `android/gradle/libs.versions.toml`, from Google Maven at build time. No Gradle wrapper, so no binary jar in Git: the script calls the pinned Gradle |
+| GameActivity | `androidx.games:games-activity:4.4.0` | Gradle cache | android-activity 0.6.1 bundles the 4.4.0 C sources and names 4.4.0 in its README. 4.4.1 and 4.4.2 exist but are not used |
+| cargo-ndk | 4.1.2 | `Tools\cargo-ndk-4.1.2\bin` | `cargo install cargo-ndk --version 4.1.2 --locked --root ...` from crates.io (cargo checks the registry checksums) |
+| Rust target | `aarch64-linux-android` for rustc 1.99.0 | rustup | already installed in P0 (PLATFORMS_AND_INPUT_RESEARCH.md 1.1) |
+
+Licences: on 17 October 2026 the owner approved, in chat, accepting the Android SDK License and the Android SDK Preview License. `yes | sdkmanager --licenses` accepted all eight offered licences. The six that were not approved (Google TV, Android XR, ARM DBT, Glass GDK, microXR, MIPS system image) were withdrawn at once by deleting their files from `android-sdk\licenses`. Only `android-sdk-license` and `android-sdk-preview-license` remain. None of the six covers an installed package.
+
 ## Build and test cost — 16 October 2026
 
 Owner request: parallel sessions build slowly and load the CPU. Findings and changes:
 
 - **Tests are cheap; builds are not.** In a full release run with `--include-ignored` (local/visual-damage/tests-f306.log), all test bodies take about 85 s together; 63 s of that is the grid-tools asset tests. 161 of the 170 test executables are empty: they are the unit-test harnesses of the grid-tools probe binaries, and none of them has a `#[test]`. Plain `cargo test --workspace` still compiles and links every one.
 - **Alias.** Repository `.cargo/config.toml` defines `cargo t`, which is `test --workspace --release --lib --test * --bin grid-app`. Add `-- --include-ignored` for the asset tests. It runs every real test: library unit tests, `grid-formats/tests`, and the grid-app binary tests. It skips the empty probe harnesses. The flag set was checked on a throwaway workspace: a library, an integration test and an app binary ran; the probe binaries were not built as tests. `cargo td -p CRATE` is the dev-profile variant for quick iteration.
+- **Alias in worktrees (17 October 2026, P9).** A worktree under `C:\Dev\Reassembly\.claude\worktrees\` also reads the main checkout's `.cargo/config.toml`, and cargo merges the two `t` alias arrays. `cargo t` then fails at once: "the argument '--workspace' cannot be used multiple times". In a worktree, spell it out: `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored`.
 - **sccache v0.18.0, measured and not adopted.**
   - Source: official GitHub release `sccache-v0.18.0-x86_64-pc-windows-msvc.zip`, SHA-256 `8965c74d…348363d`, matching the published `.sha256`. A first download through Invoke-WebRequest was truncated (5.9 of 9.7 MB) and failed the check. curl gave the full file.
   - Unpacked at `C:\Users\debros\Tools\sccache-dl-v0.18.0\x\…\sccache.exe`. It is not enabled.

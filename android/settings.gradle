@@ -1,0 +1,25 @@
+// Android wrapper of the prototype (P9, docs/ANDROID.md). Based on Bevy
+// 0.19.1 examples/mobile/android_example (MIT OR Apache-2.0).
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex('com\\.android.*')
+                includeGroupByRegex('com\\.google.*')
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "GRID Reassembly"
+include ':app'

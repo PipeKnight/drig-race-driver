@@ -18,6 +18,11 @@
 //! Results columns [D 0x52E4F0..0x52E6A8, `race_results`]: position, driver,
 //! time, car and team (points only in career events).
 //!
+//! Drift events (docs/DISCIPLINES.md) [D `f_post` drift links]: finish →
+//! `post_race_stats_drift_scores` (`drift_total`) → `post_race_drift_scoreboard`
+//! (the same four pills; Continue opens the results) → `post_race_results_drift`;
+//! Retire → the scoreboard.
+//!
 //! The app has no front end, so leaving the event (Continue, Exit, Retire
 //! from the wreck screen, Finish Test Drive) closes it, back to the launcher.
 //! The cutscene, replays and the original's look are not ported.
@@ -50,6 +55,9 @@ pub struct Row {
     /// (seconds, one-based lap).
     pub best: Option<(f64, usize)>,
     pub vehicle: String,
+    /// Drift events: the drift score, and whether the original would have
+    /// replaced it with its unported estimate (docs/DISCIPLINES.md).
+    pub score: Option<(i64, bool)>,
 }
 
 /// Results rows in classification order. `player_best` replaces car 0's
@@ -87,6 +95,7 @@ pub fn rows(
                     standings.best_lap(car)
                 },
                 vehicle: vehicles.get(car).cloned().unwrap_or_default(),
+                score: None,
             }
         })
         .collect()
@@ -108,6 +117,7 @@ pub fn solo_row(name: &str, vehicle: &str, result: Option<&grid_tools::time_tria
                 .map(|(i, l)| (l.seconds, i + 1))
         }),
         vehicle: vehicle.into(),
+        score: None,
     }
 }
 
@@ -148,6 +158,9 @@ pub enum Stage {
     Hidden,
     Stats,
     Results,
+    /// Drift events: the player's drift scoreboard before the results
+    /// (`post_race_drift_scoreboard` [D]).
+    Scoreboard,
     Wreck,
     /// A confirmation and the stage it returns to.
     Confirm(Confirm, Return),
@@ -156,6 +169,7 @@ pub enum Stage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Return {
     Results,
+    Scoreboard,
     Wreck,
 }
 
@@ -177,6 +191,8 @@ pub enum Command {
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct PostRace {
     pub variant: Variant,
+    /// A drift event: stats, scoreboard, drift results (`f_post` drift links).
+    pub drift: bool,
     pub stage: Stage,
     cursor: usize,
     answer: usize,
@@ -189,6 +205,7 @@ impl PostRace {
     pub fn new(variant: Variant) -> Self {
         Self {
             variant,
+            drift: false,
             stage: Stage::Hidden,
             cursor: 0,
             answer: 1,
@@ -224,10 +241,19 @@ impl PostRace {
         }
     }
 
-    /// Retire from Race (pause menu): straight to the results.
+    /// Retire from Race (pause menu): straight to the results (a drift
+    /// event's scoreboard first, `f_post_retire_discipline_decision` [D]).
     pub fn on_retire(&mut self) {
-        self.stage = Stage::Results;
+        self.stage = self.first_results();
         self.cursor = 0;
+    }
+
+    fn first_results(&self) -> Stage {
+        if self.drift {
+            Stage::Scoreboard
+        } else {
+            Stage::Results
+        }
     }
 
     /// Terminal damage this frame (`dt` real seconds); the wreck screen after
@@ -245,10 +271,11 @@ impl PostRace {
     }
 
     pub fn reset(&mut self, segment: u64) {
-        let repeat = self.repeat;
+        let (repeat, drift) = (self.repeat, self.drift);
         *self = Self::new(self.variant);
         self.segment = segment;
         self.repeat = repeat;
+        self.drift = drift;
     }
 
     pub fn step(&mut self, nav: Nav) -> Option<Command> {
@@ -257,13 +284,13 @@ impl PostRace {
             Stage::Hidden => None,
             Stage::Stats => {
                 if nav.select {
-                    self.stage = Stage::Results;
+                    self.stage = self.first_results();
                     self.cursor = 0;
                     return Some(Command::Finalize);
                 }
                 None
             }
-            Stage::Results | Stage::Wreck => {
+            Stage::Results | Stage::Scoreboard | Stage::Wreck => {
                 if nav.left || nav.up {
                     self.cursor = (self.cursor + n - 1) % n;
                 }
@@ -273,14 +300,20 @@ impl PostRace {
                 if !nav.select {
                     return None;
                 }
-                let back = if self.stage == Stage::Wreck {
-                    Return::Wreck
-                } else {
-                    Return::Results
+                let back = match self.stage {
+                    Stage::Wreck => Return::Wreck,
+                    Stage::Scoreboard => Return::Scoreboard,
+                    _ => Return::Results,
                 };
                 let (pill, _) = self.pills()[self.cursor];
                 let confirm = |c| Stage::Confirm(c, back);
                 match pill {
+                    // The scoreboard's Continue opens the drift results.
+                    Pill::Continue if self.stage == Stage::Scoreboard => {
+                        self.stage = Stage::Results;
+                        self.cursor = 0;
+                        return None;
+                    }
                     Pill::Continue => return Some(Command::Exit),
                     Pill::Replay => {
                         return Some(Command::Replay(if self.stage == Stage::Wreck {
@@ -307,6 +340,7 @@ impl PostRace {
                 }
                 let previous = match back {
                     Return::Results => Stage::Results,
+                    Return::Scoreboard => Stage::Scoreboard,
                     Return::Wreck => Stage::Wreck,
                 };
                 if nav.back || (nav.select && self.answer == 0) {
@@ -609,7 +643,18 @@ pub struct View {
 }
 
 impl PostRace {
+    #[cfg(test)]
     pub fn view(&self, rows: &[Row], labels: &Labels) -> View {
+        self.view_with(rows, labels, None)
+    }
+
+    /// `board`: the player's drift scoreboard in a drift event.
+    pub fn view_with(
+        &self,
+        rows: &[Row],
+        labels: &Labels,
+        board: Option<&crate::drift_event::Board>,
+    ) -> View {
         let l = |id: &'static str| labels.get(id).to_owned();
         let pill_line = |pills: &[(Pill, &'static str)], cursor: usize| {
             pills
@@ -627,8 +672,74 @@ impl PostRace {
         };
         let mut view = View::default();
         let player = rows.iter().find(|r| r.car == 0);
+        let points = |n: i64| {
+            if n == 1 {
+                l("post_race_stats_drift_score_single")
+            } else {
+                l("post_race_stats_drift_score_multiple")
+                    .replace("[SCORE]", &crate::drift_event::grouped(n))
+            }
+        };
         match self.stage {
             Stage::Hidden => {}
+            // `post_race_stats_drift_scores`: `stat type="drift_total"` [D].
+            Stage::Stats if self.drift => {
+                let board = board.cloned();
+                view.title = l("post_race_stats_drift_total_title");
+                view.body = board.map_or_else(String::new, |b| {
+                    let drifts = if b.drifts == 1 {
+                        l("post_race_stats_drift_amount_single")
+                    } else {
+                        l("post_race_stats_drift_amount_multiple")
+                            .replace("[AMOUNT]", &b.drifts.to_string())
+                    };
+                    format!("{}\n{drifts}", points(b.total))
+                });
+                view.pills = format!("Enter/A: {}", l("post_race_stats_buttontext_continue"));
+            }
+            Stage::Scoreboard | Stage::Confirm(_, Return::Scoreboard) => {
+                view.title = l("drift_scoreboard_screen_title");
+                if let Some(b) = board {
+                    view.body = [
+                        (l("drift_scoreboard_fastest_speed"), format!("{:.0} mph", b.fastest)),
+                        (l("drift_scoreboard_longest_drift_time"), format!("{:.2} s", b.longest)),
+                        (
+                            l("drift_scoreboard_largest_combo_score"),
+                            crate::drift_event::grouped(b.best_combo as i64),
+                        ),
+                        (l("drift_scoreboard_average_speed"), format!("{:.0} mph", b.average_speed)),
+                        (
+                            l("drift_scoreboard_average_distance"),
+                            format!("{:.0} m", b.average_distance),
+                        ),
+                        (l("drift_scoreboard_average_angle"), format!("{:.0}°", b.average_angle)),
+                        (l("drift_scoreboard_total_score"), crate::drift_event::grouped(b.total)),
+                    ]
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                    view.table.push([
+                        l("drift_leaderboard_drift_type_column"),
+                        l("drift_leaderboard_drift_count_column"),
+                        l("drift_leaderboard_drift_score_column"),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    ]);
+                    for (name, count, score) in &b.ratings {
+                        view.table.push([
+                            labels.get(name).to_owned(),
+                            count.to_string(),
+                            crate::drift_event::grouped(*score as i64),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                        ]);
+                    }
+                }
+                view.pills = pill_line(&RESULTS_PILLS, self.cursor);
+            }
             Stage::Stats => {
                 // `stat type="position"` and `stat type="fastest_lap"` [D].
                 let position = player.map_or(0, |r| r.position);
@@ -651,11 +762,21 @@ impl PostRace {
             }
             Stage::Results | Stage::Confirm(_, Return::Results) => {
                 view.title = l("post_race_results_screen_title");
-                view.body = l("post_race_results_table_title");
+                view.body = l(if self.drift {
+                    "post_race_drift_results_table_title"
+                } else {
+                    "post_race_results_table_title"
+                });
                 let mut header: [String; 6] = std::array::from_fn(|i| {
                     COLUMNS.get(i).map_or_else(|| l("osd_best"), |(id, _)| l(id))
                 });
                 header[5] = l("post_race_stats_fastest_lap_title");
+                if self.drift {
+                    // Score in place of the time [I: the drift results
+                    // columns were not traced].
+                    header[2] = l("drift_leaderboard_drift_score_column");
+                    header[5] = String::new();
+                }
                 view.table.push(header);
                 for (i, row) in rows.iter().enumerate() {
                     if row.car == 0 {
@@ -664,11 +785,23 @@ impl PostRace {
                     view.table.push([
                         row.position.to_string(),
                         row.name.clone(),
-                        time_text(row, &l),
+                        match row.score {
+                            // `*`: the original would show its estimate.
+                            Some((score, estimate)) => format!(
+                                "{}{}",
+                                crate::drift_event::grouped(score),
+                                if estimate { " *" } else { "" }
+                            ),
+                            None => time_text(row, &l),
+                        },
                         row.vehicle.clone(),
                         "--".into(),
-                        row.best
-                            .map_or_else(|| "--".into(), |(t, _)| crate::race_hud::lap_time(t)),
+                        if row.score.is_some() {
+                            String::new()
+                        } else {
+                            row.best
+                                .map_or_else(|| "--".into(), |(t, _)| crate::race_hud::lap_time(t))
+                        },
                     ]);
                 }
                 view.pills = pill_line(&RESULTS_PILLS, self.cursor);
@@ -719,7 +852,10 @@ fn present(
     post: Res<PostRace>,
     labels: Res<Labels>,
     driving: Res<crate::Driving>,
-    trial: Option<Res<crate::time_trial::Trial>>,
+    (trial, drift): (
+        Option<Res<crate::time_trial::Trial>>,
+        Option<Res<crate::drift_event::DriftEvent>>,
+    ),
     mut panel: Query<&mut Visibility, With<Panel>>,
     mut parts: Query<(&Part, &mut Text, &mut TextColor, &mut Node)>,
     mut shown: Local<Option<View>>,
@@ -738,8 +874,12 @@ fn present(
         *shown = None;
         return;
     }
-    let rows = table(&driving, trial.as_deref());
-    let view = post.view(&rows, &labels);
+    let mut rows = table(&driving, trial.as_deref());
+    let board = drift.as_ref().and_then(|d| d.board());
+    if let (Some(d), Some(o)) = (&drift, &driving.opponents) {
+        rows = d.results(&o.standings, rows);
+    }
+    let view = post.view_with(&rows, &labels, board.as_ref());
     if shown.as_ref() == Some(&view) {
         return;
     }
@@ -818,6 +958,56 @@ mod tests {
         assert_eq!(post.stage, Stage::Confirm(Confirm::Restart, Return::Results));
         assert_eq!(post.step(press(|n| n.select = true)), Some(Command::Restart));
         assert!(!post.active());
+    }
+
+    #[test]
+    fn drift_events_show_the_scoreboard_before_the_results() {
+        let mut post = PostRace::new(Variant::FreeRace);
+        post.drift = true;
+        post.on_finish();
+        assert_eq!(post.step(press(|n| n.select = true)), Some(Command::Finalize));
+        assert_eq!(post.stage, Stage::Scoreboard);
+        // Restart's confirmation returns to the scoreboard.
+        for _ in 0..3 {
+            post.step(press(|n| n.right = true));
+        }
+        post.step(press(|n| n.select = true));
+        assert_eq!(post.stage, Stage::Confirm(Confirm::Restart, Return::Scoreboard));
+        post.step(press(|n| n.back = true));
+        assert_eq!(post.stage, Stage::Scoreboard);
+        // Continue (first pill): the drift results, then out of the event.
+        post.step(press(|n| n.right = true));
+        assert_eq!(post.step(press(|n| n.select = true)), None);
+        assert_eq!(post.stage, Stage::Results);
+        assert_eq!(post.step(press(|n| n.select = true)), Some(Command::Exit));
+        // Retire goes to the scoreboard too; a restart keeps the discipline.
+        post.reset(1);
+        assert!(post.drift && !post.active());
+        post.on_retire();
+        assert_eq!(post.stage, Stage::Scoreboard);
+        let board = crate::drift_event::Board {
+            total: 12345,
+            drifts: 3,
+            fastest: 71.,
+            longest: 4.5,
+            best_combo: 9000.,
+            average_speed: 60.,
+            average_distance: 80.,
+            average_angle: 33.,
+            ratings: vec![("osd_drift".into(), 2, 300.), ("osd_great_drift".into(), 1, 2000.)],
+        };
+        let view = post.view_with(&[], &Labels::default(), Some(&board));
+        assert_eq!(view.title, "drift_scoreboard_screen_title");
+        assert!(view.body.ends_with("drift_scoreboard_total_score: 12,345"), "{}", view.body);
+        assert_eq!(view.table.len(), 3);
+        assert_eq!(view.table[2][..3], ["osd_great_drift", "1", "2,000"]);
+        post.stage = Stage::Stats;
+        let view = post.view_with(&[], &Labels::default(), Some(&board));
+        assert_eq!(view.title, "post_race_stats_drift_total_title");
+        assert_eq!(
+            view.body,
+            "post_race_stats_drift_score_multiple\npost_race_stats_drift_amount_multiple"
+        );
     }
 
     #[test]

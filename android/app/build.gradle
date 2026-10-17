@@ -1,0 +1,44 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'org.reassembly.grid'
+    compileSdk 36
+    // The NDK that built libgrid_android.so; AGP uses its llvm-strip.
+    ndkVersion '30.0.16248370'
+
+    defaultConfig {
+        applicationId 'org.reassembly.grid'
+        // GameActivity in the Bevy 0.19.1 README: API 31 and higher. The three
+        // owner phones run Android 12 or newer.
+        minSdk 31
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    sourceSets {
+        main {
+            // cargo ndk -o writes arm64-v8a/libgrid_android.so here
+            // (tools/build_android.ps1). No game data is ever packaged.
+            jniLibs.srcDirs = ['build/rust-jniLibs']
+        }
+    }
+}
+
+dependencies {
+    implementation libs.appcompat
+    implementation libs.games.activity
+}

@@ -105,7 +105,7 @@ pub struct WheelPose {
 fn read(root: &Path, relative: &str, bound: u64) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use std::io::Read;
     let mut bytes = Vec::new();
-    std::fs::File::open(root.join(relative))?
+    std::fs::File::open(root.join(relative)).map_err(|e| format!("{relative}: {e}"))?
         .take(bound + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > bound {

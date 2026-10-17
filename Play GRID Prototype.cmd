@@ -66,6 +66,11 @@ if "%GRID_PLAY_PROFILE%"=="race" (
   echo Three-lap race: wait for GO, race the AI cars for three laps, then view the result.
   echo The opponents are driven by the ported GRID AI ^(Normal difficulty^). R restarts the race.
 )
+if "%GRID_PLAY_PROFILE%"=="drift-battle" (
+  echo Drift Battle: two laps against 7 AI cars. Drift to score: hold an angle above 15 degrees at
+  echo 50 mph or more; long drifts, combos and close drifts past the flags score more; a collision
+  echo loses the combo. The race leader scores x3, the last car x1. Results are ordered by score.
+)
 echo Private diagnostic log: %GRID_PLAY_LOG%
 echo Loading the source track can take a little while...
 "target\release\grid-app.exe" --settings "settings\%GRID_PLAY_PROFILE%.ini" %GRID_ROOT_ARGS% %GRID_EXTRA_ARGS% > "%GRID_PLAY_LOG%" 2>&1

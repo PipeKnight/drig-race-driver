@@ -216,7 +216,8 @@ These routes are not in grid-soak or the launchers yet; they can be selected wit
 - Seed 59 of the forced Long Beach set: a tumbling tyre lands through the road (section 5.2).
 - The barrier stand-ins remain authored; the catch fence above 3.13 m and its leaning top are not solid.
 - Spa: the three blockers of section 1.
-- Le Mans: the lap-1 crash; Jarama route 0: late braking.
+- Le Mans: the lap-1 crash; Jarama route 0: late braking (route 1 is the fifth circuit since
+  F361, [JARAMA.md](JARAMA.md)).
 - Istanbul turn-8 and Long Beach ~2.7 km recoveries: a comparison with the running original
   needs a live AI trace on those tracks, which needs input to the game (not done in a night run).
 - The flat grey road (unresolved track batches) and the prototype launcher's Donington banner.

@@ -9,3 +9,18 @@ grid-formats = { path = "../grid-formats" }
 grid-tools = { path = "../grid-tools" }
 grid-world = { path = "../grid-world" }
 bevy = { version = "=0.19.1", default-features = false, features = ["3d", "ui_bevy_render", "bevy_audio", "dds", "png"] }
+
+# Android (P9, docs/ANDROID.md): GameActivity loads libgrid_android.so, built
+# by tools/build_android.ps1 with `cargo ndk ... build --lib`. src/lib.rs is
+# empty on every other target; the desktop program stays the grid-app binary.
+[lib]
+name = "grid_android"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "grid-app"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "android")'.dependencies]
+bevy = { version = "=0.19.1", default-features = false, features = ["android-game-activity"] }
+libc = "0.2"
