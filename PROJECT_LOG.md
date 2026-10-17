@@ -1,6 +1,11 @@
 # GRID engine project log
 
 
+G055 vegetation source/parser established (17 October2026): docs/SOURCE_VEGETATION.md. trees.pssg9ROOT/27draws, closest_x0andbillboard_x2ancestry;47tree textures. Actualroute_0/trees.bin646placements/9types uses36header/48prototype/52instance, unlikeornaments40/52/56. Boundedindependentreader added rawmetadata retained(643x0x680dff/3x0);3tests/0ignoredinclpurchased646pass/Clippyformats1.72s. UTF8readtree_attributes failed(binaryXML, existingreaderavailable), notcorruptdata. Renderer/placement/LODselection/alpha/wrap/wind/normalmaterialnotyetvalidated; noforestfixclaim. Privatevegetation01surveys. Existingtools reused/noinstall/sourceSteam untouched.
+
+G054 texture full-lap4K verification (17 October2026): sourcef8e5310 currentbinary/native3840x2160, sharedRGBAfallback/two candidates/mildwheels/bodyevents/deformation/currentautopilot+1opponent/6500ticks104simsec,1validlap89.955257484s/terminalnone/4wheelcontacts, logwall58.46snotmonitorFPS. Actualpaired1080passing30frame sequencesaudited/exact800tickendpoint; inspectedviewtargetwallsdistant/partlyoccluded, limitedmovingviewnotcompletemipacceptance. KnownnilUUIDgilrsWARNonly. Private local/graphics/texture-lap01 validation/images/full logs. Continueforest/farstrips withoutchangingphysics ordrivingcameras.
+
+
 G053 optional texture pilot integrated (17 October2026): main0a13bbf->66d330cFF after exacthead/status/ownerresearchSHAguards. PlayGRIDGraphicsTextures.cmd nowavailablemain+graphics; private2map44.74MBpackageinstalledignoredinboth, sourceSteamuntouched, maindata-dirCPUbindingverified. Originalnormal/Wheels textures stayunchanged; purelauncher/docschange, compiledsource remainsf8e5310 andexehashf9192a...unchanged/verified inbothmanifests. Assetpackmetadata addedatomically; no runningexe replaced/closed. Full450tests/Clippy/exactsolo andknownbaselinequick1/12 applyunchangedsource; extra2material4KRGBA andcombineddrivingsmoke verified. Privatepilot02/mainpackage dedup0duplicates/0errors, allcitedfullcaptureskept. Nextroadmap: moving-mip/full-lap texturequality, furtherprominentmaterials withoutAItextdamage, sourcevegetation/farstrips, physicalmaterialrelief/reflections; ownerwheelmonitorfeedbackoptional, no currentrequiredhelp. No newtools/camera/engine changes.
 
 

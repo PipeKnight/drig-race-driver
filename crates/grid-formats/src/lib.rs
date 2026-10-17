@@ -23,6 +23,7 @@ pub mod kickup;
 pub mod material;
 pub mod mesh;
 pub mod ornaments;
+pub mod tree_placements;
 pub mod physparams;
 pub mod progress;
 pub mod pssg;
