@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G063 — Foliage lighting and rectangular mips verified (17 October 2026)
+
+- [Mip research and limits](docs/PSSG_PAYLOADS.md), [source forest](docs/SOURCE_VEGETATION.md). Candidate source `486e7eb`, executable SHA256 `bcf548936860bdcb97dde0a7a26a23a64f3046635d68f2fd86b391e8b1d79846`, release build 1m13s. Restores contiguous mip prefixes for 47 confirmed rectangular maps; 14 nonzero excess layouts remain unsupported. Source pixels stay unchanged.
+- 520 release workspace tests passed, zero ignored; workspace all-target Clippy passed (18.49s), exact solo identity passed, quick soak passed 20/20 / 100000 ticks. Native4K BC/RGBA side and far views inspected. RGBA: 537 decoded images, zero BC. Small BC/RGBA cutout-edge differences remain (MAE0.0891byte, max172); no pixel-identity claim. Only known nil-UUID gilrs warning in six checked GPU logs.
+- 30-frame motion sequences have identical before/after request-clock and physics metadata; temporal improvement is not quantified. Default enhanced / forest-off 1200-tick4K smoke matches prior21b0 control pose and velocity exactly. Baseline smoke rendered, but its enhanced-only sky/land are absent. Private evidence: `local/graphics/vegetation01/mip-validation01.json`, full logs/images and GIF. Main promotion/push pending.
+- Continue distant-wall/source visibility and foliage coverage/normal maps. Forest remains opt-in; wind and original backlighting are not reproduced. No new tools or Steam changes; physics and the other agent's work preserved.
+
+
 G062 foliage lighting GPU improved / rectangular mip recovery draft (17 October2026): docs/SOURCE_VEGETATION.md and docs/PSSG_PAYLOADS.md. a3e5ae3/SHAff243335... build1m00s, 4Ksameviewsinspected: normalorientation+thinleaflobe removesblack-whitepatches; RGBA0BC/knownWARNonly. Moving30x2audited, negativeyawfacesgrandstand/rejected, positiveyawMCNleafview; nofinaltemporalclaim. Mainverified21b0unchanged. Sourcefullmiptailpreviouslyunknownrediscovered: distantBC3stored701120=699088contiguous11levels+2032zeros; alllevelsPillowdecoded/montageinspected. Sixpackaudit69rect:47eligiblezero-tail/8exact/14nonzeroopen. ConservativefullPOTrectBC-only<=2048whole-blockallzero trimdraft, exactbase/mipskept;22payloadtests0ignored/Clippyformats1.59spass. Newauthoredprivateoutputaudittool. GPU/fullchecks/rebuildfornewmipsnext; no assetsinGit/Steamwrites/newinstalls/physicschanges.
 
 
