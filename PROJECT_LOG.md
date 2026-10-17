@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G084 — Distant forest visible in matched4K; upstream P6 preserved (17 October 2026)
+
+[Forest evidence](docs/SOURCE_VEGETATION.md). Sourceafccf08/SHA92538437.../release1m56s restores three missing cylindrical layers in the same native4K view; inspected image has the previously absent distant treeline.3draws/2922triangles, known-warning-only. This is a verified missing vertex-stage correction, not proof of all original LODs/passes. Mainfb32d54 P6 merged as667dd2b, journal conflict resolved retaining both additions. Graphics launcher forest-on candidate staged with no-trees control; merged build/motion/final tests pending. Primary playable unchanged by this work; do not promote old-base candidate.
+
 ## G083 — Owner spotting confirms collapsed distant-tree layers (17 October 2026)
 
 [Forest correction](docs/SOURCE_VEGETATION.md).646placements did not establish visible completeness. Three source distant-tree layers use a separate cylindrical treesheet vertex stage; importer included their draws but left centres unexpanded. Source03audit682triangles/1364vertices/zeroXYarea, sourceVS confirms signedUV1horizontal/world-up expansion. Draft extends existing camera-facing presentation to explicitly tagged sheet parts; no new placements or source-install edits. Three targeted tests pass, including all2922rawdegenerate/expandednonzero triangles and nearer-facing control; final app Clippy19.32s passes. GPU comparison pending, nearer foliage/coverage/grass preserved. Prior blanket forest-restored wording is corrected; main playable917ca5f unchanged.
