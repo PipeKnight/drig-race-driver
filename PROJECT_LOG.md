@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G097 — F370 combined source passes a full warm/HDR4K lap (18 October 2026)
+
+Source575633fb7639/SHA256c3ad51f4.../release2m41s: seven focused settings/profile tests pass after F370 merge; workspace Clippy11.18s clean. Full602test P11 graphics baseline precedes the small settings-only change. Combined source-colour +1024moving HDR probe completes6500ticks/native3840x2160, valid lap89.955257484; all four physical/handling/deformation/lap exits exactly match direction-only0ffe4af control except walltime. Final image inspected. Exactly2HDRaudits, finite/nonnegative/nonempty6faces, maxima7.87109375/17.53125,3064cube copies, no errors beyond known nilUUID warning. Private sun-f370-full-validation01.json / sun-warm-probe-full4k01 and probe-warm-full audits.
+
+Direction-only sun stays the Graphics-launcher default; warm colour and probe remain explicit options. Static review found moving-probe follow() still reads live runtime pose during a replay, whereas presented car uses the replay snapshot; this limitation needs a focused reproduction/fix before changing reflection defaults. It is not a new camera feature. Main nowclean atd3ea04f with owner report intact: guarded fast-forward/publication and inactive executable promotion next, then continue reflection/replay synchronization. No owner action needed.
+
 ## G096 — P11 merged renderer and dynamic reflections checked (18 October 2026)
 
 Source233c19b16864/SHA25655de054c.../build2m36s:602workspace release tests0failed0ignored, workspace all-target Clippy15.18s clean. Native4K warm-sun far and source-direction sky/probe side-driving images inspected; physical exits equal each other and previous96dddba control.1024moving probe yields exactly2HDRreadbacks, finite/no negative RGB, max4.4140625/4.7421875, all six faces nonempty; main local-probe assignment/filter readiness and zero capture-view assignments confirmed. Private sun-p11-probe-validation01.json and two probe-sun audits. Reflection default remains unchanged pending full-lap check with this light.

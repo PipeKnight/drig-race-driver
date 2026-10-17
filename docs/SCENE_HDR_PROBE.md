@@ -55,3 +55,8 @@ Corrected3afc6e241cab/exeSHA1F1805283BA21B14BC85522B9F5857C2CD9459CEEC03E8F84FC3
 
 
 Source233c19b16864 (P11 integrated), saved direction/source sky/native4K/240tick side pair: both inspected; local reflections change body/window response, physical exits match sky-only and prior control. Exactly2raw1024cubes, each50331648bytes, independently audited finite/nonnegative/nonempty6faces, max4.4140625 and4.7421875. Zero capture-view local assignments and main filtering readiness logged, no invalid-entity warning. Private vegetation01/sun-p11-probe-validation01.json and probe-sun-{first,periodic}-audit01.json. This validates the existing feature under new light over a limited drive, not a new full-lap reflection default.
+
+
+F370 combined full-lap checkpoint, source575633fb7639: saved warm sun +1024moving probe completes6500ticks/native4K with valid89.955257484s lap; four final physical-state lines equal direction-only control except walltime. Exactly2audits,3064cube copies, finite/nonnegative/nonempty faces, maxima7.87109375/17.53125, known nilUUID warning only. Final screenshot inspected; private vegetation01/sun-f370-full-validation01.json. No monitor-FPS or original radiometric equivalence claim.
+
+Remaining integration limitation found by static review: follow() reads the paused live runtime pose even while Replay.session.shown presents an earlier pose. The local-probe box can therefore stay at the live location during a replay; the actual GPU symptom is not yet reproduced. Keep probe opt-in, reproduce this case and choose the presented replay pose before considering a reflection default. Preserve submitted-cube/box synchronization and do not alter physics or replay state.
