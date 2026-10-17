@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G069 — Atmosphere preview integrated and playable refreshed (17 October 2026)
+
+Primary main guarded-fast-forwarded ae9f649 -> a85a730, preserving owner AI research SHA c4d52b9e... and untracked status. Checked source8b9919fbf5c6 / SHAc5b98420... atomically promoted to main target and both verified backups; all four graphics/playtest manifests updated. No running prototype replaced or closed. Optional Play GRID Graphics Atmosphere.cmd enables forest+haze; normal modes remain unchanged. G068 checks apply. Dedup applied to vegetation01; cited full evidence retained. Private promotion-haze.json and before-manifest snapshot. Publish both branches next, then continue source foliage coverage/distant-model diagnosis; no owner action required.
+
+
 ## G068 — Optional source atmosphere ready to integrate (17 October 2026)
 
 Source8b9919fbf5c6 / executable SHAc5b9842062bfc45f962a62d45d8c826438e95e9937fb9a87ae30ae6d2a55c545 checked again: 522release workspace tests/0failed/0ignored, workspace all-target Clippy4.84s, solo laps88.42029812185638/86.28228501935392 and statea4a35f899a490c36 exact. Quick20/20/100000ticks pass. Private vegetation01/*-haze-linear01 logs and soak summary. Source crates unchanged since binary build; later changes are launcher/docs only. Separate Atmosphere launcher enables trees+haze, default remains off. Guarded primary integration/playable promotion next; preserve owner untracked AI report.
