@@ -40,6 +40,7 @@ Grammar:
 | `[sound]` | `effects` | 0..100, percent (default 100): the pause menu's Effects Volume, engine and tyre sound | none |
 | `[front_end]` | `show` | `on` (default) / `off`: the Race Options front end with Driver Aids before the race ([DRIVER_AIDS.md](DRIVER_AIDS.md)); never shown for scripted or autopilot runs | none |
 | `[osd]` | `lap_timer`, `position`, `minimap`, `dials` | `on` (default) / `off`: the pause menu's Screen Setup, the HUD's lap group, race position, minimap and dial (docs/RACE_HUD.md) | none |
+| `[osd]` | `fps` | `on` / `off`: frame-rate counter at the top (FPS, mean and worst frame time of the last second) and one `frame_stats` log line per second; default `on` on Android, `off` on the desktop, where F9 toggles it ([ANDROID.md](ANDROID.md) "Frame rate") | none |
 | | `speed_units` | `kph` (default) or `mph` | none |
 | `[diagnostics]` | `free_look` | `yaw,pitch` | legacy `GRID_FREE_LOOK` |
 | | `effects_camera` | `x,y,z,lx,ly,lz` | `GRID_EFFECTS_CAMERA` |

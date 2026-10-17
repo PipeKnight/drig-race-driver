@@ -247,6 +247,8 @@ pub struct Settings {
     pub osd_mph: Option<bool>,
     pub osd_minimap: Option<bool>,
     pub osd_dials: Option<bool>,
+    /// `[osd] fps`: the frame-rate counter (default on Android only).
+    pub osd_fps: Option<bool>,
     /// `[front_end] show`: the Race Options front end before the race
     /// (docs/DRIVER_AIDS.md); default on.
     pub front_end: Option<bool>,
@@ -409,6 +411,7 @@ impl Settings {
                 ("osd", "position") => self.osd_position = Some(on(&key, value).map_err(at)?),
                 ("osd", "minimap") => self.osd_minimap = Some(on(&key, value).map_err(at)?),
                 ("osd", "dials") => self.osd_dials = Some(on(&key, value).map_err(at)?),
+                ("osd", "fps") => self.osd_fps = Some(on(&key, value).map_err(at)?),
                 ("osd", "speed_units") => {
                     self.osd_mph = Some(match value.to_ascii_lowercase().as_str() {
                         "kph" | "km/h" => false,

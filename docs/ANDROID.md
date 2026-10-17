@@ -89,7 +89,26 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 - **Controls (P11):** tilt steering with on-screen pedals and buttons; see "Controls" below. Not yet tried on a phone. A Bluetooth keyboard may also work through GameActivity, but this is untested.
 - **Gamepads:** not available on Android. Bevy's gamepad input comes from gilrs, and gilrs-core 0.6.8 has no Android backend (`src/platform` has linux, macos, wasm and windows only; other targets get a dummy). Android delivers pad buttons and sticks as KeyEvent/MotionEvent through GameActivity, but winit 0.30.13 maps pad buttons to `Key::Unidentified` ("Gamepad events should be exposed through a separate API", `platform_impl/android/keycodes.rs`) and does not forward joystick axes. A pad needs a bridge from android-activity's input events into the P1 input layer, which is input code (P11's "optional Android pad bridge"), so it was not done here. A Bluetooth keyboard may work through winit, but this is untested.
 - **Data without the bundled APK:** the code-only APK needs the data placed by adb (below). Android 11+ blocks phone file managers from `Android/data`; copying from Windows Explorer over USB (MTP) into it works on many phones but is not guaranteed [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). **P10** (folder picker) would remove the PC step without bundling.
-- **Not measured:** frame rate, tick time, thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
+- **Not measured yet:** frame rate (the counter below now shows it), thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
+
+## Frame rate
+
+**Counter.** `[osd] fps` (default `on` on Android, `off` on the desktop, where F9 toggles it) shows `NN FPS  M ms  max W` at the top edge, between the II button and the race position panel: frames per second, the mean frame time and the worst frame of the last second. While it is on, the app logs once per second (logcat and `Download/GRID-Reassembly/log-*.txt`):
+
+```
+frame_stats fps=59.1 avg_ms=16.92 max_ms=18.49 frames=60 sim_ticks_per_s=63.1
+```
+
+`sim_ticks_per_s` is the simulation's successful fixed ticks per second (62.5 at full speed; lower means the simulation falls behind real time or is paused). The first line after start-up, `frame_setup`, records the requested present mode, frame latency, the window's physical and logical size, its scale factor and the refresh rate winit reports. The counter reads only real time and the tick counter, so simulation results are unchanged (solo identity, F374).
+
+**What limits the frame rate in the current build** [V code, Bevy 0.19.1 / wgpu defaults; nothing measured on the phone yet]:
+
+- **Present mode:** the window keeps Bevy's default `PresentMode::AutoVsync`; wgpu picks FifoRelaxed, else Fifo. Either is vsync: at most one frame per display refresh.
+- **Frame cap:** none in the app. `WinitSettings::game()`: continuous updates while focused; `desired_maximum_frame_latency` is Bevy's default (none set, wgpu's 2).
+- **Display refresh:** the app requests none. No `ANativeWindow_setFrameRate`/`Surface.setFrameRate`, no `preferredDisplayModeId` or `preferredRefreshRate` in the manifest or activities; only `appCategory="game"`. So Android and MIUI/HyperOS choose the rate, and a phone's adaptive refresh often holds unknown apps at 60 Hz [I]. 120 Hz is therefore not available to the app, and a frame that misses a 16.7 ms vsync waits for the next one, so 60 → 30 FPS steps are expected with Fifo [I].
+- **Render resolution:** the full native surface. The requested `--resolution` (1280 × 800 default) is ignored on Android; there is no render scale. The Xiaomi 13 Ultra's panel is 3200 × 1440 (WQHD+), 4.6 Mpixel, unless the phone's display resolution setting is FHD+ (2400 × 1080) [S]. `frame_setup` will tell which.
+- **Graphics preset:** `baseline`, the desktop default (log `graphics preset=Baseline shadow_size=2048 anisotropy=1 sky_ibl=false ssao=false taa=false tonemapping=Bevy-default`): none of the enhanced preset's HDR, bloom, SSAO, SMAA/TAA, atmosphere or 4096 shadow map. But the camera keeps Bevy's default **4× MSAA** (`Msaa::Sample4` is a required camera component; only the enhanced preset sets `Msaa::Off`), at the full native resolution.
+- Tuning any of these is P12, after the phone numbers.
 
 ## Controls (P11)
 

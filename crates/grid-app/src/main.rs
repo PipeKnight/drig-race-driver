@@ -46,6 +46,7 @@ mod sky;
 mod sky_environment;
 mod source_trees;
 mod foliage_mips;
+mod fps_counter;
 mod front_end;
 mod texture_cache;
 mod texture_overrides;
@@ -2451,6 +2452,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             // The original HUD layout and post-race screens (docs/RACE_HUD.md).
             race_hud::install(&mut app);
+            // Frame-rate counter ([osd] fps; on by default on Android, F9 on the desktop).
+            fps_counter::install(
+                &mut app,
+                profile.osd_fps.unwrap_or(cfg!(target_os = "android")),
+            );
             post_race::install(&mut app, variant);
         }
         // Drift Battle on top of the race (docs/DISCIPLINES.md).
