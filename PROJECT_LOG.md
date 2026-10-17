@@ -17,7 +17,7 @@ F349 third circuit: Istanbul Park GP drives solo and races with the AI field; pe
   - Windowed app race (autopilot, 11 opponents, CD01/BP01/DF01, characteristics): 5.0 s countdown, lap 1 valid 1:53.376 (39.745 / 36.997 / 36.633), all 12 classified, no failure.
   - grid-soak quick forced onto Istanbul (old seeds 1..12): 12/12 pass.
 - Checks (cargo/rustc 1.99.0, release):
-  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 457 passed, 0 failed; after the rebase onto 0a13bbf 458 passed, and clippy, solo identity and quick soak (same 16 result lines) repeated (grid-soak sha256 a7f34b9f…54f0e, grid-app f3a7cc1f…ed00).
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 457 passed, 0 failed; after the final rebase onto 62221a3 (F348 pause menu) 472 passed, and clippy, solo identity and quick soak (same 16 result lines) repeated (grid-soak sha256 01f1c785…b014, grid-app f412e8e9…7de4).
   - Clippy --workspace --all-targets -D warnings: clean.
   - Solo identity: `grid-opponent-race ROOT CD01 BP01 1 14000 ai` byte-identical to local/ai-pacing/runs/solo-rebased.txt (88.42029812185638 / 86.28228501935392, a4a35f899a490c36).
   - Against a 307fe9b baseline build, byte-identical: Nürburgring solo and 12-car, Donington 12-car, mixed lac,bmw 12-car (DF01), Istanbul 12-car (local/third-track/regress/).
