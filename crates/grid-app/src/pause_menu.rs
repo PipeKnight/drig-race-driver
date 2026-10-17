@@ -724,6 +724,7 @@ fn apply_tunes(actions: &mut Actions, values: &Options) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     mut menu: ResMut<PauseMenu>,
     mut driving: ResMut<crate::Driving>,

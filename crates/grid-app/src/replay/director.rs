@@ -159,7 +159,7 @@ impl Director {
 
     /// Zones the segment `a`..`b` passes through, in path order.
     pub fn crossed(&self, a: Vec3, b: Vec3) -> Vec<usize> {
-        let steps = ((a.distance(b) / 0.25).ceil() as usize).max(1).min(400);
+        let steps = ((a.distance(b) / 0.25).ceil() as usize).clamp(1, 400);
         let mut out: Vec<(usize, usize)> = Vec::new();
         for (z, zone) in self.zones.iter().enumerate() {
             let inverse = zone.rotation.inverse();
@@ -182,7 +182,7 @@ impl Director {
 /// Bézier chain point nearest to `target` (dense sampling).
 pub fn project_on_path(path: &[Vec3], target: Vec3) -> Option<Vec3> {
     let mut best: Option<(f32, Vec3)> = None;
-    for seg in path.chunks_exact(4) {
+    for seg in path.as_chunks::<4>().0 {
         for k in 0..=32 {
             let t = k as f32 / 32.;
             let u = 1. - t;

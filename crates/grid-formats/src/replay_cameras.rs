@@ -314,7 +314,7 @@ mod tests {
                     let path = config.path(path).unwrap();
                     assert_eq!(path.kind, "spline");
                     // Cubic Bézier chain: four points per segment.
-                    assert!(path.points.len() >= 4 && path.points.len() % 4 == 0, "{track}");
+                    assert!(path.points.len() >= 4 && path.points.len().is_multiple_of(4), "{track}");
                 }
             }
         }
@@ -322,7 +322,7 @@ mod tests {
         let d = shipped("europe/donington");
         let c = d.camera("TERMINAL_Replay_Cam_R01_00").unwrap();
         assert_eq!(c.kind, Kind::Zoom);
-        assert_eq!(c.vector("Position"), Some([-236.013123, -10.7, 16.135307]));
+        assert_eq!(c.vector("Position"), Some([-236.013_12, -10.7, 16.135_307]));
         assert_eq!(c.scalar("defaultFov"), Some(7.5));
         assert_eq!(c.scalar("radius"), Some(2.));
         assert_eq!(
