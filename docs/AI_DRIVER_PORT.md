@@ -115,7 +115,7 @@ AUTHORED or omitted:
 - cars on both sides hold the planned offset;
 - avoid, block and draft are not ported (block and draft are disabled by default anyway);
 - the bend-direction sign is [I];
-- car geometry uses Lacetti half width 0.9 m and half length 2.24 m.
+- car geometry used Lacetti half width 0.9 m and half length 2.24 m; since F345 each car has its own extents, taken from its hull, body offset and tyres as the original does (docs/CAR_GENERALIZATION.md, "AI car extents").
 
 Checks (headless `grid-opponent-race`; `GRID_SLOW_CAR0=f` scales car 0's throttle,
 `GRID_TRACE_BEHAVIOUR=1` prints behaviour changes and contact pairs):
@@ -238,7 +238,7 @@ Live check (F302, [AI_AVOID_RECOVERY_LIVE.md](AI_AVOID_RECOVERY_LIVE.md)):
 ### Drives
 
 - **avoid**: decides every 0.25 s or on a new target.
-  - Clearance = half length + 2 m + both half widths (6.04 m).
+  - Clearance = the target's half length + 2 m + both half widths (Lacetti pair 6.066 m since F345; 6.04 m with the old constants).
   - Mode 1 when closing > own speed.
   - Otherwise the side needing the smaller move from our front's lateral position.
     - The room check uses the track limit at the predicted position, with w = 3.2 m.

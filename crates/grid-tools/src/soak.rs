@@ -11,6 +11,7 @@
 //! back without the chaos driver.
 use crate::{
     ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Other, Parameters, View},
+    car::Car,
     route::Route,
     source_vehicle::{
         Controls, DELTA, Runtime,
@@ -122,6 +123,11 @@ pub struct Scenario {
     pub reset_rate: f64,
     /// Force one chaos mode for the whole run (`None`: weighted mix).
     pub chaos: Option<Mode>,
+    /// The player's car model (app `--car`).
+    pub car: Car,
+    /// Opponent models cycled over the opponents (app `--opponent-cars`);
+    /// empty: the player's model.
+    pub opponent_cars: Vec<Car>,
 }
 
 /// Car counts the quick profile cycles through: the owner's 12-car race
@@ -197,7 +203,48 @@ impl Scenario {
                 Profile::Long => 1.5,
             },
             chaos: None,
+            car: Car::default(),
+            opponent_cars: Vec::new(),
         }
+        .with_long_models(seed, profile)
+    }
+
+    /// Long runs also drive the BMW 320si: half the races are a mixed
+    /// Touring_cars field, some solo runs use the BMW. Drawn from their own
+    /// stream, so every other field of a seed stays as before; quick runs
+    /// stay all-Lacetti (pass `--car`/`--opponent-cars` to mix them).
+    fn with_long_models(mut self, seed: u64, profile: Profile) -> Self {
+        if profile != Profile::Long {
+            return self;
+        }
+        let mut rng = Rng::new(seed ^ 0xca75_0000_0000_0000);
+        let bmw = || Car::new(crate::car::BMW).unwrap();
+        if self.cars > 1 && rng.chance(0.5) {
+            if rng.chance(0.5) {
+                self.car = bmw();
+            }
+            self.opponent_cars = if rng.chance(0.5) {
+                vec![bmw(), Car::default()]
+            } else {
+                vec![Car::default(), bmw()]
+            };
+        } else if rng.chance(0.25) {
+            self.car = bmw();
+        }
+        self
+    }
+
+    /// Model of every car, the player's first (app `--opponent-cars` order).
+    pub fn field_models(&self) -> Vec<Car> {
+        std::iter::once(self.car.clone())
+            .chain((0..self.cars.saturating_sub(1)).map(|i| {
+                if self.opponent_cars.is_empty() {
+                    self.car.clone()
+                } else {
+                    self.opponent_cars[i % self.opponent_cars.len()].clone()
+                }
+            }))
+            .collect()
     }
 
     /// Countdown seconds the app runs before GO (0 without an event).
@@ -228,7 +275,25 @@ impl Scenario {
             self.ticks,
             self.reset_rate,
             self.chaos.map_or("mixed", Mode::name)
-        )
+        ) + &self.models_field()
+    }
+
+    /// ` car=.. opponent_cars=..` for a non-Lacetti field (as the app's
+    /// `drive_replay`), empty otherwise so default headers keep their form.
+    fn models_field(&self) -> String {
+        if self.car.is_default() && self.opponent_cars.iter().all(Car::is_default) {
+            return String::new();
+        }
+        let list = if self.opponent_cars.is_empty() {
+            self.car.to_string()
+        } else {
+            self.opponent_cars
+                .iter()
+                .map(Car::stem)
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        format!(" car={} opponent_cars={list}", self.car)
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -241,6 +306,11 @@ impl Scenario {
             get(k)?.parse().map_err(|e| format!("scenario {k}: {e}"))
         };
         let flag = |k: &str| -> Result<bool, String> { Ok(get(k)? == "1") };
+        // Inputs files written before mixed fields are all-Lacetti.
+        let car = match fields.get("car") {
+            Some(stem) => Car::new(stem).map_err(|e| format!("scenario car: {e}"))?,
+            None => Car::default(),
+        };
         Ok(Self {
             seed: num("seed")?,
             profile: Profile::parse(get("profile")?)?,
@@ -265,6 +335,16 @@ impl Scenario {
             chaos: match fields.get("chaos").copied() {
                 None | Some("mixed") => None,
                 Some(name) => Some(Mode::parse(name)?),
+            },
+            car: car.clone(),
+            // `opponent_cars=<car>` is the header form of "the player's model".
+            opponent_cars: match fields.get("opponent_cars") {
+                Some(list) => {
+                    let list =
+                        Car::list(list).map_err(|e| format!("scenario opponent_cars: {e}"))?;
+                    if list == [car] { Vec::new() } else { list }
+                }
+                None => Vec::new(),
             },
         })
     }
@@ -363,6 +443,8 @@ impl Step {
 pub struct Race {
     pub multi: MultiRuntime,
     pub drivers: Vec<AiDriver>,
+    /// AI data of each opponent's model (driver `i` drives car `i + 1`).
+    pub car_ai: Vec<AiData>,
     /// The app's race manager with its default `--ai` settings.
     pub pacing: crate::ai_pacing::Field,
 }
@@ -521,8 +603,14 @@ impl Session {
             return Err("opponents require body contacts (app --opponents)".into());
         }
         let player_slot = scenario.grid_position - 1;
-        let mut runtime =
-            Runtime::lacetti_on(root, &route, &format!("slot_{player_slot:02}"), 200679)?;
+        let models = scenario.field_models();
+        let mut runtime = Runtime::load(
+            root,
+            &route,
+            &models[0],
+            &format!("slot_{player_slot:02}"),
+            200679,
+        )?;
         runtime.set_assists(scenario.assists)?;
         runtime.enable_lap_timing(root)?;
         if scenario.body_events {
@@ -552,18 +640,27 @@ impl Session {
         } else {
             None
         };
-        let ai = AiData::load(root, route.path(), "touring", "lac")?;
+        // Every model's own AI statistics; the touring class data is shared.
+        let mut by_model = BTreeMap::new();
+        for model in &models {
+            if !by_model.contains_key(model) {
+                let data = AiData::load(root, route.path(), "touring", model.stem())?;
+                by_model.insert(model.clone(), data);
+            }
+        }
+        let ai = by_model[&models[0]].clone();
         let race = if opponents > 0 {
             let table = private.table.as_ref().ok_or("missing private CD01")?;
             let slots: Vec<String> = std::iter::once(player_slot)
                 .chain((0..=opponents).filter(|&i| i != player_slot))
                 .map(|i| format!("slot_{i:02}"))
                 .collect();
-            let refs: Vec<&str> = slots.iter().map(String::as_str).collect();
-            let mut multi = MultiRuntime::lacetti_deforming_on(
+            let entries: Vec<(&str, &Car)> =
+                slots.iter().map(String::as_str).zip(models.iter()).collect();
+            let mut multi = MultiRuntime::load_deforming_on(
                 root,
                 &route,
-                &refs,
+                &entries,
                 table,
                 runtime.body_events,
                 deformation,
@@ -576,11 +673,12 @@ impl Session {
             } else {
                 &[]
             };
+            let car_ai: Vec<AiData> = models[1..].iter().map(|m| by_model[m].clone()).collect();
             // Opponent k uses driver row k (row 0 is the player's slot).
             let drivers = (0..opponents)
                 .map(|i| -> Result<AiDriver, String> {
                     let row = characteristics.get((i + 1) % characteristics.len().max(1));
-                    let p = Parameters::new(&ai, NORMAL_DIFFICULTY, |name| {
+                    let p = Parameters::new(&car_ai[i], NORMAL_DIFFICULTY, |name| {
                         row.and_then(|r| r.get(name).copied()).unwrap_or(1.)
                     })?;
                     Ok(AiDriver::new(p, 0x5eed + i as u32 + 1))
@@ -596,6 +694,7 @@ impl Session {
             let mut race = Race {
                 multi,
                 drivers,
+                car_ai,
                 pacing: crate::ai_pacing::Field::new(
                     crate::ai_pacing::Data::load(root, &settings)?,
                     settings,
@@ -687,7 +786,7 @@ impl Session {
             let cars: Vec<Other> = std::iter::once(&self.runtime)
                 .chain(race.multi.cars.iter().skip(1))
                 .enumerate()
-                .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+                .map(|(i, c)| Other::of(i as u32 + 1, c))
                 .collect();
             // Gentle blips first, hard revving in the second half of the countdown.
             let rev_state = match self.countdown.as_ref().map(State::phase) {
@@ -728,7 +827,7 @@ impl Session {
                         .map(|(_, o)| *o)
                         .collect();
                     let view = View::of(car, race.multi.obstruction(i + 1));
-                    driver.controls(&self.ai, &view, &others, DELTA)
+                    driver.controls(&race.car_ai[i], &view, &others, DELTA)
                 });
             }
             std::mem::swap(&mut self.runtime, &mut race.multi.cars[0]);
@@ -1089,7 +1188,7 @@ impl Chaos {
                     .iter()
                     .enumerate()
                     .skip(1)
-                    .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+                    .map(|(i, c)| Other::of(i as u32 + 1, c))
                     .collect(),
                 race.multi.obstruction(0),
             ),
@@ -1336,6 +1435,9 @@ pub struct LogSegment {
 #[derive(Clone, Debug, Default)]
 pub struct AppLog {
     pub route: Option<String>,
+    /// `drive_replay` car and opponent_cars (absent: all-Lacetti).
+    pub car: Option<Car>,
+    pub opponent_cars: Option<Vec<Car>>,
     pub opponents: usize,
     pub grid_position: Option<usize>,
     pub assists: Option<Assists>,
@@ -1388,12 +1490,14 @@ impl AppLog {
             if let Some(rest) = line.strip_prefix("drive_replay ") {
                 log.route = field(rest, "route").map(str::to_string);
                 log.grid_position = field(rest, "grid_position").and_then(|v| v.parse().ok());
-                // The session builds an all-Lacetti field (docs/CAR_GENERALIZATION.md).
-                if field(rest, "car").is_some_and(|c| c != crate::car::LACETTI)
-                    || field(rest, "opponent_cars").is_some_and(|c| c != crate::car::LACETTI)
-                {
-                    return Err("replay of a non-Lacetti field is not supported".into());
-                }
+                log.car = field(rest, "car")
+                    .map(Car::new)
+                    .transpose()
+                    .map_err(|e| format!("drive_replay car: {e}"))?;
+                log.opponent_cars = field(rest, "opponent_cars")
+                    .map(Car::list)
+                    .transpose()
+                    .map_err(|e| format!("drive_replay opponent_cars: {e}"))?;
             } else if let Some(rest) = line.strip_prefix("drive_assists ") {
                 let mut assists = Assists::parse(rest.trim())?;
                 // Builds before F333 drove the player at damage gain 1.0.
@@ -1519,6 +1623,8 @@ impl AppLog {
             ticks: self.segments.iter().map(|s| s.ticks + 1).sum(),
             reset_rate: 0.,
             chaos: None,
+            car: self.car.clone().unwrap_or_default(),
+            opponent_cars: self.opponent_cars.clone().unwrap_or_default(),
         }
     }
 
@@ -1552,6 +1658,7 @@ impl AppLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn rng_is_reproducible_and_in_range() {
@@ -1581,6 +1688,54 @@ mod tests {
             }
         }
         assert_eq!(Scenario::generate(1, Profile::Quick, available, 12).cars, 12);
+    }
+
+    #[test]
+    fn long_runs_mix_models_and_quick_runs_stay_lacetti() {
+        let available = Available {
+            events: true,
+            deformation: true,
+            characteristics: true,
+        };
+        let mixed = (1..200)
+            .map(|seed| Scenario::generate(seed, Profile::Long, available, 12))
+            .filter(|s| s.field_models().iter().collect::<BTreeSet<_>>().len() == 2)
+            .count();
+        assert!((60..140).contains(&mixed), "{mixed}");
+        for seed in 1..=12 {
+            let s = Scenario::generate(seed, Profile::Quick, available, 12);
+            assert!(s.field_models().iter().all(Car::is_default));
+            assert!(!s.header().contains("car="));
+        }
+        let mut s = Scenario::generate(1, Profile::Quick, available, 12);
+        s.car = Car::new("bmw").unwrap();
+        s.cars = 4;
+        let stems = |s: &Scenario| s.field_models().iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        assert_eq!(stems(&s), ["bmw"; 4]);
+        s.opponent_cars = Car::list("lac,bmw").unwrap();
+        assert_eq!(stems(&s), ["bmw", "lac", "bmw", "lac"]);
+        assert!(s.header().ends_with(" car=bmw opponent_cars=lac,bmw"));
+        assert_eq!(Scenario::parse(&s.header()).unwrap(), s);
+    }
+
+    #[test]
+    fn app_logs_name_a_mixed_field() {
+        let parsed = AppLog::parse(
+            "drive_replay version=1 route=tracks/europe/donington/route_0 opponents=3 grid_position=2 car=bmw opponent_cars=lac,bmw\n\
+             drive_opponents enabled=true count=3 world=shared\n\
+             drive_sample version=1 event=tick segment=0 tick=1 seconds=0.016 wall_seconds=1 throttle=0 brake=0 steering=0 handbrake=true gear=1\n",
+        )
+        .unwrap();
+        let s = parsed.scenario(None, None);
+        assert_eq!(s.car, Car::new("bmw").unwrap());
+        assert_eq!(s.opponent_cars, Car::list("lac,bmw").unwrap());
+        assert_eq!(s.grid_position, 2);
+        let default = AppLog::parse(
+            "drive_replay version=1 route=r opponents=0 grid_position=1\ndrive_sample version=1 event=tick segment=0 tick=1 seconds=0.016 wall_seconds=1 throttle=0 brake=0 steering=0 handbrake=true gear=1\n",
+        )
+        .unwrap()
+        .scenario(None, None);
+        assert!(default.car.is_default() && default.opponent_cars.is_empty());
     }
 
     #[test]

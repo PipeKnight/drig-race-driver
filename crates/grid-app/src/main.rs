@@ -2868,7 +2868,7 @@ fn drive_tick(
             .iter()
             .enumerate()
             .skip(1)
-            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+            .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         let view = View::of(car, opponents.multi.obstruction(0));
         Some(pilot.controls(
@@ -2948,7 +2948,7 @@ fn drive_tick(
         let cars: Vec<Other> = std::iter::once(&driving.runtime)
             .chain(opponents.multi.cars.iter().skip(1))
             .enumerate()
-            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+            .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         // Start state while held [I]: gentle blips first, hard revving in the
         // second half of the countdown.

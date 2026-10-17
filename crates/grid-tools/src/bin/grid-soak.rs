@@ -11,8 +11,9 @@
 //!
 //! Options: --out local/soak/DIR, --seeds A..B, --jobs J, --timeout SECONDS,
 //! --max-cars N, --cars N, --route ROUTE, --ticks N, --grid-position P,
-//! --assists SPEC, --chaos MODE, --props on|off, --keep (keep passing inputs),
-//! --game-root PATH.
+//! --assists SPEC, --chaos MODE, --props on|off, --car STEM, --opponent-cars
+//! STEM[,STEM...] (the app's car options; long runs also mix BMW and Lacetti
+//! fields by themselves), --keep (keep passing inputs), --game-root PATH.
 //! Private inputs: GRID_CONTACT_DIRECTIONS, GRID_BODY_EVENT_PARAMETERS,
 //! GRID_DEFORMATION_PARAMETERS, GRID_AI_CHARACTERISTICS (else local/*.bin).
 use grid_tools::soak::{
@@ -54,6 +55,8 @@ struct Options {
     assists: Option<String>,
     chaos: Option<Mode>,
     props: Option<bool>,
+    car: Option<String>,
+    opponent_cars: Option<String>,
     extra: u64,
 }
 
@@ -81,6 +84,8 @@ impl Default for Options {
             assists: None,
             chaos: None,
             props: None,
+            car: None,
+            opponent_cars: None,
             extra: 0,
         }
     }
@@ -161,6 +166,12 @@ fn scenario_for(options: &Options, seed: u64, private: &Private) -> Result<Scena
     }
     if options.chaos.is_some() {
         s.chaos = options.chaos;
+    }
+    if let Some(car) = &options.car {
+        s.car = grid_tools::car::Car::new(car)?;
+    }
+    if let Some(list) = &options.opponent_cars {
+        s.opponent_cars = grid_tools::car::Car::list(list)?;
     }
     Ok(s)
 }
@@ -993,6 +1004,8 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
                 ("--assists", options.assists.clone()),
                 ("--chaos", options.chaos.map(|m| m.name().to_string())),
                 ("--props", options.props.map(|p| if p { "on" } else { "off" }.to_string())),
+                ("--car", options.car.clone()),
+                ("--opponent-cars", options.opponent_cars.clone()),
             ] {
                 if let Some(value) = value {
                     command.arg(flag).arg(value);
@@ -1186,6 +1199,8 @@ fn parse_options(args: &[String]) -> Result<(Options, Vec<String>)> {
             "--max-cars" => o.max_cars = value(&mut i)?.parse()?,
             "--cars" => o.cars = Some(value(&mut i)?.parse()?),
             "--route" => o.route = Some(value(&mut i)?),
+            "--car" => o.car = Some(value(&mut i)?),
+            "--opponent-cars" => o.opponent_cars = Some(value(&mut i)?),
             "--ticks" => o.ticks = Some(value(&mut i)?.parse()?),
             "--grid-position" => o.grid_position = Some(value(&mut i)?.parse()?),
             "--assists" => o.assists = Some(value(&mut i)?),

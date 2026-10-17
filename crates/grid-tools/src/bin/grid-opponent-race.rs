@@ -313,7 +313,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .cars
             .iter()
             .enumerate()
-            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+            .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         // Race manager before the AI update (0x4095C0).
         if let Some(field) = &mut field {

@@ -69,6 +69,8 @@ pub struct Runtime {
     shift: Option<(u64, assists::Shift)>,
     /// Opt-in breakable route props (`enable_dynamic_props`).
     props: Option<crate::dynamic_props::PropWorld>,
+    /// `collision_main` bounds of the car's `.ned` (description extents).
+    hull: car_collision::Bounds,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -457,6 +459,7 @@ impl Runtime {
             assists: assists::Assists::default(),
             shift: None,
             props: None,
+            hull: shape.bounds,
         })
     }
 
@@ -1090,6 +1093,11 @@ impl Runtime {
     pub fn car(&self) -> &Car {
         &self.car
     }
+    /// The car's AI traffic extents (AI car state +0x110/+0x114 and bumper
+    /// points), from its collision hull and current wheel words.
+    pub fn ai_extents(&self) -> crate::ai_driver::Extents {
+        crate::ai_driver::Extents::from_vehicle(self.hull, &self.state.car.owner.vehicle)
+    }
     pub fn track(&self) -> &Track {
         &self.track
     }
@@ -1169,6 +1177,37 @@ mod tests {
             timed.reset();assert_eq!(timed.ticks,0);assert!(timed.lap.as_ref().unwrap().elapsed().is_none());assert!(timed.lap_events.is_empty());
             eprintln!("source_lap_progress gates=71 points=389 sectors=3 ordered_kinematic_lap_valid=1 source_path_repeat_exact=1 reverse_path_valid_laps=0 actual_driving_ticks=300 actual_start_events={started} no_vehicle_world_feedback=1 late_timing_failure_atomic=1 reset_waits_for_finish=1");
         }).unwrap().join().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires purchased GRID car and route resources"]
+    fn ai_extents_are_each_cars_hull_and_body_offset() {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                // collision_main bounds (docs/CAR_COLLISION.md) and body
+                // offset Z (+0x1638) of each car; no tyre reaches past them.
+                for (stem, half_width, max_z, min_z, offset_z) in [
+                    ("lac", 0.913279f32, 2.241661f32, -2.237876f32, -0.14642298f32),
+                    ("bmw", 0.947784, 2.258862, -2.237876, -0.1827681),
+                ] {
+                    let car = Car::new(stem).unwrap();
+                    let runtime =
+                        Runtime::load(root, &Route::default(), &car, "slot_01", 200679).unwrap();
+                    assert_eq!(f32::from_bits(runtime.state.car.owner.vehicle[0x1638 / 4]), offset_z);
+                    let e = runtime.ai_extents();
+                    assert_eq!(
+                        (e.half_width, e.front, e.rear),
+                        (half_width, max_z + offset_z, min_z + offset_z),
+                        "{stem}"
+                    );
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

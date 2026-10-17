@@ -1472,7 +1472,7 @@ mod tests {
                         .cars
                         .iter()
                         .enumerate()
-                        .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+                        .map(|(i, c)| Other::of(i as u32 + 1, c))
                         .collect();
                     let mut controls: Vec<Controls> = (0..12)
                         .map(|i| {
