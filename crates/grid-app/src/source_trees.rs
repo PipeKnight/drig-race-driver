@@ -28,7 +28,7 @@ fn closest(tree: &pssg::Tree<'_>, node: usize) -> bool {
     false
 }
 
-pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn Error>> {
+pub fn append(root: &Path, route: &Route, car: &mut Car, coverage: bool) -> Result<(), Box<dyn Error>> {
     let bytes = read(&root.join(route.track_file("trees.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_static_meshes(&tree)?;
@@ -80,6 +80,7 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
     let (mut count, mut triangles, mut closest_draws) = (0usize, 0usize, 0usize);
     let mut matched = BTreeSet::new();
     let mut needed = BTreeSet::new();
+    let mut leaf_textures = BTreeSet::new();
     // Stage CPU objects before appending: no partial forest if a source is invalid.
     let mut parts = Vec::new();
     let mut bindings = BTreeMap::new();
@@ -98,6 +99,7 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
         let tex = *diffuse
             .get(d.material)
             .ok_or("tree draw lacks diffuse map")?;
+        if leaves.contains(d.material) { leaf_textures.insert(tex); }
         let name = format!(
             "trees/{}{id}",
             if leaves.contains(d.material) {
@@ -187,7 +189,15 @@ pub fn append(root: &Path, route: &Route, car: &mut Car) -> Result<(), Box<dyn E
     let mut images = BTreeMap::new();
     for t in texture::read_named(&textures, &names)? {
         let key = format!("trees/{}", std::str::from_utf8(t.id)?);
-        images.insert(key, t.validated_dds().0);
+        let (dds, adjusted) = if coverage && leaf_textures.contains(t.id) {
+            crate::foliage_mips::prepare(&t)?
+        } else {
+            (t.validated_dds().0, 0)
+        };
+        if adjusted > 0 {
+            println!("foliage_mip_coverage texture={key} adjusted_levels={adjusted} base=unchanged rgb=unchanged scale_max=2");
+        }
+        images.insert(key, dds);
     }
     if bindings.values().any(|key| !images.contains_key(key)) {
         return Err("tree diffuse texture unresolved".into());
@@ -248,7 +258,7 @@ mod tests {
             track: true,
             liveries: Vec::new(),
         };
-        append(Path::new(&root), &Route::default(), &mut car).unwrap();
+        append(Path::new(&root), &Route::default(), &mut car, false).unwrap();
         assert_eq!(car.parts.len(), 21);
         let facing: Vec<_> = car
             .parts
@@ -296,7 +306,7 @@ mod tests {
                 .values()
                 .all(|key| car.textures.contains_key(key))
         );
-        assert!(append(Path::new(&root), &Route::default(), &mut car).is_err());
+        assert!(append(Path::new(&root), &Route::default(), &mut car, false).is_err());
         assert_eq!(car.parts.len(), 21);
     }
 }

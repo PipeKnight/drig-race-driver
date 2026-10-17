@@ -37,6 +37,7 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod foliage_mips;
 mod texture_cache;
 mod texture_overrides;
 mod texture_upload;
@@ -1497,11 +1498,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--trees" => {
-                graphics.source_trees = match args.next().as_deref() {
-                    Some("source") => true,
-                    Some("off") => false,
-                    _ => return Err("--trees needs source or off".into()),
+                let mode = args.next().ok_or("--trees needs source, coverage or off")?;
+                graphics.source_trees = match mode.as_str() {
+                    "source" | "coverage" => true,
+                    "off" => false,
+                    _ => return Err("--trees needs source, coverage or off".into()),
                 };
+                graphics.foliage_coverage = mode == "coverage";
             }
             "--land" => {
                 graphics.source_land = match args.next().as_deref() {
@@ -2016,7 +2019,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         append_land(&root, &route, &player_car, &mut car)?;
     }
     if track && !collision && graphics.enhanced() && graphics.source_trees {
-        source_trees::append(&root, &route, &mut car)?;
+        source_trees::append(&root, &route, &mut car, graphics.foliage_coverage)?;
     }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))

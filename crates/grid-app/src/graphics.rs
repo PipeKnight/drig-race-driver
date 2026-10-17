@@ -60,6 +60,8 @@ pub struct Settings {
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
     pub source_trees: bool,
+    /// Optional authored coverage-preserving leaf alpha mips; source remains default.
+    pub foliage_coverage: bool,
     pub clearcoat_prepass_fix: bool,
     pub tread_normals: bool,
     pub layered_car: bool,
@@ -93,6 +95,7 @@ impl Default for Settings {
             layered_track: true,
             source_land: true,
             source_trees: false,
+            foliage_coverage: false,
             clearcoat_prepass_fix: true,
             tread_normals: true,
             layered_car: true,
