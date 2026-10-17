@@ -168,7 +168,10 @@ pub enum Command {
     Exit,
     /// Retire from the wreck screen, then leave the event.
     RetireAndExit,
-    Unavailable(&'static str),
+    /// View Replay (`c_post_replay_interface`, the whole race) or the wreck
+    /// screen's Replay (the last 10 s, AUTHORED stand-in for the
+    /// terminal-damage replay); back to this screen on Replay Exit.
+    Replay(crate::replay::Kind),
 }
 
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -275,11 +278,17 @@ impl PostRace {
                 } else {
                     Return::Results
                 };
-                let (pill, id) = self.pills()[self.cursor];
+                let (pill, _) = self.pills()[self.cursor];
                 let confirm = |c| Stage::Confirm(c, back);
                 match pill {
                     Pill::Continue => return Some(Command::Exit),
-                    Pill::Replay => return Some(Command::Unavailable(id)),
+                    Pill::Replay => {
+                        return Some(Command::Replay(if self.stage == Stage::Wreck {
+                            crate::replay::Kind::Instant
+                        } else {
+                            crate::replay::Kind::Full
+                        }));
+                    }
                     Pill::Exit => self.stage = confirm(Confirm::Exit),
                     Pill::Restart => self.stage = confirm(Confirm::Restart),
                     Pill::Retire => {
@@ -340,7 +349,12 @@ pub fn update(
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
     time: Option<Res<Time<Real>>>,
     mut exit: MessageWriter<AppExit>,
+    mut replay: Option<ResMut<crate::replay::Replay>>,
 ) {
+    // A replay owns the input; its exit returns here.
+    if replay.as_ref().is_some_and(|r| r.owns_input()) {
+        return;
+    }
     let dt = time.map_or(0., |t| t.delta_secs());
     if post.segment != driving.segment {
         let segment = driving.segment;
@@ -407,9 +421,12 @@ pub fn update(
             crate::pause_menu::retire_player(&mut driving, trial.as_deref());
             exit.write(AppExit::Success);
         }
-        Command::Unavailable(id) => {
-            log_line!("drive_post_race version=1 action=unavailable button={id}");
+        Command::Replay(kind) => {
+            if let Some(replay) = replay.as_mut() {
+                replay.request(kind, crate::replay::Origin::Results);
+            }
         }
+
     }
 }
 
@@ -783,12 +800,13 @@ mod tests {
         let mut post = PostRace::new(Variant::FreeRace);
         post.on_retire();
         assert_eq!(post.stage, Stage::Results);
-        // View Replay is not in the prototype.
+        // View Replay: the whole race.
         post.step(press(|n| n.right = true));
         assert_eq!(
             post.step(press(|n| n.select = true)),
-            Some(Command::Unavailable("post_race_menu_replay_button_header"))
+            Some(Command::Replay(crate::replay::Kind::Full))
         );
+        assert_eq!(post.stage, Stage::Results);
         post.step(press(|n| n.right = true));
         post.step(press(|n| n.select = true));
         assert_eq!(post.stage, Stage::Confirm(Confirm::Exit, Return::Results));

@@ -30,6 +30,7 @@ mod particles;
 mod pause_menu;
 mod post_race;
 mod race_hud;
+mod replay;
 mod scene_probe;
 mod settings;
 mod sidewall_filter;
@@ -338,8 +339,10 @@ struct DeformingPart {
     source: Mesh,
     raw_bind: Mat4,
 }
+/// The deformation keys drive_present last projected: the player's, then
+/// each opponent's (cleared when a replay hands the meshes back).
 #[derive(Resource, Default)]
-struct DeformationPresentation(Option<Vec<u32>>);
+struct DeformationPresentation(Option<Vec<u32>>, Vec<Option<Vec<u32>>>);
 /// Start-light board of the route's track (`start_lights.xml`). The emissive
 /// texture is swapped per stage; `stage` 0 is the idle board.
 #[derive(Resource)]
@@ -2361,6 +2364,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
         camera::install(&mut app, &root, field.models[0].stem());
         damage_hud::install(&mut app);
+        if app.world().contains_resource::<input::Actions>() {
+            replay::install(&mut app, &root, &route);
+        }
     }
     if track && graphics.source_trees {
         source_trees::install(&mut app);
@@ -2917,8 +2923,13 @@ fn capture(
     probe: Option<Res<scene_probe::Cube>>,
     graphics: Res<graphics::Settings>,
     motion: Option<Res<motion_capture::Motion>>,
+    replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
+    // Diagnostics replay_capture: the replay plays first.
+    if replay.is_some_and(|r| r.capture_pending()) {
+        return;
+    }
     // Scripted drives tick in real time; allow their length plus headroom.
     let limit = driving
         .as_ref()
@@ -3425,7 +3436,12 @@ fn drive_actions(
     actions: Option<Res<input::Actions>>,
     mut exit: MessageWriter<AppExit>,
     mut trial: Option<ResMut<time_trial::Trial>>,
+    replay: Option<Res<replay::Replay>>,
 ) {
+    // A replay owns the keys while it plays.
+    if replay.is_some_and(|r| r.owns_input()) {
+        return;
+    }
     if input.just_pressed(KeyCode::KeyR) {
         restart(&mut driving, trial.as_deref_mut());
     }
@@ -3519,7 +3535,6 @@ fn drive_present(
     trial: Option<Res<time_trial::Trial>>,
     actions: Option<Res<input::Actions>>,
     mut look_back: Local<Option<bool>>,
-    mut opponent_keys: Local<Vec<Option<Vec<u32>>>>,
     (free_look, mut cameras): (
         Option<Res<free_look::FreeLook>>,
         Option<ResMut<camera::Cameras>>,
@@ -3625,6 +3640,7 @@ fn drive_present(
             })
             .collect();
         // Opponent body dents: re-project a car's parts when its field changes.
+        let opponent_keys = &mut presentation.1;
         opponent_keys.resize(opponents.multi.cars.len(), None);
         let mut dirty = Vec::new();
         for (car, runtime) in opponents.multi.cars.iter().enumerate().skip(1) {

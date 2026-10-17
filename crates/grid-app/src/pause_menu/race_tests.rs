@@ -4,7 +4,7 @@ use super::*;
 use crate::{Driving, Opponents, input, time_trial};
 use std::path::Path;
 
-const OPPONENTS: usize = 3;
+pub(crate) const OPPONENTS: usize = 3;
 
 /// A 2-lap race at Donington like `settings/race.ini`, player at the back.
 fn race_app() -> App {
@@ -14,7 +14,7 @@ fn race_app() -> App {
 /// A race on `route` with `OPPONENTS` AI cars; car models cycle through
 /// `models` (car 0, the player, takes the first), player at the back.
 /// `autopilot`: the ported AI drives the player's car too.
-fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> App {
+pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> App {
     use grid_tools::ai_driver::{AiData, AiDriver, Line, Parameters};
     use grid_tools::{car::Car, route::Route};
     let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
@@ -167,7 +167,7 @@ fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: bool) -> Ap
 
 /// FNV-1a over every car's vehicle and physical words (as grid-opponent-race
 /// prints), plus the lap, event clock, race, props and race manager records.
-fn digest(app: &App) -> (Vec<u64>, String) {
+pub(crate) fn digest(app: &App) -> (Vec<u64>, String) {
     let d = app.world().resource::<Driving>();
     let o = d.opponents.as_ref().unwrap();
     let cars = std::iter::once(&d.runtime)
@@ -200,16 +200,16 @@ fn digest(app: &App) -> (Vec<u64>, String) {
     (cars, rest)
 }
 
-fn ticks(app: &App) -> u64 {
+pub(crate) fn ticks(app: &App) -> u64 {
     app.world().resource::<Driving>().runtime.ticks
 }
 
-fn keys(app: &mut App) -> Mut<'_, ButtonInput<KeyCode>> {
+pub(crate) fn keys(app: &mut App) -> Mut<'_, ButtonInput<KeyCode>> {
     app.world_mut().resource_mut::<ButtonInput<KeyCode>>()
 }
 
 /// One menu key press and release (two frames).
-fn tap(app: &mut App, key: KeyCode) {
+pub(crate) fn tap(app: &mut App, key: KeyCode) {
     keys(app).press(key);
     app.update();
     keys(app).release(key);
@@ -217,7 +217,7 @@ fn tap(app: &mut App, key: KeyCode) {
 }
 
 /// Hold W (throttle) and D (right) until the player's tick count.
-fn drive_to(app: &mut App, target: u64) {
+pub(crate) fn drive_to(app: &mut App, target: u64) {
     keys(app).press(KeyCode::KeyW);
     keys(app).press(KeyCode::KeyD);
     while ticks(app) < target {
@@ -226,7 +226,7 @@ fn drive_to(app: &mut App, target: u64) {
     assert_eq!(ticks(app), target);
 }
 
-fn big_stack(f: impl FnOnce() + Send + 'static) {
+pub(crate) fn big_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
         .stack_size(256 * 1024 * 1024)
         .spawn(f)

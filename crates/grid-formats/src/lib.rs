@@ -28,6 +28,7 @@ pub mod tree_placements;
 pub mod physparams;
 pub mod progress;
 pub mod pssg;
+pub mod replay_cameras;
 pub mod scene;
 pub mod skidmarks;
 pub mod start_lights;

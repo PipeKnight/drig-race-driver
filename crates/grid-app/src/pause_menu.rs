@@ -73,7 +73,7 @@ pub const TEST_DRIVE: [Button; 6] = [
 
 /// Not in the prototype yet: shown, not selectable.
 fn available(link: Link) -> bool {
-    !matches!(link, Link::InstantReplay | Link::GhostCar)
+    !matches!(link, Link::GhostCar)
 }
 
 /// Options screen links (`pause_settings_standard`, `_wheel_no_ffb`) [D].
@@ -197,6 +197,9 @@ pub enum Command {
     RetireRace,
     Exit,
     ResetCar,
+    /// `instant_replay`: the last 10 s (docs/REPLAY.md); the menu stays
+    /// open underneath and shows again after Replay Exit.
+    InstantReplay,
     /// Options changed (applied at once).
     Apply(Options),
     /// A button whose feature is not in the prototype.
@@ -361,7 +364,8 @@ impl PauseMenu {
                     }
                     Link::RetireRace => self.confirm(Confirm::RetireRace),
                     Link::Exit => self.confirm(Confirm::FinishTestDrive),
-                    Link::InstantReplay | Link::GhostCar => {}
+                    Link::InstantReplay => return Some(Command::InstantReplay),
+                    Link::GhostCar => {}
                 }
                 None
             }
@@ -731,7 +735,12 @@ pub fn update(
         Option<ResMut<crate::post_race::PostRace>>,
     ),
     mut exit: MessageWriter<AppExit>,
+    mut replay: Option<ResMut<crate::replay::Replay>>,
 ) {
+    // A replay owns the input; after it the menu shows again.
+    if replay.as_ref().is_some_and(|r| r.owns_input()) {
+        return;
+    }
     // A restart from elsewhere (R) closes the menu.
     if menu.open && !driving.paused {
         menu.close();
@@ -789,6 +798,12 @@ pub fn update(
         Command::Exit => {
             log("finish-test-drive");
             exit.write(AppExit::Success);
+        }
+        Command::InstantReplay => {
+            log("instant-replay");
+            if let Some(replay) = replay.as_mut() {
+                replay.request(crate::replay::Kind::Instant, crate::replay::Origin::PauseMenu);
+            }
         }
         Command::Apply(values) => {
             log_line!(
@@ -1062,11 +1077,24 @@ mod tests {
         let mut menu = PauseMenu::new(Variant::TestDrive, false, true, Options::default());
         menu.step(press(|n| n.pause = true));
         menu.step(press(|n| n.down = true));
+        // Instant Replay starts the replay; the menu stays open under it.
         assert_eq!(
             menu.step(press(|n| n.select = true)),
-            Some(Command::Unavailable("pause_mainmenu_button_instant_replay"))
+            Some(Command::InstantReplay)
         );
         assert!(menu.open);
+        // Ghost Car is not in the prototype.
+        for _ in 0..4 {
+            menu.step(press(|n| n.down = true));
+        }
+        assert_eq!(
+            menu.step(press(|n| n.select = true)),
+            Some(Command::Unavailable("test_track_select_ghost_car_title"))
+        );
+        menu.step(press(|n| n.up = true));
+        menu.step(press(|n| n.up = true));
+        menu.step(press(|n| n.up = true));
+        menu.step(press(|n| n.up = true));
         menu.step(press(|n| n.button3 = true));
         assert_eq!(menu.screen, Screen::Confirm(Confirm::ResetCar));
         assert_eq!(
@@ -1316,4 +1344,4 @@ mod tests {
 }
 
 #[cfg(test)]
-mod race_tests;
+pub(crate) mod race_tests;

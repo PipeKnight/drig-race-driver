@@ -46,6 +46,27 @@ impl Field {
             positions: if rest { &self.rest } else { &self.current },
         }
     }
+    /// The moved lattice nodes and the activity flag: the part of the field a
+    /// replay records (the layout and rest lattice are fixed per car).
+    pub fn current(&self) -> (&[[f32; 4]], bool) {
+        (&self.current, self.active)
+    }
+    /// This car's field with a recorded lattice; the node count must match.
+    pub fn with_current(&self, current: &[[f32; 4]], active: bool) -> Result<Self, Error> {
+        if current.len() != self.current.len() || current.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(Error("recorded deformation lattice does not fit"));
+        }
+        let out = Self {
+            dimensions: self.dimensions,
+            spacing: self.spacing,
+            minimum: self.minimum,
+            current: current.to_vec(),
+            rest: self.rest.clone(),
+            active,
+        };
+        out.grid(false).prepare()?;
+        Ok(out)
+    }
     /// Complete cache key includes consumed current/rest nodes and layout only.
     pub fn key(&self) -> Vec<u32> {
         self.dimensions

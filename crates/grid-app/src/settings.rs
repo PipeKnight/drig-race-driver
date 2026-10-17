@@ -79,6 +79,9 @@ pub struct Diagnostics {
     /// Forced texture path for P8 checks: `rgba8` (CPU BC decode) or `etc2`
     /// (private ETC2 cache); `None` picks BC, ETC2, RGBA8 by GPU support.
     pub texture_fallback: Option<String>,
+    /// Seconds: once a scripted drive ends, play an Instant Replay and delay
+    /// the offscreen capture until it has run this long (docs/REPLAY.md).
+    pub replay_capture: Option<f64>,
 }
 
 impl Default for Diagnostics {
@@ -95,6 +98,7 @@ impl Default for Diagnostics {
             damage_zones: false,
             damage_camera: None,
             texture_fallback: None,
+            replay_capture: None,
         }
     }
 }
@@ -118,6 +122,7 @@ impl Diagnostics {
             damage_camera: text("GRID_DAMAGE_CAMERA"),
             texture_fallback: text("GRID_TEXTURE_FALLBACK")
                 .and_then(|v| texture_path("GRID_TEXTURE_FALLBACK", &v).ok().flatten()),
+            replay_capture: text("GRID_REPLAY_CAPTURE").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -137,6 +142,9 @@ impl Diagnostics {
             "damage_zones" => self.damage_zones = on(key, value)?,
             "damage_camera" => self.damage_camera = text(),
             "texture_fallback" => self.texture_fallback = texture_path(key, value)?,
+            "replay_capture" => {
+                self.replay_capture = Some(value.parse().map_err(|_| number(key))?)
+            }
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
         Ok(())
