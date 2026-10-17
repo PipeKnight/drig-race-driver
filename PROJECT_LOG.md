@@ -1,5 +1,7 @@
 # GRID engine project log
 
+F358 playable bee2e56ae01a with the Long Beach tyre-stack fix (2026-10-17, Claude Code): rebuilt with tools/update_prototype.ps1 from main at bee2e56 (91 s). New since playable ab6acdd28e93 (F356): F357 Long Beach barrier stand-ins leave out the catch fence leaning over the track (quick soak 20/20 on Long Beach). Manifest local/playtest/build-20261017T1047331082195Z, built 2026-10-17T10:49:03Z, exe sha256 fd316af2c144b5d6954d0f8cb69cac8c92440ccd53d016f5e08a722e90f94981, cargo/rustc 1.99.0; source driving and Bevy checks passed. Dirty only through the untracked docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md. Not checked: a manual windowed lap.
+
 F357 Long Beach tyre stacks no longer fall through the road: barrier stand-ins leave out a catch fence that leans over the track (2026-10-17, Claude Code). The F354 finding. Details: docs/LONG_BEACH.md sections 5.1-5.2, docs/SOAK_TESTING.md "Long Beach tyre stacks (F357)", docs/ROUTE_PROPS_COLLISION.md F284 note. Evidence: main checkout's local/lb-tyres/ (replays, soak runs, regress outputs, extents/components surveys, the temporary trace source dynamic_props.survey.rs).
 - Cause [V]:
   - The seed-10 replay with a temporary per-contact trace: the two bottom tyres had no car contacts at all. Each had three contacts with prop box 587, normal (−0.015, −0.9999, −0.009), 0.33/0.50 m deep, in their first step.
