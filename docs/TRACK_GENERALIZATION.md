@@ -2,7 +2,8 @@
 
 Status: 2026-10-15, Claude Code. Third circuit (Istanbul Park, 2026-10-17):
 [ISTANBUL_PARK.md](ISTANBUL_PARK.md), which also replaces the start-light open
-item below with per-track sequences. Goal: remove the hard-coded Donington
+item below with per-track sequences. Fourth circuit (Long Beach) and routes whose
+finish is at a later gate: [LONG_BEACH.md](LONG_BEACH.md). Goal: remove the hard-coded Donington
 assumptions so another purchased circuit loads and races end to end, while the
 default (Donington `route_0`) stays bit-identical.
 

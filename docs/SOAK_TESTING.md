@@ -83,6 +83,10 @@ file, so replays never depend on the generator.
   stream, so the other fields of a seed are unchanged. A race holds the grid for
   the track's start-light sequence (Donington 4.0 s, Nürburgring and Istanbul
   5.0 s; [ISTANBUL_PARK.md](ISTANBUL_PARK.md)).
+- Long Beach (`tracks/usa/long_beach/route_0`, the fourth circuit): quick seeds
+  17..20 (`--seeds 17..20`; not in the default 1..16 until its tyre-stack falls
+  are fixed) and a quarter of the long seeds, from their own stream
+  ([LONG_BEACH.md](LONG_BEACH.md) section 5).
 - Car models (F345):
   - quick runs stay all-Lacetti, so their results stay comparable with
     earlier runs; `--car`/`--opponent-cars` mix them;

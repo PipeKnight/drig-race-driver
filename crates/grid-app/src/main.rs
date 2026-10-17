@@ -803,6 +803,11 @@ fn append_objects(
             "track_sponsors/bridgestone/sponsor_event.pssg".into(),
         ),
     ] {
+        // Not every track ships the Le Mans sponsor package (Long Beach has
+        // none); a binding that needs it still fails as unresolved below.
+        if container == "lemans_sponsors.pssg" && !root.join(&path).is_file() {
+            continue;
+        }
         let bytes = read(&root.join(path))?;
         let tree = pssg::read_tree(&bytes)?;
         for texture in texture::read_textures(&tree)? {

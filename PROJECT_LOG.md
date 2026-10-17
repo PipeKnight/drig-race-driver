@@ -1,5 +1,42 @@
 # GRID engine project log
 
+F353 fourth circuit: Long Beach drives solo and races with the AI field; routes finishing at a later gate get lap timing (2026-10-17, Claude Code, night run). Details: docs/LONG_BEACH.md.
+- Choice: from the F350 list, Long Beach route 0 needs no format work. Spa has three blockers, all recorded and none changed:
+  - one chunk has 9 materials (the reader caps at 8; the 4-bit field allows 16);
+  - a prop mesh has a non-UV half-float stream;
+  - the packed body-contact path requires material indices < 8.
+  Jarama route 0 needs AI braking research.
+- Track data [V asset tests]:
+  - 12 grid slots with lap timing; 101 gates over 3655.78 m, sectors at gates 33 and 69; AI line 3580.5 m;
+  - 1325 prop boxes: 124 breakable tyre stacks, 275 static tyre walls;
+  - collision keys mix to the CAR_ row except GRAS (as on every circuit);
+  - start lights: Donington's board object, 7 stages over 5.0 s;
+  - the F341 auto-reset puts a flipped car back on the line.
+- Code:
+  - route::LONG_BEACH and asset tests (route, start_lights, player_reset);
+  - grid-app skips the Le Mans sponsor package when a track lacks it (Long Beach);
+  - grid-soak: quick seeds 17..20 and a quarter of the long seeds on Long Beach (own stream); the default quick set stays 1..16;
+  - settings/race-long-beach.ini and `Play GRID Race Long Beach.cmd`;
+  - lap_progress::start_at_finish re-indexes a circuit whose single forward route finishes at a later gate, so the finish is gate 0. Routes finishing at gate 0 are unchanged.
+- Results [V], release:
+  - Solo AI 81.342 / 78.816 s; two short off-track recoveries at ~2.7 km.
+  - 12-car headless race: 11 cars 2 valid laps; car 8 wrecked on lap 1 by terminal damage.
+  - App static render checked.
+  - Windowed app race (autopilot, 11 opponents, CD01/BP01/DF01, characteristics): 5.0 s countdown, lap 1 valid 1:22.763, all 12 classified, no failure.
+  - Re-indexed routes, solo AI: Donington routes 1-3, Nürburgring route 3 and Jarama route 1 each lap twice validly. Le Mans 0/1: the AI crashes and loses a wheel near the end of lap 1.
+- Finding, recorded and not fixed: `grid-soak quick --route long_beach --seeds 1..12` gives 5/12; `--seeds 17..20` gives 2/4. Every failure is a tyre-stack piece falling through the road.
+  - Replay of seed 10: the pieces spawn 5-10 mm above the road. A car runs over the stack at 34 m/s, and in one tick the 0.15 m bottom tyres are turned ~90° and pushed 0.4-0.7 m under the road.
+  - This is the existing thin-piece-under-a-car weakness of prop contact solving (the F342/F351 family), not a loading error. Seeds 17..20 join the default quick set once it is fixed.
+- Checks (cargo/rustc 1.99.0, release, on 8b8a48b):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 493 passed, 0 failed.
+  - Clippy --workspace --all-targets -D warnings: clean.
+  - Solo identity byte-identical to local/ai-pacing/runs/solo-rebased.txt.
+  - Against an 8b8a48b baseline build, byte-identical: Donington, Nürburgring, Istanbul, mixed lac,bmw and Long Beach 12-car races; Nürburgring and Istanbul solos (local/fourth-track/regress/).
+  - grid-soak quick (1..16): 16/16 pass, every result line equal to the baseline's.
+- Not done:
+  - the Istanbul turn-8 and Long Beach recoveries against the original, which needs a live AI trace with input to the game;
+  - the re-indexed routes in grid-soak or launchers.
+  - Playable not rebuilt.
 F353 the original's race HUD layout and post-race results screens in grid-app (2026-10-17, Claude Code, night run). Details, evidence and decisions: docs/RACE_HUD.md. Builds on F348; docs/PAUSE_MENU.md updated.
 - Evidence [D] (static; private files in the main checkout's local/pause-menu/ and local/hud-results/):
   - Osd/sceneconfig.xml is the HUD tree:
@@ -2620,7 +2657,7 @@ PID29904 closed after the F133 capture; the guarded follow-up reader refused its
 
 
 - [Current reverse-engineering and implementation plan](docs/IMPLEMENTATION_PLAN.md)
-- [Second circuit and route parameter](docs/TRACK_GENERALIZATION.md); [Istanbul Park, the third circuit](docs/ISTANBUL_PARK.md)
+- [Second circuit and route parameter](docs/TRACK_GENERALIZATION.md); [Istanbul Park, the third circuit](docs/ISTANBUL_PARK.md); [Long Beach, the fourth circuit](docs/LONG_BEACH.md)
 - [Deformation grid sampler and wheel geometry investigation](docs/DEFORMATION_GRID.md)
 - [Contact-to-grid record generation and actual Rust pipeline](docs/IMPACT_GENERATION.md)
 - [First Rust resource readers and format specification](docs/RESOURCE_FORMATS.md)
