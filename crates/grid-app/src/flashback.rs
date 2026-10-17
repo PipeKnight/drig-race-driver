@@ -238,6 +238,7 @@ impl Flashback {
     }
 
     /// Ticks of a jump-in are still being run again.
+    #[cfg(test)]
     pub fn restoring(&self) -> bool {
         self.pending.is_some()
     }
