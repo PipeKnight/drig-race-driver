@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G064 — Second graphics update integrated (17 October 2026)
+
+Primary `main` fast-forwarded from `a2c61b2` to `aefbbd8` after exact status/hash guards. The owner's untracked AI report remains unchanged. Verified source `486e7ebcd5ed` / executable SHA256 `bcf548936860bdcb97dde0a7a26a23a64f3046635d68f2fd86b391e8b1d79846` was atomically promoted to main and both verified backups; both playtest/graphics manifests are current. No destination prototype was running or closed. Standard graphics now benefits from recovered source mips; the improved forest remains opt-in. Repeated dedup on new captures found no further duplicates/errors. G063 checks and limitations apply. Continue distant-wall/source-land diagnosis; no owner action is required.
+
+
 ## G063 — Foliage lighting and rectangular mips verified (17 October 2026)
 
 - [Mip research and limits](docs/PSSG_PAYLOADS.md), [source forest](docs/SOURCE_VEGETATION.md). Candidate source `486e7eb`, executable SHA256 `bcf548936860bdcb97dde0a7a26a23a64f3046635d68f2fd86b391e8b1d79846`, release build 1m13s. Restores contiguous mip prefixes for 47 confirmed rectangular maps; 14 nonzero excess layouts remain unsupported. Source pixels stay unchanged.
