@@ -28,7 +28,12 @@ fn closest(tree: &pssg::Tree<'_>, node: usize) -> bool {
     false
 }
 
-pub fn append(root: &Path, route: &Route, car: &mut Car, coverage: bool) -> Result<(), Box<dyn Error>> {
+pub fn append(
+    root: &Path,
+    route: &Route,
+    car: &mut Car,
+    coverage: bool,
+) -> Result<(), Box<dyn Error>> {
     let bytes = read(&root.join(route.track_file("trees.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
     let sources = mesh::read_static_meshes(&tree)?;
@@ -51,6 +56,15 @@ pub fn append(root: &Path, route: &Route, car: &mut Car, coverage: bool) -> Resu
                 && tree
                     .string(i, b"shaderGroup")
                     .is_ok_and(|s| s == b"#facing_foliage.fx")
+        })
+        .map(|i| tree.string(i, b"id"))
+        .collect::<grid_formats::Result<_>>()?;
+    let sheets: BTreeSet<_> = (0..tree.nodes.len())
+        .filter(|&i| {
+            tree.name(i) == b"SHADERINSTANCE"
+                && tree
+                    .string(i, b"shaderGroup")
+                    .is_ok_and(|v| v == b"#treesheet_foliage.fx")
         })
         .map(|i| tree.string(i, b"id"))
         .collect::<grid_formats::Result<_>>()?;
@@ -99,7 +113,9 @@ pub fn append(root: &Path, route: &Route, car: &mut Car, coverage: bool) -> Resu
         let tex = *diffuse
             .get(d.material)
             .ok_or("tree draw lacks diffuse map")?;
-        if leaves.contains(d.material) { leaf_textures.insert(tex); }
+        if leaves.contains(d.material) {
+            leaf_textures.insert(tex);
+        }
         let name = format!(
             "trees/{}{id}",
             if leaves.contains(d.material) {
@@ -168,6 +184,8 @@ pub fn append(root: &Path, route: &Route, car: &mut Car, coverage: bool) -> Resu
                 "trees/{}{id}",
                 if facing.contains(d.material) {
                     "facing/"
+                } else if sheets.contains(d.material) {
+                    "sheet/"
                 } else {
                     ""
                 },
@@ -195,7 +213,9 @@ pub fn append(root: &Path, route: &Route, car: &mut Car, coverage: bool) -> Resu
             (t.validated_dds().0, 0)
         };
         if adjusted > 0 {
-            println!("foliage_mip_coverage texture={key} adjusted_levels={adjusted} base=unchanged rgb=unchanged scale_max=2");
+            println!(
+                "foliage_mip_coverage texture={key} adjusted_levels={adjusted} base=unchanged rgb=unchanged scale_max=2"
+            );
         }
         images.insert(key, dds);
     }
@@ -207,6 +227,18 @@ pub fn append(root: &Path, route: &Route, car: &mut Car, coverage: bool) -> Resu
     {
         return Err("tree namespace already exists".into());
     }
+    let sheet_draws = parts
+        .iter()
+        .filter(|p| p.name.starts_with("trees/sheet/"))
+        .count();
+    let sheet_triangles: usize = parts
+        .iter()
+        .filter(|p| p.name.starts_with("trees/sheet/"))
+        .map(|p| p.mesh.indices().unwrap().len() / 3)
+        .sum();
+    println!(
+        "source_tree_sheets draws={sheet_draws} triangles={sheet_triangles} expansion=cylindrical-world-up orientation=main-camera physics=unchanged"
+    );
     println!(
         "source_trees enabled=true prototypes={} instances={} library_draws={library_draws} closest_draws={closest_draws} placed_draws={count} triangles={triangles} textures={} bounds={world_min:?}..{world_max:?} lod=source-x0 wind=false physics=unchanged alpha=authored-mask05 sampler=existing-repeat",
         matched.len(),
@@ -246,6 +278,42 @@ mod tests {
         );
     }
     #[test]
+    fn sheet_offsets_face_each_centre_without_camera_pitch_or_roll() {
+        let matrix = Mat4::from_scale_rotation_translation(
+            Vec3::splat(1.7),
+            Quat::from_rotation_y(1.2),
+            Vec3::new(10., -3., 20.),
+        );
+        let center = Vec3::new(0.5, 4., -0.7);
+        let world_center = matrix.transform_point3(center);
+        let offset = Vec2::new(-1.3, 0.8);
+        for delta in [Vec3::new(0., 10., 30.), Vec3::new(30., -5., 0.)] {
+            let eye = world_center + delta;
+            let actual = matrix.transform_point3(sheet_expanded(
+                center,
+                offset,
+                eye,
+                matrix,
+                matrix.inverse(),
+                1.7,
+            ));
+            let right = Vec3::Y.cross(Vec3::new(delta.x, 0., delta.z)).normalize();
+            let expected = world_center + (right * offset.x + Vec3::Y * offset.y) * 1.7;
+            assert!(actual.distance(expected) < 0.00001);
+        }
+        assert!(
+            sheet_expanded(
+                center,
+                offset,
+                world_center + Vec3::Y,
+                matrix,
+                matrix.inverse(),
+                1.7
+            )
+            .is_finite()
+        );
+    }
+    #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn purchased_donington_closest_forest_is_bound_without_billboard_duplicates() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
@@ -265,7 +333,44 @@ mod tests {
             .iter()
             .filter_map(|p| FacingSource::from_mesh(&p.name, &p.mesh))
             .collect();
-        assert_eq!(facing.len(), 4);
+        assert_eq!(facing.len(), 7);
+        assert_eq!(facing.iter().filter(|f| f.cylindrical).count(), 3);
+        for part in car
+            .parts
+            .iter()
+            .filter(|p| p.name.starts_with("trees/sheet/"))
+        {
+            let source = FacingSource::from_mesh(&part.name, &part.mesh).unwrap();
+            assert!(source.cylindrical);
+            let points: Vec<_> = source
+                .centers
+                .iter()
+                .zip(&source.offsets)
+                .map(|(p, uv)| {
+                    sheet_expanded(
+                        Vec3::from_array(*p),
+                        Vec2::from_array(*uv),
+                        Vec3::new(-429., -12., -262.),
+                        Mat4::IDENTITY,
+                        Mat4::IDENTITY,
+                        1.,
+                    )
+                })
+                .collect();
+            let Indices::U16(indices) = part.mesh.indices().unwrap() else {
+                panic!("expected source indices")
+            };
+            let mut expanded_triangles = 0;
+            for triangle in indices.as_chunks::<3>().0 {
+                let raw = triangle.map(|i| Vec3::from_array(source.centers[i as usize]));
+                assert!((raw[1] - raw[0]).cross(raw[2] - raw[0]).length_squared() < 1e-10);
+                let p = triangle.map(|i| points[i as usize]);
+                expanded_triangles +=
+                    usize::from((p[1] - p[0]).cross(p[2] - p[0]).length_squared() > 1e-6);
+            }
+            assert_eq!(expanded_triangles, indices.len() / 3);
+            assert!(source.radius() > 1.);
+        }
         for part in car
             .parts
             .iter()
@@ -317,12 +422,14 @@ mod tests {
 /// camera for all passes; shadow/reflection-view orientation is not 1:1 yet.
 #[derive(Clone)]
 pub struct FacingSource {
+    cylindrical: bool,
     centers: Vec<[f32; 3]>,
     offsets: Vec<[f32; 2]>,
 }
 impl FacingSource {
     pub fn from_mesh(name: &str, mesh: &Mesh) -> Option<Self> {
-        if !name.starts_with("trees/facing/") {
+        let cylindrical = name.starts_with("trees/sheet/");
+        if !cylindrical && !name.starts_with("trees/facing/") {
             return None;
         }
         let Some(VertexAttributeValues::Float32x3(centers)) =
@@ -336,6 +443,7 @@ impl FacingSource {
         };
         assert_eq!(centers.len(), offsets.len(), "validated foliage streams");
         Some(Self {
+            cylindrical,
             centers: centers.clone(),
             offsets: offsets.clone(),
         })
@@ -349,6 +457,7 @@ impl FacingSource {
     pub fn placed(&self, matrix: Mat4) -> Facing {
         Facing {
             source: self.clone(),
+            world: matrix,
             inverse: matrix.inverse(),
             scale: matrix.x_axis.truncate().length(),
         }
@@ -357,11 +466,27 @@ impl FacingSource {
 #[derive(Component)]
 pub struct Facing {
     source: FacingSource,
+    world: Mat4,
     inverse: Mat4,
     scale: f32,
 }
 fn expanded(center: Vec3, offset: Vec2, right: Vec3, up: Vec3, inverse: Mat4, scale: f32) -> Vec3 {
     center + inverse.transform_vector3((right * offset.x + up * offset.y) * scale)
+}
+// Original treesheet VS faces each centre about world Y, unlike the
+// spherical inverse-view X/Y offsets used by the nearer facing foliage.
+fn sheet_expanded(
+    center: Vec3,
+    offset: Vec2,
+    eye: Vec3,
+    world: Mat4,
+    inverse: Mat4,
+    scale: f32,
+) -> Vec3 {
+    let world_center = world.transform_point3(center);
+    let toward_eye = Vec3::new(eye.x - world_center.x, 0., eye.z - world_center.z);
+    let right = Vec3::Y.cross(toward_eye).try_normalize().unwrap_or(Vec3::X);
+    expanded(center, offset, right, Vec3::Y, inverse, scale)
 }
 pub fn install(app: &mut App) {
     app.add_systems(Update, present.after(super::drive_present));
@@ -384,15 +509,26 @@ fn present(
             .iter()
             .zip(&facing.source.offsets)
             .map(|(p, uv)| {
-                expanded(
-                    Vec3::from_array(*p),
-                    Vec2::from_array(*uv),
-                    camera.right().as_vec3(),
-                    camera.up().as_vec3(),
-                    facing.inverse,
-                    facing.scale,
-                )
-                .to_array()
+                let point = if facing.source.cylindrical {
+                    sheet_expanded(
+                        Vec3::from_array(*p),
+                        Vec2::from_array(*uv),
+                        camera.translation,
+                        facing.world,
+                        facing.inverse,
+                        facing.scale,
+                    )
+                } else {
+                    expanded(
+                        Vec3::from_array(*p),
+                        Vec2::from_array(*uv),
+                        camera.right().as_vec3(),
+                        camera.up().as_vec3(),
+                        facing.inverse,
+                        facing.scale,
+                    )
+                };
+                point.to_array()
             })
             .collect();
         // Original zero-wind facing VS uses a radial local normal, not the
@@ -402,10 +538,14 @@ fn present(
             .centers
             .iter()
             .map(|p| {
-                Vec3::from_array(*p)
-                    .try_normalize()
-                    .unwrap_or(Vec3::Y)
-                    .to_array()
+                (if facing.source.cylindrical {
+                    facing.inverse.transform_vector3(Vec3::Y)
+                } else {
+                    Vec3::from_array(*p)
+                })
+                .try_normalize()
+                .unwrap_or(Vec3::Y)
+                .to_array()
             })
             .collect();
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, points);

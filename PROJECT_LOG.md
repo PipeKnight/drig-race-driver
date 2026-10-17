@@ -1,12 +1,16 @@
 # GRID engine project log
 
+## G083 — Owner spotting confirms collapsed distant-tree layers (17 October 2026)
+
+[Forest correction](docs/SOURCE_VEGETATION.md).646placements did not establish visible completeness. Three source distant-tree layers use a separate cylindrical treesheet vertex stage; importer included their draws but left centres unexpanded. Source03audit682triangles/1364vertices/zeroXYarea, sourceVS confirms signedUV1horizontal/world-up expansion. Draft extends existing camera-facing presentation to explicitly tagged sheet parts; no new placements or source-install edits. Three targeted tests pass, including all2922rawdegenerate/expandednonzero triangles and nearer-facing control; final app Clippy19.32s passes. GPU comparison pending, nearer foliage/coverage/grass preserved. Prior blanket forest-restored wording is corrected; main playable917ca5f unchanged.
+
 ## G082 — Isolated original light rotation checked; sun mapping still open (17 October 2026)
 
 [Lighting research](docs/SOURCE_SKY_LIGHTING.md). Installed missing Unicorn2.1.4 privately from official PyPI/pinned SHA256; smoke and actual pinned-PE calculation passed. New bounded read-only probe verifies four synthetic/saved angle cases against Ry(-rotation)*Rx(-height), <=2.0e-7 difference,1275instructions/one explicit environment-getter stub per case. Initial instruction guard stopped safely; corrected only after aligned entry-to-RET decoding. Full private failure/success reports retained. This is not live capture: render-context vector/sign selection remains unproved, so authored Bevy sun unchanged. No original install writes or shared Ghidra lock changes.
 
 ## G081 — Source sky scale/exponent recovered; integrated pilot pending (17 October 2026)
 
-[Sky research](docs/SOURCE_SKY_LIGHTING.md). Examined source shader and static XML-to-uniform chain use saved skyscale0.8/skygamma0.7 directly as scale/exponent, despite InvGamma uniform name. Optional --sky-tone source applies the same algebra to background/sourceIBL; raw remains default, linear sampling/original radiometry still unverified. Bounded shared lighting parser3tests including purchased controls and app2tests pass; format/app all-target Clippy18.36s passes. GPU pending. Ghidra project locked: no lock/process modified, used existing private decompilation and installed Capstone/static PE reads. No installs or source-install changes. Main playable917ca5f remains unchanged.
+[Sky research](docs/SOURCE_SKY_LIGHTING.md). Examined source shader and static XML-to-uniform chain use saved skyscale0.8/skygamma0.7 directly as scale/exponent, despite InvGamma uniform name. Optional --sky-tone source applies the same algebra to background/sourceIBL; raw remains default, linear sampling/original radiometry still unverified. Bounded shared lighting parser3tests including purchased controls and app2tests pass; format/app all-target Clippy18.36s passes. Four native4K captures/240tick physical exits pass; raw max1byte difference vs previous image, modest source-tone change.528workspace tests/Clippy29.06s pass before sheet correction. Raw default retained. Ghidra project locked: no lock/process modified, used existing private decompilation and installed Capstone/static PE reads. No installs or source-install changes. Main playable917ca5f remains unchanged.
 
 ## G080 — Farther shadows do not repair the distant strips; playable unchanged (17 October 2026)
 
