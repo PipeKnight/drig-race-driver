@@ -18,7 +18,7 @@ use grid_tools::source_vehicle::{
 };
 use std::collections::VecDeque;
 
-pub const HELP: &str = "--input SPEC: controller settings, comma-separated: device=auto|keyboard|pad|wheel (keyboard and pad: assisted steering; wheel: unassisted, like the original's input/device_type), steering_deadzone/steering_saturation, accelerate_deadzone/accelerate_saturation, brake_deadzone/brake_saturation 0..1 (original Advanced Controls overrides; default: the preset's values). The same keys go in an [input] section of the --assists-file. A gamepad uses the original XInput pad preset read from ActionMap/actionMapPreset4.xml of the game folder.";
+pub const HELP: &str = "--input SPEC: controller settings, comma-separated: device=auto|keyboard|pad|wheel (keyboard and pad: assisted steering; wheel: unassisted, like the original's input/device_type), steering_deadzone/steering_saturation, accelerate_deadzone/accelerate_saturation, brake_deadzone/brake_saturation 0..1 (original Advanced Controls overrides; default: the preset's values). The same keys go in an [input] section of the --assists-file. A gamepad uses the original XInput pad preset read from ActionMap/actionMapPreset4.xml of the game folder. Phone controls (docs/ANDROID.md): touch=auto|on|off (auto: on with a touch screen), tilt=on|off, tilt_max_angle=5..90 degrees (30), tilt_neutral=auto|-90..90 degrees, tilt_smoothing=0..1 s (0.05).";
 
 /// The 23 in-game actions of table 0xE4DEE8, in id order, then the
 /// original's menu actions used by the pause menu (preset `<!-- Menu Actions -->`)
@@ -238,6 +238,10 @@ pub enum Source {
     PadAxis(GamepadAxis),
     /// `unmapped` in a preset: a binding that never has a live source.
     Unmapped,
+    /// AUTHORED phone controls (P11): an on-screen touch zone, 0 or 1.
+    Touch(crate::touch_controls::Button),
+    /// AUTHORED phone tilt as a bi-axis raw value (0.5 + 0.5 tilt).
+    Tilt,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -365,6 +369,53 @@ impl ActionMap {
             }
         }
         (map, unknown)
+    }
+
+    /// AUTHORED phone controls (P11). Touch zones act as keys with the
+    /// keyboard preset's calibrations (pedals uniPos dz 0 sat 1, buttons the
+    /// constructor defaults), so they give exact 0/1 like the original's
+    /// digital pedals. Tilt is a bi-axis source like the pad stick:
+    /// biLower/biUpper with dz 0.05 and sat 1, the values 4CC630 sets for
+    /// steering on controller types 1-3; the Advanced Controls overrides
+    /// apply on top. Menu Back also exits a replay, like Escape.
+    pub fn touch(tilt: bool) -> Self {
+        use crate::touch_controls::Button as B;
+        use Action::*;
+        let pedal = Calibration::new(CalibrationType::UniPositive, 0., 1., 0.5);
+        let button = Calibration::default();
+        let mut map = Self::default();
+        for (action, b, calibration) in [
+            (Accelerate, B::Throttle, pedal),
+            (Brake, B::Brake, pedal),
+            (Handbrake, B::Handbrake, button),
+            (GearUp, B::GearUp, button),
+            (GearDown, B::GearDown, button),
+            (Pause, B::Pause, button),
+            (LookBack, B::LookBack, button),
+            (ChangeView, B::ChangeView, button),
+            (MenuUp, B::MenuUp, button),
+            (MenuDown, B::MenuDown, button),
+            (MenuLeft, B::MenuLeft, button),
+            (MenuRight, B::MenuRight, button),
+            (MenuSelect, B::MenuSelect, button),
+            (MenuBack, B::MenuBack, button),
+            (ReplayExit, B::MenuBack, button),
+        ] {
+            map.bind(action, Source::Touch(b), calibration);
+        }
+        if tilt {
+            map.bind(
+                SteerLeft,
+                Source::Tilt,
+                Calibration::new(CalibrationType::BiLower, 0.05, 1., 0.5),
+            );
+            map.bind(
+                SteerRight,
+                Source::Tilt,
+                Calibration::new(CalibrationType::BiUpper, 0.05, 1., 0.5),
+            );
+        }
+        map
     }
 
     pub fn extend(&mut self, other: &ActionMap) {
@@ -620,6 +671,7 @@ pub fn recognised(name: &str, vendor: Option<u16>) -> Result<(), &'static str> {
 pub fn sample(
     keys: Option<Res<ButtonInput<KeyCode>>>,
     pads: Query<(Entity, &Gamepad), With<PlayerPad>>,
+    mobile: Option<Res<crate::touch_controls::Mobile>>,
     mut actions: ResMut<Actions>,
     mut queue: ResMut<ShiftQueue>,
 ) {
@@ -628,6 +680,8 @@ pub fn sample(
     actions.update(|source| match source {
         Source::Key(k) => keys.as_ref().map(|k2| f32::from(k2.pressed(k))),
         Source::Unmapped => None,
+        Source::Touch(b) => mobile.as_ref().map(|m| f32::from(m.held.down(b))),
+        Source::Tilt => mobile.as_ref().and_then(|m| m.tilt_raw()),
         _ => pad.and_then(|p| pad_raw(p, source)),
     });
     for shift in actions.shifts() {
@@ -712,6 +766,14 @@ pub struct Settings {
     pub steering: Tune,
     pub accelerate: Tune,
     pub brake: Tune,
+    /// AUTHORED phone controls (P11). `None` is the default: touch on when
+    /// the device has a touch screen (Android), tilt on with touch.
+    pub touch: Option<bool>,
+    pub tilt: Option<bool>,
+    pub tilt_max_angle: Option<f32>,
+    /// `auto` (`None`) captures the neutral from the first reading.
+    pub tilt_neutral: Option<f32>,
+    pub tilt_smoothing: Option<f32>,
 }
 
 impl Settings {
@@ -748,6 +810,36 @@ impl Settings {
                 "accelerate_saturation" => settings.accelerate.saturation = fraction()?,
                 "brake_deadzone" => settings.brake.dead_zone = fraction()?,
                 "brake_saturation" => settings.brake.saturation = fraction()?,
+                "touch" | "tilt" => {
+                    let on = match value.as_str() {
+                        "auto" if key == "touch" => None,
+                        "on" | "true" | "1" | "yes" => Some(true),
+                        "off" | "false" | "0" | "no" => Some(false),
+                        _ => return Err(format!("input setting `{key}` needs on or off")),
+                    };
+                    if key == "touch" {
+                        settings.touch = on;
+                    } else {
+                        settings.tilt = on;
+                    }
+                }
+                "tilt_max_angle" | "tilt_neutral" | "tilt_smoothing" => {
+                    let (range, unit) = match key.as_str() {
+                        "tilt_max_angle" => (5. ..=90., "degrees 5..90"),
+                        "tilt_neutral" => (-90. ..=90., "degrees -90..90 or auto"),
+                        _ => (0. ..=1., "seconds 0..1"),
+                    };
+                    let v = match value.parse::<f32>() {
+                        Ok(v) if range.contains(&v) => Some(v),
+                        _ if key == "tilt_neutral" && value == "auto" => None,
+                        _ => return Err(format!("input setting `{key}` needs {unit}")),
+                    };
+                    match key.as_str() {
+                        "tilt_max_angle" => settings.tilt_max_angle = v,
+                        "tilt_neutral" => settings.tilt_neutral = v,
+                        _ => settings.tilt_smoothing = v,
+                    }
+                }
                 _ => return Err(format!("unknown input setting `{key}`")),
             }
         }
@@ -771,6 +863,22 @@ impl Settings {
             Device::Pad => Pads::Any,
             Device::Auto | Device::Wheel => Pads::Recognised,
         }
+    }
+
+    /// Whether the phone controls run: `touch=auto` follows the device's
+    /// touch screen (Android's configuration; false on the desktop).
+    pub fn touch_active(&self, touch_screen: bool) -> bool {
+        self.touch.unwrap_or(touch_screen)
+    }
+
+    /// Tilt steering settings when tilt is on (with the touch controls).
+    pub fn tilt_settings(&self) -> Option<crate::tilt::Settings> {
+        let base = crate::tilt::Settings::default();
+        self.tilt.unwrap_or(true).then(|| crate::tilt::Settings {
+            max_angle: self.tilt_max_angle.unwrap_or(base.max_angle),
+            neutral: self.tilt_neutral,
+            smoothing: self.tilt_smoothing.unwrap_or(base.smoothing),
+        })
     }
 
     /// 654C20: the Advanced Controls overrides go to every binding of
@@ -807,6 +915,23 @@ impl std::fmt::Display for Settings {
                 write!(f, ",{name}_saturation={v}")?;
             }
         }
+        // Phone keys only when set, so the desktop log line is unchanged.
+        let on = |v: bool| if v { "on" } else { "off" };
+        if let Some(v) = self.touch {
+            write!(f, ",touch={}", on(v))?;
+        }
+        if let Some(v) = self.tilt {
+            write!(f, ",tilt={}", on(v))?;
+        }
+        for (name, value) in [
+            ("tilt_max_angle", self.tilt_max_angle),
+            ("tilt_neutral", self.tilt_neutral),
+            ("tilt_smoothing", self.tilt_smoothing),
+        ] {
+            if let Some(v) = value {
+                write!(f, ",{name}={v}")?;
+            }
+        }
         Ok(())
     }
 }
@@ -814,8 +939,16 @@ impl std::fmt::Display for Settings {
 /// Keyboard map plus, unless `device=keyboard`, the pad preset from the
 /// user's own installation, then the Advanced Controls overrides. A missing
 /// or unreadable preset leaves the keyboard alone and is reported.
-pub fn load(root: &std::path::Path, settings: &Settings) -> Result<(Actions, String), String> {
+/// With `touch`, the phone controls' bindings are added too.
+pub fn load(
+    root: &std::path::Path,
+    settings: &Settings,
+    touch: bool,
+) -> Result<(Actions, String), String> {
     let mut map = ActionMap::keyboard();
+    if touch {
+        map.extend(&ActionMap::touch(settings.tilt_settings().is_some()));
+    }
     let mut pad = String::from("off");
     if settings.pads() != Pads::Off {
         let path = root.join("ActionMap").join("actionMapPreset4.xml");
@@ -932,6 +1065,7 @@ mod tests {
                 Source::PadButton(_) => Some(dpad),
                 Source::Key(_) => key,
                 Source::Unmapped => None,
+                Source::Touch(_) | Source::Tilt => None,
             });
             (
                 actions.value(Action::SteerLeft),
@@ -1204,6 +1338,99 @@ mod tests {
     }
 
     #[test]
+    fn phone_settings_parse_round_trip_and_stay_out_of_the_desktop_line() {
+        // Defaults print exactly as before P11.
+        assert_eq!(Settings::default().to_string(), "device=auto");
+        assert!(!Settings::default().touch_active(false));
+        assert!(Settings::default().touch_active(true));
+        let s = Settings::parse(
+            "touch=on tilt=on tilt_max_angle=25 tilt_neutral=-4.5 tilt_smoothing=0",
+        )
+        .unwrap();
+        assert!(s.touch_active(false));
+        let t = s.tilt_settings().unwrap();
+        assert_eq!((t.max_angle, t.neutral, t.smoothing), (25., Some(-4.5), 0.));
+        assert_eq!(Settings::parse(&s.to_string()).unwrap(), s);
+        let d = Settings::default().tilt_settings().unwrap();
+        assert_eq!(d, crate::tilt::Settings::default());
+        assert_eq!(Settings::parse("tilt=off").unwrap().tilt_settings(), None);
+        assert!(!Settings::parse("touch=off").unwrap().touch_active(true));
+        assert_eq!(Settings::parse("touch=auto").unwrap().touch, None);
+        assert_eq!(
+            Settings::parse("tilt_neutral=auto").unwrap().tilt_neutral,
+            None
+        );
+        for bad in [
+            "tilt=auto",
+            "touch=maybe",
+            "tilt_max_angle=2",
+            "tilt_max_angle=120",
+            "tilt_neutral=100",
+            "tilt_smoothing=-1",
+            "tilt_max_angle=auto",
+        ] {
+            assert!(Settings::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn touch_zones_drive_like_keys_and_tilt_like_a_pad_stick() {
+        use crate::touch_controls::Button as B;
+        let mut actions = Actions::new(ActionMap::touch(true), Pads::Off);
+        let run = |actions: &mut Actions, held: &[B], tilt: Option<f32>| {
+            actions.update(|s| match s {
+                Source::Touch(b) => Some(f32::from(held.contains(&b))),
+                Source::Tilt => tilt,
+                _ => None,
+            });
+            actions.controls()
+        };
+        // Idle, no tilt reading yet: centred, +0.0 like the keyboard.
+        let c = run(&mut actions, &[], None);
+        assert_eq!((c.throttle, c.brake, c.handbrake), (0., 0., false));
+        assert_eq!(c.steering.to_bits(), 0f32.to_bits());
+        // Pedals and handbrake are exact 0/1.
+        let c = run(
+            &mut actions,
+            &[B::Throttle, B::Brake, B::Handbrake],
+            Some(0.5),
+        );
+        assert_eq!((c.throttle, c.brake, c.handbrake), (1., 1., true));
+        assert_eq!(c.steering.to_bits(), 0f32.to_bits());
+        // Tilt: raw 0.5 + 0.5 t, dz 0.05, sat 1, positive right -> negative
+        // (right) port steering.
+        let steer = |actions: &mut Actions, t: f32| run(actions, &[], Some(0.5 + 0.5 * t)).steering;
+        assert_eq!(steer(&mut actions, 0.04), 0.);
+        assert_eq!(steer(&mut actions, 1.), -1.);
+        assert_eq!(steer(&mut actions, -1.), 1.);
+        let half = steer(&mut actions, 0.525);
+        assert!((half + 0.5).abs() < 1e-5, "{half}");
+        // The Advanced Controls override reaches the tilt bindings.
+        actions
+            .calibrate(
+                Action::SteerRight,
+                Tune {
+                    dead_zone: Some(0.5),
+                    saturation: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(steer(&mut actions, 0.45), 0.);
+        // Gear buttons edge once per press; Menu Back also exits a replay.
+        run(&mut actions, &[B::GearUp, B::MenuBack], None);
+        assert_eq!(actions.shifts().collect::<Vec<_>>(), vec![Shift::Up]);
+        assert!(actions.pressed(Action::ReplayExit) && actions.pressed(Action::MenuBack));
+        run(&mut actions, &[B::GearUp], None);
+        assert_eq!(actions.shifts().count(), 0);
+        // Without tilt there are no steering bindings.
+        assert!(
+            ActionMap::touch(false)
+                .bindings(Action::SteerLeft)
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn only_gamepads_take_the_pad_preset_by_default() {
         assert!(recognised("Xbox Controller", Some(0x045e)).is_ok());
         assert!(recognised("Controller (XBOX 360 For Windows)", None).is_ok());
@@ -1228,7 +1455,8 @@ mod tests {
     #[ignore = "requires GRID_GAME_ROOT purchased source"]
     fn shipped_pad_preset_reads_without_unknown_axes() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
-        let (actions, pad) = load(std::path::Path::new(&root), &Settings::default()).unwrap();
+        let (actions, pad) =
+            load(std::path::Path::new(&root), &Settings::default(), false).unwrap();
         assert_eq!(actions.pads, Pads::Recognised);
         assert_eq!(pad, "actionMapPreset4");
         let left = actions.map.bindings(Action::SteerLeft);
@@ -1254,6 +1482,7 @@ mod tests {
         let (keyboard, off) = load(
             std::path::Path::new(&root),
             &Settings::parse("device=keyboard").unwrap(),
+            false,
         )
         .unwrap();
         assert_eq!(off, "off");

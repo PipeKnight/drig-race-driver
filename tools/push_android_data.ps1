@@ -55,9 +55,13 @@ enabled = on
 body_contacts = derive
 body_events = derive
 deformation = derive
-[diagnostics]
-# No touch or tilt input yet (P11): the autopilot drives the lap.
-autopilot = on
+[input]
+# Phone controls (P11, docs/ANDROID.md "Controls"): touch zones and tilt
+# steering; touch = auto turns them on with a touch screen. Tilt full lock at
+# tilt_max_angle degrees; the neutral is captured at start and by CENTRE.
+touch = auto
+tilt = on
+tilt_max_angle = 30
 '@
 if ($NoAutopilot) {
     $settings = @($settings -split "`r?`n" | Where-Object { $_ -notmatch '^\[diagnostics\]|^# No touch or tilt|^autopilot' }) -join "`n"

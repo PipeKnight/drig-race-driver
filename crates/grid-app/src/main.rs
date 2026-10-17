@@ -12,6 +12,8 @@ macro_rules! log_line {
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "android")]
+mod android_sensor;
 mod assists;
 mod body_damage;
 mod camera;
@@ -47,7 +49,9 @@ mod foliage_mips;
 mod texture_cache;
 mod texture_overrides;
 mod texture_upload;
+mod tilt;
 mod time_trial;
+mod touch_controls;
 mod track_grade;
 mod track_surface;
 mod tyre_smoke;
@@ -1811,6 +1815,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|source| source.bytes(&root, "DF01"))
         .transpose()?;
     let mut drive_input = None;
+    // Phone controls (P11): `None` when off, else the tilt settings (if any).
+    let mut drive_touch: Option<Option<tilt::Settings>> = None;
     let driving = if drive {
         track = true;
         reference = true;
@@ -1826,8 +1832,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("drive_car car={player_car} label={:?}", player_car.label());
         // The device class decides assisted steering (record +0x33 -> +E6C).
         input_settings.apply_class(&mut driver_aids);
-        let (actions, pad) = input::load(&root, &input_settings)?;
-        println!("drive_input {input_settings} pad_preset={pad}");
+        #[cfg(target_os = "android")]
+        let touch_screen = android::touch_screen();
+        #[cfg(not(target_os = "android"))]
+        let touch_screen = false;
+        let touch = input_settings.touch_active(touch_screen);
+        let (actions, pad) = input::load(&root, &input_settings, touch)?;
+        if touch {
+            let tilt = input_settings.tilt_settings();
+            println!(
+                "drive_input {input_settings} pad_preset={pad} touch=on touch_screen={touch_screen} tilt={tilt:?}"
+            );
+            drive_touch = Some(tilt);
+        } else {
+            println!("drive_input {input_settings} pad_preset={pad}");
+        }
         drive_input = Some(actions);
         runtime.set_assists(driver_aids)?;
         println!("drive_assists {driver_aids}");
@@ -2392,6 +2411,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             let variant = menu.variant;
             input::install(&mut app, actions);
+            if let Some(tilt) = drive_touch {
+                touch_controls::install(&mut app, tilt);
+            }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
             // The original HUD layout and post-race screens (docs/RACE_HUD.md).
             race_hud::install(&mut app);

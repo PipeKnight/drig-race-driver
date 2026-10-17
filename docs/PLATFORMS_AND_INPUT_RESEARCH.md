@@ -518,7 +518,7 @@ Effort is in focused agent sessions. Sessions in the same row group can run in p
 | **P8** | ✔ (7.2, 7.3). **Texture fallback**: remove the BC assert; CPU BC1/BC3 decode when the GPU lacks BC (`bcdec_rs` or our own decoder); optional import-time ASTC/ETC2 cache | — | 1 | the app renders with BC disabled on desktop (forced fallback flag), with a recorded memory delta |
 | **P9** | **Android skeleton**: install and record SDK cmdline-tools, NDK r30 LTS, JDK, Gradle/AGP, cargo-ndk 4.1.2; `grid-app` as `cdylib` with `#[bevy_main]`; Gradle project from Bevy's mobile example (GameActivity 4.4.x matching android-activity 0.6.1, minSdk 31 or 26, target 36); landscape, keep-screen-on; lifecycle (suspend/resume) | P5, P8 | 1–2 | an APK under `local/` that starts on the owner's phone and shows the car on Donington from data placed with `adb push` |
 | **P10** | **Android data import**: folder picker (`ACTION_OPEN_DOCUMENT_TREE`) via JNI, copy to app-specific storage, hash manifest, BP01/DF01 import (P5), progress UI | P9 | 1–2 | data copied from `Documents/GRID` on the phone; the race starts with no adb |
-| **P11** | **Android controls**: tilt source (`ndk-sys` sensor, calibration, maxAngle setting), touch HUD, optional Android pad bridge | P1, P9 | 1 | **the fun target**: a lap steering by tilt with on-screen throttle and brake |
+| **P11** | ✔ code (7.7), device test open. **Android controls**: tilt source (`ndk-sys` sensor, calibration, maxAngle setting), touch HUD, optional Android pad bridge | P1, P9 | 1 | **the fun target**: a lap steering by tilt with on-screen throttle and brake |
 | **P12** | **Android performance and memory**: on-device profiling, tick time on a big core, grass density/shadows/MSAA settings, texture memory, thermal (ADPF) | P9–P11 | 1–2 | a stable 62.5 Hz tick and an acceptable frame rate on the owner's phone, with measurements recorded |
 | P13 | optional **cross-platform determinism**: one libm for all platforms, then re-run the probe validations | — | 1 | Windows/Linux/Android solo laps bit-identical |
 
@@ -770,7 +770,7 @@ Code:
   - `#[bevy_main]` on `main`; `android.rs` sends stdout/stderr to logcat and gives `external_data_path()` as the data dir (P5). The game folder defaults to `<data dir>/Grid`.
   - The texture path is chosen by P8 from the device features (BC, else ETC2 cache in the data dir, else RGBA8).
 - **Gradle project** `android/` (Bevy 0.19.1 mobile example): minSdk 31, target/compile 36, arm64-v8a, `sensorLandscape`, keep-screen-on, immersive system bars. `tools/build_android.ps1` builds the debug APK into `local/android/apk/` with a hash manifest.
-- **Data** [V on desktop]: `tools/push_android_data.ps1` pushes 245 MB: a 19-item subset of the installation and a `settings.ini` (drive on, CD01/BP01/DF01 `derive` from the pushed `grid.exe`, so no private file, autopilot because there are no touch controls yet). The desktop release binary run on the same staged subset gives a log identical to the full install's, apart from timestamps.
+- **Data** [V on desktop]: `tools/push_android_data.ps1` pushes 245 MB: a 19-item subset of the installation and a `settings.ini` (drive on, CD01/BP01/DF01 `derive` from the pushed `grid.exe`, so no private file; since P11 the phone controls instead of the autopilot). The desktop release binary run on the same staged subset gives a log identical to the full install's, apart from timestamps.
 - **Lifecycle**: bevy_winit 0.19.1 creates the surface on resume and drops it on suspend. Audio is not paused on `AppLifecycle::Suspended` yet (the Bevy example does this) [open].
 - **Cold build cost**: the first `cargo ndk` release build compiled about 300 crates in 92 min on this PC, with other sessions building at the same time. The desktop seed (TOOLCHAIN.md) has no aarch64 artifacts. Later builds are incremental. Gradle's first run took 2 min 40 s, including the AGP download.
 
@@ -785,6 +785,29 @@ The owner installed the P9 APK by copying it; it closed at once (no game data on
 - **Controls:** the owner wants only a tilt/touch APK, so the bundled `settings.ini` forces no autopilot (`push_android_data.ps1 -NoAutopilot`) and the APK uses the code's default profile; it is to be built after P11 lands (`tools\build_android.ps1 -BundleData`).
 - **Not done:** a run on a phone, Donington-only trimming (about 23 MB, under 10 %).
 
+### 7.7 P11 Android controls (docs/ANDROID.md "Controls")
+
+All of it is AUTHORED: GRID has no tilt or touch input. Where an original rule exists, it is reused.
+
+- **Action layer** (`input.rs`): two new sources, `Source::Touch(button)` (0/1) and `Source::Tilt` (bi-axis raw 0.5 + 0.5·tilt). `ActionMap::touch(tilt)` binds them:
+  - pedals uniPos dz 0 sat 1 and buttons with the constructor defaults, the keyboard preset's calibrations, so the touch pedals are exactly 0/1 like the original's digital keyboard pedals;
+  - tilt to Steer Left biLower and Steer Right biUpper, dz 0.05, sat 1.0. GRID's pad stick uses dz 0.2 for stick drift, which a fused sensor does not have (6° of a 30° range would feel dead); 0.05/1.0 are the steering values 4CC630 sets for controller types 1–3, and one step of the original's 0..20 dead-zone slider. The Advanced Controls overrides (`steering_deadzone/saturation`, pause menu) reach these bindings like every steering binding;
+  - Menu Back is also bound to Replay Exit, as Escape is on the keyboard.
+  - Max over bindings, the 827D10 record, the shift edge queue and assisted steering (+E6C = 1, the keyboard/pad class) are unchanged; tilt is therefore "pad-like". A wheel-like unassisted tilt mode is not done.
+- **Tilt math** (`tilt.rs`, pure, unit-tested):
+  - up vector from the game rotation vector (third row of getRotationMatrixFromVector) or the normalised accelerometer;
+  - steering angle = rotation about the screen normal: plane angle φ = atan2(up_x, up_y), angle = base − φ with base +90° (display rotation 90) or −90° (rotation 270). Leaning the phone back does not change it (test);
+  - the landscape is inferred from gravity with a 135° flip threshold, since `sensorLandscape` can show either and the NDK has no display-rotation API (JNI `Display.getRotation` is the alternative);
+  - below 0.25 g of in-plane gravity (the phone within about 14° of flat) the last value is kept;
+  - tilt = clamp(wrap(angle − neutral)/maxAngle, −1, 1), then a one-pole low-pass (τ = 0.05 s, `tilt_smoothing`; the plan's "no smoothing at first" was overruled by the P11 brief, and 50 ms is below a typical 100 ms human reaction time [I]);
+  - neutral: first reading, the CENTRE button, or a fixed `tilt_neutral`.
+- **Touch HUD** (`touch_controls.rs`): zones in window fractions, a pure hit test (unit-tested: no overlap within a layer, every zone at least 9 mm on a 150 × 68 mm landscape screen, layer and mode filtering, the 8-touch bound). Drive layer: GAS and BRAKE in the bottom corners, HAND, GEAR ± (manual only), II, CENTRE (tilt only), VIEW, LOOK. Menu layer (paused, post-race or replay): UP/DOWN/`<`/`>` left, OK/BACK right, II. The zones are Bevy UI nodes with `GlobalZIndex(-1)`, so the race HUD (F353) and pause menu (F348) draw on top; the race HUD has no touch handling, so nothing competes for the touches. In touch mode the UI scale is height/720 (at most 1).
+- **Sensor** (`android_sensor.rs`, `cfg(target_os = "android")`): `ndk-sys` 0.6 ASensorManager on its own looper thread; `TYPE_GAME_ROTATION_VECTOR` at 100 Hz (accelerometer fallback); off on suspend through `AppLifecycle`. `android::touch_screen()` reads `AConfiguration` touchscreen = finger for `touch = auto`.
+- **Settings**: `[input] touch`, `tilt`, `tilt_max_angle`, `tilt_neutral`, `tilt_smoothing`. They print in the `drive_input` line only when set, so the desktop line is unchanged. `tools/push_android_data.ps1` writes `touch = auto`, `tilt = on`, `tilt_max_angle = 30` instead of the autopilot.
+- **Desktop**: with `touch = auto` the desktop loads no touch bindings and installs no touch systems; `input::sample` reads an absent resource. Keyboard and pad maps are unchanged (the 512-combination keyboard test passes).
+- **Android gamepad bridge: not done.** gilrs has no Android back end. winit 0.30.13 turns pad buttons into `Key::Unidentified` and drops the axes (7.6, [S]), so a bridge must read android-activity's `InputEvent::MotionEvent`/`KeyEvent` before or beside winit. Left for P11b, with a pad on the phone.
+- **Not tested on a device** (section 8): sensor sign and landscape inference, zone feel, the UI scale, multi-touch, menu navigation by touch.
+
 ## 8. Open questions and tests that need hardware
 
 1. **Android device:** the tables of 1.2 have not been executed on ARM. P9 should run the unit tests (or a small `grid-world` self-test) on the phone.
@@ -792,7 +815,7 @@ The owner installed the P9 APK by copying it; it closed at once (no game data on
 3. **Input sampling against physics substeps** in the original: trace the order of `AFDB50`/`827D10`/`828670` against `A03670`.
 4. **FFB snapshot writer:** which physics values fill the per-car snapshot. This is static research and can be done in P4.
 5. **Missing pedal axis behaviour** (uniNegative with no source reads 1.0 [I]), the SetCooperativeLevel flags, and whether the native-friction effect is ever created.
-6. **GameActivity joystick forwarding** and MTP access to `Android/data` on the owner's phone. Code reading (7.6): GameActivity delivers pad events, but neither gilrs (no Android backend) nor winit 0.30 (buttons as `Key::Unidentified`, no axes) passes them to Bevy.
+6. **GameActivity joystick forwarding** and MTP access to `Android/data` on the owner's phone. Code reading (7.6): GameActivity delivers pad events, but neither gilrs (no Android backend) nor winit 0.30 (buttons as `Key::Unidentified`, no axes) passes them to Bevy. P11 (7.7): tilt sign, landscape inference, touch zone feel, UI scale and menu navigation by touch.
 7. **Vulkan vs GLES stability** on the owner's phone GPU (Mali/Adreno/Xclipse), and whether it supports BC.
 8. **SDL3 alongside gilrs and Logitech G HUB** on Windows.
 9. **libm differences** between platforms (1.3): measure in P7 or P13 before promising identical ghosts or replays across platforms.

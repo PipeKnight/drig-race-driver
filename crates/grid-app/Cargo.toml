@@ -27,3 +27,5 @@ libc = "0.2"
 # Calls MainActivity (log file, error screen) from android.rs; the version
 # cpal already uses on Android.
 jni = "0.21"
+# Tilt sensor (P11): ASensorManager through the NDK, the version android-activity uses.
+ndk-sys = "0.6"
