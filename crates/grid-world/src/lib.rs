@@ -36,6 +36,7 @@ pub mod deformation_volume;
 pub mod deformation_world;
 mod deforming_group_frame;
 pub mod deforming_physical_frame;
+pub mod driver_aids;
 pub mod dynamics;
 pub mod finalize;
 pub mod force_equations;

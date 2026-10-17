@@ -126,7 +126,10 @@ fn engine(b: &mut [u32], delta: f32) -> Result<f32, Error> {
         }
     }
     let mut blend = f(b, e + 0xbc);
-    if byte(b, 0x155a) != 0 {
+    if let Some(p) = crate::driver_aids::graded(byte(b, 0x155a)) {
+        // Graded Traction Control (AUTHORED): part of the off scale.
+        blend = (blend * crate::driver_aids::scale(p)).clamp(0., 1.);
+    } else if byte(b, 0x155a) != 0 {
         blend = (blend * c(0x3f8e38e4)).clamp(0., 1.);
     }
     if f(b, e + 0xc8) > 0. {

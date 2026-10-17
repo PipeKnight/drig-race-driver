@@ -192,9 +192,9 @@ impl Scenario {
         }
         .to_string();
         let mut assists = Assists {
-            traction_control: rng.chance(0.5),
+            traction_control: rng.chance(0.5).into(),
             stability_control: rng.chance(0.5),
-            braking_assist: rng.chance(0.5),
+            braking_assist: rng.chance(0.5).into(),
             transmission: if rng.chance(0.3) {
                 Transmission::Manual
             } else {

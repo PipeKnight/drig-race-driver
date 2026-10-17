@@ -206,6 +206,9 @@ default configuration, so it is recorded here and left as a follow-up.
   X shifts up and Z shifts down. The original binds A/Z, but A is the prototype's steer-left
   alias. The launchers pass `GRID_PLAY_ASSISTS` or `local\assists.txt`.
 
+The front-end Driver Aids screen, the settings it saves and the port's graded (25/50 %) Traction
+Control and Braking Assist: [DRIVER_AIDS.md](DRIVER_AIDS.md).
+
 ## 5. Test matrix and verification
 
 The matrix is every combination of the five settings: TC × SC × BA × {Automatic, Manual} ×

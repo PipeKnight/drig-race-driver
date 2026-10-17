@@ -285,7 +285,10 @@ fn brakes(s: &mut Frame, delta: f32) {
         && byte(b, 0x1640) == 0;
     let mut exceeded = false;
     for i in 0..4 {
-        let command = if byte(b, 0x1559) != 0 {
+        let command = if let Some(p) = crate::driver_aids::graded(byte(b, 0x1559)) {
+            // Graded Braking Assist (AUTHORED): part of the off scale.
+            (f(b, 0xe20) * crate::driver_aids::scale(p)).clamp(0., 1.)
+        } else if byte(b, 0x1559) != 0 {
             (f(b, 0xe20) * c(0x3f8e38e4)).clamp(0., 1.)
         } else {
             f(b, 0xe20)

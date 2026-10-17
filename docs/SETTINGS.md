@@ -34,10 +34,11 @@ Grammar:
 | `[private]` | `body_contacts` | `derive`, a CD01 path, or `off` | `--body-contacts PATH\|derive` |
 | | `body_events` | `derive`, a BP01 path, or `off` | `--body-events PATH\|derive` |
 | | `deformation` | `derive`, a DF01 path, or `off` | `--deformation PATH\|derive` |
-| `[assists]` | `tcs`, `stability`, `braking`, `gearbox`, `input` | as `--assists` | `--assists`, `--assists-file` |
+| `[assists]` | `tcs`, `stability`, `braking`, `gearbox`, `input` | as `--assists`; `tcs` and `braking` also `0`/`25`/`50`/`100` (25/50 % are AUTHORED graded aids, [DRIVER_AIDS.md](DRIVER_AIDS.md)). The front end's Driver Aids screen saves `tcs`, `stability`, `braking`, `gearbox` here in `<data dir>/settings.ini` | `--assists`, `--assists-file` |
 | `[input]` | `device`, `*_deadzone`, `*_saturation`; phone controls `touch`, `tilt`, `tilt_max_angle`, `tilt_neutral`, `tilt_smoothing` ([ANDROID.md](ANDROID.md) "Controls") | as `--input` | `--input` |
 | `[ai]` | `difficulty` (0..1 or `normal`), `catchup` (`rd_N_star`, `on` = `rd_3_star`, `off`), `choreographer`, `mistakes` (`on`/`off`) | 0.606, `rd_3_star`, on, on (AI_DRIVER_PORT.md, "Mistakes, failures and race pacing") | `--ai` |
 | `[sound]` | `effects` | 0..100, percent (default 100): the pause menu's Effects Volume, engine and tyre sound | none |
+| `[front_end]` | `show` | `on` (default) / `off`: the Race Options front end with Driver Aids before the race ([DRIVER_AIDS.md](DRIVER_AIDS.md)); never shown for scripted or autopilot runs | none |
 | `[osd]` | `lap_timer`, `position`, `minimap`, `dials` | `on` (default) / `off`: the pause menu's Screen Setup, the HUD's lap group, race position, minimap and dial (docs/RACE_HUD.md) | none |
 | | `speed_units` | `kph` (default) or `mph` | none |
 | `[diagnostics]` | `free_look` | `yaw,pitch` | legacy `GRID_FREE_LOOK` |

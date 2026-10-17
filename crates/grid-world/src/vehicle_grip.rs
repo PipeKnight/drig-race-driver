@@ -183,10 +183,17 @@ pub fn apply(
         if s.words[0x1558 / 4] & 255 != 0 {
             grip = (1. - s.f(if i < 2 { 0x1174 } else { 0x1170 })) * grip;
         }
-        if s.f(0xe74) > s.f(0x1168) {
+        // Graded Braking Assist (AUTHORED): the lock-up needs the brake held
+        // 1/p times as long.
+        let lock = match crate::driver_aids::graded((s.words[0x1558 / 4] >> 8) as u8) {
+            Some(p) => s.f(0xe74) > s.f(0x1168) / p,
+            None => s.f(0xe74) > s.f(0x1168),
+        };
+        if lock {
             grip = (1. - s.f(0x116c)) * grip;
             s.set(w + 0x104, 0.);
         }
+        let traction = crate::driver_aids::graded((s.words[0x1558 / 4] >> 16) as u8);
         if (s.words[0x1558 / 4] >> 16) & 255 != 0
             && s.f(0x185c) > f32::from_bits(0x3f66_6666)
             && s.f(w + 0x10c) > 0.
@@ -199,6 +206,8 @@ pub fn apply(
             };
             let factor = ((1. - t.clamp(0., 1.)) * s.f(0x1164))
                 * ((s.f(0x185c) - f32::from_bits(0x3f66_6666)) * f32::from_bits(0x411f_fffe));
+            // Graded Traction Control (AUTHORED): part of the grip penalty.
+            let factor = traction.map_or(factor, |p| p * factor);
             grip = (1. - factor) * grip;
         }
         grip = f(&v, 0x298 + i * 4) * grip;

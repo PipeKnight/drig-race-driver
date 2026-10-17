@@ -46,6 +46,7 @@ mod sky;
 mod sky_environment;
 mod source_trees;
 mod foliage_mips;
+mod front_end;
 mod texture_cache;
 mod texture_overrides;
 mod texture_upload;
@@ -2370,7 +2371,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             app.add_systems(Update, update_orbit);
         }
     }
-    if let Some(driving) = driving {
+    if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
         // validation drive into a breakable route prop.
         if driving.scripted_ticks.is_some()
@@ -2439,6 +2440,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 touch_controls::install(&mut app, tilt);
             }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
+            // The Race Options front end with Driver Aids before the race
+            // (docs/DRIVER_AIDS.md); not for scripted runs.
+            if profile.front_end != Some(false)
+                && driving.scripted_ticks.is_none()
+                && !settings::diagnostics().autopilot
+            {
+                driving.paused = true;
+                front_end::install(&mut app, driving.runtime.assists);
+            }
             // The original HUD layout and post-race screens (docs/RACE_HUD.md).
             race_hud::install(&mut app);
             post_race::install(&mut app, variant);
@@ -3572,9 +3582,10 @@ fn drive_actions(
     mut exit: MessageWriter<AppExit>,
     mut trial: Option<ResMut<time_trial::Trial>>,
     replay: Option<Res<replay::Replay>>,
+    front: Option<Res<front_end::FrontEnd>>,
 ) {
-    // A replay owns the keys while it plays.
-    if replay.is_some_and(|r| r.owns_input()) {
+    // A replay owns the keys while it plays, the front end before the race.
+    if replay.is_some_and(|r| r.owns_input()) || front.is_some_and(|f| f.open) {
         return;
     }
     if input.just_pressed(KeyCode::KeyR) {

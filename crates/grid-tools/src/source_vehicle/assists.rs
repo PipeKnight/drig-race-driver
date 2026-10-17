@@ -38,14 +38,76 @@ pub enum Shift {
     Gear(i8),
 }
 
+/// Aid strength in percent. The original has on (100) and off (0); 25 and 50
+/// are the port's graded steps (AUTHORED, docs/DRIVER_AIDS.md,
+/// `grid_world::driver_aids`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Level(u8);
+
+impl Level {
+    pub const OFF: Self = Self(0);
+    pub const ON: Self = Self(100);
+    /// The steps the options screen cycles through.
+    pub const STEPS: [Self; 4] = [Self(0), Self(25), Self(50), Self(100)];
+
+    pub fn new(percent: u8) -> Option<Self> {
+        Self::STEPS.into_iter().find(|l| l.0 == percent)
+    }
+    pub fn percent(self) -> u8 {
+        self.0
+    }
+    pub fn is_on(self) -> bool {
+        self == Self::ON
+    }
+    /// The vehicle byte: 0 on, 1 off (the original's), graded otherwise.
+    pub fn byte(self) -> u8 {
+        grid_world::driver_aids::byte(self.0)
+    }
+    /// The next (or previous) step, wrapping (`wrap="true"`).
+    pub fn step(self, up: bool) -> Self {
+        let i = Self::STEPS.iter().position(|&l| l == self).unwrap_or(3);
+        Self::STEPS[if up { (i + 1) % 4 } else { (i + 3) % 4 }]
+    }
+    fn parse(key: &str, value: &str) -> Result<Self, String> {
+        match value {
+            "on" | "true" | "1" | "yes" => Ok(Self::ON),
+            "off" | "false" | "no" => Ok(Self::OFF),
+            v => v
+                .trim_end_matches('%')
+                .parse()
+                .ok()
+                .and_then(Self::new)
+                .ok_or_else(|| format!("assist `{key}` needs on, off, 0, 25, 50 or 100")),
+        }
+    }
+}
+
+impl From<bool> for Level {
+    fn from(on: bool) -> Self {
+        if on { Self::ON } else { Self::OFF }
+    }
+}
+
+impl std::fmt::Display for Level {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            100 => f.write_str("on"),
+            0 => f.write_str("off"),
+            p => write!(f, "{p}%"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Assists {
-    /// Option `driveraid_traction`; off sets +155A.
-    pub traction_control: bool,
+    /// Option `driveraid_traction`; off sets +155A. 25/50 % are graded
+    /// (AUTHORED).
+    pub traction_control: Level,
     /// Option `driveraid_steering`, shown as Stability Control; off sets +1558.
     pub stability_control: bool,
     /// Option `driveraid_brake`, shown as Braking Assist; off sets +1559.
-    pub braking_assist: bool,
+    /// 25/50 % are graded (AUTHORED).
+    pub braking_assist: Level,
     pub transmission: Transmission,
     pub input: Input,
     /// Wheel response record +14: the constructor's 0.4 unless the
@@ -59,9 +121,9 @@ pub struct Assists {
 impl Default for Assists {
     fn default() -> Self {
         Self {
-            traction_control: true,
+            traction_control: Level::ON,
             stability_control: true,
-            braking_assist: true,
+            braking_assist: Level::ON,
             transmission: Transmission::Automatic,
             input: Input::Keyboard,
             wheel_response: f32::from_bits(0x3ecc_cccd),
@@ -75,9 +137,9 @@ impl Assists {
     /// the event disables assists (FUN_006572D0).
     pub fn none() -> Self {
         Self {
-            traction_control: false,
+            traction_control: Level::OFF,
             stability_control: false,
-            braking_assist: false,
+            braking_assist: Level::OFF,
             transmission: Transmission::Manual,
             ..Self::default()
         }
@@ -93,8 +155,8 @@ impl Assists {
     /// Player-car bytes, written as FUN_00654C20 and FUN_00828670 do.
     pub fn apply(&self, vehicle: &mut [u32]) {
         byte(vehicle, 0x1558, u8::from(!self.stability_control));
-        byte(vehicle, 0x1559, u8::from(!self.braking_assist));
-        byte(vehicle, 0x155a, u8::from(!self.traction_control));
+        byte(vehicle, 0x1559, self.braking_assist.byte());
+        byte(vehicle, 0x155a, self.traction_control.byte());
         let [automatic, clutch, reverse] = gearbox_bytes(self.gearbox_mode());
         byte(vehicle, 0x1970, automatic);
         byte(vehicle, 0x1971, clutch);
@@ -125,11 +187,15 @@ impl Assists {
                 _ => Err(format!("assist `{key}` needs on or off")),
             };
             match key.as_str() {
-                "tcs" | "traction" | "traction_control" => assists.traction_control = on()?,
+                "tcs" | "traction" | "traction_control" => {
+                    assists.traction_control = Level::parse(&key, &value)?
+                }
                 "stability" | "stability_control" | "scs" | "esp" => {
                     assists.stability_control = on()?
                 }
-                "braking" | "braking_assist" | "brake" | "abs" => assists.braking_assist = on()?,
+                "braking" | "braking_assist" | "brake" | "abs" => {
+                    assists.braking_assist = Level::parse(&key, &value)?
+                }
                 "gearbox" | "transmission" | "gears" => {
                     assists.transmission = match value.as_str() {
                         "auto" | "automatic" => Transmission::Automatic,
@@ -172,9 +238,9 @@ impl Assists {
                 }
                 "all" => {
                     let on = on()?;
-                    assists.traction_control = on;
+                    assists.traction_control = on.into();
                     assists.stability_control = on;
-                    assists.braking_assist = on;
+                    assists.braking_assist = on.into();
                 }
                 "preset" => {
                     assists = match value.as_str() {
@@ -196,9 +262,9 @@ impl std::fmt::Display for Assists {
         write!(
             f,
             "tcs={},stability={},braking={},gearbox={},input={}",
-            on(self.traction_control),
+            self.traction_control,
             on(self.stability_control),
-            on(self.braking_assist),
+            self.braking_assist,
             match self.transmission {
                 Transmission::Automatic => "automatic",
                 Transmission::Manual => "manual",
@@ -428,7 +494,7 @@ mod tests {
         assert_eq!(b[0x1558 / 4], 0);
         assert_eq!(b[0xe6c / 4], 1);
         let a = Assists::parse("abs=on,tcs=off,stability=off,gearbox=manual").unwrap();
-        assert!(!a.traction_control && !a.stability_control && a.braking_assist);
+        assert!(!a.traction_control.is_on() && !a.stability_control && a.braking_assist.is_on());
         assert_eq!(a.gearbox_mode(), 2);
         a.apply(&mut b);
         assert_eq!(b[0x1558 / 4], 0x0001_0001);
@@ -443,6 +509,32 @@ mod tests {
         for bad in ["tcs", "tcs=maybe", "gearbox=cvt", "linearity=2", "turbo=on"] {
             assert!(Assists::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn graded_levels_parse_display_and_bytes() {
+        let a = Assists::parse("tcs=25 braking=50%").unwrap();
+        assert_eq!(a.traction_control.percent(), 25);
+        assert_eq!(a.braking_assist.percent(), 50);
+        assert_eq!(Assists::parse(&a.to_string()).unwrap(), a);
+        assert!(a.to_string().starts_with("tcs=25%,stability=on,braking=50%"));
+        // 0 and 100 are the original's off and on, with their bytes 1 and 0.
+        let off = Assists::parse("tcs=0,braking=0").unwrap();
+        assert_eq!(off, Assists::parse("tcs=off,braking=off").unwrap());
+        assert_eq!(Assists::parse("tcs=100").unwrap(), Assists::default());
+        let mut b = vec![0u32; 0x2000 / 4];
+        off.apply(&mut b);
+        assert_eq!(b[0x1558 / 4], 0x0001_0100);
+        a.apply(&mut b);
+        assert_eq!(b[0x1558 / 4], (0x80 | 75) << 16 | (0x80 | 50) << 8);
+        assert!(Assists::parse("tcs=30").is_err());
+        // Right cycles off, 25, 50, on and wraps.
+        let steps: Vec<u8> = std::iter::successors(Some(Level::OFF), |l| Some(l.step(true)))
+            .take(5)
+            .map(Level::percent)
+            .collect();
+        assert_eq!(steps, [0, 25, 50, 100, 0]);
+        assert_eq!(Level::OFF.step(false), Level::ON);
     }
 
     #[test]
@@ -582,7 +674,7 @@ mod tests {
                 };
                 let on = launch(Assists::default());
                 let off = launch(Assists {
-                    traction_control: false,
+                    traction_control: Level::OFF,
                     ..Default::default()
                 });
                 eprintln!("assists_launch tcs_on={on:?} tcs_off={off:?}");
@@ -613,12 +705,70 @@ mod tests {
                 };
                 let on = brake(Assists::default());
                 let off = brake(Assists {
-                    braking_assist: false,
+                    braking_assist: Level::OFF,
                     ..Default::default()
                 });
                 eprintln!("assists_brake ba_on={on:?} ba_off={off:?}");
                 assert_eq!((on.0, on.1), (0., 0));
                 assert!(off.0 > 0.3 && off.1 > 0);
+                // Graded steps (AUTHORED): between on and off.
+                let level = |p| Level::new(p).unwrap();
+                let tc: Vec<_> = [25, 50]
+                    .map(|p| {
+                        launch(Assists {
+                            traction_control: level(p),
+                            ..Default::default()
+                        })
+                    })
+                    .into();
+                let ba: Vec<_> = [25, 50]
+                    .map(|p| {
+                        brake(Assists {
+                            braking_assist: level(p),
+                            ..Default::default()
+                        })
+                    })
+                    .into();
+                eprintln!("assists_graded tcs_25_50={tc:?} ba_25_50={ba:?}");
+                let (tc_on, tc_off) = (launch(Assists::default()).0, launch(Assists {
+                    traction_control: Level::OFF,
+                    ..Default::default()
+                }).0);
+                for (slip, _) in &tc {
+                    assert!(*slip > tc_on && *slip < tc_off, "{slip} {tc_on} {tc_off}");
+                }
+                assert!(tc[0].0 > tc[1].0, "25 % slips more than 50 %");
+                // The lock-up comes later, so the car stops later than with
+                // the aid off and sooner than with it on.
+                assert!(off.2 < ba[0].2 && ba[0].2 < ba[1].2 && ba[1].2 < on.2, "{ba:?} {off:?} {on:?}");
+                // 0 % is the original's off and 100 % its on, bit for bit: the
+                // same run as with the bytes written as the original does.
+                let mut graded = new(Assists::parse("tcs=0 braking=0").unwrap());
+                let mut original = new(Assists::default());
+                for b in [
+                    &mut original.state.car.owner.vehicle[..],
+                    &mut original.state.car.frame.body[..],
+                ] {
+                    byte(b, 0x1559, 1);
+                    byte(b, 0x155a, 1);
+                }
+                let mut hundred = new(Assists::parse("tcs=100 braking=100").unwrap());
+                let mut default = new(Assists::default());
+                for tick in 0..700 {
+                    let c = Controls {
+                        throttle: if tick < 400 { 1. } else { 0. },
+                        brake: if tick < 400 { 0. } else { 1. },
+                        steering: if (200..300).contains(&tick) { 0.3 } else { 0. },
+                        ..Default::default()
+                    };
+                    for r in [&mut graded, &mut original, &mut hundred, &mut default] {
+                        r.tick(c).unwrap();
+                    }
+                    assert_eq!(graded.state.car.owner.vehicle, original.state.car.owner.vehicle);
+                    assert_eq!(graded.state.car.owner.physical, original.state.car.owner.physical);
+                    assert_eq!(hundred.state.car.owner.vehicle, default.state.car.owner.vehicle);
+                    assert_eq!(hundred.state.car.owner.physical, default.state.car.owner.physical);
+                }
                 // Stability control off: less front grip, a lower yaw rate in a
                 // steady powered turn.
                 let turn = |a: Assists| {
