@@ -12,7 +12,7 @@ use bevy::{
         DirectionalLightShadowMap, ShadowFilteringMethod, atmosphere::ScatteringMedium,
         light_consts::lux,
     },
-    pbr::{AtmosphereSettings, ScreenSpaceAmbientOcclusion, ScreenSpaceReflections},
+    pbr::{AtmosphereSettings, DistanceFog, FogFalloff, ScreenSpaceAmbientOcclusion, ScreenSpaceReflections},
     post_process::bloom::Bloom,
     prelude::*,
     render::view::{ColorGrading, ColorGradingGlobal},
@@ -67,6 +67,8 @@ pub struct Settings {
     pub smooth_tyres: bool,
     pub track_grade: bool,
     pub saved_grade: Option<grid_formats::graphics_grade::Grade>,
+    /// Opt-in distance-only adaptation of saved source fog; height formula unknown.
+    pub saved_fog: Option<grid_formats::track_lighting::Fog>,
     pub benchmark_frames: Option<u32>,
     pub source_sky: bool,
     pub preset: Preset,
@@ -98,6 +100,7 @@ impl Default for Settings {
             smooth_tyres: true,
             track_grade: false,
             saved_grade: None,
+            saved_fog: None,
             benchmark_frames: None,
             source_sky: true,
             preset: Preset::Baseline,
@@ -195,6 +198,19 @@ pub fn configure(
     );
     if !settings.enhanced() {
         return;
+    }
+    if let Some(fog) = settings.saved_fog {
+        commands.entity(camera).insert(DistanceFog {
+            // Bevy applies this after lighting/exposure and before HDR tonemapping.
+            // Treating saved RGB as linear is an explicit pilot assumption.
+            color: Color::linear_rgba(fog.colour[0] * fog.brightness,
+                fog.colour[1] * fog.brightness, fog.colour[2] * fog.brightness, fog.density_cap),
+            directional_light_color: Color::NONE,
+            falloff: FogFalloff::Exponential { density: fog.distance.recip() },
+            ..default()
+        });
+        println!("source_haze enabled=true distance={} density_cap={} colour={:?} brightness={} height_bounds=[{},{}] mapping=authored-distance-exponential height_applied=false colour_space=assumed-linear source_sky=unchanged",
+            fog.distance, fog.density_cap, fog.colour, fog.brightness, fog.base_height, fog.top_height);
     }
     commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight::NONE);

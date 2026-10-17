@@ -1223,6 +1223,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut drive = profile.drive;
     let mut audio_check = false;
     let mut graphics = graphics::Settings::default();
+    let mut source_haze = false;
     let mut reflection_calibration = false;
     let mut geometry_pixel = None;
     let mut render_fixed_step = false;
@@ -1431,6 +1432,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     return Err("motion orbit rate must be finite, -3..3 rad/s".into());
                 }
                 capture_orbit_rate = Some(rate);
+            }
+            "--haze" => {
+                source_haze = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("off") => false,
+                    _ => return Err("--haze needs source or off".into()),
+                };
             }
             "--aa" => {
                 graphics.anti_aliasing = match args.next().as_deref() {
@@ -1661,6 +1669,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.benchmark_frames.is_some() && output.is_none() {
         return Err("--benchmark-frames requires --render for bounded unattended exit".into());
+    }
+    if source_haze {
+        if !graphics.enhanced() || (!track && !drive) {
+            return Err("--haze source requires an enhanced track scene".into());
+        }
+        let bytes = read(&root.join(route.track_file("lighting.xml")))?;
+        graphics.saved_fog = Some(grid_formats::track_lighting::read_fog(&bytes)?);
     }
     if graphics.track_grade {
         if !graphics.enhanced() {
