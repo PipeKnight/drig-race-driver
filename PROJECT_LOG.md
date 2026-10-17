@@ -1,5 +1,39 @@
 # GRID engine project log
 
+F348 the original's in-race pause menu in grid-app (2026-10-17, Claude Code). Details, evidence and decisions: docs/PAUSE_MENU.md.
+- Evidence [D] (static; private copies in the main checkout's local/pause-menu/):
+  - the menus are defined in system/states.bin (GRID binary XML), not in the front-end .pssg files;
+  - system/flow.bin is the state graph: it picks the menu per event type and says where each link goes;
+  - labels are ids in language/language_eng.lng; the new grid_formats::language reads that table (LNGT/HSHS/HSHT/SIDA/SIDB/LNGB);
+  - menu keys and repeat timing come from ActionMap presets 0 (keyboard) and 4 (XInput) and repeatSettings.xml.
+- Menus ported, in the original's order:
+  - races (Race Day flow `f_`, pause_mainmenu_free_race): Continue, Instant Replay, Restart Race, Options, Retire from Race;
+  - free practice (test drive, pause_mainmenu_test_drive): Continue, Instant Replay, Restart Test Drive, Options, Finish Test Drive, Ghost Car;
+  - overlay: Back (= Continue) and button3 Reset Vehicle; Yes/No confirmations with Yes as the default ([D] active_default);
+  - Options: Sound Setup, Screen Setup, plus Advanced for wheels, with each screen's rows. Effects volume, lap timer/position HUD blocks, km/h or mph and the controls' dead zones/saturations work; the other rows are shown dimmed.
+- Behaviour:
+  - Escape/P (pad Start) opens the menu and holds every fixed tick (`Driving::paused`). Escape no longer closes the app; it is the original keyboard Pause key.
+  - Restart (menu or R) is one function covering every car, damage, the shared world and props, AI drivers, race manager, standings, timing and the countdown.
+  - Retire from Race and Finish Test Drive close the app, back to the launcher. Decision [I]: the original goes to its post-race screens and from there to the front end; the results screens are a later task and the app has no front end.
+  - Reset Vehicle uses the F341 placement, through the new `player_reset::place`.
+  - Menu presses clear the gear queue (pad A is also Gear Up).
+  - Pad Y thumbs are now read flipped, as the original's +0x94 flag does and its biDirectionalLower menu/look bindings need [I]; nothing else read stick Y.
+  - New settings keys: `[sound] effects`, `[osd] lap_timer`/`position`/`speed_units` (docs/SETTINGS.md). Menu changes are not persisted (the original autosaves its profile).
+- Code: crates/grid-app/src/pause_menu.rs (state machine, UI panel, race actions) and pause_menu/race_tests.rs; small changes in main.rs (install, restart function, drive_actions, HUD options), input.rs (7 menu actions), settings.rs, engine_sound.rs, tyre_sound.rs; grid-tools player_reset::place; grid-formats language.rs; tools/scan_strings.py.
+- Tests [V], release:
+  - menu unit tests;
+  - asset test menus_match_the_original_states_file: both main menus, both options screens, the f_/t_ sound/screen/advanced rows and four confirmations equal states.bin; every label is in the English table;
+  - pause_menu_freezes_the_race_and_resumes_bit_identically (3 AI, shared world, deformation): pause at tick 300, browse and change options, 50 idle frames, Continue. The state is unchanged during the pause, and at tick 600 it equals an unpaused run (FNV of every car's words plus lap, clock, standings, props, contacts, race manager, AI throttles);
+  - restart_race_resets_cars_damage_ai_timing_and_props: 1800 ticks flat out (player damage changed, 115 car-contact ticks), then Restart from the menu. The state equals a fresh race, and 900 replayed ticks equal a fresh race given the same input;
+  - grid-tools reset_restores_intact_props_and_replays_a_fresh_world: two broken tyre stacks are gone after reset and the world replays a fresh one.
+- Failed first: the restart test compared against a fresh run whose first countdown tick had throttle, while the restarted one had none (test input, not state); cargo fmt also reformatted unrelated files, which were reverted.
+- Pre-push checks (cargo/rustc 1.99.0, release, outputs main checkout local/pause-menu/checks/, local/soak/quick-pause-menu/) on 0a13bbf + this change (the later upstream commits change only docs and launchers):
+  - cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS/GRID_AI_CHARACTERISTICS: 464 passed, 0 failed (after fixing the engine-sound test, whose chain had no menu: 463 + 1 failed first; grid-app then 77/77);
+  - clippy --workspace --all-targets --release -D warnings: clean (first run: engine_sound::update had 8 arguments);
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` with GRID_AI_CHARACTERISTICS set as for the baseline: byte-identical, sha256 aad9a07a…e41b, laps 88.42029812185638 / 86.28228501935392. Without the table the output differs (88.42039565 / 86.26613868); that run is kept as solo-after.txt for reference;
+  - grid-soak quick: 11/12. Seed 12 is the known Donington board piece fall at (-406, -51, -16), tick 3003, as in F345/F346.
+- Not done: a windowed check of the menu in the app; the original's visual style (animated glyphs, blur, paused-world camera); Instant Replay and Ghost Car; profile autosave; the post-race results screen after Retire.
+
 
 G053 optional texture pilot integrated (17 October2026): main0a13bbf->66d330cFF after exacthead/status/ownerresearchSHAguards. PlayGRIDGraphicsTextures.cmd nowavailablemain+graphics; private2map44.74MBpackageinstalledignoredinboth, sourceSteamuntouched, maindata-dirCPUbindingverified. Originalnormal/Wheels textures stayunchanged; purelauncher/docschange, compiledsource remainsf8e5310 andexehashf9192a...unchanged/verified inbothmanifests. Assetpackmetadata addedatomically; no runningexe replaced/closed. Full450tests/Clippy/exactsolo andknownbaselinequick1/12 applyunchangedsource; extra2material4KRGBA andcombineddrivingsmoke verified. Privatepilot02/mainpackage dedup0duplicates/0errors, allcitedfullcaptureskept. Nextroadmap: moving-mip/full-lap texturequality, furtherprominentmaterials withoutAItextdamage, sourcevegetation/farstrips, physicalmaterialrelief/reflections; ownerwheelmonitorfeedbackoptional, no currentrequiredhelp. No newtools/camera/engine changes.
 
