@@ -1119,3 +1119,42 @@ fn selects_renderable_subtree_and_excludes_its_external_ancestry() {
         .is_err()
     );
 }
+
+
+#[test]
+fn rectangular_full_bc_chain_accepts_only_small_zero_block_padding() {
+    let base = [13u8; 32];
+    let mut lower = vec![29u8; 48];
+    lower.extend([0u8; 16]);
+    let mut t = texture::Texture { id: b"rect-zero-tail", width: 8, height: 4,
+        format: texture::Format::Bc3, declared_mip_levels: 3, base_blocks: &base, remaining_data: &lower };
+    let (dds, levels) = t.validated_dds();
+    assert_eq!(levels, 4);
+    assert_eq!(dds.len(), 128 + 80);
+    assert_eq!(&dds[160..], &[29u8; 48]);
+    let mut nonzero = lower.clone(); nonzero[63] = 1; t.remaining_data = &nonzero;
+    assert_eq!(t.validated_dds().1, 1);
+    t.remaining_data = &lower[..63]; // Non-block-aligned residual.
+    assert_eq!(t.validated_dds().1, 1);
+    t.remaining_data = &lower[..47]; // Truncated actual level data.
+    assert_eq!(t.validated_dds().1, 1);
+    let mut excessive = vec![29u8; 48]; excessive.extend([0u8; 2064]); t.remaining_data = &excessive;
+    assert_eq!(t.validated_dds().1, 1);
+    t.remaining_data = &lower; t.declared_mip_levels = 2; // Do not accept padded partial chains.
+    assert_eq!(t.validated_dds().1, 1);
+}
+
+#[test]
+#[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+fn purchased_distant_forest_keeps_all_mips_and_only_drops_zero_tail() {
+    let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+    let bytes = std::fs::read(std::path::Path::new(&root).join("tracks/europe/donington/treestextures.pssg")).unwrap();
+    let tree = pssg::read_tree(&bytes).unwrap();
+    let maps = texture::read_named(&tree, &[b"distant_trees_01_d.tga"]).unwrap();
+    let t = &maps[0]; let base = t.base_dds(); let (dds, levels) = t.validated_dds();
+    assert_eq!(levels, 11); assert_eq!(dds.len(), 128+699088);
+    assert_eq!(&dds[128..128+t.base_blocks.len()], &base[128..]);
+    assert_eq!(&dds[128+t.base_blocks.len()..], &t.remaining_data[..699088-t.base_blocks.len()]);
+    let padding = &t.remaining_data[699088-t.base_blocks.len()..];
+    assert_eq!(padding.len(), 2032); assert!(padding.iter().all(|&v| v==0));
+}

@@ -33,7 +33,8 @@ pub struct Texture<'a> {
 
 impl Texture<'_> {
     /// Use declared full or partial chains only when tightly packed BC sizes agree.
-    /// Unknown padded layouts retain the previously verified base-only image.
+    /// Full power-of-two rectangular BC chains may have a small, block-aligned
+    /// all-zero allocation tail. Never interpret nonzero or interleaved padding.
     pub fn validated_dds(&self) -> (Vec<u8>, u32) {
         let mut dds = self.base_dds();
         let Some(target_levels) = self.declared_mip_levels.checked_add(1) else {
@@ -55,11 +56,29 @@ impl Texture<'_> {
             width = (width / 2).max(1);
             height = (height / 2).max(1);
         }
-        if levels == target_levels && self.base_blocks.len() + self.remaining_data.len() == size {
+        let stored_size = self.base_blocks.len() + self.remaining_data.len();
+        let used_tail = size.saturating_sub(self.base_blocks.len());
+        let padded_full_bc = matches!(self.format, Format::Bc1 | Format::Bc3)
+            && self.width != self.height
+            && self.width.is_power_of_two()
+            && self.height.is_power_of_two()
+            && width == 1
+            && height == 1
+            && stored_size > size
+            && stored_size - size <= 2048
+            && (stored_size - size).is_multiple_of(match self.format {
+                Format::Bc1 => 8,
+                _ => 16,
+            })
+            && self
+                .remaining_data
+                .get(used_tail..)
+                .is_some_and(|tail| tail.iter().all(|&b| b == 0));
+        if levels == target_levels && (stored_size == size || padded_full_bc) {
             for (offset, value) in [(8, 0x000a_1007u32), (28, levels), (108, 0x0040_1008)] {
                 dds[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
             }
-            dds.extend_from_slice(self.remaining_data);
+            dds.extend_from_slice(&self.remaining_data[..used_tail]);
             if self.format == Format::Bgra8 {
                 dds[8..12].copy_from_slice(&0x0002_100fu32.to_le_bytes());
             }

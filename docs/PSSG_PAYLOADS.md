@@ -85,3 +85,14 @@ cargo run -p grid-tools -- pssg-obj 'C:\Program Files (x86)\Steam\steamapps\comm
 ```
 
 Render slices, rigid joint transforms, Donington static ancestry, placements and diffuse associations are now implemented; see the linked continuation reports. Unknown animation/older texture leaves remain unsupported. Continue collision, tuning/vehicle consumers and original shader fidelity; an independent playable lap remains pending.
+
+
+## Rectangular full mip chains with trailing zeros — 17 October2026
+
+The earlier base-only fallback for unknown rectangular tails was correct conservatism; it unnecessarily discarded the now-inspected contiguous mip prefix in some resources. Distant_trees_01_d.tga is1024x512 BC3:701120stored bytes =699088conventional bytes (11levels) +2032all-zero bytes. Every mip was independently decoded with the installed Pillow12.3.0 and inspected in a private montage; the tree shapes/alpha remain coherent at each level. This is trailing allocation data, not evidence that arbitrary interleaved padding can be removed.
+
+Read-only `tools/audit_texture_mip_tails.py` inventories the original six Donington packs (treestextures,patchup_ot,tracksplit,land,sky,ground_cover), pins source SHA256 and writes only under ignoredlocal. 69rectangular BC textures:47full power-of-two chains have a small block-aligned all-zero suffix,8are exact-sized,14have nonzero excess and remain unsupported. Of the47,19are tree textures,20object maps,8track maps. These are format observations, not proof that every map's shader/colour/alpha semantics is understood. Evidence local/graphics/vegetation01/rectangular-mip-audit02.json; independent distant-conventional-mips.png/.json.
+
+Reader extension only accepts a declared complete rectangular power-of-two BC1/BC3 chain with at most2048extra bytes, a whole-block residual and every residual byte zero. It copies the exact conventional prefix and drops only that suffix. Nonzero/oversized/nonaligned residuals, padded partial chains, impossible counts and truncation keep the base-only fallback. Existing exact-sized full/partial chains remain unchanged. New synthetic negative tests and purchased forest exact-prefix/base checks pass with the full22-test payload suite (zeroignored); grid-formats alltargetreleaseClippy1.59s. Source image pixels are not resampled, alpha is not regenerated and the source installation is unchanged. Common texture_upload::image remains the only diffuse GPU path, so extra validated mips must also be checked under forcedRGBA.
+
+This may reduce distant texture aliasing; GPU motion proof is still pending. Remaining14nonzero layouts need separate research. Do not treat this as a universal rectangular-layout decoder. A scratch index loop ran past the final surveyed node once and was corrected; the public bounded audit avoids that guess.
