@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G106 — Highlight observation scoped; original output also reaches white (18 October 2026)
+
+Owner clarified clipping alone is acceptable and did not request mandatory correction. Stop this detour, retain existing visual defaults. Same-frame source/neuralEV13 have1011white windowROI pixels; newEV13 frame is pixel-identical to owner's prior frame. EV14/15 reduce core but darken body; roughness0.20/0.30 remove pure-white core yet look more frosted, rejected as quality fixes. Four physics exit records match across all6short comparisons; frame clocks/known warning audited. Original recorded225s MCN scene-sign ROI has19purewhite/946nearwhite pixels; HUD excluded, video/JPEG cannot prove original internal HDR clip stage. Private original-sign-highlight01.json / highlight-exposure-audit01.json / highlight-glass-audit01.json.
+
+Optional bounded exposure/window roughness/reflectance controls are research tools only, defaults13/0.08/0.5 preserved. Six actual graphics_settings_tests and latest appClippy9.56s pass; initial wrong exposure test filter ran0, corrected5then6tests explicitly recorded. New controls are not a tuned graphics preset. Source window shader static mapping preserved privately, no direct Phong-to-GGX equivalence claimed. Resume coherent lighting/material/detail plan, not zero-clipping optimization. Existing verified playable remains01cbcf8 until a separately guarded promotion. No owner action required.
+
 ## G105 — Sheet shading GPU check complete; owner highlight report reproduced (18 October 2026)
 
 b4be86e release1m23s, appClippy7.48s, four tree tests. Same-camera3840x2160 ordinary coverage is pixel-identical to previous verified01cbcf8. Optional savedRGB affects83622pixels/max55byte/wholemean0.032; inspected native-pixel forest comparison, changes darkening more than perceived volume, keep opt-in. Paired1200tick modes produce identical4physics exits; both30frame sequences unique/ticks1102..1162/requesterror2.05ns, first/last forward frames inspected. Known nilUUID warning only. Private sheet-gradient-validation01.json; not a full lap or remaster-tree completion.
