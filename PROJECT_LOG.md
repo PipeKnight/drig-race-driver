@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G100 — Moving reflections follow the actual replay car on GPU (18 October 2026)
+
+Source01cbcf8078c9/release2m05s. Old verified575633f and fixed1024moving-probe/1200tick Instant Replay captures inspected at identical displayed10.251/19.184s camera. Old cube stays at live(-353.28693,-17.944292,-283.40234); fixed capture matches shown snapshot tick646/(-547.1819,-12.284001,-59.563877). Submitted cube centre is one publication step behind as intended, not moved ahead of its image. Both physical/handling/deformation/lap exits exactly match. Two probe tests and app all-target Clippy10.38s pass; exactly2finite/nonnegative/nonempty1024HDRreadbacks, known nilUUID warning only. Readbacks precede replay; no filtered-replay readback or full-lap claim. Private probe-replay-validation01.json, before/after images/logs and two probe-replay audits.
+
+This corrects optional dynamic-probe integration with replays; standard graphics/physics settings unchanged. Publish focused fix and refresh verified builds next. Separate future texture-selection audit confirms actual player body diffuse2048opaque and cabin512opaque; wheel/glass/main_m1 contain alpha controls and must not use an opaque-only upscale preset. No texture replacement/inference applied; reflection fix remains current priority.
+
 ## G099 — Replay probe anchoring reproduced and corrected in ECS (18 October 2026)
 
 Extended the existing asset-backed probe/reset test with an actual two-frame Replay session. Old code fails with capture centre(-182.06895,-10.536222,19.616879) while the displayed snapshot needs(19.74173,5.2740865,30). Failed tests-probe-replay-repro01.log retained. Draft follow() now reads the shown player snapshot while replay is active, otherwise live pose; PostUpdate explicitly follows replay::present. Submitted-cube/parallax-box synchronization unchanged. Test checks all6camera transforms, box publication delay, unchanged live vehicle bytes and replay pose, then return to live pose after exit. Both scene_probe tests pass; app all-target Clippy10.38s clean.
