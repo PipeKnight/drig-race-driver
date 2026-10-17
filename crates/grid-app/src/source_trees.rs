@@ -314,6 +314,74 @@ mod tests {
         );
     }
     #[test]
+    fn sheet_presentation_uses_the_final_replay_camera_in_the_same_frame() {
+        use crate::replay::{self, frame, stream};
+        let mut snapshot = frame::Snapshot {
+            tick: 0,
+            cars: vec![frame::Car {
+                pose: frame::Pose::from_mat4(Mat4::from_translation(Vec3::new(20., 0., 30.))),
+                velocity: Vec3::X * 10.,
+                wheels: [frame::Wheel::default(); 4],
+                geometry: [frame::WheelGeometry {
+                    anchor: [0.; 3],
+                    axis: [0., 1., 0.],
+                    deformation_translation: [0.; 3],
+                    deformation_orientation: Mat4::IDENTITY.to_cols_array_2d(),
+                }; 4],
+                deformation: None,
+                lost: [None; 4],
+            }],
+            props: None,
+        };
+        let mut encoder = frame::Encoder::default();
+        let mut stream = stream::Stream::new(stream::Limits::default(), None);
+        for (number, tick) in [0, 2].into_iter().enumerate() {
+            snapshot.tick = tick;
+            stream.push(tick, &encoder.encode(&snapshot, number as u32));
+        }
+        let views = crate::camera::Views::fallback();
+        let mut replay = replay::Replay::new(stream, None);
+        assert!(replay.start(replay::Kind::Full, replay::Origin::PauseMenu, false, &views));
+        replay.session.as_mut().unwrap().shown = Some(snapshot);
+        let center = Vec3::new(0., 4., 0.);
+        let offset = Vec2::new(2., 3.);
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, vec![center.to_array()]);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![offset.to_array()]);
+        let facing = FacingSource::from_mesh("trees/sheet/test", &mesh)
+            .unwrap()
+            .placed(Mat4::IDENTITY);
+        let mut app = App::new();
+        app.insert_resource(Assets::<Mesh>::default())
+            .insert_resource(replay)
+            .insert_resource(crate::camera::Cameras::new(views, "chase_close", None));
+        let initial = Transform::from_xyz(-60., 10., -50.);
+        let camera = app.world_mut().spawn((crate::ViewerCamera, initial)).id();
+        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
+        app.world_mut().spawn((facing, Mesh3d(handle.clone())));
+        // Register the foliage first, as in production. Its explicit dependency
+        // must still make it observe the replay's later camera writer.
+        install(&mut app);
+        app.add_systems(Update, replay::frame_camera);
+        app.update();
+        let camera = app.world().get::<Transform>(camera).unwrap();
+        assert!(camera.translation.distance(initial.translation) > 1.);
+        let mesh = app.world().resource::<Assets<Mesh>>().get(&handle).unwrap();
+        let Some(VertexAttributeValues::Float32x3(points)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions")
+        };
+        let delta = Vec3::from_array(points[0]) - center;
+        let toward = (camera.translation - center).with_y(0.).normalize();
+        assert!(delta.with_y(0.).dot(toward).abs() < 0.00001);
+        assert!((delta.y - offset.y).abs() < 0.00001);
+        assert!((delta.with_y(0.).length() - offset.x).abs() < 0.00001);
+    }
+    #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn purchased_donington_closest_forest_is_bound_without_billboard_duplicates() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
@@ -489,7 +557,12 @@ fn sheet_expanded(
     expanded(center, offset, right, Vec3::Y, inverse, scale)
 }
 pub fn install(app: &mut App) {
-    app.add_systems(Update, present.after(super::drive_present));
+    app.add_systems(
+        Update,
+        present
+            .after(super::drive_present)
+            .after(super::replay::frame_camera),
+    );
 }
 fn present(
     camera: Query<&Transform, With<super::ViewerCamera>>,
