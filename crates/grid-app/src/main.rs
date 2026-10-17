@@ -30,6 +30,7 @@ mod settings;
 mod sidewall_filter;
 mod skid_marks;
 mod sky;
+mod source_trees;
 mod sky_environment;
 mod texture_cache;
 mod texture_upload;
@@ -1443,6 +1444,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
                 };
             }
+            "--trees" => {
+                graphics.source_trees = match args.next().as_deref() {
+                    Some("source") => true,
+                    Some("off") => false,
+                    _ => return Err("--trees needs source or off".into()),
+                };
+            }
             "--land" => {
                 graphics.source_land = match args.next().as_deref() {
                     Some("source") => true,
@@ -1946,6 +1954,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if track && !collision && graphics.enhanced() && graphics.source_land {
         append_land(&root, &route, &player_car, &mut car)?;
+    }
+    if track && !collision && graphics.enhanced() && graphics.source_trees {
+        source_trees::append(&root, &route, &mut car)?;
     }
     let anchor = if let Some(driving) = &driving {
         Some(Mat4::from_cols_array(&driving.runtime.pose()))
@@ -2469,7 +2480,7 @@ fn setup(
                     } else {
                         0.0
                     },
-                    alpha_mode: if name.starts_with("objects/") {
+                    alpha_mode: if name.starts_with("objects/") || name.starts_with("trees/") {
                         AlphaMode::Mask(0.5)
                     } else if glass {
                         AlphaMode::Blend
@@ -2477,8 +2488,8 @@ fn setup(
                         AlphaMode::Opaque
                     },
                     unlit: name.starts_with("collision/"),
-                    double_sided: glass || name.starts_with("collision/"),
-                    cull_mode: if glass || name.starts_with("collision/") {
+                    double_sided: glass || name.starts_with("collision/") || name.starts_with("trees/"),
+                    cull_mode: if glass || name.starts_with("collision/") || name.starts_with("trees/") {
                         None
                     } else {
                         Some(Face::Back)
