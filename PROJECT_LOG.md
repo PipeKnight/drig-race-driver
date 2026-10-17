@@ -1,5 +1,7 @@
 # GRID engine project log
 
+G058 corrected foliage GPU verified (17 October2026): source437b20061075/exe42779513.../build1m01s, native3840x2160 far-facing4k01 inspected: broadleaf crowns restored with sourceUV1expansion, trunks/alpha present; far wall strips stillvisible. RGBA537/0BC, knownnilUUIDWARNonly. Privatevegetation01/validation.json; opt-in/defaultoff pendingfullmoving/lightingacceptance. MainadvancedF348-F356/newengineplayable; mergingandfreshchecksnext, preserveowneractiveapp/research. No forestorstripcompletionclaim.
+
 G057 forest GPU rejection / facing foliage corrected (17 October2026): docs/SOURCE_VEGETATION.md. 6cc native4K off/source inspected: trees load, broadleaf crowns absent, far strips remain; notaccepted/defaultoff. Actual facing buffers collapsedcentres+UV1offsets/nonfiniteNORMAL; installed tree_facing VS zero-wind expands inverse-viewright/up*instancescale. ExistingD3DDisassemble/sourcehash evidence private vegetation01. Only4facing draws nowexpanded perplacedmutablemesh/maincamera, radialnormals/conservativebounds; verifieduniformsourceplacements/math2tests/Clippy5.03s. Wind/wrappedlighting/per-shadow-viewfacing remainapprox; correctedGPU pending. Prior454workspace tests/Clippy18.26s/exactsolo pass, quickknownseed12tick3003markerfall1/12 unchanged. Failedcompile/incorrecttestalias and rejectedHEADrestore documented; saferbackup+whitespace-onlycleanup preservescode. No toolsinstalled/Steamwrites/physicschanges.
 
 
