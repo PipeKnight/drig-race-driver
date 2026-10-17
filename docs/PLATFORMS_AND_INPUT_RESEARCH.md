@@ -759,7 +759,7 @@ Code:
 - **Port:**
   - `private_parameters::contact_directions`;
   - `grid-private-parameters … [CD01_OUTPUT]`;
-  - `body_contacts = derive` / `--body-contacts derive`. A path still works. The shipped profiles use `derive`, and the launchers no longer require `localody-contact-directions.bin`.
+  - `body_contacts = derive` / `--body-contacts derive`. A path still works. The shipped profiles use `derive`, and the launchers no longer require `local/body-contact-directions.bin`.
 - **Verified:** the derived CD01 is byte-identical to `local/body-contact-directions.bin` (SHA-256 `ea8d8bff…79c7`). Test `contact_directions_equal_the_prepared_file`, which skips without inputs. The pre-push checks are in PROJECT_LOG.md F359.
 
 ### 7.5 P9 Android skeleton (docs/ANDROID.md)
