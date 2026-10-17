@@ -16,7 +16,10 @@ param(
     [string]$GameRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Grid',
     [string]$Stage = '',
     [string]$Adb = 'C:\Users\debros\Tools\android-sdk\platform-tools\adb.exe',
-    [string]$Package = 'org.reassembly.grid'
+    [string]$Package = 'org.reassembly.grid',
+    # Leave the controls to the code's default profile (P11 tilt/touch) instead
+    # of turning the autopilot on; the bundled APK uses this.
+    [switch]$NoAutopilot
 )
 $ErrorActionPreference = 'Stop'
 
@@ -56,6 +59,11 @@ deformation = derive
 # No touch or tilt input yet (P11): the autopilot drives the lap.
 autopilot = on
 '@
+if ($NoAutopilot) {
+    $settings = @($settings -split "`r?`n" | Where-Object { $_ -notmatch '^\[diagnostics\]|^# No touch or tilt|^autopilot' }) -join "`n"
+}
+# LF whatever the checkout's line endings, so the bundle version is stable.
+$settings = $settings -replace "`r`n", "`n"
 
 foreach ($item in $items) {
     if (!(Test-Path -LiteralPath (Join-Path $GameRoot $item))) { throw "Missing in the installation: $item" }

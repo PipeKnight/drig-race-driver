@@ -48,7 +48,7 @@ powershell -NoProfile -File tools\build_android.ps1
 powershell -NoProfile -File tools\build_android.ps1 -BundleData
 ```
 
-1. `tools/push_android_data.ps1 -Stage` copies the same subset as the adb path (table below) into `local/android/bundle/assets/grid-data/` (ignored; the script refuses a folder git does not ignore). The original installation is only read.
+1. `tools/push_android_data.ps1 -Stage … -NoAutopilot` copies the same subset as the adb path (table below) into `local/android/bundle/assets/grid-data/` (ignored; the script refuses a folder git does not ignore). The original installation is only read. `-NoAutopilot` leaves out `[diagnostics] autopilot = on`, so the bundled APK uses whatever controls profile the code selects by default (P11 makes tilt/touch the default on a touch screen). Desktop check [V]: with that `settings.ini` the release binary starts with `drive_input device=auto` and no autopilot.
 2. It writes `grid-data/bundle.txt`: a header `grid-bundle 1`, `version <sha256>` (over every file's SHA-256, size, mode and path), then one `size<TAB>mode<TAB>path` line per file. `settings.ini` has mode `keep` (written only when missing, so the owner's edits survive an update); everything under `Grid/` is `replace`.
 3. Gradle gets `-PgridBundleAssets=<that folder>`, so the files go into the APK under `assets/grid-data/`.
 4. The APK is `local/android/apk/grid-<revision>-bundled-PRIVATE-debug.apk`; the `.json` manifest adds `bundled_data` (version, file count, bytes).
@@ -86,7 +86,7 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 
 ### What does not work yet
 
-- **Controls:** no touch, tilt or on-screen input yet (P11, another session). The bundled `settings.ini` turns the autopilot on, so the car drives itself.
+- **Controls:** touch and tilt are P11 (another session). The owner wants only a build with those controls, so the bundled APK is meant to be built after P11 lands; it forces no autopilot. Built before P11, it would start with no usable input on a phone. The adb path's `settings.ini` still turns the autopilot on for development.
 - **Gamepads:** not available on Android. Bevy's gamepad input comes from gilrs, and gilrs-core 0.6.8 has no Android backend (`src/platform` has linux, macos, wasm and windows only; other targets get a dummy). Android delivers pad buttons and sticks as KeyEvent/MotionEvent through GameActivity, but winit 0.30.13 maps pad buttons to `Key::Unidentified` ("Gamepad events should be exposed through a separate API", `platform_impl/android/keycodes.rs`) and does not forward joystick axes. A pad needs a bridge from android-activity's input events into the P1 input layer, which is input code (P11's "optional Android pad bridge"), so it was not done here. A Bluetooth keyboard may work through winit, but this is untested.
 - **Data without the bundled APK:** the code-only APK needs the data placed by adb (below). Android 11+ blocks phone file managers from `Android/data`; copying from Windows Explorer over USB (MTP) into it works on many phones but is not guaranteed [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). **P10** (folder picker) would remove the PC step without bundling.
 - **Not measured:** frame rate, tick time, thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
@@ -104,7 +104,7 @@ It runs `adb push --sync` into `/sdcard/Android/data/org.reassembly.grid/files/`
 | Path on the phone | Source |
 |---|---|
 | `Grid/...` | the items listed in the script, from `C:\Program Files (x86)\Steam\steamapps\common\Grid` (read only) |
-| `settings.ini` | written by the script: drive on, CD01/BP01/DF01 `derive` (computed in memory from the pushed `grid.exe`), `[diagnostics] autopilot = on` because there is no touch or tilt input yet (P11) |
+| `settings.ini` | written by the script: drive on, CD01/BP01/DF01 `derive` (computed in memory from the pushed `grid.exe`), `[diagnostics] autopilot = on` because there is no touch or tilt input yet (P11); left out with `-NoAutopilot` (the bundled APK) |
 
 The app must be installed first: Android creates the folder for the package, and `adb shell` may write to it. Uninstalling the app deletes it.
 

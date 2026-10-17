@@ -12,7 +12,8 @@
 # (tools/push_android_data.ps1).
 #
 # -BundleData packs the subset push_android_data.ps1 selects from the owner's
-# own installation into the APK (assets/grid-data, with bundle.txt listing the
+# own installation into the APK, with a settings.ini that leaves the controls
+# to the code's default profile (no forced autopilot; P11 tilt/touch) (assets/grid-data, with bundle.txt listing the
 # files and a version hash). LauncherActivity copies it to the app's data
 # folder on the first start. That APK contains proprietary game files: it is
 # for the owner's own phone only, is named grid-<rev>-bundled-PRIVATE-debug.apk
@@ -58,7 +59,7 @@ function Stage-Bundle([string]$bundleRoot) {
     if ($LASTEXITCODE -ne 0) { throw "$bundleRoot is not ignored by git; refusing to stage game data there" }
     $data = Join-Path $bundleRoot 'grid-data'
     if (Test-Path -LiteralPath $bundleRoot) { Remove-Item -LiteralPath $bundleRoot -Recurse -Force }
-    & powershell -NoProfile -File (Join-Path $root 'tools\push_android_data.ps1') -GameRoot $GameRoot -Stage $data | Out-Host
+    & powershell -NoProfile -File (Join-Path $root 'tools\push_android_data.ps1') -GameRoot $GameRoot -Stage $data -NoAutopilot | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'staging the game data failed' }
     $prefix = $data.TrimEnd('\').Length + 1
     $files = Get-ChildItem -LiteralPath $data -Recurse -File -Force |
