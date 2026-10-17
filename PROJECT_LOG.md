@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G096 — P11 merged renderer and dynamic reflections checked (18 October 2026)
+
+Source233c19b16864/SHA25655de054c.../build2m36s:602workspace release tests0failed0ignored, workspace all-target Clippy15.18s clean. Native4K warm-sun far and source-direction sky/probe side-driving images inspected; physical exits equal each other and previous96dddba control.1024moving probe yields exactly2HDRreadbacks, finite/no negative RGB, max4.4140625/4.7421875, all six faces nonempty; main local-probe assignment/filter readiness and zero capture-view assignments confirmed. Private sun-p11-probe-validation01.json and two probe-sun audits. Reflection default remains unchanged pending full-lap check with this light.
+
+Graphics published through233c19b. Primary's19uncommitted app files were observed during integration, preserved; subsequently it returned clean (owner untracked report retained) with F370/d3ea04f settings whitespace fix. Bring that small observed fix into graphics and run focused settings checks before main publication. No repeated full suite solely for docs; latest602baseline preserved. Existing primary playable remains its own newer P11 build until a verified combined promotion.
+
 ## G095 — Warm-sun pilot checked; P11 base integrated (18 October 2026)
 
 Source96dddba54905/release1m39s: four matched native4K far/240tick side-driving captures inspected, known nilUUID warning only; paired physical exits equal. Direction-only control differs by1pixel/1byte/mean4.02e-8byte from0ffe4af: initial exact-identity assertion was too strict, corrected to measured error without claiming equality or rerendering. Seven focused tests/Clippy26.37s apply. Colour remains opt-in, standard graphics launcher direction-only. Private source-sun-colour-validation01.json. Warmer direct-light ratio is not original radiometry or complete background/material quality.
