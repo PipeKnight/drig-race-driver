@@ -1,5 +1,25 @@
 # GRID engine project log
 
+F352 research probes moved into a new grid-probes crate (2026-10-17, Claude Code). The next step named by F330. Details and timings: docs/TOOLCHAIN.md "Research probes crate".
+- 158 probes were moved with `git mv` from crates/grid-tools/src/bin to crates/grid-probes/src/bin. Their names, sources and outputs are unchanged, and they still build to target/<profile>/<name>.exe.
+- Kept in grid-tools: grid-tools itself, grid-soak, grid-opponent-race and grid-private-parameters (update_prototype.ps1). A grep of every name found no other test, launcher or build-script use. tools/*.py run the probes from target/, which is unchanged.
+- grid-probes forwards hw-sse and is not in default-members. Each probe has `[[bin]] test = false`; none had a test.
+- References updated: 18 tools/*.py that hash a probe's source (35 paths), and docs build commands now say `-p grid-probes`. AGENTS.md check levels and the .cargo/config.toml comment are updated; the `cargo t`/`td` flags are unchanged. PROJECT_LOG history is left as written.
+- [V] grid-binxml from the new crate gives a TSV byte-identical to the one made before the move (Lacetti cameras.xml).
+- Timings (release, after touching the grid-tools lib, with other sessions building; logs in main checkout local/grid-probes/):
+  - `cargo build --release`: 101.4 s → 56.7 s;
+  - `cargo test --workspace --release --no-run`: 47.8 s, 173 executables → 29.7 s, 15;
+  - `cargo build --release -p grid-tools`: 35.9 s → 12.5 s;
+  - `cargo t --no-run`: 27.2 → 33.1 s, 11 executables both; Clippy workspace: 14.9 → 18.9 s. Both cover the same targets as before; the differences are within the noise of concurrent builds;
+  - building all probes when needed (`-p grid-probes`): 38.1 s.
+- Checks on 4458a31 (cargo/rustc 1.99.0, release):
+  - `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 489 passed, 0 failed;
+  - Clippy --workspace --all-targets -D warnings: clean;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai`: sha256 aad9a07a…e41b, as in F351;
+  - grid-soak quick: 16/16 (local/soak/quick-f352-probes).
+- Failed first: a Python regex with a backslash character class broke when written through a shell heredoc; the script was then written as a file.
+- Note: the validators' recorded source-identity keys change on their next run (new path).
+
 F351 grid-soak residuals fixed: prop boxes as box primitives, road triangles with their 0.02 margin (2026-10-17, Claude Code). The F342 follow-ups: thin props driven into the ground and players falling out of the world. Details in docs/BOX_CONTACTS.md, docs/SOAK_TESTING.md "Residuals (F351)" and docs/DYNAMIC_PROPS_RESEARCH.md "Pieces pushed into the ground".
 - Static evidence: read-only Ghidra 12.1.4 headless on a copy of the dynamic-props project, plus capstone 5.0.6 through the private pe.py, on the hash-pinned image. Pseudocode, scripts and traces are in the main checkout's private local/soak-residuals/ (decomp/b1..b7, scripts/, bin/ = the compared binaries, wip/ = trace and tried patches, runs/ = the soak runs and traces).
   - [D] B18E70 builds a 12 × 12 pair matrix. Every pair of convex kinds {0 box, 3 sphere, 4 capsule, 5 cylinder, 6, 7 mesh} goes to AE8AD0; packed road chunks (kind 11) are queried per triangle (AEA1F0).
