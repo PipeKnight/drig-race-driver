@@ -63,7 +63,7 @@ pub struct Settings {
     /// Diagnostic isolation of ambient occlusion and grass shadow reception.
     pub ambient_occlusion: bool,
     pub grass_receive_shadows: bool,
-    /// Authored soft-coverage experiment; source-style masking stays the default.
+    /// Authored enhanced soft coverage; mask remains available for comparison.
     pub grass_soft_alpha: bool,
     /// Optional authored coverage-preserving leaf alpha mips; source remains default.
     pub foliage_coverage: bool,
@@ -102,7 +102,7 @@ impl Default for Settings {
             source_trees: false,
             ambient_occlusion: true,
             grass_receive_shadows: true,
-            grass_soft_alpha: false,
+            grass_soft_alpha: true,
             foliage_coverage: false,
             clearcoat_prepass_fix: true,
             tread_normals: true,
@@ -198,8 +198,8 @@ pub fn configure(
         settings.height,
         if settings.enhanced() { 4096 } else { 2048 },
         if settings.enhanced() { 16 } else { 1 },
-        settings.enhanced() && settings.ambient_occlusion,
         settings.enhanced(),
+        settings.enhanced() && settings.ambient_occlusion,
         settings.enhanced() && settings.anti_aliasing == 0,
         if settings.enhanced() {
             "AgX"

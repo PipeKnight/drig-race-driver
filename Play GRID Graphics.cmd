@@ -13,10 +13,10 @@ set "GRID_GRAPHICS_WHEELS="
 if /I "%~3"=="wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
 if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
 set "GRID_GRAPHICS_TREES="
-if /I "%~3"=="trees" set "GRID_GRAPHICS_TREES=--trees source"
+if /I "%~3"=="trees" set "GRID_GRAPHICS_TREES=--trees coverage"
 set "GRID_GRAPHICS_HAZE="
 if /I "%~3"=="atmosphere" (
-  set "GRID_GRAPHICS_TREES=--trees source"
+  set "GRID_GRAPHICS_TREES=--trees coverage"
   set "GRID_GRAPHICS_HAZE=--haze source"
 )
 set "GRID_GRAPHICS_TEXTURES="

@@ -291,9 +291,9 @@ fn start(
         buckets.entry(key).or_default().push(i as u32);
     }
     let mesh = meshes.add(empty());
-    // Original coverage needs MSAA. Enhanced views use SMAA/TAA with MSAA off:
-    // explicit masking keeps colour and Bevy's normal/depth prepasses on the
-    // same cutoff (coverage's prepass otherwise accepts near-transparent texels).
+    // Original coverage needs MSAA. With MSAA off, a hard mask loses thin
+    // blades and leaves dark opaque remnants. Enhanced soft alpha is an
+    // authored alternative; mask stays available as an exact control.
     let alpha_mode = if graphics.enhanced() && graphics.grass_soft_alpha {
         AlphaMode::Blend
     } else if graphics.enhanced() {
@@ -310,18 +310,25 @@ fn start(
         cull_mode: None,
         ..default()
     });
-    let entity = commands.spawn((
-        Name::new("ground cover"),
-        Mesh3d(mesh.clone()),
-        MeshMaterial3d(material),
-        Transform::IDENTITY,
-        bevy::camera::visibility::NoFrustumCulling,
-        bevy::light::NotShadowCaster,
-    )).id();
+    let entity = commands
+        .spawn((
+            Name::new("ground cover"),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::IDENTITY,
+            bevy::camera::visibility::NoFrustumCulling,
+            bevy::light::NotShadowCaster,
+        ))
+        .id();
     if !graphics.grass_receive_shadows {
-        commands.entity(entity).insert(bevy::light::NotShadowReceiver);
+        commands
+            .entity(entity)
+            .insert(bevy::light::NotShadowReceiver);
     }
-    println!("ground_detail_shading receive_shadows={} ssao={} alpha={alpha_mode:?} normals=terrain", graphics.grass_receive_shadows, graphics.ambient_occlusion);
+    println!(
+        "ground_detail_shading receive_shadows={} ssao={} alpha={alpha_mode:?} normals=terrain",
+        graphics.grass_receive_shadows, graphics.ambient_occlusion
+    );
     commands.insert_resource(GroundDetail {
         instances: loaded.instances,
         quads: loaded.quads,

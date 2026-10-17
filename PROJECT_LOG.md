@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G074 — Grass soft-alpha near/far 4K accepted for final validation (17 October 2026)
+
+[Grass result](docs/GRASS_RENDERING.md). Source25570ce / SHAb21a52e7... / release2m07s: native4K mask/blend pairs inspected at owner far view and source-ray-selected near view. Black remnants substantially suppressed, near blades retained; texture/RGB/scatter unchanged. Matched814old dark pixels meanRGB51.7/48.5/39.6 ->154.2/147.1/112.8 via alpha composition. This is not brightness recolouring or full ordering/motion acceptance. Select soft alpha enhanced default; mask remains explicit diagnostic, baseline A2C unchanged. Fix diagnostic preset-summary label order. Atmosphere/trees modes select owner-preferred coverage leaf mips. Final full checks, moving/lap and playable promotion pending; main verified8b9919f remains untouched.
+
+
 ## G073 — Grass shadow/AO hypotheses rejected in reported view (17 October 2026)
 
 [Grass diagnosis](docs/GRASS_RENDERING.md). Source233012c/SHAf3792dcf... release2m35s, independent native4K controls: shadow receptionoff leaves814selected dark grass pixels exact; AOoff meanchange0.518byte. Grass sprites confirmed by effectsoffcontrol. AtlasRGB is dark green/brown and does not become substantially darker in mips; threshold coverage instead falls7.1%base->0.195%32->0%16, meanalpha~8.2%. Hard mask loses thin blades; sourceA2C cannot be restored by toggling AlphaToCoverage with MSAAoff. Optional --grass-alpha blend draft retains texture/RGB/geometry, pendingGPU; masking/defaults unchanged. NewappClippy23.55s passes. Existingcoverage524tests/exactsolo/20soak predate grass toggles; finalfullchecks will be repeated before publication.

@@ -15,3 +15,14 @@
 Opt-in --grass-alpha blend keeps original atlas/RGB/scatter/geometry/shadows but uses soft alpha composition in enhanced mode. Ordinary mode remains mask until GPU acceptance. This is an authored alternative to original A2C, not its reconstruction. Transparent grass does not write opaque depth, is sorted as one generated mesh and may have overlap/SSAO/contact limitations; assess near/far views and movement before changing any default. No texture recolouring or guessed brightness lift.
 
 Evidence private in graphics local/graphics/vegetation01: grass-atlas.dds/grass-atlas-grey.png, grass-alpha-colour-mips01.json, grass-lighting-isolation01.json/crop01.png, grass-{off-far,no-shadows,no-ao,no-ao-shadows}4k01 captures/logs. Nativepixel ROI2250,730..3150,1100, selected baseRGBmean<80/no-grass>120/drop>35: localized diagnostic, not quality score. Existing tools/Pillow12.3/NumPy2.3.5 reused; source assets/decompilation remain ignored.
+
+Diagnostic provenance correction: source233012c/25570ce preset summary accidentally labels sky_ibl and SSAO in swapped order under --ao off. Component setup and ground_detail_shading ssao=false are correct; image comparisons follow the actual component. Fixed summary ordering before the final candidate; this is a logging correction, not a change to the isolated result.
+
+
+## Soft-alpha native4K result and selected enhanced default
+
+Candidate25570ce0c4a2 / executable SHA256b21a52e7f85cef1820c833f82681a66cfa81f615fed4fa4aea444ee6d8a2d97e / release2m07s: mask/blend far and near pairs rendered/inspected at3840x2160, AO and shadow reception enabled. The prior814dark pixels rise from meanRGB51.7/48.5/39.6 to154.2/147.1/112.8 through composition with the ground, not texture recolouring. The near view retains recognizable green blades; the farther ink-like sparse strokes are suppressed. Native crop grass-alpha-comparison-crop01.png was shown to the owner. This establishes this view's improvement, not absence of all sorting/temporal issues.
+
+Near camera was selected from source CPU geometry ray2700,950 (grass-pixel-ray01.log, source terrain22.065702m); camera(-410.21,-15.47,-261.665),target(-408.21,-16.57,-263.665). This diagnostic does not change driving cameras. Mask/blend near captures grass-alpha-*-close4k01; exact far captures grass-alpha-*-far4k01, localized measurements grass-alpha-comparison01.json. Known nilUUID warning only; common portable RGBA path.
+
+Select soft alpha as enhanced default, retaining --grass-alpha mask for comparison and baseline MSAA/A2C unchanged. Source scatter/geometry/atlas remain intact; this is still an authored transparent-mesh approximation. Final source-stamped build, full release checks and moving/lap acceptance are required before playable promotion. The Atmosphere/trees launcher pilot also selects the owner's preferred coverage-preserving tree mips; ordinary graphics keeps forest/fog off.
