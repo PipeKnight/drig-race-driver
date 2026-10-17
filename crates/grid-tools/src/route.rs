@@ -10,6 +10,8 @@ pub const DONINGTON: &str = "tracks/europe/donington/route_0";
 pub const NURBURGRING: &str = "tracks/europe/nurburgring/route_0";
 /// The third circuit: Istanbul Park GP (docs/ISTANBUL_PARK.md).
 pub const ISTANBUL_PARK: &str = "tracks/europe/istanbul_park/route_0";
+/// The fourth circuit: Long Beach street circuit (docs/LONG_BEACH.md).
+pub const LONG_BEACH: &str = "tracks/usa/long_beach/route_0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Route {
@@ -188,6 +190,55 @@ mod tests {
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
+    fn fourth_circuit_sources_load() {
+        use crate::{
+            ai_driver::AiData, dynamic_props::Catalog, entity_geometry::Props, lap_progress,
+            source_vehicle::Runtime,
+        };
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        let route = Route::new(LONG_BEACH).unwrap();
+        assert_eq!(route.track_name(), "long_beach");
+        let progress = lap_progress::load_route(root, &route).unwrap();
+        let splits: Vec<_> = progress.progress.routes[0]
+            .splits
+            .iter()
+            .map(|s| (s.kind, s.gate))
+            .collect();
+        // 101 gates over 3655.8 m; finish at gate 0, sector splits at 33 and 69.
+        use grid_formats::progress::SplitKind::{Finish, Time};
+        assert_eq!(progress.progress.gates.len(), 101);
+        assert!((progress.progress.total_distance - 3655.78).abs() < 0.01);
+        assert_eq!(splits, [(Finish, 0), (Time, 33), (Time, 69)]);
+        for slot in 0..12 {
+            let mut car =
+                Runtime::lacetti_on(root, &route, &format!("slot_{slot:02}"), 200679).unwrap();
+            car.enable_lap_timing(root).unwrap();
+            assert_eq!(car.lap_gate_count(), progress.progress.gates.len());
+        }
+        let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
+        assert!(
+            (data.line.length - 3580.55).abs() < 1.,
+            "{}",
+            data.line.length
+        );
+        let props = Props::read_route(root, &route).unwrap();
+        let catalog = Catalog::read(root, &route, &props).unwrap();
+        let mut templates = std::collections::BTreeMap::<&str, usize>::new();
+        for b in &catalog.breakables {
+            *templates.entry(&b.template).or_default() += 1;
+        }
+        // Tyre stacks (single and double, three colours) break; the tyre walls
+        // need the joint rows the port lacks and stay static, as on Donington.
+        assert_eq!(props.boxes.len(), 1325);
+        assert_eq!(templates.values().sum::<usize>(), 124);
+        assert!(templates.keys().all(|t| t.starts_with("tyrestack_")));
+        assert_eq!(catalog.unported.values().sum::<usize>(), 275);
+        assert!(catalog.unported.keys().all(|t| t.starts_with("tyrewall_")));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
     fn circuit_barrier_keys_mix_to_the_car_row() {
         // The car body registers only the CAR_ solver row (source_vehicle.rs);
         // that is exact while every key it meets mixes to the same values.
@@ -199,7 +250,7 @@ mod tests {
         )
         .unwrap();
         let car = surfaces.physical(*b"CAR_").unwrap().1;
-        for path in [DONINGTON, NURBURGRING, ISTANBUL_PARK] {
+        for path in [DONINGTON, NURBURGRING, ISTANBUL_PARK, LONG_BEACH] {
             let route = Route::new(path).unwrap();
             let mut keys = std::collections::BTreeSet::new();
             let bytes = std::fs::read(root.join(route.file("track.jpk"))).unwrap();
@@ -217,6 +268,8 @@ mod tests {
                 .filter(|k| surfaces.physical(**k).unwrap().1[1..] != car[1..])
                 .map(|k| String::from_utf8_lossy(k).into_owned())
                 .collect();
+            // Only grass differs, on every circuit; Istanbul's extra HGDR
+            // matches the car row.
             // Only grass differs, on every circuit; Istanbul's extra HGDR
             // matches the car row.
             assert_eq!(different, ["GRAS"], "{}", route.track_name());

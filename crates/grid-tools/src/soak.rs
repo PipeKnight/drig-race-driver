@@ -23,7 +23,7 @@ use crate::{
 };
 use std::{collections::BTreeMap, path::Path};
 
-pub use crate::route::{DONINGTON, ISTANBUL_PARK, NURBURGRING};
+pub use crate::route::{DONINGTON, ISTANBUL_PARK, LONG_BEACH, NURBURGRING};
 /// Donington's race start-light sequence; every race holds the grid for its
 /// track's shipped sequence time (`start_lights::load`, grid-app StartLights).
 pub const RACE_COUNTDOWN: f64 = 4.0;
@@ -134,6 +134,8 @@ pub struct Scenario {
 /// first, then solo and mid-size fields.
 const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
 /// Quick seeds 1..=12 keep their F326 routes; 13..=16 run Istanbul Park.
+/// Seeds 17..=20 run Long Beach (`--seeds 17..20`); they stay out of the
+/// default set until its tyre-stack falls are fixed (docs/LONG_BEACH.md).
 pub const QUICK_SEEDS: (u64, u64) = (1, 16);
 
 impl Scenario {
@@ -149,6 +151,8 @@ impl Scenario {
             Profile::Long => 1 + rng.below(max_cars as u64) as usize,
         };
         let route = match profile {
+            // Quick seeds 17..=20 (12, 1, 12 and 6 cars) on Long Beach.
+            Profile::Quick if seed > 16 => LONG_BEACH,
             // Quick seeds 13..=16 (2, 12, 9 and 4 cars) on Istanbul Park.
             Profile::Quick if seed > 12 => ISTANBUL_PARK,
             // Odd quick seeds on Donington; the 12-car seeds 1 and 3 cover both.
@@ -163,6 +167,14 @@ impl Scenario {
             && Rng::new(seed ^ 0x157a_0000_0000_0000).chance(1. / 3.)
         {
             ISTANBUL_PARK
+        } else {
+            route
+        };
+        // A quarter of the long runs then move to Long Beach (own stream too).
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x10b3_0000_0000_0000).chance(0.25)
+        {
+            LONG_BEACH
         } else {
             route
         }
@@ -1741,7 +1753,7 @@ mod tests {
     }
 
     #[test]
-    fn istanbul_park_joins_without_moving_the_earlier_seeds() {
+    fn new_circuits_join_without_moving_the_earlier_seeds() {
         let available = Available {
             events: true,
             deformation: true,
@@ -1757,12 +1769,22 @@ mod tests {
         assert!(istanbul.iter().all(|s| s.route == ISTANBUL_PARK));
         assert_eq!(istanbul.iter().map(|s| s.cars).collect::<Vec<_>>(), [2, 12, 9, 4]);
         assert_eq!(QUICK_SEEDS, (1, 16));
-        // Long runs: about a third on Istanbul (its own stream, so the other
-        // fields of a seed keep their F326 draws).
-        let moved = (1001..1301)
-            .filter(|&seed| Scenario::generate(seed, Profile::Long, available, 12).route == ISTANBUL_PARK)
-            .count();
-        assert!((70..130).contains(&moved), "{moved}");
+        let long_beach: Vec<_> = (17..=20).map(quick).collect();
+        assert!(long_beach.iter().all(|s| s.route == LONG_BEACH));
+        assert_eq!(
+            long_beach.iter().map(|s| s.cars).collect::<Vec<_>>(),
+            [12, 1, 12, 6]
+        );
+        // Long runs: about a quarter each on Istanbul Park (a third, then a
+        // quarter of all moved on) and Long Beach, from their own streams, so
+        // the other fields of a seed keep their F326 draws.
+        let on = |route: &str| {
+            (1001..1401)
+                .filter(|&seed| Scenario::generate(seed, Profile::Long, available, 12).route == route)
+                .count()
+        };
+        assert!((70..130).contains(&on(ISTANBUL_PARK)), "{}", on(ISTANBUL_PARK));
+        assert!((70..130).contains(&on(LONG_BEACH)), "{}", on(LONG_BEACH));
     }
 
     #[test]

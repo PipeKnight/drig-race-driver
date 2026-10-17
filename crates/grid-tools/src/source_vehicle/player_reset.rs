@@ -174,6 +174,12 @@ mod tests {
         run(|| flipped_on(crate::route::ISTANBUL_PARK));
     }
 
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_long_beach() {
+        run(|| flipped_on(crate::route::LONG_BEACH));
+    }
+
     fn flipped_on(route: &str) {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
