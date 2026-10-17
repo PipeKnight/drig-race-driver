@@ -105,6 +105,13 @@ pub fn apply(
             };
             s.put(0x250 + i * 16, point);
         }
+        // A00E10 (A0129B): a detached wheel (body +2278 + i) skips the tyre
+        // history 9BA490 and every grip modifier; its grip is zero.
+        if (s.words[0x2278 / 4] >> (i * 8)) & 255 != 0 {
+            set(&mut v, 0x5c + i * 4, 0.);
+            s.set(w + 0x78, 0.);
+            continue;
+        }
         let m = material(s.words[(w + 0xc0) / 4])?;
         let history = wheel_history::calculate_angled(
             wheel_history::Input {

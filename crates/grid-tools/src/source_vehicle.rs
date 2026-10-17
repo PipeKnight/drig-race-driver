@@ -18,6 +18,8 @@ use std::path::Path;
 pub mod assists;
 pub mod multi;
 pub mod player_reset;
+#[cfg(test)]
+mod wheel_detach;
 
 pub const DELTA: f32 = 0.016;
 pub const GRAVITY: f32 = f32::from_bits(0x411c_f5c3);
@@ -71,6 +73,8 @@ pub struct Runtime {
     props: Option<crate::dynamic_props::PropWorld>,
     /// `collision_main` bounds of the car's `.ned` (description extents).
     hull: car_collision::Bounds,
+    /// The car's NED loose-part levels; the wheel rule changes driving.
+    loose_parts: crate::loose_parts::Config,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -160,9 +164,15 @@ impl Runtime {
     /// Source terminal wheel state; ordinal order is rear L/R, front L/R.
     /// Status 3 disables driving controls on the following synchronization,
     /// while the physical simulation and reset remain active.
+    /// The wheel of terminal damage: status 3 (9F2F80, wheel damage above
+    /// terminalDamagePercentage) or 4 (9E65B0, a detached wheel).
     pub fn terminal_wheel(&self) -> Option<usize> {
         let b = &self.state.car.owner.vehicle;
-        (b[0xd234 / 4] == 3).then_some((b[0xd238 / 4] & 255) as usize)
+        matches!(b[0xd234 / 4], 3 | 4).then_some((b[0xd238 / 4] & 255) as usize)
+    }
+    /// Whether the terminal damage is a lost wheel (status 4).
+    pub fn lost_wheel(&self) -> bool {
+        self.state.car.owner.vehicle[0xd234 / 4] == 4
     }
 
     pub fn wheels(&self) -> [WheelPose; 4] {
@@ -239,6 +249,7 @@ impl Runtime {
         let ned_bytes = read(root, &model.file(".ned"), 16 * 1024 * 1024)?;
         let ned = binxml::read(&ned_bytes)?;
         let geometry = vehicle::read_wheel_geometry(&ned)?;
+        let loose_parts = crate::loose_parts::Config::from_ned(&ned)?;
         let widths_node = ned
             .elements
             .iter()
@@ -460,6 +471,7 @@ impl Runtime {
             shift: None,
             props: None,
             hull: shape.bounds,
+            loose_parts,
         })
     }
 
@@ -826,7 +838,54 @@ impl Runtime {
         self.cache = cache;
         self.ticks += 1;
         self.last_body_contacts = body_contacts;
+        let impacts = self.impacts();
+        self.detach_wheels(&impacts);
         Ok(())
+    }
+
+    /// Wheels lost to the loose-part rule (car +22E4..+22E7, RL, RR, FL, FR).
+    pub fn detached_wheels(&self) -> [bool; 4] {
+        let v = &self.state.car.owner.vehicle;
+        std::array::from_fn(|i| (v[(0x22e4 + i) / 4] >> ((0x22e4 + i) % 4 * 8)) & 255 != 0)
+    }
+
+    /// The loose-part user after a committed tick: 9A7670 -> 98B430 for each
+    /// solved body notification of this car, then the 9EC9B0 wheel rule, which
+    /// sets car +22E4 + i. The next tick's 9BD7F0 copy (vehicle_sync) makes
+    /// the suspension, grip, contacts and handling treat the wheel as gone.
+    /// Returns the newly detached wheels.
+    pub(crate) fn detach_wheels(&mut self, impacts: &[crate::body_impacts::Impact]) -> [bool; 4] {
+        let v = &self.state.car.owner.vehicle;
+        let flag = |o: usize| (v[o / 4] >> (o % 4 * 8)) & 255 != 0;
+        // 9A7670 forwards notifications only while car B13 and B14 are set;
+        // the damage option's mode 0 clears B14.
+        if !flag(0xb13) || !flag(0xb14) || impacts.is_empty() {
+            return [false; 4];
+        }
+        let f = |o: usize| f32::from_bits(v[o / 4]);
+        let frame = crate::loose_parts::Frame {
+            pose: self.pose(),
+            offset: [f(0x1630), f(0x1634), f(0x1638)],
+        };
+        let mut zones = [0.; crate::loose_parts::ZONES];
+        for impact in impacts {
+            frame.classify(&self.loose_parts, impact, &mut zones);
+        }
+        let mass = f32::from_bits(self.state.car.owner.physical[0x3f0 / 4]);
+        let new = crate::loose_parts::wheels_to_detach(
+            &self.loose_parts,
+            &zones,
+            mass,
+            self.detached_wheels(),
+        );
+        for (i, &lost) in new.iter().enumerate() {
+            if lost {
+                // The frame keeps the car's body words in step with the owner.
+                byte(&mut self.state.car.owner.vehicle, 0x22e4 + i, 1);
+                byte(&mut self.state.car.frame.body, 0x22e4 + i, 1);
+            }
+        }
+        new
     }
     pub fn reset(&mut self) {
         self.state = self.initial.clone();

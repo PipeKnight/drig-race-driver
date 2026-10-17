@@ -18,157 +18,14 @@ use bevy::{asset::RenderAssetUsages, camera::primitives::Aabb, image::ImageSampl
 use grid_tools::body_impacts::Impact;
 use std::{collections::BTreeMap, path::Path};
 
-/// Zone accumulators of the original parts object (+7F0..+830).
-const LEFT_SIDE: usize = 0; // +7F0
-const RIGHT_SIDE: usize = 1; // +7F4
-const BONNET: usize = 2; // +7F8
-const FRONT_RIGHT: usize = 3; // +7FC
-const FRONT_LEFT: usize = 4; // +800
-const REAR_LEFT_WING: usize = 5; // +804
-const REAR_RIGHT_WING: usize = 6; // +808
-const ROOF: usize = 7; // +80C
-const REAR: usize = 8; // +810
-const BOOT: usize = 9; // +814
-const EXHAUST: usize = 10; // +818
-const REAR_RIGHT: usize = 11; // +81C
-const REAR_LEFT: usize = 12; // +820
-/// Wheels RL, RR, FL, FR (+824..+830); wheel detachment is physics and is
-/// left to the simulation's own wheel damage.
-const WHEELS: usize = 13;
-const ZONES: usize = 17;
+use grid_tools::loose_parts::{
+    BONNET, BOOT, Config, EXHAUST, FRONT_LEFT, FRONT_RIGHT, LEFT_SIDE, REAR, REAR_LEFT,
+    REAR_LEFT_WING, REAR_RIGHT, REAR_RIGHT_WING, RIGHT_SIDE, ROOF, Rule, WINDOWS, ZONES,
+};
+#[cfg(test)]
+use grid_tools::loose_parts::WHEELS;
 /// Exhaust part ids 31, 34, 101, 102 of the original exhaust list.
 const EXHAUSTS: [&str; 4] = ["exhaust", "exhaust_b", "exhaust_bl", "exhaust_br"];
-/// Window ids 0x4E..0x53 in the original order, with their NED crack-only flag.
-const WINDOWS: [(&str, &str); 6] = [
-    ("window_b", "rearWindow"),
-    ("window_bl", "rearLeftWindow"),
-    ("window_br", "rearRightWindow"),
-    ("window_f", "frontWindow"),
-    ("window_fl", "frontLeftWindow"),
-    ("window_fr", "frontRightWindow"),
-];
-
-/// Swing (loose) and detach rule of one part group; `None` when its NED flag
-/// is off.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Rule {
-    swing: Option<f32>,
-    detach: Option<f32>,
-}
-
-/// A car model's NED `PARTS`, `WINDOW` and `SIDE` values plus collision
-/// extents, as stored by the original description loader 9EFB30.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Config {
-    disabled: bool,
-    scalar: f32,
-    bonnet: Option<f32>,
-    boot: Option<f32>,
-    /// Boot hinge limit in degrees after the loader's clamp to 5.
-    boot_max_angle: f32,
-    exhaust: Rule,
-    exhaust_swing_multiple: f32,
-    front_doors: Option<f32>,
-    rear_doors: Option<f32>,
-    front_wings: Rule,
-    rear_wings: Rule,
-    mirrors_detach: Option<f32>,
-    mirror_with_door: bool,
-    front_bumper_detach: Option<f32>,
-    rear_bumper_detach: Option<f32>,
-    front_bumper_side: Rule,
-    rear_bumper_side: Rule,
-    crack_cos: f32,
-    smash_cos: f32,
-    smash_light: f32,
-    crack_only: [bool; 6],
-    /// SIDE strong points: zone front/rear limits (car +EE2C/+EE30).
-    front: f32,
-    rear: f32,
-    /// Collision max X and max Y (description m_cs_left_x / m_cs_roof_y).
-    half_width: f32,
-    roof: f32,
-}
-
-impl Config {
-    pub(crate) fn read(root: &Path, model: &grid_tools::car::Car) -> Result<Self, String> {
-        let bytes = std::fs::read(root.join(model.file(".ned"))).map_err(|e| e.to_string())?;
-        let doc = grid_formats::binxml::read(&bytes).map_err(|e| format!("{e:?}"))?;
-        let bounds = grid_formats::car_collision::read(&doc)
-            .map_err(|e| format!("{e:?}"))?
-            .bounds;
-        let element = |name: &str| doc.elements.iter().find(|e| e.name == name);
-        let value = |e: &str, key: &str| -> Option<f32> {
-            element(e)?
-                .attributes
-                .iter()
-                .find(|(k, _)| *k == key)
-                .and_then(|(_, v)| v.trim().parse().ok())
-        };
-        // The loader zero-fills the description, then stores present values;
-        // flags are values above 0.5.
-        let parts = |key: &str| value("PARTS", key).unwrap_or(0.);
-        let flag = |key: &str| parts(key) > 0.5;
-        let level = |on: &str, key: &str| flag(on).then(|| parts(key));
-        let rule = |swing: &str, swing_level: &str, detach: &str, detach_level: &str| Rule {
-            swing: level(swing, swing_level),
-            detach: level(detach, detach_level),
-        };
-        Ok(Self {
-            disabled: parts("m_disableLooseParts") > 0.,
-            scalar: value("PARTS", "m_overall_speed_required_scalar").unwrap_or(4.),
-            bonnet: level("m_bonnet_swings", "m_bonnet_swing_level"),
-            boot: level("m_boot_swings", "m_boot_swing_level"),
-            boot_max_angle: parts("m_boot_max_angle").min(5.),
-            exhaust: rule(
-                "m_exhaust_swings",
-                "m_exhaust_swing_level",
-                "m_exhaust_detaches",
-                "m_exhaust_detach_level",
-            ),
-            exhaust_swing_multiple: value("PARTS", "m_exhaust_swing_multiple").unwrap_or(1.),
-            front_doors: level("m_front_doors_swing", "m_front_doors_swing_level"),
-            rear_doors: level("m_rear_doors_swing", "m_rear_doors_swing_level"),
-            front_wings: rule(
-                "m_front_wings_swing",
-                "m_front_wings_swing_level",
-                "m_front_wings_detach",
-                "m_front_wings_detach_level",
-            ),
-            rear_wings: rule(
-                "m_rear_wings_swing",
-                "m_rear_wings_swing_level",
-                "m_rear_wings_detach",
-                "m_rear_wings_detach_level",
-            ),
-            mirrors_detach: level("m_wing_mirrors_detach", "m_wing_mirrors_detach_level"),
-            mirror_with_door: value("PARTS", "m_wing_mirror_move_with_door").unwrap_or(1.) > 0.5,
-            front_bumper_detach: level("m_front_bumper_detaches", "m_front_bumper_detach_level"),
-            rear_bumper_detach: level("m_rear_bumper_detaches", "m_rear_bumper_detach_level"),
-            front_bumper_side: rule(
-                "m_front_bumper_side_swings",
-                "m_front_bumper_side_swing_level",
-                "m_front_bumper_side_detaches",
-                "m_front_bumper_side_detach_level",
-            ),
-            rear_bumper_side: rule(
-                "m_rear_bumper_side_swings",
-                "m_rear_bumper_side_swing_level",
-                "m_rear_bumper_side_detaches",
-                "m_rear_bumper_side_detach_level",
-            ),
-            // Loader defaults cos(1 deg) / cos(2 deg) when WINDOW is absent.
-            crack_cos: value("WINDOW", "crackCosTheta").unwrap_or(1f32.to_radians().cos()),
-            smash_cos: value("WINDOW", "smashCosTheta").unwrap_or(2f32.to_radians().cos()),
-            smash_light: value("PARTS", "m_smashLightCluster").unwrap_or(0.1),
-            crack_only: WINDOWS.map(|(_, key)| value("WINDOW", key).unwrap_or(0.) != 0.),
-            front: value("SIDE", "strong_point_front").unwrap_or(0.),
-            rear: value("SIDE", "strong_point_rear").unwrap_or(0.),
-            half_width: bounds.max[0],
-            roof: bounds.max[1],
-        })
-    }
-}
 
 /// Car frame of one tick: world-to-model transform, the car-local offset at
 /// car +1630 and the world Y of the car's up axis.
@@ -178,93 +35,19 @@ struct Frame {
     up_y: f32,
 }
 
-/// Original 98B430: add one notification's impact to the zone accumulators.
+/// Original 98B430 (grid_tools::loose_parts) for one notification. The wheel
+/// zones feed the simulation's own wheel rule; here they are unused.
 fn classify(config: &Config, frame: &Frame, impact: &Impact, zones: &mut [f32; ZONES]) {
     let p = frame.inverse.transform_point3(Vec3::from(impact.point)) - frame.offset;
     let n = frame.inverse.transform_vector3(Vec3::from(impact.normal));
-    let m = impact.impact;
-    // Roof hits count only on an inverted car (pose row 1 Y below zero).
-    if config.roof - 0.4 < p.y && n.y < -std::f32::consts::FRAC_1_SQRT_2 && frame.up_y < 0. {
-        zones[ROOF] += -n.y * m;
-    }
-    let mut lateral = 1;
-    if config.half_width * 0.5 < p.x {
-        lateral = 2; // left (+X)
-    }
-    if p.x < config.half_width * -0.5 {
-        lateral = 0; // right
-    }
-    let mut longitudinal = 1;
-    if p.z > config.front {
-        longitudinal = 2;
-    }
-    if p.z < config.rear {
-        longitudinal = 0;
-    }
-    let [rl, rr, fl, fr] = [WHEELS, WHEELS + 1, WHEELS + 2, WHEELS + 3];
-    match (longitudinal, lateral) {
-        (0, _) => {
-            for z in [REAR, BOOT, EXHAUST] {
-                zones[z] += m;
-            }
-            match lateral {
-                0 => {
-                    zones[REAR_RIGHT] += m;
-                    zones[REAR_RIGHT_WING] += m;
-                    zones[rl] += m * 0.2;
-                    zones[rr] += m;
-                }
-                1 => {
-                    zones[rl] += m;
-                    zones[rr] += m;
-                }
-                _ => {
-                    zones[REAR_LEFT_WING] += m;
-                    zones[REAR_LEFT] += m;
-                    zones[rl] += m;
-                    zones[rr] += m * 0.2;
-                }
-            }
-        }
-        (1, 0) => {
-            if n.x > 0. {
-                zones[RIGHT_SIDE] += (n.x * m).abs();
-                zones[rr] += m * 0.5;
-                zones[fr] += m * 0.5;
-            }
-        }
-        (1, 2) => {
-            if n.x < 0. {
-                zones[LEFT_SIDE] += (n.x * m).abs();
-            }
-            zones[rl] += m * 0.5;
-            zones[fl] += m * 0.5;
-        }
-        (1, _) => {}
-        (_, 0) => {
-            zones[FRONT_RIGHT] += m;
-            zones[fl] += m * 0.2;
-            zones[fr] += m;
-            if n.z < 0. {
-                zones[BONNET] += -n.z * m;
-            }
-        }
-        (_, 1) => {
-            if n.z < 0. {
-                zones[BONNET] += -n.z * m;
-            }
-            zones[fl] += m;
-            zones[fr] += m;
-        }
-        _ => {
-            zones[FRONT_LEFT] += m;
-            zones[fl] += m;
-            zones[fr] += m * 0.2;
-            if n.z < 0. {
-                zones[BONNET] += -n.z * m;
-            }
-        }
-    }
+    grid_tools::loose_parts::classify(
+        config,
+        p.to_array(),
+        n.to_array(),
+        impact.impact,
+        frame.up_y < 0.,
+        zones,
+    );
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -645,6 +428,9 @@ struct CarDamage {
     velocity: Option<Vec3>,
     acceleration: Vec3,
     shards: Vec<&'static str>,
+    /// Wheels the simulation has detached (car +22E4..+22E7) and their flight.
+    lost: [bool; 4],
+    wheels: [Option<Debris>; 4],
 }
 
 /// Model-space joint bounds and grid-frame glass/light anchors.
@@ -880,7 +666,8 @@ pub(crate) fn install(
         }),
     })
     .add_systems(FixedUpdate, tick.after(crate::drive_tick))
-    .add_systems(Update, present.after(crate::drive_present));
+    .add_systems(Update, present.after(crate::drive_present))
+    .add_systems(Update, present_lost_wheels.after(crate::drive_present));
 }
 
 fn byte(words: &[u32], o: usize) -> u8 {
@@ -895,20 +682,81 @@ struct Reading {
     velocity: Vec3,
     enabled: bool,
     impacts: Vec<Impact>,
+    /// Car +22E4..+22E7 after the tick (grid_tools::loose_parts wheel rule).
+    detached: [bool; 4],
+    /// Each wheel's presented world frame (pose x wheel motion) and hub.
+    wheel_frames: [Mat4; 4],
+    hubs: [Vec3; 4],
+    /// Wheel spins +104 (rad/s).
+    spins: [f32; 4],
+    /// Car +C754 while a deformation impact is active (+C7A0 = 1).
+    strength: Option<f32>,
 }
 
 fn reading(runtime: &grid_tools::source_vehicle::Runtime, impacts: Vec<Impact>) -> Reading {
     let owner = &runtime.state.car.owner;
     let f = |o: usize| f32::from_bits(owner.vehicle[o / 4]);
     let v = runtime.velocity();
+    let pose = Mat4::from_cols_array(&runtime.pose());
+    let anchors = runtime.wheels().map(|w| Vec3::from_array(w.anchor));
+    let motion = crate::wheel_presentation::wheels(runtime, 0.).map(crate::wheel_motion);
+    let wheel_frames = motion.map(|m| pose * m);
     Reading {
-        pose: Mat4::from_cols_array(&runtime.pose()),
+        pose,
         mass: f32::from_bits(owner.physical[0x3f0 / 4]),
         offset: Vec3::new(f(0x1630), f(0x1634), f(0x1638)),
         velocity: Vec3::new(v[0], v[1], v[2]),
         // 9A7670 forwards notifications only while both damage flags are set.
         enabled: byte(&owner.vehicle, 0xb13) != 0 && byte(&owner.vehicle, 0xb14) != 0,
         impacts,
+        detached: runtime.detached_wheels(),
+        hubs: std::array::from_fn(|i| wheel_frames[i].transform_point3(anchors[i])),
+        wheel_frames,
+        spins: std::array::from_fn(|i| crate::wheel_presentation::angular_speed(runtime, i)),
+        strength: (owner.vehicle[0xc7a0 / 4] == 1).then(|| f(0xc754)),
+    }
+}
+
+/// 98C5C0 maps the wheel parts 0x2E..0x31 (wheel_bl, _br, _fl, _fr; wheel
+/// records 0..3 in 9FA6E0) to the records 1, 0, 3, 2, so a lost wheel takes
+/// the spin of the other wheel on its axle [D].
+const SPIN_RECORD: [usize; 4] = [1, 0, 3, 2];
+
+/// Launch of a lost wheel by 9DC270's state-4 path for a wheel part [D]:
+/// while a deformation impact is active (car +C7A0 = 1), a kick of
+/// (2.5 + 5 r/255) x clamp(+C754 - 0.25, 0.75, 4) along the normalised
+/// (|r - 127.5|, r - 127.5, r - 127.5) / 637.5, and the spin about the axle
+/// (part X). [I] the kick is a car-frame velocity added to the car's; the
+/// original hands both to its debris-body builder 9DB0E0/9D9F80.
+/// AUTHORED: the random bytes (a seeded LCG for the CRT rand) and the flight
+/// (`Debris::step`); the original debris is a rigid body in its world.
+fn launch(r: &Reading, i: usize, seed: u32) -> Debris {
+    let mut state = seed;
+    let mut random = || {
+        state = state.wrapping_mul(0x41c6_4e6d).wrapping_add(12345);
+        ((state >> 16) & 255) as f32
+    };
+    let mut velocity = r.velocity;
+    if let Some(strength) = r.strength {
+        let k = f32::from_bits(0x3acd_9a67); // 0.0015686 = 0.2 / 127.5
+        let x = ((random() - 127.5) * k).abs();
+        let y = (random() - 127.5) * k;
+        let z = (random() - 127.5) * k;
+        let magnitude =
+            (random() * f32::from_bits(0x3b80_8081) * 5. + 2.5) * (strength - 0.25).clamp(0.75, 4.);
+        let direction = Vec3::new(x, y, z);
+        if direction.length_squared() > 0. {
+            velocity += r.pose.transform_vector3(direction.normalize() * magnitude);
+        }
+    }
+    Debris {
+        origin: r.wheel_frames[i],
+        centre: r.hubs[i],
+        position: r.hubs[i],
+        velocity,
+        rotation: Quat::IDENTITY,
+        spin: r.pose.x_axis.truncate() * r.spins[SPIN_RECORD[i]],
+        ground: r.hubs[i].y,
     }
 }
 
@@ -942,11 +790,27 @@ fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>) {
     } else {
         vec![reading(&driving.runtime, driving.runtime.impacts())]
     };
+    damage.cars.resize_with(readings.len(), CarDamage::default);
+    let dt = grid_tools::source_vehicle::DELTA;
+    for (index, (car, r)) in damage.cars.iter_mut().zip(&readings).enumerate() {
+        for i in 0..4 {
+            if r.detached[i] && !car.lost[i] {
+                car.lost[i] = true;
+                let seed = (ticks as u32) ^ (((index * 4 + i) as u32) << 24);
+                car.wheels[i] = Some(launch(r, i, seed));
+                log_line!(
+                    "drive_wheel_detached car={index} tick={ticks} wheel={i} impact_strength={:?}",
+                    r.strength
+                );
+            }
+            if let Some(wheel) = &mut car.wheels[i] {
+                wheel.step(dt);
+            }
+        }
+    }
     if damage.models.iter().any(|m| m.layout.is_none()) {
         return;
     }
-    damage.cars.resize_with(readings.len(), CarDamage::default);
-    let dt = grid_tools::source_vehicle::DELTA;
     for (index, (car, r)) in damage.cars.iter_mut().zip(&readings).enumerate() {
         if !r.mass.is_finite() || r.mass <= 0. {
             continue;
@@ -1472,6 +1336,30 @@ fn layout(parts: &PartQuery, m: usize, car_model: &[usize]) -> Layout {
     }
 }
 
+/// Draw a lost wheel (and its tyre) at its flight pose instead of on the car;
+/// the disc and the caliper stay (`m_calipers_come_off_with_wheels` is 0 on
+/// both cars).
+fn present_lost_wheels(
+    damage: Res<DamageParts>,
+    mut parts: Query<(&crate::MovingPart, &mut Transform), Without<crate::OpponentPart>>,
+    mut opponents: Query<(&crate::OpponentPart, &mut Transform), Without<crate::MovingPart>>,
+) {
+    let flight = |car: usize, wheel: Option<usize>, flies: bool| {
+        let debris = damage.cars.get(car)?.wheels[wheel?].as_ref()?;
+        flies.then(|| debris.matrix())
+    };
+    for (part, mut transform) in &mut parts {
+        if let Some(matrix) = flight(0, part.wheel, part.lost_with_wheel) {
+            *transform = Transform::from_matrix(matrix * part.rest);
+        }
+    }
+    for (part, mut transform) in &mut opponents {
+        if let Some(matrix) = flight(part.car, part.wheel, part.lost_with_wheel) {
+            *transform = Transform::from_matrix(matrix * part.rest);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1515,6 +1403,7 @@ mod tests {
             rear: -1.2,
             half_width: 0.9,
             roof: 1.4,
+            wheel_detach: 6.,
         }
     }
     fn frame() -> Frame {
@@ -1641,6 +1530,46 @@ mod tests {
         // Detached parts never swing again.
         let detached = |_: &str| Some(State::Detached);
         assert!(decide(&c, &z, &z, mass, &detached).is_empty());
+    }
+
+    #[test]
+    fn a_lost_wheel_launches_with_the_axle_partner_spin_and_the_impact_kick() {
+        let pose = Mat4::from_rotation_y(0.5) * Mat4::IDENTITY;
+        let pose = Mat4::from_translation(Vec3::new(5., 1., -3.)) * pose;
+        let mut r = Reading {
+            pose,
+            mass: 1140.,
+            offset: Vec3::ZERO,
+            velocity: Vec3::new(0., 0., 20.),
+            enabled: true,
+            impacts: Vec::new(),
+            detached: [false, false, true, false],
+            wheel_frames: [pose; 4],
+            hubs: [Vec3::new(1., 0.3, 2.); 4],
+            spins: [10., 20., 30., 40.],
+            strength: None,
+        };
+        // No active impact: the car's velocity and the front-right record's spin.
+        let quiet = launch(&r, 2, 7);
+        assert_eq!(quiet.velocity, r.velocity);
+        assert_eq!(quiet.spin, pose.x_axis.truncate() * 40.);
+        assert_eq!((quiet.position, quiet.ground), (r.hubs[2], 0.3));
+        // An impact of strength 2: kick 2.5..7.5 x 1.75, outward along local +X.
+        r.strength = Some(2.);
+        let kicked = launch(&r, 2, 7);
+        let local = pose
+            .inverse()
+            .transform_vector3(kicked.velocity - r.velocity);
+        assert!(
+            (2.5 * 1.75..=7.5 * 1.75).contains(&local.length()),
+            "{local}"
+        );
+        assert!(local.x >= 0.);
+        // The impact factor is clamped to 0.75..4.
+        r.strength = Some(100.);
+        let hard = launch(&r, 2, 7);
+        let ratio = (hard.velocity - r.velocity).length() / (kicked.velocity - r.velocity).length();
+        assert!((ratio - 4. / 1.75).abs() < 1e-4, "{ratio}");
     }
 
     #[test]

@@ -75,9 +75,10 @@ pub fn apply(
     if s.f(C) <= 0. {
         return Err(Error("invalid suspension vehicle scale"));
     }
-    if state.words[0x2278 / 4] != 0 {
-        return Err(Error("disabled suspension wheels unsupported"));
-    }
+    // Body +2278..+227B: wheels detached by the loose-part rule (9EC9B0),
+    // copied from car +22E4 by 9BD7F0. Only the substep 9C1F60 reads them.
+    let detached: [bool; 4] =
+        std::array::from_fn(|i| (state.words[0x2278 / 4] >> (i * 8)) & 255 != 0);
     let incoming: [f32; 3] = std::array::from_fn(|i| s.f(0x15a8 + i * 4));
     if incoming.iter().any(|v| !v.is_finite() || *v <= 0.) {
         return Err(Error("invalid vehicle inertia"));
@@ -130,7 +131,15 @@ pub fn apply(
     let schedule = dynamics::substeps(delta)?;
     let mut weight = 1.;
     for _ in 0..schedule.count {
-        wheels = wheel_step::step(wheels, response, secondary, s.f(C), schedule.delta, weight)?;
+        wheels = wheel_step::step_detached(
+            wheels,
+            response,
+            secondary,
+            s.f(C),
+            schedule.delta,
+            weight,
+            detached,
+        )?;
         weight -= schedule.weight_decrement;
     }
     for (i, wheel) in wheels.iter().enumerate() {
@@ -291,9 +300,15 @@ mod tests {
         );
         assert_eq!(calls, 1);
         assert_eq!(state.words, before);
+        // A detached wheel (body +2279) is supported and rolls back the same way.
         state.words[0x2278 / 4] = 0x0100;
-        let disabled = state.words;
-        assert!(apply(&mut state, 0.01, |_, _| panic!("disabled-wheel query")).is_err());
-        assert_eq!(state.words, disabled);
+        let detached = state.words;
+        assert!(
+            apply(&mut state, 0.01, |_, _| Err(Error(
+                "authored query failure"
+            )))
+            .is_err()
+        );
+        assert_eq!(state.words, detached);
     }
 }
