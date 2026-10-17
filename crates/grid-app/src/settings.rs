@@ -282,6 +282,11 @@ fn strip_comment(line: &str) -> &str {
     &line[..cut.unwrap_or(line.len())]
 }
 
+/// `touch = auto` -> `touch=auto`; lists such as `tcs=on, abs=off` stay.
+fn joined_item(line: &str) -> String {
+    line.split('=').map(str::trim).collect::<Vec<_>>().join("=")
+}
+
 impl Settings {
     pub fn new() -> Self {
         Self {
@@ -323,23 +328,18 @@ impl Settings {
                 }
                 continue;
             }
-            match section.as_str() {
-                "assists" => {
-                    self.assists.push_str(raw);
-                    self.assists.push('\n');
-                    continue;
-                }
-                "input" => {
-                    self.input.push_str(raw);
-                    self.input.push('\n');
-                    continue;
-                }
-                "ai" => {
-                    self.ai.push_str(raw);
-                    self.ai.push('\n');
-                    continue;
-                }
-                _ => {}
+            let list = match section.as_str() {
+                "assists" => Some(&mut self.assists),
+                "input" => Some(&mut self.input),
+                "ai" => Some(&mut self.ai),
+                _ => None,
+            };
+            if let Some(list) = list {
+                // These sections take `key=value` items split at spaces, so
+                // the file's `key = value` form is joined first.
+                list.push_str(&joined_item(line));
+                list.push('\n');
+                continue;
             }
             if line.is_empty() {
                 continue;
@@ -638,6 +638,35 @@ prop_script_speed = 12.5
             }
         }
         assert!(n >= 4);
+    }
+
+    #[test]
+    fn phone_profile_written_by_the_android_scripts_parses() {
+        // The settings.ini that push_android_data.ps1 writes (and the
+        // bundled APK ships) uses `key = value` in [input] too.
+        let script = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/push_android_data.ps1"),
+        )
+        .unwrap();
+        let text = script
+            .split_once("$settings = @'")
+            .and_then(|(_, rest)| rest.split_once("'@"))
+            .unwrap()
+            .0;
+        let mut s = Settings::default();
+        s.apply(text, Path::new("files")).unwrap();
+        let input = s.input().unwrap();
+        assert_eq!(input.touch, None);
+        assert!(input.touch_active(true));
+        assert_eq!(input.tilt_settings().unwrap().max_angle, 30.);
+        s.assists().unwrap();
+        s.apply(
+            "[assists]\ntcs = off, gearbox = manual\n[ai]\nmistakes = off\n",
+            Path::new("d"),
+        )
+        .unwrap();
+        assert!(!s.assists().unwrap().traction_control);
+        s.ai().unwrap();
     }
 
     #[test]
