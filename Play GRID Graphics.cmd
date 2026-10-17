@@ -10,8 +10,8 @@ set "GRID_GRAPHICS_REFLECTIONS="
 if /I "%~3"=="probe" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe --probe-update moving --probe-size 1024"
 if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe --probe-update moving --probe-size 1024"
 set "GRID_GRAPHICS_WHEELS="
-if /I "%~3"=="wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25"
-if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25"
+if /I "%~3"=="wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
+if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
 if not exist "target\release\grid-app.exe" (
   echo Build this graphics checkout first: cargo build -p grid-app --release --offline
   popd
