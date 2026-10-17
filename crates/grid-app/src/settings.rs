@@ -185,13 +185,23 @@ fn platform_data_dir() -> Option<PathBuf> {
     } else if cfg!(target_os = "macos") {
         env("HOME").map(|h| h.join("Library/Application Support/GRID Reassembly"))
     } else if cfg!(target_os = "android") {
-        // App-specific storage comes from the activity (P9).
-        None
+        // App-specific external storage from the activity (P9).
+        android_data_dir()
     } else {
         env("XDG_DATA_HOME")
             .or_else(|| env("HOME").map(|h| h.join(".local/share")))
             .map(|p| p.join("grid-reassembly"))
     }
+}
+
+#[cfg(target_os = "android")]
+fn android_data_dir() -> Option<PathBuf> {
+    crate::android::data_dir()
+}
+
+#[cfg(not(target_os = "android"))]
+fn android_data_dir() -> Option<PathBuf> {
+    None
 }
 
 /// Values from the settings files. `None` keeps the built-in default.
@@ -451,7 +461,8 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
             return Err(format!("settings file {} exceeds 64 KiB", file.display()).into());
         }
         settings
-            .apply(&std::fs::read_to_string(file)?, &dir)
+            // A byte-order mark (Windows editors, PowerShell 5) is not a key.
+            .apply(std::fs::read_to_string(file)?.trim_start_matches('\u{feff}'), &dir)
             .map_err(|e| format!("settings file {}: {e}", file.display()))?;
         println!("settings_file path={}", file.display());
     }

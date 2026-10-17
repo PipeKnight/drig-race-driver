@@ -1,0 +1,14 @@
+# Pinned versions (docs/TOOLCHAIN.md, "Android toolchain").
+[versions]
+agp = "9.4.1"
+appcompat = "1.7.1"
+# Must match the GameActivity C sources bundled in the android-activity crate
+# (0.6.1 bundles 4.4.0; its README names androidx.games:games-activity:4.4.0).
+gamesActivity = "4.4.0"
+
+[libraries]
+appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+games-activity = { group = "androidx.games", name = "games-activity", version.ref = "gamesActivity" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }

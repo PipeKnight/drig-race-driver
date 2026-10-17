@@ -762,6 +762,18 @@ Code:
   - `body_contacts = derive` / `--body-contacts derive`. A path still works. The shipped profiles use `derive`, and the launchers no longer require `localody-contact-directions.bin`.
 - **Verified:** the derived CD01 is byte-identical to `local/body-contact-directions.bin` (SHA-256 `ea8d8bff…79c7`). Test `contact_directions_equal_the_prepared_file`, which skips without inputs. The pre-push checks are in PROJECT_LOG.md F359.
 
+### 7.5 P9 Android skeleton (docs/ANDROID.md)
+
+- **Toolchain** [V installed and used]: SDK cmdline-tools 22.0, platform-tools 37.0.1, build-tools 36.1.0, `platforms;android-36`, NDK r30 30.0.16248370, Temurin JDK 21.0.12.1, Gradle 9.8.1, AGP 9.4.1, GameActivity 4.4.0, cargo-ndk 4.1.2. Versions, hashes and licences: docs/TOOLCHAIN.md "Android toolchain".
+- **Code** [V builds]:
+  - `grid-app` has a second target, the `grid_android` cdylib (`src/lib.rs`). On Android it `include!`s `main.rs`; on other targets it is empty, so the desktop binary is unchanged.
+  - `#[bevy_main]` on `main`; `android.rs` sends stdout/stderr to logcat and gives `external_data_path()` as the data dir (P5). The game folder defaults to `<data dir>/Grid`.
+  - The texture path is chosen by P8 from the device features (BC, else ETC2 cache in the data dir, else RGBA8).
+- **Gradle project** `android/` (Bevy 0.19.1 mobile example): minSdk 31, target/compile 36, arm64-v8a, `sensorLandscape`, keep-screen-on, immersive system bars. `tools/build_android.ps1` builds the debug APK into `local/android/apk/` with a hash manifest.
+- **Data** [V on desktop]: `tools/push_android_data.ps1` pushes 245 MB: a 17-item subset of the installation, CD01 and a `settings.ini` (drive on, BP01/DF01 `derive`, autopilot because there are no touch controls yet). The desktop release binary run on the same staged subset gives a log identical to the full install's, apart from timestamps.
+- **Lifecycle**: bevy_winit 0.19.1 creates the surface on resume and drops it on suspend. Audio is not paused on `AppLifecycle::Suspended` yet (the Bevy example does this) [open].
+- **Cold build cost**: the first `cargo ndk` release build compiled about 300 crates in 92 min on this PC, with other sessions building at the same time. The desktop seed (TOOLCHAIN.md) has no aarch64 artifacts. Later builds are incremental. Gradle's first run took 2 min 40 s, including the AGP download.
+
 ## 8. Open questions and tests that need hardware
 
 1. **Android device:** the tables of 1.2 have not been executed on ARM. P9 should run the unit tests (or a small `grid-world` self-test) on the phone.

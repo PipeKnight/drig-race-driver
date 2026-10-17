@@ -1,4 +1,5 @@
-//! Source reference viewer and serial driving prototype.
+// Source reference viewer and serial driving prototype. A plain comment, not
+// `//!`: src/lib.rs includes this file for the Android library (P9).
 
 /// One stdout log line for the per-tick paths. Unlike `println!`, a failed
 /// write (closed pipe, full disk) is dropped instead of panicking.
@@ -9,6 +10,8 @@ macro_rules! log_line {
     }};
 }
 
+#[cfg(target_os = "android")]
+mod android;
 mod assists;
 mod body_damage;
 mod camera;
@@ -454,7 +457,8 @@ fn diffuse(material: &str, model: &CarModel) -> Option<String> {
 }
 fn read(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use std::io::Read;
-    let file = std::fs::File::open(path)?;
+    // The path in the error: on a phone a missing pushed file must be named.
+    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let limit = 256 * 1024 * 1024;
     if file.metadata()?.len() > limit {
         return Err("resource exceeds viewer limit".into());
@@ -1024,9 +1028,14 @@ fn append_entities(
     }
     Ok(())
 }
+#[bevy_main]
 fn main() {
+    #[cfg(target_os = "android")]
+    android::init();
     if let Err(error) = run() {
         eprintln!("grid-app: {error}");
+        #[cfg(target_os = "android")]
+        android::log(true, &format!("grid-app: {error}"));
         std::process::exit(1);
     }
 }
@@ -1679,6 +1688,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let root = match root {
         Some(root) => root,
+        // Android: the game data pushed into the app's storage (docs/ANDROID.md).
+        None if cfg!(target_os = "android") => settings::data_dir().join("Grid"),
         None => grid_tools::install::discover(&grid_tools::install::steam_roots()).map_err(
             |tried| {
                 format!(
