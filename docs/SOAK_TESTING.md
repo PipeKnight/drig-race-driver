@@ -341,8 +341,8 @@ that the races now take different paths.
 
 17 October 2026. Both F342 residuals were port gaps against the original. Details:
 [BOX_CONTACTS.md](BOX_CONTACTS.md). Evidence is in the main checkout's private
-`local/soak-residuals/` (decompilations, the F342 scratch worktree `wt-f342`, the
-binaries compared below in `bin/`) and this worktree's `local/soak/`.
+`local/soak-residuals/` (decompilations, `wip/` with the trace and tried patches, the
+binaries compared below in `bin/`, and `runs/` with the soak runs and traces).
 
 | Failure | Cause | Fix |
 |---|---|---|
@@ -352,18 +352,40 @@ binaries compared below in `bin/`) and this worktree's `local/soak/`.
 Replays: `grid-soak replay local/soak/final-long-{donington,nurburgring}/seed-1087.inputs.tsv`
 (main checkout) fails on the F342 build 4ffec8b and passes with the box change.
 Current main no longer reaches this state: F345 changed the field's paths. Main's own
-failing inputs from the long run below (`local/soak/long-main-307fe9b-*/`), replayed on
-the fixed build: REPLAY_TABLE
+failing inputs from the long run below (`local/soak-residuals/runs/soak/long-main-307fe9b-*/`), replayed on
+the fixed build: 15 of 16 pass.
+
+| Route | Main seeds (failure tick's piece) | On the fix |
+|---|---|---|
+| Donington | 1005, 1012, 1074 (the 150 m board, -406/-16); 1042, 1067, 1072, 1078, 1081 (other pieces) | pass; 1005 and 1074 with the same breaks as main |
+| Donington | 1062 | fails at (-386, -54, -12), on another path (6 breaks against 2): the board kicked and spun by the triangle-soup car contacts |
+| Nürburgring | 1001, 1004, 1011, 1035, 1062, 1085, 1099 (pieces) | pass; 1011 with the same breaks as main |
+
+Most inputs take another path on the fix (the break count differs), so a pass there
+shows only that the run survives.
 
 ### Runs (F351)
 
 Main 307fe9b and the fix ran side by side on the same seeds, props on, two jobs each
-(`--seeds 1001..1100`). The fix build is grid-soak sha256 FIX_SHA.
+(`--seeds 1001..1100`). The fix build is grid-soak sha256 9a34103e…12f2. Its code equals the pushed commit before the rebase onto the Istanbul Park and camera work.
 
-LONG_TABLE
+| Run | Donington | Nürburgring |
+|---|---|---|
+| main 307fe9b | 9/100: 1005, 1012, 1042, 1062, 1067, 1072, 1074, 1078, 1081 | 7/100: 1001, 1004, 1011, 1035, 1062, 1085, 1099 |
+| this change | 2/100: 1056, 1099 | 1/100: 1085 (a tyre-stack piece at (-335, 569, 64), not traced) |
 
-Quick: 12/12 on both routes for the fix, also with `--car bmw --opponent-cars lac,bmw`
-and `--opponent-cars bmw,lac`. Targeted `--cars 1 --chaos prop --ticks 8000`, seeds
+Every failure in both builds is `prop piece falling through the world`; no car fell,
+and there was no world error, retirement, panic or hang. The fix's runs were made in
+two parts: seeds 1001..1074 / 1001..1049, then the rest. In between, two builds that
+were not adopted ran on the same seeds; see BOX_CONTACTS.md, "Tried and not
+adopted". The fix's two Donington losses:
+- seed 1056: a board of breakable 105 at (-11, -331), spun into the road by the
+  triangle-soup car contacts;
+- seed 1099: the board of breakable 88 settled after its break at tick 1866 and was
+  lost at (-257, -282) at tick 10930, about 170 m away (not traced).
+
+Quick on the rebased build: 16/16 (seeds 13-16 are Istanbul Park), also with
+`--car bmw --opponent-cars lac,bmw` and `--opponent-cars bmw,lac`. Targeted `--cars 1 --chaos prop --ticks 8000`, seeds
 1..80 on Donington: main 1 piece fall, fix 0.
 
 ## Follow-ups
@@ -373,8 +395,9 @@ and `--opponent-cars bmw,lac`. Targeted `--cars 1 --chaos prop --ticks 8000`, se
   AE8AD0 for both and sums the margins. Both were tried; at the port's fixed 16 ms
   step they lose more boards (BOX_CONTACTS.md, "Tried and not adopted"). Revisit
   them together with the world step: the original steps once per rendered frame.
-- Remaining piece losses on this build: long Donington seed 1056 (a board spun into
-  the road by the triangle-soup car contacts).
+- Remaining piece losses on this build: long Donington seeds 1056 (a board spun into
+  the road by the triangle-soup car contacts) and 1099, and Nürburgring 1085 (a
+  tyre-stack piece). The last two are not traced.
 - The boundary sheet's and the car hull's own shape margins are not established
   (both 0 in the port).
 - `Session` mirrors `drive_tick` as of F323 (retired cars, the player's own

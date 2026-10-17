@@ -103,7 +103,7 @@ either way).
 
 ## Players falling out of the world (seed 1087)
 
-[V] Reproduced on the F342 build 4ffec8b (scratch worktree `local/soak-residuals/wt-f342`,
+[V] Reproduced on the F342 build 4ffec8b (a scratch worktree, since removed; its trace changes are `local/soak-residuals/wip/f342-trace.patch`;
 `grid-soak replay local/soak/final-long-*/seed-1087.inputs.tsv`): the same tick and
 failure on both routes. Current main no longer reaches them: F345 changed the
 field's paths.
@@ -225,7 +225,7 @@ measured. The patches are kept in the main checkout as
 
 ## Race results and the solo lap (F351)
 
-[V] Release, cargo/rustc 1.99.0; outputs in this worktree's `local/identity/`:
+[V] Release, cargo/rustc 1.99.0; outputs in the main checkout's `local/soak-residuals/runs/identity/`:
 
 - Solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai`: byte-identical to main
   (sha256 aad9a07a…e41b, laps 88.42029812185638 / 86.28228501935392), with both
