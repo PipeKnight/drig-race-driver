@@ -180,9 +180,12 @@ fn update(
     input: Res<ButtonInput<KeyCode>>,
     mut sinks: Query<&mut AudioSink, (With<AudioPlayer<EngineSource>>, Without<OpponentEngine>)>,
     mut started: Local<bool>,
-    trial: Option<Res<super::time_trial::Trial>>,
+    // The event and the pause menu (Effects Volume).
+    (trial, menu): (
+        Option<Res<super::time_trial::Trial>>,
+        Option<Res<super::pause_menu::PauseMenu>>,
+    ),
     mut opponent_engines: Query<(&OpponentEngine, Option<&mut AudioSink>)>,
-    menu: Option<Res<super::pause_menu::PauseMenu>>,
 ) {
     // Pause menu Effects Volume.
     let gain = menu.map_or(1., |m| m.values.gain());
@@ -314,7 +317,7 @@ mod tests {
             app.insert_resource(sound).init_resource::<ButtonInput<KeyCode>>()
                 .add_message::<AppExit>()
                 .insert_resource(crate::Driving { runtime: grid_tools::source_vehicle::Runtime::lacetti(root,"slot_00",200679).unwrap(), geometry: None, paused:false, failure:None, notices:Vec::new(), scripted_ticks:None, scripted:Default::default(),handbrake_from:None, last_controls:None, segment:0, started:std::time::Instant::now(), opponents: None, auto_reset: Default::default(), reset_line: None })
-                .insert_resource(crate::input::Actions::new(crate::input::ActionMap::keyboard(),crate::input::Pads::Off)).init_resource::<crate::input::ShiftQueue>().add_systems(Update,(crate::input::sample,crate::drive_actions,crate::drive_tick,update).chain());
+                .insert_resource(crate::input::Actions::new(crate::input::ActionMap::keyboard(),crate::input::Pads::Off)).init_resource::<crate::input::ShiftQueue>().insert_resource(crate::pause_menu::PauseMenu::new(crate::pause_menu::Variant::TestDrive,false,false,Default::default())).add_systems(Update,(crate::input::sample,crate::pause_menu::update,crate::drive_actions,crate::drive_tick,update).chain());
             let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.load(Ordering::Relaxed));
             let press = |app: &mut App,key| {let mut input=app.world_mut().resource_mut::<ButtonInput<KeyCode>>();input.reset_all();input.press(key);};
             press(&mut app,KeyCode::ArrowUp);app.update();
