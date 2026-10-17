@@ -10,9 +10,9 @@
 - Fresh full-mip export: grass texel alpha>=128 coverage falls7.106%base ->4.893%256 ->2.899%128 ->1.343%64 ->0.195%32, then0%at16and smaller. Mean alpha stays~8.2%. Visible RGB stays near55/62/24 through64: a mip-RGB-darkening hypothesis is not supported. Hard thresholding loses fine parts and keeps sparse dark opaque remnants. Texture statistics alone do not establish the whole screen-space effect.
 - Existing original source ground-cover shader includes sun/back/ambient contributions plus screen shadow mask; original render state uses alpha-to-coverage. Our enhanced main view uses MSAAoff/SMAA; pinned Bevy0.19.1 alpha-to-coverage falls back to a mask without MSAA, so simply renaming the alpha mode does not restore smooth coverage. Earlier mirrored-geometry normal problem had already been corrected upstream; it is not reintroduced here.
 
-## Current experiment and limits
+## Initial experiment and limits
 
-Opt-in --grass-alpha blend keeps original atlas/RGB/scatter/geometry/shadows but uses soft alpha composition in enhanced mode. Ordinary mode remains mask until GPU acceptance. This is an authored alternative to original A2C, not its reconstruction. Transparent grass does not write opaque depth, is sorted as one generated mesh and may have overlap/SSAO/contact limitations; assess near/far views and movement before changing any default. No texture recolouring or guessed brightness lift.
+Opt-in --grass-alpha blend keeps original atlas/RGB/scatter/geometry/shadows but uses soft alpha composition in enhanced mode. The initial candidate kept masking as its default pending GPU acceptance; the later selected default is recorded below. This is an authored alternative to original A2C, not its reconstruction. Transparent grass does not write opaque depth, is sorted as one generated mesh and may have overlap/SSAO/contact limitations; assess near/far views and movement before changing any default. No texture recolouring or guessed brightness lift.
 
 Evidence private in graphics local/graphics/vegetation01: grass-atlas.dds/grass-atlas-grey.png, grass-alpha-colour-mips01.json, grass-lighting-isolation01.json/crop01.png, grass-{off-far,no-shadows,no-ao,no-ao-shadows}4k01 captures/logs. Nativepixel ROI2250,730..3150,1100, selected baseRGBmean<80/no-grass>120/drop>35: localized diagnostic, not quality score. Existing tools/Pillow12.3/NumPy2.3.5 reused; source assets/decompilation remain ignored.
 
@@ -33,3 +33,19 @@ Finalf03982e9cdd9 / SHAb5773e00... / release2m09s full4K6500tick attempt hit the
 Add --capture-timeout30..3600seconds as a bounded optional extension of the offscreen watchdog only (requires --render). Default watchdog unchanged; a smaller supplied value cannot reduce the normal budget. Nonfinite/out-of-range values rejected, unit-tested. Retry with900s at identical4K/quality after the source-stamped rebuild; do not lower image quality or alter physics to pass.
 
 Bounded-watchdog unit test passed; changed-app all-target Clippy26.46s passed. Partial tick3785 state matches the prior completed-lap control exactly after removing wall-clock timing. This does not turn the failed attempt into a full-lap pass. CPU contention versus soft-alpha overdraw cost was not isolated, so the slowdown is not attributed solely to CPU load. The unaffected headless quick soak continues; its source crates/binaries remain unchanged by the timeout-only extension.
+
+
+## Final verified candidate
+
+Source `917ca5f94d5e1996ff233a55f2701fd0dcad18ba`, executable SHA256 `785488a18bd7039bfd0d2beee85281c16185be5f8e83cbc793a985766c413275`, release build 4m25s, Rust/Cargo 1.99.0 and Bevy 0.19.1. Enhanced mode now uses soft grass alpha by default. `--grass-alpha mask` restores the comparison; baseline MSAA/A2C is unchanged. Shadows and AO stay enabled. No purchased texture, sprite placement or physics parameter is edited.
+
+Validation completed:
+
+- 525 release workspace tests passed, zero failed/ignored; workspace all-target Clippy passed in 37.75s.
+- Exact solo lap identity: 88.42029812185638 / 86.28228501935392, state a4a35f899a490c36.
+- Quick soak passed 20/20 scenarios / 100000 ticks. The completed run used the identical headless source/binaries from f03982e; the only intervening change is the offscreen watchdog option/test. The explicit Git source comparison is retained. No redundant long soak.
+- Identical-quality native 3840x2160 retry with the explicit 900s capture budget completed 6500 ticks, one valid lap 89.955257484s. Final pose/velocity match the earlier full-lap control exactly. Wall time 411.7454s is a loaded offscreen-run duration, not monitor FPS. Includes source fog, coverage foliage, two texture overrides and mild wheel filtering.
+- A separate 30-frame 1080p moving sequence passed the virtual-30FPS audit: 30 unique frames, <=2.05ns request-clock error, metadata and physical endpoint identical to the source-alpha control. First/last frames inspected. This is not a full perceptual temporal score.
+- Six current GPU logs have no unexpected WARN/ERROR; only the known nil-UUID gilrs warning. Forced RGBA8 path has zero BC assets. Earlier source/coverage native-BC 4K control also rendered successfully; no phone acceptance is claimed.
+
+Private `grass-final-validation02.json`, `grass-final-lap4k02` and `grass-final-moving30-02` captures/logs/audit retain the successful result; the earlier timed-out attempt remains explicitly failed. Sorting of the single transparent grass mesh, original radiometry and future detailed grass geometry remain limitations. This improves the reported strokes without claiming a finished vegetation remaster.
