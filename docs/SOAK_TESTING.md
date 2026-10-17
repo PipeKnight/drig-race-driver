@@ -29,7 +29,7 @@ contacts); BP01, DF01 and the characteristics table are used when present.
 
 | Command | What it does |
 |---|---|
-| `grid-soak quick` | Seeds 1..12 (fixed), 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
+| `grid-soak quick` | Seeds 1..16 (fixed; 1..12 until 2026-10-17, 13..16 are Istanbul Park), 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
 | `grid-soak long --hours 8 --jobs 2` | Seeds from 1001 upwards until the deadline (or `--seeds A..B`), 6000-30000 ticks each. Unattended; the summary is rewritten after every scenario. |
 | `grid-soak run --seed N [--profile quick\|long]` | One scenario in-process (the orchestrator runs each scenario this way in a child process). |
 | `grid-soak replay local/soak/.../seed-N.inputs.tsv` | Exact replay of recorded inputs, independent of later chaos-driver changes. |
@@ -77,7 +77,12 @@ file, so replays never depend on the generator.
   13..20 cars are refused at set-up ("unsupported shared-world car count"):
   `MultiRuntime` and the app's `--opponents 1..11` cap the field at 12, matching
   the original's 12 driver objects. `--max-cars 20` exercises that refusal.
-- Routes: Donington GP and Nürburgring GP (`route_0`).
+- Routes: Donington GP, Nürburgring GP and (since 2026-10-17) Istanbul Park GP
+  (`route_0`). Quick seeds 1..12 keep their routes; 13..16 run Istanbul Park.
+  Long runs move about a third of the seeds to Istanbul Park from a separate
+  stream, so the other fields of a seed are unchanged. A race holds the grid for
+  the track's start-light sequence (Donington 4.0 s, Nürburgring and Istanbul
+  5.0 s; [ISTANBUL_PARK.md](ISTANBUL_PARK.md)).
 - Car models (F345):
   - quick runs stay all-Lacetti, so their results stay comparable with
     earlier runs; `--car`/`--opponent-cars` mix them;

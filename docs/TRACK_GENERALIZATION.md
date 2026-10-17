@@ -1,6 +1,8 @@
 # Track generalization (second circuit)
 
-Status: 2026-10-15, Claude Code. Goal: remove the hard-coded Donington
+Status: 2026-10-15, Claude Code. Third circuit (Istanbul Park, 2026-10-17):
+[ISTANBUL_PARK.md](ISTANBUL_PARK.md), which also replaces the start-light open
+item below with per-track sequences. Goal: remove the hard-coded Donington
 assumptions so another purchased circuit loads and races end to end, while the
 default (Donington `route_0`) stays bit-identical.
 
@@ -124,7 +126,7 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
 
 ## Open items
 
-- Start lights per track: Nürburgring/Jarama `start_lights.xml` differ
+- ~~Start lights per track~~ (done 2026-10-17, ISTANBUL_PARK.md section 3): Nürburgring/Jarama `start_lights.xml` differ
   (object `gg_startlights_lights_horiz`, 7 stages over 5.0 s, textures 1..7);
   the app still uses the Donington sequence constants on every route.
 - Spa VCQTC count limits; Jarama late-braking corner; Istanbul off-track
