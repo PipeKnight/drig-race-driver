@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G090 — Latest main retained; replay foliage ordering verified (18 October 2026)
+
+Owner confirmed the other agent integrated graphics. Inspected primary b48dc9c/F364: playable ce405a1989d6 SHA256f461a115... includes graphics plus F360-F363. Do not overwrite it with the older forest build. Committed focused ordering fix8f92f46, merged latest local main as84d681d; journal-only conflict resolved retaining both records. Four source_trees release tests pass on latest merged source (0failed/0ignored); app all-target Clippy13.99s passed on preceding replay base. Source84d681d build2m28s, private forest-replay-latest01 render inspected: Instant Replay active after1200ticks; pose/velocity/handling/deformation/lap exit match prior1200tick forest control. This single replay view faces the pits, so it is not a far-forest motion proof. Same-frame final replay camera is covered by the regression. Existing primary playable preserved.
+
+Resumed planned lighting research: static caller + isolated original context-write slice connect the recovered light matrix's third vector to sunDirection; source pixel shader confirms towards-light sign. Optional source-sun pilot is being implemented/tested; authored default retained. [Research](docs/SOURCE_SKY_LIGHTING.md). No physics changes, no original-install writes, no owner action required.
+
 ## G089 — Remote main advanced with replays; integrate without force (17 October 2026)
 
 Forest playable and local main promotion completed; graphics branchf0df3a3 pushed successfully. Main push was rejected non-fast-forward (normal Git concurrency, not approval rejection): origin/main advanced to5307ed1 with F360 replay work. Fetched and merged remote; only journal conflict, retaining both records. New replay camera runs after live presentation, so forest presentation must explicitly follow that final camera. Add a real replay-camera/foliage schedule regression, then rebuild/revalidate merged source before a second main promotion/publication. Existing verified forest source3d12ef1 remains playable meanwhile; no force push/reset/other process changes.

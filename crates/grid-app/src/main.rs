@@ -1323,6 +1323,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.benchmark_frames = Some(count);
             }
+            "--sun" => {
+                graphics.source_sun = match args.next().as_deref() {
+                    Some("authored") => false,
+                    Some("source") => true,
+                    _ => return Err("--sun needs authored or source".into()),
+                };
+            }
             "--sky-tone" => {
                 graphics.source_sky_tone = match args.next().as_deref() {
                     Some("raw") => false,
@@ -1661,7 +1668,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
                 );
                 println!(
-                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural).\n--sky-tone raw|source: optional saved scale/exponent for the sky and source IBL; raw default."
+                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural).\n--sky-tone raw|source: optional saved scale/exponent for the sky and source IBL; raw default.\n--sun authored|source: optional recovered diffuse-sun direction; radiometry remains authored."
                 );
                 println!(
                     "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
@@ -1721,6 +1728,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.benchmark_frames.is_some() && output.is_none() {
         return Err("--benchmark-frames requires --render for bounded unattended exit".into());
+    }
+    if graphics.source_sun {
+        if !graphics.enhanced() || (!track && !drive) {
+            return Err("--sun source requires an enhanced track scene".into());
+        }
+        let bytes = read(&root.join(route.track_file("lighting.xml")))?;
+        let sun = grid_formats::track_lighting::read_sun(&bytes)?;
+        println!("source_sun angles={sun:?} direction_to_light={:?} mapping=source-basis radiometry=authored", sun.direction_to_light());
+        graphics.saved_sun = Some(sun);
     }
     if source_haze {
         if !graphics.enhanced() || (!track && !drive) {
@@ -2899,7 +2915,7 @@ fn setup(
             shadow_maps_enabled: true,
             ..default()
         },
-        Transform::from_xyz(-4.0, 8.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        graphics.sun_transform(),
         graphics.cascades(),
     ));
     commands.insert_resource(GlobalAmbientLight {

@@ -84,6 +84,8 @@ pub struct Settings {
     pub source_sky: bool,
     /// Optional recovered sky scale/exponent applied to background and source IBL.
     pub source_sky_tone: bool,
+    pub source_sun: bool,
+    pub saved_sun: Option<grid_formats::track_lighting::Sun>,
     pub preset: Preset,
     pub width: u32,
     pub height: u32,
@@ -123,6 +125,8 @@ impl Default for Settings {
             capture_timeout_seconds: None,
             source_sky: true,
             source_sky_tone: false,
+            source_sun: false,
+            saved_sun: None,
             preset: Preset::Baseline,
             width: 1280,
             height: 800,
@@ -186,6 +190,21 @@ impl Settings {
         }
         sampler.anisotropy_clamp = if self.enhanced() { 16 } else { 1 };
         ImageSampler::Descriptor(sampler)
+    }
+
+    pub fn sun_transform(&self) -> Transform {
+        if self.enhanced()
+            && let Some(sun) = self.saved_sun
+        {
+            let direction = Vec3::from_array(sun.direction_to_light()).normalize();
+            let up = if direction.dot(Vec3::Y).abs() > 0.9999 {
+                Vec3::Z
+            } else {
+                Vec3::Y
+            };
+            return Transform::from_translation(direction).looking_at(Vec3::ZERO, up);
+        }
+        Transform::from_xyz(-4., 8., 5.).looking_at(Vec3::ZERO, Vec3::Y)
     }
 
     pub fn sun_illuminance(&self) -> f32 {
@@ -361,6 +380,30 @@ mod graphics_settings_tests {
             assert!(settings.capture_timeout(value).is_err());
             assert_eq!(settings.capture_timeout_seconds, Some(3600.));
         }
+    }
+    #[test]
+    fn source_sun_emits_away_from_the_light_and_handles_vertical_poles() {
+        let mut settings = Settings {
+            preset: Preset::Enhanced,
+            ..Default::default()
+        };
+        let authored = settings.sun_transform();
+        for height in [-90., 0., 37., 90.] {
+            let sun = grid_formats::track_lighting::Sun {
+                height_degrees: height,
+                rotation_degrees: 123.,
+            };
+            settings.saved_sun = Some(sun);
+            let transform = settings.sun_transform();
+            assert!(transform.rotation.is_finite());
+            assert!(
+                Vec3::from(transform.forward())
+                    .distance(-Vec3::from_array(sun.direction_to_light()))
+                    < 0.000001
+            );
+        }
+        settings.preset = Preset::Baseline;
+        assert_eq!(settings.sun_transform(), authored);
     }
     #[test]
     fn shadow_distance_reaches_requested_bound_and_rejects_invalid_limits() {

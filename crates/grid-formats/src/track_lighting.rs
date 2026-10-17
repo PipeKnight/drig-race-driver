@@ -161,9 +161,84 @@ pub fn read_sky(bytes: &[u8]) -> Result<Sky> {
     Ok(sky)
 }
 
+/// Saved diffuse-sun angles. The source shader uses the third basis vector of
+/// Ry(-rotation) * Rx(-height) as its direction towards the light.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sun {
+    pub height_degrees: f32,
+    pub rotation_degrees: f32,
+}
+
+impl Sun {
+    pub fn direction_to_light(self) -> [f32; 3] {
+        let (h_sin, h_cos) = self.height_degrees.to_radians().sin_cos();
+        let (r_sin, r_cos) = self.rotation_degrees.to_radians().sin_cos();
+        [-r_sin * h_cos, h_sin, r_cos * h_cos]
+    }
+}
+
+pub fn read_sun(bytes: &[u8]) -> Result<Sun> {
+    let values = parameters(bytes)?;
+    let angle = |name: &str| -> Result<f32> {
+        let value = values
+            .get(name)
+            .ok_or(Error {
+                offset: 0,
+                message: "sun angle absent",
+            })?
+            .parse::<f32>()
+            .map_err(|_| Error {
+                offset: 0,
+                message: "invalid sun angle",
+            })?;
+        if !value.is_finite() || !(-36_000.0..=36_000.0).contains(&value) {
+            return fail(0, "sun angle outside supported range");
+        }
+        Ok(value)
+    };
+    Ok(Sun {
+        height_degrees: angle("heightangle")?,
+        rotation_degrees: angle("rotationangle")?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sun_angles_follow_source_basis_and_reject_bad_inputs() {
+        for (height, rotation, expected) in [
+            (0., 0., [0., 0., 1.]),
+            (90., 0., [0., 1., 0.]),
+            (0., 90., [-1., 0., 0.]),
+            (0., -90., [1., 0., 0.]),
+        ] {
+            let xml = format!(
+                r#"<lighting><param heightangle="{height}"/><param rotationangle="{rotation}"/></lighting>"#
+            );
+            let direction = read_sun(xml.as_bytes()).unwrap().direction_to_light();
+            for i in 0..3 {
+                assert!((direction[i] - expected[i]).abs() < 0.000001);
+            }
+        }
+        let xml = r#"<lighting><param heightangle="20"/><param rotationangle="30"/></lighting>"#;
+        for (from, to) in [
+            ("20", "NaN"),
+            ("30", "inf"),
+            ("20", "36001"),
+            ("30", "-36001"),
+            ("heightangle", "missing"),
+        ] {
+            assert!(read_sun(xml.replace(from, to).as_bytes()).is_err());
+        }
+        assert!(
+            read_sun(
+                xml.replace("</lighting>", "<param heightangle=\"1\"/></lighting>")
+                    .as_bytes()
+            )
+            .is_err()
+        );
+    }
     const XML: &str = r#"<lighting><param fogBaseLevel="0"/><param fogTopLevel="2000"/><param fogDistance="500"/><param fogDensityCap="0.4"/><param fogColour="0.6 0.7 0.9"/><param fogColourBrightness="0.5"/></lighting>"#;
     #[test]
     fn reads_controls_and_rejects_ambiguous_or_invalid_xml() {
