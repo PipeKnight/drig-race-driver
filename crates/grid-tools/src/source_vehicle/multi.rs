@@ -41,6 +41,8 @@ pub struct MultiRuntime {
     statics_normals: Vec<[f32; 3]>,
     /// Per car: track, prop and car body records of the last tick.
     body_counts: Vec<usize>,
+    /// Body-to-prop records of the last tick: (contact slot, route prop box).
+    prop_slots: Vec<(usize, usize)>,
     car_normals: Vec<(usize, usize, [f32; 3])>,
     /// Car speeds at the end of the last tick (the app swaps car 0 out
     /// between ticks).
@@ -54,6 +56,17 @@ pub struct MultiRuntime {
     newly_retired: Vec<usize>,
     #[cfg(test)]
     fail_lap_timing: Option<(usize, u64)>,
+}
+
+/// What a car body record touched (see [`MultiRuntime::contact_impacts`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Contacted {
+    /// Route prop box index.
+    Prop(usize),
+    /// Another car of the shared world.
+    Car(usize),
+    /// Road, boundary sheet or other static geometry.
+    Static,
 }
 
 /// A car taken out after its own pipeline failed (see [`MultiRuntime::tick`]).
@@ -368,6 +381,7 @@ impl MultiRuntime {
             last_active: 0,
             statics_normals: vec![[0.; 3]; n],
             body_counts: vec![0; n],
+            prop_slots: Vec::new(),
             car_normals: Vec::new(),
             speeds: vec![0.; n],
             props: None,
@@ -473,6 +487,46 @@ impl MultiRuntime {
         )
     }
 
+    /// [`Self::impacts`] with what each record touched: a route prop box,
+    /// another car or other static geometry.
+    pub fn contact_impacts(&self, i: usize) -> Vec<(crate::body_impacts::Impact, Contacted)> {
+        let contacts = &self.world.groups.contacts;
+        let token = self.token(i);
+        let cars: Vec<u32> = (0..self.cars.len()).map(|j| self.token(j)).collect();
+        contacts[..self.last_active.min(contacts.len())]
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, c)| {
+                let impact = crate::body_impacts::collect(std::slice::from_ref(c), token).pop()?;
+                let other = if c[0x28 / 4] == token {
+                    c[0x2c / 4]
+                } else {
+                    c[0x28 / 4]
+                };
+                let contacted = match self.prop_slots.iter().find(|&&(s, _)| s == slot) {
+                    Some(&(_, p)) => Contacted::Prop(p),
+                    None => match cars.iter().position(|&t| t == other) {
+                        Some(j) => Contacted::Car(j),
+                        None => Contacted::Static,
+                    },
+                };
+                Some((impact, contacted))
+            })
+            .collect()
+    }
+
+    /// Route prop boxes that are `close_drift_flag` entities.
+    pub fn close_drift_flag_boxes(&self) -> Vec<usize> {
+        self.cars[0].track.props().map_or_else(Vec::new, |p| {
+            p.boxes
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| b.template.contains("close_drift_flag"))
+                .map(|(k, _)| k)
+                .collect()
+        })
+    }
+
     /// World shape token (one-based) of car `i`'s body shape.
     fn token(&self, i: usize) -> u32 {
         if i == 0 {
@@ -499,6 +553,7 @@ impl MultiRuntime {
         self.last_car_contacts = 0;
         self.statics_normals = vec![[0.; 3]; self.cars.len()];
         self.body_counts = vec![0; self.cars.len()];
+        self.prop_slots.clear();
         self.car_normals.clear();
         self.speeds = vec![0.; self.cars.len()];
         self.retired = vec![None; self.cars.len()];
@@ -613,6 +668,7 @@ impl MultiRuntime {
         let mut piece_contacts = 0;
         let mut statics_normals = vec![[0f32; 3]; n];
         let mut body_counts = vec![0; n];
+        let mut prop_slots = Vec::new();
         let mut car_normals = Vec::new();
         let mut contact_failed: Vec<Option<Error>> = vec![None; n];
         let mut provider = |bodies: &[contact_groups::Body], remaining: usize| {
@@ -621,6 +677,7 @@ impl MultiRuntime {
             body_counts.iter_mut().for_each(|c| *c = 0);
             car_normals.clear();
             recorded.clear();
+            prop_slots.clear();
             for i in 0..n {
                 if out.len() >= remaining {
                     break;
@@ -651,6 +708,9 @@ impl MultiRuntime {
                         for k in 0..3 {
                             statics_normals[i][k] += normal[k];
                         }
+                    }
+                    if let Some(prop) = prop {
+                        prop_slots.push((wheel_contacts + out.len(), prop));
                     }
                     if let Some(prop) = prop
                         && props.is_some()
@@ -916,6 +976,7 @@ impl MultiRuntime {
         self.last_active = active;
         self.statics_normals = statics_normals;
         self.body_counts = body_counts;
+        self.prop_slots = prop_slots;
         self.car_normals = car_normals;
         self.speeds = self
             .cars
@@ -1536,6 +1597,105 @@ mod tests {
                 multi.reset();
                 assert!((0..12).all(|i| multi.retirement(i).is_none()));
                 assert_eq!(run(&mut multi).3, first);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Drift Battle AI (docs/DISCIPLINES.md §4.1): a solo AI BMW with the
+    /// drift_battle config on longbeach_cl follows the drift line, initiates
+    /// and holds drifts that the drift scorer detects, deterministically.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_drift_battle_ai_car_drifts_and_is_scored() {
+        use crate::ai_driver::{AiData, AiDriver, Behaviour, NORMAL_DIFFICULTY, Parameters, RaceView, View};
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/usa/long_beach/route_1").unwrap();
+                let bmw = Car::new(crate::car::BMW).unwrap();
+                let data =
+                    AiData::load_for(root, route.path(), "touring", "bmw", Some("drift_battle"))
+                        .unwrap();
+                let settings = crate::drift::Settings::load(root).unwrap();
+                let flags = crate::drift::close_drift_flags(root, &route).unwrap();
+                let progress = crate::lap_progress::load_route(root, &route).unwrap().progress;
+                let gate = &progress.gates[0];
+                let start = std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5);
+                let run = || {
+                    let mut multi =
+                        MultiRuntime::load_deforming_on(root, &route, &[("slot_00", &bmw)], &table, events, None)
+                            .unwrap();
+                    let at = |m: &MultiRuntime| {
+                        let p = m.cars[0].pose();
+                        vec![[p[12], p[13], p[14]]]
+                    };
+                    let mut standings = crate::race::Standings::new(&data.line, 2, start, &at(&multi));
+                    let p = Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.).unwrap();
+                    let mut driver = AiDriver::new(p, 0x5eed);
+                    let mut entry = crate::drift::Entry::new(true, Some(1), false);
+                    let flag_boxes = multi.close_drift_flag_boxes();
+                    let (mut states, mut slip, mut detected, mut drift_line) = ([0u32; 5], 0f32, 0u32, 0u32);
+                    for _ in 0..2600 {
+                        driver.race = RaceView {
+                            place: 0,
+                            cars: 1,
+                            progress: standings.laps_covered(0) as f32,
+                        };
+                        multi.cars[0].set_ai_grip(driver.request_grip());
+                        let view = View::of(&multi.cars[0], multi.obstruction(0));
+                        let c = driver.controls(&data, &view, &[], DELTA);
+                        multi.tick(&[c]).unwrap();
+                        standings.update(&data.line, &at(&multi), 0., &[]);
+                        let contacts: Vec<_> = multi
+                            .contact_impacts(0)
+                            .iter()
+                            .map(|(x, o)| (x.impact, *o))
+                            .collect();
+                        let (impact, touched) = crate::drift::split_contacts(&contacts, &flag_boxes);
+                        if touched {
+                            entry.detector.touch_flag();
+                        }
+                        let sample = crate::drift::Sample::of(
+                            &multi.cars[0],
+                            standings.laps_covered(0) as f32,
+                            0,
+                            1,
+                            impact,
+                        );
+                        entry.update(&settings, &flags, &sample, DELTA);
+                        let m = driver.telemetry;
+                        if m.behaviour == Behaviour::Drift {
+                            states[m.drift_state as usize] += 1;
+                        }
+                        slip = slip.max(m.slip.to_degrees());
+                        detected += u32::from(entry.detector.drifting);
+                        drift_line += u32::from(m.drift_line);
+                    }
+                    (states, slip, detected, drift_line, multi.cars[0].pose())
+                };
+                let first = run();
+                eprintln!(
+                    "drift_battle_ai states={:?} max_slip={:.1} detected_ticks={} drift_line_ticks={}",
+                    first.0, first.1, first.2, first.3
+                );
+                let (states, slip, detected, drift_line, _) = first;
+                // Approach, initiation and drifting all occur, on the drift line.
+                assert!(states[1] > 0 && states[2] > 0 && states[3] > 0, "{states:?}");
+                assert!(slip > 20., "{slip}");
+                assert!(detected > 0, "{detected}");
+                assert!(drift_line > 2400, "{drift_line}");
+                // Deterministic: an identical second run.
+                assert_eq!(run().4, first.4);
             })
             .unwrap()
             .join()

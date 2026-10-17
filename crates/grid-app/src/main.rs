@@ -1901,7 +1901,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let mut by_model = BTreeMap::new();
                 for model in &field {
                     if !by_model.contains_key(model) {
-                        let data = AiData::load(&root, route.path(), "touring", model.stem())?;
+                        // A Drift Battle reads the drift_battle AI config (docs/DISCIPLINES.md).
+                        let data = AiData::load_for(
+                            &root,
+                            route.path(),
+                            "touring",
+                            model.stem(),
+                            drift.then_some("drift_battle"),
+                        )?;
                         by_model.insert(model.clone(), data);
                     }
                 }
@@ -1965,7 +1972,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     &positions,
                 );
                 let pacing = grid_tools::ai_pacing::Field::new(
-                    grid_tools::ai_pacing::Data::load(&root, &ai_settings)?,
+                    grid_tools::ai_pacing::Data::load_for(
+                        &root,
+                        &ai_settings,
+                        if drift { "drift_battle" } else { "circuit" },
+                    )?,
                     ai_settings.clone(),
                     &ai.line,
                     trial_laps.unwrap_or(1),
@@ -3137,6 +3148,11 @@ fn drive_tick(
             .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         let view = View::of(car, opponents.multi.obstruction(0));
+        pilot.race = grid_tools::ai_driver::RaceView {
+            place: opponents.standings.position(0).saturating_sub(1) as u32,
+            cars: opponents.standings.len() as u32,
+            progress: opponents.standings.laps_covered(0) as f32,
+        };
         Some(pilot.controls(
             &opponents.ai,
             &view,
@@ -3274,6 +3290,12 @@ fn drive_tick(
                     .map(|(_, o)| *o)
                     .collect();
                 let view = View::of(car, opponents.multi.obstruction(i + 1));
+                // Race place for the drift test (read only in drift events).
+                driver.race = grid_tools::ai_driver::RaceView {
+                    place: opponents.standings.position(i + 1).saturating_sub(1) as u32,
+                    cars: opponents.standings.len() as u32,
+                    progress: opponents.standings.laps_covered(i + 1) as f32,
+                };
                 driver.controls(
                     &opponents.car_ai[i],
                     &view,

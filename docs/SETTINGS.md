@@ -124,5 +124,9 @@ CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_direct
 | Play GRID Time Trial.cmd | `settings/time-trial.ini` | as above, 3 laps |
 | Play GRID Race.cmd | `settings/race.ini` | 3 laps, 11 opponents, back of the grid, AI characteristics when present |
 | Play GRID Drift Battle.cmd | `settings/drift-battle.ini` | Drift Battle ([DISCIPLINES.md](DISCIPLINES.md)): Long Beach route_1, 2 laps, 7 BMW opponents |
+| Play GRID Drift Battle Nurburgring.cmd | `settings/drift-battle-nurburgring.ini` | Drift Battle on Nürburgring route_1 (nurburgring_spr) |
+| Play GRID Drift Battle Istanbul.cmd | `settings/drift-battle-istanbul.ini` | Drift Battle on Istanbul Park route_1 (istanbul_int) |
+| Play GRID Drift Battle Jarama.cmd | `settings/drift-battle-jarama.ini` | Drift Battle on Jarama route_1 (jarama_r) |
+| Play GRID Drift Battle Jarama GP.cmd | `settings/drift-battle-jarama-gp.ini` | Drift Battle on Jarama route_0 (jarama_gp) |
 
 Changes in behaviour: BP01 and DF01 are now always derived from `grid.exe` instead of being used only when `local\*.bin` existed (the bytes are equal on this PC). The game folder argument is optional. `local\assists.txt`, `GRID_PLAY_ASSISTS`, `GRID_PLAY_INPUT`, `GRID_PLAY_OPPONENTS` and `GRID_PLAY_GRID` still work; the launcher turns them into command-line flags. Equivalent without any variables: `target\release\grid-app.exe --settings settings\race.ini`.

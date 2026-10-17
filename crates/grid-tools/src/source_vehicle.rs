@@ -1291,8 +1291,14 @@ impl Runtime {
     /// clamped as 0x98F2D0 does) and each wheel's grip scale at wheel +0x80
     /// (0x408710), rear L/R, front L/R. Written for AI cars only.
     pub fn set_ai_pacing(&mut self, torque: f32, grip: [f32; 4]) {
+        self.state.car.owner.vehicle[0x1888 / 4] = torque.to_bits();
+        self.set_ai_grip(grip);
+    }
+
+    /// Only the wheel grip scales of [`Self::set_ai_pacing`] (headless runs
+    /// without a race manager apply the AI request grips this way).
+    pub fn set_ai_grip(&mut self, grip: [f32; 4]) {
         let b = &mut self.state.car.owner.vehicle;
-        b[0x1888 / 4] = torque.to_bits();
         for (i, g) in grip.iter().enumerate() {
             b[(0x1990 + i * 0x150 + 0x80) / 4] = g.to_bits();
         }

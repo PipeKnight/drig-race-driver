@@ -21,6 +21,8 @@ pub(crate) struct DriftEvent {
     pub flags: Vec<[f32; 3]>,
     pub entries: Vec<Entry>,
     pub laps: u32,
+    /// Route prop boxes of the close-drift flags (found at the first tick).
+    flag_boxes: Option<Vec<usize>>,
     /// AI difficulty level for the drift bias (`DifficultyBias`).
     ai_level: usize,
     segment: u64,
@@ -47,6 +49,7 @@ impl DriftEvent {
             flags,
             entries: Vec::new(),
             laps,
+            flag_boxes: None,
             ai_level,
             segment: 0,
             last_tick: 0,
@@ -133,32 +136,27 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut event: ResMut<DriftEvent>) 
     event.last_tick = driving.runtime.ticks;
     if advanced && !o.standings.over() {
         for (i, car) in cars.iter().enumerate() {
-            let pose = car.pose();
-            let v = car.velocity();
-            let wheels = car.wheels().map(|w| {
-                std::array::from_fn(|k| {
-                    pose[12 + k]
-                        + w.anchor[0] * pose[k]
-                        + w.anchor[1] * pose[4 + k]
-                        + w.anchor[2] * pose[8 + k]
-                })
-            });
-            let sample = Sample {
-                velocity: [v[0], v[1], v[2]],
-                forward: [pose[8], pose[9], pose[10]],
-                left: [pose[0], pose[1], pose[2]],
-                wheels,
-                progress: o.standings.laps_covered(i) as f32,
-                position: o.standings.position(i).saturating_sub(1),
-                cars: cars.len(),
-                impact: o
-                    .multi
-                    .impacts(i)
-                    .iter()
-                    .map(|x| x.impact)
-                    .fold(0., f32::max),
-            };
+            let contacts: Vec<_> = o
+                .multi
+                .contact_impacts(i)
+                .iter()
+                .map(|(x, other)| (x.impact, *other))
+                .collect();
+            let flags = event
+                .flag_boxes
+                .get_or_insert_with(|| o.multi.close_drift_flag_boxes());
+            let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flags);
+            let sample = Sample::of(
+                car,
+                o.standings.laps_covered(i) as f32,
+                o.standings.position(i).saturating_sub(1),
+                cars.len(),
+                impact,
+            );
             let entry = &mut event.entries[i];
+            if touched {
+                entry.detector.touch_flag();
+            }
             let before = (
                 entry.scorer.combo,
                 entry.scorer.rating,

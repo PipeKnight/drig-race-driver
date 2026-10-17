@@ -41,9 +41,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(_) => return Err("--cars needs STEM[,STEM...]".into()),
         None => vec![Car::default()],
     };
+    // `--discipline drift_battle`: the drift_battle AI config and choreographer
+    // set, every car scored by the drift scorer (docs/DISCIPLINES.md).
+    let drift = match args.iter().position(|a| a == "--discipline") {
+        Some(i) if args.get(i + 1).map(String::as_str) == Some("drift_battle") => {
+            args.drain(i..i + 2);
+            true
+        }
+        Some(_) => return Err("--discipline needs drift_battle".into()),
+        None => false,
+    };
+    let format = drift.then_some("drift_battle");
+    // GRID_AI_CLASS=CLASS: another ai_vehicle_config/ai_vehicle_track class
+    // (research; the cars' own class is `touring`).
+    let class_variable = std::env::var("GRID_AI_CLASS").ok();
+    let class = class_variable.as_deref().unwrap_or("touring");
     if !(5..=7).contains(&args.len()) {
         return Err(
-            "usage: grid-opponent-race [--route ROUTE] [--cars STEM,...] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
+            "usage: grid-opponent-race [--route ROUTE] [--cars STEM,...] [--discipline drift_battle] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
                 .into(),
         );
     }
@@ -94,7 +109,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for model in &models {
         by_model.insert(
             model.clone(),
-            AiData::load(root, route.path(), "touring", model.stem())?,
+            AiData::load_for(root, route.path(), class, model.stem(), format)?,
         );
     }
     let car_data: Vec<&AiData> = field.iter().map(|m| &by_model[*m]).collect();
@@ -192,7 +207,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(k) => {
             println!("pacing reference=car{k} settings={settings} laps={race_laps}");
             Some(grid_tools::ai_pacing::Field::new(
-                grid_tools::ai_pacing::Data::load(root, &settings)?,
+                grid_tools::ai_pacing::Data::load_for(
+                    root,
+                    &settings,
+                    format.unwrap_or("circuit"),
+                )?,
                 settings.clone(),
                 &data.line,
                 race_laps,
@@ -320,6 +339,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(_) => None,
     };
+    // Drift Battle: drift.xml, the route's close-drift flags and one entry
+    // per car (all AI cars at the difficulty's DifficultyBias level).
+    let mut drift_event = match drift {
+        true => {
+            let settings = grid_tools::drift::Settings::load(root)?;
+            let flags = grid_tools::drift::close_drift_flags(root, &route)?;
+            let level = grid_tools::drift::ai_level(difficulty);
+            println!(
+                "drift_battle close_drift_flags={} ai_level={level}",
+                flags.len()
+            );
+            let entries = (0..cars)
+                .map(|_| grid_tools::drift::Entry::new(true, Some(level), false))
+                .collect::<Vec<_>>();
+            Some((settings, flags, entries, multi.close_drift_flag_boxes()))
+        }
+        false => None,
+    };
+    // Per car: drift-behaviour ticks, drift-mode ticks, ticks the drift test
+    // fired, and the largest slip angle (degrees).
+    let mut drift_counts = vec![(0u64, 0u64, 0u64, 0f32); cars];
     let mut behaviours = vec![(grid_tools::ai_driver::Behaviour::Race, 0u8, 0u8, false); cars];
     let mut pair_contacts = vec![vec![0usize; cars]; cars];
     let mut car_contacts = 0;
@@ -332,6 +372,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
+        if drift {
+            // The drift test's race place; without a race manager the AI
+            // request grips of the last update reach the wheels here, as the
+            // grip application 0x408710 does.
+            for (i, driver) in drivers.iter_mut().enumerate() {
+                if let Driver::Ai(ai) = driver {
+                    ai.race = grid_tools::ai_driver::RaceView {
+                        place: standings.position(i).saturating_sub(1) as u32,
+                        cars: cars as u32,
+                        progress: standings.laps_covered(i) as f32,
+                    };
+                    if field.is_none() {
+                        multi.cars[i].set_ai_grip(ai.request_grip());
+                    }
+                }
+            }
+        }
         // Race manager before the AI update (0x4095C0).
         if let Some(field) = &mut field {
             if let Some((car, _, wheel)) = blow_tyre.filter(|b| b.1 == multi.ticks) {
@@ -524,6 +581,50 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
             &[],
         );
+        if let Some((settings, flags, entries, flag_boxes)) = &mut drift_event {
+            for (i, car) in multi.cars.iter().enumerate() {
+                let contacts: Vec<_> = multi
+                    .contact_impacts(i)
+                    .iter()
+                    .map(|(x, other)| (x.impact, *other))
+                    .collect();
+                let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flag_boxes);
+                if std::env::var_os("GRID_TRACE_DRIFT_CONTACTS").is_some() {
+                    for (x, prop) in multi.contact_impacts(i) {
+                        if x.impact > 100. {
+                            println!(
+                                "drift_contact tick={} car{i} impact={:.0} point={:?} normal={:?} prop={prop:?}",
+                                multi.ticks, x.impact, x.point, x.normal
+                            );
+                        }
+                    }
+                }
+                let sample = grid_tools::drift::Sample::of(
+                    car,
+                    standings.laps_covered(i) as f32,
+                    standings.position(i).saturating_sub(1),
+                    cars,
+                    impact,
+                );
+                if touched {
+                    entries[i].detector.touch_flag();
+                }
+                entries[i].update(settings, flags, &sample, grid_tools::source_vehicle::DELTA);
+                if matches!(standings.status(i), Status::Finished | Status::Out(_)) {
+                    let v = car.velocity();
+                    let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                    entries[i].finish_race(settings, true, speed, race_laps);
+                }
+                if let Driver::Ai(ai) = &drivers[i] {
+                    let m = ai.telemetry;
+                    let c = &mut drift_counts[i];
+                    c.0 += u64::from(m.behaviour == grid_tools::ai_driver::Behaviour::Drift);
+                    c.1 += u64::from(m.drift_mode);
+                    c.2 += u64::from(m.drift_fired);
+                    c.3 = c.3.max(m.slip.to_degrees());
+                }
+            }
+        }
         // A car stopped by the failure/damage retire drive is out (AUTHORED).
         for (i, driver) in drivers.iter().enumerate() {
             if let Driver::Ai(ai) = driver
@@ -581,6 +682,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 u8::from(multi.cars[0].reverse_gear()),
                 m.behaviour
             )?;
+            if drift {
+                // Drift runs append: test fired, state, drift mode, drift
+                // line, request grips rear/front, scorer total and display.
+                let g = ai.request_grip();
+                let s = drift_event.as_ref().map(|e| &e.2[0].scorer);
+                writeln!(
+                    t,
+                    "#drift\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{:.2}\t{:.0}\t{:.0}\t{:.0}\t{}\t{:.2}\t{:.2}",
+                    multi.ticks,
+                    u8::from(m.drift_fired),
+                    m.drift_state,
+                    u8::from(m.drift_mode),
+                    u8::from(m.drift_line),
+                    g[0],
+                    g[2],
+                    s.map_or(0., |s| s.total),
+                    s.map_or(0., |s| s.display),
+                    multi.impacts(0).iter().map(|x| x.impact).fold(0., f32::max),
+                    drift_event.as_ref().map_or(0, |e| u8::from(e.2[0].detector.drifting)),
+                    m.drift_room[0],
+                    m.drift_room[1],
+                )?;
+            }
         }
         for (i, car) in multi.cars.iter().enumerate() {
             use grid_tools::lap_progress::Event;
@@ -611,6 +735,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             &[],
         );
         println!("race finalized tick={} reason=tick-limit", multi.ticks);
+    }
+    if let Some((settings, _, entries, _)) = &mut drift_event {
+        // The race end banks the rest (0x64D940).
+        for (i, car) in multi.cars.iter().enumerate() {
+            let v = car.velocity();
+            let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            let finished = matches!(standings.status(i), Status::Finished | Status::Out(_));
+            entries[i].finish_race(settings, finished, speed, race_laps);
+            let s = &entries[i].scorer;
+            let (behaviour, mode, fired, slip) = drift_counts[i];
+            println!(
+                "drift car{i} score={} estimate_needed={} drifts={} longest={:.2} largest_angle={:.1} fastest_mph={:.1} best_combo={:.0} ai_drift_ticks={behaviour} drift_mode_ticks={mode} test_fired_ticks={fired} max_slip={slip:.1}",
+                entries[i].score(),
+                entries[i].needs_estimate,
+                s.ratings.iter().map(|r| r.count).sum::<i32>(),
+                s.longest_drift,
+                s.largest_angle,
+                s.fastest_drift,
+                s.best_combo,
+            );
+        }
+        let order = grid_tools::drift::classification(entries, &standings.order());
+        println!("drift_results order={order:?}");
     }
     for (i, car) in multi.cars.iter().enumerate() {
         let lap = car.lap.as_ref().unwrap();

@@ -309,6 +309,33 @@ pub struct AiData {
     driver: BTreeMap<String, f32>,
     vehicle: BTreeMap<String, f32>,
     mappings: BTreeMap<String, ai::Mapping>,
+    /// `behaviour_*` and `test_*` switches of the driver config (behaviour
+    /// flags cfg+0xCB4+type, test flags cfg+0xCC4+type).
+    switches: BTreeMap<String, f32>,
+    /// The same data on the route's `drift` racing line, when the event's
+    /// config enables the drift behaviour (line choice 0x794870 reads
+    /// cfg+0xCC3 = behaviour_drift).
+    drift: Option<Box<AiData>>,
+}
+
+/// `(arc length of the brake-line gate, class brake data)` per brake-line id.
+type BrakeLines = Vec<(f32, ai::BrakeData)>;
+
+/// Racing line and brake lines of `track` (brake-line arcs on that line).
+fn track_lines(
+    track: &ai::Track,
+    class_lines: &Option<Vec<ai::BrakeData>>,
+) -> Result<(Line, BrakeLines), Box<dyn std::error::Error>> {
+    let line = Line::new(track)?;
+    let mut brake_lines = Vec::new();
+    for (id, b) in track.brake_lines.iter().enumerate() {
+        let data = match class_lines {
+            Some(lines) => *lines.get(id).ok_or("class brake line absent")?,
+            None => b.data,
+        };
+        brake_lines.push((line.start[line.gate_index[b.gate]], data));
+    }
+    Ok((line, brake_lines))
 }
 
 impl AiData {
@@ -319,27 +346,50 @@ impl AiData {
         class: &str,
         car: &str,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_for(root, route, class, car, None)
+    }
+
+    /// [`Self::load`] for an event of the competition format `format` (e.g.
+    /// `drift_battle`): its `ai_driver_config.xml` section overrides the
+    /// `default` values and switches, and its parameter-mapping section the
+    /// `default` mappings [I: the section names are the format names; a
+    /// single race has an empty `single_race` section and showed the
+    /// `default` values live, F290]. With the drift behaviour switched on the
+    /// data is also built on the route's `drift` racing line.
+    pub fn load_for(
+        root: &Path,
+        route: &str,
+        class: &str,
+        car: &str,
+        format: Option<&str>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let bytes = read_doc(&root.join(route).join("ai_track.xml"))?;
-        let track = ai::track(&binxml::read(&bytes)?)?;
+        let track_doc = binxml::read(&bytes)?;
+        let track = ai::track(&track_doc)?;
         let bytes = read_doc(&root.join(route).join("ai_vehicle_track.xml"))?;
         let class_lines = ai::class_brake_lines(&binxml::read(&bytes)?, class)?;
-        let line = Line::new(&track)?;
-        let mut brake_lines = Vec::new();
-        for (id, b) in track.brake_lines.iter().enumerate() {
-            let data = match &class_lines {
-                Some(lines) => *lines.get(id).ok_or("class brake line absent")?,
-                None => b.data,
-            };
-            brake_lines.push((line.start[line.gate_index[b.gate]], data));
-        }
+        let (line, brake_lines) = track_lines(&track, &class_lines)?;
         let bytes = read_doc(&root.join("ai/ai_vehicle_statistics.xml"))?;
         let brake_tables = ai::statistics(&binxml::read(&bytes)?, car)?.brake;
         let bytes = read_doc(&root.join("ai/ai_driver_config.xml"))?;
-        let driver = ai::config(
-            &binxml::read(&bytes)?,
-            "ai_driver_config",
-            &[("default", None)],
-        )?;
+        let config = binxml::read(&bytes)?;
+        let mut driver = ai::config(&config, "ai_driver_config", &[("default", None)])?;
+        let mut switches = BTreeMap::new();
+        for section in std::iter::once("default").chain(format) {
+            // A format without its own section keeps the defaults.
+            if section != "default"
+                && let Ok(values) = ai::config(&config, "ai_driver_config", &[(section, None)])
+            {
+                driver.extend(values);
+            }
+            for group in ["behaviour", "behaviourTest"] {
+                if let Ok(values) =
+                    ai::config(&config, "ai_driver_config", &[(section, None), (group, None)])
+                {
+                    switches.extend(values);
+                }
+            }
+        }
         let bytes = read_doc(&root.join("ai/ai_vehicle_config.xml"))?;
         let doc = binxml::read(&bytes)?;
         let mut vehicle = ai::config(
@@ -355,15 +405,37 @@ impl AiData {
             vehicle.extend(overrides);
         }
         let bytes = read_doc(&root.join("ai/ai_driver_parameter_mappings.xml"))?;
-        let mappings = ai::mappings(&binxml::read(&bytes)?, "default")?;
-        Ok(Self {
+        let mapping_doc = binxml::read(&bytes)?;
+        let mut mappings = ai::mappings(&mapping_doc, "default")?;
+        if let Some(format) = format
+            && let Ok(overrides) = ai::mappings(&mapping_doc, format)
+        {
+            mappings.extend(overrides);
+        }
+        let mut data = Self {
             line,
             brake_lines,
             brake_tables,
             driver,
             vehicle,
             mappings,
-        })
+            switches,
+            drift: None,
+        };
+        if data.switch("behaviour_drift") {
+            let (line, brake_lines) = track_lines(&ai::track_on(&track_doc, "drift")?, &class_lines)?;
+            data.drift = Some(Box::new(Self {
+                line,
+                brake_lines,
+                ..data.clone()
+            }));
+        }
+        Ok(data)
+    }
+
+    /// A `behaviour_*` or `test_*` switch of the driver config.
+    fn switch(&self, name: &str) -> bool {
+        self.switches.get(name).is_some_and(|&v| v != 0.)
     }
 
     /// Braking distance from `from` down to `to` (0x7A6650).
@@ -416,6 +488,42 @@ pub struct Parameters {
     deviation_small: f32,
     deviation_large: f32,
     faults: Faults,
+    /// tgNonOptimalSpeedFactor: corner-speed factor on a line other than
+    /// `optimal` (0x792C80).
+    tg_non_optimal_speed_factor: f32,
+    /// behaviour_race_damaged and behaviour_controlled_stop switches.
+    race_damaged: bool,
+    controlled_stop: bool,
+    /// The drift behaviour and test, when the event's config switches both on.
+    pub drift: Option<Drift>,
+}
+
+/// Drift behaviour parameters (docs/DISCIPLINES.md §4.1): ai_vehicle_config
+/// `drift*` (vcfg+0x3B0..+0x4F0), thBrakeLineHoldTimeDrift (cfg+0x2E8) and the
+/// mappings drift_skill (45) and drift_position (46). Built-in defaults where
+/// the shipped XML is silent: driftInitiateGrip 1.2, driftRacingGrip 1.1,
+/// driftBrakeLineAdvance 8 m.
+#[derive(Clone, Debug)]
+pub struct Drift {
+    st_ang_vel_factor: f32,
+    /// driftAngleRangeMin/Max and driftAngleMax (degrees).
+    angle_range: [f32; 2],
+    angle_max: f32,
+    /// driftMinGrip / driftMaxGrip (rear wheels).
+    min_grip: f32,
+    max_grip: f32,
+    /// driftStartAngle / driftEndAngle (degrees).
+    start_angle: f32,
+    end_angle: f32,
+    merge: f32,
+    speed_min: f32,
+    grip_front: f32,
+    initiate_grip: f32,
+    racing_grip: f32,
+    brake_line_advance: f32,
+    hold_time: f32,
+    pub skill: f32,
+    pub position: f32,
 }
 
 /// Mistake, failure and let-pass parameters (docs/AI_MISTAKES_PACING_RESEARCH.md
@@ -524,6 +632,9 @@ impl Parameters {
                 .ok_or(format!("AI vehicle config {k} absent"))
         };
         let d_or = |k: &str, default: f32| data.driver.get(k).copied().unwrap_or(default);
+        let v_or = |k: &str, default: f32| data.vehicle.get(k).copied().unwrap_or(default);
+        // A behaviour absent from the config keeps the port's default (on).
+        let on = |k: &str| data.switches.get(k).is_none_or(|&s| s != 0.);
         let m = |k: &str| {
             data.mappings
                 .get(k)
@@ -716,6 +827,31 @@ impl Parameters {
                 damage_retirement_ratio: m("damage_retirement_ratio")?,
                 let_pass_distance: d_or("coLetPassDistance", 30.),
                 let_pass_throttle: d_or("coLetPassThrottleRatio", 0.8),
+            },
+            tg_non_optimal_speed_factor: d_or("tgNonOptimalSpeedFactor", 0.8),
+            race_damaged: on("behaviour_race_damaged"),
+            controlled_stop: on("behaviour_controlled_stop"),
+            drift: if data.switch("behaviour_drift") && data.switch("test_drift") {
+                Some(Drift {
+                    st_ang_vel_factor: v("driftStAngVelFactor")?,
+                    angle_range: [v("driftAngleRangeMin")?, v("driftAngleRangeMax")?],
+                    angle_max: v("driftAngleMax")?,
+                    min_grip: v("driftMinGrip")?,
+                    max_grip: v("driftMaxGrip")?,
+                    start_angle: v("driftStartAngle")?,
+                    end_angle: v("driftEndAngle")?,
+                    merge: v("driftMergeFactor")?,
+                    speed_min: v("driftSpeedMin")?,
+                    grip_front: v("driftGripFront")?,
+                    initiate_grip: v_or("driftInitiateGrip", 1.2),
+                    racing_grip: v_or("driftRacingGrip", 1.1),
+                    brake_line_advance: v_or("driftBrakeLineAdvance", 8.),
+                    hold_time: d_or("thBrakeLineHoldTimeDrift", 0.2),
+                    skill: m("drift_skill")?,
+                    position: m("drift_position")?,
+                })
+            } else {
+                None
             },
         })
     }
@@ -951,7 +1087,181 @@ pub enum Behaviour {
     ControlledStop,
     RaceDamaged,
     RetireFailure,
+    /// Drift events (score 2/12/13, docs/DISCIPLINES.md §4.1).
+    Drift,
 }
+
+/// The car's place in the race, read by the drift test (test context +0x14
+/// count, +0x18: +8 place, +0x10 race progress).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RaceView {
+    /// 0-based race position (0 = leader).
+    pub place: u32,
+    pub cars: u32,
+    /// Race progress in laps (not positive before the start line).
+    pub progress: f32,
+}
+
+impl Default for RaceView {
+    fn default() -> Self {
+        Self {
+            place: 0,
+            cars: 1,
+            progress: 0.,
+        }
+    }
+}
+
+/// Drift test object (0x78FE90, created by 0x7A7950: +8 fired, +0x10 place
+/// when it fired, +0x14 timer = -1, +0x18 before-start flag) and the drift
+/// behaviour state (+0x30, 0 at construction 0x795AC0).
+#[derive(Clone, Copy, Debug)]
+struct DriftState {
+    fired: bool,
+    place: u32,
+    timer: f32,
+    before_start: bool,
+    state: u8,
+    /// The previous update's next brake line: (drift speed, distance), the
+    /// request fields +0x1C/+0x28 the test reads (0x78CB30).
+    line: Option<(f32, f32)>,
+}
+
+impl Default for DriftState {
+    fn default() -> Self {
+        Self {
+            fired: false,
+            place: 0,
+            timer: -1.,
+            before_start: false,
+            state: 0,
+            line: None,
+        }
+    }
+}
+
+impl DriftState {
+    /// One update of the drift test 0x78FE90 with the race place `race` and
+    /// `draw(a, b)` uniform between a and b. Returns true when the test is
+    /// fired and the refusal 0x78CB30 must run.
+    /// - Before the start (progress not positive) a first window is drawn.
+    /// - Racing, the test fires when its timer runs out, or at once on an
+    ///   even place after its first drift; a fired test lasts a random
+    ///   window and stops when that ends unless the car gained places or
+    ///   leads, then pauses for a random time.
+    fn test(&mut self, race: RaceView, dt: f32, mut draw: impl FnMut(f32, f32) -> f32) -> bool {
+        let RaceView {
+            place,
+            cars,
+            progress,
+        } = race;
+        let f = if cars < 2 {
+            0.
+        } else {
+            place as f32 / (cars - 1) as f32
+        };
+        let window = |ranges: [[f32; 2]; 2]| {
+            (
+                remap(f, 0., 1., ranges[0][0], ranges[0][1]),
+                remap(f, 0., 1., ranges[1][0], ranges[1][1]),
+            )
+        };
+        if progress <= 0. {
+            self.fired = false;
+            self.before_start = true;
+            if self.timer < 0. {
+                let a = (f * -8. + 10.).clamp(2., 10.);
+                let b = (f * -12. + 20.).clamp(8., 20.);
+                self.timer = draw(a, b);
+            }
+            return false;
+        }
+        self.timer -= dt;
+        if self.fired {
+            if self.timer <= 0. && self.place <= place && place != 0 {
+                self.fired = false;
+                let (a, b) = window(DRIFT_PAUSE);
+                self.timer = draw(a, b);
+                return false;
+            }
+        } else {
+            if self.timer < 0. || (place % 2 == 0 && !self.before_start) {
+                self.fired = true;
+            }
+            if !self.fired {
+                return false;
+            }
+            let (a, b) = window(DRIFT_FIRE);
+            self.timer = draw(a, b);
+            self.place = place;
+            self.before_start = false;
+        }
+        true
+    }
+}
+
+impl Drift {
+    /// Drift behaviour state update 0x78B3C0: 1 approach, 2 initiate (a
+    /// cornering test below 50 m/s), 3 drifting (slip above driftStartAngle),
+    /// 4 end (slip below driftEndAngle or the corner over), then 1 again;
+    /// below driftSpeedMin it is 1.
+    fn next_state(&self, state: u8, speed: f32, slip: f32, cornering: bool) -> u8 {
+        let state = state.max(1);
+        if speed < self.speed_min {
+            return 1;
+        }
+        match state {
+            1 if cornering && speed < DRIFT_INITIATE_SPEED => 2,
+            2 if slip > self.start_angle.to_radians() => 3,
+            3 if slip < self.end_angle.to_radians() || !cornering => 4,
+            4 => 1,
+            s => s,
+        }
+    }
+
+    /// Request grips while drifting (0x783A10 state 3), rear L/R then front
+    /// L/R: the front gets driftGripFront; the rear driftMinGrip below the
+    /// skill-scaled angle range, 1 inside it and up to driftMaxGrip toward
+    /// driftAngleMax above it. The range's top is lowered to the angle at
+    /// which the car (half width, length) still fits the `outside` room to
+    /// the track limit: asin((room - w) / (length + w)) (0xBF8C93 = asin).
+    fn drifting_grip(&self, angle: f32, outside: f32, [half_width, length]: [f32; 2]) -> [f32; 4] {
+        let (fit, reach) = (outside - half_width, length + half_width);
+        let limit = if fit < reach {
+            (fit / reach).asin().to_degrees()
+        } else {
+            90.
+        };
+        let mut high = self.angle_range[1];
+        if limit < high {
+            high = limit;
+        }
+        let low = self.skill * self.angle_range[0];
+        let rear = if angle > high {
+            remap(angle, high, self.angle_max, 1., self.max_grip)
+        } else if low <= angle {
+            1.
+        } else {
+            remap(angle, low, high, self.min_grip, 1.)
+        };
+        [rear, rear, self.grip_front, self.grip_front]
+    }
+}
+
+/// Drift test ranges (0x78FE90, .rdata): first window before the start
+/// clamp(10 - 8f, 2, 10)..clamp(20 - 12f, 8, 20) s, fired window 48..16 and
+/// 24..8 s, pause 15..30 and 5..15 s over the place fraction f (0 leader,
+/// 1 last), retry after a refused drift 3 s.
+const DRIFT_FIRE: [[f32; 2]; 2] = [[48., 16.], [24., 8.]];
+const DRIFT_PAUSE: [[f32; 2]; 2] = [[15., 30.], [5., 15.]];
+const DRIFT_RETRY: f32 = 3.;
+/// Drift behaviour: initiation needs speed below 50 m/s (0xCB1104); the wall
+/// limit starts at 90 degrees (0xCB3D64); fire scores (ai_behaviour_fire.xml
+/// drift entries 2, 12, 13).
+const DRIFT_INITIATE_SPEED: f32 = 50.;
+const DRIFT_SCORES: [u8; 3] = [2, 12, 13];
+/// The next corner's direction is measured 20 m past the brake line (0x792580).
+const NEXT_CORNER_DISTANCE: f32 = 20.;
 
 /// Per-car inputs from the race manager (choreographer, ctx+0x38 =
 /// drv+0x3150): corner-speed scale A (+0x3154) and floor B (+0x3158), the
@@ -1203,6 +1513,13 @@ pub struct Telemetry {
     pub reverse: bool,
     /// Signed lateral offset of our front from the racing line (0x40AE90).
     pub front_lateral: f32,
+    /// Drift test fired, drift behaviour state, drift mode, drift line.
+    pub drift_fired: bool,
+    pub drift_state: u8,
+    pub drift_mode: bool,
+    pub drift_line: bool,
+    /// Room to the left/right track limits at the look-ahead (drift drive).
+    pub drift_room: [f32; 2],
 }
 
 #[derive(Clone)]
@@ -1246,6 +1563,11 @@ pub struct AiDriver {
     /// Request grip multipliers of the last update (read by the grip
     /// application 0x408710).
     grip: [f32; 4],
+    /// Race place, set before each update (drift events).
+    pub race: RaceView,
+    drift: DriftState,
+    /// The car follows the `drift` racing line.
+    on_drift_line: bool,
 }
 
 fn clamp01(x: f32) -> f32 {
@@ -1307,6 +1629,9 @@ impl AiDriver {
             mistake: Mistake::default(),
             failure: Failure::default(),
             grip,
+            race: RaceView::default(),
+            drift: DriftState::default(),
+            on_drift_line: false,
         }
     }
 
@@ -1415,6 +1740,30 @@ impl AiDriver {
         } else {
             0.
         };
+
+        // Line choice (0x794870): with the drift behaviour switched on the
+        // car follows the `drift` line once past the start line (before it
+        // the `start` kind, absent on our routes, falls back to `optimal`).
+        let drift_line = match (&p.drift, &data.drift) {
+            (Some(_), Some(d)) if self.race.progress >= 0. => Some(d.as_ref()),
+            _ => None,
+        };
+        if drift_line.is_some() != self.on_drift_line {
+            // Keep the planned path in place across the change [I]: shift
+            // the offsets by the two lines' lateral distance at the car.
+            let new = drift_line.unwrap_or(data);
+            let old = if self.on_drift_line {
+                data.drift.as_deref().unwrap_or(data)
+            } else {
+                data
+            };
+            let (_, _, from) = old.line.project(position, self.segment);
+            let (_, _, to) = new.line.project(position, self.segment);
+            self.offset += to - from;
+            self.desired_offset += to - from;
+            self.on_drift_line = drift_line.is_some();
+        }
+        let data = drift_line.unwrap_or(data);
 
         // Track view: progress along the racing line (0x79C360).
         let (segment, arc, line_distance) = data.line.project(position, self.segment);
@@ -1746,6 +2095,23 @@ impl AiDriver {
             self.avoid.remembered = None;
         }
 
+        // cornering (0x77ED00) and drift (0x78FE90) tests; drift score 0x78B360.
+        let cornering = self.curvature.abs() > p.cornering_curvature;
+        let drift_score = match &p.drift {
+            Some(_) => {
+                self.drift_test(data, speed, dt);
+                let mut score = 0;
+                if self.drift.fired {
+                    score = DRIFT_SCORES[if cornering { 1 } else { 0 }];
+                }
+                if self.drift.state != 1 {
+                    score = DRIFT_SCORES[2];
+                }
+                score
+            }
+            None => 0,
+        };
+
         // Arbitration (0x79A400): the first strictly greatest score wins.
         let overtake_target = pass_vehicle.or(attempt);
         let scores = [
@@ -1762,14 +2128,21 @@ impl AiDriver {
                 },
             ),
             (Behaviour::LostControl, faults[0]),
-            (Behaviour::ControlledStop, faults[1]),
+            (
+                Behaviour::ControlledStop,
+                if p.controlled_stop { faults[1] } else { 0 },
+            ),
             (Behaviour::Recovery, recovery_score),
             (
                 Behaviour::Avoid,
                 if avoid_fire.is_some() { AVOID_SCORE } else { 0 },
             ),
+            (Behaviour::Drift, drift_score),
             (Behaviour::RetireFailure, faults[2]),
-            (Behaviour::RaceDamaged, faults[3]),
+            (
+                Behaviour::RaceDamaged,
+                if p.race_damaged { faults[3] } else { 0 },
+            ),
             (Behaviour::Alongside, if fired { 8 } else { 0 }),
             (
                 Behaviour::Overtake,
@@ -1856,7 +2229,29 @@ impl AiDriver {
         };
         let corner =
             clamp01((self.curvature.abs() - tr.ov_corner[0]) / (tr.ov_corner[1] - tr.ov_corner[0]));
+        // Request +0xC8: drift mode (set by the drift drive).
+        let mut drift_mode = false;
+        let mut drift_room = [0f32; 2];
         match self.behaviour {
+            Behaviour::Drift => {
+                let ([left, right], length) = (
+                    data.line.track_limits_at(arc + self.look_ahead),
+                    view.extents.front - view.extents.rear,
+                );
+                drift_room = [self.offset - left, right - self.offset];
+                drift_mode = self.drive_drift(
+                    data,
+                    &mut request,
+                    arc,
+                    speed,
+                    slip,
+                    cornering,
+                    // Room from the planned path at the look-ahead sample to
+                    // the left/right track limits (view +0x218/+0x21C).
+                    [self.offset - left, right - self.offset],
+                    [view.extents.half_width, length],
+                );
+            }
             Behaviour::Race => {
                 self.offset_timer += dt;
                 if p.ra_generate && self.offset_timer >= p.ra_generate_time {
@@ -2223,26 +2618,47 @@ impl AiDriver {
 
         // Next brake line ahead and its corner speed (0x792C80) with the
         // race manager's scale A and floor B.
-        let (id, distance) = data
-            .brake_lines
-            .iter()
-            .enumerate()
-            .map(|(i, &(s, _))| (i, (s - arc).rem_euclid(data.line.length)))
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .expect("brake lines");
+        let (id, distance) = next_brake_line(data, arc);
         let line = data.brake_lines[id].1;
-        let factor = remap(
-            self.offset.abs().max(line_distance.abs()),
-            0.,
-            p.tg_offset_max_for_speed,
-            1.,
-            p.tg_offset_speed_factor,
-        );
+        // Off the optimal line the factor is tgNonOptimalSpeedFactor.
+        let factor = if self.on_drift_line {
+            p.tg_non_optimal_speed_factor
+        } else {
+            remap(
+                self.offset.abs().max(line_distance.abs()),
+                0.,
+                p.tg_offset_max_for_speed,
+                1.,
+                p.tg_offset_speed_factor,
+            )
+        };
         let s = self.corner_speed_ratio(p.corner_speed_in_ratio);
         let line_target = (line.min_speed + (line.max_speed - line.min_speed) * factor * s).clamp(
             line.min_speed.min(line.max_speed),
             line.min_speed.max(line.max_speed),
         );
+        // Drift mode: the line counts driftBrakeLineAdvance earlier and its
+        // target is the drift speed (the maximum when that is 0); within the
+        // advance of the line the request has no brake line.
+        let (distance, line_target, line_valid) = match (&p.drift, drift_mode) {
+            (Some(d), true) => (
+                distance - d.brake_line_advance,
+                if line.drift_speed != 0. {
+                    line.drift_speed
+                } else {
+                    line.max_speed
+                },
+                distance - d.brake_line_advance > 0.,
+            ),
+            _ => (distance, line_target, true),
+        };
+        // Request +0x1C/+0x28 as the next drift test reads them; an early
+        // return leaves the reset values 0 [I: provider kept valid].
+        self.drift.line = Some(if line_valid {
+            (line.drift_speed, distance)
+        } else {
+            (0., 0.)
+        });
 
         // Mistake slot update (0x787620), after the behaviour drive.
         self.mistake_update(id, dt, &mut request.grip);
@@ -2251,23 +2667,26 @@ impl AiDriver {
         if let Some(passed) = &mut self.lines.passed {
             passed.3 += dt;
         }
-        if self.lines.request != Some(id) {
+        let request_line = line_valid.then_some(id);
+        if self.lines.request != request_line {
             if let Some(active) = self.lines.active {
                 self.lines.passed = Some((active, self.lines.target, self.lines.hold, 0.));
             }
             self.lines.active = None;
         }
-        self.lines.request = Some(id);
+        self.lines.request = request_line;
         let mut line_brake = 0.;
         let previous_brake = self.brake;
-        self.lines.target = line_target;
-        self.lines.modifier = line.distance_modifier;
-        self.lines.hold = line.hold_time;
-        if speed <= line_target {
+        if line_valid {
+            self.lines.target = line_target;
+            self.lines.modifier = line.distance_modifier;
+            self.lines.hold = line.hold_time;
+        }
+        if line_valid && speed <= line_target {
             if speed < line_target * BRAKE_LINE_CANCEL_FACTOR {
                 self.lines.active = None;
             }
-        } else {
+        } else if line_valid {
             let b = data.braking_distance(TABLE_GRIP, speed, line_target);
             let pedal = if p.brake_on_speed > 0. {
                 speed / p.brake_on_speed
@@ -2340,7 +2759,15 @@ impl AiDriver {
         let throttle = if previous_brake > 0. {
             0.
         } else {
-            let within_hold = self.lines.passed.is_some_and(|(_, _, hold, t)| t < hold);
+            // Drift mode holds a passed line for thBrakeLineHoldTimeDrift.
+            let hold_time = |hold: f32| match &p.drift {
+                Some(d) if drift_mode => d.hold_time,
+                _ => hold,
+            };
+            let within_hold = self
+                .lines
+                .passed
+                .is_some_and(|(_, _, hold, t)| t < hold_time(hold));
             governor_target = governor_target.min(request.desired_speed);
             if within_hold {
                 governor_target = governor_target.min(self.lines.passed.unwrap().1);
@@ -2427,7 +2854,12 @@ impl AiDriver {
         let steer = if request.no_steer {
             0.
         } else {
-            ((p.st_angle_factor * heading_error + p.st_ang_vel_factor * yaw)
+            // Drift mode damps the yaw rate with driftStAngVelFactor.
+            let ang_vel_factor = match &p.drift {
+                Some(d) if drift_mode => d.st_ang_vel_factor,
+                _ => p.st_ang_vel_factor,
+            };
+            ((p.st_angle_factor * heading_error + ang_vel_factor * yaw)
                 / view.maximum_steering_angle.max(1e-3))
             .clamp(-1., 1.)
         };
@@ -2478,6 +2910,11 @@ impl AiDriver {
             octant: octant_index,
             reverse,
             front_lateral: own_lateral,
+            drift_fired: self.drift.fired,
+            drift_state: self.drift.state,
+            drift_mode,
+            drift_line: self.on_drift_line,
+            drift_room,
         };
         // AUTHORED reverse boundary: the car-side consumer of the reverse
         // byte is not traced (§5, §7.3). The assisted automatic gearbox
@@ -2500,6 +2937,16 @@ impl AiDriver {
             handbrake: false,
         }
     }
+}
+
+/// The next brake line ahead of arc `arc`: (id, distance along the line).
+fn next_brake_line(data: &AiData, arc: f32) -> (usize, f32) {
+    data.brake_lines
+        .iter()
+        .enumerate()
+        .map(|(i, &(s, _))| (i, (s - arc).rem_euclid(data.line.length)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("brake lines")
 }
 
 /// brake_lock slot order: drawn index 0..3 -> request +0xC0, +0xC4, +0xB8,
@@ -2579,6 +3026,85 @@ impl AiDriver {
             if retire { 10 } else { 0 },
             if damaged { 9 } else { 0 },
         ]
+    }
+
+    /// Drift test 0x78FE90 ([`DriftState::test`]) and the refusal 0x78CB30
+    /// on the previous update's request: no drift the car could not brake
+    /// from to the next line's drift speed in time.
+    /// AUTHORED: the draws use the driver's random stream (the original's
+    /// RNG instance at test context +0x38 is not identified).
+    fn drift_test(&mut self, data: &AiData, speed: f32, dt: f32) {
+        let mut state = self.drift;
+        let check = state.test(self.race, dt, |a, b| a + (b - a) * self.unit());
+        self.drift = state;
+        if check
+            && let Some((drift_speed, distance)) = self.drift.line
+            && drift_speed < speed
+            && data.braking_distance(TABLE_GRIP, speed, drift_speed) > distance
+        {
+            self.drift.fired = false;
+            self.drift.timer = DRIFT_RETRY;
+        }
+    }
+
+    /// Drift behaviour: state update 0x78B3C0 and drive 0x783A10 (request
+    /// edits; the shared race drive follows). Returns the drift-mode flag
+    /// (+0xC8). `room` is the free room to the left/right track limits at
+    /// the look-ahead sample, `size` the car's half width and length.
+    #[allow(clippy::too_many_arguments)]
+    fn drive_drift(
+        &mut self,
+        data: &AiData,
+        request: &mut Request,
+        arc: f32,
+        speed: f32,
+        slip: f32,
+        cornering: bool,
+        room: [f32; 2],
+        size: [f32; 2],
+    ) -> bool {
+        let Some(d) = self.parameters.drift.clone() else {
+            return false;
+        };
+        self.drift.state = d.next_state(self.drift.state, speed, slip, cornering);
+        request.merge = 0.;
+        match self.drift.state {
+            1 => {
+                // Toward the side of the next corner (view +0x84, 0x792580).
+                let (id, _) = next_brake_line(data, arc);
+                let at = data.brake_lines[id].0;
+                let (_, here, _, _) = data.line.at(at);
+                let (_, ahead, _, _) = data.line.at(at + NEXT_CORNER_DISTANCE);
+                let next_corner = wrap(heading(ahead) - heading(here)) / NEXT_CORNER_DISTANCE;
+                request.desired_offset = if next_corner < 0. {
+                    -d.position
+                } else {
+                    d.position
+                };
+                request.merge = d.merge;
+                request.grip = [d.racing_grip; 4];
+                true
+            }
+            2 => {
+                // Kick only once off the brakes [I: context +0x3C +4 = the
+                // published brake].
+                if self.brake <= 0. {
+                    request.grip = [d.min_grip, d.min_grip, d.initiate_grip, d.initiate_grip];
+                }
+                true
+            }
+            3 => {
+                // The outside of the bend: left room for a right-hand bend.
+                let outside = if self.curvature >= 0. {
+                    room[0]
+                } else {
+                    room[1]
+                };
+                request.grip = d.drifting_grip(slip.to_degrees(), outside, size);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Activation of lost_control (0x78B1F0: crash mode above crashMinSpeed,
@@ -3121,5 +3647,178 @@ mod tests {
             contact_type(&own, &car([10., 0., 0.], [0., 0., 1.]), 0.1),
             None
         );
+    }
+
+    /// ai_vehicle_config `default` drift values (the touring class has no
+    /// overrides) and built-in defaults; drift_skill 1, drift_position 0.5.
+    fn default_drift() -> Drift {
+        Drift {
+            st_ang_vel_factor: -0.3,
+            angle_range: [15., 30.],
+            angle_max: 60.,
+            min_grip: 0.5,
+            max_grip: 3.,
+            start_angle: 15.,
+            end_angle: 10.,
+            merge: 1.,
+            speed_min: 15.,
+            grip_front: 10.,
+            initiate_grip: 1.2,
+            racing_grip: 1.1,
+            brake_line_advance: 8.,
+            hold_time: 0.2,
+            skill: 1.,
+            position: 0.5,
+        }
+    }
+
+    fn race(place: u32, progress: f32) -> RaceView {
+        RaceView {
+            place,
+            cars: 8,
+            progress,
+        }
+    }
+
+    #[test]
+    fn drift_test_windows_follow_the_race_place() {
+        // Draws are recorded and return the window's first bound.
+        let draws = std::cell::RefCell::new(Vec::new());
+        let draw = |a: f32, b: f32| {
+            draws.borrow_mut().push((a, b));
+            a
+        };
+        // Before the start: one first window, leader 10..20 s, last 2..8 s.
+        let mut leader = DriftState::default();
+        assert!(!leader.test(race(0, 0.), 0.1, &draw));
+        assert!(!leader.test(race(0, -0.01), 0.1, &draw));
+        let mut last = DriftState::default();
+        assert!(!last.test(race(7, 0.), 0.1, &draw));
+        assert_eq!(*draws.borrow(), [(10., 20.), (2., 8.)]);
+        assert!(leader.before_start && !leader.fired);
+        // Racing: the test fires once the first window runs out.
+        draws.borrow_mut().clear();
+        let mut t = 0.;
+        while !leader.test(race(0, 0.5), 0.5, &draw) {
+            t += 0.5;
+        }
+        assert_eq!(t, 10.);
+        // Fired window for the leader 48..24 s; the leader never stops.
+        assert_eq!(*draws.borrow(), [(48., 24.)]);
+        for _ in 0..200 {
+            assert!(leader.test(race(0, 0.6), 0.5, &draw));
+        }
+        assert!(leader.fired);
+        // The last car: 16..8 s, then a 30..15 s pause when it gained nothing.
+        draws.borrow_mut().clear();
+        while !last.test(race(7, 0.5), 0.5, &draw) {}
+        assert_eq!(*draws.borrow(), [(16., 8.)]);
+        let mut fired = 0;
+        while last.test(race(7, 0.5), 0.5, &draw) {
+            fired += 1;
+        }
+        assert_eq!(fired, 31);
+        assert_eq!(*draws.borrow(), [(16., 8.), (30., 15.)]);
+        // An odd place waits for the pause; an even place fires again at once
+        // after its first drift.
+        assert!(!last.test(race(7, 0.5), 0.5, &draw));
+        assert!(last.test(race(6, 0.5), 0.5, &draw));
+        // A car that gained places keeps the test fired past its window.
+        let mut gaining = DriftState {
+            fired: true,
+            place: 5,
+            timer: 0.1,
+            ..DriftState::default()
+        };
+        assert!(gaining.test(race(3, 1.), 0.5, &draw));
+        assert!(!gaining.test(race(5, 1.), 0.5, &draw));
+    }
+
+    #[test]
+    fn drift_states_follow_angle_speed_and_corner() {
+        let d = default_drift();
+        let deg = |a: f32| a.to_radians();
+        // State 0 (construction) acts as 1; below driftSpeedMin it is 1.
+        assert_eq!(d.next_state(0, 20., 0., false), 1);
+        assert_eq!(d.next_state(3, 14.9, deg(40.), true), 1);
+        // Initiation needs a corner below 50 m/s.
+        assert_eq!(d.next_state(1, 30., 0., true), 2);
+        assert_eq!(d.next_state(1, 50., 0., true), 1);
+        assert_eq!(d.next_state(1, 30., 0., false), 1);
+        // Drifting past driftStartAngle (15 degrees), ending below
+        // driftEndAngle (10 degrees) or out of the corner.
+        assert_eq!(d.next_state(2, 30., deg(14.), true), 2);
+        assert_eq!(d.next_state(2, 30., deg(16.), true), 3);
+        assert_eq!(d.next_state(3, 30., deg(12.), true), 3);
+        assert_eq!(d.next_state(3, 30., deg(9.), true), 4);
+        assert_eq!(d.next_state(3, 30., deg(30.), false), 4);
+        assert_eq!(d.next_state(4, 30., deg(30.), true), 1);
+    }
+
+    #[test]
+    fn drifting_grip_holds_the_angle_range_and_the_wall() {
+        let d = default_drift();
+        let car = [0.9, 4.5];
+        let open = 20.;
+        // Rear L/R then front L/R; the front gets driftGripFront 10.
+        assert_eq!(d.drifting_grip(10., open, car), [0.5, 0.5, 10., 10.]);
+        assert_eq!(d.drifting_grip(20., open, car), [1., 1., 10., 10.]);
+        assert_eq!(d.drifting_grip(30., open, car)[0], 1.);
+        // Above the range toward driftAngleMax: 1 -> driftMaxGrip 3.
+        assert!((d.drifting_grip(45., open, car)[0] - 2.).abs() < 1e-5);
+        assert_eq!(d.drifting_grip(70., open, car)[0], 3.);
+        // A wall 2.4 m away caps the range at asin(1.5 / 5.4) = 16.1 degrees.
+        let near = d.drifting_grip(20., 2.4, car)[0];
+        let expected = 1. + 2. * (20. - 16.128) / (60. - 16.128);
+        assert!((near - expected).abs() < 1e-3, "{near} {expected}");
+        // Drift skill scales the bottom of the range.
+        let unskilled = Drift {
+            skill: 0.5,
+            ..default_drift()
+        };
+        assert_eq!(unskilled.drifting_grip(10., open, car)[0], 1.);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn drift_battle_config_switches_on_the_drift_behaviour() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        for route in [
+            "tracks/usa/long_beach/route_1",
+            "tracks/europe/nurburgring/route_1",
+            "tracks/europe/istanbul_park/route_1",
+            "tracks/europe/jarama/route_0",
+            "tracks/europe/jarama/route_1",
+        ] {
+            let race = AiData::load(root, route, "touring", "bmw").unwrap();
+            let drift = AiData::load_for(root, route, "touring", "bmw", Some("drift_battle")).unwrap();
+            let p = Parameters::new(&race, NORMAL_DIFFICULTY, |_| 1.).unwrap();
+            let q = Parameters::new(&drift, NORMAL_DIFFICULTY, |_| 1.).unwrap();
+            // A race keeps the defaults: no drift behaviour or line.
+            assert!(race.drift.is_none() && p.drift.is_none());
+            assert!(p.race_damaged && p.controlled_stop);
+            assert_eq!(p.la[0], 10.);
+            // drift_battle: drift behaviour and test on, race_damaged and
+            // controlled_stop off, laDistMin 15, the drift line [D].
+            let d = q.drift.clone().unwrap();
+            assert!(!q.race_damaged && !q.controlled_stop);
+            assert_eq!(q.la[0], 15.);
+            assert_eq!(d.hold_time, 0.2);
+            assert_eq!(
+                (d.angle_range, d.grip_front, d.start_angle, d.end_angle),
+                ([15., 30.], 10., 15., 10.)
+            );
+            assert_eq!((d.initiate_grip, d.racing_grip, d.brake_line_advance), (1.2, 1.1, 8.));
+            assert_eq!((d.skill, d.position), (1., 0.5));
+            assert_eq!(q.tg_non_optimal_speed_factor, 0.8);
+            let line = &drift.drift.as_ref().unwrap().line;
+            assert_eq!(line.points.len(), drift.line.points.len());
+            assert_ne!(line.points, drift.line.points, "{route}");
+            assert!((line.length - drift.line.length).abs() < 0.05 * drift.line.length);
+            // Mapping overrides of the section (deviation large at
+            // difficulty 0.606 and characteristic 1: 3 + (1 - 3) * 0.606).
+            assert!((q.deviation_large - (3. - 2. * NORMAL_DIFFICULTY)).abs() < 1e-5);
+        }
     }
 }
