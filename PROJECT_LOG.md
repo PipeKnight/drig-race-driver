@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G088 — Restored forest integrated and playable updated (17 October 2026)
+
+Primary main fast-forwarded fb32d54 ->2fa3db2 after exact status/owner-note hash guards. Verified source3d12ef12ebae0cbf852dbb8c52d9210ada46342e / executable SHA256f0ce990f5a64b5c52ed38305d46d63edd6b61d7d7f3e96d7c562d65f124deb08 atomically promoted to inactive primary target and both verified backups; four graphics/playtest manifests updated. Other checkout's active prototype preserved, no process closed. Owner AI reportc4d52b9e... unchanged. Private promotion-forest01.json/manifests-before01.json.
+
+Ordinary Donington Graphics/Wheels/Textures/Reflections launcher now includes preferred coverage forest with restored1461distant sheets; no-trees mode retains a control. Raw sky tone/250m shadows/hazeoff stay defaults.531tests/Clippy32.58s/exactsolo/fresh20of20quick and matched4K/two30-frame sequences apply. Dedup reclaimed one duplicate4K image,0errors; cited evidence retained. Source/geometry/lighting detail and real per-pass billboards remain open, future richer backgrounds documented. Publish main/graphics next; engine project is not complete.
+
 ## G087 — Restored forest ready for playable promotion (17 October 2026)
 
 Source3d12ef1/SHAf0ce990f.../release2m29s.531workspace release tests, Clippy32.58s, exactsolo statea4a35f899a490c36/11018ticks, fresh20/20quick/100000ticks pass. NativeBC/RGBA4K, side and forward30-frame sequences validated; forward0/15/29 inspected with restored far treeline, physical exits exact prior1200tick control. Limited sequence, no new full-rendered-lap or monitorFPS claim. [Forest evidence](docs/SOURCE_VEGETATION.md); private distant-sheets-gpu-validation01.json. Owner's future background detail/light request recorded. Guarded main FF/promotion/publication next; no owner action required.
