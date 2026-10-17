@@ -43,6 +43,15 @@ set "GRID_GRAPHICS_CONTACTS="
 if exist "local\body-contact-directions.bin" set "GRID_GRAPHICS_CONTACTS=--body-contacts local\body-contact-directions.bin"
 if defined GRID_GRAPHICS_CONTACTS if exist "local\body-impact-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --body-events local\body-impact-parameters.bin"
 if defined GRID_GRAPHICS_CONTACTS if exist "local\deformation-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --deformation local\deformation-parameters.bin"
+if /I "%~3"=="body" (
+  if not exist "local\graphics\materials-livery01\body-realesrgan8k01.overrides.tsv" (
+    echo Private Lacetti body texture pilot is missing. See docs\TEXTURE_OVERRIDES.md.
+    popd
+    pause
+    exit /b 3
+  )
+  set "GRID_GRAPHICS_TEXTURES=--texture-overrides local\graphics\materials-livery01\body-realesrgan8k01.overrides.tsv"
+)
 set "GRID_GRAPHICS_LOG=local\graphics\manual-%RANDOM%-%RANDOM%.log"
 echo Experimental graphics branch - source sky lighting, layered car/track materials and smooth tyres.
 echo Arrows/WASD drive; Space handbrake; Escape/P pause menu; R restart.
@@ -51,7 +60,7 @@ if defined GRID_GRAPHICS_REFLECTIONS echo Environment reflections enabled.
 if defined GRID_GRAPHICS_WHEELS echo Experimental wheel filtering enabled; geometry filtering is player-only.
 if defined GRID_GRAPHICS_TREES echo Experimental source forest enabled; wind and foliage lighting remain approximate.
 if defined GRID_GRAPHICS_HAZE echo Experimental source distance haze enabled.
-if defined GRID_GRAPHICS_TEXTURES echo Two experimental high-resolution building textures enabled.
+if defined GRID_GRAPHICS_TEXTURES echo Experimental high-resolution textures enabled.
 echo Private log: %GRID_GRAPHICS_LOG%
 "target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"

@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G102 — One-atlas Lacetti detail pilot validated at native4K (18 October 2026)
+
+Installed Real-ESRGANx4plus reused/pinned hashes, no install; actual player main2048opaque->8192, compared with source and Lanczos4x. Reference DDS9324de60... matches runtime; candidatefb02ff6e.../357914068bytes/14mips. BGRA8sRGB upload after device selection uses shared helper; forcedRGBA0BCassets. Seven captures/large-logo native-pixel crops inspected: cleaner lettering, no new visible chart seams, tiny neural/carbon details not recovered truth. Approximate mean correction/residuals/clipping reported. Source/neural240tick exits exact;1200tick motion exits match prior control,30unique frames/ticks1102..1162/2.05ns. Native/fallback bumper max1byte/mean0.00198, whole-frame max150/mean0.08887 not parity. Private validation-body8k01.json, full images/logs and provenance.
+
+Added optional Body launcher using tested manifest; ordinary graphics default remains original textures. No new Rust source/tests or full-lap texture claim. Package runtime files must be staged privately into primary before enabling that launcher there; keep all other five livery maps and opponent banks unchanged. [Workflow/limitations](docs/TEXTURE_OVERRIDES.md). No owner action needed.
+
 ## G101 — Replay fix published and playable refreshed; next detail pilot scoped (18 October 2026)
 
 Guarded main fast-forward9625b6f->9b75c63 and non-force push of main/graphics succeeded. Both inactive Windows executables, both verified backups and four manifests now source01cbcf8078c9/SHA256529dad80..., integrated9b75c63. Private promotion-probe-replay01.json retains previous records and distinguishes two new probe tests/Clippy10.38s from602pre-F370 and7settings baseline checks. Original Steam resources and owner report preserved.
