@@ -41,7 +41,7 @@ powershell -NoProfile -File tools\build_android.ps1
 3. If Play Protect warns about an unknown developer, choose "Install anyway". The APK is signed with this PC's debug key.
 4. The app is called **GRID Reassembly**. To update it, install a newer APK over it. That works only while the signing key stays the same (the same PC). Otherwise uninstall first, which also deletes the pushed data.
 
-Requirements: Android 12 (API 31) or newer, a 64-bit ARM phone (all three owner phones qualify).
+Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three owner phones qualify. The APK is about 90 MB and holds only our code, about 82 MB of it the stripped Rust library.
 
 ### What the app needs, and what does not work yet
 
