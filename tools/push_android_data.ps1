@@ -17,8 +17,8 @@ param(
     [string]$Stage = '',
     [string]$Adb = 'C:\Users\debros\Tools\android-sdk\platform-tools\adb.exe',
     [string]$Package = 'org.reassembly.grid',
-    # Leave the controls to the code's default profile (P11 tilt/touch) instead
-    # of turning the autopilot on; the bundled APK uses this.
+    # Without effect since P11: the profile has no autopilot any more (the
+    # phone controls drive); kept because build_android.ps1 -BundleData passes it.
     [switch]$NoAutopilot
 )
 $ErrorActionPreference = 'Stop'
@@ -55,9 +55,13 @@ enabled = on
 body_contacts = derive
 body_events = derive
 deformation = derive
-[diagnostics]
-# No touch or tilt input yet (P11): the autopilot drives the lap.
-autopilot = on
+[input]
+# Phone controls (P11, docs/ANDROID.md "Controls"): touch zones and tilt
+# steering; touch = auto turns them on with a touch screen. Tilt full lock at
+# tilt_max_angle degrees; the neutral is captured at start and by CENTRE.
+touch = auto
+tilt = on
+tilt_max_angle = 30
 '@
 if ($NoAutopilot) {
     $settings = @($settings -split "`r?`n" | Where-Object { $_ -notmatch '^\[diagnostics\]|^# No touch or tilt|^autopilot' }) -join "`n"

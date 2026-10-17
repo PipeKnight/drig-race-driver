@@ -86,10 +86,52 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 
 ### What does not work yet
 
-- **Controls:** touch and tilt are P11 (another session). The owner wants only a build with those controls, so the bundled APK is meant to be built after P11 lands; it forces no autopilot. Built before P11, it would start with no usable input on a phone. The adb path's `settings.ini` still turns the autopilot on for development.
+- **Controls (P11):** tilt steering with on-screen pedals and buttons; see "Controls" below. Not yet tried on a phone. A Bluetooth keyboard may also work through GameActivity, but this is untested.
 - **Gamepads:** not available on Android. Bevy's gamepad input comes from gilrs, and gilrs-core 0.6.8 has no Android backend (`src/platform` has linux, macos, wasm and windows only; other targets get a dummy). Android delivers pad buttons and sticks as KeyEvent/MotionEvent through GameActivity, but winit 0.30.13 maps pad buttons to `Key::Unidentified` ("Gamepad events should be exposed through a separate API", `platform_impl/android/keycodes.rs`) and does not forward joystick axes. A pad needs a bridge from android-activity's input events into the P1 input layer, which is input code (P11's "optional Android pad bridge"), so it was not done here. A Bluetooth keyboard may work through winit, but this is untested.
 - **Data without the bundled APK:** the code-only APK needs the data placed by adb (below). Android 11+ blocks phone file managers from `Android/data`; copying from Windows Explorer over USB (MTP) into it works on many phones but is not guaranteed [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). **P10** (folder picker) would remove the PC step without bundling.
 - **Not measured:** frame rate, tick time, thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
+
+## Controls (P11)
+
+Tilt and touch are not original GRID inputs, so the layout and the defaults are AUTHORED. They feed the original action layer (F325) like keyboard keys and a pad stick, so the human record 827D10, assisted steering (+E6C = 1, the keyboard/pad class) and the driver aids are the same as on the desktop. Design: [PLATFORMS_AND_INPUT_RESEARCH.md](PLATFORMS_AND_INPUT_RESEARCH.md) 6.2 and 7.7.
+
+**Holding the phone.** Landscape, screen towards you, like a steering wheel. Turn it clockwise to steer right. Leaning it back or forward does not steer. The neutral angle is taken from the first sensor reading, and again whenever you tap **CENTRE**; hold the phone the way you want "straight" and tap it.
+
+**Screen zones** (fractions of the screen; the race HUD draws on top of them):
+
+| Zone | Where | Action |
+|---|---|---|
+| GAS | bottom right, 17 % × 50 % | Accelerate, held (0 or 1) |
+| BRAKE | bottom left, 17 % × 50 % | Brake, held (0 or 1) |
+| HAND | right of BRAKE | Hand Brake, held |
+| GEAR + / GEAR − | left of GAS, only with the manual gearbox | Gear Up / Gear Down, one shift per tap |
+| II | top centre | Pause (opens the pause menu; in the menu it goes back one step) |
+| CENTRE | left of II, only with tilt | re-centre the tilt neutral |
+| VIEW / LOOK | bottom centre | Change View; Look Back while held |
+
+A thin bar above VIEW/LOOK shows the tilt value. While the pause menu, the post-race screens or a replay own the input, the driving zones are hidden and the menu zones appear at the side edges: UP/DOWN and `<`/`>` on the left, OK and BACK on the right (BACK also leaves a replay). A finger can slide from one zone to another; the zone under it counts each frame. A finger that is down when the layer changes (OK resumes the race, II pauses it) is ignored until lifted, so OK does not turn into GAS. At most 8 touches count (Bevy issue #16798).
+
+**Settings** (`[input]` section of `settings.ini`, docs/SETTINGS.md):
+
+| Key | Values | Default |
+|---|---|---|
+| `touch` | `auto`, `on`, `off` | `auto`: on when Android reports a finger touch screen; off on the desktop |
+| `tilt` | `on`, `off` | `on` (with touch). Off: no steering source on the phone yet |
+| `tilt_max_angle` | degrees 5..90 | 30: full lock at 30° from neutral |
+| `tilt_neutral` | degrees −90..90, or `auto` | `auto` (captured at start and by CENTRE) |
+| `tilt_smoothing` | seconds 0..1 | 0.05 (one-pole low-pass; 0 = off) |
+
+The tilt dead zone and saturation are those of the steering bindings: biLower/biUpper dz 0.05, sat 1.0, the values the original's 4CC630 gives steering on controller types 1–3. The Advanced Controls `steering_deadzone`/`steering_saturation` (settings file or pause menu) override them, as for every steering binding.
+
+**Sensor.** `TYPE_GAME_ROTATION_VECTOR` at 100 Hz through the NDK (`ndk-sys` 0.6, the version android-activity uses), on its own thread; the accelerometer if the phone has no rotation vector. It is switched off while the app is suspended. Logcat shows `drive_tilt sensor=Rotation period_us=10000`, and `drive_tilt recentre neutral_deg=...` on each CENTRE tap. Which landscape the phone is in (top edge left or right) is inferred from gravity, because the NDK has no display-rotation API (a JNI call to `Display.getRotation` would be the alternative now that `jni` is a dependency, F365).
+
+**UI scale.** With touch on, the UI scale becomes window height / 720 (at most 1), so the desktop-sized race HUD and pause menu fit a phone's small logical window. Not used on the desktop.
+
+**Older settings.ini.** The bundled APK copies `settings.ini` only when it is missing, so a phone that installed the F365 bundle keeps its file (with `autopilot = on` and no `[input]`). The controls still start, because `touch = auto` and `tilt = on` are the defaults when the keys are absent; the autopilot line does nothing without `--drive-ticks`.
+
+**Desktop.** `[input] touch = on` shows the zones on the desktop too (Bevy touch events, e.g. a touch monitor); there is no tilt sensor there. With the default `touch = auto` nothing changes on the desktop.
+
+**Not tested on a phone** (no device was connected): the sensor sign and the landscape inference, the zone sizes under real thumbs, the UI scale, multi-touch throttle + brake, the pause menu by touch, and whether GameActivity delivers touches to Bevy as expected.
 
 ## Game data on the phone (development path; P10 replaces it)
 
@@ -104,7 +146,7 @@ It runs `adb push --sync` into `/sdcard/Android/data/org.reassembly.grid/files/`
 | Path on the phone | Source |
 |---|---|
 | `Grid/...` | the items listed in the script, from `C:\Program Files (x86)\Steam\steamapps\common\Grid` (read only) |
-| `settings.ini` | written by the script: drive on, CD01/BP01/DF01 `derive` (computed in memory from the pushed `grid.exe`), `[diagnostics] autopilot = on` because there is no touch or tilt input yet (P11); left out with `-NoAutopilot` (the bundled APK) |
+| `settings.ini` | written by the script: drive on, CD01/BP01/DF01 `derive` (computed in memory from the pushed `grid.exe`), `[input] touch = auto`, `tilt = on`, `tilt_max_angle = 30` (P11). Until P11 it set `[diagnostics] autopilot = on`, but that switch only acts with `--drive-ticks`, which the phone never passes, so the P9 car would have stood still [V code: `main.rs` builds the autopilot only when `drive_ticks.is_some()`] |
 
 The app must be installed first: Android creates the folder for the package, and `adb shell` may write to it. Uninstalling the app deletes it.
 

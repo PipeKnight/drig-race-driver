@@ -153,3 +153,12 @@ pub fn data_dir() -> Option<PathBuf> {
         .get()
         .and_then(|app| app.external_data_path())
 }
+
+/// Whether the device has a finger touch screen (AConfiguration
+/// `ACONFIGURATION_TOUCHSCREEN_FINGER` = 3): `[input] touch=auto` turns the
+/// phone controls on then (P11).
+pub fn touch_screen() -> bool {
+    bevy::android::ANDROID_APP
+        .get()
+        .is_some_and(|app| i32::from(app.config().touchscreen()) == 3)
+}
