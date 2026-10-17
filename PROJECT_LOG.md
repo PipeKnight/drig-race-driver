@@ -1,5 +1,62 @@
 # GRID engine project log
 
+F353 the original's race HUD layout and post-race results screens in grid-app (2026-10-17, Claude Code, night run). Details, evidence and decisions: docs/RACE_HUD.md. Builds on F348; docs/PAUSE_MENU.md updated.
+- Evidence [D] (static; private files in the main checkout's local/pause-menu/ and local/hud-results/):
+  - Osd/sceneconfig.xml is the HUD tree:
+    - right: dial (speedo, odometer, gear, needle, red zone, gear and rev lights, pedal gauges, damage icons) and the position group (4 split pills, n/total);
+    - left: message/countdown box, minimap with flag, lap group (LAP n/total, RACE, LAP, BEST, PB);
+    - top: wrong way and penalty pills.
+  - Osd/config.xml gives:
+    - the four selectable groups;
+    - dial revlimit 0.95 and gearchange 0.90;
+    - rpm ranges 8000/10000/12000, each with a 2000 rpm red line;
+    - split display 5..10 s;
+    - wrong way 4 s / 2 s.
+  - system/flow.bin `f_post` and states.bin give the free-race post-race flow:
+    - finish → stats screen (position, fastest lap) → results;
+    - Retire from Race → results directly;
+    - results pills Continue, View Replay, Exit, Restart Race;
+    - fr_/td_terminal_damage wreck screens after the 1 s flash and 1 s fade.
+  - Results columns from the header set-up at 0x52E4F0..0x52E6A8 (capstone on the hash-pinned image): position, (points in career only), driver, time, car, team.
+- Code:
+  - race_hud.rs: placeholder panels in the original layout, each group switchable from Screen Setup. Mini Map and Dials are now live options, with `[osd] minimap`/`dials`. The old text HUD keeps only the heading and status lines, and the F333 damage icons moved beside the dial.
+  - post_race.rs: stats, results and wreck screens with Yes/No confirmations. Continue and Exit close the app (no front end). Restart restarts. Replays are shown but unavailable.
+  - pause_menu: Retire from Race now shows the results instead of closing the app (this replaces the F348 stopgap); the pause menu is off while a post-race screen is up.
+  - grid_tools::race::Standings: per-car lap times and best lap measured on the race-progress line (AUTHORED), plus `on_loop` and `step_arcs` for tests.
+  - ai_driver::Line::points for the minimap.
+  - grid-app now depends on grid-world.
+- Interpretations and authored choices, all recorded in the doc:
+  - the time cell is the winner's total, then "+gap", with `*` for estimates;
+  - an added best-lap column;
+  - split pills show car ahead / player / car behind for 5 s after each lap;
+  - the dial scale and red zone, and rpm = rad/s × 60/2π;
+  - wrong way means moving against the AI line above 3 m/s;
+  - the wreck screen after 2 s;
+  - no post-race cutscene.
+- Launcher: the `Play GRID Prototype.cmd` banner no longer says Donington (F350 open item; it was in the launcher, not in grid-app).
+- Tests [V], release:
+  - race lap-time test;
+  - post_race unit tests: flow, pills, wreck, rows order/gaps/estimates/out/best laps, ordinals;
+  - race_hud unit tests: dial, wrong way, lap group, minimap;
+  - asset screens_match_the_original_states_file: results pills, both wreck screens, stats types, labels;
+  - pause_menu::race_tests::retire_from_race_shows_the_results_on_every_circuit, 3 AI each: Donington with Lacetti, Nürburgring with BMW, Istanbul Park mixed. Results, finalised race, player retired, opponents estimated, frozen simulation, then Restart from the results;
+  - a_finished_race_goes_through_stats_to_classified_results: one autopiloted lap at Donington. Stats show 4th with best 1:29.993; results: winner 90.736 s, gaps +0.544/+1.248/+1.935, all four finished;
+  - the F348 pause and restart tests still pass.
+- Offscreen renders (worktree local/hud-results/: hud-race.png, finish-stats.png, hud-istanbul.png): the layout appears as designed on Donington and Istanbul Park, and the stats screen ("Podium Finish, 2nd / 4, Fastest Lap 1:29.842") after an autopiloted lap. The first render showed the lap group under the heading text; it was moved down.
+- Pre-push checks (cargo/rustc 1.99.0, release, outputs main checkout local/hud-results/checks/, local/soak/quick-hud-results/) on the rebase onto 6d432bb (F352 grid-probes):
+  - cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS/GRID_AI_CHARACTERISTICS: 502 passed, 0 failed;
+  - clippy --workspace --all-targets --release -D warnings: clean;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` without GRID_DEFORMATION_PARAMETERS: byte-identical, sha256 aad9a07a…e41b, with or without the characteristics table (solo-after-nodf*.txt). With DF01 set the output is the FE38… variant, so the baseline condition is DF01 off;
+  - grid-soak quick: 16/16.
+- Not done:
+  - the original visual style (dial2.pssg glyphs, needle, animations);
+  - the minimap track mask and brake light;
+  - driver name tags; penalty pills;
+  - replays; the post-race cutscene;
+  - the career points column;
+  - the original's exact results time-cell format and split-pill rows;
+  - a windowed check by a person.
+
 F352 research probes moved into a new grid-probes crate (2026-10-17, Claude Code). The next step named by F330. Details and timings: docs/TOOLCHAIN.md "Research probes crate".
 - 158 probes were moved with `git mv` from crates/grid-tools/src/bin to crates/grid-probes/src/bin. Their names, sources and outputs are unchanged, and they still build to target/<profile>/<name>.exe.
 - Kept in grid-tools: grid-tools itself, grid-soak, grid-opponent-race and grid-private-parameters (update_prototype.ps1). A grep of every name found no other test, launcher or build-script use. tools/*.py run the probes from target/, which is unchanged.
@@ -154,7 +211,7 @@ F348 the original's in-race pause menu in grid-app (2026-10-17, Claude Code). De
 - Pre-push checks (cargo/rustc 1.99.0, release, outputs main checkout local/pause-menu/checks/, local/soak/quick-pause-menu/) on 0a13bbf + this change (the later upstream commits change only docs and launchers):
   - cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored with absolute GRID_GAME_ROOT/GRID_CONTACT_DIRECTIONS/GRID_BODY_EVENT_PARAMETERS/GRID_DEFORMATION_PARAMETERS/GRID_AI_CHARACTERISTICS: 464 passed, 0 failed (after fixing the engine-sound test, whose chain had no menu: 463 + 1 failed first; grid-app then 77/77);
   - clippy --workspace --all-targets --release -D warnings: clean (first run: engine_sound::update had 8 arguments);
-  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` with GRID_AI_CHARACTERISTICS set as for the baseline: byte-identical, sha256 aad9a07a…e41b, laps 88.42029812185638 / 86.28228501935392. Without the table the output differs (88.42039565 / 86.26613868); that run is kept as solo-after.txt for reference;
+  - solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` without GRID_DEFORMATION_PARAMETERS, as the baseline is run: byte-identical, sha256 aad9a07a…e41b, laps 88.42029812185638 / 86.28228501935392. With DF01 set the output differs (88.42039565 / 86.26613868, deformation=Some); that run is kept as solo-after.txt. Correction (F353): this line first blamed GRID_AI_CHARACTERISTICS; F353 showed the table makes no difference and DF01 does.
   - grid-soak quick: 11/12. Seed 12 is the known Donington board piece fall at (-406, -51, -16), tick 3003, as in F345/F346.
 - Not done: a windowed check of the menu in the app; the original's visual style (animated glyphs, blur, paused-world camera); Instant Replay and Ghost Car; profile autosave; the post-race results screen after Retire.
 
