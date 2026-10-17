@@ -123,14 +123,14 @@ pub(crate) fn append_pieces(
 pub(crate) struct PropScript(pub(crate) grid_tools::dynamic_props::PropPursuit);
 
 #[derive(Component)]
-pub(crate) struct IntactProp(usize);
+pub(crate) struct IntactProp(pub(crate) usize);
 
 #[derive(Component)]
 pub(crate) struct PropPiece {
-    breakable: usize,
-    spec: usize,
+    pub(crate) breakable: usize,
+    pub(crate) spec: usize,
     /// Draw world matrix at the intact placement.
-    rest: Mat4,
+    pub(crate) rest: Mat4,
 }
 
 /// Tag the spawned prop parts by name (pieces start hidden).
@@ -158,7 +158,7 @@ pub(crate) fn tag(mut commands: Commands, parts: Query<(Entity, &Name, &Transfor
     }
 }
 
-fn pose(m: &[[f32; 4]; 4]) -> Mat4 {
+pub(crate) fn pose(m: &[[f32; 4]; 4]) -> Mat4 {
     Mat4::from_cols_array(&std::array::from_fn(|i| m[i / 4][i % 4]))
 }
 

@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G089 — Remote main advanced with replays; integrate without force (17 October 2026)
+
+Forest playable and local main promotion completed; graphics branchf0df3a3 pushed successfully. Main push was rejected non-fast-forward (normal Git concurrency, not approval rejection): origin/main advanced to5307ed1 with F360 replay work. Fetched and merged remote; only journal conflict, retaining both records. New replay camera runs after live presentation, so forest presentation must explicitly follow that final camera. Add a real replay-camera/foliage schedule regression, then rebuild/revalidate merged source before a second main promotion/publication. Existing verified forest source3d12ef1 remains playable meanwhile; no force push/reset/other process changes.
+
 ## G088 — Restored forest integrated and playable updated (17 October 2026)
 
 Primary main fast-forwarded fb32d54 ->2fa3db2 after exact status/owner-note hash guards. Verified source3d12ef12ebae0cbf852dbb8c52d9210ada46342e / executable SHA256f0ce990f5a64b5c52ed38305d46d63edd6b61d7d7f3e96d7c562d65f124deb08 atomically promoted to inactive primary target and both verified backups; four graphics/playtest manifests updated. Other checkout's active prototype preserved, no process closed. Owner AI reportc4d52b9e... unchanged. Private promotion-forest01.json/manifests-before01.json.
@@ -44,6 +48,33 @@ Owner positively reviewed distant-forest-comparison01, requests richer/more dime
 G078 publication verified at remote main/graphics `cdfc79023ad9952484ec105c545a67acc2732655`; playable remains checked source917ca5f / SHA785488a1.... [Wall research](docs/DONINGTON_ATMOSPHERE.md): new bounded read-only LOD tool tested on two purchased prototypes, affine convention and missing-root guard. Wall closest/alternative140/160triangles have similar solid XY silhouettes (94.81/95.09%union); no large missing skirt. Corrected secondary ordinary-NODE stage annotation to other, bounds unchanged.
 
 At one identified wall base the source land/trees surface is0.345m above its bottom, and three below-strip rays meet front-facing land before the wall. Literal floating/missing-ground/backface-only explanations are not supported at those samples. Saved normal cull states areCW; no arbitrary two-sided override or wall hiding. Actual shadow reach250m excludes733–899m wall samples; controlled farther-shadow/lighting comparison is next, not a claimed repair. Private vegetation01 reports/previews/rays cited in notes. No renderer changes, new installs or source-install writes in this research stage.
+F360 Race replays: the original's snapshot replays with Instant Replay, View Replay and the replay director (2026-10-17, Claude Code). Details: docs/REPLAY.md. Evidence: main checkout local/replay/ (strings, Ghidra 12.1.4 read-only pseudocode decomp/r1..r13 and z1..z3 with the new private helper ghidra/ReplayRefs.java, decoded camera configs, render/, checks/).
+- Research [D] (static, no live process):
+  - the original stores state snapshots, not inputs: every `Recordable` serialises its state into a frame (0x93D000); rigid-body records (template/instance index) are decoded as two matrices, converted to quaternions and slerped on playback (0x92F9E0);
+  - 30 Hz ("@ 30Hz" statistics); REPLAY pool 7.5 MiB; in-memory buffer 0x380000 bytes (seeks clamp to it, 0x91CC00); disk stream `replay.pbf` with limit 0x7D000000;
+  - Instant Replay rewinds 10.0 s (0xDB4FEC). PAUSE_MENU.md's earlier "15 s" was unsourced and is corrected;
+  - shuttle (0x944430/0x944710, checked in Capstone): f = (ff - rw)/0.9, play 3f +/- 1 (+/-4.33x on a key), pause scrub +0xA84 = 1.0, slow 0.1x, frame step 1/60 s; keys F1 pause, F2/F3, F4/F5 lap, F7/F8 camera, F12 jump in, Esc exit;
+  - flow: instant replay rewind -> play -> `loop` / BACK; View Replay begins at the race start and loops;
+  - replay cameras are separate from race cameras: per-route `replay_camera_config.xml` (zoom/static cameras, Bézier paths, activation zones; `grid_formats::replay_cameras`).
+- Port (grid-app `replay.rs` + `replay/`):
+  - recording after each fixed tick at 30 Hz of simulation time (12 samples per 25 ticks): every car's exact 3x4 pose, velocity, wheels, wheel geometry, body deformation, lost wheels; props' broken flags and pieces. Shared state is written on change and referenced otherwise. The newest 0x380000 bytes stay in memory, older 1 MiB chunks spool to `<data dir>/replay-cache/replay.spool` up to 0x7D000000 bytes; without a spool it is a memory ring;
+  - Instant Replay from the pause menu (menu shows again on exit) or with the race key Return / pad Back; View Replay from the results (whole race); the wreck screen's Replay plays the last 10 s (AUTHORED);
+  - playback holds the simulation, interpolates (lerp/slerp) and overwrites the live presentation last; the HUD is hidden; a plain replay panel (AUTHORED);
+  - cameras: the route's replay director (zone crossings logged while recording, so seeking shows the same shots), then the car's replay views, then its race views. Zone `size` are half extents [I: racing line passes 9-11 m below the centres]. Zoom framing factor 3 and "cut starts framed" are AUTHORED (camera behaviour classes not found; params bind at 0x7F7590);
+  - input layer: replay actions from presets 0 and 4; diagnostics `replay_capture` for offscreen renders.
+  - main.rs: module, install line, opponent deformation keys moved into `DeformationPresentation`, R/F ignored during a replay.
+- Tests [V], release, `--include-ignored`, absolute GRID_* paths, rebased on fb32d54 (F359):
+  - 543 passed, 0 failed, 0 ignored (local/replay/checks/tests.log);
+  - `recorded_frames_equal_the_live_race_on_every_circuit`: Donington, Nürburgring, Istanbul Park, Long Beach, Lacetti and BMW, 3 AI, 1600 ticks: every frame decodes bit for bit to the live pose/velocity and the replayed body x wheel matrices equal drive_present's; 769 frames, 0.50-0.71 MB; 6-8 zone entries per circuit;
+  - `instant_replay_leaves_the_race_bit_identical`: Instant Replay at tick 900 with FF, rewind, loop, camera change, exit, continue: digest at 1200 equals a never-recorded race; race-key replay returns to the race;
+  - `view_replay_plays_the_whole_race_from_the_results`;
+  - unit tests for frame encoding, stream ring/spool, shuttle, director;
+  - Clippy --workspace --all-targets --release -D warnings: clean;
+  - solo identity `grid-opponent-race ROOT CD01 BP01 1 11200 ai` (no DF01): sha256 aad9a07a…e41b;
+  - grid-soak quick: 20/20 (local/soak/quick-replay-F360).
+- Offscreen renders (11 AI, autopilot, `replay_capture`): Donington and Long Beach replay frames with HUD hidden and the director active (local/replay/render). The Long Beach dolly camera shows a very close shot (data min = max FOV 20 at 4.7 m) [I].
+- Log prefix `drive_race_replay` (`drive_replay ` is the soak replay-log header).
+- Not done: Flashback (next task; docs/REPLAY.md §5), Replay Save, slow motion, frame step, replay music, terminal-damage replay and TERMINAL cameras, replaying glass/light damage, shards, part swings, particles, skid marks and sound; a windowed check by a person.
 
 F359 P6: CD01 (body-contact sampling directions) comes from the Steam grid.exe alone; no unpacked image or desktop preparation step is needed (2026-10-17, Claude Code). Details: docs/CONTACT_DIRECTIONS.md; docs/PLATFORMS_AND_INPUT_RESEARCH.md section 7.4.
 - Evidence [V]: read-only Capstone 5.0.6 trace of the unpacked image (bundled Python 3.12.14). Main checkout `local/p6-cd01/`: `trace_recipe.py`, `trace.txt`, `recipe.rs.txt`.

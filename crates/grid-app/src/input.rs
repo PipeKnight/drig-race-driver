@@ -21,7 +21,8 @@ use std::collections::VecDeque;
 pub const HELP: &str = "--input SPEC: controller settings, comma-separated: device=auto|keyboard|pad|wheel (keyboard and pad: assisted steering; wheel: unassisted, like the original's input/device_type), steering_deadzone/steering_saturation, accelerate_deadzone/accelerate_saturation, brake_deadzone/brake_saturation 0..1 (original Advanced Controls overrides; default: the preset's values). The same keys go in an [input] section of the --assists-file. A gamepad uses the original XInput pad preset read from ActionMap/actionMapPreset4.xml of the game folder.";
 
 /// The 23 in-game actions of table 0xE4DEE8, in id order, then the
-/// original's menu actions used by the pause menu (preset `<!-- Menu Actions -->`).
+/// original's menu actions used by the pause menu (preset `<!-- Menu Actions -->`)
+/// and the replay actions (`<!-- Replay Actions -->`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Accelerate,
@@ -54,9 +55,17 @@ pub enum Action {
     MenuSelect,
     MenuBack,
     MenuButton3,
+    ReplayRewind,
+    ReplayFastForward,
+    ReplayPause,
+    ReplayNextCamera,
+    ReplayPrevCamera,
+    ReplayNextLap,
+    ReplayPreviousLap,
+    ReplayExit,
 }
 
-pub const ACTIONS: usize = 30;
+pub const ACTIONS: usize = 38;
 
 const ALL: [Action; ACTIONS] = {
     use Action::*;
@@ -91,6 +100,14 @@ const ALL: [Action; ACTIONS] = {
         MenuSelect,
         MenuBack,
         MenuButton3,
+        ReplayRewind,
+        ReplayFastForward,
+        ReplayPause,
+        ReplayNextCamera,
+        ReplayPrevCamera,
+        ReplayNextLap,
+        ReplayPreviousLap,
+        ReplayExit,
     ]
 };
 
@@ -126,6 +143,14 @@ const NAMES: [&str; ACTIONS] = [
     "Menu Select",
     "Menu Back",
     "Menu Button3",
+    "Replay Rewind",
+    "Replay Fast Forward",
+    "Replay Pause",
+    "Replay Next Camera",
+    "Replay Prev Camera",
+    "Replay Next Lap",
+    "Replay Previous Lap",
+    "Replay Exit",
 ];
 
 impl Action {
@@ -218,9 +243,17 @@ pub struct Binding {
     pub calibration: Calibration,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ActionMap {
     bindings: [Vec<Binding>; ACTIONS],
+}
+
+impl Default for ActionMap {
+    fn default() -> Self {
+        Self {
+            bindings: std::array::from_fn(|_| Vec::new()),
+        }
+    }
 }
 
 impl ActionMap {
@@ -266,6 +299,18 @@ impl ActionMap {
             (MenuDown, &[KeyCode::ArrowDown, KeyCode::Numpad2], button),
             (MenuSelect, &[KeyCode::Enter, KeyCode::NumpadEnter], button),
             (MenuBack, &[KeyCode::Escape], button),
+            // Preset 0's Instant Replay and `<!-- Replay Actions -->` keys
+            // (docs/REPLAY.md); Replay Jump In (F12) and Save (S) are not
+            // ported yet.
+            (InstantReplay, &[KeyCode::Enter], button),
+            (ReplayRewind, &[KeyCode::F2], button),
+            (ReplayFastForward, &[KeyCode::F3], button),
+            (ReplayPause, &[KeyCode::F1], button),
+            (ReplayNextCamera, &[KeyCode::F8], button),
+            (ReplayPrevCamera, &[KeyCode::F7], button),
+            (ReplayNextLap, &[KeyCode::F5], button),
+            (ReplayPreviousLap, &[KeyCode::F4], button),
+            (ReplayExit, &[KeyCode::Escape], button),
             (
                 MenuButton3,
                 &[KeyCode::ControlLeft, KeyCode::ControlRight],

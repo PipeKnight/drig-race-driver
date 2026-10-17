@@ -154,12 +154,13 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
   - Continue and Exit (after its confirmation) leave the event. The app has no front end, so it
     closes, back to the launcher.
   - Restart Race (after its confirmation) restarts.
-  - View Replay is shown but not selectable.
+  - View Replay plays the whole recorded race (F360, docs/REPLAY.md); Replay Exit returns to the
+    results.
 - Terminal damage: the wreck screen appears 2 s after the damage (the two 1 s transitions [D]; the
   delay state's own wait was not traced).
   - Restart, after its confirmation.
   - Retire / Finish Test Drive, after its confirmation: the player retires and the app closes.
-  - Instant Replay is unavailable.
+  - Replay plays the last 10 s (F360; an AUTHORED stand-in for the terminal-damage replay).
 - While a post-race screen is up, the pause menu is off and gear presses are dropped. Once the race
   is over the simulation is frozen.
 - Best laps:
@@ -175,7 +176,7 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
 - `grid_tools::race::tests::lap_times_and_best_lap_follow_the_line_crossings`.
 - `post_race::tests` (unit):
   - stats → results → leave;
-  - results pills, Exit/Restart confirmations, unavailable replay;
+  - results pills, Exit/Restart confirmations, View Replay (F360);
   - wreck screen after 2 s, free race and test drive;
   - results rows: order, total and gaps, estimated, out with laps, best laps (the player's
     gate-timed lap replacing the line-timed one), positions;
