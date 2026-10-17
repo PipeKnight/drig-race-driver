@@ -1,4 +1,4 @@
-# Android build (P9 skeleton)
+# Android build (P9 skeleton, bundled data, error screen)
 
 Plan and status: [PLATFORMS_AND_INPUT_RESEARCH.md](PLATFORMS_AND_INPUT_RESEARCH.md) section 7 (P9), tools: [TOOLCHAIN.md](TOOLCHAIN.md) "Android toolchain".
 
@@ -11,14 +11,20 @@ Plan and status: [PLATFORMS_AND_INPUT_RESEARCH.md](PLATFORMS_AND_INPUT_RESEARCH.
   - On Android the default game folder is `<data dir>/Grid`, not the Steam libraries.
   - `read` (main.rs) and `source_vehicle::read` (grid-tools) name the missing file in their open error, so a missing pushed file shows up in logcat.
 - `crates/grid-app/src/android.rs`:
-  - redirects stdout and stderr to logcat (tag `grid`);
+  - redirects stdout and stderr to logcat (tag `grid`) and to a log file in the shared Downloads folder (below);
+  - installs a panic hook; a start-up error (`run()` returning `Err`) or a panic is shown on screen through `MainActivity.showFatal` (JNI, `jni` 0.21, the version cpal already uses);
   - `data_dir()` = `AndroidApp::external_data_path()`, which is `/sdcard/Android/data/org.reassembly.grid/files`. `settings::platform_data_dir` uses it (P5), so `settings.ini`, records, renders and the ETC2 texture cache (P8) live there.
 - `settings::load` skips a UTF-8 byte-order mark at the start of a settings file. Windows PowerShell 5 writes one, and Windows editors may.
 - `android/`: a Gradle project based on Bevy 0.19.1 `examples/mobile/android_example`:
   - AGP 9.4.1, `compileSdk`/`targetSdk` 36, `minSdk` 31, `arm64-v8a` only, `ndkVersion` 30.0.16248370;
   - `androidx.games:games-activity:4.4.0`, the version whose C sources android-activity 0.6.1 bundles (its README), plus appcompat 1.7.1;
-  - `MainActivity extends GameActivity`: loads `libgrid_android.so`, keeps the screen on, hides the system bars; landscape (`sensorLandscape`);
-  - the Rust library comes from `app/build/rust-jniLibs` (ignored output). No game data or asset folder is packaged.
+  - Java classes in `org.reassembly.grid`:
+    - `LauncherActivity` (the launcher entry): copies bundled game data on the first start (below), then starts `MainActivity`. Without bundled data it starts the game at once.
+    - `MainActivity extends GameActivity` (not exported): loads `libgrid_android.so`, keeps the screen on, hides the system bars; landscape (`sensorLandscape`). `openLogFile()` and `showFatal(String)` are called from Rust. When it finishes it ends its process, because winit and Bevy cannot start twice in one process.
+    - `ErrorActivity`, in its own process `:error`, so it stays on screen when the game process exits or aborts: the message, the log file path and a Close button.
+    - `BundleExtractor`: the copy logic, plain Java; `CrashLog`: log files through MediaStore.
+  - desktop unit tests: `app/src/test/.../BundleExtractorTest.java` (JUnit 4.13.2), run with `gradle -p android testDebugUnitTest`;
+  - the Rust library comes from `app/build/rust-jniLibs` (ignored output). Game data is packaged only with `-PgridBundleAssets` (the private bundled build); `ignoreAssetsPattern` is `!.svn:!.git`, so files starting with `.` and folders starting with `_` are not dropped.
 - `tools/build_android.ps1`: builds the APK (below).
 - `tools/push_android_data.ps1`: copies the data to the phone, or with `-Stage DIR` to a desktop folder for checking the file list.
 
@@ -34,31 +40,60 @@ powershell -NoProfile -File tools\build_android.ps1
 
 "Debug" means signed with this PC's Android debug key (`%USERPROFILE%\.android\debug.keystore`, created by AGP on first use). The key differs per machine, so APK hashes differ between machines; the `.so` hash does not depend on it.
 
+### Private bundled APK (`-BundleData`)
+
+> **For the owner's own phone only. Never share, upload or commit this APK.** It contains about 245 MB of proprietary files from the owner's purchased GRID installation. AGENTS.md forbids publishing original assets; this file is the owner's private copy, like the Steam folder itself.
+
+```
+powershell -NoProfile -File tools\build_android.ps1 -BundleData
+```
+
+1. `tools/push_android_data.ps1 -Stage` copies the same subset as the adb path (table below) into `local/android/bundle/assets/grid-data/` (ignored; the script refuses a folder git does not ignore). The original installation is only read.
+2. It writes `grid-data/bundle.txt`: a header `grid-bundle 1`, `version <sha256>` (over every file's SHA-256, size, mode and path), then one `size<TAB>mode<TAB>path` line per file. `settings.ini` has mode `keep` (written only when missing, so the owner's edits survive an update); everything under `Grid/` is `replace`.
+3. Gradle gets `-PgridBundleAssets=<that folder>`, so the files go into the APK under `assets/grid-data/`.
+4. The APK is `local/android/apk/grid-<revision>-bundled-PRIVATE-debug.apk`; the `.json` manifest adds `bundled_data` (version, file count, bytes).
+
+The default build (no switch) is unchanged and packages no game data. Gradle keeps a merged copy of the assets in `android/app/build/intermediates` (about 245 MB); delete `android/app/build` and `local/android/bundle` when disk space matters.
+
+**Measured (F365):** 382 files, 256,504,419 bytes of data (245 MiB), stored compressed as 143 MB; the APK is about 233 MB (223 MiB), of which the stripped `libgrid_android.so` is 82.8 MB. Exact size and hashes of the delivered APK: PROJECT_LOG.md F365. Trimming Donington's other routes and Le Mans layout (about 23 MB, under 10 %) was not done: the subset is already one car and one circuit, and a trim would need a new desktop check.
+
+**Desktop checks [V]:** the APK was unpacked with the app's own `BundleExtractor` (a desktop Java runner reading the APK as a zip): 382 files byte-identical to the staged folder, 2.2 s. The desktop release binary on that unpacked folder (`--data-dir`, `--game-root`, 600 autopilot ticks, render): log identical to a run on the full installation apart from timestamps and paths, and identical drive samples.
+
+### First start: copying the data
+
+`LauncherActivity` reads `assets/grid-data/bundle.txt`. If `Android/data/org.reassembly.grid/files/.bundle-version` holds the same version, it starts the game at once. Otherwise it shows "First start: copying the game data" with a progress bar (MB done of total), copies every file to `files/` (each through `name.part`, renamed when its size matches), then writes the marker and starts the game. The marker is deleted before copying, so an interrupted copy (app killed, storage full) starts again on the next launch. Files of an older bundle that the new one no longer lists are not deleted. A failed copy shows the error on screen and writes `Download/GRID-Reassembly/extract-<time>.txt`.
+
+All loaders still read from `files/` (the same layout as the adb push), so the bundled and adb paths can be mixed. Uninstalling the app deletes `files/`; reinstalling the bundled APK copies again.
+
+Unit tests (desktop JVM, `gradle -p android testDebugUnitTest`, 7 tests [V]): first copy and marker; same version skipped; new version replaces game files but keeps an edited `settings.ini`; a deleted `settings.ini` is written again; an interrupted copy leaves no marker; a size mismatch fails without replacing the old file; `bundle.txt` paths that would leave the data folder and malformed lines are rejected.
+
+## Errors and the log file
+
+- **Log file:** every start creates `Download/GRID-Reassembly/log-<yyyyMMdd-HHmmss>.txt` in the phone's shared Downloads folder (Files / File Manager → Downloads → GRID-Reassembly). It is written through MediaStore, which needs no permission on Android 10+. It gets everything the game prints (stdout and stderr), errors marked `E`, each line with seconds since start. The ten newest files are kept; older ones are deleted. Logcat (`adb logcat -s grid`) still gets the same lines.
+- **On-screen error:** a start-up error (for example missing game data) or a Rust panic opens a "GRID Reassembly stopped" screen with the message and the log file path. It runs in its own process, so it stays when the game process exits. "Close" ends both processes.
+- Without game data the message is "no game data in …/files/Grid: this APK carries none; …" (an Android-only check in `run()`; on the desktop the first loader's error is unchanged).
+- Not covered: a crash inside Java or the system before the Rust code starts (for example the library failing to load) appears only in logcat.
+- [V] Java compiles, both APK variants build, the extraction tests pass, `cargo ndk … clippy -D warnings` is clean. [N] The error screen, the log file and the copy have not been seen on a phone; no device or ARM emulator was available.
+
 ## Installing the APK yourself (no adb)
 
-1. Copy the APK to the phone: connect it by USB in "File transfer" mode and copy `grid-<revision>-debug.apk` (from `C:\Dev\Reassembly\local\android\apk\`) into `Download`. Sending it to yourself or using a cloud drive also works.
+1. Copy the APK to the phone: connect it by USB in "File transfer" mode and copy the APK (from `C:\Dev\Reassembly\local\android\apk\`) into `Download`. A cloud drive also works, but only your own private one: the bundled APK must not be shared.
 2. On the phone, open the file in Files (Xiaomi: File Manager) and tap it. Android asks you to allow that app to "install unknown apps"; allow it once.
 3. If Play Protect warns about an unknown developer, choose "Install anyway". The APK is signed with this PC's debug key.
-4. The app is called **GRID Reassembly**. To update it, install a newer APK over it. That works only while the signing key stays the same (the same PC). Otherwise uninstall first, which also deletes the pushed data.
+4. The app is called **GRID Reassembly**. To update it, install a newer APK over it. That works while the signing key stays the same (APKs built on this PC). If Android says "App not installed" or reports a conflicting package, uninstall the old app first (this deletes its data folder; the bundled APK copies it again).
 
-Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three owner phones qualify. The APK is about 90 MB and holds only our code, about 82 MB of it the stripped Rust library.
+Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three owner phones qualify. The code-only APK is about 90 MB; the bundled one about 233 MB and needs about 245 MB more free space for the copied data.
 
-### What the app needs, and what does not work yet
+### What does not work yet
 
-- **The game data is not in the APK.** The app reads it from its own folder: `Internal storage/Android/data/org.reassembly.grid/files/` (`settings.ini` and `Grid/`, listed below).
-- **Without the data the app closes right after start** [I: `main` exits on the error; not seen on a phone]. The cause is logged to logcat (`adb logcat -s grid`), but nothing is shown on screen; an error screen is P10 work.
-- **Getting the data there without adb:** Android 11+ blocks phone file managers from `Android/data`. Copying from Windows Explorer over USB (MTP) into that folder still works on many phones, but Android does not guarantee it [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). Not tested on the owner's phones. Steps:
-  1. install and start the app once, so Android creates the folder;
-  2. stage the data on the PC: `powershell -NoProfile -File tools\push_android_data.ps1 -Stage C:\Temp\grid-phone`;
-  3. copy the **contents** of `C:\Temp\grid-phone` into `Android/data/org.reassembly.grid/files/`.
-  If Explorer does not show `Android/data`, only adb (below) or P10 can place the data.
-- **The reliable path is adb** (below). **P10** (folder picker: copy from `Documents/GRID` inside the app) removes the PC from the process.
-- **No controls:** there is no touch, tilt or on-screen input yet (P11). The pushed `settings.ini` turns the autopilot on, so the car drives itself. A Bluetooth keyboard may work through GameActivity, but this is untested.
+- **Controls:** no touch, tilt or on-screen input yet (P11, another session). The bundled `settings.ini` turns the autopilot on, so the car drives itself.
+- **Gamepads:** not available on Android. Bevy's gamepad input comes from gilrs, and gilrs-core 0.6.8 has no Android backend (`src/platform` has linux, macos, wasm and windows only; other targets get a dummy). Android delivers pad buttons and sticks as KeyEvent/MotionEvent through GameActivity, but winit 0.30.13 maps pad buttons to `Key::Unidentified` ("Gamepad events should be exposed through a separate API", `platform_impl/android/keycodes.rs`) and does not forward joystick axes. A pad needs a bridge from android-activity's input events into the P1 input layer, which is input code (P11's "optional Android pad bridge"), so it was not done here. A Bluetooth keyboard may work through winit, but this is untested.
+- **Data without the bundled APK:** the code-only APK needs the data placed by adb (below). Android 11+ blocks phone file managers from `Android/data`; copying from Windows Explorer over USB (MTP) into it works on many phones but is not guaranteed [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). **P10** (folder picker) would remove the PC step without bundling.
 - **Not measured:** frame rate, tick time, thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
 
 ## Game data on the phone (development path; P10 replaces it)
 
-The phone needs a subset of the owner's own installation, about 245 MB. No private table is needed: CD01 (F359), BP01 and DF01 are derived in memory from the pushed `grid.exe`. Nothing of it goes into Git or the APK.
+The phone needs a subset of the owner's own installation, about 245 MB. No private table is needed: CD01 (F359), BP01 and DF01 are derived in memory from the pushed `grid.exe`. Nothing of it goes into Git; only the private bundled APK (above) packs it.
 
 ```
 powershell -NoProfile -File tools\push_android_data.ps1
