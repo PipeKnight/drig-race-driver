@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G095 — Warm-sun pilot checked; P11 base integrated (18 October 2026)
+
+Source96dddba54905/release1m39s: four matched native4K far/240tick side-driving captures inspected, known nilUUID warning only; paired physical exits equal. Direction-only control differs by1pixel/1byte/mean4.02e-8byte from0ffe4af: initial exact-identity assertion was too strict, corrected to measured error without claiming equality or rerendering. Seven focused tests/Clippy26.37s apply. Colour remains opt-in, standard graphics launcher direction-only. Private source-sun-colour-validation01.json. Warmer direct-light ratio is not original radiometry or complete background/material quality.
+
+Primary4c29350/F369 now has playabled3b9af5 (Flashback, drift AI, P11). Merged that observed base into graphics as36da0b9; journal-only conflict, both records kept, code auto-merged. Validate combined source before main/playable refresh; owner report/newer primary executable preserved. Dedup linked3identical evidence files/0.04GiB/0errors, cited paths retained. No owner action required.
+
 ## G094 — Graphics playable refreshed; optional warm-sun ratio draft (18 October 2026)
 
 Atomically promoted verified source0ffe4affccd1/SHA256c59806b2... to this worktree target/release/grid-app.exe and local/graphics/verified-grid-app.exe; both local manifests record full4K/585tests/motion/replay acceptance. Private promotion-source-sun01.json preserves old manifests. No active grid-app process found; primaryF368 executable/files untouched. Graphics launcher uses verified source direction, source colour unchanged. Full6500tick physical exits also exactly equal grass-final-lap4k02 after walltime removal.
