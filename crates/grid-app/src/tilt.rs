@@ -40,8 +40,9 @@ const FLAT: f32 = 0.25;
 
 /// Landscape orientations are inferred from gravity: the display uses
 /// `sensorLandscape`, and the NDK has no display-rotation API (JNI
-/// `Display.getRotation` is the alternative). A flip needs the phone more than this far (degrees) from the current
-/// landscape, so steering never reaches it (full lock is `max_angle` <= 90).
+/// `Display.getRotation` is the alternative). A flip needs the phone more
+/// than this far (degrees) from the current landscape, so steering never
+/// reaches it (full lock is `max_angle` <= 90).
 const FLIP: f32 = 135.;
 
 /// World up in device coordinates from a rotation-vector quaternion
