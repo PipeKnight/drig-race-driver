@@ -17,8 +17,8 @@ param(
     [string]$Stage = '',
     [string]$Adb = 'C:\Users\debros\Tools\android-sdk\platform-tools\adb.exe',
     [string]$Package = 'org.reassembly.grid',
-    # Leave the controls to the code's default profile (P11 tilt/touch) instead
-    # of turning the autopilot on; the bundled APK uses this.
+    # Without effect since P11: the profile has no autopilot any more (the
+    # phone controls drive); kept because build_android.ps1 -BundleData passes it.
     [switch]$NoAutopilot
 )
 $ErrorActionPreference = 'Stop'
