@@ -1,6 +1,6 @@
 # GRID engine project log
 
-F348 third circuit: Istanbul Park GP drives solo and races with the AI field; per-track start lights (2026-10-17, Claude Code, night run). Details: docs/ISTANBUL_PARK.md.
+F349 third circuit: Istanbul Park GP drives solo and races with the AI field; per-track start lights (2026-10-17, Claude Code, night run). Details: docs/ISTANBUL_PARK.md.
 - Choice: a solo-AI survey of every shipped route with today's readers (local/third-track/solo/). Istanbul Park loads and laps on all four routes. Long Beach also works, but it is a street circuit. Spa, Milan, Detroit and the Japanese tracks fail in readers; Jarama goes off; several routes are refused by lap timing. Selected `tracks/europe/istanbul_park/route_0` (5.34 km GP layout, touring field like the other two).
 - The parked draft claude/second-circuit-03a7ea (7ecd58f) is an unbuilt parallel version of F304's route plumbing, which main already has. Nothing was taken from it; not pushed.
 - Track data [V asset tests]: 12 grid slots with lap timing; 109 gates over 5336.79 m, finish gate 0, sectors at gates 33 and 74; AI line 5226.9 m; 1689 prop boxes, breakable brake boards (6 templates) and 222 double tyre walls, armco and single tyre walls static as on Donington; collision keys mix to the CAR_ row except GRAS (as on all three circuits); the F341 auto-reset puts a flipped car back on Istanbul's line.
