@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G068 — Optional source atmosphere ready to integrate (17 October 2026)
+
+Source8b9919fbf5c6 / executable SHAc5b9842062bfc45f962a62d45d8c826438e95e9937fb9a87ae30ae6d2a55c545 checked again: 522release workspace tests/0failed/0ignored, workspace all-target Clippy4.84s, solo laps88.42029812185638/86.28228501935392 and statea4a35f899a490c36 exact. Quick20/20/100000ticks pass. Private vegetation01/*-haze-linear01 logs and soak summary. Source crates unchanged since binary build; later changes are launcher/docs only. Separate Atmosphere launcher enables trees+haze, default remains off. Guarded primary integration/playable promotion next; preserve owner untracked AI report.
+
+
 ## G067 — Fog bindings established and linear 4K checked (17 October 2026)
 
 [Atmosphere evidence](docs/DONINGTON_ATMOSPHERE.md). Read-only Ghidra12.1.4/Capstone5.0.6 trace now proves XML-distance reciprocal/cap into fogParams.zw and normalized packed RGB times brightness into fogColour for the examined shader. Linear factor matches source; height/variant/exposure and float-to-byte rounding remain unresolved. Discarded zero-constructor/getter hypotheses recorded. No tools installed/Steam changes. Source8b9919fbf5c6 / SHAc5b98420... build59.27s rendered native4K static and1200tick drive; logs clean except known nilUUID warning, RGBA path, endpoint exactly haze-off. Images inspected: depth fade present, strips persist, default stays off. Private vegetation01/haze-linear-validation01.json and fog-ghidra evidence. Main verified486e7eb untouched pending final checks/integration.
