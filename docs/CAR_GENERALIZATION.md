@@ -273,6 +273,32 @@ The contact counts count every contact tick of every pair. They are chaotic
 over a 2-lap race and move both ways (787→1604, 1021→868), so they are not a
 measure of AI quality on their own.
 
+### Mixed-field soak
+
+`grid-soak` can now build mixed fields: `--car`/`--opponent-cars`, and long
+runs mix models by themselves
+([SOAK_TESTING.md](SOAK_TESTING.md#runs-for-per-car-ai-extents-f345)). Results:
+
+- **quick**: baseline 0/12 failed.
+  - F345 with all-Lacetti fields: 1/12. Seed 12 (Donington, 6 cars) is a prop
+    piece falling at the 150 m brake-marker board, (-406, -51, -16), at tick
+    3003. Replayed exactly from its inputs. The player is alone at the board,
+    and the opponents are more than 600 m away. The chaos player's autopilot
+    mode reads the other cars' records, so its path differs from the baseline
+    run. This is the known F342 board residual (11 of 24 long Donington piece
+    falls at -406..-413, -16), not a new regression.
+  - `--car bmw --opponent-cars lac,bmw`: 0/12.
+  - `--opponent-cars bmw,lac`: 1/12, the same seed-12 board fall at the same
+    tick.
+- **long, seeds 1001..**, stopped after 24-26 scenarios each:
+  - baseline (all-Lacetti): 4/24 prop piece falls.
+  - F345: 2/26, with 14 of the 26 mixed fields. Seed 1004 fails identically in
+    both. Seed 1001 (mixed 12-car Nürburgring) is a tyre-stack piece falling
+    41 m off the line at (-255, 571, -130), tick 9655. Replayed exactly. This is
+    the F342 Nürburgring piece-fall residual (pieces at (-169, 574, -124) and
+    (-162, 574, -32) on F342's final run), not a new failure class.
+- No world error, retirement, panic, set-up failure or car fall in any run.
+
 ## Open items
 
 - Free-race field composition and grid order of the original: not traced.

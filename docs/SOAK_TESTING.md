@@ -310,6 +310,27 @@ falls), Nürburgring with props could not start at all, and without props 48 of
 234 runs lost a car. No world error, retirement, panic, set-up failure, crash or
 hang occurred after the fixes.
 
+### Runs for per-car AI extents (F345)
+
+These runs cover the F345 change: each car now has its own AI traffic extents
+([CAR_GENERALIZATION.md](CAR_GENERALIZATION.md), "AI car extents"), and mixed
+fields are supported. The baseline is origin/main c09ca82, built in a separate
+worktree. The runs are in the F345 worktree's private `local/soak/quick-*`,
+`long-*` and `local/car-extents/`.
+
+| Run | Scenarios | Failed | Groups |
+|---|---|---|---|
+| quick, baseline | 12 | 0 | - |
+| quick, F345 | 12 | 1 | seed 12: Donington board fall at (-406, -51, -16), tick 3003 (F342 residual) |
+| quick, F345 `--car bmw --opponent-cars lac,bmw` | 12 | 0 | - |
+| quick, F345 `--opponent-cars bmw,lac` | 12 | 1 | the same seed-12 board fall |
+| long 1001.., baseline (stopped) | 24 | 4 | prop piece falls (1004, 1013, 1016, 1026) |
+| long 1001.., F345, 14 mixed fields (stopped) | 26 | 2 | 1004, identical to the baseline; 1001, a mixed 12-car Nürburgring tyre-stack piece at (-255, 571, -130) |
+
+Both new failures were replayed exactly with `grid-soak replay`. They belong to
+the open F342 prop-piece residuals, not to a new class. The only cause found is
+that the races now take different paths.
+
 ## Follow-ups
 
 - The two off-track player falls of seed 1087 (both routes): replay
