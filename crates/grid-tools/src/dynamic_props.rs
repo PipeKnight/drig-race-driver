@@ -60,6 +60,9 @@ pub struct PieceSpec {
     pub inertia: [f32; 3],
     pub body: physparams::Body,
     pub shell: f32,
+    /// Body descriptor +0xE8 (constructor +0xEC): 50 for entity pieces,
+    /// the descriptor default FLT_MAX for a loose wheel (6174F0).
+    pub limit: f32,
     hull: collision_mesh::Mesh,
     points: Vec<[f32; 4]>,
     triangles: Vec<[u32; 3]>,
@@ -120,8 +123,10 @@ pub struct PropWorld {
     pub events: Vec<BreakEvent>,
     pending: Vec<(usize, [f32; 4], f32)>,
     base_slots: Option<usize>,
-    /// Held kinematics of lost pieces, by piece index.
+    /// Held kinematics of lost bodies, by index in [`Self::parts`].
     lost: BTreeMap<usize, [u32; KINEMATICS.end - KINEMATICS.start]>,
+    /// Wheels lost by cars, after the pieces in contact order.
+    pub wheels: Vec<LooseWheel>,
 }
 
 fn f(b: &[u32], o: usize) -> f32 {
@@ -364,6 +369,7 @@ impl Catalog {
                     inertia,
                     body,
                     shell: shape.shell,
+                    limit: DESCRIPTOR_EC,
                     hull,
                     points,
                     triangles,
@@ -413,7 +419,7 @@ pub fn explosion_velocity(position: [f32; 3], e: [f32; 4]) -> [f32; 4] {
 }
 
 /// Ported B11F40 settings for a piece (0x7B8F40 field mapping; see research).
-fn body_settings(spec: &PieceSpec, linear: [f32; 4]) -> [u32; 88] {
+fn body_settings(spec: &PieceSpec, linear: [f32; 4], angular: [f32; 4]) -> [u32; 88] {
     let mut s = [0u32; 88];
     let b = &spec.body;
     set(&mut s, 0, spec.mass);
@@ -444,7 +450,7 @@ fn body_settings(spec: &PieceSpec, linear: [f32; 4]) -> [u32; 88] {
     set(&mut s, 0xe0, b.sphericalise);
     set(&mut s, 0xe4, b.spherical_mass);
     set(&mut s, 0xe8, b.spherical_radius);
-    set(&mut s, 0xec, DESCRIPTOR_EC);
+    set(&mut s, 0xec, spec.limit);
     for r in 0..4 {
         for c in 0..4 {
             set(&mut s, 0xf0 + r * 16 + c * 4, spec.pose[r][c]);
@@ -452,8 +458,9 @@ fn body_settings(spec: &PieceSpec, linear: [f32; 4]) -> [u32; 88] {
     }
     // Supplied pose and active; directional friction and angular scale off.
     s[0x130 / 4] = 0x0000_0101;
-    for (k, v) in linear.iter().take(3).enumerate() {
-        set(&mut s, 0x150 + 4 * k, *v);
+    for k in 0..3 {
+        set(&mut s, 0x140 + 4 * k, angular[k]);
+        set(&mut s, 0x150 + 4 * k, linear[k]);
     }
     s
 }
@@ -463,8 +470,9 @@ type Properties = (f32, Matrix);
 fn piece_body(
     spec: &PieceSpec,
     linear: [f32; 4],
+    angular: [f32; 4],
 ) -> Result<(contact_groups::Body, Properties), Error> {
-    let out = physical_constructor::initialize(&body_settings(spec, linear), 0, 0)?;
+    let out = physical_constructor::initialize(&body_settings(spec, linear, angular), 0, 0)?;
     let mut body: contact_groups::Body = out.body[..0x424 / 4].try_into().unwrap();
     for o in [0x32c, 0x334, 0x338, 0x33c, 0x340] {
         body[o / 4] = 0;
@@ -475,6 +483,70 @@ fn piece_body(
         std::array::from_fn(|i| std::array::from_fn(|j| f(&body, 0x150 + 16 * i + 4 * j))),
     );
     Ok((body, properties))
+}
+
+impl PieceSpec {
+    /// The detached wheel's debris body (9D9F80 for wheel parts 0x2A..0x31):
+    /// a cylinder (9A8BB0) about local Y, at world `pose`, with the 0.02
+    /// shell, the given mass, a solid cylinder's inertia [I: the
+    /// constructor derives it from the shape when no tensor is supplied] and
+    /// 9D9F80's body words: angular damping 0.2, air resistance 0.01 x mass,
+    /// no linear damping, stationary 0.1, no wake-up force, turn-off time 1,
+    /// gravity scale 1, unbounded velocities.
+    pub fn loose_wheel(radius: f32, height: f32, mass: f32, pose: Matrix) -> Result<Self, Error> {
+        if ![radius, height, mass]
+            .iter()
+            .all(|v| v.is_finite() && *v > 0.)
+        {
+            return Err(Error("invalid loose wheel shape"));
+        }
+        let primitive = Primitive::Cylinder { radius, height };
+        let side = mass * (3. * radius * radius + height * height) / 12.;
+        let air = mass * f32::from_bits(0x3c23_d70a); // 0.01 (CB0DE4)
+        let body = physparams::Body {
+            sphericalise: 0.,
+            spherical_radius: 1.,
+            spherical_mass: 1.,
+            max_angular_velocity: [f32::MAX; 3],
+            max_linear_speed: f32::MAX,
+            angular_damping: [f32::from_bits(0x3e4c_cccd); 3], // 0.2 (CB870C)
+            linear_damping: 0.,
+            forward_air_resistance: [air; 3],
+            backward_air_resistance: [air; 3],
+            linear_stationary: f32::from_bits(0x3dcc_cccd), // 0.1 (CAFCD4)
+            angular_stationary: f32::from_bits(0x3dcc_cccd),
+            wake_up_force: 0.,
+            wake_up_torque: 0.,
+            turn_off_time: 1.,
+            gravity_scale: 1.,
+        };
+        let (points, triangles) = hull(primitive);
+        let hull = collision_mesh::build(&points, &triangles, 0)?;
+        Ok(Self {
+            renderable: String::new(),
+            anchor: String::new(),
+            primitive,
+            pose,
+            mass,
+            inertia: [side, mass * radius * radius * 0.5, side],
+            body,
+            shell: f32::from_bits(0x3ca3_d70a), // 0.02 (CB0934, 9A8BB0)
+            limit: f32::MAX,
+            hull,
+            points,
+            triangles,
+        })
+    }
+}
+
+/// A wheel a car lost (car +22E4 + `wheel`) as a dynamic body.
+#[derive(Clone)]
+pub struct LooseWheel {
+    pub car: usize,
+    pub wheel: usize,
+    pub spec: std::sync::Arc<PieceSpec>,
+    pub body: usize,
+    pub token: u32,
 }
 
 /// Current world pose of a piece's shape (body published matrix).
@@ -670,6 +742,47 @@ fn pair_record(
     c
 }
 
+/// Append a dynamic body to the active chain after its current tail (the
+/// world double-buffers its active heads and tails by selector) with its own
+/// shape token; returns its body index and token.
+fn append(
+    world: &mut grouped_physical_frame::Output,
+    shapes: &mut Vec<contact_groups::Shape>,
+    mut body: contact_groups::Body,
+    properties: Properties,
+) -> Result<(usize, u32), Error> {
+    let selector = world.groups.world[5] as usize;
+    if selector > 1 {
+        return Err(Error("invalid physical world selector"));
+    }
+    let mut tail = world.groups.world[7 + selector] as usize;
+    let mut guard = 0;
+    while tail != 0 && world.groups.bodies[tail - 1][0x300 / 4] != 0 {
+        tail = world.groups.bodies[tail - 1][0x300 / 4] as usize;
+        guard += 1;
+        if guard > world.groups.bodies.len() {
+            return Err(Error("cyclic physical body chain"));
+        }
+    }
+    if tail == 0 || world.groups.world[9 + selector] as usize != tail {
+        return Err(Error("unsupported physical body chain"));
+    }
+    body[0x400 / 4] = world.groups.bodies[tail - 1][0x400 / 4];
+    let id = world.groups.bodies.len() + 1;
+    body[0x300 / 4] = 0;
+    body[0x304 / 4] = tail as u32;
+    world.groups.bodies[tail - 1][0x300 / 4] = id as u32;
+    world.groups.bodies.push(body);
+    world.groups.world[9 + selector] = id as u32;
+    world.manager.properties.push(properties);
+    world.manager.workspace.push([[0.; 4]; 2]);
+    shapes.push(contact_groups::Shape {
+        flag229: true,
+        ..Default::default()
+    });
+    Ok((id - 1, shapes.len() as u32))
+}
+
 /// A car hull taking part in piece contacts.
 pub struct CarHull<'a> {
     pub geometry: &'a BodyGeometry,
@@ -694,7 +807,28 @@ impl PropWorld {
             pending: Vec::new(),
             base_slots: None,
             lost: BTreeMap::new(),
+            wheels: Vec::new(),
         }
+    }
+
+    /// Whether any dynamic body (piece or wheel) is live.
+    pub fn has_bodies(&self) -> bool {
+        !self.pieces.is_empty() || !self.wheels.is_empty()
+    }
+
+    /// Every live body as (spec, world body, shape token): pieces, then wheels.
+    fn parts(&self) -> Vec<(&PieceSpec, usize, u32)> {
+        self.pieces
+            .iter()
+            .map(|p| {
+                (
+                    &self.catalog.breakables[p.breakable].pieces[p.spec],
+                    p.body,
+                    p.token,
+                )
+            })
+            .chain(self.wheels.iter().map(|w| (&*w.spec, w.body, w.token)))
+            .collect()
     }
 
     /// Hold every piece that has fallen more than [`LOST_DEPTH`] below
@@ -704,8 +838,11 @@ impl PropWorld {
     /// coordinate domain (`Mesh::world_bounds`) would instead stop the whole
     /// world about 150 s later (F318 R06). Call after each committed step.
     pub fn hold_lost(&mut self, bodies: &mut [contact_groups::Body], floor: f32) {
-        for (k, piece) in self.pieces.iter().enumerate() {
-            let Some(body) = bodies.get_mut(piece.body) else {
+        let indices: Vec<usize> = (self.pieces.iter().map(|p| p.body))
+            .chain(self.wheels.iter().map(|w| w.body))
+            .collect();
+        for (k, index) in indices.into_iter().enumerate() {
+            let Some(body) = bodies.get_mut(index) else {
                 continue;
             };
             let held = self.lost.entry(k);
@@ -763,24 +900,22 @@ impl PropWorld {
         recorded: &mut Vec<(usize, PropContact)>,
     ) -> Result<Vec<contact_groups::Contact>, Error> {
         let mut out = Vec::new();
-        let poses = self
-            .pieces
+        let parts = self.parts();
+        let poses = parts
             .iter()
             .map(|p| {
                 bodies
-                    .get(p.body)
+                    .get(p.1)
                     .map(body_pose)
                     .ok_or(Error("missing prop piece body"))
             })
             .collect::<Result<Vec<_>, _>>()?;
         // World hulls once per call, with the largest centre-to-vertex reach.
-        let convexes: Vec<(Convex, f32)> = self
-            .pieces
+        let convexes: Vec<(Convex, f32)> = parts
             .iter()
             .zip(&poses)
             .map(|(p, pose)| {
-                let convex =
-                    Convex::new(&self.catalog.breakables[p.breakable].pieces[p.spec], pose);
+                let convex = Convex::new(p.0, pose);
                 let reach = convex
                     .points
                     .iter()
@@ -797,8 +932,7 @@ impl PropWorld {
                 (convex, reach)
             })
             .collect();
-        for (k, piece) in self.pieces.iter().enumerate() {
-            let spec = &self.catalog.breakables[piece.breakable].pieces[piece.spec];
+        for (k, &(spec, piece_body, piece_token)) in parts.iter().enumerate() {
             let query = convex_distance::ContactSettings {
                 margin: spec.shell,
                 directions: directions.directions,
@@ -814,12 +948,12 @@ impl PropWorld {
                 })?
             {
                 let mut c = [0; 32];
-                c[1] = piece.body as u32 + 1;
+                c[1] = piece_body as u32 + 1;
                 c[0xc / 4] = 0x01000000;
                 c[0x1c / 4] = u32::MAX;
                 c[0x20 / 4] = u32::MAX;
                 c[0x24 / 4] = 1;
-                c[0x28 / 4] = piece.token;
+                c[0x28 / 4] = piece_token;
                 c[0x2c / 4] = hit.shape + 1;
                 c[0x38 / 4] = hit.contact.penetration.to_bits();
                 c[0x3c / 4] = hit.limit.to_bits();
@@ -832,18 +966,18 @@ impl PropWorld {
                         PropContact {
                             contact: c,
                             prop,
-                            body: piece.body,
+                            body: piece_body,
                         },
                     ));
                 }
                 out.push(c);
             }
-            for (j, other) in self.pieces.iter().enumerate().skip(k + 1) {
+            for (j, &(other_spec, other_body, other_token)) in parts.iter().enumerate().skip(k + 1)
+            {
                 let room = remaining - out.len();
                 if room == 0 {
                     break;
                 }
-                let other_spec = &self.catalog.breakables[other.breakable].pieces[other.spec];
                 let margin = spec.shell.max(other_spec.shell);
                 let ((a, a_reach), (b, b_reach)) = (&convexes[k], &convexes[j]);
                 // Each hull's face normals hold an orthonormal triple (box
@@ -863,8 +997,8 @@ impl PropWorld {
                 for hit in convex_contacts(a, b, margin, room.min(PAIR_CONTACTS)) {
                     out.push(pair_record(
                         &hit,
-                        [piece.body, other.body],
-                        [piece.token, other.token],
+                        [piece_body, other_body],
+                        [piece_token, other_token],
                     ));
                 }
             }
@@ -884,8 +1018,8 @@ impl PropWorld {
                 {
                     out.push(pair_record(
                         &hit,
-                        [car.body, piece.body],
-                        [car.token, piece.token],
+                        [car.body, piece_body],
+                        [car.token, piece_token],
                     ));
                 }
             }
@@ -957,7 +1091,7 @@ impl PropWorld {
         if self.pending.is_empty() {
             return Ok(Vec::new());
         }
-        let base = *self.base_slots.get_or_insert(world.groups.contacts.len());
+        self.base_slots.get_or_insert(world.groups.contacts.len());
         let mut disabled = Vec::new();
         for (breakable, explosion, force) in std::mem::take(&mut self.pending) {
             let entry = &self.catalog.breakables[breakable];
@@ -974,43 +1108,13 @@ impl PropWorld {
                     [spec.pose[3][0], spec.pose[3][1], spec.pose[3][2]],
                     explosion,
                 );
-                let (mut body, properties) = piece_body(spec, linear)?;
-                // Append to the active chain after its current tail. The
-                // world double-buffers its active heads/tails by selector.
-                let selector = world.groups.world[5] as usize;
-                if selector > 1 {
-                    return Err(Error("invalid physical world selector"));
-                }
-                let mut tail = world.groups.world[7 + selector] as usize;
-                let mut guard = 0;
-                while tail != 0 && world.groups.bodies[tail - 1][0x300 / 4] != 0 {
-                    tail = world.groups.bodies[tail - 1][0x300 / 4] as usize;
-                    guard += 1;
-                    if guard > world.groups.bodies.len() {
-                        return Err(Error("cyclic physical body chain"));
-                    }
-                }
-                if tail == 0 || world.groups.world[9 + selector] as usize != tail {
-                    return Err(Error("unsupported physical body chain"));
-                }
-                body[0x400 / 4] = world.groups.bodies[tail - 1][0x400 / 4];
-                let id = world.groups.bodies.len() + 1;
-                body[0x300 / 4] = 0;
-                body[0x304 / 4] = tail as u32;
-                world.groups.bodies[tail - 1][0x300 / 4] = id as u32;
-                world.groups.bodies.push(body);
-                world.groups.world[9 + selector] = id as u32;
-                world.manager.properties.push(properties);
-                world.manager.workspace.push([[0.; 4]; 2]);
-                shapes.push(contact_groups::Shape {
-                    flag229: true,
-                    ..Default::default()
-                });
+                let (body, properties) = piece_body(spec, linear, [0.; 4])?;
+                let (body, token) = append(world, shapes, body, properties)?;
                 self.pieces.push(Piece {
                     breakable,
                     spec: spec_index,
-                    body: id - 1,
-                    token: shapes.len() as u32,
+                    body,
+                    token,
                 });
             }
             self.broken[breakable] = true;
@@ -1021,14 +1125,62 @@ impl PropWorld {
                 force,
             });
         }
-        let slots =
-            (base + SLOTS_PER_PIECE * self.pieces.len()).min(grid_world::MAX_WORLD_CONTACTS);
+        self.reserve(world);
+        Ok(disabled)
+    }
+
+    /// Contact slots for every live body, beyond the cars' pool.
+    fn reserve(&mut self, world: &mut grouped_physical_frame::Output) {
+        let base = *self.base_slots.get_or_insert(world.groups.contacts.len());
+        let count = self.pieces.len() + self.wheels.len();
+        let slots = (base + SLOTS_PER_PIECE * count).min(grid_world::MAX_WORLD_CONTACTS);
         if slots > world.groups.contacts.len() {
             world.groups.contacts.resize(slots, [0; 32]);
             world.manager.rows.resize(slots * 4, [0; 48]);
             world.manager.capacity = slots * 4;
         }
-        Ok(disabled)
+    }
+
+    /// Add a lost wheel as a dynamic body after a committed step (9DC270
+    /// state 4 creates it in the scene update, so it takes part from the
+    /// next step on). Refused beyond the world's body bound, as a break is.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_wheel(
+        &mut self,
+        world: &mut grouped_physical_frame::Output,
+        shapes: &mut Vec<contact_groups::Shape>,
+        car: usize,
+        wheel: usize,
+        spec: PieceSpec,
+        linear: [f32; 4],
+        angular: [f32; 4],
+    ) -> Result<bool, Error> {
+        if world.groups.bodies.len() + 1 > grid_world::MAX_WORLD_BODIES {
+            return Ok(false);
+        }
+        self.base_slots.get_or_insert(world.groups.contacts.len());
+        let (body, properties) = piece_body(&spec, linear, angular)?;
+        let (body, token) = append(world, shapes, body, properties)?;
+        self.wheels.push(LooseWheel {
+            car,
+            wheel,
+            spec: std::sync::Arc::new(spec),
+            body,
+            token,
+        });
+        self.reserve(world);
+        Ok(true)
+    }
+
+    /// Lost wheels for presentation: (car, wheel, pose at the loss, pose now).
+    pub fn wheel_poses(
+        &self,
+        bodies: &[contact_groups::Body],
+    ) -> Vec<(usize, usize, Matrix, Matrix)> {
+        self.wheels
+            .iter()
+            .filter_map(|w| Some((w.car, w.wheel, w.spec.pose, body_pose(bodies.get(w.body)?))))
+            .collect()
     }
 
     /// Stop the broken intact boxes colliding in a track.
@@ -1047,6 +1199,7 @@ impl PropWorld {
     pub fn reset(&mut self, tracks: &mut [&mut Track]) -> Result<(), Error> {
         self.broken.iter_mut().for_each(|b| *b = false);
         self.pieces.clear();
+        self.wheels.clear();
         self.events.clear();
         self.pending.clear();
         self.base_slots = None;
@@ -1523,11 +1676,13 @@ mod tests {
                 gravity_scale: 1.,
             },
             shell: 0.02,
+            limit: DESCRIPTOR_EC,
             hull: collision_mesh::build(&points, &triangles, 0).unwrap(),
             points,
             triangles,
         };
-        let (body, (inverse_mass, inverse_inertia)) = piece_body(&spec, [0., 1., 0., 0.]).unwrap();
+        let (body, (inverse_mass, inverse_inertia)) =
+            piece_body(&spec, [0., 1., 0., 0.], [0.; 4]).unwrap();
         assert!((inverse_mass - 1. / 70.).abs() < 1e-6);
         assert!((inverse_inertia[0][0] - 6. / 70.).abs() < 1e-5);
         assert_eq!(body_pose(&body)[3], [5., 2., -3., 1.]);

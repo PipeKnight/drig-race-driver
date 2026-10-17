@@ -1,4 +1,4 @@
-# Wheel detachment — F346
+# Wheel detachment — F346, loose wheel body F355
 
 17 October 2026. Port of the plan in [MECHANICAL_DAMAGE.md](MECHANICAL_DAMAGE.md) section 5 (F339/F340).
 Tags: [D] read from the code, [V] checked by a run or test, [I] interpretation, AUTHORED port choice.
@@ -24,8 +24,9 @@ contact impulse (+3C) [V data]. The original then:
 - turns the wheel part (and the caliper when `m_calipers_come_off_with_wheels` is set) into a debris body
   with a random kick and the axle spin.
 
-The port reproduces the trigger, the terminal status and every driving branch. The loose wheel is drawn
-by grid-app with the original launch (kick and spin), but its flight is AUTHORED, not a rigid body.
+The port reproduces the trigger, the terminal status and every driving branch. Since F355 the loose wheel
+is a rigid body of the car's world (solo or shared): the original's capped cylinder, mass, inertia, launch
+and body settings, colliding with the track, props and cars (section 5); grid-app draws that body.
 
 ## 2. Trigger [D]
 
@@ -119,14 +120,49 @@ Original [D]:
   deflated (+22E0 + i), else the wheel node; mass = box volume × density, capped at car mass × 0.015;
   shape by 9A8BB0 with descriptor D17150 (D17158 when car +BA4); created by A742E0.
 
-Port (grid-app `damage_parts`):
+### Body (F355) [D]
 
-- The rim and tyre meshes of a lost wheel leave the car; the disc and caliper stay (both cars have
-  `m_calipers_come_off_with_wheels` 0).
-- Launch: the car's velocity plus the kick above, the spin about the car's X axis from the axle partner's
-  record (both [D]). [I] the kick is taken as a car-frame velocity.
-- AUTHORED: the random bytes (seeded LCG), and the flight (`Debris::step`: gravity, ground plane at the hub
-  height at the moment of loss, damped bounce). The wheel does not collide with cars or the track.
+Decompilations of 9D9F80, 9A8BB0, 9DC270, 7E9D60, 9B9A90 and 9BA2B6 (entry 9B9DA0) are in the private
+`local/soak-residuals/decomp/w1/`, 6174F0 in `w2/`; 9DB0E0 in `local/detached-parts/ghidra-02/`, A742E0 in
+`local/dynamic-props/decomp/a12/` (Ghidra 12.1.4 headless, read-only, script
+`local/soak-residuals/scripts/decomp.ps1`).
+
+- Size: the node bounds (min, max) in car-model space. 9DB0E0 is called with `param_5` = 0 for a detached
+  part, so the density is 600 (CE5C1C); mass = (Δx Δy Δz) × 600, capped at car +15A0 × 0.015 (CB5068).
+  For the shipped tyres the box is about 0.2 × 0.62 × 0.62 m (46 kg), so the cap decides: 17.1 kg.
+- Shape, 9A8BB0: a cylinder of radius (zmax − zmin) / 2 and half-length (xmax − xmin) / 2 about the axle,
+  shell 0.02 (CB0934), material D17150 "TYRE" (D17158 when car +BA4).
+- Descriptor written by 9D9F80 for A742E0 (offsets in the descriptor at esp+0xC0): mass; 0x60 = 0 (inertia
+  from the shape); linear and angular stationary thresholds 0.1 and 0.1; wake-up 0 and 0; turn-off time 1;
+  maximum velocities FLT_MAX; angular damping 0.2 on each axis; air resistance 0.01 × mass; linear damping 0;
+  gravity scale 1; no sphericalisation; 0xE8 FLT_MAX (6174F0's default). A742E0 copies these into the body
+  as B11F40 expects (descriptor 0x8C→0x98, 0x90→0x9C, 0x94→0x90, 0x98→0x94, 0x9C→0xA0, 0xD4→0xD8,
+  0xD8→0xDC, 0xDC→0xE0, 0xE8→0xEC; angular velocity 0x150→0x140, linear 0x160→0x150).
+- Pose: the wheel node's world transform (the presented wheel motion: spin phase, steer, deformation and
+  travel), with the car-model coordinates moved into the car's physical frame by +1630..+1638.
+- Velocity: A697C0 gives the car's velocity at the body's point (v + ω × r), A69820 the car's angular
+  velocity. 9DB0E0 then adds R_car × kick (+30) to the linear and R_car × spin (+40, about the axle) to the
+  angular velocity, with the car's rows +15E0.
+- Lifetime: there is no despawn timer. The part stays a body until the car is reset.
+- Not ported: the optional 0x33 + i calipers (`m_calipers_come_off_with_wheels` is 0 on both cars, so
+  9FA6E0 does not detach them).
+
+### Port
+
+- `grid_tools::loose_wheel` (new): `WheelNodes::read` (LOD0 `_tyre_` and `_wheel_` joint bounds from
+  `<car>_highLOD.pssg`), `spawn` (size, mass cap, pose, point velocity, kick and spin), `kick` (the 9DC270
+  formula with a seeded LCG in place of the CRT rand, AUTHORED), `wheel_motion`.
+- `grid_tools::dynamic_props`: `PieceSpec::loose_wheel` (the descriptor above; a solid cylinder's inertia,
+  the shape a twelve-sided prism like every port cylinder), `PropWorld::add_wheel`, `wheels`,
+  `wheel_poses`. The wheel is a body of the same world as the route pieces, so the existing contact paths
+  give it the road (packed triangles, margin 0.02), prop boxes, pieces and every car, the wheel's own car
+  included.
+- `Runtime::add_loose_wheels` (solo, after `detach_wheels`) and `MultiRuntime::add_loose_wheels` (each
+  car in the shared world). The prop world is created on demand, so a race without dynamic props still
+  simulates the wheel. Without body geometry (`prepare_body_geometry` not run) no body is made.
+- grid-app `damage_parts` draws the rim and tyre at body(now) × body(at loss)⁻¹ × the wheel's frame at
+  the loss. The authored flight (`Debris::step`) remains only when the world has no body for that wheel.
+- The rim and tyre meshes of a lost wheel leave the car; the disc and caliper stay.
 - Log line `drive_wheel_detached car= tick= wheel= impact_strength=`; the HUD says
   "Lost the front-left wheel; controls disabled; R resets".
 
@@ -158,12 +194,64 @@ Port (grid-app `damage_parts`):
   tick 3003) byte-identical to F345's origin/main run (`local/car-extents/soak/quick-extents`).
   Outputs: `local/wheel-detach/checks/`, `local/soak/quick-f346-wheel/`.
 
+### The wheel body (F355) [V]
+
+Release, cargo/rustc 1.99.0. Outputs in this worktree's private `local/wheel-body/` (`identity/`, `soak/`,
+`bin/` = the compared binaries).
+
+- Unit: `loose_wheel::tests::a_wheel_body_is_a_capped_cylinder_about_the_axle_at_the_tyre` (mass cap, radius
+  and half-length from the tyre bounds, axle along X, point velocity, the +1630 offset, the deflated tyre
+  falls back to the wheel node), `the_kick_needs_an_active_impact_and_is_seeded`; grid-app
+  `a_lost_wheel_is_drawn_at_its_body_and_falls_back_to_the_flight`.
+- Asset, `source_vehicle::wheel_detach`: after the loss the world has one wheel body of 0.015 × car mass
+  (17.1 kg) that starts within 0.15 m of the hub; over the next 4 s it stays finite, its centre stays more
+  than 0.05 m above the road under it (lowest 0.26-0.35 m, the tyre radius is 0.31 m) and it ends more than
+  1 m from the car. Both cars, all four circuits:
+
+  | car | circuit | wheel speed after 4 s (m/s) | lowest centre above the road (m) | distance from the car (m) |
+  |---|---|---|---|---|
+  | Lacetti | Donington | 8.19 | 0.33 | 42.5 |
+  | BMW | Donington | 3.78 | 0.32 | 11.0 |
+  | Lacetti | Nürburgring | 6.89 | 0.32 | 35.6 |
+  | BMW | Nürburgring | 9.20 | 0.35 | 31.8 |
+  | Lacetti | Istanbul Park | 4.23 | 0.26 | 34.3 |
+  | BMW | Istanbul Park | 10.11 | 0.35 | 35.6 |
+  | Lacetti | Long Beach | 5.98 | 0.29 | 28.9 |
+  | BMW | Long Beach | 4.97 | 0.29 | 30.4 |
+
+  The shared-world test gives the wheel body index 2 (after both cars) and races on 250 ticks.
+  The F346 check that the bare corner sits lower stays on Donington only; on the other circuits the
+  camber where the car stops can outweigh it (e.g. BMW Nürburgring 618.792 vs 618.796).
+- Damage off: no wheel is flagged, so no body is made (`damage_off_keeps_every_wheel`).
+- Solo lap `grid-opponent-race ROOT CD01 BP01 1 11200 ai`: sha256 `aad9a07a…e41b`, identical to F351/F352.
+- Races, origin/main 6d432bb against this change, DF01: Donington 12 × 12000, Nürburgring 12 × 14000, and with
+  the characteristics table also Istanbul Park 12 × 16000 and `--cars lac,bmw` 12 × 16000. All eight
+  outputs are byte-identical: no car loses a wheel in them, so no body is made.
+- Wheel-loss scenario: `GRID_LOSE_WHEEL=car:tick[:wheel]` in grid-opponent-race (new) flags the wheel
+  after that tick through `MultiRuntime::force_wheel_loss`, then the normal body path runs. With DF01 and
+  the characteristics:
+  - Donington, car 3 front left at tick 2000: car 3 retires `reason=lost-wheel wheel=2` at 2001, the race
+    runs its 12 000 ticks, the wheel body ends 254 m from where it came off. The output is identical on a
+    second run (sha256 `23279909…c450`);
+  - Nürburgring, car 5 rear right at 2500: retires at 2501, body moved 134 m, race completes;
+  - Istanbul Park, `--cars bmw,lac`, car 0 (BMW) front right at 3000: retires at 3001, body moved 125 m;
+  - Long Beach (rebased on F354), car 4 front left at 2500: retires at 2501, body moved 64 m, race completes.
+  Without the variable the Donington race is byte-identical to main.
+- grid-soak checks every world body (non-finite, out of bounds, falling, speed), so a wheel body is
+  covered like a prop piece. `grid-soak quick`: 16/16 (`local/wheel-body/soak/quick`, and again on the tree
+  rebased onto F354: `quick-final`). No quick seed loses a wheel.
+- Checks before the push, rebased on 50e6634 (F354): `cargo test --workspace --release --lib --test '*'
+  --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 510 passed, 0 failed;
+  Clippy `--workspace --all-targets --release -D warnings` clean; solo lap `aad9a07a…e41b`.
+
 ## 8. Not done / open
 
-- The loose wheel as a rigid body (9D9F80: tyre-node box, density, mass cap 0.015 × car mass, 9A8BB0 shape,
-  descriptor D17150) in the shared world, colliding with the track and cars. The dynamic-props pieces
-  (`grid_tools::dynamic_props`, cylinders as twelve-sided prisms) are the likely route.
-- 7E9D60's per-wheel record (+6C) consumer, and 9B9A90's caller 9BA2B6.
-- No comparison with the running game. Two AI cars in twelve lose a wheel in a two-lap Donington race
+- The wheel body's material (D17150 "TYRE") is not used: the port's contact paths do not yet take
+  per-material friction and restitution for pieces.
+- The cylinder is the port's twelve-sided prism, not a true cylinder; a rolling wheel bumps slightly.
+- 7E9D60's per-wheel record (+6C) consumer, and 9B9A90's caller 9BA2B6 (decompiled in
+  `local/soak-residuals/decomp/w1/`, not analysed further).
+- The caliper bodies (0x33 + i) when `m_calipers_come_off_with_wheels` is set (not on the shipped cars).
+- No comparison with the running game, also for the wheel body's flight. Two AI cars in twelve lose a wheel in a two-lap Donington race
   (section 4); whether the original loses wheels as often is not checked.
 - Ride height of the bare corner (section 4 [I]) against the original.

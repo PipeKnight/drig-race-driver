@@ -53,12 +53,13 @@ fn mass(car: &Runtime) -> f32 {
 }
 
 /// Drive 2 s, lose the front-left wheel to one corner hit, then 4 s more.
-fn lose_front_left(stem: &str) {
+fn lose_front_left(stem: &str, route: &str) {
     let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
     let root = Path::new(&root);
     let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
     let model = Car::new(stem).unwrap();
-    let mut car = Runtime::load(root, &Route::default(), &model, "slot_00", 200679).unwrap();
+    let route = Route::new(route).unwrap();
+    let mut car = Runtime::load(root, &route, &model, "slot_00", 200679).unwrap();
     let geometry = car.prepare_body_geometry(root, &table).unwrap();
     for _ in 0..125 {
         car.tick_with_body_geometry(DRIVE, &geometry).unwrap();
@@ -79,6 +80,43 @@ fn lose_front_left(stem: &str) {
     let lost = car.detach_wheels(&[front_left_hit(&car, threshold * 1.01)]);
     assert_eq!(lost, [false, false, true, false]);
     assert_eq!(car.detached_wheels(), lost);
+    // 9DC270 state 4: the wheel becomes a body of the world (loose_wheel).
+    let hub = world(&car, car.wheels()[2].anchor);
+    car.add_loose_wheels(lost).unwrap();
+    let props = car.dynamic_props().expect("a prop world for the wheel");
+    assert_eq!(props.wheels.len(), 1);
+    let loose = props.wheels[0].clone();
+    assert_eq!((loose.car, loose.wheel), (0, 2));
+    let cap = 0.015 * f(&car, 0x15a0);
+    assert!(
+        (loose.spec.mass - cap).abs() < 1e-3,
+        "mass {} cap {cap}",
+        loose.spec.mass
+    );
+    let wheel_at = |car: &Runtime| crate::dynamic_props::body_pose(&car.bodies()[loose.body])[3];
+    let start = wheel_at(&car);
+    let gap = (0..3)
+        .map(|j| (start[j] - hub[j]).powi(2))
+        .sum::<f32>()
+        .sqrt();
+    assert!(
+        gap < 0.15,
+        "the body starts at the hub: {start:?} vs {hub:?}"
+    );
+    // Height of the wheel centre above the road under it.
+    let clearance = |car: &Runtime, at: [f32; 4]| {
+        let mut cache = grid_world::rectangle_cull::Cache::default();
+        let hit = car
+            .track
+            .query(
+                [at[0], at[1] + 2., at[2], 1.],
+                [at[0], at[1] - 4., at[2], 1.],
+                &mut cache,
+            )
+            .unwrap()
+            .hit;
+        hit.map_or(f32::MAX, |h| at[1] - (at[1] + 2. - 6. * h.contact.fraction))
+    };
     assert_eq!(car.terminal_wheel(), None, "terminal only on the next tick");
     let spin_before = f(&car, 0x1990 + 2 * 0x150 + 0x104);
     assert!(
@@ -112,10 +150,35 @@ fn lose_front_left(stem: &str) {
 
     // The car runs on, slides to a stop on three wheels and the bare front
     // left corner sits lower than the front right.
-    for _ in 0..250 {
+    let mut lowest = f32::MAX;
+    for t in 0..250 {
         car.tick_with_body_geometry(DRIVE, &geometry).unwrap();
         assert_eq!(f(&car, w + 0x78), 0., "no grip");
+        let at = wheel_at(&car);
+        assert!(at.iter().all(|v| v.is_finite()));
+        lowest = lowest.min(clearance(&car, at));
+        if t % 25 == 0 {
+            let v = &car.bodies()[loose.body][0x220 / 4..0x22c / 4];
+            println!(
+                "{stem}: wheel tick {t} at {at:?} v {:?}",
+                v.iter().map(|x| f32::from_bits(*x)).collect::<Vec<_>>()
+            );
+        }
     }
+    // The wheel stays on the road (no tunnelling) and comes off the car.
+    let end = wheel_at(&car);
+    let body_speed = {
+        let v = &car.bodies()[loose.body][0x220 / 4..0x22c / 4];
+        v.iter()
+            .map(|x| f32::from_bits(*x).powi(2))
+            .sum::<f32>()
+            .sqrt()
+    };
+    let car_at = car.pose();
+    let apart = ((end[0] - car_at[12]).powi(2) + (end[2] - car_at[14]).powi(2)).sqrt();
+    println!("{stem} {}: wheel end {end:?} speed {body_speed} lowest {lowest} apart {apart}", route.path());
+    assert!(lowest > 0.05, "the wheel stays above the road: {lowest}");
+    assert!(apart > 1., "the wheel left the car: {apart}");
     let anchors = car.wheels().map(|w| w.anchor);
     let fl = world(&car, anchors[2])[1];
     let fr = world(&car, anchors[3])[1];
@@ -128,20 +191,39 @@ fn lose_front_left(stem: &str) {
     // 9BD7F0 copies status != 7 to +226C at the start of each later tick.
     assert_eq!(f(&car, 0x226c), 1., "controls disabled");
     assert!(speed(&car) < 3., "comes to rest: {}", speed(&car));
-    assert!(fl < fr - 0.03, "the bare corner is down: {fl} vs {fr}");
+    // On Donington's flat start the car comes to rest level; elsewhere the
+    // road's camber can outweigh the lower corner.
+    if route.is_default() {
+        assert!(fl < fr - 0.03, "the bare corner is down: {fl} vs {fr}");
+    }
     assert_eq!(car.terminal_wheel(), Some(2));
 }
 
 #[test]
 #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
 fn a_lacetti_loses_its_front_left_wheel_to_a_corner_hit() {
-    run(|| lose_front_left("lac"));
+    run(|| lose_front_left("lac", crate::route::DONINGTON));
 }
 
 #[test]
 #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
 fn a_bmw_loses_its_front_left_wheel_to_a_corner_hit() {
-    run(|| lose_front_left("bmw"));
+    run(|| lose_front_left("bmw", crate::route::DONINGTON));
+}
+
+/// The loose wheel body on the other circuits, for both cars.
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+fn a_lost_wheel_rolls_off_on_the_other_circuits() {
+    for route in [
+        crate::route::NURBURGRING,
+        crate::route::ISTANBUL_PARK,
+        crate::route::LONG_BEACH,
+    ] {
+        for stem in ["lac", "bmw"] {
+            run(move || lose_front_left(stem, route));
+        }
+    }
 }
 
 #[test]
@@ -173,12 +255,15 @@ fn a_shared_world_car_loses_a_wheel_without_retiring() {
         }
         let threshold = 6. * (mass(&multi.cars[1]) * 4.);
         let hit = front_left_hit(&multi.cars[1], threshold * 1.01);
-        assert_eq!(
-            multi.cars[1].detach_wheels(&[hit]),
-            [false, false, true, false]
-        );
+        let lost = multi.cars[1].detach_wheels(&[hit]);
+        assert_eq!(lost, [false, false, true, false]);
+        multi.add_loose_wheels(1, lost).unwrap();
+        let loose = multi.dynamic_props().unwrap().wheels[0].clone();
+        assert_eq!((loose.car, loose.wheel, loose.body), (1, 2, 2));
         for _ in 0..250 {
             multi.tick(&[DRIVE, DRIVE]).unwrap();
+            let at = crate::dynamic_props::body_pose(&multi.bodies()[loose.body])[3];
+            assert!(at.iter().all(|v| v.is_finite()) && at[1] > -20., "{at:?}");
         }
         assert!(multi.retirement(0).is_none() && multi.retirement(1).is_none());
         assert_eq!(multi.cars[1].terminal_wheel(), Some(2));

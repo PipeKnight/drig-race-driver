@@ -1,5 +1,31 @@
 # GRID engine project log
 
+F355 a lost wheel is a rigid body of the world (2026-10-17, Claude Code, night run). The F346 follow-up. Details: docs/WHEEL_DETACHMENT.md section 5 "Body (F355)", "Port" and section 7 "The wheel body (F355)".
+- Static evidence [D]: read-only Ghidra 12.1.4 headless on the hash-pinned image. Pseudocode of 9D9F80, 9A8BB0, 9DC270, 7E9D60, 9B9A90 and 9BA2B6 is in the main checkout's private local/soak-residuals/decomp/w1/, 6174F0 in w2/; the earlier 9DB0E0 (local/detached-parts/ghidra-02) and A742E0 (local/dynamic-props/decomp/a12) were reread.
+  - 9DB0E0 with param_5 = 0 (detached): density 600 (CE5C1C); mass = tyre-node box volume × 600, capped at car +15A0 × 0.015 (CB5068). The wheel node is used when the tyre is deflated (+22E0 + i).
+  - 9A8BB0: cylinder of radius (zmax − zmin)/2 and half-length (xmax − xmin)/2, shell 0.02 (CB0934), material D17150 "TYRE".
+  - 9D9F80's descriptor for A742E0: inertia from the shape; stationary thresholds 0.1/0.1; turn-off time 1; angular damping 0.2; air resistance 0.01 × mass; gravity scale 1; maximum velocities FLT_MAX. A697C0 point velocity and A69820 angular velocity of the car, then the 9DC270 kick and the axle partner's spin rotated by the car's rows.
+  - No despawn timer: the body stays until the car is reset.
+- Port:
+  - grid_tools::loose_wheel (new): tyre/wheel node bounds from `<car>_highLOD.pssg`, `spawn`, `kick`.
+  - grid_tools::dynamic_props: `PieceSpec::loose_wheel`, `PropWorld::add_wheel`, `wheels`, `wheel_poses`. The wheel shares the route pieces' world and contact paths (road with its 0.02 margin, prop boxes, pieces, cars). Body settings now take an angular velocity and the 0xEC limit per spec.
+  - Runtime/MultiRuntime `add_loose_wheels` after `detach_wheels`; the prop world is created on demand.
+  - grid-app damage_parts draws the rim and tyre at body(now) × body(at loss)⁻¹ × the wheel's frame at the loss. The authored flight stays only as the fallback without a body.
+  - grid-opponent-race `GRID_LOSE_WHEEL=car:tick[:wheel]` (diagnostic, `MultiRuntime::force_wheel_loss`) and `wheel_body` lines at the end.
+- Interpretations and choices: the kick's random bytes are a seeded LCG for the CRT rand (as in F346). The cylinder is the port's twelve-sided prism. The TYRE material is not used yet (no per-material piece contacts). Calipers (0x33 + i) are not detached; neither shipped car sets m_calipers_come_off_with_wheels.
+- Results [V], release, cargo/rustc 1.99.0 (outputs: worktree local/wheel-body/):
+  - Asset tests, both cars on Donington, Nürburgring, Istanbul Park and Long Beach: the body starts at the hub, stays 0.26-0.35 m (centre) above the road, ends 11-43 m from the car after 4 s. The shared-world car races on.
+  - Solo identity: sha256 aad9a07a…e41b, unchanged.
+  - 12-car races against origin/main 6d432bb (Donington, Nürburgring; with the characteristics also Istanbul Park and a lac/bmw field): all eight byte-identical. No car loses a wheel in them, so no body is made.
+  - Forced wheel loss on all four circuits: the car retires as lost-wheel, the race completes, the wheel body ends 64-254 m away; Donington's run repeats byte-identically.
+  - grid-soak quick: 16/16. Soak's body checks cover the wheel body like a prop piece.
+- Checks, rebased on 50e6634 (F354): `cargo test --workspace --release --lib --test '*' --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 510 passed, 0 failed; Clippy --workspace --all-targets -D warnings clean; solo identity aad9a07a…e41b; grid-soak quick 16/16 (local/wheel-body/soak/quick-final).
+- Failed along the way:
+  - The first BMW body started 0.17/0.42 m from the hub: node bounds are car-model coordinates, the anchors are in the physical frame. Fixed with the +1630 offset.
+  - A "does not sink" check against the start height failed on Donington's downhill; it now measures the clearance to the road under the wheel.
+  - F346's bare-corner check failed on the Nürburgring (camber); it stays on Donington.
+- Open: 7E9D60 (+6C consumer) and 9B9A90/9BA2B6 decompiled but not analysed; the TYRE material; a true cylinder; no live comparison of the wheel's flight.
+
 F354 fourth circuit: Long Beach drives solo and races with the AI field; routes finishing at a later gate get lap timing (2026-10-17, Claude Code, night run). Details: docs/LONG_BEACH.md.
 - Choice: from the F350 list, Long Beach route 0 needs no format work. Spa has three blockers, all recorded and none changed:
   - one chunk has 9 materials (the reader caps at 8; the 4-bit field allows 16);
