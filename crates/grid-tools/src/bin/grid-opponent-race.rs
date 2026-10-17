@@ -313,7 +313,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .cars
             .iter()
             .enumerate()
-            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+            .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         // Race manager before the AI update (0x4095C0).
         if let Some(field) = &mut field {
@@ -512,9 +512,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         // Terminal damage takes a car out of the race (AUTHORED for AI cars).
         for (i, car) in multi.cars.iter().enumerate() {
-            if car.terminal_wheel().is_some() && standings.status(i) == Status::Racing {
+            if let Some(wheel) = car.terminal_wheel()
+                && standings.status(i) == Status::Racing
+            {
                 standings.retire(i, Out::Wrecked);
-                println!("retire tick={} car{i} reason=terminal-damage", multi.ticks);
+                // A lost wheel (status 4) names the wheel; the earlier wheel
+                // damage terminal (status 3) keeps its line unchanged.
+                if car.lost_wheel() {
+                    println!(
+                        "retire tick={} car{i} reason=lost-wheel wheel={wheel}",
+                        multi.ticks
+                    );
+                } else {
+                    println!("retire tick={} car{i} reason=terminal-damage", multi.ticks);
+                }
             }
         }
         if multi.ticks.is_multiple_of(1500) {

@@ -921,6 +921,13 @@ impl MultiRuntime {
                 (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
             })
             .collect();
+        // The loose-part wheel rule of every car still in the world.
+        for i in 0..n {
+            if self.retired[i].is_none() {
+                let impacts = self.impacts(i);
+                self.cars[i].detach_wheels(&impacts);
+            }
+        }
         Ok(())
     }
 
@@ -1472,7 +1479,7 @@ mod tests {
                         .cars
                         .iter()
                         .enumerate()
-                        .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+                        .map(|(i, c)| Other::of(i as u32 + 1, c))
                         .collect();
                     let mut controls: Vec<Controls> = (0..12)
                         .map(|i| {

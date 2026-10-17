@@ -39,8 +39,9 @@ Options: `--out local/soak/DIR` (must contain a `local` component; default
 `local/soak/<command>-<unix time>`), `--jobs J`, `--seeds A..B`, `--timeout S`
 (per scenario; default 120 s + 25 ms per car-tick), `--max-cars N`, and scenario
 overrides `--cars N`, `--route tracks/...`, `--ticks N`, `--grid-position P`,
-`--assists SPEC`, `--chaos MODE`, `--props on|off`, `--keep` (keep the inputs of
-passing runs). `GRID_SOAK_TRACE=N` prints one player sample every N ticks.
+`--assists SPEC`, `--chaos MODE`, `--props on|off`, `--car STEM` and
+`--opponent-cars STEM[,STEM...]` (the app's car options, F345), `--keep` (keep
+the inputs of passing runs). `GRID_SOAK_TRACE=N` prints one player sample every N ticks.
 `GRID_SOAK_TRACE_BODY=I,J..[:FROM]` prints world bodies I, J.. (cars first, then
 pieces) every tick from session tick FROM: position, velocity, angular velocity,
 the up row and, for cars, the body-contact count and wheel displacements. A
@@ -77,6 +78,17 @@ file, so replays never depend on the generator.
   `MultiRuntime` and the app's `--opponents 1..11` cap the field at 12, matching
   the original's 12 driver objects. `--max-cars 20` exercises that refusal.
 - Routes: Donington GP and Nürburgring GP (`route_0`).
+- Car models (F345):
+  - quick runs stay all-Lacetti, so their results stay comparable with
+    earlier runs; `--car`/`--opponent-cars` mix them;
+  - long runs draw the models from a separate seeded stream, so every other
+    field of a seed is unchanged: half of the races are a mixed BMW 320si +
+    Lacetti field (player model random, opponents `bmw,lac` or `lac,bmw`), and
+    a quarter of the other runs put the player in a BMW;
+  - opponents cycle the list as in the app; each car uses its own AI
+    statistics;
+  - a non-Lacetti field adds `car=... opponent_cars=...` to the scenario
+    header.
 - Player grid position 1..cars; opponents fill the other slots in the app's
   order and use the app's AI seeds (0x5eed + k) and characteristics rows.
 - Driver aids: random traction control, stability control, braking assist,
@@ -90,9 +102,9 @@ file, so replays never depend on the generator.
 ### What mirrors the app
 
 `grid_tools::soak::Session` builds the player runtime exactly as `grid-app run`
-does (`Runtime::lacetti_on` on the player's slot, assists, lap timing, body
+does (`Runtime::load` with the player's model on the player's slot, assists, lap timing, body
 events, CD01 geometry, DF01 deformation, dynamic props) and, with opponents,
-the shared world (`MultiRuntime::lacetti_deforming_on` with the same slot
+the shared world (`MultiRuntime::load_deforming_on` with the same slot
 order, dynamic props, AI drivers). `Session::step` is `drive_tick`: countdown
 hold (player handbrake, opponents `grid_rev` state 2 then 3), AI controls from
 `View::of` and the others' poses, the player runtime swapped into slot 0 for one
@@ -166,6 +178,10 @@ prints the first divergence. Older logs without `drive_input` replay from the
 `drive_sample` lines, which the app already prints on every control change; the
 grid position then defaults to the race launcher's back of the grid
 (`--grid-position` overrides) and manual gear changes are not recoverable.
+
+`replay-log` also replays mixed fields: the app names a non-Lacetti field in
+`drive_replay` (`car=... opponent_cars=...`), and the session builds the same
+models. Before F345 such a log was refused.
 
 ## Findings (2026-10-16)
 
@@ -293,6 +309,27 @@ For comparison, F326: Donington 73 of 248 long runs failed (62 piece and 11 car
 falls), Nürburgring with props could not start at all, and without props 48 of
 234 runs lost a car. No world error, retirement, panic, set-up failure, crash or
 hang occurred after the fixes.
+
+### Runs for per-car AI extents (F345)
+
+These runs cover the F345 change: each car now has its own AI traffic extents
+([CAR_GENERALIZATION.md](CAR_GENERALIZATION.md), "AI car extents"), and mixed
+fields are supported. The baseline is origin/main c09ca82, built in a separate
+worktree. The runs are in the main checkout's private `local/car-extents/` (soak
+directories under `soak/`).
+
+| Run | Scenarios | Failed | Groups |
+|---|---|---|---|
+| quick, baseline | 12 | 0 | - |
+| quick, F345 | 12 | 1 | seed 12: Donington board fall at (-406, -51, -16), tick 3003 (F342 residual) |
+| quick, F345 `--car bmw --opponent-cars lac,bmw` | 12 | 0 | - |
+| quick, F345 `--opponent-cars bmw,lac` | 12 | 1 | the same seed-12 board fall |
+| long 1001.., baseline (stopped) | 24 | 4 | prop piece falls (1004, 1013, 1016, 1026) |
+| long 1001.., F345, 14 mixed fields (stopped) | 26 | 2 | 1004, identical to the baseline; 1001, a mixed 12-car Nürburgring tyre-stack piece at (-255, 571, -130) |
+
+Both new failures were replayed exactly with `grid-soak replay`. They belong to
+the open F342 prop-piece residuals, not to a new class. The only cause found is
+that the races now take different paths.
 
 ## Follow-ups
 

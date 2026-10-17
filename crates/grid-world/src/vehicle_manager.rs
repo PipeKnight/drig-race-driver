@@ -42,10 +42,10 @@ fn norm(a: [f32; 4], square_first: bool) -> Result<[f32; 4], Error> {
 fn finish(b: &mut [u32]) -> Result<(), Error> {
     if byte(b, 0x1ee0) != 0
         && b[0xdc8 / 4] != 0
-        && byte(b, 0x22e4) == 0
         && (0..4).any(|i| {
+            // 9BAB4F: a detached wheel (car +22E4 + i) adds no constraint.
             let w = 0x1990 + i * 0x150;
-            f(b, w + 0x40) > f(b, w + 0x50) && b[(w + 0xc4) / 4] != 0
+            byte(b, 0x22e4 + i) == 0 && f(b, w + 0x40) > f(b, w + 0x50) && b[(w + 0xc4) / 4] != 0
         })
     {
         return Err(Error("unsupported manager wheel constraint"));

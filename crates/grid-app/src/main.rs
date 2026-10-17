@@ -203,6 +203,8 @@ struct OpponentPart {
     car: usize,
     rest: Mat4,
     wheel: Option<usize>,
+    /// Wheel rim or tyre: drawn in flight once the wheel is lost.
+    lost_with_wheel: bool,
 }
 impl Driving {
     fn report(&self, event: &str, controls: grid_tools::source_vehicle::Controls) {
@@ -322,6 +324,8 @@ impl Driving {
 struct MovingPart {
     rest: Mat4,
     wheel: Option<usize>,
+    /// Wheel rim or tyre: drawn in flight once the wheel is lost.
+    lost_with_wheel: bool,
 }
 #[derive(Component)]
 struct DeformingPart {
@@ -353,6 +357,14 @@ const START_SEQUENCE_SECONDS: f64 = 4.0;
 /// Body dents of one opponent part, projected from that car's own field.
 #[derive(Component)]
 struct OpponentDeforming(DeformingPart);
+
+/// Wheel rim and tyre joints leave with a detached wheel (9FA6E0 detaches the
+/// wheel part; 9D9F80 sizes its body by the tyre); discs stay on the hub.
+fn lost_with_wheel(joint: &str) -> bool {
+    joint
+        .split_once('_')
+        .is_some_and(|(_, name)| name.starts_with("wheel_") || name.starts_with("tyre_"))
+}
 
 fn wheel_joint(joint: &[u8]) -> Option<usize> {
     let name = std::str::from_utf8(joint).ok()?;
@@ -2536,6 +2548,7 @@ fn setup(
                     MovingPart {
                         rest: matrix,
                         wheel: part.wheel,
+                        lost_with_wheel: lost_with_wheel(&part.joint),
                     },
                     damage_parts::Joint::new(&part.joint),
                 ));
@@ -2613,6 +2626,7 @@ fn setup(
                             car,
                             rest: matrix,
                             wheel: part.wheel,
+                            lost_with_wheel: lost_with_wheel(&part.joint),
                         },
                         damage_parts::Joint::new(&part.joint),
                     ));
@@ -2868,7 +2882,7 @@ fn drive_tick(
             .iter()
             .enumerate()
             .skip(1)
-            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+            .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         let view = View::of(car, opponents.multi.obstruction(0));
         Some(pilot.controls(
@@ -2948,7 +2962,7 @@ fn drive_tick(
         let cars: Vec<Other> = std::iter::once(&driving.runtime)
             .chain(opponents.multi.cars.iter().skip(1))
             .enumerate()
-            .map(|(i, c)| Other::from_pose(i as u32 + 1, c.pose(), c.velocity()))
+            .map(|(i, c)| Other::of(i as u32 + 1, c))
             .collect();
         // Start state while held [I]: gentle blips first, hard revving in the
         // second half of the countdown.
@@ -3653,7 +3667,11 @@ fn terminal_damage_message(runtime: &grid_tools::source_vehicle::Runtime) -> Opt
             .get(i)
             .copied()
             .unwrap_or("unknown");
-        format!("Terminal {wheel} wheel damage; controls disabled; R resets")
+        if runtime.lost_wheel() {
+            format!("Lost the {wheel} wheel; controls disabled; R resets")
+        } else {
+            format!("Terminal {wheel} wheel damage; controls disabled; R resets")
+        }
     })
 }
 /// Stage of the start-light board: lights 1..5 come on across the race
@@ -3761,6 +3779,14 @@ fn update_orbit(
 #[cfg(test)]
 mod driving_tests {
     use super::*;
+    #[test]
+    fn only_rims_and_tyres_leave_with_a_lost_wheel() {
+        assert!(lost_with_wheel("x0_wheel_fl"));
+        assert!(lost_with_wheel("x1_tyre_br"));
+        assert!(!lost_with_wheel("x0_disc_fl"));
+        assert!(!lost_with_wheel("x0_hub_caliper_fl"));
+        assert!(!lost_with_wheel("x0_bonnet"));
+    }
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
@@ -3844,6 +3870,7 @@ mod driving_tests {
                 MovingPart {
                     rest: Mat4::IDENTITY,
                     wheel: Some(0),
+                    lost_with_wheel: true,
                 },
                 Transform::default(),
                 Mesh3d::default(),
@@ -4139,6 +4166,7 @@ mod driving_tests {
                         MovingPart {
                             rest: *bind,
                             wheel: None,
+                            lost_with_wheel: false,
                         },
                         Transform::default(),
                         Mesh3d(handle.clone()),

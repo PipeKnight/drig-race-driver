@@ -60,7 +60,6 @@ pub fn apply(
         || !gravity.is_finite()
         || gravity < 0.
         || byte(b, 0x24a) != 0
-        || b[0x2278 / 4] != 0
         || byte(b, 0xde4) != 0
         || byte(b, 0xdfc) != 0
         || !matches!(b[0x1598 / 4], 1 | 2)
@@ -109,6 +108,12 @@ pub fn apply(
     let mut next = frame.clone();
     let b: &mut [u32] = &mut next.body;
     set(b, 0x1568, delta + f(b, 0x1568));
+    // A036A7..A036E0: a detached wheel (body +2278 + i) stops spinning.
+    for i in 0..4 {
+        if byte(b, 0x2278 + i) != 0 {
+            set(b, w(i) + 0x104, 0.);
+        }
+    }
     if byte(b, 0x1108) != 0 {
         set(b, 0x1884, 1.);
         let gear = b[0x196c / 4];

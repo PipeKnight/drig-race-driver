@@ -45,7 +45,7 @@ Observed by `grep` over `crates/` at 0eb216e.
 | `multi.rs` | `Runtime::lacetti_on` per car | per entry |
 | `engine_audio_continuous.rs` | `carsetup.bin` row `lac`, `eng_lac.WIP`, `lac.csv` | per car |
 | `engine_audio.rs` `EngineBank::lacetti` | `eng_lac`, `lacengine.ini` (older diagnostic layout) | unchanged (diagnostic tools only) |
-| `ai_driver.rs` `HALF_WIDTH`/`HALF_LENGTH` | Lacetti extents 0.9 / 2.24 m for traffic geometry | **unchanged, open** (see below) |
+| `ai_driver.rs` `HALF_WIDTH`/`HALF_LENGTH` | Lacetti extents 0.9 / 2.24 m for traffic geometry | per car, the original's rule (F345, "AI car extents" below) |
 | `ai_driver.rs`, `soak.rs`, `route.rs`, `tyre_*`, diagnostics `bin/*` | `"lac"` / `Runtime::lacetti` | unchanged (Lacetti evidence tools and tests) |
 | `soak.rs` | all-Lacetti session | unchanged; `replay-log` now refuses an app log whose `drive_replay` names a non-Lacetti field instead of replaying it as Lacetti |
 | `grid-app` `load` / `append_car` | `lac_highLOD.pssg`, `livery_00`, `lac_gen_high.pssg`, materials and textures keyed `lacetti/` | per model, keyed `car<m>/` (m = 0 the player's model, then each new opponent model) |
@@ -171,13 +171,139 @@ Checks after rebasing on ae14337 (P5 settings, F331/F332 reset path, F333 damage
 Not checked: windowed play with sound (one engine bank per model is loaded;
 not listened to), BMW damage-part thresholds in a crash, BMW glass shards.
 
+## AI car extents (F345, 2026-10-17)
+
+Before F345 every car's AI traffic geometry used `ai_driver::HALF_WIDTH` 0.9 m
+and `HALF_LENGTH` 2.24 m, with bumper points at centre ± forward · 2.24. These
+were the port's rounded Lacetti body-mesh values, not values taken from the
+original. They are now per car (`ai_driver::Extents`, `Runtime::ai_extents()`,
+`Other::of`, `View::extents`).
+
+### Where the original takes them [V static]
+
+Read-only capstone disassembly of the hash-pinned unpacked image
+(`local/ai-overtaking/scripts/pe.py`; listings in the main checkout's private
+`local/car-extents/static/`):
+
+- **0x402D20** is the AI car-state update. It also writes the centre +0x20,
+  axes, velocity +0xA0, speed +0xD0 and grip +0x144.
+  1. It calls the body dimension getter **0x9B8750**(vehicle, &front, &rear,
+     &half width).
+  2. It stores **+0x110 = half width** and **+0x114 = front − rear** (the full
+     length).
+  3. It grows the extents to cover the tyres (below).
+  4. It writes the **front point +0xF0 = centre + forward · front** and the
+     **rear point +0x100 = centre + forward · rear**.
+- **0x9B8750** builds two points:
+  - front = (body +0xED64, +0xED68, **+0xED6C**), rear = (+0xED64, +0xED68,
+    **+0xED88**);
+  - only when body byte +0xC7AD is set, it moves both through the deformation
+    lattice (0x9A39D0);
+  - it adds the body offset vector +0x1630 to both;
+  - it returns their Z values and the half width **+0xED70**.
+  - [docs/CAR_COLLISION.md](CAR_COLLISION.md) already identifies these fields
+    as the `.ned` `collision_main` description extents: +0xED6C maximum Z,
+    +0xED70 maximum X, +0xED88 minimum Z.
+- **Tyre cover** (0x4033CE..0x4034B5). The wheel words are written by 0xA0EC80
+  from the description: +0x14E0/+0x14F0/+0x1500/+0x1510 are the wheel centres
+  RL/RR/FL/FR, +0x1520.. the radii, +0x1540.. the tyre widths.
+  - If front-left Z + radius > front, then front = that value.
+  - Otherwise, if rear-right Z − radius < rear, then rear = that value. The two
+    tests are exclusive: the rear test is the else branch of the front one.
+  - If front-left X + width/2 > half width, then half width = that value.
+  - Otherwise, if |rear-right X − width/2| > half width, then half width = that
+    value.
+- **Consumers**:
+  - Observed records copy the fields (0x777A80): record +0xD0/+0xE0 bumpers,
+    +0xF0 half width, +0xF4 length.
+  - The overtake side choice (0x77BF4C..) and brake_for_vehicle (0x78F928) use
+    own +0x110 + record +0xF0.
+  - The avoid clearance (0x799B30) is 0.5·|front − rear| + avBufferZone + own
+    half width + other half width.
+  - The avoid room check (0x797720) is own half width × 2.0 (0xCB8DA4) + other
+    half width + 0.5.
+
+Not ported: the lattice transform of the bumper points of a deformed car. The
+extents stay those of the undamaged hull.
+
+### Values [V asset test `ai_extents_are_each_cars_hull_and_body_offset`]
+
+| Car | Half width | Front | Rear | Body offset Z (+0x1638) |
+|---|---|---|---|---|
+| Port before F345 (all cars) | 0.9 | +2.24 | −2.24 | — |
+| Lacetti | 0.913279 | +2.095238 (2.241661 − 0.146423) | −2.384299 (−2.237876 − 0.146423) | −0.14642298 |
+| BMW 320si | 0.947784 | +2.076094 (2.258862 − 0.182768) | −2.420644 (−2.237876 − 0.182768) | −0.1827681 |
+
+No tyre reaches past either hull, so the tyre cover changes nothing for these
+two cars. It is ported and unit-tested anyway. The body origin sits about
+0.15 m ahead of the hull centre, so the AI box is asymmetric: the nose is
+shorter and the tail longer than the old ±2.24.
+
+### Port changes
+
+- `Other` carries `extents`. `front()`/`rear()`, `corners`, `contains` and the
+  `contact_type` faces use each car's own front, rear and half width.
+- The pass and corridor width, the alongside gap, the overtake side-choice
+  width, the avoid clearance and the avoid room check use own + other half
+  widths, as the original does.
+- The path-obstacle distance and the remembered avoid target (both AUTHORED
+  corridors) use the own front and each car's half length.
+- The failure retire point and the yield room use the own half width.
+
+### Results change on purpose
+
+The original's rule reproduces neither old constant, so every multi-car race
+changes, Lacetti-only fields included. This is intended (coordinator decision,
+2026-10-17). The solo AI lap has no traffic and stays byte-identical.
+
+Release `grid-opponent-race`, Donington, baseline = origin/main c09ca82 built
+in a separate worktree, private characteristics. Outputs are in the main checkout's
+`local/car-extents/runs/`.
+
+| Run | Before (c09ca82) | After (F345) |
+|---|---|---|
+| Solo `1 11200 ai` | 88.42029812185638 / 86.28228501935392 | **byte-identical output** |
+| Lacetti × 4 | 102 car contacts; car3 only 1 valid lap | 106 contacts; every car 2 valid laps |
+| Lacetti × 12 | 1021 contacts, 11747 ticks | 868 contacts, 11769 ticks; all 2 valid laps |
+| Lacetti × 12 + DF01 | 787 contacts; car8 **Wrecked, 0 laps** | 1604 contacts; **no wreck**, all 12 cars 2 valid laps |
+| `--cars lac,bmw` × 4 | 19 contacts; winner car2 3:00.560 (as F338) | 134 contacts; winner car3 3:02.416 |
+| `--cars lac,bmw` × 12 + DF01 | 1825 contacts | 3356 contacts; all 12 cars 2 valid laps |
+
+The contact counts count every contact tick of every pair. They are chaotic
+over a 2-lap race and move both ways (787→1604, 1021→868), so they are not a
+measure of AI quality on their own.
+
+### Mixed-field soak
+
+`grid-soak` can now build mixed fields: `--car`/`--opponent-cars`, and long
+runs mix models by themselves
+([SOAK_TESTING.md](SOAK_TESTING.md#runs-for-per-car-ai-extents-f345)). Results:
+
+- **quick**: baseline 0/12 failed.
+  - F345 with all-Lacetti fields: 1/12. Seed 12 (Donington, 6 cars) is a prop
+    piece falling at the 150 m brake-marker board, (-406, -51, -16), at tick
+    3003. Replayed exactly from its inputs. The player is alone at the board,
+    and the opponents are more than 600 m away. The chaos player's autopilot
+    mode reads the other cars' records, so its path differs from the baseline
+    run. This is the known F342 board residual (11 of 24 long Donington piece
+    falls at -406..-413, -16), not a new regression.
+  - `--car bmw --opponent-cars lac,bmw`: 0/12.
+  - `--opponent-cars bmw,lac`: 1/12, the same seed-12 board fall at the same
+    tick.
+- **long, seeds 1001..**, stopped after 24-26 scenarios each:
+  - baseline (all-Lacetti): 4/24 prop piece falls.
+  - F345: 2/26, with 14 of the 26 mixed fields. Seed 1004 fails identically in
+    both. Seed 1001 (mixed 12-car Nürburgring) is a tyre-stack piece falling
+    41 m off the line at (-255, 571, -130), tick 9655. Replayed exactly. This is
+    the F342 Nürburgring piece-fall residual (pieces at (-169, 574, -124) and
+    (-162, 574, -32) on F342's final run), not a new failure class.
+- No world error, retirement, panic, set-up failure or car fall in any run.
+
 ## Open items
 
-- **AI car extents**: `ai_driver::HALF_WIDTH`/`HALF_LENGTH` (0.9 / 2.24 m)
-  are Lacetti body extents and are used for every car's traffic geometry
-  (bumper points, contact type, pass width). Other sessions are changing
-  `ai_driver.rs`; making them per-car fields is left to a follow-up.
 - Free-race field composition and grid order of the original: not traced.
-- `grid-soak` builds an all-Lacetti field; mixed fields are not soaked.
+- AI bumper points of a deformed car: the original moves them through the
+  deformation lattice (0x9A39D0 when body +0xC7AD is set); the port keeps the
+  undamaged hull extents (F345).
 - The launchers do not pass a car (the settings file can).
 - Diagnostic binaries and `engine_audio::EngineBank` remain Lacetti-only.

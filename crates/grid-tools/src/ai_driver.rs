@@ -761,12 +761,68 @@ pub struct Traffic {
     view_angle: f32,
 }
 
-/// Lacetti half width and half length (m) from the body mesh extents; the
-/// front/rear bumper points are the centre +/- forward * half length.
-pub const HALF_WIDTH: f32 = 0.9;
-pub const HALF_LENGTH: f32 = 2.24;
+/// A car's AI traffic extents (m) along its own axes from the body origin.
+///
+/// The AI car-state update (0x402D20) takes front, rear and half width from
+/// the body dimension getter 0x9B8750: the `.ned` `collision_main` maximum Z,
+/// minimum Z and maximum X (body +0xED6C/+0xED88/+0xED70) plus the body
+/// offset +0x1630 on Z. It then grows them to cover the tyres: front-left
+/// wheel Z + radius, rear-right wheel Z - radius, front-left X + half tyre
+/// width, |rear-right X - half tyre width|. The state keeps the half width
+/// (+0x110), the length front - rear (+0x114) and the bumper points
+/// centre + forward * front / rear (+0xF0/+0x100); observed records copy
+/// them (0x777A80).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Extents {
+    pub half_width: f32,
+    /// Front bumper distance ahead of the body origin.
+    pub front: f32,
+    /// Rear bumper position along forward (negative: behind the origin).
+    pub rear: f32,
+}
 
-/// Another car seen by the AI (observed record: id, centre, axes, velocity).
+impl Extents {
+    /// From the car's collision hull bounds and its vehicle words (wheel
+    /// positions +0x14E0.., radii +0x1520.., tyre widths +0x1540.., body
+    /// offset +0x1630). The optional deformation-lattice transform of the
+    /// two bumper points (0x9A39D0 when body +0xC7AD is set) is not ported:
+    /// the extents stay those of the undamaged hull.
+    pub fn from_vehicle(hull: grid_formats::car_collision::Bounds, vehicle: &[u32]) -> Self {
+        let w = |o: usize| f32::from_bits(vehicle[o / 4]);
+        let offset_z = w(0x1638);
+        let mut front = hull.max[2] + offset_z;
+        let mut rear = hull.min[2] + offset_z;
+        // Wheels: +0x1500 front-left centre, +0x14F0 rear-right centre.
+        let front_tyre = w(0x1508) + w(0x1528);
+        let rear_tyre = w(0x14F8) - w(0x1524);
+        // Only one of the two length tests runs (0x403409/0x403473).
+        if front_tyre > front {
+            front = front_tyre;
+        } else if rear > rear_tyre {
+            rear = rear_tyre;
+        }
+        let mut half_width = hull.max[0];
+        let left_tyre = w(0x1500) + w(0x1548) * 0.5;
+        let right_tyre = (w(0x14F0) - w(0x1544) * 0.5).abs();
+        if left_tyre > half_width {
+            half_width = left_tyre;
+        } else if right_tyre > half_width {
+            half_width = right_tyre;
+        }
+        Self {
+            half_width,
+            front,
+            rear,
+        }
+    }
+    /// Half the length (car state +0x114 / 2).
+    pub fn half_length(&self) -> f32 {
+        0.5 * (self.front - self.rear)
+    }
+}
+
+/// Another car seen by the AI (observed record: id, centre, axes, velocity,
+/// extents).
 #[derive(Clone, Copy)]
 pub struct Other {
     pub id: u32,
@@ -775,28 +831,40 @@ pub struct Other {
     /// Unit forward and car-left (+X) axes.
     pub forward: [f32; 3],
     pub left: [f32; 3],
+    pub extents: Extents,
 }
 
 impl Other {
     /// From a 4x4 row-major pose (rows 0/2 = left/forward, 12..14 translation).
-    pub fn from_pose(id: u32, pose: [f32; 16], velocity: [f32; 4]) -> Self {
+    pub fn from_pose(id: u32, pose: [f32; 16], velocity: [f32; 4], extents: Extents) -> Self {
         Self {
             id,
             position: [pose[12], pose[13], pose[14]],
             velocity,
             forward: [pose[8], pose[9], pose[10]],
             left: [pose[0], pose[1], pose[2]],
+            extents,
         }
+    }
+    /// The observed record of a source car.
+    pub fn of(id: u32, car: &crate::source_vehicle::Runtime) -> Self {
+        Self::from_pose(id, car.pose(), car.velocity(), car.ai_extents())
+    }
+    fn half_width(&self) -> f32 {
+        self.extents.half_width
+    }
+    fn half_length(&self) -> f32 {
+        self.extents.half_length()
     }
     fn speed(&self) -> f32 {
         let v = self.velocity;
         (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
     }
     fn front(&self) -> [f32; 3] {
-        std::array::from_fn(|k| self.position[k] + self.forward[k] * HALF_LENGTH)
+        std::array::from_fn(|k| self.position[k] + self.forward[k] * self.extents.front)
     }
     fn rear(&self) -> [f32; 3] {
-        std::array::from_fn(|k| self.position[k] - self.forward[k] * HALF_LENGTH)
+        std::array::from_fn(|k| self.position[k] + self.forward[k] * self.extents.rear)
     }
     /// Record state 2 (not racing) when the car moves against its nose [I].
     fn backwards(&self) -> bool {
@@ -808,10 +876,11 @@ impl Other {
     fn corners(&self, margin: f32) -> [[f32; 3]; 4] {
         let f = horizontal(self.forward);
         let right = horizontal(self.left.map(|x| -x));
-        let (l, w) = (HALF_LENGTH + margin, HALF_WIDTH + margin);
+        let e = self.extents;
+        let (front, rear, w) = (e.front + margin, e.rear - margin, e.half_width + margin);
         let at =
             |a: f32, b: f32| std::array::from_fn(|k| self.position[k] + f[k] * a + right[k] * b);
-        [at(l, w), at(l, -w), at(-l, w), at(-l, -w)]
+        [at(front, w), at(front, -w), at(rear, w), at(rear, -w)]
     }
     /// Box-local (forward, right) coordinates of `p`.
     fn local(&self, p: [f32; 3]) -> (f32, f32) {
@@ -823,7 +892,8 @@ impl Other {
     }
     fn contains(&self, p: [f32; 3], margin: f32) -> bool {
         let (x, y) = self.local(p);
-        x.abs() <= HALF_LENGTH + margin && y.abs() <= HALF_WIDTH + margin
+        let e = self.extents;
+        e.rear - margin <= x && x <= e.front + margin && y.abs() <= e.half_width + margin
     }
 }
 
@@ -844,8 +914,9 @@ fn contact_type(own: &Other, other: &Other, margin: f32) -> Option<u8> {
         .into_iter()
         .find(|&c| own.contains(c, margin))?;
     let (x, y) = own.local(corner);
-    let (l, w) = (HALF_LENGTH + margin, HALF_WIDTH + margin);
-    let faces = [l - x, l + x, w - y, w + y];
+    let e = own.extents;
+    let w = e.half_width + margin;
+    let faces = [e.front + margin - x, x - (e.rear - margin), w - y, w + y];
     let nearest = (0..4).min_by(|&a, &b| faces[a].total_cmp(&faces[b]))?;
     Some(5 + nearest as u8)
 }
@@ -1034,6 +1105,8 @@ pub struct View {
     /// The car's gearbox is in reverse (selects the pedal mapping of the
     /// AUTHORED reverse boundary).
     pub reverse_gear: bool,
+    /// The car's AI traffic extents (own car state +0x110/+0x114).
+    pub extents: Extents,
 }
 
 impl View {
@@ -1056,6 +1129,7 @@ impl View {
             wheels,
             obstruction,
             reverse_gear: car.reverse_gear(),
+            extents: car.ai_extents(),
         }
     }
 }
@@ -1342,7 +1416,7 @@ impl AiDriver {
         self.segment = Some(segment);
         let (_, here, _, limits_here) = data.line.at(arc);
         let tr = p.traffic.clone();
-        let own = Other::from_pose(0, view.pose, view.velocity);
+        let own = Other::from_pose(0, view.pose, view.velocity, view.extents);
         let f = horizontal(forward);
         // Car-right in the original's sense is our -X (car left is +X).
         let right_vec = [-right[0], -right[1], -right[2]];
@@ -1365,14 +1439,14 @@ impl AiDriver {
                 let visible = dot3(horizontal(to_rear), f) >= cone;
                 along > 0.
                     && along < 200.
-                    && lat.abs() < 2. * HALF_WIDTH + tr.buffer + 0.5
+                    && lat.abs() < own.half_width() + r.half_width() + tr.buffer + 0.5
                     && visible
             })
             .min_by(|a, b| {
                 dot3(sub(a.position, position), f).total_cmp(&dot3(sub(b.position, position), f))
             })
         {
-            let w = 2. * HALF_WIDTH;
+            let w = own.half_width() + r.half_width();
             let lat = dot3(sub(r.position, position), right_vec);
             let (gap_r, gap_l) = (lat - w, -lat - w);
             let same = dot3(f, horizontal(r.forward));
@@ -1402,7 +1476,8 @@ impl AiDriver {
                     dot3(sub(r.rear(), own_front), f)
                 } else {
                     (dot3(sub(r.position, position), sub(r.position, position))).sqrt()
-                        - 2. * HALF_LENGTH
+                        - own.half_length()
+                        - r.half_length()
                 };
                 let sep = remap(
                     closing,
@@ -1487,7 +1562,7 @@ impl AiDriver {
             let strict =
                 dot3(sub(r.rear(), own_front), f) < 0. && dot3(sub(r.front(), own_rear), f) > 0.;
             let lat = dot3(sub(r.rear(), own_front), horizontal(right_vec));
-            let gap = (lat.abs() - 2. * HALF_WIDTH).max(0.);
+            let gap = (lat.abs() - own.half_width() - r.half_width()).max(0.);
             let slot = usize::from(lat > 0.);
             let replace = match slots[slot] {
                 None => true,
@@ -1607,14 +1682,14 @@ impl AiDriver {
             let lat = dot3(d, right_vec);
             let relative = [v[0] - r.velocity[0], 0., v[2] - r.velocity[2]];
             if along <= 0.
-                || lat.abs() >= 2. * HALF_WIDTH + tr.buffer + 0.5
+                || lat.abs() >= own.half_width() + r.half_width() + tr.buffer + 0.5
                 || dot3(relative, d) <= 0.
             {
                 continue;
             }
-            let extent = dot2(horizontal(r.forward), f).abs() * HALF_LENGTH
-                + dot2(horizontal(r.left), f).abs() * HALF_WIDTH;
-            let distance = (along - HALF_LENGTH - extent - buffer).max(0.);
+            let extent = dot2(horizontal(r.forward), f).abs() * r.half_length()
+                + dot2(horizontal(r.left), f).abs() * r.half_width();
+            let distance = (along - own.extents.front - extent - buffer).max(0.);
             let closing = dot3(relative, relative).sqrt();
             let time = distance / closing.max(1e-6);
             if time < best_time {
@@ -1654,7 +1729,7 @@ impl AiDriver {
             let along = dot3(d, f);
             let relative = [v[0] - r.velocity[0], 0., v[2] - r.velocity[2]];
             let closing = dot3(relative, relative).sqrt();
-            if along > 2. * HALF_LENGTH
+            if along > own.half_length() + r.half_length()
                 && cone < dot3(f, horizontal(d))
                 && along < rs.av_eta * closing
             {
@@ -1818,7 +1893,7 @@ impl AiDriver {
                             let _ = target_arc;
                             let s = target_lat - self.offset;
                             let dist = s.abs();
-                            let w = 2. * HALF_WIDTH;
+                            let w = own.half_width() + target.half_width();
                             let room_l = self.offset - limits_here[0] + s;
                             let room_r = limits_here[1] - self.offset - s;
                             let need = w + tr.ov_safe;
@@ -1832,8 +1907,8 @@ impl AiDriver {
                                 2
                             } else {
                                 match (room_l > need, room_r > need) {
-                                    (true, true) if s > HALF_WIDTH => 1,
-                                    (true, true) if s < -HALF_WIDTH => 2,
+                                    (true, true) if s > own.half_width() => 1,
+                                    (true, true) if s < -own.half_width() => 2,
                                     (true, true) => {
                                         if room_l > room_r {
                                             1
@@ -1926,8 +2001,8 @@ impl AiDriver {
                     };
                     let gap = |slot: &Option<(f32, bool, Other)>| slot.map_or(f32::MAX, |s| s.0);
                     let (left, right) = (yields(&slots[0]), yields(&slots[1]));
-                    let room_l = self.offset - limits_here[0] - HALF_WIDTH;
-                    let room_r = limits_here[1] - self.offset - HALF_WIDTH;
+                    let room_l = self.offset - limits_here[0] - own.half_width();
+                    let room_r = limits_here[1] - self.offset - own.half_width();
                     let chosen = match (left, right) {
                         (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
                         (Some(a), None) if distance > gap(&slots[1]) || room_r < to_limit => {
@@ -1953,7 +2028,8 @@ impl AiDriver {
                     self.avoid.target = Some(r.id);
                     // Side choice 0x799B30 and offset 0x799DE0 around the
                     // target's predicted position.
-                    let clearance = HALF_LENGTH + rs.av_buffer + 2. * HALF_WIDTH;
+                    let clearance =
+                        r.half_length() + rs.av_buffer + own.half_width() + r.half_width();
                     let predicted: [f32; 3] =
                         std::array::from_fn(|k| r.position[k] + eta * r.velocity[k]);
                     let (_, p_arc, lat) = data.line.project(predicted, None);
@@ -1968,7 +2044,7 @@ impl AiDriver {
                             1
                         };
                         // Room check 0x797720 against the chosen track limit.
-                        let w = 3. * HALF_WIDTH + 0.5;
+                        let w = 2. * own.half_width() + r.half_width() + 0.5;
                         let [left_limit, right_limit] = data.line.track_limits_at(p_arc);
                         let limit = if side == 1 { left_limit } else { right_limit };
                         if (lat - limit).abs() < w {
@@ -2089,7 +2165,7 @@ impl AiDriver {
             | Behaviour::ControlledStop
             | Behaviour::RaceDamaged
             | Behaviour::RetireFailure => {
-                self.drive_failure(data, &mut request, arc, speed, dt);
+                self.drive_failure(data, &mut request, arc, speed, own.half_width(), dt);
             }
         }
         // Planned offset moves toward the request at its merge rate.
@@ -2515,12 +2591,12 @@ impl AiDriver {
 
     /// The nearer track limit, re-chosen every second (0x797F00 [I]): the
     /// planned offset keeps the car's half width plus 0.5 m inside it.
-    fn limit_side(&mut self, data: &AiData, arc: f32, dt: f32) -> f32 {
+    fn limit_side(&mut self, data: &AiData, arc: f32, half_width: f32, dt: f32) -> f32 {
         self.failure.side_timer -= dt;
         if self.failure.side_timer <= 0. {
             self.failure.side_timer = DAMAGED_PERIOD;
             let [left, right] = data.line.track_limits_at(arc);
-            let margin = HALF_WIDTH + 0.5;
+            let margin = half_width + 0.5;
             self.failure.side_offset = if (self.offset - left).abs() <= (right - self.offset).abs()
             {
                 left + margin
@@ -2543,6 +2619,7 @@ impl AiDriver {
         request: &mut Request,
         arc: f32,
         speed: f32,
+        half_width: f32,
         dt: f32,
     ) {
         let f = self.parameters.faults.clone();
@@ -2579,11 +2656,11 @@ impl AiDriver {
                 request.desired_speed = DAMAGED_SPEED;
                 request.throttle_cap = DAMAGED_THROTTLE;
                 request.merge = self.parameters.ra_merge;
-                request.desired_offset = self.limit_side(data, arc, dt);
+                request.desired_offset = self.limit_side(data, arc, half_width, dt);
                 request.track_limits = true;
             }
             Behaviour::RetireFailure => {
-                let side = self.limit_side(data, arc, dt);
+                let side = self.limit_side(data, arc, half_width, dt);
                 request.desired_speed = f.retirement_speed;
                 request.brake_to_speed = true;
                 request.merge = self.parameters.ra_merge;
@@ -2927,6 +3004,84 @@ mod tests {
     }
 
     #[test]
+    fn extents_take_the_hull_offset_and_cover_the_tyres() {
+        use grid_formats::car_collision::Bounds;
+        let hull = Bounds {
+            min: [-0.9, 0.1, -2.2],
+            max: [0.92, 1.4, 2.25],
+        };
+        let mut vehicle = vec![0u32; 0x1640 / 4];
+        let set = |vehicle: &mut [u32], o: usize, v: f32| vehicle[o / 4] = v.to_bits();
+        set(&mut vehicle, 0x1638, -0.15);
+        // Rear-right and front-left wheel centres, radii and tyre widths.
+        for (o, v) in [(0x14F0, -0.76), (0x14F8, -1.2), (0x1500, 0.74), (0x1508, 1.35)] {
+            set(&mut vehicle, o, v);
+        }
+        for o in [0x1524, 0x1528] {
+            set(&mut vehicle, o, 0.3);
+        }
+        for o in [0x1544, 0x1548] {
+            set(&mut vehicle, o, 0.27);
+        }
+        let e = Extents::from_vehicle(hull, &vehicle);
+        assert_eq!(e.half_width, 0.92);
+        assert_eq!(e.front, 2.25 + -0.15);
+        assert_eq!(e.rear, -2.2 + -0.15);
+        assert_eq!(e.half_length(), 0.5 * (e.front - e.rear));
+        // A front tyre beyond the nose moves the front only: the rear test is
+        // the else branch of the front test (0x403469).
+        set(&mut vehicle, 0x1508, 2.0);
+        set(&mut vehicle, 0x14F8, -2.3);
+        let e = Extents::from_vehicle(hull, &vehicle);
+        assert_eq!((e.front, e.rear), (2.0 + 0.3, -2.2 + -0.15));
+        set(&mut vehicle, 0x1508, 1.35);
+        let e = Extents::from_vehicle(hull, &vehicle);
+        assert_eq!(e.rear, -2.3 - 0.3);
+        // Tyre widths: the left (front-left) test first, then the right one.
+        set(&mut vehicle, 0x14F0, -0.9);
+        let e = Extents::from_vehicle(hull, &vehicle);
+        assert_eq!(e.half_width, (-0.9f32 - 0.27 * 0.5).abs());
+        set(&mut vehicle, 0x1500, 0.85);
+        let e = Extents::from_vehicle(hull, &vehicle);
+        assert_eq!(e.half_width, 0.85 + 0.27 * 0.5);
+    }
+
+    #[test]
+    fn boxes_use_each_cars_own_asymmetric_extents() {
+        let long = Extents {
+            half_width: 0.95,
+            front: 2.0,
+            rear: -2.5,
+        };
+        let car = |position: [f32; 3], extents| Other {
+            id: 1,
+            position,
+            velocity: [0.; 4],
+            forward: [0., 0., 1.],
+            left: [1., 0., 0.],
+            extents,
+        };
+        let own = car([0.; 3], long);
+        assert_eq!(own.front(), [0., 0., 2.]);
+        assert_eq!(own.rear(), [0., 0., -2.5]);
+        assert!(own.contains([0., 0., -2.45], 0.));
+        assert!(!own.contains([0., 0., 2.05], 0.));
+        assert!(own.contains([0.94, 0., 0.], 0.));
+        assert!(!own.contains([0.96, 0., 0.], 0.));
+        // A narrow car whose nose reaches 0.05 m into our rear face (type 6).
+        let narrow = Extents {
+            half_width: 0.5,
+            front: 1.0,
+            rear: -1.0,
+        };
+        assert_eq!(
+            contact_type(&own, &car([0., 0., -3.45], narrow), 0.),
+            Some(6)
+        );
+        assert_eq!(contact_type(&own, &car([0., 0., -3.55], narrow), 0.), None);
+    }
+
+    #[test]
     fn contact_types_classify_corners_and_faces() {
         let car = |position: [f32; 3], forward: [f32; 3]| Other {
             id: 1,
@@ -2935,6 +3090,11 @@ mod tests {
             forward,
             // Car-left (+X for a car facing +Z): forward rotated by +90 degrees.
             left: [forward[2], 0., -forward[0]],
+            extents: Extents {
+                half_width: 0.9,
+                front: 2.24,
+                rear: -2.24,
+            },
         };
         let own = car([0.; 3], [0., 0., 1.]);
         // Other car's rear overlapping our nose: our front corners are inside.

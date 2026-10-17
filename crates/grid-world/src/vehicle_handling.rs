@@ -276,10 +276,10 @@ fn calculate_owned(
         || car[0x1620 / 4] != 4
         || byte(car, 0xb13) != 1
         || byte(car, 0xb14) != 1
-        || car[0x22e4 / 4] != 0
+        || (0..4).any(|i| byte(car, 0x22e4 + i) > 1)
         || byte(b, 0x442) > 1
-        || !(b[0x444 / 4] == 7 || (empty_notification_receiver && b[0x444 / 4] == 3))
-        || (b[0x444 / 4] == 3 && byte(b, 0x448) > 3)
+        || !(b[0x444 / 4] == 7 || (empty_notification_receiver && matches!(b[0x444 / 4], 3 | 4)))
+        || (matches!(b[0x444 / 4], 3 | 4) && byte(b, 0x448) > 3)
         || byte(b, 0x440) > 1
         || byte(car, 0xc7ae) > 1
         || car[0x2118 / 4] > 1
@@ -459,6 +459,21 @@ fn calculate_owned(
         b.store(0x42c, if timer < 0. { 0. } else { timer });
     }
     effects(&mut b, queries, true)?;
+    // 9E65B0 (called at 9F4246): while racing (status 7), the first detached
+    // wheel (car +22E4 + i, set by the loose-part rule 9EC9B0) is terminal
+    // damage 9E64E0(4, wheel). 9E64E0 needs +442 and A14E40 (car B13/B14,
+    // validated above); status and wheel commit before the absent receiver.
+    // The second 9E65B0 loop only returns early and changes nothing.
+    if b[0x444 / 4] == 7
+        && byte(&b, 0x442) != 0
+        && let Some(i) = (0..4).find(|&i| byte(car, 0x22e4 + i) != 0)
+    {
+        if !empty_notification_receiver {
+            return Err(Error("unsupported handling notification event"));
+        }
+        b[0x444 / 4] = 4;
+        b.store_byte(0x448, i as u8);
+    }
     if !bounded(&b, 0, 0x60) || !bounded(&b, 0x42c, 0x430) {
         return Err(Error("nonfinite handling result"));
     }
@@ -735,5 +750,37 @@ mod tests {
         assert!(calculate_with_empty_notification_receiver(&s, 0.016, Some(&[])).is_err());
         assert_eq!(s.vehicle, before.vehicle);
         assert_eq!(s.damage_random_state, before.damage_random_state);
+    }
+
+    #[test]
+    fn a_detached_wheel_is_terminal_damage_for_the_first_flagged_wheel() {
+        let mut s = fixture();
+        activate_damage(&mut s);
+        s.vehicle.store_byte(MUTABLE + 0x442, 1);
+        s.vehicle.store_byte(0x22e4 + 2, 1);
+        s.vehicle.store_byte(0x22e4 + 3, 1);
+        let before = s.clone();
+        let lost = calculate_with_empty_notification_receiver(&s, 0.016, Some(&[])).unwrap();
+        assert_eq!(lost.vehicle[(MUTABLE + 0x444) / 4], 4);
+        assert_eq!(byte(&lost.vehicle, MUTABLE + 0x448), 2);
+        assert_eq!(s.vehicle, before.vehicle);
+        // Status 4 is not 7, so 9E65B0 does nothing on later ticks.
+        let continued =
+            calculate_with_empty_notification_receiver(&lost, 0.016, Some(&[])).unwrap();
+        assert_eq!(continued.vehicle[(MUTABLE + 0x444) / 4], 4);
+        assert_eq!(byte(&continued.vehicle, MUTABLE + 0x448), 2);
+        // A healthy receiver would get a notification, which is not ported.
+        assert_eq!(
+            calculate_with_queries(&s, 0.016, Some(&[]))
+                .err()
+                .unwrap()
+                .0,
+            "unsupported handling notification event"
+        );
+        // 9E64E0 ignores the request while +442 is clear.
+        let mut quiet = s.clone();
+        quiet.vehicle.store_byte(MUTABLE + 0x442, 0);
+        let quiet = calculate_with_empty_notification_receiver(&quiet, 0.016, Some(&[])).unwrap();
+        assert_eq!(quiet.vehicle[(MUTABLE + 0x444) / 4], 7);
     }
 }

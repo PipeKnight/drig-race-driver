@@ -20,14 +20,32 @@ pub struct Wheel {
 
 /// Supplied prepared response matrices and travel bounds. No extra tyre impulses.
 /// The +/-99 envelope is a diagnostic restriction, not a game clamp.
-#[allow(clippy::assign_op_pattern)] // Keep the observed f32 operand order.
 pub fn step(
+    wheels: [Wheel; 4],
+    response: [[f32; 4]; 4],
+    secondary: [[f32; 4]; 4],
+    scale: f32,
+    delta: f32,
+    weight: f32,
+) -> Result<[Wheel; 4], Error> {
+    step_detached(
+        wheels, response, secondary, scale, delta, weight, [false; 4],
+    )
+}
+
+/// [`step`] with the body's detached-wheel bytes +2278..+227B. 9C1F60
+/// (9C2516): a detached wheel's suspension impulse is zero and its
+/// displacement (+64) and speed (+74) are reset to zero before gravity and
+/// the response loops; the axle means were taken before, from every wheel.
+#[allow(clippy::assign_op_pattern)] // Keep the observed f32 operand order.
+pub fn step_detached(
     mut wheels: [Wheel; 4],
     response: [[f32; 4]; 4],
     secondary: [[f32; 4]; 4],
     scale: f32,
     delta: f32,
     weight: f32,
+    detached: [bool; 4],
 ) -> Result<[Wheel; 4], Error> {
     if !weight.is_finite()
         || response
@@ -61,7 +79,14 @@ pub fn step(
     {
         return Err(Error("invalid supported wheel travel bounds"));
     }
-    let impulses = suspension::impulses(wheels.map(|w| w.suspension), scale, delta)?;
+    let mut impulses = suspension::impulses(wheels.map(|w| w.suspension), scale, delta)?;
+    for (i, wheel) in wheels.iter_mut().enumerate() {
+        if detached[i] {
+            impulses[i] = 0.;
+            wheel.suspension.displacement = 0.;
+            wheel.suspension.speed = 0.;
+        }
+    }
     let inverse_wheel_mass = f32::from_bits(0x3d08_8889);
     let gravity = [0., f32::from_bits(0xc11c_f5c3), 0., 0.];
     for wheel in &mut wheels {
@@ -205,6 +230,64 @@ mod tests {
             assert_eq!(wheel.suspension.displacement, 0.);
             assert!(wheel.suspension.speed.abs() < 1e-8);
             assert!((wheel.contact_raw - 0.2943).abs() < 1e-6);
+        }
+    }
+    #[test]
+    fn a_detached_wheel_has_no_suspension_impulse_and_restarts_from_zero_travel() {
+        let wheel = Wheel {
+            suspension: suspension::Wheel {
+                displacement: -0.05,
+                speed: 0.3,
+                spring: 20000.,
+                preload: -0.1,
+                travel_denominator: 1.,
+                damper: 1000.,
+                speed_threshold: 1.,
+                high_speed_ratio: 1.,
+                negative_speed_scale: 1.,
+                bump: 0.,
+                axle_coupling: 0.,
+            },
+            axis: [0., 1., 0., 0.],
+            body_speed: 0.,
+            body_rate: 0.,
+            floor: -10.,
+            contact_speed: 0.,
+            raw: 0.,
+            weighted: 0.,
+            contact_raw: 0.,
+            contact_weighted: 0.,
+            contact: false,
+            lower: -0.5,
+            upper: 0.5,
+        };
+        let zero = [[0.; 4]; 4];
+        let delta = 0.01 / 4.;
+        let attached = step([wheel; 4], zero, zero, 1., delta, 1.).unwrap();
+        assert!(attached[2].raw != 0.);
+        let out = step_detached(
+            [wheel; 4],
+            zero,
+            zero,
+            1.,
+            delta,
+            1.,
+            [false, false, true, false],
+        )
+        .unwrap();
+        assert_eq!(out[2].raw, 0.);
+        assert_eq!(out[2].weighted, 0.);
+        // Travel restarts at zero, then gravity alone moves it this substep.
+        let gravity = f32::from_bits(0xc11c_f5c3) * delta;
+        assert_eq!(out[2].suspension.speed, gravity);
+        assert_eq!(out[2].suspension.displacement, gravity * delta);
+        // Without response coupling the other wheels are unchanged.
+        for i in [0, 1, 3] {
+            assert_eq!(out[i].raw, attached[i].raw);
+            assert_eq!(
+                out[i].suspension.displacement,
+                attached[i].suspension.displacement
+            );
         }
     }
 }
