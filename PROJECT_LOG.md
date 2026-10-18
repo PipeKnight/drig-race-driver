@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G128 — Latest source checks and packed road-lighting audit (18 October 2026)
+
+Combined551dcc4/F404 source passes675 workspace tests across12 harnesses with0failed/0ignored (paint-specular enabled), all-target release Clippy feature33.65s/default16.46s, Rust1.99.0/two jobs/two test threads. Rebuilt tools35.31s. Canonical native stdout SHAaad9a07a26cdd1787502cf89ea15f086f10ecf6f565f44eda2648462fbb0e41b matches the accepted solo identity. First command erroneously supplied literal CD01/BP01 labels instead of private table paths and failed with no stdout; retained canonical01 failure, corrected canonical02 passes. New F402 quicksoak24-scenario set is still running; do not count its in-progress summary as completed acceptance.
+
+Installed graphics remains the verified6aec3a9/F401 binary SHAddf26b5b874c...; newer F402-F404 source/input/Android checks do not relabel it. Primary normal executable2014aae6... and owner's untracked choreography note c4d52b9e... remain unchanged. Launcher source publication pending final soak. Dedup private report dedup-paint-delivery01.tsv retains cited frames while sharing identical storage. No desktop interaction, installs, Steam edits or approval rejection.
+
+Roadmap surface research: fresh purchased package audit finds39 bound textures/27 repeating diffuse maps, all27 with nonwhite packed alpha, no normal-map binding among94 selected materials. Source shader uses vertex-red mixed diffuse alpha in its direct specular weighting; current extension drops this lighting mask. Native RGB/alpha sheet inspected, quantitative alpha differences confirmed for asphalt/curbs; exact sampler/runtime uniform packing and original BRDF equivalence still unproved. Macro U/V saved scales all1 match copied UVs. Details and cautious opt-in pilot next actions in docs/DONINGTON_SURFACE_LAYERS.md; private track-surface-alpha-audit01.py/.json/atlas01.png. Pillow version directly checked12.3.0; no neural generation or asset replacement in this audit.
+
 ## G127 — Combined paint build installed; preserve incoming Android/robustness work (18 October 2026)
 
 Promoted verified6aec3a9(F401+graphics), release2m22s/SHAddf26b5b874c8f8fd2050e1740817fa873d47e8dfb53ceb11b0e11c98ef8773e, to graphics target/verified backup and main local/graphics/grid-graphics-app.exe. Archived previous9f9d9937binary/manifests. Process guard leaves another agent's active prototype in .claude/worktrees/admiring-swartz-2f8287 untouched; no promoted destination was active. Normal2014aae6and owner notec4d52b9e remain byte-identical. Primary launcher source publication still pending; until then its old arguments omit new base-specular mode.
