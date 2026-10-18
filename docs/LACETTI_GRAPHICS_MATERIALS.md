@@ -71,3 +71,15 @@ Motion acceptance99902a6:1200ticks/oneopponent/source numbers/30unique virtual30
 
 
 Graphics build delivery: `Play GRID Graphics.cmd` prefers `local/graphics/grid-graphics-app.exe` when it exists and falls back to the checkout's `target/release/grid-app.exe`. The main checkout can therefore receive a separately verified graphics binary with `local/graphics/graphics-current-build.json`, preserving its other agent's normal executable. Graphics wrappers share this selection and the selected file's help capability checks. Installed build/source revisions and pending HUD integration stay explicit; source sync alone is not executable publication.
+
+
+Combined graphics/HUD delivery80babb019213: release8m34s, SHA9ba214eeb4b8...,1200ticks/30unique virtual30FPSframes with two own-mask uploads; four physical exits equal99902a6control. Source numbers/ambient paint masks and F383 original-look HUD inspected together. Updated main-folder dedicated graphics executable and graphics verified copy, preserving peer normal2014aae6... . Full-lap evidence remains attributed to31e74b; no new full-lap/phone claim. Source tree subsequently fast-forwarded through F397/2393a9e; those newer changes are pending a separately verified graphics build.
+
+
+### Specular-map transfer audit (Bevy0.19.1)
+
+Local pinned renderer code confirms that `StandardMaterial::specular_texture` reads **alpha**, multiplies reflectance by `sampleAlpha * 0.5`, and then computes dielectric F0 as `0.16 * reflectance^2`. Simply attaching the original packed mask with the current scalar0.5 makes even a white texel produce F0=0.01 instead of the unmapped0.04. This would unintentionally dull the complete paint material. The feature is separately gated by Bevy `pbr_specular_textures` and is currently not enabled; no mobile material-binding expansion has been introduced.
+
+For an **authored** target F0=0.04*A, one possible sampled-point encoding is alpha=sqrt(A), scalar reflectance1.0 (accounting for the half factor). Across all256 input bytes, nearest-byte encoding has maximum absolute F0 error0.00015625. This is only a transfer calculation: bilinear/mip filtering of sqrt(A) does not commute with squaring. It is not evidence of the original game's production response or of acceptable appearance. A future pilot must compare filtered mip levels and independently account for clearcoat; modulating only the base dielectric lobe leaves the coat's reflection intact.
+
+The selected source fragment has separate alpha-derived terms (including a saturated doubled-alpha environment factor) and dust/vertex/uniform gates. A single modern specular map cannot be declared equivalent to all of them. Keep the source packed map immutable; do not copy alpha into roughness, color or opacity. Next bounded experiment should be a separate optional desktop material feature and matched native4K comparison, with per-car own-mask staging/shared linear uploads and white-mask control. Do not enable it in either launcher before GPU acceptance. Private `materials-livery01/paint-specular-transfer-audit01.json` pins the local source-file hashes and256-value calculation; no original shader text is published.
