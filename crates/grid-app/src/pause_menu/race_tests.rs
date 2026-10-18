@@ -425,7 +425,8 @@ fn retire_from_race_shows_the_results_on_every_circuit() {
     use crate::post_race::{Cell, Stage};
     use grid_tools::race::{Out, Status};
     use grid_tools::route::{
-        DONINGTON, ISTANBUL_PARK, JARAMA, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
+        DONINGTON, ISTANBUL_PARK, JARAMA, LE_MANS, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA,
+        YOKOHAMA,
     };
     big_stack(|| {
         for (route, models) in [
@@ -442,6 +443,8 @@ fn retire_from_race_shows_the_results_on_every_circuit() {
             (MILAN, &["lac"][..]),
             (SHIBUYA, &["bmw"][..]),
             (SAN_FRANCISCO, &["lac"][..]),
+            // Circuit de la Sarthe: 13.6 km, 20 grid slots (docs/LE_MANS.md).
+            (LE_MANS, &["lac"][..]),
         ] {
             let mut app = race_app_with(route, models, 2, false);
             keys(&mut app).press(KeyCode::KeyW);
@@ -699,5 +702,81 @@ fn a_handbrake_turn_in_the_bmw_scores_drift_points() {
         // the autopiloted Drift Battle tests. (Before F403 the player passed
         // through the boundary wall here and slid out at 27 degrees.)
         assert_eq!(e.scorer.drifts, 1);
+    });
+}
+
+/// A time-limited Le Mans race (race type 3, docs/LE_MANS.md): nobody finishes
+/// at the line, the race ends for every car at the limit, the stats follow and
+/// the results rank by progress with the race clock (24 h of day in the limit). The limit is 40 s here, the career's 720 s.
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+fn a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress() {
+    use crate::le_mans_event::LeMansEvent;
+    use crate::post_race::{Cell, Stage};
+    use grid_tools::time_of_day::{Mode, Timeline};
+    const LIMIT: f64 = 40.;
+    big_stack(|| {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let route = grid_tools::route::Route::new(grid_tools::route::LE_MANS).unwrap();
+        let mut app = race_app_with(route.path(), &["lac"], 8, true);
+        {
+            let mut d = app.world_mut().resource_mut::<Driving>();
+            let o = d.opponents.as_mut().unwrap();
+            o.standings = o.standings.clone().with_time_limit(LIMIT);
+        }
+        app.world_mut().resource_mut::<time_trial::Trial>().state =
+            grid_tools::time_trial::State::new(
+                99,
+                f64::from(grid_tools::source_vehicle::DELTA),
+                crate::START_SEQUENCE_SECONDS,
+            )
+            .unwrap()
+            .with_time_limit(LIMIT)
+            .unwrap();
+        let schema = std::fs::read(root.join("database/schema.bin")).unwrap();
+        let data = std::fs::read(root.join("database/database.bin")).unwrap();
+        let db = grid_formats::database::read(&schema, &data).unwrap();
+        let lac = grid_tools::series::lemans_class(&db, &grid_tools::car::Car::new("lac").unwrap())
+            .unwrap();
+        app.insert_resource(LeMansEvent::new(
+            Some(LIMIT),
+            Mode::Timeline,
+            vec![lac; OPPONENTS + 1],
+            Timeline::load(root, &route).unwrap(),
+        ))
+        .add_systems(Update, crate::le_mans_event::tick.after(crate::drive_tick));
+        while post(&app).stage == Stage::Hidden {
+            app.update();
+            assert!(ticks(&app) < 4_000, "no end at the time limit");
+        }
+        assert_eq!(post(&app).stage, Stage::Stats);
+        let d = app.world().resource::<Driving>();
+        let s = &d.opponents.as_ref().unwrap().standings;
+        assert!(s.over());
+        // Every car still racing is classified with the limit as its time.
+        for car in 0..=OPPONENTS {
+            assert_eq!(s.finished(car), Some(LIMIT), "car {car} {:?}", s.status(car));
+        }
+        // 40 s of a 40 s limit is the whole day: back to 15:00.
+        let event = app.world().resource::<LeMansEvent>();
+        assert_eq!(grid_tools::time_of_day::clock_text(event.time_of_day), "15:00:00");
+        let rows = event.results(Some(s), results(&app));
+        eprintln!("le_mans_results rows={rows:?}");
+        assert_eq!(rows.len(), OPPONENTS + 1);
+        let mut last = f64::INFINITY;
+        for (i, r) in rows.iter().enumerate() {
+            assert_eq!(r.position, i + 1);
+            assert_eq!(r.time, Cell::Total(grid_tools::time_of_day::DAY_SECONDS));
+            let progress = s.progress(r.car);
+            assert!(progress <= last);
+            last = progress;
+        }
+        let view = post(&app).view(&rows, &Labels::default());
+        eprintln!("le_mans_stats title={}", view.title);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(post(&app).stage, Stage::Results);
+        let view = post(&app).view(&rows, &Labels::default());
+        assert_eq!(view.table[1][2], "1440:00.000");
     });
 }

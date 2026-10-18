@@ -911,13 +911,14 @@ type Events<'w> = (
     Option<Res<'w, crate::drift_event::DriftEvent>>,
     Option<Res<'w, crate::touge_event::TougeEvent>>,
     Option<Res<'w, CarClasses>>,
+    Option<Res<'w, crate::le_mans_event::LeMansEvent>>,
 );
 
 fn present(
     post: Res<PostRace>,
     labels: Res<Labels>,
     driving: Res<crate::Driving>,
-    (trial, drift, touge, classes): Events,
+    (trial, drift, touge, classes, le_mans): Events,
     mut panel: Query<&mut Visibility, With<Panel>>,
     mut parts: Query<(&Part, &mut Text, &mut TextColor, &mut Node)>,
     mut shown: Local<Option<View>>,
@@ -948,6 +949,9 @@ fn present(
         for row in &mut rows {
             row.class = c.0.get(row.car).cloned();
         }
+    }
+    if let Some(e) = &le_mans {
+        rows = e.results(driving.opponents.as_ref().map(|o| &o.standings), rows);
     }
     let view = post.view_with(&rows, &labels, board.as_ref());
     if shown.as_ref() == Some(&view) {

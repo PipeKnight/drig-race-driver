@@ -12,6 +12,12 @@
 //! - the chequered flag is shown when the leader is on the last lap within
 //!   250 m of the line [V 0x94aa70, rules.xml end_race].
 //!
+//! A time-limited race (the original's race type 3, Le Mans) is over when its
+//! time limit expires: nobody finishes at the line, laps count up to the
+//! event laps (unlimited for 0 or 52+), every car still racing at expiry is
+//! classified, and classified cars rank by race progress [V 0x669700,
+//! 0x912170, 0x90E1B0, 0x90F880, 0x908CF0; docs/LE_MANS.md §2].
+//!
 //! Race progress is the distance along the AI racing line from the
 //! start-finish line, unwrapped tick by tick (the original uses its own lap
 //! count plus lap fraction). The remaining-distance estimate is AUTHORED: the
@@ -24,6 +30,9 @@ use crate::ai_driver::Line;
 pub const FINALIZE_MINIMUM_SPEED: f64 = 5. * 1.609_344 / 3.6;
 /// rules.xml `end_race distance_to_line` (single_race rule set).
 pub const END_RACE_DISTANCE: f64 = 250.;
+/// Event lap counts of 0 or at least 52 mean unlimited laps (counted up to
+/// 50 internally) [V 0x90E020].
+pub const UNLIMITED_LAPS: u32 = 52;
 
 /// Why a car left the race.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,7 +54,8 @@ pub enum Out {
 pub enum Status {
     Racing,
     Finished,
-    /// Finish time estimated when the race was ended.
+    /// Finish time estimated when the race was ended (in a time-limited
+    /// race: distance projected to the limit, entry +0xBF4).
     Estimated,
     Out(Out),
 }
@@ -73,6 +83,8 @@ pub struct Standings {
     start_arc: f64,
     cars: Vec<Car>,
     finalized: bool,
+    /// Real time limit (s) of a time-limited race (race type 3).
+    limit: Option<f64>,
 }
 
 /// `m:ss.mmm`.
@@ -83,6 +95,21 @@ pub fn format_time(seconds: f64) -> String {
         milliseconds / 60000,
         milliseconds / 1000 % 60,
         milliseconds % 1000
+    )
+}
+
+/// Le Mans results time `MM:SS.cc` with total minutes (`%02u:%02u.%02u`,
+/// 0x908860; 24 h prints as `1440:00.00`), `--:--:--` for zero [V 0x53FE10].
+pub fn format_lemans_time(seconds: f64) -> String {
+    let centiseconds = (seconds.max(0.) * 100.).round() as u64;
+    if centiseconds == 0 {
+        return "--:--:--".into();
+    }
+    format!(
+        "{:02}:{:02}.{:02}",
+        centiseconds / 6000,
+        centiseconds / 100 % 60,
+        centiseconds % 100
     )
 }
 
@@ -117,6 +144,7 @@ impl Standings {
             start_arc,
             cars: Vec::new(),
             finalized: false,
+            limit: None,
         };
         standings.reset(line, positions);
         standings
@@ -135,6 +163,7 @@ impl Standings {
             start_arc,
             cars: Vec::new(),
             finalized: false,
+            limit: None,
         };
         standings.reset(line, positions);
         standings
@@ -177,7 +206,26 @@ impl Standings {
                 })
                 .collect(),
             finalized: false,
+            limit: None,
         }
+    }
+
+    /// A time-limited race (race type 3) of `seconds` real race time from GO:
+    /// over when the race time reaches it, no finish at the line [V].
+    pub fn with_time_limit(mut self, seconds: f64) -> Self {
+        self.limit = (seconds.is_finite() && seconds > 0.).then_some(seconds);
+        self
+    }
+
+    /// The real time limit (s) of a time-limited race.
+    pub fn time_limit(&self) -> Option<f64> {
+        self.limit
+    }
+
+    /// Laps a time-limited race counts: the event laps, unlimited for 0 or
+    /// [`UNLIMITED_LAPS`]+ [V 0x90E020, 0x912170].
+    fn lap_cap(&self) -> Option<usize> {
+        (self.laps > 0 && self.laps < UNLIMITED_LAPS).then_some(self.laps as usize)
     }
 
     /// [`Self::update`] with the cars' arc positions along the line.
@@ -208,27 +256,64 @@ impl Standings {
 
     /// [`Self::update`] with the cars' arc positions along the line.
     fn step(&mut self, arcs: &[f64], time: f64, external: &[usize]) {
+        let timed = self.limit.is_some();
+        if timed && self.finalized {
+            return;
+        }
         let target = self.target();
+        let cap = if timed {
+            self.lap_cap()
+        } else {
+            Some(self.laps as usize)
+        };
         for (i, (car, &arc)) in self.cars.iter_mut().zip(arcs).enumerate() {
             if car.status != Status::Racing {
                 continue;
             }
             car.distance += wrap(arc - car.last_arc, self.length);
             car.last_arc = arc;
-            while car.laps.len() < self.laps as usize
+            while cap.is_none_or(|c| car.laps.len() < c)
                 && car.distance >= (car.laps.len() + 1) as f64 * self.length
             {
                 car.laps.push(time);
             }
-            if car.distance >= target && !external.contains(&i) {
+            // [V 0x912170] no finish at the line in a time-limited race.
+            if !timed && car.distance >= target && !external.contains(&i) {
                 car.finish = Some(time);
                 car.status = Status::Finished;
             }
         }
+        // [V 0x90E1B0 type 3, 0x90F880] at the limit the race ends at once and
+        // every car still racing is classified with the limit as its time.
+        if let Some(limit) = self.limit
+            && time >= limit
+        {
+            for car in &mut self.cars {
+                if car.status == Status::Racing {
+                    car.finish = Some(limit);
+                    car.status = Status::Finished;
+                }
+            }
+            self.finalized = true;
+        }
     }
 
+    /// Race progress of `car` in laps: completed laps (capped at the counted
+    /// laps in a time-limited race) plus the fraction of the current lap
+    /// (the original's vf18, laps + lap fraction).
+    pub fn progress(&self, car: usize) -> f64 {
+        let laps = self.cars[car].distance / self.length;
+        match (self.limit, self.lap_cap()) {
+            (Some(_), Some(cap)) if laps >= cap as f64 => cap as f64 + laps.fract(),
+            _ => laps,
+        }
+    }
+
+    /// A car finishes (the player through its lap timing); ignored in a
+    /// time-limited race, where nobody finishes at the line [V].
     pub fn finish(&mut self, car: usize, time: f64) {
-        if let Some(c) = self.cars.get_mut(car)
+        if self.limit.is_none()
+            && let Some(c) = self.cars.get_mut(car)
             && c.status == Status::Racing
         {
             c.finish = Some(time);
@@ -256,6 +341,10 @@ impl Standings {
     /// - Estimate (AUTHORED): remaining distance at the car's mean race speed
     ///   so far, or its current speed (floor 1 m/s) before it has covered any.
     pub fn finalize(&mut self, speeds: &[f64], time: f64, humans: &[usize]) {
+        if let Some(limit) = self.limit {
+            self.finalize_timed(speeds, time, limit, humans);
+            return;
+        }
         let target = self.target();
         let human_unfinished = humans.iter().any(|&h| {
             self.cars
@@ -278,6 +367,37 @@ impl Standings {
                 car.status = Status::Estimated;
             } else {
                 car.status = Status::Out(Out::Stopped);
+            }
+        }
+        self.finalized = true;
+    }
+
+    /// Time-limited finalisation [V 0x911F30, 0x90F880]: at or past the limit
+    /// every car still racing is classified with the limit as its time; a
+    /// human ending the race early retires and every AI car still racing is
+    /// projected to the limit and marked estimated. Projection (AUTHORED, as
+    /// in [`Self::finalize`]): the car's mean race speed so far; the original
+    /// adds AI-estimator laps (0x67FFB0, not ported).
+    fn finalize_timed(&mut self, speeds: &[f64], time: f64, limit: f64, humans: &[usize]) {
+        let short = time < limit;
+        for (i, (car, &speed)) in self.cars.iter_mut().zip(speeds).enumerate() {
+            if car.status != Status::Racing {
+                continue;
+            }
+            if !short {
+                car.finish = Some(limit);
+                car.status = Status::Finished;
+            } else if humans.contains(&i) {
+                car.status = Status::Out(Out::Retired);
+            } else {
+                let mean = if car.distance > 0. && time > 0. {
+                    car.distance / time
+                } else {
+                    speed
+                };
+                car.distance += (limit - time) * mean.max(0.);
+                car.finish = Some(limit);
+                car.status = Status::Estimated;
             }
         }
         self.finalized = true;
@@ -331,6 +451,19 @@ impl Standings {
     /// finishers by estimated time, then every other car by race progress
     /// (cars still racing and cars out alike, as in 0x908CF0).
     pub fn order(&self) -> Vec<usize> {
+        if self.limit.is_some() {
+            // [V 0x908CF0 type 3] classified cars first, then the rest, each
+            // by progress.
+            let classified =
+                |c: usize| matches!(self.cars[c].status, Status::Finished | Status::Estimated);
+            let mut order: Vec<usize> = (0..self.cars.len()).collect();
+            order.sort_by(|&a, &b| {
+                classified(b)
+                    .cmp(&classified(a))
+                    .then_with(|| self.progress(b).total_cmp(&self.progress(a)))
+            });
+            return order;
+        }
         let rank = |c: &Car| match c.status {
             Status::Finished => 0,
             Status::Estimated => 1,
@@ -349,9 +482,44 @@ impl Standings {
         order
     }
 
+    /// Le Mans results order [V 0x4EC820]: every car by progress, times its
+    /// `vehicle_class.lemans_progress_adjustment` (`adjustment[car]`) when its
+    /// distance was estimated, descending, with no priority for classified
+    /// cars; ties keep the running order.
+    pub fn lemans_results_order(&self, adjustment: &[f64]) -> Vec<usize> {
+        let value = |c: usize| {
+            let scale = if self.cars[c].status == Status::Estimated {
+                adjustment.get(c).copied().unwrap_or(1.)
+            } else {
+                1.
+            };
+            self.progress(c) * scale
+        };
+        let mut order = self.order();
+        order.sort_by(|&a, &b| value(b).total_cmp(&value(a)));
+        order
+    }
+
+    /// Zero-based position of each car within its class in the running
+    /// order [V 0x90B5B0]: the class is `vehicle_class.lemans_sort_order`
+    /// (LMP1 1, LMP2 2, GT1 3, GT2 4, other cars 0) clamped to 0..=5.
+    pub fn class_positions(&self, classes: &[i32]) -> Vec<usize> {
+        let mut counters = [0usize; 6];
+        let mut positions = vec![0; self.cars.len()];
+        for c in self.order() {
+            let class = classes.get(c).copied().unwrap_or(0).clamp(0, 5) as usize;
+            positions[c] = counters[class];
+            counters[class] += 1;
+        }
+        positions
+    }
+
     /// Flag for the race leader: chequered once the leader is on the last
     /// lap within [`END_RACE_DISTANCE`] of the line, or has finished.
     pub fn leader_flag(&self) -> Option<Flag> {
+        if self.limit.is_some() {
+            return None;
+        }
         let leader = &self.cars[*self.order().first()?];
         let to_go = self.target() - leader.distance;
         (leader.finish.is_some() || (to_go <= END_RACE_DISTANCE && to_go < self.length))
@@ -408,6 +576,14 @@ impl Standings {
                             Out::Disqualified => "Disqualified",
                         }
                     ),
+                    (Status::Finished | Status::Estimated, _, _) if self.limit.is_some() => {
+                        let mark = if car.status == Status::Estimated {
+                            " (est.)"
+                        } else {
+                            ""
+                        };
+                        format!("{:.3} laps{mark}", self.progress(c))
+                    }
                     (Status::Racing, _, _) => {
                         format!("running, {:.0} m to go", (target - car.distance).max(0.))
                     }
@@ -457,6 +633,7 @@ mod tests {
                 })
                 .collect(),
             finalized: false,
+            limit: None,
         }
     }
 
@@ -587,6 +764,91 @@ mod tests {
         // 250 m from the line on the second-to-last lap: no flag.
         let s = standings(3, &[1760., 1500.]);
         assert_eq!(s.leader_flag(), None);
+    }
+
+    #[test]
+    fn a_time_limited_race_ends_at_the_limit_and_ranks_by_progress() {
+        let mut s = standings(8, &[-5., -10., -20.]).with_time_limit(100.);
+        s.cars[0].last_arc = 995.;
+        s.cars[1].last_arc = 990.;
+        s.cars[2].last_arc = 980.;
+        // The line is no finish: car 0 keeps racing after its laps.
+        for (t, a) in [(30., [400., 300., 200.]), (60., [800., 600., 400.])] {
+            s.step(&a, t, &[]);
+            s.finish(0, t);
+        }
+        assert_eq!(s.status(0), Status::Racing);
+        assert!(!s.over());
+        assert_eq!(s.leader_flag(), None);
+        s.step(&[100., 700., 850.], 90., &[]);
+        assert_eq!(s.lap_times(0), vec![90.]);
+        assert!(!s.over());
+        s.step(&[500., 750., 950.], 100., &[]);
+        assert!(s.over());
+        for c in 0..3 {
+            assert_eq!(s.status(c), Status::Finished);
+            assert_eq!(s.finished(c), Some(100.));
+        }
+        assert_eq!(s.order(), vec![0, 2, 1]);
+        assert!((s.progress(0) - 1.5).abs() < 1e-9);
+        // Nothing moves after the end.
+        s.step(&[900., 760., 960.], 110., &[]);
+        assert!((s.progress(0) - 1.5).abs() < 1e-9);
+        assert_eq!(s.classification(&names(3))[0], "1. car0  1.500 laps");
+    }
+
+    #[test]
+    fn laps_count_up_to_the_event_laps_unless_unlimited() {
+        let mut s = standings(2, &[2950.]).with_time_limit(1000.);
+        s.cars[0].last_arc = 950.;
+        s.step(&[50.], 10., &[]);
+        assert_eq!(s.lap_times(0).len(), 2);
+        assert!((s.progress(0) - 2.05).abs() < 1e-9);
+        let mut s = standings(0, &[2950.]).with_time_limit(1000.);
+        s.cars[0].last_arc = 950.;
+        s.step(&[50.], 10., &[]);
+        assert_eq!(s.lap_times(0).len(), 3);
+        assert!((s.progress(0) - 3.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_early_human_end_projects_the_ai_to_the_limit() {
+        let mut s = standings(8, &[1000., 1500., 600.]).with_time_limit(200.);
+        s.retire(2, Out::Wrecked);
+        s.finalize(&[30., 30., 0.], 100., &[0]);
+        assert_eq!(s.status(0), Status::Out(Out::Retired));
+        assert_eq!(s.status(1), Status::Estimated);
+        assert_eq!(s.status(2), Status::Out(Out::Wrecked));
+        // 1500 m in 100 s, 100 s more at 15 m/s.
+        assert!((s.progress(1) - 3.).abs() < 1e-9);
+        assert_eq!(s.order(), vec![1, 0, 2]);
+        // Results: the estimated car's progress times its class adjustment;
+        // an unclassified car with more progress may rank above it.
+        let mut s = standings(8, &[1000., 1500., 3100.]).with_time_limit(200.);
+        s.retire(2, Out::Wrecked);
+        s.finalize(&[30., 30., 0.], 100., &[0]);
+        assert_eq!(s.lemans_results_order(&[1., 1., 1.]), vec![2, 1, 0]);
+        assert_eq!(s.lemans_results_order(&[1., 1.08, 1.]), vec![1, 2, 0]);
+        // At the limit nobody is estimated.
+        let mut s = standings(8, &[1000., 1500.]).with_time_limit(200.);
+        s.finalize(&[30., 30.], 200., &[0]);
+        assert_eq!(s.status(0), Status::Finished);
+        assert_eq!(s.status(1), Status::Finished);
+    }
+
+    #[test]
+    fn class_positions_count_within_each_class() {
+        let s = standings(2, &[500., 900., 700., 100.]);
+        // Order 1, 2, 0, 3; classes LMP1, LMP1, GT1, GT1.
+        assert_eq!(s.class_positions(&[1, 1, 3, 3]), vec![1, 0, 0, 1]);
+        assert_eq!(s.class_positions(&[9, -1, 0, 5]), vec![0, 0, 1, 1]);
+    }
+
+    #[test]
+    fn le_mans_times_print_total_minutes() {
+        assert_eq!(format_lemans_time(86_400.), "1440:00.00");
+        assert_eq!(format_lemans_time(754.236), "12:34.24");
+        assert_eq!(format_lemans_time(0.), "--:--:--");
     }
 
     #[test]

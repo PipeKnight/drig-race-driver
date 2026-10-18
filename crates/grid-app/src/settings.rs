@@ -229,7 +229,8 @@ pub struct Settings {
     pub drive: bool,
     pub laps: Option<u32>,
     /// `[drive] time_limit`: seconds of a Freestyle drift event (90 in the
-    /// career [D]).
+    /// career [D]) or of the Le Mans 24 Hours (`series = le_mans`, 720 in the
+    /// career [D], docs/LE_MANS.md).
     pub time_limit: Option<f64>,
     pub opponents: Option<usize>,
     pub grid_position: Option<usize>,

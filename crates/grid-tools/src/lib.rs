@@ -39,6 +39,7 @@ pub mod source_deformation;
 pub mod source_physical;
 pub mod soak;
 pub mod source_vehicle;
+pub mod time_of_day;
 pub mod standard_car;
 pub mod start_lights;
 mod standard_car_fields;

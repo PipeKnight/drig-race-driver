@@ -263,6 +263,12 @@ mod tests {
         }
     }
 
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_le_mans() {
+        run(|| flipped_on(crate::route::LE_MANS));
+    }
+
     fn flipped_on(route: &str) {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);

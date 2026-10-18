@@ -24,8 +24,8 @@ use crate::{
 use std::{collections::BTreeMap, path::Path};
 
 pub use crate::route::{
-    DETROIT_STADIUM, DETROIT_STADIUM_SHORT, DONINGTON, HARUNA, ISTANBUL_PARK, JARAMA, LONG_BEACH,
-    MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
+    DETROIT_STADIUM, DETROIT_STADIUM_SHORT, DONINGTON, HARUNA, ISTANBUL_PARK, JARAMA, LE_MANS,
+    LONG_BEACH, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
 };
 /// Donington's race start-light sequence; every race holds the grid for its
 /// track's shipped sequence time (`start_lights::load`, grid-app StartLights).
@@ -149,6 +149,8 @@ const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
 /// Seeds 37..=40 run Spa (docs/SPA.md), 41..=44 Milan, 45..=48 Shibuya and
 /// 49..=52 San Francisco (docs/STREET_CIRCUITS.md), also outside it;
 /// `--seeds 37..52`.
+/// Seeds 53..=56 run Circuit de la Sarthe (docs/LE_MANS.md), outside it too;
+/// `--seeds 53..56`.
 pub const QUICK_SEEDS: (u64, u64) = (1, 24);
 
 impl Scenario {
@@ -172,6 +174,8 @@ impl Scenario {
             Profile::Long => 1 + rng.below(max_cars as u64) as usize,
         };
         let route = match profile {
+            // Quick seeds 53..=56 (2, 12, 9 and 4 cars) on Circuit de la Sarthe.
+            Profile::Quick if seed > 52 => LE_MANS,
             // Quick seeds 49..=52 on San Francisco.
             Profile::Quick if seed > 48 => SAN_FRANCISCO,
             // Quick seeds 45..=48 on Shibuya.
@@ -260,6 +264,15 @@ impl Scenario {
             && Rng::new(seed ^ 0x5f40_0000_0000_0000).chance(0.1)
         {
             SAN_FRANCISCO
+        } else {
+            route
+        };
+        // An eleventh of the long runs then move to Circuit de la Sarthe (own
+        // stream too).
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x1e3a_0000_0000_0000).chance(1. / 11.)
+        {
+            LE_MANS
         } else {
             route
         }
@@ -1965,9 +1978,16 @@ mod tests {
             yokohama.iter().map(|s| s.cars).collect::<Vec<_>>(),
             [12, 1, 12, 6]
         );
-        // Long runs: about a sixth each on Istanbul Park (a third, less the later
+        let le_mans: Vec<_> = (53..=56).map(quick).collect();
+        assert!(le_mans.iter().all(|s| s.route == LE_MANS));
+        assert_eq!(
+            le_mans.iter().map(|s| s.cars).collect::<Vec<_>>(),
+            [2, 12, 9, 4]
+        );
+        // Long runs: about a seventh each on Istanbul Park (a third, less the later
         // moves), Long Beach (a quarter, less the later moves), Jarama (a fifth,
-        // less Yokohama's), Yokohama and Spa (a seventh), from their own
+        // less Yokohama's), Yokohama and Spa (a seventh), Milan, Shibuya, San
+        // Francisco and Circuit de la Sarthe (an eleventh), from their own
         // streams, so the other fields of a seed keep their F326 draws.
         let on = |route: &str| {
             (1001..1401)
@@ -1975,9 +1995,9 @@ mod tests {
                 .count()
         };
         for route in [ISTANBUL_PARK, LONG_BEACH, JARAMA, YOKOHAMA, SPA] {
-            assert!((30..95).contains(&on(route)), "{route} {}", on(route));
+            assert!((25..95).contains(&on(route)), "{route} {}", on(route));
         }
-        for route in [MILAN, SHIBUYA, SAN_FRANCISCO] {
+        for route in [MILAN, SHIBUYA, SAN_FRANCISCO, LE_MANS] {
             assert!((25..70).contains(&on(route)), "{route} {}", on(route));
         }
     }

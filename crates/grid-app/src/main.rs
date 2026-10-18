@@ -70,6 +70,7 @@ mod front_end;
 mod texture_cache;
 mod touge_event;
 mod demolition_event;
+mod le_mans_event;
 mod texture_overrides;
 mod texture_upload;
 mod tilt;
@@ -1916,6 +1917,24 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("{}", event.log_line());
     }
+    // Le Mans 24 Hours: a time-limited race (race type 3) of `time_limit`
+    // real seconds (720 in the career [D]) running 24 h of day [V 0x669700];
+    // the career events' 8 laps only cap the lap count (docs/LE_MANS.md).
+    let race_limit = series
+        .as_deref()
+        .is_some_and(grid_tools::series::is_le_mans_24)
+        .then(|| profile.time_limit.unwrap_or(720.));
+    if let Some(limit) = race_limit {
+        if !drive || opponents.is_none() {
+            return Err("the Le Mans 24 Hours needs --drive and opponents (docs/LE_MANS.md)".into());
+        }
+        trial_laps.get_or_insert(8);
+        println!(
+            "drive_le_mans version=1 time_limit={limit} clock_scale={} laps={}",
+            grid_tools::time_of_day::clock_scale(limit),
+            trial_laps.unwrap_or(8)
+        );
+    }
     let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
@@ -2261,12 +2280,18 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     Some(finish) => {
                         grid_tools::race::Standings::new_run(&ai.line, start, finish, &positions)
                     }
-                    None => grid_tools::race::Standings::new(
-                        &ai.line,
-                        trial_laps.unwrap_or(1),
-                        start,
-                        &positions,
-                    ),
+                    None => {
+                        let standings = grid_tools::race::Standings::new(
+                            &ai.line,
+                            trial_laps.unwrap_or(1),
+                            start,
+                            &positions,
+                        );
+                        match race_limit {
+                            Some(limit) => standings.with_time_limit(limit),
+                            None => standings,
+                        }
+                    }
                 };
                 let pacing = grid_tools::ai_pacing::Field::new(
                     grid_tools::ai_pacing::Data::load_for(
@@ -2606,6 +2631,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 start_sequence.seconds,
             )?;
         }
+        if let Some(limit) = race_limit {
+            // The player's event ends at the limit, not after its laps.
+            trial.state = grid_tools::time_trial::State::new(
+                99,
+                f64::from(grid_tools::source_vehicle::DELTA),
+                start_sequence.seconds,
+            )?
+            .with_time_limit(limit)?;
+        }
         if freestyle {
             let seconds = profile.time_limit.unwrap_or(90.);
             trial.state = trial.state.clone().with_time_limit(seconds)?;
@@ -2849,6 +2883,33 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             println!("drive_demolition version=1 event=setup cars={cars} settings={settings:?}");
             app.insert_resource(demolition_event::DemolitionEvent::new(settings, cars))
                 .add_systems(FixedUpdate, demolition_event::tick.after(drive_tick));
+        }
+        // Le Mans: the time-limited race, its class results and the time of
+        // day on the route that has one (docs/LE_MANS.md).
+        let mode = grid_tools::time_of_day::Mode::for_route(&root, &route)
+            .unwrap_or(grid_tools::time_of_day::Mode::None);
+        if race_limit.is_some() || mode == grid_tools::time_of_day::Mode::Timeline {
+            let schema = std::fs::read(root.join("database/schema.bin"))?;
+            let data = std::fs::read(root.join("database/database.bin"))?;
+            let db = grid_formats::database::read(&schema, &data)?;
+            let mut cars = vec![driving.runtime.car().clone()];
+            if let Some(o) = &driving.opponents {
+                cars.extend(o.multi.cars.iter().skip(1).map(|c| c.car().clone()));
+            }
+            let classes = cars
+                .iter()
+                .map(|c| grid_tools::series::lemans_class(&db, c))
+                .collect::<Result<Vec<_>, _>>()?;
+            let timeline = grid_tools::time_of_day::Timeline::load(&root, &route)?;
+            println!(
+                "drive_time_of_day version=1 event=setup mode={mode:?} curves={} classes={}",
+                timeline.as_ref().map_or(0, |t| t.curves.len()),
+                classes.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(",")
+            );
+            app.insert_resource(le_mans_event::LeMansEvent::new(race_limit, mode, classes, timeline))
+                .add_systems(Startup, le_mans_event::spawn_hud)
+                .add_systems(Update, le_mans_event::show_hud)
+                .add_systems(FixedUpdate, le_mans_event::tick.after(drive_tick));
         }
         if let Some((next, length)) = touge_run.take() {
             app.insert_resource(touge_event::TougeEvent::new(

@@ -62,6 +62,9 @@ pub enum Kind {
     /// Demolition Derby: the stadium laps with disqualification (F421,
     /// docs/DEMOLITION_DERBY.md).
     Demolition,
+    /// The 24 Hours of Le Mans (free race `Le_Mans`): a time-limited race of
+    /// `free_race_times` minutes on Circuit de la Sarthe (docs/LE_MANS.md).
+    LeMans,
 }
 
 /// One layout a discipline offers.
@@ -193,6 +196,7 @@ fn supported(kind: Kind, route: &str) -> bool {
         Kind::Demolition => {
             route == route::DETROIT_STADIUM || route == route::DETROIT_STADIUM_SHORT
         }
+        Kind::LeMans => route == route::LE_MANS,
     }
 }
 
@@ -289,8 +293,8 @@ impl Catalog {
                     "illegal_touge" => Kind::Touge,
                     "legal_touge" => Kind::ProTouge,
                     "Demolition_D" => Kind::Demolition,
-                    // The 24 Hours of Le Mans, open wheel, muscle, club and
-                    // prestige are not ported
+                    "Le_Mans" => Kind::LeMans,
+                    // Open wheel, muscle, club and prestige are not ported
                     // (docs/SERIES.md, docs/DISCIPLINES.md).
                     _ => continue,
                 };
@@ -307,7 +311,7 @@ impl Catalog {
                 };
                 let routes = &mut pool.into_iter();
                 let (cars, stand_in) = match kind {
-                    Kind::Series => (
+                    Kind::Series | Kind::LeMans => (
                         cars(
                             &series
                                 .raceable_cars()
@@ -339,7 +343,7 @@ impl Catalog {
                     }
                 };
                 let max_cars = series.layouts.first().map_or(12, |l| l.max_cars);
-                let times: Vec<(u32, String)> = if kind == Kind::Freestyle {
+                let times: Vec<(u32, String)> = if matches!(kind, Kind::Freestyle | Kind::LeMans) {
                     let mut rows: Vec<(u32, String)> = db
                         .table("free_race_times")
                         .map(|t| {
@@ -371,6 +375,8 @@ impl Catalog {
                     stand_in_cars: stand_in,
                     default_laps: match kind {
                         Kind::Series => Some(3),
+                        // The career events' 8 laps cap the lap count [D].
+                        Kind::LeMans => Some(8),
                         Kind::DriftBattle | Kind::DriftGp => Some(2),
                         // Western_states_D: 6 laps on both stadium routes [D].
                         Kind::Demolition => Some(6),
@@ -393,13 +399,13 @@ impl Catalog {
         types.retain(|t| {
             !t.layouts.is_empty()
                 && !t.cars.is_empty()
-                && (t.kind != Kind::Freestyle || !t.times.is_empty())
+                && (!matches!(t.kind, Kind::Freestyle | Kind::LeMans) || !t.times.is_empty())
         });
         Self { types }
     }
 
     pub fn find(&self, key: &str) -> Option<&EventType> {
-        self.types.iter().find(|t| t.key == key)
+        self.types.iter().find(|t| t.key.eq_ignore_ascii_case(key))
     }
 }
 
@@ -502,6 +508,16 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
         }
         Kind::ProTouge => {
             drive += &format!("discipline = pro_touge\nlaps = 1\nopponents = 1\n{field}");
+            AI
+        }
+        Kind::LeMans => {
+            game = format!(
+                "[game]\nseries = {}\nroute = {}\ncar = {}\n",
+                c.key.to_ascii_lowercase(),
+                c.route,
+                c.car
+            );
+            drive += &format!("laps = {}\ntime_limit = {}\n{field}", c.laps, c.minutes * 60);
             AI
         }
         Kind::Demolition => {

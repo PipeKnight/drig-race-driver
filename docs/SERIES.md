@@ -17,6 +17,7 @@ image (`local/compatibility/grid-unpacked.exe`) or verified by a run; **[I]** in
 | GT1 | dbr, c6r, sal, ccg, c5r, lam | **races since F406** (collision floor lift): 12-car fields on all 20 layouts |
 | GT2 | spk, esp | **races since F406**: 12-car fields on all 20 layouts |
 | Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | **races since F420** (default setup's downforce limit): original field and grid, 15–17 cars, launcher |
+| Le Mans (24 Hours, free race `Le_Mans`) | lam, 911, dbr, c6r, c5r, sal, spk, esp, r10, cre, b06, b05, lc7, c65 | **F429: series `le_mans`, `lemans_24` = 1 field (DBR9: 16 cars with two R10s), time-limited race on Circuit de la Sarthe (docs/LE_MANS.md)** |
 
 New code:
 - `grid_formats::database`: the whole NDBS `database.bin` decoded by `schema.bin` (78 tables).
