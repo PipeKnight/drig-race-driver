@@ -1,5 +1,14 @@
 # GRID engine project log
 
+## G112 — Combined tests pass; preserve other-agent playable; trace paint bindings (18 October 2026)
+
+Combined F381 integration passes632release tests/12executables,0failed/0ignored, including172app/67formats/156tools/197world. All-target workspace Clippy2m37s clean. New binary stamped31e74b689b19/SHAbee2138a...; build8m29s includes waiting for the shared target test lock. Control full6500tick/native4K run completes valid89.955257484s lap; source-number repeat is underway with supported1800s timeout. No full paired acceptance yet. Private numbers-f381-code-validation01.json.
+
+Primary target executable independently reports27665f2704d5-dirty/SHA6364b328...; preserve it because dirty-source provenance cannot be established from main. Graphics launcher capability check avoids new number flags on older installed playables; publish graphics-checkout executable after acceptance, keep main binary untouched. Other-agent untracked note SHA unchanged. No owner help needed.
+
+Read-only Ghidra/Capstone static paint audit recovers16row texture binding table and its12byte-stride callback consumer: main_m1→TDustMap for Car Body Paint. Corrected first material-first alignment after consumer proved suffix-first order; table01 retained as superseded, table02 authoritative. Packed-map channels and original shader algebra documented as next material work, not an automatic PBR conversion or live runtime proof. No new tools/Steam edits; original code and source texture evidence remain ignored local/.
+
+
 ## G111 — Retained full-lap capture timeout; graphics launcher candidate (18 October 2026)
 
 Control6500ticks/native4K completed one valid89.955257484s lap. Source-number run hit configured600s capture timeout at4674ticks; four common-tick state lines equal control excluding walltime. No completed source lap/performance claim. Failed log and private numbers-full-timeout01.json retained; supported1800s retry planned after merged build. F381 contact-pool initialization already preserved in334dbb1. Combined workspace tests underway with two jobs.

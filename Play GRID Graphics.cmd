@@ -41,6 +41,12 @@ if not exist "target\release\grid-app.exe" (
   exit /b 2
 )
 if not exist "local\graphics" mkdir "local\graphics"
+rem Keep this launcher usable while another agent's older playable is installed.
+"target\release\grid-app.exe" --help 2>nul | "%SystemRoot%\System32\findstr.exe" /L /C:"--numbers source|off" >nul
+if errorlevel 1 (
+  set "GRID_GRAPHICS_NUMBERS="
+  echo This executable predates race numbers; using its supported graphics controls.
+)
 set "GRID_GRAPHICS_CONTACTS="
 if exist "local\body-contact-directions.bin" set "GRID_GRAPHICS_CONTACTS=--body-contacts local\body-contact-directions.bin"
 if defined GRID_GRAPHICS_CONTACTS if exist "local\body-impact-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --body-events local\body-impact-parameters.bin"
