@@ -44,14 +44,19 @@ const AXES: [(Axis, &str, &str); 4] = [
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut gilrs = Gilrs::new().map_err(|e| format!("gilrs: {e}"))?;
+    // As bevy_gilrs builds it: no default filters (no gilrs dead zone or
+    // jitter filter), so the values are what the game reads.
+    let mut gilrs = gilrs::GilrsBuilder::new()
+        .with_default_filters(false)
+        .build()
+        .map_err(|e| format!("gilrs: {e}"))?;
     // Let the backend's thread enumerate the pads.
     let start = Instant::now();
     while start.elapsed() < Duration::from_millis(1500) {
         while gilrs.next_event().is_some() {}
         std::thread::sleep(Duration::from_millis(10));
     }
-    println!("pad_probe version=1 backend={}", if cfg!(windows) { "wgi" } else { "platform" });
+    println!("pad_probe version=2 filters=none backend={}", if cfg!(windows) { "wgi" } else { "platform" });
     let pads: Vec<_> = gilrs.gamepads().map(|(id, _)| id).collect();
     if pads.is_empty() {
         println!("pad_probe pads=0 (none connected, or the backend reports none)");
