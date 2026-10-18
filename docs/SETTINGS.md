@@ -42,6 +42,7 @@ Grammar:
 | `[osd]` | `lap_timer`, `position`, `minimap`, `dials` | `on` (default) / `off`: the pause menu's Screen Setup, the HUD's lap group, race position, minimap and dial (docs/RACE_HUD.md) | none |
 | `[osd]` | `fps` | `on` / `off`: frame-rate counter at the top (FPS, mean and worst frame time of the last second) and one `frame_stats` log line per second; default `on` on Android, `off` on the desktop, where F9 toggles it ([ANDROID.md](ANDROID.md) "Frame rate") | none |
 | `[video]` | `render_height` | `native` or rows 240..4320: the 3D view renders at most this many rows (window aspect) and is stretched over the window; HUD and touch zones are scaled with it; never above native. Default 1080 on Android, `native` on the desktop ([ANDROID.md](ANDROID.md) "Frame rate") | none |
+| `[video]` | `present_mode`, `refresh_hz`, `frame_latency` | `fifo` (default) / `auto_vsync` / `auto_no_vsync`; `system` (default) or 30..240 Hz (Android `ANativeWindow_setFrameRate` hint); 1..3 frames in flight (default wgpu's 2) ([ANDROID.md](ANDROID.md) "Frame rate") | none |
 | | `speed_units` | `kph` (default) or `mph` | none |
 | `[diagnostics]` | `free_look` | `yaw,pitch` | legacy `GRID_FREE_LOOK` |
 | | `effects_camera` | `x,y,z,lx,ly,lz` | `GRID_EFFECTS_CAMERA` |

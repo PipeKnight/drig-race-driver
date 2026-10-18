@@ -251,6 +251,10 @@ pub struct Settings {
     pub osd_fps: Option<bool>,
     /// `[video] render_height`: `native` or rows (render_scale.rs).
     pub render_height: Option<crate::render_scale::RenderHeight>,
+    /// `[video] present_mode`, `refresh_hz` (`Some(None)` = system), `frame_latency`.
+    pub present_mode: Option<bevy::window::PresentMode>,
+    pub refresh_hz: Option<Option<f32>>,
+    pub frame_latency: Option<std::num::NonZero<u32>>,
     /// `[front_end] show`: the Race Options front end before the race
     /// (docs/DRIVER_AIDS.md); default on.
     pub front_end: Option<bool>,
@@ -415,6 +419,15 @@ impl Settings {
                 ("osd", "minimap") => self.osd_minimap = Some(on(&key, value).map_err(at)?),
                 ("osd", "dials") => self.osd_dials = Some(on(&key, value).map_err(at)?),
                 ("osd", "fps") => self.osd_fps = Some(on(&key, value).map_err(at)?),
+                ("video", "present_mode") => {
+                    self.present_mode = Some(crate::render_scale::present_mode(value).map_err(at)?)
+                }
+                ("video", "refresh_hz") => {
+                    self.refresh_hz = Some(crate::render_scale::refresh_hz(value).map_err(at)?)
+                }
+                ("video", "frame_latency") => {
+                    self.frame_latency = Some(crate::render_scale::frame_latency(value).map_err(at)?)
+                }
                 ("video", "render_height") => {
                     self.render_height = Some(crate::render_scale::RenderHeight::parse(value).map_err(at)?)
                 }

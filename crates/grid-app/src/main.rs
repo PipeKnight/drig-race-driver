@@ -13,6 +13,8 @@ macro_rules! log_line {
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
+mod android_display;
+#[cfg(target_os = "android")]
 mod android_sensor;
 mod assists;
 mod body_damage;
@@ -2364,6 +2366,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     .into(),
                     resolution: (graphics.width, graphics.height).into(),
+                    // [video] present_mode / frame_latency (default Bevy's Fifo, wgpu's 2).
+                    present_mode: profile.present_mode.unwrap_or_default(),
+                    desired_maximum_frame_latency: profile.frame_latency,
                     ..default()
                 }),
                 ..default()
@@ -2380,6 +2385,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .render_height
                 .unwrap_or_else(render_scale::RenderHeight::platform_default),
         );
+        // Window size from the native surface, optional refresh-rate hint.
+        #[cfg(target_os = "android")]
+        android_display::install(&mut app, profile.refresh_hz.flatten());
     }
     if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored

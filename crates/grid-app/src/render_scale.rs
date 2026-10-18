@@ -38,6 +38,41 @@ impl RenderHeight {
     }
 }
 
+/// `[video] present_mode`: only modes with a fallback chain, so an
+/// unsupported choice cannot fail at swapchain set-up. Default `fifo` (Bevy's
+/// default, strict vsync).
+pub fn present_mode(value: &str) -> Result<bevy::window::PresentMode, String> {
+    use bevy::window::PresentMode;
+    match value.to_ascii_lowercase().as_str() {
+        "fifo" => Ok(PresentMode::Fifo),
+        "auto_vsync" => Ok(PresentMode::AutoVsync),
+        "auto_no_vsync" => Ok(PresentMode::AutoNoVsync),
+        _ => Err("`present_mode` needs fifo, auto_vsync or auto_no_vsync".into()),
+    }
+}
+
+/// `[video] refresh_hz`: `system` (`None`, the default) or 30..240 Hz, a hint
+/// for the display rate (Android `ANativeWindow_setFrameRate`).
+pub fn refresh_hz(value: &str) -> Result<Option<f32>, String> {
+    if value.eq_ignore_ascii_case("system") {
+        return Ok(None);
+    }
+    match value.parse::<f32>() {
+        Ok(hz) if (30. ..=240.).contains(&hz) => Ok(Some(hz)),
+        _ => Err("`refresh_hz` needs system or 30..240".into()),
+    }
+}
+
+/// `[video] frame_latency`: 1..3 frames in flight (`None`: wgpu's default 2).
+pub fn frame_latency(value: &str) -> Result<std::num::NonZero<u32>, String> {
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|n| (1..=3).contains(n))
+        .and_then(std::num::NonZero::new)
+        .ok_or_else(|| "`frame_latency` needs 1..3".into())
+}
+
 /// Render size for a window of `physical` pixels: `None` renders straight to
 /// the window (native, or a cap at or above the window height, so never an
 /// upscale beyond native). The width keeps the window's aspect ratio.
@@ -187,6 +222,19 @@ mod tests {
         for bad in ["0", "100", "5000", "full", "-1080"] {
             assert!(RenderHeight::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn video_options_parse() {
+        use bevy::window::PresentMode;
+        assert_eq!(present_mode("FIFO"), Ok(PresentMode::Fifo));
+        assert_eq!(present_mode("auto_no_vsync"), Ok(PresentMode::AutoNoVsync));
+        assert!(present_mode("mailbox").is_err());
+        assert_eq!(refresh_hz("system"), Ok(None));
+        assert_eq!(refresh_hz("120"), Ok(Some(120.)));
+        assert!(refresh_hz("10").is_err() && refresh_hz("fast").is_err());
+        assert_eq!(frame_latency("1").map(|n| n.get()), Ok(1));
+        assert!(frame_latency("0").is_err() && frame_latency("4").is_err());
     }
 
     #[test]

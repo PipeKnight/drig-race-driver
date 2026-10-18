@@ -141,8 +141,13 @@ fn update(
                     .map_or("unknown".into(), |r| format!("{:.2}", f64::from(r) / 1000.))
             })
             .collect();
+        // winit reports no refresh rate on Android; ask the Display (JNI).
+        #[cfg(target_os = "android")]
+        let display = format!(" display_hz={:?}", crate::android::display_refresh_hz());
+        #[cfg(not(target_os = "android"))]
+        let display = String::new();
         println!(
-            "frame_setup present_mode={:?} frame_latency={:?} physical={}x{} logical={}x{} scale={} monitor_hz=[{}] update_mode=continuous frame_cap=none",
+            "frame_setup present_mode={:?} frame_latency={:?} physical={}x{} logical={}x{} scale={} monitor_hz=[{}]{display} update_mode=continuous frame_cap=none",
             w.present_mode,
             w.desired_maximum_frame_latency,
             w.physical_width(),
