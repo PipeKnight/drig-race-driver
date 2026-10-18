@@ -19,26 +19,37 @@
 //!   phone the touch menu zones, navigate it (P11).
 use crate::input::Actions;
 use crate::pause_menu::{Labels, Nav, Repeat, View};
+use crate::render_scale::RenderHeight;
 use bevy::prelude::*;
+use bevy::window::PresentMode;
 use grid_tools::source_vehicle::assists::{Assists, Level, Transmission};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
     RaceOptions,
     DriverAids,
+    Video,
 }
 
 /// Race Options items [D `event_options` itemflow, the ported subset].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
     DriverAids,
+    Video,
     Race,
 }
-const ITEMS: [(Item, &str, &str); 2] = [
+/// Video is AUTHORED (F381); its strings are not in the game's language file,
+/// so the labels fall back to the plain English ids.
+const ITEMS: [(Item, &str, &str); 3] = [
     (
         Item::DriverAids,
         "event_options_driver_aids_button_title",
         "help_info_event_options_driver_aids_button",
+    ),
+    (
+        Item::Video,
+        "Video",
+        "Frame-rate counter, render resolution, vsync and refresh rate (this port's options).",
     ),
     (
         Item::Race,
@@ -61,7 +72,11 @@ const AIDS: [(Aid, &str, &str); 4] = [
         "driver_aids_traction_control_toggle_title",
         "help_info_driver_aids_traction_toggle",
     ),
-    (Aid::Gearbox, "driver_aids_transmission_control_toggle_title", ""),
+    (
+        Aid::Gearbox,
+        "driver_aids_transmission_control_toggle_title",
+        "",
+    ),
     (
         Aid::Brake,
         "driver_aids_braking_assist_toggle_title",
@@ -74,12 +89,168 @@ const AIDS: [(Aid, &str, &str); 4] = [
     ),
 ];
 
+/// Video screen (AUTHORED, F381: GRID's PC version has its own graphics
+/// options, not ported; this screen sets the port's `[osd] fps` and `[video]`
+/// keys so they can be changed on a phone).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VideoRow {
+    Fps,
+    RenderHeight,
+    PresentMode,
+    Refresh,
+    Latency,
+}
+const VIDEO_ROWS: [(VideoRow, &str, &str); 5] = [
+    (
+        VideoRow::Fps,
+        "FPS counter",
+        "Shows frames per second, the average and the slowest frame of the last second at the top of the screen, and writes them to the log once a second.",
+    ),
+    (
+        VideoRow::RenderHeight,
+        "Render height",
+        "How many pixel rows the 3D picture is drawn with before it is stretched to the screen. Fewer rows: faster, softer. Native: the full screen. Applies at once.",
+    ),
+    (
+        VideoRow::PresentMode,
+        "Present mode",
+        "Fifo: classic vsync, no tearing; a late frame waits for the next refresh (60 can drop to 30). Auto vsync: a late frame is shown at once, with possible tearing. Auto no vsync: no waiting at all. Applies at once.",
+    ),
+    (
+        VideoRow::Refresh,
+        "Refresh rate",
+        "Asks Android for this screen refresh rate (a hint the phone may ignore). System: let the phone decide. No effect on the desktop. Applies at once.",
+    ),
+    (
+        VideoRow::Latency,
+        "Frame latency",
+        "Frames prepared ahead of the screen. 1: less input lag; 3: smoother when frames are uneven. Default is 2. Applies at the next start.",
+    ),
+];
+
+const RENDER_HEIGHTS: [RenderHeight; 4] = [
+    RenderHeight::Rows(720),
+    RenderHeight::Rows(900),
+    RenderHeight::Rows(1080),
+    RenderHeight::Native,
+];
+const PRESENT_MODES: [PresentMode; 3] = [
+    PresentMode::Fifo,
+    PresentMode::AutoVsync,
+    PresentMode::AutoNoVsync,
+];
+const REFRESH: [Option<f32>; 4] = [None, Some(60.), Some(90.), Some(120.)];
+const LATENCY: [Option<u32>; 4] = [None, Some(1), Some(2), Some(3)];
+
+/// The next value in `list` (wrapping); a value not in the list goes to the
+/// first entry.
+fn cycle<T: PartialEq + Copy>(list: &[T], current: T, up: bool) -> T {
+    let n = list.len();
+    match list.iter().position(|v| *v == current) {
+        Some(i) if up => list[(i + 1) % n],
+        Some(i) => list[(i + n - 1) % n],
+        None => list[0],
+    }
+}
+
+/// The Video screen's values; defaults are the settings' defaults.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Video {
+    pub fps: bool,
+    pub render_height: RenderHeight,
+    pub present_mode: PresentMode,
+    pub refresh_hz: Option<f32>,
+    pub frame_latency: Option<u32>,
+}
+
+impl Video {
+    pub fn from_settings(s: &crate::settings::Settings) -> Self {
+        Self {
+            fps: s.osd_fps.unwrap_or(cfg!(target_os = "android")),
+            render_height: s
+                .render_height
+                .unwrap_or_else(RenderHeight::platform_default),
+            present_mode: s.present_mode.unwrap_or_default(),
+            refresh_hz: s.refresh_hz.flatten(),
+            frame_latency: s.frame_latency.map(|n| n.get()),
+        }
+    }
+
+    /// `[video]` keys for the settings file; default latency removes the key.
+    pub fn keys(&self) -> Vec<(&'static str, Option<String>)> {
+        vec![
+            (
+                "render_height",
+                Some(match self.render_height {
+                    RenderHeight::Native => "native".into(),
+                    RenderHeight::Rows(r) => r.to_string(),
+                }),
+            ),
+            ("present_mode", Some(present_name(self.present_mode).into())),
+            (
+                "refresh_hz",
+                Some(
+                    self.refresh_hz
+                        .map_or("system".into(), |hz| format!("{hz}")),
+                ),
+            ),
+            ("frame_latency", self.frame_latency.map(|n| n.to_string())),
+        ]
+    }
+
+    fn change(&mut self, row: VideoRow, up: bool) {
+        match row {
+            VideoRow::Fps => self.fps = !self.fps,
+            VideoRow::RenderHeight => {
+                self.render_height = cycle(&RENDER_HEIGHTS, self.render_height, up)
+            }
+            VideoRow::PresentMode => {
+                self.present_mode = cycle(&PRESENT_MODES, self.present_mode, up)
+            }
+            VideoRow::Refresh => self.refresh_hz = cycle(&REFRESH, self.refresh_hz, up),
+            VideoRow::Latency => self.frame_latency = cycle(&LATENCY, self.frame_latency, up),
+        }
+    }
+
+    fn value(&self, row: VideoRow) -> String {
+        match row {
+            VideoRow::Fps => if self.fps { "On" } else { "Off" }.into(),
+            VideoRow::RenderHeight => match self.render_height {
+                RenderHeight::Native => "Native".into(),
+                RenderHeight::Rows(r) => r.to_string(),
+            },
+            VideoRow::PresentMode => match self.present_mode {
+                PresentMode::Fifo => "Fifo (vsync)".into(),
+                PresentMode::AutoVsync => "Auto vsync".into(),
+                PresentMode::AutoNoVsync => "Auto no vsync".into(),
+                other => format!("{other:?}"),
+            },
+            VideoRow::Refresh => self
+                .refresh_hz
+                .map_or("System".into(), |hz| format!("{hz} Hz")),
+            VideoRow::Latency => self
+                .frame_latency
+                .map_or("Default (2)".into(), |n| n.to_string()),
+        }
+    }
+}
+
+fn present_name(mode: PresentMode) -> &'static str {
+    match mode {
+        PresentMode::AutoVsync => "auto_vsync",
+        PresentMode::AutoNoVsync => "auto_no_vsync",
+        _ => "fifo",
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     /// Go To Race with these aids.
     Race(Assists),
     /// The Driver Aids screen was left with a changed choice.
     Save(Assists),
+    /// The Video screen was left with a changed choice.
+    SaveVideo(Video),
 }
 
 #[derive(Resource)]
@@ -94,17 +265,24 @@ pub struct FrontEnd {
     /// The last saved (or loaded) choice.
     saved: Assists,
     repeat: Repeat,
+    /// Video screen values (applied live by `apply_video`), on entry, saved.
+    pub video: Video,
+    video_undo: Video,
+    video_saved: Video,
     /// Where the choice is saved (`<data dir>/settings.ini`).
     pub settings: std::path::PathBuf,
 }
 
 impl FrontEnd {
-    pub fn new(values: Assists) -> Self {
+    pub fn new(values: Assists, video: Video) -> Self {
         Self {
             open: true,
             screen: Screen::RaceOptions,
             // `active_default="race"`.
-            item: 1,
+            item: ITEMS.len() - 1,
+            video,
+            video_undo: video,
+            video_saved: video,
             row: 0,
             values,
             undo: values,
@@ -150,6 +328,11 @@ impl FrontEnd {
                             self.row = 0;
                             self.undo = self.values;
                         }
+                        Item::Video => {
+                            self.screen = Screen::Video;
+                            self.row = 0;
+                            self.video_undo = self.video;
+                        }
                         Item::Race => {
                             self.open = false;
                             return Some(Command::Race(self.values));
@@ -177,6 +360,29 @@ impl FrontEnd {
                     if self.values != self.saved {
                         self.saved = self.values;
                         return Some(Command::Save(self.values));
+                    }
+                }
+                None
+            }
+            Screen::Video => {
+                let n = VIDEO_ROWS.len();
+                if nav.up {
+                    self.row = (self.row + n - 1) % n;
+                }
+                if nav.down {
+                    self.row = (self.row + 1) % n;
+                }
+                if nav.left || nav.right {
+                    self.video.change(VIDEO_ROWS[self.row].0, nav.right);
+                }
+                if nav.button3 {
+                    self.video = self.video_undo;
+                }
+                if nav.back {
+                    self.screen = Screen::RaceOptions;
+                    if self.video != self.video_saved {
+                        self.video_saved = self.video;
+                        return Some(Command::SaveVideo(self.video));
                     }
                 }
                 None
@@ -237,14 +443,30 @@ impl FrontEnd {
                     ),
                 }
             }
+            Screen::Video => View {
+                title: "Video".into(),
+                subtitle: VIDEO_ROWS[self.row].2.into(),
+                rows: VIDEO_ROWS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (row, name, _))| {
+                        ((*name).into(), self.video.value(*row), true, i == self.row)
+                    })
+                    .collect(),
+                help: format!(
+                    "Left/Right: change    Esc/B: {} (saves)    Ctrl/X: {}",
+                    l("default_buttontext_back"),
+                    l("default_buttontext_undo")
+                ),
+            },
         }
     }
 }
 
 /// Opens the front end; the caller holds the race from the first frame (the
 /// aids apply before the first tick).
-pub fn install(app: &mut App, values: Assists) {
-    app.insert_resource(FrontEnd::new(values))
+pub fn install(app: &mut App, values: Assists, video: Video) {
+    app.insert_resource(FrontEnd::new(values, video))
         .add_systems(
             Update,
             update
@@ -252,7 +474,8 @@ pub fn install(app: &mut App, values: Assists) {
                 .before(crate::pause_menu::update)
                 .before(crate::drive_actions),
         )
-        .add_systems(Update, (spawn, present).chain().after(update));
+        .add_systems(Update, (spawn, present).chain().after(update))
+        .add_systems(Update, apply_video.after(update));
     log_line!("drive_front_end version=1 event=open assists={values}");
 }
 
@@ -275,16 +498,30 @@ pub fn update(
     // Escape is both Pause and Menu Back.
     nav.pause = false;
     match front.step(nav) {
-        Some(Command::Save(aids)) => match crate::settings::save_driver_aids(&front.settings, &aids) {
-            Ok(()) => log_line!(
-                "drive_front_end version=1 event=save assists={aids} path={}",
-                front.settings.display()
-            ),
-            Err(error) => {
-                warn!("driver aids not saved: {error}");
-                log_line!("drive_front_end version=1 event=save_failed error={error:?}");
+        Some(Command::Save(aids)) => {
+            match crate::settings::save_driver_aids(&front.settings, &aids) {
+                Ok(()) => log_line!(
+                    "drive_front_end version=1 event=save assists={aids} path={}",
+                    front.settings.display()
+                ),
+                Err(error) => {
+                    warn!("driver aids not saved: {error}");
+                    log_line!("drive_front_end version=1 event=save_failed error={error:?}");
+                }
             }
-        },
+        }
+        Some(Command::SaveVideo(video)) => {
+            match crate::settings::save_video(&front.settings, &video) {
+                Ok(()) => log_line!(
+                    "drive_front_end version=1 event=save_video video={video:?} path={}",
+                    front.settings.display()
+                ),
+                Err(error) => {
+                    warn!("video settings not saved: {error}");
+                    log_line!("drive_front_end version=1 event=save_video_failed error={error:?}");
+                }
+            }
+        }
         Some(Command::Race(aids)) => {
             match driving.runtime.set_assists(aids) {
                 Ok(()) => log_line!("drive_assists {aids}"),
@@ -299,6 +536,43 @@ pub fn update(
         }
         None => {}
     }
+}
+
+/// Applies the Video screen's values that can change live: the FPS counter,
+/// the render cap, the present mode and (Android) the refresh-rate hint.
+/// Frame latency waits for the next start (wgpu reads it only when the
+/// swapchain is created).
+fn apply_video(
+    front: Res<FrontEnd>,
+    mut applied: Local<Option<Video>>,
+    fps: Option<ResMut<crate::fps_counter::FpsCounter>>,
+    scale: Option<ResMut<crate::render_scale::RenderScale>>,
+    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    #[cfg(target_os = "android")] display: Option<ResMut<crate::android_display::Display>>,
+) {
+    let video = front.video;
+    let Some(before) = applied.replace(video) else {
+        return;
+    };
+    if before == video {
+        return;
+    }
+    if let Some(mut fps) = fps {
+        fps.shown = video.fps;
+    }
+    if let Some(mut scale) = scale {
+        scale.set_height(video.render_height);
+    }
+    for mut window in &mut windows {
+        if window.present_mode != video.present_mode {
+            window.present_mode = video.present_mode;
+        }
+    }
+    #[cfg(target_os = "android")]
+    if let Some(mut display) = display {
+        display.set_refresh(video.refresh_hz);
+    }
+    log_line!("drive_video version=1 event=apply video={video:?}");
 }
 
 #[derive(Component)]
@@ -362,7 +636,7 @@ fn spawn(
                         font(18.),
                         TextColor(Color::srgb(0.75, 0.8, 0.85)),
                     ));
-                    for i in 0..AIDS.len().max(ITEMS.len()) {
+                    for i in 0..AIDS.len().max(ITEMS.len()).max(VIDEO_ROWS.len()) {
                         panel.spawn((Row(i), Text::new(""), font(22.), TextColor(Color::WHITE)));
                     }
                     panel.spawn((
@@ -438,6 +712,10 @@ fn present(
 mod tests {
     use super::*;
 
+    fn video() -> Video {
+        Video::from_settings(&crate::settings::Settings::default())
+    }
+
     fn press(f: impl Fn(&mut Nav)) -> Nav {
         let mut nav = Nav::default();
         f(&mut nav);
@@ -446,14 +724,18 @@ mod tests {
 
     #[test]
     fn race_options_open_on_go_to_race_and_lead_to_driver_aids() {
-        let mut front = FrontEnd::new(Assists::default());
+        let mut front = FrontEnd::new(Assists::default(), video());
         let labels = Labels::default();
         let view = front.view(&labels);
         assert_eq!(view.title, "event_options_screen_title");
         assert_eq!(
-            view.rows.iter().map(|r| (r.0.as_str(), r.3)).collect::<Vec<_>>(),
+            view.rows
+                .iter()
+                .map(|r| (r.0.as_str(), r.3))
+                .collect::<Vec<_>>(),
             [
                 ("event_options_driver_aids_button_title", false),
+                ("Video", false),
                 ("event_options_exit_to_race_button_title", true)
             ]
         );
@@ -467,10 +749,16 @@ mod tests {
         assert_eq!(view.title, "driver_aids_screen_title");
         assert_eq!(view.subtitle, "help_info_driver_aids_traction_toggle");
         assert_eq!(
-            view.rows.iter().map(|r| (r.0.as_str(), r.1.as_str())).collect::<Vec<_>>(),
+            view.rows
+                .iter()
+                .map(|r| (r.0.as_str(), r.1.as_str()))
+                .collect::<Vec<_>>(),
             [
                 ("driver_aids_traction_control_toggle_title", "on_off_on"),
-                ("driver_aids_transmission_control_toggle_title", "transmission_automatic"),
+                (
+                    "driver_aids_transmission_control_toggle_title",
+                    "transmission_automatic"
+                ),
                 ("driver_aids_braking_assist_toggle_title", "on_off_on"),
                 ("driver_aids_steering_assist_toggle_title", "on_off_on"),
             ]
@@ -480,7 +768,9 @@ mod tests {
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
     fn the_front_end_holds_the_race_saves_and_applies_the_aids() {
-        use crate::pause_menu::race_tests::{big_stack, digest, drive_to, keys, race_app_with, tap, ticks};
+        use crate::pause_menu::race_tests::{
+            big_stack, digest, drive_to, keys, race_app_with, tap, ticks,
+        };
         use grid_tools::route::DONINGTON;
         big_stack(|| {
             let chosen = Assists {
@@ -507,7 +797,7 @@ mod tests {
             std::fs::write(&file, "[osd]\nminimap = off\n").unwrap();
             let mut app = race_app_with(DONINGTON, &["lac"], 2, false);
             app.world_mut().resource_mut::<crate::Driving>().paused = true;
-            let mut front = FrontEnd::new(Assists::default());
+            let mut front = FrontEnd::new(Assists::default(), video());
             front.settings = file.clone();
             app.insert_resource(front).add_systems(
                 Update,
@@ -525,7 +815,9 @@ mod tests {
             assert_eq!(ticks(&app), 0);
             assert!(open(&app));
             assert!(!app.world().resource::<crate::pause_menu::PauseMenu>().open);
-            // Driver Assists; Traction 25 %, Gearbox Manual, Braking 50 %.
+            // Driver Assists (two up, past Video); Traction 25 %, Gearbox
+            // Manual, Braking 50 %.
+            tap(&mut app, KeyCode::ArrowUp);
             tap(&mut app, KeyCode::ArrowUp);
             tap(&mut app, KeyCode::Enter);
             for key in [
@@ -547,7 +839,9 @@ mod tests {
                 "[osd]\nminimap = off\n[assists]\ntcs=25% stability=on braking=50% gearbox=manual\n"
             );
             assert_eq!(ticks(&app), 0);
-            // Go To Race: the aids are on the car before the first tick.
+            // Go To Race (two down, past Video): the aids are on the car
+            // before the first tick.
+            tap(&mut app, KeyCode::ArrowDown);
             tap(&mut app, KeyCode::ArrowDown);
             // The race frame ticks too: with drive_to's keys held.
             keys(&mut app).press(KeyCode::KeyW);
@@ -556,7 +850,10 @@ mod tests {
             app.update();
             keys(&mut app).release(KeyCode::Enter);
             assert!(!open(&app));
-            assert_eq!(app.world().resource::<crate::Driving>().runtime.assists, chosen);
+            assert_eq!(
+                app.world().resource::<crate::Driving>().runtime.assists,
+                chosen
+            );
             drive_to(&mut app, 500);
             assert_eq!(digest(&app), expected);
             let _ = std::fs::remove_dir_all(&dir);
@@ -564,8 +861,71 @@ mod tests {
     }
 
     #[test]
+    fn video_screen_cycles_undoes_and_saves() {
+        let mut front = FrontEnd::new(Assists::default(), video());
+        let start = front.video;
+        // Race -> up -> Video.
+        front.step(press(|n| n.up = true));
+        front.step(press(|n| n.select = true));
+        assert_eq!(front.screen, Screen::Video);
+        let view = front.view(&Labels::default());
+        assert_eq!(view.title, "Video");
+        assert_eq!(view.rows.len(), 5);
+        assert!(view.subtitle.starts_with("Shows frames per second"));
+        // FPS toggles; Render height 720 -> 900 -> 1080 -> Native wraps.
+        front.step(press(|n| n.right = true));
+        assert_eq!(front.video.fps, !start.fps);
+        front.step(press(|n| n.down = true));
+        front.video.render_height = RenderHeight::Rows(720);
+        for expected in [
+            RenderHeight::Rows(900),
+            RenderHeight::Rows(1080),
+            RenderHeight::Native,
+            RenderHeight::Rows(720),
+        ] {
+            front.step(press(|n| n.right = true));
+            assert_eq!(front.video.render_height, expected);
+        }
+        // An odd value from the file goes to the first entry.
+        front.video.render_height = RenderHeight::Rows(600);
+        front.step(press(|n| n.left = true));
+        assert_eq!(front.video.render_height, RenderHeight::Rows(720));
+        // Present mode, refresh rate (left wraps to 120), latency.
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.right = true));
+        assert_eq!(front.video.present_mode, PresentMode::AutoVsync);
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.left = true));
+        assert_eq!(front.video.refresh_hz, Some(120.));
+        assert_eq!(front.view(&Labels::default()).rows[3].1, "120 Hz");
+        front.step(press(|n| n.down = true));
+        front.step(press(|n| n.right = true));
+        assert_eq!(front.video.frame_latency, Some(1));
+        // Undo, then one change and Back: saved once.
+        front.step(press(|n| n.button3 = true));
+        assert_eq!(front.video, start);
+        assert_eq!(
+            front.step(press(|n| n.back = true)),
+            None,
+            "nothing changed"
+        );
+        front.step(press(|n| n.select = true));
+        front.step(press(|n| n.right = true));
+        let chosen = Video {
+            fps: !start.fps,
+            ..start
+        };
+        assert_eq!(
+            front.step(press(|n| n.back = true)),
+            Some(Command::SaveVideo(chosen))
+        );
+        assert_eq!(front.screen, Screen::RaceOptions);
+    }
+
+    #[test]
     fn driver_aids_cycle_undo_save_and_race() {
-        let mut front = FrontEnd::new(Assists::default());
+        let mut front = FrontEnd::new(Assists::default(), video());
+        front.step(press(|n| n.up = true));
         front.step(press(|n| n.up = true));
         front.step(press(|n| n.select = true));
         // Traction: Right wraps from On to Off, then 25 %.
@@ -592,7 +952,11 @@ mod tests {
         // Undo restores the values on entry; change again and leave: saved.
         front.step(press(|n| n.button3 = true));
         assert_eq!(front.values, Assists::default());
-        assert_eq!(front.step(press(|n| n.back = true)), None, "nothing changed");
+        assert_eq!(
+            front.step(press(|n| n.back = true)),
+            None,
+            "nothing changed"
+        );
         front.step(press(|n| n.select = true));
         front.step(press(|n| n.down = true));
         front.step(press(|n| n.right = true));
@@ -600,11 +964,18 @@ mod tests {
             transmission: Transmission::Manual,
             ..Assists::default()
         };
-        assert_eq!(front.step(press(|n| n.back = true)), Some(Command::Save(manual)));
+        assert_eq!(
+            front.step(press(|n| n.back = true)),
+            Some(Command::Save(manual))
+        );
         assert_eq!(front.screen, Screen::RaceOptions);
-        // Down to Go To Race.
+        // Down past Video to Go To Race.
         front.step(press(|n| n.down = true));
-        assert_eq!(front.step(press(|n| n.select = true)), Some(Command::Race(manual)));
+        front.step(press(|n| n.down = true));
+        assert_eq!(
+            front.step(press(|n| n.select = true)),
+            Some(Command::Race(manual))
+        );
         assert!(!front.open);
         assert_eq!(front.step(press(|n| n.select = true)), None);
     }

@@ -2521,7 +2521,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 && !settings::diagnostics().autopilot
             {
                 driving.paused = true;
-                front_end::install(&mut app, driving.runtime.assists);
+                front_end::install(&mut app, driving.runtime.assists, front_end::Video::from_settings(&profile));
             }
             // The original HUD and post-race screens (docs/RACE_HUD.md): the
             // OSD scene from the install when it loads, else plain panels.

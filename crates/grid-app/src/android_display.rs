@@ -24,10 +24,22 @@ unsafe extern "C" {
 const COMPATIBILITY_DEFAULT: i8 = 0;
 
 #[derive(Resource)]
-struct Display {
+pub struct Display {
     refresh_hz: Option<f32>,
     /// Native window the hint was last sent to.
     hinted: Option<usize>,
+    /// A hint was sent, so `None` must be sent as 0 (no preference).
+    sent: bool,
+}
+
+impl Display {
+    /// A new hint from the Video screen, sent on the next frame.
+    pub fn set_refresh(&mut self, hz: Option<f32>) {
+        if self.refresh_hz != hz {
+            self.refresh_hz = hz;
+            self.hinted = None;
+        }
+    }
 }
 
 fn update(mut display: ResMut<Display>, mut windows: Query<&mut Window, With<PrimaryWindow>>) {
@@ -60,10 +72,11 @@ fn update(mut display: ResMut<Display>, mut windows: Query<&mut Window, With<Pri
             .set_physical_resolution(w as u32, h as u32);
     }
     let ptr = native.ptr().as_ptr();
-    if let Some(hz) = display.refresh_hz
-        && display.hinted != Some(ptr as usize)
-    {
+    if (display.refresh_hz.is_some() || display.sent) && display.hinted != Some(ptr as usize) {
+        // 0 Hz clears an earlier hint (no preference).
+        let hz = display.refresh_hz.unwrap_or(0.);
         display.hinted = Some(ptr as usize);
+        display.sent = display.refresh_hz.is_some();
         // SAFETY: `native` keeps a reference to the window for this call.
         let result = unsafe { ANativeWindow_setFrameRate(ptr.cast(), hz, COMPATIBILITY_DEFAULT) };
         println!(
@@ -77,6 +90,7 @@ pub fn install(app: &mut App, refresh_hz: Option<f32>) {
     app.insert_resource(Display {
         refresh_hz,
         hinted: None,
+        sent: false,
     })
     .add_systems(PreUpdate, update);
 }

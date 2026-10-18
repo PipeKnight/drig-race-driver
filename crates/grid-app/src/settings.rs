@@ -554,6 +554,94 @@ pub fn with_driver_aids(text: &str, aids: &grid_tools::source_vehicle::assists::
     text
 }
 
+/// `text` with `key = value` lines of one line-grammar section (`[osd]`,
+/// `[video]`) set: an existing key line is rewritten in place (its comment
+/// kept; later duplicates dropped), a `None` value removes the key, and
+/// missing keys go after the section's last line, or into a new section at
+/// the end. Everything else, comments included, is kept.
+pub fn with_keys(text: &str, section: &str, keys: &[(&str, Option<String>)]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::from("assists");
+    let mut end = None;
+    let mut written = vec![false; keys.len()];
+    for raw in text.lines() {
+        let body = strip_comment(raw);
+        let trimmed = body.trim();
+        if let Some(name) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            current = name.trim().to_ascii_lowercase();
+            out.push(raw.to_owned());
+            if current == section {
+                end = Some(out.len());
+            }
+            continue;
+        }
+        if current == section {
+            let key = trimmed
+                .split_once('=')
+                .map(|(k, _)| k.trim().to_ascii_lowercase());
+            if let Some(i) = key.and_then(|k| keys.iter().position(|(name, _)| *name == k)) {
+                if let (Some(value), false) = (&keys[i].1, written[i]) {
+                    out.push(format!("{} = {value}{}", keys[i].0, &raw[body.trim_end().len()..]));
+                    written[i] = true;
+                    end = Some(out.len());
+                }
+                continue;
+            }
+            out.push(raw.to_owned());
+            if !raw.trim().is_empty() {
+                end = Some(out.len());
+            }
+            continue;
+        }
+        out.push(raw.to_owned());
+    }
+    let missing: Vec<String> = keys
+        .iter()
+        .zip(&written)
+        .filter_map(|((name, value), done)| match (value, done) {
+            (Some(v), false) => Some(format!("{name} = {v}")),
+            _ => None,
+        })
+        .collect();
+    if !missing.is_empty() {
+        match end {
+            Some(at) => {
+                for (i, line) in missing.into_iter().enumerate() {
+                    out.insert(at + i, line);
+                }
+            }
+            None => {
+                out.push(format!("[{section}]"));
+                out.extend(missing);
+            }
+        }
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    text
+}
+
+/// The Video screen's choice (front_end.rs) as settings keys: `[osd] fps`
+/// and `[video] render_height / present_mode / refresh_hz / frame_latency`.
+pub fn save_video(path: &Path, video: &crate::front_end::Video) -> Result<(), String> {
+    let old = match std::fs::read_to_string(path) {
+        Ok(text) => text.trim_start_matches('\u{feff}').to_owned(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let new = with_keys(&old, "osd", &[("fps", Some(if video.fps { "on" } else { "off" }.into()))]);
+    let new = with_keys(&new, "video", &video.keys());
+    let mut check = Settings::new();
+    check.apply(&new, path.parent().unwrap_or(Path::new(".")))?;
+    if crate::front_end::Video::from_settings(&check) != *video {
+        return Err("saved video settings do not read back".into());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// Saves the Driver Aids choice in the settings file `path`
 /// (`<data dir>/settings.ini`).
 pub fn save_driver_aids(
@@ -815,6 +903,44 @@ prop_script_speed = 12.5
         .unwrap();
         assert!(!s.assists().unwrap().traction_control.is_on());
         s.ai().unwrap();
+    }
+
+    #[test]
+    fn video_keys_are_set_in_place_and_read_back() {
+        use crate::render_scale::RenderHeight;
+        use bevy::window::PresentMode;
+        let old = "# phone\n[osd]\nminimap = off # mine\nfps = on # counter\n[video]\nrender_height = 900 # cap\nframe_latency = 1\n[assists]\ntcs=on\n";
+        let new = with_keys(old, "osd", &[("fps", Some("off".into()))]);
+        let video = crate::front_end::Video {
+            fps: false,
+            render_height: RenderHeight::Native,
+            present_mode: PresentMode::AutoVsync,
+            refresh_hz: Some(120.),
+            frame_latency: None,
+        };
+        let new = with_keys(&new, "video", &video.keys());
+        assert_eq!(
+            new,
+            "# phone\n[osd]\nminimap = off # mine\nfps = off # counter\n[video]\nrender_height = native # cap\npresent_mode = auto_vsync\nrefresh_hz = 120\n[assists]\ntcs=on\n"
+        );
+        let mut s = Settings::new();
+        s.apply(&new, Path::new(".")).unwrap();
+        assert_eq!(crate::front_end::Video::from_settings(&s), video);
+        // A file without the sections gets them at the end.
+        let new = with_keys("[drive]\nenabled = on\n", "video", &[("refresh_hz", Some("system".into()))]);
+        assert_eq!(new, "[drive]\nenabled = on\n[video]\nrefresh_hz = system\n");
+        // save_video writes and reads back.
+        let dir = std::env::temp_dir().join(format!("grid-video-save-{}", std::process::id()));
+        let file = dir.join("settings.ini");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&file, old).unwrap();
+        save_video(&file, &video).unwrap();
+        let mut s = Settings::new();
+        s.apply(&std::fs::read_to_string(&file).unwrap(), &dir).unwrap();
+        assert_eq!(crate::front_end::Video::from_settings(&s), video);
+        assert_eq!(s.osd_minimap, Some(false));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

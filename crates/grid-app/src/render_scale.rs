@@ -100,6 +100,16 @@ pub struct RenderScale {
     display: Option<Entity>,
 }
 
+impl RenderScale {
+    /// A new cap from the Video screen, applied on the next frame.
+    pub fn set_height(&mut self, height: RenderHeight) {
+        if self.height != height {
+            self.height = height;
+            self.screen = UVec2::ZERO;
+        }
+    }
+}
+
 /// Window camera that shows the scaled image.
 #[derive(Component)]
 struct DisplayCamera;
