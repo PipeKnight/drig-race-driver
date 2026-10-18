@@ -7,9 +7,22 @@ use std::{collections::BTreeMap, error::Error};
 #[derive(Default, Resource)]
 pub struct Prepared(BTreeMap<usize, Vec<u8>>);
 
-fn derive(dds: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+impl Prepared {
+    pub(super) fn drain(&mut self) -> BTreeMap<usize, Vec<u8>> {
+        std::mem::take(&mut self.0)
+    }
+}
+
+type MaskResult = Result<Vec<u8>, Box<dyn Error>>;
+
+fn derive(dds: &[u8]) -> MaskResult {
+    derive_with(dds, |p| [p[1], p[1], p[1], 255])
+}
+
+/// Shared bounded DDS validation; conversions preserve each authored mip.
+pub(super) fn derive_with(dds: &[u8], convert: fn([u8; 4]) -> [u8; 4]) -> MaskResult {
     if dds.len() < 128 || &dds[..4] != b"DDS " {
-        return Err("body occlusion requires a classic BC3 DDS".into());
+        return Err("source paint mask requires a classic BC3 DDS".into());
     }
     let word = |i| u32::from_le_bytes(dds[i..i + 4].try_into().unwrap());
     let (w, h, levels) = (word(16), word(12), word(28));
@@ -24,23 +37,22 @@ fn derive(dds: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
         || levels == 0
         || levels > w.max(h).ilog2() + 1
     {
-        return Err("unsupported body occlusion dimensions/format/mips".into());
+        return Err("unsupported source paint mask dimensions/format/mips".into());
     }
     let expected: usize = (0..levels)
         .map(|i| Format::Bc3.level_size((w >> i).max(1), (h >> i).max(1)))
         .sum();
     if dds.len() != 128 + expected {
-        return Err("body occlusion rejects truncated or trailing DDS data".into());
+        return Err("source paint mask rejects truncated or trailing DDS data".into());
     }
     let mut rgba = super::texture_upload::decode_levels(&dds[128..], w, h, levels, true)
-        .ok_or("body occlusion BC3 decode failed")?;
+        .ok_or("source paint mask BC3 decode failed")?;
     for p in rgba.as_chunks_mut::<4>().0 {
-        let g = p[1];
-        *p = [g, g, g, 255];
+        *p = convert(*p);
     }
     let base = w as usize * h as usize * 4;
     let (out, actual_levels) = Texture {
-        id: b"source_paint_ambient_occlusion",
+        id: b"source_paint_mask",
         width: w,
         height: h,
         format: Format::Bgra8,
@@ -50,19 +62,27 @@ fn derive(dds: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
     }
     .validated_dds();
     if actual_levels != levels {
-        return Err("body occlusion mip envelope mismatch".into());
+        return Err("source paint mask mip envelope mismatch".into());
     }
     Ok(out)
 }
 
 /// Stage each vehicle's own livery mask; never reuse the player's mask on peers.
 pub fn prepare(car: &super::Car, field: &super::Field) -> Result<Prepared, Box<dyn Error>> {
+    prepare_with(car, field, derive)
+}
+
+pub(super) fn prepare_with(
+    car: &super::Car,
+    field: &super::Field,
+    convert: fn(&[u8]) -> MaskResult,
+) -> Result<Prepared, Box<dyn Error>> {
     let mut staged = BTreeMap::new();
     for (index, &model) in field.car_model.iter().enumerate() {
         let model = field
             .models
             .get(model)
-            .ok_or("body occlusion model missing")?;
+            .ok_or("source paint mask model missing")?;
         let prefix = if car.track {
             super::model_prefix(field.car_model[index])
         } else {
@@ -74,15 +94,15 @@ pub fn prepare(car: &super::Car, field: &super::Field) -> Result<Prepared, Box<d
         } else {
             car.liveries
                 .get(index - 1)
-                .ok_or("body occlusion opponent bank missing")?
+                .ok_or("source paint mask opponent bank missing")?
         };
         let dds = bank
             .get(&key)
-            .ok_or_else(|| format!("body occlusion own mask absent: car={index} key={key}"))?;
-        staged.insert(index, derive(dds)?);
+            .ok_or_else(|| format!("source paint mask own mask absent: car={index} key={key}"))?;
+        staged.insert(index, convert(dds)?);
     }
     if staged.is_empty() {
-        return Err("body occlusion requires a car scene".into());
+        return Err("source paint mask requires a car scene".into());
     }
     Ok(Prepared(staged))
 }
@@ -92,9 +112,9 @@ pub fn upload(
     images: &mut Assets<Image>,
     sampler: ImageSampler,
 ) -> BTreeMap<usize, Handle<Image>> {
-    std::mem::take(&mut prepared.0).into_iter().map(|(car, dds)| {
+    prepared.drain().into_iter().map(|(car, dds)| {
         let image = super::texture_upload::image_linear(&dds, sampler.clone(), RenderAssetUsages::default())
-            .expect("validated body occlusion DDS through shared upload");
+            .expect("validated source paint mask DDS through shared upload");
         println!("body_occlusion car={car} channel=green srgb=false format={:?} mips={} scope=authored-ambient-only source_shader_parity=false", image.texture_descriptor.format, image.texture_descriptor.mip_level_count);
         (car, images.add(image))
     }).collect()
