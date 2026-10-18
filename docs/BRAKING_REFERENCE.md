@@ -437,6 +437,49 @@ corners are a pre-existing AI-line problem at Sarthe (le-mans already saw the pr
 ~7 m off the line at ~52 m/s in the last chicane); finding it needs the original AI's trace
 there, which only a live capture gives.
 
+## Sarthe AI corner speeds and the live-capture plan (F427)
+
+19 October 2026, Claude Code; static analysis only. Evidence: main checkout
+`local/driving/f417-regression/` (`sarthe-solo-trace.tsv` from `grid-opponent-race --route
+tracks/europe/le_mans/route_0 … 1 30000 ai`, the throwaway reader `grid-tmp-brakelines.rs`).
+
+**What the port reads [V].** Sarthe route 0 has one AI track (`default`), 27 brake lines and a
+13 519 m racing line. `ai_vehicle_track.xml` lists every class with the same 27 lines, keyed by
+id 0..26 like `ai_track.xml`, so the port's pairing by id is right; no reader, index-wrap or
+precision fault shows (arcs and gates match, f32 at 13 500 m keeps 1 mm). The class data is
+the original's own tuning: route 1 (`le_mans_classic`) ends with the same three lines.
+
+**What the AI does with it [V].** The touring class gives the Ford chicanes (lines 24–26, arcs
+13 121 / 13 283 / 13 345) min/max 49.2–70.0, 46.8–62.0 and 42.0–70.0 m/s, while the track's own
+data there is 24.6–46.9. The corner speed (0x792C80) is clamped to [min, max], so the AI never
+aims below 42 m/s, and the racing line's curvature there is 0.009–0.015 rad/m (radius 68–110 m):
+2.3–4 g at the target, impossible with touring `racingGripMultiplier` 1.0. The solo trace enters
+at 59 m/s, the line error grows to −6.6 m and the car wrecks at 0.988 laps. Past line 26 the next
+line is line 0 beyond the start/finish wrap (54.6–91.0), so the target jumps to 72–77 m/s.
+
+[I] With the same data and logic the original would aim equally fast here, so the difference
+must be in what the original does at the corner that the port does not (a curvature/grip limit
+in another controller, AI grip boosts, or simply not racing touring cars at Sarthe: the Race
+Day Touring Cars location list cycled on 18 October did not show Le Mans). It cannot be settled
+statically.
+
+**Live-capture plan (owner's go first; about 15 minutes; 60 Hz lock as in "Frame rate of live
+captures").**
+
+1. Snapshot the 19 user files; set `vsync="1"` and `refreshRate 60` in the snapshotted
+   hardware settings; start the research copy.
+2. Race Day → Le Mans Series → Aston Martin DBR9 (GT1) → Le Mans (Circuit de la Sarthe) route 0;
+   grid Back, Normal, assists default. Also note whether Touring Cars offers Le Mans at all.
+3. Pause on the grid; `tools/find_reference_vehicle_manager.ps1` → manager scan JSON.
+4. Unpause and record the whole field for 60 s twice with `tools/capture_grid_field.py`
+   (covers the Dunlop and the Esses at ≈ 0.28 laps): every AI car's pose, velocity, published
+   throttle/brake/steering and gear per frame. Check world `+7C8` ≈ 16.67 ms.
+5. Restart and let the field run to the Ford chicanes (≈ 3:30 race time), then record 60 s
+   again; or, if shorter, retire and repeat with grid Front.
+6. Close the game, restore the files and settings, verify the hashes.
+7. Offline: speed and line offset of each AI car at the Esses and Ford chicanes against the
+   port's targets (line 8/9 and 24–26) and against the port's field on the same grid.
+
 ## Next
 
 1. Repeat a BA-off live run with the extended capture, and runs at a second onset speed;
