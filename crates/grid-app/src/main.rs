@@ -2402,8 +2402,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 (graphics.width, graphics.height),
             )?;
         }
+        println!("capture_pipeline_compilation synchronous=true scope=offscreen-only");
         app.add_plugins(with_profile(
             DefaultPlugins
+                // A capture's frame counter must not outrun background shader
+                // compilation. Interactive windows keep Bevy's async default.
+                .set(bevy::render::RenderPlugin {
+                    synchronous_pipeline_compilation: true,
+                    ..default()
+                })
                 .set(WindowPlugin {
                     primary_window: None,
                     exit_condition: ExitCondition::DontExit,

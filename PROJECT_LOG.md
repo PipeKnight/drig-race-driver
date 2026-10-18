@@ -1,5 +1,14 @@
 # GRID engine project log
 
+## G124 — Specular CPU checks pass; reject a premature black capture (18 October 2026)
+
+Pilot36be2ac release2m52s/SHA9b7eaf2353a043712f9f0e55cc42b16be13a277afabbf423e766be0cee3c0006 preserved privately, graphics target restored to accepted1d07640; primary dedicated9f9d9937unchanged. Featureworkspace661tests/12harnesses0failed/0ignored, defaultapp190tests0failed/0ignored, both all-target workspaceClippy clean (feature1m13s/default13.32s). Source code split into917e0f6sharedstaging and36be2acoptionalpilot, not yet promoted/enabled.
+
+First native4Kfeature-off capture returned process0/savedPNG but all pixels black, no shader error. Rejected as acceptance; original image/log retained. White-control and source-base/forcedRGBA render normally; one subsequent exact off retry renders and equals both white-control and accepted80babb0sky comparison pixel-for-pixel (0changedpixels). Thus white compensation/default appearance is verified on successful frames, while the first failure cannot be dismissed from process0 alone. Transient startup/pipeline readiness is suspected, not proven root cause. Existing screenshot gate used180CPUframes and did not wait for async shader compilation.
+
+Small offscreen-only mitigation now requests Bevy0.19.1 RenderPlugin synchronous_pipeline_compilation=true (confirmed pinned public API), leaving interactive windows at async defaults. Rebuild/repeat GPU acceptance and motion pending; do not claim a demonstrated uncached-driver fix from warm retries. Source-base versus successful white-control mean1.67169byte/max109/1393356changedpixels; visual/GPU acceptance still being assessed. No current original GRID process for a live uniform read; continue offline, no owner request/desktop input/Steam changes.
+
+
 ## G123 — Begin optional source-alpha base-specular material pilot (18 October 2026)
 
 G120verified1d07640/SHA9f9d9937graphics executable remains delivered; normal2014aae6unchanged. Draft code adds non-default Cargo paint-specular feature (Bevy pbr_specular_textures), CLI body-specular off/source-base/white-control, source-alpha square-root encoding to compensate the renderer's half-and-square reflectance transfer. White control retains sampled-pointF0.04; source-base authorsF0.04*A. Coat/roughness/albedo/exposure/glass unchanged; filtered transfer and original multi-term alpha response are explicitly not equivalent. Extra material bindings stay out of normal/phone builds. No launcher selects the experiment.
