@@ -87,7 +87,7 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 ### What does not work yet
 
 - **Controls (P11):** tilt steering with on-screen pedals and buttons; see "Controls" below. Not yet tried on a phone. A Bluetooth keyboard may also work through GameActivity, but this is untested.
-- **Gamepads (P11b):** code since F402, see "Gamepads" below; not yet tried on a phone. A Bluetooth keyboard may work through winit, but this is untested.
+- **Gamepads (P11b):** code since F404, see "Gamepads" below; not yet tried on a phone. A Bluetooth keyboard may work through winit, but this is untested.
 - **Data without the bundled APK:** the code-only APK needs the data placed by adb (below). Android 11+ blocks phone file managers from `Android/data`; copying from Windows Explorer over USB (MTP) into it works on many phones but is not guaranteed [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). **P10** (folder picker) would remove the PC step without bundling.
 - **Not measured yet:** frame rate (the counter below now shows it), thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
 
@@ -182,7 +182,7 @@ The tilt dead zone and saturation are those of the steering bindings: biLower/bi
 
 **Not tested on a phone** (no device was connected): the sensor sign and the landscape inference, the zone sizes under real thumbs, the UI scale, multi-touch throttle + brake, the pause menu by touch, and whether GameActivity delivers touches to Bevy as expected.
 
-## Gamepads (P11b, F402)
+## Gamepads (P11b, F404)
 
 Bluetooth and USB pads (Xbox, DualSense, other HID pads Android classifies as gamepads) drive through the same original XInput pad preset as on the desktop (`ActionMap/actionMapPreset4.xml`, input.rs): steering on the left stick, triggers for throttle and brake, the preset's buttons for gears, view, pause and the menus. Pause, Race Options (with Video, Driver Aids and Performance test), the post-race screens and replays all read the same Menu/Replay actions, so they work with the pad without screen-specific code.
 
