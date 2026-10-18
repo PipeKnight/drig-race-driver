@@ -2,7 +2,7 @@
 
 The engine uses Rust and Bevy and loads resources from a player's purchased installation of Race Driver: GRID (2008). Resource readers, a Lacetti/Donington scene viewer and an experimental keyboard driving prototype are implemented. Body/barrier collisions, a verified full lap and a complete independent game remain ahead.
 
-To try the current build on this PC, double-click **Play GRID Prototype.cmd**. See [prototype controls and limitations](docs/TRY_THE_PROTOTYPE.md).
+To try the current build on this PC, double-click **Play GRID.cmd** and pick the event in the game's Race Day menu ([event menu](docs/EVENT_MENU.md)); the other `Play GRID *.cmd` launchers start one event directly. See [prototype controls and limitations](docs/TRY_THE_PROTOTYPE.md).
 
 Start with [PROJECT_LOG.md](PROJECT_LOG.md) for current progress, findings and next actions. The [9 October progress assessment](docs/PROGRESS_ASSESSMENT_2026-10-09.md) records completed capabilities, blockers, completion estimates and the next integration milestones. Detailed initial work is in [Phase 0 reference identification and compatibility investigation](docs/PHASE0.md).
 

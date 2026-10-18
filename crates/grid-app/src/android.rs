@@ -138,6 +138,20 @@ pub fn fatal(message: &str) {
     }
 }
 
+/// Restarts the game in a new process (`MainActivity.relaunch` through
+/// `RelaunchActivity`): the event menu's Continue and Back to menu
+/// (event_menu.rs). winit and Bevy cannot start twice in one process.
+pub fn relaunch() {
+    log(false, "relaunch: restarting the game process");
+    let done = with_activity(|env, activity| {
+        env.call_method(activity, "relaunch", "()V", &[])?;
+        Ok(())
+    });
+    if done.is_none() {
+        log(true, "relaunch: MainActivity.relaunch failed");
+    }
+}
+
 /// Calls into the Java `MainActivity` from any thread (attached on demand).
 /// A Java exception is logged, cleared and turned into `None`.
 fn with_activity<R>(

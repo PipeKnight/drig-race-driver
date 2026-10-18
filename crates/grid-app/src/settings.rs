@@ -268,6 +268,12 @@ pub struct Settings {
     /// `[front_end] show`: the Race Options front end before the race
     /// (docs/DRIVER_AIDS.md); default on.
     pub front_end: Option<bool>,
+    /// `[front_end] event_menu`: Android starts in the event menu
+    /// (event_menu.rs); default on. The desktop opens it with `--menu`.
+    pub event_menu: Option<bool>,
+    /// `[event]`: the event menu's last choice (`type`, `route`, `car`,
+    /// `laps`, `opponents`, `time`, `direction`), read only by the menu.
+    pub event: Vec<(String, String)>,
     pub diagnostics: Diagnostics,
 }
 
@@ -342,6 +348,7 @@ impl Settings {
                     "sound",
                     "osd",
                     "front_end",
+                    "event",
                     "video",
                     "diagnostics",
                 ]
@@ -480,6 +487,16 @@ impl Settings {
                     })
                 }
                 ("front_end", "show") => self.front_end = Some(on(&key, value).map_err(at)?),
+                ("front_end", "event_menu") => {
+                    self.event_menu = Some(on(&key, value).map_err(at)?)
+                }
+                (
+                    "event",
+                    "type" | "route" | "car" | "laps" | "opponents" | "time" | "direction",
+                ) => {
+                    self.event.retain(|(k, _)| *k != key);
+                    self.event.push((key.to_string(), value.to_string()));
+                }
                 ("diagnostics", key) => self.diagnostics.set(key, value).map_err(at)?,
                 (section, key) => {
                     return Err(at(format!("unknown setting `{key}` in [{section}]")));

@@ -77,6 +77,21 @@ public class MainActivity extends GameActivity {
     }
 
     /**
+     * Called by android.rs (event menu Continue, Back to menu): ends this
+     * process and starts the game again in a new one, through
+     * RelaunchActivity in its own process (the native library cannot start
+     * twice in one process).
+     */
+    public void relaunch() {
+        runOnUiThread(() -> {
+            startActivity(new Intent(this, RelaunchActivity.class)
+                    .putExtra(RelaunchActivity.EXTRA_PID, Process.myPid())
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            finish();
+        });
+    }
+
+    /**
      * Called by android.rs at start-up: a new log file in
      * Download/GRID-Reassembly; returns its file descriptor (now owned by the
      * caller) or -1.

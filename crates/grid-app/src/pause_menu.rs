@@ -731,10 +731,11 @@ pub fn update(
     mut actions: ResMut<Actions>,
     mut shifts: ResMut<ShiftQueue>,
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
-    (time, mut post, front): (
+    (time, mut post, front, from_menu): (
         Option<Res<Time<Real>>>,
         Option<ResMut<crate::post_race::PostRace>>,
         Option<Res<crate::front_end::FrontEnd>>,
+        Option<Res<crate::event_menu::FromMenu>>,
     ),
     mut exit: MessageWriter<AppExit>,
     mut replay: Option<ResMut<crate::replay::Replay>>,
@@ -793,14 +794,12 @@ pub fn update(
             driving.paused = false;
             match post.as_mut() {
                 Some(post) => post.on_retire(),
-                None => {
-                    exit.write(AppExit::Success);
-                }
+                None => crate::event_menu::leave(&mut exit, from_menu.is_some()),
             }
         }
         Command::Exit => {
             log("finish-test-drive");
-            exit.write(AppExit::Success);
+            crate::event_menu::leave(&mut exit, from_menu.is_some());
         }
         Command::InstantReplay => {
             log("instant-replay");
