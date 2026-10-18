@@ -536,6 +536,19 @@ impl Runtime {
         root: &Path,
         table: &[u8],
     ) -> Result<crate::body_geometry::BodyGeometry, Box<dyn std::error::Error>> {
+        let props = crate::entity_geometry::Props::read_route(root, &self.route)?;
+        self.prepare_body_geometry_with(root, table, props)
+    }
+
+    /// [`Self::prepare_body_geometry`] with this runtime's route props already
+    /// read (`Props::read_route`), so a field parses them once. The boxes are
+    /// shared copy-on-write: a car that changes a box gets its own copy.
+    pub fn prepare_body_geometry_with(
+        &mut self,
+        root: &Path,
+        table: &[u8],
+        props: crate::entity_geometry::Props,
+    ) -> Result<crate::body_geometry::BodyGeometry, Box<dyn std::error::Error>> {
         let ned = read(root, &self.car.file(".ned"), 16 * 1024 * 1024)?;
         let offset =
             std::array::from_fn(|j| f32::from_bits(self.state.car.owner.vehicle[0x1630 / 4 + j]));
@@ -545,7 +558,6 @@ impl Runtime {
             &self.route.file("boundarylines.cqtc"),
             2 * 1024 * 1024,
         )?)?;
-        let props = crate::entity_geometry::Props::read_route(root, &self.route)?;
         let wheel_nodes = crate::loose_wheel::WheelNodes::read(root, &self.car)?;
         if self.track.has_boundary() || self.state.shapes.len() != self.track.shape_count() + 1 {
             return Err("body boundary already prepared or shape registration differs".into());

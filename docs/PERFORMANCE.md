@@ -91,6 +91,7 @@ vehicle manager is about 58 %, the world advance with its contact provider 28 %,
 Loading 12 cars took 6–10 s (1 tick: 10.2 s; solo: under 1.5 s for the whole lap). The sampler
 puts about 85 % of that in `MultiRuntime::load_deforming_on` → `Runtime::prepare_body_geometry`
 → `entity_geometry::Props::read_route`: every car parses the route's prop entities again.
+Fixed in F382; see "Loading a field".
 
 ### Desktop app frame (12 cars, `--render`, baseline graphics, 1280 × 800)
 
@@ -325,6 +326,42 @@ period available; the loaded rounds are kept in `local/perf/measure/`.
   commit. `GRID_PERF_TIMING` cannot be set on the phone yet (no environment variables for the
   activity).
 
+## Loading a field (F382)
+
+Before: `MultiRuntime::load_deforming_on` called `Runtime::prepare_body_geometry` for every
+car, and each call parsed `objects.ens`, `objecttypes.pssg` and the barrier ornaments again
+(`Props::read_route`). Every car of a field is on the same route, so all twelve parses gave the
+same boxes.
+
+Change: `load_deforming_on` parses the route props once and hands each car a clone through the
+new `Runtime::prepare_body_geometry_with(root, table, props)`. `prepare_body_geometry` keeps
+its old behaviour (it reads the props and calls the new function). `Props` already holds its
+boxes as `Arc<Vec<PropBox>>` and every writer goes through `Arc::make_mut`
+(`PropWorld::arm`, prop breaking), and `PropBox` has no interior mutability. So a car that
+arms or breaks a box gets its own copy, as before; nothing per car is shared mutably. The
+cars still load one after another; parallel loading was not needed.
+
+Measured on the desktop (i7-12700, shared with other sessions' builds, so single runs vary),
+release, interleaved rounds:
+
+| | Before | After |
+|---|---|---|
+| `grid-opponent-race ROOT CD01 BP01 12 1 ai` (load + 1 tick), 3 rounds | 6.38 / 6.28 / 11.08 s | 1.09 / 1.07 / 1.24 s |
+| `grid-app --drive --body-contacts CD01 --body-events BP01 --opponents 11 --render … --drive-ticks 1` (process start to exit), 4 rounds | 19.9 / 18.0 / 21.8 / 24.5 s | 12.4 / 13.2 / 13.0 / 12.5 s |
+| The same app run without opponents, for reference | | 9.6 / 9.4 s |
+
+So a 12-car race now starts about 7 s sooner in the app on this PC. The 12-car field costs
+about 3 s more than a solo run. That and the rest of the app's start are probably Bevy, the
+track and the car graphics [I, not profiled], not the car physics (the headless load of all 12
+cars is about 1 s). On the phone
+the saving should be several times larger [I, not measured].
+
+Identity [V]: the 1-tick outputs are byte-identical; 12-car `… 12 11200 ai` sha256
+54abbecb…2a2b and solo `… 1 11200 ai` aad9a07a…e41b, unchanged; a 12-car 6,000-tick race with
+`GRID_DYNAMIC_PROPS=1` and DF01 (breakable props, deformation) is byte-identical to the
+pre-change binary (sha256 3c932872…841e). `grid-soak quick` 20/20, all 20 digests equal to the
+pre-change binary's.
+
 ## Follow-ups (not done here)
 
 1. **Mesh re-uploads every frame.** On the render thread, `allocate_and_free_meshes` (1.0 ms),
@@ -332,8 +369,7 @@ period available; the loaded rounds are kept in `local/perf/measure/`.
    (0.2 ms) mean about 13 mesh assets change every frame. Changing them only when their
    contents change could save about 1.5 ms of the 7 ms render thread on the desktop, more on
    the phone. The graphics files involved belong to the graphics work, so this was left alone.
-2. **Loading 12 cars.** Every car parses the route's prop entities again (about 85 % of a
-   6–10 s load on the desktop). Parsing once and sharing, or loading the cars in parallel,
-   would cut the race start, especially on the phone.
+2. **Loading 12 cars.** Done in F382: the route props are parsed once per field (see
+   "Loading a field").
 3. **GPU and render resolution on the phone.** 4× MSAA at the full surface, the render-height
    cap (F375) and the render graph are the likely limits of the solo lap.
