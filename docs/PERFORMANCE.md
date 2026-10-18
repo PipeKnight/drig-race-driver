@@ -540,7 +540,7 @@ were byte-identical, so it did not show there. Passing their centres to `sort_ce
 restore the order they had before F392. That could change today's picture compared with
 main, so it needs its own before/after check.
 
-## Phone bisection (FNNN)
+## Phone bisection (F395)
 
 Why: F392 cut the desktop render thread from 7.3 to 5.5 ms on the phone's preset, but the
 owner's phone stayed at about 30 FPS [V, APK dca690b773e4, logs
