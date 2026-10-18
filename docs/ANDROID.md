@@ -203,7 +203,7 @@ Bluetooth and USB pads (Xbox, DualSense, other HID pads Android classifies as ga
 
 **Checks [V]:** mapping unit tests (`android_pad::tests`, desktop), wheel guard test, tilt silenced while a pad holds; `cargo ndk … clippy --release --lib -p grid-app -- -D warnings` clean; Java compiles in the APK build. [N] Not tried with a real pad on a phone.
 
-## Event menu (F413)
+## Event menu (F414)
 
 The phone starts in the event menu (Race Day, [EVENT_MENU.md](EVENT_MENU.md)); its Continue and a race's Back to menu restart the game process through `RelaunchActivity` (own process `:relaunch`), since winit and Bevy cannot start twice in one process. With the bundled or imported data subset only Race and Time Trial at Donington with the Lacetti are offered (no `database/` in the subset). `[front_end] event_menu = off` in `settings.ini` restores the old direct start. Touch uses the P11 menu zones; a pad navigates as in the pause menu. Not tried on a phone yet.
 
