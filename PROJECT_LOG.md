@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G134 — Stamped image controls match; diagnose variable-clock full-lap comparison (18 October 2026)
+
+b9d145651ef3/SHA3e3195a4... native02 off/white/source/RGBA PNG bytes equal each corresponding1f858a1b prior image exactly, with embedded revision confirmed in logs and no GPU errors. Repeated stamped1200tick motion final image and all4physical exits also match the same-Rust prior; frame audit still to be saved for this repeated sequence.
+
+Repeated stamped6500tick native4K run completes valid89.955257484slap with all4physical/handling/deformation/lap exit records exactly equal prior. However initial strict final whole-PNG assertion FAILS: full-frame mean11.904968byte/max225/8069818changedpixels; image inspected, scene/camera slightly shifted, no blank/GPU-error failure. Keep this failed parity assertion/validation/diff8x, do not label full image exact. Prior commands had no --render-fps. Camera::frame uses variable gaps in displayed physical samples to update chase history; identical final physical pose alone does not force an identical shot. This is a code-supported timing hypothesis, not yet a proven cause. Current paired6500tick native4K runs of both immutable artifacts explicitly use virtual30FPS to test it; no live-camera code change or camera-roadmap detour.
+
+Independent private alpha-retention proof: curb03 RGB carrier1024x2048/BGRA8/full12mips, original256x512BC3/all10mips decoded separately. All10 aligned source alpha mip arrays are copied exactly (candidatelevels2..11), two larger levels use deterministic periodic integer bilinear; RGBbytes unchanged and originalDDS unchanged. Constant/wrapping-edge invariants pass. surface-textures01/curb03-alpha-retention01.py/.json/source-alpha01.dds retain evidence. This is offline data preparation only: current V1 intentionally rejects packed-alpha road overrides; no in-engine texture-quality acceptance. Neural cracks/grain changes remain unapproved as default. Existing torch is absent in bundled Python (find_spec check), no tool installed.
+
 ## G133 — Preserve F405–F413 beside the bounded graphics pilot (18 October 2026)
 
 Merged origin/main b851721 throughF413: Android data importer, GT1/GT2 and Le Mans grids/results, Haruna/touge/Freestyle support, continuous prop/lost-wheel road collision. main.rs auto-merges; journal conflict retains both full histories. No peer source discarded or primary executable replaced. Incoming core/source changes require fresh combined checks; do not attribute old675tests/old complete lap to this newly merged tree. Source-only graphics branch throughb9d1456 was already pushed before this merge. The candidate b9d1456 is deliberately the bounded premerge Rust snapshot, not F413.
