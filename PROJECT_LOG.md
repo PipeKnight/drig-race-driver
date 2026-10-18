@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G122 — Body normal/scratch resource table and consumer linked (18 October 2026)
+
+Separate41row general-bank table0xd14c28 binds _main_nm.→TNormalMap and _main_sc.→TScratchMap specifically to Car Body Paint. Sole base reference0x9caccf enters coherent0x9cac70; read-only decompile/assembly confirms same0x9ca780consumer at0x9cacd7, guarded bankECX=car_state+0xdc8+20*index. Livery bank uses separate0x918+20*index; hidden-this omission in pseudocode is not evidence of a shared field. Purchased gen_high/gen_low inventories both resolve exact Lacetti keys,1024²/512² normalBC1/scratchBC3, storedgammaflags0. Offline resource/table/consumer/selector linkage advances; live handle resolution/sampler state/scalar uniform packing still unobserved.
+
+Detailed findings and private evidence paths in docs/LACETTI_GRAPHICS_MATERIALS.md. Actual source high8bf605b1.../low87ba56a8... unchanged. No global damage normal/scratch assignment or visual-default change; preserve source vertex controls and other agent's damage interface. Next unresolved step: production scalar-to-float4 packing before a bounded optional specular comparison. Existing657tests/workspaceClippy/canonicalsolo/20soak/accepted graphics1d07640build remain the executable acceptance scope; this continuation after G120 changes research/docs only. No owner help needed.
+
+
 ## G121 — Exact metallic-paint variant selection verified in isolation (18 October 2026)
 
 Read-only Ghidra12.1.4 and Capstone5.0.6 identify exact carpaint_metallic selector0x61bb80 (callback pointer0xce4998, literal reference0x61bbbd, coherent ret8/padded entry). Variants mask1noscratchnormal/5noscratch/7full depend on diffuse/scratch/normal non-null handles, not dust/occlusion scalar. Unicorn2.1.4 original selector+bounded-copy bytes pass16synthetic cases (8presence combinations, two collection storage modes), exact names/storage equivalence. This is isolated execution, not live clean-car binding/uniform/radiometry proof. Detailed scope, rejected generic/scenery selectors, destructor identification and failed queries/hooks are in docs/LACETTI_GRAPHICS_MATERIALS.md. All decompilation/emulation/assets private materials-livery01; no new tool/game/renderer default changes.
