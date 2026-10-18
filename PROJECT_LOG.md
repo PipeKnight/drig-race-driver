@@ -1,5 +1,14 @@
 # GRID engine project log
 
+## G121 — Exact metallic-paint variant selection verified in isolation (18 October 2026)
+
+Read-only Ghidra12.1.4 and Capstone5.0.6 identify exact carpaint_metallic selector0x61bb80 (callback pointer0xce4998, literal reference0x61bbbd, coherent ret8/padded entry). Variants mask1noscratchnormal/5noscratch/7full depend on diffuse/scratch/normal non-null handles, not dust/occlusion scalar. Unicorn2.1.4 original selector+bounded-copy bytes pass16synthetic cases (8presence combinations, two collection storage modes), exact names/storage equivalence. This is isolated execution, not live clean-car binding/uniform/radiometry proof. Detailed scope, rejected generic/scenery selectors, destructor identification and failed queries/hooks are in docs/LACETTI_GRAPHICS_MATERIALS.md. All decompilation/emulation/assets private materials-livery01; no new tool/game/renderer default changes.
+
+First Ghidra containing query had no analyzed function and returned process0 despite script error; expected-artifact/error checks caught it. Proven entries decompiled read-only with changes discarded. Two emulator copy-hook drafts failed from a return-convention error; accepted03executes original ret12copy. String query recorded unbackedBSS after first rejection. Second binding table is wheel/tyre diffuse only with empty-string sentinel, not body normal/scratch. Next: trace actual clean-car normal/scratch resolution and scalar packing before a specular-mask visual pilot.
+
+G119/G120 source/publication: both main and codex/grid-graphics reached7661eb7; main-folder graphics executable remains verified1d07640/SHA9f9d9937... . Normal2014aae6... and owner notec4d52b9e... preserved.657workspace tests/Clippy/canonical identity/20scenario soak remain applicable (this entry changes documentation/research evidence only). New motion folders deduplicated; cited private evidence retained. No owner action needed.
+
+
 ## G120 — F397 combined graphics build accepted and delivered (18 October 2026)
 
 Source1d07640bfb42 (F397/2393a9e plus G119 docs), release3m54s, Cargo compiler-artifact path target/release/grid-app.exe, SHA9f9d9937c193adde62c62c490fab5c1a18d9f04c17575c4b7a9b6c7b96120495. Rust/Cargo1.99.0/Bevy0.19.1, offline/two build jobs. Full workspace657tests/12harnesses/0fail/0ignored; all-target release workspaceClippy clean3m03s. Quicksoak20/20pass/100000ticks. Canonical solo11200ai direct stdoutSHAaad9a07a26cdd1787502cf89ea15f086f10ecf6f565f44eda2648462fbb0e41b unchanged. Earlier PS capture2744694a also equals earlier graphics logs byte-for-byte; its CRLF differs from native LF, normalized lines equal (not a driving divergence).
