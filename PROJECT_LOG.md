@@ -1,5 +1,7 @@
 # GRID engine project log
 
+F400 evidence moved before archiving the mesh re-upload session (2026-10-18, Claude Code): worktree great-goldwasser-388661 (F392, F398) local/ (perf381/, f398/, soak/) moved to local/worktree-evidence/great-goldwasser-388661/; nothing unpushed or uncommitted. Earlier citations of "worktree great-goldwasser-388661 local/..." resolve there.
+
 F399 More of GRID's tracks load; Yokohama Docks route 0 is the sixth circuit (2026-10-18, Claude Code; coordinator's track/format reader task). Details: docs/TRACK_READERS.md (survey, reader findings, open items) and docs/YOKOHAMA.md. Evidence: worktree admiring-swartz-2f8287 `local/track-readers/` (survey-before/, survey-readers2/, app/, soak-yokohama/, checks/, 12-car and drift runs). Static analysis only: Capstone 5.0.6 on `local/compatibility/grid-unpacked.exe`; nothing installed; no input to the original game.
 - Survey [V] (`tools/route_survey.sh`, solo AI, 16000 ticks, before any change): Spa `objects.pssg` NaN half UVs (and a 9-key VCQTC chunk), Milan/Detroit sphere collision shapes, Detroit 8-9 `Normal/half4`, Haruna 532 collision chunks, Okutama a multi-child entity, Shibuya/San Francisco/Washington mesh streams, Yokohama NaN half UVs. New probe `grid-route-readers stages|streams|nodes` names the file behind each error.
 - Reader changes:
