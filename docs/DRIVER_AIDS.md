@@ -70,7 +70,7 @@ The app had no front end: it started the race at once. Now, before the race:
   launchers' `GRID_PLAY_ASSISTS`/`local\assists.txt` still override the saved choice at the next
   start.
 
-- **Video** (F385, AUTHORED, not an original GRID screen; the PC version's graphics options are
+- **Video** (F390, AUTHORED, not an original GRID screen; the PC version's graphics options are
   not ported): a third Race Options item between Driver Assists and Go To Race, so the port's
   `[osd] fps` and `[video]` settings can be changed on a phone. Same controls as Driver Aids
   (Up/Down, Left/Right cycle, Ctrl/X undo, Back saves when changed; touch UP/DOWN, < >, OK, BACK).
