@@ -1,4 +1,4 @@
-//! Android window and display (F377, docs/ANDROID.md "Frame rate").
+//! Android window and display (F378, docs/ANDROID.md "Frame rate").
 //!
 //! Bevy's `Window` starts with the requested 1280 x 800 and scale factor 1;
 //! on Android winit ignores the request, and the first phone log
