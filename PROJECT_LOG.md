@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G129 — Verified graphics source published to main (18 October 2026)
+
+Published focused graphics commits and preserved F398-F404 peer sources through0966e735e460 to origin/codex/grid-graphics and origin/main; primary checkout fast-forwarded fromF400 without source conflicts or dirty-file loss. Primary's only untracked choreography note and normal executable remain unchanged (c4d52b9e.../2014aae6...). Graphics launcher now uses installed dedicated6aec3a9/SHAddf26b5... with source numbers/ambient/base-specular options; actual CMD capability block selects all3 supported flags. Source publication does not relabel the binary as F404: newer input/harness/Android code remains unbuilt in this verified desktop snapshot. Private manifests and paint-specular-main-publication01.json track that distinction. No game window launched or peer prototype process altered.
+
+Next worktree-only experiment implements an off-by-default mixed-alpha surface reflectance control using existing samplers; no launcher changes. Audit shows the same mixed-alpha direct-specular use in both examined surface/infield programs. Preserve source alpha through future RGB upscale, do not infer roughness/normals from it. GPU acceptance still required before delivery of this new surface pilot.
+
 ## G128 — Latest source checks and packed road-lighting audit (18 October 2026)
 
 Combined551dcc4/F404 source passes675 workspace tests across12 harnesses with0failed/0ignored (paint-specular enabled), all-target release Clippy feature33.65s/default16.46s, Rust1.99.0/two jobs/two test threads. Rebuilt tools35.31s. Canonical native stdout SHAaad9a07a26cdd1787502cf89ea15f086f10ecf6f565f44eda2648462fbb0e41b matches the accepted solo identity. First command erroneously supplied literal CD01/BP01 labels instead of private table paths and failed with no stdout; retained canonical01 failure, corrected canonical02 passes. New F402 quicksoak completed24/24pass,120000ticks,11.9min wall under current load; no new failures/auto-resets. Known expected geometry-driven losses are separately classified: seed22=1,seed24=14; seed23 passes with369peak bodies/20breaks. This is robustness acceptance, not a renderer performance benchmark.
