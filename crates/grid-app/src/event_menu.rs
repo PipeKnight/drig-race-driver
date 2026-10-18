@@ -55,7 +55,10 @@ pub enum Kind {
     DriftBattle,
     DriftGp,
     Freestyle,
+    /// Midnight Touge: one run, either direction.
     Touge,
+    /// Pro Touge: two runs, downhill then uphill (F412, docs/TOUGE.md).
+    ProTouge,
 }
 
 /// One layout a discipline offers.
@@ -87,6 +90,9 @@ pub struct EventType {
     pub times: Vec<(u32, String)>,
     /// Touge: downhill (subroute 0) or uphill (1).
     pub directions: bool,
+    /// Le Mans Series: the fields hold LMP1 cars that still ground at speed;
+    /// the race runs with GRID_SERIES_EXPERIMENTAL=1, like its launcher.
+    pub experimental: bool,
 }
 
 /// What the user picked (`[event]` keys).
@@ -179,7 +185,7 @@ fn supported(kind: Kind, route: &str) -> bool {
                     .any(|t| route.starts_with(&format!("{t}/")))
         }
         Kind::Freestyle => route.starts_with("tracks/japan/yokohama_docks/"),
-        Kind::Touge => route == route::HARUNA,
+        Kind::Touge | Kind::ProTouge => route == route::HARUNA,
     }
 }
 
@@ -232,6 +238,7 @@ impl Catalog {
                 opponents: Some((11, 11)),
                 times: Vec::new(),
                 directions: false,
+                experimental: false,
             },
             EventType {
                 kind: Kind::TimeTrial,
@@ -247,6 +254,7 @@ impl Catalog {
                 opponents: None,
                 times: Vec::new(),
                 directions: false,
+                experimental: false,
             },
         ];
         if let Some(db) = db {
@@ -267,20 +275,29 @@ impl Catalog {
             disciplines.sort();
             for (_, id, name) in disciplines {
                 let kind = match name.as_str() {
-                    "pro_tuned" | "touring" | "gt1" | "gt2" => Kind::Series,
+                    "pro_tuned" | "touring" | "gt1" | "gt2" | "le_mans_series" => Kind::Series,
                     "drift_battle" => Kind::DriftBattle,
                     "drift_gp" => Kind::DriftGp,
                     "Free_Drift" => Kind::Freestyle,
                     "illegal_touge" => Kind::Touge,
-                    // Le Mans (LMP1 cars ground at speed), open wheel,
-                    // muscle, club, prestige, demolition and pro touge are
-                    // not ported (docs/SERIES.md, docs/DISCIPLINES.md).
+                    "legal_touge" => Kind::ProTouge,
+                    // The 24 Hours of Le Mans, open wheel, muscle, club,
+                    // prestige and demolition are not ported
+                    // (docs/SERIES.md, docs/DISCIPLINES.md).
                     _ => continue,
                 };
                 let Ok(series) = grid_tools::series::Series::from_database(db, &name) else {
                     continue;
                 };
-                let routes = &mut series.layouts.iter().map(|l| l.route.clone());
+                // Pro Touge's pool holds the legal Haruna layouts; the port
+                // runs it on route 1, the validated road, as its launcher
+                // does (AUTHORED).
+                let pool: Vec<String> = if kind == Kind::ProTouge {
+                    vec![route::HARUNA.to_string()]
+                } else {
+                    series.layouts.iter().map(|l| l.route.clone()).collect()
+                };
+                let routes = &mut pool.into_iter();
                 let (cars, stand_in) = match kind {
                     Kind::Series => (
                         cars(
@@ -356,6 +373,7 @@ impl Catalog {
                     },
                     times,
                     directions: kind == Kind::Touge,
+                    experimental: name == "le_mans_series",
                 });
             }
         }
@@ -467,6 +485,10 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
             // The opponent drives the player's car (the default field).
             game += &format!("subroute = {}\n", c.subroute);
             drive += &format!("laps = 1\nopponents = 1\n{field}");
+            AI
+        }
+        Kind::ProTouge => {
+            drive += &format!("discipline = pro_touge\nlaps = 1\nopponents = 1\n{field}");
             AI
         }
     };
@@ -742,6 +764,9 @@ impl Menu {
         let mut help = String::from(
             "Up/Down choose, Left/Right change, Select on Continue starts the event; Race Options follow.",
         );
+        if t.experimental {
+            help += " Experimental: the LMP1 prototypes still ground at speed.";
+        }
         if t.stand_in_cars {
             help += " The original's cars of this discipline are not ported yet: ported cars stand in.";
         }
@@ -814,7 +839,12 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         if menu.code() != Some(MENU_GO) {
             return Ok(menu.code().unwrap_or(1));
         }
-        let race = std::process::Command::new(&exe)
+        // Le Mans Series runs as its launcher does (experimental fields).
+        let mut race = std::process::Command::new(&exe);
+        if experimental(&dir) {
+            race.env("GRID_SERIES_EXPERIMENTAL", "1");
+        }
+        let race = race
             .args(&flags)
             .arg("--settings")
             .arg(dir.join(PROFILE))
@@ -824,6 +854,15 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
             return Ok(race.code().unwrap_or(1));
         }
     }
+}
+
+/// Whether the saved choice is an experimental event (Le Mans Series).
+#[cfg(not(target_os = "android"))]
+fn experimental(dir: &Path) -> bool {
+    let mut s = crate::settings::Settings::new();
+    std::fs::read_to_string(dir.join("settings.ini"))
+        .is_ok_and(|text| s.apply(text.trim_start_matches('\u{feff}'), dir).is_ok())
+        && saved(&s.event).key == "le_mans_series"
 }
 
 /// Android: the arguments of this start. A start after the menu's Continue
@@ -1248,6 +1287,7 @@ mod tests {
                 (None, Some("drift_battle"), _) => "drift_battle".into(),
                 (None, Some("drift_grand_prix"), _) => "drift_gp".into(),
                 (None, Some("drift_freestyle"), _) => "Free_Drift".into(),
+                (None, Some("pro_touge"), _) => "legal_touge".into(),
                 (None, _, _) if ini.route.as_deref() == Some(route::HARUNA) => "illegal_touge".into(),
                 (None, _, Some(_)) => "race".into(),
                 (None, _, None) => "time_trial".into(),
