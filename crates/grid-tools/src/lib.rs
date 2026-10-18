@@ -24,6 +24,8 @@ pub mod flashback;
 pub mod impact_diagnostic;
 pub mod install;
 pub mod lap_progress;
+pub mod parallel;
+pub mod perf;
 pub mod loose_parts;
 pub mod loose_wheel;
 pub mod private_parameters;

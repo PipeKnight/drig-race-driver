@@ -17,6 +17,11 @@ bevy = { version = "=0.19.1", default-features = false, features = ["3d", "ui_be
 name = "grid_android"
 crate-type = ["cdylib"]
 
+[features]
+# Per-system Chrome trace of a run (docs/PERFORMANCE.md): build with
+# `--features trace`, run with TRACE_CHROME=PATH.json. Rebuilds Bevy.
+trace = ["bevy/trace_chrome"]
+
 [[bin]]
 name = "grid-app"
 path = "src/main.rs"

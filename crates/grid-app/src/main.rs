@@ -31,6 +31,7 @@ mod free_look;
 mod geometry_ray;
 mod graphics;
 mod graphics_benchmark;
+mod perf_timing;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
@@ -2536,6 +2537,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
     }
+    perf_timing::install(&mut app);
     if graphics.track_grade {
         track_grade::install(&mut app);
     }
@@ -3169,6 +3171,7 @@ fn drive_tick(
     // The player's inputs for Flashback (logged, or given back when ticks run again).
     mut inputs: Option<ResMut<flashback::Inputs>>,
 ) {
+    let _tick_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DriveTick);
     // One queued gear edge per fixed tick, dropped when the tick does not run.
     let shift = shifts.pop();
     if driving.paused
@@ -3329,6 +3332,7 @@ fn drive_tick(
             }
             _ => 3,
         };
+        let ai_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::AiDrivers);
         // Race manager (catch-up, choreographer) before the AI update.
         if !held {
             use grid_tools::race::Status;
@@ -3384,6 +3388,7 @@ fn drive_tick(
                 )
             });
         }
+        drop(ai_timer);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
         let result = opponents.multi.tick(&all);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
