@@ -107,10 +107,56 @@ Speed and distance from onset, every 0.25 s (BA on):
 - The port is **not changed**: the evidence locates the gap but does not yet say which code
   writes the original's values.
 
+## Follow-up analysis (F377, offline)
+
+**The wheel constants come from the default car setup.** Columns 216–267 of `lac.csv` are the
+setup ranges (properties +0x40..+0x130). Their suspension subset is the setup consumer
+`9C32F0` that F077 already ported and verified exactly against 24 live cars
+(`grid_world::setup::prepare`, `cap_denominators`; docs/VEHICLE_UPDATE.md "Suspension setup
+ranges and constructor cap"). The runtime never calls it: the port builds the car with the
+verified constructor and stops there. The cap operand, body +0xED68, is the collision hull's
+lowest Y (0.103433; live block at body +0xED64 read 0.0042, 0.10343, 2.24166 = max Z, 0.91328
+= max X, …, −2.23788 = min Z) [V].
+
+A trial wiring (`Car::configure_default_setup` after `configure_handling`; patch kept as
+`local/driving/setup-F372/setup-wiring.patch`) makes all nine setup fields of every wheel equal
+to the live original at rest (+0x4, +0x4C 0.153433, +0x54, +0x5C, +0x60, +0x64 0.14, +0x68,
++0x70, +0x114) [V]. But:
+
+- braking is unchanged: BA on 76.231 m / 3.376 s (76.234 without), BA off 54.774 m [V];
+- the solo lap moves slightly (88.455 / 86.267 s against 88.420 / 86.282 s; output sha256
+  b88b3cd6…), the 12-car race completes [V];
+- three release asset tests fail on the changed trajectories: the assists matrix's
+  throttle-and-steer run hits a wall and returns "unsupported contact-group impact record"
+  (an existing port gap), the autopiloted Drift Battle lap does not finish within 12000 ticks,
+  and the deep fresh-mesh wall test no longer changes the damage RNG [V].
+
+So the wiring is **not pushed**; it needs those three cases resolved first (follow-up).
++0x140 (contact floor offset read by the contact-material stage) and +0xBC (a timer) remain
+unexplained.
+
+**Where the braking gap is.** Comparing every wheel field that switches on with the brake
+(12 rows after onset, BA on) [V]:
+
+| Field | Original | Port |
+|---|---|---|
+| +0x118 brake torque, rear / front | 1150 / 1850 | 1150 / 1850 |
+| +0x88 longitudinal tyre force, rear | −3719 | −3723 |
+| +0x88 longitudinal tyre force, front | **−6093** | **−5529** |
+
+Brake torque and the undriven rear axle agree; only the **driven front axle** delivers ~10 %
+less force for the same torque. [I] Something on the drivetrain side absorbs front brake torque
+in the port (engine inertia or clutch coupling while braking in gear). The shift timer +0x1974
+runs alike in both. Car +0x1980 differs (original ≈ 25.6 at rest, falling ≈ 1/s while driving;
+port 0); its use is unknown.
+
+The capture tool and the replay probe now also record the engine/drivetrain block car
++0x1840..+0x195F (RPM +0x1894, gear ratios), which the first capture lacked.
+
 ## Next
 
-1. Find the original's writer of wheel +0x4C/+0x64/+0x140/+0xBC (watch the fields on a fresh
-   race load, or search the set-up path), port it, and rerun this comparison (`brake_test` and
-   `grid-braking-replay`, Braking Assist on).
-2. Repeat both runs once more for repeatability, and at a second onset speed.
-3. Compare idle +E34 with a port run that starts at rest.
+1. One more live run (about 5 minutes of the owner's desktop): `brake_test` with Braking Assist
+   on, now capturing the engine block, to compare RPM and the drivetrain torque path while
+   braking; then fix the front-axle coupling if it is clear.
+2. Resolve the three cases the default-setup wiring exposes, then wire it (patch above).
+3. Repeat runs for repeatability and at a second onset speed; compare idle +E34 from rest.
