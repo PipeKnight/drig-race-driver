@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G114 — Begin opt-in per-car paint occlusion comparison (18 October 2026)
+
+G113source22363aa published to both main/graphics; guarded primary fast-forward preserved6364b328...dirty-provenance executable and owner note SHA. Graphics playable31e74b remains verified and installed. Next material step drafted: body-occlusion source-ambient/off (defaultoff), green-channel data-only extraction retaining full mips, per-car own livery/model staging, shared linear P8 upload, Car Body Paint only, opponent own-material override even on diffuse fallback. Original direct/reflected-light weighting is not reproduced; this is an authored PBR ambient-only adaptation for comparison.
+
+Synthetic channel/alpha/mip/corruption tests and model/livery isolation tests added, purchased-mask test checks every green mip. Four CPU tests pass0fail/0ignored after supplying GRID_GAME_ROOT; initial resource test failed only because first test shell lacked that variable (3synthetic tests already passed), both logs retained. New module formatted with Rustfmt1.99 after the semantic tests. GPU/Clippy acceptance pending, no new visual default or executable publication. First edit script matched three StartSequence parameters and stopped before writing main; corrected to the unique setup signature. Existing playables/Steam resources preserved, no new tool/owner action.
+
+
 ## G113 — Source numbers accepted through a full4K lap; graphics playable refreshed (18 October 2026)
 
 Repeated off/source6500tick native4K captures finish0errors, each one valid89.955257484s lap; four final physics/handling/deformation/lap lines equal excluding walltime. Final images inspected,01roof in saved quarter-turn orientation. Known nilUUID warning only. Private numbers-source-f381-full4k02-validation.json contains both image/log hashes and states. Prior600s timeout retained. Walltimes449.49/672.89s under changing CPU load do not establish performance. F381 source31e74b689b19/SHAbee2138a... is the verified executable.

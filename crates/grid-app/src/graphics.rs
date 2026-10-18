@@ -62,6 +62,8 @@ pub struct Settings {
     pub source_trees: bool,
     pub player_race_number: Option<grid_formats::car_decals::Number>,
     pub source_race_numbers: bool,
+    /// Source green mask adapted only to ambient PBR occlusion, default off.
+    pub source_body_occlusion: bool,
     /// Fixed photographic exposure; +1EV halves scene light before tonemapping.
     pub exposure_ev100: f32,
     /// Window-only material control; light lenses are a separate material.
@@ -121,6 +123,7 @@ impl Default for Settings {
             source_trees: false,
             player_race_number: None,
             source_race_numbers: false,
+            source_body_occlusion: false,
             exposure_ev100: 13.,
             window_roughness: 0.08,
             window_reflectance: 0.5,

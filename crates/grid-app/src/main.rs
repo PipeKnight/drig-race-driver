@@ -18,6 +18,7 @@ mod android_display;
 mod android_sensor;
 mod assists;
 mod body_damage;
+mod body_occlusion;
 mod camera;
 mod car_materials;
 mod car_numbers;
@@ -1571,6 +1572,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
                 };
             }
+            "--body-occlusion" => {
+                graphics.source_body_occlusion = match args.next().as_deref() {
+                    Some("source-ambient") => true,
+                    Some("off") => false,
+                    _ => return Err("--body-occlusion needs source-ambient or off".into()),
+                };
+            }
             "--numbers" => {
                 graphics.source_race_numbers = match args.next().as_deref() {
                     Some("source") => true, Some("off") => false,
@@ -1700,6 +1708,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--help" => {
+                println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
                     "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
                 );
@@ -2252,6 +2261,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             car_numbers::apply(&root, &player_car, &mut car, number)?;
         }
     }
+    let body_occlusion = if graphics.source_body_occlusion {
+        if !graphics.enhanced() { return Err("body occlusion pilot requires enhanced graphics".into()); }
+        body_occlusion::prepare(&car, &field)?
+    } else { body_occlusion::Prepared::default() };
     let mut orbit = if track {
         Orbit {
             yaw: -0.4,
@@ -2614,6 +2627,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.add_systems(Last, graphics_texture_state);
     }
     let exit = app
+        .insert_resource(body_occlusion)
         .insert_resource(field)
         .insert_resource(graphics)
         .insert_resource(car)
@@ -2678,6 +2692,7 @@ fn setup(
     mut scattering_media: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
     overrides: Option<Res<texture_overrides::Active>>,
     start: Option<Res<StartSequence>>,
+    mut body_occlusion: ResMut<body_occlusion::Prepared>,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -2687,6 +2702,8 @@ fn setup(
         adapter.driver_info,
         device.features()
     );
+    let body_occlusion_handles = body_occlusion::upload(&mut body_occlusion, &mut images, graphics.sampler(false));
+    let mut occluded_liveries = BTreeMap::new();
     let mut texture_handles = BTreeMap::new();
     for (name, dds) in &car.textures {
         let image = texture_upload::image(
@@ -2817,6 +2834,9 @@ fn setup(
                     },
                     ..default()
                 };
+                if name == "Car Body Paint" && (!track || part_model(&part.material) == Some(0)) {
+                    material.occlusion_texture = body_occlusion_handles.get(&0).cloned();
+                }
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
                     && graphics.layered_car
@@ -2974,6 +2994,15 @@ fn setup(
                                     .clone()
                             },
                         );
+                    let opponent_material = if graphics.source_body_occlusion
+                        && part.material.rsplit('/').next() == Some("Car Body Paint")
+                    {
+                        occluded_liveries.entry((car, part.material.clone())).or_insert_with(|| {
+                            let mut own = materials.get(&opponent_material).expect("opponent material").clone();
+                            own.occlusion_texture = body_occlusion_handles.get(&car).cloned();
+                            materials.add(own)
+                        }).clone()
+                    } else { opponent_material };
                     let mut opponent = commands.spawn((
                         Name::new(format!("opponent{car} {}", part.name)),
                         Mesh3d(opponent_mesh),
