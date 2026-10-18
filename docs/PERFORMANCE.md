@@ -540,6 +540,77 @@ were byte-identical, so it did not show there. Passing their centres to `sort_ce
 restore the order they had before F392. That could change today's picture compared with
 main, so it needs its own before/after check.
 
+## Phone bisection (FNNN)
+
+Why: F392 cut the desktop render thread from 7.3 to 5.5 ms on the phone's preset, but the
+owner's phone stayed at about 30 FPS [V, APK dca690b773e4, logs
+`log-20261018-093253.txt` and `-093621.txt`, kept privately]:
+- render 2308 × 1080, `display_hz` 120;
+- mean 36 FPS (Fifo, then AutoVsync at 60/90 Hz) and 31 FPS (AutoNoVsync / Fifo at 120 Hz),
+  ranging 22–65.
+
+The front end with nothing simulating (`sim_ticks_per_s=0.0`) already sits at 30.5 FPS:
+`avg_ms` 32.8 with `max_ms` exactly 33.33. A 33.33 ms ceiling is four refreshes at 120 Hz (or
+two at 60 Hz), so the frame's work takes longer than 25 ms (or 16.7 ms) and less than
+33.3 ms [I]. AutoNoVsync gave the same numbers, so the driver probably falls back to Fifo
+[I]. The render height made no difference between 1280 × 800 and 2308 × 1080.
+The desktop cannot show what the phone spends this time on, so the phone has to report it
+itself. The owner only sideloads APKs and sends logs; there is no adb.
+
+### Performance test screen (normal APK)
+
+Race Options → **Performance test** (AUTHORED diagnostics; `crates/grid-app/src/perf_test.rs`).
+Each row turns one part of the frame off, live, and is never saved, so the next start is the
+normal game:
+
+| Row | Off means |
+|---|---|
+| Shadows | every directional light stops rendering shadow maps |
+| Foliage | camera-facing tree and bush billboards (`source_trees::Facing`) hidden |
+| Ground cover | the `ground cover` mesh hidden |
+| Smoke, debris, skid marks | tyre smoke groups, `wheel debris *` and `skid marks` hidden |
+| HUD | race HUD parts and the damage panel hidden, the OSD scene's camera inactive (touch zones stay) |
+| Sample logging | the periodic `drive_sample`/`drive_*_sample` "tick" reports skipped (events such as pause, reset and exit stay) |
+| Whole scene | Off: every mesh except the player's car hidden (prop pieces that their own system shows again may stay) |
+| Auto cycle | On: steps through normal → each part alone → all six off → car only → normal, 8 s each |
+
+- Every `frame_stats` line ends with `perf_test=normal` or `perf_test=off:shadows+hud…` once
+  the screen has been used (or `GRID_PERF_TEST` is set). Each change logs
+  `perf_test version=1 event=apply switches=…`, and each Auto cycle step logs `event=step`.
+  One run therefore gives a table per switch.
+- The switches change only visibility, shadow maps, a camera's activity and log lines; the
+  simulation is untouched.
+- Desktop: `GRID_PERF_TEST=auto` or a list such as `GRID_PERF_TEST=shadows,foliage`.
+  Checked on the desktop [V]: the auto cycle logs ten steps and labels every `frame_stats`
+  line. Renders with everything off show no shadows, HUD or grass, and car-only shows the
+  car alone.
+
+### Per-system profile (separate profiling APK)
+
+grid-app feature `profile` (`crates/grid-app/src/span_profile.rs`) turns on Bevy 0.19.1's
+`trace` spans and adds a tracing layer through `LogPlugin::custom_layer`. The layer adds up
+each span's inclusive and exclusive time per name and thread. Every 10 s
+(`GRID_PROFILE_SECONDS`) the app logs:
+- `profile_window` (frames, FPS, `perf_test` label);
+- `profile_thread`: busy ms per frame of the 12 busiest threads (main, render, compute pool…);
+- `profile_span`: the top 25 systems and work spans by exclusive ms per frame;
+- `profile_schedule`: the top 12 schedules and wrappers by inclusive ms per frame (Main,
+  Render, Extract…).
+
+The tables are text in the normal log file, not a 1.5 GB chrome trace. Spans cost time, so
+this lives only in a separate APK (`tools/build_android.ps1 -BundleData -Profile`, named
+`…-bundled-PRIVATE-profile-debug.apk`); the normal APK has no spans.
+
+### Log writes
+
+On Android every log line used to be a separate unbuffered write to the shared-storage file,
+besides the logcat call. That is about 220 lines/s while driving (`drive_sample`,
+`drive_lap_sample`, `drive_handling_sample`, `drive_deformation_sample` about 49/s each, plus
+`drive_input`), all on the `grid-logcat` thread that reads the stdout pipe. Now the file is
+written through a 64 KiB buffer, flushed when a line finds the last flush at least 0.5 s old,
+and at once for error lines (panics, fatal screens). On an abrupt kill up to 0.5 s of lines
+can be lost. The game's main thread only writes to the pipe, unchanged.
+
 ## Follow-ups (not done here)
 
 1. **Mesh re-uploads every frame.** Done in F392 for foliage, ground cover, wheel debris

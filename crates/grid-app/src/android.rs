@@ -9,7 +9,7 @@
 
 use std::ffi::{CString, c_char, c_int};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,7 +27,11 @@ unsafe extern "C" {
 const ANDROID_LOG_INFO: c_int = 4;
 const ANDROID_LOG_ERROR: c_int = 6;
 
-static LOG_FILE: OnceLock<Mutex<File>> = OnceLock::new();
+/// The log file, buffered (P12: about 220 lines per second while driving went
+/// to the shared storage one write each), with the time of its last flush.
+static LOG_FILE: OnceLock<Mutex<(BufWriter<File>, Instant)>> = OnceLock::new();
+/// Longest a line waits in the buffer; errors and panics are written at once.
+const FLUSH_SECONDS: f64 = 0.5;
 static STARTED: OnceLock<Instant> = OnceLock::new();
 static FATAL_SHOWN: AtomicBool = AtomicBool::new(false);
 
@@ -43,9 +47,15 @@ pub fn log(priority_error: bool, text: &str) {
     if let Some(file) = LOG_FILE.get() {
         let seconds = STARTED.get().map_or(0.0, |t| t.elapsed().as_secs_f64());
         let mark = if priority_error { "E" } else { " " };
-        if let Ok(mut file) = file.lock() {
-            // Unbuffered: every line reaches the file even if the process aborts.
+        if let Ok(mut guard) = file.lock() {
+            let (file, flushed) = &mut *guard;
             let _ = writeln!(file, "[{seconds:9.3}] {mark} {text}");
+            // Errors (panics, fatal screens) reach the file at once; the rest
+            // at most FLUSH_SECONDS later.
+            if priority_error || flushed.elapsed().as_secs_f64() >= FLUSH_SECONDS {
+                let _ = file.flush();
+                *flushed = Instant::now();
+            }
         }
     }
 }
@@ -56,7 +66,10 @@ pub fn init() {
     STARTED.get_or_init(Instant::now);
     match with_activity(|env, activity| env.call_method(activity, "openLogFile", "()I", &[])?.i()) {
         // SAFETY: Java detached the descriptor and handed its ownership over.
-        Some(fd) if fd >= 0 => drop(LOG_FILE.set(Mutex::new(unsafe { File::from_raw_fd(fd) }))),
+        Some(fd) if fd >= 0 => drop(LOG_FILE.set(Mutex::new((
+            BufWriter::with_capacity(64 * 1024, unsafe { File::from_raw_fd(fd) }),
+            Instant::now(),
+        )))),
         _ => log(true, "log file: Download/GRID-Reassembly could not be opened; logcat only"),
     }
     log(

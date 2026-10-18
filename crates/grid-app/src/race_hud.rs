@@ -201,7 +201,7 @@ struct HudState {
 }
 
 #[derive(Component)]
-enum Part {
+pub(crate) enum Part {
     LapGroup,
     LapText,
     PositionGroup,

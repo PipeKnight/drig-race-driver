@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use grid_tools::source_vehicle::assists::mechanical_damage::{ICONS, indicators};
 
 #[derive(Component)]
-struct DamagePanel;
+pub(crate) struct DamagePanel;
 
 #[derive(Component)]
 struct DamageIcon(usize);

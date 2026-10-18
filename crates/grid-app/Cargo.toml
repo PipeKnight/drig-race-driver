@@ -21,6 +21,9 @@ crate-type = ["cdylib"]
 # Per-system Chrome trace of a run (docs/PERFORMANCE.md): build with
 # `--features trace`, run with TRACE_CHROME=PATH.json. Rebuilds Bevy.
 trace = ["bevy/trace_chrome"]
+# On-device per-system profile tables in the log (docs/PERFORMANCE.md "Phone
+# bisection"); a separate APK, since Bevy's spans cost time. Rebuilds Bevy.
+profile = ["bevy/trace", "bevy/debug"]
 
 [[bin]]
 name = "grid-app"

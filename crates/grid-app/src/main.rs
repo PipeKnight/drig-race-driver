@@ -33,7 +33,10 @@ mod free_look;
 mod geometry_ray;
 mod graphics;
 mod graphics_benchmark;
+mod perf_test;
 mod perf_timing;
+#[cfg(feature = "profile")]
+mod span_profile;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
@@ -235,6 +238,10 @@ struct OpponentPart {
 }
 impl Driving {
     fn report(&self, event: &str, controls: grid_tools::source_vehicle::Controls) {
+        // Performance test: Sample logging off drops the periodic samples only.
+        if event == "tick" && perf_test::quiet_samples() {
+            return;
+        }
         let b = &self.runtime.state.car.owner.vehicle;
         let brakes: [f32; 4] = std::array::from_fn(|i| {
             f32::from_bits(self.runtime.state.car.frame.view[0x28 / 4 + i])
@@ -2376,7 +2383,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 (graphics.width, graphics.height),
             )?;
         }
-        app.add_plugins(
+        app.add_plugins(with_profile(
             DefaultPlugins
                 .set(WindowPlugin {
                     primary_window: None,
@@ -2385,7 +2392,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .disable::<WinitPlugin>()
                 .disable::<bevy::audio::AudioPlugin>(),
-        )
+        ))
         .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
             1.0 / 60.0,
         )))
@@ -2413,7 +2420,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("capture_render_clock virtual_fps={fps} measured_display_fps=false");
         }
     } else {
-        app.add_plugins(
+        app.add_plugins(with_profile(
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     title: if drive {
@@ -2430,7 +2437,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }),
                 ..default()
             }),
-        );
+        ));
         if !drive {
             app.add_systems(Update, update_orbit);
         }
@@ -2515,6 +2522,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 touch_controls::install(&mut app, tilt);
             }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
+            perf_test::install(&mut app);
             // The Race Options front end with Driver Aids before the race
             // (docs/DRIVER_AIDS.md); not for scripted runs.
             if profile.front_end != Some(false)
@@ -2621,6 +2629,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         graphics_benchmark::install(&mut app, frames);
     }
     perf_timing::install(&mut app);
+    #[cfg(feature = "profile")]
+    span_profile::install(&mut app);
     mesh_stream::install(&mut app);
     if graphics.track_grade {
         track_grade::install(&mut app);
@@ -4324,6 +4334,17 @@ fn update_orbit(
         exit.write(AppExit::Success);
     }
     **camera = camera_transform(&orbit);
+}
+
+/// Bevy's plugins; with the `profile` feature its log plugin also carries the
+/// per-system span profile (docs/PERFORMANCE.md "Phone bisection").
+fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGroupBuilder {
+    #[cfg(feature = "profile")]
+    let plugins = plugins.set(bevy::log::LogPlugin {
+        custom_layer: |_| Some(Box::new(span_profile::SpanProfile)),
+        ..default()
+    });
+    plugins
 }
 
 #[cfg(test)]

@@ -29,18 +29,27 @@ pub enum Screen {
     RaceOptions,
     DriverAids,
     Video,
+    PerfTest,
 }
 
 /// Race Options items [D `event_options` itemflow, the ported subset].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item {
+    PerfTest,
     DriverAids,
     Video,
     Race,
 }
 /// Video is AUTHORED (F390); its strings are not in the game's language file,
-/// so the labels fall back to the plain English ids.
-const ITEMS: [(Item, &str, &str); 3] = [
+/// so the labels fall back to the plain English ids. Performance test (AUTHORED
+/// diagnostics, `perf_test`) comes first, so Go To Race stays the default and
+/// last item.
+const ITEMS: [(Item, &str, &str); 4] = [
+    (
+        Item::PerfTest,
+        "Performance test",
+        "Diagnostics: turn parts of the frame off live; the FPS log line names them (not saved).",
+    ),
     (
         Item::DriverAids,
         "event_options_driver_aids_button_title",
@@ -86,6 +95,34 @@ const AIDS: [(Aid, &str, &str); 4] = [
         Aid::Steering,
         "driver_aids_steering_assist_toggle_title",
         "help_info_driver_aids_steering_toggle",
+    ),
+];
+
+/// Performance test rows (AUTHORED diagnostics, `perf_test`): On = that part is
+/// drawn, as in the normal game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PerfRow {
+    Shadows,
+    Foliage,
+    Ground,
+    Effects,
+    Hud,
+    Samples,
+    Empty,
+    Auto,
+}
+const PERF_ROWS: [(PerfRow, &str, &str); 8] = [
+    (PerfRow::Shadows, "Shadows", "Shadow casting of every mesh (the sun keeps its shadow maps, empty)."),
+    (PerfRow::Foliage, "Foliage", "Camera-facing tree and bush billboards."),
+    (PerfRow::Ground, "Ground cover", "Grass and ground detail sprites."),
+    (PerfRow::Effects, "Smoke, debris, skid marks", "Tyre smoke, wheel debris and skid marks."),
+    (PerfRow::Hud, "HUD", "The race HUD and its OSD camera (touch zones stay)."),
+    (PerfRow::Samples, "Sample logging", "The periodic drive_*_sample log lines."),
+    (PerfRow::Empty, "Whole scene", "Off: only your car is drawn."),
+    (
+        PerfRow::Auto,
+        "Auto cycle",
+        "On: steps through every switch, 8 s each, and logs each step.",
     ),
 ];
 
@@ -269,6 +306,9 @@ pub struct FrontEnd {
     pub video: Video,
     video_undo: Video,
     video_saved: Video,
+    /// Performance test switches (live, never saved).
+    pub perf: crate::perf_test::Switches,
+    pub perf_auto: bool,
     /// Where the choice is saved (`<data dir>/settings.ini`).
     pub settings: std::path::PathBuf,
 }
@@ -283,6 +323,8 @@ impl FrontEnd {
             video,
             video_undo: video,
             video_saved: video,
+            perf: Default::default(),
+            perf_auto: false,
             row: 0,
             values,
             undo: values,
@@ -333,6 +375,10 @@ impl FrontEnd {
                             self.row = 0;
                             self.video_undo = self.video;
                         }
+                        Item::PerfTest => {
+                            self.screen = Screen::PerfTest;
+                            self.row = 0;
+                        }
                         Item::Race => {
                             self.open = false;
                             return Some(Command::Race(self.values));
@@ -361,6 +407,36 @@ impl FrontEnd {
                         self.saved = self.values;
                         return Some(Command::Save(self.values));
                     }
+                }
+                None
+            }
+            Screen::PerfTest => {
+                let n = PERF_ROWS.len();
+                if nav.up {
+                    self.row = (self.row + n - 1) % n;
+                }
+                if nav.down {
+                    self.row = (self.row + 1) % n;
+                }
+                if nav.left || nav.right || nav.select {
+                    let p = &mut self.perf;
+                    match PERF_ROWS[self.row].0 {
+                        PerfRow::Shadows => p.shadows = !p.shadows,
+                        PerfRow::Foliage => p.foliage = !p.foliage,
+                        PerfRow::Ground => p.ground = !p.ground,
+                        PerfRow::Effects => p.effects = !p.effects,
+                        PerfRow::Hud => p.hud = !p.hud,
+                        PerfRow::Samples => p.samples = !p.samples,
+                        PerfRow::Empty => p.empty = !p.empty,
+                        PerfRow::Auto => self.perf_auto = !self.perf_auto,
+                    }
+                }
+                if nav.button3 {
+                    self.perf = Default::default();
+                    self.perf_auto = false;
+                }
+                if nav.back {
+                    self.screen = Screen::RaceOptions;
                 }
                 None
             }
@@ -443,6 +519,33 @@ impl FrontEnd {
                     ),
                 }
             }
+            Screen::PerfTest => View {
+                title: "Performance test".into(),
+                subtitle: PERF_ROWS[self.row].2.into(),
+                rows: PERF_ROWS
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (row, name, _))| {
+                        let p = &self.perf;
+                        let off = match row {
+                            PerfRow::Shadows => p.shadows,
+                            PerfRow::Foliage => p.foliage,
+                            PerfRow::Ground => p.ground,
+                            PerfRow::Effects => p.effects,
+                            PerfRow::Hud => p.hud,
+                            PerfRow::Samples => p.samples,
+                            PerfRow::Empty => p.empty,
+                            PerfRow::Auto => !self.perf_auto,
+                        };
+                        let value = if off { "Off" } else { "On" };
+                        ((*name).into(), value.into(), true, i == self.row)
+                    })
+                    .collect(),
+                help: format!(
+                    "Left/Right: change    Esc/B: {}    Ctrl/X: reset",
+                    l("default_buttontext_back")
+                ),
+            },
             Screen::Video => View {
                 title: "Video".into(),
                 subtitle: VIDEO_ROWS[self.row].2.into(),
@@ -475,7 +578,8 @@ pub fn install(app: &mut App, values: Assists, video: Video) {
                 .before(crate::drive_actions),
         )
         .add_systems(Update, (spawn, present).chain().after(update))
-        .add_systems(Update, apply_video.after(update));
+        .add_systems(Update, apply_video.after(update))
+        .add_systems(Update, apply_perf.after(update));
     log_line!("drive_front_end version=1 event=open assists={values}");
 }
 
@@ -542,6 +646,27 @@ pub fn update(
 /// the render cap, the present mode and (Android) the refresh-rate hint.
 /// Frame latency waits for the next start (wgpu reads it only when the
 /// swapchain is created).
+/// The Performance test screen's switches reach `perf_test` (live; never saved).
+fn apply_perf(
+    front: Res<FrontEnd>,
+    mut last: Local<Option<(crate::perf_test::Switches, bool)>>,
+    test: Option<ResMut<crate::perf_test::PerfTest>>,
+) {
+    let now = (front.perf, front.perf_auto);
+    let Some(before) = last.replace(now) else {
+        return;
+    };
+    if before == now {
+        return;
+    }
+    if let Some(mut test) = test {
+        test.auto = front.perf_auto;
+        if !test.auto {
+            test.switches = front.perf;
+        }
+    }
+}
+
 fn apply_video(
     front: Res<FrontEnd>,
     mut applied: Local<Option<Video>>,
@@ -734,14 +859,16 @@ mod tests {
                 .map(|r| (r.0.as_str(), r.3))
                 .collect::<Vec<_>>(),
             [
+                ("Performance test", false),
                 ("event_options_driver_aids_button_title", false),
                 ("Video", false),
                 ("event_options_exit_to_race_button_title", true)
             ]
         );
-        // Back does nothing here; Up wraps to Driver Assists.
+        // Back does nothing here; Down wraps to Performance test, then Driver Assists.
         assert_eq!(front.step(press(|n| n.back = true)), None);
         assert!(front.open);
+        front.step(press(|n| n.down = true));
         front.step(press(|n| n.down = true));
         assert_eq!(front.step(press(|n| n.select = true)), None);
         assert_eq!(front.screen, Screen::DriverAids);
@@ -858,6 +985,39 @@ mod tests {
             assert_eq!(digest(&app), expected);
             let _ = std::fs::remove_dir_all(&dir);
         });
+    }
+
+    #[test]
+    fn performance_test_screen_toggles_live_and_resets() {
+        let mut front = FrontEnd::new(Assists::default(), video());
+        // Race -> Down wraps to Performance test.
+        front.step(press(|n| n.down = true));
+        assert_eq!(front.step(press(|n| n.select = true)), None);
+        assert_eq!(front.screen, Screen::PerfTest);
+        let view = front.view(&Labels::default());
+        assert_eq!(view.title, "Performance test");
+        assert_eq!(view.rows.len(), 8);
+        assert!(view.rows[..7].iter().all(|r| r.1 == "On"));
+        assert_eq!(view.rows[7].1, "Off");
+        // Shadows off, then HUD (row 5) off; nothing is saved.
+        front.step(press(|n| n.right = true));
+        for _ in 0..4 {
+            front.step(press(|n| n.down = true));
+        }
+        front.step(press(|n| n.left = true));
+        assert_eq!(front.perf.label(), "off:shadows+hud");
+        // Auto cycle is the last row; Up wraps from the first.
+        for _ in 0..5 {
+            front.step(press(|n| n.up = true));
+        }
+        front.step(press(|n| n.right = true));
+        assert!(front.perf_auto);
+        // Ctrl/X resets everything; Back returns without a command.
+        front.step(press(|n| n.button3 = true));
+        assert_eq!(front.perf, crate::perf_test::Switches::default());
+        assert!(!front.perf_auto);
+        assert_eq!(front.step(press(|n| n.back = true)), None);
+        assert_eq!(front.screen, Screen::RaceOptions);
     }
 
     #[test]

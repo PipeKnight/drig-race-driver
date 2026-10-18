@@ -25,6 +25,9 @@
 param(
     [string]$Tools = 'C:\Users\debros\Tools',
     [switch]$BundleData,
+    # -Profile: grid-app feature `profile` (on-device per-system tables in the
+    # log, docs/PERFORMANCE.md "Phone bisection"); the APK name ends in -profile.
+    [switch]$Profile,
     [string]$GameRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Grid'
 )
 $ErrorActionPreference = 'Stop'
@@ -99,7 +102,8 @@ try {
     $jni = Join-Path $root 'android\app\build\rust-jniLibs'
     if (Test-Path -LiteralPath $jni) { Remove-Item -LiteralPath $jni -Recurse -Force }
     $started = Get-Date
-    & cargo ndk -t arm64-v8a -P 31 -o $jni build --release --lib -p grid-app
+    $features = if ($Profile) { @('--features', 'profile') } else { @() }
+    & cargo ndk -t arm64-v8a -P 31 -o $jni build --release --lib -p grid-app @features
     if ($LASTEXITCODE -ne 0) { throw 'cargo ndk build failed' }
     $so = Join-Path $jni 'arm64-v8a\libgrid_android.so'
     if (!(Test-Path -LiteralPath $so)) { throw "cargo ndk did not produce $so" }
@@ -112,7 +116,8 @@ try {
     $apk = Join-Path $root 'android\app\build\outputs\apk\debug\app-debug.apk'
     $outDir = Join-Path $root 'local\android\apk'
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-    $name = if ($bundle) { "grid-$($env:GRID_BUILD_REVISION)-bundled-PRIVATE-debug.apk" } else { "grid-$($env:GRID_BUILD_REVISION)-debug.apk" }
+    $variant = if ($Profile) { '-profile' } else { '' }
+    $name = if ($bundle) { "grid-$($env:GRID_BUILD_REVISION)-bundled-PRIVATE$variant-debug.apk" } else { "grid-$($env:GRID_BUILD_REVISION)$variant-debug.apk" }
     $out = Join-Path $outDir $name
     Copy-Item -LiteralPath $apk -Destination $out -Force
     $manifest = [ordered]@{
@@ -125,6 +130,7 @@ try {
         so_sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $so).Hash.ToLower()
         so_bytes = (Get-Item -LiteralPath $so).Length
         bundled_data = $bundle
+        profile = [bool]$Profile
         rustc = (& rustc --version)
         ndk = $ndk
         gradle = $gradle

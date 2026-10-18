@@ -176,8 +176,12 @@ fn update(
         format!(" render={}x{} screen={}x{}", r.x, r.y, s.x, s.y)
     });
     println!(
-        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} frames={} sim_ticks_per_s={rate}{res}",
-        stats.fps, stats.mean_ms, stats.worst_ms, stats.frames
+        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} frames={} sim_ticks_per_s={rate}{res}{}",
+        stats.fps,
+        stats.mean_ms,
+        stats.worst_ms,
+        stats.frames,
+        crate::perf_test::stats_suffix()
     );
     for (mut t, _) in &mut text {
         t.0 = match sizes {

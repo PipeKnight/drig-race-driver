@@ -33,6 +33,13 @@ pub(crate) struct TyreSmoke {
     frames: u64,
 }
 
+impl TyreSmoke {
+    /// The smoke group meshes (Performance test, `perf_test`).
+    pub(crate) fn mesh_handles(&self) -> &[Handle<Mesh>] {
+        &self.meshes
+    }
+}
+
 pub(crate) fn install(app: &mut App, root: &std::path::Path) {
     let loaded = Library::load(root).and_then(|library| {
         let textures = smoke::load_textures(root, &library.texture_names())?;
