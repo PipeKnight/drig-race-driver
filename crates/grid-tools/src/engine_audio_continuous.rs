@@ -30,6 +30,8 @@ pub struct Bank {
     maximum: f32,
     idle: f32,
     trims: [f32; 2],
+    /// carsetup EngineBay and Exhaust emitter offsets in the car frame.
+    pub emitters: [[f32; 3]; 2],
 }
 fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
@@ -123,6 +125,7 @@ impl Bank {
             maximum,
             idle,
             trims: [setup.trims[1], setup.trims[2]],
+            emitters: [setup.offsets[0], setup.offsets[1]],
         }))
     }
 }
@@ -148,9 +151,15 @@ pub struct Mixer {
     remaining: usize,
     generation: Option<u32>,
     gain: f32,
+    /// Group levels in dB (engine, exhaust) added at the backend (A23B70):
+    /// group mix plus distance; `-inf` silences. Default: Normal mode, Chase
+    /// camera, PC platform (`audio_mix::Table::group_db`).
+    pub bus_db: [f32; 2],
     pub diagnostics: Diagnostics,
     pub failure: Option<&'static str>,
 }
+/// Normal/Chase/PC levels of the Engine and Exhaust groups.
+pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
 impl Mixer {
     pub fn new(bank: Arc<Bank>) -> Self {
         let mut result = Self {
@@ -161,6 +170,7 @@ impl Mixer {
             remaining: 0,
             generation: None,
             gain: 0.,
+            bus_db: CHASE_BUS_DB,
             diagnostics: Diagnostics::default(),
             failure: None,
         };
@@ -235,13 +245,8 @@ impl Mixer {
             cursor.step = f64::from((layer.rate as f32 * f(&self.voices[slot], 0x18) + 0.5) as u32)
                 / f64::from(RATE);
             let db = f(&self.voices[slot], 0x14);
-            // Observed Chase routing offsets, not a ported general bus/spatial rule.
-            // The captured floor voices are silent at the backend, not -48dB PCM.
-            cursor.gain = if db <= -48. {
-                0.
-            } else {
-                10_f32.powf((db - if slot / 3 % 2 == 0 { 14. } else { 7. }) / 20.)
-            };
+            // Backend level (A23B70): voice + group, silent at or below the floor.
+            cursor.gain = crate::audio_mix::backend_gain(db, self.bus_db[slot / 3 % 2], Some(0.));
         }
         self.diagnostics.pair_restarts += commands.len() as u64 / 2;
         for command in commands {
@@ -316,6 +321,7 @@ mod tests {
             maximum: 800.,
             idle: 240.,
             trims: [0.; 2],
+            emitters: [[0., 0., 4.], [0., 0., -4.]],
         })
     }
     #[test]

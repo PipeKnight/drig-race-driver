@@ -107,7 +107,8 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
   line.
 - **Options**: the standard screen, or the wheel screen for `device=wheel`. There is no force
   feedback in the prototype, so the `_ffb` screen is not used.
-  - Effects Volume scales the engine and tyre sound (`AudioSink` volume).
+  - Effects Volume trims the engine and tyre groups in dB like the original (4124A0:
+    -24·(1-v), silent below 10 %; F422, docs/AUDIO_RESEARCH.md).
   - Lap & Times, Race Position, Mini Map and Dials hide those HUD groups (docs/RACE_HUD.md). Speed
     Unit switches the HUD between km/h and mph.
   - Advanced recalibrates every steering, accelerate and brake binding live

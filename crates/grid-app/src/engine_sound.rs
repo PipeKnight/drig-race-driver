@@ -4,8 +4,9 @@ use bevy::{
     prelude::*,
 };
 use grid_tools::{
+    audio_mix::{self, Camera, Table},
     engine_audio::{Control, RATE},
-    engine_audio_continuous::{Bank as EngineBank, Mixer},
+    engine_audio_continuous::{Bank as EngineBank, CHASE_BUS_DB, Mixer},
 };
 use std::{
     sync::{
@@ -18,6 +19,10 @@ use std::{
 #[derive(Resource)]
 pub(crate) struct EngineSound {
     mailbox: Arc<AtomicU64>,
+    /// Engine/exhaust group levels in dB for the audio thread (`pack_bus`).
+    bus: Arc<AtomicU64>,
+    /// The original group mix (`audio/GroupModeVolumes.bin`).
+    pub(crate) table: Option<Arc<Table>>,
     failure: Arc<AtomicU32>,
     bank: Arc<EngineBank>,
     /// One bank per field car model (`Field::models`); the player's is 0.
@@ -31,6 +36,8 @@ impl EngineSound {
     pub(crate) fn with_models(banks: Vec<Arc<EngineBank>>) -> Self {
         Self {
             mailbox: Arc::new(AtomicU64::new(0)),
+            bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
+            table: None,
             failure: Arc::new(AtomicU32::new(0)),
             bank: banks[0].clone(),
             banks,
@@ -55,22 +62,51 @@ impl EngineSound {
 pub(crate) struct OpponentEngine {
     car: usize,
     mailbox: Arc<AtomicU64>,
+    bus: Arc<AtomicU64>,
+    model: usize,
 }
-/// AUTHORED opponent attenuation (the original 3D audio model is not
-/// recovered): gain relative to the player's engine, full within the
-/// reference distance, then inversely proportional to distance.
-const OPPONENT_GAIN: f32 = 0.6;
-const OPPONENT_REFERENCE: f32 = 10.;
+/// audioVarieties presets `Engine`/`Exhaust`: min/max distance in metres.
+const ENGINE_DISTANCE: (f32, f32) = (10., 175.);
+
+pub(crate) fn pack_bus(db: [f32; 2]) -> u64 {
+    u64::from(db[0].to_bits()) | (u64::from(db[1].to_bits()) << 32)
+}
+fn unpack_bus(word: u64) -> [f32; 2] {
+    [
+        f32::from_bits(word as u32),
+        f32::from_bits((word >> 32) as u32),
+    ]
+}
+/// Engine and exhaust group levels of one car: the group mix of its groups
+/// (Engine/Exhaust for the player, AI for opponents, 4223D0) plus each
+/// emitter's distance term (A23B70); `-inf` beyond the maximum distance.
+pub(crate) fn bus_levels(
+    table: Option<&Table>,
+    camera: Camera,
+    groups: [usize; 2],
+    trim: f32,
+    distances: [f32; 2],
+) -> [f32; 2] {
+    std::array::from_fn(|k| {
+        let mix = table.map_or(CHASE_BUS_DB[k], |t| {
+            t.group_db(audio_mix::NORMAL, camera, groups[k], 0.)
+        }) + trim;
+        audio_mix::distance_db(distances[k], ENGINE_DISTANCE.0, ENGINE_DISTANCE.1)
+            .map_or(f32::NEG_INFINITY, |d| mix + d)
+    })
+}
 
 #[derive(Asset, TypePath)]
 pub(crate) struct EngineSource {
     bank: Arc<EngineBank>,
     mailbox: Arc<AtomicU64>,
+    bus: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
     mailbox: Arc<AtomicU64>,
+    bus: Arc<AtomicU64>,
     control: Control,
     count: usize,
     failure: Arc<AtomicU32>,
@@ -82,6 +118,7 @@ impl Iterator for Decoder {
         if self.count.is_multiple_of(64) {
             let generation = self.control.generation;
             self.control = Control::unpack(self.mailbox.load(Ordering::Relaxed));
+            self.mixer.bus_db = unpack_bus(self.bus.load(Ordering::Relaxed));
             if generation != self.control.generation {
                 self.reported_failure = false;
             }
@@ -115,6 +152,7 @@ impl Decodable for EngineSource {
         Decoder {
             mixer: Mixer::new(self.bank.clone()),
             mailbox: self.mailbox.clone(),
+            bus: self.bus.clone(),
             control: Control::default(),
             count: 0,
             failure: self.failure.clone(),
@@ -123,9 +161,11 @@ impl Decodable for EngineSource {
     }
 }
 /// `banks` holds one bank per field car model, the player's first.
-pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>) {
+pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<Arc<Table>>) {
+    let mut sound = EngineSound::with_models(banks);
+    sound.table = table;
     app.add_audio_source::<EngineSource>()
-        .insert_resource(EngineSound::with_models(banks))
+        .insert_resource(sound)
         .add_systems(Startup, start)
         .add_systems(Update, update.after(super::drive_present));
 }
@@ -139,6 +179,7 @@ fn start(
     let handle = assets.add(EngineSource {
         bank: sound.bank.clone(),
         mailbox: sound.mailbox.clone(),
+        bus: sound.bus.clone(),
         failure: sound.failure.clone(),
     });
     commands.spawn(AudioPlayer(handle));
@@ -148,52 +189,98 @@ fn start(
         .map_or(0, |o| o.multi.cars.len());
     for car in 1..cars {
         let mailbox = Arc::new(AtomicU64::new(0));
+        let bus = Arc::new(AtomicU64::new(pack_bus([f32::NEG_INFINITY; 2])));
         // Each opponent sounds like its own car model.
         let model = field
             .as_ref()
             .and_then(|f| f.car_model.get(car).copied())
+            .filter(|&m| m < sound.banks.len())
             .unwrap_or(0);
         let handle = assets.add(EngineSource {
-            bank: sound.banks.get(model).unwrap_or(&sound.bank).clone(),
+            bank: sound.banks[model].clone(),
             mailbox: mailbox.clone(),
+            bus: bus.clone(),
             failure: sound.failure.clone(),
         });
         commands.spawn((
             AudioPlayer(handle),
-            PlaybackSettings::LOOP.with_volume(bevy::audio::Volume::Linear(0.)),
-            OpponentEngine { car, mailbox },
+            PlaybackSettings::LOOP,
+            OpponentEngine {
+                car,
+                mailbox,
+                bus,
+                model,
+            },
         ));
     }
     if cars > 1 {
         println!(
-            "engine_audio version=2 event=opponents count={} attenuation=authored gain={OPPONENT_GAIN} reference_m={OPPONENT_REFERENCE}",
-            cars - 1
+            "engine_audio version=3 event=opponents count={} group=AI distance_m={}..{} law=floor*((d-min)/(max-min))^2",
+            cars - 1,
+            ENGINE_DISTANCE.0,
+            ENGINE_DISTANCE.1
         );
     }
     println!(
         "engine_audio version=2 event=queued rate={RATE} layers=dn_en,up_en,up_en_load,dn_ex,up_ex,up_ex_load voices=12 mixer=continuous_pair_scheduler fidelity=experimental mute_key=M"
     );
 }
+/// What the audio mix reads from the presentation: the event, the pause
+/// menu (Effects Volume), the shown view and the listener.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct Listening<'w, 's> {
+    pub(crate) trial: Option<Res<'w, super::time_trial::Trial>>,
+    menu: Option<Res<'w, super::pause_menu::PauseMenu>>,
+    cameras: Option<Res<'w, super::camera::Cameras>>,
+    listener: Query<'w, 's, &'static GlobalTransform, With<super::ViewerCamera>>,
+}
+impl Listening<'_, '_> {
+    /// Effects Volume as a group trim in dB (4124A0), not a linear gain.
+    pub(crate) fn trim(&self) -> f32 {
+        audio_mix::slider_db(self.menu.as_ref().map_or(1., |m| m.values.gain()))
+    }
+    pub(crate) fn camera(&self) -> Camera {
+        self.cameras
+            .as_ref()
+            .map_or(Camera::Chase, |c| c.audio_camera())
+    }
+    /// The listener is the rendered camera; `player` (its pose) without one.
+    pub(crate) fn ear(&self, player: &[f32; 16]) -> Vec3 {
+        self.listener
+            .single()
+            .map_or(Vec3::new(player[12], player[13], player[14]), |t| {
+                t.translation()
+            })
+    }
+}
 fn update(
     mut sound: ResMut<EngineSound>,
     driving: Res<super::Driving>,
     input: Res<ButtonInput<KeyCode>>,
-    mut sinks: Query<&mut AudioSink, (With<AudioPlayer<EngineSource>>, Without<OpponentEngine>)>,
+    sinks: Query<(), (With<AudioSink>, With<AudioPlayer<EngineSource>>)>,
     mut started: Local<bool>,
-    // The event and the pause menu (Effects Volume).
-    (trial, menu): (
-        Option<Res<super::time_trial::Trial>>,
-        Option<Res<super::pause_menu::PauseMenu>>,
-    ),
-    mut opponent_engines: Query<(&OpponentEngine, Option<&mut AudioSink>)>,
+    listening: Listening,
+    opponent_engines: Query<&OpponentEngine>,
 ) {
-    // Pause menu Effects Volume.
-    let gain = menu.map_or(1., |m| m.values.gain());
-    for mut sink in &mut sinks {
-        if sink.volume() != bevy::audio::Volume::Linear(gain) {
-            sink.set_volume(bevy::audio::Volume::Linear(gain));
-        }
-    }
+    let (trim, camera) = (listening.trim(), listening.camera());
+    let table = sound.table.clone();
+    let table = table.as_deref();
+    let ear = listening.ear(&driving.runtime.pose());
+    let player = Mat4::from_cols_array(&driving.runtime.pose());
+    let emitters: Vec<_> = sound.banks.iter().map(|b| b.emitters).collect();
+    let distances = |pose: Mat4, model: usize| {
+        emitters[model].map(|e| pose.transform_point3(Vec3::from_array(e)).distance(ear))
+    };
+    sound.bus.store(
+        pack_bus(bus_levels(
+            table,
+            camera,
+            [audio_mix::ENGINE, audio_mix::EXHAUST],
+            trim,
+            distances(player, 0),
+        )),
+        Ordering::Relaxed,
+    );
     if sound.failure.swap(0, Ordering::Relaxed) != 0 && !sound.muted {
         sound.muted = true;
         eprintln!("engine_audio version=2 event=decoder_failed muted=true reset_key=R");
@@ -209,15 +296,14 @@ fn update(
     let mut control = sound.control(&driving);
     // The engine idles and may be revved during the countdown; the vehicle no
     // longer ticks after the finish.
-    let finished = trial.is_some_and(|t| t.finished());
+    let finished = listening.trial.as_ref().is_some_and(|t| t.finished());
     if finished {
         control.audible = false;
     }
     sound.mailbox.store(control.pack(), Ordering::Relaxed);
     if let Some(opponents) = &driving.opponents {
-        let player = driving.runtime.pose();
         let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;
-        for (engine, sink) in &mut opponent_engines {
+        for engine in &opponent_engines {
             let car = &opponents.multi.cars[engine.car];
             let throttle = opponents
                 .throttles
@@ -235,16 +321,17 @@ fn update(
                 driving.segment as u32,
             );
             engine.mailbox.store(control.pack(), Ordering::Relaxed);
-            if let Some(mut sink) = sink {
-                let pose = car.pose();
-                let distance = ((pose[12] - player[12]).powi(2)
-                    + (pose[13] - player[13]).powi(2)
-                    + (pose[14] - player[14]).powi(2))
-                .sqrt();
-                let volume =
-                    gain * OPPONENT_GAIN * OPPONENT_REFERENCE / distance.max(OPPONENT_REFERENCE);
-                sink.set_volume(bevy::audio::Volume::Linear(volume));
-            }
+            let distances = distances(Mat4::from_cols_array(&car.pose()), engine.model);
+            engine.bus.store(
+                pack_bus(bus_levels(
+                    table,
+                    camera,
+                    [audio_mix::AI; 2],
+                    trim,
+                    distances,
+                )),
+                Ordering::Relaxed,
+            );
         }
     }
 }
@@ -310,9 +397,10 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: Arc::new(AtomicU64::new(0)), failure: Arc::new(AtomicU32::new(0)) }.decoder();
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: Arc::new(AtomicU64::new(0)), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)) }.decoder();
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
+            decoder.bus = sound.bus.clone();
             let mut app = App::new();
             app.insert_resource(sound).init_resource::<ButtonInput<KeyCode>>()
                 .add_message::<AppExit>()

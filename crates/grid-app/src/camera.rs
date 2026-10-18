@@ -440,6 +440,16 @@ impl Cameras {
         &self.views.0[self.current].ident
     }
 
+    /// Audio camera of the view on screen (4139F0, docs/AUDIO_RESEARCH.md).
+    pub fn audio_camera(&self) -> grid_tools::audio_mix::Camera {
+        let rig = &self.views.0[self.shown.unwrap_or(self.current)].rig;
+        grid_tools::audio_mix::Camera::of_view(match rig {
+            Rig::Chase(_) => Kind::Chase,
+            Rig::Mounted(_) => Kind::Mounted,
+            Rig::Head(_) => Kind::Head,
+        })
+    }
+
     /// Frames the current (or, looking back, its reverse) view for `sample`.
     pub fn frame(&mut self, sample: &Sample, back: bool, orbit: impl Fn(Vec3) -> Vec3) -> Shot {
         let view = &self.views.0[self.current];

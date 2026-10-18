@@ -2727,17 +2727,26 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         // Offscreen captures never open an audio device or play sound.
         if app.is_plugin_added::<bevy::audio::AudioPlugin>() {
+            // The original group mix (docs/AUDIO_RESEARCH.md); without it the
+            // mixers keep the Normal/Chase levels.
+            let mix = match grid_tools::audio_mix::Table::load(&root) {
+                Ok(table) => Some(std::sync::Arc::new(table)),
+                Err(error) => {
+                    warn!("Audio group mix unavailable; Chase levels used: {error}");
+                    None
+                }
+            };
             match field
                 .models
                 .iter()
                 .map(|m| grid_tools::engine_audio_continuous::Bank::load(&root, m))
                 .collect::<Result<Vec<_>, _>>()
             {
-                Ok(banks) => engine_sound::install(&mut app, banks),
+                Ok(banks) => engine_sound::install(&mut app, banks, mix.clone()),
                 Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
             }
             match grid_tools::tyre_audio::Bank::load(&root) {
-                Ok(bank) => tyre_sound::install(&mut app, bank),
+                Ok(bank) => tyre_sound::install(&mut app, bank, mix),
                 Err(error) => warn!("Tyre audio unavailable; driving continues: {error}"),
             }
         }

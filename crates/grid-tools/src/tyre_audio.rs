@@ -266,6 +266,9 @@ pub struct Driver {
     bank: Arc<Bank>,
     wheels: [Wheel; 4],
     smoothed_height: Option<f32>,
+    /// 457BE0: the player car runs all four wheel objects with roll and scrub;
+    /// other cars run wheel object 0 only, and 455410/scrub/W+17C are player-only.
+    player: bool,
 }
 
 /// Read-only per-tick inputs (vehicle and physical words of the player car).
@@ -306,6 +309,14 @@ impl Driver {
                 random: Random(0x5eed_0000 + i as u32),
             }),
             smoothed_height: None,
+            player: true,
+        }
+    }
+    /// An AI car's tyre audio: wheel object 0, peel/slide/skid.
+    pub fn opponent(bank: Arc<Bank>) -> Self {
+        Self {
+            player: false,
+            ..Self::new(bank)
         }
     }
     pub fn voices(&self) -> [[Voice; CATEGORIES]; 4] {
@@ -367,12 +378,20 @@ impl Driver {
         let mass = f(b, 0x15a0);
         let front_fraction = f(b, 0xe78 + 0x154);
         let bank = self.bank.clone();
+        let player = self.player;
         for (i, w) in self.wheels.iter_mut().enumerate() {
+            if !player && i > 0 {
+                break;
+            }
             let o = 0x1990 + i * 0x150;
             let omega = f(b, o + 0x104).abs();
             let radius = f(b, o + 0xf4);
             let displacement = f(b, o + 0x40);
-            let d = displacement - w.previous_displacement;
+            let d = if player {
+                displacement - w.previous_displacement
+            } else {
+                0.
+            };
             w.previous_displacement = displacement;
             let token = b[(o + 0xc0) / 4];
             let contact = token != 0;
@@ -406,7 +425,10 @@ impl Driver {
 
             // Roll (455410).
             let x = omega + d;
-            if contact && let Some(ci) = info(ROLL) {
+            if player
+                && contact
+                && let Some(ci) = info(ROLL)
+            {
                 if !w.active[ROLL] {
                     Self::start(&bank, w, ROLL, ci);
                     w.roll_volume = -24.;
@@ -502,7 +524,7 @@ impl Driver {
             if speed > 20. {
                 skid = (skid * (1. + 0.05 * (speed - 20.)).min(1.8)).min(1.);
             }
-            if let Some(ci) = info(SCRUB) {
+            if player && let Some(ci) = info(SCRUB) {
                 let c = &bank.infos[ci];
                 let mut x = w.scrub;
                 let excess = x - c.max_vel;
@@ -582,10 +604,48 @@ impl Driver {
     }
 }
 
-/// Authored tyre bus level (-12 dB). Original player tyre mixer groups 6/7 and
-/// backend attenuation are not recovered; without it four rolling wheels on a
-/// rumble strip plus a slide voice exceed full scale (scenario peak 1.35).
-pub const BUS_GAIN: f32 = 0.25;
+/// Group levels per category for the player car (413E50: roll in Wheels,
+/// the others in Skids) at Normal/Chase/PC (`audio_mix::Table::group_db`).
+pub const CHASE_BUS_DB: [f32; CATEGORIES] = [-9., -8., -8., -8., -8.];
+/// Min/max emitter distance per category: the variety presets (roll
+/// `surfaceloops` 15/50, the others `skidloops` 10/20), with the peel and skid
+/// overrides 10/50 of 44F330/44FE60 (ordinary race, W+4D/W+4E clear).
+pub const DISTANCES: [(f32, f32); CATEGORIES] =
+    [(15., 50.), (10., 50.), (10., 20.), (10., 50.), (10., 20.)];
+
+/// Backend levels per wheel and category: the group mix (player 413E50: roll
+/// Wheels, others Skids; other cars AI) plus each wheel's distance term.
+pub fn bus_levels(
+    table: Option<&crate::audio_mix::Table>,
+    camera: crate::audio_mix::Camera,
+    player: bool,
+    trim: f32,
+    distances: [f32; 4],
+) -> [[f32; CATEGORIES]; 4] {
+    use crate::audio_mix::{AI, NORMAL, SKIDS, WHEELS, distance_db};
+    distances.map(|d| {
+        std::array::from_fn(|c| {
+            let group = match (player, c) {
+                (false, _) => AI,
+                (true, ROLL) => WHEELS,
+                _ => SKIDS,
+            };
+            let mix = table.map_or(if player { CHASE_BUS_DB[c] } else { -9. }, |t| {
+                t.group_db(NORMAL, camera, group, 0.)
+            }) + trim;
+            distance_db(d, DISTANCES[c].0, DISTANCES[c].1).map_or(f32::NEG_INFINITY, |x| mix + x)
+        })
+    })
+}
+/// World position of each wheel's anchor (vehicle +1990 + i*150, car frame).
+pub fn wheel_positions(vehicle: &[u32], physical: &[u32]) -> [[f32; 3]; 4] {
+    let m: [f32; 16] = std::array::from_fn(|i| f(physical, 0x1d0 + i * 4));
+    std::array::from_fn(|i| {
+        let o = 0x1990 + i * 0x150;
+        let a = [f(vehicle, o), f(vehicle, o + 4), f(vehicle, o + 8)];
+        std::array::from_fn(|r| m[r] * a[0] + m[4 + r] * a[1] + m[8 + r] * a[2] + m[12 + r])
+    })
+}
 
 /// Independent looping mixer at the output rate: linear interpolation over the
 /// 40 kHz descriptor rate times pitch, and a per-sample gain ramp so 62.5 Hz
@@ -594,6 +654,9 @@ pub struct Mixer {
     bank: Arc<Bank>,
     rate: u32,
     slots: [[Slot; CATEGORIES]; 4],
+    /// Group level per wheel and category in dB (mix plus distance), added
+    /// at the backend (A23B70); `-inf` silences.
+    pub bus_db: [[f32; CATEGORIES]; 4],
 }
 #[derive(Clone, Copy, Default)]
 struct Slot {
@@ -608,13 +671,14 @@ impl Mixer {
             bank,
             rate,
             slots: [[Slot::default(); CATEGORIES]; 4],
+            bus_db: [CHASE_BUS_DB; 4],
         }
     }
     /// One output sample. `audible=false` ramps every voice to silence.
     pub fn sample(&mut self, voices: &[[Voice; CATEGORIES]; 4], audible: bool) -> f32 {
         let mut out = 0.;
-        for (wheel, targets) in self.slots.iter_mut().zip(voices) {
-            for (slot, voice) in wheel.iter_mut().zip(targets) {
+        for ((wheel, targets), buses) in self.slots.iter_mut().zip(voices).zip(self.bus_db) {
+            for ((slot, voice), bus) in wheel.iter_mut().zip(targets).zip(buses) {
                 if slot.sample != voice.sample || slot.generation != voice.generation {
                     if voice.sample.is_some() && slot.gain > 1e-4 && slot.sample.is_some() {
                         // Let the old voice fade before switching sample.
@@ -627,7 +691,7 @@ impl Mixer {
                 }
                 let Some(index) = slot.sample else { continue };
                 let target = if audible && slot.sample == voice.sample {
-                    10f32.powf(voice.volume_db / 20.)
+                    crate::audio_mix::backend_gain(voice.volume_db, bus, Some(0.))
                 } else {
                     0.
                 };
@@ -645,7 +709,7 @@ impl Mixer {
                 slot.position = (slot.position + step) % length;
             }
         }
-        out * BUS_GAIN
+        out
     }
 }
 
