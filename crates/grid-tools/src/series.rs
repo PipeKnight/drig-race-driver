@@ -669,9 +669,13 @@ mod tests {
         assert_eq!(stems(&pro), ["sup", "sky", "nsx", "350"]);
         assert_eq!(pro.layouts.len(), 76);
         let supported: Vec<&str> = pro.supported_layouts().map(|l| l.name.as_str()).collect();
-        // 20 layouts of the surveyed circuits and Yokohama route_0 (yoko_v1).
-        assert_eq!(supported.len(), 21);
-        assert!(supported.contains(&"yoko_v1"));
+        // 20 layouts of the surveyed circuits and the route_0 circuits of
+        // Yokohama (yoko_v1), Spa (spa_gp), Milan (milan_gp), Shibuya
+        // (shib_drift_cir) and San Francisco (san_francisco_gp).
+        assert_eq!(supported.len(), 25);
+        for name in ["yoko_v1", "spa_gp", "milan_gp", "shib_drift_cir", "san_francisco_gp"] {
+            assert!(supported.contains(&name), "{name}");
+        }
         let nat = pro.layout("donington_nat").unwrap();
         assert_eq!(
             (nat.route.as_str(), nat.max_cars),

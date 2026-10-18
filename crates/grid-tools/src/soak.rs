@@ -25,7 +25,7 @@ use std::{collections::BTreeMap, path::Path};
 
 pub use crate::route::{
     DETROIT_STADIUM, DETROIT_STADIUM_SHORT, DONINGTON, HARUNA, ISTANBUL_PARK, JARAMA, LONG_BEACH,
-    NURBURGRING, YOKOHAMA,
+    MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
 };
 /// Donington's race start-light sequence; every race holds the grid for its
 /// track's shipped sequence time (`start_lights::load`, grid-app StartLights).
@@ -146,6 +146,9 @@ const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
 /// (docs/TOUGE.md); `--seeds 29..32`. Seeds 33..=36 run 12, 12, 6 and 12
 /// stock cars on the Detroit stadium routes 8 and 9 (heavy contact, docs/
 /// DEMOLITION_DERBY.md), also outside the default set; `--seeds 33..36`.
+/// Seeds 37..=40 run Spa (docs/SPA.md), 41..=44 Milan, 45..=48 Shibuya and
+/// 49..=52 San Francisco (docs/STREET_CIRCUITS.md), also outside it;
+/// `--seeds 37..52`.
 pub const QUICK_SEEDS: (u64, u64) = (1, 24);
 
 impl Scenario {
@@ -155,9 +158,13 @@ impl Scenario {
         let max_cars = max_cars.max(1);
         let cars = match profile {
             // Derby seeds 33..=36: 12, 12, 6 and 12 stock cars.
-            Profile::Quick if seed > 32 => [12, 12, 6, 12][((seed - 33) % 4) as usize].min(max_cars),
+            Profile::Quick if (33..=36).contains(&seed) => {
+                [12, 12, 6, 12][((seed - 33) % 4) as usize].min(max_cars)
+            }
             // Haruna's touge grids hold two cars.
-            Profile::Quick if seed > 28 => [2, 1][(seed % 2) as usize].min(max_cars),
+            Profile::Quick if (29..=32).contains(&seed) => {
+                [2, 1][(seed % 2) as usize].min(max_cars)
+            }
             Profile::Quick => QUICK_CARS[(seed.wrapping_sub(1) % QUICK_CARS.len() as u64) as usize]
                 .min(max_cars),
             // Full fields are weighted up: they are the owner's race.
@@ -165,6 +172,14 @@ impl Scenario {
             Profile::Long => 1 + rng.below(max_cars as u64) as usize,
         };
         let route = match profile {
+            // Quick seeds 49..=52 on San Francisco.
+            Profile::Quick if seed > 48 => SAN_FRANCISCO,
+            // Quick seeds 45..=48 on Shibuya.
+            Profile::Quick if seed > 44 => SHIBUYA,
+            // Quick seeds 41..=44 on Milan.
+            Profile::Quick if seed > 40 => MILAN,
+            // Quick seeds 37..=40 on Spa.
+            Profile::Quick if seed > 36 => SPA,
             // Quick seeds 33..=36 on the Detroit stadium, long and short in turn.
             Profile::Quick if seed > 32 && seed % 2 == 1 => DETROIT_STADIUM,
             Profile::Quick if seed > 32 => DETROIT_STADIUM_SHORT,
@@ -214,6 +229,37 @@ impl Scenario {
             && Rng::new(seed ^ 0x70c0_0000_0000_0000).chance(1. / 6.)
         {
             YOKOHAMA
+        } else {
+            route
+        };
+        // A seventh of the long runs then move to Spa (own stream too).
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x5ba0_0000_0000_0000).chance(1. / 7.)
+        {
+            SPA
+        } else {
+            route
+        };
+        // An eighth, a ninth and a tenth of the long runs then move to Milan,
+        // Shibuya and San Francisco (own streams too).
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x3a10_0000_0000_0000).chance(1. / 8.)
+        {
+            MILAN
+        } else {
+            route
+        };
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x5b1b_0000_0000_0000).chance(1. / 9.)
+        {
+            SHIBUYA
+        } else {
+            route
+        };
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x5f40_0000_0000_0000).chance(0.1)
+        {
+            SAN_FRANCISCO
         } else {
             route
         }
@@ -277,7 +323,7 @@ impl Scenario {
     /// Derby quick seeds (33..=36) run the stock car (`stk`) for every car:
     /// heavy contact in the stadium's crossing (docs/DEMOLITION_DERBY.md).
     fn with_derby_models(mut self, seed: u64, profile: Profile) -> Self {
-        if profile == Profile::Quick && seed > 32 {
+        if profile == Profile::Quick && (33..=36).contains(&seed) {
             // An empty opponent list gives every car the player's model.
             self.car = Car::new("stk").unwrap();
             self.opponent_cars.clear();
@@ -1902,6 +1948,17 @@ mod tests {
         let haruna: Vec<_> = (29..=32).map(quick).collect();
         assert!(haruna.iter().all(|s| s.route == HARUNA));
         assert_eq!(haruna.iter().map(|s| s.cars).collect::<Vec<_>>(), [1, 2, 1, 2]);
+        for (seeds, route, cars) in [
+            (37..=40, SPA, [2, 12, 9, 4]),
+            (41..=44, MILAN, [12, 1, 12, 6]),
+            (45..=48, SHIBUYA, [2, 12, 9, 4]),
+            (49..=52, SAN_FRANCISCO, [12, 1, 12, 6]),
+        ] {
+            let s: Vec<_> = seeds.map(quick).collect();
+            assert!(s.iter().all(|s| s.route == route), "{route}");
+            assert_eq!(s.iter().map(|s| s.cars).collect::<Vec<_>>(), cars, "{route}");
+            assert!(s.iter().all(|s| s.car.stem() == "lac"), "{route}");
+        }
         let yokohama: Vec<_> = (25..=28).map(quick).collect();
         assert!(yokohama.iter().all(|s| s.route == YOKOHAMA));
         assert_eq!(
@@ -1910,15 +1967,18 @@ mod tests {
         );
         // Long runs: about a sixth each on Istanbul Park (a third, less the later
         // moves), Long Beach (a quarter, less the later moves), Jarama (a fifth,
-        // less Yokohama's) and Yokohama, from their own streams, so the other
-        // fields of a seed keep their F326 draws.
+        // less Yokohama's), Yokohama and Spa (a seventh), from their own
+        // streams, so the other fields of a seed keep their F326 draws.
         let on = |route: &str| {
             (1001..1401)
                 .filter(|&seed| Scenario::generate(seed, Profile::Long, available, 12).route == route)
                 .count()
         };
-        for route in [ISTANBUL_PARK, LONG_BEACH, JARAMA, YOKOHAMA] {
-            assert!((45..95).contains(&on(route)), "{route} {}", on(route));
+        for route in [ISTANBUL_PARK, LONG_BEACH, JARAMA, YOKOHAMA, SPA] {
+            assert!((30..95).contains(&on(route)), "{route} {}", on(route));
+        }
+        for route in [MILAN, SHIBUYA, SAN_FRANCISCO] {
+            assert!((25..70).contains(&on(route)), "{route} {}", on(route));
         }
     }
 

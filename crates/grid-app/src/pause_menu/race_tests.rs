@@ -424,7 +424,9 @@ fn results(app: &App) -> Vec<crate::post_race::Row> {
 fn retire_from_race_shows_the_results_on_every_circuit() {
     use crate::post_race::{Cell, Stage};
     use grid_tools::race::{Out, Status};
-    use grid_tools::route::{DONINGTON, ISTANBUL_PARK, JARAMA, NURBURGRING, YOKOHAMA};
+    use grid_tools::route::{
+        DONINGTON, ISTANBUL_PARK, JARAMA, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
+    };
     big_stack(|| {
         for (route, models) in [
             (DONINGTON, &["lac"][..]),
@@ -434,6 +436,12 @@ fn retire_from_race_shows_the_results_on_every_circuit() {
             (JARAMA, &["lac"][..]),
             // Yokohama: the first Japanese track, a 2.0 s start (docs/YOKOHAMA.md).
             (YOKOHAMA, &["bmw", "lac"][..]),
+            // Spa: the 7.0 km Grand Prix circuit (docs/SPA.md).
+            (SPA, &["lac"][..]),
+            // The street circuits (docs/STREET_CIRCUITS.md).
+            (MILAN, &["lac"][..]),
+            (SHIBUYA, &["bmw"][..]),
+            (SAN_FRANCISCO, &["lac"][..]),
         ] {
             let mut app = race_app_with(route, models, 2, false);
             keys(&mut app).press(KeyCode::KeyW);

@@ -19,7 +19,10 @@ pub fn load(root: &Path, route: &Route) -> Result<Sequence, Box<dyn std::error::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::route::{DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING, YOKOHAMA};
+    use crate::route::{
+        DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA,
+        SPA, YOKOHAMA,
+    };
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
@@ -35,17 +38,20 @@ mod tests {
         assert_eq!(donington.object, "startlights_lights_horizontal");
         assert_eq!(donington.seconds, 4.0);
         assert_eq!(donington.stages, names(&[1, 2, 3, 4, 5, 7]));
-        for path in [NURBURGRING, ISTANBUL_PARK, JARAMA] {
+        for path in [NURBURGRING, ISTANBUL_PARK, JARAMA, SPA, MILAN] {
             let s = load(root, &Route::new(path).unwrap()).unwrap();
             assert_eq!(s.object, "gg_startlights_lights_horiz", "{path}");
             assert_eq!(s.seconds, 5.0);
             assert_eq!(s.stages, names(&[1, 2, 3, 4, 5, 6, 7]));
         }
-        // Long Beach: Donington's board object with the 7-stage, 5.0 s sequence.
-        let long_beach = load(root, &Route::new(LONG_BEACH).unwrap()).unwrap();
-        assert_eq!(long_beach.object, "startlights_lights_horizontal");
-        assert_eq!(long_beach.seconds, 5.0);
-        assert_eq!(long_beach.stages, names(&[1, 2, 3, 4, 5, 6, 7]));
+        // Long Beach, Shibuya and San Francisco: Donington's board object with
+        // the 7-stage, 5.0 s sequence.
+        for path in [LONG_BEACH, SHIBUYA, SAN_FRANCISCO] {
+            let s = load(root, &Route::new(path).unwrap()).unwrap();
+            assert_eq!(s.object, "startlights_lights_horizontal", "{path}");
+            assert_eq!(s.seconds, 5.0);
+            assert_eq!(s.stages, names(&[1, 2, 3, 4, 5, 6, 7]));
+        }
         // Yokohama: its own board object, four stages over 2.0 s.
         let yokohama = load(root, &Route::new(YOKOHAMA).unwrap()).unwrap();
         assert_eq!(yokohama.object, "startlights_lights");

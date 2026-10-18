@@ -245,6 +245,24 @@ mod tests {
         });
     }
 
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_spa() {
+        run(|| flipped_on(crate::route::SPA));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_the_street_circuits() {
+        for route in [
+            crate::route::MILAN,
+            crate::route::SHIBUYA,
+            crate::route::SAN_FRANCISCO,
+        ] {
+            run(move || flipped_on(route));
+        }
+    }
+
     fn flipped_on(route: &str) {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
