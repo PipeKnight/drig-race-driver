@@ -61,7 +61,7 @@ The default build (no switch) is unchanged and packages no game data. Gradle kee
 
 **Desktop checks [V]:** the APK was unpacked with the app's own `BundleExtractor` (a desktop Java runner reading the APK as a zip): 382 files byte-identical to the staged folder, 2.2 s. The desktop release binary on that unpacked folder (`--data-dir`, `--game-root`, 600 autopilot ticks, render): log identical to a run on the full installation apart from timestamps and paths, and identical drive samples.
 
-### Events in the bundled APK (F413)
+### Events in the bundled APK (F414)
 
 `build_android.ps1 -BundleData -Event <name>` (and `push_android_data.ps1 -Event <name>`) chooses what the private APK starts:
 
@@ -110,7 +110,7 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 
 ## Frame rate
 
-**Counter.** `[osd] fps` (default `on` on Android, `off` on the desktop, where F9 toggles it) shows `NN FPS  M ms  max W` at the right edge under the race position (since F413; it was at the top centre, where the Drift Battle score panel now sits): frames per second, the mean frame time and the worst frame of the last second. While it is on, the app logs once per second (logcat and `Download/GRID-Reassembly/log-*.txt`):
+**Counter.** `[osd] fps` (default `on` on Android, `off` on the desktop, where F9 toggles it) shows `NN FPS  M ms  max W` at the right edge under the race position (since F414; it was at the top centre, where the Drift Battle score panel now sits): frames per second, the mean frame time and the worst frame of the last second. While it is on, the app logs once per second (logcat and `Download/GRID-Reassembly/log-*.txt`):
 
 ```
 frame_stats fps=59.1 avg_ms=16.92 max_ms=18.49 frames=60 sim_ticks_per_s=63.1
