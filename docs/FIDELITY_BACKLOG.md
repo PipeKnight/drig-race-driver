@@ -1,0 +1,137 @@
+# Fidelity backlog: open discrepancies against the original
+
+19 October 2026, Claude Code (F437). One table of every open discrepancy between the port and Race
+Driver: GRID (2008) that the project log and docs/ record, as of F433: items marked [I], "not
+ported", AUTHORED deviations and stand-ins, "remaining gap", open checks, and residual soak
+failures. Gathered by four read-only scans (PROJECT_LOG.md F300–F423; docs/ A–F, G–R and S–Z),
+merged and de-duplicated. Rows closed by F434–F436 are marked **closed**. Low-level research
+caveats inside verified function ports are left out unless the running game differs.
+
+Columns:
+- **impact**: H/M/L, what the player notices.
+- **needs**: S = static analysis of the hash-pinned image, L = live capture of the original,
+  O = owner test, D = decision (owner or coordinator).
+- **size**: S under ~2 h, M about a day, L several days.
+- **owner**: suggested session. drift-battle-ai = AI driver and braking; robustness = contacts,
+  props and circuits; le-mans = Circuit de la Sarthe and the 24 Hours; replay-weather = replay
+  director and weather; career = GRID World; series = this session (cars, series, fields, setup);
+  android = the Android sessions; graphics = the graphics owner; audio and coordinator = unassigned
+  (the audio and track-readers sessions are archived, F423).
+
+## Top 10 by gameplay impact
+
+1. AI first-corner pile-ups (Jarama, Long Beach GP/cl and reverse, Detroit route 1, Nürburgring):
+   the three "alongside" parts and the original's per-island/side logic (rows 30, 31).
+2. Audio: crashes, scrapes, kick-ups, wind, crowd, HUD beeps, speech and music are missing; output
+   is mono with no 3D panning or Doppler (rows 70–73).
+3. Career (GRID World) has no playable front end (row 60).
+4. No force feedback, wheel input layer or rumble (row 22).
+5. Flat grey road on every non-Donington circuit from unresolved road batches (row 80).
+6. Demolition Derby AI has no figure-of-eight or oncoming avoidance, so every field piles up and
+   is disqualified (row 33).
+7. Drift Battle uses touring stand-in cars with `default` drift values; AI drift scores are one to
+   two orders of magnitude low (rows 36, 52).
+8. Le Mans 24 Hours (time-limited race, class results, time of day, headlights) is not supported
+   (row 58; le-mans is on it).
+9. Cockpit/head camera has no interior or head dynamics; the chase camera lacks tilt, roll and impact
+   envelopes (rows 66, 67).
+10. Continuous collision covers only pieces and lost wheels; cars, boundary sheet and route boxes
+    can tunnel in hard hits, and the fixed 16 ms step deepens overlaps (rows 10, 11).
+
+## Table
+
+| # | area | discrepancy | evidence | impact | needs | size | owner |
+|---|---|---|---|---|---|---|---|
+| 1 | physics/vehicle | Only downforce (slot 27) of the original default car setup 0x9C32F0 is applied; the other 29 values (suspension, dampers, gears, castor, anti-roll, ride-height loop, 0x9AE8F0/0x9AD6B0) are not. | F420; SERIES.md "downforce limit" | M: per-car handling may differ slightly | L | M | series |
+| 2 | physics/vehicle | Porsche 911 is weak solo (0/1/1 laps, understeers); cause not traced, independent of the floor. | F409; F420 | L–M: one GT car barely laps | S+L | M | series |
+| 3 | physics/vehicle | Of the car reset A09CE0 only the engine reset 996C70 is ported; Braking Assist off verified at one onset speed only. | F417; BRAKING_REFERENCE "Next" | L–M: residual reset/braking differences | S+L | M | drift-battle-ai |
+| 4 | physics/vehicle | The original writes the clutch slot +E34 = 0 every frame; the port keeps the previous value; manual clutch is rejected. | F309; DRIVING_ASSISTS_RESEARCH | L | S | S | drift-battle-ai |
+| 5 | physics/vehicle | A full XInput trigger reads 1.0, the original b/256 = 0.996; keyboard and pad bindings are merged (max) where the original replaces the keyboard preset. | F325; PLATFORMS_AND_INPUT_RESEARCH §7.1 | L | D | S | coordinator |
+| 6 | physics/vehicle | Graded TC/BA levels (25 %, 50 %) are AUTHORED; the original has on/off. | DRIVER_AIDS §3 | L | D | S | coordinator |
+| 7 | physics/vehicle | Degenerate contact orientation (32·FLT_EPSILON tolerance) and saturated-damage NaN read as 0 are recorded port deviations awaiting owner confirmation. | F342; CONTACT_REORIENTATION_RESEARCH | L | D | S | robustness |
+| 8 | physics/vehicle | Domain guards (asin of an exactly sideways slide, zero-velocity drag, degenerate deformed triangles) raise errors where the original propagates NaN. | F318 R10/R17; RUNTIME_LIMITS_AUDIT S5 | L–M: rare pause or retirement | S | S | robustness |
+| 9 | physics/vehicle | A wheel ray on a material without mechanics (WARN/RESE/RESD/UNRE/FBND) fails the tick; the original fallback is unknown. | RUNTIME_LIMITS_AUDIT R15 | L–M: possible freeze on some routes | S | M | robustness |
+| 10 | physics/contacts | Continuous collision covers only prop pieces and lost wheels; cars, boundary sheet, route boxes and piece/car pairs (AE34B0/AE95B0) are not swept. | F411; ROBUSTNESS_RESEARCH §7–8 | M: GT2 nose-sink, fast tunnelling | S | L | robustness |
+| 11 | physics/world | Fixed 16 ms world step against the original's one variable step per rendered frame (owner decision F286); deepens overlaps, blocks AE8AD0 for car-vs-piece. | WORLD_STEPPING_RESEARCH; F320; F402 | M: impact feel, board losses | D | L | coordinator |
+| 12 | physics/contacts | Car-vs-piece uses the car-to-car hull path and piece-vs-piece an authored separating-axis test; the original uses AE8AD0 for both with summed margins; no per-pair direction caches. | BOX_CONTACTS; F351 | M: pieces fly/settle differently | S+D | M | robustness |
+| 13 | physics/contacts | Boundary-sheet and car-hull shape margins not established (0 in the port; car maybe 0.02); cold per-pair contexts can miss witnesses at 0.4–0.5 m sheet overlaps. | COLLISION_GAPS A5/A6; SOAK_TESTING follow-ups | L–M | S | S | robustness |
+| 14 | physics/contacts | Body–road contact scheduling (boundary first, chunks in archive order) is AUTHORED, not checked against the original. | DONINGTON_BODY_CONTACTS; CQTC_BOUNDARY_CONTACTS; F409 | L | L | M | robustness |
+| 15 | physics/contacts | Car contact pool is an AUTHORED clamp(24n, 64, 256) filled in car order, so later cars lose contacts in pile-ups; the original per-island limits (200 bodies/1000 contacts/3000 rows, B7B850 skip) are not ported. | RUNTIME_LIMITS_AUDIT R05, S1/S2; multi.rs | M: sinking/tunnelling in big pile-ups | S | M | robustness |
+| 16 | physics/props | Tyre walls and armco never give or break (joint rows, armco hinges, ENS link propagation not ported); close-drift flags are static boxes. | F312; DYNAMIC_PROPS_RESEARCH; ROUTE_PROPS_COLLISION | M: rigid barriers | S | L | robustness |
+| 17 | physics/props | Barrier ornaments (concrete, chain fence, ad boards, group parts ≤ 10 m) get AUTHORED box stand-ins; the original has no ornament collision (walls are the boundary sheet); Long Beach catch fence above 3.13 m not solid. | F284; F357; ROUTE_PROPS_COLLISION; LONG_BEACH §5.1 | M: walls in slightly different places | D | M | robustness |
+| 18 | physics/props | Pieces never sleep (turnOffTime), lost pieces held at an AUTHORED 100 m depth; the original's farthest-first restore past 1000 bodies is refused instead. | F317; RUNTIME_LIMITS_AUDIT §2.1 | L | S | M | robustness |
+| 19 | physics/props | Residual prop sinks: Istanbul seed 14 class, Nürburgring tyre stacks (seed 1085, spawn inside a neighbour's box), Donington board 1056/1099, Long Beach chaos 2/13 and forced 37/61/74, piece spawned inside a fast car (1067), 15-car LMS soak 6/8, Spa brake-board pieces through grass (chaos 17/20), San Francisco quick seed 49 player wheel through the road. | SOAK_TESTING; ROBUSTNESS_RESEARCH §3; F406; F420; F425 | L–M | S | M | robustness |
+| 20 | physics/props | Static cylinders/spheres are not route collision; cylinder/sphere breakables (Yokohama barrels, Haruna pieces) stay static; kind-5 cylinders are 12-gons (original cylinderFacets 10). | TRACK_READERS §3.7; YOKOHAMA §4; F399 | M: drive through barrels | S | M | robustness |
+| 21 | physics/props | CAR_ material mix for barrier keys re-checked only on Donington (and the five circuits in a test); new tracks' keys not checked. | TRACK_GENERALIZATION | L | S | S | robustness |
+| 22 | platform/input | No force feedback (GameFFB, ConstantForce, damping), no SDL3 wheel layer or presets, no wheel latency extrapolation, no rumble. | F309; F321; F325; PLATFORMS_AND_INPUT_RESEARCH §6 | H for wheel users | S | L | coordinator |
+| 23 | platform/input | Pad dead zones for a fresh profile unknown (preset 0.2 kept); owner pad not tested at rest. | F325; F415; PAD_PROBE | L | O | S | android |
+| 24 | physics/damage | Lost wheels ignore their TYRE material and roll as 12-sided prisms; flight and bare-corner ride height never compared; stuck test 9B9A90 and record copy 7E9D60 not ported; kick uses an LCG. | WHEEL_DETACHMENT §3, §5, §8; F346; F355 | L | S+L | M | robustness |
+| 25 | physics/damage | Car-to-car body-impact events may not reach the struck car (`other_registration` 0). | MULTI_CAR_INTEGRATION; F292 | M: struck car may miss damage (status unclear) | S | M | robustness |
+| 26 | physics/damage | Whether the solved +3C impact magnitude matches the original in heavy impacts (all part/zone thresholds) is unverified; a rear hit can push a crushed front wheel to terminal damage. | VISUAL_DAMAGE_PARTS_RESEARCH §5; DAMAGE_BEHAVIOUR_CHECK | M | L | M | robustness |
+| 27 | graphics/damage | Loose-part motion is AUTHORED (spring hinge, authored flight); hinge solver 9AA960, timed detach 9FF4F0, wipers on a smashed windscreen, bumper light pods and exhaust gate not ported; exhaust part has no handling effect. | VISUAL_DAMAGE_PARTS_RESEARCH §2–5; MECHANICAL_DAMAGE §5 | M: parts swing and fall differently | S | L | coordinator |
+| 28 | graphics/damage | Window anchors (4 corners + centre vs six), authored shards, `_Cracked` shader values and light beam changes (9D1820) not traced; glass state evaluated per rendered frame. | VISUAL_DAMAGE_PARTS_RESEARCH §2, §4 | L | S | M | graphics |
+| 29 | graphics/damage | Body dents are an independent CPU projection of the deformation grid, uncalibrated against the original part factory. | BODY_DEFORMATION_PRESENTATION | L | L | M | graphics |
+| 30 | AI | Three alongside parts missing (empty-slot gap 0x795C00, far-side squeeze 0x799630, both-sides mean); the measured patch was not adopted. | AI_DRIVER_PORT; AI_OVERTAKING §8; F402 | H: first-corner pile-ups | S+D | M | drift-battle-ai |
+| 31 | AI | 12-car pile-ups at Jarama, Long Beach GP/cl and reverse, Detroit route 1, Nürburgring also with all-Lacetti fields. | F401; F402; SERIES "Layouts" | H: races there lose several cars | S+L | L | drift-battle-ai |
+| 32 | AI | Record state derived from motion ("moving against its nose" = 2) instead of participant status (player 0, AI 1, retired 2), so side checks needing state 0 differ. | AI_MISTAKES_PACING_RESEARCH §1, §8 Q1; ai_driver.rs `backwards()` | M: AI pass/alongside choices | S | M | drift-battle-ai |
+| 33 | AI | No figure-of-eight or oncoming avoidance (`avFigureOfEightTrack`, `avOncomingTraffic` read, not ported). | F421; DEMOLITION_DERBY §5 | H for Demolition Derby | S | L | drift-battle-ai |
+| 34 | AI | Path-obstacle scan 0x78B560 is an authored straight corridor; brake_for_vehicle's different-heading branch and contacted_vehicle's two-corner refinement not recovered; avoid never fired in traffic. | AI_DRIVER_PORT; AI_OVERTAKING §12; AI_AVOID_RECOVERY_RESEARCH §8 | M: traffic choices differ | S+L | M | drift-battle-ai |
+| 35 | AI | AI traction control 0x77AA10, ABS cap 0x77A2E0, start-light reaction and in-air steering blend not ported. | AI_DRIVER_PORT; AI_DRIVER_RESEARCH §4.3/4.4; F391 | M: AI wheelspin, lock-ups, launch | S | M | drift-battle-ai |
+| 36 | AI | AI drift quality: spins, barrier hits, stalls (recovery flicker at the track limit), scores one to two orders below the virtual race. | F367; F389; DISCIPLINES §4.5 | M: weak Drift Battle opponents | L | L | drift-battle-ai |
+| 37 | AI | Failure modes AUTHORED: crash PID, flip, inertia +0x21C0, wobble, failed-wheel grip 0.1 (spins instead of limping), spun-and-fast lost_control (coSpinSpeed), visibility_loss absent; blow_engine does not reduce power. | F336; AI_DRIVER_PORT | M: AI mistakes look different | S+L | M | drift-battle-ai |
+| 38 | AI | Race manager measures along the AI line, not the progress track; conveyor slots, catch-up config name (default rd_3_star AUTHORED), race-start factors and "inside" side are [I]; half of armed mistakes abort; paced fields have 4.7× the contacts. | AI_DRIVER_PORT "Race manager"; AI_MISTAKES §8; F336 | M: rubber-banding differs | L | M | drift-battle-ai |
+| 39 | AI | Reverse-request consumer untraced (AUTHORED pedal mapping); obstruction magnitude [I]; controlled_stop has no trigger; retired car held with no braking phase. | F301; F336; F332 | L | S | M | drift-battle-ai |
+| 40 | AI | AI extents ignore the deformation-lattice move of the bumper points on a damaged car. | F345; CAR_GENERALIZATION | L | S | S | drift-battle-ai |
+| 41 | AI | Solo AI runs wide and recovers (Istanbul turn 8, Long Beach ~2.7 km), misses a late-braking pair on Jarama route 0; Spa route 3, Detroit 0, Le Mans and Washington routes wreck; Milan 12-car: a car stuck in RecoverTbone against a wreck. | ISTANBUL_PARK §4; JARAMA §7; TRACK_READERS §4–5; F425; STREET_CIRCUITS 2.3 | M: AI leaves the track | S+L | L | drift-battle-ai |
+| 42 | AI | Open AI lines (touge) use an authored look-ahead past the road end and an authored brake fallback; ai_pacing measures gaps on a loop on point-to-point routes. | TOUGE §3, §6 | L | S | S | drift-battle-ai |
+| 43 | AI | Player auto-reset targets the AI line; the original tracker line, saved point, 0x90C0F0 offsets, fade, camera hold and collision switch are not ported. | F341; RESET_AND_RESPAWN_RESEARCH §6–7 | L–M | S | M | coordinator |
+| 44 | race rules | Circuit-race estimator 0x67FFB0 (per-vehicle table + RNG) not ported; unfinished cars use mean race speed (AUTHORED, `*`). | F308; F353; RACE_RULES_RESEARCH §1 | M: wrong order after Retire | S | M | coordinator |
+| 45 | race rules | An AI that latches Retire only brakes and is never taken out of the standings, so the race does not end by itself (original retire timer 0x77E3B0). | RUNTIME_LIMITS_AUDIT R08/C27 | M: player must press F | S | M | drift-battle-ai |
+| 46 | race rules | Terminal damage retires an AI at once (AUTHORED); the original runs damage_retirement_ratio and drives to a retire point. | RACE_RULES_RESEARCH §7 | L–M | S | M | drift-battle-ai |
+| 47 | race rules | Marshal yellow flags (serious_incident 0x94A6E0) and the start green flag not ported. | F308; RACE_RULES_RESEARCH §3 | L | S | M | coordinator |
+| 48 | race rules | Free-race grid option (front/middle/back/random) unmapped; launchers start at the back; free_race_teams reader not found; driver names/skills (roster) not ported; series and LMS seeds/grid mapping AUTHORED. | RACE_RULES_RESEARCH §5; SERIES "Grid fill"; F409 | L–M: start position, names | S | M | series |
+| 49 | race rules | Countdown handbrake hold AUTHORED (original grid hold D234 unknown); AI lap times along the line; results "+gap" format [I]; progress uses a global nearest point (R24). | LAUNCH_AND_GRID_START; RACE_HUD §4; RUNTIME_LIMITS_AUDIT R24 | L | S | S | coordinator |
+| 50 | race rules | Time-trial personal bests kept only for Lacetti on Donington. | ISTANBUL_PARK §6; main.rs | L–M | D | S | coordinator |
+| 51 | race rules | Lap timing refuses multi-route-file and non-zero-finish routes (some Milan/Le Mans layouts). | ISTANBUL_PARK §6; F399 | M: layouts unavailable | S | L | robustness |
+| 52 | disciplines | Drift Battle uses touring BMW/Lacetti stand-ins with `default` drift values; player starts at the back (AUTHORED; original draws a slot). | DISCIPLINES §4.1/§4.5; EVENT_MENU | H: chaotic, low-scoring drift fields | D+S | L | series |
+| 53 | disciplines | Drift scoring leaves out the smoke multiplier, wrong-way message and collisionPenalty; detector permission +0x41 [I]; boundary wrapper type [I]. | DISCIPLINES §4, §4.3 | M | S | M | drift-battle-ai |
+| 54 | disciplines | Drift GP: no career rounds, pre-results scene, rival intros, parked rivals; no start lights (AUTHORED). | F388; DISCIPLINES §7 | L–M | S | M | career |
+| 55 | disciplines | Reverse drift layouts load and score but are not launch options. | DISCIPLINES §4.4 | L | — | S | **closed (F436)** |
+| 56 | disciplines | Freestyle: no HUD timer, no player auto-reset (no line), 90 s default AUTHORED, scored run unverified. | TOUGE §4, §6; YOKOHAMA §4; F407 | M | O | M | coordinator |
+| 57 | disciplines | Pro Touge: penalty assignment AUTHORED (alongside gate 0x6441B0/0x63C940 not ported); run-2 swap [I]; 30 s wait AUTHORED; round state untraced; penalties unit-tested only. Midnight Touge: no traffic, no random direction (rule recovered). Haruna `resetlines.cqtc` not read (fall-off, seed 29); missing forward/reverse grids. | TOUGE §2–7; F407; F412 | M | S+O | M | coordinator |
+| 58 | disciplines | Le Mans 24 Hours: time-limited race type 3, class results, time of day, headlights not supported; `lemans_progress_adjustment` not ported. | DISCIPLINES §1.4/§5.7; F413 | H: a whole discipline | S | L | le-mans |
+| 59 | disciplines | Demolition Derby: flipped/wrong-way warning settings and "You will be disqualified!" have no reader; DD results layout and race end 0x64E130 not ported; stadium routes time one lap fewer. | DEMOLITION_DERBY §5 | M | S | M | coordinator |
+| 60 | front end | Career (GRID World) is a data library without an app front end; Routine B, Flashback Bonus, eBay, track-pool race draw, career AI field (grid 0x5C7D40) absent; tier/team-win/h2h rules [I]. | F416; CAREER_RESEARCH §10–11 | H: no career mode | S+O | L | career |
+| 61 | front end | Head-to-head and driver-offer events (objectives, time_trial, top_speed) not supported. | DISCIPLINES §1.4/§5.8 | M | S | L | career |
+| 62 | front end | Pause-menu Options changes are not saved (the original autosaves the profile); Ghost Car, Speech/Music volume, Steering Linearity, 900° wheel unavailable; no animated glyphs, blur, ducking. | PAUSE_MENU §3; SETTINGS §1 | M: settings lost between launches | S | M | coordinator |
+| 63 | front end | Race Options and event menu are AUTHORED subsets (opponent count instead of pool fill, laps 1–10, no livery choice, no Controller Setup, no surface assist, no aid-off rewards, plain background); launcher races close the app on results Continue. | EVENT_MENU; DRIVER_AIDS §2/§5; F414 | M | D+S | M | coordinator |
+| 64 | front end | Flashback: no transition samples, effects, cameras or FFB; skid marks/smoke of the abandoned future stay; "Restart gives flashbacks back" [I]; bonus formula untraced; 13 MB per 12-car checkpoint. | F366; FLASHBACK §3.4, §5 | L–M | L | M | replay-weather |
+| 65 | replay | Replay lacks Save, slow motion, frame step, music, terminal-damage replay and TERMINAL cameras; glass/lights, shards, part angles, particles, skid marks and sound are not replayed; director timeline untraced. | F360; REPLAY §4, §6 | M | S | L | replay-weather |
+| 66 | camera | Chase camera lacks tilt/roll, suspension heave, impact envelopes, drift blend, gear drop-back; Mounted tilt/twist and bonnet turn not ported (equations traced); FOV convention and Change View order [I]. | CAMERA_VIEWS §2, §4 | M: stiffer camera | S | M | coordinator |
+| 67 | camera | Head-cam has no head/body dynamics (0x842DD0) and no cockpit interior (int_*.pssg); bonnet view shows no hood. | CAMERA_VIEWS; CAMERA_COCKPIT_PLAN; F349 | M–H: no cockpit view | S | L | graphics |
+| 68 | HUD | OSD lacks boost, drift groups, penalty pills, name tags, PB/WR animation, needle blur, stacker re-flow, excessive-speed brake light; minimap draws the AI line instead of `track_mask`; split-pill trigger [I]; gaps AUTHORED. | RACE_HUD §3, §6.2; F383 | M: HUD incomplete | S | M | coordinator |
+| 69 | HUD | Original post-race and pause art missing; post-race cutscene not ported; wreck-screen delay and results formats AUTHORED; no career points column. | F353; RACE_HUD §4 | L–M | S | M | career |
+| 70 | audio | Missing sounds: gear-shift whine, turbo/blow-off/backfire, handbrake, collisions, scrapes, part/glass, kick-ups, wind, crowd/ambience, HUD/countdown beeps, spotter speech, music. | AUDIO_RESEARCH §4, §6; F422 | H: quiet, incomplete soundscape | S | L | audio |
+| 71 | audio | Output is mono: no OpenAL positional stereo, direction term or Doppler; only the Normal mix mode (no StartLine/Crashed/EndOfRace); master start-up smoothing not modelled. | AUDIO_RESEARCH §3–5; TYRE_AUDIO; F422 | M: no spatial cues | S | M | audio |
+| 72 | audio | Engine mixer still "artificial" to the owner (linear mono resampler, 16 ms cadence); tyre smoothers at 62.5 Hz; never compared by ear with the original. | CONTINUOUS_ENGINE_AUDIO; TYRE_AUDIO; F422 | M | O | L | audio |
+| 73 | audio | Every engine, including AI cars still racing, was muted when the player finished (authored). | RUNTIME_LIMITS_AUDIT R21/D28 | M: silent field after the finish | — | S | **closed (F434)** |
+| 74 | graphics | Skid-strip stealing took the farthest finished strip; the original takes the farthest active one (allocator 0x73F330). | RUNTIME_LIMITS_AUDIT R25/D24 | L | — | S | **closed (F435)** |
+| 75 | graphics | Skid marks: retirement skips strips still being laid (0x73D270 has no owner test); no normal map, no two-UV crossfade, no per-car LOD, width from .ned instead of +10A4, colour mapping [I]; ground cover: per-cell RNG, CPU billboards, no slope shear, fixed-mesh type 1 not rendered. | GROUND_EFFECTS_RESEARCH §4, §6; F313; F316 | L | S+L | M | graphics |
+| 76 | graphics | Tyre smoke uses lit diffuse billboards instead of `pfx_half_smoke`; emitter height +A4 and body+1630 offset omitted; drift-effect smoke, rim sparks, wheel+148 term absent; debris handbrake ×2/rear drive-slip missing, pool drops newest instead of the 80-system refusal. | TYRE_SMOKE; TYRE_SMOKE_RESEARCH §5; F310; F314 | L–M: smoke look and density | S | M | graphics |
+| 77 | graphics | Original post-process chain (tone scale, bloom, saturation, tint, vignette) not ported; grade/AgX AUTHORED; car shader masks (normal, scratch, damage, source-alpha specular) only as opt-in pilots; track surfaces lack the source alpha specular. | GRAPHICS_REMASTER; GRID_IMAGE_FORMATION; CAR_SHADER_MASKS; DONINGTON_SURFACE_LAYERS | M: look differs from 2008 | S | L | graphics |
+| 78 | graphics | Enhanced profile limited to Lacetti on Donington; other cars/routes fall back to baseline. | GRAPHICS_INTEGRATION; main.rs | M | S | L | graphics |
+| 79 | graphics | Sun/sky lighting AUTHORED by default (source sky, sun and haze opt-in); forest opt-in and incomplete; Donington floating distant strips; reflection-probe exposure provisional. | SOURCE_SKY_LIGHTING; SOURCE_VEGETATION; DONINGTON_ATMOSPHERE; GRAPHICS_DEFECTS | M | S+D | L | graphics |
+| 80 | graphics | Unresolved road batches drawn as flat grey road on every non-Donington circuit (Nürburgring 55, Istanbul 50, Jarama 46, Yokohama 42; NaN UVs); entity draws without a diffuse binding omitted. | F304; F350; F361; F399; YOKOHAMA §4 | H visual | S | M | graphics |
+| 81 | graphics | Wheel/lettering strobing at speed (opt-in shutter); TAA car trail (SMAA default); race numbers use an equal-width digit layout. | GRAPHICS_DEFECTS; WHEEL_ROTATION_FILTERING; CAR_LIVERY_DECALS | L–M | O+S | M | graphics |
+| 82 | tracks | Okutama fails to load (`objects.ens` entity with more than one typed child); Washington routes 0/2/5/7 exceed the 8192 route-box bound. | TRACK_READERS §3.6, §4–5 | M: tracks unavailable | S | M | robustness |
+| 83 | robustness | A single-car tick failure (practice, time trial) still pauses; no kill plane/respawn (0xDE4/0xDFC); route traps (`expect("brake lines")`, unsupported breakables, >8 chunk materials) fail at load. | F318 R11/R14; F323; RUNTIME_LIMITS_AUDIT S3/S8 | L–M | S | M | robustness |
+| 84 | robustness | Shutdown segfault/hang after a screenshot (exit 139), never investigated; grid-soak `Session` mirrors `drive_tick` as of F323 and can drift. | F319; SOAK_TESTING follow-ups | L | S | S | robustness |
+| 85 | platform | Android untested on a phone (data import, tilt/touch, pad bridge, menu relaunch, Drift APK); CPU-bound ~30–34 FPS; audio not paused on suspend [I]; no rumble or pad glyphs. | F363–F405; F418; ANDROID | H for phone play | O | M | android |
+| 86 | platform | About 88 asset readers open exact-case paths (no `FileIndex::resolve`); libm sin/tan/atan/acos/pow may differ off Windows. | SETTINGS §3; F321 | M on Linux | S | M | coordinator |
+| 87 | physics/vehicle | Earlier F13 acceleration (81→106 mph) unexplained; game-time alignment with the original open (status unclear after F417/F419). | REFERENCE_DRIVING_INPUT; NEXT_MILESTONES | L–M | L | M | drift-battle-ai |
+
+## Closed in this sweep
+
+- **F434** — opponent engines kept running after the player finishes (row 73).
+- **F435** — skid strips: steal the farthest active strip, as the original (row 74).
+- **F436** — reverse drift layouts as Drift Battle launch options (row 55).

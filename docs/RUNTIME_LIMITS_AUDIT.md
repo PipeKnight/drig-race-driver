@@ -138,11 +138,11 @@ Score = likelihood (H 3, M 2, L 1) × impact. Impact: race freeze or crash 3, wr
 | R18 | **Pose correction above 64 rad or rotation above 4000 rad/s** with light pieces wedged under cars. | A23, A24, B40 | L | freeze | 3 | port diagnostic bound | yes |
 | R19 | **Force-solver event or limit iterations exceed 64.** | B09 | L | freeze | 3 | authored, not measured | yes |
 | R20 | **Frame-rate collapse** when a tick takes more than 16 ms (FixedUpdate catch-up). Pile-ups with pieces, dent reprojection and effect mesh rebuilds can cause it, and it looks like a freeze. | D32, D33 | M | perceived freeze | 2–4 | n/a | yes |
-| R21 | **All engine audio is muted after the player finishes,** including AI cars still racing. | D28 | H | audio | 3 | n/a | yes |
+| R21 | **[Resolved by F434: engines and tyres stay audible until the race is frozen]** **All engine audio is muted after the player finishes,** including AI cars still racing. | D28 | H | audio | 3 | n/a | yes |
 | R22 | **Debris pool full: the newest particles are dropped.** Debris and smoke keep two separate 12 000 pools, sized from a config value the exe never reads. | D23 | M | cosmetic | 2 | 80 systems, new ones refused | yes |
 | R23 | **Tyre smoke uses 80 system slots:** exactly full at 20 cars × 4 wheels. Whether the original's debris systems share this pool is not established. | C42, D25 | L (20 cars) | cosmetic | 1 | 80, refuse [V] | 20 |
 | R24 | **Race progress uses a global nearest-point projection,** so a car far off the line can jump in progress and an AI can be marked finished early. | C28 | L | wrong result | 2 | — | yes |
-| R25 | **Skid-strip stealing takes the farthest finished strip;** the original takes the farthest active one. | D24 | — | cosmetic divergence | 1 | 73E430 [V] | — |
+| R25 | **[Resolved by F435: 0x73F330 ported, see D24]** **Skid-strip stealing takes the farthest finished strip;** the original takes the farthest active one. | D24 | — | cosmetic divergence | 1 | 73E430 [V] | — |
 | Latent | **Unsupported original states** that would freeze at once when ported: respawn, nitro, manual clutch, handling notification receivers, pending deformation rebuild or observers. | B10, B11, B13, B25, B29, B30 | None today; H when ported | freeze | — | supported by the original | — |
 
 Checked and supported, with no guard firing: car on its roof or side, airborne, reverse gear, neutral, handbrake, stalled engine, terminal wheel damage (no longer a pause since the 14 October fix), deflated tyres, saturated body damage, reverse driving across the finish line, and long races (u64 ticks, f64 lap clock, wrapped phases).
@@ -323,11 +323,11 @@ IDs match the per-area work tables. Rows were grouped when several guards share 
 | D21 | all `println!`/`eprintln!` | stdout write failure panics | crash | yes | L–M (with D29) | std |
 | D22 | `ground_detail.rs:354,365` | LOD and sprite index | panic | yes | None | original table 0xD11698 [V] |
 | D23 | `wheel_debris.rs:20,347`, `particles.rs:96` | 12 000-particle pool full → newest dropped | silent | yes | **M** (several cars in gravel) | config value not read by the exe; original 80 systems, refuse [V] |
-| D24 | `skid_marks.rs:12-276` | 240 × 32 strips; steals the farthest finished strip | recycle | yes | None (stops) | original 240 × 32 [V]; original steals the farthest **active** strip |
+| D24 | `skid_marks.rs:12-276` | 240 × 32 strips; steals the farthest finished strip | recycle | yes | None (stops) | original 240 × 32 [V]; original steals the farthest **active** strip (allocator 0x73F330 [V]; its release 0x7289C0 detaches the wheel laying it; ported in F435) |
 | D25 | via grid-tools `tyre_smoke.rs` | 80 systems | silent drop | yes | 20 cars exactly full | original [V] |
 | D26 | `damage_parts.rs:1251-1314` | glass shard bursts | bounded | yes | M | authored |
 | D27 | `time_trial.rs:176` | first 6 laps shown | display clamp | yes | None | authored |
-| D28 | `engine_sound.rs:137-195` | `finished` mutes every engine, AI included | silent audio | yes | **H** | authored |
+| D28 | `engine_sound.rs:137-195` | `finished` mutes every engine, AI included | silent audio | yes | **H** | authored; F434 mutes only once the race is frozen |
 | D29 | `main.rs:2310-2316` and others | report on every tick with any field contact (`last_body_contacts` = whole world) | **unbounded log** | yes | **M–H** | authored diagnostics |
 | D30 | `main.rs:101,2221` etc. | counters u64; `segment as u32` | wrap | yes | None | — |
 | D31 | grid-world `time_trial.rs:113` | 24 h | pause | yes | None | authored |

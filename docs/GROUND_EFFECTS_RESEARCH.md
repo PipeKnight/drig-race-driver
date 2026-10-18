@@ -79,9 +79,14 @@ of its `grid_tools::tyre_smoke::SMOKE_TEXTURES` (`SM33`, `SM33_dark`, `SM38`, `W
 - **Pool:** one global pool of 240 strips × 32 quads (20 cars × 4 wheels).
   - A full strip chains into a new one.
   - Allocation order: the free list, then retiring strips, then steal the active strip farthest
-    from the camera.
+    from the camera [V allocator 0x73F330: free list 0x824F4, front of the retiring list 0x824F0,
+    else the active list 0x824EC by +0x2D3C, with no owner test]. Releasing the stolen strip
+    (0x7289C0) unlinks its chain neighbours and clears any wheel record that points at it, so a wheel
+    still laying it starts a fresh strip (port: F435).
   - There is no time limit. While free + retiring strips < 40, the farthest strip retires and
-    fades by 25/255 per update, one quad at a time from its oldest end.
+    fades by 25/255 per update, one quad at a time from its oldest end [V 0x73D270: the farthest
+    strip of the active list, with no owner test; the port's `maintain` still skips strips a wheel
+    is laying (open, FIDELITY_BACKLOG row 75)].
 
 [I] The COLOR declaration type is `uchar4`, not the particle system's explicit
 `uint_color_argb`, so the bytes most likely reach the shader unswizzled. On that reading:

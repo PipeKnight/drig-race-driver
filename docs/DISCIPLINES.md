@@ -515,7 +515,10 @@ longbeach_cl_r (Long Beach route_4), nurburgring_spr_r (Nürburgring route_3) an
 route_3 every car 1–2 valid laps (104–141 s), Nürburgring route_3 two cars 2 laps (113–122 s), one
 stopped with wheel terminal damage; Long Beach route_4 three cars 1 lap (118–245 s); Jarama route_0
 three cars 2 laps (96–106 s), route_1 three cars 2 laps, one with terminal damage at 0.13 laps.
-Close-drift flags: 17, 11, 10, 16, 16. The reverse layouts are not launch options yet.
+Close-drift flags: 17, 11, 10, 16, 16. F436: the three reverse layouts are launch options too
+(`settings/drift-battle-{long-beach,nurburgring,istanbul}-reverse.ini`, `Play GRID Drift Battle *
+Reverse.cmd`, same field and laps). The event menu already listed them, because the Drift Battle
+pool holds them and their tracks are surveyed.
 
 ### 4.5 AI drift quality (F389)
 
