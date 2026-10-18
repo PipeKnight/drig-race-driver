@@ -23,6 +23,11 @@ impl Language {
         self.texts.len()
     }
 
+    /// Every string id, in no particular order.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.texts.keys().map(String::as_str)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.texts.is_empty()
     }

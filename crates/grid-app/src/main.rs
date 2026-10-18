@@ -67,6 +67,7 @@ mod foliage_mips;
 mod fps_counter;
 mod front_end;
 mod texture_cache;
+mod touge_event;
 mod texture_overrides;
 mod texture_upload;
 mod tilt;
@@ -1965,11 +1966,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("drift_freestyle") => {
             return Err("drift_freestyle needs --drive and no opponents (docs/DISCIPLINES.md)".into());
         }
+        Some("pro_touge") => None,
         Some(other) => {
-            return Err(format!("unknown discipline {other}: race, drift_battle, drift_grand_prix or drift_freestyle").into());
+            return Err(format!("unknown discipline {other}: race, drift_battle, drift_grand_prix, drift_freestyle or pro_touge").into());
         }
     };
     let freestyle = drift_format == Some(Format::DriftFreestyle);
+    // Pro Touge: two runs against one AI car on a point-to-point road.
+    let pro_touge = discipline.as_deref() == Some("pro_touge");
+    if pro_touge && (opponents != Some(1) || !drive) {
+        return Err("pro_touge needs --drive and one opponent (docs/TOUGE.md)".into());
+    }
     if freestyle {
         // [V] drift_freestyle ignores race progress (Route::ignoring_progress);
         // the event is one timed run that ends at its time limit.
@@ -2012,19 +2019,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut drive_input = None;
     // Phone controls (P11): `None` when off, else the tilt settings (if any).
     let mut drive_touch: Option<Option<tilt::Settings>> = None;
+    let mut touge_run = None;
     let driving = if drive {
         track = true;
         reference = true;
         collision = false;
         start_view = true;
-        let mut runtime = grid_tools::source_vehicle::Runtime::load(
-            &root,
-            &route,
-            &player_car,
-            &format!("slot_{player_slot:02}"),
-            200679,
-        )?;
-        println!("drive_car car={player_car} label={:?}", player_car.label());
         // The device class decides assisted steering (record +0x33 -> +E6C).
         input_settings.apply_class(&mut driver_aids);
         #[cfg(target_os = "android")]
@@ -2043,6 +2043,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("drive_input {input_settings} pad_preset={pad}");
         }
         drive_input = Some(actions);
+        // One race of the event: the player's runtime and the AI field on
+        // `route` from `player_slot` (built again for a Pro Touge's second
+        // run, docs/TOUGE.md).
+        #[allow(clippy::type_complexity)]
+        let build_race = |route: &Route,
+                          player_slot: usize|
+         -> Result<
+            (
+                grid_tools::source_vehicle::Runtime,
+                Option<grid_tools::body_geometry::BodyGeometry>,
+                Option<Opponents>,
+            ),
+            Box<dyn std::error::Error>,
+        > {
+        let mut runtime = grid_tools::source_vehicle::Runtime::load(
+            &root,
+            route,
+            &player_car,
+            &format!("slot_{player_slot:02}"),
+            200679,
+        )?;
+        println!("drive_car car={player_car} label={:?}", player_car.label());
         runtime.set_assists(driver_aids)?;
         println!("drive_assists {driver_aids}");
         runtime.enable_lap_timing(&root)?;
@@ -2055,7 +2077,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 runtime.lap_required_gate_count()
             );
         }
-        if let Some(source) = body_events {
+        if let Some(source) = &body_events {
             let bytes = source.bytes(&root, "BP01")?;
             if bytes.len() != 28 {
                 return Err("invalid private body event parameter extent".into());
@@ -2107,7 +2129,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     refs.iter().copied().zip(field.iter()).collect();
                 let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::load_deforming_on(
                     &root,
-                    &route,
+                    route,
                     &entries,
                     table,
                     runtime.body_events,
@@ -2122,7 +2144,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         // A Drift Battle reads the drift_battle AI config (docs/DISCIPLINES.md).
                         let data = AiData::load_route(
                             &root,
-                            &route,
+                            route,
                             model,
                             drift.then_some("drift_battle"),
                         )?;
@@ -2168,7 +2190,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
                 println!("drive_ai_pacing {ai_settings}");
-                let progress = grid_tools::lap_progress::load_route(&root, &route)?.progress;
+                let progress = grid_tools::lap_progress::load_route(&root, route)?.progress;
                 let centre = |gate: &grid_formats::progress::Gate| -> [f32; 3] {
                     std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
                 };
@@ -2234,6 +2256,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
             })
             .transpose()?;
+            Ok((runtime, geometry, opponents))
+        };
+        let (runtime, geometry, opponents) = build_race(&route, player_slot)?;
+        // A Pro Touge's second run: the reverse subroute, the slots swapped
+        // [I] (docs/TOUGE.md §7).
+        if pro_touge {
+            let reverse = route.clone().with_subroute(1)?;
+            let (runtime, geometry, opponents) = build_race(&reverse, 1 - player_slot)?;
+            let length = |r: &Route| -> Result<f64, Box<dyn std::error::Error>> {
+                Ok(f64::from(grid_tools::lap_progress::load_route(&root, r)?.progress.total_distance))
+            };
+            touge_run = Some((
+                touge_event::NextRun {
+                    runtime,
+                    geometry,
+                    opponents,
+                    reset_line: Some(grid_tools::ai_driver::Line::load_route(&root, &reverse)?),
+                    length: length(&reverse)?,
+                },
+                length(&route)?,
+            ));
+            println!("drive_touge version=1 event=setup runs=2 run2=subroute_1 slots=swapped");
+        }
         // Set-up for headless replays of this log (grid-soak replay-log).
         println!(
             "drive_replay version=1 route={} opponents={} grid_position={}{}",
@@ -2731,6 +2776,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(mut post) = app.world_mut().get_resource_mut::<post_race::PostRace>() {
                 post.drift = true;
             }
+        }
+        if let Some((next, length)) = touge_run.take() {
+            app.insert_resource(touge_event::TougeEvent::new(
+                grid_tools::touge::Settings::load(&root)?,
+                length,
+                next,
+            ))
+            .add_systems(FixedUpdate, touge_event::tick.after(drive_tick));
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(

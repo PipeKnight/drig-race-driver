@@ -124,8 +124,9 @@ far); our cars the Chevrolet Lacetti (FWD) and BMW 320si (RWD).
   Diff"; `StateIngameTougeRoundDecisionMaker`; HUD penalty pills `osd_minor`/`osd_major`.
 - Rules [I]: pro touge = two runs, total time with collision penalties; midnight touge = a single
   head-to-head run with traffic (`touge_traffic`).
-- **Engine: one run supported** (F407, docs/TOUGE.md: Haruna both directions, point-to-point
-  timing, two-car grids); not supported: two runs, penalties, traffic.
+- **Engine: Pro Touge supported** (F407/F412, docs/TOUGE.md: Haruna both directions, point-to-point
+  timing, two-car grids; two runs with touge.xml penalties and Round 1 / Round 2 / Total Times
+  results, the fault geometry AUTHORED); not supported: Midnight Touge traffic.
 
 #### Drift (drift_battle, drift_grand_prix, drift_freestyle)
 
@@ -586,8 +587,9 @@ session: no input to the original), the car-state angular velocity sign, the dri
    rules, midnight traffic; needs Haruna and Japanese cars, point-to-point lap timing. F407: Haruna
    drives start to finish in both directions (subroutes, open AI line, run timing; docs/TOUGE.md),
    solo, two-car and in the app (`Play GRID Touge Haruna.cmd`). [V] pro_touge sets the touge state
-   0 and midnight_touge state 1 (random direction); the second round's reverse switch is not found,
-   so the two runs, penalties and traffic are not ported.
+   0 and midnight_touge state 1 (random direction). F412: Pro Touge's two runs (run 2 reverse, slots
+   swapped), the penalty windows and counts [V] and the results; who takes a penalty is AUTHORED
+   (the alongside gate 0x6441B0 is not ported); traffic not ported.
 6. **Demolition Derby**: Detroit stadium routes, stock car, flipped/wrong-way disqualification
    (demolition_derby.xml, 0x630BC0), DD results screen; needs Detroit and a stock car, robust heavy
    contact (soak). F399: every Detroit route loads; the stadium routes 8-9 lap solo (one valid lap of

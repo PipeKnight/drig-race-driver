@@ -7,6 +7,7 @@
 //! grid-route-readers nodes FILE ELEMENT [LIMIT]
 //! grid-route-readers streams FILE
 //! grid-route-readers run GAME_ROOT ROUTE [SUBROUTE]
+//! grid-route-readers lang LANGUAGE.lng PATTERN
 use grid_formats::{collision, entities, jpk, mesh, ornaments, pssg, scene, start_lights};
 use grid_tools::route::Route;
 use std::{error::Error, path::Path};
@@ -188,6 +189,15 @@ fn run() -> Res<()> {
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["stages", root, route] => stages(Path::new(root), &Route::new(route)?),
         ["streams", file] => streams(Path::new(file)),
+        ["lang", file, pattern] => {
+            let language = grid_formats::language::read(&read(Path::new(file))?)?;
+            let mut ids: Vec<&str> = language.ids().filter(|id| id.contains(pattern)).collect();
+            ids.sort();
+            for id in ids {
+                println!("{id}	{}", language.get(id).unwrap_or_default());
+            }
+            Ok(())
+        }
         ["run", root, route] => run_check(Path::new(root), &Route::new(route)?),
         ["run", root, route, subroute] => {
             run_check(Path::new(root), &Route::new(route)?.with_subroute(subroute.parse()?)?)

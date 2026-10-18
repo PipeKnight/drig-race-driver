@@ -70,7 +70,7 @@ Forward grids stand 3.6 m past their start gate; reverse grids stand 9.3 m behin
   - The 0x23E4 object is the drift manager: 0x668720 constructs its settings at +8 with 0x6683D0, the drift-settings constructor with the rating table 500…10000.
   - So the byte is settings +0x1C8, `ignore_progress`. DISCIPLINES.md had this as [I]; it is now [V].
 - **Brake data.** 0x792C80 takes the class brake data, or the brake line's own data at +0x10 when the class is absent. It does not treat zero speeds specially.
-- **Not found.** Where a pro touge's second round sets `+4 = 1` (and so the reverse subroute) was not found. Pattern scans for stores to `[obj+4]` after loads of `[race+0x23EC]` found only the reset 0x63C710 (`+4 = 0` in state 0). **Two-run timing is therefore not ported.**
+- **Not found.** Where a pro touge's second round sets `+4 = 1` (and so the reverse subroute) was not found. Pattern scans for stores to `[obj+4]` after loads of `[race+0x23EC]` found only the reset 0x63C710 (`+4 = 0` in state 0). F412 shows that `+4` indexes the per-run penalty counters (§7), so `+4` is the run and run 2 is the reverse subroute; the store itself is still not found.
 
 ## 3. Port
 
@@ -193,9 +193,74 @@ Cars that finish drive on past the end of the road; terminal damage there happen
 
 ## 6. Open
 
-- Pro Touge two runs (round-2 subroute setter not found), touge.xml penalties and the alongside rules, midnight traffic, and the midnight random direction (state 1) in the app.
+- Pro Touge (F412, §7): the alongside fault geometry, the round sequence and decision state, the penalty HUD pills. Midnight Touge: traffic and the random direction (state 1) in the app.
 - `resetlines.cqtc`: falls off Haruna's edges.
 - Route 9 forward grid; AI behaviour at the road end.
 - The app race and freestyle runs were measured before F406 and not rerun.
 - Freestyle HUD and timer display, and a scored arena run in the app; the arenas have no player auto-reset (no AI line).
 - `ai_pacing` catch-up still measures gaps on a loop of the open line's length [I: only with pacing on].
+
+## 7. Pro Touge (F412)
+
+Two runs against one AI car with collision penalties and a result by total time.
+
+### Original [V unless marked]
+
+Static analysis, read-only (Ghidra 12.1.4 headless, Capstone 5.0.6); evidence in this worktree's `local/touge/decomp/`.
+
+- **Settings.** `gameconfig/touge.xml` (`TougeSettings`) is read by 0x630FD0 into the touge state at +0xB0:
+  - `minorPenaltyTimePenalty` +0xB8 (2.0);
+  - `majorPenaltyTimePenalty` +0xBC (10.0);
+  - `ignoreCollisionTime` +0xC0 (2.0);
+  - `alongsideLengthOffset` +0xC4 (0.05);
+  - `alongsideThresholdTweakMax` +0xC8 (0.2).
+- **Car records.** The touge state holds two 0x50-byte car records:
+  - +0: the car;
+  - +0x31: the car's applied-damage byte;
+  - +0x38: a double, the penalty window;
+  - +0x40: penalty pending;
+  - +0x41: major;
+  - +0x44: the other car's record;
+  - +0x48: the touge state;
+  - minor/major counters at +0x1C/+0x20 + 12 × run.
+- **Contacts.** A per-car listener 0x644520 copies the car's +0xBA5 into record +0x31. +0xBA5 is the byte the impact handler 0x9EF360 stores from the damage dispatcher 0x9E6660 (BODY_IMPACT_HANDLER.md). The listener then runs 0x6441B0 when the contact is with the other touge car.
+  - Past the alongside geometry gate (0x63C940 on both cars, using `alongsideLengthOffset` and `alongsideThresholdTweakMax`), the contact is major (0x631240) when either record's +0x31 is set, else minor (0x631210).
+  - 0x631210: when no window is open, the window becomes `ignoreCollisionTime` and a minor penalty is pending.
+  - 0x631240: the same with major, and it also upgrades a pending minor penalty in an open window.
+- **Counting.** Each tick in a pro touge (state +8 == 0), 0x64E1E0 counts the window down. When it falls below zero, a pending penalty is counted once in the current run's minor or major counter, provided the car has not finished (+0x2E64 [I]). The minor/major HUD calls 0x6B3500/0x6B3630 show the seconds (`osd_minor`/`osd_major`).
+- **Penalty time.** A run's penalty time is `minor × 2.0 + major × 10.0` (0x63C830, called for both cars by 0x644180).
+- **Strings [D].** `touge_round_one_results_table_title` "Round 1", `touge_round_two_results_table_title` "Round 2", `touge_race_results_table_title` "Total Times", `post_race_stats_touge_round_1_info`/`_2_info` "Run 1/2"/"Run 2/2", `post_race_stats_touge_penalty_time` "Penalty Total: [AMOUNT]", `post_race_stats_touge_time_difference_title`.
+
+### Port
+
+- **Rules** (`grid_tools::touge`): `Settings::load`, `Penalties::{contact, tick, seconds}` as above, `classify` by total time.
+- **AUTHORED:**
+  - Who takes a penalty. The alongside gate is not ported: the car behind on race progress is penalised, both cars when closer than 4.5 m.
+  - Run 2 swaps the grid slots [I].
+  - Cars without both runs rank last.
+- **Headless:** `touge::run_pro_touge` and the probe `grid-pro-touge ROOT CD01 BP01 [ROUTE] [CARS] [TICKS]`.
+- **App:** `discipline = pro_touge` with one opponent (`settings/pro-touge.ini`, `Play GRID Pro Touge.cmd`).
+  - The race block builds run 2 at start-up: the reverse subroute, the player in the other slot.
+  - `touge_event` counts the penalties. After run 1 it waits for both cars, up to 30 s after the player's finish (AUTHORED), then swaps in run 2 with a new countdown.
+  - The results screen opens only after run 2, ordered by total. Columns: Total Times in the time column, Round 1 and Round 2 (run time plus penalty) in the last two.
+  - Restart Race restarts the current run (AUTHORED).
+
+### Results [V]
+
+**Headless,** `grid-pro-touge` with DF01 and the characteristics (`local/touge/runs/`):
+
+| Route | Winner | Round 1 | Round 2 | Total | Other car |
+|---|---|---|---|---|---|
+| 1 | car 0 | 2:32.272 | 2:26.864 | 4:59.136 | car 1, 5:02.208 |
+| 4 | car 1 | 3:07.344 | 2:59.888 | 6:07.232 | car 0, 6:30.288 (round 2 3:25.056) |
+
+There was no car contact in either event, so no penalties.
+
+**App,** windowed autopilot on route 1 with 1 AI (`local/touge/app/pro-touge.log`):
+- Run 1: player 2:35.593, AI 2:33.440.
+- `drive_touge event=run_end`, then `run_start run=2 subroute=1 slots=swapped` and a new countdown.
+- Run 2: AI 2:25.664, player +1.495.
+- The post-race stats opened only in segment 1 (after run 2).
+
+**Not verified:** the penalty path in a real contact (unit-tested only), and the results table on screen (unit-tested view).
+

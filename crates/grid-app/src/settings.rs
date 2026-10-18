@@ -431,12 +431,13 @@ impl Settings {
                     };
                 }
                 ("drive", "discipline") => match value.to_ascii_lowercase().as_str() {
-                    d @ ("race" | "drift_battle" | "drift_grand_prix" | "drift_freestyle") => {
+                    d @ ("race" | "drift_battle" | "drift_grand_prix" | "drift_freestyle"
+                    | "pro_touge") => {
                         self.discipline = Some(d.into())
                     }
                     _ => {
                         return Err(at(
-                            "`discipline` needs race, drift_battle, drift_grand_prix or drift_freestyle"
+                            "`discipline` needs race, drift_battle, drift_grand_prix, drift_freestyle or pro_touge"
                                 .into(),
                         ));
                     }
