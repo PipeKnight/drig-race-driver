@@ -1431,7 +1431,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--opponents" => {
                 opponents = Some(
                     args.next()
-                        .ok_or("--opponents needs 1..11")?
+                        .ok_or("--opponents needs 1..19")?
                         .parse::<usize>()?,
                 )
             }
@@ -1820,7 +1820,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", input::HELP);
                 println!("{}", grid_tools::ai_pacing::Settings::HELP);
                 println!(
-                    "--opponents 1..11: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
+                    "--opponents 1..19: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
                 );
                 println!(
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
@@ -1856,7 +1856,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
     if let Some(name) = &series {
-        let event = grid_tools::series::Event::prepare(
+        // Le Mans Series grid option (AUTHORED mapping of the settings):
+        // `grid_position = back` is the back of the player's class group,
+        // anything else its front.
+        let event = grid_tools::series::Event::prepare_on_grid(
             &root,
             name,
             &route,
@@ -1864,7 +1867,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             opponents,
             opponent_cars.is_none(),
             series_seed(),
+            if profile.grid_back { 1 } else { 0 },
         )?;
+        if let Some(slot) = event.player_slot {
+            grid_position = Some(slot + 1);
+        }
         player_car = event.player.clone();
         opponents = Some(event.opponent_count);
         if opponent_cars.is_none() {
@@ -1938,10 +1945,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if deformation.is_some() && (!drive || body_contacts.is_none()) {
         return Err("--deformation requires --drive and --body-contacts".into());
     }
-    if opponents.is_some_and(|n| !(1..=11).contains(&n))
+    if opponents.is_some_and(|n| !(1..=19).contains(&n))
         || (opponents.is_some() && (!drive || body_contacts.is_none()))
     {
-        return Err("--opponents 1..11 requires --drive and --body-contacts".into());
+        return Err("--opponents 1..19 requires --drive and --body-contacts".into());
     }
     use grid_tools::virtual_race::Format;
     // A Drift GP runs the player alone; its rivals are virtual (docs/DISCIPLINES.md).

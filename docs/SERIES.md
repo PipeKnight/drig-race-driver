@@ -16,7 +16,7 @@ image (`local/compatibility/grid-unpacked.exe`) or verified by a run; **[I]** in
 | Pro Tuned | sup, sky, nsx, 350 | **races**: 12-car fields on all 20 layouts |
 | GT1 | dbr, c6r, sal, ccg, c5r, lam | **races since F406** (collision floor lift): 12-car fields on all 20 layouts |
 | GT2 | spk, esp | **races since F406**: 12-car fields on all 20 layouts |
-| Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | c65, cre, b05 lap solo since F406; LMP1 lc7/b06 still ground; field recovered (15–17 cars incl. 2–3 LC70s, no 12-car cap) — no launcher |
+| Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | **F409: original field and grid, 15–17 cars, launcher (experimental)**; the LC70s in every field still ground and wreck |
 
 New code:
 - `grid_formats::database`: the whole NDBS `database.bin` decoded by `schema.bin` (78 tables).
@@ -193,6 +193,53 @@ LC70s]. Grid 0x5BDF10: one MT19937 draw `genrand() % n` per car swaps it with th
 stable bubble sort by `vehicle_class.lemans_sort_order` (LMP1 1, LMP2 2, GT1 3, GT2 4) and the player
 goes to the front/back/middle of its class group (or stays). Not ported: the port's grids hold at most
 12 cars and the LC70 does not race yet.
+
+## Le Mans Series and the LMP1 cars (F409) [V unless marked]
+
+**Le Mans Series port.** `series::build_lemans_field` (0x663860: the player's entry, then every
+`lemans_restrictions` row of the player's counting vehicle with `lemans_24` = 0 in storage order,
+skipping the row in the player's own livery), `series::lemans_sort_order` (`vehicle_class`) and
+`series::lemans_grid` (0x5BDF10: one `genrand() % n` swap per slot, stable bubble sort by class key,
+player to the front/back/middle of its class group). `Event::prepare_on_grid` returns the opponents
+in slot order and the player's slot; grid-app applies it (`grid_position = back` → back of the class
+group, else its front: AUTHORED mapping; the original's option comes from the front end). AUTHORED:
+the player's livery is `<stem>_00` (the front end chooses it in the original) and the grid seed
+(`Mt::new(seed + 2)`; the original uses the clock). Field sizes [D]: DBR9 15, Spyker 16 (one row is
+the player's own livery in both).
+
+Limits raised to the routes' 20 grid slots [D: every route's grids.pssg has slot_00..slot_19]:
+`MultiRuntime` (was 12), `Car::list`, grid-opponent-race (1..20 cars), grid-app `--opponents 1..19`,
+the results table (header + 20 rows). Deformation readers now accept a negative strength-box damage
+weight: the C65, B05, LC70 and R10 cabins have damage −1 [D], and 0x9E7CE0 only multiplies by it (the
+port's 0..100 range was an authored guard).
+
+Launcher `Play GRID Series Le Mans.cmd` (settings/series-le-mans.ini, Donington GP, DBR9, back of
+the GT1 group). Every Le Mans Series field holds 2–3 LC70s, which still ground (below), so the
+launcher sets GRID_SERIES_EXPERIMENTAL=1. Not ported: the results screen's Class column
+(`post_race_results_lemans`) and `lemans_progress_adjustment`.
+
+**LMP1 (still open).** Findings (static + headless):
+- The 3 × 3 body pieces of 0x9E0240 are built with margins `param_2 = param_3 = 0.02` (0xA01DA4..
+  0xA01DBB, constant 0xCB0934): every plane gets +0.02, and the outer ones −0.02 again, so the outer
+  faces — the floor included — do not move; only the faces between pieces overlap by 0.02. The
+  9-piece hull would not change the floor height that F406 already reproduces. Not ported.
+- The suspension step 0x9F1E10 with its travel stops is already verified 1:1 (docs/SUSPENSION_VEHICLE.md).
+- Body +0x2214 (aero scale) is reset to the same value as the air density in 0xA09CE0 (≈ 1).
+- Diagnostic (temporary build, not kept): with the floor raised a further 0.15 m the LC70 and B06
+  complete 2 laps at Donington (70.5 / 74.6 s); at the shipped floor they wreck. The 911's single
+  lap does not change with the floor (another cause).
+- [I] So the LMP1s' 0.15–0.26 m compression puts the lifted floor on the road; the remaining
+  difference to the original is in what that contact does (the port's body–road contact scheduling
+  is authored, docs/DONINGTON_BODY_CONTACTS.md) or in an aero input not found statically. A live
+  trace of the original is needed to decide.
+
+**Checks (F409)**: headless 17-car mixed field (c65, 911, dbr, cre, b05, lam, sal, c5r, c6r, spk, esp
+cycled; DF01) at Donington: 15/17 finish 2 laps. The DBR9 Le Mans Series field (15 cars, 3 LC70s),
+20000 ticks: Donington 7/15, Istanbul 13/15, Jarama 10/15, Nürburgring 11/15 finish 2 laps; the LC70s
+(cars 0–2) wreck or stall. `grid-soak quick --seeds 1..8 --cars 16 --max-cars 16` with the LMS cars:
+7/8 (seed 4: a prop piece sinks, the open family). App (GRID_SERIES_SEED 5): field
+`lc7_02, lc7_00, lc7_01, c65_02, c65_03, c65_01, c65_00, dbr_01, dbr_02, sal_00, lam_00, 911_00..02`,
+player slot 11 (back of GT1), HUD 12 / 15; a 1-lap run finished 9th / 15 (`local/gtfix/series-lms*`).
 
 ## Layouts
 

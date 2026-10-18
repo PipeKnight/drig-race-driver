@@ -330,7 +330,9 @@ impl MultiRuntime {
         events: Option<body_impact::Parameters>,
         deformation: Option<DeformationParameters>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        if !(1..=12).contains(&entries.len()) {
+        // Up to the routes' 20 grid slots: the Le Mans Series fields have
+        // 15-17 cars (docs/SERIES.md, F409).
+        if !(1..=20).contains(&entries.len()) {
             return Err("unsupported shared-world car count".into());
         }
         let mut cars = Vec::new();

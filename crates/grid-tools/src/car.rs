@@ -31,8 +31,8 @@ impl Car {
             .split(',')
             .map(Self::new)
             .collect::<Result<Vec<_>, _>>()?;
-        if cars.is_empty() || cars.len() > 12 {
-            return Err("car list needs 1..12 stems".into());
+        if cars.is_empty() || cars.len() > 20 {
+            return Err("car list needs 1..20 stems".into());
         }
         Ok(cars)
     }

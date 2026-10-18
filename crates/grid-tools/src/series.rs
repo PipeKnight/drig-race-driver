@@ -350,6 +350,118 @@ pub fn build_field(
     Ok(Field { entries, player })
 }
 
+/// The Le Mans Series free-race field (0x676F50 → 0x663860 for the mode
+/// `le_mans_series` [V, docs/SERIES.md]): the player's entry first, then one
+/// AI car per `lemans_restrictions` row of the player's vehicle with
+/// `lemans_24` = 0, in storage order, in the row's entrant livery; the row in
+/// the player's own livery is skipped. No RNG, no `max_cars` cap (15–17 cars
+/// for the shipped vehicles). `teammate_replace` only matters with a career
+/// team-mate, which a free race never has. The player's livery is its
+/// `<stem>_00` row, else the vehicle's first livery (AUTHORED: the original
+/// takes the one chosen in the front end).
+pub fn build_lemans_field(
+    db: &Database,
+    player: &Car,
+) -> Result<Vec<Entry>, Box<dyn std::error::Error>> {
+    let vehicles = table(db, "vehicle")?;
+    let liveries = table(db, "vehicle_livery")?;
+    let player_row = vehicles
+        .rows()
+        .filter(|v| v.text("file_string") == Some(player.stem()))
+        .find(|v| v.int("count_towards_achievement") == Some(1))
+        .ok_or(format!("no counting vehicle row for {player}"))?;
+    let vehicle_id = player_row.int("id");
+    let own = liveries
+        .rows()
+        .filter(|l| l.int("vehicle_id") == vehicle_id)
+        .find(|l| l.text("file_string") == Some(&format!("{}_00", player.stem())))
+        .or_else(|| liveries.rows().find(|l| l.int("vehicle_id") == vehicle_id))
+        .ok_or(format!("no livery for {player}"))?;
+    let entry = |livery: grid_formats::database::Row<'_>| -> Result<Entry, Box<dyn std::error::Error>> {
+        let file = livery.text("file_string").ok_or("livery file absent")?;
+        let stem = vehicles
+            .rows()
+            .find(|v| v.int("id") == livery.int("vehicle_id"))
+            .and_then(|v| v.text("file_string"))
+            .ok_or("livery vehicle absent")?;
+        Ok(Entry {
+            car: Car::new(stem)?,
+            livery: file.into(),
+            livery_index: file
+                .strip_prefix(&format!("{stem}_"))
+                .and_then(|n| n.parse().ok()),
+        })
+    };
+    let mut field = vec![entry(own)?];
+    for row in table(db, "lemans_restrictions")?.rows() {
+        if row.int("player_vehicle_id") != vehicle_id || row.int("lemans_24") != Some(0) {
+            continue;
+        }
+        let livery_id = row.int("entrant_vehicle_livery_id");
+        if livery_id == own.int("id") {
+            continue;
+        }
+        let livery = liveries
+            .rows()
+            .find(|l| l.int("id") == livery_id)
+            .ok_or("entrant livery absent")?;
+        field.push(entry(livery)?);
+    }
+    if field.len() < 2 {
+        return Err(format!("no Le Mans Series field for {player}").into());
+    }
+    Ok(field)
+}
+
+/// `vehicle_class.lemans_sort_order` of a car (LMP1 1, LMP2 2, GT1 3, GT2 4).
+pub fn lemans_sort_order(db: &Database, car: &Car) -> Result<i32, Box<dyn std::error::Error>> {
+    let row = table(db, "vehicle")?
+        .rows()
+        .find(|v| v.text("file_string") == Some(car.stem()))
+        .ok_or(format!("no vehicle row for {car}"))?;
+    table(db, "vehicle_class")?
+        .rows()
+        .find(|c| c.int("id") == row.int("vehicle_class_id"))
+        .and_then(|c| c.int("lemans_sort_order"))
+        .ok_or_else(|| format!("no vehicle class for {car}").into())
+}
+
+/// The Le Mans Series grid (0x5BDF10 [V]): car indices in slot order.
+/// `keys[i]` is car i's class sort key; car 0 is the player. Each slot i
+/// swaps with slot `genrand() % n` (one draw per car, a naive shuffle), then
+/// a stable bubble sort by key (strict >), then the player moves to the
+/// front (option 0), back (1) or middle (2) of its class group, or stays (3).
+pub fn lemans_grid(keys: &[i32], rng: &mut Mt, option: u8) -> Vec<usize> {
+    let n = keys.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    for i in 0..n {
+        let j = (rng.range(0, n as u32) % n as u32) as usize;
+        if j != i {
+            order.swap(i, j);
+        }
+    }
+    for p in 0..n {
+        for k in 0..n.saturating_sub(1 + p) {
+            if keys[order[k]] > keys[order[k + 1]] {
+                order.swap(k, k + 1);
+            }
+        }
+    }
+    let less = keys.iter().filter(|&&k| k < keys[0]).count();
+    let equal = keys.iter().filter(|&&k| k == keys[0]).count();
+    let target = match option {
+        1 => Some(less + equal - 1),
+        2 => Some(less + equal / 2),
+        3 => None,
+        _ => Some(less),
+    };
+    if let Some(target) = target {
+        let at = order.iter().position(|&c| c == 0).unwrap();
+        order.swap(at, target);
+    }
+    order
+}
+
 /// A prepared series race: layout, player car and the opponents in grid
 /// order (opponent k = the k-th car after the player).
 #[derive(Clone, Debug)]
@@ -360,6 +472,9 @@ pub struct Event {
     pub opponent_count: usize,
     /// Empty when the caller keeps its own opponent cars.
     pub opponents: Vec<Entry>,
+    /// The player's 0-based grid slot when the series places it (Le Mans
+    /// Series, 0x5BDF10); `None` keeps the caller's grid position.
+    pub player_slot: Option<usize>,
     pub seed: u32,
 }
 
@@ -379,6 +494,23 @@ impl Event {
         fill: bool,
         seed: u32,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::prepare_on_grid(root, name, route, player, opponents, fill, seed, 0)
+    }
+
+    /// [`Self::prepare`] with the player's grid option of a Le Mans Series
+    /// event (0 front, 1 back, 2 middle of its class group, 3 where the
+    /// shuffle put it).
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_on_grid(
+        root: &std::path::Path,
+        name: &str,
+        route: &crate::route::Route,
+        player: Option<&Car>,
+        opponents: Option<usize>,
+        fill: bool,
+        seed: u32,
+        grid_option: u8,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let schema = std::fs::read(root.join("database/schema.bin"))?;
         let data = std::fs::read(root.join("database/database.bin"))?;
         let db = grid_formats::database::read(&schema, &data)?;
@@ -392,6 +524,34 @@ impl Event {
             Some(car) => return Err(format!("{car} is not a {name} car").into()),
             None => series.cars[0].clone(),
         };
+        if name == "le_mans_series" {
+            // The whole recovered field and grid (0x663860, 0x5BDF10); the
+            // pool's max_cars and the caller's opponent count do not apply.
+            let field = build_lemans_field(&db, &player)?;
+            let keys = field
+                .iter()
+                .map(|e| lemans_sort_order(&db, &e.car))
+                .collect::<Result<Vec<_>, _>>()?;
+            // AUTHORED seeding: the original seeds the grid generator from
+            // the clock (session +0x241C).
+            let order = lemans_grid(&keys, &mut Mt::new(seed.wrapping_add(2)), grid_option);
+            let player_slot = order.iter().position(|&c| c == 0);
+            let opponents: Vec<Entry> = order
+                .iter()
+                .filter(|&&c| c != 0)
+                .map(|&c| field[c].clone())
+                .collect();
+            Self::check_raceable(&player, &opponents)?;
+            return Ok(Self {
+                series: name.into(),
+                layout,
+                player,
+                opponent_count: opponents.len(),
+                opponents,
+                player_slot,
+                seed,
+            });
+        }
         let opponent_count = opponents
             .unwrap_or(layout.max_cars - 1)
             .min(layout.max_cars - 1);
@@ -409,8 +569,21 @@ impl Event {
         } else {
             Vec::new()
         };
+        Self::check_raceable(&player, &opponents)?;
+        Ok(Self {
+            series: name.into(),
+            layout,
+            player,
+            opponent_count,
+            opponents,
+            player_slot: None,
+            seed,
+        })
+    }
+
+    fn check_raceable(player: &Car, opponents: &[Entry]) -> Result<(), Box<dyn std::error::Error>> {
         let experimental = std::env::var_os("GRID_SERIES_EXPERIMENTAL").is_some();
-        for car in std::iter::once(&player).chain(opponents.iter().map(|e| &e.car)) {
+        for car in std::iter::once(player).chain(opponents.iter().map(|e| &e.car)) {
             if !experimental && !RACEABLE.contains(&car.stem()) {
                 return Err(format!(
                     "{car} cannot race yet (docs/SERIES.md); set GRID_SERIES_EXPERIMENTAL=1 to try"
@@ -418,14 +591,7 @@ impl Event {
                 .into());
             }
         }
-        Ok(Self {
-            series: name.into(),
-            layout,
-            player,
-            opponent_count,
-            opponents,
-            seed,
-        })
+        Ok(())
     }
 
     pub fn cars(&self) -> Vec<Car> {
@@ -435,7 +601,7 @@ impl Event {
     pub fn log_line(&self) -> String {
         let field: Vec<&str> = self.opponents.iter().map(|e| e.livery.as_str()).collect();
         format!(
-            "drive_series series={} layout={} pool_id={} max_cars={} player={} opponents={} field={} seed={} fill=original-free-race seeding=authored",
+            "drive_series series={} layout={} pool_id={} max_cars={} player={} opponents={} field={} player_slot={} seed={} fill={} seeding=authored",
             self.series,
             self.layout.name,
             self.layout.id,
@@ -443,7 +609,13 @@ impl Event {
             self.player,
             self.opponent_count,
             field.join(","),
-            self.seed
+            self.player_slot.map_or("caller".to_string(), |s| s.to_string()),
+            self.seed,
+            if self.player_slot.is_some() {
+                "original-le-mans-series"
+            } else {
+                "original-free-race"
+            }
         )
     }
 }
@@ -565,5 +737,47 @@ mod tests {
             })
             .collect();
         assert!(players.len() > 5);
+    }
+
+    #[test]
+    fn lemans_grid_sorts_classes_and_places_the_player_in_its_group() {
+        // Player (car 0) is GT1 (3) among LMP1 (1), LMP2 (2) and GT2 (4).
+        let keys = [3, 1, 2, 3, 4, 1, 3, 2];
+        for option in 0..4u8 {
+            let order = lemans_grid(&keys, &mut Mt::new(7), option);
+            let sorted: Vec<i32> = order.iter().map(|&c| keys[c]).collect();
+            assert!(sorted.windows(2).all(|w| w[0] <= w[1]), "{sorted:?}");
+            let slot = order.iter().position(|&c| c == 0).unwrap();
+            match option {
+                0 => assert_eq!(slot, 4),
+                1 => assert_eq!(slot, 6),
+                2 => assert_eq!(slot, 5),
+                _ => assert!((4..=6).contains(&slot)),
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn lemans_series_fields_come_from_lemans_restrictions() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let schema = std::fs::read(root.join("database/schema.bin")).unwrap();
+        let data = std::fs::read(root.join("database/database.bin")).unwrap();
+        let db = grid_formats::database::read(&schema, &data).unwrap();
+        // DBR9: 15 rows for vehicle 29 with lemans_24 = 0, one in dbr_00 (the
+        // player takes it).
+        let dbr = build_lemans_field(&db, &Car::new("dbr").unwrap()).unwrap();
+        assert_eq!(dbr[0].livery, "dbr_00");
+        assert_eq!(dbr.len(), 15);
+        let count = |f: &[Entry], s: &str| f.iter().filter(|e| e.car.stem() == s).count();
+        assert_eq!(count(&dbr, "lc7"), 3);
+        assert_eq!(count(&dbr, "c65"), 4);
+        // Spyker: 16 rows, one in spk_00.
+        let spk = build_lemans_field(&db, &Car::new("spk").unwrap()).unwrap();
+        assert_eq!(spk.len(), 16);
+        assert_eq!(lemans_sort_order(&db, &Car::new("b06").unwrap()).unwrap(), 1);
+        assert_eq!(lemans_sort_order(&db, &Car::new("c65").unwrap()).unwrap(), 2);
+        assert_eq!(lemans_sort_order(&db, &Car::new("dbr").unwrap()).unwrap(), 3);
+        assert_eq!(lemans_sort_order(&db, &Car::new("esp").unwrap()).unwrap(), 4);
     }
 }

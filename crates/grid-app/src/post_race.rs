@@ -554,7 +554,9 @@ const COLUMNS: [(&str, f32); 5] = [
     ("post_race_positions_table_team_column", 90.),
 ];
 const BEST_COLUMN: f32 = 130.;
-const TABLE_ROWS: usize = 13;
+/// The header and up to 20 cars (the routes' grid slots; Le Mans Series
+/// fields have 15-17, F409).
+const TABLE_ROWS: usize = 21;
 
 fn spawn(
     mut commands: Commands,
