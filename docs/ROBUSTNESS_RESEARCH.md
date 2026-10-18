@@ -186,10 +186,166 @@ Next for the pile-up:
 - recover the view links +0x20/+0x24 that 0x795C00 uses, and port the exact segment test;
 - a live 12-car trace of the original at Jarama, if the owner allows it.
 
-## 7. Open
+## 7. The original's continuous collision (F411)
+
+18 October 2026, Claude Code, the follow-up to section 3. Static, read-only. Pseudocode and
+dumps are in this worktree's private `local/robust/decomp/d1..d13`. Nothing was run in the
+original game.
+
+### Where the setting goes [D]
+
+- `maxContinuousCollisions` is config index 0xF (+0x3C, default 1000).
+  - 0xA749A0 puts it at world-struct +0x54.
+  - The collision world B18E70 takes its config at world-struct +0x3C, so the value lands in its
+    +0x958.
+- 0xB18A00 divides it by the worker count and passes it to each narrow-phase worker (0xB3AC80).
+  The worker allocates that many 0x30-byte records at +0x18 (count +0x20, capacity +0x24).
+- The world step 0xAD8A40 runs in phases:
+  1. AD8070;
+  2. **B18E20**;
+  3. B18300, the ordinary narrow phase;
+  4. B184F0;
+  5. AD7110;
+  6. AD8130.
+- B18E20 refreshes the broadphase for the moved bodies and calls **B15B70** when world byte +0x84
+  is set. The constructor AD8BA0 sets it to 1, and the existing read-only capture
+  `local/world-settings/paused01.json` shows +0x84 = 1 in the running original [V].
+
+### Which bodies [D]
+
+B15B70 works per body (list +0x300):
+- d = predicted centre (+0x334 → +0x1C0) − step start (+0x2A0).
+- The body is swept when, for one of its shapes, (r · 0.75)² < |d|² (0xCAFE64 = 0.75, x87).
+- r is the shape's vtable +0x18. For a mesh shape, B41F50 returns mesh data +0x5C: the least
+  absolute coordinate among the six extrema, which the port already writes (B42540).
+- Pairs with another body qualify. So do pairs with static geometry, such as the road, if body
+  byte +0x416 is set; B11F40 sets it to 1 for every body.
+- Joined or same-body pairs (B38D80) and the layer mask (B15540) are excluded, as in the ordinary
+  narrow phase.
+
+### The swept test [D]
+
+B3A700 calls the pair matrix's third entry (+8):
+- AE4700 for a convex shape against a packed road chunk;
+- AE34B0 for convex pairs;
+- AE3910, AE3F20 and ADDFD0 for the other kinds.
+
+Each call gets the shape's end pose and its start pose, which is the end pose with the
+displacement subtracted (end rotation, translation only).
+
+AE4700, per candidate triangle (B212D0 with the motion):
+- **The mesh already touches the triangle at the start pose.** B7F740 finds witnesses, and the
+  record is kept only if their distance exceeds 1e-3 (CB2294):
+  - normal: the witness difference, or the face normal on a sheet;
+  - AEE640 orientation;
+  - time 0.
+- **Otherwise, B80CE0 → B801C0, a GJK ray cast:**
+  - shape 1 is the triangle (first-maximum support), shape 2 the mesh rotated about the origin;
+  - both margins are 0;
+  - the ray runs from the start translation to the end translation;
+  - the simplex is B81620/B81700/B81E30/B817C0, using the port's existing B7D570/B7DE90 features;
+  - it stops at |v|² ≤ 1e-6 × the simplex's largest |w|², or after 100 iterations (scratch
+    +0x200, B7E440);
+  - a hit at λ > 0 gives a record with the ray normal (a sheet's face normal is turned to agree
+    with it).
+
+### The response [D]
+
+B3A700, for each record:
+- k = −(d_rel · n) / ((w_A + w_B) |n|²), with w the inverse mass (+0x3F4).
+- If k ≤ 0 the record is dropped.
+- Otherwise the body moves to prev + t′·d + (1 − t′)(d + k w n), with t′ = min(1.01 t, 1). After
+  the time of impact, the approach along n is removed.
+
+B18220 then applies the records:
+- B10680 sums each body's records.
+- B14550:
+  - averages them (sum × refined RCPPS of the count);
+  - stores the correction in +0x360;
+  - sets the centre;
+  - republishes the pose from the unchanged rotation (B0F730).
+
+Velocity is unchanged. Phase 3 then generates the ordinary contacts from the corrected pose.
+
+### Port [V]
+
+- `grid_world::continuous`:
+  - `radius`, `is_fast`, `step`;
+  - the ray simplex and `ray_cast`;
+  - `sweep_packed` (AE4700);
+  - `response` (B3A700), `mean` and `apply` (B14550).
+- `Track::sweep_road`: every road chunk the swept bounds reach.
+- `PropWorld::continuous` for the pieces and the lost wheels, called at the start of the geometry
+  provider (between prediction and contacts, as phase 2 precedes phase 3). The provider now gets
+  `&mut [Body]`.
+
+Not ported, recorded:
+- cars;
+- the boundary sheet (AE95B0);
+- route boxes;
+- piece and car pairs (AE34B0).
+
+Inferences [I]:
+- candidate gathering uses the union of the start and end bounds;
+- each query starts from direction +x;
+- records are applied in body and chunk order;
+- the live `maxContinuousCollisions` was not read (default 1000).
+
+Native byte-exact proof is not done.
+
+### Results [V], release
+
+First on main 78b1837 (F401), before F406 (`local/robust/ccd/`, binaries `soak-base`/`soak-ccd`):
+
+| Run | main 78b1837 | with continuous collision |
+|---|---|---|
+| solo identity | aad9a07a…e41b | same |
+| 12-car Donington, 12,000 ticks | 1c66a317… | same |
+| grid-soak quick 1..24 | 24/24 | 24/24 |
+| Long Beach forced 21..80 | 59/60 (seed 59) | **60/60** |
+| Long Beach `--cars 1 --chaos prop --ticks 8000 --seeds 1..19` | 1 fail (13) | 2 fail (2, 13) |
+| Donington `--cars 1 --chaos prop --ticks 8000 --seeds 1..80` | 3 fail (car falls 50 and 66, piece 54) | 1 fail (54, same tick) |
+
+Then on main 9050690 (F408, with F406's collision-floor lift; `local/robust/ccd/checks3/`, binaries
+`soak-main408`/`soak-ccd408`, `race-main408`):
+
+| Run | main 9050690 | with continuous collision |
+|---|---|---|
+| solo identity | aad9a07a…e41b | same |
+| 12-car Donington, 12,000 ticks (DF01, characteristics) | 85363097… | **e42ba1dd…** |
+| grid-soak quick 1..24 | 23/24 (seed 14, tick 1531) | **24/24** |
+| Long Beach forced 21..80 | 57/60 (37, 41, 48) | 57/60 (37, 61, 74) |
+
+- **Seed 59** (the 0.15 m tyre landing at 10 m/s) no longer tunnels.
+- **Seed 14** (F406's residual, a prop piece at Istanbul nudged and sinking through the ground)
+  passes. It fails on main at tick 1531; both runs have 2 breaks.
+- **The 12-car race change is the 1:1 port.** Since F406, car 6 loses wheels 2 and 3 at tick 6,640.
+  The lost wheel is a body of the shared world, so it is swept:
+  - wheel 3 ends at (−526.43, −173.43) instead of (−526.52, −173.56);
+  - cars 9–11 then differ in late contacts;
+  - finishing order, lap counts and retirements are unchanged.
+  - A race without a lost wheel or broken prop is unchanged, because cars are not swept.
+- **Long Beach chaos seed 2** is a different trajectory from main's: 22 breaks against 15, and
+  main never creates body 231.
+  - At tick 2121 a car hit drives body 231 down 0.38 m in the ordinary contact solve. The swept
+    stage found no hit at that step.
+  - From then on the piece starts its steps below the road, and the swept stage correctly adds
+    nothing.
+  - This is the known family of thin pieces driven down in one 16 ms step by a hard hit (F351).
+- **Long Beach forced 61 and 74** (new on the F408 base, while 41 and 48 pass) are trajectory changes:
+  - Seed 74's piece gets small upward corrections at ticks 3302–3303 (+1 to +13 mm, the approach
+    along up-pointing road normals removed).
+  - At tick 3304 it drops 0.1 m in the ordinary solve with no swept hit, then sinks: the
+    thin-piece family of section 3.
+- **Seed 22** is not settled by this. Its wheel spawns inside the armco box, and the sweep only
+  shortens motion toward the obstacle; it is still an expected loss (EntityBox).
+- **The F406 GT2 residual** (a car on its nose sinking through the road) is not covered: cars are
+  not swept yet.
+
+## 8. Open
 
 - The 16 ms step against the original's per-frame step (F320; seeds 22 and 59, the pile-up depth).
-- The original's continuous collision (`maxContinuousCollisions`, config +0x3C): consumer not
-  traced (seed 59).
+- Continuous collision (section 7): cars, the boundary sheet, route boxes and piece/car pairs are
+  not swept yet.
 - Kind-5 cylinders and `cylinderFacets` (10) against the port's 12-sided prisms.
 - First-corner pile-up: the exact 0x795C00 segment test, then a live comparison.

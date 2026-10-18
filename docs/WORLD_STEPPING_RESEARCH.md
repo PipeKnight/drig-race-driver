@@ -45,7 +45,9 @@ maxfps after `A749A0`. Two candidate store sites (`A70050`/`A70090`) are list it
 not setters. A read-only live capture of world `+8/+C/+10/+7C4/+7C8` and the solver
 manager settings settles the stepping and confirms whether the solver defaults above are
 the live values, before any prototype change. `maxContinuousCollisions` indicates the
-original has continuous collision detection, which the prototype lacks entirely.
+original has continuous collision detection, which the prototype lacks entirely. F411 traced it
+(world phase 2, B18E20 → B15B70 → B3A700 → AE4700; live world +0x84 = 1) and ported it for prop
+pieces and lost wheels against the road: ROBUSTNESS_RESEARCH.md section 7.
 
 ## Live capture (resolved)
 
