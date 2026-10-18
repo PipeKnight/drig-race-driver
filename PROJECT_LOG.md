@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G130 — Optional source-alpha road F0 pilot, not delivered (18 October 2026)
+
+Added explicit off/source-base/white-control surface mode, default off, enhanced source-track requirement, no launcher changes. Shader reuses sampled/blended diffuse alpha and existing mode uniform; sqrt follows texture filtering/blending to weight Bevy's quadratic dielectric F0. RGB/roughness/opacity/geometry stay unchanged; no new texture upload or mobile bindings. This also weights GGX environment reflection unlike the original direct Phong term, so not source parity.198app tests pass; final CLI validation guard edited during compilation needs exact-source follow-up Clippy/build/negative CLI checks. Native4K off/white/source/RGBA matrix harness prepared privately; all GPU acceptance remains pending.
+
+Publication note: G129 journal commit9d9398b also reached main by explicit fast-forward. An initial PowerShell invocation using an unquoted reflog expression failed parsing before any merge; corrected explicit commit succeeded, no approval decline or content loss. Material audit Pillow12.3.0 checked directly; no original installation changes.
+
 ## G129 — Verified graphics source published to main (18 October 2026)
 
 Published focused graphics commits and preserved F398-F404 peer sources through0966e735e460 to origin/codex/grid-graphics and origin/main; primary checkout fast-forwarded fromF400 without source conflicts or dirty-file loss. Primary's only untracked choreography note and normal executable remain unchanged (c4d52b9e.../2014aae6...). Graphics launcher now uses installed dedicated6aec3a9/SHAddf26b5... with source numbers/ambient/base-specular options; actual CMD capability block selects all3 supported flags. Source publication does not relabel the binary as F404: newer input/harness/Android code remains unbuilt in this verified desktop snapshot. Private manifests and paint-specular-main-publication01.json track that distinction. No game window launched or peer prototype process altered.

@@ -36,6 +36,14 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     albedo = mix(albedo, skid_colour.rgb, skid_a);
     albedo = mix(albedo, skid_colour2.rgb, skid_b);
     pbr.material.base_color = vec4(albedo, 1.0);
+    // Source diffuse alpha weights its Phong lobe. This optional adaptation
+    // weights Bevy's dielectric base F0 without changing roughness or opacity.
+    // Square-root AFTER texture filtering/blending: F0 is quadratic in reflectance.
+    // White control follows the same path and must reproduce feature-off output.
+    if controls.w > 0.5 {
+        let weight = select(clamp(layer.a, 0.0, 1.0), 1.0, controls.w > 1.5);
+        pbr.material.reflectance *= sqrt(weight);
+    }
     // Original AO-scale uniform is not recovered; scale=1 is an explicit choice.
     let ao = mix(1.0, macro_sample.a, controls.z);
     pbr.diffuse_occlusion *= ao;

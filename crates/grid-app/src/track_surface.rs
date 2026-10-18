@@ -10,6 +10,32 @@ use bevy::{
 use grid_formats::{material, mesh, pssg, scene, texture};
 use std::{collections::BTreeMap, path::Path};
 
+/// Optional authored GGX base-F0 weighting; not the source Phong model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Specular {
+    #[default]
+    Off,
+    SourceBase,
+    WhiteControl,
+}
+impl Specular {
+    pub fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "off" => Ok(Self::Off),
+            "source-base" => Ok(Self::SourceBase),
+            "white-control" => Ok(Self::WhiteControl),
+            _ => Err("--surface-specular needs off, source-base or white-control"),
+        }
+    }
+    fn control(self) -> f32 {
+        match self {
+            Self::Off => 0.,
+            Self::SourceBase => 1.,
+            Self::WhiteControl => 2.,
+        }
+    }
+}
+
 const SHADER: Handle<Shader> = uuid_handle!("ef412ff6-5acc-4977-bdb9-d5f314970b66");
 type SurfaceMaterial = ExtendedMaterial<StandardMaterial, Surface>;
 
@@ -34,7 +60,7 @@ pub struct Surface {
     // A scale, B scale, C scale, A offset.
     #[uniform(108)]
     scales: Vec4,
-    // B offset, skid enabled, authored macro AO strength, unused.
+    // B offset, skid enabled, authored macro AO strength, specular pilot mode.
     #[uniform(109)]
     controls: Vec4,
     #[uniform(110)]
@@ -361,7 +387,12 @@ fn attach(
                         macro_map: textures[&d.textures[2]].clone(),
                         skids: skid_textures[&d.textures[3]].clone(),
                         scales: d.scales,
-                        controls: d.controls,
+                        controls: Vec4::new(
+                            d.controls.x,
+                            d.controls.y,
+                            d.controls.z,
+                            settings.surface_specular.control(),
+                        ),
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
                     },
@@ -375,8 +406,9 @@ fn attach(
         attached += 1;
     }
     println!(
-        "track_surface attached draws={attached} materials={} uv1=true masks=linear-ARGB-to-RGBA",
-        handles.len()
+        "track_surface attached draws={attached} materials={} uv1=true masks=linear-ARGB-to-RGBA specular={:?}",
+        handles.len(),
+        settings.surface_specular
     );
     assert_eq!(
         attached,

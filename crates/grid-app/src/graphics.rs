@@ -57,6 +57,8 @@ pub struct Settings {
     pub moving_probe: bool,
     pub ssr_thickness: f32,
     pub layered_track: bool,
+    /// Optional source blended-alpha base-F0 adaptation; default off.
+    pub surface_specular: super::track_surface::Specular,
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
     pub source_trees: bool,
@@ -123,6 +125,7 @@ impl Default for Settings {
             moving_probe: false,
             ssr_thickness: 0.05,
             layered_track: true,
+            surface_specular: super::track_surface::Specular::Off,
             source_land: true,
             source_trees: false,
             player_race_number: None,

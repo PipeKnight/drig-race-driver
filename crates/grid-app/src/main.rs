@@ -1717,6 +1717,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--reflections needs sky, deferred, ssr or probe".into()),
                 };
             }
+            "--surface-specular" => {
+                graphics.surface_specular = track_surface::Specular::parse(
+                    &args.next().ok_or("--surface-specular needs off, source-base or white-control")?,
+                )?;
+            }
             "--track-materials" => {
                 graphics.layered_track = match args.next().as_deref() {
                     Some("source") => true,
@@ -1768,6 +1773,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--help" => {
                 #[cfg(feature = "paint-specular")]
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
+                println!("--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source layers required; off default, not original Phong parity.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
                     "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
@@ -1853,6 +1859,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             series_liveries = event.opponents.iter().map(|e| e.livery_index).collect();
         }
         println!("{}", event.log_line());
+    }
+    if graphics.surface_specular != track_surface::Specular::Off
+        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive))
+    {
+        return Err("--surface-specular requires an enhanced track scene with --track-materials source".into());
     }
     let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
