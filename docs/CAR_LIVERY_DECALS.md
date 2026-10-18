@@ -62,3 +62,12 @@ After executable acceptance/publication, run `Play GRID Graphics.cmd` from the g
 
 
 Primary executable preservation: an independently installed primary playable reports27665f2704d5-dirty/SHA6364b328... while primary source main remainsfde38ef. Its uncommitted build provenance cannot be reconstructed from main alone; do not overwrite it with the graphics candidate. The graphics launcher checks help capability before adding number flags, so source integration remains usable with that older playable. Verified numbers are available in the graphics checkout build; main's executable is a separate publication decision. This is a compatibility check, not a claim that the older executable has the new numbers.
+
+
+## Accepted paired lap and graphics playable — 18 October
+
+Source31e74b689b19/SHAbee2138a... passes the repeated full paired6500tick/native3840x2160run with supported1800s capture budget. Both complete one valid89.955257484s lap; all four final physical/handling/deformation/lap lines match after removing walltime. Final images inspected, original-font01roof quarter-turn visible and attached. No render errors; only known nilUUID gamepad warning. Wall completion449.49s versus672.89s under changing workstation load is not a controlled performance comparison. Initial600s timeout remains retained, not hidden.
+
+632release tests/12executables and all-target Clippy pass on the F381 integration. Later F382 route-prop caching is merged in source with its history preserved; all-target Clippy passes again2m06s, but the published executable deliberately stays the GPU-validatedF381/31e74b. No F382 executable/full-lap claim. Static roof/bothdoors/8K/forcedRGBA and30frame checks remain the earlier c0b graphics-equivalent evidence. No phone performance claim or original compositor parity claim.
+
+Graphics checkout target/release/grid-app.exe and local/graphics/verified-grid-app.exe now contain that verified build. Previous529dad80... executable and current-build manifest are archived privately. Primary C:/Dev/Reassembly executable6364b328.../27665f2704d5-dirty remains byte-identical. Graphics launchers enable source numbers where supported; capability guard is tested on both executables (new0/old1 findstr match). Private current-build.json records built/integrated revisions and unbuiltF382scope. Next actual material change awaits production-channel/uniform binding proof rather than treating the packed map as generic PBR roughness.

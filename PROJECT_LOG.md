@@ -1,5 +1,14 @@
 # GRID engine project log
 
+## G113 — Source numbers accepted through a full4K lap; graphics playable refreshed (18 October 2026)
+
+Repeated off/source6500tick native4K captures finish0errors, each one valid89.955257484s lap; four final physics/handling/deformation/lap lines equal excluding walltime. Final images inspected,01roof in saved quarter-turn orientation. Known nilUUID warning only. Private numbers-source-f381-full4k02-validation.json contains both image/log hashes and states. Prior600s timeout retained. Walltimes449.49/672.89s under changing CPU load do not establish performance. F381 source31e74b689b19/SHAbee2138a... is the verified executable.
+
+Promoted only graphics-worktree target/release and verified backup, archived previous529dad80.../manifest. Primary target6364b328.../27665f2704d5-dirty unchanged. Graphics launcher detects number capability (new0/old1), remains compatible across source integration. Preserve owner note SHA. Source mergedF382/7789739with journal-only conflict retaining both histories; all-target Clippy2m06s clean, no newF382full-run or executable claim. Built/integrated revisions and unbuiltF382scope explicit in private current-build.json. All632F381tests pass, no new tools/Steam edits/owner help.
+
+Uniform decompile found a gated material override/cache path, not proof of active clean-car defaults. Separate OcclusionMapScale state-offset candidate likewise not enough to equate independent object layouts. Keep this uncertainty for the next material stage; no speculative appearance change introduced. Findings documented alongside corrected texture binding table; proprietary evidence stays ignored local/.
+
+
 ## G112 — Combined tests pass; preserve other-agent playable; trace paint bindings (18 October 2026)
 
 Combined F381 integration passes632release tests/12executables,0failed/0ignored, including172app/67formats/156tools/197world. All-target workspace Clippy2m37s clean. New binary stamped31e74b689b19/SHAbee2138a...; build8m29s includes waiting for the shared target test lock. Control full6500tick/native4K run completes valid89.955257484s lap; source-number repeat is underway with supported1800s timeout. No full paired acceptance yet. Private numbers-f381-code-validation01.json.
