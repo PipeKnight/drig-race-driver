@@ -653,6 +653,7 @@ mod tests {
             vehicle: "BMW 320si".into(),
             score: None,
             touge: None,
+            class: None,
         };
         let rows = event.results(None, vec![player]);
         assert_eq!(

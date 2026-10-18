@@ -61,7 +61,15 @@ pub struct Row {
     /// Pro Touge: each run's time with its penalty (`None` unfinished);
     /// the time column then holds the total (docs/TOUGE.md §7).
     pub touge: Option<[Option<f64>; 2]>,
+    /// Le Mans Series: the car's class name key (`db_lmp1`, ...), shown in
+    /// the Class column (`post_race_results_lemans`, F413).
+    pub class: Option<String>,
 }
+
+/// Each car's class name key by car index (the player first) in a Le Mans
+/// Series race (docs/SERIES.md).
+#[derive(Resource, Clone, Debug, Default)]
+pub struct CarClasses(pub Vec<String>);
 
 /// Results rows in classification order. `player_best` replaces car 0's
 /// line-timed best lap with its gate-timed one.
@@ -100,6 +108,7 @@ pub fn rows(
                 vehicle: vehicles.get(car).cloned().unwrap_or_default(),
                 score: None,
                 touge: None,
+                class: None,
             }
         })
         .collect()
@@ -123,6 +132,7 @@ pub fn solo_row(name: &str, vehicle: &str, result: Option<&grid_tools::time_tria
         vehicle: vehicle.into(),
         score: None,
         touge: None,
+        class: None,
     }
 }
 
@@ -802,6 +812,13 @@ impl PostRace {
                     header[4] = l("touge_round_one_results_table_title");
                     header[5] = l("touge_round_two_results_table_title");
                 }
+                let classes = rows.iter().any(|r| r.class.is_some());
+                if classes {
+                    // The Le Mans results' Class column [D string
+                    // post_race_positions_table_car_class_header; its place
+                    // in the layout is I: the team column's].
+                    header[4] = l("post_race_positions_table_car_class_header");
+                }
                 view.table.push(header);
                 for (i, row) in rows.iter().enumerate() {
                     if row.car == 0 {
@@ -815,9 +832,10 @@ impl PostRace {
                             None => time_text(row, &l),
                         },
                         row.vehicle.clone(),
-                        match row.touge {
-                            Some([run, _]) => run.map_or_else(|| "DNF".into(), crate::race_hud::lap_time),
-                            None => "--".into(),
+                        match (row.touge, &row.class) {
+                            (Some([run, _]), _) => run.map_or_else(|| "DNF".into(), crate::race_hud::lap_time),
+                            (None, Some(class)) => labels.get(class).to_owned(),
+                            (None, None) => "--".into(),
                         },
                         match (row.touge, row.score) {
                             (Some([_, run]), _) => run.map_or_else(|| "DNF".into(), crate::race_hud::lap_time),
@@ -877,13 +895,14 @@ type Events<'w> = (
     Option<Res<'w, crate::time_trial::Trial>>,
     Option<Res<'w, crate::drift_event::DriftEvent>>,
     Option<Res<'w, crate::touge_event::TougeEvent>>,
+    Option<Res<'w, CarClasses>>,
 );
 
 fn present(
     post: Res<PostRace>,
     labels: Res<Labels>,
     driving: Res<crate::Driving>,
-    (trial, drift, touge): Events,
+    (trial, drift, touge, classes): Events,
     mut panel: Query<&mut Visibility, With<Panel>>,
     mut parts: Query<(&Part, &mut Text, &mut TextColor, &mut Node)>,
     mut shown: Local<Option<View>>,
@@ -909,6 +928,11 @@ fn present(
     }
     if let Some(t) = &touge {
         rows = t.results(rows);
+    }
+    if let Some(c) = &classes {
+        for row in &mut rows {
+            row.class = c.0.get(row.car).cloned();
+        }
     }
     let view = post.view_with(&rows, &labels, board.as_ref());
     if shown.as_ref() == Some(&view) {
@@ -1126,6 +1150,7 @@ mod tests {
             vehicle: "Lacetti".into(),
             score: None,
             touge: Some(touge),
+            class: None,
         };
         let rows = [
             row(1, 1, Cell::Total(299.136), [Some(152.272), Some(146.864)]),
@@ -1139,6 +1164,33 @@ mod tests {
         assert_eq!(view.table[1][5], crate::race_hud::lap_time(146.864));
         assert_eq!(view.table[2][5], "DNF");
         assert_eq!(view.player_row, Some(2));
+    }
+
+    #[test]
+    fn le_mans_results_show_the_class_column() {
+        let mut post = PostRace::new(Variant::FreeRace);
+        post.stage = Stage::Results;
+        let row = |position, car, class: &str| Row {
+            position,
+            car,
+            name: format!("car {car}"),
+            time: Cell::Running,
+            estimated: false,
+            best: None,
+            vehicle: "Aston Martin DBR9".into(),
+            score: None,
+            touge: None,
+            class: Some(class.into()),
+        };
+        let rows: Vec<Row> = (0..16)
+            .map(|i| row(i + 1, i, if i < 3 { "db_lmp1" } else { "db_gt1" }))
+            .collect();
+        let view = post.view(&rows, &Labels::default());
+        assert_eq!(view.table[0][4], "post_race_positions_table_car_class_header");
+        assert_eq!(view.table[1][4], "db_lmp1");
+        assert_eq!(view.table[16][4], "db_gt1");
+        // Header plus 16 cars fit the table.
+        assert!(view.table.len() <= TABLE_ROWS);
     }
 
     #[test]

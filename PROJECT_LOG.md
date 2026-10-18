@@ -1,5 +1,9 @@
 # GRID engine project log
 
+F413 Le Mans Series results: the original's Class column (2026-10-18, Claude Code; coordinator's request to finish the Le Mans Series). Details: docs/SERIES.md "Le Mans Series and the LMP1 cars". The 15–17-car fields, grid, AI, HUD and the gated launcher landed in F409; this adds the results screen's Class column [D: `post_race_positions_table_car_class_header`, class names `db_<vehicle_class.type_string_id>`; its place in the layout (the team column's) is I]: `series::class_key`, `Event::classes`, grid-app `post_race::CarClasses`. Not ported: `lemans_progress_adjustment` (time-limited progress classification only [I]). The LC70/B06 and the launcher stay behind GRID_SERIES_EXPERIMENTAL (F410).
+- Checks [V], release, cargo/rustc 1.99.0, on 9bafbfb (after F411/F412): tests 691 passed, 0 failed (new: Class column view, class keys); clippy clean; solo identity aad9a07a…e41b unchanged; 12-car b8fe54e5… (F411's change; this commit touches no physics); `grid-soak quick` 24/24. Playable not rebuilt.
+- Left for the Le Mans Series: only the LMP1 cars (live trace of the original, F409/F410).
+
 F412 Pro Touge: two runs on Haruna with touge.xml penalties and Round 1 / Round 2 / Total Times results (2026-10-18, Claude Code; coordinator task 1 after F407). Details: docs/TOUGE.md §7. Evidence: worktree admiring-swartz-2f8287 `local/touge/` (`decomp/`: Ghidra 12.1.4 headless, read-only, drift-ai project copy; `runs/`, `app/`). Nothing installed; no input to the original game.
 - Static analysis [V]:
   - touge.xml is read into the touge state +0xB0 (0x630FD0).

@@ -1290,6 +1290,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut car_chosen = profile.car.is_some();
     // Opponent k's livery package in a series event (docs/SERIES.md).
     let mut series_liveries: Vec<Option<usize>> = Vec::new();
+    // A Le Mans Series race's class name keys by car (results Class column).
+    let mut car_classes: Vec<String> = Vec::new();
     let mut driver_aids = profile.assists()?;
     let mut input_settings = profile.input()?;
     let mut ai_settings = profile.ai()?;
@@ -1878,6 +1880,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if opponent_cars.is_none() {
             opponent_cars = Some(event.cars());
             series_liveries = event.opponents.iter().map(|e| e.livery_index).collect();
+            car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
     }
@@ -2776,6 +2779,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(mut post) = app.world_mut().get_resource_mut::<post_race::PostRace>() {
                 post.drift = true;
             }
+        }
+        if !car_classes.is_empty() {
+            app.insert_resource(post_race::CarClasses(std::mem::take(&mut car_classes)));
         }
         if let Some((next, length)) = touge_run.take() {
             app.insert_resource(touge_event::TougeEvent::new(

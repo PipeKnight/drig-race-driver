@@ -413,6 +413,21 @@ pub fn build_lemans_field(
     Ok(field)
 }
 
+/// The language key of a car's class name, `db_<vehicle_class.type_string_id>`
+/// (e.g. `db_lmp1` "LMP1", `db_gt2` "GT2") [D].
+pub fn class_key(db: &Database, car: &Car) -> Result<String, Box<dyn std::error::Error>> {
+    let row = table(db, "vehicle")?
+        .rows()
+        .find(|v| v.text("file_string") == Some(car.stem()))
+        .ok_or(format!("no vehicle row for {car}"))?;
+    table(db, "vehicle_class")?
+        .rows()
+        .find(|c| c.int("id") == row.int("vehicle_class_id"))
+        .and_then(|c| c.text("type_string_id"))
+        .map(|t| format!("db_{t}"))
+        .ok_or_else(|| format!("no vehicle class for {car}").into())
+}
+
 /// `vehicle_class.lemans_sort_order` of a car (LMP1 1, LMP2 2, GT1 3, GT2 4).
 pub fn lemans_sort_order(db: &Database, car: &Car) -> Result<i32, Box<dyn std::error::Error>> {
     let row = table(db, "vehicle")?
@@ -475,6 +490,9 @@ pub struct Event {
     /// The player's 0-based grid slot when the series places it (Le Mans
     /// Series, 0x5BDF10); `None` keeps the caller's grid position.
     pub player_slot: Option<usize>,
+    /// Le Mans Series: each car's class name key ([`class_key`]), the player
+    /// first, then the opponents in grid order; empty otherwise.
+    pub classes: Vec<String>,
     pub seed: u32,
 }
 
@@ -542,6 +560,10 @@ impl Event {
                 .map(|&c| field[c].clone())
                 .collect();
             Self::check_raceable(&player, &opponents)?;
+            let classes = std::iter::once(&player)
+                .chain(opponents.iter().map(|e| &e.car))
+                .map(|c| class_key(&db, c))
+                .collect::<Result<Vec<_>, _>>()?;
             return Ok(Self {
                 series: name.into(),
                 layout,
@@ -549,6 +571,7 @@ impl Event {
                 opponent_count: opponents.len(),
                 opponents,
                 player_slot,
+                classes,
                 seed,
             });
         }
@@ -577,6 +600,7 @@ impl Event {
             opponent_count,
             opponents,
             player_slot: None,
+            classes: Vec::new(),
             seed,
         })
     }
@@ -779,5 +803,7 @@ mod tests {
         assert_eq!(lemans_sort_order(&db, &Car::new("c65").unwrap()).unwrap(), 2);
         assert_eq!(lemans_sort_order(&db, &Car::new("dbr").unwrap()).unwrap(), 3);
         assert_eq!(lemans_sort_order(&db, &Car::new("esp").unwrap()).unwrap(), 4);
+        assert_eq!(class_key(&db, &Car::new("lc7").unwrap()).unwrap(), "db_lmp1");
+        assert_eq!(class_key(&db, &Car::new("911").unwrap()).unwrap(), "db_gt2");
     }
 }

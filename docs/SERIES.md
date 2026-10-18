@@ -215,8 +215,12 @@ port's 0..100 range was an authored guard).
 
 Launcher `Play GRID Series Le Mans.cmd` (settings/series-le-mans.ini, Donington GP, DBR9, back of
 the GT1 group). Every Le Mans Series field holds 2–3 LC70s, which still ground (below), so the
-launcher sets GRID_SERIES_EXPERIMENTAL=1. Not ported: the results screen's Class column
-(`post_race_results_lemans`) and `lemans_progress_adjustment`.
+launcher sets GRID_SERIES_EXPERIMENTAL=1. Results (F413): the Class column of
+`post_race_results_lemans` [D: header `post_race_positions_table_car_class_header`, class names
+`db_<vehicle_class.type_string_id>`, e.g. "LMP1", "GT2"] in the team column's place (its place in
+the original layout is [I]); `series::class_key`, `Event::classes`, grid-app `post_race::CarClasses`.
+Not ported: `lemans_progress_adjustment` (read only at 0x4D166B, the time-limited races' progress
+classification, which a lap race does not use [I]).
 
 **LMP1 (still open).** Findings (static + headless):
 - The 3 × 3 body pieces of 0x9E0240 are built with margins `param_2 = param_3 = 0.02` (0xA01DA4..
