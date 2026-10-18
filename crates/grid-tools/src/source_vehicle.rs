@@ -1171,6 +1171,20 @@ impl Runtime {
         )
     }
 
+    /// [`Self::impacts`] without the records against packed track chunks,
+    /// which the drift collision listener 0x64D840 skips (type 11).
+    pub fn impacts_off_track(&self) -> Vec<crate::body_impacts::Impact> {
+        let contacts = &self.state.world.groups.contacts;
+        contacts[..self.last_active_contacts.min(contacts.len())]
+            .iter()
+            .filter(|c| {
+                let other = if c[0x28 / 4] == 1 { c[0x2c / 4] } else { c[0x28 / 4] };
+                !self.track.is_chunk_token(other)
+            })
+            .flat_map(|c| crate::body_impacts::collect(std::slice::from_ref(c), 1))
+            .collect()
+    }
+
     /// Opt in to breakable route props (after `prepare_body_geometry`, before
     /// the first tick): breakable boxes get their threshold as contact limit
     /// and break into dynamic pieces (DYNAMIC_PROPS_RESEARCH.md).

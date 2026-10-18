@@ -341,6 +341,12 @@ impl Sample {
 /// - 0x62FFE0 leaves the combo alone when the other body's callback is the
 ///   car body-impact dispatcher 0xA01910 [V]: contact with another car is no
 ///   collision [I: 0xA01910 serves car bodies only].
+/// - 0x64D840 skips a contact whose other object reports type 11 (0x958310)
+///   [V], the wrapper class (vtable 0xD3A778) the body factory 0xA73FD0
+///   builds for every packed `qt_*.vcqtc` collision chunk in the static
+///   loader 0x5BB180 [V]: touching the road, kerbs or verges is no
+///   collision (F387). The boundary sheet is shape kind 10 and still counts
+///   [I: its wrapper type is not traced].
 /// - The original's flags are jointed entities whose touch the listener
 ///   0x64D840 reports through 0x64D7E0; the port keeps them as static boxes
 ///   (no joint rows, F284), so their contact is a flag touch only [I].
@@ -354,7 +360,7 @@ pub fn split_contacts(
     for &(value, other) in contacts {
         match other {
             Contacted::Prop(p) if flags.contains(&p) => touched = true,
-            Contacted::Car(_) => {}
+            Contacted::Car(_) | Contacted::Track => {}
             _ => impact = impact.max(value),
         }
     }
@@ -876,9 +882,8 @@ impl Scorer {
 
     /// Race end for this car (0x64D940). The open combo is banked. A car
     /// still racing that moves faster than 5 mph has its score scaled up to
-    /// the event distance. Returns true when the original would replace the
-    /// score with its result estimator's (displayed score still zero); that
-    /// estimator is not ported.
+    /// the event distance. Returns true when the shown score is still zero,
+    /// so the virtual race's estimate replaces it (`Entry::finish_race`).
     pub fn finish_race(&mut self, s: &Settings, finished: bool, speed: f32, laps: u32) -> bool {
         self.banked_at_end = true;
         self.bank(s);
@@ -903,9 +908,9 @@ impl Scorer {
 pub struct Entry {
     pub detector: Detector,
     pub scorer: Scorer,
-    /// Banked at the race end; the original's estimate would have replaced
-    /// the score.
-    pub needs_estimate: bool,
+    /// Banked at the race end with a zero score, which the virtual race's
+    /// estimate replaced (`crate::virtual_race`).
+    pub estimated: bool,
     pub done: bool,
 }
 
@@ -914,7 +919,7 @@ impl Entry {
         Self {
             detector: Detector::default(),
             scorer: Scorer::new(battle, difficulty, player),
-            needs_estimate: false,
+            estimated: false,
             done: false,
         }
     }
@@ -934,11 +939,26 @@ impl Entry {
             self.scorer.display as i64
         }
     }
-    pub fn finish_race(&mut self, s: &Settings, finished: bool, speed: f32, laps: u32) {
+    /// Race end (0x64D940); `performance` is the car's driver skill for the
+    /// virtual race (0x62B170: `Virtual_Performance`, 1.0 without a driver).
+    pub fn finish_race(
+        &mut self,
+        s: &Settings,
+        (finished, speed, laps): (bool, f32, u32),
+        race: &mut crate::virtual_race::VirtualRace,
+        performance: f32,
+    ) {
         if self.done {
             return;
         }
-        self.needs_estimate = self.scorer.finish_race(s, finished, speed, laps);
+        if self.scorer.finish_race(s, finished, speed, laps) {
+            // The estimate times the laps replaces the banked total (+0xC)
+            // and the shown score (+0x130).
+            let score = race.drift_score(performance, laps);
+            self.scorer.total = score;
+            self.scorer.display = score;
+            self.estimated = race.loaded;
+        }
         self.done = true;
     }
 }
@@ -959,17 +979,22 @@ mod tests {
 
     #[test]
     fn flags_are_touched_and_cars_are_no_collision() {
-        use crate::source_vehicle::multi::Contacted::{Car, Prop, Static};
+        use crate::source_vehicle::multi::Contacted::{Car, Prop, Static, Track};
         let flags = [7, 9];
         // A flag box is a touch, never a collision; another car is neither.
         assert_eq!(
             split_contacts(&[(900., Prop(7)), (700., Car(2))], &flags),
             (0., true)
         );
-        // Walls, other props and the road are collisions; the largest counts.
+        // The boundary sheet and other props are collisions; the largest
+        // counts. The packed road chunks are not (0x958310 type 11).
         assert_eq!(
             split_contacts(&[(450., Static), (300., Prop(3)), (90., Prop(9))], &flags),
             (450., true)
+        );
+        assert_eq!(
+            split_contacts(&[(455., Track), (300., Prop(3))], &flags),
+            (300., false)
         );
         assert_eq!(split_contacts(&[], &flags), (0., false));
         // A touch disarms the close-drift bonus like the original's clock.
@@ -1295,31 +1320,48 @@ mod tests {
     }
 
     #[test]
-    fn race_end_banks_scales_and_flags_estimates() {
+    fn race_end_banks_scales_and_estimates_zero_scores() {
+        use crate::virtual_race::{Format, VirtualRace, difficulty, drift_pool};
         let s = shipped();
+        let pool = drift_pool(Format::DriftBattle, "tracks/usa/long_beach/route_1");
+        let mut race = VirtualRace::new(pool, difficulty(2, 1), 3);
         let mut e = Entry::new(false, None, true);
         run(&mut e, &s, &sample(30., 30., 0.5), 120);
         let pending = e.scorer.display;
         // Half of a 2-lap race covered, still moving: score × 4.
-        e.finish_race(&s, false, 30., 2);
-        assert!(e.done && !e.needs_estimate);
+        e.finish_race(&s, (false, 30., 2), &mut race, 1.);
+        assert!(e.done && !e.estimated);
         assert_eq!(e.score(), (pending * 4.) as i64);
         // Finished cars are only banked; idle unfinished cars get no scaling
-        // and, without points, would be estimated.
+        // and, without points, the virtual race's estimate × laps.
         let mut f = Entry::new(false, None, true);
         run(&mut f, &s, &sample(30., 30., 0.5), 120);
         let p = f.scorer.display;
-        f.finish_race(&s, true, 30., 2);
+        f.finish_race(&s, (true, 30., 2), &mut race, 1.);
         assert_eq!(f.score(), p as i64);
         let mut idle = Entry::new(false, Some(2), false);
         run(&mut idle, &s, &sample(1., 0., 0.5), 10);
-        idle.finish_race(&s, false, 1., 2);
-        assert!(idle.needs_estimate && idle.score() == 0);
+        let expected = race.clone().drift_score(0.5, 2);
+        idle.finish_race(&s, (false, 1., 2), &mut race, 0.5);
+        assert!(idle.estimated);
+        assert_eq!(idle.score(), expected as i64);
+        assert!(idle.scorer.display == expected && idle.scorer.total == expected);
+        // 2 laps of 5,300,000 / 43 .. / 14 (Normal).
+        assert!(
+            (246_000..757_200).contains(&idle.score()),
+            "{}",
+            idle.score()
+        );
+        // Without base results the estimate is zero.
+        let mut none = VirtualRace::new(None, difficulty(2, 1), 3);
+        let mut zero = Entry::new(false, Some(2), false);
+        zero.finish_race(&s, (false, 0., 2), &mut none, 1.);
+        assert!(!zero.estimated && zero.score() == 0);
         // A second race end changes nothing; updates stop.
-        e.finish_race(&s, true, 0., 2);
+        e.finish_race(&s, (true, 0., 2), &mut race, 1.);
         run(&mut e, &s, &sample(30., 30., 0.9), 120);
         assert_eq!(e.score(), (pending * 4.) as i64);
-        assert_eq!(classification(&[idle, e, f], &[0, 2, 1]), [1, 2, 0]);
+        assert_eq!(classification(&[zero, e, f], &[0, 2, 1]), [1, 2, 0]);
     }
 
     #[test]

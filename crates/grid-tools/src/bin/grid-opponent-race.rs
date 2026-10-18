@@ -43,14 +43,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     // `--discipline drift_battle`: the drift_battle AI config and choreographer
     // set, every car scored by the drift scorer (docs/DISCIPLINES.md).
-    let drift = match args.iter().position(|a| a == "--discipline") {
-        Some(i) if args.get(i + 1).map(String::as_str) == Some("drift_battle") => {
+    // `--discipline drift_grand_prix`: one car on the track (an AI drift
+    // driver stands in for the player, AUTHORED) and the pool's other cars
+    // as virtual rivals, estimated at the race end.
+    use grid_tools::virtual_race::Format;
+    let discipline = match args.iter().position(|a| a == "--discipline") {
+        Some(i) => {
+            let format = args
+                .get(i + 1)
+                .and_then(|name| Format::from_name(name))
+                .filter(|f| *f != Format::DriftFreestyle)
+                .ok_or("--discipline needs drift_battle or drift_grand_prix")?;
             args.drain(i..i + 2);
-            true
+            Some(format)
         }
-        Some(_) => return Err("--discipline needs drift_battle".into()),
-        None => false,
+        None => None,
     };
+    let drift = discipline.is_some();
+    // The drift AI config: the stand-in player's drift line and behaviour in
+    // a Drift GP come from the drift_battle section (the drift_grand_prix
+    // section switches every behaviour off).
     let format = drift.then_some("drift_battle");
     // GRID_AI_CLASS=CLASS: another ai_vehicle_config/ai_vehicle_track class
     // (research; the cars' own class is `touring`).
@@ -58,7 +70,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let class = class_variable.as_deref().unwrap_or("touring");
     if !(5..=7).contains(&args.len()) {
         return Err(
-            "usage: grid-opponent-race [--route ROUTE] [--cars STEM,...] [--discipline drift_battle] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
+            "usage: grid-opponent-race [--route ROUTE] [--cars STEM,...] [--discipline drift_battle|drift_grand_prix] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
                 .into(),
         );
     }
@@ -339,27 +351,54 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(_) => None,
     };
-    // Drift Battle: drift.xml, the route's close-drift flags and one entry
-    // per car (all AI cars at the difficulty's DifficultyBias level).
-    let mut drift_event = match drift {
-        true => {
+    // Drift events: drift.xml, the route's close-drift flags and one entry
+    // per car (all AI cars at the difficulty's DifficultyBias level); the
+    // battle multiplier only in a Drift Battle (0x5F4E60). The virtual race
+    // of the route's free-race pool row estimates zero scores at the end.
+    let mut drift_event = match discipline {
+        Some(format) => {
             let settings = grid_tools::drift::Settings::load(root)?;
             let flags = grid_tools::drift::close_drift_flags(root, &route)?;
             let level = grid_tools::drift::ai_level(difficulty);
-            println!(
-                "drift_battle close_drift_flags={} ai_level={level}",
-                flags.len()
+            let pool = grid_tools::virtual_race::drift_pool(format, route.path());
+            if format == Format::DriftGrandPrix && cars != 1 {
+                return Err("drift_grand_prix runs one car on the track".into());
+            }
+            let rivals = match format {
+                Format::DriftGrandPrix => std::env::var("GRID_DRIFT_RIVALS")
+                    .ok()
+                    .map(|v| v.parse::<usize>())
+                    .transpose()?
+                    .unwrap_or(pool.map_or(1, |p| p.max_cars as usize - 1)),
+                _ => 0,
+            };
+            let race = grid_tools::virtual_race::VirtualRace::new(
+                pool,
+                grid_tools::virtual_race::difficulty(2, level),
+                0x5eed,
             );
-            let entries = (0..cars)
-                .map(|_| grid_tools::drift::Entry::new(true, Some(level), false))
+            println!(
+                "{} close_drift_flags={} ai_level={level} base_result={:?} rivals={rivals}",
+                format.name(),
+                flags.len(),
+                pool.map(|p| p.base_result)
+            );
+            let battle = format == Format::DriftBattle;
+            let entries = (0..cars + rivals)
+                .map(|_| grid_tools::drift::Entry::new(battle, Some(level), false))
                 .collect::<Vec<_>>();
-            Some((settings, flags, entries, multi.close_drift_flag_boxes()))
+            Some((settings, flags, entries, multi.close_drift_flag_boxes(), race))
         }
-        false => None,
+        None => None,
     };
     // Per car: drift-behaviour ticks, drift-mode ticks, ticks the drift test
     // fired, and the largest slip angle (degrees).
     let mut drift_counts = vec![(0u64, 0u64, 0u64, 0f32); cars];
+    // Drift quality (research measure, AUTHORED): spins (body slip above 90°
+    // until it falls below 45°), barrier hits (a static or prop contact above
+    // collisionThreshold with a mostly horizontal normal, new after 1 s
+    // without one) and stalled seconds (below 1 m/s while racing).
+    let mut quality = vec![Quality::default(); cars];
     let mut behaviours = vec![(grid_tools::ai_driver::Behaviour::Race, 0u8, 0u8, false); cars];
     let mut pair_contacts = vec![vec![0usize; cars]; cars];
     let mut car_contacts = 0;
@@ -581,7 +620,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
             &[],
         );
-        if let Some((settings, flags, entries, flag_boxes)) = &mut drift_event {
+        if let Some((settings, flags, entries, flag_boxes, race)) = &mut drift_event {
             for (i, car) in multi.cars.iter().enumerate() {
                 let contacts: Vec<_> = multi
                     .contact_impacts(i)
@@ -610,10 +649,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     entries[i].detector.touch_flag();
                 }
                 entries[i].update(settings, flags, &sample, grid_tools::source_vehicle::DELTA);
+                if standings.status(i) == Status::Racing && standings.laps_covered(i) > 0. {
+                    let barrier = multi.contact_impacts(i).iter().any(|(x, other)| {
+                        !matches!(
+                            other,
+                            grid_tools::source_vehicle::multi::Contacted::Car(_)
+                                | grid_tools::source_vehicle::multi::Contacted::Track
+                        )
+                            && x.impact > settings.collision_threshold
+                            && x.normal[1].abs() < 0.7
+                    });
+                    quality[i].tick(
+                        entries[i].detector.angle,
+                        entries[i].detector.speed,
+                        barrier,
+                        multi.ticks,
+                    );
+                }
                 if matches!(standings.status(i), Status::Finished | Status::Out(_)) {
                     let v = car.velocity();
                     let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-                    entries[i].finish_race(settings, true, speed, race_laps);
+                    entries[i].finish_race(
+                        settings,
+                        (true, speed, race_laps),
+                        race,
+                        characteristic(i, "virtual_performance"),
+                    );
                 }
                 if let Driver::Ai(ai) = &drivers[i] {
                     let m = ai.telemetry;
@@ -736,19 +797,41 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("race finalized tick={} reason=tick-limit", multi.ticks);
     }
-    if let Some((settings, _, entries, _)) = &mut drift_event {
-        // The race end banks the rest (0x64D940).
-        for (i, car) in multi.cars.iter().enumerate() {
-            let v = car.velocity();
-            let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-            let finished = matches!(standings.status(i), Status::Finished | Status::Out(_));
-            entries[i].finish_race(settings, finished, speed, race_laps);
-            let s = &entries[i].scorer;
-            let (behaviour, mode, fired, slip) = drift_counts[i];
+    if let Some((settings, _, entries, _, race)) = &mut drift_event {
+        // The race end banks the rest (0x64D940); virtual rivals never
+        // move, so they are estimated.
+        for (i, entry) in entries.iter_mut().enumerate() {
+            let (finished, speed) = match multi.cars.get(i) {
+                Some(car) => {
+                    let v = car.velocity();
+                    (
+                        matches!(standings.status(i), Status::Finished | Status::Out(_)),
+                        (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
+                    )
+                }
+                None => (false, 0.),
+            };
+            entry.finish_race(
+                settings,
+                (finished, speed, race_laps),
+                race,
+                characteristic(i, "virtual_performance"),
+            );
+            let s = &entry.scorer;
+            let (behaviour, mode, fired, slip) = drift_counts.get(i).copied().unwrap_or_default();
+            if let Some(q) = quality.get(i) {
+                println!(
+                    "drift_quality car{i} laps_covered={:.3} spins={} barrier_hits={} stalled_s={:.1}",
+                    standings.laps_covered(i),
+                    q.spins,
+                    q.hits,
+                    q.stalled as f32 * grid_tools::source_vehicle::DELTA
+                );
+            }
             println!(
-                "drift car{i} score={} estimate_needed={} drifts={} longest={:.2} largest_angle={:.1} fastest_mph={:.1} best_combo={:.0} ai_drift_ticks={behaviour} drift_mode_ticks={mode} test_fired_ticks={fired} max_slip={slip:.1}",
-                entries[i].score(),
-                entries[i].needs_estimate,
+                "drift car{i} score={} estimated={} drifts={} longest={:.2} largest_angle={:.1} fastest_mph={:.1} best_combo={:.0} ai_drift_ticks={behaviour} drift_mode_ticks={mode} test_fired_ticks={fired} max_slip={slip:.1}",
+                entry.score(),
+                entry.estimated,
                 s.ratings.iter().map(|r| r.count).sum::<i32>(),
                 s.longest_drift,
                 s.largest_angle,
@@ -756,7 +839,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 s.best_combo,
             );
         }
-        let order = grid_tools::drift::classification(entries, &standings.order());
+        let mut race_order = standings.order();
+        race_order.extend(multi.cars.len()..entries.len());
+        let order = grid_tools::drift::classification(entries, &race_order);
         println!("drift_results order={order:?}");
     }
     for (i, car) in multi.cars.iter().enumerate() {
@@ -881,5 +966,35 @@ fn main() {
     if let Err(error) = result {
         eprintln!("grid-opponent-race: {error}");
         std::process::exit(1);
+    }
+}
+
+/// Drift quality counters of one car (see `quality` in `main`).
+#[derive(Clone, Copy, Default)]
+struct Quality {
+    spins: u32,
+    spinning: bool,
+    hits: u32,
+    last_hit: Option<u64>,
+    stalled: u64,
+}
+
+impl Quality {
+    fn tick(&mut self, angle: f32, speed: f32, barrier: bool, tick: u64) {
+        if !self.spinning && angle > 90. {
+            self.spinning = true;
+            self.spins += 1;
+        } else if self.spinning && angle < 45. {
+            self.spinning = false;
+        }
+        if barrier {
+            if self.last_hit.is_none_or(|t| tick > t + 100) {
+                self.hits += 1;
+            }
+            self.last_hit = Some(tick);
+        }
+        if speed < 1. {
+            self.stalled += 1;
+        }
     }
 }

@@ -55,9 +55,9 @@ pub struct Row {
     /// (seconds, one-based lap).
     pub best: Option<(f64, usize)>,
     pub vehicle: String,
-    /// Drift events: the drift score, and whether the original would have
-    /// replaced it with its unported estimate (docs/DISCIPLINES.md).
-    pub score: Option<(i64, bool)>,
+    /// Drift events: the drift score (a zero score replaced by the virtual
+    /// race's estimate, docs/DISCIPLINES.md).
+    pub score: Option<i64>,
 }
 
 /// Results rows in classification order. `player_best` replaces car 0's
@@ -794,12 +794,7 @@ impl PostRace {
                         row.position.to_string(),
                         row.name.clone(),
                         match row.score {
-                            // `*`: the original would show its estimate.
-                            Some((score, estimate)) => format!(
-                                "{}{}",
-                                crate::drift_event::grouped(score),
-                                if estimate { " *" } else { "" }
-                            ),
+                            Some(score) => crate::drift_event::grouped(score),
                             None => time_text(row, &l),
                         },
                         row.vehicle.clone(),
@@ -884,8 +879,8 @@ fn present(
     }
     let mut rows = table(&driving, trial.as_deref());
     let board = drift.as_ref().and_then(|d| d.board());
-    if let (Some(d), Some(o)) = (&drift, &driving.opponents) {
-        rows = d.results(&o.standings, rows);
+    if let Some(d) = &drift {
+        rows = d.results(driving.opponents.as_ref().map(|o| &o.standings), rows);
     }
     let view = post.view_with(&rows, &labels, board.as_ref());
     if shown.as_ref() == Some(&view) {

@@ -134,7 +134,7 @@ fn app_for(case: &Case) -> App {
         let settings = grid_tools::drift::Settings::load(root).unwrap();
         let route = grid_tools::route::Route::new(case.route).unwrap();
         let flags = grid_tools::drift::close_drift_flags(root, &route).unwrap();
-        app.insert_resource(crate::drift_event::DriftEvent::new(
+        app.insert_resource(crate::drift_event::DriftEvent::battle(
             settings,
             flags,
             crate::pause_menu::race_tests::OPPONENTS + 1,

@@ -139,6 +139,16 @@ impl Track {
     pub fn shape_count(&self) -> usize {
         self.chunks.len() + usize::from(self.boundary.is_some()) + usize::from(self.props.is_some())
     }
+    /// Packed collision chunks (`qt_*.vcqtc`, shape kind 11); chunk `i` is
+    /// world shape `i + 1`.
+    pub fn chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+    /// Whether a body contact's other world token (shape + 1) is a packed
+    /// collision chunk.
+    pub fn is_chunk_token(&self, token: u32) -> bool {
+        (2..=self.chunks.len() as u64 + 1).contains(&u64::from(token))
+    }
     fn props_shape(&self) -> u32 {
         (self.chunks.len() + usize::from(self.boundary.is_some()) + 1) as u32
     }

@@ -45,3 +45,4 @@ pub mod tyre_audio;
 pub mod tyre_smoke;
 pub mod tyre_tables;
 pub mod vehicle_world_diagnostic;
+pub mod virtual_race;

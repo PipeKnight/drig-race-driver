@@ -539,7 +539,7 @@ fn a_drift_battle_is_scored_banked_and_classified_by_drift_points() {
         )
         .unwrap();
         assert!(!flags.is_empty());
-        app.insert_resource(DriftEvent::new(settings, flags, OPPONENTS + 1, 1, 1))
+        app.insert_resource(DriftEvent::battle(settings, flags, OPPONENTS + 1, 1, 1))
             .add_systems(Update, crate::drift_event::tick.after(crate::drive_tick));
         app.world_mut()
             .resource_mut::<crate::post_race::PostRace>()
@@ -564,7 +564,7 @@ fn a_drift_battle_is_scored_banked_and_classified_by_drift_points() {
             player.score(),
             player.scorer.drifts
         );
-        assert!(player.done && !player.needs_estimate);
+        assert!(player.done && !player.estimated);
         assert!(fastest > 50., "the detector sees the car's speed");
         assert_eq!(board.total, player.score());
         let view = post(&app).view_with(&[], &Labels::default(), Some(&board));
@@ -579,23 +579,23 @@ fn a_drift_battle_is_scored_banked_and_classified_by_drift_points() {
         assert!(o.standings.over());
         let event = app.world().resource::<DriftEvent>();
         assert!(event.entries.iter().all(|e| e.done));
-        let rows = event.results(&o.standings, results(&app));
+        let rows = event.results(Some(&o.standings), results(&app));
         eprintln!("drift_results rows={rows:?}");
         assert_eq!(rows.len(), OPPONENTS + 1);
         assert_eq!(
             rows.iter().map(|r| r.position).collect::<Vec<_>>(),
             (1..=OPPONENTS + 1).collect::<Vec<_>>()
         );
-        let scores: Vec<i64> = rows.iter().map(|r| r.score.unwrap().0).collect();
+        let scores: Vec<i64> = rows.iter().map(|r| r.score.unwrap()).collect();
         assert!(scores.windows(2).all(|w| w[0] >= w[1]), "{scores:?}");
         for r in &rows {
-            assert_eq!(r.score.unwrap().0, event.entries[r.car].score());
+            assert_eq!(r.score.unwrap(), event.entries[r.car].score());
             assert!(!matches!(r.time, Cell::Running));
         }
         // Equal scores keep the race order.
         let order = o.standings.order();
         for w in rows.windows(2) {
-            if w[0].score.unwrap().0 == w[1].score.unwrap().0 {
+            if w[0].score.unwrap() == w[1].score.unwrap() {
                 let at = |car| order.iter().position(|&c| c == car).unwrap();
                 assert!(at(w[0].car) < at(w[1].car));
             }
@@ -613,7 +613,7 @@ fn a_handbrake_turn_in_the_bmw_scores_drift_points() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
         let settings = grid_tools::drift::Settings::load(root).unwrap();
-        app.insert_resource(DriftEvent::new(settings, Vec::new(), OPPONENTS + 1, 2, 1))
+        app.insert_resource(DriftEvent::battle(settings, Vec::new(), OPPONENTS + 1, 2, 1))
             .add_systems(Update, crate::drift_event::tick.after(crate::drive_tick));
         let entry = |app: &App| app.world().resource::<DriftEvent>().entries[0].clone();
         // Flat out after the countdown, then a handbrake turn to the right

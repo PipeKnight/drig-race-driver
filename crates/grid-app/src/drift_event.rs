@@ -8,12 +8,18 @@
 //! `grid_tools::race::Standings` and the car's largest solved contact
 //! impact. A car that finishes or drops out is banked at once (0x65F250);
 //! the race end banks the rest and scales a moving car's score to the event
-//! distance (0x64D940).
+//! distance (0x64D940); a zero score gets the virtual race's estimate
+//! (`grid_tools::virtual_race`).
+//!
+//! Drift GP (docs/DISCIPLINES.md §7): the player alone on the time-trial run,
+//! no position multiplier, and the free-race pool's other cars as virtual
+//! rivals estimated when the run ends.
 //!
 //! The HUD panel shows the original OSD elements as text (the dial2 glyphs,
 //! meters and animations are not ported).
 use bevy::prelude::*;
 use grid_tools::drift::{Entry, Sample, Settings};
+use grid_tools::virtual_race::{Format, VirtualRace};
 
 #[derive(Resource)]
 pub(crate) struct DriftEvent {
@@ -21,12 +27,33 @@ pub(crate) struct DriftEvent {
     pub flags: Vec<[f32; 3]>,
     pub entries: Vec<Entry>,
     pub laps: u32,
+    /// drift_battle or drift_grand_prix.
+    pub format: Format,
+    /// Cars on the track; the entries after them are a Drift GP's virtual
+    /// rivals.
+    cars: usize,
+    /// The result estimator of zero scores (0x64D940).
+    race: VirtualRace,
+    /// Its seed at the start, for Restart Race.
+    race_start: VirtualRace,
+    /// Driver skill per entry for the estimator (0x62B170: 1.0 without a
+    /// driver row).
+    performances: Vec<f32>,
     /// Route prop boxes of the close-drift flags (found at the first tick).
     flag_boxes: Option<Vec<usize>>,
+    /// A Drift GP's solo run: the player's race progress along the line.
+    solo: Option<Solo>,
     /// AI difficulty level for the drift bias (`DifficultyBias`).
     ai_level: usize,
     segment: u64,
     last_tick: u64,
+}
+
+/// The progress of a car alone on the track.
+pub(crate) struct Solo {
+    line: grid_tools::ai_driver::Line,
+    start: [f32; 3],
+    standings: grid_tools::race::Standings,
 }
 
 /// The AI difficulty setting picks the nearest `difficulty` row of career
@@ -37,38 +64,72 @@ pub(crate) fn ai_level(difficulty: f32) -> usize {
 }
 
 impl DriftEvent {
+    /// `cars` on the track and `rivals` virtual ones (Drift GP).
     pub fn new(
         settings: Settings,
         flags: Vec<[f32; 3]>,
-        cars: usize,
+        (format, cars, rivals): (Format, usize, usize),
         laps: u32,
         ai_level: usize,
+        race: VirtualRace,
     ) -> Self {
         let mut event = Self {
             settings,
             flags,
             entries: Vec::new(),
             laps,
+            format,
+            cars,
+            race_start: race.clone(),
+            race,
+            performances: vec![1.; cars + rivals],
             flag_boxes: None,
+            solo: None,
             ai_level,
             segment: 0,
             last_tick: 0,
         };
-        event.reset(cars, 0, 0);
+        event.reset(0, 0);
         event
     }
 
+    /// A Drift Battle of `cars` without base results (tests).
+    #[cfg(test)]
+    pub fn battle(
+        settings: Settings,
+        flags: Vec<[f32; 3]>,
+        cars: usize,
+        laps: u32,
+        ai_level: usize,
+    ) -> Self {
+        let race = VirtualRace::new(None, grid_tools::virtual_race::difficulty(2, ai_level), 1);
+        Self::new(
+            settings,
+            flags,
+            (Format::DriftBattle, cars, 0),
+            laps,
+            ai_level,
+            race,
+        )
+    }
+
     /// Restart Race: fresh entries (0x64D8E0 resets and activates them).
-    fn reset(&mut self, cars: usize, segment: u64, tick: u64) {
-        self.entries = (0..cars)
+    /// The scorer's battle flag is format 2, Drift Battle (0x5F4E60).
+    fn reset(&mut self, segment: u64, tick: u64) {
+        let battle = self.format == Format::DriftBattle;
+        self.entries = (0..self.performances.len())
             .map(|i| {
                 if i == 0 {
-                    Entry::new(true, None, true)
+                    Entry::new(battle, None, true)
                 } else {
-                    Entry::new(true, Some(self.ai_level), false)
+                    Entry::new(battle, Some(self.ai_level), false)
                 }
             })
             .collect();
+        self.race = self.race_start.clone();
+        if let Some(solo) = &mut self.solo {
+            solo.standings.reset(&solo.line, &[solo.start]);
+        }
         self.segment = segment;
         self.last_tick = tick;
     }
@@ -83,125 +144,237 @@ impl DriftEvent {
         self.last_tick = *last_tick;
     }
 
-    /// Car indices in drift results order.
-    pub fn order(&self, standings: &grid_tools::race::Standings) -> Vec<usize> {
-        grid_tools::drift::classification(&self.entries, &standings.order())
+    /// Car indices in drift results order (virtual rivals after the cars).
+    pub fn order(&self, standings: Option<&grid_tools::race::Standings>) -> Vec<usize> {
+        let mut race_order = standings.map_or_else(|| vec![0], |s| s.order());
+        race_order.extend(self.cars..self.entries.len());
+        grid_tools::drift::classification(&self.entries, &race_order)
+    }
+
+    /// Banks an entry at its finish or the race end (0x65F250, 0x64D940).
+    fn finish(&mut self, i: usize, gone: bool, speed: f32) {
+        let performance = self.performances[i];
+        self.entries[i].finish_race(
+            &self.settings,
+            (gone, speed, self.laps),
+            &mut self.race,
+            performance,
+        );
     }
 }
 
-/// Loads `drift.xml` and the route's close-drift flags.
+/// Loads `drift.xml`, the route's close-drift flags and the virtual race of
+/// the route's free-race pool row. `cars` are on the track; a Drift GP adds
+/// the pool's other cars as virtual rivals and runs the player alone.
 pub(crate) fn install(
     app: &mut App,
     root: &std::path::Path,
     route: &grid_tools::route::Route,
-    cars: usize,
-    laps: u32,
+    (format, cars, laps): (Format, usize, u32),
     ai_difficulty: f32,
+    performances: &[f32],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::load(root)?;
     let flags = grid_tools::drift::close_drift_flags(root, route)?;
+    let pool = grid_tools::virtual_race::drift_pool(format, route.path());
+    let level = ai_level(ai_difficulty);
+    // [D] free-race pools: up to 8 cars in a battle, 2 in most Drift GPs.
+    let rivals = match format {
+        Format::DriftGrandPrix => pool.map_or(1, |p| p.max_cars as usize).saturating_sub(1),
+        _ => 0,
+    };
+    // AUTHORED seed (the original seeds its generator from the clock).
+    let race = VirtualRace::new(pool, grid_tools::virtual_race::difficulty(2, level), 0x5eed);
     println!(
-        "drive_drift_event version=1 discipline=drift_battle route={} cars={cars} laps={laps} close_drift_flags={} ai_level={}",
+        "drive_drift_event version=2 discipline={} route={} cars={cars} rivals={rivals} laps={laps} close_drift_flags={} ai_level={level} base_result={:?}",
+        format.name(),
         route.path(),
         flags.len(),
-        ai_level(ai_difficulty)
+        pool.map(|p| p.base_result)
     );
-    app.insert_resource(DriftEvent::new(
-        settings,
-        flags,
-        cars,
-        laps,
-        ai_level(ai_difficulty),
-    ))
-    .add_systems(FixedUpdate, tick.after(crate::drive_tick))
-    .add_systems(Update, (spawn, present).chain());
+    let mut event = DriftEvent::new(settings, flags, (format, cars, rivals), laps, level, race);
+    for (p, &v) in event.performances.iter_mut().zip(performances) {
+        *p = v;
+    }
+    app.insert_resource(event)
+        .add_systems(FixedUpdate, tick.after(crate::drive_tick))
+        .add_systems(Update, (spawn, present).chain());
     Ok(())
 }
 
 /// After each fixed tick: scores every car, banks finished ones, and ends
 /// the event with the race.
-pub(crate) fn tick(driving: Res<crate::Driving>, mut event: ResMut<DriftEvent>) {
-    let Some(o) = &driving.opponents else {
-        return;
-    };
-    let cars: Vec<&grid_tools::source_vehicle::Runtime> = std::iter::once(&driving.runtime)
-        .chain(o.multi.cars.iter().skip(1))
-        .collect();
-    if event.segment != driving.segment {
-        event.reset(cars.len(), driving.segment, driving.runtime.ticks);
-    }
+pub(crate) fn tick(
+    driving: Res<crate::Driving>,
+    trial: Option<Res<crate::time_trial::Trial>>,
+    mut event: ResMut<DriftEvent>,
+) {
     let event = &mut *event;
-    let dt = grid_tools::source_vehicle::DELTA;
-    let advanced = driving.runtime.ticks > event.last_tick;
-    event.last_tick = driving.runtime.ticks;
-    if advanced && !o.standings.over() {
-        for (i, car) in cars.iter().enumerate() {
-            let contacts: Vec<_> = o
-                .multi
-                .contact_impacts(i)
-                .iter()
-                .map(|(x, other)| (x.impact, *other))
+    match &driving.opponents {
+        Some(o) => {
+            let cars: Vec<&grid_tools::source_vehicle::Runtime> = std::iter::once(&driving.runtime)
+                .chain(o.multi.cars.iter().skip(1))
                 .collect();
-            let flags = event
-                .flag_boxes
-                .get_or_insert_with(|| o.multi.close_drift_flag_boxes());
-            let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flags);
-            let sample = Sample::of(
-                car,
-                o.standings.laps_covered(i) as f32,
-                o.standings.position(i).saturating_sub(1),
-                cars.len(),
-                impact,
-            );
-            let entry = &mut event.entries[i];
-            if touched {
-                entry.detector.touch_flag();
+            if event.segment != driving.segment {
+                event.reset(driving.segment, driving.runtime.ticks);
             }
-            let before = (
-                entry.scorer.combo,
-                entry.scorer.rating,
-                entry.scorer.combo_failed,
-            );
-            entry.update(&event.settings, &event.flags, &sample, dt);
-            let s = &entry.scorer;
-            if i == 0 && before != (s.combo, s.rating, s.combo_failed) {
-                log_line!(
-                    "drive_drift_event version=1 segment={} tick={} car=0 combo={} rating={} failed={} current={} total={} display={}",
-                    driving.segment,
-                    driving.runtime.ticks,
-                    s.combo,
-                    s.rating,
-                    s.combo_failed,
-                    s.current,
-                    s.total,
-                    s.display
-                );
+            let advanced = driving.runtime.ticks > event.last_tick;
+            event.last_tick = driving.runtime.ticks;
+            if advanced && !o.standings.over() {
+                for (i, car) in cars.iter().enumerate() {
+                    let contacts: Vec<_> = o
+                        .multi
+                        .contact_impacts(i)
+                        .iter()
+                        .map(|(x, other)| (x.impact, *other))
+                        .collect();
+                    let flags = event
+                        .flag_boxes
+                        .get_or_insert_with(|| o.multi.close_drift_flag_boxes());
+                    let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flags);
+                    let sample = Sample::of(
+                        car,
+                        o.standings.laps_covered(i) as f32,
+                        o.standings.position(i).saturating_sub(1),
+                        cars.len(),
+                        impact,
+                    );
+                    score(event, &driving, i, &sample, touched);
+                }
+            }
+            // Finished or out: banked now (0x65F250); the race end: the rest.
+            use grid_tools::race::Status;
+            let over = o.standings.over();
+            for (i, car) in cars.iter().enumerate() {
+                let status = o.standings.status(i);
+                let gone = matches!(status, Status::Finished | Status::Out(_));
+                if !event.entries[i].done && (gone || over) {
+                    bank(
+                        event,
+                        &driving,
+                        i,
+                        gone,
+                        car.velocity(),
+                        &format!("{status:?}"),
+                    );
+                }
+            }
+        }
+        None => {
+            // A Drift GP: the player alone; the race ends with the run.
+            let Some(trial) = trial else {
+                return;
+            };
+            if event.segment != driving.segment {
+                event.reset(driving.segment, driving.runtime.ticks);
+            }
+            let advanced = driving.runtime.ticks > event.last_tick;
+            event.last_tick = driving.runtime.ticks;
+            let car = &driving.runtime;
+            let p = car.pose();
+            if event.solo.is_none()
+                && let Some(line) = &driving.reset_line
+            {
+                let start = [p[12], p[13], p[14]];
+                event.solo = Some(Solo {
+                    standings: grid_tools::race::Standings::new(line, event.laps, start, &[start]),
+                    line: line.clone(),
+                    start,
+                });
+            }
+            let over = trial.finished();
+            if advanced && trial.driving() {
+                let progress = event.solo.as_mut().map_or(0., |solo| {
+                    solo.standings
+                        .update(&solo.line, &[[p[12], p[13], p[14]]], 0., &[0]);
+                    solo.standings.laps_covered(0) as f32
+                });
+                // No flag touches (AUTHORED: the solo world's prop boxes are
+                // not labelled); packed road chunks are no collision.
+                let impact = car
+                    .impacts_off_track()
+                    .iter()
+                    .map(|x| x.impact)
+                    .fold(0., f32::max);
+                let sample = Sample::of(car, progress, 0, 1, impact);
+                score(event, &driving, 0, &sample, false);
+            }
+            if over {
+                for i in 0..event.entries.len() {
+                    if !event.entries[i].done {
+                        let v = if i == 0 { car.velocity() } else { [0.; 4] };
+                        bank(
+                            event,
+                            &driving,
+                            i,
+                            i == 0,
+                            v,
+                            if i == 0 { "Finished" } else { "Virtual" },
+                        );
+                    }
+                }
             }
         }
     }
-    // Finished or out: banked now (0x65F250); the race end: the rest.
-    use grid_tools::race::Status;
-    let over = o.standings.over();
-    for (i, car) in cars.iter().enumerate() {
-        let entry = &mut event.entries[i];
-        if entry.done {
-            continue;
-        }
-        let status = o.standings.status(i);
-        let gone = matches!(status, Status::Finished | Status::Out(_));
-        if gone || over {
-            let v = car.velocity();
-            let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-            entry.finish_race(&event.settings, gone, speed, event.laps);
-            log_line!(
-                "drive_drift_event version=1 segment={} tick={} car={i} banked score={} estimate_needed={} status={status:?}",
-                driving.segment,
-                driving.runtime.ticks,
-                entry.score(),
-                entry.needs_estimate
-            );
-        }
+}
+
+/// One car's detector and scorer tick.
+fn score(
+    event: &mut DriftEvent,
+    driving: &crate::Driving,
+    i: usize,
+    sample: &Sample,
+    touched: bool,
+) {
+    let entry = &mut event.entries[i];
+    if touched {
+        entry.detector.touch_flag();
     }
+    let before = (
+        entry.scorer.combo,
+        entry.scorer.rating,
+        entry.scorer.combo_failed,
+    );
+    entry.update(
+        &event.settings,
+        &event.flags,
+        sample,
+        grid_tools::source_vehicle::DELTA,
+    );
+    let s = &entry.scorer;
+    if i == 0 && before != (s.combo, s.rating, s.combo_failed) {
+        log_line!(
+            "drive_drift_event version=1 segment={} tick={} car=0 combo={} rating={} failed={} current={} total={} display={}",
+            driving.segment,
+            driving.runtime.ticks,
+            s.combo,
+            s.rating,
+            s.combo_failed,
+            s.current,
+            s.total,
+            s.display
+        );
+    }
+}
+
+fn bank(
+    event: &mut DriftEvent,
+    driving: &crate::Driving,
+    i: usize,
+    gone: bool,
+    v: [f32; 4],
+    status: &str,
+) {
+    let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    event.finish(i, gone, speed);
+    let entry = &event.entries[i];
+    log_line!(
+        "drive_drift_event version=2 segment={} tick={} car={i} banked score={} estimated={} status={status}",
+        driving.segment,
+        driving.runtime.ticks,
+        entry.score(),
+        entry.estimated
+    );
 }
 
 /// The drift scoreboard of the player (`post_race_drift_scoreboard`).
@@ -245,19 +418,32 @@ impl DriftEvent {
         })
     }
 
-    /// Results rows in drift order, each with its score.
+    /// Results rows in drift order, each with its score; a Drift GP's
+    /// virtual rivals get rows of their own (named like the race's AI cars).
     pub fn results(
         &self,
-        standings: &grid_tools::race::Standings,
-        rows: Vec<crate::post_race::Row>,
+        standings: Option<&grid_tools::race::Standings>,
+        mut rows: Vec<crate::post_race::Row>,
     ) -> Vec<crate::post_race::Row> {
+        if let Some(player) = rows.iter().find(|r| r.car == 0).cloned() {
+            for car in self.cars..self.entries.len() {
+                rows.push(crate::post_race::Row {
+                    car,
+                    name: format!("AI {car}"),
+                    time: crate::post_race::Cell::Running,
+                    estimated: false,
+                    best: None,
+                    ..player.clone()
+                });
+            }
+        }
         self.order(standings)
             .into_iter()
             .enumerate()
             .filter_map(|(rank, car)| {
                 let mut row = rows.iter().find(|r| r.car == car)?.clone();
                 row.position = rank + 1;
-                row.score = self.entries.get(car).map(|e| (e.score(), e.needs_estimate));
+                row.score = self.entries.get(car).map(|e| e.score());
                 Some(row)
             })
             .collect()
@@ -421,8 +607,68 @@ mod tests {
     }
 
     #[test]
+    fn a_drift_gp_estimates_its_virtual_rivals_and_ranks_them() {
+        use grid_tools::virtual_race::{difficulty, drift_pool};
+        let pool = drift_pool(Format::DriftGrandPrix, "tracks/usa/long_beach/route_1");
+        let race = VirtualRace::new(pool, difficulty(2, 1), 0x5eed);
+        let mut event = DriftEvent::new(
+            Settings::default(),
+            Vec::new(),
+            (
+                Format::DriftGrandPrix,
+                1,
+                pool.unwrap().max_cars as usize - 1,
+            ),
+            2,
+            1,
+            race.clone(),
+        );
+        // No position multiplier outside a Drift Battle (0x5F4E60).
+        assert_eq!(event.entries.len(), 2);
+        assert!(event.entries.iter().all(|e| !e.scorer.battle));
+        assert_eq!(
+            hud_text(&event, &crate::pause_menu::Labels(None)),
+            "drift_scoreboard_total_score  0"
+        );
+        // The player finishes with points; the rival never moved and gets
+        // the estimate (rival skill 1.0: near base / top_time_factor × laps).
+        event.entries[0].scorer.total = 5000.;
+        event.entries[0].scorer.display = 5000.;
+        event.finish(0, true, 30.);
+        event.finish(1, false, 0.);
+        assert_eq!(event.entries[0].score(), 5000);
+        assert!(!event.entries[0].estimated && event.entries[1].estimated);
+        let expected = race.clone().drift_score(1., 2) as i64;
+        assert_eq!(event.entries[1].score(), expected);
+        assert!((2 * 1_890_000 / 14 * 93 / 100..=2 * 1_890_000 / 14).contains(&expected));
+        let player = crate::post_race::Row {
+            position: 1,
+            car: 0,
+            name: "You".into(),
+            time: crate::post_race::Cell::Total(200.),
+            estimated: false,
+            best: None,
+            vehicle: "BMW 320si".into(),
+            score: None,
+        };
+        let rows = event.results(None, vec![player]);
+        assert_eq!(
+            rows.iter()
+                .map(|r| (r.position, r.car, r.score))
+                .collect::<Vec<_>>(),
+            [(1, 1, Some(expected)), (2, 0, Some(5000))]
+        );
+        assert_eq!(rows[0].name, "AI 1");
+        // Restart Race: fresh entries and the same estimator draws.
+        event.reset(1, 0);
+        assert!(event.entries.iter().all(|e| !e.done));
+        event.finish(1, false, 0.);
+        assert_eq!(event.entries[1].score(), expected);
+    }
+
+    #[test]
     fn hud_shows_rating_combo_timer_and_battle_multiplier() {
-        let mut event = DriftEvent::new(Settings::default(), Vec::new(), 2, 2, 1);
+        let mut event = DriftEvent::battle(Settings::default(), Vec::new(), 2, 2, 1);
         let labels = crate::pause_menu::Labels(None);
         assert_eq!(
             hud_text(&event, &labels),

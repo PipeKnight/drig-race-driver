@@ -1380,7 +1380,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .ok_or("--deformation needs a private DF01 path or derive")?,
                 ))
             }
-            "--discipline" => discipline = Some(args.next().ok_or("--discipline needs race or drift_battle")?),
+            "--discipline" => discipline = Some(args.next().ok_or("--discipline needs race, drift_battle or drift_grand_prix")?),
             "--opponents" => {
                 opponents = Some(
                     args.next()
@@ -1840,12 +1840,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--opponents 1..11 requires --drive and --body-contacts".into());
     }
-    let drift = match discipline.as_deref() {
-        None | Some("race") => false,
-        Some("drift_battle") if trial_laps.is_some() && opponents.is_some() => true,
+    use grid_tools::virtual_race::Format;
+    // A Drift GP runs the player alone; its rivals are virtual (docs/DISCIPLINES.md).
+    let drift_format = match discipline.as_deref() {
+        None | Some("race") => None,
+        Some("drift_battle") if trial_laps.is_some() && opponents.is_some() => Some(Format::DriftBattle),
         Some("drift_battle") => return Err("drift_battle needs laps and opponents (docs/DISCIPLINES.md)".into()),
-        Some(other) => return Err(format!("unknown discipline {other}: race or drift_battle").into()),
+        Some("drift_grand_prix") if trial_laps.is_some() && opponents.is_none() => Some(Format::DriftGrandPrix),
+        Some("drift_grand_prix") => {
+            return Err("drift_grand_prix needs laps and no opponents (docs/DISCIPLINES.md)".into());
+        }
+        Some(other) => {
+            return Err(format!("unknown discipline {other}: race, drift_battle or drift_grand_prix").into());
+        }
     };
+    let drift = drift_format == Some(Format::DriftBattle);
     if let Some(position) = grid_position
         && !opponents.is_some_and(|n| (1..=n + 1).contains(&position))
     {
@@ -2527,10 +2536,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             post_race::install(&mut app, variant);
         }
-        // Drift Battle on top of the race (docs/DISCIPLINES.md).
-        if drift {
+        // Drift Battle on top of the race, Drift GP on top of the solo run
+        // (docs/DISCIPLINES.md).
+        if let Some(format) = drift_format {
             let cars = driving.opponents.as_ref().map_or(1, |o| o.multi.cars.len());
-            drift_event::install(&mut app, &root, &route, cars, trial_laps.unwrap_or(1), ai_settings.difficulty)?;
+            // The virtual race's driver skill: the player 1.0 (0x62B170 without a
+            // driver row), opponent k its characteristics row's virtual_performance.
+            let characteristics = match &ai_characteristics {
+                Some(path) => grid_tools::ai_driver::read_characteristics(&std::fs::read_to_string(path)?)?,
+                None => Vec::new(),
+            };
+            let performances: Vec<f32> = (0..12)
+                .map(|k| {
+                    characteristics
+                        .get(k % characteristics.len().max(1))
+                        .filter(|_| k > 0)
+                        .and_then(|r| r.get("virtual_performance").copied())
+                        .unwrap_or(1.)
+                })
+                .collect();
+            drift_event::install(
+                &mut app,
+                &root,
+                &route,
+                (format, cars, trial_laps.unwrap_or(1)),
+                ai_settings.difficulty,
+                &performances,
+            )?;
             if let Some(mut post) = app.world_mut().get_resource_mut::<post_race::PostRace>() {
                 post.drift = true;
             }
@@ -4061,8 +4093,11 @@ fn drive_present(
         "{} / {} {}",
         driving.runtime.car().label(),
         track_label(driving.runtime.route()),
-        if drift.is_some() {
-            "drift battle"
+        if let Some(d) = &drift {
+            match d.format {
+                grid_tools::virtual_race::Format::DriftGrandPrix => "drift gp",
+                _ => "drift battle",
+            }
         } else if trial.as_ref().is_some_and(|t| t.race) {
             "race"
         } else if trial.is_some() {

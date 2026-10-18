@@ -227,7 +227,7 @@ pub struct Settings {
     /// `grid_position = back`: the last slot, after the opponents.
     pub grid_back: bool,
     pub ai_characteristics: Option<PathBuf>,
-    /// `[drive] discipline`: `race` (default) or `drift_battle`
+    /// `[drive] discipline`: `race` (default), `drift_battle` or `drift_grand_prix`
     /// (docs/DISCIPLINES.md).
     pub discipline: Option<String>,
     pub body_contacts: Option<Private>,
@@ -398,8 +398,8 @@ impl Settings {
                     };
                 }
                 ("drive", "discipline") => match value.to_ascii_lowercase().as_str() {
-                    d @ ("race" | "drift_battle") => self.discipline = Some(d.into()),
-                    _ => return Err(at("`discipline` needs race or drift_battle".into())),
+                    d @ ("race" | "drift_battle" | "drift_grand_prix") => self.discipline = Some(d.into()),
+                    _ => return Err(at("`discipline` needs race, drift_battle or drift_grand_prix".into())),
                 },
                 ("drive", "ai_characteristics") => {
                     self.ai_characteristics = (!off).then(|| private_path(value))

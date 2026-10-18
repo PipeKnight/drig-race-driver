@@ -68,7 +68,10 @@ pub enum Contacted {
     Prop(usize),
     /// Another car of the shared world.
     Car(usize),
-    /// Road, boundary sheet or other static geometry.
+    /// A packed track collision chunk (`qt_*.vcqtc`, shape kind 11: road,
+    /// kerbs, verges).
+    Track,
+    /// The boundary sheet or other static geometry.
     Static,
 }
 
@@ -517,6 +520,7 @@ impl MultiRuntime {
                     Some(&(_, p)) => Contacted::Prop(p),
                     None => match cars.iter().position(|&t| t == other) {
                         Some(j) => Contacted::Car(j),
+                        None if self.cars[i].track.is_chunk_token(other) => Contacted::Track,
                         None => Contacted::Static,
                     },
                 };

@@ -2,7 +2,8 @@
 
 17 October 2026, Claude Code. Inventory of every event type of Race Driver: GRID, the port of the
 first one the engine did not have (Drift Battle, with the drift scoring shared by all drift
-formats), and the order for the rest.
+formats), and the order for the rest. 18 October 2026: the result estimator (§4.2, F386), the road
+contact question (§4.3, F387), Drift GP (§7, F388) and an AI drift quality measurement (§4.5, F389).
 
 Labels:
 - **[V]** verified in a decompilation or disassembly of the hash-pinned analysis image
@@ -136,7 +137,8 @@ far); our cars the Chevrolet Lacetti (FWD) and BMW 320si (RWD).
 - Post-race [D, flow.bin `f_post`]: stats `post_race_stats_drift_scores` (stat `drift_total`) →
   `post_race_drift_scoreboard` → `post_race_results_drift` ("Drift Scores"); Retire goes to the
   scoreboard; Drift GP adds `state_drift_gp_pre_results` and named rival intros.
-- **Engine: Drift Battle ported (F362; AI drift behaviour, flag touches and more routes F367)**;
+- **Engine: Drift Battle ported (F362; AI drift behaviour, flag touches and more routes F367;
+  result estimator F386; road contacts F387); Drift GP F388 (§7)**;
   Drift GP and freestyle share the scorer (section 4).
 
 #### Head-to-head and driver offers
@@ -190,8 +192,9 @@ Constructor defaults [V] and `drift.xml` [D]:
   0xA7DE00 (× 3600 × 0.001 × 0.62137121).
 - Drifting (0x62FF80): while angle ≥ thresholdSlideAngle and mph ≥ the enter speed (the exit
   speed once drifting), a slide timer grows, else it is 0; drifting = timer > thresholdSlideTime.
-- Collision listener (registered through 0x996150; 0x64D840 skips an object whose vf+4 type is 11
-  and a non-positive impact): an impact above collisionThreshold (0x62FFE0) zeroes the collision
+- Collision listener (registered through 0x996150 in the car's 11 listener slots at +0x37098, called
+  by the car body-contact handler 0x9EF360; 0x64D840 skips an object whose vf+4 type is 11, the
+  packed track chunks (§4.3, F387), and a non-positive impact): an impact above collisionThreshold (0x62FFE0) zeroes the collision
   clock unless the other object's +8 → +0x230 byte is set or its callback (0xA6A270 → +0xC) is
   0xA01910, the car body-impact dispatcher [V]; **so contact with another car never fails a combo**
   [I: 0xA01910 serves car bodies]. Touching a `close_drift_flag` entity (0x64D7E0: the other object's
@@ -230,9 +233,8 @@ Constructor defaults [V] and `drift.xml` [D]:
 ### Race end (0x64D940)
 
 Every active entry is banked. A car still racing that moves faster than 5 mph has its total scaled
-by event laps / progress. If its shown score is still 0, the original replaces it with its result
-estimator × laps (estimator object at race +0xF2D8, value × 1e−6): **not ported**, like the race
-estimator 0x67FFB0 (the port marks such rows with `*`). Structure recovered in F367, §4.2.
+by event laps / progress. If its shown score is still 0, the original replaces the banked total and
+the shown score with its virtual race's estimate × the event laps (§4.2, ported in F386).
 
 ## 3. Choice: Drift Battle
 
@@ -273,9 +275,9 @@ lap timing (`local/disciplines/runs/`: 4 cars, 9000 ticks, laps 85–97 s, no fa
   the body-impact listener receives [I]; the detector permission (+0x41) is always granted [I]; the
   results order by score with ties in race order [I]; a car that drops out is banked like a finisher
   [I]; the slip-angle sign side [I]; the HUD is text in the original's places only roughly.
-- Not ported: the result estimator for zero scores (§4.2); smoke multiplier, wrong-way message;
-  collisionPenalty use; the original OSD look and sounds; Drift GP rounds and intros; freestyle.
-  AI drift behaviour and flag touches followed in F367 (§4.1, §4.3).
+- Not ported: smoke multiplier, wrong-way message; collisionPenalty use; the original OSD look and
+  sounds; Drift GP rounds and intros; freestyle. AI drift behaviour and flag touches followed in
+  F367 (§4.1, §4.3), the result estimator in F386 (§4.2), Drift GP in F388 (§7).
 
 ### 4.1 AI drift behaviour (F367) [V unless marked]
 
@@ -404,22 +406,75 @@ barriers and each other, and some stall in recovery, so the fields are much less
 Whether the original's AI shows the same with a touring car cannot be checked (the original never
 runs one in a drift event; no live drift trace was taken).
 
-### 4.2 Result estimator (research only, not ported)
+### 4.2 Result estimator: the virtual race (F386)
 
-The race end (0x64D940) uses the object at race world +0x21A0 → +0xF2D8: vtable 0xCE87FC = {+0
-0x6808C0, +4 0x67FF20 add entity with a skill clamped to 0..1, +8 0x67D650 clear, +0xC 0x67D660
-remove entity, +0x10 0x6850F0, +0x14 0x685190 estimate one entity, +0x18 **0x67FFB0** estimate the
-field, +0x1C 0x67D3A0}. 0x64D940 adds the car with 0x62B170 (the entity's driver skill, 1.0 when
-none), asks for its result through +0x10 (0x6850F0, not decompiled: no function bounds in the
-saved analysis) and removes it; the value comes back through the 64-bit integer
-microsecond library at 0x908xxx (add 0x908360/0x908380, subtract 0x9083B0, compare
-0x9084C0/0x908560, from/to double 0x908450/0x908820, h:m:s split 0x908740) and is multiplied by
-the laps. Entries: +4 count (≤ 20), +0x4C (entity, skill) pairs; +0x18 variance used as
-U(1 − (skill − 0.5·var) …) around the skill (0x67D6C0); +0x48 up to four base results (the event's
-`res'100000,0,0,0'` [D] for Drift Battle), +0xAB8/+0xABA/+0xABC flags and championship statistics
-(0x680B20 scales by 8 − (two counts) with constants 0xCB4698/0xCE8FCC..0xCE8FD4). Porting it needs
-0x67FFB0 (≈150 lines of the 0x908xxx arithmetic), 0x680B20, 0x6850F0 and the base-result source;
-the decompilation is in `local/drift-ai/decomp/e1..e3`. The port still marks such zero scores `*`.
+18 October 2026, Claude Code. Sources: F367's decompilation (`local/drift-ai/decomp/e1..e3`) and new
+Ghidra 12.1.4 headless read-only pseudocode on a private copy of the drift-ai project
+(`local/drift-est/ghidra-project`, deleted after use; wrapper `local/drift-est/ghidra/run.ps1`,
+outputs `local/drift-est/decomp/g1..g10`), Capstone 5.0.6 dumps through `local/disciplines/scripts/dis.py`
+(`local/drift-est/dis/`), constants through `consts.py`, strings through
+`local/drift-est/scripts/str.py`. Nothing was installed.
+
+**Observations [V].**
+- The object at race world +0x21A0 → +0xF2D8 (vtable 0xCE87FC, constructor 0x67D590) is the
+  original's *virtual race*: its error strings are "Virtual race not initialised", "Competitor not
+  in virtual race", "Not enough competitor slots" and `virtualRace::updateVirtualLapBaseResult::
+  eventTrackPoolId %d not found` (0xCE8F6C..0xCE9020).
+- Set-up for a free race (0x646320) and a career event (0x646A90): +0x10, +0x14, +0x18 are copied
+  from a difficulty object's +0x14, +0x18, +0x1C, +0xABC points at that object, +0xABA = 1, and
+  0x680CE0 loads the base results; when it succeeds, +0xAB9 = 1.
+- The difficulty object (vtable 0xCC0A64, constructor 0x5F1B10) is filled by the `difficulty` row
+  reader 0x60A7B0: +4 `star_level`, +0xC `ai_ratio` (clamped 0..1), +0x10 `rep_bonus_factor`,
+  +0x14 `base_time_factor`, +0x18 `top_time_factor`, +0x1C `performance_variance`, +0x20
+  `available_flashbacks`, +0x24 `flashback_bonus`. So the virtual race holds +0x10
+  base_time_factor, +0x14 top_time_factor, +0x18 performance_variance.
+- 0x680CE0 reads `event_track_pool` (career) or `free_race_track_pool` (free race)
+  `base_result_list`: each value is a float in seconds (0x826740), converted to 64-bit
+  microseconds (0x908450: × 1e6 in 0xD0E390, truncated by 0xBF7786) into +0x28 + 8·i, summed into
+  +0x20, count +0x48; `competition_format.time_based` goes to +0xAB8.
+- 0x64D940 at the race end, for a car whose shown score (+0x130) is still 0: add the car with
+  0x62B170's skill (0x67FF20 clamps it to 0..1), call +0x10 = 0x6850F0 into a local result, remove
+  the car (0x67D660), and store result × 1e−6 (0x908820, an unsigned 64-bit conversion) × the event
+  laps (fimul) into both the banked total (+0xC) and the shown score (+0x130).
+- 0x62B170: a driver entity with a driver row returns `ai_driver.Virtual_Performance` (through
+  `driver.ai_driver_id`); without one (or for entity type 2) it returns 1.0.
+- 0x6850F0: result 0 unless the car is in the race and +0xAB9 is set; else s = 0x67D6C0(car) and
+  0x680B20(+0x20 base, s).
+- 0x67D6C0: s = U(clamp(1 − (skill + var/2), 0, 1), clamp(1 − (skill − var/2), 0, 1)) with the
+  global generator 0xA683B0 (a + u·(b − a), u = 32 bits × 2^−32; seeded with the clock × 1000 in
+  the constructor, 0xA68440).
+- 0x680B20 with +0xAB8 = 0 (score formats; `time_based` is 0 for all drift formats [D]): result =
+  (1 − s) · clamp(base/top_time_factor − base/base_time_factor, 0, DBL_MAX) + base/base_time_factor,
+  in seconds, back to microseconds. The time branch (+0xAB8 = 1: base × a factor between 1 +
+  0.05·(8 − n) and 1.15 + 0.0625·(8 − n) clamped to 1..1.4 and 1.15..1.65, n from two counts of the
+  difficulty object) is overwritten by this branch in score formats and is not ported.
+- vtable 0xCE87FC = {+0 0x6808C0, +4 0x67FF20 add, +8 0x67D650 clear, +0xC 0x67D660 remove, +0x10
+  0x6850F0 result of one car, +0x14 0x685190, +0x18 0x67FFB0 (a lap estimate of the time races,
+  used by 0x63C830), +0x1C 0x67D3A0 reset}.
+
+**Data [D]** (`database.bin`, `local/race-rules/data/database.json`): career Drift Battle events
+carry `100000,0,0,0`, career Drift GPs 650,000–2,000,000; the free-race pools carry per route
+values, e.g. Drift Battle longbeach_cl 5,300,000, nurburgring_spr 4,900,000, istanbul_int
+3,210,000, jarama 3,420,000; Drift GP longbeach_cl 1,890,000, nurburgring_spr 1,250,000,
+istanbul_int 1,750,000, jarama 1,900,000 (53 drift rows in all, `virtual_race::DRIFT_POOLS`,
+cross-checked against the decoded table by a script). `difficulty` rank 2 star 1 (ai_ratio 0.606,
+the port's Normal): base_time_factor 43, top_time_factor 14, performance_variance 0.13.
+
+**Interpretation [I].** A zero-score car gets a score between laps × base/43 (skill 0) and laps ×
+base/14 (skill 1): on longbeach_cl, 2 laps, 246,500 to 757,100 points. The free-race base results
+are the score scale the original expects of a drift event.
+
+**Port** (`grid_tools::virtual_race`, F386): `DIFFICULTY` (24 rows), `DRIFT_POOLS`, `VirtualRace`
+(`result`, `drift_score`), `micros`/`seconds`; `drift::Entry::finish_race(settings, (finished,
+speed, laps), race, performance)` replaces a zero score and sets `estimated`. The results no longer
+mark a `*`. grid-app and `grid-opponent-race` build the virtual race from the route's free-race pool
+row of the event's format and the career rank 2 row of the AI difficulty's star level.
+AUTHORED / [I]: the free-race pool (not the career event's 100,000) because the port's launch
+options are free-race style; career rank 2 (the rank `flashback::AI_RATIOS` uses); a seeded LCG
+(seed 0x5EED) in place of the clock-seeded global generator; the skill is the characteristics
+table's `virtual_performance` when the private table is set, else 1.0 (0x62B170 without a driver
+row), and the player 1.0. Routes without a pool row (Donington GP) estimate 0, as the original
+without base results.
 
 ### 4.3 Flag touches and the collision filter (F367)
 
@@ -429,9 +484,21 @@ the decompilation is in `local/drift-ai/decomp/e1..e3`. The port still marks suc
   disarms the close-drift bonus) [I: the original's flags are jointed entities, the port keeps them
   as static boxes, F284]; a car is no collision ([V] 0xA01910 guard); the rest gives the collision
   impact. grid-app and the headless tool use it.
-- Road contact still counts: a sliding BMW body touched the road surface with impact 455 (normal up)
-  and lost its combo (`local/drift-ai/runs`, GRID_TRACE_DRIFT_CONTACTS). Whether the original's
-  listener sees the road (the +0x230 guard) is open.
+- Road contact (F387) [V unless marked]: the listener 0x64D840 returns before the collision clock
+  when 0x958310(other) is true, i.e. the other object's virtual +4 returns 11. The class whose +4
+  returns 11 (0xAD9950) has vtable 0xD3A778, built by 0xAD9720 from the body factory 0xA73FD0
+  (via 0xA75E40). The static loader 0x5BB180 calls that factory once per packed `qt_*.vcqtc`
+  collision chunk (docs/GRID_POPULATION.md: the 245 Donington chunks). Two other listeners treat
+  type 11 the same way: 0x5B5E90 skips it, 0x4022F0 skips its contacts with a normal Y ≥ 0.1. So a
+  car body touching a packed track chunk (road, kerbs, verges) never fails a combo. The boundary
+  sheet `boundarylines.cqtc` is shape kind 10 (docs/CQTC_BOUNDARY_CONTACTS.md) and keeps counting
+  [I: its wrapper's type was not traced]; props and barrier boxes count.
+- Port: `Contacted::Track` for records whose other token is a packed chunk (`Track::is_chunk_token`,
+  chunk i = shape i + 1); `split_contacts` ignores it like a car; the solo world uses
+  `Runtime::impacts_off_track`. Car physics is unchanged (the headless field state hashes are equal
+  before and after); only the drift scores change. Headless 8-car BMW battles, 16,000 ticks
+  (`local/drift-est/runs/base-*` against `road-*`): summed scores Istanbul 5,911 → 44,980,
+  Nürburgring 47,297 → 64,381, Long Beach 1,875 → 2,566.
 
 ### 4.4 Routes (F367)
 
@@ -445,19 +512,61 @@ stopped with wheel terminal damage; Long Beach route_4 three cars 1 lap (118–2
 three cars 2 laps (96–106 s), route_1 three cars 2 laps, one with terminal damage at 0.13 laps.
 Close-drift flags: 17, 11, 10, 16, 16. The reverse layouts are not launch options yet.
 
+### 4.5 AI drift quality (F389)
+
+18 October 2026, Claude Code. Measure (AUTHORED, `grid-opponent-race` `drift_quality` lines): per
+car, *spins* (body slip above 90° until it falls below 45°), *barrier hits* (a boundary or prop
+contact above collisionThreshold with a mostly horizontal normal, a new hit after 1 s without one;
+packed road chunks excluded) and *stalled seconds* (below 1 m/s while racing), counted from the
+start line on. Headless 8-car BMW Drift Battles, 16,000 ticks, `local/drift-est/runs/road-*`
+(totals over the field):
+
+| Route | laps | spins/lap | hits/lap | stalled s | score sum | best |
+|---|---|---|---|---|---|---|
+| longbeach_cl | 10.5 | 25.1 | 5.6 | 544 | 2,566 | 1,156 |
+| nurburgring_spr | 13.8 | 11.1 | 1.6 | 343 | 64,381 | 17,887 |
+| istanbul_int | 14.6 | 12.0 | 2.0 | 316 | 44,980 | 28,835 |
+
+Against the virtual race's scale (one Normal AI car on longbeach_cl ≈ 250,000–750,000 points for 2
+laps, §4.2) the port's AI drift scores are one to two orders of magnitude low.
+
+Checks against the original, none of which showed a port difference that a 1:1 change could fix:
+- drive 0x783A10 and states 0x78B3C0 re-read: state grips, the state-3 angle window, the room
+  limit and the state transitions match `drive_drift`/`next_state`.
+- The state-2 gate "context +0x3C → +4 > 0" (port: the published brake [I]): the behaviour context
+  built at 0x79CAA0 stores the driver's `this+4` at +0x3C, consistent with the published controls;
+  not proven further.
+- Steering 0x77AC50 [V]: steer = |slip|·stSlideFactor + factor·(−ω·up) + G·heading error, the yaw
+  term negated through the sign mask 0xCAF470; the port uses +ω·up (AUTHORED, docs/AI_DRIVER_PORT.md:
+  "the yaw term sign (damping)").
+  A private experiment with the sign flipped in drift and race alike made the fields far worse
+  (spins/lap 12 → 52 at Istanbul, 25 → 67 at Long Beach, `local/drift-est/runs/yawflip-*`), so the
+  port's angular velocity sign convention is probably opposite to the original's car-state copy and
+  the effective law matches; the convention itself is not established. No change.
+- Stalled cars: a spun car on the track scores recovery 11 against drift 12/13, so Drift wins; when
+  `on_track` flickers at the limit Recovery re-activates (and resets, [V] 0x776990) every few ticks
+  (car5 at Long Beach: 1,047 Recovery activations, 0.05 m/s for 170 s). Scores and activation
+  semantics are the original's; the flicker comes from the shared on_track test.
+- The touring BMW uses the `default` drift values (driftGripFront 10); the original's drift grids
+  use the `drift*` classes (§4.1).
+The fields stay chaotic. Next candidates: a live drift trace of the original (not allowed in this
+session: no input to the original), the car-state angular velocity sign, the drift classes.
+
 ## 5. Order for the remaining disciplines
 
 1. **Drift Battle completion**: AI drift behaviour, flag touches and the routes done in F367
-   (§4.1, §4.3, §4.4). Left: the result estimator (§4.2, shared with 0x67FFB0); the reverse
-   layouts as launch options; a drift-class car or a live original trace to judge the AI; the road
-   contact question (§4.3).
-2. **Drift GP**: same scorer without the position multiplier; 2-car pools, rounds
-   (`drift_gp_info.round`), `state_drift_gp_pre_results`, rival intros. Needs: the flow states.
+   (§4.1, §4.3, §4.4); the result estimator (F386, §4.2) and road contacts (F387, §4.3). Left: the
+   reverse layouts as launch options; a drift-class car or a live original trace to judge the AI
+   (§4.5).
+2. **Drift GP**: done as a free-race event in F388 (§7). Left: career rounds
+   (`drift_gp_info.round`), the pre-results scene and rival intros.
 3. **Circuit-race series on our tracks** (Pro Tuned, Touring, GT, Le Mans Series): only cars and the
    other route layouts (route_1–3 of our circuits, reverse routes). Needs: car generalization for
    more models (F338), random grid fill.
 4. **Freestyle drift**: time-limited solo scoring with `ignore_progress` (+0x1C8 [I]); needs the
-   Yokohama track (four arenas) — first Japanese track.
+   Yokohama track (four arenas) — first Japanese track. Not cheap: every `Free_Drift` pool row is a
+   Yokohama freestyle arena (route_3..6, 90 s career, 1,148,000 base result [D]); none of our tracks
+   has one.
 5. **Touge**: Haruna point-to-point routes, two-run timing, touge.xml penalties and the alongside
    rules, midnight traffic; needs Haruna and Japanese cars, point-to-point lap timing.
 6. **Demolition Derby**: Detroit stadium routes, stock car, flipped/wrong-way disqualification
@@ -484,3 +593,54 @@ Close-drift flags: 17, 11, 10, 16, 16. The reverse layouts are not launch option
 - Pre-push checks (F362): 565 release workspace tests passed, 0 failed, 0 ignored; Clippy clean;
   solo identity aad9a07a…e41b; the 12-car headless race byte-identical to origin/main before the
   change; grid-soak quick 20/20.
+
+## 7. Drift GP (F388)
+
+18 October 2026, Claude Code.
+
+**Observations.**
+- [V] The drift entries exist for format enum 2, 3, 4 (0x5F4E60); the scorer's battle flag is
+  format 2 only, so a Drift GP scores without the position multiplier.
+- [D] `ai_driver_config.xml` `drift_grand_prix` (and `drift_freestyle`): `<behaviour
+  default="false">` with only `behaviour_controlled_stop` on, every other behaviour off.
+  `ai_choreographer.xml` puts drift_grand_prix in a set with drift_freestyle and pro_touge (manager
+  on, no conveyor or race-start factors).
+- [D] Free-race Drift GP pools hold 2 cars on every route except Okutama (8), with their own base
+  results (§4.2). Career Drift GPs (world_drift, Lng_Beach_battle, yokohama_drift, drift_gp_inter,
+  downhill_drift) run on Yokohama, Washington, Okutama, Shibuya and Haruna only.
+- [D flow.bin] Pre-race `c_pre_drift_gp_place_vehicles` (`state_drift_gp_pre_results`), the
+  results through `end_race_prepare_retire_event` → `state_drift_gp_pre_results` →
+  `drift_results_sequence` (a StateRaceIntroDrift scene with two drivers' wheel locks) and a
+  `c_full_drift_gp_next_round` → `next_race` path for the rounds; stats → scoreboard → results as
+  the other drift formats. `drift_gp_info.round/track_type/track_name` (0x5A0CC0) and the rival
+  intros `DriftGPIntro_Kazuhiro/Nobushige/Madoka/Youichi` are front-end/audio.
+- [V] 0x64D940 gives every car still unfinished with a zero shown score the virtual race's
+  estimate.
+
+**Interpretation [I, supported by the AI config and the race end].** In a Drift GP the player
+drifts alone; the rivals do not drive (every behaviour off) and their results are the virtual
+race's estimates at the race end. Where the original keeps the rivals' cars (parked for the
+pre-results scene, or on the grid) was not traced.
+
+**Port.**
+- `[drive] discipline = drift_grand_prix` / `--discipline drift_grand_prix` (laps, no opponents):
+  the solo run with the time-trial event (3 s countdown, AUTHORED: no start lights) and a
+  `DriftEvent` of one car on the track plus the pool's other cars as virtual rivals (Long Beach:
+  1); the player's race progress comes from a one-car `Standings` on the reset line; impacts from
+  `Runtime::impacts_off_track` (no flag touches in the solo world, AUTHORED); at the finish the
+  player is banked and every rival estimated (skill 1.0 without the private table).
+- Results: one row per rival ("AI k", the player's car label), ordered by score; heading
+  "drift gp"; HUD without the battle multiplier.
+- `settings/drift-gp.ini` and `Play GRID Drift GP.cmd`: longbeach_cl, 2 laps (career Drift GPs
+  run 1–3 laps [D]).
+- `grid-opponent-race --discipline drift_grand_prix` runs one car (an AI drift driver with the
+  drift_battle config stands in for the player, AUTHORED) and estimates the rivals.
+- Not ported: rounds, the pre-results scene and intros, parked rival cars.
+
+**Checks.** Unit test `a_drift_gp_estimates_its_virtual_rivals_and_ranks_them`; headless runs
+`local/drift-est/runs/gp-*` (longbeach_cl stand-in 1 point against the rival's 262,259; istanbul_int
+11,760 against 242,832; nurburgring_spr 8,588 against 173,452; jarama_gp 43 against 263,647); an
+offscreen app run of `settings/drift-gp.ini` (`local/drift-est/gp-app.log`, `gp-1500.png`: heading
+"drift gp", HUD "Total 0", `drive_drift_event version=2 discipline=drift_grand_prix ... rivals=1
+... base_result=Some(1890000.0)`). A full app Drift GP to the results screen was not run (the solo
+run has no autopilot).
