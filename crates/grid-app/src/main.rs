@@ -19,6 +19,8 @@ mod android_sensor;
 mod assists;
 mod body_damage;
 mod body_occlusion;
+#[cfg(feature = "paint-specular")]
+mod body_specular;
 mod camera;
 mod car_materials;
 mod car_numbers;
@@ -1582,6 +1584,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
                 };
             }
+            "--body-specular" => {
+                let value = args.next().ok_or("--body-specular needs off, source-base or white-control")?;
+                graphics.source_body_specular = match value.as_str() {
+                    "off" => false,
+                    "source-base" | "white-control" if cfg!(feature = "paint-specular") => true,
+                    "source-base" | "white-control" => return Err("body specular masks need a build with --features paint-specular".into()),
+                    _ => return Err("--body-specular needs off, source-base or white-control".into()),
+                };
+                graphics.white_body_specular = value == "white-control";
+            }
             "--body-occlusion" => {
                 graphics.source_body_occlusion = match args.next().as_deref() {
                     Some("source-ambient") => true,
@@ -1718,6 +1730,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--help" => {
+                #[cfg(feature = "paint-specular")]
+                println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
                     "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
@@ -2280,6 +2294,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             car_numbers::apply(&root, &player_car, &mut car, number)?;
         }
     }
+    #[cfg(feature = "paint-specular")]
+    let body_specular = if graphics.source_body_specular {
+        if !graphics.enhanced() { return Err("body specular pilot requires enhanced graphics".into()); }
+        body_specular::prepare(&car, &field, graphics.white_body_specular)?
+    } else { body_specular::Prepared::default() };
     let body_occlusion = if graphics.source_body_occlusion {
         if !graphics.enhanced() { return Err("body occlusion pilot requires enhanced graphics".into()); }
         body_occlusion::prepare(&car, &field)?
@@ -2676,6 +2695,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if graphics.enhanced() {
         app.add_systems(Last, graphics_texture_state);
     }
+    #[cfg(feature = "paint-specular")]
+    app.insert_resource(body_specular);
     let exit = app
         .insert_resource(body_occlusion)
         .insert_resource(field)
@@ -2724,6 +2745,13 @@ fn graphics_texture_state(images: Res<Assets<Image>>, mut emitted: Local<bool>) 
     );
 }
 
+#[derive(bevy::ecs::system::SystemParam)]
+struct PaintMaskResources<'w> {
+    occlusion: ResMut<'w, body_occlusion::Prepared>,
+    #[cfg(feature = "paint-specular")]
+    specular: ResMut<'w, body_specular::Prepared>,
+}
+
 // Bevy system parameters are separate ECS borrows, not a public call interface.
 #[allow(clippy::too_many_arguments)]
 fn setup(
@@ -2742,7 +2770,7 @@ fn setup(
     mut scattering_media: ResMut<Assets<bevy::light::atmosphere::ScatteringMedium>>,
     overrides: Option<Res<texture_overrides::Active>>,
     start: Option<Res<StartSequence>>,
-    mut body_occlusion: ResMut<body_occlusion::Prepared>,
+    mut paint_masks: PaintMaskResources,
 ) {
     println!(
         "renderer adapter={:?} backend={:?} driver={:?} driver_info={:?} features={:?}",
@@ -2752,7 +2780,9 @@ fn setup(
         adapter.driver_info,
         device.features()
     );
-    let body_occlusion_handles = body_occlusion::upload(&mut body_occlusion, &mut images, graphics.sampler(false));
+    let body_occlusion_handles = body_occlusion::upload(&mut paint_masks.occlusion, &mut images, graphics.sampler(false));
+    #[cfg(feature = "paint-specular")]
+    let body_specular_handles = body_specular::upload(&mut paint_masks.specular, &mut images, graphics.sampler(false));
     let mut occluded_liveries = BTreeMap::new();
     let mut texture_handles = BTreeMap::new();
     for (name, dds) in &car.textures {
@@ -2886,6 +2916,8 @@ fn setup(
                 };
                 if name == "Car Body Paint" && (!track || part_model(&part.material) == Some(0)) {
                     material.occlusion_texture = body_occlusion_handles.get(&0).cloned();
+                    #[cfg(feature = "paint-specular")]
+                    body_specular::apply(&mut material, body_specular_handles.get(&0));
                 }
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
@@ -3044,12 +3076,14 @@ fn setup(
                                     .clone()
                             },
                         );
-                    let opponent_material = if graphics.source_body_occlusion
+                    let opponent_material = if (graphics.source_body_occlusion || graphics.source_body_specular)
                         && part.material.rsplit('/').next() == Some("Car Body Paint")
                     {
                         occluded_liveries.entry((car, part.material.clone())).or_insert_with(|| {
                             let mut own = materials.get(&opponent_material).expect("opponent material").clone();
                             own.occlusion_texture = body_occlusion_handles.get(&car).cloned();
+                            #[cfg(feature = "paint-specular")]
+                            body_specular::apply(&mut own, body_specular_handles.get(&car));
                             materials.add(own)
                         }).clone()
                     } else { opponent_material };

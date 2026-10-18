@@ -64,6 +64,10 @@ pub struct Settings {
     pub source_race_numbers: bool,
     /// Source green mask adapted only to ambient PBR occlusion, default off.
     pub source_body_occlusion: bool,
+    /// Authored base-lobe alpha-mask pilot; requires the paint-specular build feature.
+    pub source_body_specular: bool,
+    /// Diagnostic white map for rendered compensation parity; never a launcher default.
+    pub white_body_specular: bool,
     /// Fixed photographic exposure; +1EV halves scene light before tonemapping.
     pub exposure_ev100: f32,
     /// Window-only material control; light lenses are a separate material.
@@ -124,6 +128,8 @@ impl Default for Settings {
             player_race_number: None,
             source_race_numbers: false,
             source_body_occlusion: false,
+            source_body_specular: false,
+            white_body_specular: false,
             exposure_ev100: 13.,
             window_roughness: 0.08,
             window_reflectance: 0.5,
