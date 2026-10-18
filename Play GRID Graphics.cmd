@@ -2,6 +2,8 @@
 setlocal
 pushd "%~dp0"
 if errorlevel 1 exit /b 1
+set "GRID_GRAPHICS_EXE=target\release\grid-app.exe"
+if exist "local\graphics\grid-graphics-app.exe" set "GRID_GRAPHICS_EXE=local\graphics\grid-graphics-app.exe"
 set "GRID_GRAPHICS_ROOT=C:\Program Files (x86)\Steam\steamapps\common\Grid"
 if not "%~1"=="" set "GRID_GRAPHICS_ROOT=%~1"
 set "GRID_GRAPHICS_RESOLUTION=1920x1080"
@@ -36,7 +38,7 @@ if /I "%~3"=="textures" (
   )
   set "GRID_GRAPHICS_TEXTURES=--texture-overrides local\graphics\texture-pilot02\buildings-two.overrides.tsv"
 )
-if not exist "target\release\grid-app.exe" (
+if not exist "%GRID_GRAPHICS_EXE%" (
   echo Build this graphics checkout first: cargo build -p grid-app --release --offline
   popd
   pause
@@ -45,7 +47,7 @@ if not exist "target\release\grid-app.exe" (
 if not exist "local\graphics" mkdir "local\graphics"
 rem Query once: old verified or other-agent executables remain usable.
 set "GRID_GRAPHICS_CAPABILITIES=local\graphics\capabilities-%RANDOM%-%RANDOM%.txt"
-"target\release\grid-app.exe" --help > "%GRID_GRAPHICS_CAPABILITIES%" 2>&1
+"%GRID_GRAPHICS_EXE%" --help > "%GRID_GRAPHICS_CAPABILITIES%" 2>&1
 "%SystemRoot%\System32\findstr.exe" /L /C:"--numbers source|off" "%GRID_GRAPHICS_CAPABILITIES%" >nul
 if errorlevel 1 (
   set "GRID_GRAPHICS_NUMBERS="
@@ -79,8 +81,9 @@ if defined GRID_GRAPHICS_TREES echo Experimental source forest enabled; wind and
 if defined GRID_GRAPHICS_HAZE echo Experimental source distance haze enabled.
 if defined GRID_GRAPHICS_TEXTURES echo Experimental high-resolution textures enabled.
 if defined GRID_GRAPHICS_BODY_OCCLUSION echo Source paint occlusion control: %GRID_GRAPHICS_BODY_OCCLUSION%
+echo Graphics executable: %GRID_GRAPHICS_EXE%
 echo Private log: %GRID_GRAPHICS_LOG%
-"target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% %GRID_GRAPHICS_NUMBERS% %GRID_GRAPHICS_BODY_OCCLUSION% > "%GRID_GRAPHICS_LOG%" 2>&1
+"%GRID_GRAPHICS_EXE%" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% %GRID_GRAPHICS_NUMBERS% %GRID_GRAPHICS_BODY_OCCLUSION% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"
 echo Exited with code %GRID_GRAPHICS_EXIT%.
 popd

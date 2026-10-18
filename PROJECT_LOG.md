@@ -1,5 +1,19 @@
 # GRID engine project log
 
+## G118 — Dedicated main-checkout graphics executable delivered without replacing normal playable (18 October 2026)
+
+Installed validated99902a6/SHAa40aeaf7... as C:/Dev/Reassembly/local/graphics/grid-graphics-app.exe with separate graphics-current-build.json. Launcher source now prefers that file when present, falls back to checkouttarget/release. Thus graphics updates can be delivered from the main project folder independently of the normal engine executable. ActualCMDselector/capability harness03passes5cases: mainfolder→dedicated, graphicsworktree→target, currentprimary/priorgraphics omit unsupported occlusion, dedicated enables numbers+occlusion. Private capabilities and manifests remain ignored.
+
+First copy guard caught a concurrent legitimate primary refresh (old6364b328... became617dfc14..., reported22363aa7eaf8-dirty/F384); no files were copied before that guard stopped. Re-read actual hash/help and installed only the dedicated file, preserving new617dfc14...byte-identical. Owner untracked note SHA unchanged. Historical G117primary6364hash refers to its earlier promotion; do not restore it over the peer's new build. Source publication and new F383+graphics combined executable build follow. Current verified graphics build still has the previous HUD; original-look HUD is source-integrated but not yet claimed in that binary.
+
+
+## G117 — Refreshed graphics playable and preserved incoming original-look HUD (18 October 2026)
+
+Promoted validated99902a6/SHAa40aeaf7... to graphics target/release and verified backup after checking no active graphics playable; previousbee2138a... and manifest archived privately. Primary executable6364b328... remained byte-identical. Current graphics launcher enables numbers and moderate source-ambient paint occlusion; no-body-occlusion gives comparison, globalCLIoff unchanged. ActualCMDcapability harness passes for primaryold(no flags), previousgraphics(numbers only) andcandidate(bothflags). Private launcher-occlusion-capabilities02.json/current-build.json. No candidate full-lap claim;4newCPUtests, all-target appClippy, native4K/offbyteparity/forcedRGBA/30framemotion and4physical-exit identity are the acceptance scope.
+
+Incoming originF383/cdf1210adds original-look OSD/HUD; preserved as98f2170. Journal conflict kept both histories; removed one incoming trailing blank line in RACE_HUD.md to pass diffcheck. Paint/graphics preset/material modules remain identical to tested999; executable still uses its older HUD. Combined formats69tests0fail/0ignored and all-target workspaceClippy1m57s pass. Source sync/new combined build next. Private manifest marks unbuiltF383explicitly. Owner untracked note preserved; primary legacy manifest may predate its actual executable, use actual hash/help rather than assuming it matches. No original Steam changes/new installs/owner help needed.
+
+
 ## G116 — Paint-mask motion and per-car uploads pass; enable graphics-launcher comparison (18 October 2026)
 
 99902a6motion1200ticks/30unique virtual30FPSframes passes;4final physical/handling/deformation/lap lines equal olderc0bcontrol excludingwalltime. Bothcar0/car1ownmask linearBgra8Unorm11mips logged, first/lastframes inspected, onlyknownnilUUIDwarning. No new full-lap/actualmonitorFPS claim. Private body-occlusion-motion-validation01.json. Static CLI-off old/new PNGbyteparity, native4Ksource-ambient andforcedRGBA accepted earlier.
@@ -3487,3 +3501,4 @@ PID29904 closed after the F133 capture; the guarded follow-up reader refused its
 - `local/phase1/`: upcoming static-analysis projects and runtime traces.
 
 G080 test note: initial endpoint assertion failed because Bevy computed 250.00006 m; corrected assertion tolerance to 1 mm, without changing renderer behaviour. Failed log retained; retry passed. Rust1.99.0/Bevy0.19.1, two Cargo jobs, no new tools.
+
