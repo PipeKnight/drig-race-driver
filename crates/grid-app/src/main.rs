@@ -28,6 +28,7 @@ mod body_specular;
 mod camera;
 mod car_materials;
 mod car_numbers;
+mod career_screen;
 mod clearcoat_prepass;
 mod damage_hud;
 mod damage_parts;
@@ -1099,9 +1100,23 @@ fn main() {
             }
         }
     }
+    // `--career`: the career screen and its races (career_screen.rs).
+    #[cfg(not(target_os = "android"))]
+    if args.first().is_some_and(|a| a == "--career") {
+        match career_screen::supervise(&args[1..]) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("grid-app: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     let result = if args.iter().any(|a| a == "--menu-screen") {
         let rest: Vec<String> = args.into_iter().filter(|a| a != "--menu-screen").collect();
         event_menu::screen(&rest)
+    } else if args.iter().any(|a| a == "--career-screen") {
+        let rest: Vec<String> = args.into_iter().filter(|a| a != "--career-screen").collect();
+        career_screen::screen(&rest)
     } else {
         run(args)
     };
@@ -1342,6 +1357,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut track = false;
     let mut include_batches = false;
     let mut from_menu = false;
+    let mut career_result: Option<PathBuf> = None;
     let mut reference = false;
     let mut collision = false;
     let mut start_view = false;
@@ -1380,6 +1396,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--drive" => drive = true,
             // Started by the event menu: leaving the event goes back to it.
             "--from-menu" => from_menu = true,
+            // A career race: its result goes to this file (career_screen.rs).
+            "--career-result" => {
+                career_result = Some(PathBuf::from(args.next().ok_or("missing career result path")?));
+            }
             "--audio-check" => audio_check = true,
             "--graphics" => {
                 graphics.preset =
@@ -3025,6 +3045,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     app.insert_resource(body_specular);
     if from_menu {
         app.insert_resource(event_menu::FromMenu);
+    }
+    if let Some(path) = career_result {
+        if !drive {
+            return Err("--career-result requires a race".into());
+        }
+        app.insert_resource(career_screen::ResultPath(path))
+            .add_systems(Last, career_screen::write_result);
     }
     let exit = app
         .insert_resource(body_occlusion)

@@ -413,6 +413,7 @@ pub fn update(
     mut exit: MessageWriter<AppExit>,
     mut replay: Option<ResMut<crate::replay::Replay>>,
     touge: Option<Res<crate::touge_event::TougeEvent>>,
+    mut waited: Local<f32>,
 ) {
     // A replay owns the input; its exit returns here.
     if replay.as_ref().is_some_and(|r| r.owns_input()) {
@@ -454,10 +455,25 @@ pub fn update(
         );
     }
     let mut repeat = post.repeat;
-    let nav = crate::pause_menu::nav(&actions, &mut repeat, dt);
+    let mut nav = crate::pause_menu::nav(&actions, &mut repeat, dt);
     post.repeat = repeat;
     if !post.active() {
         return;
+    }
+    // Diagnostics results_continue: a scripted run selects Continue on the
+    // stats and results screens by itself (unattended checks).
+    if let Some(after) = crate::settings::diagnostics().results_continue
+        && driving.scripted_ticks.is_some()
+        && matches!(post.stage, Stage::Stats | Stage::Results)
+    {
+        *waited += dt;
+        if f64::from(*waited) >= after {
+            *waited = 0.;
+            post.cursor = 0;
+            nav.select = true;
+        }
+    } else {
+        *waited = 0.;
     }
     // The car is held while the screens are up (no gear edges leak).
     *shifts = ShiftQueue::default();

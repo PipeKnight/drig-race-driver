@@ -841,7 +841,7 @@ pub fn leave(exit: &mut MessageWriter<AppExit>, from_menu: bool) {
 
 /// The flags a supervised child gets from the supervisor's own arguments.
 #[cfg(not(target_os = "android"))]
-fn passed_on(args: &[String]) -> Vec<String> {
+pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {

@@ -85,6 +85,10 @@ pub struct Diagnostics {
     /// Seconds: in that Instant Replay, Jump In (Flashback) once it has run
     /// this long; the drive goes on from there (docs/FLASHBACK.md).
     pub flashback_capture: Option<f64>,
+    /// Seconds: in a scripted run, the stats and results screens select
+    /// Continue by themselves after this long (unattended career checks,
+    /// docs/CAREER_SCREEN.md).
+    pub results_continue: Option<f64>,
 }
 
 impl Default for Diagnostics {
@@ -103,6 +107,7 @@ impl Default for Diagnostics {
             texture_fallback: None,
             replay_capture: None,
             flashback_capture: None,
+            results_continue: None,
         }
     }
 }
@@ -128,6 +133,7 @@ impl Diagnostics {
                 .and_then(|v| texture_path("GRID_TEXTURE_FALLBACK", &v).ok().flatten()),
             replay_capture: text("GRID_REPLAY_CAPTURE").and_then(|v| v.parse().ok()),
             flashback_capture: text("GRID_FLASHBACK_CAPTURE").and_then(|v| v.parse().ok()),
+            results_continue: text("GRID_RESULTS_CONTINUE").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -152,6 +158,9 @@ impl Diagnostics {
             }
             "flashback_capture" => {
                 self.flashback_capture = Some(value.parse().map_err(|_| number(key))?)
+            }
+            "results_continue" => {
+                self.results_continue = Some(value.parse().map_err(|_| number(key))?)
             }
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
