@@ -1,5 +1,7 @@
 # GRID engine project log
 
+F385 playable b43b57596031 with the original-look race HUD (2026-10-18, Claude Code): rebuilt with tools/update_prototype.ps1 (741 s) right after F384, because F383 (race HUD in the original's look: Osd/dial2.pssg scene, fonts and animations read at run time) landed during the F384 build. Manifest local/playtest/build-20261018T0509589175515Z, built 2026-10-18T05:22:17Z, exe sha256 2014aae6a7a6b643d36b3ad7ff364d4ffefbbb376ecb3c665345a6fe84f71b38, cargo/rustc 1.99.0; source driving and Bevy checks passed. Dirty only through the untracked docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md. Supersedes the F384 executable. Not checked here: the HUD in a running window.
+
 ## G118 — Dedicated main-checkout graphics executable delivered without replacing normal playable (18 October 2026)
 
 Installed validated99902a6/SHAa40aeaf7... as C:/Dev/Reassembly/local/graphics/grid-graphics-app.exe with separate graphics-current-build.json. Launcher source now prefers that file when present, falls back to checkouttarget/release. Thus graphics updates can be delivered from the main project folder independently of the normal engine executable. ActualCMDselector/capability harness03passes5cases: mainfolder→dedicated, graphicsworktree→target, currentprimary/priorgraphics omit unsupported occlusion, dedicated enables numbers+occlusion. Private capabilities and manifests remain ignored.
