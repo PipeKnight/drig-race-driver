@@ -121,9 +121,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     for bits in 0..32u32 {
         let assists = Assists {
-            traction_control: bits & 1 == 0,
+            traction_control: (bits & 1 == 0).into(),
             stability_control: bits & 2 == 0,
-            braking_assist: bits & 4 == 0,
+            braking_assist: (bits & 4 == 0).into(),
             transmission: if bits & 8 == 0 {
                 Transmission::Automatic
             } else {

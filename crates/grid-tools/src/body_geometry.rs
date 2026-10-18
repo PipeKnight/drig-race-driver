@@ -335,6 +335,21 @@ impl BodyGeometry {
             .collect())
     }
 
+    /// Whether `result`, returned by [`Self::contacts_with_props`] for some
+    /// `remaining`, is also what it returns for the smaller `room`.
+    ///
+    /// The capacity reaches the query only as each pair query's room,
+    /// `PAIR_CONTACTS.min(remaining - found)` with `found` at most the final
+    /// count, and as a stop once `found == remaining`. When `room` leaves at
+    /// least `PAIR_CONTACTS` free after every contact found, every pair query
+    /// gets `PAIR_CONTACTS` under both capacities and neither stops early, so
+    /// the two queries take identical steps. Lets the multi-car tick query
+    /// every car at once and keep the order-dependent capacity in its
+    /// sequential pass.
+    pub fn reusable_with<T>(result: &Result<Vec<T>, Error>, room: usize) -> bool {
+        matches!(result, Ok(found) if found.len() + PAIR_CONTACTS <= room)
+    }
+
     /// Contact query settings (margin and sampling directions).
     /// The current collision hull in its shape frame (see [`Self::pose`]).
     pub fn mesh(&self) -> &collision_mesh::Mesh {

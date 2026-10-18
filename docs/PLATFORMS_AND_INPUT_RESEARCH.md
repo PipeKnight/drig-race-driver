@@ -808,6 +808,11 @@ All of it is AUTHORED: GRID has no tilt or touch input. Where an original rule e
 - **Android gamepad bridge: not done.** gilrs has no Android back end. winit 0.30.13 turns pad buttons into `Key::Unidentified` and drops the axes (7.6, [S]), so a bridge must read android-activity's `InputEvent::MotionEvent`/`KeyEvent` before or beside winit. Left for P11b, with a pad on the phone.
 - **Not tested on a device** (section 8): sensor sign and landscape inference, zone feel, the UI scale, multi-touch, menu navigation by touch.
 
+### 7.8 P12 groundwork: frame-rate counter (docs/ANDROID.md "Frame rate")
+
+- `fps_counter.rs`: `[osd] fps` (on by default on Android, F9 on the desktop) shows FPS, mean and worst frame time of the last second; `frame_stats` log line once per second with `sim_ticks_per_s`; a `frame_setup` line with present mode, window size, scale and reported refresh rate. Read-only on the simulation.
+- Current Android frame pacing [V code]: Bevy default `PresentMode::Fifo` (strict vsync; F374 wrongly said AutoVsync), no frame cap, no requested refresh rate (Android/HyperOS choose, likely 60 Hz [I]), full native resolution (since F375 capped at 1080 rows by `[video] render_height`), `baseline` preset with Bevy's default 4× MSAA. No change made: tuning is P12 after the phone numbers.
+
 ## 8. Open questions and tests that need hardware
 
 1. **Android device:** the tables of 1.2 have not been executed on ARM. P9 should run the unit tests (or a small `grid-world` self-test) on the phone.

@@ -365,15 +365,28 @@ fn present(
 /// owner's phone at its default density, [I]), while the race HUD and the
 /// pause menu are laid out in desktop pixels. In touch mode the UI is scaled
 /// so the window is at least 720 UI pixels high.
-fn ui_scale(camera: Query<&Camera, With<crate::ViewerCamera>>, mut scale: ResMut<UiScale>) {
-    // The HUD camera's target: the window, or the image of a --render capture.
+fn ui_scale(
+    camera: Query<&Camera, With<crate::ViewerCamera>>,
+    window: Query<&Window, With<PrimaryWindow>>,
+    mut scale: ResMut<UiScale>,
+) {
+    // The HUD camera's target: the window, the render_height image shown
+    // over the window (render_scale.rs), or the image of a --render capture.
+    // The cap keeps the HUD at the size it has on the window itself.
+    let cap = |h: f32| {
+        window
+            .iter()
+            .next()
+            .filter(|w| w.height() > 0.)
+            .map_or(1., |w| h / w.height())
+    };
     let height = camera
         .iter()
         .next()
         .and_then(Camera::logical_target_size)
         .map(|s| s.y);
     if let Some(h) = height.filter(|h| *h > 0.) {
-        let s = (h / 720.).min(1.);
+        let s = (h / 720.).min(cap(h).max(1.));
         if (scale.0 - s).abs() > 1e-3 {
             scale.0 = s;
         }

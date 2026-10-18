@@ -875,6 +875,9 @@ fn main() {
         .expect("race worker")
         .join()
         .expect("race worker panic");
+    if grid_tools::perf::enabled() {
+        eprintln!("{}", grid_tools::perf::report());
+    }
     if let Err(error) = result {
         eprintln!("grid-opponent-race: {error}");
         std::process::exit(1);

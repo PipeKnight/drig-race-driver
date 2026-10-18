@@ -247,6 +247,17 @@ pub struct Settings {
     pub osd_mph: Option<bool>,
     pub osd_minimap: Option<bool>,
     pub osd_dials: Option<bool>,
+    /// `[osd] fps`: the frame-rate counter (default on Android only).
+    pub osd_fps: Option<bool>,
+    /// `[video] render_height`: `native` or rows (render_scale.rs).
+    pub render_height: Option<crate::render_scale::RenderHeight>,
+    /// `[video] present_mode`, `refresh_hz` (`Some(None)` = system), `frame_latency`.
+    pub present_mode: Option<bevy::window::PresentMode>,
+    pub refresh_hz: Option<Option<f32>>,
+    pub frame_latency: Option<std::num::NonZero<u32>>,
+    /// `[front_end] show`: the Race Options front end before the race
+    /// (docs/DRIVER_AIDS.md); default on.
+    pub front_end: Option<bool>,
     pub diagnostics: Diagnostics,
 }
 
@@ -320,6 +331,8 @@ impl Settings {
                     "private",
                     "sound",
                     "osd",
+                    "front_end",
+                    "video",
                     "diagnostics",
                 ]
                 .contains(&section.as_str())
@@ -405,6 +418,19 @@ impl Settings {
                 ("osd", "position") => self.osd_position = Some(on(&key, value).map_err(at)?),
                 ("osd", "minimap") => self.osd_minimap = Some(on(&key, value).map_err(at)?),
                 ("osd", "dials") => self.osd_dials = Some(on(&key, value).map_err(at)?),
+                ("osd", "fps") => self.osd_fps = Some(on(&key, value).map_err(at)?),
+                ("video", "present_mode") => {
+                    self.present_mode = Some(crate::render_scale::present_mode(value).map_err(at)?)
+                }
+                ("video", "refresh_hz") => {
+                    self.refresh_hz = Some(crate::render_scale::refresh_hz(value).map_err(at)?)
+                }
+                ("video", "frame_latency") => {
+                    self.frame_latency = Some(crate::render_scale::frame_latency(value).map_err(at)?)
+                }
+                ("video", "render_height") => {
+                    self.render_height = Some(crate::render_scale::RenderHeight::parse(value).map_err(at)?)
+                }
                 ("osd", "speed_units") => {
                     self.osd_mph = Some(match value.to_ascii_lowercase().as_str() {
                         "kph" | "km/h" => false,
@@ -412,6 +438,7 @@ impl Settings {
                         _ => return Err(at("`speed_units` needs kph or mph".into())),
                     })
                 }
+                ("front_end", "show") => self.front_end = Some(on(&key, value).map_err(at)?),
                 ("diagnostics", key) => self.diagnostics.set(key, value).map_err(at)?,
                 (section, key) => {
                     return Err(at(format!("unknown setting `{key}` in [{section}]")));
@@ -432,6 +459,127 @@ impl Settings {
     pub fn input(&self) -> Result<crate::input::Settings, String> {
         crate::input::Settings::parse(&self.input)
     }
+}
+
+/// `[assists]` keys the Driver Aids screen owns.
+const AID_KEYS: [&str; 14] = [
+    "tcs",
+    "traction",
+    "traction_control",
+    "stability",
+    "stability_control",
+    "scs",
+    "esp",
+    "braking",
+    "braking_assist",
+    "brake",
+    "abs",
+    "gearbox",
+    "transmission",
+    "gears",
+];
+
+/// `text` (a settings file) with the Driver Aids choice saved: earlier
+/// traction, stability, braking and gearbox items are removed from the
+/// `[assists]` lines and one line with the new values ends the section (later
+/// keys win). Everything else, comments included, is kept.
+pub fn with_driver_aids(text: &str, aids: &grid_tools::source_vehicle::assists::Assists) -> String {
+    use grid_tools::source_vehicle::assists::Transmission;
+    let line = format!(
+        "tcs={} stability={} braking={} gearbox={}",
+        aids.traction_control,
+        if aids.stability_control { "on" } else { "off" },
+        aids.braking_assist,
+        match aids.transmission {
+            Transmission::Automatic => "automatic",
+            Transmission::Manual => "manual",
+        }
+    );
+    let mut out: Vec<String> = Vec::new();
+    let mut section = String::from("assists");
+    // The new line goes after the last [assists] line.
+    let mut end = None;
+    for raw in text.lines() {
+        let body = strip_comment(raw);
+        let trimmed = body.trim();
+        if let Some(name) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            section = name.trim().to_ascii_lowercase();
+            out.push(raw.to_owned());
+            if section == "assists" {
+                end = Some(out.len());
+            }
+            continue;
+        }
+        if section != "assists" {
+            out.push(raw.to_owned());
+            continue;
+        }
+        // `key = value` counts as one item, as the reader joins it (F370).
+        let joined = joined_item(trimmed);
+        let items: Vec<&str> = joined
+            .split([',', ' ', '\t', ';'])
+            .filter(|i| !i.is_empty())
+            .collect();
+        let kept: Vec<&str> = items
+            .iter()
+            .copied()
+            .filter(|i| {
+                let key = i.split_once('=').map_or(*i, |(k, _)| k).to_ascii_lowercase();
+                !AID_KEYS.contains(&key.as_str())
+            })
+            .collect();
+        if kept.len() == items.len() {
+            out.push(raw.to_owned());
+        } else if !kept.is_empty() {
+            out.push(format!("{}{}", kept.join(" "), &raw[body.len()..]));
+        } else if body.len() < raw.len() {
+            // Only its comment is left.
+            out.push(raw[body.len()..].trim_start().to_owned());
+        } else {
+            continue;
+        }
+        if !raw.trim().is_empty() {
+            end = Some(out.len());
+        }
+    }
+    match end {
+        Some(at) => out.insert(at, line),
+        None => {
+            out.push("[assists]".into());
+            out.push(line);
+        }
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    text
+}
+
+/// Saves the Driver Aids choice in the settings file `path`
+/// (`<data dir>/settings.ini`).
+pub fn save_driver_aids(
+    path: &Path,
+    aids: &grid_tools::source_vehicle::assists::Assists,
+) -> Result<(), String> {
+    let old = match std::fs::read_to_string(path) {
+        Ok(text) => text.trim_start_matches('\u{feff}').to_owned(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let new = with_driver_aids(&old, aids);
+    // The result must still be a valid settings file with these aids.
+    let mut check = Settings::new();
+    check.apply(&new, path.parent().unwrap_or(Path::new(".")))?;
+    let back = check.assists()?;
+    let owned = |a: &grid_tools::source_vehicle::assists::Assists| {
+        (a.traction_control, a.stability_control, a.braking_assist, a.transmission)
+    };
+    if owned(&back) != owned(aids) {
+        return Err("saved driver aids do not read back".into());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Reads `--data-dir` and the settings files named by `--settings`, sets the
@@ -539,7 +687,7 @@ prop_script_speed = 12.5
         };
         assert_eq!(s.deformation, Some(Private::File(df01)));
         let aids = s.assists().unwrap();
-        assert!(!aids.traction_control);
+        assert!(!aids.traction_control.is_on());
         assert_eq!(
             aids.transmission,
             grid_tools::source_vehicle::assists::Transmission::Manual
@@ -569,7 +717,7 @@ prop_script_speed = 12.5
         assert_eq!(s.body_events, None);
         assert_eq!(s.deformation, Some(Private::Derive));
         // Lines before any header are driver aids, as in the assists file.
-        assert!(s.assists().unwrap().traction_control);
+        assert!(s.assists().unwrap().traction_control.is_on());
     }
 
     #[test]
@@ -599,7 +747,7 @@ prop_script_speed = 12.5
     fn bad_settings_are_refused_with_the_line() {
         let dir = Path::new("d");
         for (text, error) in [
-            ("[video]\n", "line 1: unknown settings section [video]"),
+            ("[audio]\n", "line 1: unknown settings section [audio]"),
             (
                 "[drive]\nspeed = 3\n",
                 "line 2: unknown setting `speed` in [drive]",
@@ -665,8 +813,52 @@ prop_script_speed = 12.5
             Path::new("d"),
         )
         .unwrap();
-        assert!(!s.assists().unwrap().traction_control);
+        assert!(!s.assists().unwrap().traction_control.is_on());
         s.ai().unwrap();
+    }
+
+    #[test]
+    fn driver_aids_are_saved_in_the_assists_section() {
+        use grid_tools::source_vehicle::assists::{Assists, Level, Transmission};
+        let aids = Assists {
+            traction_control: Level::new(25).unwrap(),
+            stability_control: false,
+            braking_assist: Level::ON,
+            transmission: Transmission::Manual,
+            ..Assists::default()
+        };
+        let read = |text: &str| {
+            let mut s = Settings::new();
+            s.apply(text, Path::new("local")).unwrap();
+            s
+        };
+        // No file yet: a new section.
+        let text = with_driver_aids("", &aids);
+        assert_eq!(text, "[assists]\ntcs=25% stability=off braking=on gearbox=manual\n");
+        assert_eq!(read(&text).assists().unwrap(), aids);
+        // The aid keys go, other keys, comments and sections stay; the
+        // driver aids end the [assists] section.
+        let old = "# mine\ntcs=off input=wheel\n[game]\nroot = auto\n[assists]\nabs=off # old\ndamage=normal\n[osd]\nminimap = off\n";
+        let text = with_driver_aids(old, &aids);
+        assert_eq!(
+            text,
+            "# mine\ninput=wheel\n[game]\nroot = auto\n[assists]\n# old\ndamage=normal\ntcs=25% stability=off braking=on gearbox=manual\n[osd]\nminimap = off\n"
+        );
+        let s = read(&text);
+        let back = s.assists().unwrap();
+        assert_eq!(back.traction_control, aids.traction_control);
+        assert!(!back.stability_control);
+        assert_eq!(back.transmission, Transmission::Manual);
+        assert_eq!(back.input, grid_tools::source_vehicle::assists::Input::Wheel);
+        assert_eq!(s.osd_minimap, Some(false));
+        // The `key = value` form is understood too.
+        assert_eq!(
+            with_driver_aids("[assists]\ntcs = off, damage = normal\n", &aids),
+            "[assists]\ndamage=normal\ntcs=25% stability=off braking=on gearbox=manual\n"
+        );
+        // Saving again changes nothing.
+        assert_eq!(with_driver_aids(&text, &aids), text);
+        assert_eq!(read("[front_end]\nshow = off\n").front_end, Some(false));
     }
 
     #[test]

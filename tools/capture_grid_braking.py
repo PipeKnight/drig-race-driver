@@ -12,8 +12,9 @@ Each row: QPC seconds, then hex of car+0xE00 (0x100 bytes: controls +E1C..,
 clutch +E34, lock-up timer +E74), car+0x1140 (0x80: assist parameters
 +1160..+1178, ABS mode +11BC), car+0x1550 (0x10: aid bytes +1558..+155A),
 car+0x1960 (0x30: gear +196C, gearbox +1970..+1972, +197C, +1988), the four
-wheel blocks car+0x1990 (4 x 0x150), physical+0x1D0 (0x60 pose/motion) and
-world+0x7C4 (8). A row is written only when the physical motion block or a
+wheel blocks car+0x1990 (4 x 0x150), physical+0x1D0 (0x60 pose/motion),
+world+0x7C4 (8) and the engine/drivetrain block car+0x1840 (0x120: RPM +0x1894,
+ratios +0x18F4..). A row is written only when the physical motion block or a
 wheel block changed since the last row (one row per physics step).
 """
 import ctypes
@@ -78,7 +79,8 @@ def main():
     if not (0x10000 < physical < 0x7FFE0000 and 0x10000 < world < 0x7FFE0000):
         sys.exit("car links invalid")
     regions = [(car + 0xE00, 0x100), (car + 0x1140, 0x80), (car + 0x1550, 0x10), (car + 0x1960, 0x30),
-               (car + 0x1990, 0x540), (physical + 0x1D0, 0x60), (world + 0x7C4, 8)]
+               (car + 0x1990, 0x540), (physical + 0x1D0, 0x60), (world + 0x7C4, 8),
+               (car + 0x1840, 0x120)]
     rows = 0
     last = None
     end = time.perf_counter() + seconds

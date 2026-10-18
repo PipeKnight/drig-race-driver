@@ -54,6 +54,9 @@ pub struct MultiRuntime {
     retired: Vec<Option<Retirement>>,
     /// Cars retired by the last tick.
     newly_retired: Vec<usize>,
+    /// Independent per-car stages run on the shared compute pool
+    /// ([`crate::parallel`]); results are identical either way.
+    pub parallel: bool,
     #[cfg(test)]
     fail_lap_timing: Option<(usize, u64)>,
 }
@@ -387,6 +390,7 @@ impl MultiRuntime {
             props: None,
             retired: vec![None; n],
             newly_retired: Vec::new(),
+            parallel: true,
             #[cfg(test)]
             fail_lap_timing: None,
         })
@@ -603,6 +607,7 @@ impl MultiRuntime {
         if controls.len() != n {
             return Err(Error("one control set per car is required"));
         }
+        let _tick_timer = crate::perf::Timer::start(crate::perf::Stage::WorldTick);
         let tokens: Vec<u32> = (0..n).map(|i| self.token(i)).collect();
         let mut previous = self.world.clone();
         let mut slots = self.world.groups.contacts.clone();
@@ -612,26 +617,42 @@ impl MultiRuntime {
         let mut caches = Vec::with_capacity(n);
         let mut published: Vec<Option<crate::body_geometry::BodyGeometry>> = vec![None; n];
         let mut registrations: Vec<Option<deformation_world::Registration>> = vec![None; n];
-        for (i, car) in self.cars.iter().enumerate() {
-            if self.retired[i].is_none() {
+        let vehicle_timer = crate::perf::Timer::start(crate::perf::Stage::VehicleStage);
+        // A car's vehicle stage reads only that car and its own body record
+        // in the previous world, so every racing car's stage runs at once.
+        // Only the shared wheel-contact pool offset depends on the cars
+        // before it; the contacts produced into a blank pool are placed in
+        // their real slots below, in car order (wheel_contacts::overlay).
+        let blank = wheel_contacts::Pool {
+            slots: vec![[0; 32]; 4],
+            used: 0,
+            shapes: self.statics,
+        };
+        let stages = {
+            let (cars, geometry, retired, previous) =
+                (&self.cars, &self.geometry, &self.retired, &previous);
+            crate::parallel::map(n, self.parallel, |i| {
+                retired[i].is_none().then(|| {
+                    vehicle_stage(
+                        &cars[i],
+                        &geometry[i],
+                        controls[i],
+                        previous.groups.bodies[i],
+                        previous.manager.parameters[0],
+                        &blank,
+                    )
+                })
+            })
+        };
+        for ((i, car), stage) in self.cars.iter().enumerate().zip(stages) {
+            if let Some(stage) = stage {
                 if used + 4 > pool_slots(n) {
                     return Err(Error("shared wheel contact pool exhausted"));
                 }
-                let pool = wheel_contacts::Pool {
-                    slots: slots[used..used + 4].to_vec(),
-                    used: 0,
-                    shapes: self.statics,
-                };
-                match vehicle_stage(
-                    car,
-                    &self.geometry[i],
-                    controls[i],
-                    previous.groups.bodies[i],
-                    previous.manager.parameters[0],
-                    &pool,
-                ) {
+                match stage {
                     Ok(stage) => {
-                        for mut c in stage.contacts {
+                        for c in stage.contacts {
+                            let mut c = wheel_contacts::overlay(&slots[used], &c);
                             c[1] = i as u32 + 1;
                             c[0x28 / 4] = tokens[i];
                             slots[used] = c;
@@ -653,7 +674,10 @@ impl MultiRuntime {
             staged.push(None);
             caches.push(car.cache);
         }
+        drop(vehicle_timer);
         let wheel_contacts = used;
+        let parallel = self.parallel;
+        let mut provider_nanos = 0u64;
         let mut body_contacts = 0;
         let mut car_contacts = 0;
         let geometry: Vec<&crate::body_geometry::BodyGeometry> = published
@@ -672,26 +696,52 @@ impl MultiRuntime {
         let mut car_normals = Vec::new();
         let mut contact_failed: Vec<Option<Error>> = vec![None; n];
         let mut provider = |bodies: &[contact_groups::Body], remaining: usize| {
+            let provider_started = crate::perf::enabled().then(std::time::Instant::now);
+            let body_timer = crate::perf::Timer::start(crate::perf::Stage::BodyContacts);
             let mut out: Vec<contact_groups::Contact> = Vec::new();
             statics_normals.iter_mut().for_each(|s| *s = [0.; 3]);
             body_counts.iter_mut().for_each(|c| *c = 0);
             car_normals.clear();
             recorded.clear();
             prop_slots.clear();
-            for i in 0..n {
+            // A held body needs no static contacts; the others still hit it.
+            let wanted: Vec<bool> = (0..n)
+                .map(|i| moving[i] && contact_failed[i].is_none())
+                .collect();
+            // Every car's static contacts at once with the whole capacity;
+            // the sequential pass below reuses a result only where the
+            // smaller capacity left to that car gives the same one.
+            let full = crate::parallel::map(n, parallel, |i| {
+                wanted[i].then(|| {
+                    geometry[i].contacts_with_props(
+                        &cars[i].track,
+                        &cars[i].surfaces,
+                        &bodies[i..=i],
+                        remaining,
+                    )
+                })
+            });
+            for (i, full) in full.into_iter().enumerate() {
                 if out.len() >= remaining {
                     break;
                 }
-                // A held body needs no static contacts; the others still hit it.
-                if !moving[i] || contact_failed[i].is_some() {
+                let Some(full) = full else {
                     continue;
-                }
-                let fresh = match geometry[i].contacts_with_props(
-                    &cars[i].track,
-                    &cars[i].surfaces,
-                    &bodies[i..=i],
-                    remaining - out.len(),
-                ) {
+                };
+                let room = remaining - out.len();
+                let fresh = if room == remaining
+                    || crate::body_geometry::BodyGeometry::reusable_with(&full, room)
+                {
+                    full
+                } else {
+                    geometry[i].contacts_with_props(
+                        &cars[i].track,
+                        &cars[i].surfaces,
+                        &bodies[i..=i],
+                        room,
+                    )
+                };
+                let fresh = match fresh {
                     Ok(fresh) => fresh,
                     Err(error) => {
                         contact_failed[i] = Some(error);
@@ -728,9 +778,46 @@ impl MultiRuntime {
                 }
             }
             body_contacts = out.len();
-            // Each car's world hull is built once, when a pair first needs it.
-            let mut hulls: Vec<Option<crate::body_geometry::WorldHull>> =
-                (0..n).map(|_| None).collect();
+            drop(body_timer);
+            let pairs_timer = crate::perf::Timer::start(crate::perf::Stage::CarPairs);
+            // Each car's world hull is built once, when a pair first needs it,
+            // and a pair query depends on the capacity only through
+            // `capacity.min(PAIR)` (zero never reaches it). Both are pure, so
+            // the hulls and then each car's row of pair queries run at once
+            // beforehand with the full pair capacity; the pass below keeps the
+            // original order, failures and capacities and takes a prepared
+            // result exactly where the original would compute the same one.
+            // A pair first needs car j's hull while j's failure state is still
+            // the one at this point: only j's own build or j's own pairs,
+            // which come later, can change it.
+            const PAIR: usize = 16;
+            let built = crate::parallel::map(n, parallel, |j| {
+                (j > 0 && contact_failed[j].is_none()).then(|| {
+                    geometry[j]
+                        .hull_world_triangles(&bodies[j])
+                        .map(|triangles| crate::body_geometry::WorldHull::new(&triangles))
+                })
+            });
+            let rows = {
+                let built = &built;
+                crate::parallel::map(n, parallel, |i| {
+                    (contact_failed[i].is_none() && remaining - out.len() >= PAIR).then(|| {
+                        (0..n)
+                            .map(|j| match &built[j] {
+                                Some(Ok(hull)) if j > i => {
+                                    Some(geometry[i].car_contacts_hull(&bodies[i], hull, PAIR))
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+            };
+            let mut rows: Vec<Vec<Option<_>>> = rows
+                .into_iter()
+                .map(|row| row.unwrap_or_else(|| (0..n).map(|_| None).collect()))
+                .collect();
+            let mut needed = vec![false; n];
             for i in 0..n {
                 for j in i + 1..n {
                     if out.len() >= remaining || contact_failed[i].is_some() {
@@ -739,23 +826,22 @@ impl MultiRuntime {
                     if contact_failed[j].is_some() {
                         continue;
                     }
-                    let other = match &mut hulls[j] {
-                        Some(hull) => hull,
-                        empty => match geometry[j].hull_world_triangles(&bodies[j]) {
-                            Ok(triangles) => {
-                                empty.insert(crate::body_geometry::WorldHull::new(&triangles))
-                            }
-                            Err(error) => {
-                                contact_failed[j] = Some(error);
-                                continue;
-                            }
-                        },
+                    if !needed[j] {
+                        needed[j] = true;
+                        if let Some(Err(error)) = &built[j] {
+                            contact_failed[j] = Some(error.clone());
+                            continue;
+                        }
+                    }
+                    let Some(Ok(other)) = &built[j] else {
+                        unreachable!("hulls are built for every car that can be met");
                     };
-                    let pair = match geometry[i].car_contacts_hull(
-                        &bodies[i],
-                        other,
-                        remaining - out.len(),
-                    ) {
+                    let room = remaining - out.len();
+                    let pair = match rows[i][j].take() {
+                        Some(prepared) if room >= PAIR => prepared,
+                        _ => geometry[i].car_contacts_hull(&bodies[i], other, room),
+                    };
+                    let pair = match pair {
                         Ok(pair) => pair,
                         Err(error) => {
                             contact_failed[i] = Some(error);
@@ -785,6 +871,8 @@ impl MultiRuntime {
                     }
                 }
             }
+            drop(pairs_timer);
+            let _pieces_timer = crate::perf::Timer::start(crate::perf::Stage::PieceContacts);
             piece_contacts = 0;
             if let Some(props) = props.filter(|p| p.has_bodies()) {
                 let hulls: Vec<_> = (0..n)
@@ -809,8 +897,12 @@ impl MultiRuntime {
                 piece_contacts = more.len();
                 out.extend(more);
             }
+            if let Some(started) = provider_started {
+                provider_nanos += started.elapsed().as_nanos() as u64;
+            }
             Ok(out)
         };
+        let advance_started = crate::perf::enabled().then(std::time::Instant::now);
         let world = if registrations.iter().any(Option::is_some) {
             let mut owned: Vec<Option<&mut deformation_world::Registration>> =
                 registrations.iter_mut().map(Option::as_mut).collect();
@@ -833,6 +925,14 @@ impl MultiRuntime {
                 provider,
             )?
         };
+        if let Some(started) = advance_started {
+            let total = started.elapsed().as_nanos() as u64;
+            crate::perf::add(
+                crate::perf::Stage::WorldAdvance,
+                total.saturating_sub(provider_nanos),
+            );
+        }
+        let _commit_timer = crate::perf::Timer::start(crate::perf::Stage::Commit);
         let mut world = world;
         let mut shapes = None;
         let mut props_next = None;
@@ -1805,6 +1905,119 @@ mod tests {
                         assert!(c > covered[5] + 0.02, "car {i} at {c:.3} laps, held car at {:.3}", covered[5]);
                     }
                 }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// P12 (docs/PERFORMANCE.md): the per-car stages that run on the compute
+    /// pool give bit-identical results to the serial tick. A deforming
+    /// 12-car AI race with breakable props and a car retired on the grid runs
+    /// twice, serially and in parallel; every body and every car's vehicle
+    /// record are compared tick by tick.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+    fn twelve_car_race_is_identical_on_one_thread_and_many() {
+        use crate::ai_driver::{AiData, AiDriver, NORMAL_DIFFICULTY, Other, Parameters, View};
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let deformation =
+                    crate::deformation_parameters::read(&read("GRID_DEFORMATION_PARAMETERS"))
+                        .unwrap();
+                let route = crate::route::Route::new("tracks/europe/donington/route_0").unwrap();
+                let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
+                let names: Vec<String> = (0..12).map(|i| format!("slot_{i:02}")).collect();
+                let slots: Vec<&str> = names.iter().map(String::as_str).collect();
+                let field = |parallel: bool| {
+                    let mut multi = MultiRuntime::lacetti_deforming_on(
+                        root,
+                        &route,
+                        &slots,
+                        &table,
+                        events,
+                        Some(deformation.clone()),
+                    )
+                    .unwrap();
+                    multi.enable_dynamic_props(root).unwrap();
+                    multi.parallel = parallel;
+                    let drivers: Vec<AiDriver> = (0..12)
+                        .map(|i| {
+                            let p = Parameters::new(&data, NORMAL_DIFFICULTY, |_| 1.).unwrap();
+                            AiDriver::new(p, 0x5eed + i as u32)
+                        })
+                        .collect();
+                    (multi, drivers)
+                };
+                let step = |(multi, drivers): &mut (MultiRuntime, Vec<AiDriver>), tick: u64| {
+                    let others: Vec<Other> = multi
+                        .cars
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| Other::of(i as u32 + 1, c))
+                        .collect();
+                    let mut controls: Vec<Controls> = (0..12)
+                        .map(|i| {
+                            let seen: Vec<Other> = others
+                                .iter()
+                                .enumerate()
+                                .filter(|&(j, _)| j != i)
+                                .map(|(_, o)| *o)
+                                .collect();
+                            let view = View::of(&multi.cars[i], multi.obstruction(i));
+                            drivers[i].controls(&data, &view, &seen, DELTA)
+                        })
+                        .collect();
+                    // Car 5 fails in its vehicle stage and is held on the grid.
+                    if tick == 1 {
+                        controls[5].throttle = f32::NAN;
+                    }
+                    multi
+                        .tick(&controls)
+                        .unwrap_or_else(|e| panic!("tick {tick}: {e}"));
+                };
+                let words = |multi: &MultiRuntime| -> Vec<u32> {
+                    let mut all: Vec<u32> = multi.bodies().iter().flatten().copied().collect();
+                    for car in &multi.cars {
+                        all.extend(&car.state.car.owner.vehicle);
+                        all.extend(car.state.car.owner.physical);
+                        all.extend(&car.state.car.frame.body);
+                        if let Some(r) = &car.deformation_registration {
+                            all.extend([r.bulk_calls as u32, r.records as u32]);
+                        }
+                    }
+                    all
+                };
+                let (mut serial, mut parallel) = (field(false), field(true));
+                let mut car_contacts = 0;
+                for tick in 1..=1500 {
+                    step(&mut serial, tick);
+                    step(&mut parallel, tick);
+                    assert_eq!(
+                        serial.0.last_active, parallel.0.last_active,
+                        "active contacts at tick {tick}"
+                    );
+                    assert!(words(&serial.0) == words(&parallel.0), "state at tick {tick}");
+                    car_contacts += serial.0.last_car_contacts;
+                }
+                let threads = crate::parallel::threads();
+                eprintln!(
+                    "parallel_identity threads={threads} car_contacts={car_contacts} bodies={} retired={:?}",
+                    serial.0.bodies().len(),
+                    serial.0.retired.iter().map(Option::is_some).collect::<Vec<_>>()
+                );
+                assert!(threads > 1, "the compute pool has one thread");
+                assert!(car_contacts > 0, "no car-to-car contact was compared");
+                assert!(serial.0.retired[5].is_some());
             })
             .unwrap()
             .join()

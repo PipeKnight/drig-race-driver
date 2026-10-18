@@ -154,11 +154,9 @@ With deformation, `deformation_world`/`deforming_physical_frame` and their clone
 
 ## Not done / options
 
-- **Parallel per-car stages.** The job part of the vehicle manager is independent per car. Only
-  the wheel-contact pool offset depends on the cars before it, so jobs could run in parallel
-  with an ordered commit. The workspace has no dependencies, and spawning scoped threads per
-  tick (~20-50 µs each on Windows) costs as much as the work, so this would need a persistent
-  worker pool. It is not needed for 60 fps now.
+- **Parallel per-car stages.** Done in P12 (18 October 2026, [PERFORMANCE](PERFORMANCE.md)):
+  the vehicle stage, body contacts and car pairs run on Bevy's persistent compute task pool
+  with an ordered commit, bit-identical to the serial tick.
 - **Remaining clones.** `vehicle_handling::calculate_owned`, `vehicle_publication`,
   `impact_frame` and the deforming frame still copy their inputs for their transactional
   "input unchanged on failure" contracts. Owned variants would need care because some read

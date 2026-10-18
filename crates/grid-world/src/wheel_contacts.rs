@@ -97,6 +97,26 @@ fn initialize(c: &mut Contact, point: [f32; 4], direction: [f32; 4], penetration
     c[0x60 / 4..0x70 / 4].copy_from_slice(&direction.map(f32::to_bits));
 }
 
+/// `produced`, a contact that [`calculate`] or [`produce`] initialized in some
+/// pool slot, as it would be initialized in the slot `template` instead.
+/// Initialization writes only fields that it stores verbatim (point,
+/// direction, penetration bits, shape token), so re-initializing `template`
+/// from them is bit-identical to producing into that slot. This lets a
+/// caller produce several cars' contacts independently and place them in the
+/// shared pool afterwards, in order.
+pub fn overlay(template: &Contact, produced: &Contact) -> Contact {
+    let words = |o: usize| -> [f32; 4] { std::array::from_fn(|j| f(produced, o + 4 * j)) };
+    let mut c = *template;
+    initialize(
+        &mut c,
+        words(0x50),
+        words(0x60),
+        f(produced, 0x38),
+        produced[0x2c / 4],
+    );
+    c
+}
+
 fn f(b: &[u32], o: usize) -> f32 {
     f32::from_bits(b[o / 4])
 }
@@ -220,6 +240,16 @@ mod tests {
         };
         let good = calculate(&car, &physical, &pool).unwrap();
         assert_eq!(good.used, 4);
+        // Producing into other slot contents and overlaying onto these
+        // slots gives the same contacts, NaN payloads and signed zeros included.
+        let mut other = pool.clone();
+        for (k, slot) in other.slots.iter_mut().enumerate() {
+            *slot = std::array::from_fn(|w| (w as u32).wrapping_mul(0x9e3779b9) ^ k as u32);
+        }
+        let produced = calculate(&car, &physical, &other).unwrap();
+        for k in 0..4 {
+            assert_eq!(overlay(&pool.slots[k], &produced.slots[k]), good.slots[k]);
+        }
         assert_eq!(good.slots[0][0], 0xdeadbeef);
         assert_eq!(
             good.slots[0][0x50 / 4..0x60 / 4],

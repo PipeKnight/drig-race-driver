@@ -40,6 +40,9 @@ $items = @(
     'audio\cars',
     'audio\eng_lac.WIP',
     'audio\car_surfaces.WIP',
+    'audio\audioVarieties.bin',    # tyre audio (missing before F376)
+    'audio\CollisionInfos.bin',
+    'audio\audioMaterials.bin',
     'track_sponsors\tag_heuer\sponsor_minor.pssg',
     'track_sponsors\bridgestone\sponsor_event.pssg',
     'cars\lac',

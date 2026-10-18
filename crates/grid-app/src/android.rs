@@ -162,3 +162,14 @@ pub fn touch_screen() -> bool {
         .get()
         .is_some_and(|app| i32::from(app.config().touchscreen()) == 3)
 }
+
+/// The display's current refresh rate (`Activity.getDisplay().getRefreshRate()`,
+/// API 30); winit reports none on Android.
+pub fn display_refresh_hz() -> Option<f32> {
+    with_activity(|env, activity| {
+        let display = env
+            .call_method(activity, "getDisplay", "()Landroid/view/Display;", &[])?
+            .l()?;
+        env.call_method(&display, "getRefreshRate", "()F", &[])?.f()
+    })
+}

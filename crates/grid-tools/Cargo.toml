@@ -12,3 +12,5 @@ hw-sse = ["grid-world/hw-sse"]
 [dependencies]
 grid-formats = { path = "../grid-formats" }
 grid-world = { path = "../grid-world" }
+# Per-car work on Bevy's compute pool, shared with grid-app (docs/PERFORMANCE.md).
+bevy_tasks = { version = "=0.19.1", default-features = false, features = ["multi_threaded"] }

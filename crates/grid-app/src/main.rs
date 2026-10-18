@@ -13,6 +13,8 @@ macro_rules! log_line {
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
+mod android_display;
+#[cfg(target_os = "android")]
 mod android_sensor;
 mod assists;
 mod body_damage;
@@ -29,6 +31,7 @@ mod free_look;
 mod geometry_ray;
 mod graphics;
 mod graphics_benchmark;
+mod perf_timing;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
@@ -37,6 +40,7 @@ mod particles;
 mod pause_menu;
 mod post_race;
 mod race_hud;
+mod render_scale;
 mod replay;
 mod scene_probe;
 mod settings;
@@ -46,6 +50,8 @@ mod sky;
 mod sky_environment;
 mod source_trees;
 mod foliage_mips;
+mod fps_counter;
+mod front_end;
 mod texture_cache;
 mod texture_overrides;
 mod texture_upload;
@@ -2371,6 +2377,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     .into(),
                     resolution: (graphics.width, graphics.height).into(),
+                    // [video] present_mode / frame_latency (default Bevy's Fifo, wgpu's 2).
+                    present_mode: profile.present_mode.unwrap_or_default(),
+                    desired_maximum_frame_latency: profile.frame_latency,
                     ..default()
                 }),
                 ..default()
@@ -2379,8 +2388,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if !drive {
             app.add_systems(Update, update_orbit);
         }
+        // [video] render_height: the 3D view renders at most that many rows
+        // (Android default 1080) and is stretched over the window.
+        render_scale::install(
+            &mut app,
+            profile
+                .render_height
+                .unwrap_or_else(render_scale::RenderHeight::platform_default),
+        );
+        // Window size from the native surface, optional refresh-rate hint.
+        #[cfg(target_os = "android")]
+        android_display::install(&mut app, profile.refresh_hz.flatten());
     }
-    if let Some(driving) = driving {
+    if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
         // validation drive into a breakable route prop.
         if driving.scripted_ticks.is_some()
@@ -2449,8 +2469,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 touch_controls::install(&mut app, tilt);
             }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
+            // The Race Options front end with Driver Aids before the race
+            // (docs/DRIVER_AIDS.md); not for scripted runs.
+            if profile.front_end != Some(false)
+                && driving.scripted_ticks.is_none()
+                && !settings::diagnostics().autopilot
+            {
+                driving.paused = true;
+                front_end::install(&mut app, driving.runtime.assists);
+            }
             // The original HUD layout and post-race screens (docs/RACE_HUD.md).
             race_hud::install(&mut app);
+            // Frame-rate counter ([osd] fps; on by default on Android, F9 on the desktop).
+            fps_counter::install(
+                &mut app,
+                profile.osd_fps.unwrap_or(cfg!(target_os = "android")),
+            );
             post_race::install(&mut app, variant);
         }
         // Drift Battle on top of the race (docs/DISCIPLINES.md).
@@ -2513,6 +2547,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
     }
+    perf_timing::install(&mut app);
     if graphics.track_grade {
         track_grade::install(&mut app);
     }
@@ -3150,6 +3185,7 @@ fn drive_tick(
     // The player's inputs for Flashback (logged, or given back when ticks run again).
     mut inputs: Option<ResMut<flashback::Inputs>>,
 ) {
+    let _tick_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DriveTick);
     // One queued gear edge per fixed tick, dropped when the tick does not run.
     let shift = shifts.pop();
     if driving.paused
@@ -3310,6 +3346,7 @@ fn drive_tick(
             }
             _ => 3,
         };
+        let ai_timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::AiDrivers);
         // Race manager (catch-up, choreographer) before the AI update.
         if !held {
             use grid_tools::race::Status;
@@ -3365,6 +3402,7 @@ fn drive_tick(
                 )
             });
         }
+        drop(ai_timer);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
         let result = opponents.multi.tick(&all);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
@@ -3586,9 +3624,10 @@ fn drive_actions(
     mut exit: MessageWriter<AppExit>,
     mut trial: Option<ResMut<time_trial::Trial>>,
     replay: Option<Res<replay::Replay>>,
+    front: Option<Res<front_end::FrontEnd>>,
 ) {
-    // A replay owns the keys while it plays.
-    if replay.is_some_and(|r| r.owns_input()) {
+    // A replay owns the keys while it plays, the front end before the race.
+    if replay.is_some_and(|r| r.owns_input()) || front.is_some_and(|f| f.open) {
         return;
     }
     if input.just_pressed(KeyCode::KeyR) {

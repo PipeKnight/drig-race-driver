@@ -724,22 +724,24 @@ fn apply_tunes(actions: &mut Actions, values: &Options) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update(
     mut menu: ResMut<PauseMenu>,
     mut driving: ResMut<crate::Driving>,
     mut actions: ResMut<Actions>,
     mut shifts: ResMut<ShiftQueue>,
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
-    (time, mut post): (
+    (time, mut post, front): (
         Option<Res<Time<Real>>>,
         Option<ResMut<crate::post_race::PostRace>>,
+        Option<Res<crate::front_end::FrontEnd>>,
     ),
     mut exit: MessageWriter<AppExit>,
     mut replay: Option<ResMut<crate::replay::Replay>>,
 ) {
-    // A replay owns the input; after it the menu shows again.
-    if replay.as_ref().is_some_and(|r| r.owns_input()) {
+    // A replay owns the input; after it the menu shows again. The front end
+    // owns it before the race.
+    if replay.as_ref().is_some_and(|r| r.owns_input()) || front.is_some_and(|f| f.open) {
         return;
     }
     // A restart from elsewhere (R) closes the menu.
