@@ -2,7 +2,7 @@
 (grid-braking-replay) braking captures and summarise the braking phase
 (docs/BRAKING_REFERENCE.md).
 
-    python -I tools/analyze_braking.py CAPTURE.tsv [--rows]
+    python -I tools/analyze_braking.py CAPTURE.tsv [--rows] [--drivetrain]
 
 Per row: time (original QPC seconds / port tick x 0.016), controls +E1C/+E20
 (published throttle/brake) and +E3C/+E40 (requests), clutch +E34, lock-up
@@ -10,7 +10,9 @@ timer +E74, gear +196C, position, speed, per-wheel surface speed (+0x104 spin
 x +0xE0 radius). Summary from the first row with brake request +E40 > 0.5:
 speed, stopping distance (to < 0.5 m/s), time, locked-wheel rows (a wheel's
 surface speed below 5 % of the car speed above 2 m/s), maximum +E74, and the
-brake-request/published-brake pattern (modulation).
+brake-request/published-brake pattern (modulation). --drivetrain prints, every
+0.25 s from onset, speed, engine RPM (car +0x1894, when the capture has the
++0x1840 block) and per axle the longitudinal force (+0x88) and surface speed.
 """
 import json
 import math
@@ -46,7 +48,10 @@ def load(path):
             vel = list(struct.unpack_from("<4f", phys, 0x50))
         speed = math.sqrt(sum(x * x for x in vel[:3]))
         surface = [f(wheels, i * 0x150 + 0x104) * f(wheels, i * 0x150 + 0xE0) for i in range(4)]
+        engine = bytes.fromhex(p[8]) if len(p) > 8 else None
         rows.append({
+            "rpm": f(engine, 0x54) if engine else None,
+            "fx": [f(wheels, i * 0x150 + 0x88) for i in range(4)],
             "t": t,
             "e1c": f(e00, 0x1C), "e20": f(e00, 0x20), "e34": f(e00, 0x34),
             "e3c": f(e00, 0x3C), "e40": f(e00, 0x40), "e74": f(e00, 0x74),
@@ -92,3 +97,17 @@ if __name__ == "__main__":
             print("%.4f thr=%.2f/%.2f brk=%.2f/%.2f clutch=%.2f e74=%.3f gear=%d v=%.3f surf=%s" % (
                 r["t"], r["e3c"], r["e1c"], r["e40"], r["e20"], r["e34"], r["e74"], r["gear"], r["speed"],
                 ",".join("%.2f" % s for s in r["surface"])))
+    if "--drivetrain" in sys.argv:
+        onset = next((r for r in rows if r["e40"] > 0.5), None)
+        step = 0.0
+        for r in rows if onset else []:
+            if r["t"] - onset["t"] + 1e-9 < step:
+                continue
+            step += 0.25
+            print("%5.2f v=%6.2f rpm=%s gear=%d fx_rear=%.0f fx_front=%.0f surf_rear=%.2f surf_front=%.2f" % (
+                r["t"] - onset["t"], r["speed"],
+                "%.0f" % r["rpm"] if r["rpm"] is not None else "-", r["gear"],
+                (r["fx"][0] + r["fx"][1]) / 2, (r["fx"][2] + r["fx"][3]) / 2,
+                (r["surface"][0] + r["surface"][1]) / 2, (r["surface"][2] + r["surface"][3]) / 2))
+            if r["speed"] < 0.5:
+                break

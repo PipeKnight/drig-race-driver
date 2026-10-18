@@ -362,7 +362,10 @@ impl MultiRuntime {
             world.groups.bodies[i][0x304 / 4] = i as u32;
         }
         world.groups.world = [0, 0, 0, 0, 0, 0, 1, 1, 0, n as u32, 0];
-        world.groups.contacts.resize(pool_slots(n), [0; 32]);
+        world
+            .groups
+            .contacts
+            .resize(pool_slots(n), contact_groups::EMPTY_CONTACT);
         world.manager.rows.resize(pool_slots(n) * 4, [0; 48]);
         world.manager.capacity = pool_slots(n) * 4;
         world.manager.properties = cars
@@ -624,7 +627,7 @@ impl MultiRuntime {
         // before it; the contacts produced into a blank pool are placed in
         // their real slots below, in car order (wheel_contacts::overlay).
         let blank = wheel_contacts::Pool {
-            slots: vec![[0; 32]; 4],
+            slots: vec![contact_groups::EMPTY_CONTACT; 4],
             used: 0,
             shapes: self.statics,
         };

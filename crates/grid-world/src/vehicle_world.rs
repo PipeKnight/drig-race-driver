@@ -61,7 +61,7 @@ pub fn from_registered(
         world: grouped_physical_frame::Output {
             groups: contact_groups::Output {
                 bodies: vec![car.owner.physical],
-                contacts: vec![[0; 32]; 4],
+                contacts: vec![contact_groups::EMPTY_CONTACT; 4],
                 world: [0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0],
             },
             manager,

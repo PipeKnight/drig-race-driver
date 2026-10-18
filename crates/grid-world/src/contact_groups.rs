@@ -6,6 +6,21 @@ use crate::Error;
 pub type Body = [u32; 0x424 / 4];
 pub type Contact = [u32; 0x80 / 4];
 
+/// A contact-pool slot before any producer writes it. The original pool
+/// allocator `B19E20` builds every 0x80-byte slot with constructor `B0ECE0`:
+/// +1C/+20 = -1, byte +0F (impact-pool flag) and byte +24 = 1, and zero
+/// owners, shape tokens, limits, point, direction and byte +70. The vtable
+/// word stays zero here like every other owned pointer. Wheel overtravel
+/// keeps +0F, +1C..+24 from the slot, so a never-used slot needs this.
+pub const EMPTY_CONTACT: Contact = {
+    let mut c = [0; 0x80 / 4];
+    c[0xc / 4] = 0x0100_0000;
+    c[0x1c / 4] = u32::MAX;
+    c[0x20 / 4] = u32::MAX;
+    c[0x24 / 4] = 1;
+    c
+};
+
 /// Consumed collision-shape bytes 216, 217, 229 and 230. Identity is the
 /// one-based position in the caller's owned shape table.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
