@@ -29,7 +29,7 @@ contacts); BP01, DF01 and the characteristics table are used when present.
 
 | Command | What it does |
 |---|---|
-| `grid-soak quick` | Seeds 1..20 (fixed; 1..12 until 2026-10-17, then 1..16; 13..16 are Istanbul Park, 17..20 Long Beach since F357); Jarama seeds 21..24 only with `--seeds 21..24`, 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
+| `grid-soak quick` | Seeds 1..24 (fixed; 1..12 until 2026-10-17, then 1..16, then 1..20; 13..16 are Istanbul Park, 17..20 Long Beach since F357, 21..24 Jarama since F402); Yokohama seeds 25..28 only with `--seeds 25..28`, 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
 | `grid-soak long --hours 8 --jobs 2` | Seeds from 1001 upwards until the deadline (or `--seeds A..B`), 6000-30000 ticks each. Unattended; the summary is rewritten after every scenario. |
 | `grid-soak run --seed N [--profile quick\|long]` | One scenario in-process (the orchestrator runs each scenario this way in a child process). |
 | `grid-soak replay local/soak/.../seed-N.inputs.tsv` | Exact replay of recorded inputs, independent of later chaos-driver changes. |
@@ -430,6 +430,24 @@ Observed by the same survey and not investigated: on the Nürburgring, tyre-stac
 spawn poses have 102 downward contacts, up to 0.50 m deep, with a *neighbouring intact* stack's
 entity box (`tyrestack_red`/`tyrestack_white`). That could be the mechanism of the remaining
 Nürburgring tyre-stack loss (long seed 1085, F351) [I].
+
+## Expected losses (F402)
+
+Some bodies are pressed under by the original's own static geometry at their spawn pose: the
+bottom tyres of tyre stacks authored into a rising verge (45 pieces on Jarama, 28 on the
+Nürburgring), and a wheel lost inside an armco rail. grid-soak reports such a body as an
+*expected loss*, not a failure:
+- one `soak_expected_loss ... pressed_by=Road|EntityBox` line per body;
+- `expected_losses=N` in `soak_result` and `soak_done`;
+- a line in `summary.md`.
+
+The rule is `PropWorld::pressed_down_at_spawn`. It is checked only for a prop body that would
+otherwise fail as out of bounds or falling. Authored ornament stand-ins do not count. Physics is
+unchanged.
+
+Evidence and the [I] grade (the original loses these bodies too): docs/ROBUSTNESS_RESEARCH.md
+sections 1, 2 and 5. Jarama seeds 21..24 then pass 4/4 and join the default quick set. Long Beach
+forced seed 59 (a thin tyre landing through the road) is not covered and still fails.
 
 ## Follow-ups
 

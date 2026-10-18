@@ -1,5 +1,34 @@
 # GRID engine project log
 
+F402 Open robustness failures: Jarama seeds 22/24 are counted as expected losses, the first-corner pile-up is traced, and QUICK_SEEDS is 1..24 (2026-10-18, Claude Code; coordinator's task, option A chosen by the coordinator). Details: docs/ROBUSTNESS_RESEARCH.md. Evidence: worktree fervent-napier-50814b `local/robust/` (decomp c1..c5, probes, pileup/, race12/, bin/, checks/, alongside-port.patch). Static work only (Ghidra 12.1.4 headless read-only, Capstone 5.0.6); the original game was not run and nothing was installed.
+- Seed 24 [V+D, I]:
+  - The failing tyre is the bottom piece of `tyrestack_yell_double` entity 1297. Fifteen Jarama and ten Nürburgring stacks are authored 0.15–0.39 m into rising verges, so 45 and 28 bottom pieces start with their centre below a road triangle and get downward road contacts. No other circuit has any.
+  - The original spawns pieces at the raw placement: 0x7D3C40, and no ground query on that path. The entity code's only four-ray ground probe, 0x7C98D0, belongs to a replay/proxy pool (0x7CA070/0x7CA240/0x9335F0); 0x96B7E0 in 0x7C6350 is an empty function.
+  - Its road generator (AEA1F0/AEE640, byte-exact in the port) orients a non-sheet triangle's normal by the shape origin, so the original loses these tyres too [I].
+- Seed 22: the lost wheel spawns inside armco box 58, and the box query (AE8AD0, as in the port) pushes it down. This is the same family; the 16 ms step deepens the overlap (open, F320).
+- Fix (option A, physics unchanged): `PropWorld::pressed_down_at_spawn` reports `Pressed::Road` or `Pressed::EntityBox`. Authored ornament stand-ins do not count. grid-soak counts such a body as an expected loss and does not fail:
+  - one `soak_expected_loss` line per body;
+  - `expected_losses=N` in `soak_result` and `soak_done`;
+  - a line in `summary.md`.
+  New asset test `only_sunk_tyre_stacks_spawn_pieces_pressed_down_by_the_road` (Jarama 45, Nürburgring 28, others 0). `QUICK_SEEDS` 1..20 → 1..24.
+- Not fixed:
+  - Long Beach forced seed 59 still fails at tick 4053: a 0.15 m tyre crosses the road plane in one 16 ms step.
+  - Found [D]: the original's world config has `maxContinuousCollisions` (+0x3C, default 1000) and `cylinderFacets` (+0x84, 10) (0x6195F0, 0xA74F00). Their consumers are not traced.
+- First-corner pile-up [V]:
+  - The grid rows run side by side (Alongside) from about tick 680. The left car is pinned at a racing limit that narrows from −7.9 to −0.5 m, while the right car merges at 4 m/s. They touch from about tick 714, and both hold full lock at 48 m/s into the armco. The leader takes the corner flat at 51 m/s.
+  - Ported and measured, not adopted: three alongside parts the port lacks [D]:
+    - 0x795C00 empty-slot gap 0 beyond the racing limit;
+    - 0x799630 squeeze;
+    - 0x799630 both-sides mean.
+  - Effect: Jarama retirements 4 → 3 at 1,400 ticks but still 4 at 12,000, with Jarama contacts 24k → 84k; Nürburgring 8,517 → 2,361 contacts. Every 12-car baseline changes, and the edge test is an approximation [I]. The patch is kept privately.
+- Checks [V], release, cargo/rustc 1.99.0, on 78b1837 (F401):
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 667 passed, 0 failed;
+  - `cargo clippy --release --workspace --all-targets -- -D warnings` clean;
+  - solo identity aad9a07a…e41b (unchanged);
+  - `grid-soak quick` 24/24, expected losses only in seeds 22 (1, EntityBox) and 24 (14, Road).
+  - 12-car races are unchanged by construction (no physics or AI code changed).
+- Next: the exact 0x795C00 segment test (view links +0x20/+0x24); a live 12-car Jarama trace if the owner allows; the continuous-collision consumer; the step question (owner).
+
 F401 Circuit-race series: Pro Tuned and Touring free races on all 20 layouts with the original's free-race field (2026-10-18, Claude Code; DISCIPLINES.md §5 item 3). Details: docs/SERIES.md. Evidence: main checkout `local/series/` (survey, survey2, routes/, soak/, protuned/touring app logs and renders).
 - Cars: new `grid_formats::database` (all 78 NDBS tables) and `car::Vehicle`; `AiData::load_car` gives each car its own database AI classes (config, track brake lines, statistics) instead of the fixed `touring` — unchanged for Lacetti/BMW. Survey of the 19 series cars on Donington [V]: the four Pro Tuned cars (sup, sky, nsx, 350) lap and race 12-car fields; GT1 ccg/c5r lap solo but fields wreck; sal, c6r, lam, dbr, the GT2 and the LMP cars fail. The LMP body touches the road at speed (high CSV downforce) and spins; [I] body–road contact/ride height in shared code, not touched. `series::RACEABLE` (AUTHORED) = lac, bmw, sup, sky, nsx, 350; others need GRID_SERIES_EXPERIMENTAL=1.
 - Reader fixes: mesh `maximumIndex` may exceed the used maximum (DBR9 failed to load); deformation no longer allowlists lac/bmw; `deformation_impact` checks motion finiteness only on grid nodes — padding edges [399,399] made the spare node NaN for the Skyline/NSX-R and stopped every field at the first impact [V]; [I] the original never reads that node.

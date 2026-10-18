@@ -106,8 +106,9 @@ ticks 790–919, against the outside armco of the fast left-hander at (172, −3
   on the line, needs 0.2–0.6). They run 15–18 m wide into the armco.
 - The leader takes the corner flat at 51–52 m/s, so the corner itself is not the problem.
 
-[D] Three parts of the original's alongside code were missing in the port. All three are now
-ported (`ai_driver.rs`):
+[D] Three parts of the original's alongside code are missing in the port. All three were ported
+and measured; the change is **not adopted** (section 6). The patch is kept in the private
+`local/robust/alongside-port.patch`.
 1. 0x795C00 tail. An empty side slot gets gap 0 when the own side edge (centre ± right row ×
    half width, +0x110) lies beyond that side's racing limit segment. The test is the sign of the
    cross product with the limit segment between the view's two links, from points 0x793790
@@ -119,12 +120,76 @@ ported (`ai_driver.rs`):
 3. 0x799630 with cars on both sides, or with equal strict flags: the desired offset is the mean of
    the two cars' racing-line offsets (0x798C00/0x798D00), and 0 when a car record is missing.
 
-The side flags now follow the original's order: the strict-overlap flags first, then the slot
-cars.
+In the patch, the side flags also follow the original's order: the strict-overlap flags first,
+then the slot cars.
 
 [V] Effect on the Jarama 12-car race (1,400 ticks): retirements go from 4 (cars 5, 6, 7, 10) to 3
 (cars 5, 7, 6), and car-contact records from 526 to 420. Items 2 and 3 do not fire in this race.
 The pile-up is therefore not explained by a missing alongside branch.
 
 Whether the original's field gets through this corner needs a live 12-car trace (not allowed in
-this task). Section 6 has the cross-circuit results.
+this task).
+
+## 5. grid-soak: expected losses (option A, coordinator's decision)
+
+Physics is unchanged. Option B, an authored deviation that would keep such pieces on the ground,
+needs the owner's approval and was not done.
+
+- `dynamic_props::PropWorld::pressed_down_at_spawn(body, …)` returns whether a piece or lost
+  wheel gets a contact with a downward normal (y < −0.5) at its spawn pose, and from what:
+  - `Pressed::Road`: a road chunk or the boundary sheet;
+  - `Pressed::EntityBox`: a route entity box other than the piece's own intact boxes.
+- Authored ornament stand-ins (boxes without an entity, F284/F357) do not count, because they are
+  not the original's geometry. Without that exclusion the rule would have hidden the F357 stand-in
+  bug.
+- `soak::Session::check` calls it only for a prop body that is about to fail as out of bounds or
+  falling through the world. Such a body is recorded in `expected_losses` (segment, tick, body,
+  position, `pressed`) and is not a failure.
+- grid-soak prints one `soak_expected_loss … pressed_by=Road|EntityBox` line per loss. The result
+  and `soak_done` lines gain `expected_losses=N`. `summary.md` lists the seeds that have expected
+  losses.
+- Asset test `dynamic_props::tests::only_sunk_tyre_stacks_spawn_pieces_pressed_down_by_the_road`
+  [V]: Jarama 45 pieces (all `tyrestack_*`, including entity 1297 piece 14), Nürburgring 28, and
+  none on Donington, Istanbul Park, Long Beach or Yokohama. These match the F361 survey.
+
+[V] Results:
+- Jarama `--seeds 21..24`: 4/4 pass (was 2/4).
+  - Seed 22: 1 expected loss, the wheel (`EntityBox`, armco box 58).
+  - Seed 24: 14 expected losses, all `Road`, all bottom tyres of the sunk stacks along the verge at
+    x 148–157, z −65.
+- `QUICK_SEEDS` is now 1..24.
+- Long Beach forced seed 59 still fails, as it should: the piece was not pressed down at spawn
+  (section 3).
+
+## 6. Alongside port across circuits: not adopted
+
+[V] 12-car races, 12,000 ticks, DF01 and the characteristics; main 2355c47 against main plus the
+patch (`local/robust/race12/`, binaries `local/robust/bin/`):
+
+| Circuit | Retirements (base / patch) | Car-contact records | Cars with 2 valid laps |
+|---|---|---|---|
+| Donington | 0 / 0 | 1,211 / 1,615 | 12 / 11 |
+| Nürburgring | 0 / 0 | 8,517 / 2,361 | 0 / 0 (budget) |
+| Istanbul Park | 0 / 0 | 4,367 / 3,380 | 0 / 0 (budget) |
+| Long Beach | 1 / 1 | 3,214 / 2,592 | 11 / 11 |
+| Jarama | 4 / 4 | 24,245 / 84,363 | 6 / 2 |
+
+Every 12-car result changes:
+- Jarama gets worse: one more car loses a wheel at tick 6,943, and cars stay in contact far longer.
+- Nürburgring and Istanbul get fewer contacts.
+
+The edge test is an approximation [I] (lateral against the racing limit at the car, not the
+original's segment between the view's two links). The field is not clearly better. Under the rule
+to keep race baselines unless a change is a proven 1:1 fix, the patch stays out.
+
+Next for the pile-up:
+- recover the view links +0x20/+0x24 that 0x795C00 uses, and port the exact segment test;
+- a live 12-car trace of the original at Jarama, if the owner allows it.
+
+## 7. Open
+
+- The 16 ms step against the original's per-frame step (F320; seeds 22 and 59, the pile-up depth).
+- The original's continuous collision (`maxContinuousCollisions`, config +0x3C): consumer not
+  traced (seed 59).
+- Kind-5 cylinders and `cylinderFacets` (10) against the port's 12-sided prisms.
+- First-corner pile-up: the exact 0x795C00 segment test, then a live comparison.
