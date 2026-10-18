@@ -222,7 +222,9 @@ launcher sets GRID_SERIES_EXPERIMENTAL=1. Not ported: the results screen's Class
 - The 3 × 3 body pieces of 0x9E0240 are built with margins `param_2 = param_3 = 0.02` (0xA01DA4..
   0xA01DBB, constant 0xCB0934): every plane gets +0.02, and the outer ones −0.02 again, so the outer
   faces — the floor included — do not move; only the faces between pieces overlap by 0.02. The
-  9-piece hull would not change the floor height that F406 already reproduces. Not ported.
+  9-piece hull would not change the floor height that F406 already reproduces. **Verified-equivalent
+  for the floor and roof (coordinator's decision, F410): not ported**; the pieces' sides, the vertex
+  snap and the 0.02 overlaps between pieces remain unported and are not expected to be measurable.
 - The suspension step 0x9F1E10 with its travel stops is already verified 1:1 (docs/SUSPENSION_VEHICLE.md).
 - Body +0x2214 (aero scale) is reset to the same value as the air density in 0xA09CE0 (≈ 1).
 - Diagnostic (temporary build, not kept): with the floor raised a further 0.15 m the LC70 and B06
@@ -231,7 +233,9 @@ launcher sets GRID_SERIES_EXPERIMENTAL=1. Not ported: the results screen's Class
 - [I] So the LMP1s' 0.15–0.26 m compression puts the lifted floor on the road; the remaining
   difference to the original is in what that contact does (the port's body–road contact scheduling
   is authored, docs/DONINGTON_BODY_CONTACTS.md) or in an aero input not found statically. A live
-  trace of the original is needed to decide.
+  trace of the original is needed to decide; the coordinator will schedule it with the owner. Until
+  then the LC70 and B06 stay behind GRID_SERIES_EXPERIMENTAL, and so does the Le Mans Series
+  launcher, because every field holds LC70s (gate preferred over an authored substitution).
 
 **Checks (F409)**: headless 17-car mixed field (c65, 911, dbr, cre, b05, lam, sal, c5r, c6r, spk, esp
 cycled; DF01) at Donington: 15/17 finish 2 laps. The DBR9 Le Mans Series field (15 cars, 3 LC70s),
