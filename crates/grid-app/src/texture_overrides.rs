@@ -23,7 +23,7 @@ fn read_private(path: &Path, private: &Path, limit: u64) -> Result<Vec<u8>, Box<
 
 /// Version1 intentionally accepts only the writer's complete opaque BGRA8 DDS.
 /// This avoids another image decoder/upload before GPU feature selection.
-fn validate(bytes: &[u8]) -> Result<(u32, u32, u32), &'static str> {
+pub(crate) fn validate(bytes: &[u8]) -> Result<(u32, u32, u32), &'static str> {
     if bytes.len() < 128 || &bytes[..4] != b"DDS " {
         return Err("override is not a DDS envelope");
     }
@@ -84,11 +84,44 @@ pub fn apply(
     textures: &mut BTreeMap<String, Vec<u8>>,
     used: &BTreeSet<String>,
 ) -> Result<BTreeSet<String>, Box<dyn Error>> {
-    let private = super::settings::data_dir().canonicalize()?;
+    apply_with(manifest, textures, used, "GRID_TEXTURE_OVERRIDES_V1", None)
+}
+
+pub(crate) type ChannelTransform = fn(&[u8], &mut [u8]) -> Result<(), Box<dyn Error>>;
+
+/// Shared path/source/batch guards. The transform runs only after opaque RGB
+/// validation; every row is staged before any purchased CPU texture is replaced.
+pub(crate) fn apply_with(
+    manifest: &Path,
+    textures: &mut BTreeMap<String, Vec<u8>>,
+    used: &BTreeSet<String>,
+    version: &str,
+    transform: Option<ChannelTransform>,
+) -> Result<BTreeSet<String>, Box<dyn Error>> {
+    apply_in(
+        manifest,
+        textures,
+        used,
+        version,
+        transform,
+        super::settings::data_dir(),
+    )
+}
+
+/// Explicit root keeps filesystem tests independent of the process-wide profile.
+pub(crate) fn apply_in(
+    manifest: &Path,
+    textures: &mut BTreeMap<String, Vec<u8>>,
+    used: &BTreeSet<String>,
+    version: &str,
+    transform: Option<ChannelTransform>,
+    private: &Path,
+) -> Result<BTreeSet<String>, Box<dyn Error>> {
+    let private = private.canonicalize()?;
     let manifest = manifest.canonicalize()?;
     let text = String::from_utf8(read_private(&manifest, &private, 64 * 1024)?)?;
     let mut lines = text.lines();
-    if lines.next().map(|s| s.trim_start_matches('\u{feff}')) != Some("GRID_TEXTURE_OVERRIDES_V1") {
+    if lines.next().map(|s| s.trim_start_matches('\u{feff}')) != Some(version) {
         return Err("unknown texture override manifest version".into());
     }
     let parent = manifest
@@ -116,8 +149,11 @@ pub fn apply(
             )
             .into());
         }
-        let candidate = read_private(&parent.join(fields[2]), &private, 512 * 1024 * 1024)?;
+        let mut candidate = read_private(&parent.join(fields[2]), &private, 512 * 1024 * 1024)?;
         let (w, h, levels) = validate(&candidate)?;
+        if let Some(convert) = transform {
+            convert(&original, &mut candidate)?;
+        }
         total += candidate.len() as u64;
         if total > 1024 * 1024 * 1024 {
             return Err("override batch exceeds v1 byte bound".into());
@@ -131,7 +167,7 @@ pub fn apply(
     let count = staged.len();
     for (key, candidate, w, h, levels) in staged {
         println!(
-            "texture_override key={key:?} source_match=exact-bytes format=BGRA8srgb width={w} height={h} mips={levels} bytes={} upload=shared",
+            "texture_override key={key:?} source_match=exact-bytes format=BGRA8srgb width={w} height={h} mips={levels} bytes={} upload=shared contract={version}",
             candidate.len()
         );
         textures.insert(key, candidate);
