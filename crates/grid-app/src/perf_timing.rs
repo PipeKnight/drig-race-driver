@@ -12,6 +12,17 @@ static RENDER_STARTED: Mutex<Option<Instant>> = Mutex::new(None);
 const REPORT_FRAMES: u32 = 600;
 
 pub fn install(app: &mut App) {
+    // `GRID_CPU_CLUSTERING=1`: Bevy's CPU light clustering, which Android
+    // always uses, instead of the desktop's GPU clustering (rendering only).
+    if std::env::var_os("GRID_CPU_CLUSTERING").is_some() {
+        app.add_systems(
+            Startup,
+            |mut settings: ResMut<bevy::light::cluster::GlobalClusterSettings>| {
+                settings.gpu_clustering = None;
+                println!("perf_clustering mode=cpu");
+            },
+        );
+    }
     if !perf::enabled() {
         return;
     }

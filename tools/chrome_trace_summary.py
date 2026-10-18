@@ -98,6 +98,45 @@ def main():
     for name, us in merged_exc.most_common(args.top):
         print(f"{us / frames / 1000:9.3f}  {name[:150]}")
 
+    # Work by kind: exclusive time of systems and work spans (schedules,
+    # executors and sub-app wrappers only wait for their children).
+    waiting = ("schedule:", "multithreaded executor", "update:", "sub app:", "main app:",
+               "main_render_schedule", "camera_schedule", "system: name=\"bevy_render::run_render_schedule\"",
+               "system: name=\"bevy_time::fixed::run_fixed_main_schedule\"")
+    groups = [
+        ("simulation (drive_tick)", ("grid_app::drive_tick",)),
+        ("grid-app other systems", ("grid_app::",)),
+        ("light clustering", ("cluster",)),
+        ("mesh upload / allocation", ("allocate_and_free_meshes", "prepared_mesh_producer",
+                                      "RenderMesh", "mesh::allocator")),
+        ("batching / instance buffers", ("batching::", "collect_meshes_for_gpu_building",
+                                         "write_binned", "write_batched", "write_indirect",
+                                         "gpu_preprocess", "unpack_bins")),
+        ("visibility / culling", ("visibility", "ViewVisibility", "InheritedVisibility", "Aabb",
+                                  "frustum")),
+        ("transforms", ("transform",)),
+        ("shadows", ("shadow", "Shadow")),
+        ("specialize / queue", ("specialize", "queue_")),
+        ("bind groups / prepare", ("bind_group", "prepare_")),
+        ("render passes (encoding)", ("RenderContextState::apply", "_pass")),
+        ("queue submit", ("queue_submit", "submit_pending")),
+        ("ui", ("bevy_ui",)),
+        ("extract (other)", ("extract",)),
+    ]
+    totals = collections.Counter()
+    for name, us in merged_exc.items():
+        if name.startswith(waiting):
+            continue
+        for label, needles in groups:
+            if any(n in name for n in needles):
+                totals[label] += us
+                break
+        else:
+            totals["other"] += us
+    print("\nexclusive work by kind, ms/frame (all threads; first matching group)")
+    for label, us in totals.most_common():
+        print(f"{us / frames / 1000:9.3f}  {label}")
+
 
 if __name__ == "__main__":
     main()

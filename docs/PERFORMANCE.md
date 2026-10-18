@@ -27,6 +27,11 @@ part of the time the owner was playing a game; see "Measurement noise".
 - The desktop app already holds 60 FPS with 12 cars: the main thread works about 5–6 ms and
   the render thread about 5–7 ms per frame. The render thread is the larger CPU cost. About
   1.5 ms of it is spent re-uploading mesh assets that change every frame (follow-up below).
+- Solo run (F380), as in the owner's phone log: the render thread is the longest CPU path
+  even with one car (8.8 ms against 6.9 ms main plus extract; the simulation about 1 ms).
+  CPU light clustering, which Android always uses, costs only 0.34 ms. The biggest items are
+  batching (1.9 ms), mesh re-uploads (1.8 ms) and prepare/bind groups (1.3 ms); see
+  "Desktop solo run".
 - Phone: Bevy's compute pool has 4 threads on an 8-core phone. The solo lap the owner
   measured (F376) does not gain, because there is only one car. 12-car races should gain on
   the main thread. Whether the FPS rises depends on whether the main thread, the render
@@ -39,6 +44,7 @@ part of the time the owner was playing a game; see "Measurement noise".
 | `GRID_PERF_TIMING=1` (new) | this commit | Wall time per stage, printed by grid-app every 600 frames and at exit, and by grid-opponent-race at exit (stderr). |
 | Bevy `trace_chrome` | Bevy 0.19.1, tracing-chrome 0.7.2, tracing 0.1.44, tracing-subscriber 0.3.23 | Per-system spans. grid-app feature `trace` (off by default). |
 | `tools/chrome_trace_summary.py` (new) | this commit, bundled Python 3.12.14 | Streams a trace (1.5 GB for 33 s) and reports busy time per thread and the largest spans per frame. |
+| `GRID_CPU_CLUSTERING=1` (new, F380) | grid-app | Bevy's CPU light clustering (the Android path) instead of GPU clustering; rendering only. |
 | `tools/sample_profile.py` | F305 | User-mode stack sampler, for the headless race. With Bevy's ~30 threads it samples each thread too rarely to time systems, so the app was timed with the two tools above. |
 
 Commands (private paths as in docs/SOAK_TESTING.md):
@@ -127,6 +133,76 @@ With pipelined rendering the frame time is set by the slower of main + extract (
 render (7.2 ms). Both leave the desktop far under 16.7 ms.
 
 Replay and flashback recording do not appear among the top spans.
+
+### Desktop solo run (no opponents), and the phone's CPU light clustering
+
+The owner's first phone log (F376: Xiaomi 13 Ultra, solo Lacetti at Donington, 1280 × 800,
+Fifo, mean 35 FPS, range 28–58, simulation at 62.5 ticks/s) also contains Bevy's line "GPU
+clustering isn't supported on this device; falling back to CPU clustering". Bevy 0.19.1 hard-codes
+that fallback for every Android build (`bevy_pbr::cluster::make_global_cluster_settings`).
+`GRID_CPU_CLUSTERING=1` (grid-app diagnostic, rendering only) sets the documented switch
+`GlobalClusterSettings::gpu_clustering = None`, so the desktop takes the phone's clustering path.
+
+Chrome traces of a solo run (`--drive --body-contacts --body-events`, no opponents, 900
+benchmark frames, steady state), ms per frame:
+
+| | GPU clustering (desktop default) | CPU clustering (as on the phone) |
+|---|---|---|
+| Render thread (`RenderApp`) | 12.53 | 8.81 |
+| Main thread (`main app`) | 8.36 | 5.84 |
+| Extract (`RenderExtractApp`, main thread) | 2.98 | 1.10 |
+| `drive_tick` (1.07 ticks per frame) | 1.17 | 0.98 |
+
+The GPU-clustering run was disturbed more by other programs: benchmark p95 29.7 ms, against
+21.1 ms for the CPU run. Its thread totals are inflated, so compare the clustering rows, not
+the totals.
+
+Work by kind is the exclusive time of systems summed over all threads. Bevy runs many render
+systems on pool workers, so this is CPU time, not the length of the frame.
+
+| Kind | GPU clustering | CPU clustering |
+|---|---|---|
+| Batching and instance buffers (`batching::*`, `gpu_preprocess`, `collect_meshes_for_gpu_building`) | 2.24 | 1.85 |
+| Mesh upload and allocation (`allocate_and_free_meshes` alone 1.51) | 2.18 | 1.82 |
+| Bind groups and other `prepare_*` | 1.79 | 1.28 |
+| Specialize and queue | 1.34 | 1.01 |
+| Simulation (`drive_tick`) | 1.17 | 0.98 |
+| Visibility and culling | 1.04 | 0.99 |
+| Other grid-app systems (`ground_detail::present` 0.29, …) | 0.84 | 0.74 |
+| Shadows (pass, specialize, queue, cascades) | 0.83 | 0.75 |
+| Extraction (other) | 0.65 | 0.64 |
+| UI | 0.64 | 0.61 |
+| Render pass encoding | 0.64 | 0.59 |
+| **Light clustering** | 1.16 | **0.34** |
+| Transforms | 0.28 | 0.27 |
+| Other | 1.83 | 1.69 |
+
+Findings:
+- **CPU clustering is not the phone's problem.** On the CPU it costs 0.34 ms per frame,
+  cheaper than the GPU path's CPU-side preparation (1.16 ms). The scene has few clusterable
+  lights.
+- **Even solo, the render thread is the longest CPU path.** It takes 8.8 ms, against 6.9 ms of
+  main thread plus extract; the simulation is about 1 ms of the main thread. A phone core
+  about 3–4× slower than an i7-12700 P-core would make the render thread alone about 26–35 ms.
+  That fits the measured 35 ms frames, and it is not a vsync multiple [I: the phone itself was
+  not profiled].
+- **The single largest system is `allocate_and_free_meshes`** (1.51 ms solo). These grid-app
+  systems replace mesh assets almost every frame [V code]:
+  - `source_trees::*` re-faces every foliage billboard mesh toward the camera each frame;
+  - `tyre_smoke::*` rebuilds every smoke texture group's mesh each frame;
+  - `ground_detail::present` rebuilds the ground cover whenever the camera has moved or turned
+    past its threshold (most frames while driving);
+  - `skid_marks::present` rebuilds only when dirty;
+  - `drive_present` and the replay project deformed body meshes only on new damage.
+
+  Each replaced mesh is freed, reallocated and uploaded again on the render thread.
+- **What multithreading can still do here:** little on the render side. Bevy 0.19 already
+  runs render systems in parallel and pipelines the render thread against the main thread.
+  The remaining render-thread length comes from the order of its chained system sets. The
+  levers are less work: no per-frame mesh replacement (camera-facing done in the shader, or
+  meshes updated only when they change); fewer shadow cascades or a smaller shadow map on
+  the phone; fewer separate meshes for batching. All of these are rendering changes outside
+  the simulation, in the graphics files.
 
 ## What runs in parallel now
 
