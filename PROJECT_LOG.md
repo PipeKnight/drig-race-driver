@@ -1,8 +1,16 @@
 # GRID engine project log
 
+## G138 — Locate actual curb surface for matched native captures (18 October 2026)
+
+Added independently authored grid-probes/grid-surface-texture static resource audit (test harness disabled): resolves first/second diffuse bindings and saved red layer control, selects an upward-facing triangle with nontrivial target contribution. Actual curb03 maps to draw!SQ/material rumble3/first diffuse, representative point[-556.3741,-13.865127,-79.18592], layer weight0.997386. Missing-key negative check exits1 as expected. Release probe build2m19 including newly shared F415 pad dependencies, two jobs; not a renderer performance measure.
+
+Existing CPU geometry ray confirms the chosen3840x2160 centre pixel hits that front-facing rumble3 triangle at distance4.638935 with TRS transform error0. This is source/CPU triangle identification, not GPU visibility acceptance yet. First command used guessed --geometry-pixel and correctly failed unknown argument; actual existing --geometry-ray succeeds, both logs retained. Private surface-textures01/curb03-usage01.txt/camera-ray02.log and matched camera parameters retained.
+
+Prepared conventional Lanczos4x RGB carrier with the same wrap64 context/full12linear-lightmips alongside neural candidate; both require runtime-restored source alpha. No default or game-install substitution. New source Clippy first failed only on a useless vec in an authored fixed-size test fixture; changed it to an array, failed log retained. Retry feature workspace alltargetClippy clean1m25; default run still pending at this checkpoint. Full new combined tests/native4K source-RGB rendering remain pending; stable b9/3e installed binary stays unchanged.
+
 ## G137 — Preserve concurrent F414/F415 event-menu and pad work (18 October 2026)
 
-Merged origin/main9bd3832 after the non-fast-forward publication race. main.rs auto-merges, sole journal conflict retains both full histories. Preserve Play GRID/event menu, Android relaunch support and desktop pad probe; no force-push/reset or primary-source overwrite. New surface-RGB implementation is now a separate focused commit3ce7a96 after shared stagingb2193b1; prior ca25409/F413 checks do not cover this new combined snapshot. Fresh699+? actual test count, Clippy and native GPU validation are pending; do not substitute an estimated count for results. Stable installed b9/3e graphics and other agent's normal8762 remain separate. Source RGB remains an explicit private CLI experiment with no launcher/default change.
+Merged origin/main9bd3832 after the non-fast-forward publication race. main.rs auto-merges, sole journal conflict retains both full histories. Preserve Play GRID/event menu, Android relaunch support and desktop pad probe; no force-push/reset or primary-source overwrite. New surface-RGB implementation is now a separate focused commit3ce7a96 after shared stagingb2193b1; prior ca25409/F413 checks do not cover this new combined snapshot. Fresh combined workspace tests, Clippy and native GPU validation are pending; no estimated test count is treated as a result. Stable installed b9/3e graphics and other agent's normal8762 remain separate. Source RGB remains an explicit private CLI experiment with no launcher/default change.
 
 ## G136 — Explicit surface RGB contract passes CPU checks, GPU acceptance pending (18 October 2026)
 

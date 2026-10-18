@@ -137,7 +137,7 @@ fn retain_alpha(original: &[u8], candidate: &mut [u8]) -> Result<(), Box<dyn Err
     }
     assert_eq!(offset, candidate.len());
     println!(
-        "surface_rgb source_alpha_mips={source_levels} derived_large_levels={shift} alpha_decode=shared-BC3 RGB=unchanged source_GPU_bit_parity=unverified"
+        "surface_rgb source_alpha_mips={source_levels} derived_large_levels={shift} alpha_decode=shared-BC3 candidate_RGB_bytes=unchanged source_GPU_bit_parity=unverified"
     );
     Ok(())
 }
@@ -169,7 +169,7 @@ mod tests {
         .0
     }
     fn source() -> Vec<u8> {
-        let mut blocks = vec![0u8; 48];
+        let mut blocks = [0u8; 48];
         for (i, b) in blocks.as_chunks_mut::<16>().0.iter_mut().enumerate() {
             b[0] = [0, 93, 217][i];
             b[1] = b[0];

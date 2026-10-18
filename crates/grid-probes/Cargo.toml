@@ -835,3 +835,8 @@ test = false
 name = "grid-pad-probe"
 path = "src/bin/grid-pad-probe.rs"
 test = false
+
+[[bin]]
+name = "grid-surface-texture"
+path = "src/bin/grid-surface-texture.rs"
+test = false
