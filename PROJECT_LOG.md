@@ -1,5 +1,19 @@
 # GRID engine project log
 
+## G116 — Paint-mask motion and per-car uploads pass; enable graphics-launcher comparison (18 October 2026)
+
+99902a6motion1200ticks/30unique virtual30FPSframes passes;4final physical/handling/deformation/lap lines equal olderc0bcontrol excludingwalltime. Bothcar0/car1ownmask linearBgra8Unorm11mips logged, first/lastframes inspected, onlyknownnilUUIDwarning. No new full-lap/actualmonitorFPS claim. Private body-occlusion-motion-validation01.json. Static CLI-off old/new PNGbyteparity, native4Ksource-ambient andforcedRGBA accepted earlier.
+
+Dedicated Lacetti graphics launcher now selects source-ambient after these comparisons; no-body-occlusion diagnostic disables it, globalCLI staysdefaultoff. Help capabilities capturedonce/privatefile, unsupported number/occlusionflags omitted on older playables. Moderate recess/underbody detail improvement, no exposure/glass/clipping/defaultCLI change. New executable promotion/source sync next; other-agent primary binary preserved. Original direct/specular weighting unresolved, no 1:1claim/phone acceptance. No owner help needed.
+
+
+## G115 — Optional paint occlusion renders; ordinary4K remains byte-identical (18 October 2026)
+
+Candidate99902a6/SHAa40aeaf7...release5m12s,4CPUtests0fail/0ignored; first resource-test run lackedGRID_GAME_ROOT and failed only that test, corrected run passesall4, bothlogsretained. New module Rustfmt; app all-target Clippy39.72s clean. Three native4Koff/on/forcedRGBA views inspected. Off equals installed31e74bcontrol PNG bytes exactly/0changedpixels. Enabled map is linearBgra8Unorm/11mips/sharedhelper; forcedRGBA0BC/558images/547decoded. BC/RGBAframe max150/mean0.088929byte, no byte-parity/actual-phone claim.
+
+Enabled view subtly darkens bumper recesses/fasteners/underbody without changing light/exposure or livery. Native-pixel contact sheet prepared; no resampling. Effect mean0.220617byte; outside broad carROImean0.000669byte/11pixels>1/max23, cause unproven (do not claim all differences onlyinsidecar). Private auditJSONs/captures preserve hashes/metrics. Motion1200ticks/30frames/per-opponent own-mask validation underway; no candidate playable or main publication yet, verified source-number build remains installed. No owner help/Steam edit/new tool.
+
+
 ## G114 — Begin opt-in per-car paint occlusion comparison (18 October 2026)
 
 G113source22363aa published to both main/graphics; guarded primary fast-forward preserved6364b328...dirty-provenance executable and owner note SHA. Graphics playable31e74b remains verified and installed. Next material step drafted: body-occlusion source-ambient/off (defaultoff), green-channel data-only extraction retaining full mips, per-car own livery/model staging, shared linear P8 upload, Car Body Paint only, opponent own-material override even on diffuse fallback. Original direct/reflected-light weighting is not reproduced; this is an authored PBR ambient-only adaptation for comparison.

@@ -12,6 +12,8 @@ if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe -
 set "GRID_GRAPHICS_WHEELS="
 if /I "%~3"=="wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
 if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
+set "GRID_GRAPHICS_BODY_OCCLUSION=--body-occlusion source-ambient"
+if /I "%~3"=="no-body-occlusion" set "GRID_GRAPHICS_BODY_OCCLUSION=--body-occlusion off"
 set "GRID_GRAPHICS_NUMBERS=--numbers source"
 if /I "%~3"=="no-numbers" set "GRID_GRAPHICS_NUMBERS=--numbers off"
 set "GRID_GRAPHICS_SUN=--sun source"
@@ -41,11 +43,18 @@ if not exist "target\release\grid-app.exe" (
   exit /b 2
 )
 if not exist "local\graphics" mkdir "local\graphics"
-rem Keep this launcher usable while another agent's older playable is installed.
-"target\release\grid-app.exe" --help 2>nul | "%SystemRoot%\System32\findstr.exe" /L /C:"--numbers source|off" >nul
+rem Query once: old verified or other-agent executables remain usable.
+set "GRID_GRAPHICS_CAPABILITIES=local\graphics\capabilities-%RANDOM%-%RANDOM%.txt"
+"target\release\grid-app.exe" --help > "%GRID_GRAPHICS_CAPABILITIES%" 2>&1
+"%SystemRoot%\System32\findstr.exe" /L /C:"--numbers source|off" "%GRID_GRAPHICS_CAPABILITIES%" >nul
 if errorlevel 1 (
   set "GRID_GRAPHICS_NUMBERS="
   echo This executable predates race numbers; using its supported graphics controls.
+)
+"%SystemRoot%\System32\findstr.exe" /L /C:"--body-occlusion off|source-ambient" "%GRID_GRAPHICS_CAPABILITIES%" >nul
+if errorlevel 1 (
+  set "GRID_GRAPHICS_BODY_OCCLUSION="
+  echo This executable predates paint occlusion; using its supported graphics controls.
 )
 set "GRID_GRAPHICS_CONTACTS="
 if exist "local\body-contact-directions.bin" set "GRID_GRAPHICS_CONTACTS=--body-contacts local\body-contact-directions.bin"
@@ -69,8 +78,9 @@ if defined GRID_GRAPHICS_WHEELS echo Experimental wheel filtering enabled; geome
 if defined GRID_GRAPHICS_TREES echo Experimental source forest enabled; wind and foliage lighting remain approximate.
 if defined GRID_GRAPHICS_HAZE echo Experimental source distance haze enabled.
 if defined GRID_GRAPHICS_TEXTURES echo Experimental high-resolution textures enabled.
+if defined GRID_GRAPHICS_BODY_OCCLUSION echo Source paint occlusion control: %GRID_GRAPHICS_BODY_OCCLUSION%
 echo Private log: %GRID_GRAPHICS_LOG%
-"target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% %GRID_GRAPHICS_NUMBERS% > "%GRID_GRAPHICS_LOG%" 2>&1
+"target\release\grid-app.exe" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% %GRID_GRAPHICS_NUMBERS% %GRID_GRAPHICS_BODY_OCCLUSION% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"
 echo Exited with code %GRID_GRAPHICS_EXIT%.
 popd
