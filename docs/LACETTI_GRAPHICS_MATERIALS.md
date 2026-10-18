@@ -120,3 +120,12 @@ CTAB cross-check of the exact2736-byte selected pixel program finds20constants a
 
 
 Pilot CPU acceptance:4targeted tests pass after grouping paint-mask borrows to stay within Bevy's16system-parameter limit (first compile failure retained). Feature workspace661tests/12harnesses0failed/0ignored and all-target Clippy1m13s pass. Default-feature compilation/tests and GPU comparison still pending; no launcher/default change or prototype promotion. Parameter lookup0x4b23a0 is a case-sensitive linear name scan, not a proven compile-time hash lookup; do not search guessed CRC constants as if they were established input IDs. Private read-only paint-parameter-lookup-ghidra01.
+
+
+### Pilot GPU acceptance — e19c3a5
+
+Native4K off/white/source/forcedRGBA captures03 pass nonblank checks and synchronous offscreen compilation logs. Off and white-control equal the accepted80babb0prior PNG bytes exactly; compensation does not globally dull a white material. Source-base suppresses excess shine on paint pillars/frame; coat/roughness/albedo inputs/glass properties remain unchanged. The sample labelled glass also crosses painted frame and must not be interpreted as a glass-only measurement. Outside broad-car ROI tiny differences are measured, not causally attributed.
+
+Source mask uploads linearBgra8Unorm11mips; forcedRGBA0BC, full-image meanabs0.088979byte/max150 versus BC, not pixel parity or phone validation.30unique virtual30FPSframes/1200ticks pass, per-car own masks logged;4exitrecords equal1dcontrol. New native4K6500tick run completes valid89.955257484second lap and4exitrecords equal31e74bfullcontrol. This is new pilot full-lap evidence; first/last moving and final full-lap images inspected. Private paint-specular-static-validation03.json/motion-validation01.json/full4k01-validation.json. The first blackoff01 is retained as a rejected startup capture; warm successful repeats do not prove an unprimed-driver-cache fix.
+
+Dedicated graphics launcher will select source-base after this acceptance, with third argument `no-body-specular` for comparison. It omits the option entirely if the selected executable lacks the optional build feature; global CLI and phone defaults remain off. Actual extracted CMD capability block passes four old/new/comparison cases. Owner installation remains the earlier verified1dbuild until fresh peer-source integration/new promotion is complete.
