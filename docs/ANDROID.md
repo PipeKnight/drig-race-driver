@@ -126,7 +126,7 @@ frame_stats fps=59.1 avg_ms=16.92 max_ms=18.49 frames=60 sim_ticks_per_s=63.1
 - `[video] frame_latency = 1..3`: frames in flight (wgpu default 2); 1 lowers input lag, 3 can smooth drops.
 - Reading of the phone log: the driving stretches at 28 FPS have 35.6 ms frames with a 36.8 ms maximum. Under strict Fifo at 60 Hz, frame intervals could only be 33.3 or 50 ms, so either the panel runs at a higher or variable rate (the 13 Ultra has an LTPO 1–120 Hz panel, from memory of its specification [I]) or the measured CPU loop time is not the present interval [I]. The pre-race stretch at 32.4 ms / max 33.4 looks like 30 FPS on a 60 Hz vsync. The next log, with `display_hz` and `android_surface`, should settle it before changing any default.
 
-**Video screen (F383, AUTHORED).** The settings below can be changed in the app: before the race, **Race Options → Video** (Up/Down to choose, Left/Right or the touch `<` `>` buttons to change, BACK to leave; leaving after a change saves to `settings.ini`, keeping the other keys and comments). Rows and when they take effect:
+**Video screen (F384, AUTHORED).** The settings below can be changed in the app: before the race, **Race Options → Video** (Up/Down to choose, Left/Right or the touch `<` `>` buttons to change, BACK to leave; leaving after a change saves to `settings.ini`, keeping the other keys and comments). Rows and when they take effect:
 
 | Row | Values | Takes effect |
 |---|---|---|
