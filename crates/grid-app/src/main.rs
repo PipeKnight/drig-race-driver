@@ -903,6 +903,7 @@ fn append_entities(
     let mut cloth = 0;
     let mut boxes = 0;
     let mut cylinders = 0;
+    let mut spheres = 0;
     let mut links = 0;
     for (index, entity) in entities.iter().enumerate() {
         cloth += entity.cloth.len();
@@ -919,6 +920,7 @@ fn append_entities(
                 match shape.primitive {
                     entities::Primitive::Box { .. } => boxes += 1,
                     entities::Primitive::Cylinder { .. } => cylinders += 1,
+                    entities::Primitive::Sphere { .. } => spheres += 1,
                 }
             }
         }
@@ -1043,6 +1045,10 @@ fn append_entities(
         placements.values().map(Vec::len).sum::<usize>(),
         placements.len()
     );
+    if spheres > 0 {
+        // Static spheres (Milan and Detroit balloons) are not route collision yet.
+        println!("entities collision_spheres={spheres} route_collision=omitted");
+    }
     if omitted_empty > 0 {
         println!("entities omitted_empty_renderable_instances={omitted_empty}");
     }

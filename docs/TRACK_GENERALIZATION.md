@@ -70,7 +70,9 @@ Observed by `grep` over `crates/` at 32e747e.
   `optimal`) parses identically.
 - **Spa-Francorchamps** `route_0/track.jpk`: `VCQTC packed count limit
   exceeded` (authored sanity limits in `grid_formats::collision`: vertices >
-  1024, materials > 8 or triangles > 32768 per chunk). Not raised; open.
+  1024, materials > 8 or triangles > 32768 per chunk). F399: one chunk has 9
+  keys; the material field is four bits, so 16 are now allowed and Spa loads
+  ([TRACK_READERS.md](TRACK_READERS.md) section 3.4).
 
 ## Candidate circuits (headless, 1 car, ported AI, `touring`/`lac`)
 
@@ -130,7 +132,7 @@ late-case brake behaviour) needs a live Jarama AI trace; not attempted.
 - ~~Start lights per track~~ (done 2026-10-17, ISTANBUL_PARK.md section 3): Nürburgring/Jarama `start_lights.xml` differ
   (object `gg_startlights_lights_horiz`, 7 stages over 5.0 s, textures 1..7);
   the app still uses the Donington sequence constants on every route.
-- Spa VCQTC count limits; Jarama route 0 late-braking corner (route 1, the other
+- ~~Spa VCQTC count limits~~ (F399); Spa's solo AI retires; Jarama route 0 late-braking corner (route 1, the other
   direction, is the fifth circuit: JARAMA.md); Istanbul off-track excursions at ~56 m/s.
 - Barrier ornament stand-in families: generic `concrete_`, `chnfen`,
   `gg_ad_brd_` match on other tracks; armco/tyre stacks stay non-solid as on

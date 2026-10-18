@@ -15,8 +15,19 @@ pub const LONG_BEACH: &str = "tracks/usa/long_beach/route_0";
 /// The fifth circuit: Jarama, the shipped route that runs the circuit the
 /// other way round and finishes at gate 67 (docs/JARAMA.md).
 pub const JARAMA: &str = "tracks/europe/jarama/route_1";
+/// The sixth circuit and first Japanese track: Yokohama Docks `yoko_v1`, the
+/// 2.5 km street circuit of the Japan Street GT and Drift Battle events
+/// (docs/YOKOHAMA.md).
+pub const YOKOHAMA: &str = "tracks/japan/yokohama_docks/route_0";
 /// Every circuit the app, the soak and the cross-circuit tests cover.
-pub const CIRCUITS: [&str; 5] = [DONINGTON, NURBURGRING, ISTANBUL_PARK, LONG_BEACH, JARAMA];
+pub const CIRCUITS: [&str; 6] = [
+    DONINGTON,
+    NURBURGRING,
+    ISTANBUL_PARK,
+    LONG_BEACH,
+    JARAMA,
+    YOKOHAMA,
+];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Route {
@@ -306,6 +317,55 @@ mod tests {
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
+    fn sixth_circuit_sources_load() {
+        use crate::{
+            ai_driver::AiData, dynamic_props::Catalog, entity_geometry::Props, lap_progress,
+            source_vehicle::Runtime,
+        };
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        let route = Route::new(YOKOHAMA).unwrap();
+        assert_eq!(route.track_name(), "yokohama_docks");
+        let progress = lap_progress::load_route(root, &route).unwrap();
+        let splits: Vec<_> = progress.progress.routes[0]
+            .splits
+            .iter()
+            .map(|s| (s.kind, s.gate))
+            .collect();
+        // 57 gates over 2528.6 m, finish gate 0, time splits at 21 and 35.
+        use grid_formats::progress::SplitKind::{Finish, Time};
+        assert_eq!(progress.progress.gates.len(), 57);
+        assert!((progress.progress.total_distance - 2528.63).abs() < 0.01);
+        assert_eq!(splits, [(Finish, 0), (Time, 21), (Time, 35)]);
+        for slot in 0..12 {
+            let mut car =
+                Runtime::lacetti_on(root, &route, &format!("slot_{slot:02}"), 200679).unwrap();
+            car.enable_lap_timing(root).unwrap();
+            assert_eq!(car.lap_gate_count(), progress.progress.gates.len());
+        }
+        let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
+        assert!(
+            (data.line.length - 2328.57).abs() < 1.,
+            "{}",
+            data.line.length
+        );
+        let props = Props::read_route(root, &route).unwrap();
+        let catalog = Catalog::read(root, &route, &props).unwrap();
+        let mut templates = std::collections::BTreeMap::<&str, usize>::new();
+        for b in &catalog.breakables {
+            *templates.entry(&b.template).or_default() += 1;
+        }
+        // Nothing breaks yet: the barrels stand on cylinders and the crates,
+        // chevrons, armco and drift flags need joint rows (all static).
+        assert_eq!(props.boxes.len(), 1503);
+        assert!(templates.is_empty(), "{templates:?}");
+        assert_eq!(catalog.unported.values().sum::<usize>(), 569);
+        assert_eq!(catalog.unported["gg_barrel.max"], 77);
+        assert_eq!(catalog.unported["close_drift_flag.max"], 21);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
     fn circuit_barrier_keys_mix_to_the_car_row() {
         // The car body registers only the CAR_ solver row (source_vehicle.rs);
         // that is exact while every key it meets mixes to the same values.
@@ -336,8 +396,14 @@ mod tests {
                 .map(|k| String::from_utf8_lossy(k).into_owned())
                 .collect();
             // Only grass differs, on every circuit; Istanbul's extra HGDR
-            // matches the car row.
-            assert_eq!(different, ["GRAS"], "{}", route.track_name());
+            // matches the car row. Yokohama's SCRB has the grass row
+            // (friction 0.4, dynamicScale 4.0, dynamicThreshold 5.81).
+            let expected: &[&str] = if path == YOKOHAMA {
+                &["GRAS", "SCRB"]
+            } else {
+                &["GRAS"]
+            };
+            assert_eq!(different, expected, "{}", route.track_name());
         }
     }
 }

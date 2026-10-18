@@ -60,6 +60,10 @@ pub enum Primitive {
         radius: f32,
         height: f32,
     },
+    /// `TEMPLATESHAPESPHERE` (Milan and Detroit `col_sphere_*` balloons, `sBalloon`).
+    Sphere {
+        radius: f32,
+    },
 }
 
 fn index<'a>(tree: &Tree<'a>) -> Result<BTreeMap<&'a [u8], usize>> {
@@ -322,6 +326,9 @@ fn subentity<'a>(
             b"TEMPLATESHAPECYLINDER" => Primitive::Cylinder {
                 radius: scalar(types, target, b"radius", true)?,
                 height: scalar(types, target, b"height", true)?,
+            },
+            b"TEMPLATESHAPESPHERE" => Primitive::Sphere {
+                radius: scalar(types, target, b"radius", true)?,
             },
             _ => {
                 return fail(

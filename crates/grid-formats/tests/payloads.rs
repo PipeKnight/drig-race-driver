@@ -458,6 +458,7 @@ fn scene_mesh() -> mesh::Mesh<'static> {
         positions: vec![[0.; 3]; 6],
         normals: vec![[0., 0., 1.]; 6],
         nonfinite_normals: 0,
+        nonfinite_texcoords: 0,
         texcoords: vec![[0.; 2]; 6],
         additional_texcoords: vec![],
         skin_indices: Some(vec![7.; 6]),

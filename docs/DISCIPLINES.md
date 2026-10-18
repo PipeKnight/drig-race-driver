@@ -570,12 +570,17 @@ session: no input to the original), the car-state angular velocity sign, the dri
 4. **Freestyle drift**: time-limited solo scoring with `ignore_progress` (+0x1C8 [I]); needs the
    Yokohama track (four arenas) — first Japanese track. Not cheap: every `Free_Drift` pool row is a
    Yokohama freestyle arena (route_3..6, 90 s career, 1,148,000 base result [D]); none of our tracks
-   has one.
+   has one. Since F399 Yokohama loads (route_0 is the sixth circuit, docs/YOKOHAMA.md; a headless
+   8-car Drift Battle runs there), but the arenas' progress files (`start` split, `point_to_point`)
+   are not read yet (docs/TRACK_READERS.md §5).
 5. **Touge**: Haruna point-to-point routes, two-run timing, touge.xml penalties and the alongside
-   rules, midnight traffic; needs Haruna and Japanese cars, point-to-point lap timing.
+   rules, midnight traffic; needs Haruna and Japanese cars, point-to-point lap timing. F399: Haruna's
+   collision, objects and props now read; its grid markers, point-to-point progress and open AI line
+   do not (docs/TRACK_READERS.md §4).
 6. **Demolition Derby**: Detroit stadium routes, stock car, flipped/wrong-way disqualification
    (demolition_derby.xml, 0x630BC0), DD results screen; needs Detroit and a stock car, robust heavy
-   contact (soak).
+   contact (soak). F399: every Detroit route loads; the stadium routes 8-9 lap solo (one valid lap of
+   two, docs/TRACK_READERS.md §4).
 7. **Le Mans**: Circuit de la Sarthe, LMP/GT field (`lemans_restrictions`), time-limited race type 3,
    class results, time of day and headlights; the largest asset and rendering step.
 8. Head-to-head and driver offers come with a career/front-end layer.

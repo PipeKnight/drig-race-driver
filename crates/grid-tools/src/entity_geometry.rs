@@ -127,6 +127,36 @@ struct PrototypeMesh {
 /// 0.76 m inside it (docs/LONG_BEACH.md section 5). Prototypes without such
 /// parts (every barrier of the other circuits) keep their whole extent.
 fn barrier_extent(mesh: &PrototypeMesh) -> Extent {
+    let parts = barrier_parts(mesh);
+    let union = |keep: &dyn Fn(&Extent) -> bool| {
+        parts
+            .iter()
+            .filter(|e| keep(e))
+            .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), e| {
+                (
+                    std::array::from_fn(|j| lo[j].min(e.0[j])),
+                    std::array::from_fn(|j| hi[j].max(e.1[j])),
+                )
+            })
+    };
+    let whole = union(&|_| true);
+    // Across the barrier: the shorter horizontal axis of the whole mesh.
+    let across = if whole.1[0] - whole.0[0] <= whole.1[2] - whole.0[2] {
+        0
+    } else {
+        2
+    };
+    let base = union(&|e| e.0[1] <= whole.0[1] + BASE_TOLERANCE);
+    let mounted_overhang = |e: &Extent| {
+        e.0[1] >= base.1[1] - BASE_TOLERANCE
+            && (e.0[across] < base.0[across] - OVERHANG_TOLERANCE
+                || e.1[across] > base.1[across] + OVERHANG_TOLERANCE)
+    };
+    union(&|e| !mounted_overhang(e))
+}
+
+/// The extents of a prototype mesh's connected parts.
+fn barrier_parts(mesh: &PrototypeMesh) -> Vec<Extent> {
     // Connected parts by welded position (1 mm), across draws.
     let mut welded = BTreeMap::new();
     let ids: Vec<usize> = (mesh.points.iter())
@@ -162,31 +192,15 @@ fn barrier_extent(mesh: &PrototypeMesh) -> Extent {
             std::array::from_fn(|j| e.1[j].max(p[j])),
         );
     }
-    let union = |keep: &dyn Fn(&Extent) -> bool| {
-        parts
-            .values()
-            .filter(|e| keep(e))
-            .fold(([f32::MAX; 3], [f32::MIN; 3]), |(lo, hi), e| {
-                (
-                    std::array::from_fn(|j| lo[j].min(e.0[j])),
-                    std::array::from_fn(|j| hi[j].max(e.1[j])),
-                )
-            })
-    };
-    let whole = union(&|_| true);
-    // Across the barrier: the shorter horizontal axis of the whole mesh.
-    let across = if whole.1[0] - whole.0[0] <= whole.1[2] - whole.0[2] {
-        0
-    } else {
-        2
-    };
-    let base = union(&|e| e.0[1] <= whole.0[1] + BASE_TOLERANCE);
-    let mounted_overhang = |e: &Extent| {
-        e.0[1] >= base.1[1] - BASE_TOLERANCE
-            && (e.0[across] < base.0[across] - OVERHANG_TOLERANCE
-                || e.1[across] > base.1[across] + OVERHANG_TOLERANCE)
-    };
-    union(&|e| !mounted_overhang(e))
+    parts.into_values().collect()
+}
+
+/// AUTHORED: the longest horizontal side of one part of a group prototype
+/// that gets its own box (a concrete block or fence section, not a run).
+const GROUP_PART_LENGTH: f32 = 10.;
+
+fn valid_extent((lo, hi): &Extent) -> bool {
+    (0..3).all(|j| hi[j] > lo[j] && hi[j] - lo[j] <= 100. && (hi[j] - lo[j]).is_finite())
 }
 
 /// Closest-LOD meshes of the barrier family prototypes, by root node name.
@@ -243,24 +257,38 @@ fn ornament_barriers(
         if !BARRIER_FAMILIES.iter().any(|f| name.starts_with(f)) {
             continue;
         }
-        let Some((lo, hi)) = meshes
-            .get(format!("{name} Root").as_bytes())
-            .map(barrier_extent)
-        else {
+        let Some(mesh) = meshes.get(format!("{name} Root").as_bytes()) else {
             continue;
         };
-        if (0..3).any(|j| hi[j] <= lo[j] || hi[j] - lo[j] > 100. || !(hi[j] - lo[j]).is_finite()) {
-            return Err("invalid barrier ornament extent".into());
-        }
-        for m in &p.transforms {
-            let positions = (0..8)
-                .map(|i| {
-                    let local =
-                        std::array::from_fn(|j| if i >> j & 1 == 0 { lo[j] } else { hi[j] });
-                    scene::transform_point(m, local)
+        let whole = barrier_extent(mesh);
+        let extents = if valid_extent(&whole) {
+            vec![whole]
+        } else if p.transforms.len() == 1 {
+            // A group prototype: one placement of a mesh laid out in world
+            // space over more than 100 m (Detroit concrete_block_long_01,
+            // 146 m; Washington chnfen_e_group1, 540 m). One box per short
+            // connected part; longer or flat parts stay non-solid.
+            barrier_parts(mesh)
+                .into_iter()
+                .filter(|e| {
+                    valid_extent(e) && (e.1[0] - e.0[0]).max(e.1[2] - e.0[2]) <= GROUP_PART_LENGTH
                 })
-                .collect();
-            boxes.push(PropBox::new(name.clone(), positions, 0.)?);
+                .collect()
+        } else {
+            let (lo, hi) = whole;
+            return Err(format!("invalid barrier ornament extent: {name} {lo:?}..{hi:?}").into());
+        };
+        for (lo, hi) in extents {
+            for m in &p.transforms {
+                let positions = (0..8)
+                    .map(|i| {
+                        let local =
+                            std::array::from_fn(|j| if i >> j & 1 == 0 { lo[j] } else { hi[j] });
+                        scene::transform_point(m, local)
+                    })
+                    .collect();
+                boxes.push(PropBox::new(name.clone(), positions, 0.)?);
+            }
         }
     }
     Ok(boxes)

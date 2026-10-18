@@ -23,7 +23,7 @@ use crate::{
 };
 use std::{collections::BTreeMap, path::Path};
 
-pub use crate::route::{DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING};
+pub use crate::route::{DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING, YOKOHAMA};
 /// Donington's race start-light sequence; every race holds the grid for its
 /// track's shipped sequence time (`start_lights::load`, grid-app StartLights).
 pub const RACE_COUNTDOWN: f64 = 4.0;
@@ -137,7 +137,8 @@ const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
 /// 17..=20 Long Beach (in the default set since its barrier stand-ins were
 /// fixed, docs/LONG_BEACH.md section 5). Seeds 21..=24 run Jarama; they stay out of
 /// the default set until its two recorded piece losses are fixed (docs/JARAMA.md
-/// section 5); run them with `--seeds 21..24`.
+/// section 5); run them with `--seeds 21..24`. Seeds 25..=28 run Yokohama,
+/// also outside the default set for now (docs/YOKOHAMA.md); `--seeds 25..28`.
 pub const QUICK_SEEDS: (u64, u64) = (1, 20);
 
 impl Scenario {
@@ -153,6 +154,8 @@ impl Scenario {
             Profile::Long => 1 + rng.below(max_cars as u64) as usize,
         };
         let route = match profile {
+            // Quick seeds 25..=28 (12, 1, 12 and 6 cars) on Yokohama.
+            Profile::Quick if seed > 24 => YOKOHAMA,
             // Quick seeds 21..=24 (2, 12, 9 and 4 cars) on Jarama.
             Profile::Quick if seed > 20 => JARAMA,
             // Quick seeds 17..=20 (12, 1, 12 and 6 cars) on Long Beach.
@@ -187,6 +190,14 @@ impl Scenario {
             && Rng::new(seed ^ 0x7a2a_0000_0000_0000).chance(0.2)
         {
             JARAMA
+        } else {
+            route
+        };
+        // A sixth of the long runs then move to Yokohama (own stream too).
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x70c0_0000_0000_0000).chance(1. / 6.)
+        {
+            YOKOHAMA
         } else {
             route
         }
@@ -1793,17 +1804,24 @@ mod tests {
             jarama.iter().map(|s| s.cars).collect::<Vec<_>>(),
             [2, 12, 9, 4]
         );
-        // Long runs: about a fifth each on Istanbul Park (a third, less the later
-        // moves), Long Beach (a quarter, less Jarama's) and Jarama, from their own
-        // streams, so the other fields of a seed keep their F326 draws.
+        let yokohama: Vec<_> = (25..=28).map(quick).collect();
+        assert!(yokohama.iter().all(|s| s.route == YOKOHAMA));
+        assert_eq!(
+            yokohama.iter().map(|s| s.cars).collect::<Vec<_>>(),
+            [12, 1, 12, 6]
+        );
+        // Long runs: about a sixth each on Istanbul Park (a third, less the later
+        // moves), Long Beach (a quarter, less the later moves), Jarama (a fifth,
+        // less Yokohama's) and Yokohama, from their own streams, so the other
+        // fields of a seed keep their F326 draws.
         let on = |route: &str| {
             (1001..1401)
                 .filter(|&seed| Scenario::generate(seed, Profile::Long, available, 12).route == route)
                 .count()
         };
-        assert!((55..105).contains(&on(ISTANBUL_PARK)), "{}", on(ISTANBUL_PARK));
-        assert!((55..105).contains(&on(LONG_BEACH)), "{}", on(LONG_BEACH));
-        assert!((60..100).contains(&on(JARAMA)), "{}", on(JARAMA));
+        for route in [ISTANBUL_PARK, LONG_BEACH, JARAMA, YOKOHAMA] {
+            assert!((45..95).contains(&on(route)), "{route} {}", on(route));
+        }
     }
 
     #[test]
