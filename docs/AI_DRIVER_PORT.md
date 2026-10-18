@@ -446,7 +446,7 @@ The manager needs a reference car (the human). Without one nothing is computed o
    - race start: power 1.05 and B 1 for cars ahead of the player in the first 100 m; grip 1.25
      below 750 m; after that the off-line assist `1 + clamp(t·m, 0, m)`, t = |lat|/4 m,
      m = 0.25 inside or 0.5 outside. Which side the original calls inside is [I].
-3. Catch-up (`rd_3_star` by default):
+3. Catch-up (the Race Day config of the difficulty, `rd_2_star` at Normal, F439):
    - ahead of the reference by more than 50 m: power 1.0 → 0.5 at 200 m;
    - useLead stretches the maximum to the leader's gap;
    - behind by more than 50 m: power 1.0 → 1.2 at 400 m;
@@ -526,7 +526,7 @@ AUTHORED where not recovered:
 ### Settings
 
 An `[ai]` section in a settings file ([SETTINGS.md](SETTINGS.md); `settings/race.ini` lists
-the defaults), or grid-app `--ai difficulty=0.606,catchup=rd_3_star|on|off,choreographer=on|off,mistakes=on|off`.
+the defaults), or grid-app `--ai difficulty=0.606,catchup=on|touge|off|rd_N_star,choreographer=on|off,mistakes=on|off`.
 The difficulty feeds the AI parameter mappings. The log line is `drive_ai_pacing`; events
 are logged as `drive_ai_event`.
 

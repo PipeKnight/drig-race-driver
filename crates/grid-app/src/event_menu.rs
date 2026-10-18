@@ -460,7 +460,10 @@ impl EventType {
     }
 }
 
-const AI: &str = "[ai]\ndifficulty = 0.606\ncatchup = rd_3_star\nchoreographer = on\nmistakes = on\n";
+const AI: &str = "[ai]\ndifficulty = 0.606\ncatchup = on\nchoreographer = on\nmistakes = on\n";
+/// Touge formats use the `_touge` catch-up configs (0x5D5530, F439).
+const AI_TOUGE: &str =
+    "[ai]\ndifficulty = 0.606\ncatchup = touge\nchoreographer = on\nmistakes = on\n";
 const PRIVATE: &str =
     "[private]\nbody_contacts = derive\nbody_events = derive\ndeformation = derive\n";
 
@@ -504,11 +507,11 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
             // The opponent drives the player's car (the default field).
             game += &format!("subroute = {}\n", c.subroute);
             drive += &format!("laps = 1\nopponents = 1\n{field}");
-            AI
+            AI_TOUGE
         }
         Kind::ProTouge => {
             drive += &format!("discipline = pro_touge\nlaps = 1\nopponents = 1\n{field}");
-            AI
+            AI_TOUGE
         }
         Kind::LeMans => {
             game = format!(

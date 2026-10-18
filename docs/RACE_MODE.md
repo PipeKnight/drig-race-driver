@@ -161,7 +161,7 @@ Checks:
 The original race manager now paces the opponents around the player. Details are in
 [AI_DRIVER_PORT.md](AI_DRIVER_PORT.md), "Mistakes, failures and race pacing".
 
-- **Catch-up** (`rd_3_star` by default, AUTHORED until the Normal star level is traced):
+- **Catch-up** (`rd_{star+1}_star` from the difficulty, `rd_2_star` at Normal; F439):
   - opponents more than 50 m ahead of you lose engine torque, down to 50 % at 200 m (or at
     the leader's gap);
   - opponents more than 50 m behind gain up to +20 % at 400 m;
