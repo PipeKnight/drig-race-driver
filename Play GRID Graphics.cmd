@@ -14,6 +14,8 @@ if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_REFLECTIONS=--reflections probe -
 set "GRID_GRAPHICS_WHEELS="
 if /I "%~3"=="wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
 if /I "%~3"=="probe-wheels" set "GRID_GRAPHICS_WHEELS=--wheel-shutter 8.333 --wheel-geometry-shutter 8.333 --wheel-exposure adaptive --wheel-filter-floor 0.25 --wheel-max-arc 18"
+set "GRID_GRAPHICS_SURFACE_SPECULAR="
+if /I "%~3"=="surfaces" set "GRID_GRAPHICS_SURFACE_SPECULAR=--surface-specular source-base"
 set "GRID_GRAPHICS_BODY_SPECULAR=--body-specular source-base"
 if /I "%~3"=="no-body-specular" set "GRID_GRAPHICS_BODY_SPECULAR=--body-specular off"
 set "GRID_GRAPHICS_BODY_OCCLUSION=--body-occlusion source-ambient"
@@ -65,6 +67,11 @@ if errorlevel 1 (
   set "GRID_GRAPHICS_BODY_SPECULAR="
   echo Paint specular maps are unavailable in this build; using its supported graphics controls.
 )
+"%SystemRoot%\System32\findstr.exe" /L /C:"--surface-specular off|source-base|white-control" "%GRID_GRAPHICS_CAPABILITIES%" >nul
+if errorlevel 1 (
+  if defined GRID_GRAPHICS_SURFACE_SPECULAR echo Surface reflection control is unavailable in this build; using its supported graphics controls.
+  set "GRID_GRAPHICS_SURFACE_SPECULAR="
+)
 set "GRID_GRAPHICS_CONTACTS="
 if exist "local\body-contact-directions.bin" set "GRID_GRAPHICS_CONTACTS=--body-contacts local\body-contact-directions.bin"
 if defined GRID_GRAPHICS_CONTACTS if exist "local\body-impact-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --body-events local\body-impact-parameters.bin"
@@ -89,9 +96,10 @@ if defined GRID_GRAPHICS_HAZE echo Experimental source distance haze enabled.
 if defined GRID_GRAPHICS_TEXTURES echo Experimental high-resolution textures enabled.
 if defined GRID_GRAPHICS_BODY_OCCLUSION echo Source paint occlusion control: %GRID_GRAPHICS_BODY_OCCLUSION%
 if defined GRID_GRAPHICS_BODY_SPECULAR echo Source paint reflection control: %GRID_GRAPHICS_BODY_SPECULAR%
+if defined GRID_GRAPHICS_SURFACE_SPECULAR echo Experimental surface reflection control: %GRID_GRAPHICS_SURFACE_SPECULAR%
 echo Graphics executable: %GRID_GRAPHICS_EXE%
 echo Private log: %GRID_GRAPHICS_LOG%
-"%GRID_GRAPHICS_EXE%" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% %GRID_GRAPHICS_NUMBERS% %GRID_GRAPHICS_BODY_OCCLUSION% %GRID_GRAPHICS_BODY_SPECULAR% > "%GRID_GRAPHICS_LOG%" 2>&1
+"%GRID_GRAPHICS_EXE%" --drive --route tracks/europe/donington/route_0 --car lac --graphics enhanced --ibl source --resolution "%GRID_GRAPHICS_RESOLUTION%" --game-root "%GRID_GRAPHICS_ROOT%" %GRID_GRAPHICS_CONTACTS% %GRID_GRAPHICS_REFLECTIONS% %GRID_GRAPHICS_WHEELS% %GRID_GRAPHICS_TEXTURES% %GRID_GRAPHICS_TREES% %GRID_GRAPHICS_HAZE% %GRID_GRAPHICS_SUN% %GRID_GRAPHICS_NUMBERS% %GRID_GRAPHICS_BODY_OCCLUSION% %GRID_GRAPHICS_BODY_SPECULAR% %GRID_GRAPHICS_SURFACE_SPECULAR% > "%GRID_GRAPHICS_LOG%" 2>&1
 set "GRID_GRAPHICS_EXIT=%ERRORLEVEL%"
 echo Exited with code %GRID_GRAPHICS_EXIT%.
 popd

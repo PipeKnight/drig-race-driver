@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G131 — Surface pilot passes native4K, movement and a complete lap (18 October 2026)
+
+Candidate5b5d408 release4m20s/SHA1f858a1b...: off/white native4K match each other and6aec paint control bytes exactly. Source blended-alpha mode reduces uniform road sheen; source/RGBA mean0.104973byte/max150,0BC fallback559images, not phone parity. Three negative CLI checks pass.198initial app tests followed by exact-source675workspace tests/12harnesses0failed0ignored, alltargetfeatureClippy3.01s/default25.35s clean.30unique virtual30FPSframes/1200ticks match4physical exits; native4K6500ticks completes valid89.955257484slap with4physical exits exactly equal6aec excludingwallclock. Static comparison/first/last motion/final lap inspected; no GPU/shader errors. See docs/DONINGTON_SURFACE_LAYERS.md and private surface-specular-* evidence.
+
+Optional Surfaces wrapper drafted/tested3actualCMDcapability cases; normal launcher remains off. New pre-push24-scenario stress run still in progress, no delivery/publication claim for this pilot yet. Existing road override guard is intentional V1 objects/cars + opaque DDS; future road RGB upscales need explicit alpha-preserving routing into layered texture map, not erasing packed alpha or claiming ignored road entries were accepted. No new tool/game-install edits.
+
 ## G130 — Optional source-alpha road F0 pilot, not delivered (18 October 2026)
 
 Added explicit off/source-base/white-control surface mode, default off, enhanced source-track requirement, no launcher changes. Shader reuses sampled/blended diffuse alpha and existing mode uniform; sqrt follows texture filtering/blending to weight Bevy's quadratic dielectric F0. RGB/roughness/opacity/geometry stay unchanged; no new texture upload or mobile bindings. This also weights GGX environment reflection unlike the original direct Phong term, so not source parity.198app tests pass; final CLI validation guard edited during compilation needs exact-source follow-up Clippy/build/negative CLI checks. Native4K off/white/source/RGBA matrix harness prepared privately; all GPU acceptance remains pending.
