@@ -3,6 +3,7 @@
 //! vertices 94FAF0, update 97EDE0). `grass.grs`, `ground_cover.xml` and
 //! `ground_cover.pssg` (sprites and `gc_billboard.tga`) are read from the
 //! purchased installation for the selected route's track. Presentation only.
+use super::mesh_stream::{MeshStream, Quad, QuadMesh};
 use bevy::prelude::*;
 use grid_formats::{
     binxml,
@@ -198,6 +199,8 @@ pub(crate) struct GroundDetail {
     mesh: Handle<Mesh>,
     last: Option<(Vec3, Vec3)>,
     pub drawn: usize,
+    stream: QuadMesh,
+    scratch: Vec<Quad>,
 }
 
 struct Loaded {
@@ -249,7 +252,8 @@ pub(crate) fn install(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let loaded = load(root, route)?;
     super::ground_effect_assets::install_timing(app);
-    app.insert_resource(PendingDetail(Some(loaded)))
+    app.init_resource::<MeshStream>()
+        .insert_resource(PendingDetail(Some(loaded)))
         .add_systems(Startup, start)
         .add_systems(
             Update,
@@ -337,6 +341,8 @@ fn start(
         mesh,
         last: None,
         drawn: 0,
+        stream: QuadMesh::default(),
+        scratch: Vec::new(),
     });
 }
 
@@ -353,18 +359,14 @@ fn empty() -> Mesh {
 impl GroundDetail {
     /// Camera-facing quads for every instance inside its subset's draw
     /// distance; alpha 1 up to fadestart * D, then linear to 0 at D [D shader].
-    fn build(&self, eye: Vec3, right: Vec3, up: Vec3) -> Mesh {
+    fn gather(&self, eye: Vec3, right: Vec3, up: Vec3, out: &mut Vec<Quad>) {
+        out.clear();
         let far = self.distances.lods.iter().copied().fold(0., f32::max);
         let reach = (far / BUCKET).ceil() as i32 + 1;
         let center = (
             (eye.x / BUCKET).floor() as i32,
             (eye.z / BUCKET).floor() as i32,
         );
-        let mut positions = Vec::new();
-        let mut normals = Vec::new();
-        let mut uvs = Vec::new();
-        let mut colors = Vec::new();
-        let mut indices = Vec::new();
         for dx in -reach..=reach {
             for dz in -reach..=reach {
                 let Some(list) = self.buckets.get(&(center.0 + dx, center.1 + dz)) else {
@@ -384,29 +386,33 @@ impl GroundDetail {
                         1. - (distance - start) / (limit - start).max(1e-3)
                     };
                     let quad = &self.quads[g.sprite as usize];
-                    let base = positions.len() as u32;
-                    for k in 0..4 {
-                        let [x, y] = quad.corners[k];
-                        let p = g.position + right * (x * g.width) + up * (y * g.height);
-                        positions.push(p.to_array());
-                        normals.push(g.normal.to_array());
+                    out.push(Quad {
+                        positions: std::array::from_fn(|k| {
+                            let [x, y] = quad.corners[k];
+                            (g.position + right * (x * g.width) + up * (y * g.height)).to_array()
+                        }),
+                        normal: g.normal.to_array(),
                         // Mirroring swaps left and right UVs [D 94FAF0].
-                        uvs.push(quad.uvs[if g.mirror { k ^ 2 } else { k }]);
-                        colors.push([1., 1., 1., alpha]);
-                    }
-                    // Corners are (left, top), (left, bottom), (right, top), (right, bottom).
-                    indices.extend([base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+                        uvs: std::array::from_fn(|k| quad.uvs[if g.mirror { k ^ 2 } else { k }]),
+                        colour: [1., 1., 1., alpha],
+                    });
                 }
             }
         }
-        super::ground_effect_assets::effect_mesh(positions, normals, uvs, colors, indices)
     }
 }
 
+/// Corners are (left, top), (left, bottom), (right, top), (right, bottom).
+const TRIANGLES: [u32; 6] = [0, 1, 2, 2, 1, 3];
+
+/// Rebuilds the cover when the camera moved or turned past the threshold.
+/// The asset is replaced only when the cover outgrows its capacity; otherwise
+/// the new vertices are written over its GPU allocation (mesh_stream, F392).
 fn present(
     detail: Option<ResMut<GroundDetail>>,
     camera: Query<&Transform, With<super::ViewerCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    stream: Res<MeshStream>,
 ) {
     let Some(mut detail) = detail else { return };
     let Ok(camera) = camera.single() else { return };
@@ -418,13 +424,16 @@ fn present(
     {
         return;
     }
+    let detail = &mut *detail;
     detail.last = Some((eye, forward));
     let start = std::time::Instant::now();
-    let mesh = detail.build(eye, camera.right().as_vec3(), camera.up().as_vec3());
-    detail.drawn = mesh.count_vertices() / 4;
-    if let Some(mut target) = meshes.get_mut(&detail.mesh) {
-        *target = mesh;
-    }
+    let mut quads = std::mem::take(&mut detail.scratch);
+    detail.gather(eye, camera.right().as_vec3(), camera.up().as_vec3(), &mut quads);
+    detail.drawn = quads.len();
+    detail
+        .stream
+        .update(&quads, TRIANGLES, &detail.mesh, &mut meshes, &stream);
+    detail.scratch = quads;
     super::ground_effect_assets::charge(super::ground_effect_assets::GRASS, start);
 }
 

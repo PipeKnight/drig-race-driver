@@ -362,13 +362,120 @@ Identity [V]: the 1-tick outputs are byte-identical; 12-car `… 12 11200 ai` sh
 pre-change binary (sha256 3c932872…841e). `grid-soak quick` 20/20, all 20 digests equal to the
 pre-change binary's.
 
+## Per-frame mesh uploads (F392)
+
+18 October 2026, Claude Code. The owner approved changing the graphics files for this
+(through the coordinator; Codex was busy with other work). Evidence: this worktree's
+`local/perf381/` (images, timing runs, trace summaries, test and clippy logs).
+
+**What replaced meshes every frame.** A temporary counter of `AssetEvent::<Mesh>::Modified`
+per entity name, run on a solo Baseline lap like the phone's (patch kept as
+`local/perf381/mesh-census.patch`, not committed):
+
+| Mesh | Replaced, frames 0–600 | Frames 600–1200 |
+|---|---|---|
+| Ground cover (`ground_detail::present`) | 585 | 110 (car slower) |
+| 5 wheel-debris meshes (`wheel_debris::present`) | 585 each | 1,170–1,185 each |
+| Tyre-smoke groups (`tyre_smoke::draw`, no `Name`) | — | 1,087 (sprites on screen) |
+| Skid marks (only when dirty) | 2 | 40 |
+
+Source trees are off in the Baseline preset (`--trees`, Enhanced only), so they did not show
+in F380's profile. With `--graphics enhanced --trees source` every one of the 1,914 placed
+billboard meshes was replaced every frame.
+
+**Changes** (presentation only; no simulation code touched):
+
+- New `mesh_stream.rs`. Systems pack new vertex bytes in the main world exactly as Bevy's
+  `Mesh::write_packed_vertex_buffer_data` does: attributes interleaved per vertex in
+  attribute-id order, little-endian f32. A unit test compares the bytes with Bevy's own
+  packing. The bytes reach the render world at extraction; the main and render sides swap
+  buffers, so nothing is allocated after the first frames. A render system right after
+  `allocate_and_free_meshes` writes them with `RenderQueue::write_buffer` over the mesh's
+  existing allocation (`MeshAllocator::mesh_vertex_slice`). The `Mesh` asset is left
+  unchanged, so Bevy does not clone, free, reallocate or repack it. Writes whose size does
+  not match the allocation are skipped, and a mesh not allocated yet draws its own data.
+- `source_trees.rs`: `FacingSource` keeps the mesh's packed vertex buffer and layout.
+  `placed()` writes the placement's radial (or world-up) normals once, because they do not
+  depend on the camera. `present` writes only the faced positions each frame, with the same
+  arithmetic as before. `append` is unchanged.
+- `ground_detail.rs`: the cover mesh holds a capacity of quads (drawn ones first, then
+  zero-area padding at the origin). It is replaced only when the cover outgrows it (+25 %
+  headroom, AUTHORED); otherwise each rebuild streams its vertices (`mesh_stream::QuadMesh`).
+  The rebuild threshold is unchanged.
+- `wheel_debris.rs`: a slot's mesh is rebuilt while it has particles, and once more to empty
+  it. Before, every fixed tick marked all 5 slots dirty, so all 5 meshes were replaced every
+  frame even with no particles.
+- `tyre_smoke.rs`: a texture group with no sprites leaves its already empty mesh alone.
+  While sprites exist the groups are still rebuilt every frame (see "Not done").
+
+**Picture.** Offscreen fixed-step captures (`--render-fixed-step`, 1280 × 800, Donington,
+throttle 0.6), before (fde38ef) against after, are **byte-identical PNGs**: Baseline at 600,
+1,300 (216 smoke particles on screen) and 3,000 ticks, Enhanced with `--trees source` at
+1,300 and `--trees coverage` at 3,000. After the rebase onto main with Codex's graphics merge
+(b43b575), the same comparison against that main is byte-identical again: Baseline 1,300 and
+3,000, Enhanced `--trees source` 1,300, and `--trees coverage-shaded` 3,000 (Codex's sheet
+colours, `saved_rgb=true`). Windowed or real-clock runs differ from run to run,
+because frame timing changes what is drawn, so they cannot be compared.
+
+**Render thread** (`GRID_PERF_TIMING=1 GRID_CPU_CLUSTERING=1`, offscreen 60 Hz, solo Lacetti,
+3,000 ticks; steady state = frames 600 to the end), three interleaved rounds, ms per frame.
+Other sessions kept the CPU at 42–96 % load throughout:
+
+| | Round 1 | Round 2 | Round 3 | Median |
+|---|---|---|---|---|
+| Baseline, before | 9.07 | 7.32 | 5.79 | **7.32** |
+| Baseline, after | 5.46 | 6.55 | 5.39 | **5.46** |
+| Enhanced + source trees, before | 40.76 | 27.54 | 24.09 | **27.54** |
+| Enhanced + source trees, after | 17.25 | 17.57 | 25.83 | **17.57** |
+
+- Baseline (the phone's path): about 1.9 ms less render-thread time per frame on the median,
+  0.4–3.6 ms per pair. The main thread fell slightly too (median 4.51 → 3.63 ms), because it
+  no longer builds and moves new mesh assets.
+- Enhanced with trees: about 10 ms less. The 1,914 tree meshes had made the render thread
+  the bottleneck (p50 frame 28.8 → 17.8 ms in round 2, i.e. under 60 FPS before, at 60 after).
+- Chrome traces (Bevy trace_chrome, same run with 900 benchmark frames, before fde38ef
+  against the final tree; `local/perf381/trace/*-summary.txt`). Both runs were heavily
+  disturbed (frame p50 44 and 37 ms instead of about 17), so the totals are inflated and
+  only the mesh items compare: `allocate_and_free_meshes` 4.09 → 1.21 ms per frame, "mesh
+  upload / allocation" 4.84 → 1.65 ms, the extract sub-app 16.0 → 7.8 ms. The load was, if
+  anything, heavier in the after run (`drive_tick` 5.3 → 6.8 ms). What remains in
+  `allocate_and_free_meshes` is mostly the smoke groups, which had sprites for most of this run.
+- Phone [I, not measured]: F380 put the phone's render thread at 3–4× the desktop's. If
+  that holds, 1.5–2 ms saved on the desktop is 5–8 ms of the phone's ~35 ms frame. The new
+  phone log (F378 build: 2308 × 1080, still 34 FPS) supports a CPU limit. Check: the next
+  `frame_stats` log.
+
+**Not done.** Smoke groups while sprites exist: streaming them with the same padded capacity
+gave a slightly different picture at 1,300 and 3,000 ticks (2.6 % of pixels, at most 25
+levels, all in the smoke). Replacing the asset instead of streaming gives the same
+difference, so the cause is the padding, not the streaming. The cause is not identified:
+the smoke entities have `NoFrustumCulling`, so no bounding box enters their sort. Left as
+it was.
+
+**Merge with Codex's graphics work.** While this was under way, main merged
+codex/grid-graphics, including e075319 (`append` gains `sheet_colours` and a COLOR
+attribute on the tree sheets, `--trees coverage-shaded`) and a `tyre_smoke::draw` camera
+query change. The rebase merged both without conflicts. For later merges of graphics
+branches:
+
+- Changed here in `source_trees.rs`: `FacingSource` (fields `packed` and `layout`, set in
+  `from_mesh`), `FacingSource::placed` (writes normals into a packed copy), `Facing` (new
+  `vertices` field), `install` (`init_resource::<MeshStream>`) and `present` (streams
+  positions; no `Assets<Mesh>` writes). `append` is unchanged.
+- The test `sheet_presentation_uses_the_final_replay_camera_in_the_same_frame` now reads
+  the queued stream bytes instead of the mesh asset.
+- New vertex attributes need no extra work. `from_mesh` packs every attribute the mesh has
+  (`create_packed_vertex_buffer_data`) and takes the layout from the mesh, so Codex's sheet
+  colours go into every frame's bytes unchanged.
+- If a graphics branch changes `present`, keep the streaming and port only its orientation
+  arithmetic into the closure. Do not write to the mesh asset there: that would bring back
+  the per-frame reallocation.
+
 ## Follow-ups (not done here)
 
-1. **Mesh re-uploads every frame.** On the render thread, `allocate_and_free_meshes` (1.0 ms),
-   `prepared_mesh_producer` (0.44 ms, 13 per frame) and `extract_render_asset<RenderMesh>`
-   (0.2 ms) mean about 13 mesh assets change every frame. Changing them only when their
-   contents change could save about 1.5 ms of the 7 ms render thread on the desktop, more on
-   the phone. The graphics files involved belong to the graphics work, so this was left alone.
+1. **Mesh re-uploads every frame.** Done in F392 for foliage, ground cover, wheel debris
+   and empty smoke groups (see "Per-frame mesh uploads"). Smoke groups with sprites are
+   still replaced every frame.
 2. **Loading 12 cars.** Done in F382: the route props are parsed once per field (see
    "Loading a field").
 3. **GPU and render resolution on the phone.** 4× MSAA at the full surface, the render-height

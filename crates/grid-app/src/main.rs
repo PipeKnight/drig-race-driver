@@ -37,6 +37,7 @@ mod perf_timing;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
+mod mesh_stream;
 mod motion_capture;
 mod particles;
 mod pause_menu;
@@ -2620,6 +2621,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         graphics_benchmark::install(&mut app, frames);
     }
     perf_timing::install(&mut app);
+    mesh_stream::install(&mut app);
     if graphics.track_grade {
         track_grade::install(&mut app);
     }

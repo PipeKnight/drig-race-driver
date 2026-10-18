@@ -125,6 +125,7 @@ pub(crate) struct WheelDebris {
     random: Random,
     camera: Vec3,
     generation: u64,
+    /// Mesh per texture slot, and whether it currently holds particles.
     slots: Vec<(Handle<Mesh>, bool)>,
     pub emitted: u64,
 }
@@ -455,9 +456,6 @@ fn simulate(
             debris.emit(car, index, wheel, dt);
         }
     }
-    for slot in &mut debris.slots {
-        slot.1 = true;
-    }
     super::ground_effect_assets::charge(super::ground_effect_assets::TICK, start);
     if ground.key.is_some_and(|(_, t)| t.is_multiple_of(16))
         && crate::settings::diagnostics().ground_trace
@@ -481,12 +479,14 @@ fn present(
     let start = std::time::Instant::now();
     let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
     let debris = &mut *debris;
-    for (i, (handle, dirty)) in debris.slots.iter_mut().enumerate() {
-        // Rebuild every frame while particles exist (the camera moves).
-        if !*dirty && debris.store.particles.iter().all(|p| p.look.slot != i) {
+    for (i, (handle, drawn)) in debris.slots.iter_mut().enumerate() {
+        // Rebuild every frame while particles exist (the camera moves), and
+        // once more to empty the mesh; an empty slot stays untouched (F392).
+        let live = debris.store.particles.iter().any(|p| p.look.slot == i);
+        if !live && !*drawn {
             continue;
         }
-        *dirty = false;
+        *drawn = live;
         let mesh = debris.store.build(i, right, up);
         if let Some(mut target) = meshes.get_mut(handle) {
             *target = mesh;

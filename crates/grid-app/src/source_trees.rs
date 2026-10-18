@@ -1,4 +1,5 @@
 //! Static closest-LOD source forest. No wind, collision or original shader claim.
+use super::mesh_stream::{MeshStream, VertexLayout, put};
 use super::{Car, Part, read};
 use bevy::mesh::VertexAttributeValues;
 use bevy::{
@@ -382,13 +383,14 @@ mod tests {
         app.update();
         let camera = app.world().get::<Transform>(camera).unwrap();
         assert!(camera.translation.distance(initial.translation) > 1.);
-        let mesh = app.world().resource::<Assets<Mesh>>().get(&handle).unwrap();
-        let Some(VertexAttributeValues::Float32x3(points)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            panic!("positions")
-        };
-        let delta = Vec3::from_array(points[0]) - center;
+        // POSITION, then UV_1: the first 12 bytes are the faced point.
+        let bytes = app.world().resource::<MeshStream>().queued(handle.id()).unwrap();
+        assert_eq!(bytes.len(), 12 + 8);
+        let point: Vec<f32> = bytes[..12]
+            .chunks(4)
+            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+            .collect();
+        let delta = Vec3::from_slice(&point) - center;
         let toward = (camera.translation - center).with_y(0.).normalize();
         assert!(delta.with_y(0.).dot(toward).abs() < 0.00001);
         assert!((delta.y - offset.y).abs() < 0.00001);
@@ -513,6 +515,10 @@ pub struct FacingSource {
     cylindrical: bool,
     centers: Vec<[f32; 3]>,
     offsets: Vec<[f32; 2]>,
+    /// The mesh's packed vertex buffer; presentation rewrites only POSITION
+    /// and NORMAL in it (mesh_stream, F392).
+    packed: std::sync::Arc<Vec<u8>>,
+    layout: VertexLayout,
 }
 impl FacingSource {
     pub fn from_mesh(name: &str, mesh: &Mesh) -> Option<Self> {
@@ -534,6 +540,8 @@ impl FacingSource {
             cylindrical,
             centers: centers.clone(),
             offsets: offsets.clone(),
+            packed: std::sync::Arc::new(mesh.create_packed_vertex_buffer_data()),
+            layout: VertexLayout::of(mesh),
         })
     }
     pub fn radius(&self) -> f32 {
@@ -543,11 +551,29 @@ impl FacingSource {
             .fold(0., f32::max)
     }
     pub fn placed(&self, matrix: Mat4) -> Facing {
+        let inverse = matrix.inverse();
+        // Original zero-wind facing VS uses a radial local normal, not the
+        // intentionally nonfinite saved NORMAL stream of collapsed quads.
+        // Neither normal depends on the camera, so it is written once here.
+        let mut vertices = self.packed.to_vec();
+        if let Some(at) = self.layout.offset(Mesh::ATTRIBUTE_NORMAL) {
+            for (i, p) in self.centers.iter().enumerate() {
+                let normal = (if self.cylindrical {
+                    inverse.transform_vector3(Vec3::Y)
+                } else {
+                    Vec3::from_array(*p)
+                })
+                .try_normalize()
+                .unwrap_or(Vec3::Y);
+                put(&mut vertices, i * self.layout.stride + at, normal.to_array());
+            }
+        }
         Facing {
             source: self.clone(),
             world: matrix,
-            inverse: matrix.inverse(),
+            inverse,
             scale: matrix.x_axis.truncate().length(),
+            vertices,
         }
     }
 }
@@ -557,6 +583,8 @@ pub struct Facing {
     world: Mat4,
     inverse: Mat4,
     scale: f32,
+    /// Packed vertex buffer with this placement's normals.
+    vertices: Vec<u8>,
 }
 fn expanded(center: Vec3, offset: Vec2, right: Vec3, up: Vec3, inverse: Mat4, scale: f32) -> Vec3 {
     center + inverse.transform_vector3((right * offset.x + up * offset.y) * scale)
@@ -577,32 +605,36 @@ fn sheet_expanded(
     expanded(center, offset, right, Vec3::Y, inverse, scale)
 }
 pub fn install(app: &mut App) {
-    app.add_systems(
+    app.init_resource::<MeshStream>().add_systems(
         Update,
         present
             .after(super::drive_present)
             .after(super::replay::frame_camera),
     );
 }
+/// Re-faces every billboard toward the camera each frame. The vertex bytes are
+/// written over the mesh's GPU allocation (mesh_stream); the asset keeps its
+/// source vertices, so Bevy does not reallocate and repack it every frame.
 fn present(
     camera: Query<&Transform, With<super::ViewerCamera>>,
     foliage: Query<(&Facing, &Mesh3d)>,
-    mut meshes: ResMut<Assets<Mesh>>,
+    stream: Res<MeshStream>,
 ) {
     let Ok(camera) = camera.single() else {
         return;
     };
+    let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
     for (facing, handle) in &foliage {
-        let Some(mut mesh) = meshes.get_mut(&handle.0) else {
+        let source = &facing.source;
+        let Some(at) = source.layout.offset(Mesh::ATTRIBUTE_POSITION) else {
             continue;
         };
-        let points: Vec<_> = facing
-            .source
-            .centers
-            .iter()
-            .zip(&facing.source.offsets)
-            .map(|(p, uv)| {
-                let point = if facing.source.cylindrical {
+        stream.write(handle.id(), |bytes| {
+            let start = bytes.len();
+            bytes.extend_from_slice(&facing.vertices);
+            let vertices = &mut bytes[start..];
+            for (i, (p, uv)) in source.centers.iter().zip(&source.offsets).enumerate() {
+                let point = if source.cylindrical {
                     sheet_expanded(
                         Vec3::from_array(*p),
                         Vec2::from_array(*uv),
@@ -615,34 +647,15 @@ fn present(
                     expanded(
                         Vec3::from_array(*p),
                         Vec2::from_array(*uv),
-                        camera.right().as_vec3(),
-                        camera.up().as_vec3(),
+                        right,
+                        up,
                         facing.inverse,
                         facing.scale,
                     )
                 };
-                point.to_array()
-            })
-            .collect();
-        // Original zero-wind facing VS uses a radial local normal, not the
-        // intentionally nonfinite saved NORMAL stream of collapsed quads.
-        let normals: Vec<_> = facing
-            .source
-            .centers
-            .iter()
-            .map(|p| {
-                (if facing.source.cylindrical {
-                    facing.inverse.transform_vector3(Vec3::Y)
-                } else {
-                    Vec3::from_array(*p)
-                })
-                .try_normalize()
-                .unwrap_or(Vec3::Y)
-                .to_array()
-            })
-            .collect();
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, points);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+                put(vertices, i * source.layout.stride + at, point.to_array());
+            }
+        });
     }
 }
 

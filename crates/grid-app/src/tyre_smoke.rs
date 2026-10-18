@@ -19,6 +19,9 @@ pub(crate) struct TyreSmoke {
     smoke: Smoke,
     last: Option<(u64, u64)>,
     meshes: Vec<Handle<Mesh>>,
+    /// Groups whose mesh already draws nothing: an empty group leaves it
+    /// untouched instead of replacing it every frame (F392).
+    hidden: Vec<bool>,
     /// Camera position of the last drawn frame (distance level of detail).
     eye: [f32; 3],
     /// Frame counter for the periodic log line.
@@ -42,6 +45,7 @@ pub(crate) fn install(app: &mut App, root: &std::path::Path) {
                 smoke: Smoke::new(library.clone()),
                 last: None,
                 meshes: Vec::new(),
+                hidden: Vec::new(),
                 eye: [0.; 3],
                 frames: 0,
             })
@@ -109,6 +113,7 @@ fn setup(
             NotShadowReceiver,
         ));
         state.meshes.push(mesh);
+        state.hidden.push(true);
     }
 }
 
@@ -185,6 +190,7 @@ fn draw(
     camera: Single<&GlobalTransform, With<crate::ViewerCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
+    let state = &mut *state;
     let eye = camera.translation();
     state.eye = eye.to_array();
     let right = camera.right().as_vec3();
@@ -198,9 +204,13 @@ fn draw(
         }
     }
     let mut total = 0;
-    for (group, handle) in groups.iter_mut().zip(&state.meshes) {
+    for ((group, handle), hidden) in groups.iter_mut().zip(&state.meshes).zip(&mut state.hidden) {
         group.sort_by(|a, b| b.0.total_cmp(&a.0));
         total += group.len();
+        if group.is_empty() && *hidden {
+            continue;
+        }
+        *hidden = group.is_empty();
         let Some(mut mesh) = meshes.get_mut(handle) else {
             continue;
         };
