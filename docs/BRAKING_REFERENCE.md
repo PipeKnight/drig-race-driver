@@ -160,19 +160,19 @@ The capture tool and the replay probe now also record the engine/drivetrain bloc
 **Pool slot template [V, static].** The assists matrix's failure under the setup wiring
 ("unsupported contact-group impact record") is a wheel-overtravel contact written into a
 never-used pool slot: its flag word +0xC was 0, so byte +0x0F (impact-pool flag, which
-contact_groups requires to be 1) was 0, and +0x1C/+0x20/+0x24 were 0. The overtravel producer
+`contact_groups` requires to be 1) was 0, and +0x1C/+0x20/+0x24 were 0. The overtravel producer
 (WHEEL_CONTACT_PRODUCTION.md) writes neither +0x0F nor +0x1C..+0x24; it keeps the slot's
-template. In the original the pool allocator B19E20 allocates N × 0x80 bytes and runs the
-contact constructor B0ECE0 (vtable 0xD3D434) on every slot: +0x1C/+0x20 = −1 (via B82880),
+template. In the original the pool allocator `B19E20` allocates N × 0x80 bytes and runs the
+contact constructor `B0ECE0` (vtable 0xD3D434) on every slot: +0x1C/+0x20 = −1 (via `B82880`),
 byte +0x24 = 1, **byte +0x0F = 1**, +0x28..+0x3C, +0x50..+0x6F and byte +0x70 zero. The port's
-slots were all zero. Now contact_groups::EMPTY_CONTACT holds that template and every place
+slots were all zero. Now `contact_groups::EMPTY_CONTACT` holds that template and every place
 that creates pool slots uses it (single-car world, multi-car pool and blank overlay pool,
 geometry reservation, prop slots). With the old wheel constants no overtravel ever reached a
-fresh slot, so nothing changes in the existing runs (checks below); the template only matters
-once overtravel occurs, which the shorter original travel causes.
+fresh slot, so nothing changes in the existing runs; the template only matters once overtravel
+occurs, which the shorter original travel causes.
 
 **Setup wiring, retried with the template [V].** Braking replays on 18 October against the live
-captures (local/driving/setup-F372/{setup,nosetup}-ba-{on,off}.tsv):
+captures (`local/driving/setup-F372/{setup,nosetup}-ba-{on,off}.tsv`):
 
 | | Original | Port, no setup | Port, with setup |
 |---|---|---|---|
@@ -183,25 +183,23 @@ The setup keeps the BA-off match but does not shrink the BA-on gap, so it is **n
 (the coordinator's condition). Of the three tests it broke:
 
 - the assists matrix passes with the template;
-- the deep authored wall in source_driving_geometry_provider no longer consumes the damage
+- the deep authored wall in `source_driving_geometry_provider` no longer consumes the damage
   RNG: the suspension-force impact (wheel +0x138 × delta against the damage threshold) peaks at
   0.67 of the threshold with the original's setup, 1.28 with the old 0.3/400 constants; no wall
   depth between 5 % and 80 % of the car width reaches it (0.08–0.76). That assertion encoded the
   unverified constants; a re-baseline is in the kept patch;
-- the autopiloted Drift Battle lap (Long Beach, BMW) is a real regression: the car stops against
-  the wall at about (−523, 2.9, −241) (ticks 2600–2920), reverses to recover, pitches nose-up and
-  falls through the world (y −14 by tick 3090). Without the setup the same build finishes. The
-  fall-through has to be understood before the setup can be wired.
+- the autopiloted Drift Battle lap (Long Beach, BMW) fell through the world at the hairpin
+  (resolved in F403 below: a test-harness gap).
 
-Patch with setup, template and re-baseline: local/driving/setup-F372/setup-wiring-v2-with-template.patch
-(also contains unrelated rustfmt churn; apply only the setup hunks).
+Patches: `local/driving/setup-F372/setup-wiring-v2-with-template.patch` (setup, template and
+wall re-baseline, plus unrelated rustfmt churn) and `setup-wiring-v3.patch` (setup only, on
+F381).
 
-**Drivetrain clue [I].** 	ools/analyze_braking.py --drivetrain (new) prints speed, RPM and per-axle
-force and wheel speed every 0.25 s from onset. With BA on, the port's front force drops at each
-downshift (−5300 N in 3rd, −4830 in 2nd, −3240 in 1st), the original's much less (−5990, −5680,
-−4450 in 1st); the rear axle is equal throughout (−3720). This first suggested engine inertia
-through the gear ratio, but runs 3 and 4 below show the same engine speed in both, so the cause
-lies in the torque path to the driven wheels instead.
+**Drivetrain clue [I].** `tools/analyze_braking.py --drivetrain` (new) prints speed, RPM and
+per-axle force and wheel speed every 0.25 s from onset. With BA on, the port's front force drops
+at each downshift (−5300 N in 3rd, −4830 in 2nd, −3240 in 1st), the original's much less (−5990,
+−5680, −4450 in 1st); the rear axle is equal throughout (−3720). This first suggested engine
+inertia through the gear ratio; runs 3 and 4 below show the same engine speed in both.
 
 ## Live engine-block runs (F381)
 
@@ -210,7 +208,7 @@ lies in the torque path to the driven wheels instead.
 the coordinator, then "I allow you to run live test" in this session). Same research copy
 (SHA-256 b1da1b2d…aece34a6), PID 40200; the same scenario as F371. The 19 user files were
 snapshotted first; the runs changed 12, all 19 were restored and match the snapshot hashes; the
-game was closed with WM_CLOSE. Evidence: main checkout local/driving/braking-20261018b/
+game was closed with WM_CLOSE. Evidence: main checkout `local/driving/braking-20261018b/`
 (captures with the +0x1840 block, port replays, manager scans, screenshots, macro logs,
 user-file snapshot and after-state).
 
@@ -221,44 +219,106 @@ user-file snapshot and after-state).
 | Locked-wheel rows, max +E74 | 0, 0 | 492 of 604, 2.054 s |
 
 The original repeats within 0.2 m. [V] Engine and drivetrain block against the port
-(nalyze_braking.py --drivetrain, local/braking/scripts/blockdiff.py):
+(`analyze_braking.py --drivetrain`, `local/driving/braking-20261018b/f403/blockdiff.py`):
 
 - **Engine speed matches.** +0x1894 is 232.7 at idle in both and follows the same course while
-  braking (gears 4–2: 690–800 original, 630–790 port), so the port's engine is not spinning
-  faster or slower. Gear changes happen at nearly the same speeds.
+  braking (gears 4–2: 690–800 original, 630–790 port). Gear changes happen at nearly the same
+  speeds.
 - **The front-axle force gap is there from the first braking frame, with and without BA**:
   −5882 against −5057 N at onset, −6087 against −5537 after 0.25 s, before any lock-up in the
   BA-off run. The rear axle agrees (−3719 against −3740).
-- Words that differ during braking: car +0x1898 (525 original, 1250 port), +0x187C (4.25 / 4.50),
-  +0x189C..+0x18AC; front wheels +0x110 (−45 / −20), +0x3C, +0x40, +0x138 (suspension force,
-  3690 / 3850), +0x140 and +0xBC (non-zero only in the original), and the setup fields +0x4C/+0x64
-  (shown by F377).
+- Words that differ during braking: car +0x1898, +0x187C, +0x189C..+0x18AC; front wheels +0x110,
+  +0x3C, +0x40, +0x138 (suspension force, 3690 / 3850), +0x140 and +0xBC (non-zero only in the
+  original), and the setup fields +0x4C/+0x64 (shown by F377). F403 below shows that +0x1898,
+  +0x187C, +0x189C..+0x18AC and wheel +0x110 are phases, timers and noise.
 - Car +0x1864, +0x1880 and +0x1884 are 1.0 in the original at rest and while driving, 0 in the
-  port. Their writer is the engine reset 996C70 (also +0x1888 = 1 and +0x187C from a constant,
+  port. Their writer is the engine reset `996C70` (also +0x1888 = 1 and +0x187C from a constant,
   plus zeroing +0x185C..+0x18C4); the port's constructor sets only +0x1888. No instruction in
   the executable reads +0x1864 or +0x1880 by direct offset, and +0x1884 is read only through
-  driver preparation A03703/A0381F (already ported), so these are unlikely to explain the gap.
+  driver preparation `A03703`/`A0381F` (already ported), so these are unlikely to explain the gap.
 
-[I] With engine speed equal, the gap sits in how drivetrain torque reaches the driven wheels
-(+0x1898 and wheel +0x110 are the candidates), not in engine inertia. Next step offline: find
-the writers of car +0x1898 and wheel +0x110 in the propulsion step and compare them term by
-term with ehicle_propulsion.
+## Front-axle gap traced offline; Drift Battle fall-through (F403)
+
+18 October 2026, Claude Code, owner away (no game launched). Static analysis of the existing
+decompilations and Capstone scans of the research copy, read-only.
+
+**The differing engine words are not torque terms [V, code].** In `vehicle_propulsion::engine`
+(verified 1:1 against `9B1B90`, VEHICLE_PROPULSION.md) car +0x1898 is engine e+0xF8, the crank
+phase (speed × delta, wrapped at 3141.6); +0x187C is e+0xDC, a below-limit timer; +0x189C..+0x18AC
+are the two random engine oscillators. Wheel +0x110 is the wheel angle (spin × delta, wrapped at
+±314). They differ because their histories differ, and none feeds a force.
+
+**Torque balance of the front wheels [V].** For each axle, brake torque +0x118 minus ground
+force × radius (+0x88 × +0xE0) minus wheel inertia × angular deceleration (+0x100 × dω/dt) leaves
+the torque the drivetrain applies (`local/driving/braking-20261018b/f403/balance.py`, BA on):
+
+| Time after onset | 0.1 s (4th) | 0.6 s | 1.2 s (2nd) | 1.6 s (2nd) | 2.0 s (1st) |
+|---|---|---|---|---|---|
+| Rear, original / port (Nm) | 33 / 29 | 30 / 28 | 30 / 26 | 29 / 26 | 24 / 21 |
+| Front, original / port (Nm) | **8 / 181** | 38 / 250 | 129 / 391 | 164 / 387 | 527 / 873 |
+
+The undriven rear agrees (rolling terms). On the driven front axle the port's drivetrain pushes
+forward much harder. In the port this term is the engine inertia folded into the driven wheels in
+coupling mode 1 (`vehicle_force::run`: view +0x294 = car +0x17A0 / ratio², car +0x17A0 = 0.22):
+about 6 kg·m² on the axle in 4th gear, which matches the 181 Nm at −60 rad/s². The original
+behaves as if only ~0.24 kg·m² were coupled in 4th, 4.2 in 2nd and 22 in 1st (port: 6.0 / 15 / 42),
+while its engine speed still follows the wheels.
+
+**What is ruled out [V, static].**
+
+- Engine inertia: the original's only writer of car +0x17A0 (`A0CFED` in constructor `A0C9F0`)
+  copies property +0x1DC, as the port does.
+- The rest of the default setup `9C32F0`, which F077 left outside its comparison: gear ratios
+  (items 13–20), brake split (21), drive split (22, AWD only), differential (23–26), +0x1F04 (27,
+  with +0xE10 = ((+0x1F04 / +0xFD0) × 0.2 + 0.8) × +0xFC4, an identity at the default), camber/toe
+  (0–3). For the Lacetti (differential "full", front drive) every default value lies inside its
+  CSV range, so the setup reproduces the port's current values. `9AE8F0` (preload) and `9AD6B0`
+  (shift thresholds) are already covered.
+- The port is in coupling mode 1 (+0x1598 = 1), idle flag +0x1640 = 0 and clutch +E34 = 0
+  throughout braking; the original's +E34 is also 0.
+
+[I] The remaining candidates are the original's clutch/coupling state during braking (car
++0x1598, +0x1640, force-view +0x294), which no capture has yet. The sampler and the replay probe
+now record car +0x1560..+0x165F and +0x17A0..+0x17AF, so the next live run answers it directly.
+No port change is made without that evidence.
+
+**Drift Battle fall-through [V].** With the default setup, the autopiloted BMW slides along the
+Long Beach hairpin wall, passes the boundary line at z ≈ −239.4 (sheet triangles 138/143/161,
+`boundarylines.cqtc`) with **no body contacts**, then reverses past the end of the track mesh
+(collision ends in a straight edge at z ≈ −241.9, ground y = 2.50) and falls. The player's
+track had no boundary sheet: `race_app_with` (grid-app race tests) loaded the player runtime
+without `prepare_body_geometry`, so in these tests only the player lacked the boundary sheet,
+deformation and dynamic props, while the app (main.rs) prepares all three. The shared world
+ticks that runtime as car 0, so the test player could pass invisible walls. Fixed in the test
+helper. With the fix, the Drift Battle tests pass with the setup applied. The setup itself stays
+unwired because it does not shrink the braking gap.
+
+One test depended on the gap: `a_handbrake_turn_in_the_bmw_scores_drift_points` held full
+throttle to tick 900, which only worked because the player drove through the boundary wall
+(slide 27°, 139 points). With the wall, the BMW meets it at ~59 m/s around tick 800 and is
+wrecked; a wrecked car stops ticking and the test's loops waited forever. The test now starts the
+turn at tick 600, fails instead of hanging when ticks stop, and asserts the detected slide and
+the counted drift. From 108 mph this open-loop turn always ends in a spin (tried start ticks
+350–700, handbrake 5–40 ticks, with and without counter-steer), so it banks no points; banked
+scores remain covered by the autopiloted Drift Battle tests.
+
 ## Next
 
-1. Done in F381 (runs 3 and 4 above). For further runs, the same steps:
-   1. Snapshot Documents\Codemasters\GRID (19 files, hashes) as in F371.
-   2. Start C:\Users\debros\Tools\grid-research\grid-compat\grid.exe; Race Day, Touring Cars,
+1. One live run of about 5 minutes (when the owner allows): the same steps as F381, with the
+   extended capture (car +0x1560..+0x165F, +0x17A0):
+   1. Snapshot `Documents\Codemasters\GRID` (19 files, hashes) as in F371.
+   2. Start `C:\Users\debros\Tools\grid-research\grid-compat\grid.exe`; Race Day, Touring Cars,
       Lacetti, Donington GP, Normal, grid Back, TC on, Automatic, SC on, **Braking Assist on**.
-   3. When the race starts, pause; 	ools/find_reference_vehicle_manager.ps1 -ScanLimitBytes 256MiB
-      gives the car address.
-   4. Start python -I tools/capture_grid_braking.py SESSION.json CAR 25 local/driving/braking-DATE/run03-ba-on-engine.tsv
-      in the background (it now records the +0x1840 engine block).
-   5. 	ools/run_grid_macro.ps1 -Action brake_test -HoldMs 1500 -SessionJson ... (6 s throttle,
+   3. When the race starts, pause; `tools/find_reference_vehicle_manager.ps1 -ScanLimitBytes 256MiB`
+      gives the car address (manager index 0).
+   4. Start `python -I tools/capture_grid_braking.py SESSION.json CAR 16 local/driving/braking-DATE/run05-ba-on.tsv`
+      in the background.
+   5. `tools/run_grid_macro.ps1 -Action brake_test -HoldMs 1500 -SessionJson ...` (6 s throttle,
       5 s brake).
    6. Close the game with WM_CLOSE, restore the 19 files, verify the hashes.
-   7. Offline: nalyze_braking.py run03… --drivetrain against
-      local/driving/setup-F372/nosetup-ba-on.tsv; compare RPM and front force per gear.
-2. Trace car +0x1898 and wheel +0x110 in the original propulsion step and fix the front-axle\n   coupling.
-3. Find why the Drift Battle car falls through the world at the Long Beach hairpin with the
-   setup, then wire the setup (kept patch) with the re-baselined wall test.
-4. Repeat runs for repeatability and at a second onset speed; compare idle +E34 from rest.
+   7. Offline: compare +0x1598, +0x1640 and +0x17A0 during braking with the port's
+      (`local/driving/braking-20261018b/port/f403-ba-on.tsv` columns 10–11: mode 1, flag 0, inertia 0.22).
+2. Then port the original's coupling during braking and rerun the replays.
+3. Wire the default setup (`setup-wiring-v3.patch`, with the wall-test re-baseline from v2) once
+   the braking gap shrinks.
+4. Repeat runs at a second onset speed; compare idle +E34 from rest.

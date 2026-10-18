@@ -154,8 +154,8 @@ Release, cargo/rustc 1.99.0, against a baseline build of fb32d54 (temporary work
 
 ## 7. Open
 
-- Seeds 21..24 into the default quick set once 5.1 and 5.2 are fixed.
-- 12-car first-corner pile-up (section 4): live comparison.
+- ~~Seeds 21..24 into the default quick set once 5.1 and 5.2 are fixed.~~ Done in F402: both losses are counted as expected losses (the original's geometry presses them down at spawn; docs/ROBUSTNESS_RESEARCH.md), and `QUICK_SEEDS` is 1..24.
+- 12-car first-corner pile-up (section 4): live comparison. F402 traced the mechanism (pinned left car of each grid row, alongside contact) and measured a port of three missing alongside branches; it was not adopted (docs/ROBUSTNESS_RESEARCH.md sections 4 and 6).
 - Jarama route 0 (the other direction): AI late braking at the gate 85/88 brake-line pair (F304).
 - Spa: the three reader blockers of LONG_BEACH.md section 1.
 - The flat grey road (46 unresolved track batches) and the two unplaced brake-board renderables.

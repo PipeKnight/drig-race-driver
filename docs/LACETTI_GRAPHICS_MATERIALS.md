@@ -50,7 +50,7 @@ Selected paint shader algebra gives a useful next hypothesis: with packed sample
 Uniform trace caution: read-only decompile0x9e7360 writes SpecularValues/MetallicSpecularValues, but its context includes a35material selection index, cached per-material values and conditional override flags. It must not be treated as the unconditionally active clean-car property loader. A separate0x9cb280 tree-walk candidate writes OcclusionMapScale from offset0x1c; the equal offset in an independently inferred state object is not sufficient to prove shared object layout or production defaults. The first string query assumed several labels existed in the PE and asserted; corrected query records missing names rather than inferring them. Continue tracing the actual production binding/group expressions before enabling a packed-map material change. Private paint-uniform-ghidra01 and paint-property-readrefs02.json.
 
 
-## Ambient-only paint occlusion pilot — implementation draft
+## Ambient-only paint occlusion pilot — initial draft (historical)
 
 `--body-occlusion source-ambient|off` is a new opt-in enhanced-render experiment; off remains the default and no launcher selects it. It reads each car's own BC3 main_m1 mask, copies raw green to grayscale opaque BGRA8 while retaining every stored mip, and uploads as linear data through texture_upload::image_linear after device selection. The supported bounded format deliberately rejects malformed/trailing/unsupported masks before staging any output. Source packed maps remain byte-identical; RGB/alpha dust/specular information is not repurposed or overwritten.
 
@@ -110,7 +110,7 @@ Actual purchased `lac_gen_high.pssg` contains matching1024² `lac_main_nm.tga` B
 Private `paint-general-bank-inventory01.json`, `paint-general-bank-resolution01.json`, `paint-general-texture-binding-table01.json`, `paint-general-table-caller01.json`, `paint-general-bindings-code01.txt` and read-only `paint-general-bindings-ghidra01` preserve precise hashes and linkage. General high SHA8bf605b1.../low87ba56a8...; no assets or derived original code published. The renderer still does not apply these damage-controlled normals/scratches globally to an intact car. Next unresolved material step is production scalar-to-float4 packing, followed by an optional matched specular experiment; normal/scratch strength must retain the original per-vertex damage controls and the engine agent's damage-update contract.
 
 
-### Base-specular alpha pilot (draft, default off)
+### Base-specular alpha pilot (initial draft; CLI default off)
 
 Build with optional grid-app feature `paint-specular`; the ordinary/phone feature set remains unchanged. `--body-specular source-base` stages each car's own packed alpha, preserves all authored mip levels, encodes sqrt(A) into an otherwise white linear BGRA image's alpha, and sets the base reflectance scalar1.0 to compensate Bevy's half factor. This authors pointwise dielectric F0=.04*A; coat, roughness, albedo and glass are unchanged. `white-control` supplies white alpha through the same GPU path to test compensation against feature-off. No launchers enable the draft and no claim of GPU/appearance acceptance is made yet.
 
@@ -129,3 +129,12 @@ Native4K off/white/source/forcedRGBA captures03 pass nonblank checks and synchro
 Source mask uploads linearBgra8Unorm11mips; forcedRGBA0BC, full-image meanabs0.088979byte/max150 versus BC, not pixel parity or phone validation.30unique virtual30FPSframes/1200ticks pass, per-car own masks logged;4exitrecords equal1dcontrol. New native4K6500tick run completes valid89.955257484second lap and4exitrecords equal31e74bfullcontrol. This is new pilot full-lap evidence; first/last moving and final full-lap images inspected. Private paint-specular-static-validation03.json/motion-validation01.json/full4k01-validation.json. The first blackoff01 is retained as a rejected startup capture; warm successful repeats do not prove an unprimed-driver-cache fix.
 
 Dedicated graphics launcher will select source-base after this acceptance, with third argument `no-body-specular` for comparison. It omits the option entirely if the selected executable lacks the optional build feature; global CLI and phone defaults remain off. Actual extracted CMD capability block passes four old/new/comparison cases. Owner installation remains the earlier verified1dbuild until fresh peer-source integration/new promotion is complete.
+
+
+### Combined F401 delivery and current scope
+
+Installed desktop graphics source6aec3a9/SHAddf26b5b874c... after670feature-workspace tests, feature/default Clippy, canonical solo identity,20/20quicksoak and repeated native/moving/full-lap acceptance. Source-selected numbers, green ambient mask and alpha base-specular adaptation are selected by the graphics launcher when its executable supports them; global CLI and phone/default Cargo features remain off. Third argument `no-body-specular` disables the new mask for comparison. Older executables omit unsupported flags automatically. The current installed revision/hash is recorded separately in ignored graphics-current-build.json; merged source can be newer than that executable.
+
+All four native4K modes04 equal the accepted e19mode images byte-for-byte after F401 integration. Thirty-frame motion and new6500tick full lap preserve4physical exits; lap89.955257484s. Moving1024probe+source masks+HUD passes30frames/physical identity/two HDRreadbacks;8Kbody+numbers+bothmasks+forcedRGBA0BC passes native4K, sourceDDS unchanged. First/last/full-lap/8K frames inspected; no claim of phone rendering, calibrated reflection radiometry or exact original lighting.
+
+F402–F404input/Android/robustness sources are being retained after desktop promotion; the installed Windows binary is the verifiedF401snapshot, not relabelled as those later changes. Static normals cannot be restored by an all-on draw shortcut: the179enabled paint vertices share the spoiler draw with822disabled vertices; every other paint draw lacks an all-enabled mask. Future source normals need an interpolated dedicated control plus the damage-update contract. Keep original vertex colours separate from albedo.

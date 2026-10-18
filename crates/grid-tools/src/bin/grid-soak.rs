@@ -218,6 +218,9 @@ struct Outcome {
     verified_poses: usize,
     /// World bodies (Markdown rows) at the first failure.
     bodies: Vec<String>,
+    /// Bodies lost after the original's geometry pressed them down at their
+    /// spawn pose: reported, not failed (docs/ROBUSTNESS_RESEARCH.md).
+    expected: Vec<grid_tools::soak::ExpectedLoss>,
 }
 
 fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
@@ -308,6 +311,7 @@ impl Run<'_> {
             divergence: None,
             verified_poses: 0,
             bodies: Vec::new(),
+            expected: Vec::new(),
         };
         let mut history: VecDeque<Sample> = VecDeque::with_capacity(HISTORY);
         let mut inputs = self.out.as_ref().and_then(|out| {
@@ -526,6 +530,7 @@ impl Run<'_> {
             }
             outcome.ticks = session.total_ticks;
             outcome.auto_resets = session.auto_resets;
+            outcome.expected = session.expected_losses.borrow().clone();
             outcome.digest = digest(&session);
             Ok(())
         }));
@@ -632,10 +637,25 @@ impl Run<'_> {
     }
 }
 
+/// One `soak_expected_loss` line per expected loss, then the result line.
 fn result_line(scenario: &Scenario, outcome: &Outcome) -> String {
     let failure = outcome.failures.first();
-    format!(
-        "soak_result seed={} status={} kind={} tick={} ticks={} resets={} auto_resets={} breaks={} max_bodies={} seconds={:.1} digest={:016x} cars={} route={} error={}",
+    let mut lines = String::new();
+    for l in &outcome.expected {
+        lines += &format!(
+            "soak_expected_loss seed={} segment={} tick={} body={} at={:.1},{:.1},{:.1} pressed_by={:?}\n",
+            scenario.seed,
+            l.segment,
+            l.tick,
+            l.body,
+            l.position[0],
+            l.position[1],
+            l.position[2],
+            l.pressed
+        );
+    }
+    lines + &format!(
+        "soak_result seed={} status={} kind={} tick={} ticks={} resets={} auto_resets={} expected_losses={} breaks={} max_bodies={} seconds={:.1} digest={:016x} cars={} route={} error={}",
         scenario.seed,
         if failure.is_some() { "fail" } else { "pass" },
         failure.map_or("-", |f| f.kind.name()),
@@ -643,6 +663,7 @@ fn result_line(scenario: &Scenario, outcome: &Outcome) -> String {
         outcome.ticks,
         outcome.resets,
         outcome.auto_resets,
+        outcome.expected.len(),
         outcome.breaks,
         outcome.max_bodies,
         outcome.seconds,
@@ -818,6 +839,7 @@ struct Row {
     error: String,
     digest: String,
     auto_resets: u64,
+    expected_losses: u64,
 }
 
 fn parse_result(scenario: &Scenario, line: &str) -> Row {
@@ -842,6 +864,7 @@ fn parse_result(scenario: &Scenario, line: &str) -> Row {
             .map_or_else(String::new, |(_, e)| e.to_string()),
         digest: field("digest").into(),
         auto_resets: num("auto_resets"),
+        expected_losses: num("expected_losses"),
     }
 }
 
@@ -859,6 +882,20 @@ fn write_summary(out: &Path, name: &str, rows: &[Row], started: Instant) -> Resu
     )?;
     let auto_resets: u64 = rows.iter().map(|r| r.auto_resets).sum();
     writeln!(f, "Player auto-resets onto the line (F341): {auto_resets}.\n")?;
+    let expected: Vec<String> = rows
+        .iter()
+        .filter(|r| r.expected_losses > 0)
+        .map(|r| format!("seed {} ({})", r.scenario.seed, r.expected_losses))
+        .collect();
+    writeln!(
+        f,
+        "Expected losses (bodies the original's geometry presses down at their spawn pose, docs/ROBUSTNESS_RESEARCH.md): {}.\n",
+        if expected.is_empty() {
+            "none".to_string()
+        } else {
+            expected.join(", ")
+        }
+    )?;
     let mut groups: BTreeMap<String, Vec<&Row>> = BTreeMap::new();
     for r in rows.iter().filter(|r| r.status != "pass") {
         let kind = Kind::parse(&r.kind).unwrap_or(Kind::Crash);
@@ -1134,11 +1171,12 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
                             error,
                             digest: "-".into(),
                             auto_resets: 0,
+                            expected_losses: 0,
                         }
                     }
                 };
                 println!(
-                    "soak_done seed={} cars={} route={} {} {} tick={} ticks={} breaks={} max_bodies={} {:.0}s {}",
+                    "soak_done seed={} cars={} route={} {} {} tick={} ticks={} breaks={} max_bodies={} expected_losses={} {:.0}s {}",
                     row.scenario.seed,
                     row.scenario.cars,
                     row.scenario.route.split('/').nth(2).unwrap_or(""),
@@ -1148,6 +1186,7 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
                     row.ticks,
                     row.breaks,
                     row.max_bodies,
+                    row.expected_losses,
                     row.seconds,
                     row.error
                 );

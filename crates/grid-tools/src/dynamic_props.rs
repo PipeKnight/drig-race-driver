@@ -546,6 +546,53 @@ impl PieceSpec {
     }
 }
 
+/// [`PropWorld::pressed_down_at_spawn`] for one spec at its spawn pose;
+/// `own` are the intact boxes of the piece's own breakable.
+fn spawn_pressed(
+    spec: &PieceSpec,
+    own: &[usize],
+    track: &Track,
+    surfaces: &Surfaces,
+    directions: &convex_distance::ContactSettings,
+) -> Result<Option<Pressed>, Error> {
+    let query = convex_distance::ContactSettings {
+        margin: spec.shell,
+        directions: directions.directions,
+    };
+    let boxes = track.props().map(|p| &p.boxes);
+    let hits = track.body_contacts(
+        &spec.hull,
+        spec.pose,
+        &query,
+        TRACK_CONTACTS,
+        grid_world::MAX_WORLD_CONTACTS,
+        |code| surfaces.sheet(code),
+    )?;
+    let down = |h: &&crate::track::BodyContact| h.contact.normal[1] < -0.5;
+    if hits.iter().filter(down).any(|h| h.prop.is_none()) {
+        return Ok(Some(Pressed::Road));
+    }
+    Ok(hits
+        .iter()
+        .filter(down)
+        .any(|h| {
+            h.prop.is_some_and(|i| {
+                !own.contains(&i) && boxes.is_some_and(|b| b[i].entity.is_some())
+            })
+        })
+        .then_some(Pressed::EntityBox))
+}
+
+/// What presses a body down at its spawn pose
+/// ([`PropWorld::pressed_down_at_spawn`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pressed {
+    /// A road chunk triangle or the boundary sheet.
+    Road,
+    /// A route entity box (armco, tyre wall, another stack).
+    EntityBox,
+}
+
 /// A wheel a car lost (car +22E4 + `wheel`) as a dynamic body.
 #[derive(Clone)]
 pub struct LooseWheel {
@@ -1221,6 +1268,34 @@ impl PropWorld {
         Ok(())
     }
 
+    /// What presses world body `body` (a piece or a lost wheel) down at its
+    /// spawn pose, if anything: a contact with a downward normal from the
+    /// original's static geometry, a road chunk or the boundary sheet
+    /// (`Pressed::Road`) or an entity box other than the piece's own intact
+    /// boxes (`Pressed::EntityBox`). Authored ornament stand-ins do not
+    /// count. The original spawns pieces at the raw placement (0x7D3C40, no
+    /// ground snap) and orients a non-sheet triangle's normal by the shape
+    /// origin (AEA1F0/AEE640), so such a body is pushed under in the original
+    /// too [I] (docs/ROBUSTNESS_RESEARCH.md). Diagnostics only (grid-soak).
+    pub fn pressed_down_at_spawn(
+        &self,
+        body: usize,
+        track: &Track,
+        surfaces: &Surfaces,
+        directions: &convex_distance::ContactSettings,
+    ) -> Result<Option<Pressed>, Error> {
+        let (spec, own): (&PieceSpec, &[usize]) =
+            if let Some(p) = self.pieces.iter().find(|p| p.body == body) {
+                let entry = &self.catalog.breakables[p.breakable];
+                (&entry.pieces[p.spec], &entry.intact)
+            } else if let Some(w) = self.wheels.iter().find(|w| w.body == body) {
+                (&w.spec, &[])
+            } else {
+                return Ok(None);
+            };
+        spawn_pressed(spec, own, track, surfaces, directions)
+    }
+
     /// Piece world poses for presentation: (breakable, piece, pose).
     pub fn poses(&self, bodies: &[contact_groups::Body]) -> Vec<(usize, usize, Matrix)> {
         self.pieces
@@ -1668,6 +1743,47 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires GRID_GAME_ROOT and GRID_CONTACT_DIRECTIONS"]
+    fn only_sunk_tyre_stacks_spawn_pieces_pressed_down_by_the_road() {
+        // Jarama soak seed 24 (F361): tyrestack_yell_double entity 1297 is
+        // authored 0.27 m into the rising verge, and its bottom tyre (piece
+        // 14, body 90 in the replay) starts with its centre 3 cm below the
+        // road. The road triangles press it down at its spawn pose
+        // (docs/ROBUSTNESS_RESEARCH.md); grid-soak counts such a loss as
+        // expected. No piece on the other circuits is pressed by the road.
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        for path in crate::route::CIRCUITS {
+            let route = Route::new(path).unwrap();
+            let mut runtime =
+                crate::source_vehicle::Runtime::lacetti_on(root, &route, "slot_00", 200679)
+                    .unwrap();
+            let geometry = runtime.prepare_body_geometry(root, &table).unwrap();
+            let track = runtime.track();
+            let catalog = Catalog::read(root, &route, track.props().unwrap()).unwrap();
+            let mut road = Vec::new();
+            for b in &catalog.breakables {
+                for (k, p) in b.pieces.iter().enumerate() {
+                    let pressed =
+                        spawn_pressed(p, &b.intact, track, runtime.surfaces(), geometry.query())
+                            .unwrap();
+                    if pressed == Some(Pressed::Road) {
+                        road.push((b.entity, k, b.template.clone()));
+                    }
+                }
+            }
+            println!("{path}: {} pieces pressed down by the road", road.len());
+            if path == crate::route::JARAMA {
+                assert!(road.contains(&(1297, 14, "tyrestack_yell_double.max".into())));
+                assert!(road.iter().all(|r| r.2.starts_with("tyrestack_")), "{road:?}");
+            } else if path != crate::route::NURBURGRING {
+                assert!(road.is_empty(), "{path}: {road:?}");
+            }
+        }
+    }
+
+    #[test]
     fn a_piece_lost_below_the_world_is_held_until_reset() {
         let mut world = PropWorld::new(Catalog::default());
         world.pieces = (0..2)
@@ -1762,3 +1878,4 @@ mod tests {
         assert_eq!(f(&body, 0x3b4), f32::MAX);
     }
 }
+

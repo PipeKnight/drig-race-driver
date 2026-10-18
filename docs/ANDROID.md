@@ -87,7 +87,7 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 ### What does not work yet
 
 - **Controls (P11):** tilt steering with on-screen pedals and buttons; see "Controls" below. Not yet tried on a phone. A Bluetooth keyboard may also work through GameActivity, but this is untested.
-- **Gamepads:** not available on Android. Bevy's gamepad input comes from gilrs, and gilrs-core 0.6.8 has no Android backend (`src/platform` has linux, macos, wasm and windows only; other targets get a dummy). Android delivers pad buttons and sticks as KeyEvent/MotionEvent through GameActivity, but winit 0.30.13 maps pad buttons to `Key::Unidentified` ("Gamepad events should be exposed through a separate API", `platform_impl/android/keycodes.rs`) and does not forward joystick axes. A pad needs a bridge from android-activity's input events into the P1 input layer, which is input code (P11's "optional Android pad bridge"), so it was not done here. A Bluetooth keyboard may work through winit, but this is untested.
+- **Gamepads (P11b):** code since F404, see "Gamepads" below; not yet tried on a phone. A Bluetooth keyboard may work through winit, but this is untested.
 - **Data without the bundled APK:** the code-only APK needs the data placed by adb (below). Android 11+ blocks phone file managers from `Android/data`; copying from Windows Explorer over USB (MTP) into it works on many phones but is not guaranteed [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). **P10** (folder picker) would remove the PC step without bundling.
 - **Not measured yet:** frame rate (the counter below now shows it), thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
 
@@ -181,6 +181,25 @@ The tilt dead zone and saturation are those of the steering bindings: biLower/bi
 **Desktop.** `[input] touch = on` shows the zones on the desktop too (Bevy touch events, e.g. a touch monitor); there is no tilt sensor there. With the default `touch = auto` nothing changes on the desktop.
 
 **Not tested on a phone** (no device was connected): the sensor sign and the landscape inference, the zone sizes under real thumbs, the UI scale, multi-touch throttle + brake, the pause menu by touch, and whether GameActivity delivers touches to Bevy as expected.
+
+## Gamepads (P11b, F404)
+
+Bluetooth and USB pads (Xbox, DualSense, other HID pads Android classifies as gamepads) drive through the same original XInput pad preset as on the desktop (`ActionMap/actionMapPreset4.xml`, input.rs): steering on the left stick, triggers for throttle and brake, the preset's buttons for gears, view, pause and the menus. Pause, Race Options (with Video, Driver Aids and Performance test), the post-race screens and replays all read the same Menu/Replay actions, so they work with the pad without screen-specific code.
+
+**Why a bridge.** Bevy's gamepads come from gilrs, and gilrs-core 0.6.8 has no Android backend: the log line `bevy_gilrs: Failed to start Gilrs. Gilrs does not support current platform` is expected and harmless. winit 0.30.13 drains GameActivity's input itself (`platform_impl/android/mod.rs`): it turns a joystick's ACTION_MOVE into a fake `Touch` at the stick's AXIS_X/Y (near the top-left corner), drops every other axis, and maps pad buttons to unidentified keys [V code].
+
+**Path.**
+1. `PadBridge.java` (owned by `MainActivity`) overrides `dispatchKeyEvent` and `dispatchGenericMotionEvent`, which run before GameActivity's own handlers. Events from a device whose sources include `SOURCE_GAMEPAD` or `SOURCE_JOYSTICK` (and that is not virtual) are taken and never reach GameActivity, winit or Android's synthetic DPAD/BACK fallbacks. So a pad's B or Back button does not close the game.
+2. Connections come from `InputManager.InputDeviceListener` and the device list at `onStart`, for devices that also have an A button or an X/Y stick (AUTHORED guard, so a built-in device that only lists a gamepad source cannot hide the touch zones); any other pad device is connected on its first pad event; `onStop` releases every pad (no input arrives in the background), `onStart` announces them again.
+3. Axes sent per sample: left stick AXIS_X/Y; right stick AXIS_Z/RZ; triggers max(LTRIGGER, BRAKE) and max(RTRIGGER, GAS); hat X/Y. A pad with RX/RY but no trigger axes (no Android key layout file, Linux XInput layout) gets right stick RX/RY and triggers Z/RZ mapped from -1..1 to 0..1 (AUTHORED heuristic).
+4. `android_pad.rs` (JNI natives `Java_org_reassembly_grid_PadBridge_*`) queues the events; a `PreUpdate` system before Bevy's `InputSystems` turns them into `GamepadConnectionEvent` and raw button/axis events, like bevy_gilrs. Keys: A/B/X/Y → South/East/West/North, L1/R1 → LeftTrigger/RightTrigger, L2/R2 → LeftTrigger2/RightTrigger2 (OR'ed with the analogue triggers), THUMBL/R, START, SELECT and a pad's BACK → Select, MODE, DPAD keys (OR'ed with the hat). Stick Y is negated to Bevy's up-positive convention; input.rs flips it back for the preset as on the desktop.
+5. Entities get `input::ClassifiedPad`: with `device=auto` Android's own classification replaces the desktop name test ("8BitDo Pro 2" would fail "pad"/"controller"), keeping only the wheel guard (wheel makers' vendor ids, "wheel"/"racing"/"pedal"/... in the name).
+
+**Pad takes over from touch.** With `[input] device = auto` (the default) and the phone controls on, a connected accepted pad hides every touch zone and the tilt bar, ignores touches, and silences tilt (`Mobile::tilt_raw` is `None`). On disconnect they come back; fingers down at either change are ignored until lifted. `device = pad` or `keyboard` keeps the zones (no takeover). Log lines: `drive_input_pad android_device=ID entity=... name=... vendor=... product=...` on connect, `drive_input_pad connected=... preset4=used|ignored(...)` from input.rs, `drive_input_pad takeover=on|off`, `drive_input_pad android_device=ID disconnected`.
+
+**Not covered:** rumble (the original drives XInput motors; Android's `Vibrator` per `InputDevice` would be needed), pad-specific glyphs in help texts, more than one player, the DualSense touchpad and motion sensors (separate input devices, not pads). Desktop gamepads are unchanged (gilrs; `ClassifiedPad` is never set there).
+
+**Checks [V]:** mapping unit tests (`android_pad::tests`, desktop), wheel guard test, tilt silenced while a pad holds; `cargo ndk … clippy --release --lib -p grid-app -- -D warnings` clean; Java compiles in the APK build. [N] Not tried with a real pad on a phone.
 
 ## Game data on the phone (development path; P10 replaces it)
 

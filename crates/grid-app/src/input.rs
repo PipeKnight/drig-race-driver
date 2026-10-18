@@ -636,6 +636,28 @@ pub struct PlayerPad;
 /// USB ids: a device is taken for a pad when its name says so and neither
 /// the name nor a wheel maker's vendor id says wheel.
 pub fn recognised(name: &str, vendor: Option<u16>) -> Result<(), &'static str> {
+    not_a_wheel(name, vendor)?;
+    let name = name.to_ascii_lowercase();
+    if ["xbox", "xinput", "controller", "gamepad", "pad"]
+        .iter()
+        .any(|w| name.contains(w))
+    {
+        Ok(())
+    } else {
+        Err("unrecognised-name")
+    }
+}
+
+/// Marks a gamepad the platform itself classified as a pad (Android's
+/// SOURCE_GAMEPAD, android_pad.rs). Only the wheel half of [`recognised`]
+/// applies, since pad names such as "8BitDo Pro 2" need not say "pad".
+/// AUTHORED.
+#[derive(Component)]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub struct ClassifiedPad;
+
+/// The wheel half of [`recognised`].
+pub fn not_a_wheel(name: &str, vendor: Option<u16>) -> Result<(), &'static str> {
     // Fanatec, Thrustmaster, Moza [I: public USB vendor ids].
     if matches!(vendor, Some(0x0eb7 | 0x044f | 0x346e)) {
         return Err("wheel-vendor");
@@ -656,14 +678,7 @@ pub fn recognised(name: &str, vendor: Option<u16>) -> Result<(), &'static str> {
     {
         return Err("wheel-or-joystick-name");
     }
-    if ["xbox", "xinput", "controller", "gamepad", "pad"]
-        .iter()
-        .any(|w| name.contains(w))
-    {
-        Ok(())
-    } else {
-        Err("unrecognised-name")
-    }
+    Ok(())
 }
 
 /// `PreUpdate`, after Bevy's input systems: sample every device once per
@@ -705,16 +720,25 @@ fn passthrough() -> GamepadSettings {
     }
 }
 
+type NewPad = (
+    Entity,
+    &'static Gamepad,
+    Option<&'static Name>,
+    &'static mut GamepadSettings,
+    Has<ClassifiedPad>,
+);
+
 fn connect_pads(
     mut commands: Commands,
     actions: Res<Actions>,
-    mut pads: Query<(Entity, &Gamepad, Option<&Name>, &mut GamepadSettings), Added<Gamepad>>,
+    mut pads: Query<NewPad, Added<Gamepad>>,
 ) {
-    for (entity, pad, name, mut settings) in &mut pads {
+    for (entity, pad, name, mut settings, classified) in &mut pads {
         *settings = passthrough();
         let name = name.map(Name::as_str).unwrap_or("");
         let accepted = match actions.pads {
             Pads::Off => Err("device-keyboard"),
+            Pads::Recognised if classified => not_a_wheel(name, pad.vendor_id()),
             Pads::Recognised => recognised(name, pad.vendor_id()),
             Pads::Any => Ok(()),
         };
@@ -1441,6 +1465,12 @@ mod tests {
         assert!(recognised("T-Rudder pedals", None).is_err());
         assert!(recognised("HID-compliant game controller joystick", None).is_err());
         assert!(recognised("Unknown device", None).is_err());
+        // A pad Android classified keeps only the wheel guard.
+        assert!(recognised("8BitDo Pro 2", Some(0x2dc8)).is_err());
+        assert!(not_a_wheel("8BitDo Pro 2", Some(0x2dc8)).is_ok());
+        assert!(not_a_wheel("DualSense Wireless Controller", Some(0x054c)).is_ok());
+        assert!(not_a_wheel("Thrustmaster T300RS Racing wheel", Some(0x044f)).is_err());
+        assert!(not_a_wheel("Logitech G29 Driving Force Racing Wheel", Some(0x046d)).is_err());
     }
 
     #[test]

@@ -3,8 +3,9 @@
 //! every tick, the same vehicle regions the original capture reads
 //! (`tools/capture_grid_braking.py`): +0xE00 (0x100), +0x1140 (0x80), +0x1550
 //! (0x10), +0x1960 (0x30), the wheel blocks +0x1990 (4 x 0x150), then the
-//! pose (16 floats), velocity (4 floats) and the engine/drivetrain block
-//! +0x1840 (0x120).
+//! pose (16 floats), velocity (4 floats), the engine/drivetrain block
+//! +0x1840 (0x120), +0x1560 (0x100: coupling mode +0x1598, flag +0x1640)
+//! and +0x17A0 (0x10: engine inertia).
 //!
 //! `grid-braking-replay ROOT SLOT ASSISTS SCHEDULE.tsv local/OUT.tsv`
 //! SCHEDULE rows: `throttle brake steering` per tick (blank lines and `#`
@@ -53,7 +54,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let v = r.velocity();
         writeln!(
             out,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             r.ticks,
             region(0xe00, 0x100),
             region(0x1140, 0x80),
@@ -63,6 +64,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             pose.map(|x| x.to_string()).join(","),
             v.map(|x| x.to_string()).join(","),
             region(0x1840, 0x120),
+            region(0x1560, 0x100),
+            region(0x17a0, 0x10),
         )?;
     }
     Ok(())

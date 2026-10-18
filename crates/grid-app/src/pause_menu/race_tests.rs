@@ -42,6 +42,17 @@ pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: 
         grid_tools::source_vehicle::Runtime::load(root, &route, &car, &slots[0], 200679).unwrap();
     runtime.body_events = events;
     runtime.enable_lap_timing(root).unwrap();
+    // As the app (main.rs): the player's own track gets the boundary sheet,
+    // deformation and dynamic props. The shared world ticks this runtime as
+    // car 0, so without them the player alone could pass the boundary walls.
+    let mut geometry = runtime.prepare_body_geometry(root, &table).unwrap();
+    if let Some((limit, bulk)) = &deformation {
+        runtime.enable_deformation(root, &mut geometry).unwrap();
+        runtime
+            .register_deformation_callbacks(*limit, bulk.clone(), 1)
+            .unwrap();
+    }
+    runtime.enable_dynamic_props(root).unwrap();
     let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::load_deforming_on(
         root,
         &route,
@@ -125,7 +136,7 @@ pub(crate) fn race_app_with(route: &str, models: &[&str], laps: u32, autopilot: 
         .insert_resource(trial)
         .insert_resource(Driving {
             runtime,
-            geometry: None,
+            geometry: Some(geometry),
             paused: false,
             failure: None,
             notices: Vec::new(),
@@ -618,11 +629,23 @@ fn a_handbrake_turn_in_the_bmw_scores_drift_points() {
         app.insert_resource(DriftEvent::battle(settings, Vec::new(), OPPONENTS + 1, 2, 1))
             .add_systems(Update, crate::drift_event::tick.after(crate::drive_tick));
         let entry = |app: &App| app.world().resource::<DriftEvent>().entries[0].clone();
+        // A wrecked car stops ticking: fail instead of waiting forever.
+        let step = |app: &mut App| {
+            for _ in 0..1000 {
+                let before = ticks(app);
+                app.update();
+                if ticks(app) != before {
+                    return;
+                }
+            }
+            panic!("{:?}", app.world().resource::<Driving>().failure);
+        };
         // Flat out after the countdown, then a handbrake turn to the right
-        // held on the throttle.
+        // held on the throttle, before the first wall (about tick 800 flat
+        // out, now that the player has the boundary sheet as in the app).
         keys(&mut app).press(KeyCode::KeyW);
-        while ticks(&app) < 900 {
-            app.update();
+        while ticks(&app) < 600 {
+            step(&mut app);
         }
         let mut most = (0f32, 0f32, false);
         for (hold, keys_down) in [
@@ -637,7 +660,7 @@ fn a_handbrake_turn_in_the_bmw_scores_drift_points() {
             }
             let end = ticks(&app) + hold;
             while ticks(&app) < end {
-                app.update();
+                step(&mut app);
                 let e = entry(&app);
                 most = (
                     most.0.max(e.detector.angle),
@@ -652,6 +675,10 @@ fn a_handbrake_turn_in_the_bmw_scores_drift_points() {
             most.0, most.1, most.2, e.scorer.display, e.scorer.total, e.scorer.combo, e.scorer.rating, e.scorer.drifts
         );
         assert!(most.2, "the BMW slides past 15 degrees above 50 mph");
-        assert!(e.scorer.display > 0. || e.scorer.total > 0.);
+        // The scorer counts the slide. From 108 mph this open-loop turn ends
+        // in a spin, which banks nothing; banked drift scores are covered by
+        // the autopiloted Drift Battle tests. (Before F403 the player passed
+        // through the boundary wall here and slid out at 27 degrees.)
+        assert_eq!(e.scorer.drifts, 1);
     });
 }
