@@ -1,5 +1,36 @@
 # GRID engine project log
 
+F438 Orphaned cargo build dirs: 74 GiB freed; `tools/prune_build_dirs.ps1` keeps them from piling up again (2026-10-19, Claude Code coordinator; owner: "очень мало места на диске осталось… надо разобраться").
+
+Details: docs/DISK_USAGE.md section 9.
+
+Measured [V], read-only: C: had 56.5 GiB free. `C:\cargo-build` held 141.4 GiB:
+- 56.6 GiB in the build dirs of the 14 live checkouts: main, 10 session worktrees, `local/lemans/base-src`, and Codex's 2 worktrees;
+- 81.9 GiB in 22 dirs that no live checkout uses.
+
+Cause: since F328 the intermediate build lives in `C:\cargo-build\{workspace-path-hash}`. The archive routine removed `target/` and the worktree, but `git worktree remove` leaves the build dir behind. The same happens with temporary worktrees made for checks.
+
+Mapping: `cargo metadata --no-deps --offline` in each `git worktree list` entry reports its `build_directory`. Dep-info paths are relative, so they cannot identify the owner.
+
+New tool `tools/prune_build_dirs.ps1`:
+- dry run by default; `-Apply` deletes;
+- keeps an orphan whose newest file is younger than `-MinIdleHours` (default 6), and named dirs such as `seed` and `perf-android`;
+- `-ForWorktree <path>` removes one checkout's build dir; run it before `git worktree remove`.
+
+The dry run matched the manual mapping. `-Apply` deleted 20 orphans, 73.97 GiB, last changed between 16.10 15:00 and 18.10 15:22. Kept by the 6 h rule:
+- `21\038a71657892fc`, 3.80 GiB;
+- `7d\2d85bebf568e06`, 4.11 GiB.
+
+C: free went to 125.3 GiB. Three test builds were running in live worktrees during the deletion; their dirs were untouched.
+
+AGENTS.md now has the rule.
+
+Not done: the pre-move `%TEMP%\claude` session folders, about 7.4 GiB of task-output logs, Ghidra copies and `vd-target`, all dated 16.10 or earlier. The permission classifier refused deleting other sessions' scratch folders, so the owner decides.
+
+Not ours, untouched: NVIDIA DXCache 64.3 GiB (driver shader cache, growing since April); Google Play Games `userdata.img` (512 GiB logical, sparse, 0.66 GiB on disk); Codex worktrees 18.0 GiB.
+
+The original was not run; nothing installed; playable not rebuilt.
+
 F437 Fidelity backlog: every open discrepancy against the original in one table (2026-10-19, Claude Code; coordinator's fidelity-sweep task). Details: docs/FIDELITY_BACKLOG.md (87 rows: area, discrepancy, evidence, impact, needs, size, suggested owner session; top 10 by gameplay impact). Method: four read-only scans of PROJECT_LOG.md (F300–F433) and docs/ (A–F, G–R, S–Z) for [I], "not ported", AUTHORED, "remaining gap", open checks and residual soak failures, merged and de-duplicated by hand. Impact and size are judgements, not measurements. Rows closed in the same push: F434, F435, F436. Top 10: AI first-corner pile-ups (missing alongside parts); missing sounds and mono output; no career front end; no force feedback; flat grey road on non-Donington circuits; Demolition Derby AI without figure-of-eight avoidance; Drift Battle stand-in cars and weak AI drift; Le Mans 24 Hours; cockpit and camera dynamics; continuous collision only for pieces and wheels with the fixed 16 ms step. Checks [V], release, cargo/rustc 1.99.0, on 30d5b33 (F427) + the four changes: `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 720 passed, 0 failed; `cargo clippy --release --workspace --all-targets -- -D warnings` clean; identities solo 1ee81525…7267 and 12-car 012d4c0d…68f3 (unchanged); `grid-soak quick` 24/24. Evidence worktree kind-pike-df38cc `local/sweep/`. The original was not run; nothing installed; playable not rebuilt.
 
 F436 Reverse drift layouts as Drift Battle launch options (2026-10-19, Claude Code; fidelity sweep, DISCIPLINES §4.4). `settings/drift-battle-{long-beach,nurburgring,istanbul}-reverse.ini` (Long Beach route_4 longbeach_cl_r, Nürburgring route_3 nurburgring_spr_r, Istanbul route_3 istanbul_int_r; 2 laps, 7 BMWs, as the forward launchers) and `Play GRID Drift Battle * Reverse.cmd`. F367 had raced all three headless (load, lap, score). The event menu already offered them (Drift Battle pool [D] and surveyed tracks). Profiles checked by `shipped_profiles_parse`; not launched windowed.

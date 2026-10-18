@@ -28,6 +28,7 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
   - do not create separate debug/release/native copies of identical captures.
   Intermediate cargo output goes to `C:/cargo-build` through `~/.cargo/config.toml` `build-dir`. Final binaries stay in `target/`.
 - New worktree: before the first cargo command, run `powershell -NoProfile -File tools\seed_build_dir.ps1`. It copies the shared seed build (C:\cargo-build\seed) into this worktree's empty build dir, so dependencies such as Bevy do not rebuild. Measured: 107 s instead of 1607 s.
+- Build dirs outlive worktrees. Before any `git worktree remove`, including temporary worktrees made for checks, run `powershell -NoProfile -File tools\prune_build_dirs.ps1 -ForWorktree <path> -Apply`. The coordinator also runs `tools\prune_build_dirs.ps1 -Apply` regularly. It deletes build dirs that no live checkout uses (docs/DISK_USAGE.md section 9).
 - Check levels (docs/TOOLCHAIN.md, "Build and test cost"):
   - while working: tests of the changed package only (`cargo td -p CRATE`). One-off research probes live in `crates/grid-probes` and build only with `-p grid-probes` or `--workspace`;
   - before a push: `cargo t -- --include-ignored` with absolute GRID_* paths, `cargo clippy --workspace --all-targets -- -D warnings`, the solo-lap identity check and `grid-soak quick`, all in the release profile;
