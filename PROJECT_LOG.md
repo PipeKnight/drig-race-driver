@@ -1,5 +1,25 @@
 # GRID engine project log
 
+F395 Phone bisection tools: Performance test screen, on-device per-system profile APK, buffered Android log (2026-10-18, Claude Code; coordinator's request after F392 left the phone at about 30 FPS). Details: docs/PERFORMANCE.md "Phone bisection (F395)". Evidence: worktree focused-torvalds-7a0b54 `local/perf/measure/` (perftest-auto, sim-none/auto, profile-desktop), `local/perf/shots/`.
+- Phone logs [V] (owner, APK dca690b773e4, log-20261018-093253/-093621, kept privately): render 2308 × 1080, display_hz 120, mean 36 and 31 FPS. The front end with `sim_ticks_per_s=0.0` sits at 30.5 FPS with `max_ms` exactly 33.33, so the frame's work is real and not simulation; AutoNoVsync gave the same [I: probably a Fifo fallback]. The desktop cannot show the phone's cost.
+- Performance test (normal APK; `perf_test.rs`, AUTHORED diagnostics). Race Options gets a first item, Performance test, with live switches, never saved:
+  - Shadows: every mesh `NotShadowCaster`. Toggling `shadow_maps_enabled` at run time panics in Bevy 0.19.1's cascade lookup, so it is not used.
+  - Foliage (`source_trees::Facing`), Ground cover, Smoke/debris/skid marks.
+  - HUD: race HUD parts, the damage panel and the OSD camera.
+  - Sample logging: the periodic `drive_*_sample` tick reports.
+  - Whole scene: only the player's car is drawn.
+  - Auto cycle: normal → each part alone → all off → car only, 8 s each.
+  - Every `frame_stats` line carries `perf_test=…`; changes log `perf_test event=apply|step`. Desktop: `GRID_PERF_TEST=auto|shadows,…`.
+- Per-system profile (grid-app feature `profile` = bevy/trace + bevy/debug; `span_profile.rs` via `LogPlugin::custom_layer`): every 10 s (`GRID_PROFILE_SECONDS`) `profile_window`, `profile_thread` (in-span and work ms per frame per thread), the top 25 `profile_span` by exclusive ms and the top 12 `profile_schedule`. Separate APK: `tools/build_android.ps1 -BundleData -Profile` (`…-PRIVATE-profile-debug.apk`); the normal build has no spans. Checked on the desktop [V]: system names and render-thread times appear.
+- Android log: the Download log file is written through a 64 KiB `BufWriter`, flushed after 0.5 s and at once for error lines; it was one write per line, about 220 lines/s while driving.
+- Touched: front_end.rs (item first, so Go To Race stays default and last; one test updated, one added), fps_counter.rs (label suffix), race_hud `Part` and damage_hud `DamagePanel` now pub(crate), `TyreSmoke::mesh_handles`. P11 session told.
+- Checks [V], release, cargo/rustc 1.99.0, before the rebase onto F394: `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 656 passed, 0 failed; solo identity (no DF01) sha256 aad9a07a…e41b; `grid-soak quick` 20/20.
+- More checks [V]:
+  - Desktop clippy `-D warnings` clean; `cargo ndk … clippy --release --lib -p grid-app -- -D warnings` clean.
+  - After the rebase: clippy clean, grid-app tests 190 passed.
+  - A scripted 6,000-tick drive gives an identical exit state with the full auto cycle (12 steps, no panic) as without it.
+- APKs: see the next entry or the coordinator's report. Next: the owner runs both APKs and sends the logs; then decide from `profile_*` and the `perf_test` table.
+
 F394 P12: tyre-smoke groups streamed instead of replaced every frame; picture byte-identical; render thread unchanged within desktop noise (2026-10-18, Claude Code; follow-up of F392, started by the coordinator session). Details: docs/PERFORMANCE.md "Tyre-smoke streaming (F394)". Evidence: worktree objective-darwin-d70888 `local/f393/` (named before the renumbering).
 - Cause of F392's smoke difference [V]: Bevy 0.19 sorts blended meshes by the centre of the mesh *asset's* bounding box (`RenderMesh::aabb_center` → `TransparentSortingInfo3d::mesh_center`), not by the entity's `Aabb`. Padding at the origin moved each smoke group's centre and reordered the groups. The phase is retained, so a streamed asset would also keep a stale centre (entities are re-queued only on `AssetChanged<Mesh3d>`).
 - Change: `MeshStream::sort_centre` and a render system `resort` (PhaseSort, before `sort_phase_system::<Transparent3d>`) write the centre the unpadded mesh would have into the retained item. `tyre_smoke::draw` streams through `QuadMesh` and passes `Aabb::enclosing` of the drawn corners (origin when empty). New unit test `padding_moves_the_sort_centre_so_it_is_queued_separately`.
