@@ -434,6 +434,15 @@ pub fn update(
         );
         post.on_finish();
     }
+    // A disqualified player (Demolition Derby) goes to the results.
+    if driving.runtime.disqualified() && post.stage == Stage::Hidden {
+        log_line!(
+            "drive_post_race version=1 segment={} tick={} stage=results reason=disqualified",
+            driving.segment,
+            driving.runtime.ticks
+        );
+        post.on_retire();
+    }
     let wrecked = driving.runtime.terminal_wheel().is_some() && !finished;
     let before = post.stage;
     post.on_wreck(wrecked, if driving.paused { 0. } else { dt });
@@ -541,6 +550,7 @@ fn time_text(row: &Row, l: &dyn Fn(&'static str) -> String) -> String {
                 Out::Retired => l("RETIRED"),
                 Out::Wrecked => l("net_race_results_terminal_damage"),
                 Out::Stopped => "DNF".into(),
+                Out::Disqualified => l("net_race_results_disqualified"),
             };
             format!("{word} ({laps})")
         }

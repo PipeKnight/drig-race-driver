@@ -176,6 +176,25 @@ impl Runtime {
         let b = &self.state.car.owner.vehicle;
         matches!(b[0xd234 / 4], 3 | 4).then_some((b[0xd238 / 4] & 255) as usize)
     }
+    /// Disqualify the car: 0x9E64E0(6, 0) sets the handling status +0x444 to
+    /// 6 (from a running car, status 7) and its argument byte +0x448 to 0;
+    /// the next synchronisation disables the controls as for terminal
+    /// damage (vehicle_sync, status != 7) [V]. The gate's other conditions
+    /// (+0x214, +0x442, 0xA14E40) are not modelled [I]. Returns whether the
+    /// status changed.
+    pub fn disqualify(&mut self) -> bool {
+        let b = &mut self.state.car.owner.vehicle;
+        if b[0xd234 / 4] != 7 {
+            return false;
+        }
+        b[0xd234 / 4] = 6;
+        b[0xd238 / 4] &= !0xff;
+        true
+    }
+    /// Disqualified (status 6, [`Self::disqualify`]).
+    pub fn disqualified(&self) -> bool {
+        self.state.car.owner.vehicle[0xd234 / 4] == 6
+    }
     /// Whether the terminal damage is a lost wheel (status 4).
     pub fn lost_wheel(&self) -> bool {
         self.state.car.owner.vehicle[0xd234 / 4] == 4

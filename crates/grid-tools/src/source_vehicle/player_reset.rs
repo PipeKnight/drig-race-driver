@@ -17,6 +17,9 @@ use grid_world::{Error, reset_lines::Detector};
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PlayerReset {
     pub detector: Detector,
+    /// Demolition Derby: the trigger disqualifies the car instead of
+    /// resetting it (0x60D590 calls 0x9E64E0(6, 0) when +0x2E5C is 2) [V].
+    pub demolition: bool,
 }
 
 /// A performed reset: the line point and heading the car was placed at.
@@ -51,12 +54,19 @@ impl PlayerReset {
         ) {
             return Ok(None);
         }
+        if self.demolition {
+            player.disqualify();
+            return Ok(None);
+        }
         place(player, shared, line).map(Some)
     }
 
-    /// `R` restarts the whole event.
+    /// `R` restarts the whole event (the derby mode stays).
     pub fn reset(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            demolition: self.demolition,
+            ..Self::default()
+        };
     }
 }
 
@@ -192,6 +202,47 @@ mod tests {
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
     fn a_flipped_player_car_is_reset_on_yokohama() {
         run(|| flipped_on(crate::route::YOKOHAMA));
+    }
+
+    /// Demolition Derby: the same trigger disqualifies the stock car on the
+    /// Detroit stadium instead of resetting it; its controls are then
+    /// disabled (status 6, vehicle_sync) and the car stays where it is.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_derby_car_is_disqualified_not_reset() {
+        run(|| {
+            let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+            let root = Path::new(&root);
+            let table =
+                std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+            let route = crate::route::Route::new(crate::route::DETROIT_STADIUM).unwrap();
+            let stock = crate::car::Car::new("stk").unwrap();
+            let mut car = Runtime::load(root, &route, &stock, "slot_00", 200679).unwrap();
+            let geometry = car.prepare_body_geometry(root, &table).unwrap();
+            let line = Line::load(root, car.route().path()).unwrap();
+            car.set_pose_at_rest(flipped(car.pose()));
+            let mut reset = PlayerReset {
+                demolition: true,
+                ..Default::default()
+            };
+            let mut at = None;
+            for tick in 1..=1200u64 {
+                car.tick_with_body_geometry(HOLD, &geometry).unwrap();
+                assert_eq!(reset.update(&mut car, None, &line).unwrap(), None);
+                if car.disqualified() {
+                    at = Some(tick);
+                    break;
+                }
+            }
+            let tick = at.expect("the flipped derby car is disqualified");
+            let pose = car.pose();
+            assert!(pose[5] < 0.17, "still on its roof: {}", pose[5]);
+            // The next tick synchronises the disabled controls.
+            car.tick_with_body_geometry(HOLD, &geometry).unwrap();
+            let disabled = f32::from_bits(car.state.car.owner.vehicle[0x226c / 4]);
+            assert_eq!(disabled, 1., "controls disabled after tick {tick}");
+            assert!(!car.disqualify(), "only once");
+        });
     }
 
     fn flipped_on(route: &str) {

@@ -69,6 +69,7 @@ mod fps_counter;
 mod front_end;
 mod texture_cache;
 mod touge_event;
+mod demolition_event;
 mod texture_overrides;
 mod texture_upload;
 mod tilt;
@@ -2000,7 +2001,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         Some("drift_freestyle") => {
             return Err("drift_freestyle needs --drive and no opponents (docs/DISCIPLINES.md)".into());
         }
-        Some("pro_touge") => None,
+        Some("pro_touge" | "demolition_derby") => None,
         Some(other) => {
             return Err(format!("unknown discipline {other}: race, drift_battle, drift_grand_prix, drift_freestyle or pro_touge").into());
         }
@@ -2008,6 +2009,21 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let freestyle = drift_format == Some(Format::DriftFreestyle);
     // Pro Touge: two runs against one AI car on a point-to-point road.
     let pro_touge = discipline.as_deref() == Some("pro_touge");
+    // Demolition Derby: a lap race of the field with disqualification
+    // (docs/DEMOLITION_DERBY.md).
+    let demolition = discipline.as_deref() == Some("demolition_derby");
+    if demolition && (opponents.is_none() || trial_laps.is_none()) {
+        return Err("demolition_derby needs laps and opponents (docs/DEMOLITION_DERBY.md)".into());
+    }
+    // The AI config section of the event's format [D ai_driver_config.xml;
+    // I: sections are named by format, F290].
+    let ai_format = if demolition {
+        Some("single_demolition_race")
+    } else if pro_touge {
+        Some("pro_touge")
+    } else {
+        drift_format.and_then(|f| (f == Format::DriftBattle).then_some("drift_battle"))
+    };
     if pro_touge && (opponents != Some(1) || !drive) {
         return Err("pro_touge needs --drive and one opponent (docs/TOUGE.md)".into());
     }
@@ -2180,7 +2196,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                             &root,
                             route,
                             model,
-                            drift.then_some("drift_battle"),
+                            ai_format,
                         )?;
                         by_model.insert(model.clone(), data);
                     }
@@ -2345,7 +2361,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             segment: 0,
             started: Instant::now(),
             opponents,
-            auto_reset: Default::default(),
+            // A derby disqualifies a flipped player instead (0x60D590).
+            auto_reset: grid_tools::source_vehicle::player_reset::PlayerReset {
+                demolition,
+                ..Default::default()
+            },
             // The Yokohama arenas have no AI line: no auto-reset there.
             reset_line: if route.ignores_progress() {
                 grid_tools::ai_driver::Line::load_route(&root, &route).ok()
@@ -2813,6 +2833,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         if !car_classes.is_empty() {
             app.insert_resource(post_race::CarClasses(std::mem::take(&mut car_classes)));
+        }
+        if demolition {
+            let cars = driving.opponents.as_ref().map_or(1, |o| o.multi.cars.len());
+            let settings = grid_tools::demolition::Settings::load(&root)?;
+            println!("drive_demolition version=1 event=setup cars={cars} settings={settings:?}");
+            app.insert_resource(demolition_event::DemolitionEvent::new(settings, cars))
+                .add_systems(FixedUpdate, demolition_event::tick.after(drive_tick));
         }
         if let Some((next, length)) = touge_run.take() {
             app.insert_resource(touge_event::TougeEvent::new(

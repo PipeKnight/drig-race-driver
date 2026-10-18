@@ -31,10 +31,11 @@ Labels: **[D]** read from shipped data; **[I]** interpretation; **AUTHORED** a c
 | Freestyle Drift | `Free_Drift` | the four Yokohama arenas | BMW, Lacetti (stand-ins) | Time (`free_race_times`; 2 minutes AUTHORED default) |
 | Midnight Touge | `illegal_touge` | Haruna route 1 (`route::HARUNA`), the validated road | Lacetti, then the pool's raceable 350Z, Skyline, Supra | Direction Downhill/Uphill (subroute 0/1) |
 | Pro Touge | `legal_touge` (F412) | Haruna route 1, as its launcher (the pool holds the legal `haruna_leg_*` layouts; AUTHORED) | Lacetti, then the pool's raceable cars | two runs, downhill then uphill (`discipline = pro_touge`) |
+| Demolition Derby | `Demolition_D` (F421) | the Detroit stadium routes 8 and 9 (`route::DETROIT_STADIUM`, `_SHORT`) | the stock car `stk` | laps (6 [D]), opponents (11), `discipline = demolition_derby` (docs/DEMOLITION_DERBY.md) |
 
 - The numbers in brackets are the counts with the owner's full installation (log line `drive_event_menu ... event=open types=...`).
 - Not offered:
-  - the 24 Hours of Le Mans, open wheel, muscle, club, prestige and demolition: not ported (docs/SERIES.md, docs/DISCIPLINES.md);
+  - the 24 Hours of Le Mans, open wheel, muscle, club and prestige: not ported (docs/SERIES.md, docs/DISCIPLINES.md);
   - practice and the body-contact test drive: not events; their launchers stay.
 - Stand-in cars: the original's drift cars (cor, gto, imp, mop, rx7, s15, soa) and most touge cars are not ported. The help line says so. AUTHORED.
 - A route or car whose folder is missing is left out. On the phone's data subset that leaves Race and Time Trial at Donington with the Lacetti. That subset has no `database/`, so the series and drift disciplines are absent, and venue and layout names fall back to folder names (AUTHORED).
@@ -52,7 +53,7 @@ Labels: **[D]** read from shipped data; **[I]** interpretation; **AUTHORED** a c
 
 - On Continue the choice is saved in `<data dir>/settings.ini` `[event]` (`type`, `route`, `car`, `laps`, `opponents`, `time`, `direction`) with `settings::with_keys`, which keeps the other keys and comments. Only the menu reads `[event]`, so the launchers' profiles are unaffected. The next menu opens on that choice, with the cursor on Continue.
 - The menu also writes `<data dir>/event-menu.ini`, a settings profile with the same keys as the launchers' `settings/*.ini` for that event. The race reads it like a launcher profile.
-- The asset test `every_launcher_event_is_offered_and_written_identically` checks every launcher profile except practice and body contacts (21 profiles, including Le Mans Series and Pro Touge): the catalog offers its event, and the menu's profile for it parses to the same settings. The one exception is Freestyle Drift: the launcher's 90 s is not one of the original's whole-minute times.
+- The asset test `every_launcher_event_is_offered_and_written_identically` checks every launcher profile except practice and body contacts (22 profiles, including Le Mans Series, Pro Touge and Demolition Derby): the catalog offers its event, and the menu's profile for it parses to the same settings. The one exception is Freestyle Drift: the launcher's 90 s is not one of the original's whole-minute times.
 
 ## Processes and Back to menu
 

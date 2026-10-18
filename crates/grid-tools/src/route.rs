@@ -23,6 +23,10 @@ pub const YOKOHAMA: &str = "tracks/japan/yokohama_docks/route_0";
 /// illegal touge, mid to bottom, 5.86 km), run downhill (subroute 0) or
 /// uphill (subroute 1) (docs/TOUGE.md).
 pub const HARUNA: &str = "tracks/japan/haruna/route_1";
+/// The Demolition Derby stadium (`detroit_stad_L`, 2.6 km figure of eight)
+/// and its short variant (`detroit_stad_s`, route 9) (docs/DEMOLITION_DERBY.md).
+pub const DETROIT_STADIUM: &str = "tracks/usa/detroit/route_8";
+pub const DETROIT_STADIUM_SHORT: &str = "tracks/usa/detroit/route_9";
 /// Every circuit the app, the soak and the cross-circuit tests cover.
 pub const CIRCUITS: [&str; 6] = [
     DONINGTON,

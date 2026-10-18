@@ -1,5 +1,31 @@
 # GRID engine project log
 
+F421 Demolition Derby on the Detroit stadium: stock car, the original's disqualification rules, results and soak; Pro Touge reads the pro_touge AI section (2026-10-18, Claude Code; coordinator task 2 after F412). Details: docs/DEMOLITION_DERBY.md, docs/TOUGE.md §7. Evidence: worktree admiring-swartz-2f8287 `local/dd/` (runs/, app/, soak-derby/) and `local/touge/decomp/d1..d5` (Ghidra 12.1.4 headless, read-only; Capstone 5.0.6). Nothing installed; no input to the original game.
+- Static analysis [V]:
+  - The derby manager (0x668820, race +0x23E8) reads demolition_derby.xml with the keys `flippedCountdown`, `flippedThreshold`, `wrongWayThreshold`, `warningThreshold`, `notMovingTreshold`, `notMovingCountdown` (defaults 5, 1, 1, 0.5, 10, 10). The shipped `flippedVelocityThreshold` is not read.
+  - Per car (0x630CF0): an AI car below 10 mph for 10 s is disqualified with 0x9E64E0(6, 0), handling status 6, which disables the controls. The countdown starts at 9999 (0x64E030).
+  - The player's flip trigger 0x60D590 disqualifies instead of resetting in the derby mode.
+  - No reader of the flipped, wrong-way and warning fields was found.
+- Port:
+  - `grid_tools::demolition` (Settings, NotMoving);
+  - `Runtime::disqualify`/`disqualified` (status 6; the handling validator accepts 6);
+  - `race::Out::Disqualified`; `PlayerReset::demolition`;
+  - `route::DETROIT_STADIUM(_SHORT)`;
+  - grid-opponent-race `--demolition` (with the `single_demolition_race` AI section);
+  - grid-soak quick seeds 33..36 (12/12/6/12 stock cars, routes 8/9; outside the default set);
+  - grid-app `discipline = demolition_derby` (`demolition_event`, the derby AI section, the flipped player to the results, "Disqualified" cells);
+  - `settings/demolition-derby.ini`, `Play GRID Demolition Derby.cmd`;
+  - the event menu (F414) offers Demolition Derby (`Demolition_D` [D], stadium routes 8/9, stock car, 6 laps, 11 opponents); docs/EVENT_MENU.md.
+  - Pro Touge (headless and app) now loads the `pro_touge` AI section [D]: route 1 headless 5:12.064 vs 5:13.952, no contact.
+- Results [V]:
+  - The stock car laps the stadium solo (1:33.104 for 2 laps).
+  - 12-car derbies (6 laps): the fields pile up at the figure-of-eight crossing (11 of 12 within 17 m of (790, 174, 570)) and are disqualified by the not-moving rule. Route 8: 12 of 12 disqualified, by tick 7,594 with the derby section and 9,008 without. Route 9 with the default section: one finisher, 4:02.368.
+  - The ported AI has no crossing (oncoming-traffic) avoidance; that is the open gap.
+  - Derby soak 4/4.
+  - Asset test: a flipped stock car is disqualified, not reset, and its controls are disabled.
+  - App route 8 (autopilot): the AI cars were disqualified as they stopped; the autopilot player was stuck in the pile on lap 1 at the 20,000-tick limit.
+- Checks [V], release, cargo/rustc 1.99.0, on 9bafbfb (F412): `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 692 passed, 1 failed (the soak header round trip of the new derby seeds: an explicit opponent list equal to the player's car does not survive the header; fixed by leaving the list empty, which gives every car the player's model; grid-tools library tests then 181 passed, 0 failed, and the derby soak gave the same results); `cargo clippy --release --workspace --all-targets -- -D warnings` clean; solo identity aad9a07a…e41b and 12-car b8fe54e5…1e3b unchanged; `grid-soak quick` 24/24. After rebasing onto b851721 (F413): tests 694 passed, 0 failed; clippy clean; solo identity aad9a07a…e41b and 12-car b8fe54e5…1e3b unchanged; `grid-soak quick` 24/24. After rebasing onto 9bd3832 (F415, the event menu and a gamepad probe, no physics change): the menu's launcher test failed for the new derby launcher until the menu offered it; then clippy clean, grid-app tests 201 passed, 0 failed, identities unchanged. Final rebase onto 57b406d (F417, engine reset; it changes driving): `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 712 passed, 0 failed; clippy clean; solo identity 1ee81525…7267 and 12-car 012d4c0d…68f3, the same as F417's main; `grid-soak quick` 24/24; derby soak seeds 33..36 again 4/4. After rebasing onto fba00a7 (F419; Android, settings and FPS-counter changes, no physics): clippy clean, grid-app tests 201 passed, 0 failed; onto 77c585a (F420, LMP1 setup and the event menu): event-menu tests 5 passed, solo 1ee81525…7267 and 12-car 012d4c0d…68f3 unchanged. The headless derby, touge and app runs above were measured before F417. Playable not rebuilt (coordinator).
+
 F420 LMP1 cars race: the original's default car setup limits downforce (2026-10-18, Claude Code; coordinator's task with the LC70 live capture). Details: docs/SERIES.md "The default car setup's downforce limit (F420)". Evidence: main checkout `local/driving/lmp1-lc70-20261018/` (capture), `local/gtfix/` (survey3, routes/*-f414, lms15b, soak/*-f416); decomp in the worktree's `local/gtfix/decomp/g9..g14`.
 - Capture [V]: the LC70 sags only 1–2 cm at 63–74 m/s (≈ 4.4 kN downforce); block +0xE00 e10 = 0x3EEAAAAC (port 0.55). Static [V]: 0xA0F260 → 0x9C3C30 default sliders s = (clamp(x, B, A) − B)/(A − B) → 0x9E5680 clamp [−1, 1] → 0x9C32F0 value (A − B)·s + B; downforce slot 27's range is CSV columns 245/244 = 1.5/0.001, so CSV downforce above 1.5 (LC70 9, B06 15, Pro Tuned 4–5, most GT 3.6–6.1) is limited to 1.5, and +0xE10 = ((+0x1F04/+0xFD0)·0.2 + 0.8)·+0xFC4. f32 emulation reproduces both live e10 words (LC70 0x3EEAAAAC, Lacetti 0x3F4CCCCD).
 - Port: `standard_car::apply_default_downforce_setup` in `Runtime::load` (asset test against both live values). The other 29 setup values of 0x9C32F0 stay unapplied (need their own capture). Port ride now matches the capture (−0.002 at rest, +0.014..+0.016 at 51–57 m/s, no body contacts).

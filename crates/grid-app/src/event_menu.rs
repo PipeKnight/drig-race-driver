@@ -59,6 +59,9 @@ pub enum Kind {
     Touge,
     /// Pro Touge: two runs, downhill then uphill (F412, docs/TOUGE.md).
     ProTouge,
+    /// Demolition Derby: the stadium laps with disqualification (F421,
+    /// docs/DEMOLITION_DERBY.md).
+    Demolition,
 }
 
 /// One layout a discipline offers.
@@ -187,6 +190,9 @@ fn supported(kind: Kind, route: &str) -> bool {
         }
         Kind::Freestyle => route.starts_with("tracks/japan/yokohama_docks/"),
         Kind::Touge | Kind::ProTouge => route == route::HARUNA,
+        Kind::Demolition => {
+            route == route::DETROIT_STADIUM || route == route::DETROIT_STADIUM_SHORT
+        }
     }
 }
 
@@ -282,8 +288,9 @@ impl Catalog {
                     "Free_Drift" => Kind::Freestyle,
                     "illegal_touge" => Kind::Touge,
                     "legal_touge" => Kind::ProTouge,
-                    // The 24 Hours of Le Mans, open wheel, muscle, club,
-                    // prestige and demolition are not ported
+                    "Demolition_D" => Kind::Demolition,
+                    // The 24 Hours of Le Mans, open wheel, muscle, club and
+                    // prestige are not ported
                     // (docs/SERIES.md, docs/DISCIPLINES.md).
                     _ => continue,
                 };
@@ -315,6 +322,8 @@ impl Catalog {
                     Kind::DriftBattle | Kind::DriftGp | Kind::Freestyle => {
                         (cars(&[grid_tools::car::BMW, grid_tools::car::LACETTI]), true)
                     }
+                    // The event's stock car (`Stock_Car` discipline) [D].
+                    Kind::Demolition => (cars(&["stk"]), false),
                     // The pool's raceable cars (350Z, Skyline, Supra) after
                     // the launcher's Lacetti.
                     _ => {
@@ -363,6 +372,8 @@ impl Catalog {
                     default_laps: match kind {
                         Kind::Series => Some(3),
                         Kind::DriftBattle | Kind::DriftGp => Some(2),
+                        // Western_states_D: 6 laps on both stadium routes [D].
+                        Kind::Demolition => Some(6),
                         _ => None,
                     },
                     opponents: match kind {
@@ -370,6 +381,7 @@ impl Catalog {
                             let most = max_cars.saturating_sub(1).clamp(1, 11);
                             Some((most, most))
                         }
+                        Kind::Demolition => Some((11, 11)),
                         _ => None,
                     },
                     times,
@@ -490,6 +502,14 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
         }
         Kind::ProTouge => {
             drive += &format!("discipline = pro_touge\nlaps = 1\nopponents = 1\n{field}");
+            AI
+        }
+        Kind::Demolition => {
+            game += &format!("opponent_cars = {}\n", c.car);
+            drive += &format!(
+                "discipline = demolition_derby\nlaps = {}\nopponents = {}\n{field}",
+                c.laps, c.opponents
+            );
             AI
         }
     };
@@ -1289,6 +1309,7 @@ mod tests {
                 (None, Some("drift_grand_prix"), _) => "drift_gp".into(),
                 (None, Some("drift_freestyle"), _) => "Free_Drift".into(),
                 (None, Some("pro_touge"), _) => "legal_touge".into(),
+                (None, Some("demolition_derby"), _) => "Demolition_D".into(),
                 (None, _, _) if ini.route.as_deref() == Some(route::HARUNA) => "illegal_touge".into(),
                 (None, _, Some(_)) => "race".into(),
                 (None, _, None) => "time_trial".into(),

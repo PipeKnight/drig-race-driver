@@ -113,7 +113,10 @@ far); our cars the Chevrolet Lacetti (FWD) and BMW 320si (RWD).
   disqualified!"; results `post_race_results_dd`.
 - Rules [I]: a lap race in an arena where contact is the point; a car flipped for 5 s or driving the
   wrong way is warned and disqualified. Parser 0x630BC0/0x668846 [V] (not traced further).
-- **Engine: not supported** (no stadium route, no stock car, no flipped/wrong-way disqualification).
+- **Engine: supported** (F421, docs/DEMOLITION_DERBY.md): both stadium routes, the stock car
+  `stk`, the original's not-moving (AI) and flipped (player) disqualification [V]; not supported:
+  the flipped/wrong-way countdown settings (no reader found), the DD results layout, AI crossing
+  avoidance (fields pile up in the crossing).
 
 #### Touge (pro_touge, midnight_touge)
 
@@ -593,7 +596,9 @@ session: no input to the original), the car-state angular velocity sign, the dri
 6. **Demolition Derby**: Detroit stadium routes, stock car, flipped/wrong-way disqualification
    (demolition_derby.xml, 0x630BC0), DD results screen; needs Detroit and a stock car, robust heavy
    contact (soak). F399: every Detroit route loads; the stadium routes 8-9 lap solo (one valid lap of
-   two, docs/TRACK_READERS.md §4).
+   two, docs/TRACK_READERS.md §4). F421: the derby runs (stock car, not-moving and flipped
+   disqualification [V], results, soak seeds 33..36; docs/DEMOLITION_DERBY.md); the AI's
+   figure-of-eight/oncoming avoidance is the open gap.
 7. **Le Mans**: Circuit de la Sarthe, LMP/GT field (`lemans_restrictions`), time-limited race type 3,
    class results, time of day and headlights; the largest asset and rendering step.
 8. Head-to-head and driver offers come with a career/front-end layer. F416: the career rules and data

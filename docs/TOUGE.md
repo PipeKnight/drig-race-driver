@@ -264,3 +264,5 @@ There was no car contact in either event, so no penalties.
 
 **Not verified:** the penalty path in a real contact (unit-tested only), and the results table on screen (unit-tested view).
 
+**F421:** the AI now loads the `pro_touge` section of `ai_driver_config.xml` [D] (`raGenerateRandomOffsets`, `avBufferZone` 5). Headless route 1 with it: car 0 5:12.064 (2:38.672 + 2:33.392), car 1 5:13.952; no contact.
+

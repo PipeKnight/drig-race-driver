@@ -43,6 +43,7 @@ pub mod start_lights;
 mod standard_car_fields;
 pub mod time_trial;
 pub mod touge;
+pub mod demolition;
 pub mod track;
 pub mod tyre_audio;
 pub mod tyre_smoke;

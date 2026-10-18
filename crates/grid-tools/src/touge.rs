@@ -310,7 +310,8 @@ pub fn run_pro_touge(
         let data: Vec<AiData> = e
             .cars
             .iter()
-            .map(|c| AiData::load_route(e.root, &route, c, None))
+            // The pro_touge section of ai_driver_config.xml [D].
+            .map(|c| AiData::load_route(e.root, &route, c, Some("pro_touge")))
             .collect::<std::result::Result<_, _>>()?;
         let mut drivers: Vec<AiDriver> = (0..2)
             .map(|i| -> std::result::Result<AiDriver, String> {

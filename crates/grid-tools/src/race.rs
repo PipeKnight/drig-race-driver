@@ -35,6 +35,9 @@ pub enum Out {
     Wrecked,
     /// Retired by the player, or a human still racing when the race ended [V].
     Retired,
+    /// Disqualified (Demolition Derby: 0x9E64E0(6, 0) for a flipped player
+    /// or an AI car that stopped; docs/DEMOLITION_DERBY.md) [V].
+    Disqualified,
 }
 
 /// Classification state of one car.
@@ -402,6 +405,7 @@ impl Standings {
                             Out::Stopped => "DNF",
                             Out::Wrecked => "Wrecked",
                             Out::Retired => "Retired",
+                            Out::Disqualified => "Disqualified",
                         }
                     ),
                     (Status::Racing, _, _) => {

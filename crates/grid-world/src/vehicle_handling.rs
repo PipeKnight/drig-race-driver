@@ -278,7 +278,9 @@ fn calculate_owned(
         || byte(car, 0xb14) != 1
         || (0..4).any(|i| byte(car, 0x22e4 + i) > 1)
         || byte(b, 0x442) > 1
-        || !(b[0x444 / 4] == 7 || (empty_notification_receiver && matches!(b[0x444 / 4], 3 | 4)))
+        // Status 6: a disqualified car (0x9E64E0(6, 0); Demolition Derby).
+        || !(b[0x444 / 4] == 7
+            || (empty_notification_receiver && matches!(b[0x444 / 4], 3 | 4 | 6)))
         || (matches!(b[0x444 / 4], 3 | 4) && byte(b, 0x448) > 3)
         || byte(b, 0x440) > 1
         || byte(car, 0xc7ae) > 1
