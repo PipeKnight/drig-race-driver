@@ -1,5 +1,25 @@
 # GRID engine project log
 
+F433 First corner against the original's live 12-car Donington field: the launch is the main difference, not the alongside logic (2026-10-19, Claude Code; coordinator's task after F425). Details: docs/FIRST_CORNER_LIVE.md. Evidence: worktree fervent-napier-50814b `local/firstcorner/` (decoder, comparison script, port traces, `cmp-*.txt`), `local/robust/decomp/g1..g3` (Ghidra 12.1.4 headless read-only: 0x775BF0, 0x783180, 0x404C90; Capstone 5.0.6 for 0x7978D0). Input: F417's `field-20261018/field02.tsv` (main checkout `local/driving/`). The original was not run; nothing installed. **No driving change.**
+- Capture [V]: a restart; 11 AI cars of one model in slots 0–10, the player parked in slot 11. One row per physics step, 15 ms mean (8–30 ms, unlocked). Its QPC time matches the speeds (distance against ∫v dt 0.97–1.02), so step deltas come from QPC (no world +0x7C8 in the capture).
+- Grid hold [V live, D static]:
+  - Live: throttle 0 for 3.7 s, then exactly 1.0 for the last 3.04 s before the go, no pulses.
+  - Static: 0x7978D0 sets the request's start state (+0xA8 = S > 1: 0x775BF0 pulses), a throttle cap of 0 (S = 1) or the full-throttle flag +0xAC (S ≤ 0) from S = [[ctx+0x38]+0x18] and a held object. 0x783180 returns 1.0 for +0xAC.
+  - The port's authored 2/3 rev schedule (F298) is not what this restart shows. The writer of S is not found; nothing changed.
+- Launch [V]:
+  - The original's AI do 15.4–17.1 m/s 1 s after the go (20–26 m/s² in the first half second). The port does 8.4–8.5 m/s: traction-limited at about 8 m/s² until its race-start grip 1.25 (0x404C90, gated at 10 m/s, static [V]) switches on.
+  - With or without a grid hold (the engine at the limiter) the port is the same. With grip 1.25 from the go it reaches 10.7 m/s. Above 10 m/s both accelerate alike.
+  - The port reaches Redgate 0.9–1.2 s later. Cause open [I]: a capture of a normal start with car-state +0xD0 and wheel grip scales.
+- Redgate [V]:
+  - Neither field runs side by side before the braking zone (staggered file).
+  - The original gets through with every car; some pairs at 1.3–1.8 m lateral gaps (probably touching [I]).
+  - The port also gets through without retirements, but brakes deeper (back of the field 18–22 m/s against 25–28): left to the AI braking session.
+  - Porting the alongside branches (ROBUSTNESS_RESEARCH §4/§6) is not indicated by this trace.
+- Harness (research only, default output unchanged): `grid-opponent-race` options `GRID_PARKED_CAR`, `GRID_GRID_HOLD=idle,full` and `GRID_FIELD_TRACE`.
+- Checks [V], release, on 0001c8c (F425) + this change: `cargo clippy --workspace --all-targets -- -D warnings` clean; identities 1ee81525…7267 and 012d4c0d…68f3 unchanged. The test suite and grid-soak were not rerun, because only an env-gated research path in one binary changed (the soak binary is unchanged).
+- San Francisco quick seed 49 (F425, a lost wheel driven through the road): not taken up; it is the thin-body family and not cheap.
+- Next: the writer of the start state; a live capture of a normal start at the 60 Hz lock.
+
 F431 Desktop pad guided test: no drift above gilrs's 0.1 dead zone, LT 0.9956 / RT 1.0000; probe now unfiltered like the game (2026-10-19, Claude Code; owner ran the F415 test). Details: docs/PAD_PROBE.md "Guided test on the owner's PC (F431)". Evidence: main checkout `local/pad-probe/buttons-20261019-021650.txt` (owner's run, wired USB).
 - [V] At rest, focused: no event, four stick axes 0.0000, no button or trigger event. LT max 0.9956 (= 255/256, the original's XInput `b/256`), RT max 1.0000; triggers 0..1, never −1. Sticks reach −1..1. Every preset control produced events (the owner's presses mostly one prompt late, so step labels are shifted).
 - Correction of my own probe: the F415 build used gilrs's default filters (radial dead zone 0.1 here, since WGI gives no driver dead zone, and jitter), while bevy_gilrs disables them, so the rest result bounds drift below 0.1 rather than measuring the game's raw values. Below preset 4's 0.2 steering dead zone either way. The probe now uses `with_default_filters(false)` (`pad_probe version=2 filters=none`); `local/pad-probe/grid-pad-probe.exe` replaced (sha256 92b95384…fd29). `cargo clippy --release -p grid-probes --bin grid-pad-probe -- -D warnings` clean.
