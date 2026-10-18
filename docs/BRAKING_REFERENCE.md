@@ -411,6 +411,32 @@ suspension distance +0x40 is +0.011..+0.016 m at 63 m/s (−0.002 at rest, limit
 summed suspension force grows from 9.8 to 14.5 kN (the springs carry the downforce). The car
 left the track at turn 1 after about 8 s; the world contact pool was not sampled.
 
+## Engine reset and AI wrecks (F426)
+
+19 October 2026, Claude Code. le-mans reported that since F417 Lacetti/BMW cars wreck in Sarthe's
+last chicane and the DBR9 field at the Dunlop/Esses. Tested headless (`grid-opponent-race`,
+release, no DF01 / AI characteristics), the engine reset toggled by a temporary switch; evidence
+`local/driving/f417-regression/` (main checkout). [V]
+
+| Case | With reset | Without reset |
+|---|---|---|
+| Main circuits, 12 cars, 11 200 ticks: wrecks (Donington, Nürburgring, Istanbul, Long Beach, Jarama, Yokohama) | 1, 0, 0, 0, 0, 1 = 2 | 1, 0, 0, 0, 2, 0 = 3 |
+| Same, laps covered (sum of 12 cars) | 125.9 | 129.5 |
+| Sarthe solo Lacetti on main, at e548701, 57b406d, fba00a7, 77c585a | wrecked at 0.988 laps, (−781, −1091) | e548701 (before F417): the same, identical position |
+| Sarthe solo Lacetti, le-mans branch tip | wrecked at 0.988 laps | the same |
+| Sarthe 12 Lacettis, le-mans branch tip | 7 wrecks (Dunlop/Esses ≈ 0.28 and 1.28 laps; last chicane ≈ 0.98) | 5 wrecks at the same two places |
+
+So the reset does not cause these wrecks: the cars wreck at the same two corners without it,
+and on the main circuits the wreck count does not rise. Engine braking makes the cars about
+3 % slower over a race (they now slow when lifting), which shuffles which car crashes where.
+Sarthe's `ai_vehicle_track.xml` has a genuine `touring` class with its own brake-line speeds
+(for example the last chicane, line 26, 42–70 m/s), so the Lacetti uses original data there,
+not a fallback. The AI's braking distances come from the shipped brake tables
+(`ai_vehicle_statistics.xml`, 0x7A6650), which do not depend on the engine. [I] The two
+corners are a pre-existing AI-line problem at Sarthe (le-mans already saw the pre-F417 trace
+~7 m off the line at ~52 m/s in the last chicane); finding it needs the original AI's trace
+there, which only a live capture gives.
+
 ## Next
 
 1. Repeat a BA-off live run with the extended capture, and runs at a second onset speed;
