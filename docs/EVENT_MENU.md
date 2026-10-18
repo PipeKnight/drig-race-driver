@@ -1,6 +1,6 @@
 # Event menu (Race Day)
 
-18 October 2026, Claude Code (F409). Code: `crates/grid-app/src/event_menu.rs`. Launcher: `Play GRID.cmd`.
+18 October 2026, Claude Code (F412). Code: `crates/grid-app/src/event_menu.rs`. Launcher: `Play GRID.cmd`.
 
 The owner picks the event inside the game instead of through one launcher per event. The menu is the original's free-race selection screen, then the race process with its Race Options front end ([DRIVER_AIDS.md](DRIVER_AIDS.md)) and Go To Race.
 
