@@ -891,17 +891,15 @@ prop_script_speed = 12.5
 
     #[test]
     fn phone_profile_written_by_the_android_scripts_parses() {
-        // The settings.ini that push_android_data.ps1 writes (and the
-        // bundled APK ships) uses `key = value` in [input] too.
-        let script = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/push_android_data.ps1"),
+        // The settings.ini that push_android_data.ps1 writes, the bundled APK
+        // ships and the code-only APK's import writes (one template, P10)
+        // uses `key = value` in [input] too.
+        let text = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../android/app/src/main/assets/grid-import/settings.ini"),
         )
         .unwrap();
-        let text = script
-            .split_once("$settings = @'")
-            .and_then(|(_, rest)| rest.split_once("'@"))
-            .unwrap()
-            .0;
+        let text = text.as_str();
         let mut s = Settings::default();
         s.apply(text, Path::new("files")).unwrap();
         let input = s.input().unwrap();
