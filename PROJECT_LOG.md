@@ -6,7 +6,7 @@ F390 Race Options → Video screen: FPS counter, render height, present mode, re
 - Saving: `settings::with_keys` rewrites `key = value` lines of `[osd]`/`[video]` in place (comments kept, duplicates dropped, a default removes the key, missing keys appended to the section or a new section); `save_video` checks that the file reads back to the same choice before writing, like the Driver Aids save.
 - Defaults unchanged (Android: FPS on, 1080 rows, Fifo, system rate; desktop: FPS off, native). Desktop has the same screen.
 - Tests: Video screen cycle/undo/save; `with_keys` in-place rewrite with comments, new section, `save_video` round trip; the Race Options tests updated for the third item (Driver Aids now two Up from Go To Race).
-- Checks [V], release, cargo/rustc 1.99.0, on cf04fdc (on dd30bba, F384 plus Codex G118): tests 645 passed, 0 failed, 0 ignored; clippy workspace all targets clean; solo identity aad9a07a…e41b, unchanged; grid-soak quick 20/20 (`local/android-p11/checks-video6/`); `cargo ndk` clippy clean. The same set passed before four earlier rebases onto newer main (618, 618, 634, 641 tests; `checks-video2..5/`).
+- Checks [V], release, cargo/rustc 1.99.0, on 68b48e0 (on 35e75f0, F389): tests 651 passed, 0 failed, 0 ignored; clippy workspace all targets clean; solo identity aad9a07a…e41b, unchanged; grid-soak quick 20/20 (`local/android-p11/checks-video7/`); `cargo ndk` clippy clean. The same set passed before five earlier rebases onto newer main (618, 618, 634, 641, 645 tests; `checks-video2..6/`).
 - Not checked: the screen on a phone or in a manual windowed run (no key input sent to a window here).
 
 
