@@ -1,2 +1,5 @@
 # Keep Rust source diffs independent of Windows checkout line endings.
 *.rs text eol=lf
+
+# Committed import assets (docs/ANDROID.md "Importing the game data"): stable bytes.
+android/app/src/main/assets/grid-import/* text eol=lf

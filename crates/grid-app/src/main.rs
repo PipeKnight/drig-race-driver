@@ -14,6 +14,8 @@ macro_rules! log_line {
 mod android;
 #[cfg(target_os = "android")]
 mod android_display;
+#[cfg(target_os = "android")]
+mod android_import;
 // Mapping tested on the desktop; the JNI bridge is Android-only.
 mod android_pad;
 #[cfg(target_os = "android")]
@@ -1831,7 +1833,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "android")]
     if !root.join("tracks").is_dir() {
         return Err(format!(
-            "no game data in {}: this APK carries none; install the bundled APK or push the data (docs/ANDROID.md)",
+            "no game data in {}: this APK carries none; start the app again to import your GRID folder, or push the data (docs/ANDROID.md)",
             root.display()
         )
         .into());
