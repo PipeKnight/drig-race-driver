@@ -59,6 +59,9 @@ pub enum Kind {
     Touge,
     /// Pro Touge: two runs, downhill then uphill (F412, docs/TOUGE.md).
     ProTouge,
+    /// Demolition Derby: the stadium laps with disqualification (F421,
+    /// docs/DEMOLITION_DERBY.md).
+    Demolition,
 }
 
 /// One layout a discipline offers.
@@ -90,8 +93,9 @@ pub struct EventType {
     pub times: Vec<(u32, String)>,
     /// Touge: downhill (subroute 0) or uphill (1).
     pub directions: bool,
-    /// Le Mans Series: the fields hold LMP1 cars that still ground at speed;
-    /// the race runs with GRID_SERIES_EXPERIMENTAL=1, like its launcher.
+    /// A series whose fields still hold cars that cannot race
+    /// (`series::is_experimental`; none since F420): the race runs with
+    /// GRID_SERIES_EXPERIMENTAL=1.
     pub experimental: bool,
 }
 
@@ -186,6 +190,9 @@ fn supported(kind: Kind, route: &str) -> bool {
         }
         Kind::Freestyle => route.starts_with("tracks/japan/yokohama_docks/"),
         Kind::Touge | Kind::ProTouge => route == route::HARUNA,
+        Kind::Demolition => {
+            route == route::DETROIT_STADIUM || route == route::DETROIT_STADIUM_SHORT
+        }
     }
 }
 
@@ -281,8 +288,9 @@ impl Catalog {
                     "Free_Drift" => Kind::Freestyle,
                     "illegal_touge" => Kind::Touge,
                     "legal_touge" => Kind::ProTouge,
-                    // The 24 Hours of Le Mans, open wheel, muscle, club,
-                    // prestige and demolition are not ported
+                    "Demolition_D" => Kind::Demolition,
+                    // The 24 Hours of Le Mans, open wheel, muscle, club and
+                    // prestige are not ported
                     // (docs/SERIES.md, docs/DISCIPLINES.md).
                     _ => continue,
                 };
@@ -314,6 +322,8 @@ impl Catalog {
                     Kind::DriftBattle | Kind::DriftGp | Kind::Freestyle => {
                         (cars(&[grid_tools::car::BMW, grid_tools::car::LACETTI]), true)
                     }
+                    // The event's stock car (`Stock_Car` discipline) [D].
+                    Kind::Demolition => (cars(&["stk"]), false),
                     // The pool's raceable cars (350Z, Skyline, Supra) after
                     // the launcher's Lacetti.
                     _ => {
@@ -362,6 +372,8 @@ impl Catalog {
                     default_laps: match kind {
                         Kind::Series => Some(3),
                         Kind::DriftBattle | Kind::DriftGp => Some(2),
+                        // Western_states_D: 6 laps on both stadium routes [D].
+                        Kind::Demolition => Some(6),
                         _ => None,
                     },
                     opponents: match kind {
@@ -369,11 +381,12 @@ impl Catalog {
                             let most = max_cars.saturating_sub(1).clamp(1, 11);
                             Some((most, most))
                         }
+                        Kind::Demolition => Some((11, 11)),
                         _ => None,
                     },
                     times,
                     directions: kind == Kind::Touge,
-                    experimental: name == "le_mans_series",
+                    experimental: grid_tools::series::is_experimental(&name),
                 });
             }
         }
@@ -489,6 +502,14 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
         }
         Kind::ProTouge => {
             drive += &format!("discipline = pro_touge\nlaps = 1\nopponents = 1\n{field}");
+            AI
+        }
+        Kind::Demolition => {
+            game += &format!("opponent_cars = {}\n", c.car);
+            drive += &format!(
+                "discipline = demolition_derby\nlaps = {}\nopponents = {}\n{field}",
+                c.laps, c.opponents
+            );
             AI
         }
     };
@@ -765,7 +786,7 @@ impl Menu {
             "Up/Down choose, Left/Right change, Select on Continue starts the event; Race Options follow.",
         );
         if t.experimental {
-            help += " Experimental: the LMP1 prototypes still ground at speed.";
+            help += " Experimental: some cars of this series cannot race yet.";
         }
         if t.stand_in_cars {
             help += " The original's cars of this discipline are not ported yet: ported cars stand in.";
@@ -839,7 +860,7 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         if menu.code() != Some(MENU_GO) {
             return Ok(menu.code().unwrap_or(1));
         }
-        // Le Mans Series runs as its launcher does (experimental fields).
+        // An experimental series runs with the gate (none since F420).
         let mut race = std::process::Command::new(&exe);
         if experimental(&dir) {
             race.env("GRID_SERIES_EXPERIMENTAL", "1");
@@ -862,7 +883,7 @@ fn experimental(dir: &Path) -> bool {
     let mut s = crate::settings::Settings::new();
     std::fs::read_to_string(dir.join("settings.ini"))
         .is_ok_and(|text| s.apply(text.trim_start_matches('\u{feff}'), dir).is_ok())
-        && saved(&s.event).key == "le_mans_series"
+        && grid_tools::series::is_experimental(&saved(&s.event).key)
 }
 
 /// Android: the arguments of this start. A start after the menu's Continue
@@ -1288,6 +1309,7 @@ mod tests {
                 (None, Some("drift_grand_prix"), _) => "drift_gp".into(),
                 (None, Some("drift_freestyle"), _) => "Free_Drift".into(),
                 (None, Some("pro_touge"), _) => "legal_touge".into(),
+                (None, Some("demolition_derby"), _) => "Demolition_D".into(),
                 (None, _, _) if ini.route.as_deref() == Some(route::HARUNA) => "illegal_touge".into(),
                 (None, _, Some(_)) => "race".into(),
                 (None, _, None) => "time_trial".into(),

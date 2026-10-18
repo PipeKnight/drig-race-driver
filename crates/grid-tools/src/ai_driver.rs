@@ -2842,6 +2842,9 @@ impl AiDriver {
         self.lines.request = request_line;
         let mut line_brake = 0.;
         let previous_brake = self.brake;
+        // 0x7886C0 goes on only when the class's brake data is valid
+        // (0x7A3160); otherwise the line neither activates nor brakes.
+        let line_valid = line_valid && brake_data_valid(&line);
         if line_valid {
             self.lines.target = line_target;
             self.lines.modifier = line.distance_modifier;
@@ -3107,13 +3110,27 @@ impl AiDriver {
 }
 
 /// The next brake line ahead of arc `arc`: (id, distance along the line).
+/// The track view's next line (0x7923F0) is the first link ahead whose line
+/// has valid data for the class (0x78E820), so lines a class does not brake
+/// for are passed over. A class with no valid line keeps the nearest one.
 fn next_brake_line(data: &AiData, arc: f32) -> (usize, f32) {
-    data.brake_lines
-        .iter()
-        .enumerate()
-        .map(|(i, &(s, _))| (i, (s - arc).rem_euclid(data.line.length)))
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .expect("brake lines")
+    let ahead = |valid: bool| {
+        data.brake_lines
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, b))| !valid || brake_data_valid(b))
+            .map(|(i, &(s, _))| (i, (s - arc).rem_euclid(data.line.length)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    };
+    ahead(true).or_else(|| ahead(false)).expect("brake lines")
+}
+
+/// 0x7A3160: brake data is valid when its maximum and minimum speeds and its
+/// distance modifier are all positive. The shipped data marks the lines a
+/// class does not brake for with 0/0 speeds (Milan route 0: touring lines 1
+/// and 3, formula3 also 7).
+fn brake_data_valid(b: &ai::BrakeData) -> bool {
+    b.max_speed > 0. && b.min_speed > 0. && b.distance_modifier > 0.
 }
 
 /// brake_lock slot order: drawn index 0..3 -> request +0xC0, +0xC4, +0xB8,

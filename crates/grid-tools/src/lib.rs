@@ -1,8 +1,10 @@
 //! Resource-to-behavior adapters shared by local diagnostics.
+pub mod audio_mix;
 pub mod ai_driver;
 pub mod ai_pacing;
 pub mod body_deformation;
 pub mod car;
+pub mod career;
 pub mod body_geometry;
 pub mod body_impact_parameters;
 pub mod body_impacts;
@@ -42,6 +44,7 @@ pub mod start_lights;
 mod standard_car_fields;
 pub mod time_trial;
 pub mod touge;
+pub mod demolition;
 pub mod track;
 pub mod tyre_audio;
 pub mod tyre_smoke;

@@ -439,12 +439,12 @@ impl Settings {
                 }
                 ("drive", "discipline") => match value.to_ascii_lowercase().as_str() {
                     d @ ("race" | "drift_battle" | "drift_grand_prix" | "drift_freestyle"
-                    | "pro_touge") => {
+                    | "pro_touge" | "demolition_derby") => {
                         self.discipline = Some(d.into())
                     }
                     _ => {
                         return Err(at(
-                            "`discipline` needs race, drift_battle, drift_grand_prix, drift_freestyle or pro_touge"
+                            "`discipline` needs race, drift_battle, drift_grand_prix, drift_freestyle, pro_touge or demolition_derby"
                                 .into(),
                         ));
                     }
@@ -742,6 +742,13 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(default_data_dir);
     let mut files: Vec<PathBuf> = Vec::new();
+    // The bundled APK's event profile (track, discipline, field; replaced on
+    // every install, docs/ANDROID.md), read first so the owner's settings.ini
+    // (kept across installs, written by the in-app screens) overrides it.
+    let event = dir.join("event.ini");
+    if event.is_file() {
+        files.push(event);
+    }
     let user = dir.join("settings.ini");
     if user.is_file() {
         files.push(user);

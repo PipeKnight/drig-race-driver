@@ -83,7 +83,7 @@ pub fn check(track: &packed_query::Mesh<'_>, materials: &[u8]) -> Checked {
 const REACH_MARGIN: f32 = 4.;
 
 fn materials_valid(track: &packed_query::Mesh<'_>, materials: &[u8]) -> bool {
-    materials.len() == track.triangles.len() && materials.iter().all(|&x| x < 8)
+    materials.len() == track.triangles.len() && materials.iter().all(|&x| x < 16)
 }
 
 /// Sampling directions accepted by the pair query.

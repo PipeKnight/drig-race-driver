@@ -5,6 +5,10 @@ start, the prototype did not. This records the cause, the fix and its limits.
 
 ## Frame delta (F279 follow-up)
 
+Live captures of the original are locked to 60 Hz from F419 on (vsync in the snapshotted
+hardware settings, verified by world `+7C8` ≈ 16.67 ms per capture): see
+BRAKING_REFERENCE.md "Frame rate of live captures".
+
 Original physics task `5E7F30` receives a pointer to a double frame delta and passes it,
 converted to f32, to the car manager (`A02B70`) and world scheduler (`A72930`). Paused
 native world/job deltas (0.00605..0.00609 s) and the five-entry body delta ring

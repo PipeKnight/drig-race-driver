@@ -27,12 +27,13 @@ AL_LOOPING (0x1007) at A2A14C.
 
 ## Authored choices (not recovered)
 
-- Tyre bus level -12 dB (`BUS_GAIN`). Without it four rumble-strip roll voices plus a
-  slide voice reach peak 1.35; with it the scenario peaks at 0.337.
+- F422 replaced the authored -12 dB bus (`BUS_GAIN`) with the original group mix:
+  roll in Wheels, the rest in Skids (Normal/Chase -9/-8 dB), per-wheel distance law and
+  the -48 dB floor gate ([AUDIO_RESEARCH.md](AUDIO_RESEARCH.md)).
 - Driver runs at the 62.5 Hz physics tick; the original per-frame smoothers (0.2, 1/3,
   1/13) run at the display frame rate, so their time constants differ slightly.
-- Mono mix without 3D position/distance attenuation/Doppler; kickup one-shots, carscrape
-  and AI-car tyres are not implemented. Treble is unused by the original tyre code.
+- Mono mix without 3D panning/Doppler; kickup one-shots and carscrape are not implemented.
+  AI-car tyres (wheel object 0, peel/slide/skid, AI group) were added in F422. Treble is unused by the original tyre code.
 - Event-mode flags W+4D/W+4E assumed zero (ordinary race).
 
 ## Verification

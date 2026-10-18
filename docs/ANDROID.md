@@ -61,6 +61,22 @@ The default build (no switch) is unchanged and packages no game data. Gradle kee
 
 **Desktop checks [V]:** the APK was unpacked with the app's own `BundleExtractor` (a desktop Java runner reading the APK as a zip): 382 files byte-identical to the staged folder, 2.2 s. The desktop release binary on that unpacked folder (`--data-dir`, `--game-root`, 600 autopilot ticks, render): log identical to a run on the full installation apart from timestamps and paths, and identical drive samples.
 
+### Events in the bundled APK (F418)
+
+`build_android.ps1 -BundleData -Event <name>` (and `push_android_data.ps1 -Event <name>`) chooses which game data the private APK carries and which event the event menu (F414, [EVENT_MENU.md](EVENT_MENU.md)) opens on:
+
+| Event | Profile | Extra data | APK name |
+|---|---|---|---|
+| `donington` (default) | `android/events/donington.ini`: no starting choice (the menu's default) | — | `grid-<rev>-bundled-PRIVATE-debug.apk` |
+| `drift-nurburgring` | `android/events/drift-nurburgring.ini`: Drift Battle, Nürburgring sprint (`route_1`), 2 laps, BMW 320si against 7 AI BMWs from the back of the grid, as `settings/drift-battle-nurburgring.ini` | `cars/bmw`, `audio/eng_bmw.WIP`, `audio/mec_bmw.WIP`, `tracks/europe/nurburgring`, `database`, `gameconfig`, and the private `local/ai-driver-characteristics.tsv` (`-Characteristics PATH`; skipped if missing) | `grid-<rev>-bundled-PRIVATE-drift-nurburgring-debug.apk` |
+
+- The profile is written as **`event.ini`** next to `settings.ini` and replaced on every install. `settings::load` reads `<data dir>/event.ini` first, then `settings.ini` (kept across installs, written by the menu, Driver Aids and Video screens), so the owner's choices win. The drift profile holds only the menu's starting choice (`[event] type = drift_battle`, Nürburgring `route_1`, BMW, 2 laps, 7 opponents), so the menu opens on the Drift Battle until the owner picks something else; a Race picked in the menu gets no drift keys. With `[front_end] event_menu = off` the app starts `settings.ini`'s own event (Donington practice) as before.
+- What the menu offers with the drift bundle [V desktop, `--menu-screen` with `[game] root` on the staged folder]: `race:2x2, time_trial:2x2, touring:8x2, drift_battle:2x2, drift_gp:2x2` (Donington and the Nürburgring layouts, Lacetti and BMW). A Touring Cars race there fills its field with the bundled cars only (`field=bmw_…,lac_…`, ran 300 ticks headless). The Donington bundle has no `database/`, so its menu offers Race and Time Trial at Donington only.
+- Why the Nürburgring: of the Drift Battle routes, the 8-car AI battles there scored most and spun and hit barriers least (F367: up to 17,703 points; F389: 11.1 spins and 1.6 barrier hits per lap, against 25.1 / 5.6 at Long Beach and 12.0 / 2.0 at Istanbul). Yokohama Docks (F399) was not measured in drift battles.
+- [V desktop] The release binary on the staged drift folder (`--data-dir` and `--game-root` there, autopilot, 3000 ticks, 914 × 411 render) gives a log identical to the same run on the full installation apart from time stamps: `drive_drift_event discipline=drift_battle route=tracks/europe/nurburgring/route_1 cars=8`. The first try failed with "os error 3" until `database` and `gameconfig/drift.xml` were added.
+- Phone layout [V desktop render, 914 × 411]: the Drift Battle score panel (`Total … ×multiplier`) sits at the top centre over the II and CENTRE zones (the zones are drawn under the HUD; both still respond to a tap there). The FPS counter moved to the right edge under the race position so it no longer covers the score.
+- Drifting by touch: hold GAS with the right thumb, steer by tilting, and pull the car sideways with a tap or hold of HAND (left thumb, next to BRAKE); BRAKE shifts weight forward before a corner. HAND is the original Hand Brake action (record handbrake > 0.5), so it acts exactly like Space or the pad's B. The manual gearbox's GEAR ± zones appear next to GAS if Driver Aids sets it.
+
 ### First start: copying the data
 
 `LauncherActivity` reads `assets/grid-data/bundle.txt`. If `Android/data/org.reassembly.grid/files/.bundle-version` holds the same version, it starts the game at once. Otherwise it shows "First start: copying the game data" with a progress bar (MB done of total), copies every file to `files/` (each through `name.part`, renamed when its size matches), then writes the marker and starts the game. The marker is deleted before copying, so an interrupted copy (app killed, storage full) starts again on the next launch. Files of an older bundle that the new one no longer lists are not deleted. A failed copy shows the error on screen and writes `Download/GRID-Reassembly/extract-<time>.txt`.
@@ -95,7 +111,7 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 
 ## Frame rate
 
-**Counter.** `[osd] fps` (default `on` on Android, `off` on the desktop, where F9 toggles it) shows `NN FPS  M ms  max W` at the top edge, between the II button and the race position panel: frames per second, the mean frame time and the worst frame of the last second. While it is on, the app logs once per second (logcat and `Download/GRID-Reassembly/log-*.txt`):
+**Counter.** `[osd] fps` (default `on` on Android, `off` on the desktop, where F9 toggles it) shows `NN FPS  M ms  max W` at the right edge under the race position (since F418; it was at the top centre, where the Drift Battle score panel now sits): frames per second, the mean frame time and the worst frame of the last second. While it is on, the app logs once per second (logcat and `Download/GRID-Reassembly/log-*.txt`):
 
 ```
 frame_stats fps=59.1 avg_ms=16.92 max_ms=18.49 frames=60 sim_ticks_per_s=63.1

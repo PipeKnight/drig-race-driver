@@ -1813,7 +1813,9 @@ mod tests {
                 let (states, slip, detected, drift_line, _) = first;
                 // Approach, initiation and drifting all occur, on the drift line.
                 assert!(states[1] > 0 && states[2] > 0 && states[3] > 0, "{states:?}");
-                assert!(slip > 20., "{slip}");
+                // About 22 degrees before the F417 engine reset, 19.1 with
+                // engine braking (states [0, 866, 454, 140, 6]).
+                assert!(slip > 15., "{slip}");
                 // F406: with the original's collision floor lift the car holds
                 // slides of about 22 degrees without spinning and the scorer's
                 // detector does not latch in these 2600 ticks (states

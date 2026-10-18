@@ -19,18 +19,38 @@ pub const JARAMA: &str = "tracks/europe/jarama/route_1";
 /// 2.5 km street circuit of the Japan Street GT and Drift Battle events
 /// (docs/YOKOHAMA.md).
 pub const YOKOHAMA: &str = "tracks/japan/yokohama_docks/route_0";
+/// The seventh circuit: Spa-Francorchamps route 0, the 7.0 km Grand Prix
+/// circuit (docs/SPA.md).
+pub const SPA: &str = "tracks/europe/spa_francorchamps/route_0";
+/// The eighth circuit: Milan route 0, `milan_gp`, the 4.9 km street circuit
+/// (docs/STREET_CIRCUITS.md).
+pub const MILAN: &str = "tracks/europe/milan/route_0";
+/// The ninth circuit: Shibuya route 0, `shib_drift_cir`, the 2.1 km street
+/// circuit of the Pro Tuned and Touring pools (docs/STREET_CIRCUITS.md).
+pub const SHIBUYA: &str = "tracks/japan/shibuya/route_0";
+/// The tenth circuit: San Francisco route 0, `san_francisco_gp`, the 5.3 km
+/// street circuit (docs/STREET_CIRCUITS.md).
+pub const SAN_FRANCISCO: &str = "tracks/usa/san_fran/route_0";
 /// The first point-to-point road: Haruna route 1 (`haruna_ill_mid_bot`,
 /// illegal touge, mid to bottom, 5.86 km), run downhill (subroute 0) or
 /// uphill (subroute 1) (docs/TOUGE.md).
 pub const HARUNA: &str = "tracks/japan/haruna/route_1";
+/// The Demolition Derby stadium (`detroit_stad_L`, 2.6 km figure of eight)
+/// and its short variant (`detroit_stad_s`, route 9) (docs/DEMOLITION_DERBY.md).
+pub const DETROIT_STADIUM: &str = "tracks/usa/detroit/route_8";
+pub const DETROIT_STADIUM_SHORT: &str = "tracks/usa/detroit/route_9";
 /// Every circuit the app, the soak and the cross-circuit tests cover.
-pub const CIRCUITS: [&str; 6] = [
+pub const CIRCUITS: [&str; 10] = [
     DONINGTON,
     NURBURGRING,
     ISTANBUL_PARK,
     LONG_BEACH,
     JARAMA,
     YOKOHAMA,
+    SPA,
+    MILAN,
+    SHIBUYA,
+    SAN_FRANCISCO,
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -180,6 +200,10 @@ mod tests {
             ("tracks/usa/long_beach/route_5", 0.05),
             (JARAMA, 0.),
             (YOKOHAMA, 0.05),
+            (SPA, 0.),
+            (MILAN, 0.05),
+            (SHIBUYA, 0.),
+            (SAN_FRANCISCO, 0.05),
         ] {
             let route = Route::new(path).unwrap();
             assert_eq!(route.additional_ground_clearance(root).unwrap(), expected, "{path}");
@@ -460,6 +484,102 @@ mod tests {
         assert_eq!(catalog.unported["close_drift_flag.max"], 21);
     }
 
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn seventh_circuit_sources_load() {
+        use crate::{
+            ai_driver::AiData, dynamic_props::Catalog, entity_geometry::Props, lap_progress,
+            source_vehicle::Runtime,
+        };
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        let route = Route::new(SPA).unwrap();
+        assert_eq!(route.track_name(), "spa_francorchamps");
+        let progress = lap_progress::load_route(root, &route).unwrap();
+        let splits: Vec<_> = progress.progress.routes[0]
+            .splits
+            .iter()
+            .map(|s| (s.kind, s.gate))
+            .collect();
+        // 150 gates over 6995.9 m, finish gate 0, time splits at 41 and 112.
+        use grid_formats::progress::SplitKind::{Finish, Time};
+        assert_eq!(progress.progress.gates.len(), 150);
+        assert!((progress.progress.total_distance - 6995.89).abs() < 0.01);
+        assert_eq!(splits, [(Finish, 0), (Time, 41), (Time, 112)]);
+        // The grid holds 20 slots; the app's fields use the first 12.
+        for slot in 0..20 {
+            let mut car =
+                Runtime::lacetti_on(root, &route, &format!("slot_{slot:02}"), 200679).unwrap();
+            car.enable_lap_timing(root).unwrap();
+            assert_eq!(car.lap_gate_count(), progress.progress.gates.len());
+        }
+        let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
+        assert!(
+            (data.line.length - 6909.03).abs() < 1.,
+            "{}",
+            data.line.length
+        );
+        let props = Props::read_route(root, &route).unwrap();
+        let catalog = Catalog::read(root, &route, &props).unwrap();
+        let mut templates = std::collections::BTreeMap::<&str, usize>::new();
+        for b in &catalog.breakables {
+            *templates.entry(&b.template).or_default() += 1;
+        }
+        // 22 brake-marker boards break; armco, tyre walls and cones stay static.
+        assert_eq!(props.boxes.len(), 1515);
+        assert_eq!(templates.values().sum::<usize>(), 22);
+        assert!(templates.keys().all(|t| t.starts_with("gg_brake_marker")));
+        assert_eq!(catalog.unported.values().sum::<usize>(), 1136);
+        assert_eq!(catalog.unported["tyrewall_a_red.max"], 360);
+    }
+
+    /// Milan, Shibuya and San Francisco route 0: lap timing, grids, AI lines,
+    /// route boxes and breakables (docs/STREET_CIRCUITS.md).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn street_circuit_sources_load() {
+        use crate::{
+            ai_driver::AiData, dynamic_props::Catalog, entity_geometry::Props, lap_progress,
+            source_vehicle::Runtime,
+        };
+        use grid_formats::progress::SplitKind::{Finish, Time};
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        // (route, name, gates, distance, time splits, grid slots, AI line,
+        // route boxes, breakable entities, unported placements)
+        for (path, name, gates, distance, splits, slots, line, boxes, breakables, unported) in [
+            (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2236, 251, 1212),
+            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 1048, 0, 382),
+            (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 1308, 68, 172),
+        ] {
+            let route = Route::new(path).unwrap();
+            assert_eq!(route.track_name(), name);
+            let progress = lap_progress::load_route(root, &route).unwrap();
+            let found: Vec<_> = progress.progress.routes[0]
+                .splits
+                .iter()
+                .map(|s| (s.kind, s.gate))
+                .collect();
+            assert_eq!(progress.progress.gates.len(), gates, "{path}");
+            assert!((progress.progress.total_distance - distance).abs() < 0.01, "{path}");
+            assert_eq!(found, [(Finish, 0), (Time, splits[0]), (Time, splits[1])], "{path}");
+            for slot in 0..slots {
+                let mut car =
+                    Runtime::lacetti_on(root, &route, &format!("slot_{slot:02}"), 200679).unwrap();
+                car.enable_lap_timing(root).unwrap();
+                assert_eq!(car.lap_gate_count(), gates);
+            }
+            let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
+            assert!((data.line.length - line).abs() < 1., "{path} {}", data.line.length);
+            let props = Props::read_route(root, &route).unwrap();
+            let catalog = Catalog::read(root, &route, &props).unwrap();
+            assert_eq!(props.boxes.len(), boxes, "{path}");
+            assert_eq!(catalog.breakables.len(), breakables, "{path}");
+            assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")));
+            assert_eq!(catalog.unported.values().sum::<usize>(), unported, "{path}");
+        }
+    }
+
     /// Haruna route 1 (`haruna_ill_mid_bot`), both directions: one run from
     /// the subroute's start to its finish over an open AI line, from its own
     /// two-car grid (docs/TOUGE.md).
@@ -552,9 +672,9 @@ mod tests {
                 .map(|k| String::from_utf8_lossy(k).into_owned())
                 .collect();
             // Only grass differs, on every circuit; Istanbul's extra HGDR
-            // matches the car row. Yokohama's SCRB has the grass row
-            // (friction 0.4, dynamicScale 4.0, dynamicThreshold 5.81).
-            let expected: &[&str] = if path == YOKOHAMA {
+            // matches the car row. Yokohama's and Spa's SCRB has the grass
+            // row (friction 0.4, dynamicScale 4.0, dynamicThreshold 5.81).
+            let expected: &[&str] = if path == YOKOHAMA || path == SPA {
                 &["GRAS", "SCRB"]
             } else {
                 &["GRAS"]
@@ -563,3 +683,6 @@ mod tests {
         }
     }
 }
+
+
+

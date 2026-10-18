@@ -29,7 +29,7 @@ contacts); BP01, DF01 and the characteristics table are used when present.
 
 | Command | What it does |
 |---|---|
-| `grid-soak quick` | Seeds 1..24 (fixed; 1..12 until 2026-10-17, then 1..16, then 1..20; 13..16 are Istanbul Park, 17..20 Long Beach since F357, 21..24 Jarama since F402); Yokohama seeds 25..28 only with `--seeds 25..28`, 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
+| `grid-soak quick` | Seeds 1..24 (fixed; 1..12 until 2026-10-17, then 1..16, then 1..20; 13..16 are Istanbul Park, 17..20 Long Beach since F357, 21..24 Jarama since F402); seeds 25..52 only with `--seeds` (Yokohama 25..28, Haruna 29..32, the Detroit derby 33..36 since F421; Spa 37..40, Milan 41..44, Shibuya 45..48, San Francisco 49..52 since F425), 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
 | `grid-soak long --hours 8 --jobs 2` | Seeds from 1001 upwards until the deadline (or `--seeds A..B`), 6000-30000 ticks each. Unattended; the summary is rewritten after every scenario. |
 | `grid-soak run --seed N [--profile quick\|long]` | One scenario in-process (the orchestrator runs each scenario this way in a child process). |
 | `grid-soak replay local/soak/.../seed-N.inputs.tsv` | Exact replay of recorded inputs, independent of later chaos-driver changes. |

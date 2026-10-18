@@ -123,6 +123,36 @@ Still differs (not sign questions):
   (0x990FC0) and sets +0xE2 = (count < 4). So the branch runs only while all four wheels
   are off the ground [V]. It does not affect ground driving or drift.
 
+## Brake lines a class does not brake for (F425)
+
+18 October 2026, Claude Code. Found while making Milan route 0 raceable (docs/STREET_CIRCUITS.md).
+Static, read-only. Pseudocode is in the worktree fervent-napier-50814b
+`local/robust/decomp/e1`, `e2`; the earlier `local/ai-research/decomp/drv3/7923f0.c.txt`,
+`792c80.c.txt` and `drv6/7886c0.c.txt` were reread.
+
+- [V] The shipped `ai_vehicle_track.xml` gives some class/line pairs `min_speed = max_speed = 0`.
+  - Milan route 0: touring lines 1 and 3, formula3 also line 7, and others.
+  - Every Milan route has some.
+  - None for touring on the other circuits the port races.
+- [D] The brake-data class (vtable 0xCF7244: loader 0x775100) has a validity method at slot +0xC,
+  0x7A3160: `max_speed > 0 && min_speed > 0 && distance_modifier > 0`.
+- [D] The track view's next-line search 0x7923F0 walks the links ahead. For each link it asks
+  0x78E820, which returns the link's line only when the class's data passes 0x7A3160, so an
+  invalid line is passed over and the next valid one is the car's next brake line.
+- [D] 0x7886C0 also calls the same check before it touches the line's state, and skips braking
+  when it fails.
+- Port: `next_brake_line` skips lines whose data is invalid (`brake_data_valid`), and the
+  line-braking block requires it as well.
+  - Before: the touring AI braked toward 0 m/s at Milan's lines 1 and 3. Solo it rolled past them
+    (121.7 / 118.7 s laps). In traffic a car that slowed early stopped short of the line, the
+    assisted gearbox selected reverse, and the authored reverse-gear pedal mapping dropped the
+    brake that the throttle logic still saw. Every 12-car race deadlocked at the first chicane.
+  - After: solo 100.8 / 98.8 s (101.9 / 99.9 s on top of F417's engine braking); the 12-car race
+    goes past the chicane (docs/STREET_CIRCUITS.md section 2).
+- The solo identity and the 12-car Donington races are byte-identical, because no touring line on
+  the existing circuits has invalid data [V]. On main 57b406d (F417): solo 1ee81525…7267 and
+  `12 11200 ai` 012d4c0d…68f3, as F417 recorded.
+
 ## Results (headless, Donington, Lacetti, Normal)
 
 - One car: 2 valid laps, 88.42 s (standing) and 86.28 s, no contacts, bit-identical

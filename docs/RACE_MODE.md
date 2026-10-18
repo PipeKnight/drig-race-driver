@@ -59,8 +59,10 @@ opponents fill the other slots in order. `Play GRID Race.cmd` starts the player 
 ## Opponent engine sound (F295)
 
 Every opponent runs its own continuous engine mixer (same Lacetti bank as the player), fed
-with that car's engine speed and AI throttle. AUTHORED attenuation (the original 3D audio is not
-recovered): gain 0.6 within 10 m, then inversely proportional to distance, no panning. A first
+with that car's engine speed and AI throttle. Since F422 its level is the original's: the AI
+group of the group mix plus the backend distance law per EngineBay/Exhaust emitter (10/175 m),
+heard from the rendered camera ([AUDIO_RESEARCH.md](AUDIO_RESEARCH.md)); still mono, no panning.
+(F295 used an AUTHORED gain 0.6 within 10 m, then inversely proportional to distance.) A first
 windowed run panicked on a Bevy query conflict (two AudioSink queries), fixed with a disjoint
 filter. Windowed 4-car race: output started, no decoder failure, simulation real-time.
 

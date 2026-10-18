@@ -19,7 +19,14 @@ param(
     [string]$Package = 'org.reassembly.grid',
     # Without effect since P11: the profile has no autopilot any more (the
     # phone controls drive); kept because build_android.ps1 -BundleData passes it.
-    [switch]$NoAutopilot
+    [switch]$NoAutopilot,
+    # Event profile (android/events/<Event>.ini, written as event.ini): donington
+    # (solo Lacetti practice) or drift-nurburgring (Drift Battle, 7 AI BMWs).
+    [ValidateSet('donington', 'drift-nurburgring')]
+    [string]$Event = 'donington',
+    # The private AI characteristics table for drift-nurburgring (data-dir relative
+    # in the profile); never put into the repository.
+    [string]$Characteristics = (Join-Path $PSScriptRoot '..\local\ai-driver-characteristics.tsv')
 )
 $ErrorActionPreference = 'Stop'
 
@@ -54,6 +61,18 @@ $items = @(
     'frontend\fonts\swiss_time.pssg',
     'tracks\europe\donington'
 )
+# Extra data per event (checked with -Stage and a desktop run, docs/ANDROID.md "Events").
+if ($Event -eq 'drift-nurburgring') {
+    $items += @(
+        'database',              # car and route tables for a non-default car
+        'gameconfig',            # drift.xml (drift scoring settings)
+        'cars\bmw',
+        'audio\eng_bmw.WIP',
+        'audio\mec_bmw.WIP',
+        'tracks\europe\nurburgring'
+    )
+}
+$eventText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\android\events\$Event.ini")) -replace "`r`n", "`n"
 
 # The drive profile, shared with the code-only APK's import (P10):
 # android/app/src/main/assets/grid-import/settings.ini.
@@ -77,6 +96,10 @@ if ($Stage) {
     }
     # No byte-order mark (Set-Content -Encoding utf8 writes one in PowerShell 5).
     [IO.File]::WriteAllText([IO.Path]::GetFullPath((Join-Path $Stage 'settings.ini')), $settings)
+    [IO.File]::WriteAllText([IO.Path]::GetFullPath((Join-Path $Stage 'event.ini')), $eventText)
+    if ($Event -eq 'drift-nurburgring' -and (Test-Path -LiteralPath $Characteristics)) {
+        Copy-Item -LiteralPath $Characteristics -Destination (Join-Path $Stage 'ai-driver-characteristics.tsv') -Force
+    }
     Write-Output "staged $Stage"
     return
 }
@@ -94,5 +117,12 @@ $tmp = Join-Path ([IO.Path]::GetTempPath()) 'grid-android-settings.ini'
 [IO.File]::WriteAllText($tmp, $settings)
 & $Adb push $tmp "$dest/settings.ini"
 if ($LASTEXITCODE -ne 0) { throw 'adb push failed: settings.ini' }
+[IO.File]::WriteAllText($tmp, $eventText)
+& $Adb push $tmp "$dest/event.ini"
+if ($LASTEXITCODE -ne 0) { throw 'adb push failed: event.ini' }
 Remove-Item -LiteralPath $tmp
+if ($Event -eq 'drift-nurburgring' -and (Test-Path -LiteralPath $Characteristics)) {
+    & $Adb push $Characteristics "$dest/ai-driver-characteristics.tsv"
+    if ($LASTEXITCODE -ne 0) { throw 'adb push failed: ai-driver-characteristics.tsv' }
+}
 Write-Output "pushed to $dest"

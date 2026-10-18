@@ -176,6 +176,25 @@ impl Runtime {
         let b = &self.state.car.owner.vehicle;
         matches!(b[0xd234 / 4], 3 | 4).then_some((b[0xd238 / 4] & 255) as usize)
     }
+    /// Disqualify the car: 0x9E64E0(6, 0) sets the handling status +0x444 to
+    /// 6 (from a running car, status 7) and its argument byte +0x448 to 0;
+    /// the next synchronisation disables the controls as for terminal
+    /// damage (vehicle_sync, status != 7) [V]. The gate's other conditions
+    /// (+0x214, +0x442, 0xA14E40) are not modelled [I]. Returns whether the
+    /// status changed.
+    pub fn disqualify(&mut self) -> bool {
+        let b = &mut self.state.car.owner.vehicle;
+        if b[0xd234 / 4] != 7 {
+            return false;
+        }
+        b[0xd234 / 4] = 6;
+        b[0xd238 / 4] &= !0xff;
+        true
+    }
+    /// Disqualified (status 6, [`Self::disqualify`]).
+    pub fn disqualified(&self) -> bool {
+        self.state.car.owner.vehicle[0xd234 / 4] == 6
+    }
     /// Whether the terminal damage is a lost wheel (status 4).
     pub fn lost_wheel(&self) -> bool {
         self.state.car.owner.vehicle[0xd234 / 4] == 4
@@ -298,6 +317,7 @@ impl Runtime {
         car.configure_suspension(geometry)?;
         car.configure_damage_regions(&ned)?;
         car.configure_handling(&settings, true)?;
+        car.reset_engine();
         let mut owner = car.bytes().to_vec();
         owner.resize(source_physical::CAR_BYTES, 0);
         let factory = source_physical::initialize(
@@ -321,6 +341,8 @@ impl Runtime {
         // leaves only idle/drag behavior despite an otherwise exact update.
         owner[0x2fc / 4] = 1f32.to_bits();
         owner[0x188c / 4] = 1f32.to_bits();
+        // The default car setup's downforce and drag (F414).
+        standard_car::apply_default_downforce_setup(&mut owner);
         // Running engine on the grid. The native no-input stationary reference
         // (F275 stationary-idle01) holds 232.6573..232.6873, the idle governor
         // target idle*1.01 that the reconstructed post-force stage maintains
@@ -1464,11 +1486,12 @@ mod tests {
             runtime.reset();
             let drive=|runtime:&mut Runtime,geometry:&mut crate::body_geometry::BodyGeometry|{
                 let mut contacts=0;
-                // First mid-run tick (>=165) with pending deformed geometry
-                // (C7F2). The idling launch changed its exact timing.
+                // First mid-run tick (>=150) with pending deformed geometry
+                // (C7F2). Its timing follows the launch (165 before the F417
+                // engine reset; now 160).
                 let mut checked=None;
                 for _ in 0..600 {
-                    if checked.is_none() && runtime.ticks>=165 && runtime.state.car.owner.vehicle[0xc7f0/4]&0xff0000!=0 {
+                    if checked.is_none() && runtime.ticks>=150 && runtime.state.car.owner.vehicle[0xc7f0/4]&0xff0000!=0 {
                         let tick=runtime.ticks;checked=Some(tick);
                         let good_lap=runtime.lap.clone();
                         runtime.lap.as_mut().unwrap().next_gate=71;
@@ -2782,5 +2805,41 @@ mod tests {
         }
         assert_ne!(runtime.state.car.owner.vehicle[0x196c / 4], 9);
         assert!(signed_speed(&runtime) > 1.);
+    }
+}
+#[cfg(test)]
+mod default_setup_tests {
+    /// F414: the default setup's downforce and drag against the live
+    /// original (Lacetti braking capture and the LC70 capture, block +0xE00).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn default_setup_limits_prototype_downforce_like_the_original() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+                let words = |stem: &str| {
+                    let car = crate::car::Car::new(stem).unwrap();
+                    let rt = super::Runtime::load(
+                        &root,
+                        &crate::route::Route::default(),
+                        &car,
+                        "slot_00",
+                        200679,
+                    )
+                    .unwrap();
+                    let w = |o: usize| rt.state.car.owner.vehicle[o / 4];
+                    (w(0x1f04), w(0xe10))
+                };
+                // Lacetti: inside the setup range, unchanged; e10 as captured.
+                assert_eq!(words("lac"), (0.5f32.to_bits(), 0x3f4c_cccd));
+                // LC70: 9 limited to 1.5; e10 0x3EEAAAAC as captured live.
+                assert_eq!(words("lc7"), (1.5f32.to_bits(), 0x3eea_aaac));
+                assert_eq!(words("b06").0, 1.5f32.to_bits());
+                assert_eq!(words("sal").0, 1.2f32.to_bits());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

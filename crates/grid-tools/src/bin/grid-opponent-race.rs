@@ -32,6 +32,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(_) => return Err("--route needs tracks/<region>/<track>/<route>".into()),
         None => Route::default(),
     };
+    // `--demolition`: the Demolition Derby rules (grid_tools::demolition).
+    let demolition = match args.iter().position(|a| a == "--demolition") {
+        Some(i) => {
+            args.remove(i);
+            true
+        }
+        None => false,
+    };
     // `--subroute 1`: the point-to-point route's second (reverse) direction.
     let route = match args.iter().position(|a| a == "--subroute") {
         Some(i) if i + 1 < args.len() => {
@@ -73,13 +81,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // The drift AI config: the stand-in player's drift line and behaviour in
     // a Drift GP come from the drift_battle section (the drift_grand_prix
     // section switches every behaviour off).
-    let format = drift.then_some("drift_battle");
+    // A derby reads the single_demolition_race section [D].
+    let format = if demolition {
+        Some("single_demolition_race")
+    } else {
+        drift.then_some("drift_battle")
+    };
     // GRID_AI_CLASS=CLASS: another ai_vehicle_config/ai_vehicle_track class
     // for every car (research); by default each car's own database classes.
     let class_variable = std::env::var("GRID_AI_CLASS").ok();
     if !(5..=7).contains(&args.len()) {
         return Err(
-            "usage: grid-opponent-race [--route ROUTE] [--cars STEM,...] [--discipline drift_battle|drift_grand_prix] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
+            "usage: grid-opponent-race [--route ROUTE] [--subroute N] [--cars STEM,...] [--discipline drift_battle|drift_grand_prix] [--demolition] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
                 .into(),
         );
     }
@@ -433,6 +446,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut pair_contacts = vec![vec![0usize; cars]; cars];
     let mut car_contacts = 0;
     let mut laps: Vec<Vec<f64>> = vec![Vec::new(); cars];
+    let mut derby = if demolition {
+        let s = grid_tools::demolition::Settings::load(root)?;
+        println!("demolition {s:?}");
+        Some((s, vec![grid_tools::demolition::NotMoving::default(); cars]))
+    } else {
+        None
+    };
     let trace_laps = std::env::var_os("GRID_TRACE_LAPS").is_some();
     let mut maximum_speed = 0f32;
     for _ in 0..ticks {
@@ -651,6 +671,30 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             multi.ticks as f64 * f64::from(grid_tools::source_vehicle::DELTA),
             &[],
         );
+        if let Some((settings, not_moving)) = &mut derby {
+            // Every car here is AI: a stopped car is disqualified (0x630CF0).
+            for (i, n) in not_moving.iter_mut().enumerate() {
+                if standings.status(i) != Status::Racing {
+                    continue;
+                }
+                let v = multi.cars[i].velocity();
+                let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                if n.tick(settings, speed, f64::from(grid_tools::source_vehicle::DELTA))
+                    && multi.cars[i].disqualify()
+                {
+                    standings.retire(i, Out::Disqualified);
+                    let p = multi.cars[i].pose();
+                    let behaviour = match &drivers[i] {
+                        Driver::Ai(ai) => format!("{:?}", ai.telemetry.behaviour),
+                        Driver::Pursuit(_) => "pursuit".into(),
+                    };
+                    println!(
+                        "disqualified tick={} car{i} reason=not-moving pos=({:.1},{:.1},{:.1}) behaviour={behaviour} up_y={:.2}",
+                        multi.ticks, p[12], p[13], p[14], p[5]
+                    );
+                }
+            }
+        }
         if let Some((settings, flags, entries, flag_boxes, race)) = &mut drift_event {
             for (i, car) in multi.cars.iter().enumerate() {
                 let contacts: Vec<_> = multi

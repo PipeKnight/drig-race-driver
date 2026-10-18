@@ -153,7 +153,9 @@ only affects the breakable catalog):
   open AI line~~: done in F407 ([TOUGE.md](TOUGE.md)); Haruna routes 0-8 and
   Milan 3 now lap, the Yokohama arenas run Freestyle in the app.
 - Okutama `objects.ens`: an entity with more than one typed child.
-- Spa: the solo AI retires; Detroit route 0 and the San Francisco/Washington
-  wrecks; Detroit stadium laps.
+- ~~Spa: the solo AI retires~~: the packed-contact material check still stopped
+  at 8 keys; fixed in F425 ([SPA.md](SPA.md)). Spa, Milan, Shibuya and San
+  Francisco route 0 race ([STREET_CIRCUITS.md](STREET_CIRCUITS.md)).
+- Detroit route 0 and the Washington wrecks; Detroit stadium laps.
 - Washington's route box count after the group parts (section 3.6).
 - Static cylinders and spheres are not route collision (all tracks).

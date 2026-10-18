@@ -24,6 +24,29 @@ user-file snapshot and after-state).
   Memory access is read-only: `tools/capture_grid_braking.py` opens VM_READ | QUERY_LIMITED
   only. The game was closed with WM_CLOSE afterwards.
 
+## Frame rate of live captures (F419)
+
+The original steps its world once per rendered frame with the real frame delta (world `+7C8`;
+maxfps 10000 at runtime, WORLD_STEPPING_RESEARCH.md); its config has `vsync="0"`. The unlocked
+captures so far ran at 57–164 Hz: runs 1/3/4 about 6.1 ms per step (163–164 Hz, the display
+limit), run 2 9.1 ms, runs 5–9 12–18 ms, the LC70 10.3 ms, with up to ±30 % spread inside one
+run when other work loads the machine. [V]
+
+Braking is barely sensitive to this: k = stop distance / v0² × 1000 is 29.04 (run 1, 164 Hz)
+against 29.18 (run 5, 71 Hz) with Braking Assist on, and 22.34 / 22.37 / 22.48 (runs 4/2/6 at
+163/110/57 Hz) with it off, all within about 1 %. Fast transients (crashes, drifts, car
+contacts) may be more sensitive. [V]
+
+**Rule from now on:** lock the original to 60 Hz for captures.
+
+1. In the snapshotted `Documents\Codemasters\GRID\hardwaresettings\hardware_settings_config.xml`
+   set `vsync="1"` and `<refreshRate rate="60" />` before launch; the normal restore puts the
+   original back afterwards. The Steam install is not touched.
+2. Verify on the first capture: world `+7C8` ≈ 0.01667 s (the braking sampler records world
+   `+7C4..+7CB`); record the median step of every capture next to its result.
+3. If the config route does not hold 60 Hz (unverified on the 165 Hz monitor), ask the owner
+   to switch the display to 60 Hz for the session.
+
 ## Scenario
 
 Race Day, Touring Cars, Chevrolet Lacetti, Donington Park Grand Prix, Normal, grid position
@@ -236,6 +259,8 @@ The original repeats within 0.2 m. [V] Engine and drivetrain block against the p
   plus zeroing +0x185C..+0x18C4); the port's constructor sets only +0x1888. No instruction in
   the executable reads +0x1864 or +0x1880 by direct offset, and +0x1884 is read only through
   driver preparation `A03703`/`A0381F` (already ported), so these are unlikely to explain the gap.
+  **Corrected in F417:** the readers address the engine block through its base (+0x1880 and
+  +0x1884 are engine e+0xE0/e+0xE4, the engine-braking scale); their absence was the cause.
 
 ## Front-axle gap traced offline; Drift Battle fall-through (F403)
 
@@ -282,6 +307,9 @@ while its engine speed still follows the wheels.
 now record car +0x1560..+0x165F and +0x17A0..+0x17AF, so the next live run answers it directly.
 No port change is made without that evidence.
 
+**Superseded by F417:** run 5 shows the coupling state identical; the cause was the missing
+engine reset.
+
 **Drift Battle fall-through [V].** With the default setup, the autopiloted BMW slides along the
 Long Beach hairpin wall, passes the boundary line at z ≈ −239.4 (sheet triangles 138/143/161,
 `boundarylines.cqtc`) with **no body contacts**, then reverses past the end of the track mesh
@@ -302,23 +330,160 @@ the counted drift. From 108 mph this open-loop turn always ends in a spin (tried
 350–700, handbrake 5–40 ticks, with and without counter-steer), so it banks no points; banked
 scores remain covered by the autopiloted Drift Battle tests.
 
+## Engine reset: the missing engine braking (F417)
+
+18 October 2026, Claude Code. A short live session on the research copy (the owner freed the
+desktop for live tests in general: "Компьютер свободен, ты можешь тестировать оригинальную Grid",
+via the coordinator; same conditions), then offline analysis. PID 35844, 16:45–17:12 UTC; the
+19 user files were snapshotted and restored (none changed); the game was closed with WM_CLOSE.
+Evidence: main checkout `local/driving/braking-20261018c/` (run 5, scripts, shots, macro logs,
+user-file snapshot) and `local/driving/field-20261018/` (12-car field, for the robustness work).
+
+**Run 5, BA on [V]:** 67.94 m / 2.98 s from 48.25 m/s (runs 1 and 3: 69.65 and 69.50 m from
+48.97 and 48.91 m/s). The extended capture shows the coupling state identical to the port
+throughout: mode +0x1598 = 1, +0x1640 = +0x1641 = 0, clutch +E34 = 0, engine inertia +0x17A0 =
+0.22, +0x17A4/+0x17A8 = 890.1/230.4, differential +0x1570..+0x1594, mass 1140. The F403
+hypothesis (a different coupling state) is ruled out. A BA-off run was skipped: at 16:51 another
+window took the foreground and the macro guard refused the pending keys (none was sent).
+
+**Cause [V].** The engine block starts at car +0x17A0 (`e`). In `vehicle_propulsion::engine`,
+which matches `9B1B90` 1:1, the closed-throttle friction (engine braking) is
+`e+0xB4 × 3000 × e+0xE4 × e+0xE0`; e+0xE0 and e+0xE4 are car +0x1880 and +0x1884. The original's
+engine reset `996C70` sets both to 1.0; the port never ran it, so both were 0 and **the port had
+no engine braking at all**. Under braking the engine's inertia then pushed the driven front
+wheels forward (the residual in F403) instead of being balanced by friction. F381's note that
+nothing reads +0x1880 by direct offset was wrong: the readers address the engine block through
+its own base.
+
+`996C70` is the first call of the original's car reset `A09CE0` (single caller, 0xA09CFF). Its
+stores: +0x1880, +0x1884, +0x1888, +0x1864 = 1.0 (0xCAF888); +0x187C = 9999.0 (0xCB0D94); zero
+for +0x18C4, +0x189C, +0x18A0, +0x18A4, +0x1F60, +0x1894, +0x1890, +0x185C, +0x1878, +0x1898,
++0x1868, +0x18C0, +0x1858 and bytes +0x1860/+0x1861. Ported 1:1 as `Car::reset_engine`, called
+by the source runtime after `configure_handling` (the verified cold constructor itself is
+unchanged; the rest of `A09CE0` is not ported here).
+
+**Result [V]:** front-axle drivetrain residual (Nm, BA on, port / run 5): 6.6 / 9.2 at onset
+(4th), 38 / 43 at 0.6 s, 126 / 133 at 1.2 s (2nd), 162 / 175 at 1.6 s, 522 / 546 at 2.0 s (1st);
+the rear stays equal. Stops: BA on 70.30 m / 3.12 s from 49.47 m/s (before 76.23 m; ≈ 68.9 m
+scaled to 48.97 m/s by v², against 69.65 m), BA off 54.10 m / 2.21 s (before 54.77; original
+53.31 / 53.49 m). The BA-off match is kept and improves; the BA-on gap falls from 9 % to about 1 %.
+Replays: `local/driving/braking-20261018c/port/reset-ba-{on,off}.tsv`.
+
+**Run 6, BA off [V]** (a second short session the same evening, PID 38604, 17:00–17:20 UTC, user
+files restored, 12 changed): 52.11 m / 2.17 s from 48.15 m/s, locked (136 rows, max +E74
+2.05 s); `local/driving/braking-20261018c/run06-ba-off.tsv`. Runs 2, 4 and 6 span 52.1–53.5 m.
+
+**Runs 7–9: other gear and car [V]** (third short session, PID 15100, 17:35–17:48 UTC; 12 user
+files changed, all 19 restored and verified; the game was terminated after it ignored the close
+request; one stray Enter during start-up opened a career race, quit from its pause menu). Port
+replays with the engine reset (`port/v-*.tsv`; `GRID_REPLAY_CAR=bmw` selects the BMW;
+`sched-low.tsv` = 188 ticks of throttle). The start speeds differ a little, so the table also
+gives k = distance / v0² (× 1000):
+
+| Case | Original | Port | k original / port |
+|---|---|---|---|
+| Lacetti, BA on, low speed (2nd) | 25.79 m / 1.98 s from 28.23 m/s | 29.57 m / 2.10 s from 30.70 m/s | 32.4 / 31.4 |
+| BMW 320si (rear drive), BA on | 74.36 m / 3.19 s from 50.02 m/s | 74.89 m / 3.23 s from 50.51 m/s | 29.7 / 29.4 |
+| BMW 320si, BA off | 55.43 m / 2.29 s from 49.63 m/s, locked | 56.53 m / 2.30 s from 50.51 m/s, locked | 22.5 / 22.2 |
+
+All within 3 %, on the rear-driven car too and in 2nd gear, where engine braking acts most.
+Captures `local/driving/braking-20261018c/live6/run0{7,8,9}-*.tsv`.
+
+**Race tests [V].** The engine reset changes driving, and with F403's boundary walls the
+scripted player can now be wrecked. A wrecked player is no longer ticked, which made two scripted
+loops hang. `race_tests::advance` now updates until the tick moves and returns false only for
+terminal damage (failing on any other stop); `drive_to` and the handbrake test assert on it, and
+the restart test ends its flat-out attempt when the car is wrecked (tick 865, damage and 112
+car contacts; the restarted race still replays the fresh one exactly). The handbrake turn now
+banks a score again (display 424).
+Two grid-tools scenario tests were re-baselined for the same reason. The assists matrix compared
+Stability on/off yaw in a steady turn where the two differed by under 1 % in either direction
+(0.377 / 0.374 before, 0.418 / 0.422 after); it now measures the turn-in (ticks 190–260, full
+steering), where Stability off (front grip × 0.6 for the Lacetti) is lower in every variant tried
+(now 1.014 / 0.966). The deformation-callback test's first mid-run tick with pending deformed
+geometry moved from 168 to 160; its threshold is now 150 instead of 165.
+
+**LC70 capture (for the car series work, not braking) [V].** Same session: Courage LC70, Le Mans
+Series, Istanbul Park GP, 8 s of full throttle from the grid, then braking;
+`local/driving/lmp1-lc70-20261018/` (`lc70-run01.tsv` in this sampler's format, `summary.tsv`
+every 0.1 s). From 0 to 69 m/s on the straight the body sinks only 2.3 cm (y 2.869 → 2.846);
+suspension distance +0x40 is +0.011..+0.016 m at 63 m/s (−0.002 at rest, limit 0.25) and the
+summed suspension force grows from 9.8 to 14.5 kN (the springs carry the downforce). The car
+left the track at turn 1 after about 8 s; the world contact pool was not sampled.
+
+## Engine reset and AI wrecks (F426)
+
+19 October 2026, Claude Code. le-mans reported that since F417 Lacetti/BMW cars wreck in Sarthe's
+last chicane and the DBR9 field at the Dunlop/Esses. Tested headless (`grid-opponent-race`,
+release, no DF01 / AI characteristics), the engine reset toggled by a temporary switch; evidence
+`local/driving/f417-regression/` (main checkout). [V]
+
+| Case | With reset | Without reset |
+|---|---|---|
+| Main circuits, 12 cars, 11 200 ticks: wrecks (Donington, Nürburgring, Istanbul, Long Beach, Jarama, Yokohama) | 1, 0, 0, 0, 0, 1 = 2 | 1, 0, 0, 0, 2, 0 = 3 |
+| Same, laps covered (sum of 12 cars) | 125.9 | 129.5 |
+| Sarthe solo Lacetti on main, at e548701, 57b406d, fba00a7, 77c585a | wrecked at 0.988 laps, (−781, −1091) | e548701 (before F417): the same, identical position |
+| Sarthe solo Lacetti, le-mans branch tip | wrecked at 0.988 laps | the same |
+| Sarthe 12 Lacettis, le-mans branch tip | 7 wrecks (Dunlop/Esses ≈ 0.28 and 1.28 laps; last chicane ≈ 0.98) | 5 wrecks at the same two places |
+
+So the reset does not cause these wrecks: the cars wreck at the same two corners without it,
+and on the main circuits the wreck count does not rise. Engine braking makes the cars about
+3 % slower over a race (they now slow when lifting), which shuffles which car crashes where.
+Sarthe's `ai_vehicle_track.xml` has a genuine `touring` class with its own brake-line speeds
+(for example the last chicane, line 26, 42–70 m/s), so the Lacetti uses original data there,
+not a fallback. The AI's braking distances come from the shipped brake tables
+(`ai_vehicle_statistics.xml`, 0x7A6650), which do not depend on the engine. [I] The two
+corners are a pre-existing AI-line problem at Sarthe (le-mans already saw the pre-F417 trace
+~7 m off the line at ~52 m/s in the last chicane); finding it needs the original AI's trace
+there, which only a live capture gives.
+
+## Sarthe AI corner speeds and the live-capture plan (F427)
+
+19 October 2026, Claude Code; static analysis only. Evidence: main checkout
+`local/driving/f417-regression/` (`sarthe-solo-trace.tsv` from `grid-opponent-race --route
+tracks/europe/le_mans/route_0 … 1 30000 ai`, the throwaway reader `grid-tmp-brakelines.rs`).
+
+**What the port reads [V].** Sarthe route 0 has one AI track (`default`), 27 brake lines and a
+13 519 m racing line. `ai_vehicle_track.xml` lists every class with the same 27 lines, keyed by
+id 0..26 like `ai_track.xml`, so the port's pairing by id is right; no reader, index-wrap or
+precision fault shows (arcs and gates match, f32 at 13 500 m keeps 1 mm). The class data is
+the original's own tuning: route 1 (`le_mans_classic`) ends with the same three lines.
+
+**What the AI does with it [V].** The touring class gives the Ford chicanes (lines 24–26, arcs
+13 121 / 13 283 / 13 345) min/max 49.2–70.0, 46.8–62.0 and 42.0–70.0 m/s, while the track's own
+data there is 24.6–46.9. The corner speed (0x792C80) is clamped to [min, max], so the AI never
+aims below 42 m/s, and the racing line's curvature there is 0.009–0.015 rad/m (radius 68–110 m):
+2.3–4 g at the target, impossible with touring `racingGripMultiplier` 1.0. The solo trace enters
+at 59 m/s, the line error grows to −6.6 m and the car wrecks at 0.988 laps. Past line 26 the next
+line is line 0 beyond the start/finish wrap (54.6–91.0), so the target jumps to 72–77 m/s.
+
+[I] With the same data and logic the original would aim equally fast here, so the difference
+must be in what the original does at the corner that the port does not (a curvature/grip limit
+in another controller, AI grip boosts, or simply not racing touring cars at Sarthe: the Race
+Day Touring Cars location list cycled on 18 October did not show Le Mans). It cannot be settled
+statically.
+
+**Live-capture plan (owner's go first; about 15 minutes; 60 Hz lock as in "Frame rate of live
+captures").**
+
+1. Snapshot the 19 user files; set `vsync="1"` and `refreshRate 60` in the snapshotted
+   hardware settings; start the research copy.
+2. Race Day → Le Mans Series → Aston Martin DBR9 (GT1) → Le Mans (Circuit de la Sarthe) route 0;
+   grid Back, Normal, assists default. Also note whether Touring Cars offers Le Mans at all.
+3. Pause on the grid; `tools/find_reference_vehicle_manager.ps1` → manager scan JSON.
+4. Unpause and record the whole field for 60 s twice with `tools/capture_grid_field.py`
+   (covers the Dunlop and the Esses at ≈ 0.28 laps): every AI car's pose, velocity, published
+   throttle/brake/steering and gear per frame. Check world `+7C8` ≈ 16.67 ms.
+5. Restart and let the field run to the Ford chicanes (≈ 3:30 race time), then record 60 s
+   again; or, if shorter, retire and repeat with grid Front.
+6. Close the game, restore the files and settings, verify the hashes.
+7. Offline: speed and line offset of each AI car at the Esses and Ford chicanes against the
+   port's targets (line 8/9 and 24–26) and against the port's field on the same grid.
+
 ## Next
 
-1. One live run of about 5 minutes (when the owner allows): the same steps as F381, with the
-   extended capture (car +0x1560..+0x165F, +0x17A0):
-   1. Snapshot `Documents\Codemasters\GRID` (19 files, hashes) as in F371.
-   2. Start `C:\Users\debros\Tools\grid-research\grid-compat\grid.exe`; Race Day, Touring Cars,
-      Lacetti, Donington GP, Normal, grid Back, TC on, Automatic, SC on, **Braking Assist on**.
-   3. When the race starts, pause; `tools/find_reference_vehicle_manager.ps1 -ScanLimitBytes 256MiB`
-      gives the car address (manager index 0).
-   4. Start `python -I tools/capture_grid_braking.py SESSION.json CAR 16 local/driving/braking-DATE/run05-ba-on.tsv`
-      in the background.
-   5. `tools/run_grid_macro.ps1 -Action brake_test -HoldMs 1500 -SessionJson ...` (6 s throttle,
-      5 s brake).
-   6. Close the game with WM_CLOSE, restore the 19 files, verify the hashes.
-   7. Offline: compare +0x1598, +0x1640 and +0x17A0 during braking with the port's
-      (`local/driving/braking-20261018b/port/f403-ba-on.tsv` columns 10–11: mode 1, flag 0, inertia 0.22).
-2. Then port the original's coupling during braking and rerun the replays.
-3. Wire the default setup (`setup-wiring-v3.patch`, with the wall-test re-baseline from v2) once
-   the braking gap shrinks.
-4. Repeat runs at a second onset speed; compare idle +E34 from rest.
+1. Repeat a BA-off live run with the extended capture, and runs at a second onset speed;
+   compare idle +E34 from rest.
+2. Port the rest of the original car reset `A09CE0` where it differs from the port's state.
+3. Retry the default setup (`local/driving/setup-F372/setup-wiring-v3.patch`, with the wall-test
+   re-baseline from v2) on top of the engine reset.

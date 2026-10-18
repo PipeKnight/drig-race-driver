@@ -232,9 +232,29 @@ pub(crate) fn drive_to(app: &mut App, target: u64) {
     keys(app).press(KeyCode::KeyW);
     keys(app).press(KeyCode::KeyD);
     while ticks(app) < target {
-        app.update();
+        assert!(advance(app), "wrecked at tick {}", ticks(app));
     }
     assert_eq!(ticks(app), target);
+}
+
+/// Update until the player's tick count moves. False when it stops for good:
+/// a wrecked player (terminal damage) is no longer ticked, which used to hang
+/// the loops above. The player has the boundary walls since F403.
+pub(crate) fn advance(app: &mut App) -> bool {
+    for _ in 0..1000 {
+        let before = ticks(app);
+        app.update();
+        if ticks(app) != before {
+            return true;
+        }
+    }
+    let d = app.world().resource::<Driving>();
+    assert!(d.failure.is_none(), "{:?}", d.failure);
+    assert!(
+        d.runtime.terminal_wheel().is_some(),
+        "the player stopped ticking without terminal damage"
+    );
+    false
 }
 
 pub(crate) fn big_stack(f: impl FnOnce() + Send + 'static) {
@@ -312,8 +332,8 @@ fn restart_race_resets_cars_damage_ai_timing_and_props() {
         // into the field and off at the first corner.
         keys(&mut app).press(KeyCode::KeyW);
         let mut car_contacts = 0;
-        while ticks(&app) < 2 * RUN {
-            app.update();
+        // Wrecked at the first corner is the expected end of this attempt.
+        while ticks(&app) < 2 * RUN && advance(&mut app) {
             car_contacts += app
                 .world()
                 .resource::<Driving>()
@@ -404,7 +424,9 @@ fn results(app: &App) -> Vec<crate::post_race::Row> {
 fn retire_from_race_shows_the_results_on_every_circuit() {
     use crate::post_race::{Cell, Stage};
     use grid_tools::race::{Out, Status};
-    use grid_tools::route::{DONINGTON, ISTANBUL_PARK, JARAMA, NURBURGRING, YOKOHAMA};
+    use grid_tools::route::{
+        DONINGTON, ISTANBUL_PARK, JARAMA, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
+    };
     big_stack(|| {
         for (route, models) in [
             (DONINGTON, &["lac"][..]),
@@ -414,6 +436,12 @@ fn retire_from_race_shows_the_results_on_every_circuit() {
             (JARAMA, &["lac"][..]),
             // Yokohama: the first Japanese track, a 2.0 s start (docs/YOKOHAMA.md).
             (YOKOHAMA, &["bmw", "lac"][..]),
+            // Spa: the 7.0 km Grand Prix circuit (docs/SPA.md).
+            (SPA, &["lac"][..]),
+            // The street circuits (docs/STREET_CIRCUITS.md).
+            (MILAN, &["lac"][..]),
+            (SHIBUYA, &["bmw"][..]),
+            (SAN_FRANCISCO, &["lac"][..]),
         ] {
             let mut app = race_app_with(route, models, 2, false);
             keys(&mut app).press(KeyCode::KeyW);
@@ -630,16 +658,7 @@ fn a_handbrake_turn_in_the_bmw_scores_drift_points() {
             .add_systems(Update, crate::drift_event::tick.after(crate::drive_tick));
         let entry = |app: &App| app.world().resource::<DriftEvent>().entries[0].clone();
         // A wrecked car stops ticking: fail instead of waiting forever.
-        let step = |app: &mut App| {
-            for _ in 0..1000 {
-                let before = ticks(app);
-                app.update();
-                if ticks(app) != before {
-                    return;
-                }
-            }
-            panic!("{:?}", app.world().resource::<Driving>().failure);
-        };
+        let step = |app: &mut App| assert!(advance(app), "wrecked at tick {}", ticks(app));
         // Flat out after the countdown, then a handbrake turn to the right
         // held on the throttle, before the first wall (about tick 800 flat
         // out, now that the player has the boundary sheet as in the app).

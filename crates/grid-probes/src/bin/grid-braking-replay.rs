@@ -10,6 +10,7 @@
 //! `grid-braking-replay ROOT SLOT ASSISTS SCHEDULE.tsv local/OUT.tsv`
 //! SCHEDULE rows: `throttle brake steering` per tick (blank lines and `#`
 //! comments ignored). ASSISTS is the `--assists` spec, e.g. `braking=off`.
+//! `GRID_REPLAY_CAR=bmw` replays another purchased car instead of the Lacetti.
 use grid_tools::source_vehicle::{Controls, Runtime, assists::Assists};
 use std::{io::Write, path::Path};
 
@@ -19,7 +20,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: grid-braking-replay ROOT SLOT ASSISTS SCHEDULE.tsv local/OUT.tsv".into());
     }
     let root = Path::new(&args[0]);
-    let mut r = Runtime::lacetti(root, &args[1], 200679)?;
+    // GRID_REPLAY_CAR selects another purchased car (e.g. `bmw`); default Lacetti.
+    let mut r = match std::env::var("GRID_REPLAY_CAR") {
+        Ok(stem) => Runtime::load(
+            root,
+            &grid_tools::route::Route::default(),
+            &grid_tools::car::Car::new(&stem)?,
+            &args[1],
+            200679,
+        )?,
+        Err(_) => Runtime::lacetti(root, &args[1], 200679)?,
+    };
     r.set_assists(Assists::parse(&args[2])?)?;
     let schedule: Vec<Controls> = std::fs::read_to_string(&args[3])?
         .lines()

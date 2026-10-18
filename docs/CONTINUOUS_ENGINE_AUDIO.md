@@ -60,3 +60,9 @@ Owner follow-up (2026-10-14T18:08:04.841527+00:00): improved but still more arti
 original GRID. Owner explicitly defers further engine sound work. Preserve this
 build and the open fidelity gaps; next driving/event milestones are documented
 in NEXT_MILESTONES.md. No further audio experiment is requested now.
+
+F422 (18 October 2026): the "observed Chase bus offsets (-14 engine/-7 exhaust dB)" are the
+original group mix (`audio/GroupModeVolumes.bin`: Chase camera + PC platform + -3 dB master).
+The mixer now takes those levels from the table for the shown view's audio camera and gates
+voices whose voice+group level is at or below -48 dB, as the backend does. See
+[AUDIO_RESEARCH.md](AUDIO_RESEARCH.md).
