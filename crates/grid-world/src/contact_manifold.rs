@@ -105,7 +105,7 @@ pub struct OrientedOutput {
     pub witnesses: [V; 2],
 }
 
-fn witness_length(square: f32) -> Result<f32, Error> {
+pub(crate) fn witness_length(square: f32) -> Result<f32, Error> {
     if square == 0. {
         return Ok(0.);
     }

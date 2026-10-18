@@ -11,6 +11,7 @@ pub mod collision_damage;
 pub mod collision_dispatch;
 pub mod collision_mesh;
 pub mod contact_bias;
+pub mod continuous;
 pub mod contact_collection;
 pub mod contact_groups;
 pub mod contact_inverse;

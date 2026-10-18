@@ -25,7 +25,7 @@ pub const DELTA: f32 = 0.016;
 pub const GRAVITY: f32 = f32::from_bits(0x411c_f5c3);
 
 type GeometryProvider<'a> = dyn FnMut(
-        &[grid_world::contact_groups::Body],
+        &mut [grid_world::contact_groups::Body],
         usize,
     ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>
     + 'a;
@@ -596,7 +596,7 @@ impl Runtime {
         &mut self,
         controls: Controls,
         mut geometry: impl FnMut(
-            &[grid_world::contact_groups::Body],
+            &mut [grid_world::contact_groups::Body],
             usize,
         ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>,
     ) -> Result<(), Error> {
@@ -753,7 +753,17 @@ impl Runtime {
                 let mut publication = |owner: &vehicle_publication::State, delta| {
                     resource.borrow_mut().publish_deformation(owner, delta)
                 };
-                let provider = |bodies: &[grid_world::contact_groups::Body], remaining| {
+                let provider = |bodies: &mut [grid_world::contact_groups::Body], remaining| {
+                    // World phase 2 (continuous) before the contacts.
+                    if let Some(props) = self.props.as_ref().filter(|p| p.has_bodies()) {
+                        props.continuous(
+                            &self.track,
+                            &self.surfaces,
+                            bodies,
+                            resource.borrow().query(),
+                        )?;
+                    }
+                    let bodies: &[grid_world::contact_groups::Body] = bodies;
                     let contacts =
                         self.fresh_contacts(&resource.borrow(), bodies, remaining, &mut recorded)?;
                     body_contacts = contacts.len();
@@ -1858,7 +1868,7 @@ mod tests {
         runtime.state.car.frame.body[0x1568 / 4] = 1.25f32.to_bits();
         let before = trace(&runtime);
         let good_point: [f32; 4] = runtime.pose()[12..16].try_into().unwrap();
-        let invalid = |_: &[grid_world::contact_groups::Body], _: usize| {
+        let invalid = |_: &mut [grid_world::contact_groups::Body], _: usize| {
             let mut c = [0; 32];
             c[1] = 1;
             c[0xc / 4] = 0x01000000;
@@ -1971,8 +1981,8 @@ mod tests {
         assert!(close(&away.state.vehicle, &early.state.vehicle));
 
         // A whole tick with a body event 3.8 km from the car no longer pauses.
-        let far = |_: &[grid_world::contact_groups::Body], _: usize| {
-            let mut c = invalid(&[], 0)?;
+        let far = |_: &mut [grid_world::contact_groups::Body], _: usize| {
+            let mut c = invalid(&mut [], 0)?;
             c[1][0x50 / 4..0x60 / 4].copy_from_slice(&[2928f32, 0., -2416., 1.].map(f32::to_bits));
             Ok(c)
         };

@@ -22,12 +22,12 @@ fn cross(a: V, b: V) -> V {
 }
 
 /// Barycentric closest-feature result, including the original active flags.
-struct Feature {
-    point: V,
-    weights: V,
-    active: [bool; 4],
+pub(crate) struct Feature {
+    pub(crate) point: V,
+    pub(crate) weights: V,
+    pub(crate) active: [bool; 4],
 }
-fn triangle_feature(a: V, b: V, c: V, ab: V, ac: V) -> Feature {
+pub(crate) fn triangle_feature(a: V, b: V, c: V, ab: V, ac: V) -> Feature {
     let feature = |mut point: V, weights, active| {
         point[3] = 1.;
         Feature {
@@ -101,7 +101,7 @@ fn triangle_feature(a: V, b: V, c: V, ab: V, ac: V) -> Feature {
 }
 
 /// None means origin inside; Err means the original degenerate-plane guard.
-fn tetrahedron_feature(p: [V; 4]) -> Result<Option<Feature>, ()> {
+pub(crate) fn tetrahedron_feature(p: [V; 4]) -> Result<Option<Feature>, ()> {
     let ab = sub(p[1], p[0]);
     let ac = sub(p[2], p[0]);
     let ad = sub(p[3], p[0]);
@@ -347,7 +347,7 @@ pub struct Output {
     pub simplex_bytes: [u8; 0x120],
 }
 
-fn mesh_support(
+pub(crate) fn mesh_support(
     mesh: &Mesh,
     matrix: Matrix,
     direction: V,

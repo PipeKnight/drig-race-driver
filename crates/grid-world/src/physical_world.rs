@@ -63,7 +63,7 @@ pub fn advance_with_geometry_provider(
     external_count: usize,
     shapes: &[contact_groups::Shape],
     mut provider: impl FnMut(
-        &[contact_groups::Body],
+        &mut [contact_groups::Body],
         usize,
     ) -> Result<Vec<contact_groups::Contact>, Error>,
 ) -> Result<grouped_physical_frame::Output, Error> {

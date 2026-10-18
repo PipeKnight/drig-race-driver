@@ -334,6 +334,53 @@ impl Track {
         }
         Ok(contacts)
     }
+    /// The continuous stage (grid_world::continuous) for one mesh swept from
+    /// `start` to `end` against every packed road chunk its swept bounds
+    /// reach, in archive order, at most `capacity` hits. The boundary sheet
+    /// (kind 10, swept callback AE95B0) and the route props are not swept.
+    pub fn sweep_road(
+        &self,
+        mesh: &grid_world::collision_mesh::Mesh,
+        start: grid_world::physical_pose::Matrix,
+        end: grid_world::physical_pose::Matrix,
+        query: &grid_world::convex_distance::ContactSettings,
+        capacity: usize,
+        mut sheet: impl FnMut([u8; 4]) -> Result<bool, grid_world::Error>,
+    ) -> Result<Vec<grid_world::continuous::Hit>, grid_world::Error> {
+        let margin = query.margin + ROAD_MARGIN;
+        let [a0, a1] = mesh.world_bounds(start, margin)?;
+        let [b0, b1] = mesh.world_bounds(end, margin)?;
+        let mut hits = Vec::new();
+        for c in self.chunks.iter() {
+            if hits.len() == capacity {
+                break;
+            }
+            if (0..3).any(|j| a0[j].min(b0[j]) > c.bounds[j + 3] || a1[j].max(b1[j]) < c.bounds[j]) {
+                continue;
+            }
+            if c.material_keys.len() > 16 {
+                return Err(grid_world::Error(
+                    "packed body material count exceeds bound",
+                ));
+            }
+            let mut sheet_mask = 0;
+            for (j, &key) in c.material_keys.iter().enumerate() {
+                sheet_mask |= u32::from(sheet(key)?) << j;
+            }
+            hits.extend(grid_world::continuous::sweep_packed(
+                mesh,
+                start,
+                end,
+                &c.mesh(),
+                &c.material_indices,
+                sheet_mask,
+                ROAD_MARGIN,
+                query,
+                capacity - hits.len(),
+            )?);
+        }
+        Ok(hits)
+    }
     pub fn query(
         &self,
         start: [f32; 4],

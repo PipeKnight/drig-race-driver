@@ -707,8 +707,18 @@ impl MultiRuntime {
         let mut prop_slots = Vec::new();
         let mut car_normals = Vec::new();
         let mut contact_failed: Vec<Option<Error>> = vec![None; n];
-        let mut provider = |bodies: &[contact_groups::Body], remaining: usize| {
+        let mut provider = |bodies: &mut [contact_groups::Body], remaining: usize| {
             let provider_started = crate::perf::enabled().then(std::time::Instant::now);
+            // World phase 2 (continuous) before the contacts of phase 3.
+            if let Some(props) = props.filter(|p| p.has_bodies()) {
+                props.continuous(
+                    &cars[0].track,
+                    &cars[0].surfaces,
+                    bodies,
+                    geometry[0].query(),
+                )?;
+            }
+            let bodies: &[contact_groups::Body] = bodies;
             let body_timer = crate::perf::Timer::start(crate::perf::Stage::BodyContacts);
             let mut out: Vec<contact_groups::Contact> = Vec::new();
             statics_normals.iter_mut().for_each(|s| *s = [0.; 3]);
