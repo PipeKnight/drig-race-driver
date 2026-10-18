@@ -1,5 +1,17 @@
 # GRID engine project log
 
+## G144 — Optional curb comparison launcher, guarded and tested (19 October 2026)
+
+Added Play GRID Graphics Curbs.cmd and explicit curbs mode to graphics launcher: source surface F0 plus private alpha-preserving RGB seam derivative. Ordinary mode keeps source textures/surface control off. Missing derivative refuses launch; old installed b9 lacks RGB loader and is rejected for this opt-in rather than silently showing unchanged textures. No installed exe or primary launcher update yet.
+
+Actual CMD control flow (only help query/final game spawn stubbed, no window/input) passes5cases: default, Surfaces, Curbs, old unsupported Curbs, missing private manifest. First missing-manifest case printed error but returned0 because nested-block exit was followed by SETs in its outer block; flattened the new guard and all5retry cases pass. Failed harness/result files retained. Probe of CMD confirmed nested behavior; not a game/GPU issue.
+
+During draft write, invalid Python newline argument truncated only our worktree graphics launcher before raising; reconstructed from its previously clean HEAD2c5 source, applied planned edits via atomic bytes, then tested. Primary/installed files untouched; no failed launcher was run against the game. A later diagnostic here-string parse failed before execution, corrected. These failures are not presented as successful checks.
+
+Rust application/source remains2c5f9ca while fresh F427 tests/build run; this commit changes launcher/Markdown only. New derivative source/preparer acceptance remains opt-in. Private launcher-curbs-validation02.json and launcher-write-repair01.json retain evidence.
+
+
+
 ## G143 — Preserve remote F416–F427 in isolated graphics source (19 October 2026)
 
 Merged origin/main30d5b33 after publishing checked graphics checkpoint923fd64. Preserve career/data/save research, event bundle, engine-braking reset, live60Hz capture policy, LMP1 setup, derby, source audio mix and Spa/street circuits. main.rs auto-merges; sole conflict is additive PROJECT_LOG prefixes, resolved by retaining both histories with a full nonempty-line multiplicity check and private merge JSON. No physics/world/formats difference against incoming main. Incoming route.rs trailing blank-line whitespace warning is inherited unchanged; own delta against origin/main passes diff--check.

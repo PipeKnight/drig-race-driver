@@ -63,3 +63,9 @@ Additional evidence:
 Current result remains optional: neural inferred grain/cracks and all adjacent material pairs still need broader acceptance. No launcher/default or installed executable change is implied by these tests. New remote F416–F427 must be preserved in a later integration; these checks do not cover that future merge.
 
 Final pre-F427 checkpoint: quick soak24/24pass120000ticks/6.7min wall,0auto-resets/0expected losses. This completes that source checkpoint's pre-push checks. New main F416–F427 integration is separate; source texture acceptance is still optional.
+
+## Optional playable comparison
+
+Play GRID Graphics Curbs.cmd selects this private curb pilot plus source-alpha surface reflectance; ordinary Play GRID Graphics.cmd keeps source RGB. It requires a graphics executable advertising --surface-rgb-overrides and the private surface-textures01 manifest/source DDS/carrier. Older b9 rejects this opt-in deliberately; don't interpret that as an installed new build until the manifest records promotion.
+
+Extracted actual CMD flow passes five cases with help/spawn stubbed: ordinary, Surfaces, Curbs, unsupported older build, missing files. First draft's nested error exit returned success; flattened guard fixes it, retry passes. No game window/input during these checks.
