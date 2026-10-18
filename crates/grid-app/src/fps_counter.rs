@@ -63,7 +63,10 @@ pub struct FpsCounter {
     pub shown: bool,
     window: Window,
     last_ticks: Option<u64>,
-    reported_setup: bool,
+    /// Window size of the last `frame_setup` line: logged again on a change,
+    /// since Android sizes the window after the first frames (a phone log
+    /// showed the requested 1280x800 first).
+    reported_setup: Option<UVec2>,
 }
 
 #[derive(Component)]
@@ -127,10 +130,10 @@ fn update(
         counter.last_ticks = None;
         return;
     }
-    if !counter.reported_setup
-        && let Some(w) = windows.iter().next()
+    if let Some(w) = windows.iter().next()
+        && counter.reported_setup != Some(UVec2::new(w.physical_width(), w.physical_height()))
     {
-        counter.reported_setup = true;
+        counter.reported_setup = Some(UVec2::new(w.physical_width(), w.physical_height()));
         let refresh: Vec<String> = monitors
             .iter()
             .map(|m| {
@@ -184,7 +187,7 @@ pub fn install(app: &mut App, shown: bool) {
         shown,
         window: Window::default(),
         last_ticks: None,
-        reported_setup: false,
+        reported_setup: None,
     })
     .add_systems(Update, (spawn, update).chain());
 }
