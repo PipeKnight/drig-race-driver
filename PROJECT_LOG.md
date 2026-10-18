@@ -21,7 +21,7 @@ F416 Career ("GRID World") researched and its data model ported as `grid_tools::
   - The career unit's layout for a new profile: money, reputation[5], season number. The private tools round-trip all 15 units byte-identically.
 - Port: `career::data::Catalogue` (database + rewards.xml), `career::rules`, `career::state::Career` (`apply_event`, `apply_driver_offer`, ranks/licences/garages, seasons, cars, teammate, sponsors), and `career::save`, our own versioned text save with an FNV-1a checksum. 11 unit tests plus 2 asset tests (catalogue; a rookie career from offers to a won bmw_si_tour).
 - [I]/AUTHORED in the port: tier availability and repeatability, the team-win test, equal-points order, the "won" field for the head-to-head unlock. Not ported: routine B, eBay, the race draw from an event's track pool, the career AI field. No app front end. Open list: docs/CAREER_RESEARCH.md §11. A live check of one rookie event's bank screen is suggested for the owner. Playable not rebuilt.
-- Checks [V], release, cargo/rustc 1.99.0, worktree `local/career/checks/`:
+- Checks [V], release, cargo/rustc 1.99.0, main checkout `local/career/checks/` (script `local/career/scripts/checks.sh`):
   - On 3c4f4e5 (base da7f2ab, F414): `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 709 passed, 0 failed.
   - `grid-soak quick`: 24/24.
   - Clippy flagged 3 style errors in `career/rules.rs`. After the fix, `cargo clippy --release --workspace --all-targets -- -D warnings` is clean, and the career tests (13, asset tests included) pass again.
