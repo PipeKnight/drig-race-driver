@@ -322,6 +322,8 @@ impl Runtime {
         // leaves only idle/drag behavior despite an otherwise exact update.
         owner[0x2fc / 4] = 1f32.to_bits();
         owner[0x188c / 4] = 1f32.to_bits();
+        // The default car setup's downforce and drag (F414).
+        standard_car::apply_default_downforce_setup(&mut owner);
         // Running engine on the grid. The native no-input stationary reference
         // (F275 stationary-idle01) holds 232.6573..232.6873, the idle governor
         // target idle*1.01 that the reconstructed post-force stage maintains
@@ -2784,5 +2786,41 @@ mod tests {
         }
         assert_ne!(runtime.state.car.owner.vehicle[0x196c / 4], 9);
         assert!(signed_speed(&runtime) > 1.);
+    }
+}
+#[cfg(test)]
+mod default_setup_tests {
+    /// F414: the default setup's downforce and drag against the live
+    /// original (Lacetti braking capture and the LC70 capture, block +0xE00).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn default_setup_limits_prototype_downforce_like_the_original() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+                let words = |stem: &str| {
+                    let car = crate::car::Car::new(stem).unwrap();
+                    let rt = super::Runtime::load(
+                        &root,
+                        &crate::route::Route::default(),
+                        &car,
+                        "slot_00",
+                        200679,
+                    )
+                    .unwrap();
+                    let w = |o: usize| rt.state.car.owner.vehicle[o / 4];
+                    (w(0x1f04), w(0xe10))
+                };
+                // Lacetti: inside the setup range, unchanged; e10 as captured.
+                assert_eq!(words("lac"), (0.5f32.to_bits(), 0x3f4c_cccd));
+                // LC70: 9 limited to 1.5; e10 0x3EEAAAAC as captured live.
+                assert_eq!(words("lc7"), (1.5f32.to_bits(), 0x3eea_aaac));
+                assert_eq!(words("b06").0, 1.5f32.to_bits());
+                assert_eq!(words("sal").0, 1.2f32.to_bits());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }

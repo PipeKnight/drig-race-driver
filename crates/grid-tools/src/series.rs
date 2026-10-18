@@ -45,15 +45,22 @@ pub const SURVEYED_TRACKS: [&str; 5] = [
     "tracks/europe/jarama",
 ];
 
-/// Cars of the circuit series that race 12-car fields on our circuits
-/// (AUTHORED port limitation, docs/SERIES.md "Car survey"). The GT1 and GT2
-/// cars race since the collision floor lift (F406); the LMP1 prototypes
-/// (lc7, b06) still ground at speed and the Le Mans Series field builder is
-/// separate, so a series event that draws another car needs
-/// GRID_SERIES_EXPERIMENTAL=1.
-pub const RACEABLE: [&str; 14] = [
+/// Cars of the circuit series that race fields on our circuits (AUTHORED
+/// port list, docs/SERIES.md "Car survey"): Touring, Pro Tuned, GT1, GT2 and,
+/// since the default setup's downforce limit (F414), the Le Mans Series
+/// prototypes and the 911. Another car needs GRID_SERIES_EXPERIMENTAL=1.
+pub const RACEABLE: [&str; 21] = [
     "lac", "bmw", "sup", "sky", "nsx", "350", "dbr", "c6r", "sal", "ccg", "c5r", "lam", "spk", "esp",
+    "911", "c65", "b05", "cre", "lc7", "b06", "r10",
 ];
+
+/// Whether a series' events still need GRID_SERIES_EXPERIMENTAL=1 (a car of
+/// its fields outside [`RACEABLE`]). None since F420: the Le Mans Series
+/// prototypes race with the default setup's downforce limit.
+pub fn is_experimental(series: &str) -> bool {
+    let _ = series;
+    false
+}
 
 fn table<'a>(
     db: &'a Database,

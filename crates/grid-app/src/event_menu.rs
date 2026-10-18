@@ -90,8 +90,9 @@ pub struct EventType {
     pub times: Vec<(u32, String)>,
     /// Touge: downhill (subroute 0) or uphill (1).
     pub directions: bool,
-    /// Le Mans Series: the fields hold LMP1 cars that still ground at speed;
-    /// the race runs with GRID_SERIES_EXPERIMENTAL=1, like its launcher.
+    /// A series whose fields still hold cars that cannot race
+    /// (`series::is_experimental`; none since F420): the race runs with
+    /// GRID_SERIES_EXPERIMENTAL=1.
     pub experimental: bool,
 }
 
@@ -373,7 +374,7 @@ impl Catalog {
                     },
                     times,
                     directions: kind == Kind::Touge,
-                    experimental: name == "le_mans_series",
+                    experimental: grid_tools::series::is_experimental(&name),
                 });
             }
         }
@@ -765,7 +766,7 @@ impl Menu {
             "Up/Down choose, Left/Right change, Select on Continue starts the event; Race Options follow.",
         );
         if t.experimental {
-            help += " Experimental: the LMP1 prototypes still ground at speed.";
+            help += " Experimental: some cars of this series cannot race yet.";
         }
         if t.stand_in_cars {
             help += " The original's cars of this discipline are not ported yet: ported cars stand in.";
@@ -839,7 +840,7 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         if menu.code() != Some(MENU_GO) {
             return Ok(menu.code().unwrap_or(1));
         }
-        // Le Mans Series runs as its launcher does (experimental fields).
+        // An experimental series runs with the gate (none since F420).
         let mut race = std::process::Command::new(&exe);
         if experimental(&dir) {
             race.env("GRID_SERIES_EXPERIMENTAL", "1");
@@ -862,7 +863,7 @@ fn experimental(dir: &Path) -> bool {
     let mut s = crate::settings::Settings::new();
     std::fs::read_to_string(dir.join("settings.ini"))
         .is_ok_and(|text| s.apply(text.trim_start_matches('\u{feff}'), dir).is_ok())
-        && saved(&s.event).key == "le_mans_series"
+        && grid_tools::series::is_experimental(&saved(&s.event).key)
 }
 
 /// Android: the arguments of this start. A start after the menu's Continue

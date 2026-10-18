@@ -16,7 +16,7 @@ image (`local/compatibility/grid-unpacked.exe`) or verified by a run; **[I]** in
 | Pro Tuned | sup, sky, nsx, 350 | **races**: 12-car fields on all 20 layouts |
 | GT1 | dbr, c6r, sal, ccg, c5r, lam | **races since F406** (collision floor lift): 12-car fields on all 20 layouts |
 | GT2 | spk, esp | **races since F406**: 12-car fields on all 20 layouts |
-| Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | **F409: original field and grid, 15–17 cars, launcher (experimental)**; the LC70s in every field still ground and wreck |
+| Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | **races since F420** (default setup's downforce limit): original field and grid, 15–17 cars, launcher |
 
 New code:
 - `grid_formats::database`: the whole NDBS `database.bin` decoded by `schema.bin` (78 tables).
@@ -222,7 +222,7 @@ the original layout is [I]); `series::class_key`, `Event::classes`, grid-app `po
 Not ported: `lemans_progress_adjustment` (read only at 0x4D166B, the time-limited races' progress
 classification, which a lap race does not use [I]).
 
-**LMP1 (still open).** Findings (static + headless):
+**LMP1 (F409 findings; solved in F420, see "The default car setup's downforce limit").** Findings (static + headless):
 - The 3 × 3 body pieces of 0x9E0240 are built with margins `param_2 = param_3 = 0.02` (0xA01DA4..
   0xA01DBB, constant 0xCB0934): every plane gets +0.02, and the outer ones −0.02 again, so the outer
   faces — the floor included — do not move; only the faces between pieces overlap by 0.02. The
@@ -248,6 +248,53 @@ cycled; DF01) at Donington: 15/17 finish 2 laps. The DBR9 Le Mans Series field (
 7/8 (seed 4: a prop piece sinks, the open family). App (GRID_SERIES_SEED 5): field
 `lc7_02, lc7_00, lc7_01, c65_02, c65_03, c65_01, c65_00, dbr_01, dbr_02, sal_00, lam_00, 911_00..02`,
 player slot 11 (back of GT1), HUD 12 / 15; a 1-lap run finished 9th / 15 (`local/gtfix/series-lms*`).
+
+## The default car setup's downforce limit (F420) [V unless marked]
+
+**Live capture** (coordinator, research copy, memory reads only; main checkout
+`local/driving/lmp1-lc70-20261018/`: `lc70-run01.tsv` BR01 format, `summary.tsv`): Courage LC70,
+Le Mans Series, Istanbul Park GP, 8 s full throttle. Ride height y 2.869 → 2.846 at 0–74 m/s;
+suspension distance (+0x40, limit 0.25) −0.002 at rest, +0.011..+0.016 at 63 m/s; total suspension
+force 9.8 kN at rest, 14.2 kN at 63 m/s (≈ 4.4 kN of downforce). The port applied the CSV downforce 9 directly, which
+gave about 36 kN there and compressed the suspension to 0.15–0.26 m. Block +0xE00: e08 0.840203,
+e0c 1.68041, **e10 0.45833 (0x3EEAAAAC)** against the port's 0.55; the Lacetti's braking capture
+has e10 0.8 (0x3F4CCCCD), equal to its CSV.
+
+**Cause.** After construction the original applies the car's default setup: 0xA0F260 (and
+0x9EFAE0) → **0x9C3C30** computes a default slider per setup value,
+`s = (clamp(x, B, A) − B) / (A − B)` (0 when B ≥ A), from the car's own property x and the setup
+range A (properties +0x40 + 4i) / B (+0xB8 + 4i) → **0x9E5680** clamps the sliders to [−1, 1] →
+**0x9C32F0** writes `value = (A − B)·s + B` (0 for a negative slider). For value 27 (downforce,
+property +0x158) the range comes from CSV columns 245 / 244 = 1.5 / 0.001 on every car with the
+explicit setup layout [D], so a CSV downforce above 1.5 is limited to 1.5: the LC70's 9, the B06's 15,
+the Pro Tuned cars' 4–5, most GT cars' 3.6–6.1. 0x9C32F0 then writes body +0x1F04 and the drag
+`+0xE10 = ((+0x1F04 / +0xFD0)·0.2 + 0.8)·+0xFC4` (constants 0xCB870C, 0xCB0F24; +0xFD0/+0xFC4 = the
+property copies of the CSV downforce and drag). Emulated in f32 this gives exactly the two live
+values: LC70 e10 0x3EEAAAAC and downforce 1.5, Lacetti e10 0x3F4CCCCD and downforce 0.5 (inside the
+range, unchanged).
+
+**Port.** `standard_car::apply_default_downforce_setup` after construction in `Runtime::load`
+(asset test `default_setup_limits_prototype_downforce_like_the_original`). The other 29 setup values
+of 0x9C32F0 (suspension, dampers, gears, castor, anti-roll; wheel-record writes, ride-height loop,
+calls 0x9AE8F0 / 0x9AD6B0) are not applied: they are not verified against live words; the explicit
+ranges are wide, so they would mostly be identities, but f32 re-interpolation over ranges up to 5e6
+can change values, so they need their own capture.
+
+**Results** [V]:
+- Port LC70 at Istanbul GP (grid-soak trace): wheel displacement −0.002 at rest, +0.014..+0.016 at
+  51–57 m/s, no body contacts — the capture's ride.
+- Solo, 14000 ticks, Donington / Istanbul / Nürburgring GP: LC70, B06, R10, Creation, B05 2/2/2;
+  C65 1/2/2; GT1 cars 2/2/2; Esperante 2/2/2, Spyker 2/0/2; 911 0/1/1 (its problem predates this);
+  Pro Tuned 2/2/1. LC70 at Donington 81.96 / 82.52 s, B06 73.86 / 80.17 s.
+- DBR9 Le Mans Series field (15 cars, 3 LC70s), 20000 ticks: Donington 15/15, Istanbul 14/15,
+  Jarama 13/15, Nürburgring 14/15 finish 2 laps (F409: 7, 13, 10, 11).
+- 12-car fields on all 20 layouts (`local/gtfix/routes/*-f414`): Pro Tuned 6–12 of 12, GT1 3–12, GT2
+  7–12; mixed against the earlier runs (the fields are chaotic).
+- Ungated: lc7, b06, r10, cre, c65, b05 and 911 join `series::RACEABLE`; `series::is_experimental`
+  is false for every series; the Le Mans launcher and the event menu no longer set
+  GRID_SERIES_EXPERIMENTAL.
+- The F406 floor lift stays: it is independent and equally 1:1. The +0.15 m diagnostic of F409 is
+  explained: the port's suspension compressed under about eight times the original's downforce.
 
 ## Layouts
 

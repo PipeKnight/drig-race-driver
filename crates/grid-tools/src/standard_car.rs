@@ -138,6 +138,47 @@ fn f(b: &[u8], o: usize) -> f32 {
 /// Whole selected cold Standard initialization. Source properties and geometry
 /// must be independently selected. Owned links become body-relative tokens;
 /// callback C784 is an identity token, never executable. Settings padding is zero.
+/// The car setup's downforce slot (F414): the original applies the car's
+/// default setup after construction (0xA0F260 → 0x9C3C30 default sliders →
+/// 0x9E5680 → 0x9C32F0). For setup value 27 (downforce) the default slider is
+/// `(clamp(x, B, A) − B) / (A − B)` with A, B the setup range (body +0xF24 and
+/// +0xF9C, from CSV columns 245 and 244 in the explicit layout: 1.5 and 0.001)
+/// and x the CSV downforce (+0xFD0), clamped to [−1, 1]; the applied value is
+/// `(A − B)·s + B` (0 for a negative slider) and replaces +0x1F04; the drag
+/// +0xE10 becomes `((downforce / +0xFD0)·0.2 + 0.8)·+0xFC4` when +0xFD0 ≠ 0.
+/// A car whose CSV downforce lies inside the range keeps it (Lacetti 0.5,
+/// e10 0x3F4CCCCD live); one above it is limited (Courage LC70 9 → 1.5,
+/// e10 0x3EEAAAAC live) [V: both live captures]. The other 29 setup values
+/// are not applied here (open).
+pub fn apply_default_downforce_setup(owner: &mut [u32]) {
+    let f = |o: usize| f32::from_bits(owner[o / 4]);
+    let (a, b, x, drag_base) = (f(0xf24), f(0xf9c), f(0xfd0), f(0xfc4));
+    // 0x9C3C30: NaN or below the range selects B, as the compares do.
+    let slider = if b < a {
+        let mut v = b;
+        if b <= x {
+            v = if a < x { a } else { x };
+        }
+        (v - b) / (a - b)
+    } else {
+        0.
+    };
+    // 0x9E5680 clamps every slider to [-1, 1].
+    let slider = if -1. <= slider {
+        if 1. < slider { 1. } else { slider }
+    } else {
+        -1.
+    };
+    let value = if 0. <= slider { (a - b) * slider + b } else { 0. };
+    owner[0x1f04 / 4] = value.to_bits();
+    if x != 0. {
+        // 0xCB870C = 0.2, 0xCB0F24 = 0.8.
+        let drag = ((value / x) * f32::from_bits(0x3e4c_cccd) + f32::from_bits(0x3f4c_cccd))
+            * drag_base;
+        owner[0xe10 / 4] = drag.to_bits();
+    }
+}
+
 pub fn initialize(
     properties: &Properties,
     geometry: WheelGeometry,
