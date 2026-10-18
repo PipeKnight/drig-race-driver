@@ -19,6 +19,10 @@ pub const JARAMA: &str = "tracks/europe/jarama/route_1";
 /// 2.5 km street circuit of the Japan Street GT and Drift Battle events
 /// (docs/YOKOHAMA.md).
 pub const YOKOHAMA: &str = "tracks/japan/yokohama_docks/route_0";
+/// The first point-to-point road: Haruna route 1 (`haruna_ill_mid_bot`,
+/// illegal touge, mid to bottom, 5.86 km), run downhill (subroute 0) or
+/// uphill (subroute 1) (docs/TOUGE.md).
+pub const HARUNA: &str = "tracks/japan/haruna/route_1";
 /// Every circuit the app, the soak and the cross-circuit tests cover.
 pub const CIRCUITS: [&str; 6] = [
     DONINGTON,
@@ -33,6 +37,8 @@ pub const CIRCUITS: [&str; 6] = [
 pub struct Route {
     path: String,
     split: usize,
+    subroute: u8,
+    ignore_progress: bool,
 }
 
 impl Route {
@@ -54,7 +60,44 @@ impl Route {
         Ok(Self {
             path: path.into(),
             split: path.rfind('/').unwrap(),
+            subroute: 0,
+            ignore_progress: false,
         })
+    }
+    /// The same folder for an event that ignores race progress: [V] for the
+    /// `drift_freestyle` format the race setup (0x5F84E0, case 0x5F8705)
+    /// sets byte +0x1D0 of the drift manager, which is drift settings
+    /// +0x1C8 (`ignore_progress`; the manager 0x668720 builds its settings
+    /// at +8). The Yokohama arenas' progress files are placeholders (2-3
+    /// gates); the port then times no laps.
+    pub fn ignoring_progress(mut self) -> Self {
+        self.ignore_progress = true;
+        self
+    }
+    pub fn ignores_progress(&self) -> bool {
+        self.ignore_progress
+    }
+    /// The same folder run as progress route `subroute` of its
+    /// `progress_track.xml` (0 or 1). Haruna's point-to-point routes ship a
+    /// `forwards` route 0 and a `reverse` route 1; the original selects
+    /// `subroute_0` for a race and `subroute_1` for a reverse run (0x65B2C0)
+    /// [V]. Circuits have only subroute 0.
+    pub fn with_subroute(mut self, subroute: u8) -> Result<Self, Box<dyn std::error::Error>> {
+        if subroute > 1 {
+            return Err("subroute must be 0 or 1".into());
+        }
+        self.subroute = subroute;
+        Ok(self)
+    }
+    pub fn subroute(&self) -> u8 {
+        self.subroute
+    }
+    /// The `ai_track.xml` / `ai_vehicle_track.xml` track of the subroute:
+    /// `default` or `reverse` [I: the AI files name their two tracks so, and
+    /// the reverse track's gates run the other way; the original's selection
+    /// code is not traced].
+    pub fn ai_track(&self) -> &'static str {
+        if self.subroute == 1 { "reverse" } else { "default" }
     }
     /// The route folder.
     pub fn path(&self) -> &str {
@@ -75,8 +118,42 @@ impl Route {
     pub fn track_file(&self, name: &str) -> String {
         format!("{}/{name}", self.track())
     }
+    /// The track's `additional_ground_clearance` (database `track`, through
+    /// its `track_model` rows by folder and file) [D]: 0.05 on the city
+    /// tracks (Long Beach, ...), 0 elsewhere. The original stores it in a
+    /// global (0x997280, called from 0x60BEF0) that lifts every car's collision
+    /// floor (F406, `body_geometry::FloorLift`).
+    pub fn additional_ground_clearance(
+        &self,
+        root: &std::path::Path,
+    ) -> Result<f32, Box<dyn std::error::Error>> {
+        let schema = std::fs::read(root.join("database/schema.bin"))?;
+        let data = std::fs::read(root.join("database/database.bin"))?;
+        let db = grid_formats::database::read(&schema, &data)?;
+        let mut parts = self.path().split('/');
+        let (Some("tracks"), Some(folder), Some(file)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err(format!("route {} is not tracks/<region>/<track>/<route>", self.path()).into());
+        };
+        let models = db.table("track_model").ok_or("database track_model absent")?;
+        let tracks = db.table("track").ok_or("database track absent")?;
+        let track_id = models
+            .rows()
+            .find(|m| {
+                m.text("folder_string").is_some_and(|f| f.eq_ignore_ascii_case(folder))
+                    && m.text("file_string").is_some_and(|f| f.eq_ignore_ascii_case(file))
+            })
+            .and_then(|m| m.int("track_id"))
+            .ok_or(format!("no database track model for {folder}/{file}"))?;
+        tracks
+            .rows()
+            .find(|t| t.int("id") == Some(track_id))
+            .and_then(|t| t.float("additional_ground_clearance"))
+            .ok_or_else(|| format!("database track {track_id} absent").into())
+    }
+
     pub fn is_default(&self) -> bool {
-        self.path == DONINGTON
+        self.path == DONINGTON && self.subroute == 0
     }
 }
 
@@ -89,6 +166,25 @@ impl Default for Route {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn additional_ground_clearance_comes_from_the_track_row() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        for (path, expected) in [
+            (DONINGTON, 0.),
+            (NURBURGRING, 0.),
+            (ISTANBUL_PARK, 0.),
+            (LONG_BEACH, 0.05),
+            ("tracks/usa/long_beach/route_5", 0.05),
+            (JARAMA, 0.),
+            (YOKOHAMA, 0.05),
+        ] {
+            let route = Route::new(path).unwrap();
+            assert_eq!(route.additional_ground_clearance(root).unwrap(), expected, "{path}");
+        }
+    }
     #[test]
     fn route_folders() {
         let r = Route::default();
@@ -362,6 +458,66 @@ mod tests {
         assert_eq!(catalog.unported.values().sum::<usize>(), 569);
         assert_eq!(catalog.unported["gg_barrel.max"], 77);
         assert_eq!(catalog.unported["close_drift_flag.max"], 21);
+    }
+
+    /// Haruna route 1 (`haruna_ill_mid_bot`), both directions: one run from
+    /// the subroute's start to its finish over an open AI line, from its own
+    /// two-car grid (docs/TOUGE.md).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn haruna_runs_both_ways_from_their_own_grids() {
+        use crate::{ai_driver::Line, lap_progress, source_vehicle::Runtime};
+        use grid_formats::progress::{SplitKind, TrackKind};
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        for (subroute, sectors) in [(0, [56, 119]), (1, [29, 92])] {
+            let route = Route::new(HARUNA).unwrap().with_subroute(subroute).unwrap();
+            let prepared = lap_progress::load_route(root, &route).unwrap();
+            let p = &prepared.progress;
+            assert_eq!(p.kind, TrackKind::PointToPoint);
+            assert!(prepared.course.is_open());
+            assert_eq!(p.gates.len(), 149, "{subroute}");
+            assert!((p.total_distance - 5859.21).abs() < 0.01, "{}", p.total_distance);
+            assert_eq!(p.gates[0].distance, 0.);
+            let splits: Vec<_> = p.routes[0].splits.iter().map(|s| (s.kind, s.gate)).collect();
+            assert_eq!(
+                splits,
+                [
+                    (SplitKind::Start, 0),
+                    (SplitKind::Time, sectors[0]),
+                    (SplitKind::Time, sectors[1]),
+                    (SplitKind::Finish, 148)
+                ]
+            );
+            let line = Line::load_route(root, &route).unwrap();
+            assert!(line.is_open());
+            for slot in ["slot_00", "slot_01"] {
+                let mut car = Runtime::lacetti_on(root, &route, slot, 200679).unwrap();
+                car.enable_lap_timing(root).unwrap();
+                assert_eq!(car.lap_gate_count(), 149);
+            }
+            // Touge grids hold two cars.
+            assert!(Runtime::lacetti_on(root, &route, "slot_02", 200679).is_err());
+        }
+        // The forward AI track is `default`, the other `reverse`, and the
+        // reverse run starts where the forward one ends.
+        let forward = Route::new(HARUNA).unwrap();
+        let reverse = forward.clone().with_subroute(1).unwrap();
+        let ends = |r: &Route| {
+            let p = lap_progress::load_route(root, r).unwrap().progress;
+            let c = |g: &grid_formats::progress::Gate| [g.left[0] + g.right[0], g.left[2] + g.right[2]];
+            (c(&p.gates[0]), c(p.gates.last().unwrap()))
+        };
+        let (a, b) = (ends(&forward), ends(&reverse));
+        assert_eq!((a.0, a.1), (b.1, b.0));
+        let (fl, rl) = (
+            Line::load_route(root, &forward).unwrap(),
+            Line::load_route(root, &reverse).unwrap(),
+        );
+        let near = |l: &Line, x: f32, z: f32| l.arc([x * 0.5, 0., z * 0.5]);
+        // Along each line its own start comes before its finish.
+        assert!(near(&fl, a.0[0], a.0[1]) < near(&fl, a.1[0], a.1[1]));
+        assert!(near(&rl, b.0[0], b.0[1]) < near(&rl, b.1[0], b.1[1]));
     }
 
     #[test]

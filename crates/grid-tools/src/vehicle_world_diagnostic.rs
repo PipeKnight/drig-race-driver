@@ -86,7 +86,7 @@ fn calculate_owned(
         || p.iter().any(|x| !x.is_finite())
         || pool.used != 0
         || pool.slots.len() != 4
-        || !(1..=512).contains(&pool.shapes)
+        || !(1..=grid_world::MAX_STATIC_SHAPES).contains(&pool.shapes)
         || links
             .iter()
             .any(|&o| physical[o / 4] != u32::from(registered && [8, 0xc, 0x18].contains(&o)))

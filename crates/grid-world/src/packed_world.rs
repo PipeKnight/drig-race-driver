@@ -28,7 +28,7 @@ pub fn query(
     end: [f32; 4],
     cache: &mut Cache,
 ) -> Result<Query, Error> {
-    if start.into_iter().chain(end).any(|v| !v.is_finite()) || shapes.len() > 512 {
+    if start.into_iter().chain(end).any(|v| !v.is_finite()) || shapes.len() > crate::MAX_STATIC_SHAPES {
         return Err(Error("invalid packed-world segment or shape count"));
     }
     if !grid.active {
@@ -79,7 +79,7 @@ pub fn query_sequential<'a>(
     end: [f32; 4],
     cache: &mut Cache,
 ) -> Result<Query, Error> {
-    if start.into_iter().chain(end).any(|v| !v.is_finite()) || count > 512 {
+    if start.into_iter().chain(end).any(|v| !v.is_finite()) || count > crate::MAX_STATIC_SHAPES {
         return Err(Error("invalid packed-world segment or shape count"));
     }
     if !grid.active {

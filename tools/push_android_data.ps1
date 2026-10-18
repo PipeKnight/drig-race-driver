@@ -55,23 +55,9 @@ $items = @(
     'tracks\europe\donington'
 )
 
-$settings = @'
-# Solo Lacetti practice at Donington on the phone (docs/ANDROID.md).
-# The game folder defaults to Grid/ next to this file on Android.
-[drive]
-enabled = on
-[private]
-body_contacts = derive
-body_events = derive
-deformation = derive
-[input]
-# Phone controls (P11, docs/ANDROID.md "Controls"): touch zones and tilt
-# steering; touch = auto turns them on with a touch screen. Tilt full lock at
-# tilt_max_angle degrees; the neutral is captured at start and by CENTRE.
-touch = auto
-tilt = on
-tilt_max_angle = 30
-'@
+# The drive profile, shared with the code-only APK's import (P10):
+# android/app/src/main/assets/grid-import/settings.ini.
+$settings = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\android\app\src\main\assets\grid-import\settings.ini'))
 if ($NoAutopilot) {
     $settings = @($settings -split "`r?`n" | Where-Object { $_ -notmatch '^\[diagnostics\]|^# No touch or tilt|^autopilot' }) -join "`n"
 }

@@ -174,7 +174,9 @@ pub(crate) fn install(
     ai_difficulty: f32,
     performances: &[f32],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let settings = Settings::load(root)?;
+    let mut settings = Settings::load(root)?;
+    // [V] the drift_freestyle race setup sets settings +0x1C8 (0x5F8705).
+    settings.ignore_progress = format == Format::DriftFreestyle;
     let flags = grid_tools::drift::close_drift_flags(root, route)?;
     let pool = grid_tools::virtual_race::drift_pool(format, route.path());
     let level = ai_level(ai_difficulty);
@@ -650,6 +652,8 @@ mod tests {
             best: None,
             vehicle: "BMW 320si".into(),
             score: None,
+            touge: None,
+            class: None,
         };
         let rows = event.results(None, vec![player]);
         assert_eq!(

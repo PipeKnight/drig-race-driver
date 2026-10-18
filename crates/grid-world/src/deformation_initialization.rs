@@ -58,7 +58,9 @@ pub fn calculate(
             || get(settings, b + 60) != 1.
             || (0..3).any(|a| !(0.0001..=100.).contains(&get(settings, b + 0x40 + a * 4)))
             || get(settings, b + 0x4c) != 0.
-            || (0..4).any(|a| !(0. ..=100.).contains(&get(settings, b + 0x50 + a * 4)))
+            || (0..3).any(|a| !(0. ..=100.).contains(&get(settings, b + 0x50 + a * 4)))
+            // Damage is a plain weight; prototypes use -1 on the cabin (F409).
+            || !(-100. ..=100.).contains(&get(settings, b + 0x5c))
         {
             return Err(Error("invalid deformation strength box"));
         }

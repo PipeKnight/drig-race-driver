@@ -149,15 +149,9 @@ only affects the breakable catalog):
 
 ## 5. Open
 
-- **Point-to-point progress** (Haruna, Yokohama freestyle arenas 4-6) and the
-  `start` split kind (Yokohama 3, Milan 3) [V: `progress_track.xml` `type=
-  point_to_point`, splits `start`/`time`/`finish`, Haruna two routes
-  `forwards`/`reverse`]. Needs the lap-timing model for a run from start to
-  finish, not a reader limit alone.
-- Haruna `grids.pssg` [V]: two-car grids named `slot_00_00`/`slot_01_00` under
-  `grid_start_standing_subroute_0_00`, and `slot_00_dft`/`slot_01_dft` under
-  `grid_drift_intro_123456790`; no `slot_00`..`slot_11`. The AI line is not one
-  loop (point-to-point), which `ai_driver` assumes.
+- ~~Point-to-point progress, the `start` split, Haruna's subroute grids and
+  open AI line~~: done in F407 ([TOUGE.md](TOUGE.md)); Haruna routes 0-8 and
+  Milan 3 now lap, the Yokohama arenas run Freestyle in the app.
 - Okutama `objects.ens`: an entity with more than one typed child.
 - Spa: the solo AI retires; Detroit route 0 and the San Francisco/Washington
   wrecks; Detroit stadium laps.

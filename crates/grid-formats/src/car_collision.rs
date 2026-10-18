@@ -62,6 +62,39 @@ fn children<'a, 'b>(doc: &'b Document<'a>, element: &Element<'a>) -> Result<&'b 
         })
 }
 
+/// The COLLISION `m_groundClearence` attribute: the reader 0x9EFB30 stores it
+/// at description +0x1B20 (body +0xED60) after presetting 0.17 (0xCE770C), so
+/// a NED without it keeps 0.17 [V, F406]. Every shipped car declares 0.07 or
+/// 0.05 [D].
+pub fn ground_clearance(document: &Document<'_>) -> Result<f32> {
+    let mut candidates = document.elements.iter().filter(|e| e.name == "COLLISION");
+    let collision = candidates.next().ok_or(crate::Error {
+        offset: 0,
+        message: "car COLLISION element is absent",
+    })?;
+    if candidates.next().is_some() {
+        return fail(0, "car COLLISION element is ambiguous");
+    }
+    let mut values = collision
+        .attributes
+        .iter()
+        .filter(|(key, _)| *key == "m_groundClearence");
+    let Some((_, text)) = values.next() else {
+        return Ok(f32::from_bits(0x3e2e_147b));
+    };
+    if values.next().is_some() {
+        return fail(0, "duplicate collision attribute");
+    }
+    let value = text.trim().parse::<f64>().map_err(|_| crate::Error {
+        offset: 0,
+        message: "invalid collision ground clearance",
+    })? as f32;
+    if !value.is_finite() {
+        return fail(0, "nonfinite collision ground clearance");
+    }
+    Ok(value)
+}
+
 /// Read exactly one COLLISION/GEOMETRY with id collision_main.
 /// Reject oversized meshes rather than reproducing the original's silent truncation.
 pub fn read(document: &Document<'_>) -> Result<Mesh> {
@@ -176,6 +209,17 @@ pub fn read(document: &Document<'_>) -> Result<Mesh> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn purchased_ground_clearances() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        for (stem, expected) in [("lac", 0.07f32), ("lc7", 0.07), ("spk", 0.05), ("b05", 0.05)] {
+            let bytes = std::fs::read(root.join(format!("cars/{stem}/{stem}.ned"))).unwrap();
+            let doc = crate::binxml::read(&bytes).unwrap();
+            assert_eq!(ground_clearance(&doc).unwrap(), expected, "{stem}");
+        }
+    }
     fn fixture() -> Document<'static> {
         let element = |name, attributes, children| Element {
             name,

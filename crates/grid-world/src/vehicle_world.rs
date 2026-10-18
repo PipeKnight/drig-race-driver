@@ -32,7 +32,7 @@ pub fn from_registered(
     static_shapes: usize,
 ) -> Result<State, Error> {
     let p = &mut car.owner.physical;
-    if !(1..=512).contains(&static_shapes)
+    if !(1..=crate::MAX_STATIC_SHAPES).contains(&static_shapes)
         || car.owner.vehicle.len() != crate::vehicle_publication::VEHICLE_WORDS
         || car.owner.vehicle[..car.frame.body.len()] != car.frame.body
         || [8, 0xc, 0x18, 0x20].iter().any(|&o| p[o / 4] != 1)
@@ -136,7 +136,7 @@ pub fn calculate_with_geometry(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     mut geometry: impl FnMut(
-        &[contact_groups::Body],
+        &mut [contact_groups::Body],
         usize,
     ) -> Result<Vec<contact_groups::Contact>, Error>,
 ) -> Result<Output, Error> {
@@ -163,7 +163,7 @@ pub fn calculate_with_geometry_events(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     mut geometry: impl FnMut(
-        &[contact_groups::Body],
+        &mut [contact_groups::Body],
         usize,
     ) -> Result<Vec<contact_groups::Contact>, Error>,
     events: Option<body_impact::Parameters>,
@@ -192,7 +192,7 @@ pub fn calculate_with_geometry_events_publication(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     mut geometry: impl FnMut(
-        &[contact_groups::Body],
+        &mut [contact_groups::Body],
         usize,
     ) -> Result<Vec<contact_groups::Contact>, Error>,
     events: Option<body_impact::Parameters>,
@@ -222,7 +222,7 @@ pub fn calculate_with_deformation(
     query: impl FnMut(usize, contact_ray::Ray) -> Result<Option<Contact>, Error>,
     material: impl FnMut(u32) -> Result<Option<Material>, Error>,
     mut geometry: impl FnMut(
-        &[contact_groups::Body],
+        &mut [contact_groups::Body],
         usize,
     ) -> Result<Vec<contact_groups::Contact>, Error>,
     events: Option<body_impact::Parameters>,
@@ -332,7 +332,7 @@ fn calculate_owned(
     let world = if let Some(geometry) = geometry {
         let mut slots = input.world.groups.contacts.clone();
         slots[..manager.contacts.slots.len()].copy_from_slice(&manager.contacts.slots);
-        let mut provider = |bodies: &[contact_groups::Body], remaining| {
+        let mut provider = |bodies: &mut [contact_groups::Body], remaining| {
             let contacts = geometry(bodies, remaining)?;
             active_contacts += contacts.len();
             Ok(contacts)

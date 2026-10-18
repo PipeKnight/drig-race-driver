@@ -289,7 +289,10 @@ impl Catalog {
             }
         }
         let mut catalog = Self::default();
-        for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
+        'entities: for (index, e) in entities::read(&placements, &types)?
+            .into_iter()
+            .enumerate()
+        {
             let template = String::from_utf8_lossy(e.template).into_owned();
             let behaviours: Vec<_> = e
                 .renderables
@@ -317,19 +320,26 @@ impl Catalog {
             let placement = matrix(&e.transform);
             let mut pieces = Vec::new();
             for added in &behaviour.added {
+                // A piece kind the port cannot break (several shapes, static,
+                // sphericalised, fixed mass, a sphere; first seen on Haruna):
+                // the template stays static, like armco.
                 let [shape] = &added.shapes[..] else {
-                    return Err("unsupported multi-shape prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 };
                 if added.infinite_mass || shape.phantom {
-                    return Err("unsupported static prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 }
                 let body = parameters.body(reference(added.body_properties)?)?;
                 if body.sphericalise != 0. {
-                    return Err("unsupported sphericalised prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 }
                 let (_, source) = parameters.shape(reference(shape.properties)?)?;
                 let physparams::MassSource::Density(density) = source else {
-                    return Err("unsupported fixed-mass prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 };
                 let primitive = match shape.primitive {
                     entities::Primitive::Box {
@@ -341,7 +351,8 @@ impl Catalog {
                         Primitive::Cylinder { radius, height }
                     }
                     entities::Primitive::Sphere { .. } => {
-                        return Err("unsupported sphere prop piece".into());
+                        *catalog.unported.entry(template).or_default() += 1;
+                        continue 'entities;
                     }
                 };
                 let (mass, inertia) = mass_properties(primitive, density);
@@ -1079,6 +1090,56 @@ impl PropWorld {
             }
         }
         Ok(out)
+    }
+
+    /// The original's continuous stage for the pieces and lost wheels
+    /// (world phase 2, before the contacts; grid_world::continuous): a body
+    /// that moved more than 0.75 of its hull radius this step is swept
+    /// against the road chunks, and the time-of-impact responses (B3A700)
+    /// move it back (B14550). Returns the number of bodies moved. Cars, the
+    /// boundary sheet, route boxes and piece pairs are not swept here
+    /// (docs/ROBUSTNESS_RESEARCH.md).
+    pub fn continuous(
+        &self,
+        track: &Track,
+        surfaces: &Surfaces,
+        bodies: &mut [contact_groups::Body],
+        directions: &convex_distance::ContactSettings,
+    ) -> Result<usize, Error> {
+        let mut records = 0;
+        let mut moved = 0;
+        for (spec, index, _) in self.parts() {
+            let body = bodies.get(index).ok_or(Error("missing prop piece body"))?;
+            let (displacement, previous, start, end) = grid_world::continuous::step(body);
+            if !grid_world::continuous::is_fast(grid_world::continuous::radius(&spec.hull), displacement) {
+                continue;
+            }
+            let query = convex_distance::ContactSettings {
+                margin: spec.shell,
+                directions: directions.directions,
+            };
+            let room = grid_world::continuous::MAX_RECORDS - records;
+            let hits = track.sweep_road(&spec.hull, start, end, &query, room, |code| {
+                surfaces.sheet(code)
+            })?;
+            records += hits.len();
+            let inverse_mass = f32::from_bits(body[0x3f4 / 4]);
+            let positions: Vec<_> = hits
+                .iter()
+                .filter_map(|h| {
+                    grid_world::continuous::response(h, inverse_mass, displacement, previous)
+                })
+                .collect();
+            if !positions.is_empty() {
+                let position = grid_world::continuous::mean(&positions)?;
+                grid_world::continuous::apply(&mut bodies[index], position)?;
+                moved += 1;
+            }
+            if records == grid_world::continuous::MAX_RECORDS {
+                break;
+            }
+        }
+        Ok(moved)
     }
 
     /// Queue breaks from solved prop contacts: `recorded` holds the pool

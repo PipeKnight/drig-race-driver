@@ -821,3 +821,8 @@ test = false
 name = "grid-route-readers"
 path = "src/bin/grid-route-readers.rs"
 test = false
+
+[[bin]]
+name = "grid-pro-touge"
+path = "src/bin/grid-pro-touge.rs"
+test = false

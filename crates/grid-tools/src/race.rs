@@ -119,6 +119,24 @@ impl Standings {
         standings
     }
 
+    /// Standings of a point-to-point run (one "lap" from `start` to
+    /// `finish`, both points on the open line): the target is the line
+    /// distance between them instead of the line length. [D] Touge events
+    /// run one lap (`event_track_pool.num_laps` 1).
+    pub fn new_run(line: &Line, start: [f32; 3], finish: [f32; 3], positions: &[[f32; 3]]) -> Self {
+        let start_arc = f64::from(line.arc(start));
+        let length = (f64::from(line.arc(finish)) - start_arc).max(1.);
+        let mut standings = Self {
+            laps: 1,
+            length,
+            start_arc,
+            cars: Vec::new(),
+            finalized: false,
+        };
+        standings.reset(line, positions);
+        standings
+    }
+
     /// Restart from grid positions (cars behind the line start below zero).
     pub fn reset(&mut self, line: &Line, positions: &[[f32; 3]]) {
         self.finalized = false;

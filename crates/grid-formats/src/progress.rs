@@ -1,4 +1,5 @@
-//! Typed circuit progress data. Crossing and lap behavior are not inferred.
+//! Typed circuit and point-to-point progress data. Crossing and lap behavior
+//! are not inferred.
 use crate::{
     Result,
     binxml::{Document, Element},
@@ -20,6 +21,17 @@ pub struct Point {
 pub enum SplitKind {
     Finish,
     Time,
+    /// The start of a point-to-point run (Haruna, the Yokohama arenas) and
+    /// of Yokohama route 3's circuit.
+    Start,
+    /// Milan route 3's speed trap.
+    Speed,
+}
+/// `track type`: a lap circuit or an open road run from a start to a finish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackKind {
+    Circuit,
+    PointToPoint,
 }
 #[derive(Debug)]
 pub struct Split {
@@ -29,9 +41,13 @@ pub struct Split {
 #[derive(Debug)]
 pub struct Route {
     pub splits: Vec<Split>,
+    /// `direction="reverse"`: the run goes down the gate order (Haruna's
+    /// second route). Circuits are always forwards.
+    pub reverse: bool,
 }
 #[derive(Debug)]
 pub struct Progress {
+    pub kind: TrackKind,
     pub total_distance: f32,
     pub gates: Vec<Gate>,
     pub points: Vec<Point>,
@@ -129,16 +145,20 @@ pub fn read(doc: &Document<'_>) -> Result<Progress> {
         }
     }
     let [track, routes, gates, points] = selected.map(Option::unwrap);
-    if !children(doc, track, "track")?.is_empty()
-        || attr(&doc.elements[track], "type")? != "circuit"
-    {
-        return fail(track, "only circuit progress supported");
+    if !children(doc, track, "track")?.is_empty() {
+        return fail(track, "progress track must be leaf");
     }
+    let kind = match attr(&doc.elements[track], "type")? {
+        "circuit" => TrackKind::Circuit,
+        "point_to_point" => TrackKind::PointToPoint,
+        _ => return fail(track, "unknown progress track type"),
+    };
     let total_distance = number(attr(&doc.elements[track], "total_distance")?)?;
     if total_distance <= 0.0 {
         return fail(track, "progress distance must be positive");
     }
     let mut out = Progress {
+        kind,
         total_distance,
         gates: Vec::new(),
         points: Vec::new(),
@@ -174,17 +194,28 @@ pub fn read(doc: &Document<'_>) -> Result<Progress> {
         out.gates.iter().map(|g| g.distance).collect::<Vec<_>>(),
         out.points.iter().map(|p| p.distance).collect(),
     ] {
-        if distances.iter().any(|&d| d < 0.0 || d >= total_distance)
+        // An open road's last point lies at its end (Haruna: 8999.339 of
+        // 8999.339 m); a circuit's distances stay below its length.
+        let beyond = |d: f32| match kind {
+            TrackKind::Circuit => d >= total_distance,
+            TrackKind::PointToPoint => d > total_distance,
+        };
+        if distances.iter().any(|&d| d < 0.0 || beyond(d))
             || distances.windows(2).any(|w| w[1] <= w[0])
         {
             return fail(0, "progress distances must increase within circuit length");
         }
     }
     for index in records(doc, routes, "routes", "num_routes", "route")? {
-        if attr(&doc.elements[index], "direction")? != "forwards" {
-            return fail(index, "only forward progress route supported");
-        }
-        let mut route = Route { splits: Vec::new() };
+        let reverse = match attr(&doc.elements[index], "direction")? {
+            "forwards" => false,
+            "reverse" if kind == TrackKind::PointToPoint => true,
+            _ => return fail(index, "unsupported progress route direction"),
+        };
+        let mut route = Route {
+            splits: Vec::new(),
+            reverse,
+        };
         for split in records(doc, index, "route", "num_splits", "split")? {
             if !children(doc, split, "split")?.is_empty() {
                 return fail(split, "progress split must be leaf");
@@ -192,6 +223,8 @@ pub fn read(doc: &Document<'_>) -> Result<Progress> {
             let kind = match attr(&doc.elements[split], "type")? {
                 "finish" => SplitKind::Finish,
                 "time" => SplitKind::Time,
+                "start" => SplitKind::Start,
+                "speed" => SplitKind::Speed,
                 _ => return fail(split, "unknown progress split kind"),
             };
             let gate = integer(&doc.elements[split], "gate")?;

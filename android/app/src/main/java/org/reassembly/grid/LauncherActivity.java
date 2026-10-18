@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -26,8 +27,9 @@ import java.nio.charset.StandardCharsets;
  * {@code tools/build_android.ps1 -BundleData} carries the owner's game data as
  * assets; this activity copies it to the data folder on the first start (and
  * after the bundled data changes), with a progress bar, before the game
- * (MainActivity) loads the native library. Without bundled data, or with an
- * up-to-date copy, it starts the game at once.
+ * (MainActivity) loads the native library. With an up-to-date copy it starts
+ * the game at once. Without bundled data (the code-only APK) it hands over to
+ * {@link ImportFlow}, which imports the user's own GRID files (P10).
  */
 public class LauncherActivity extends Activity {
     private static final String TAG = "grid";
@@ -37,6 +39,7 @@ public class LauncherActivity extends Activity {
 
     private ProgressBar bar;
     private TextView status;
+    private boolean gameStarted;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,8 +52,12 @@ public class LauncherActivity extends Activity {
             fail("Cannot read the bundled game data list", e);
             return;
         }
-        if (manifest == null || (worker == null && dataDir != null
-                && BundleExtractor.upToDate(dataDir, manifest))) {
+        if (manifest == null) {
+            // The code-only APK: import the user's own files (P10).
+            ImportFlow.start(this, dataDir);
+            return;
+        }
+        if (worker == null && dataDir != null && BundleExtractor.upToDate(dataDir, manifest)) {
             startGame();
             return;
         }
@@ -76,7 +83,38 @@ public class LauncherActivity extends Activity {
                 shown = null;
             }
         }
+        ImportFlow.detach(this);
         super.onDestroy();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // An import that finished while the app was in the background could
+        // not start the game then (background activity starts are blocked).
+        ImportFlow.resumed(this);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        ImportFlow.picked(this, requestCode, resultCode, data);
+    }
+
+    /** Pads on the import screens: A presses the focused button, B is Back. */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (ImportFlow.key(this, event)) {
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (!ImportFlow.back(this)) {
+            super.onBackPressed();
+        }
     }
 
     /** null when the APK has no bundled data (the default build). */
@@ -171,7 +209,12 @@ public class LauncherActivity extends Activity {
                 done >> 20, total >> 20));
     }
 
-    private void startGame() {
+    void startGame() {
+        // Once: the import's worker and onResume may both get here.
+        if (gameStarted) {
+            return;
+        }
+        gameStarted = true;
         startActivity(new Intent(this, MainActivity.class));
         finish();
     }

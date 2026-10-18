@@ -19,11 +19,13 @@ Plan and status: [PLATFORMS_AND_INPUT_RESEARCH.md](PLATFORMS_AND_INPUT_RESEARCH.
   - AGP 9.4.1, `compileSdk`/`targetSdk` 36, `minSdk` 31, `arm64-v8a` only, `ndkVersion` 30.0.16248370;
   - `androidx.games:games-activity:4.4.0`, the version whose C sources android-activity 0.6.1 bundles (its README), plus appcompat 1.7.1;
   - Java classes in `org.reassembly.grid`:
-    - `LauncherActivity` (the launcher entry): copies bundled game data on the first start (below), then starts `MainActivity`. Without bundled data it starts the game at once.
+    - `LauncherActivity` (the launcher entry): copies bundled game data on the first start (below), then starts `MainActivity`. Without bundled data (the code-only APK) it hands over to `ImportFlow`, which imports the user's own GRID files ("Importing the game data", P10).
     - `MainActivity extends GameActivity` (not exported): loads `libgrid_android.so`, keeps the screen on, hides the system bars; landscape (`sensorLandscape`). `openLogFile()` and `showFatal(String)` are called from Rust. When it finishes it ends its process, because winit and Bevy cannot start twice in one process.
     - `ErrorActivity`, in its own process `:error`, so it stays on screen when the game process exits or aborts: the message, the log file path and a Close button.
     - `BundleExtractor`: the copy logic, plain Java; `CrashLog`: log files through MediaStore.
-  - desktop unit tests: `app/src/test/.../BundleExtractorTest.java` (JUnit 4.13.2), run with `gradle -p android testDebugUnitTest`;
+    - P10 import: `ImportFlow` (screens, picker, worker thread), `GridImporter` (find, check, resumable copy; plain Java), `SafTree` (the picked folder through the Storage Access Framework), `NativeCheck` (JNI into `android_import.rs`).
+  - `app/src/main/assets/grid-import/`: `import.txt` (the import manifest: size, SHA-256 and path of each needed file, no contents; written by `tools/make_import_manifest.ps1`) and `settings.ini` (the phone's drive profile, also used by `push_android_data.ps1`). The bundled build replaces the asset folder, so these are only in the code-only APK.
+  - desktop unit tests: `app/src/test/.../BundleExtractorTest.java` and `GridImporterTest.java` (JUnit 4.13.2), run with `gradle -p android testDebugUnitTest` (set `GRID_GAME_ROOT` to include the import of the real installation);
   - the Rust library comes from `app/build/rust-jniLibs` (ignored output). Game data is packaged only with `-PgridBundleAssets` (the private bundled build); `ignoreAssetsPattern` is `!.svn:!.git`, so files starting with `.` and folders starting with `_` are not dropped.
 - `tools/build_android.ps1`: builds the APK (below).
 - `tools/push_android_data.ps1`: copies the data to the phone, or with `-Stage DIR` to a desktop folder for checking the file list.
@@ -88,7 +90,7 @@ Requirements: Android 12 (API 31) or newer and a 64-bit ARM phone; all three own
 
 - **Controls (P11):** tilt steering with on-screen pedals and buttons; see "Controls" below. Not yet tried on a phone. A Bluetooth keyboard may also work through GameActivity, but this is untested.
 - **Gamepads (P11b):** code since F404, see "Gamepads" below; not yet tried on a phone. A Bluetooth keyboard may work through winit, but this is untested.
-- **Data without the bundled APK:** the code-only APK needs the data placed by adb (below). Android 11+ blocks phone file managers from `Android/data`; copying from Windows Explorer over USB (MTP) into it works on many phones but is not guaranteed [S] (PLATFORMS_AND_INPUT_RESEARCH.md section 3). **P10** (folder picker) would remove the PC step without bundling.
+- **Data without the bundled APK:** since F405 the code-only APK imports the user's own GRID folder ("Importing the game data" below); adb still works. Not yet tried on a phone.
 - **Not measured yet:** frame rate (the counter below now shows it), thermal behaviour and memory on a phone (P12). Audio is not paused on suspend yet, so it may keep playing in the background [I].
 
 ## Frame rate
@@ -201,7 +203,34 @@ Bluetooth and USB pads (Xbox, DualSense, other HID pads Android classifies as ga
 
 **Checks [V]:** mapping unit tests (`android_pad::tests`, desktop), wheel guard test, tilt silenced while a pad holds; `cargo ndk … clippy --release --lib -p grid-app -- -D warnings` clean; Java compiles in the APK build. [N] Not tried with a real pad on a phone.
 
-## Game data on the phone (development path; P10 replaces it)
+## Importing the game data (P10, F405)
+
+The code-only APK (`tools\build_android.ps1` without `-BundleData`) carries no game data. On a start without data it explains what is needed and lets the user pick their own copy of the GRID folder. This is the path for anyone who owns the game: no PC tools, nothing proprietary in the APK.
+
+**What the user does.** Copy the GRID folder of the installation (Steam: `steamapps\common\Grid`) to the phone, for example over USB into `Documents/GRID`, start the app, tap **Choose GRID folder** and pick that folder (the one with `grid.exe`, or the folder above it). The whole folder (several GB) works; only the 394 needed files (248 MB) are read. Afterwards the copy in Documents can be deleted. Android's picker cannot pick the storage root, `Download` itself or `Android/data` (Android 11+), so a sub-folder such as `Documents/GRID` is needed.
+
+**Flow** (`ImportFlow.java`, worker thread; the screens are plain Android views):
+1. **Start screen** with the steps, the needed and the free space, and **Choose GRID folder** / **Close**. The system picker (`ACTION_OPEN_DOCUMENT_TREE`, starting in Documents) returns a tree URI; the app takes a persistable read permission and remembers it, so an interrupted import can continue after a restart.
+2. **Find:** the picked folder itself when it holds `grid.exe`, else a folder directly inside it (a folder named Grid first). Names are matched ignoring case (a copy from Windows may differ in case); the copies get the manifest's spelling, which the game expects on Android's case-sensitive storage.
+3. **Check** against `import.txt` (committed: 394 lines of size, SHA-256 and path, version c32bec7e…; the same subset `push_android_data.ps1` stages and the bundled APK carries): missing files and files of another size are listed on screen (up to 12, then "… and N more"), with **Choose another folder**. Then free space: the bytes still to copy + 64 MB.
+4. **Copy** with a progress bar (MB done of total, current file) into `files/Grid/`, each file through `name.part`, hashed on the way. A file whose SHA-256 differs from the manifest is not copied; at the end they are listed with **Choose another folder** and **Use these files anyway** (copies them unverified; the game may then fail to start).
+5. **Resume:** each verified file is appended to `files/.import-progress` (`sha256<TAB>path`). A later run skips a file that is in the journal with the manifest's hash and has the right size. After a kill or a crash the next start shows **The last import did not finish** (copied X of Y MB) with **Continue** (same folder, while the permission is held) and **Choose GRID folder**.
+6. **Native check:** `NativeCheck.deriveTables` loads `libgrid_android.so` and derives CD01, BP01 and DF01 from the imported `grid.exe` exactly as the game does at start (`android_import.rs`, `grid_tools::private_parameters`), logging `import_derive kind=… sha256=…`. A failure is shown on screen.
+7. **Finish:** writes `settings.ini` when missing (the template from the assets; an edited file stays) and the marker `files/.import-version` (the manifest version), then starts the game. Later starts with that marker start the game at once.
+
+**Texture cache:** not run on the import screen. Which path applies (BC native, ETC2 cache or CPU decode, P8) depends on the GPU, which only the game's renderer knows; on the owner's Adreno 740 it is BC native and nothing is encoded. On an ETC2-only phone the game builds the cache on its first start, as before ("import on first launch", P8).
+
+**Other data paths stay:** the bundled PRIVATE APK has no `grid-import` assets and runs its first-start copy unchanged (the push script now reads the same `settings.ini` template; the staged bytes are identical, sha256 888bfe9e…, so the bundle version is unchanged). Data placed by adb, or left by an earlier bundled APK, starts the game at once (a `Grid/grid.exe` without an interrupted import).
+
+**Controls on the import screens:** touch; a pad moves the focus with the D-pad or the stick (Android's own focus navigation), **A** presses the focused button (also handled explicitly, since not every pad maps it to DPAD_CENTER) and **B** or Back goes back (ignored while copying). Tilt has nothing to do there. The system folder picker is Android's own screen: touch works; pad support there is the system's.
+
+**Errors:** on screen, and in `Download/GRID-Reassembly/import-<time>.txt`; logcat tag `grid`, lines `import: …`.
+
+**Updating the manifest:** after changing the file list in `push_android_data.ps1`, run `powershell -NoProfile -File tools\make_import_manifest.ps1` (stages into the ignored `local/android/import-stage`, hashes, deletes the stage) and commit `import.txt`. A new manifest version makes phones import again; only changed or new files are copied, since the journal keeps the hashes.
+
+**Checks [V]:** `GridImporterTest` (desktop JVM): manifest parsing rejects bad lines and paths; the GRID folder is found directly or inside the picked folder, any case; a copy keeps the manifest spelling and finishes with the marker and `settings.ini`; missing and wrong-size files are reported; an interrupted import resumes without copying finished files and copies a deleted one again; other contents are reported and copied only when accepted; an edited `settings.ini` stays; the committed manifest parses; with `GRID_GAME_ROOT` the owner's installation imports with every hash equal (about 3 s on the desktop). `cargo ndk … clippy -D warnings` clean. [N] Not tried on a phone: the picker, SAF read speed, the screens and pad focus.
+
+## Game data on the phone (development path)
 
 The phone needs a subset of the owner's own installation, about 245 MB. No private table is needed: CD01 (F359), BP01 and DF01 are derived in memory from the pushed `grid.exe`. Nothing of it goes into Git; only the private bundled APK (above) packs it.
 

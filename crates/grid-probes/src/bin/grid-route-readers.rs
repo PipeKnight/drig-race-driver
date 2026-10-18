@@ -6,6 +6,8 @@
 //! grid-route-readers stages GAME_ROOT ROUTE
 //! grid-route-readers nodes FILE ELEMENT [LIMIT]
 //! grid-route-readers streams FILE
+//! grid-route-readers run GAME_ROOT ROUTE [SUBROUTE]
+//! grid-route-readers lang LANGUAGE.lng PATTERN
 use grid_formats::{collision, entities, jpk, mesh, ornaments, pssg, scene, start_lights};
 use grid_tools::route::Route;
 use std::{error::Error, path::Path};
@@ -187,6 +189,19 @@ fn run() -> Res<()> {
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["stages", root, route] => stages(Path::new(root), &Route::new(route)?),
         ["streams", file] => streams(Path::new(file)),
+        ["lang", file, pattern] => {
+            let language = grid_formats::language::read(&read(Path::new(file))?)?;
+            let mut ids: Vec<&str> = language.ids().filter(|id| id.contains(pattern)).collect();
+            ids.sort();
+            for id in ids {
+                println!("{id}	{}", language.get(id).unwrap_or_default());
+            }
+            Ok(())
+        }
+        ["run", root, route] => run_check(Path::new(root), &Route::new(route)?),
+        ["run", root, route, subroute] => {
+            run_check(Path::new(root), &Route::new(route)?.with_subroute(subroute.parse()?)?)
+        }
         ["nodes", file, element] => nodes(Path::new(file), element, 20),
         ["nodes", file, element, limit] => nodes(Path::new(file), element, limit.parse()?),
         _ => Err(
@@ -297,5 +312,40 @@ fn streams(path: &Path) -> Res<()> {
     for (k, n) in kinds {
         println!("kind\t{k}\t{n}");
     }
+    Ok(())
+}
+
+/// A route's run: its start gate frame, the signed distance of each grid
+/// slot from it (negative behind) and the run length.
+fn run_check(root: &Path, route: &Route) -> Res<()> {
+    let prepared = grid_tools::lap_progress::load_route(root, route)?;
+    let p = &prepared.progress;
+    let (center, normal) = prepared.course.gate_frame(0).ok_or("no gate")?;
+    println!(
+        "kind={:?} open={} gates={} run={:.2} start=({:.1},{:.1},{:.1}) normal=({:.3},{:.3}) splits={:?}",
+        p.kind,
+        prepared.course.is_open(),
+        p.gates.len(),
+        p.total_distance,
+        center[0],
+        center[1],
+        center[2],
+        normal[0],
+        normal[1],
+        p.routes[0].splits.iter().map(|s| (s.kind, s.gate)).collect::<Vec<_>>()
+    );
+    let bytes = read(&root.join(route.file("grids.pssg")))?;
+    let tree = pssg::read_tree(&bytes)?;
+    for slot in 0..12 {
+        let name = format!("slot_{slot:02}");
+        let Ok(m) = grid_formats::grid::read_slot(&tree, name.as_bytes(), route.subroute()) else {
+            break;
+        };
+        let c = m.center.map(f64::from);
+        let ahead = (c[0] - center[0]) * normal[0] + (c[2] - center[2]) * normal[1];
+        println!("{name} centre=({:.1},{:.1},{:.1}) ahead_of_start={ahead:.2}", c[0], c[1], c[2]);
+    }
+    let line = grid_tools::ai_driver::Line::load_route(root, route)?;
+    println!("ai_line open={} length={:.2}", line.is_open(), line.length);
     Ok(())
 }

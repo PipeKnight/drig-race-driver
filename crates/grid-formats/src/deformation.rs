@@ -153,7 +153,9 @@ pub fn settings(document: &Document<'_>) -> Result<Vec<u32>> {
             (0x5c, "damage", 1.),
         ] {
             let v = scalar(b, name, default)?;
-            if !(0. ..=100.).contains(&v) {
+            // A plain weight in 0x9E7CE0 (no sign branch); several prototypes
+            // give their cabin box damage=-1 (F409).
+            if !(-100. ..=100.).contains(&v) {
                 return fail(0, "unsupported strength weight");
             }
             put(&mut result, i * 0x80 + at, v);

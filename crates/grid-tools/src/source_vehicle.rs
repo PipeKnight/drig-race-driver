@@ -25,7 +25,7 @@ pub const DELTA: f32 = 0.016;
 pub const GRAVITY: f32 = f32::from_bits(0x411c_f5c3);
 
 type GeometryProvider<'a> = dyn FnMut(
-        &[grid_world::contact_groups::Body],
+        &mut [grid_world::contact_groups::Body],
         usize,
     ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>
     + 'a;
@@ -357,7 +357,7 @@ impl Runtime {
         let surfaces = Surfaces::read(&read(root, "surface_materials.xml", 16 * 1024 * 1024)?)?;
         let grid_bytes = read(root, &route.file("grids.pssg"), 256 * 1024 * 1024)?;
         let markers = pssg::read_tree(&grid_bytes)?;
-        let marker = grid::read(&markers, slot.as_bytes())?;
+        let marker = grid::read_slot(&markers, slot.as_bytes(), route.subroute())?;
         let shape = car_collision::read(&ned)?;
         let front_extent = shape.bounds.max[2] + f32::from_bits(owner[0x1638 / 4]);
         let center = spawn::reference_front_aligned_center(marker.corners, front_extent, 0.)?;
@@ -491,6 +491,10 @@ impl Runtime {
         if self.ticks != 0 || self.lap_course.is_some() {
             return Err("invalid source lap timing startup boundary".into());
         }
+        // Freestyle drift ignores race progress [V 0x5F8705]: no lap timing.
+        if self.route.ignores_progress() {
+            return Ok(());
+        }
         let prepared = crate::lap_progress::load_route(root, &self.route)?;
         let position = std::array::from_fn(|i| self.pose()[12 + i]);
         let lap = grid_world::lap_timing::State::new(&prepared.course, position)?;
@@ -552,7 +556,12 @@ impl Runtime {
         let ned = read(root, &self.car.file(".ned"), 16 * 1024 * 1024)?;
         let offset =
             std::array::from_fn(|j| f32::from_bits(self.state.car.owner.vehicle[0x1630 / 4 + j]));
-        let geometry = crate::body_geometry::BodyGeometry::read(&ned, offset, table)?;
+        let geometry = crate::body_geometry::BodyGeometry::read_on_track(
+            &ned,
+            offset,
+            table,
+            self.route.additional_ground_clearance(root)?,
+        )?;
         let boundary = crate::cqtc_geometry::Geometry::read(&read(
             root,
             &self.route.file("boundarylines.cqtc"),
@@ -587,7 +596,7 @@ impl Runtime {
         &mut self,
         controls: Controls,
         mut geometry: impl FnMut(
-            &[grid_world::contact_groups::Body],
+            &mut [grid_world::contact_groups::Body],
             usize,
         ) -> Result<Vec<grid_world::contact_groups::Contact>, Error>,
     ) -> Result<(), Error> {
@@ -744,7 +753,17 @@ impl Runtime {
                 let mut publication = |owner: &vehicle_publication::State, delta| {
                     resource.borrow_mut().publish_deformation(owner, delta)
                 };
-                let provider = |bodies: &[grid_world::contact_groups::Body], remaining| {
+                let provider = |bodies: &mut [grid_world::contact_groups::Body], remaining| {
+                    // World phase 2 (continuous) before the contacts.
+                    if let Some(props) = self.props.as_ref().filter(|p| p.has_bodies()) {
+                        props.continuous(
+                            &self.track,
+                            &self.surfaces,
+                            bodies,
+                            resource.borrow().query(),
+                        )?;
+                    }
+                    let bodies: &[grid_world::contact_groups::Body] = bodies;
                     let contacts =
                         self.fresh_contacts(&resource.borrow(), bodies, remaining, &mut recorded)?;
                     body_contacts = contacts.len();
@@ -1849,7 +1868,7 @@ mod tests {
         runtime.state.car.frame.body[0x1568 / 4] = 1.25f32.to_bits();
         let before = trace(&runtime);
         let good_point: [f32; 4] = runtime.pose()[12..16].try_into().unwrap();
-        let invalid = |_: &[grid_world::contact_groups::Body], _: usize| {
+        let invalid = |_: &mut [grid_world::contact_groups::Body], _: usize| {
             let mut c = [0; 32];
             c[1] = 1;
             c[0xc / 4] = 0x01000000;
@@ -1962,8 +1981,8 @@ mod tests {
         assert!(close(&away.state.vehicle, &early.state.vehicle));
 
         // A whole tick with a body event 3.8 km from the car no longer pauses.
-        let far = |_: &[grid_world::contact_groups::Body], _: usize| {
-            let mut c = invalid(&[], 0)?;
+        let far = |_: &mut [grid_world::contact_groups::Body], _: usize| {
+            let mut c = invalid(&mut [], 0)?;
             c[1][0x50 / 4..0x60 / 4].copy_from_slice(&[2928f32, 0., -2416., 1.].map(f32::to_bits));
             Ok(c)
         };

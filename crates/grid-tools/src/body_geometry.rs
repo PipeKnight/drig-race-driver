@@ -9,6 +9,47 @@ use grid_world::{Error, collision_mesh, contact_groups, convex_distance, physica
 /// port's packed generator bound (the original allows 20, F318 A32).
 const PAIR_CONTACTS: usize = 16;
 
+/// The original's collision floor lift (0x9E0240 at 0x9E0674..0x9E072A [V]):
+/// the operation order and single-precision rounding of the original.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FloorLift {
+    bottom: f32,
+    height: f32,
+    inverse: f32,
+    raised: f32,
+}
+
+impl FloorLift {
+    /// `bottom`/`roof`: body +0xED68/+0xED94; `clearance`: +0xED60;
+    /// `track`: the global set from `additional_ground_clearance`.
+    pub fn new(bottom: f32, roof: f32, clearance: f32, track: f32) -> Result<Self, Error> {
+        let height = roof - bottom;
+        let inverse = 1. / height;
+        // 0xD1728C = 0.176, 0xCB0D94 = 9999; the original's compares keep a
+        // NaN, as clamp does.
+        let g = ((track + f32::from_bits(0x3e34_3958)) - (clearance + bottom)).clamp(0., 9999.);
+        let raised = (g + clearance) * inverse;
+        if [bottom, roof, clearance, track, inverse, raised]
+            .iter()
+            .any(|v| !v.is_finite())
+            || height <= 0.
+        {
+            return Err(Error("invalid collision floor lift"));
+        }
+        Ok(Self {
+            bottom,
+            height,
+            inverse,
+            raised,
+        })
+    }
+
+    pub fn apply(&self, y: f32) -> f32 {
+        ((((y - self.bottom) * self.inverse) * (1. - self.raised)) + self.raised) * self.height
+            + self.bottom
+    }
+}
+
 #[derive(Clone)]
 pub struct BodyGeometry {
     shape: collision_mesh::MeshShape,
@@ -75,10 +116,38 @@ impl BodyGeometry {
     }
     /// Source NED, verified owner layout offset, and locally prepared private
     /// CD01 sampling data. Raw source Y bounds define this selected mesh center.
+    /// The raw `collision_main` hull, without the original's floor lift
+    /// (diagnostics and the raw-mesh comparisons); driving uses
+    /// [`Self::read_on_track`].
     pub fn read(
         ned: &[u8],
         offset: [f32; 4],
         table: &[u8],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::read_lifted(ned, offset, table, None)
+    }
+
+    /// [`Self::read`] with the original's collision floor lift (0x9E0240, F406):
+    /// every hull point's height is remapped from [bottom, roof] to
+    /// [bottom + clearance + g, roof], where clearance is the car's NED
+    /// `m_groundClearence` and g = clamp(track + 0.176 − (clearance + bottom),
+    /// 0, 9999) with `track` the route's `additional_ground_clearance`
+    /// (database `track`, set through 0x997280 from 0x60BEF0). Bottom and roof
+    /// are the `collision_main` extremes (body +0xED68/+0xED94).
+    pub fn read_on_track(
+        ned: &[u8],
+        offset: [f32; 4],
+        table: &[u8],
+        track_clearance: f32,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::read_lifted(ned, offset, table, Some(track_clearance))
+    }
+
+    fn read_lifted(
+        ned: &[u8],
+        offset: [f32; 4],
+        table: &[u8],
+        track_clearance: Option<f32>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         if ned.len() > 16 * 1024 * 1024 || table.len() != 712 || &table[..8] != b"CD01\x2c\0\0\0" {
             return Err("invalid source body geometry framing".into());
@@ -100,10 +169,19 @@ impl BodyGeometry {
         }
         let doc = binxml::read(ned)?;
         let source = car_collision::read(&doc)?;
+        let lift = match track_clearance {
+            Some(track) => Some(FloorLift::new(
+                source.bounds.min[1],
+                source.bounds.max[1],
+                car_collision::ground_clearance(&doc)?,
+                track,
+            )?),
+            None => None,
+        };
         let points: Vec<_> = source
             .points
             .iter()
-            .map(|p| [p[0], p[1], p[2], 1.])
+            .map(|p| [p[0], lift.map_or(p[1], |l| l.apply(p[1])), p[2], 1.])
             .collect();
         let mesh = collision_mesh::build_from_source(
             &points,
@@ -422,6 +500,26 @@ impl WorldHull {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floor_lift_raises_the_bottom_and_keeps_the_roof() {
+        // Lacetti collision_main: bottom 0.103433, roof 1.420987, clearance
+        // 0.07, Donington (track 0): the floor goes to 0.176.
+        let lift = FloorLift::new(0.103433, 1.420987, 0.07, 0.).unwrap();
+        assert!((lift.apply(0.103433) - 0.176).abs() < 1e-6);
+        assert!((lift.apply(1.420987) - 1.420987).abs() < 1e-6);
+        // A low prototype floor is raised more; a city track adds 0.05.
+        let lmp = FloorLift::new(0.047, 1.44, 0.07, 0.).unwrap();
+        assert!((lmp.apply(0.047) - 0.176).abs() < 1e-6);
+        let city = FloorLift::new(0.103433, 1.420987, 0.07, 0.05).unwrap();
+        assert!((city.apply(0.103433) - 0.226).abs() < 1e-6);
+        // A floor already above track + 0.176 keeps bottom + clearance.
+        let high = FloorLift::new(0.2, 1.4, 0.07, 0.).unwrap();
+        assert!((high.apply(0.2) - 0.27).abs() < 1e-6);
+        // Heights stay ordered.
+        assert!(lift.apply(0.5) < lift.apply(0.6));
+        assert!(FloorLift::new(1., 1., 0.07, 0.).is_err());
+    }
 
     #[test]
     fn malformed_sampling_rejected_before_resource_decoding() {

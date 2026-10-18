@@ -104,6 +104,36 @@ pub fn from_bounds(transform: [f32; 16], bounds: [f32; 6]) -> Result<Marker> {
         forward: direction.map(|v| v / length),
     })
 }
+/// [`read`] of slot `name` (`slot_00`..) for progress subroute `subroute`.
+/// Where `name` itself is absent and the grids are split by subroute
+/// (Haruna: a group `grid_start_standing_subroute_<N>_<id>` holding
+/// `slot_00_<id>`, `slot_01_<id>`), the slot of subroute N's standing-start
+/// group. [V] 0x916BF0 reads a grid group's start type and the number after
+/// `subroute_` from its name; routes with one grid keep `slot_NN`.
+pub fn read_slot(tree: &Tree<'_>, name: &[u8], subroute: u8) -> Result<Marker> {
+    let named = |id: &[u8]| {
+        (0..tree.nodes.len())
+            .filter(|&i| tree.name(i) == b"NODE" && tree.string(i, b"id").is_ok_and(|v| v == id))
+            .count()
+    };
+    if named(name) != 0 {
+        return read(tree, name);
+    }
+    let prefix = format!("grid_start_standing_subroute_{subroute}_");
+    let groups: Vec<&[u8]> = (0..tree.nodes.len())
+        .filter(|&i| tree.name(i) == b"NODE")
+        .filter_map(|i| tree.string(i, b"id").ok())
+        .filter(|id| id.starts_with(prefix.as_bytes()))
+        .collect();
+    let [group] = groups[..] else {
+        return fail(0, "expected one standing-start grid of the subroute");
+    };
+    let mut slot = name.to_vec();
+    slot.push(b'_');
+    slot.extend_from_slice(&group[prefix.len()..]);
+    read(tree, &slot)
+}
+
 pub fn read(tree: &Tree<'_>, name: &[u8]) -> Result<Marker> {
     let nodes: Vec<_> = (0..tree.nodes.len())
         .filter(|&i| tree.name(i) == b"NODE" && tree.string(i, b"id").is_ok_and(|id| id == name))

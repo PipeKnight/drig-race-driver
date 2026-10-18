@@ -217,6 +217,9 @@ fn android_data_dir() -> Option<PathBuf> {
 pub struct Settings {
     pub root: Option<PathBuf>,
     pub route: Option<String>,
+    /// `[game] subroute`: a point-to-point route's direction, 0 (the
+    /// `forwards` progress route) or 1 (`reverse`; docs/TOUGE.md).
+    pub subroute: Option<u8>,
     /// `[game] car` / `opponent_cars` (docs/CAR_GENERALIZATION.md).
     pub car: Option<String>,
     pub opponent_cars: Option<String>,
@@ -225,12 +228,16 @@ pub struct Settings {
     pub series: Option<String>,
     pub drive: bool,
     pub laps: Option<u32>,
+    /// `[drive] time_limit`: seconds of a Freestyle drift event (90 in the
+    /// career [D]).
+    pub time_limit: Option<f64>,
     pub opponents: Option<usize>,
     pub grid_position: Option<usize>,
     /// `grid_position = back`: the last slot, after the opponents.
     pub grid_back: bool,
     pub ai_characteristics: Option<PathBuf>,
-    /// `[drive] discipline`: `race` (default), `drift_battle` or `drift_grand_prix`
+    /// `[drive] discipline`: `race` (default), `drift_battle`, `drift_grand_prix`
+    /// or `drift_freestyle`
     /// (docs/DISCIPLINES.md).
     pub discipline: Option<String>,
     pub body_contacts: Option<Private>,
@@ -381,6 +388,15 @@ impl Settings {
                     self.root = (!value.eq_ignore_ascii_case("auto")).then(|| value.into())
                 }
                 ("game", "route") => self.route = Some(value.into()),
+                ("game", "subroute") => {
+                    self.subroute = Some(
+                        value
+                            .parse()
+                            .ok()
+                            .filter(|s| *s <= 1)
+                            .ok_or("[game] subroute must be 0 or 1")?,
+                    )
+                }
                 ("game", "car") => self.car = Some(value.into()),
                 ("game", "opponent_cars") => self.opponent_cars = Some(value.into()),
                 ("game", "series") => {
@@ -394,6 +410,10 @@ impl Settings {
                     self.series = Some(name);
                 }
                 ("drive", "enabled") => self.drive = on(&key, value).map_err(at)?,
+                ("drive", "time_limit") => {
+                    let seconds = value.parse::<f64>().map_err(|_| at(number(&key)))?;
+                    self.time_limit = (seconds > 0.).then_some(seconds);
+                }
                 ("drive", "laps") => {
                     let laps = value.parse::<u32>().map_err(|_| at(number(&key)))?;
                     self.laps = (laps > 0).then_some(laps);
@@ -411,8 +431,16 @@ impl Settings {
                     };
                 }
                 ("drive", "discipline") => match value.to_ascii_lowercase().as_str() {
-                    d @ ("race" | "drift_battle" | "drift_grand_prix") => self.discipline = Some(d.into()),
-                    _ => return Err(at("`discipline` needs race, drift_battle or drift_grand_prix".into())),
+                    d @ ("race" | "drift_battle" | "drift_grand_prix" | "drift_freestyle"
+                    | "pro_touge") => {
+                        self.discipline = Some(d.into())
+                    }
+                    _ => {
+                        return Err(at(
+                            "`discipline` needs race, drift_battle, drift_grand_prix, drift_freestyle or pro_touge"
+                                .into(),
+                        ));
+                    }
                 },
                 ("drive", "ai_characteristics") => {
                     self.ai_characteristics = (!off).then(|| private_path(value))
@@ -891,17 +919,15 @@ prop_script_speed = 12.5
 
     #[test]
     fn phone_profile_written_by_the_android_scripts_parses() {
-        // The settings.ini that push_android_data.ps1 writes (and the
-        // bundled APK ships) uses `key = value` in [input] too.
-        let script = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/push_android_data.ps1"),
+        // The settings.ini that push_android_data.ps1 writes, the bundled APK
+        // ships and the code-only APK's import writes (one template, P10)
+        // uses `key = value` in [input] too.
+        let text = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../android/app/src/main/assets/grid-import/settings.ini"),
         )
         .unwrap();
-        let text = script
-            .split_once("$settings = @'")
-            .and_then(|(_, rest)| rest.split_once("'@"))
-            .unwrap()
-            .0;
+        let text = text.as_str();
         let mut s = Settings::default();
         s.apply(text, Path::new("files")).unwrap();
         let input = s.input().unwrap();

@@ -126,8 +126,10 @@ pub(crate) fn calculate_tick_carried(
     )
 }
 
-pub(crate) type GeometryProvider<'a> =
-    dyn FnMut(&[contact_groups::Body], usize) -> Result<Vec<contact_groups::Contact>, Error> + 'a;
+/// Called after the bodies are predicted: it may move bodies first (the
+/// continuous stage, crate::continuous), then returns the step's contacts.
+pub(crate) type GeometryProvider<'a> = dyn FnMut(&mut [contact_groups::Body], usize) -> Result<Vec<contact_groups::Contact>, Error>
+    + 'a;
 
 pub(crate) fn calculate_tick_carried_with_provider(
     input: &contact_groups::Input,
@@ -233,7 +235,7 @@ fn tick(
         let remaining = capacity
             .checked_sub(next.contacts.len())
             .ok_or(Error("invalid geometry capacity"))?;
-        let contacts = provider(&next.bodies, remaining)?;
+        let contacts = provider(&mut next.bodies, remaining)?;
         if contacts.len() > remaining {
             return Err(Error("geometry provider exceeded remaining capacity"));
         }

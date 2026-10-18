@@ -14,6 +14,8 @@ macro_rules! log_line {
 mod android;
 #[cfg(target_os = "android")]
 mod android_display;
+#[cfg(target_os = "android")]
+mod android_import;
 // Mapping tested on the desktop; the JNI bridge is Android-only.
 mod android_pad;
 #[cfg(target_os = "android")]
@@ -65,6 +67,7 @@ mod foliage_mips;
 mod fps_counter;
 mod front_end;
 mod texture_cache;
+mod touge_event;
 mod texture_overrides;
 mod texture_upload;
 mod tilt;
@@ -934,6 +937,7 @@ fn append_entities(
     let closest_lod = scene::read_object_draws(objects, sources)?;
     let mut provisional_lod_instances = 0;
     let mut omitted_empty = 0;
+    let mut omitted_unbound = 0;
     for (node, placements) in &placements {
         let mut draws = scene::read_renderable_draws(objects, sources, node)?;
         if draws.is_empty() {
@@ -985,7 +989,13 @@ fn append_entities(
             let source = &sources[draw.source];
             let material = format!("objects/{}", String::from_utf8(draw.material.to_vec())?);
             if !car.bindings.contains_key(&material) {
-                return Err(format!("unresolved entity material {material}").into());
+                // Haruna's flag_a_01 has no diffuse binding; other routes omit
+                // the draw (counted), the default route stays strict.
+                if route.is_default() {
+                    return Err(format!("unresolved entity material {material}").into());
+                }
+                omitted_unbound += 1;
+                continue;
             }
             let mut mesh = Mesh::new(
                 PrimitiveTopology::TriangleList,
@@ -1049,6 +1059,9 @@ fn append_entities(
         placements.values().map(Vec::len).sum::<usize>(),
         placements.len()
     );
+    if omitted_unbound > 0 {
+        println!("entities omitted_unbound_material_draws={omitted_unbound}");
+    }
     if spheres > 0 {
         // Static spheres (Milan and Detroit balloons) are not route collision yet.
         println!("entities collision_spheres={spheres} route_collision=omitted");
@@ -1165,7 +1178,7 @@ fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
 fn grid_slot(root: &Path, route: &Route, name: &str) -> Result<Mat4, Box<dyn std::error::Error>> {
     let bytes = read(&root.join(route.file("grids.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
-    let marker = grid_formats::grid::read(&tree, name.as_bytes())?;
+    let marker = grid_formats::grid::read_slot(&tree, name.as_bytes(), route.subroute())?;
     let transform = marker.horizontal_preview()?;
     println!(
         "grid marker {name} raw_matrix={:?} corners={:?} forward={:?}; horizontal preview only, final contact height/offset pending",
@@ -1262,7 +1275,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut route = match &profile.route {
         Some(path) => Route::new(path)?,
         None => Route::default(),
-    };
+    }
+    .with_subroute(profile.subroute.unwrap_or(0))?;
     let mut player_car = match &profile.car {
         Some(stem) => CarModel::new(stem)?,
         None => CarModel::default(),
@@ -1276,6 +1290,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut car_chosen = profile.car.is_some();
     // Opponent k's livery package in a series event (docs/SERIES.md).
     let mut series_liveries: Vec<Option<usize>> = Vec::new();
+    // A Le Mans Series race's class name keys by car (results Class column).
+    let mut car_classes: Vec<String> = Vec::new();
     let mut driver_aids = profile.assists()?;
     let mut input_settings = profile.input()?;
     let mut ai_settings = profile.ai()?;
@@ -1418,7 +1434,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--opponents" => {
                 opponents = Some(
                     args.next()
-                        .ok_or("--opponents needs 1..11")?
+                        .ok_or("--opponents needs 1..19")?
                         .parse::<usize>()?,
                 )
             }
@@ -1495,11 +1511,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )?)
             }
             "--route" => {
+                let subroute = route.subroute();
                 route = Route::new(
                     &args
                         .next()
                         .ok_or("--route needs tracks/<region>/<track>/<route>")?,
                 )?
+                .with_subroute(subroute)?
+            }
+            "--subroute" => {
+                let subroute = args.next().ok_or("--subroute needs 0 or 1")?.parse()?;
+                route = route.with_subroute(subroute)?
             }
             "--render" => {
                 output = Some(PathBuf::from(
@@ -1807,7 +1829,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", input::HELP);
                 println!("{}", grid_tools::ai_pacing::Settings::HELP);
                 println!(
-                    "--opponents 1..11: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
+                    "--opponents 1..19: AI cars in the shared world (needs --body-contacts); --grid-position N: player grid slot (1 = pole)."
                 );
                 println!(
                     "--body-events PRIVATE_BP01: experimental registered impacts after solving, including wheel contacts. Single car/static peers and empty notifications; EVENTS appears in the title."
@@ -1837,13 +1859,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "android")]
     if !root.join("tracks").is_dir() {
         return Err(format!(
-            "no game data in {}: this APK carries none; install the bundled APK or push the data (docs/ANDROID.md)",
+            "no game data in {}: this APK carries none; start the app again to import your GRID folder, or push the data (docs/ANDROID.md)",
             root.display()
         )
         .into());
     }
     if let Some(name) = &series {
-        let event = grid_tools::series::Event::prepare(
+        // Le Mans Series grid option (AUTHORED mapping of the settings):
+        // `grid_position = back` is the back of the player's class group,
+        // anything else its front.
+        let event = grid_tools::series::Event::prepare_on_grid(
             &root,
             name,
             &route,
@@ -1851,12 +1876,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             opponents,
             opponent_cars.is_none(),
             series_seed(),
+            if profile.grid_back { 1 } else { 0 },
         )?;
+        if let Some(slot) = event.player_slot {
+            grid_position = Some(slot + 1);
+        }
         player_car = event.player.clone();
         opponents = Some(event.opponent_count);
         if opponent_cars.is_none() {
             opponent_cars = Some(event.cars());
             series_liveries = event.opponents.iter().map(|e| e.livery_index).collect();
+            car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
     }
@@ -1916,16 +1946,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if trial_laps.is_some_and(|n| !(1..=99).contains(&n)) || (trial_laps.is_some() && !drive) {
         return Err("time trial requires --drive and 1..99 laps".into());
     }
+    // A point-to-point route (Haruna) is one run from its start to its
+    // finish: touge events run one lap [D event_track_pool num_laps 1].
+    if trial_laps.is_some()
+        && grid_tools::lap_progress::load_route(&root, &route)
+            .is_ok_and(|p| p.progress.kind == grid_formats::progress::TrackKind::PointToPoint)
+    {
+        trial_laps = Some(1);
+    }
     if (body_contacts.is_some() || body_events.is_some()) && !drive {
         return Err("--body-contacts and --body-events require --drive".into());
     }
     if deformation.is_some() && (!drive || body_contacts.is_none()) {
         return Err("--deformation requires --drive and --body-contacts".into());
     }
-    if opponents.is_some_and(|n| !(1..=11).contains(&n))
+    if opponents.is_some_and(|n| !(1..=19).contains(&n))
         || (opponents.is_some() && (!drive || body_contacts.is_none()))
     {
-        return Err("--opponents 1..11 requires --drive and --body-contacts".into());
+        return Err("--opponents 1..19 requires --drive and --body-contacts".into());
     }
     use grid_tools::virtual_race::Format;
     // A Drift GP runs the player alone; its rivals are virtual (docs/DISCIPLINES.md).
@@ -1937,10 +1975,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("drift_grand_prix") => {
             return Err("drift_grand_prix needs laps and no opponents (docs/DISCIPLINES.md)".into());
         }
+        // Freestyle drift: the player alone for a time limit, no progress.
+        Some("drift_freestyle") if drive && opponents.is_none() => Some(Format::DriftFreestyle),
+        Some("drift_freestyle") => {
+            return Err("drift_freestyle needs --drive and no opponents (docs/DISCIPLINES.md)".into());
+        }
+        Some("pro_touge") => None,
         Some(other) => {
-            return Err(format!("unknown discipline {other}: race, drift_battle or drift_grand_prix").into());
+            return Err(format!("unknown discipline {other}: race, drift_battle, drift_grand_prix, drift_freestyle or pro_touge").into());
         }
     };
+    let freestyle = drift_format == Some(Format::DriftFreestyle);
+    // Pro Touge: two runs against one AI car on a point-to-point road.
+    let pro_touge = discipline.as_deref() == Some("pro_touge");
+    if pro_touge && (opponents != Some(1) || !drive) {
+        return Err("pro_touge needs --drive and one opponent (docs/TOUGE.md)".into());
+    }
+    if freestyle {
+        // [V] drift_freestyle ignores race progress (Route::ignoring_progress);
+        // the event is one timed run that ends at its time limit.
+        route = route.ignoring_progress();
+        trial_laps = Some(1);
+    }
     let drift = drift_format == Some(Format::DriftBattle);
     if let Some(position) = grid_position
         && !opponents.is_some_and(|n| (1..=n + 1).contains(&position))
@@ -1977,19 +2033,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut drive_input = None;
     // Phone controls (P11): `None` when off, else the tilt settings (if any).
     let mut drive_touch: Option<Option<tilt::Settings>> = None;
+    let mut touge_run = None;
     let driving = if drive {
         track = true;
         reference = true;
         collision = false;
         start_view = true;
-        let mut runtime = grid_tools::source_vehicle::Runtime::load(
-            &root,
-            &route,
-            &player_car,
-            &format!("slot_{player_slot:02}"),
-            200679,
-        )?;
-        println!("drive_car car={player_car} label={:?}", player_car.label());
         // The device class decides assisted steering (record +0x33 -> +E6C).
         input_settings.apply_class(&mut driver_aids);
         #[cfg(target_os = "android")]
@@ -2008,15 +2057,41 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("drive_input {input_settings} pad_preset={pad}");
         }
         drive_input = Some(actions);
+        // One race of the event: the player's runtime and the AI field on
+        // `route` from `player_slot` (built again for a Pro Touge's second
+        // run, docs/TOUGE.md).
+        #[allow(clippy::type_complexity)]
+        let build_race = |route: &Route,
+                          player_slot: usize|
+         -> Result<
+            (
+                grid_tools::source_vehicle::Runtime,
+                Option<grid_tools::body_geometry::BodyGeometry>,
+                Option<Opponents>,
+            ),
+            Box<dyn std::error::Error>,
+        > {
+        let mut runtime = grid_tools::source_vehicle::Runtime::load(
+            &root,
+            route,
+            &player_car,
+            &format!("slot_{player_slot:02}"),
+            200679,
+        )?;
+        println!("drive_car car={player_car} label={:?}", player_car.label());
         runtime.set_assists(driver_aids)?;
         println!("drive_assists {driver_aids}");
         runtime.enable_lap_timing(&root)?;
-        println!(
-            "drive_lap_timing enabled=true gates={} required_gates={} finish=0 clock=successful-simulation-ticks policy=independent-ordered-route-splits",
-            runtime.lap_gate_count(),
-            runtime.lap_required_gate_count()
-        );
-        if let Some(source) = body_events {
+        if route.ignores_progress() {
+            println!("drive_lap_timing enabled=false reason=progress-ignored");
+        } else {
+            println!(
+                "drive_lap_timing enabled=true gates={} required_gates={} finish=0 clock=successful-simulation-ticks policy=independent-ordered-route-splits",
+                runtime.lap_gate_count(),
+                runtime.lap_required_gate_count()
+            );
+        }
+        if let Some(source) = &body_events {
             let bytes = source.bytes(&root, "BP01")?;
             if bytes.len() != 28 {
                 return Err("invalid private body event parameter extent".into());
@@ -2068,7 +2143,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     refs.iter().copied().zip(field.iter()).collect();
                 let mut multi = grid_tools::source_vehicle::multi::MultiRuntime::load_deforming_on(
                     &root,
-                    &route,
+                    route,
                     &entries,
                     table,
                     runtime.body_events,
@@ -2081,9 +2156,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 for model in &field {
                     if !by_model.contains_key(model) {
                         // A Drift Battle reads the drift_battle AI config (docs/DISCIPLINES.md).
-                        let data = AiData::load_car(
+                        let data = AiData::load_route(
                             &root,
-                            route.path(),
+                            route,
                             model,
                             drift.then_some("drift_battle"),
                         )?;
@@ -2129,12 +2204,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
                 println!("drive_ai_pacing {ai_settings}");
-                let start = {
-                    let gate = &grid_tools::lap_progress::load_route(&root, &route)?
-                        .progress
-                        .gates[0];
+                let progress = grid_tools::lap_progress::load_route(&root, route)?.progress;
+                let centre = |gate: &grid_formats::progress::Gate| -> [f32; 3] {
                     std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
                 };
+                let start = centre(&progress.gates[0]);
+                // A point-to-point run (Haruna) finishes at its last gate.
+                let run_finish = (progress.kind
+                    == grid_formats::progress::TrackKind::PointToPoint)
+                    .then(|| centre(progress.gates.last().unwrap()));
                 let mut positions = vec![{
                     let p = runtime.pose();
                     [p[12], p[13], p[14]]
@@ -2143,12 +2221,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let p = c.pose();
                     [p[12], p[13], p[14]]
                 }));
-                let standings = grid_tools::race::Standings::new(
-                    &ai.line,
-                    trial_laps.unwrap_or(1),
-                    start,
-                    &positions,
-                );
+                let standings = match run_finish {
+                    Some(finish) => {
+                        grid_tools::race::Standings::new_run(&ai.line, start, finish, &positions)
+                    }
+                    None => grid_tools::race::Standings::new(
+                        &ai.line,
+                        trial_laps.unwrap_or(1),
+                        start,
+                        &positions,
+                    ),
+                };
                 let pacing = grid_tools::ai_pacing::Field::new(
                     grid_tools::ai_pacing::Data::load_for(
                         &root,
@@ -2187,6 +2270,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
             })
             .transpose()?;
+            Ok((runtime, geometry, opponents))
+        };
+        let (runtime, geometry, opponents) = build_race(&route, player_slot)?;
+        // A Pro Touge's second run: the reverse subroute, the slots swapped
+        // [I] (docs/TOUGE.md §7).
+        if pro_touge {
+            let reverse = route.clone().with_subroute(1)?;
+            let (runtime, geometry, opponents) = build_race(&reverse, 1 - player_slot)?;
+            let length = |r: &Route| -> Result<f64, Box<dyn std::error::Error>> {
+                Ok(f64::from(grid_tools::lap_progress::load_route(&root, r)?.progress.total_distance))
+            };
+            touge_run = Some((
+                touge_event::NextRun {
+                    runtime,
+                    geometry,
+                    opponents,
+                    reset_line: Some(grid_tools::ai_driver::Line::load_route(&root, &reverse)?),
+                    length: length(&reverse)?,
+                },
+                length(&route)?,
+            ));
+            println!("drive_touge version=1 event=setup runs=2 run2=subroute_1 slots=swapped");
+        }
         // Set-up for headless replays of this log (grid-soak replay-log).
         println!(
             "drive_replay version=1 route={} opponents={} grid_position={}{}",
@@ -2220,7 +2326,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             started: Instant::now(),
             opponents,
             auto_reset: Default::default(),
-            reset_line: Some(grid_tools::ai_driver::Line::load(&root, route.path())?),
+            // The Yokohama arenas have no AI line: no auto-reset there.
+            reset_line: if route.ignores_progress() {
+                grid_tools::ai_driver::Line::load_route(&root, &route).ok()
+            } else {
+                Some(grid_tools::ai_driver::Line::load_route(&root, &route)?)
+            },
         })
     } else {
         None
@@ -2455,6 +2566,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 start_sequence.seconds,
             )?;
         }
+        if freestyle {
+            let seconds = profile.time_limit.unwrap_or(90.);
+            trial.state = trial.state.clone().with_time_limit(seconds)?;
+            println!("drive_freestyle time_limit={seconds} progress=ignored");
+        }
         app.insert_resource(trial);
     }
     if let Some(path) = output {
@@ -2674,6 +2790,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(mut post) = app.world_mut().get_resource_mut::<post_race::PostRace>() {
                 post.drift = true;
             }
+        }
+        if !car_classes.is_empty() {
+            app.insert_resource(post_race::CarClasses(std::mem::take(&mut car_classes)));
+        }
+        if let Some((next, length)) = touge_run.take() {
+            app.insert_resource(touge_event::TougeEvent::new(
+                grid_tools::touge::Settings::load(&root)?,
+                length,
+                next,
+            ))
+            .add_systems(FixedUpdate, touge_event::tick.after(drive_tick));
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
