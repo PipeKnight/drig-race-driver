@@ -158,6 +158,7 @@ pub fn read_tree(bytes: &[u8]) -> Result<Tree<'_>> {
                     | b"TEXTUREIMAGEBLOCKDATA"
                     | b"TRANSFORM"
                     | b"TEMPLATETRANSFORM"
+                    | b"NEANIMKEYS"
                     | b"SHADERPROGRAMCODEBLOCK"
             );
         let index = nodes.len();

@@ -46,6 +46,12 @@ $items = @(
     'track_sponsors\tag_heuer\sponsor_minor.pssg',
     'track_sponsors\bridgestone\sponsor_event.pssg',
     'cars\lac',
+    'Osd',                   # the original HUD scene (docs/RACE_HUD.md section 6)
+    'frontend\fonts\microgramma_osd.PSSG',
+    'frontend\fonts\swiss_bold_osd_2d.PSSG',
+    'frontend\fonts\micro_drift.pssg',
+    'frontend\fonts\micro_lap.pssg',
+    'frontend\fonts\swiss_time.pssg',
     'tracks\europe\donington'
 )
 
@@ -90,7 +96,7 @@ if ($Stage) {
 }
 
 $dest = "/sdcard/Android/data/$Package/files"
-& $Adb shell mkdir -p "$dest/Grid/audio" "$dest/Grid/language" "$dest/Grid/track_sponsors/tag_heuer" "$dest/Grid/track_sponsors/bridgestone" "$dest/Grid/tracks/europe" "$dest/Grid/cars"
+& $Adb shell mkdir -p "$dest/Grid/audio" "$dest/Grid/language" "$dest/Grid/track_sponsors/tag_heuer" "$dest/Grid/track_sponsors/bridgestone" "$dest/Grid/tracks/europe" "$dest/Grid/cars" "$dest/Grid/frontend/fonts"
 if ($LASTEXITCODE -ne 0) { throw 'adb shell mkdir failed (is the phone connected and the app installed?)' }
 foreach ($item in $items) {
     $parent = (Split-Path $item) -replace '\\', '/'

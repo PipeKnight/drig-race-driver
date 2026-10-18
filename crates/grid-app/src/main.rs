@@ -41,7 +41,9 @@ mod motion_capture;
 mod particles;
 mod pause_menu;
 mod post_race;
+mod osd_scene;
 mod race_hud;
+mod race_osd;
 mod render_scale;
 mod replay;
 mod scene_probe;
@@ -2512,7 +2514,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 driving.paused = true;
                 front_end::install(&mut app, driving.runtime.assists);
             }
-            // The original HUD layout and post-race screens (docs/RACE_HUD.md).
+            // The original HUD and post-race screens (docs/RACE_HUD.md): the
+            // OSD scene from the install when it loads, else plain panels.
+            if let Err(error) = osd_scene::install(&mut app, &root) {
+                warn!("Original OSD unavailable, plain HUD panels used: {error}");
+            }
             race_hud::install(&mut app);
             // Frame-rate counter ([osd] fps; on by default on Android, F9 on the desktop).
             fps_counter::install(
