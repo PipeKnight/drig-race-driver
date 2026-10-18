@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G109 — Source-selected player/opponent number composition connected (18 October 2026)
+
+New optional numbers source/off, manual race-number decimal text (including01); enhanced-only, defaultoff preserved. CPU layer reads purchased glyphs/UV layout, composes after diffuse overrides, regenerates full linear-light mips to opaqueBGRA8, and retains shared P8 upload after device selection. Other maps/physics untouched. Outputs for all banks stage atomically; late missing-opponent base publishes nothing, source01/25banks remain independent. Five composition tests/seven settings tests and67formats library tests pass. Workspace all-target Clippy29.60s passes after test-only useless_vec correction; initial import alias error corrected earlier.627test workspace baseline was before final leadingzero/source-bank conversion, recorded without overclaim.
+
+Commit renderer separately, source-stamped build and GPU roof/both-door/native4K/source-vs8K/motion/forcedRGBA checks next. Equal-width digit layout/linear blend/font0 are adaptations, not full original compositor or career/event selection proof. Private number-source-provenance01.json pins all four source resources/PE and read-only Ghidra failures/successes. No new install/Steam edit/owner action. Existing primary/newer gameplay playable preserved while graphics candidate is validated.
+
 ## G108 — Source decal/number readers and leading-zero selection (18 October 2026)
 
 Merged observed origin/main throughF380 as870ea31, journal-only conflict preserved both histories; newer primary playable untouched. Ghidra12.1.4 reused read-only/noanalysis/maxCPU2: first containing-function request had no analyzed function; static preceding ret/int3 plus vtable pointer independently identify6c5780, targeted decompile succeeds and changes discarded. Loader copies six placement fields into bounded70records. Static shader variants/source font and XML evidence remain private; runtime selection/compositor parity not claimed.

@@ -60,6 +60,8 @@ pub struct Settings {
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
     pub source_trees: bool,
+    pub player_race_number: Option<grid_formats::car_decals::Number>,
+    pub source_race_numbers: bool,
     /// Fixed photographic exposure; +1EV halves scene light before tonemapping.
     pub exposure_ev100: f32,
     /// Window-only material control; light lenses are a separate material.
@@ -117,6 +119,8 @@ impl Default for Settings {
             layered_track: true,
             source_land: true,
             source_trees: false,
+            player_race_number: None,
+            source_race_numbers: false,
             exposure_ev100: 13.,
             window_roughness: 0.08,
             window_reflectance: 0.5,
@@ -150,6 +154,11 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn race_number(&mut self, value: &str) -> Result<(), &'static str> {
+        let number = grid_formats::car_decals::Number::parse(value).map_err(|_| "race number needs 1..3 decimal digits")?;
+        self.player_race_number = Some(number);
+        Ok(())
+    }
     pub fn glass_reflectance(&mut self, value: &str) -> Result<(), &'static str> {
         let reflectance = value.parse::<f32>().map_err(|_| "invalid glass reflectance")?;
         if !reflectance.is_finite() || !(0.0..=1.0).contains(&reflectance) {
@@ -430,6 +439,20 @@ mod graphics_settings_tests {
             assert!(settings.capture_timeout(value).is_err());
             assert_eq!(settings.capture_timeout_seconds, Some(3600.));
         }
+    }
+    #[test]
+    fn race_number_is_explicit_bounded_and_preserved_after_invalid_input() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.player_race_number, None);
+        settings.race_number("70").unwrap();
+        for value in ["", "-1", "+1", "1000", "1.5", "a", " 1"] {
+            assert!(settings.race_number(value).is_err());
+            assert_eq!(settings.player_race_number, Some(grid_formats::car_decals::Number::parse("70").unwrap()));
+        }
+        settings.race_number("01").unwrap();
+        assert_eq!(settings.player_race_number.unwrap().as_str(), "01");
+        settings.race_number("0").unwrap();
+        assert_eq!(settings.player_race_number, Some(grid_formats::car_decals::Number::parse("0").unwrap()));
     }
     #[test]
     fn glass_response_control_is_bounded_without_changing_default() {

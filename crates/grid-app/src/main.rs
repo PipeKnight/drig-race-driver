@@ -20,6 +20,7 @@ mod assists;
 mod body_damage;
 mod camera;
 mod car_materials;
+mod car_numbers;
 mod clearcoat_prepass;
 mod damage_hud;
 mod damage_parts;
@@ -1570,6 +1571,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--wheel-exposure needs fixed or adaptive".into()),
                 };
             }
+            "--numbers" => {
+                graphics.source_race_numbers = match args.next().as_deref() {
+                    Some("source") => true, Some("off") => false,
+                    _ => return Err("--numbers needs source or off".into()),
+                };
+            }
+            "--race-number" => {
+                graphics.race_number(&args.next().ok_or("--race-number needs 0..999")?)?;
+            }
             "--glass-reflectance" => {
                 graphics.glass_reflectance(&args.next().ok_or("--glass-reflectance needs 0..1")?)?;
             }
@@ -2231,6 +2241,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         geometry_ray::describe_texture_usage(&car, &applied);
         Some(applied)
     } else { None };
+    if graphics.source_race_numbers || graphics.player_race_number.is_some() {
+        if !graphics.enhanced() { return Err("race-number pilot requires enhanced graphics".into()); }
+        if graphics.source_race_numbers {
+            car_numbers::apply_source(&root, &field, &mut car, graphics.player_race_number)?;
+        } else if let Some(number) = graphics.player_race_number {
+            car_numbers::apply(&root, &player_car, &mut car, number)?;
+        }
+    }
     let mut orbit = if track {
         Orbit {
             yaw: -0.4,
