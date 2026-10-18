@@ -1,5 +1,7 @@
 # GRID engine project log
 
+F397 evidence moved before archiving the tyre-smoke streaming session (2026-10-18, Claude Code): worktree objective-darwin-d70888 (F394) local/ (f393/, soak/) moved to local/worktree-evidence/objective-darwin-d70888/; nothing unpushed or uncommitted. The F395/F396 APKs grid-5f862525392c-dirty-bundled-PRIVATE-debug.apk (235,805,681 bytes) and ...-profile-debug.apk (241,898,513 bytes) were copied from worktree focused-torvalds-7a0b54 to local/android/apk/ for the owner.
+
 F396 Phone bisection APKs built from 5f86252 (F395) (2026-10-18, Claude Code): `tools/build_android.ps1 -BundleData`, then `-BundleData -Profile`. Both are labelled `-dirty` only because docs/PERFORMANCE.md had an unstaged section number (pushed afterwards as ad81473); the code is 5f86252. cargo/rustc 1.99.0, NDK 30.0.16248370, Gradle 9.8.1, JDK 21.0.12.1+1; bundle version 85acf6d9… (395 files). Not committed (private data); not yet run on the phone.
 - Normal: `local/android/apk/grid-5f862525392c-dirty-bundled-PRIVATE-debug.apk` (worktree focused-torvalds-7a0b54), 235,805,681 bytes, sha256 a5807779cc746257e14be6f9a07a9f659bf7e23ddeb6d310435f9d3fab67be94, built in 641 s.
 - Profile: `local/android/apk/grid-5f862525392c-dirty-bundled-PRIVATE-profile-debug.apk`, 241,898,513 bytes, sha256 87ecf86f670d15924452c5c514bbdcbbb4c21dcd01623f9308a6dbabc48caf5f, built in 481 s.
