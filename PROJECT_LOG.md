@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G111 — Retained full-lap capture timeout; graphics launcher candidate (18 October 2026)
+
+Control6500ticks/native4K completed one valid89.955257484s lap. Source-number run hit configured600s capture timeout at4674ticks; four common-tick state lines equal control excluding walltime. No completed source lap/performance claim. Failed log and private numbers-full-timeout01.json retained; supported1800s retry planned after merged build. F381 contact-pool initialization already preserved in334dbb1. Combined workspace tests underway with two jobs.
+
+Graphics launcher candidate now selects source numbers, third argument no-numbers restores comparison, globalCLI staysoff; help documents decimal text/leadingzero. Existing primary executable not replaced. Source font/UV/DB selection restoration remains an adaptation (equal-width cells), not complete original compositor equivalence. No Steam edits/tool installs/owner action.
+
+
 ## G110 — Numbers render on roof/doors/8K body and no-BC path (18 October 2026)
 
 Sourcec0b30eb/F380base, release3m11s/SHAa1931b87...: six3840x2160captures inspected, roof/bothdoors show01in saved slots;8192candidate keeps14mips and shared-helper upload after composition. ForcedRGBA0BCassets/557images/547decoded; measured full max65/mean0.172745byte, roofROImax65/mean0.012735, no parity/phone claim. Native-pixel before/after roof contact sheet shared. Static logs known nilUUID warning only. Candidate asset files remain immutable/read-only.

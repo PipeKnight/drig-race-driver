@@ -1701,6 +1701,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 println!(
+                    "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
+                );
+                println!(
                     "--grade authored|track: enhanced color treatment; track reads saved exterior controls, with an authored display-domain mapping (not 1:1 original postprocessing)."
                 );
                 println!(

@@ -47,3 +47,10 @@ Release3m11s/SHA256a1931b87... on the F380 integration base. Six native3840x2160
 ForcedRGBA reports0BCassets/557images/547decoded; whole-frame max65/mean0.172745byte and roofROI(2040,800)-(2370,1060)max65/mean0.012735byte are measured differences, not byte parity or phone performance proof. No new visible number-layout issue in the inspected static views. Roof contact sheet contains native-pixel crops from the same prototype/camera/light, not an original-game matched shot.
 
 Paired1200tick off/source captures have all4physical/handling/deformation/lap exit lines equal after walltime removal. Both30frame sequences are unique, tick1102..1162/maxrequestdt2.05ns; first/last source side frames inspected. GPU bank logs select player01/lac_00andopponent25/lac_01separately. Only known nilUUID gamepad warning. Private numbers-static-validation01.json, numbers-rgba-audit01.json, numbers-motion-validation01.json and numbers-roof-comparison01.png/.json. Full6500tick/native4K paired lap acceptance and newest main integration remain pending; no ordinary launcher default or primary playable promotion yet.
+
+
+## Full-lap failure retained and launcher candidate
+
+The c0b30eb control run completed6500ticks/native4K and one valid89.955257484s lap. The source-number run hit the configured600s render-capture timeout at4674ticks; it did not complete a lap. All four state lines at that common tick match the control after removing walltime. Private numbers-full-timeout01.json and the failed log are retained. This does not establish number-render performance or full-lap acceptance; repeat with a supported longer capture budget after the F381 rebuild, without changing physical timestep or capture resolution.
+
+The graphics launcher candidate enables saved source numbers and accepts third argument no-numbers for comparison; global CLI default remains off. This launcher must be used with a verified executable supporting the new flags. Primary playable publication remains pending combined-build checks. CLI help now describes both controls and leading-zero preservation. Lighting/exposure defaults stay unchanged.
