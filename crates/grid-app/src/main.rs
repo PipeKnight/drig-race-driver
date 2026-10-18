@@ -69,6 +69,7 @@ mod front_end;
 mod texture_cache;
 mod touge_event;
 mod texture_overrides;
+mod surface_rgb;
 mod texture_upload;
 mod tilt;
 mod time_trial;
@@ -1315,6 +1316,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut capture_orbit_rate = None;
     let mut motion_sequence = None;
     let mut texture_override_path = None;
+    let mut surface_rgb_override = None;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut body_contacts = profile.body_contacts.clone();
@@ -1739,6 +1741,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--reflections needs sky, deferred, ssr or probe".into()),
                 };
             }
+            "--surface-rgb-overrides" => {
+                surface_rgb_override = Some(PathBuf::from(args.next().ok_or("--surface-rgb-overrides needs a private manifest")?));
+            }
             "--surface-specular" => {
                 graphics.surface_specular = track_surface::Specular::parse(
                     &args.next().ok_or("--surface-specular needs off, source-base or white-control")?,
@@ -1795,6 +1800,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--help" => {
                 #[cfg(feature = "paint-specular")]
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
+                println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source layers required; off default, not original Phong parity.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
@@ -1890,10 +1896,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("{}", event.log_line());
     }
-    if graphics.surface_specular != track_surface::Specular::Off
-        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive))
+    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some())
+        && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
-        return Err("--surface-specular requires an enhanced track scene with --track-materials source".into());
+        return Err("surface controls (--surface-specular/--surface-rgb-overrides) require an enhanced non-collision track scene with --track-materials source".into());
     }
     let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
@@ -2868,7 +2874,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
     }
     if graphics.enhanced() && graphics.layered_track && track && !collision {
-        track_surface::install(&mut app, &root, graphics.source_land)?;
+        track_surface::install(&mut app, &root, graphics.source_land, surface_rgb_override.as_deref())?;
     }
     if graphics.reflection_mode == 3 {
         if !graphics.enhanced()

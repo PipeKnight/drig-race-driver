@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G136 — Explicit surface RGB contract passes CPU checks, GPU acceptance pending (18 October 2026)
+
+Added worktree --surface-rgb-overrides with GRID_SURFACE_RGB_OVERRIDES_V1: only actually selected source draws' first/second diffuse keys, exact purchased DDS reference, opaque2x/4xBGRA RGB carrier/full mip chain, source alpha restored by the runtime. Authored source mip arrays retain the renderer's canonical BC3 CPU decode; extra large levels use periodic integer bilinear and absent small tails are derived explicitly. This does not claim exact compressed-GPU interpolation or Pillow decoder parity. Candidate RGB/headers are unchanged during alpha attachment, no new GPU samplers/early image upload. Shared image/image_linear post-device path remains intact. Existing object/car V1 still rejects packed alpha and road keys.
+
+Split shared bounded staging/channel hook from surface loader/CLI integration. Initial focused run3pass/1fail was a test-root assumption (crate cwd/default data dir absent); failure retained, fixed with explicit canonical ignored local root rather than process-global env/cwd mutation. Retry4pass0failed0ignored including purchased curb10mips, periodic edge/constant invariants and a late transform failure leaving both original CPU maps intact. Existing V1 regression1pass. Actual-render validation, exact-source Clippy/full tests and stamped release still pending; installed3e3195a4/b9 graphics is unchanged and does not include this draft. Private curb03 RGB derivatives remain optional/not accepted for visual quality.
+
+ca25409 checked graphics checkpoint pushed to origin/codex/grid-graphics and primary main fast-forwarded, normal8762/graphics3e/notec4 unchanged. Remote main push rejected by Git non-fast-forward because concurrent event-menu/gamepad work reached9bd3832/F415; this was NOT an approval rejection. No force-push/reset/discard. Preserve F414/F415 via a careful source merge before another main publication. RGB drafts were excluded from ca25409.
+
 ## G135 — Verified stamped graphics delivered; F413 source checks complete (18 October 2026)
 
 Controlled6500tick/native4K pair at explicit virtual30FPS is byte-identical across1f858a1b unversioned and3e3195a4 stamped artifacts (PNG SHA6451c26bb075e326897bf37d1f9f3ae3fd4f90057b4a63fed5330ca345a14a54). All4physical exits match, both valid89.955257484slaps. All30 repeated motion frames are also byte-identical. Thus comparisons are cadence-sensitive; fixed render clock removes the observed shot difference. The camera history code explains that sensitivity; live camera behavior is unchanged. Prior variable-clock failure remains retained, not erased/relabelled exact.

@@ -268,7 +268,12 @@ fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error
     })
 }
 
-pub fn install(app: &mut App, root: &Path, land: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn install(
+    app: &mut App,
+    root: &Path,
+    land: bool,
+    rgb_overrides: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut source = read_source(root)?;
     if land {
         let land = read_package(root, "land.pssg")?;
@@ -287,6 +292,18 @@ pub fn install(app: &mut App, root: &Path, land: bool) -> Result<(), Box<dyn std
         for (name, texture) in land.textures {
             source.textures.insert(format!("land/{name}"), texture);
         }
+    }
+    if let Some(manifest) = rgb_overrides {
+        let used = source
+            .draws
+            .values()
+            .flat_map(|draw| {
+                source.definitions[&draw.material].textures[..2]
+                    .iter()
+                    .cloned()
+            })
+            .collect();
+        super::surface_rgb::apply(manifest, &mut source.textures, &used)?;
     }
     app.world_mut().resource_mut::<Assets<Shader>>().insert(
         SHADER.id(),
