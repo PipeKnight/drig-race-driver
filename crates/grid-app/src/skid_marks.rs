@@ -125,7 +125,9 @@ impl SkidMarks {
             .map_or(f32::INFINITY, |p| p.center.distance_squared(self.camera))
     }
 
-    /// Free strip, else a retiring one, else steal the farthest finished strip.
+    /// Free strip, else a retiring one, else steal the active strip farthest
+    /// from the camera, even one a wheel is still laying [V 73F330]. Releasing
+    /// it detaches that wheel, which starts a fresh strip next sample [V 7289C0].
     fn allocate(&mut self) -> Option<usize> {
         let index = self
             .strips
@@ -133,13 +135,16 @@ impl SkidMarks {
             .position(|s| !s.used)
             .or_else(|| self.strips.iter().position(|s| s.retiring))
             .or_else(|| {
-                (0..STRIPS)
-                    .filter(|&i| self.strips[i].owner.is_none())
-                    .max_by(|&a, &b| {
-                        self.distance(&self.strips[a])
-                            .total_cmp(&self.distance(&self.strips[b]))
-                    })
+                (0..STRIPS).max_by(|&a, &b| {
+                    self.distance(&self.strips[a])
+                        .total_cmp(&self.distance(&self.strips[b]))
+                })
             })?;
+        if let Some((car, wheel)) = self.strips[index].owner
+            && let Some(head) = self.heads.get_mut(car).and_then(|h| h.get_mut(wheel))
+        {
+            *head = None;
+        }
         self.strips[index] = Strip {
             used: true,
             ..Strip::default()
@@ -506,5 +511,38 @@ mod tests {
         assert_eq!(marks.strips.len(), STRIPS);
         assert!(marks.strips.iter().any(|s| s.retiring) || marks.strips.iter().any(|s| !s.used));
         assert!(marks.build().count_vertices() > 0);
+    }
+
+    #[test]
+    fn full_pool_steals_the_farthest_active_strip_like_the_original() {
+        let mut marks = SkidMarks::new(profile());
+        marks.heads.resize(2, [None; 4]);
+        // Car 1 lays a strip far from the camera and keeps it open.
+        marks.advance(1, 0, &wheel(b"STDR", 3.0, 0., 500.));
+        marks.advance(1, 0, &wheel(b"STDR", 3.0, 0., 500.2));
+        let far = marks.heads[1][0].unwrap().strip;
+        // Every other strip is a finished one near the camera.
+        for (i, strip) in marks.strips.iter_mut().enumerate() {
+            if i != far {
+                strip.used = true;
+                strip.points = vec![
+                    Point {
+                        center: Vec3::new(i as f32 * 0.01, 0., 0.),
+                        side: Vec3::Z,
+                        normal: Vec3::Y,
+                        half_width: 0.1,
+                        u: [0., 1.],
+                        v: 0.,
+                        alpha: 1.,
+                    };
+                    2
+                ];
+            }
+        }
+        // 73F330: no free or retiring strip, so the open far strip is stolen
+        // and its wheel detached (7289C0).
+        assert_eq!(marks.allocate(), Some(far));
+        assert!(marks.heads[1][0].is_none());
+        assert!(marks.strips[far].owner.is_none() && marks.strips[far].points.is_empty());
     }
 }

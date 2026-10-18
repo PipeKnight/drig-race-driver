@@ -228,6 +228,6 @@ fn audibility(
     let audible = !engine.is_some_and(|e| e.muted)
         && !driving.paused
         && driving.failure.is_none()
-        && !listening.trial.as_ref().is_some_and(|t| t.finished());
+        && !listening.stopped(&driving);
     sound.audible.store(audible, Ordering::Relaxed);
 }

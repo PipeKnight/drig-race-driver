@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G148 — Integrate bounded F438 source without delaying verified prototype (19 October 2026)
+
+Merged selected incomingbe29245/F438 after delivering F427 graphics. Preserve filtered-pad correction/research, first-corner CLI probe, source skid-strip stealing, audio after finish, reverse drift profiles, fidelity backlog and owner-approved cleanup documentation/tool. Sole additive PROJECT_LOG conflict resolved with both-history nonempty-line check; no code conflict or authored physics change. Read new AGENTS build-dir pruning rule; no worktree removal or pruning performed here.
+
+Installed dedicated graphics remains accepted2c5/F427/SHA2197... with existing rollback3e. New source F438 audio/skid changes are not in that executable and require source checks before publication. Freeze this selected incoming snapshot for the current integration, rather than attributing future upstream edits to current acceptance. Current core library/world/formats/soak code is unchanged from F427; only the opponent-race CLI probe changed among tools. Source app still needs fresh full tests/Clippy; canonical CLI rebuilt/checked. Optional Curbs primary wrapper publication follows source main fast-forward; private data already staged.
+
+
+
 ## G147 — Verified F427 graphics prototype delivered (19 October 2026)
 
 After full exact-path Win32 process guard found no active destination, promoted accepted2c5f9cadd020/SHA2197f800c1b30dfba5f4973feeaa8e6670b932b36b2171663c610585c12ee122 to gfx stable + verified and primary dedicated local/graphics/grid-graphics-app.exe. All3post-copy hashes match. Reused existing immutable b9/SHA3e3195a4 archive; old manifests retained privately. Primary normal8762e64d... and owner's note c4d52b9e... verified unchanged; legacy peer graphics manifest/exe untouched. Both owned schema2 manifests distinguish the installed/runtime snapshot from later source and report full worktree compile-start HEAD as unsampled rather than invent it.
@@ -157,6 +165,74 @@ Optional Surfaces wrapper drafted/tested3actualCMDcapability cases; normal launc
 Added explicit off/source-base/white-control surface mode, default off, enhanced source-track requirement, no launcher changes. Shader reuses sampled/blended diffuse alpha and existing mode uniform; sqrt follows texture filtering/blending to weight Bevy's quadratic dielectric F0. RGB/roughness/opacity/geometry stay unchanged; no new texture upload or mobile bindings. This also weights GGX environment reflection unlike the original direct Phong term, so not source parity.198app tests pass; final CLI validation guard edited during compilation needs exact-source follow-up Clippy/build/negative CLI checks. Native4K off/white/source/RGBA matrix harness prepared privately; all GPU acceptance remains pending.
 
 Publication note: G129 journal commit9d9398b also reached main by explicit fast-forward. An initial PowerShell invocation using an unquoted reflog expression failed parsing before any merge; corrected explicit commit succeeded, no approval decline or content loss. Material audit Pillow12.3.0 checked directly; no original installation changes.
+F438 Orphaned cargo build dirs: 74 GiB freed; `tools/prune_build_dirs.ps1` keeps them from piling up again (2026-10-19, Claude Code coordinator; owner: "очень мало места на диске осталось… надо разобраться").
+
+Details: docs/DISK_USAGE.md section 9.
+
+Measured [V], read-only: C: had 56.5 GiB free. `C:\cargo-build` held 141.4 GiB:
+- 56.6 GiB in the build dirs of the 14 live checkouts: main, 10 session worktrees, `local/lemans/base-src`, and Codex's 2 worktrees;
+- 81.9 GiB in 22 dirs that no live checkout uses.
+
+Cause: since F328 the intermediate build lives in `C:\cargo-build\{workspace-path-hash}`. The archive routine removed `target/` and the worktree, but `git worktree remove` leaves the build dir behind. The same happens with temporary worktrees made for checks.
+
+Mapping: `cargo metadata --no-deps --offline` in each `git worktree list` entry reports its `build_directory`. Dep-info paths are relative, so they cannot identify the owner.
+
+New tool `tools/prune_build_dirs.ps1`:
+- dry run by default; `-Apply` deletes;
+- keeps an orphan whose newest file is younger than `-MinIdleHours` (default 6), and named dirs such as `seed` and `perf-android`;
+- `-ForWorktree <path>` removes one checkout's build dir; run it before `git worktree remove`.
+
+The dry run matched the manual mapping. `-Apply` deleted 20 orphans, 73.97 GiB, last changed between 16.10 15:00 and 18.10 15:22. Kept by the 6 h rule:
+- `21\038a71657892fc`, 3.80 GiB;
+- `7d\2d85bebf568e06`, 4.11 GiB.
+
+C: free went to 125.3 GiB. Three test builds were running in live worktrees during the deletion; their dirs were untouched.
+
+AGENTS.md now has the rule.
+
+Pre-move `%TEMP%\claude` session folders: task-output logs, Ghidra copies and `vd-target`, all dated 16.10 or earlier. The permission classifier first refused deleting other sessions' scratch folders. After the owner's approval ("Да, удали старые временные папки сессий"), 20 folders were deleted:
+- `C--Users-debros-OneDrive-*`;
+- `C--Users-debros-AppData-Roaming-Claude-scratch-workspaces-*`;
+- `vd-target`.
+
+That freed 6.81 GiB, and C: had 131.7 GiB free.
+
+Not ours, untouched: NVIDIA DXCache 64.3 GiB (driver shader cache, growing since April); Google Play Games `userdata.img` (512 GiB logical, sparse, 0.66 GiB on disk); Codex worktrees 18.0 GiB.
+
+The original was not run; nothing installed; playable not rebuilt.
+
+F437 Fidelity backlog: every open discrepancy against the original in one table (2026-10-19, Claude Code; coordinator's fidelity-sweep task). Details: docs/FIDELITY_BACKLOG.md (87 rows: area, discrepancy, evidence, impact, needs, size, suggested owner session; top 10 by gameplay impact). Method: four read-only scans of PROJECT_LOG.md (F300–F433) and docs/ (A–F, G–R, S–Z) for [I], "not ported", AUTHORED, "remaining gap", open checks and residual soak failures, merged and de-duplicated by hand. Impact and size are judgements, not measurements. Rows closed in the same push: F434, F435, F436. Top 10: AI first-corner pile-ups (missing alongside parts); missing sounds and mono output; no career front end; no force feedback; flat grey road on non-Donington circuits; Demolition Derby AI without figure-of-eight avoidance; Drift Battle stand-in cars and weak AI drift; Le Mans 24 Hours; cockpit and camera dynamics; continuous collision only for pieces and wheels with the fixed 16 ms step. Checks [V], release, cargo/rustc 1.99.0, on 30d5b33 (F427) + the four changes: `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 720 passed, 0 failed; `cargo clippy --release --workspace --all-targets -- -D warnings` clean; identities solo 1ee81525…7267 and 12-car 012d4c0d…68f3 (unchanged); `grid-soak quick` 24/24. Evidence worktree kind-pike-df38cc `local/sweep/`. The original was not run; nothing installed; playable not rebuilt.
+
+F436 Reverse drift layouts as Drift Battle launch options (2026-10-19, Claude Code; fidelity sweep, DISCIPLINES §4.4). `settings/drift-battle-{long-beach,nurburgring,istanbul}-reverse.ini` (Long Beach route_4 longbeach_cl_r, Nürburgring route_3 nurburgring_spr_r, Istanbul route_3 istanbul_int_r; 2 laps, 7 BMWs, as the forward launchers) and `Play GRID Drift Battle * Reverse.cmd`. F367 had raced all three headless (load, lap, score). The event menu already offered them (Drift Battle pool [D] and surveyed tracks). Profiles checked by `shipped_profiles_parse`; not launched windowed.
+
+F435 Skid strips: steal the farthest active strip, as the original (2026-10-19, Claude Code; fidelity sweep, RUNTIME_LIMITS_AUDIT R25/D24). [V static, hash-pinned unpacked image, capstone] The allocator is 0x73F330 (the audit's 0x73E430 is the plugin init that sets 240 strips): free list (+0x824F4), else the front of the retiring list (+0x824F0), else the strip of the active list (+0x824EC) with the largest camera distance +0x2D3C, with no owner test; the release 0x7289C0 unlinks the chain neighbours (+0x2D40/+0x2D44) and clears every car-wheel record (4 per car, stride 0x390) that points at the strip. Maintenance 0x73D270 (retire the farthest active strip while free + retiring < 40) also has no owner test; the port's maintenance still skips owned strips (left as is, recorded in GROUND_EFFECTS_RESEARCH). Port: `SkidMarks::allocate` steals over all strips and detaches the owning wheel, which starts a fresh strip on its next sample; test `full_pool_steals_the_farthest_active_strip_like_the_original`. Presentation only.
+
+F434 Engines and tyres stay audible after the player's finish while the field races on (2026-10-19, Claude Code; fidelity sweep, RUNTIME_LIMITS_AUDIT R21/D28). [V code] After the player's finish in a field race the opponents race on and the player car follows the after-finish pilot (main.rs `cooldown`), but `engine_sound.rs` and `tyre_sound.rs` muted every engine and tyre voice as soon as the player's trial finished, an authored rule (the original has no such mute; its EndOfRace mix mode is not ported, backlog row 71). New `Listening::stopped`: muted only when the race is frozen (single-car event finished, or `standings.over()`), the same condition under which main.rs stops ticking. Presentation only; no physics or AI change. Not heard in a windowed race (playable not rebuilt).
+
+F433 First corner against the original's live 12-car Donington field: the launch is the main difference, not the alongside logic (2026-10-19, Claude Code; coordinator's task after F425). Details: docs/FIRST_CORNER_LIVE.md. Evidence: worktree fervent-napier-50814b `local/firstcorner/` (decoder, comparison script, port traces, `cmp-*.txt`), `local/robust/decomp/g1..g3` (Ghidra 12.1.4 headless read-only: 0x775BF0, 0x783180, 0x404C90; Capstone 5.0.6 for 0x7978D0). Input: F417's `field-20261018/field02.tsv` (main checkout `local/driving/`). The original was not run; nothing installed. **No driving change.**
+- Capture [V]: a restart; 11 AI cars of one model in slots 0–10, the player parked in slot 11. One row per physics step, 15 ms mean (8–30 ms, unlocked). Its QPC time matches the speeds (distance against ∫v dt 0.97–1.02), so step deltas come from QPC (no world +0x7C8 in the capture).
+- Grid hold [V live, D static]:
+  - Live: throttle 0 for 3.7 s, then exactly 1.0 for the last 3.04 s before the go, no pulses.
+  - Static: 0x7978D0 sets the request's start state (+0xA8 = S > 1: 0x775BF0 pulses), a throttle cap of 0 (S = 1) or the full-throttle flag +0xAC (S ≤ 0) from S = [[ctx+0x38]+0x18] and a held object. 0x783180 returns 1.0 for +0xAC.
+  - The port's authored 2/3 rev schedule (F298) is not what this restart shows. The writer of S is not found; nothing changed.
+- Launch [V]:
+  - The original's AI do 15.4–17.1 m/s 1 s after the go (20–26 m/s² in the first half second). The port does 8.4–8.5 m/s: traction-limited at about 8 m/s² until its race-start grip 1.25 (0x404C90, gated at 10 m/s, static [V]) switches on.
+  - With or without a grid hold (the engine at the limiter) the port is the same. With grip 1.25 from the go it reaches 10.7 m/s. Above 10 m/s both accelerate alike.
+  - The port reaches Redgate 0.9–1.2 s later. Cause open [I]: a capture of a normal start with car-state +0xD0 and wheel grip scales.
+- Redgate [V]:
+  - Neither field runs side by side before the braking zone (staggered file).
+  - The original gets through with every car; some pairs at 1.3–1.8 m lateral gaps (probably touching [I]).
+  - The port also gets through without retirements, but brakes deeper (back of the field 18–22 m/s against 25–28): left to the AI braking session.
+  - Porting the alongside branches (ROBUSTNESS_RESEARCH §4/§6) is not indicated by this trace.
+- Harness (research only, default output unchanged): `grid-opponent-race` options `GRID_PARKED_CAR`, `GRID_GRID_HOLD=idle,full` and `GRID_FIELD_TRACE`.
+- Checks [V], release, on 0001c8c (F425) + this change: `cargo clippy --workspace --all-targets -- -D warnings` clean; identities 1ee81525…7267 and 012d4c0d…68f3 unchanged. The test suite and grid-soak were not rerun, because only an env-gated research path in one binary changed (the soak binary is unchanged).
+- San Francisco quick seed 49 (F425, a lost wheel driven through the road): not taken up; it is the thin-body family and not cheap.
+- Next: the writer of the start state; a live capture of a normal start at the 60 Hz lock.
+
+F431 Desktop pad guided test: no drift above gilrs's 0.1 dead zone, LT 0.9956 / RT 1.0000; probe now unfiltered like the game (2026-10-19, Claude Code; owner ran the F415 test). Details: docs/PAD_PROBE.md "Guided test on the owner's PC (F431)". Evidence: main checkout `local/pad-probe/buttons-20261019-021650.txt` (owner's run, wired USB).
+- [V] At rest, focused: no event, four stick axes 0.0000, no button or trigger event. LT max 0.9956 (= 255/256, the original's XInput `b/256`), RT max 1.0000; triggers 0..1, never −1. Sticks reach −1..1. Every preset control produced events (the owner's presses mostly one prompt late, so step labels are shifted).
+- Correction of my own probe: the F415 build used gilrs's default filters (radial dead zone 0.1 here, since WGI gives no driver dead zone, and jitter), while bevy_gilrs disables them, so the rest result bounds drift below 0.1 rather than measuring the game's raw values. Below preset 4's 0.2 steering dead zone either way. The probe now uses `with_default_filters(false)` (`pad_probe version=2 filters=none`); `local/pad-probe/grid-pad-probe.exe` replaced (sha256 92b95384…fd29). `cargo clippy --release -p grid-probes --bin grid-pad-probe -- -D warnings` clean.
+
 F427 Sarthe AI corner speeds: static analysis and live-capture plan (2026-10-19, Claude Code; coordinator's task; docs only). Details: docs/BRAKING_REFERENCE.md "Sarthe AI corner speeds and the live-capture plan". [V] The port reads Sarthe's AI data correctly (one `default` track, 27 brake lines keyed by id in both files, 13 519 m line; no reader, wrap or precision fault). The original's touring/GT class data gives the Ford chicanes 42–70 m/s (track's own data 24.6–46.9), and the corner speed is clamped to [min, max], so the AI aims ≥ 42 m/s through radius 68–110 m bends (2.3–4 g with racingGripMultiplier 1.0); past line 26 the next line is beyond the wrap (target 72–77 m/s). [I] Same data and logic in the original, so the difference is outside the brake-line path or the combination is not raced in the original (Touring did not list Le Mans on 18 October). Next: the ~15-minute live capture in the doc (DBR9 field at Sarthe, 60 Hz lock), on the owner's go. Evidence: main checkout `local/driving/f417-regression/`.
 
 F426 The F417 engine reset does not cause the Sarthe AI wrecks (2026-10-19, Claude Code; coordinator's task after le-mans's report). Docs only; no code change. Details: docs/BRAKING_REFERENCE.md "Engine reset and AI wrecks". Evidence: main checkout `local/driving/f417-regression/`. [V] Headless, release, the reset toggled by a temporary switch: main circuits, 12 cars × 11 200 ticks, wrecks 2 with the reset against 3 without (laps covered 125.9 vs 129.5); Sarthe solo Lacetti wrecks at the identical point (0.988 laps, (−781, −1091)) on main at e548701 (before F417), 57b406d, fba00a7 and 77c585a, and on le-mans's branch tip with and without the reset; 12 Lacettis on that branch wreck at the same two corners either way (7 vs 5). Sarthe's AI data has a genuine `touring` class (no fallback) and AI braking distances come from the shipped brake tables, independent of the engine. [I] The Dunlop/Esses and last-chicane wrecks are a pre-existing Sarthe AI problem; tracing it 1:1 needs a live capture of the original AI there (owner's go first). Also: live runs 07–09 against the port are recorded in F417 (all within 3 %).

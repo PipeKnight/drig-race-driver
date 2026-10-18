@@ -1,0 +1,136 @@
+# First corner against a live 12-car field (Donington, F433)
+
+Status: 2026-10-19, Claude Code. Comparison of the original's 12-car Donington field
+(F417's capture `field-20261018/field02.tsv`, main checkout `local/driving/`) with the
+port's headless field. **No driving change**: the cause of the main difference (the launch,
+§3) is not settled.
+
+Evidence (ignored, worktree fervent-napier-50814b `local/firstcorner/`):
+- `decode_field.py` decodes the FD01 capture into `field02.dec.tsv`;
+- `compare.py` aligns the two fields at the go and compares them (`cmp-*.txt`);
+- port traces `port-{nopace,pace,hold,grip}.tsv`;
+- `local/robust/decomp/g1..g3`: Ghidra 12.1.4 headless, read-only, of 0x775BF0, 0x783180 and
+  0x404C90. Capstone 5.0.6 (`pe.py`) for 0x7978D0.
+
+## 1. The capture [V]
+
+- 12 vehicles. Manager slot 0 is the player in grid slot 11; it stays parked at (−94, 29) and
+  never moves. Slots 1–11 are the AI in grid slots 0–10, all with the same constant control
+  and gear blocks, so one car model.
+- Rows are written once per physics step of the original: 2715 rows over 43 s.
+  - Between the go and the first corner the step is 15 ms on average (about 67 Hz).
+  - It varies from under 8 ms to over 30 ms: unlocked, as the coordinator noted (F419).
+  - The capture has no world +0x7C8. Its QPC time agrees with the speeds: distance travelled
+    against ∫v dt is 0.97–1.02 in every window from the go to 34 s. So simulation time is
+    wall time, and the step deltas below are taken from QPC.
+- Timeline: the field is a restart.
+  - The cars are placed on the grid at 2.25 s and held to the go at 9.04 s.
+  - They reach Redgate (x < −520) 8.6–9.9 s after the go and run on through the Craner
+    Curves to 43 s.
+
+Car+0xE1C is the throttle. The doc comment of `tools/capture_grid_field.py` calls +0xE3C a
+steering request; in this capture it equals the throttle.
+
+## 2. The grid hold [V live, D static]
+
+Live:
+- From placement to 6.0 s (3.7 s), every AI car's throttle is 0.
+- From 6.0 s to the go (3.04 s), every car's throttle is exactly 1.0, without pulses.
+- At the go the throttle stays 1.0 for about 0.1 s. It then drops to 0.50 and ramps back
+  up: the traction-control limiter.
+
+Static:
+- The throttle 0x783180 first calls the grid rev 0x775BF0 with the request's start state
+  (request +0xA8).
+  - States 2 and 3 give the random pulses the port already has.
+  - State 1, and any state above 3, gives 0.
+  - Below 1, 0x775BF0 clears its "revving" flag (+0x17), and 0x783180 then returns 1.0
+    if request flag +0xAC is set, otherwise the usual minimum of the limiters.
+- The request setup 0x7978D0 (0x797960–0x7979AE) fills those fields every frame.
+  - It reads S = [[ctx+0x38]+0x18] and a held-state object X = [[[ctx+0x30]+4]+0xC]:
+    X+8 means held, X+0xC means no rev.
+  - While held: S > 1 → +0xA7 = 1 and +0xA8 = S (pulses).
+  - S = 1, or X+0xC set → throttle cap +0x7C = 0.
+  - S ≤ 0 with X+0xC clear → +0xAC = 1, full throttle.
+  - Not held: +0xA8 = S when S ≠ 0.
+
+So this restart held the field in state 1, then for the last 3.04 s in state 0 with full
+throttle. The port's app and soak hold use states 2 then 3 (AUTHORED [I], F298). Who writes
+S, and whether a normal race start (not a restart) uses 2/3, are not found yet.
+
+The grid hold does not explain the launch gap. The port's held engine sits at the limiter
+(~900 rad/s, `vehicle+0x1894`) at the go, and its launch is the same with or without the
+hold (§3).
+
+## 3. The launch: the main difference [V]
+
+Speeds after the go (m/s, slots 0–10):
+
+| Time after the go | Original | Port, no hold | Port, hold 3.7 s + 3.04 s | Port, hold + grip 1.25 from the go |
+|---|---|---|---|---|
+| 1 s | 15.4–17.1 | 8.4–8.5 | 8.4–8.5 | 10.6–10.7 |
+| 3 s | 36.1–37.0 | 30.0–30.4 | 30.0–30.5 | 32.2–32.9 |
+| 5 s | 49.1–50.0 | 43.1–44.0 | 43.2–44.0 | 44.5–45.5 |
+| 7 s | 57.1–59.0 | 52.1–53.1 | 52.1–53.1 | 53.3–54.2 |
+
+- The original gains 20–26 m/s² in its first half second (for example car 1:
+  1.06 → 3.13 m/s in 92 ms) and 15–18 m/s² up to 1 s.
+- The port gains 8 m/s² until 10 m/s, traction-limited with the engine at the limiter.
+  Above 10 m/s, where the race-start grip factor 1.25 (0x404C90) applies, it gains 17 m/s².
+- From 10 m/s up, both accelerate alike: about 10, then 6–7, then 4.5 m/s².
+- The original's field launches in two groups. Slots 0, 1, 5, 6 and 7 reach 17.1 m/s at 1 s;
+  slots 2, 3, 4, 8, 9 and 10 reach 15.4–15.5. The cause is not known (characteristics?).
+- The 10 m/s gate of 0x404C90 is static [V]: car-state +0xD0 (speed in m/s,
+  AI_AVOID_RECOVERY_LIVE) compared with 10.0 (0xCAFA58).
+- Giving the port 1.25 from the go still leaves 10.7 against 15.4–17.1 m/s. So the grip factor
+  alone does not close the gap.
+- Open [I]: the AI's car-state speed may keep its pre-restart value (the cars were doing
+  47 m/s before the restart) while the field is held, so the 1.25 factor would apply from the
+  go after a restart. The rest of the gap needs more than that. A capture of a normal start,
+  with the wheel slip and the vehicle's grip scales (wheel +0x80), would settle it.
+
+Consequence: the port reaches Redgate 0.9–1.2 s later than the original (8.6–9.9 s), with the
+field in the same order and the same staggered spacing.
+
+## 4. Lines, speeds and contacts through Redgate [V]
+
+Neither field runs side by side on the run to Redgate. Both keep the grid's staggered file,
+because the grid slots are offset by about 4.5 m. Side-by-side pairs (|longitudinal| < 5 m,
+lateral < 4 m) form only in the braking zone and the corner.
+
+| | Original | Port (hold) |
+|---|---|---|
+| Pairs side by side, per second from the go | 9 s: 1; 10 s: 3; 11 s: 3; 12 s: 2; 13 s: 2 | 11 s: 1; 12 s: 5; 13 s: 1 |
+| Closest centre distances, first 20 s | slots 0–1 1.77 m (11.8–12.4 s), 8–10 2.0 m, 8–9 2.57 m | 0–1 2.42–2.56 m |
+| Minimum speed in Redgate (x < −500) | 24.7–37.0 m/s (front 32–37, back 25–28) | 18–32 m/s (front 25–32, back 18–22) |
+| Retirements in 2400–2800 ticks | none (all 11 run on to 43 s) | none |
+
+- The original's field gets through Redgate without anyone dropping out. At 11–13 s some
+  pairs run with 1.3–1.8 m lateral gaps, less than a car's width. So it probably touches too
+  [I: no contact data in the capture].
+- The port brakes deeper. The back of its field slows to 18–22 m/s against 25–28 in the
+  original. AI braking belongs to the drift-battle-ai session (F417 follow-ups) and is not
+  changed here.
+- Pacing (`GRID_REFERENCE_CAR=11`, the parked car as the reference) changes none of this.
+  The port's race-start grip only switches on at 10 m/s.
+
+## 5. Harness options (grid-opponent-race, research only)
+
+None of these changes the default output. Identities are unchanged.
+- `GRID_PARKED_CAR=k`: car k holds the brake, as the idle player at the back of the capture.
+- `GRID_GRID_HOLD=idle,full`: every car is held on the handbrake, first at throttle 0, then
+  at full throttle (start states 1 and 0), before the AI drives.
+- `GRID_FIELD_TRACE=local/X.tsv`: per tick every car's position, speed, controls and
+  behaviour, and the contact pairs.
+
+Port runs: `GRID_PARKED_CAR=11 [GRID_GRID_HOLD=3.7,3.04] [GRID_REFERENCE_CAR=11]
+GRID_FIELD_TRACE=… grid-opponent-race ROOT CD01 BP01 12 2800 ai`, with DF01 and the
+characteristics.
+
+## 6. Next
+
+1. Who writes the start state S ([[ctx+0x38]+0x18]) and the held object. Then port the hold
+   (states 1 and 0, full throttle) in place of the authored 2/3 schedule.
+2. A live capture of a normal race start (not a restart) at the 60 Hz lock, adding car-state
+   +0xD0 and the wheels' grip scale (+0x80) and slip, to settle the launch.
+3. The deeper braking in Redgate (AI braking session).

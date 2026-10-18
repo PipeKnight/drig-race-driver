@@ -336,6 +336,49 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Ok(std::env::var(name).ok().map(|v| v.parse()).transpose()?)
     };
     let stop_car0 = tick_variable("GRID_STOP_CAR0")?;
+    // GRID_PARKED_CAR=k: car k holds the brake from the start, as the idle
+    // player at the back of the grid in a live field capture of the original.
+    let parked_car: Option<usize> = std::env::var("GRID_PARKED_CAR")
+        .ok()
+        .map(|v| v.parse())
+        .transpose()?
+        .filter(|&k| k < cars);
+    // GRID_GRID_HOLD=idle,full (seconds): before the AI drives, every car is
+    // held on the handbrake, first at throttle 0, then at full throttle (the
+    // start states 1 and 0 of a live field capture of the original).
+    let grid_hold: Option<(u64, u64)> = match std::env::var("GRID_GRID_HOLD") {
+        Ok(v) => {
+            let (idle, full) = v.split_once(',').ok_or("GRID_GRID_HOLD=idle,full")?;
+            let ticks = |s: &str| -> Result<u64, Box<dyn std::error::Error>> {
+                Ok(
+                    (s.parse::<f64>()? / f64::from(grid_tools::source_vehicle::DELTA)).round()
+                        as u64,
+                )
+            };
+            Some((ticks(idle)?, ticks(full)?))
+        }
+        Err(_) => None,
+    };
+    // GRID_FIELD_TRACE=local/X.tsv: per tick every car's position, speed,
+    // controls and behaviour, and the car pairs in contact.
+    let mut field_trace = match std::env::var("GRID_FIELD_TRACE") {
+        Ok(path) => {
+            if !Path::new(&path).starts_with("local") {
+                return Err("trace must stay under local/".into());
+            }
+            let mut t = std::io::BufWriter::new(std::fs::File::create(path)?);
+            write!(t, "tick")?;
+            for i in 0..cars {
+                write!(
+                    t,
+                    "\tc{i}_x\tc{i}_y\tc{i}_z\tc{i}_v\tc{i}_thr\tc{i}_brk\tc{i}_steer\tc{i}_beh"
+                )?;
+            }
+            writeln!(t, "\tpairs")?;
+            Some(t)
+        }
+        Err(_) => None,
+    };
     // GRID_RETIRE_CAR=car:tick: that car's controls fail at that tick, so the
     // shared world retires and holds it (F323) in front of the field.
     let retire_car = match std::env::var("GRID_RETIRE_CAR") {
@@ -588,6 +631,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ..Default::default()
             };
         }
+        if let Some((idle, full)) = grid_hold
+            && multi.ticks < idle + full
+        {
+            for c in &mut controls {
+                *c = Controls {
+                    throttle: if multi.ticks < idle { 0. } else { 1. },
+                    handbrake: true,
+                    ..Default::default()
+                };
+            }
+        }
+        if let Some(k) = parked_car {
+            controls[k] = Controls {
+                brake: 1.,
+                ..Default::default()
+            };
+        }
         // GRID_SPIN_CAR0: car 0 gets full lock with the handbrake (spin and
         // recovery check).
         if spin_car0.is_some_and(|(t, n)| (t..t + n).contains(&multi.ticks)) {
@@ -659,6 +719,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         let pairs = multi.contact_pairs();
+        if let Some(t) = &mut field_trace {
+            write!(t, "{}", multi.ticks)?;
+            for (i, (car, c)) in multi.cars.iter().zip(&controls).enumerate() {
+                let p = car.pose();
+                let v = car.velocity();
+                let behaviour = match &drivers[i] {
+                    Driver::Ai(ai) if Some(i) != parked_car => {
+                        format!("{:?}", ai.telemetry.behaviour)
+                    }
+                    _ => "-".into(),
+                };
+                write!(
+                    t,
+                    "\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{behaviour}",
+                    p[12],
+                    p[13],
+                    p[14],
+                    (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt(),
+                    c.throttle,
+                    c.brake,
+                    c.steering
+                )?;
+            }
+            writeln!(t, "\t{pairs:?}")?;
+        }
         if !pairs.is_empty() && std::env::var_os("GRID_TRACE_BEHAVIOUR").is_some() {
             println!("contact tick={} pairs={pairs:?}", multi.ticks);
         }

@@ -239,6 +239,15 @@ impl Listening<'_, '_> {
     pub(crate) fn trim(&self) -> f32 {
         audio_mix::slider_db(self.menu.as_ref().map_or(1., |m| m.values.gain()))
     }
+    /// The race is frozen: the player finished a single-car event, or every
+    /// car finished or is out. After the player's finish in a field race the
+    /// opponents race on and the player car follows the after-finish pilot
+    /// (main.rs), so their engines and tyres stay audible; the original has no
+    /// mute there (docs/RUNTIME_LIMITS_AUDIT.md R21).
+    pub(crate) fn stopped(&self, driving: &super::Driving) -> bool {
+        self.trial.as_ref().is_some_and(|t| t.finished())
+            && driving.opponents.as_ref().is_none_or(|o| o.standings.over())
+    }
     pub(crate) fn camera(&self) -> Camera {
         self.cameras
             .as_ref()
@@ -294,9 +303,9 @@ fn update(
         log_line!("engine_audio version=2 event=output_started");
     }
     let mut control = sound.control(&driving);
-    // The engine idles and may be revved during the countdown; the vehicle no
-    // longer ticks after the finish.
-    let finished = listening.trial.as_ref().is_some_and(|t| t.finished());
+    // The engine idles and may be revved during the countdown; the vehicles no
+    // longer tick once the race is frozen.
+    let finished = listening.stopped(&driving);
     if finished {
         control.audible = false;
     }

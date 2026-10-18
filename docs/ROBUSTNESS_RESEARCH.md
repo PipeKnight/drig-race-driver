@@ -348,4 +348,6 @@ Then on main 9050690 (F408, with F406's collision-floor lift; `local/robust/ccd/
 - Continuous collision (section 7): cars, the boundary sheet, route boxes and piece/car pairs are
   not swept yet.
 - Kind-5 cylinders and `cylinderFacets` (10) against the port's 12-sided prisms.
-- First-corner pile-up: the exact 0x795C00 segment test, then a live comparison.
+- First-corner pile-up: the exact 0x795C00 segment test. The live comparison on Donington
+  (F433, [FIRST_CORNER_LIVE.md](FIRST_CORNER_LIVE.md)): the original's field also gets through
+  Redgate; the main difference is its much harder launch, not the alongside logic.
