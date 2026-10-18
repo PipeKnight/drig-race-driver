@@ -39,3 +39,25 @@ Both native4K captures complete successfully on the unchanged2591f75 candidate/S
 ## Next acceptance
 
 Check motion and a second viewpoint, forced RGBA upload, all source mip alpha preservation and unaffected physics endpoints. Keep the neural inferred-detail/grain decision separate from edge treatment. Before default adoption, audit adjacent material pairs elsewhere; a successful two-draw donor mapping is not a safe universal road/curb remap. A reusable preparation tool should require explicit audited mappings and provenance rather than assume every curb joins the same asphalt.
+
+## Reproducible preparation and subsequent acceptance
+
+tools/prepare_surface_edge_candidate.py turns the pilot into explicit, bounded preparation. Supply purchased DDS donor and an opaque complete BGRA8 carrier, pin both SHA256 values, and provide the audited transition/mapping. It refuses packed/cutout carrier alpha at every mip, malformed/truncated chains, nonfinite mappings, existing outputs and destinations outside this checkout's ignored local/. Generates DDS, PNG preview and provenance JSON; NumPy2.3.5/Pillow12.3.0 on bundled Python3.12.14, no additional installation. Source packed alpha is still restored by surface_rgb.rs, not derived or replaced by this RGB tool.
+
+Example (paths/hashes refer to private inputs, substitute verified actual values):
+```powershell
+python tools/prepare_surface_edge_candidate.py local/CARRIER.dds local/DONOR.dds local/EDGE_CANDIDATE --carrier-sha256 CARRIER_SHA256 --donor-sha256 DONOR_SHA256 --transition 0.825 0.875 --donor-u-at-edge 0.9116211 --u-density 0.7
+python tools/validate_surface_edge_candidate.py
+```
+
+Four synthetic tests check linear-light transition values/full opaque mip packing, periodic donor interpolation, packed alpha/truncated chain rejection, and invalid/nonfinite mapping rejection. Actual CLI reproduces the tested neural pilot DDS SHA701ec63f... byte-for-byte. Existing-output/public-destination/bad-input-hash guards reject without creating a replacement.
+
+Additional evidence:
+- Both1200tick/virtual30FPS sequences have30unique frames and4equal physical exit records excluding wallclock.
+- Both6500tick/1080p/virtual30FPS runs complete1valid90.021579891second lap and4equal physical exits. This is current F415 control versus RGB pilot, not equality to older b9 driving code before peer F413 improvements.
+- Additional curb-pass capture at ticks6131..6254 has60unique30FPS frames; first/last inspected,4physical exits match the full pilot run. This addresses the first sequence's weak actual-curb visibility.
+- Reverse-view native4K source/pilot and forward forced-RGBA pilot are nonblank/error-free; reverse pilot inspected. RGBA logs report0BC assets,537images/527decoded. It is desktop fallback operation, not a phone test or BC pixel parity.
+- Projected shared-edge display-RGB difference at434sample pairs,3pixels each side: neural23.3720 → matched15.4289code values without analysis filtering; after4pixel Gaussian analysis filter9.5353 →2.5842. Analysis filtering is only for measurement, never fed into the renderer. This local metric is not an overall quality score.
+- Source81aff6e:704workspace tests/19result harnesses including empty/doctest harnesses,0failed0ignored; feature/default alltarget workspace Clippy clean11.78s/2.85s. Solo canonical raw stdout SHAaad9a07a...e41b unchanged. Quick soak still pending at this checkpoint.
+
+Current result remains optional: neural inferred grain/cracks and all adjacent material pairs still need broader acceptance. No launcher/default or installed executable change is implied by these tests. New remote F416–F427 must be preserved in a later integration; these checks do not cover that future merge.

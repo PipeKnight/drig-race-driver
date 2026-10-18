@@ -1,5 +1,15 @@
 # GRID engine project log
 
+## G141 — Reproducible edge preparation and driving/fallback validation (19 October 2026)
+
+Added bounded independently authored tools/prepare_surface_edge_candidate.py and4synthetic checks: linear-light colours/full opaque mip packing, periodic donor sampling, packed alpha/truncated chain and invalid mapping rejection. SHA-pinned inputs, existing-output/private-output guards; source masks stay separately runtime-restored. Actual command reproduces tested701ec63f... DDS bytes; bad-hash/public-destination/existing-file negatives reject without output replacement. No installed dependencies/Steam changes.
+
+[CURB_SURFACE_SEAMS.md](docs/CURB_SURFACE_SEAMS.md) now records matched1200tick30frame and6500tick full-lap pairs:4physical exits exact excludingwallclock;1valid90.021579891slap. Additional actual curb-pass60unique30FPSframes/ticks6131..6254 inspected first/last and matches full physical endpoints. Reverse4K and forcedRGBA0BC/537images527decoded pass; not phone or BC pixel parity. Native edge metric improves23.3720→15.4289displayRGBcode at434pairs;4pixel analysis-filter metric9.5353→2.5842, no renderer blur.
+
+Fresh exact Rust81aff6e704workspace tests/19result harnesses0failed0ignored, feature/default alltargetClippy11.78s/2.85s; tools build1.30s; raw canonicalaad9a07a...e41b unchanged. Quick24soak still running. Tests cover F415 source + graphics, NOT new remoteF416–F427/30d5b33. Incoming main contains career/audio/engine/track work and must be merged/preserved carefully after this checkpoint. Stable b9 graphics/normal8762 preserved; derivatives/default promotion remains separate.
+
+
+
 ## G140 — Diagnose curb seam and test a local RGB transition (19 October 2026)
 
 Read current journal/status; preserve clean graphics sourcee4fa336 and peer primary work. Extended grid-surface-texture with bounded read-only single/all triangle attribute audit. Exact source locator logical lines unchanged; real triangles/draws succeed, bounds/parse negatives exit1, release probe Clippy clean. Initial locator byte-text check failed only LF/CRLF; normalized lines pass. Private Python audit initially shadowed regex module with a dict, corrected. No new tool installed or original-install writes.
