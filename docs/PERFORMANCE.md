@@ -611,12 +611,80 @@ written through a 64 KiB buffer, flushed when a line finds the last flush at lea
 and at once for error lines (panics, fatal screens). On an abrupt kill up to 0.5 s of lines
 can be lost. The game's main thread only writes to the pipe, unchanged.
 
+## Sort centres and the HUD timer (F398)
+
+18 October 2026, Claude Code, coordinator's follow-ups to F394. Evidence: this worktree's
+`local/f398/` (img/, time/, census, check logs).
+
+**Sort centre.** F394 found that Bevy sorts blended meshes by the centre of the mesh asset's
+bounding box. It copies that centre into the retained `Transparent3d` item only when the
+entity is queued, so a streamed or skipped asset can keep a stale centre.
+
+- Ground cover: blended in Enhanced (soft alpha, the default). Its padded asset is replaced
+  only on growth, so since F392 it sorted by the padded centre. `ground_detail::present` now
+  passes the centre of the drawn quads on every rebuild, as the asset replaced on every
+  rebuild had before F392; an empty cover is the origin, as the old three degenerate
+  vertices.
+- Wheel debris needs nothing. A slot with particles is still a replaced asset. An empty
+  slot left alone holds the same mesh as before F392 (three degenerate vertices at the
+  origin, independent of the camera), so its centre is the same.
+- `mesh_stream::resort` now takes a local centre and applies Bevy's own world-from-local
+  transform (`get_mesh_instance_world_from_local(...).transform_point3`, as
+  `queue_material_meshes`). That matters for HUD nodes, which move. It also keeps, per
+  entity, the world centre it last wrote. When Bevy re-queues the entity from the stale
+  asset (visible again, material changed), the item's centre no longer matches, so the
+  current centre is written again. Otherwise an item keeps its old centre, as a retained
+  item of an unchanged asset does. So the order changes exactly when it changed with
+  replaced assets.
+
+**HUD timer.** A temporary counter in `osd_scene::texts` (not committed) on a solo Baseline
+run at 1,300 ticks: one 8-character text (the running time) was rebuilt in 892 of about 900
+text updates; every other text changed once. `texts` already skipped unchanged strings. Now
+a new string whose glyph mesh has the same vertex count and triangles as the asset (the
+next frame's time) is streamed: `create_packed_vertex_buffer_data` of the new mesh is
+written over the old allocation, and its centre goes to `sort_centre`. Other changes still
+replace the asset. The asset test with the purchased time font checks that two consecutive
+times have equal vertex counts and indices.
+
+**Picture.** `--render-fixed-step` PNGs, 1280 × 800, Donington solo, throttle 0.6. Pre-F392
+= 7912ee7, main = 2393a9e (F397), new = this change:
+
+| Case | new = pre-F392 | new = main | main = pre-F392 |
+|---|---|---|---|
+| Baseline 1,300 ticks | identical | identical | identical |
+| Baseline 3,000 ticks | **identical** | differs | differs (2 pixels, 1 level) |
+| Enhanced `--trees source` 1,300 | identical | identical | identical |
+| Enhanced `--trees source` 3,000 | identical | identical | identical |
+
+At Baseline 3,000 main differs from pre-F392 and the change matches pre-F392 again: the
+intended fix. The other cases never showed the stale order.
+
+**Meshes replaced** (temporary counter, solo Baseline, fixed step, 1,300 ticks): unnamed
+meshes (HUD texts, smoke) 496 → 9 in frames 0–600 and 1,119 → 32 in frames 0–1,200. Ground
+cover 1, skid marks 44 and wheel debris (only while a slot has particles) are unchanged.
+
+**Render thread** (`GRID_PERF_TIMING=1 GRID_CPU_CLUSTERING=1`, offscreen 60 Hz, solo, 3,000
+ticks, steady state from frame 600; 4 ABBA rounds of main 2393a9e against the change, 3–97 %
+load from other sessions), ms per frame:
+
+| | Runs, sorted | Median |
+|---|---|---|
+| Baseline, main | 5.19, 5.24, 5.56, 5.76 | 5.40 |
+| Baseline, change | 4.31, 5.25, 5.59, 8.14 | 5.42 |
+| Enhanced + trees, main | 12.71, 12.88, 14.83, 25.53 | 13.86 |
+| Enhanced + trees, change | 12.63, 12.81, 12.85, 15.98 | 12.83 |
+
+No measurable change: the per-round differences scatter around zero within ±1.5 ms (one
+outlier each way under load). One small mesh per frame is below the desktop noise. Whether
+the phone shows it is not measured; it now has no per-frame mesh replacement on a solo lap
+apart from smoke-free debris and real HUD changes.
+
 ## Follow-ups (not done here)
 
 1. **Mesh re-uploads every frame.** Done in F392 for foliage, ground cover, wheel debris
    and empty smoke groups (see "Per-frame mesh uploads"), and in F394 for smoke groups with
-   sprites. Still replaced: probably the HUD text meshes when their string changes [I].
-   Ground cover and wheel debris sort by a stale centre (see F394).
+   sprites, and in F398 for the HUD timer; the stale ground-cover sort centre is fixed in
+   F398 too (see "Sort centres and the HUD timer").
 2. **Loading 12 cars.** Done in F382: the route props are parsed once per field (see
    "Loading a field").
 3. **GPU and render resolution on the phone.** 4× MSAA at the full surface, the render-height

@@ -4,6 +4,7 @@
 //! `ground_cover.pssg` (sprites and `gc_billboard.tga`) are read from the
 //! purchased installation for the selected route's track. Presentation only.
 use super::mesh_stream::{MeshStream, Quad, QuadMesh};
+use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use grid_formats::{
     binxml,
@@ -197,6 +198,8 @@ pub(crate) struct GroundDetail {
     buckets: HashMap<(i32, i32), Vec<u32>>,
     distances: Distances,
     mesh: Handle<Mesh>,
+    /// The cover entity (alpha-blended in Enhanced: its sort centre).
+    entity: Entity,
     last: Option<(Vec3, Vec3)>,
     pub drawn: usize,
     stream: QuadMesh,
@@ -339,6 +342,7 @@ fn start(
         buckets,
         distances: loaded.distances,
         mesh,
+        entity,
         last: None,
         drawn: 0,
         stream: QuadMesh::default(),
@@ -433,6 +437,12 @@ fn present(
     detail
         .stream
         .update(&quads, TRIANGLES, &detail.mesh, &mut meshes, &stream);
+    // Blended (Enhanced soft alpha) cover sorts by the centre of the drawn
+    // quads, as the unpadded mesh replaced on every rebuild before F392; an
+    // empty cover was three degenerate vertices at the origin (F398).
+    let corners = quads.iter().flat_map(|q| q.positions.map(Vec3::from_array));
+    let centre = Aabb::enclosing(corners).map_or(Vec3::ZERO, |aabb| aabb.center.into());
+    stream.sort_centre(detail.entity, centre);
     detail.scratch = quads;
     super::ground_effect_assets::charge(super::ground_effect_assets::GRASS, start);
 }
