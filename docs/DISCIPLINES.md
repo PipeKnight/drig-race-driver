@@ -564,7 +564,9 @@ session: no input to the original), the car-state angular velocity sign, the dri
    (§4.5).
 2. **Drift GP**: done as a free-race event in F388 (§7). Left: career rounds
    (`drift_gp_info.round`), the pre-results scene and rival intros.
-3. **Circuit-race series on our tracks** (Pro Tuned, Touring, GT, Le Mans Series): only cars and the
+3. **Circuit-race series on our tracks** — Pro Tuned and Touring done in F401 (docs/SERIES.md: all
+   20 layouts, the original's free-race field, launchers); GT1/GT2/Le Mans cars load but are not
+   raceable yet. Original note: (Pro Tuned, Touring, GT, Le Mans Series): only cars and the
    other route layouts (route_1–3 of our circuits, reverse routes). Needs: car generalization for
    more models (F338), random grid fill.
 4. **Freestyle drift**: time-limited solo scoring with `ignore_progress` (+0x1C8 [I]); needs the

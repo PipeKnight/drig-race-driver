@@ -692,11 +692,11 @@ impl Session {
         } else {
             None
         };
-        // Every model's own AI statistics; the touring class data is shared.
+        // Every model's own AI classes and statistics (database vehicle row).
         let mut by_model = BTreeMap::new();
         for model in &models {
             if !by_model.contains_key(model) {
-                let data = AiData::load(root, route.path(), "touring", model.stem())?;
+                let data = AiData::load_car(root, route.path(), model, None)?;
                 by_model.insert(model.clone(), data);
             }
         }

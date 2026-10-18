@@ -23,9 +23,8 @@ fn read(path: &Path, bound: u64) -> Result<Vec<u8>, Box<dyn std::error::Error>> 
     Ok(bytes)
 }
 pub fn load(root: &Path, stem: &str) -> Result<Prepared, Box<dyn std::error::Error>> {
-    if !["lac", "bmw"].contains(&stem) {
-        return Err("unsupported deformation source model".into());
-    }
+    // Any purchased car folder (F401); the files below must parse.
+    crate::car::Car::new(stem)?;
     let ned_bytes = read(
         &root.join(format!("cars/{stem}/{stem}.ned")),
         16 * 1024 * 1024,

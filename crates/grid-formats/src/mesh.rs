@@ -370,9 +370,12 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
             }
             indices.push(index);
         }
-        if indices.iter().copied().max().unwrap() as u32
-            != tree.integer(index_source, b"maximumIndex")?
-        {
+        // The declared maximum bounds the used indices. One shipped DBR9 mesh
+        // declares more than it uses (F401); a declared value below the used
+        // maximum or beyond the vertices is still rejected.
+        let declared = tree.integer(index_source, b"maximumIndex")?;
+        let used = indices.iter().copied().max().unwrap() as u32;
+        if used > declared || declared as usize >= positions.len() {
             return fail(
                 tree.nodes[index_source].offset,
                 "declared maximum index differs from buffer",

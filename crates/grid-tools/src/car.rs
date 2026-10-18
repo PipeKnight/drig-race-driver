@@ -63,11 +63,84 @@ impl Car {
         match self.stem.as_str() {
             LACETTI => "Lacetti",
             BMW => "BMW 320si",
+            // The circuit-series cars (docs/SERIES.md): manufacturer and
+            // `vehicle_model` names of database.bin.
+            "sup" => "Toyota Supra",
+            "sky" => "Nissan Skyline",
+            "nsx" => "Honda NSX-R",
+            "350" => "Nissan 350Z",
+            "sal" => "Saleen S7R",
+            "ccg" => "Koenigsegg CCGT",
+            "c5r" => "Corvette C5-R",
+            "c6r" => "Corvette C6-R",
+            "dbr" => "Aston Martin DBR9",
+            "lam" => "Lamborghini Murcielago",
+            "spk" => "Spyker C8",
+            "esp" => "Panoz Esperante",
+            "911" => "Porsche 911 GT3",
             other => other,
         }
     }
     pub fn is_default(&self) -> bool {
         self.stem == LACETTI
+    }
+}
+
+/// A car's `database.bin` `vehicle` row [D] (the fields the engine uses).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Vehicle {
+    /// `ai_vehicle_type_config`: the `ai/ai_vehicle_config.xml` class.
+    pub ai_config: String,
+    /// `ai_vehicle_type_track`: the class of the routes' `ai_vehicle_track.xml`.
+    pub ai_track: String,
+    /// `ai_vehicle_type_statistics`: the `ai/ai_vehicle_statistics.xml` entry.
+    pub ai_statistics: String,
+    /// `vehicle_class.file_string`, e.g. `Touring_cars`, `gt1`.
+    pub class: String,
+    /// `vehicle_drive_type.type`: `rwd`, `fwd` or `4wd`.
+    pub drive: String,
+}
+
+impl Car {
+    /// The car's `vehicle` row. Several rows may share a folder (the BMW has
+    /// three); they must agree on every field read here.
+    pub fn vehicle(&self, root: &std::path::Path) -> Result<Vehicle, Box<dyn std::error::Error>> {
+        let schema = std::fs::read(root.join("database/schema.bin"))?;
+        let data = std::fs::read(root.join("database/database.bin"))?;
+        let db = grid_formats::database::read(&schema, &data)?;
+        Self::vehicle_in(&db, &self.stem)
+    }
+
+    pub fn vehicle_in(
+        db: &grid_formats::database::Database,
+        stem: &str,
+    ) -> Result<Vehicle, Box<dyn std::error::Error>> {
+        let table = |name: &str| db.table(name).ok_or(format!("database table {name} absent"));
+        let name_of = |table_name: &str, id: Option<i32>, column: &str| -> Result<String, String> {
+            table(table_name)?
+                .rows()
+                .find(|r| r.int("id") == id)
+                .and_then(|r| r.text(column))
+                .map(str::to_string)
+                .ok_or(format!("{table_name} row {id:?} absent"))
+        };
+        let mut found: Option<Vehicle> = None;
+        for row in table("vehicle")?.rows().filter(|r| r.text("file_string") == Some(stem)) {
+            let text = |c: &str| row.text(c).map(str::to_string).ok_or(format!("vehicle {c} absent"));
+            let v = Vehicle {
+                ai_config: text("ai_vehicle_type_config")?,
+                ai_track: text("ai_vehicle_type_track")?,
+                ai_statistics: text("ai_vehicle_type_statistics")?,
+                class: name_of("vehicle_class", row.int("vehicle_class_id"), "file_string")?,
+                drive: name_of("vehicle_drive_type", row.int("vehicle_drive_type_id"), "type")?,
+            };
+            match &found {
+                Some(f) if *f != v => return Err(format!("vehicle rows of {stem} disagree").into()),
+                Some(_) => {}
+                None => found = Some(v),
+            }
+        }
+        found.ok_or_else(|| format!("no database vehicle row for cars/{stem}").into())
     }
 }
 
@@ -102,5 +175,23 @@ mod tests {
         for bad in ["", "l", "Lac", "lac/", "../x", "lac,", "toolongstem"] {
             assert!(Car::list(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn vehicle_rows_give_the_ai_classes() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let lac = Car::default().vehicle(&root).unwrap();
+        assert_eq!((lac.ai_config.as_str(), lac.ai_track.as_str()), ("touring", "touring"));
+        assert_eq!((lac.ai_statistics.as_str(), lac.drive.as_str()), ("lac", "fwd"));
+        assert_eq!(lac.class, "Touring_cars");
+        let bmw = Car::new("bmw").unwrap().vehicle(&root).unwrap();
+        assert_eq!((bmw.ai_config.as_str(), bmw.drive.as_str()), ("touring", "rwd"));
+        let sky = Car::new("sky").unwrap().vehicle(&root).unwrap();
+        assert_eq!((sky.ai_config.as_str(), sky.drive.as_str()), ("streetgt", "4wd"));
+        assert_eq!(sky.class, "protuned_street");
+        let c65 = Car::new("c65").unwrap().vehicle(&root).unwrap();
+        assert_eq!((c65.ai_config.as_str(), c65.class.as_str()), ("lmp2", "lmp2"));
+        assert!(Car::new("zz").unwrap().vehicle(&root).is_err());
     }
 }

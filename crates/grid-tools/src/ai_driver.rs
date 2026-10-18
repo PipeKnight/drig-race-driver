@@ -363,11 +363,44 @@ impl AiData {
         car: &str,
         format: Option<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_classes(root, route, (class, class), car, format)
+    }
+
+    /// [`Self::load_for`] with the car's own `database.bin` `vehicle` row:
+    /// `ai_vehicle_type_config` selects the `ai_vehicle_config.xml` class,
+    /// `ai_vehicle_type_track` the route's class brake lines and
+    /// `ai_vehicle_type_statistics` the brake tables [D]. Lacetti and BMW are
+    /// `touring`/`touring` with their own stems, as the fixed class before.
+    pub fn load_car(
+        root: &Path,
+        route: &str,
+        car: &crate::car::Car,
+        format: Option<&str>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let v = car.vehicle(root)?;
+        Self::load_classes(
+            root,
+            route,
+            (&v.ai_config, &v.ai_track),
+            &v.ai_statistics,
+            format,
+        )
+    }
+
+    /// `classes` = (`ai_vehicle_config.xml` class, `ai_vehicle_track.xml` class).
+    pub fn load_classes(
+        root: &Path,
+        route: &str,
+        classes: (&str, &str),
+        car: &str,
+        format: Option<&str>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let (class, track_class) = classes;
         let bytes = read_doc(&root.join(route).join("ai_track.xml"))?;
         let track_doc = binxml::read(&bytes)?;
         let track = ai::track(&track_doc)?;
         let bytes = read_doc(&root.join(route).join("ai_vehicle_track.xml"))?;
-        let class_lines = ai::class_brake_lines(&binxml::read(&bytes)?, class)?;
+        let class_lines = ai::class_brake_lines(&binxml::read(&bytes)?, track_class)?;
         let (line, brake_lines) = track_lines(&track, &class_lines)?;
         let bytes = read_doc(&root.join("ai/ai_vehicle_statistics.xml"))?;
         let brake_tables = ai::statistics(&binxml::read(&bytes)?, car)?.brake;

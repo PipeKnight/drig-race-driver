@@ -65,9 +65,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // section switches every behaviour off).
     let format = drift.then_some("drift_battle");
     // GRID_AI_CLASS=CLASS: another ai_vehicle_config/ai_vehicle_track class
-    // (research; the cars' own class is `touring`).
+    // for every car (research); by default each car's own database classes.
     let class_variable = std::env::var("GRID_AI_CLASS").ok();
-    let class = class_variable.as_deref().unwrap_or("touring");
     if !(5..=7).contains(&args.len()) {
         return Err(
             "usage: grid-opponent-race [--route ROUTE] [--cars STEM,...] [--discipline drift_battle|drift_grand_prix] ROOT CD01 BP01 CARS TICKS [ai|pursuit] [local/TRACE.tsv]"
@@ -116,13 +115,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("GRID_DYNAMIC_PROPS").is_some() {
         multi.enable_dynamic_props(root)?;
     }
-    // Each car's own AI statistics (brake tables); the class data is shared.
+    // Each car's own AI classes and statistics (brake tables).
     let mut by_model = std::collections::BTreeMap::new();
     for model in &models {
-        by_model.insert(
-            model.clone(),
-            AiData::load_for(root, route.path(), class, model.stem(), format)?,
-        );
+        let data = match &class_variable {
+            Some(class) => AiData::load_for(root, route.path(), class, model.stem(), format)?,
+            None => AiData::load_car(root, route.path(), model, format)?,
+        };
+        by_model.insert(model.clone(), data);
     }
     let car_data: Vec<&AiData> = field.iter().map(|m| &by_model[*m]).collect();
     let data = car_data[0];
