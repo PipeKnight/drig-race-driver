@@ -66,7 +66,10 @@ BEST, `osd_pb` PB, `osd_pos` POS, `osd_GO` GO, `osd_wrong_way` WRONG WAY!, `kph`
 
 ## 2. HUD: the port
 
-`race_hud` is installed with the pause menu for every drive.
+`race_hud` is installed with the pause menu for every drive. Since F380 it draws the original's own
+OSD scene (section 6); the plain panels below remain only as the fallback when `Osd/dial2.pssg` or
+the OSD fonts cannot be loaded. The rules in the table (which values, when splits show, wrong way)
+are the same for both.
 - Each group can be switched off in Screen Setup, as in the original:
   - Lap & Times → lap group;
   - Race Position → position group;
@@ -197,3 +200,99 @@ Free race flow `f_post` in `system/flow.bin`; screens in `system/states.bin` [D]
   - `a_finished_race_goes_through_stats_to_classified_results`: one lap at Donington with the AI
     driving the player's car. Finish → stats (position, best lap) → Continue → results. Checks a
     finalised race, the winner's total time and rising gaps.
+
+## 6. Original look (F380)
+
+18 October 2026, Claude Code. Code: `grid_formats::osd` (reader), `crates/grid-app/src/osd_scene.rs`
+(scene, camera, text, animations), `osd.wgsl` and `osd_display.wgsl`, `race_osd.rs` (what the HUD
+values drive). Everything is read at run time from the owner's install; no image is extracted into
+the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.txt`, `osd-dump.txt`,
+`decomp/`, `tex/` decoded textures, `app/data/*.png` renders, `checks/`).
+
+### 6.1 What the files hold [D]
+
+- `Osd/osd_loader.xml` loads `Osd/sceneconfig.xml`, five fonts and `Osd/dial2.pssg`.
+- `Osd/dial2.pssg` is the whole HUD as one scene:
+  - 423 nodes (244 rendered quads or meshes), 206 shader instances of 11 effect files
+    (`osd3d_flat_image`, `osd3d_special_image`, `osd3d_maskramp`, `osd3d_needleblur`,
+    `osd3d_reflect_*`, `osd2d_font`, ...);
+  - 53 textures (`dial_base`, `dial_needle`, `rev_dials`, `dial_speedo`, `dial_gears`, `lap_font`,
+    `time_font`, `minimap_*`, `timer_*`, `flag`, ...) and two DXT1 cubemaps `env_soft`/`env_sharp`;
+  - 101 animations: Bezier keys (value, in and out control points) on node translation, Euler
+    rotation and scale and on shader parameters (`DiffuseColour`, `alphaScaler`, `scrollX/Y`,
+    `glowScaler`, `Ramp`, `blurScaler`), each with named time ranges (`NETIMERANGE`);
+  - the camera `camera_dialcam`: perspective, vertical field of view 12.3068 degrees, at z 3320
+    looking down -z (half height 357.9 scene units at z 0).
+- The stored node positions are the groups' off-screen positions; each group's `on` range slides it
+  in (for example the dial from x 810.5 to 452 in 1/3 s).
+- `sceneconfig.xml` gives each text node (`rd4text`) a font `parameter`. It indexes
+  `Osd/fontDescriptions.xml`: 0 `microgramma_osd` (extruded 3D glyph meshes), 1 `swiss_bold_osd_2d`
+  (flat glyph meshes), 2 `micro_drift`, 3 `micro_lap`, 4 `swiss_time` (glyph quads into
+  the scene's `drift_font`, `lap_font` and `time_font` atlases). The fonts hold
+  `NEFONTMETRICS` (ascender, descender, 1000 units per em) and per glyph `NEGLYPHMETRICS`
+  (advance, bearings, physical size) and `NEGLYPHKERN` pairs.
+- Text nodes are one box quad each; the box's place around its origin and its height are all
+  the scene says about alignment and size.
+- grid.exe [D, decompiled privately]: the `aspectratio` attach (0x8D5CB0) formats the screen aspect
+  with `%1.2f`, cuts it to three characters and plays the layout range of that name (`1.7` 16:9,
+  `1.6` 16:10, `1.3` 4:3, `1.2` 5:4); a name without a range (0x8D5900) changes nothing, so a 20:9
+  screen (`2.2`) keeps the default layout, the 16:9 one.
+- Ranges used: `gear` `R N 1..9`, `light_gear`/`light_revs` `on/off`, `mph_kmh` `mph/kmh`,
+  `outer_face` `12/10/8`, `object/position_pill=N` `normal/player/first`, `playerN` and
+  `splittimeN` `in`, `messagebox_anim` `expand`, `anim_helper` (wrong way) `in/out`,
+  `object/flag=flag` `in/out`, `object/pb_wr=*` `on/off`, the pedal gauges and damage icons
+  `start`, `redzone` `start`, `needle` 0..3.333 s.
+
+### 6.2 The port
+
+- The scene renders through its camera into a transparent image at the 3D view's size, drawn as the
+  lowest UI node (premultiplied). The pause menu, post-race screens, front end and touch zones stay
+  above it, and the 3D post-processing does not touch it (AUTHORED composition). Nodes become Bevy
+  entities in the saved hierarchy with the saved transforms; animations are sampled every frame.
+- Shaders (`osd.wgsl`) [I: the effect files were not decoded]:
+  - flat image: texture × colour, alpha × `alphaScaler`;
+  - special image: the atlas scrolled by `scrollX/Y` plus its glow map × `glowScaler`;
+  - mask ramp: `dial_redzone` holds the arc shape in red and the angle in green (0..1 over 135
+    degrees from 12 o'clock, measured); texels whose green is at or above `Ramp` show;
+  - reflect shaders: colour lit by the decoded cubemaps along the view reflection;
+  - fonts: atlas × colour.
+- Text: glyphs set by the original metrics and kerning. The box spans the font's descender to
+  ascender [I]; left, right or centre alignment from where the box sits around its origin [I];
+  titles upper-cased (the fonts have upper case only).
+- Values to times [I]: speed and odometer digits at digit/6 s (the atlas steps), leading speed zeros
+  hidden (AUTHORED), seven odometer drums with tenths on the red one; the needle at rpm/scale of its
+  240 degree sweep; the red zone from the red line (`RED_LINE` 2000 rpm before the face's top);
+  pedals over `start`.
+- Shown: lap group (LAP n / total, RACE, LAP, BEST, PB pill after a new best), position number,
+  slash and total, the split pills (player1 lowest; `player` and `first` colour states), dial with
+  speed, gear, needle, red zone, gear and rev lights, km/h or mph, odometer, pedal gauges, damage
+  icon panel, countdown box, wrong-way pill, minimap frame with the chequered flag.
+- Minimap (AUTHORED): the original draws its track shape into `track_mask` (`rd4minimap`, not
+  traced). The port hides the mask quad, draws the route as a light line inside the frame (north
+  up, as the plain HUD) and moves the original player arrow (turned with the heading [I]) and one
+  opponent marker per car.
+- The OSD is off while the pause menu, a post-race screen, a replay or the front end is up
+  (`post_race_entry` turns it off [D]; pause and replay from the original's pause frame [I]).
+- Screen Setup still hides the four groups.
+- Wider than 16:9 (AUTHORED): the original keeps its 16:9 layout. The port continues the layout's
+  own slope (`anim_right` X 0 at 16:9, -52.82 at 16:10: 297 units per aspect unit) so the groups
+  stay near the edges.
+- Touch zones (P11, AUTHORED): they fill the lower half's sides, so with touch controls the minimap
+  and the dial move up to end at 48 % screen height, and the app's help strip moves under the top
+  buttons. Without touch the help strip is a small bottom-centre line (it used to cover the lap group).
+- Not ported: boost, drift groups, chat, penalty pills, driver name tags, offers, the brake light,
+  the needle blur sweep, the stacker re-flow (hidden groups leave their gap), the cutscene/post-race
+  and pause-menu art (front-end packages, not this scene).
+
+### 6.3 Checks
+
+- `grid_formats::osd::tests`: Bezier sampling; the asset test reads dial2 (counts, camera, the
+  `1.3` layout value -134.6), the cubemaps, `sceneconfig.xml` fonts and all five fonts with metrics
+  and kerning.
+- `osd_scene::tests`: metric layout (baseline, kerning, alignment); asset: `0:05.600` in
+  `swiss_time` sits on its baseline inside `race_time`'s box.
+- `race_osd::tests`: aspect range names (`2.2` for 20:9), red-zone angle, speed digits.
+- Offscreen renders (Donington, 11 AI, autopilot, tick 1500): `r3-16x9.png` 1920 × 1080,
+  `r4-20x9-touch.png` 2400 × 1080 with touch zones; inspected: texts, dial, red zone, minimap and
+  markers in place; with touch zones nothing overlaps a zone.
+

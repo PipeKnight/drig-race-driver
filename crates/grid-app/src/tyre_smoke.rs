@@ -182,7 +182,7 @@ fn tick(mut state: ResMut<TyreSmoke>, driving: Res<super::Driving>) {
 
 fn draw(
     mut state: ResMut<TyreSmoke>,
-    camera: Single<&GlobalTransform, With<Camera3d>>,
+    camera: Single<&GlobalTransform, With<crate::ViewerCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let eye = camera.translation();

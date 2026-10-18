@@ -227,9 +227,15 @@ enum Part {
 struct CarDot(usize);
 
 pub fn install(app: &mut App) {
+    let osd = app.world().contains_resource::<crate::osd_scene::Installed>();
     app.insert_resource(Active)
         .init_resource::<HudState>()
-        .add_systems(Update, (spawn, update).chain());
+        .init_resource::<HudView>();
+    if osd {
+        app.add_systems(Update, ((frame, crate::race_osd::drive, crate::race_osd::minimap).chain(), crate::race_osd::place_help));
+    } else {
+        app.add_systems(Update, (spawn, frame, update).chain());
+    }
 }
 
 fn font(size: f32) -> TextFont {
@@ -473,28 +479,65 @@ pub fn lap_time(seconds: f64) -> String {
     grid_tools::race::format_time(seconds)
 }
 
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
-fn update(
+/// Everything the HUD shows this frame, for the plain panels or the OSD.
+#[derive(Resource, Default)]
+pub struct HudView {
+    pub lap: LapInfo,
+    /// A new personal best is marked (PB) for the split time.
+    pub new_best: bool,
+    pub position: Option<(usize, usize, Vec<Split>)>,
+    pub splits: bool,
+    /// Speed in the selected unit.
+    pub speed: f64,
+    pub mph: bool,
+    pub gear: String,
+    pub gauge: Option<Dial>,
+    pub throttle: f32,
+    pub brake: f32,
+    pub odometer: f64,
+    pub countdown: Option<String>,
+    pub wrong_way: bool,
+    pub chequered: bool,
+    pub show_lap: bool,
+    pub show_position: bool,
+    pub show_dials: bool,
+    pub show_minimap: bool,
+    /// The pause menu, a post-race screen, a replay or the front end is up:
+    /// the OSD is off then [D: `post_race_entry` turns the OSD off; I: the
+    /// pause menu and replays, from the original's pause frame].
+    pub hidden: bool,
+    labels: std::collections::HashMap<&'static str, String>,
+}
+
+/// The HUD's texts in the user's language table [D ids].
+const LABELS: [&str; 10] = ["osd_lap", "osd_race", "osd_laptime", "osd_best", "osd_pb", "osd_pos", "osd_GO", "osd_wrong_way", "kph", "mph"];
+
+impl HudView {
+    pub fn label(&self, id: &'static str) -> String {
+        self.labels.get(id).cloned().unwrap_or_else(|| id.to_owned())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn frame(
     driving: Res<crate::Driving>,
     trial: Option<Res<crate::time_trial::Trial>>,
     menu: Option<Res<PauseMenu>>,
     labels: Option<Res<Labels>>,
     time: Option<Res<Time<Real>>>,
+    post: Option<Res<crate::post_race::PostRace>>,
+    replay: Option<Res<crate::replay::Replay>>,
+    front: Option<Res<crate::front_end::FrontEnd>>,
     mut state: ResMut<HudState>,
-    mut parts: Query<(
-        &Part,
-        Option<&mut Text>,
-        Option<&mut Node>,
-        Option<&mut Visibility>,
-        Option<&mut TextColor>,
-    )>,
-    mut dots: Query<(&CarDot, &mut Node, &mut Visibility), Without<Part>>,
+    mut view: ResMut<HudView>,
 ) {
     let dt = time.map_or(0., |t| t.delta_secs());
     let options = menu.as_ref().map(|m| m.values).unwrap_or_default();
-    let l = |id: &'static str| -> String {
-        labels.as_ref().map_or(id, |l| l.get(id)).to_owned()
-    };
+    if view.labels.is_empty()
+        && let Some(labels) = &labels
+    {
+        view.labels = LABELS.iter().map(|&id| (id, labels.get(id).to_owned())).collect();
+    }
     let v = driving.runtime.velocity();
     let speed = f64::from((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
     // Odometer: distance driven this event (presentation; reset on restart).
@@ -506,10 +549,7 @@ fn update(
         _ => state.odometer = 0.,
     }
     state.last = Some(now);
-    let info = lap_info(
-        trial.as_ref().map(|t| &t.state),
-        driving.runtime.lap.as_ref(),
-    );
+    let info = lap_info(trial.as_ref().map(|t| &t.state), driving.runtime.lap.as_ref());
     // Splits show for 5 s after each completed lap; a new best is marked PB.
     let completed = driving.runtime.lap.as_ref().map_or(0, |l| l.attempts);
     if (state.split.0, state.split.1) != (driving.segment, completed) {
@@ -523,7 +563,6 @@ fn update(
     } else {
         state.best.1 = (state.best.1 - dt).max(0.);
     }
-    let showing_splits = state.split.2 > 0.;
     // Wrong way: moving against the racing line.
     let wrong = driving.reset_line.as_ref().is_some_and(|line| {
         let p = driving.runtime.pose();
@@ -533,15 +572,64 @@ fn update(
     let wrong_way = state.wrong_way.update(wrong && !driving.paused, if driving.paused { 0. } else { dt });
     let b = &driving.runtime.state.car.owner.vehicle;
     let word = |o: usize| f32::from_bits(b[o / 4]);
-    let gauge = dial(word(0x1894), word(0x17a4));
     let controls = driving.last_controls.unwrap_or_default();
     let race = driving.opponents.as_ref().filter(|_| trial.is_some());
+    let finished = trial.as_ref().is_some_and(|t| t.finished());
+    let go = view.label("osd_GO");
     let countdown = trial.as_ref().and_then(|t| match t.state.phase() {
         grid_tools::time_trial::Phase::Countdown(_) => t.state.countdown_label().map(|n| n.to_string()),
-        grid_tools::time_trial::Phase::Running if t.state.elapsed() < 1. => Some(l("osd_GO")),
+        grid_tools::time_trial::Phase::Running if t.state.elapsed() < 1. => Some(go),
         _ => None,
     });
-    let finished = trial.as_ref().is_some_and(|t| t.finished());
+    let hidden = menu.as_ref().is_some_and(|m| m.open)
+        || post.as_ref().is_some_and(|p| p.stage != crate::post_race::Stage::Hidden)
+        || replay.as_ref().is_some_and(|r| r.session.is_some())
+        || front.as_ref().is_some_and(|f| f.open);
+    let labels = std::mem::take(&mut view.labels);
+    *view = HudView {
+        lap: info,
+        new_best: state.best.1 > 0.,
+        position: race.map(|o| position(&o.standings, &o.names, 0, speed)),
+        splits: state.split.2 > 0.,
+        speed: if options.mph { speed * 3.6 / 1.609_344 } else { speed * 3.6 },
+        mph: options.mph,
+        gear: match b[0x196c / 4] {
+            0 => "N".into(),
+            9 => "R".into(),
+            n => n.to_string(),
+        },
+        gauge: Some(dial(word(0x1894), word(0x17a4))),
+        throttle: controls.throttle,
+        brake: controls.brake,
+        odometer: state.odometer,
+        countdown: if driving.paused { None } else { countdown },
+        wrong_way: wrong_way && !finished,
+        chequered: race.is_some_and(|o| o.standings.leader_flag().is_some()),
+        show_lap: options.lap_timer,
+        show_position: options.position && race.is_some(),
+        show_dials: options.dials,
+        show_minimap: options.minimap && driving.reset_line.is_some(),
+        hidden,
+        labels,
+    };
+}
+
+#[allow(clippy::type_complexity)]
+fn update(
+    driving: Res<crate::Driving>,
+    view: Res<HudView>,
+    mut parts: Query<(
+        &Part,
+        Option<&mut Text>,
+        Option<&mut Node>,
+        Option<&mut Visibility>,
+        Option<&mut TextColor>,
+    )>,
+    mut dots: Query<(&CarDot, &mut Node, &mut Visibility), Without<Part>>,
+) {
+    let l = |id: &'static str| view.label(id);
+    let info = &view.lap;
+    let gauge = view.gauge.unwrap_or(dial(0., 0.));
     for (part, text, node, visibility, colour) in &mut parts {
         let show = |v: Option<Mut<Visibility>>, on: bool| {
             if let Some(mut v) = v {
@@ -567,7 +655,7 @@ fn update(
             }
         };
         match part {
-            Part::LapGroup => show(visibility, options.lap_timer),
+            Part::LapGroup => show(visibility, view.show_lap),
             Part::LapText => {
                 let lap = match info.total {
                     Some(total) => format!("{} {}/{}", l("osd_lap"), info.lap, total),
@@ -586,24 +674,23 @@ fn update(
                     "\n{}  {}{}",
                     l("osd_best"),
                     info.best.map_or_else(|| "-:--.---".into(), lap_time),
-                    if state.best.1 > 0. { format!("  {}", l("osd_pb")) } else { String::new() }
+                    if view.new_best { format!("  {}", l("osd_pb")) } else { String::new() }
                 ));
                 set(text, s);
             }
-            Part::PositionGroup => show(visibility, options.position && race.is_some()),
+            Part::PositionGroup => show(visibility, view.show_position),
             Part::PositionText => {
-                if let Some(o) = race {
-                    let (pos, total, _) = position(&o.standings, &o.names, 0, speed);
+                if let Some((pos, total, _)) = &view.position {
                     set(text, format!("{} {pos}/{total}", l("osd_pos")));
                 }
             }
             Part::Splits => {
-                let s = race
-                    .filter(|_| showing_splits)
-                    .map(|o| {
-                        position(&o.standings, &o.names, 0, speed)
-                            .2
-                            .iter()
+                let s = view
+                    .position
+                    .as_ref()
+                    .filter(|_| view.splits)
+                    .map(|(_, _, rows)| {
+                        rows.iter()
                             .map(|r| {
                                 format!(
                                     "{:>2}  {:<10} {}",
@@ -618,25 +705,12 @@ fn update(
                     .unwrap_or_default();
                 set(text, s);
             }
-            Part::Dial => show(visibility, options.dials),
+            Part::Dial => show(visibility, view.show_dials),
             Part::Speed => {
-                let (value, unit) = if options.mph {
-                    (speed * 3.6 / 1.609_344, l("mph"))
-                } else {
-                    (speed * 3.6, l("kph"))
-                };
-                set(text, format!("{value:>3.0} {unit}"));
+                let unit = if view.mph { l("mph") } else { l("kph") };
+                set(text, format!("{:>3.0} {unit}", view.speed));
             }
-            Part::Gear => {
-                set(
-                    text,
-                    match b[0x196c / 4] {
-                        0 => "N".into(),
-                        9 => "R".into(),
-                        n => n.to_string(),
-                    },
-                );
-            }
+            Part::Gear => set(text, view.gear.clone()),
             Part::RpmFill => width(node, gauge.rpm / gauge.scale),
             Part::RpmRed => {
                 if let Some(mut n) = node {
@@ -661,29 +735,20 @@ fn update(
                     };
                 }
             }
-            Part::Throttle => width(node, controls.throttle),
-            Part::Brake => width(node, controls.brake),
+            Part::Throttle => width(node, view.throttle),
+            Part::Brake => width(node, view.brake),
             Part::Odometer => {
-                let (d, unit) = if options.mph {
-                    (state.odometer / 1609.344, "mi")
+                let (d, unit) = if view.mph {
+                    (view.odometer / 1609.344, "mi")
                 } else {
-                    (state.odometer / 1000., "km")
+                    (view.odometer / 1000., "km")
                 };
                 set(text, format!("{d:07.2} {unit}"));
             }
-            Part::Message => set(
-                text,
-                if driving.paused { None } else { countdown.clone() }.unwrap_or_default(),
-            ),
-            Part::WrongWay => set(
-                text,
-                if wrong_way && !finished { l("osd_wrong_way") } else { String::new() },
-            ),
-            Part::Minimap => show(visibility, options.minimap && driving.reset_line.is_some()),
-            Part::MinimapFlag => {
-                let flag = race.is_some_and(|o| o.standings.leader_flag().is_some());
-                set(text, if flag { "CHEQUERED".into() } else { String::new() });
-            }
+            Part::Message => set(text, view.countdown.clone().unwrap_or_default()),
+            Part::WrongWay => set(text, if view.wrong_way { l("osd_wrong_way") } else { String::new() }),
+            Part::Minimap => show(visibility, view.show_minimap),
+            Part::MinimapFlag => set(text, if view.chequered { "CHEQUERED".into() } else { String::new() }),
         }
     }
     // Car dots on the minimap.
@@ -691,15 +756,8 @@ fn update(
         return;
     };
     let bounds = map_bounds(line.points());
-    let pose = |c: usize| -> Option<[f32; 16]> {
-        if c == 0 {
-            Some(driving.runtime.pose())
-        } else {
-            driving.opponents.as_ref().and_then(|o| o.multi.cars.get(c)).map(|r| r.pose())
-        }
-    };
     for (dot, mut node, mut visibility) in &mut dots {
-        if let Some(p) = pose(dot.0) {
+        if let Some(p) = car_pose(&driving, dot.0) {
             let (x, y) = map_point([p[12], p[13], p[14]], bounds, 190.);
             node.left = px(10. + x - 4.);
             node.top = px(10. + y - 4.);
@@ -707,6 +765,15 @@ fn update(
         } else {
             *visibility = Visibility::Hidden;
         }
+    }
+}
+
+/// World pose of car `c` (0 = the player).
+pub fn car_pose(driving: &crate::Driving, c: usize) -> Option<[f32; 16]> {
+    if c == 0 {
+        Some(driving.runtime.pose())
+    } else {
+        driving.opponents.as_ref().and_then(|o| o.multi.cars.get(c)).map(|r| r.pose())
     }
 }
 
