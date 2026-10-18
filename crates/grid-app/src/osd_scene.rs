@@ -28,6 +28,8 @@ use bevy::{
     shader::ShaderRef,
     ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialKey, UiMaterialPlugin},
 };
+use crate::mesh_stream::MeshStream;
+use bevy::camera::primitives::MeshAabb;
 use grid_formats::osd;
 use std::collections::HashMap;
 use std::path::Path;
@@ -349,6 +351,12 @@ struct TextNode {
     font: usize,
     bounds: [f32; 4],
     mesh: Handle<Mesh>,
+    /// The node entity (alpha-blended: its sort centre, F398).
+    entity: Entity,
+    /// Vertex count and triangles of the mesh asset: a new string with the
+    /// same is streamed into it instead of replacing it.
+    vertices: usize,
+    indices: Vec<u16>,
     text: String,
     want: String,
 }
@@ -613,6 +621,7 @@ pub fn install(app: &mut App, root: &Path) -> Result<(), String> {
         cubes: (images.get("env_soft.dds").cloned().unwrap_or_default(), fallback_cube.clone()),
     });
     app.insert_resource(Installed)
+        .init_resource::<crate::mesh_stream::MeshStream>()
         .add_systems(Update, spawn)
         .add_systems(PostUpdate, (resize, animate, texts, visibility).chain().before(TransformSystems::Propagate));
     Ok(())
@@ -693,13 +702,17 @@ fn spawn(
                             hi[k] = hi[k].max(p[k]);
                         }
                     }
-                    let handle = meshes.add(bevy_mesh(&layout(&loaded.fonts[font as usize], "", lo[0], hi[0], lo[1], hi[1])));
+                    let empty = layout(&loaded.fonts[font as usize], "", lo[0], hi[0], lo[1], hi[1]);
+                    let handle = meshes.add(bevy_mesh(&empty));
                     texts.insert(
                         n.id.clone(),
                         TextNode {
                             font: font as usize,
                             bounds: [lo[0], hi[0], lo[1], hi[1]],
                             mesh: handle.clone(),
+                            entity: e.id(),
+                            vertices: empty.positions.len(),
+                            indices: empty.indices,
                             text: String::new(),
                             want: String::new(),
                         },
@@ -863,8 +876,10 @@ fn animate(
     }
 }
 
-/// Rebuilds the glyph meshes of changed texts.
-fn texts(osd: Option<ResMut<Osd>>, mut meshes: ResMut<Assets<Mesh>>) {
+/// Rebuilds the glyph meshes of changed texts. A string with the same glyph
+/// vertices and triangles as the mesh (a running timer) is written over the
+/// mesh's GPU allocation instead of replacing the asset (mesh_stream, F398).
+fn texts(osd: Option<ResMut<Osd>>, mut meshes: ResMut<Assets<Mesh>>, stream: Res<MeshStream>) {
     let Some(mut osd) = osd else {
         return;
     };
@@ -875,10 +890,18 @@ fn texts(osd: Option<ResMut<Osd>>, mut meshes: ResMut<Assets<Mesh>>) {
         }
         t.text = t.want.clone();
         let [x0, x1, y0, y1] = t.bounds;
-        let mesh = layout(&osd.fonts[t.font], &t.text, x0, x1, y0, y1);
-        if let Some(mut m) = meshes.get_mut(&t.mesh) {
-            *m = bevy_mesh(&mesh);
+        let glyphs = layout(&osd.fonts[t.font], &t.text, x0, x1, y0, y1);
+        let mesh = bevy_mesh(&glyphs);
+        // Blended: sorted by the centre the replaced asset would have.
+        let centre = mesh.compute_aabb().map_or(Vec3::ZERO, |aabb| aabb.center.into());
+        if glyphs.positions.len() == t.vertices && glyphs.indices == t.indices {
+            stream.write(t.mesh.id(), |bytes| bytes.extend(mesh.create_packed_vertex_buffer_data()));
+        } else if let Some(mut m) = meshes.get_mut(&t.mesh) {
+            t.vertices = glyphs.positions.len();
+            t.indices = glyphs.indices;
+            *m = mesh;
         }
+        stream.sort_centre(t.entity, centre);
     }
 }
 
@@ -958,6 +981,11 @@ mod tests {
         // race_time's box: 0..105 x 0..24, left aligned.
         let m = layout(&f, "0:05.600", 0., 105.04, 0., 24.);
         assert_eq!(m.positions.len(), 8 * 4);
+        // The next frame's time has the same vertices and triangles, so
+        // `texts` streams it instead of replacing the mesh (F398).
+        let next = layout(&f, "0:05.617", 0., 105.04, 0., 24.);
+        assert_eq!((next.positions.len(), &next.indices), (m.positions.len(), &m.indices));
+        assert_ne!(next.positions, m.positions);
         let em = 24. / (f.ascender - f.descender);
         let baseline = -f.descender * em;
         // The quads carry atlas padding: the '.' (5th glyph) bottom sits

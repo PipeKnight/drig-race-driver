@@ -11,6 +11,7 @@ pub mod car_decals;
 pub mod collision;
 pub mod cqtc;
 pub mod damage_boxes;
+pub mod database;
 pub mod deformation;
 pub mod entities;
 pub mod etc2;

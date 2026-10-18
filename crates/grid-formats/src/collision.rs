@@ -35,7 +35,9 @@ pub fn read_vcqtc(bytes: &[u8]) -> Result<Chunk<'_>> {
         return fail(24, "unsupported VCQTC count variant");
     }
     let [triangles, vertices, materials] = signed_counts.map(|n| n.unsigned_abs() as usize);
-    if vertices > 1024 || materials > 8 || triangles > 32768 {
+    // The triangle's material field is four bits (`b & 15`), so a table can
+    // hold 16 keys; Spa's qt_11_11_10_01_11 has 9.
+    if vertices > 1024 || materials > 16 || triangles > 32768 {
         return fail(24, "VCQTC packed count limit exceeded");
     }
     let [

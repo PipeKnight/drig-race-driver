@@ -136,7 +136,7 @@ pub fn run(cqtc: bool) -> Result<(), Box<dyn std::error::Error>> {
         contact_capacity: u(12) as usize,
         cache_enabled: u(16) != 0,
         candidate_capacity: capacity,
-        sheet_mask: u(40) as u8,
+        sheet_mask: u(40),
         correction_bounds: [f32::MAX; 4],
     };
     let generated = if cqtc {

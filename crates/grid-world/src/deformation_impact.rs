@@ -72,6 +72,12 @@ fn clip(node: &mut Node) {
 
 #[allow(clippy::assign_op_pattern)] // Preserve observed factor/position-first SSE operand order.
 pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
+    // Nodes the step reads and writes: the grid, padded to the four-node
+    // unroll. The packed edge list pads its last group of four with edges
+    // between the spare node 399 (F401: the Skyline grid, 6x5x13 nodes and 892
+    // edges); those edges give that spare node a nonfinite motion, which no
+    // grid node reads, so the motion checks cover only the grid nodes.
+    let used = input.dimensions.iter().product::<usize>().div_ceil(4) * 4;
     if input.dimensions.iter().any(|d| !(2..=16).contains(d))
         || input.dimensions.iter().product::<usize>() > 400
         || input.nodes.len() != 400
@@ -95,14 +101,14 @@ pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
         .into_iter()
         .chain(input.offset)
         .any(|v| !v.is_finite())
-        || input.nodes.iter().any(|n| {
+        || input.nodes.iter().enumerate().any(|(i, n)| {
             n.position
                 .into_iter()
                 .chain(n.rest)
                 .chain(n.bounds)
-                .chain(n.motion)
                 .chain([n.marker])
                 .any(|v| !v.is_finite())
+                || (i < used && n.motion.iter().any(|v| !v.is_finite()))
                 || n.bounds.iter().any(|v| *v < 0.)
         })
         || input
@@ -273,6 +279,7 @@ pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
         || out
             .nodes
             .iter()
+            .take(used)
             .flat_map(|n| n.motion)
             .any(|v| !v.is_finite())
     {
@@ -352,5 +359,48 @@ mod tests {
         nodes[399].bounds[2] = 1.;
         nodes.pop();
         assert!(calculate(input(&nodes, &[])).is_err());
+    }
+
+    #[test]
+    fn spare_node_padding_edges_do_not_fail_the_step() {
+        // F401: a 3x3x3 grid (27 nodes, 28 with the unroll) whose packed edge
+        // list pads its last group with edges on the spare node 399.
+        let mut nodes = vec![
+            Node {
+                position: [0., 0., 0., 1.],
+                rest: [0., 0., 0., 1.],
+                bounds: [1.; 4],
+                motion: [0.; 4],
+                marker: 1.,
+            };
+            400
+        ];
+        for (i, n) in nodes.iter_mut().enumerate().take(27) {
+            let p = [(i % 3) as f32, (i / 3 % 3) as f32, (i / 9) as f32, 1.];
+            n.position = p;
+            n.rest = p;
+        }
+        let edge = |a, b| deformation_settle::Edge {
+            endpoints: [a, b],
+            length: 1.,
+        };
+        let edges = [edge(0, 1), edge(1, 2), edge(399, 399), edge(399, 399)];
+        let records = [Record {
+            direction: [1., 0., 0., 0.],
+            anchor: [-0.5, 0., 0., 1.],
+            node: 0,
+            scalar: 0.2,
+        }];
+        let mut step = input(&nodes, &records);
+        step.dimensions = [3, 3, 3];
+        step.edges = &edges;
+        let out = calculate(step).unwrap();
+        assert!(out.nodes[..28].iter().all(|n| n.motion.iter().all(|v| v.is_finite())));
+        assert!(!out.nodes[399].motion.iter().all(|v| v.is_finite()));
+        // The spare node's motion is carried into the next step.
+        let mut next = input(&out.nodes, &records);
+        next.dimensions = [3, 3, 3];
+        next.edges = &edges;
+        assert!(calculate(next).is_ok());
     }
 }

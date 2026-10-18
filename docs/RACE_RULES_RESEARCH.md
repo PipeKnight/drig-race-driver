@@ -162,6 +162,10 @@ Each rule's update emits a flag event to the flag system:
 
 ## 5. Grid order
 
+F401 correction (docs/SERIES.md "Grid fill"): 0x5BE470 and 0x5C2AC0 below belong to the career grid
+(0x5C7D40). The free race places the player by its grid option (0x5B60F0) and every other car in
+entry order; `grid_order` is not read.
+
 - [D] `grid_order` has a single row, `random`.
 - [D] Free-race options are `event_options_grid_position_front/middle/back/random`. The owner's reference
   race used Random, 12 cars, start 5/12 (docs/REFERENCE_RACE.md, docs/DONINGTON_RACE_VIDEO_2026-10-09.md).

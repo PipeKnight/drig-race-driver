@@ -70,7 +70,8 @@ impl Track {
             return Err("collision archive exceeds bound".into());
         }
         let archive = jpk::inspect(bytes)?;
-        if archive.entries.is_empty() || archive.entries.len() > 512 {
+        // Inspector bound, not an original limit: Haruna has 532 chunks.
+        if archive.entries.is_empty() || archive.entries.len() > 4096 {
             return Err("collision archive entry count unsupported".into());
         }
         let mut chunks = Vec::new();
@@ -278,7 +279,7 @@ impl Track {
             let mut settings = settings(room(contacts.len()), 0.);
             if !known.misses(&settings, true) {
                 for (j, &key) in boundary.material_keys.iter().enumerate() {
-                    settings.sheet_mask |= u8::from(sheet(key)?) << j;
+                    settings.sheet_mask |= u32::from(sheet(key)?) << j;
                 }
                 let generated = boundary.contacts_known(mesh, matrix, &settings, &known)?;
                 contacts.extend(generated.into_iter().map(|contact| BodyContact {
@@ -299,7 +300,7 @@ impl Track {
             {
                 continue;
             }
-            if c.material_keys.len() > 8 {
+            if c.material_keys.len() > 16 {
                 return Err(grid_world::Error(
                     "packed body material count exceeds bound",
                 ));
@@ -314,7 +315,7 @@ impl Track {
                 continue;
             }
             for (j, &key) in c.material_keys.iter().enumerate() {
-                settings.sheet_mask |= u8::from(sheet(key)?) << j;
+                settings.sheet_mask |= u32::from(sheet(key)?) << j;
             }
             let generated = packed_contacts::calculate_known(
                 mesh,

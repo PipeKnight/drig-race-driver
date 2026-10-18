@@ -220,6 +220,9 @@ pub struct Settings {
     /// `[game] car` / `opponent_cars` (docs/CAR_GENERALIZATION.md).
     pub car: Option<String>,
     pub opponent_cars: Option<String>,
+    /// `[game] series`: a free-race circuit series (`pro_tuned`, `touring`,
+    /// `gt1`, ...; docs/SERIES.md): its cars and grid fill.
+    pub series: Option<String>,
     pub drive: bool,
     pub laps: Option<u32>,
     pub opponents: Option<usize>,
@@ -380,6 +383,16 @@ impl Settings {
                 ("game", "route") => self.route = Some(value.into()),
                 ("game", "car") => self.car = Some(value.into()),
                 ("game", "opponent_cars") => self.opponent_cars = Some(value.into()),
+                ("game", "series") => {
+                    let name = value.to_ascii_lowercase();
+                    if !grid_tools::series::CIRCUIT_SERIES.contains(&name.as_str()) {
+                        return Err(at(format!(
+                            "`series` needs one of {}",
+                            grid_tools::series::CIRCUIT_SERIES.join(", ")
+                        )));
+                    }
+                    self.series = Some(name);
+                }
                 ("drive", "enabled") => self.drive = on(&key, value).map_err(at)?,
                 ("drive", "laps") => {
                     let laps = value.parse::<u32>().map_err(|_| at(number(&key)))?;

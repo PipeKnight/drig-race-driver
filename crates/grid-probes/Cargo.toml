@@ -816,3 +816,8 @@ test = false
 name = "grid-braking-replay"
 path = "src/bin/grid-braking-replay.rs"
 test = false
+
+[[bin]]
+name = "grid-route-readers"
+path = "src/bin/grid-route-readers.rs"
+test = false

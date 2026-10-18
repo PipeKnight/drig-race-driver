@@ -27,7 +27,9 @@ pub struct Settings {
     pub contact_capacity: usize,
     pub cache_enabled: bool,
     pub candidate_capacity: usize,
-    pub sheet_mask: u8,
+    /// Shape +0x290, a dword tested with `1 << material` (AEAFE5 [V]); the
+    /// material field is four bits, so up to 16 keys.
+    pub sheet_mask: u32,
     /// Selected constructor state only. Populated correction bounds are unsupported.
     pub correction_bounds: V,
 }

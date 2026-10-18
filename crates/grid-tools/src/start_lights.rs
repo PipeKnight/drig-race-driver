@@ -19,7 +19,7 @@ pub fn load(root: &Path, route: &Route) -> Result<Sequence, Box<dyn std::error::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::route::{DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING};
+    use crate::route::{DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING, YOKOHAMA};
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
@@ -46,5 +46,10 @@ mod tests {
         assert_eq!(long_beach.object, "startlights_lights_horizontal");
         assert_eq!(long_beach.seconds, 5.0);
         assert_eq!(long_beach.stages, names(&[1, 2, 3, 4, 5, 6, 7]));
+        // Yokohama: its own board object, four stages over 2.0 s.
+        let yokohama = load(root, &Route::new(YOKOHAMA).unwrap()).unwrap();
+        assert_eq!(yokohama.object, "startlights_lights");
+        assert_eq!(yokohama.seconds, 2.0);
+        assert_eq!(yokohama.stages, names(&[1, 2, 3, 7]));
     }
 }

@@ -905,6 +905,7 @@ fn append_entities(
     let mut cloth = 0;
     let mut boxes = 0;
     let mut cylinders = 0;
+    let mut spheres = 0;
     let mut links = 0;
     for (index, entity) in entities.iter().enumerate() {
         cloth += entity.cloth.len();
@@ -921,6 +922,7 @@ fn append_entities(
                 match shape.primitive {
                     entities::Primitive::Box { .. } => boxes += 1,
                     entities::Primitive::Cylinder { .. } => cylinders += 1,
+                    entities::Primitive::Sphere { .. } => spheres += 1,
                 }
             }
         }
@@ -1045,6 +1047,10 @@ fn append_entities(
         placements.values().map(Vec::len).sum::<usize>(),
         placements.len()
     );
+    if spheres > 0 {
+        // Static spheres (Milan and Detroit balloons) are not route collision yet.
+        println!("entities collision_spheres={spheres} route_collision=omitted");
+    }
     if omitted_empty > 0 {
         println!("entities omitted_empty_renderable_instances={omitted_empty}");
     }
@@ -1233,6 +1239,18 @@ fn model_offset(runtime: &grid_tools::source_vehicle::Runtime) -> Mat4 {
         f32::from_bits(owner[0x1638 / 4]),
     ))
 }
+/// Grid-fill seed of a series event: GRID_SERIES_SEED, else the clock
+/// (docs/SERIES.md "Grid fill").
+fn series_seed() -> u32 {
+    std::env::var("GRID_SERIES_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u32)
+        })
+}
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -1252,6 +1270,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .as_deref()
         .map(CarModel::list)
         .transpose()?;
+    let mut series = profile.series.clone();
+    let mut car_chosen = profile.car.is_some();
+    // Opponent k's livery package in a series event (docs/SERIES.md).
+    let mut series_liveries: Vec<Option<usize>> = Vec::new();
     let mut driver_aids = profile.assists()?;
     let mut input_settings = profile.input()?;
     let mut ai_settings = profile.ai()?;
@@ -1451,7 +1473,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )?
             }
             "--car" => {
-                player_car = CarModel::new(&args.next().ok_or("--car needs a cars/<stem> name")?)?
+                player_car = CarModel::new(&args.next().ok_or("--car needs a cars/<stem> name")?)?;
+                car_chosen = true;
+            }
+            "--series" => {
+                let name = args.next().ok_or("--series needs a series name")?.to_ascii_lowercase();
+                if !grid_tools::series::CIRCUIT_SERIES.contains(&name.as_str()) {
+                    return Err(format!(
+                        "--series needs one of {}",
+                        grid_tools::series::CIRCUIT_SERIES.join(", ")
+                    )
+                    .into());
+                }
+                series = Some(name);
             }
             "--opponent-cars" => {
                 opponent_cars = Some(CarModel::list(
@@ -1800,6 +1834,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
         .into());
     }
+    if let Some(name) = &series {
+        let event = grid_tools::series::Event::prepare(
+            &root,
+            name,
+            &route,
+            car_chosen.then_some(&player_car),
+            opponents,
+            opponent_cars.is_none(),
+            series_seed(),
+        )?;
+        player_car = event.player.clone();
+        opponents = Some(event.opponent_count);
+        if opponent_cars.is_none() {
+            opponent_cars = Some(event.cars());
+            series_liveries = event.opponents.iter().map(|e| e.livery_index).collect();
+        }
+        println!("{}", event.log_line());
+    }
     let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
@@ -2011,16 +2063,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )?;
                 multi.enable_dynamic_props(&root)?;
                 use grid_tools::ai_driver::{AiData, AiDriver, Parameters};
-                // Every model's own AI statistics; the touring class data is shared.
+                // Every model's own AI classes and statistics (database vehicle row).
                 let mut by_model = BTreeMap::new();
                 for model in &field {
                     if !by_model.contains_key(model) {
                         // A Drift Battle reads the drift_battle AI config (docs/DISCIPLINES.md).
-                        let data = AiData::load_for(
+                        let data = AiData::load_car(
                             &root,
                             route.path(),
-                            "touring",
-                            model.stem(),
+                            model,
                             drift.then_some("drift_battle"),
                         )?;
                         by_model.insert(model.clone(), data);
@@ -2248,12 +2299,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             for k in 1..opponents.multi.cars.len() {
                 let m = field.car_model[k];
                 let model = &field.models[m];
-                car.liveries.push(load_livery(
-                    &root,
-                    model,
-                    m,
-                    k % livery_count(&root, model).max(1),
-                )?);
+                let count = livery_count(&root, model).max(1);
+                let index = series_liveries
+                    .get(k - 1)
+                    .copied()
+                    .flatten()
+                    .filter(|&i| i < count)
+                    .unwrap_or(k % count);
+                car.liveries.push(load_livery(&root, model, m, index)?);
             }
             println!(
                 "drive_opponent_liveries count={} models={}",

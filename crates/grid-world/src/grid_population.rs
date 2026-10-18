@@ -46,7 +46,7 @@ impl Path {
 /// then insert chunk IDs in supplied source order. Later entries overwrite cells.
 pub fn build(bounds: [f32; 4], entries: &[(u32, Path)]) -> Result<Grid, Error> {
     if entries.is_empty()
-        || entries.len() > 512
+        || entries.len() > 4096
         || bounds.iter().any(|v| !v.is_finite())
         || (0..2).any(|i| !((bounds[i + 2] - bounds[i]).is_finite() && bounds[i] < bounds[i + 2]))
     {

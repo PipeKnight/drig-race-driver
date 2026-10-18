@@ -188,6 +188,12 @@ mod tests {
         run(|| flipped_on(crate::route::JARAMA));
     }
 
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+    fn a_flipped_player_car_is_reset_on_yokohama() {
+        run(|| flipped_on(crate::route::YOKOHAMA));
+    }
+
     fn flipped_on(route: &str) {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);

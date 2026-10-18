@@ -340,6 +340,9 @@ impl Catalog {
                     entities::Primitive::Cylinder { radius, height } => {
                         Primitive::Cylinder { radius, height }
                     }
+                    entities::Primitive::Sphere { .. } => {
+                        return Err("unsupported sphere prop piece".into());
+                    }
                 };
                 let (mass, inertia) = mass_properties(primitive, density);
                 if !(mass.is_finite() && mass > 0.) {
@@ -377,7 +380,11 @@ impl Catalog {
             }
             let intact = boxes.get(&index).cloned().unwrap_or_default();
             if intact.is_empty() {
-                return Err("breakable entity without a collision box".into());
+                // The intact shape is not a static route box: Yokohama's
+                // gg_barrel.max stands on a cylinder, which route props do not
+                // collide with yet. It stays an unported (static) template.
+                *catalog.unported.entry(template).or_default() += 1;
+                continue;
             }
             catalog.breakables.push(Breakable {
                 entity: index,

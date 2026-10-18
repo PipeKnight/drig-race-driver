@@ -14,6 +14,10 @@ pub struct Mesh<'a> {
     pub colors_argb: Vec<[u8; 4]>,
     /// Source values are preserved; invalid normals need a renderer fallback.
     pub nonfinite_normals: usize,
+    /// Vertices whose half2 ST pairs decode to NaN or infinity in any ST
+    /// stream (0xFFFF/0x7FFF words in Yokohama, Spa, Detroit and Haruna
+    /// objects); preserved exactly like normals.
+    pub nonfinite_texcoords: usize,
     pub texcoords: Vec<[f32; 2]>,
     /// Further ST streams, in render-stream order; their shader use is separate.
     pub additional_texcoords: Vec<Vec<[f32; 2]>>,
@@ -89,30 +93,32 @@ pub fn half_to_f32(value: u16) -> f32 {
     };
     f32::from_bits(bits)
 }
-fn half_pairs(data: &[u8], count: usize, offset: usize, stride: usize) -> Result<Vec<[f32; 2]>> {
+/// The first `N` halves of each element, decoded exactly (nonfinite kept).
+fn halves<const N: usize>(
+    data: &[u8],
+    count: usize,
+    offset: usize,
+    stride: usize,
+) -> Result<Vec<[f32; N]>> {
     if count == 0
         || count > 1_000_000
-        || stride < offset + 4
+        || stride < offset + N * 2
         || count.checked_mul(stride) != Some(data.len())
     {
-        return fail(0, "unsupported half UV layout");
+        return fail(0, "unsupported half stream layout");
     }
-    let mut result = Vec::with_capacity(count);
-    for i in 0..count {
-        let start = i * stride + offset;
-        let pair = std::array::from_fn(|j| {
-            half_to_f32(u16::from_be_bytes(
-                data[start + j * 2..start + j * 2 + 2].try_into().unwrap(),
-            ))
-        });
-        if pair.iter().any(|v| !v.is_finite()) {
-            return fail(start, "nonfinite half UV");
-        }
-        result.push(pair);
-    }
-    Ok(result)
+    Ok((0..count)
+        .map(|i| {
+            let start = i * stride + offset;
+            std::array::from_fn(|j| {
+                half_to_f32(u16::from_be_bytes([
+                    data[start + j * 2],
+                    data[start + j * 2 + 1],
+                ]))
+            })
+        })
+        .collect())
 }
-
 fn color_words(data: &[u8], count: usize, offset: usize, stride: usize) -> Result<Vec<[u8; 4]>> {
     if count == 0
         || count > 1_000_000
@@ -236,11 +242,20 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
                         return fail(tree.nodes[stream].offset, "duplicate normal stream");
                     }
                 }
+                // Detroit's interleaved 48-byte objects: x, y, z of four halves.
+                (b"Normal", b"half4") => {
+                    if normals
+                        .replace(halves::<3>(data, count, offset, stride)?)
+                        .is_some()
+                    {
+                        return fail(tree.nodes[stream].offset, "duplicate normal stream");
+                    }
+                }
                 (b"ST", b"float2") => {
                     texcoords.push(floats(data, count, offset, stride, true)?);
                 }
                 (b"ST", b"half2") => {
-                    texcoords.push(half_pairs(data, count, offset, stride)?);
+                    texcoords.push(halves::<2>(data, count, offset, stride)?);
                 }
                 // Retained in the tree, but not interpreted by this mesh subset.
                 (b"SkinIndices", b"float") => {
@@ -355,9 +370,12 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
             }
             indices.push(index);
         }
-        if indices.iter().copied().max().unwrap() as u32
-            != tree.integer(index_source, b"maximumIndex")?
-        {
+        // The declared maximum bounds the used indices. One shipped DBR9 mesh
+        // declares more than it uses (F401); a declared value below the used
+        // maximum or beyond the vertices is still rejected.
+        let declared = tree.integer(index_source, b"maximumIndex")?;
+        let used = indices.iter().copied().max().unwrap() as u32;
+        if used > declared || declared as usize >= positions.len() {
             return fail(
                 tree.nodes[index_source].offset,
                 "declared maximum index differs from buffer",
@@ -367,6 +385,16 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
             .iter()
             .filter(|n| n.iter().any(|v| !v.is_finite()))
             .count();
+        let nonfinite_texcoords = (0..positions.len())
+            .filter(|&i| {
+                std::iter::once(&texcoords_first)
+                    .chain(&texcoords)
+                    .any(|uv| {
+                        uv.get(i)
+                            .is_some_and(|uv| uv.iter().any(|v| !v.is_finite()))
+                    })
+            })
+            .count();
         result.push(Mesh {
             id,
             positions,
@@ -375,6 +403,7 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
             binormals,
             colors_argb,
             nonfinite_normals,
+            nonfinite_texcoords,
             texcoords: texcoords_first,
             additional_texcoords: texcoords,
             skin_indices,

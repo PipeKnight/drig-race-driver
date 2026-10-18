@@ -88,6 +88,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     entities::Primitive::Cylinder { radius, height } => {
                         ("cylinder", bits(&[radius, height]))
                     }
+                    entities::Primitive::Sphere { radius } => ("sphere", bits(&[radius])),
                 };
                 writeln!(
                     writer,
