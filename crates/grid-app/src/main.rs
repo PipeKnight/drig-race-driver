@@ -936,6 +936,7 @@ fn append_entities(
     let closest_lod = scene::read_object_draws(objects, sources)?;
     let mut provisional_lod_instances = 0;
     let mut omitted_empty = 0;
+    let mut omitted_unbound = 0;
     for (node, placements) in &placements {
         let mut draws = scene::read_renderable_draws(objects, sources, node)?;
         if draws.is_empty() {
@@ -987,7 +988,13 @@ fn append_entities(
             let source = &sources[draw.source];
             let material = format!("objects/{}", String::from_utf8(draw.material.to_vec())?);
             if !car.bindings.contains_key(&material) {
-                return Err(format!("unresolved entity material {material}").into());
+                // Haruna's flag_a_01 has no diffuse binding; other routes omit
+                // the draw (counted), the default route stays strict.
+                if route.is_default() {
+                    return Err(format!("unresolved entity material {material}").into());
+                }
+                omitted_unbound += 1;
+                continue;
             }
             let mut mesh = Mesh::new(
                 PrimitiveTopology::TriangleList,
@@ -1051,6 +1058,9 @@ fn append_entities(
         placements.values().map(Vec::len).sum::<usize>(),
         placements.len()
     );
+    if omitted_unbound > 0 {
+        println!("entities omitted_unbound_material_draws={omitted_unbound}");
+    }
     if spheres > 0 {
         // Static spheres (Milan and Detroit balloons) are not route collision yet.
         println!("entities collision_spheres={spheres} route_collision=omitted");
@@ -1167,7 +1177,7 @@ fn vector(value: &str) -> Result<Vec3, Box<dyn std::error::Error>> {
 fn grid_slot(root: &Path, route: &Route, name: &str) -> Result<Mat4, Box<dyn std::error::Error>> {
     let bytes = read(&root.join(route.file("grids.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
-    let marker = grid_formats::grid::read(&tree, name.as_bytes())?;
+    let marker = grid_formats::grid::read_slot(&tree, name.as_bytes(), route.subroute())?;
     let transform = marker.horizontal_preview()?;
     println!(
         "grid marker {name} raw_matrix={:?} corners={:?} forward={:?}; horizontal preview only, final contact height/offset pending",
@@ -1264,7 +1274,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut route = match &profile.route {
         Some(path) => Route::new(path)?,
         None => Route::default(),
-    };
+    }
+    .with_subroute(profile.subroute.unwrap_or(0))?;
     let mut player_car = match &profile.car {
         Some(stem) => CarModel::new(stem)?,
         None => CarModel::default(),
@@ -1497,11 +1508,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )?)
             }
             "--route" => {
+                let subroute = route.subroute();
                 route = Route::new(
                     &args
                         .next()
                         .ok_or("--route needs tracks/<region>/<track>/<route>")?,
                 )?
+                .with_subroute(subroute)?
+            }
+            "--subroute" => {
+                let subroute = args.next().ok_or("--subroute needs 0 or 1")?.parse()?;
+                route = route.with_subroute(subroute)?
             }
             "--render" => {
                 output = Some(PathBuf::from(
@@ -1907,6 +1924,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if trial_laps.is_some_and(|n| !(1..=99).contains(&n)) || (trial_laps.is_some() && !drive) {
         return Err("time trial requires --drive and 1..99 laps".into());
     }
+    // A point-to-point route (Haruna) is one run from its start to its
+    // finish: touge events run one lap [D event_track_pool num_laps 1].
+    if trial_laps.is_some()
+        && grid_tools::lap_progress::load_route(&root, &route)
+            .is_ok_and(|p| p.progress.kind == grid_formats::progress::TrackKind::PointToPoint)
+    {
+        trial_laps = Some(1);
+    }
     if (body_contacts.is_some() || body_events.is_some()) && !drive {
         return Err("--body-contacts and --body-events require --drive".into());
     }
@@ -1928,10 +1953,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some("drift_grand_prix") => {
             return Err("drift_grand_prix needs laps and no opponents (docs/DISCIPLINES.md)".into());
         }
+        // Freestyle drift: the player alone for a time limit, no progress.
+        Some("drift_freestyle") if drive && opponents.is_none() => Some(Format::DriftFreestyle),
+        Some("drift_freestyle") => {
+            return Err("drift_freestyle needs --drive and no opponents (docs/DISCIPLINES.md)".into());
+        }
         Some(other) => {
-            return Err(format!("unknown discipline {other}: race, drift_battle or drift_grand_prix").into());
+            return Err(format!("unknown discipline {other}: race, drift_battle, drift_grand_prix or drift_freestyle").into());
         }
     };
+    let freestyle = drift_format == Some(Format::DriftFreestyle);
+    if freestyle {
+        // [V] drift_freestyle ignores race progress (Route::ignoring_progress);
+        // the event is one timed run that ends at its time limit.
+        route = route.ignoring_progress();
+        trial_laps = Some(1);
+    }
     let drift = drift_format == Some(Format::DriftBattle);
     if let Some(position) = grid_position
         && !opponents.is_some_and(|n| (1..=n + 1).contains(&position))
@@ -2002,11 +2039,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         runtime.set_assists(driver_aids)?;
         println!("drive_assists {driver_aids}");
         runtime.enable_lap_timing(&root)?;
-        println!(
-            "drive_lap_timing enabled=true gates={} required_gates={} finish=0 clock=successful-simulation-ticks policy=independent-ordered-route-splits",
-            runtime.lap_gate_count(),
-            runtime.lap_required_gate_count()
-        );
+        if route.ignores_progress() {
+            println!("drive_lap_timing enabled=false reason=progress-ignored");
+        } else {
+            println!(
+                "drive_lap_timing enabled=true gates={} required_gates={} finish=0 clock=successful-simulation-ticks policy=independent-ordered-route-splits",
+                runtime.lap_gate_count(),
+                runtime.lap_required_gate_count()
+            );
+        }
         if let Some(source) = body_events {
             let bytes = source.bytes(&root, "BP01")?;
             if bytes.len() != 28 {
@@ -2072,9 +2113,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 for model in &field {
                     if !by_model.contains_key(model) {
                         // A Drift Battle reads the drift_battle AI config (docs/DISCIPLINES.md).
-                        let data = AiData::load_car(
+                        let data = AiData::load_route(
                             &root,
-                            route.path(),
+                            &route,
                             model,
                             drift.then_some("drift_battle"),
                         )?;
@@ -2120,12 +2161,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if deformation.is_some() { "per-car-static-peers" } else { "disabled" }
                 );
                 println!("drive_ai_pacing {ai_settings}");
-                let start = {
-                    let gate = &grid_tools::lap_progress::load_route(&root, &route)?
-                        .progress
-                        .gates[0];
+                let progress = grid_tools::lap_progress::load_route(&root, &route)?.progress;
+                let centre = |gate: &grid_formats::progress::Gate| -> [f32; 3] {
                     std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5)
                 };
+                let start = centre(&progress.gates[0]);
+                // A point-to-point run (Haruna) finishes at its last gate.
+                let run_finish = (progress.kind
+                    == grid_formats::progress::TrackKind::PointToPoint)
+                    .then(|| centre(progress.gates.last().unwrap()));
                 let mut positions = vec![{
                     let p = runtime.pose();
                     [p[12], p[13], p[14]]
@@ -2134,12 +2178,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let p = c.pose();
                     [p[12], p[13], p[14]]
                 }));
-                let standings = grid_tools::race::Standings::new(
-                    &ai.line,
-                    trial_laps.unwrap_or(1),
-                    start,
-                    &positions,
-                );
+                let standings = match run_finish {
+                    Some(finish) => {
+                        grid_tools::race::Standings::new_run(&ai.line, start, finish, &positions)
+                    }
+                    None => grid_tools::race::Standings::new(
+                        &ai.line,
+                        trial_laps.unwrap_or(1),
+                        start,
+                        &positions,
+                    ),
+                };
                 let pacing = grid_tools::ai_pacing::Field::new(
                     grid_tools::ai_pacing::Data::load_for(
                         &root,
@@ -2211,7 +2260,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             started: Instant::now(),
             opponents,
             auto_reset: Default::default(),
-            reset_line: Some(grid_tools::ai_driver::Line::load(&root, route.path())?),
+            // The Yokohama arenas have no AI line: no auto-reset there.
+            reset_line: if route.ignores_progress() {
+                grid_tools::ai_driver::Line::load_route(&root, &route).ok()
+            } else {
+                Some(grid_tools::ai_driver::Line::load_route(&root, &route)?)
+            },
         })
     } else {
         None
@@ -2445,6 +2499,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 f64::from(grid_tools::source_vehicle::DELTA),
                 start_sequence.seconds,
             )?;
+        }
+        if freestyle {
+            let seconds = profile.time_limit.unwrap_or(90.);
+            trial.state = trial.state.clone().with_time_limit(seconds)?;
+            println!("drive_freestyle time_limit={seconds} progress=ignored");
         }
         app.insert_resource(trial);
     }

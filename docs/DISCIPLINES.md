@@ -124,7 +124,8 @@ far); our cars the Chevrolet Lacetti (FWD) and BMW 320si (RWD).
   Diff"; `StateIngameTougeRoundDecisionMaker`; HUD penalty pills `osd_minor`/`osd_major`.
 - Rules [I]: pro touge = two runs, total time with collision penalties; midnight touge = a single
   head-to-head run with traffic (`touge_traffic`).
-- **Engine: not supported** (no Haruna, no point-to-point timing, no penalties, no traffic).
+- **Engine: one run supported** (F407, docs/TOUGE.md: Haruna both directions, point-to-point
+  timing, two-car grids); not supported: two runs, penalties, traffic.
 
 #### Drift (drift_battle, drift_grand_prix, drift_freestyle)
 
@@ -576,12 +577,17 @@ session: no input to the original), the car-state angular velocity sign, the dri
    Yokohama track (four arenas) — first Japanese track. Not cheap: every `Free_Drift` pool row is a
    Yokohama freestyle arena (route_3..6, 90 s career, 1,148,000 base result [D]); none of our tracks
    has one. Since F399 Yokohama loads (route_0 is the sixth circuit, docs/YOKOHAMA.md; a headless
-   8-car Drift Battle runs there), but the arenas' progress files (`start` split, `point_to_point`)
-   are not read yet (docs/TRACK_READERS.md §5).
+   8-car Drift Battle runs there). F407: `discipline = drift_freestyle` in the app — the player alone
+   in an arena for `time_limit` (90 s), race progress ignored ([V] the format sets drift settings
+   +0x1C8 through the drift manager at 0x5F8705), no lap timing; all four arenas load and run to the
+   limit and the drift results (docs/TOUGE.md §3). Not ported: the freestyle HUD timer; a scored
+   arena run in the app is not verified.
 5. **Touge**: Haruna point-to-point routes, two-run timing, touge.xml penalties and the alongside
-   rules, midnight traffic; needs Haruna and Japanese cars, point-to-point lap timing. F399: Haruna's
-   collision, objects and props now read; its grid markers, point-to-point progress and open AI line
-   do not (docs/TRACK_READERS.md §4).
+   rules, midnight traffic; needs Haruna and Japanese cars, point-to-point lap timing. F407: Haruna
+   drives start to finish in both directions (subroutes, open AI line, run timing; docs/TOUGE.md),
+   solo, two-car and in the app (`Play GRID Touge Haruna.cmd`). [V] pro_touge sets the touge state
+   0 and midnight_touge state 1 (random direction); the second round's reverse switch is not found,
+   so the two runs, penalties and traffic are not ported.
 6. **Demolition Derby**: Detroit stadium routes, stock car, flipped/wrong-way disqualification
    (demolition_derby.xml, 0x630BC0), DD results screen; needs Detroit and a stock car, robust heavy
    contact (soak). F399: every Detroit route loads; the stadium routes 8-9 lap solo (one valid lap of

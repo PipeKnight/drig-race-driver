@@ -23,7 +23,9 @@ use crate::{
 };
 use std::{collections::BTreeMap, path::Path};
 
-pub use crate::route::{DONINGTON, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING, YOKOHAMA};
+pub use crate::route::{
+    DONINGTON, HARUNA, ISTANBUL_PARK, JARAMA, LONG_BEACH, NURBURGRING, YOKOHAMA,
+};
 /// Donington's race start-light sequence; every race holds the grid for its
 /// track's shipped sequence time (`start_lights::load`, grid-app StartLights).
 pub const RACE_COUNTDOWN: f64 = 4.0;
@@ -138,7 +140,9 @@ const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
 /// fixed, docs/LONG_BEACH.md section 5) and 21..=24 Jarama (in the default set
 /// since its two piece losses count as expected losses,
 /// docs/ROBUSTNESS_RESEARCH.md). Seeds 25..=28 run Yokohama, outside the
-/// default set for now (docs/YOKOHAMA.md); `--seeds 25..28`.
+/// default set for now (docs/YOKOHAMA.md); `--seeds 25..28`. Seeds 29..=32
+/// run Haruna's point-to-point road with one or two cars, also outside it
+/// (docs/TOUGE.md); `--seeds 29..32`.
 pub const QUICK_SEEDS: (u64, u64) = (1, 24);
 
 impl Scenario {
@@ -147,6 +151,8 @@ impl Scenario {
         let mut rng = Rng::new(seed ^ 0x5eed_50a4_0000_0000);
         let max_cars = max_cars.max(1);
         let cars = match profile {
+            // Haruna's touge grids hold two cars.
+            Profile::Quick if seed > 28 => [2, 1][(seed % 2) as usize].min(max_cars),
             Profile::Quick => QUICK_CARS[(seed.wrapping_sub(1) % QUICK_CARS.len() as u64) as usize]
                 .min(max_cars),
             // Full fields are weighted up: they are the owner's race.
@@ -154,6 +160,8 @@ impl Scenario {
             Profile::Long => 1 + rng.below(max_cars as u64) as usize,
         };
         let route = match profile {
+            // Quick seeds 29..=32 (1, 2, 1 and 2 cars) on Haruna's downhill run.
+            Profile::Quick if seed > 28 => HARUNA,
             // Quick seeds 25..=28 (12, 1, 12 and 6 cars) on Yokohama.
             Profile::Quick if seed > 24 => YOKOHAMA,
             // Quick seeds 21..=24 (2, 12, 9 and 4 cars) on Jarama.
@@ -712,7 +720,7 @@ impl Session {
         let mut by_model = BTreeMap::new();
         for model in &models {
             if !by_model.contains_key(model) {
-                let data = AiData::load_car(root, route.path(), model, None)?;
+                let data = AiData::load_route(root, &route, model, None)?;
                 by_model.insert(model.clone(), data);
             }
         }
@@ -1860,6 +1868,9 @@ mod tests {
             jarama.iter().map(|s| s.cars).collect::<Vec<_>>(),
             [2, 12, 9, 4]
         );
+        let haruna: Vec<_> = (29..=32).map(quick).collect();
+        assert!(haruna.iter().all(|s| s.route == HARUNA));
+        assert_eq!(haruna.iter().map(|s| s.cars).collect::<Vec<_>>(), [1, 2, 1, 2]);
         let yokohama: Vec<_> = (25..=28).map(quick).collect();
         assert!(yokohama.iter().all(|s| s.route == YOKOHAMA));
         assert_eq!(

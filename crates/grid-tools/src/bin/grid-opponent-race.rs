@@ -32,6 +32,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Some(_) => return Err("--route needs tracks/<region>/<track>/<route>".into()),
         None => Route::default(),
     };
+    // `--subroute 1`: the point-to-point route's second (reverse) direction.
+    let route = match args.iter().position(|a| a == "--subroute") {
+        Some(i) if i + 1 < args.len() => {
+            let subroute = args[i + 1].parse()?;
+            args.drain(i..i + 2);
+            route.with_subroute(subroute)?
+        }
+        Some(_) => return Err("--subroute needs 0 or 1".into()),
+        None => route,
+    };
     let models = match args.iter().position(|a| a == "--cars") {
         Some(i) if i + 1 < args.len() => {
             let models = Car::list(&args[i + 1])?;
@@ -119,8 +129,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut by_model = std::collections::BTreeMap::new();
     for model in &models {
         let data = match &class_variable {
-            Some(class) => AiData::load_for(root, route.path(), class, model.stem(), format)?,
-            None => AiData::load_car(root, route.path(), model, format)?,
+            Some(class) => AiData::load_named(
+                root,
+                route.path(),
+                route.ai_track(),
+                (class, class),
+                model.stem(),
+                format,
+            )?,
+            None => AiData::load_route(root, &route, model, format)?,
         };
         by_model.insert(model.clone(), data);
     }
@@ -212,8 +229,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|v| v.parse())
         .transpose()?
         .unwrap_or(2);
-    let mut standings =
-        grid_tools::race::Standings::new(&data.line, race_laps, start, &positions_of(&multi));
+    // A point-to-point run is one run from the start gate to the finish gate.
+    let open = progress.kind == grid_formats::progress::TrackKind::PointToPoint;
+    let mut standings = if open {
+        let gate = progress.gates.last().unwrap();
+        let finish = std::array::from_fn(|k| (gate.left[k] + gate.right[k]) * 0.5);
+        println!(
+            "point_to_point subroute={} run_length={:.2}",
+            route.subroute(),
+            progress.total_distance
+        );
+        grid_tools::race::Standings::new_run(&data.line, start, finish, &positions_of(&multi))
+    } else {
+        grid_tools::race::Standings::new(&data.line, race_laps, start, &positions_of(&multi))
+    };
+    let race_laps = if open { 1 } else { race_laps };
     let names: Vec<String> = (0..cars).map(|i| format!("car{i}")).collect();
     let mut field = match reference {
         Some(k) => {
@@ -403,6 +433,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut pair_contacts = vec![vec![0usize; cars]; cars];
     let mut car_contacts = 0;
     let mut laps: Vec<Vec<f64>> = vec![Vec::new(); cars];
+    let trace_laps = std::env::var_os("GRID_TRACE_LAPS").is_some();
     let mut maximum_speed = 0f32;
     for _ in 0..ticks {
         let positions: Vec<Other> = multi
@@ -770,6 +801,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         for (i, car) in multi.cars.iter().enumerate() {
             use grid_tools::lap_progress::Event;
             for event in &car.lap_events {
+                // GRID_TRACE_LAPS=1: every lap-timing event per car.
+                if trace_laps {
+                    println!("lap_event car{i} tick={} {event:?}", multi.ticks);
+                }
                 if let Event::Finished(completed) = event {
                     laps[i].push(completed.seconds);
                 }

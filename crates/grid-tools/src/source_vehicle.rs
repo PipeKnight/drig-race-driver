@@ -357,7 +357,7 @@ impl Runtime {
         let surfaces = Surfaces::read(&read(root, "surface_materials.xml", 16 * 1024 * 1024)?)?;
         let grid_bytes = read(root, &route.file("grids.pssg"), 256 * 1024 * 1024)?;
         let markers = pssg::read_tree(&grid_bytes)?;
-        let marker = grid::read(&markers, slot.as_bytes())?;
+        let marker = grid::read_slot(&markers, slot.as_bytes(), route.subroute())?;
         let shape = car_collision::read(&ned)?;
         let front_extent = shape.bounds.max[2] + f32::from_bits(owner[0x1638 / 4]);
         let center = spawn::reference_front_aligned_center(marker.corners, front_extent, 0.)?;
@@ -490,6 +490,10 @@ impl Runtime {
     pub fn enable_lap_timing(&mut self, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
         if self.ticks != 0 || self.lap_course.is_some() {
             return Err("invalid source lap timing startup boundary".into());
+        }
+        // Freestyle drift ignores race progress [V 0x5F8705]: no lap timing.
+        if self.route.ignores_progress() {
+            return Ok(());
         }
         let prepared = crate::lap_progress::load_route(root, &self.route)?;
         let position = std::array::from_fn(|i| self.pose()[12 + i]);

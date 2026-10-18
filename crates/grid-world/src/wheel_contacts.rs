@@ -22,7 +22,7 @@ pub struct Request {
 
 pub(crate) fn validate_requests(requests: &[Request], shapes: usize) -> Result<(), Error> {
     if requests.len() > 4
-        || !(1..=512).contains(&shapes)
+        || !(1..=crate::MAX_STATIC_SHAPES).contains(&shapes)
         || requests.iter().any(|r| {
             !(2..=shapes as u32 + 1).contains(&r.shape)
                 || r.local[3] != 1.
@@ -45,7 +45,7 @@ pub fn produce(
 ) -> Result<Pool, Error> {
     if input.slots.len() > 4
         || input.used > input.slots.len()
-        || !(1..=512).contains(&input.shapes)
+        || !(1..=crate::MAX_STATIC_SHAPES).contains(&input.shapes)
         || requests.len() > 4
     {
         return Err(Error("invalid selected producer pool"));
@@ -135,7 +135,7 @@ pub fn validate(car: &[u32], input: &Pool) -> Result<(), Error> {
         || car[0x1620 / 4] != 4
         || input.slots.len() > 4
         || input.used > input.slots.len()
-        || !(1..=512).contains(&input.shapes)
+        || !(1..=crate::MAX_STATIC_SHAPES).contains(&input.shapes)
         || car[0xdc8 / 4] > 1
         || car[0xdd8 / 4] != 0
         || byte(car, 0x1ee0) > 1

@@ -161,13 +161,19 @@ pub fn track(doc: &Document<'_>) -> Result<Track> {
 /// drift 6, start 7). A gate without that kind keeps its `optimal` line, as
 /// the line choice 0x794870 falls back to kind 1 where the wanted one is absent.
 pub fn track_on(doc: &Document<'_>, wanted: &str) -> Result<Track> {
+    track_named(doc, "default", wanted)
+}
+
+/// [`track_on`] on the AI track `name`: `default`, or `reverse` on
+/// Haruna's point-to-point routes, which ship both directions in one file.
+pub fn track_named(doc: &Document<'_>, name: &str, wanted: &str) -> Result<Track> {
     let root = element(doc, 0)?;
     if root.name != "ai_track_data" || attr(root, "version_major")? != "3" {
         return fail(0, "unsupported AI track data");
     }
-    let track = keyed(doc, 0, "track", "default")?.ok_or(crate::Error {
+    let track = keyed(doc, 0, "track", name)?.ok_or(crate::Error {
         offset: 0,
-        message: "default AI track absent",
+        message: "AI track absent",
     })?;
     let mut out = Track {
         gates: Vec::new(),
@@ -272,10 +278,33 @@ pub fn track_on(doc: &Document<'_>, wanted: &str) -> Result<Track> {
 /// Per-class brake data from `route_0/ai_vehicle_track.xml` (track `default`),
 /// indexed by brake-line id; `None` when the class has no entry.
 pub fn class_brake_lines(doc: &Document<'_>, class: &str) -> Result<Option<Vec<BrakeData>>> {
+    class_brake_lines_on(doc, "default", class)
+}
+
+/// The vehicle classes of vehicle track `name`, in file order.
+pub fn class_names_on<'a>(doc: &'a Document<'a>, name: &str) -> Result<Vec<&'a str>> {
     if element(doc, 0)?.name != "vehicle_type_track_data" {
         return fail(0, "unsupported AI vehicle track data");
     }
-    let Some(track) = keyed(doc, 0, "vehicle_track", "default")? else {
+    let Some(track) = keyed(doc, 0, "vehicle_track", name)? else {
+        return Ok(Vec::new());
+    };
+    named(doc, only(doc, track, "vehicle_types")?, "vehicle_type")?
+        .into_iter()
+        .map(|t| attr(&doc.elements[t], "name"))
+        .collect()
+}
+
+/// [`class_brake_lines`] of the vehicle track `name` (`default`/`reverse`).
+pub fn class_brake_lines_on(
+    doc: &Document<'_>,
+    name: &str,
+    class: &str,
+) -> Result<Option<Vec<BrakeData>>> {
+    if element(doc, 0)?.name != "vehicle_type_track_data" {
+        return fail(0, "unsupported AI vehicle track data");
+    }
+    let Some(track) = keyed(doc, 0, "vehicle_track", name)? else {
         return Ok(None);
     };
     let Some(class) = keyed(

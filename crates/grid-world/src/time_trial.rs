@@ -35,6 +35,9 @@ pub struct State {
     start: Option<f64>,
     attempts: u32,
     laps: Vec<Completed>,
+    /// A time-limited event (Freestyle drift): finished when the event
+    /// clock reaches it, with the laps completed so far.
+    time_limit: Option<f64>,
 }
 impl State {
     pub fn new(target: u32, delta: f64, countdown_seconds: f64) -> Result<Self, Error> {
@@ -60,7 +63,20 @@ impl State {
             start: None,
             attempts: 0,
             laps: Vec::new(),
+            time_limit: None,
         })
+    }
+    /// The event ends `seconds` after GO whatever the laps (Freestyle drift:
+    /// 90 s in the career [D], 1-10 minutes in a free race).
+    pub fn with_time_limit(mut self, seconds: f64) -> Result<Self, Error> {
+        if !seconds.is_finite() || !(1. ..=86400.).contains(&seconds) {
+            return Err(Error("invalid time-trial time limit"));
+        }
+        self.time_limit = Some(seconds);
+        Ok(self)
+    }
+    pub fn time_limit(&self) -> Option<f64> {
+        self.time_limit
     }
     pub fn phase(&self) -> &Phase {
         &self.phase
@@ -166,6 +182,16 @@ impl State {
                 _ => {}
             }
         }
+        if let Some(limit) = next.time_limit
+            && matches!(next.phase, Phase::Running)
+            && end >= limit - 1e-9
+        {
+            next.phase = Phase::Finished(Results {
+                seconds: end,
+                laps: next.laps.clone(),
+                invalid_attempts: next.attempts.saturating_sub(next.laps.len() as u32),
+            });
+        }
         *self = next;
         Ok(())
     }
@@ -196,6 +222,32 @@ impl State {
         self.start.is_some()
     }
 }
+#[cfg(test)]
+mod time_limit_tests {
+    use super::*;
+    #[test]
+    fn a_time_limited_event_finishes_at_its_limit_without_laps() {
+        let mut s = State::new(1, 0.1, 0.).unwrap().with_time_limit(1.).unwrap();
+        for tick in 1..=9 {
+            s.finish_tick(tick, &[]).unwrap();
+            assert_eq!(s.phase(), &Phase::Running);
+        }
+        s.finish_tick(10, &[]).unwrap();
+        let Phase::Finished(r) = s.phase() else {
+            panic!("{:?}", s.phase());
+        };
+        assert!((r.seconds - 1.).abs() < 1e-9);
+        assert_eq!((r.laps.len(), r.invalid_attempts), (0, 0));
+        assert!(s.finish_tick(11, &[]).is_err());
+        // Without a limit the same ticks keep running.
+        let mut t = State::new(1, 0.1, 0.).unwrap();
+        for tick in 1..=20 {
+            t.finish_tick(tick, &[]).unwrap();
+        }
+        assert_eq!(t.phase(), &Phase::Running);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

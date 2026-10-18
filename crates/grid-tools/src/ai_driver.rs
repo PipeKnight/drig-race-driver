@@ -80,9 +80,15 @@ fn read_doc(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     Ok(std::fs::read(path)?)
 }
 
-/// Closed racing-line polyline in AI link order.
+/// Racing-line polyline in AI link order: closed on circuits, open on
+/// point-to-point roads (Haruna: n gates, n - 1 links).
 #[derive(Clone)]
 pub struct Line {
+    /// No segment joins the last point to the first. Arc lengths outside
+    /// 0..length continue straight along the end segments (AUTHORED: the
+    /// look-ahead past a road's end; the original's end handling is not
+    /// traced).
+    open: bool,
     points: Vec<[f32; 3]>,
     lateral: Vec<[f32; 3]>,
     /// Racing-limit offsets relative to the racing line (left <= 0 <= right).
@@ -115,27 +121,51 @@ fn wrap(a: f32) -> f32 {
 impl Line {
     fn new(track: &ai::Track) -> Result<Self, Box<dyn std::error::Error>> {
         let n = track.gates.len();
-        if track.links.len() != n {
-            return Err("AI links do not form one loop".into());
+        let open = n >= 2 && track.links.len() == n - 1;
+        if track.links.len() != n && !open {
+            return Err("AI links do not form one loop or one chain".into());
         }
         let mut order = Vec::with_capacity(n);
-        let mut gate = track.links[0].1;
-        for _ in 0..n {
-            if order.contains(&gate) {
-                return Err("AI links revisit a gate".into());
+        if open {
+            // The chain's head: the one gate no link leads to.
+            let mut heads = (0..n).filter(|g| !track.links.iter().any(|l| l.1 == *g));
+            let (Some(mut gate), None) = (heads.next(), heads.next()) else {
+                return Err("AI link chain has no single head".into());
+            };
+            for i in 0..n {
+                if order.contains(&gate) {
+                    return Err("AI links revisit a gate".into());
+                }
+                order.push(gate);
+                if i + 1 < n {
+                    gate = track
+                        .links
+                        .iter()
+                        .find(|l| l.0 == gate)
+                        .ok_or("AI link chain broken")?
+                        .1;
+                }
             }
-            order.push(gate);
-            gate = track
-                .links
-                .iter()
-                .find(|l| l.0 == gate)
-                .ok_or("AI link chain broken")?
-                .1;
-        }
-        if gate != order[0] {
-            return Err("AI links do not close".into());
+        } else {
+            let mut gate = track.links[0].1;
+            for _ in 0..n {
+                if order.contains(&gate) {
+                    return Err("AI links revisit a gate".into());
+                }
+                order.push(gate);
+                gate = track
+                    .links
+                    .iter()
+                    .find(|l| l.0 == gate)
+                    .ok_or("AI link chain broken")?
+                    .1;
+            }
+            if gate != order[0] {
+                return Err("AI links do not close".into());
+            }
         }
         let mut line = Line {
+            open,
             points: Vec::with_capacity(n),
             lateral: Vec::with_capacity(n),
             limits: Vec::with_capacity(n),
@@ -162,10 +192,30 @@ impl Line {
         }
         for i in 0..n {
             line.start.push(line.length);
+            if open && i + 1 == n {
+                break;
+            }
             let d = sub(line.points[(i + 1) % n], line.points[i]);
             line.length += dot2(d, d).sqrt();
         }
         Ok(line)
+    }
+
+    /// An open line's segment and position `t` at arc length `s` (`t` runs
+    /// outside 0..1 before the first and past the last point).
+    fn open_place(&self, s: f32) -> (usize, usize, f32) {
+        let n = self.points.len();
+        let i = self
+            .start
+            .partition_point(|&x| x <= s)
+            .saturating_sub(1)
+            .min(n - 2);
+        (i, i + 1, (s - self.start[i]) / self.segment(i).max(1e-6))
+    }
+
+    /// Whether the line is an open road (point-to-point) rather than a loop.
+    pub fn is_open(&self) -> bool {
+        self.open
     }
 
     fn segment(&self, i: usize) -> f32 {
@@ -179,6 +229,23 @@ impl Line {
 
     /// Point, unit direction, lateral direction and racing limits at arc length `s`.
     fn at(&self, s: f32) -> ([f32; 3], [f32; 3], [f32; 3], [f32; 2]) {
+        if self.open {
+            let (i, j, t) = self.open_place(s);
+            let d = sub(self.points[j], self.points[i]);
+            let len = dot2(d, d).sqrt().max(1e-6);
+            let u = t.clamp(0., 1.);
+            let lateral = lerp3(self.lateral[i], self.lateral[j], u);
+            let ll = dot2(lateral, lateral).sqrt().max(1e-6);
+            return (
+                lerp3(self.points[i], self.points[j], t),
+                [d[0] / len, 0., d[2] / len],
+                [lateral[0] / ll, 0., lateral[2] / ll],
+                [
+                    self.limits[i][0] + (self.limits[j][0] - self.limits[i][0]) * u,
+                    self.limits[i][1] + (self.limits[j][1] - self.limits[i][1]) * u,
+                ],
+            );
+        }
         let s = s.rem_euclid(self.length);
         let i = self.start.partition_point(|&x| x <= s).saturating_sub(1);
         let j = (i + 1) % self.points.len();
@@ -200,6 +267,12 @@ impl Line {
 
     /// Track-limit offsets (left <= 0 <= right) at arc length `s`.
     fn track_limits_at(&self, s: f32) -> [f32; 2] {
+        if self.open {
+            let (i, j, t) = self.open_place(s);
+            let t = t.clamp(0., 1.);
+            let [a, b] = [self.track_limits[i], self.track_limits[j]];
+            return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        }
         let s = s.rem_euclid(self.length);
         let i = self.start.partition_point(|&x| x <= s).saturating_sub(1);
         let j = (i + 1) % self.points.len();
@@ -224,6 +297,19 @@ impl Line {
         Self::new(&ai::track(&binxml::read(&bytes)?)?)
     }
 
+    /// [`Self::load`] on the route's subroute AI track.
+    pub fn load_route(
+        root: &Path,
+        route: &crate::route::Route,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let bytes = read_doc(&root.join(route.path()).join("ai_track.xml"))?;
+        Self::new(&ai::track_named(
+            &binxml::read(&bytes)?,
+            route.ai_track(),
+            "optimal",
+        )?)
+    }
+
     /// Player reset target for a car at `p`: the line point at the car's
     /// projection and the line's horizontal direction there.
     ///
@@ -241,9 +327,12 @@ impl Line {
     /// length and signed lateral distance (positive toward the right limit).
     fn project(&self, p: [f32; 3], hint: Option<usize>) -> (usize, f32, f32) {
         let n = self.points.len();
-        let candidates: Vec<usize> = match hint {
-            Some(h) => (0..8).map(|k| (h + n - 2 + k) % n).collect(),
-            None => (0..n).collect(),
+        let candidates: Vec<usize> = match (hint, self.open) {
+            (Some(h), false) => (0..8).map(|k| (h + n - 2 + k) % n).collect(),
+            (None, false) => (0..n).collect(),
+            // No segment leaves an open line's last point.
+            (Some(h), true) => (h.saturating_sub(2)..(h + 6).min(n - 1)).collect(),
+            (None, true) => (0..n - 1).collect(),
         };
         let mut best = (f32::INFINITY, 0, 0., 0.);
         for i in candidates {
@@ -387,6 +476,25 @@ impl AiData {
         )
     }
 
+    /// [`Self::load_car`] on the route's subroute: its AI track (`default`,
+    /// or `reverse` for Haruna's second direction, [`Route::ai_track`]).
+    pub fn load_route(
+        root: &Path,
+        route: &crate::route::Route,
+        car: &crate::car::Car,
+        format: Option<&str>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let v = car.vehicle(root)?;
+        Self::load_named(
+            root,
+            route.path(),
+            route.ai_track(),
+            (&v.ai_config, &v.ai_track),
+            &v.ai_statistics,
+            format,
+        )
+    }
+
     /// `classes` = (`ai_vehicle_config.xml` class, `ai_vehicle_track.xml` class).
     pub fn load_classes(
         root: &Path,
@@ -395,12 +503,35 @@ impl AiData {
         car: &str,
         format: Option<&str>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::load_named(root, route, "default", classes, car, format)
+    }
+
+    /// [`Self::load_classes`] on the AI track `ai_track` of the route's files.
+    pub fn load_named(
+        root: &Path,
+        route: &str,
+        ai_track: &str,
+        classes: (&str, &str),
+        car: &str,
+        format: Option<&str>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let (class, track_class) = classes;
         let bytes = read_doc(&root.join(route).join("ai_track.xml"))?;
         let track_doc = binxml::read(&bytes)?;
-        let track = ai::track(&track_doc)?;
+        let track = ai::track_named(&track_doc, ai_track, "optimal")?;
         let bytes = read_doc(&root.join(route).join("ai_vehicle_track.xml"))?;
-        let class_lines = ai::class_brake_lines(&binxml::read(&bytes)?, track_class)?;
+        let vehicle_doc = binxml::read(&bytes)?;
+        let mut class_lines = ai::class_brake_lines_on(&vehicle_doc, ai_track, track_class)?;
+        // [V] 0x792C80 falls back to the brake line's own data when the class
+        // is absent. Haruna lists only streetgt, promuscle, muscle and clubgt,
+        // and its own data has lines with all speeds 0, where a touring car
+        // would brake to a stop. AUTHORED: then the route's first class.
+        if class_lines.is_none()
+            && track.brake_lines.iter().any(|b| b.data.max_speed <= 0.)
+            && let Some(first) = ai::class_names_on(&vehicle_doc, ai_track)?.first()
+        {
+            class_lines = ai::class_brake_lines_on(&vehicle_doc, ai_track, first)?;
+        }
         let (line, brake_lines) = track_lines(&track, &class_lines)?;
         let bytes = read_doc(&root.join("ai/ai_vehicle_statistics.xml"))?;
         let brake_tables = ai::statistics(&binxml::read(&bytes)?, car)?.brake;
@@ -456,7 +587,8 @@ impl AiData {
             drift: None,
         };
         if data.switch("behaviour_drift") {
-            let (line, brake_lines) = track_lines(&ai::track_on(&track_doc, "drift")?, &class_lines)?;
+            let (line, brake_lines) =
+                track_lines(&ai::track_named(&track_doc, ai_track, "drift")?, &class_lines)?;
             data.drift = Some(Box::new(Self {
                 line,
                 brake_lines,

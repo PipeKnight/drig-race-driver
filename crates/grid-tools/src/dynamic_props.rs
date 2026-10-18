@@ -289,7 +289,10 @@ impl Catalog {
             }
         }
         let mut catalog = Self::default();
-        for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
+        'entities: for (index, e) in entities::read(&placements, &types)?
+            .into_iter()
+            .enumerate()
+        {
             let template = String::from_utf8_lossy(e.template).into_owned();
             let behaviours: Vec<_> = e
                 .renderables
@@ -317,19 +320,26 @@ impl Catalog {
             let placement = matrix(&e.transform);
             let mut pieces = Vec::new();
             for added in &behaviour.added {
+                // A piece kind the port cannot break (several shapes, static,
+                // sphericalised, fixed mass, a sphere; first seen on Haruna):
+                // the template stays static, like armco.
                 let [shape] = &added.shapes[..] else {
-                    return Err("unsupported multi-shape prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 };
                 if added.infinite_mass || shape.phantom {
-                    return Err("unsupported static prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 }
                 let body = parameters.body(reference(added.body_properties)?)?;
                 if body.sphericalise != 0. {
-                    return Err("unsupported sphericalised prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 }
                 let (_, source) = parameters.shape(reference(shape.properties)?)?;
                 let physparams::MassSource::Density(density) = source else {
-                    return Err("unsupported fixed-mass prop piece".into());
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
                 };
                 let primitive = match shape.primitive {
                     entities::Primitive::Box {
@@ -341,7 +351,8 @@ impl Catalog {
                         Primitive::Cylinder { radius, height }
                     }
                     entities::Primitive::Sphere { .. } => {
-                        return Err("unsupported sphere prop piece".into());
+                        *catalog.unported.entry(template).or_default() += 1;
+                        continue 'entities;
                     }
                 };
                 let (mass, inertia) = mass_properties(primitive, density);

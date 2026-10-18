@@ -32,7 +32,7 @@ pub fn from_registered(
     static_shapes: usize,
 ) -> Result<State, Error> {
     let p = &mut car.owner.physical;
-    if !(1..=512).contains(&static_shapes)
+    if !(1..=crate::MAX_STATIC_SHAPES).contains(&static_shapes)
         || car.owner.vehicle.len() != crate::vehicle_publication::VEHICLE_WORDS
         || car.owner.vehicle[..car.frame.body.len()] != car.frame.body
         || [8, 0xc, 0x18, 0x20].iter().any(|&o| p[o / 4] != 1)

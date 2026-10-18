@@ -22,6 +22,9 @@ pub fn load_route(root: &Path, route: &Route) -> Result<Prepared, Box<dyn std::e
     }
     let document = binxml::read(&bytes)?;
     let mut progress = progress::read(&document)?;
+    if progress.kind == progress::TrackKind::PointToPoint {
+        return run(progress, route.subroute());
+    }
     let finish: Vec<_> = progress
         .routes
         .first()
@@ -45,6 +48,106 @@ pub fn load_route(root: &Path, route: &Route) -> Result<Prepared, Box<dyn std::e
         .collect();
     let required: Vec<_> = std::iter::once(0).chain(sectors.iter().copied()).collect();
     let course = Course::new(&endpoints, &sectors, Policy::default())?.with_required(&required)?;
+    Ok(Prepared { course, progress })
+}
+
+/// A point-to-point route as one run: the subroute's start gate becomes gate
+/// 0 and the first finish gate in its direction the last gate; gates and
+/// points are re-ordered in travel order and measured from the start, and
+/// the time splits between them are the sectors.
+///
+/// [V] Haruna ships per folder a `forwards` route (start, two time splits,
+/// one or two finishes) and a `reverse` route with start and finish
+/// swapped; the Yokohama arenas one route with a start and a finish.
+/// AUTHORED: of two finishes (Haruna route 0) the first reached ends the run.
+fn run(
+    mut progress: progress::Progress,
+    subroute: u8,
+) -> Result<Prepared, Box<dyn std::error::Error>> {
+    use progress::SplitKind::{Finish, Start, Time};
+    let route = progress
+        .routes
+        .get(subroute as usize)
+        .ok_or("point-to-point subroute absent")?;
+    let gates_of = |kind| -> Vec<usize> {
+        route
+            .splits
+            .iter()
+            .filter(|s| s.kind == kind)
+            .map(|s| s.gate)
+            .collect()
+    };
+    let [start] = gates_of(Start)[..] else {
+        return Err("point-to-point run needs one start gate".into());
+    };
+    let reverse = route.reverse;
+    let ahead = |g: usize| if reverse { g < start } else { g > start };
+    let finish = gates_of(Finish)
+        .into_iter()
+        .filter(|&g| ahead(g))
+        .min_by_key(|&g| g.abs_diff(start))
+        .ok_or("point-to-point run has no finish ahead of its start")?;
+    let order: Vec<usize> = if reverse {
+        (finish..=start).rev().collect()
+    } else {
+        (start..=finish).collect()
+    };
+    let origin = progress.gates[start].distance;
+    let end = progress.gates[finish].distance;
+    let measure = |d: f32| if reverse { origin - d } else { d - origin };
+    let sectors: Vec<usize> = gates_of(Time)
+        .into_iter()
+        .filter_map(|g| order.iter().position(|&o| o == g))
+        .filter(|&i| i > 0 && i + 1 < order.len())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let mut gates: Vec<_> = std::mem::take(&mut progress.gates)
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| order.contains(i))
+        .map(|(_, g)| g)
+        .collect();
+    if reverse {
+        gates.reverse();
+    }
+    for g in &mut gates {
+        g.distance = measure(g.distance);
+    }
+    let (lo, hi) = (origin.min(end), origin.max(end));
+    let mut points: Vec<_> = std::mem::take(&mut progress.points)
+        .into_iter()
+        .filter(|p| (lo..=hi).contains(&p.distance))
+        .collect();
+    if reverse {
+        points.reverse();
+    }
+    for p in &mut points {
+        p.distance = measure(p.distance);
+    }
+    let last = gates.len() - 1;
+    progress.gates = gates;
+    progress.points = points;
+    progress.total_distance = (end - origin).abs();
+    progress.routes = vec![progress::Route {
+        splits: std::iter::once(progress::Split {
+            kind: Start,
+            gate: 0,
+        })
+        .chain(sectors.iter().map(|&gate| progress::Split { kind: Time, gate }))
+        .chain(std::iter::once(progress::Split {
+            kind: Finish,
+            gate: last,
+        }))
+        .collect(),
+        reverse: false,
+    }];
+    let endpoints: Vec<_> = progress.gates.iter().map(|g| [g.left, g.right]).collect();
+    let required: Vec<_> = std::iter::once(0)
+        .chain(sectors.iter().copied())
+        .chain(std::iter::once(last))
+        .collect();
+    let course = Course::open(&endpoints, &sectors, Policy::default())?.with_required(&required)?;
     Ok(Prepared { course, progress })
 }
 
@@ -96,6 +199,7 @@ mod tests {
             right: [d, 0., 5.],
         };
         Progress {
+            kind: progress::TrackKind::Circuit,
             total_distance: 100.,
             gates: [0., 20., 40., 60., 80.].map(gate).into(),
             points: [0., 10., 30., 50., 70., 90.]
@@ -119,6 +223,7 @@ mod tests {
                         gate: 4,
                     },
                 ],
+                reverse: false,
             }],
         }
     }

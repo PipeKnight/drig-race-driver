@@ -1120,6 +1120,22 @@ mod tests {
         }
     }
 
+    /// Freestyle drift (the arenas have no race progress): without the flag a
+    /// drift at progress 0 never scores; with it ([V] set for the
+    /// drift_freestyle format) it does.
+    #[test]
+    fn a_drift_without_race_progress_scores_only_when_progress_is_ignored() {
+        let mut s = shipped();
+        let drift = sample(30., 30., 0.);
+        let mut e = Entry::new(false, None, true);
+        run(&mut e, &s, &drift, 120);
+        assert_eq!((e.scorer.display, e.scorer.total), (0., 0.));
+        s.ignore_progress = true;
+        let mut e = Entry::new(false, None, true);
+        run(&mut e, &s, &drift, 120);
+        assert!(e.scorer.display > 0. || e.scorer.total > 0.);
+    }
+
     #[test]
     fn a_single_drift_scores_steps_ratings_and_banks_after_the_combo_time() {
         let s = shipped();
