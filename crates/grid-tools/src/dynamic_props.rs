@@ -1135,7 +1135,10 @@ impl PropWorld {
         let count = self.pieces.len() + self.wheels.len();
         let slots = (base + SLOTS_PER_PIECE * count).min(grid_world::MAX_WORLD_CONTACTS);
         if slots > world.groups.contacts.len() {
-            world.groups.contacts.resize(slots, [0; 32]);
+            world
+                .groups
+                .contacts
+                .resize(slots, grid_world::contact_groups::EMPTY_CONTACT);
             world.manager.rows.resize(slots * 4, [0; 48]);
             world.manager.capacity = slots * 4;
         }

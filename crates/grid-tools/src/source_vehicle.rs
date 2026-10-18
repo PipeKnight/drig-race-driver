@@ -518,7 +518,11 @@ impl Runtime {
         {
             return Err(Error("invalid initial geometry reservation"));
         }
-        self.state.world.groups.contacts.resize(capacity, [0; 32]);
+        self.state
+            .world
+            .groups
+            .contacts
+            .resize(capacity, grid_world::contact_groups::EMPTY_CONTACT);
         self.state.world.manager.rows.resize(capacity * 4, [0; 48]);
         self.state.world.manager.capacity = capacity * 4;
         self.initial = std::sync::Arc::new(self.state.clone());
