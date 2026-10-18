@@ -332,9 +332,12 @@ impl MultiRuntime {
         }
         let mut cars = Vec::new();
         let mut geometry = Vec::new();
+        // Every car is on `route`: parse its props once (most of a field's
+        // load time, F382); each car's track shares them copy-on-write.
+        let props = crate::entity_geometry::Props::read_route(root, route)?;
         for (i, (slot, model)) in entries.iter().enumerate() {
             let mut car = Runtime::load(root, route, model, slot, 200679 + i as u32)?;
-            let mut body = car.prepare_body_geometry(root, table)?;
+            let mut body = car.prepare_body_geometry_with(root, table, props.clone())?;
             if let Some((limit, bulk)) = &deformation {
                 car.enable_deformation(root, &mut body)?;
                 car.register_deformation_callbacks(*limit, bulk.clone(), 1)?;
