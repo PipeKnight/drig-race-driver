@@ -249,10 +249,14 @@ brake-to-desired (v − desired > brTargetSpeedBig 2 → 1), follow brake
 
 `steer = |slip|·stSlideFactor(0) + stAngVelFactor(−0.4)·(−ω·up) + G·headingError`
 
+Signs (F391, [AI_DRIVER_PORT.md](AI_DRIVER_PORT.md) "Steering sign convention"): ω = body
++0x210 and up = body matrix row 1, unchanged. headingError is negative toward the car's
+left (+X). The publisher 0x828670 → 0x996240 writes +E30 = −steer.
+
 - **G is constant stAngleFactorMin (2.7)**: the code interpolates between
   cfg+0x40 and itself (cfg+0x54 Max is never loaded; checked in assembly at
   0x77AC84..0x77ACC7), so speed scheduling is inert in this build.
-- If car state +0xE2 == 0 (interpreted airborne) blend toward velocity
+- If car state +0xE2 == 0 (all four wheels without contact, [V] F391) blend toward velocity
   direction by stProportionRabbitWhenInAir (0 → steer = slip angle).
 - Divide by car max steering angle (state +0x118) → normalized; negate when
   reversing; clamp ±1 (0x783330).

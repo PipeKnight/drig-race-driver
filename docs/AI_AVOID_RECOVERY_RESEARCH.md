@@ -57,6 +57,8 @@ Notation is the same as in AI_OVERTAKING_RESEARCH:
   (0x77AC50), and suppresses the |slip| > π/2 full brake. 0x7929D0 turns a negative
   throttle into |throttle| plus packet byte +0x1E = 1. 0x779F70/0x7FC030 carry the byte to
   the published control packet. The car-side consumer of that byte was not traced [I].
+  F391: the controller publisher 0x828670 (types "ai"/"human") requests gear 9 when packet
+  +0x1E == 1 (0x8289EB) [V for the branch].
 
 ## 1. Corrections to earlier documents
 

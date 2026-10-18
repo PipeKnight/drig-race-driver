@@ -543,6 +543,10 @@ Checks against the original, none of which showed a port difference that a 1:1 c
   (spins/lap 12 → 52 at Istanbul, 25 → 67 at Long Beach, `local/drift-est/runs/yawflip-*`), so the
   port's angular velocity sign convention is probably opposite to the original's car-state copy and
   the effective law matches; the convention itself is not established. No change.
+  **Settled in F391 [V]** (docs/AI_DRIVER_PORT.md, "Steering sign convention"): ω and up are the
+  same body values in both; the original's heading error has the opposite sign and its publisher
+  0x996240 writes +E30 = −steer. So the port's +ω·up equals the original, and the flip was
+  anti-damping. The chaotic fields have another cause.
 - Stalled cars: a spun car on the track scores recovery 11 against drift 12/13, so Drift wins; when
   `on_track` flickers at the limit Recovery re-activates (and resets, [V] 0x776990) every few ticks
   (car5 at Long Beach: 1,047 Recovery activations, 0.05 m/s for 170 s). Scores and activation

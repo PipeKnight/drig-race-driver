@@ -1,5 +1,19 @@
 # GRID engine project log
 
+F391 AI steering yaw sign [V] (2026-10-18, Claude Code). Static analysis only: Capstone 5.0.6 and Ghidra 12.1.4 headless, read-only, on `local/compatibility/grid-unpacked.exe` and the existing drift-ai project. Evidence: main checkout `local/yaw-sign/` (`d1/403280.c.txt`, `notes.md`). Nothing installed, no input to the original game, AI behaviour unchanged (a comment was updated).
+- Inputs: the AI car state is filled by 0x402D20.
+  - +0xC0 = body +0x210, copied unchanged (0xA69820). This is the same field as the port's `angular_velocity`.
+  - +0x40 = normalised row 1 of body +0x1D0 (the port's up).
+  - So ω·up is identical in both. F389's guess of an opposite ω convention is wrong.
+- Signs:
+  - The original's heading error (0x797B50, request +0x88) is −acos when F.z·T.x − F.x·T.z ≥ 0, so a target on the car's left gives a negative value. The port's atan2 is positive there.
+  - The controller publisher 0x828670 (types "ai"/"human") writes the packet's steer through 0x996240, which multiplies slot 6 (+E30) by −1.
+  - Net: +E30 = G·h_port + f·ω·up − |slip|·stSlideFactor. This is the port's law, so the port's +ω·up is the original's sign and it damps; F389's flip was anti-damping. No code change: normal races stay byte-identical by construction.
+- Also [V]:
+  - Car state +0xE2 == 0 means all four wheels lack contact (0x990FC0), so the unported in-air blend only runs when the car is airborne.
+  - Packet +0x1E == 1 makes 0x828670 request gear 9 (reverse).
+  - The omitted slide term is inert at stSlideFactor 0.
+- Details: docs/AI_DRIVER_PORT.md "Steering sign convention (F391)", plus notes in AI_DRIVER_RESEARCH §5, DISCIPLINES §4.5 and AI_AVOID_RECOVERY_RESEARCH. The chaotic drift fields need another explanation; the yaw sign is not it.
 F390 Race Options → Video screen: FPS counter, render height, present mode, refresh rate and frame latency changeable in the app (2026-10-18, Claude Code). The owner cannot edit settings.ini on the phone. AUTHORED screen, not an original GRID screen. Details: docs/ANDROID.md "Frame rate" ("Video screen"); docs/DRIVER_AIDS.md 2; docs/SETTINGS.md.
 - `front_end.rs`: Race Options items Driver Assists, **Video**, Go To Race (Go To Race still selected first). The Video screen works like Driver Aids: Up/Down, Left/Right cycle (wrapping), Ctrl/X undo, Back saves when changed; touch UP/DOWN, `<` `>`, OK, BACK (P11 menu layer). Rows and values: FPS counter On/Off; Render height 720/900/1080/Native (another value from the file goes to 720 on the next change); Present mode Fifo/Auto vsync/Auto no vsync; Refresh rate System/60/90/120 Hz; Frame latency Default (2)/1/2/3. Each row has plain-English help text (the strings are AUTHORED, not in the game's language file).
 - Applied live by `apply_video` (logged `drive_video version=1 event=apply`): FPS counter, render cap (`RenderScale::set_height`), `Window.present_mode` (Bevy reconfigures the swapchain), Android refresh hint (`Display::set_refresh`, System sends 0 = no preference after an earlier hint). Frame latency applies at the next start (wgpu reads it only at swapchain creation); its help says so.

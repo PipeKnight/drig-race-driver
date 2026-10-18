@@ -2847,8 +2847,10 @@ impl AiDriver {
         };
 
         // Steering (0x77AC50): heading gain plus yaw-rate damping, normalised by
-        // the car's maximum steering angle. The yaw term's sign is the damping
-        // direction (original sign convention not confirmed).
+        // the car's maximum steering angle. Written in the +E30 convention
+        // (positive = left): the original negates both the heading error and
+        // ω·up, and its publisher (0x996240) negates the command again, so
+        // +ω·up here is the original's sign (docs/AI_DRIVER_PORT.md, F391).
         // Zero with no-steer; negated while reversing.
         let yaw = view.angular[0] * up[0] + view.angular[1] * up[1] + view.angular[2] * up[2];
         let steer = if request.no_steer {

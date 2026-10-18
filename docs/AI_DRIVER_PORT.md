@@ -44,13 +44,16 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
    bands; 4/s approach), follow 0x77A630, slide lift 0x77A880, corner lift 0x77A940,
    throttle_confidence.
 9. Steering 0x77AC50: (2.7·heading error + stAngVelFactor·yaw rate) / steering lock
-   (vehicle +E54, 0.576 rad for the Lacetti), clamped ±1.
+   (vehicle +E54, 0.576 rad for the Lacetti), clamped ±1. Signs: the port works in the
+   vehicle's +E30 convention (positive = left); the original computes the negated command
+   and its controller publisher negates it into +E30, so both terms match [V] (see
+   "Steering sign convention (F391)").
 10. Output slew 0x779F70 (steering 15/s, pedals by mapped on/off rates).
 
 ## Authored or not yet recovered
 
 - Corner-speed scale A/B (A=1, B=0 used); lateral PID internals, prediction and corner
-  factor; the yaw term sign (damping).
+  factor. (The yaw term sign is settled [V] in F391, below.)
 - Followed-car choice (nearest car ahead within ±2.2 m of our heading) and follow-brake
   amount (closing speed / thFollowSpeedMedium); the recovered follow throttle uses the
   shipped thFollow* bands.
@@ -61,6 +64,64 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
   (the live player-slot set); difficulty is the live Normal 0.606; table grip is 2.0.
 - Not ported: alongside, overtake, block, avoidance, traction control and AI ABS cap,
   start-light reaction, choreographed mistakes, catch-up, drafting.
+
+## Steering sign convention (F391)
+
+18 October 2026, Claude Code. Static trace (Capstone 5.0.6 and Ghidra 12.1.4 headless,
+read-only, on `local/compatibility/grid-unpacked.exe`; evidence `local/yaw-sign/`). Question:
+the original 0x77AC50 uses −ω·up (sign mask 0xCAF470 = 0x80000000 in all lanes), the port
++ω·up.
+
+**Inputs are the same values [V].**
+- The AI car state (class vtable 0xCAFC90, constructor 0x775EC0) is filled each tick by
+  0x402D20 from the car's physics body (vehicle +0xDB0, whose +8 is the body record):
+  - +0xC0 = body +0x210 copied unchanged (getter 0xA69820, a plain `movaps`, store at
+    0x403280);
+  - +0xA0 = body +0x220 (getter 0xA69800);
+  - +0x30 / +0x40 / +0x50 = normalised rows 2 / 1 / 0 of the body matrix +0x1D0
+    (getter 0xA69630; +0x40 stored at 0x402F7C);
+  - +0x118 = 0x9959A0 (steering lock).
+- The port's `View::angular` is physical +0x210 and its up is row 1 of physical +0x1D0
+  (`source_vehicle::Runtime::angular_velocity`, `pose`). So ω·up is the same number in both.
+  The port's ω has no opposite sign convention, contrary to the F389 guess.
+
+**The heading error has the opposite sign [V].** 0x797B50 stores request +0x88. T is the
+target (route point +0x60) minus the car-state position +0xF0, and F is car-state forward
++0x30. Both are flattened (mask 0xCAF410 clears y) and normalised. Then:
+- a = acos(F·T) (0xBF4067);
+- c = F.z·T.x − F.x·T.z;
+- +0x88 = a when c < 0, otherwise −0.0 − a (0xCAFE50 = −0.0).
+
+A target on the row-0 side (+X, the car's left) gives c > 0, so the original's heading
+error is negative. The port's `heading_error = atan2(T·row0, T·row2)` is positive there.
+Hence h_orig = −h_port.
+
+**The publisher negates the command [V].** The controller loop 0x828670 handles the
+controller types `"ai"` (0xCF6F30) and `"human"` (0xCE7994). It reads the controller's
+packet and writes the vehicle through the setter 0x996240 (`vehicle + 0xE18 + 4·slot`).
+That setter multiplies slot 6 = +E30 by −1.0 (0xCB0948) for every caller. Slot 6 is
+packet +0x10, the steer word clamped by 0x7FC030. The same loop also consumes packet
++0x1E: a value of 1 pushes gear 9 at 0x8289EB. That is the reverse byte from 0x7929D0 and
+answers the open "car-side consumer" question in AI_AVOID_RECOVERY_RESEARCH.md as a reverse
+request [V for the branch; its gearbox effect not traced]. The human record has the same
+layout (+0 throttle, +4 brake, +0x10 steer, +0x1C handbrake → slot 8).
+
+**Result.** The vehicle receives
++E30 = −(|slip|·stSlideFactor + f·(−ω·up) + G·h_orig) = G·h_port + f·ω·up − |slip|·stSlideFactor.
+The port's law is G·h_port + f·ω·up written straight to +E30. Several things commute with
+the final negation: the slew (equal 15/s rates both ways), the ±1 clamp and the reverse
+negation. So the yaw and heading terms are the original's, signs included, and the yaw term
+damps (f = stAngVelFactor < 0; ω·up > 0 is a left yaw in this frame). F389's private flip
+made the yaw term anti-damping, which explains why it made the fields worse. Normal races
+need no change.
+
+Still differs (not sign questions):
+- The slide term −|slip|·stSlideFactor is omitted. It is inert at the recorded value 0
+  (AI_DRIVER_RESEARCH.md §5).
+- The car-state +0xE2 == 0 branch (velocity-direction blend by stProportionRabbitWhenInAir)
+  is not ported. 0x402D20 counts the wheels whose contact word wheel +0xC0 is zero
+  (0x990FC0) and sets +0xE2 = (count < 4). So the branch runs only while all four wheels
+  are off the ground [V]. It does not affect ground driving or drift.
 
 ## Results (headless, Donington, Lacetti, Normal)
 
