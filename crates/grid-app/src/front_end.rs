@@ -38,7 +38,7 @@ pub enum Item {
     Video,
     Race,
 }
-/// Video is AUTHORED (F384); its strings are not in the game's language file,
+/// Video is AUTHORED (F385); its strings are not in the game's language file,
 /// so the labels fall back to the plain English ids.
 const ITEMS: [(Item, &str, &str); 3] = [
     (
@@ -89,7 +89,7 @@ const AIDS: [(Aid, &str, &str); 4] = [
     ),
 ];
 
-/// Video screen (AUTHORED, F384: GRID's PC version has its own graphics
+/// Video screen (AUTHORED, F385: GRID's PC version has its own graphics
 /// options, not ported; this screen sets the port's `[osd] fps` and `[video]`
 /// keys so they can be changed on a phone).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

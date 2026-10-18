@@ -63,7 +63,7 @@ Notes:
 - The `GRID_*` diagnostic variables are still read on desktop as the base that `[diagnostics]` overrides, so the research commands recorded in other docs keep working. No runtime code reads environment variables any more except through `settings::Diagnostics::from_env` (tests still use `GRID_GAME_ROOT` and the private-file variables).
 - The run log records `settings_file path=…` for every file read, `data_dir path=…`, `game_root path=…` and `drive_private_parameters kind=… source=file|derived-from-grid.exe sha256=…`.
 
-The pause menu (Escape/P, pad Start; [PAUSE_MENU.md](PAUSE_MENU.md)) starts from the `[sound]`, `[osd]` and `[input]` values and changes them for the session only; the original's profile autosave is not ported. The pre-race Race Options **Video** screen (AUTHORED, F384) changes `[osd] fps` and the `[video]` keys and saves them in `<data dir>/settings.ini` when it is left, keeping the other keys and comments.
+The pause menu (Escape/P, pad Start; [PAUSE_MENU.md](PAUSE_MENU.md)) starts from the `[sound]`, `[osd]` and `[input]` values and changes them for the session only; the original's profile autosave is not ported. The pre-race Race Options **Video** screen (AUTHORED, F385) changes `[osd] fps` and the `[video]` keys and saves them in `<data dir>/settings.ini` when it is left, keeping the other keys and comments.
 
 Example `local/settings.ini`:
 
