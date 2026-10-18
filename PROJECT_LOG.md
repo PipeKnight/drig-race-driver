@@ -1,5 +1,32 @@
 # GRID engine project log
 
+F416 Career ("GRID World") researched and its data model ported as `grid_tools::career` (2026-10-18, Claude Code; coordinator's career task). Details: docs/CAREER_RESEARCH.md. Evidence in the main checkout's `local/career/`: `data/tables/` (78 database tables as TSV), `data/inventory.txt`, `notes/{REWARDS,PROGRESSION,TEAM,SAVE}.md` (four parallel read-only research passes, with every address), `agent-{a,b,c,d}/decomp/` (Ghidra 12.1.4 headless `-readOnly -noanalysis` on private project copies; Capstone 5.0.6), `agent-d/` private save decryptor and round-trip tools. The original was not run; nothing installed.
+- Rules [V]:
+  - Reputation lives in five region buckets. Pro/Expert licences need 80,000/250,000 in the region. International needs the total of all five ≥ 1,000,000.
+  - A licence countdown of 7 drives the garages (2 after the first licence, 3 after the fourth).
+  - Arc 1 is driver offers only: an appearance fee per race plus an objective bonus. At 40,000 the team is founded, costing 40,000, with rookie licences and the free car 43 (`bos`).
+  - A season is 4 counted events plus the Le Mans 24 Hours (or refusal); the season number increments, with no reset of money or reputation.
+  - A tier's head-to-head opens when its other events are won. The International head-to-head completes the game.
+- Event rewards [V]:
+  - The reward position is the championship rank over the event's races (points table 6, dense ranks).
+  - Prize = trunc(prize_money_for_first × money list of `money_string_id`).
+  - Reputation = trunc(pot × 0.5…0.01), plus floor(base × F + 0.5). F = 1 % per assist/camera/pro-mode point from rewards.xml plus `rep_bonus_factor`; realistic damage is loaded but never paid.
+  - The per-event pot falls by the base on every payout, down to `reputation_pot_min`.
+  - Teammate share = prize × (1 − winnings %).
+  - Team Win Bonus by rank.
+  - Sponsors: 1 major (pays double) + 7 minor slots, offers unlocked by finishing 1st–3rd, paid per race for the player and the teammate.
+  - The Flashback Bonus is not paid by any native code.
+- Save [V/D]:
+  - AES-256-ECB 1 KiB chunks, one static key in the exe (kept private), an additive checksum and version 0x1FD, scrambled unit names.
+  - The career unit's layout for a new profile: money, reputation[5], season number. The private tools round-trip all 15 units byte-identically.
+- Port: `career::data::Catalogue` (database + rewards.xml), `career::rules`, `career::state::Career` (`apply_event`, `apply_driver_offer`, ranks/licences/garages, seasons, cars, teammate, sponsors), and `career::save`, our own versioned text save with an FNV-1a checksum. 11 unit tests plus 2 asset tests (catalogue; a rookie career from offers to a won bmw_si_tour).
+- [I]/AUTHORED in the port: tier availability and repeatability, the team-win test, equal-points order, the "won" field for the head-to-head unlock. Not ported: routine B, eBay, the race draw from an event's track pool, the career AI field. No app front end. Open list: docs/CAREER_RESEARCH.md §11. A live check of one rookie event's bank screen is suggested for the owner. Playable not rebuilt.
+- Checks [V], release, cargo/rustc 1.99.0, worktree `local/career/checks/`:
+  - On 3c4f4e5 (base da7f2ab, F414): `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 709 passed, 0 failed.
+  - `grid-soak quick`: 24/24.
+  - Clippy flagged 3 style errors in `career/rules.rs`. After the fix, `cargo clippy --release --workspace --all-targets -- -D warnings` is clean, and the career tests (13, asset tests included) pass again.
+  - Identity runs without DF01/AI characteristics: solo aad9a07a…e41b and 12-car b8fe54e5… are unchanged (the career module is not used by the race).
+
 F415 Desktop gamepad probe: the owner's pad has every control of the XInput pad preset; values at rest wait for a guided test (2026-10-18, Claude Code; coordinator's optional check, owner away, passive only). Details: docs/PAD_PROBE.md. New probe `grid-probes` `grid-pad-probe` (gilrs 0.11.2 and winit 0.30.13, both already in the lock; `--offline` build). Evidence: main checkout `local/pad-probe/passive-1.txt`.
 - [V] One pad, "Xbox 360 Controller for Windows", USB 2dc8:3106 (8BitDo [I]), WGI `Gamepad`, UUID zero, `mapping_source=Driver`, wired, FF. Every preset control has a gilrs code (A/B/X/Y buttons 1/2/0/3, LB/RB 4/5, Back 8, Start 9, stick clicks 10/11, D-pad buttons, LT/RT analogue axes 3/4 = gilrs LeftTrigger2/RightTrigger2 0..1, sticks axes 0/1 and 2/5); bevy_gilrs maps them 1:1, so the preset table covers it (the game's log: `preset4=used`).
 - [N] Values at rest and dead zones: the windowless probe got no event in 5 s, which cannot tell a still pad from WGI withholding input from an unfocused process [I]; no window was opened because another session was driving the original game in the foreground. A guided test (`grid-pad-probe buttons`, its own small window, Russian prompts, 3 s rest then each control 4 s) is ready for the owner: `local/pad-probe/Тест геймпада.cmd` in the main checkout (probe exe sha256 f355077d…ec34); it writes `buttons-*.txt` there.

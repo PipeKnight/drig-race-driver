@@ -1,0 +1,493 @@
+# Career ("GRID World") of the original
+
+18 October 2026, Claude Code (F416). How Race Driver: GRID's career works: regions, ranks and
+licences, seasons, events and unlocks, money and reputation, the own team (cars, sponsors,
+teammates), driver offers, Le Mans and the save. Static research only; the original was not run.
+Port: `grid_tools::career` (§10).
+
+Labels:
+- **[V]** verified in a decompilation or disassembly of the hash-pinned analysis image
+  (`local/compatibility/grid-unpacked.exe`, as in docs/RACE_RULES_RESEARCH.md), with addresses;
+- **[D]** read from shipped data;
+- **[I]** interpretation;
+- **AUTHORED** a choice of this port, not the original's.
+
+## Sources and tools
+
+- Shipped data, decoded privately with the existing independent decoders (docs/RACE_RULES_RESEARCH.md):
+  - `database.bin` dumped to one TSV per table: `local/career/data/tables/` (78 tables), in the main
+    checkout's `local/`;
+  - event inventory per tier: `local/career/data/inventory.txt` (script `local/career/scripts/inventory.py`);
+  - `gameconfig/rewards.xml`, `season_leaderboards_setup.xml`, `ebay.xml`;
+  - English text (`language_eng.lng`) and the front-end flow graph (`system/flow.bin`, decoded in
+    `local/pause-menu/flow.xml`).
+- grid.exe: Ghidra 12.1.4 headless, `-readOnly -noanalysis`, on private copies of the disciplines project
+  (`local/career/ghidra-project`, `local/career/agent-{a,b,c,d}/`); Capstone 5.0.6. No tool was installed.
+- Four parallel read-only research passes wrote detailed notes with every address:
+  `local/career/notes/{REWARDS,PROGRESSION,TEAM,SAVE}.md`. This document is their summary; the notes
+  hold the pseudocode references.
+- Save evidence: the private backup of a freshly created profile from docs/AUTOSAVE_INPUT.md, copied to
+  `local/career/agent-d/save-copy/` and only read.
+
+Database fields are fetched by name at run time (0x832900 table, 0x81AAD0/0x8329C0 field getters), so
+a field-name string's references find every use of a field [V]. `event.percentage_towards_completion`
+and the `team_mate` table have no name string in the exe: they are **not read** [V by absence].
+
+## 1. Structure
+
+### 1.1 Regions [D]
+
+`career_region`: 1 europe, 2 united_states, 3 japan, 4 international, 5 le_mans. Each region has
+its own reputation (§3). International and Le Mans have no licences of their own; their reputation
+only counts towards the total.
+
+### 1.2 Ranks and licences [D, V]
+
+`career_rank` (reputation_to_unlock): rookie 0, pro 80,000, expert 250,000, international 1,000,000.
+
+| Rank | Europe | United States | Japan |
+|---|---|---|---|
+| rookie | Rookie (Euro R) | Rookie | Rookie |
+| pro | Euro B Licence | ARL Pro Badge | J-Speed Super Two |
+| expert | Euro A Licence | ARL National | J-Speed Super One |
+| international | Global Race Permit (all regions) | | |
+
+- Region rank (0x639150) [V]: the highest of rookie/pro/expert whose threshold the **region's**
+  reputation reaches. Le Mans is always rookie. If the **sum of all five regions** reaches 1,000,000
+  the rank is international in every region.
+- Overall rank (0x6391B0) [V]: international by the total, else the best region rank.
+- "[AMOUNT] required" (0x6392A0) [V]: threshold − region reputation for pro and expert; 1,000,000 −
+  total for international.
+- Licence countdown (profile +0x1694, 0x66B1D0) [V]: starts at 7. Each new regional pro or expert
+  licence takes 1 off, and the Global Race Permit sets it to 0.
+  - Garages: 1 at first, 2 after the first licence, 3 after the fourth (0x4DA640).
+  - The International tier is first shown after the fourth licence (`itl_presented_check`) and opens at
+    overall rank 3 (`itl_unlocked_check`).
+  - [I] "Licences: [VALUE] / [TOTAL]" = 7 − countdown out of 7; the fact screen's producer was not found.
+- Rookie licences in all three regions come with founding the team (0x66F640) [V].
+
+### 1.3 Tiers [D]
+
+`tier` of the main career (`career_id` 1):
+- own-team tiers 1–9: europe/us/japan × rookie/pro/expert;
+- 14 international;
+- Le Mans 10–13: gt2 (rookie), gt1 (pro), lmp2 (expert), lmp1 (international);
+- driver-offer tiers (`is_driver_offer_tier`):
+  - per rank one per region, with `order_index` 0 US, 1 Europe, 2 Japan; the international offer
+    tiers have region 4;
+  - twelve Le Mans offer tiers 30–41 (three per rank).
+
+The other `career` rows (garage, network, skipfe, testdrive, freerace, firstrace) are the front end's
+other modes; each has one technical tier and event.
+
+### 1.4 Events [D]
+
+71 events (`local/career/data/inventory.txt`). Per own-team tier there are 3–7 events, one of them a
+head-to-head:
+- rookie events: 1–2 races, prize for first 15,000–35,000, reputation pot 40,000;
+- pro events: 3 races, 85,000–200,000, pot 80,000;
+- expert events: 1–4 races, 1–2 million, pot 200,000;
+- international: five 5-race events, 3 million, pot 1,000,000, and the 10-million final head-to-head.
+
+Event fields:
+- `num_competitions` races are drawn from the event's `event_track_pool`, which is usually larger
+  (bmw_si_tour: 2 races from 4 layouts) [D]. How the original draws them was not traced.
+- `event_vehicle` lists the cars allowed.
+- `event_sponsor_offer` has three offers per event (§5.1).
+- `points_id` is 6 for every event: 20, 18, 16, 14, 12, 10, 8, 6, 5, 4, 3, 2.
+- `money_string_id` chooses the prize split (§3.1).
+- `reputation_pot` and `reputation_pot_min` (§3.2).
+- `head_to_head`; `use_lemans_selection` (Le Mans Series events).
+
+All disciplines appear: circuit series, Stock Car demolition, Drift Battle, Drift GP, Freestyle, Pro and
+Midnight Touge, Downhill Drift.
+
+## 2. Progress through the career
+
+### 2.1 Arc 1: driving for other teams [V]
+
+A new career has no team and no money. The player drives **driver offers** (§6). Their money builds up
+until AddMoney (0x674610) sees the bank reach `career_global_settings.start_race_team` (40,000). Then:
+- 40,000 is spent and the team is activated (0x66F640);
+- rookie licences are granted in all three regions;
+- the free `initial_vehicle_id` 43 (`bos`, a US muscle car listed at 55,000) is given (0x656100).
+
+The flow then asks for a team name (`unlocked_second_arc`, while `Player_TeamName` is empty) and
+offers the livery designer.
+
+### 2.2 Arc 2: the own team
+
+- Own-team events are entered with an owned car from the event's `event_vehicle` list.
+- [I] A regional tier opens when the region's rank reaches the tier's rank, the International tier at
+  overall rank 3. The availability code (0x6766B0, 0x675F40) was not fully traced.
+- [I] Every event of an open tier is offered and can be repeated: the per-event records only
+  accumulate, and no lockout was found. Repeats pay less reputation (§3.2).
+- **Head-to-head** (0x656D40, after every event) [V]: a tier's head-to-head becomes available when
+  every other event of the tier has its event-record field +0x64 set. [I] That field means "won"; its
+  writer was not found.
+- **Game completion** [V]: winning the head-to-head of an international-rank tier (`i_h2h`, event 78,
+  10,000,000) sets profile +0x89 ("won_final_h2h"), which plays the completion video
+  (`game_completed_check`).
+
+### 2.3 Seasons [V]
+
+A season is not a calendar.
+- The season object (profile +0x1620) holds up to five (kind, id) entries. An entry is added when an own
+  event or a driver offer finishes **while the team is active** (0x6427A0, 0x67BF2D).
+- Season state (0x62C140):
+
+  | Counted entries | Le Mans refused | State |
+  |---|---|---|
+  | fewer than 4 | – | running |
+  | 4 | no | Le Mans pending: the Le Mans 24 Hours is offered |
+  | 4 | yes | ended |
+  | 5 | no | ended |
+
+- End of season (0x4DBB20, 0x656760):
+  - the leaderboard's season fields are cleared;
+  - the three driver-offer slots are regenerated;
+  - the season is copied to "previous" (+0x1650);
+  - the season number (+0x1680, starts at 1) is incremented.
+- No reset of money, reputation or event availability was found.
+- While Le Mans is pending or the season has ended, finishing a regular driver offer does not refresh
+  its slot (0x676DA4).
+- The flow shows `season_end_info`, then `end_season`, then `season_start_info`.
+
+### 2.4 Le Mans 24 Hours [V, D]
+
+- It is offered once per season, when the state is "Le Mans pending" (`le_mans_entry_decision`, 0x58A200).
+- The player can:
+  - take a Le Mans driver offer (three extra slots from tiers 30–41, 0x651A10);
+  - enter the own team with an owned car that has `vehicle.can_enter_le_mans`, in the class tier
+    10–13;
+  - refuse (0x4DBAD0), which ends the season.
+- The Le Mans events 13–16 are single 8-lap races with `time_limit_seconds` 720 on Circuit de la Sarthe
+  (docs/DISCIPLINES.md) and `reputation_pot_min` 5000 (100 elsewhere).
+- Their reputation goes to the le_mans region, so it only counts towards the international total.
+- `lemans_restrictions` builds the multi-class field (docs/SERIES.md); its career consumer was not
+  traced.
+
+## 3. Money and reputation of an event
+
+The end-of-event dispatcher 0x67B910 runs only in career mode [V]. It calls:
+- the head-to-head routine 0x6788D0;
+- routine B 0x6781F0 when a game-mode virtual (+0x98) returns true, which was not identified;
+- otherwise routine A 0x6779C0;
+- driver-offer routines 0x678BD0 and 0x678EE0 for event kinds 1 and 2.
+
+Routines A and B share the arithmetic below; B reads the pot directly, without the depletion of §3.2.
+
+### 3.1 Position and prize [V]
+
+- **Reward position** (0-based): the player's **championship rank** over the event's races, not the
+  last race.
+  - Standings (0x66FF70): per race, points from table 6 (13th and lower score 0), plus races and wins.
+  - Rank (0x6478E0): dense, so equal points share a rank.
+  - In a multi-class event (routine B, or routine A with the flag at run +0x48) the position within
+    the player's vehicle class is used instead (0x66BBA0).
+- **Prize** (0x6395E0): `trunc(prize_money_for_first × money[pos])`, computed in f64. Places past the list
+  pay 0 (0x826700).
+  - `money` is `event_money_reward.money_string` of the event's `money_string_id`. It is chosen per
+    event, not by the actual grid size: 4 "12_Car_grid", 5 "20_Car_grid", 6 "8_Car_grid",
+    7 "6_Car_grid", 8 "h2h" [D].
+  - The list for 6-car grids is `1.0,0.8, 0.6,0.4,0.2,0.1`, with a space [D].
+- **Teammate's prize** (0x677D87): the team gets `trunc(prize(teammate pos) × (1 − winnings_percentage
+  × 0.01))`. The teammate keeps their percentage of their own prize.
+- **Team Win Bonus** (0x639760): `team_win_rewards` by the tier's rank (20,000 / 150,000 / 1,000,000 /
+  3,000,000), paid when 0x660E90 returns 0.
+  - 0x660E90 sums a per-car value per team within the player's class (player and teammate are one
+    team) and ranks the teams.
+  - [I] The value is the event points, and the bonus is paid when the player's team leads.
+- **Money credited** (0x674610) = prize + teammate share + Team Win Bonus + sponsor money (§5.1) +
+  0x652200 (a per-race record field +0x5C that was not identified).
+- Flashback Bonus: `difficulty.flashback_bonus` (3,000 / 12,000 / 30,000 / 60,000 by rank) reaches the
+  race's flashback manager and its UI variables, but **no native code pays it** and it is not in the
+  money total [V by search]. The bank line `bank_rewards_flashback_desc` exists only as text.
+
+### 3.2 Reputation [V]
+
+```
+pot   = routine A: the event's remaining pot (record 0x65F130, created at reputation_pot)
+base  = trunc(pot × rep[pos])        rep = 0.5,0.4,0.3,0.2,0.17,0.14,0.12,0.1,0.08,0.06,0.05,0.04,0.03,0.02,0.01
+bonus = floor(base × F + 0.5)        f32
+gain  = base + bonus                 to the reputation of the event's tier region (0x66E1C0 -> 0x642850)
+pot   = max(pot − base, reputation_pot_min)
+```
+
+Notes on the formula:
+- **Repeats pay less.** bmw_si_tour pays 20,000 for the first win, then 10,000, then 5,000, and so on,
+  never below 50 (half of the minimum pot of 100).
+- Places 16 and lower get no reputation.
+- Head-to-heads give no reputation.
+- Negative amounts are ignored and there is no cap.
+
+Bonus factor F (0x64A3F0, from the race settings) [V]:
+
+```
+F = 0.01 × ( 10 if locked to the head camera   (fixHeadCamera)
+           + 20 if pro mode                    (proMode)
+           +  5 each if traction control, steering assist or braking assist is off
+           +  5 if manual gears                [I: the parser's `transmission` flag]
+           + floor(difficulty.rep_bonus_factor × 100 + 0.5) )
+```
+
+- `difficulty` is the row for the tier's rank and the star level (Basic … Ninja = 0 … 5).
+  `rep_bonus_factor` is −0.2, −0.1, 0, 0.1, 0.2, 0.3 by star level for every rank [D].
+- The point values come from `rewards.xml` [D], with the same defaults in the constructor (0x677718).
+- `realisticDamage` and `surfaceAssist` are loaded but **never read**. The menu says realistic damage
+  "will add an additional reputation reward", but the code does not pay one.
+- F is 0 in the non-career game modes 1, 3, 4, 5 and 6.
+
+The total reputation shown ("Reputation: [REP] pts") is the sum of the five regions (0x62C4A0). The
+teammate's reputation goes only to the leaderboards (0x665890).
+
+Worked examples (first play):
+
+| Event | Place | Money | Base reputation |
+|---|---|---|---|
+| bmw_si_tour (7) | 1st | 30,000 | 20,000 |
+| | 2nd | 25,500 | 16,000 |
+| | 5th | 18,000 | 6,800 |
+| | 16th | 1,500 | 0 |
+| lms_gt2 (31) | 1st | 150,000 | 40,000 |
+| | 3rd | 112,500 | 24,000 |
+| | 10th | 45,000 | 4,800 |
+
+- A bmw_si_tour win at star 2 with all aids off and manual gears gives F = 0.2, so 24,000 reputation.
+- With a teammate finishing 2nd at 20 %, the team also gets 20,400.
+
+### 3.3 Head-to-head [V]
+
+A win pays `prize_money_for_first` (500,000 to 10,000,000) and no reputation (0x6788D0). The
+`head_to_head_rewards` car or its alternative money (`alt_reward_amount`) is granted on a branch through
+0x65AD90 that was not traced.
+
+## 4. Cars [V, D]
+
+- **Buying** (0x6569C0): `vehicle.purchase_price` from the bank, only if it is affordable.
+- **Selling** (0x656B20): the fixed `sale_price`, with no wear factor.
+- The cars allowed in an event are listed in `event_vehicle` [D].
+- Not traced:
+  - region garage restrictions on buying;
+  - eBay (`ebay.xml`: auctions, mileage, crash chances, performance changes; event 22 is unlocked by
+    eBay, `event_unlock`).
+
+## 5. The team
+
+### 5.1 Sponsors [V]
+
+- **Slots:** one major slot (sponsor manager +0x44) and seven minor slots (+0x48).
+- **Offers:** each event has three offers with `position_to_unlock` 1, 2 and 3 [D].
+  - After an event, 0x673B20 → 0x699A20 → 0x67F000 unlocks every pool offer of that event with
+    `pos < position_to_unlock`. A win brings all three, 2nd place two, 3rd place one; "Finish in the
+    top three and sponsorship offers will start rolling in".
+  - Each offer unlocks once. No limit on received offers was found.
+- **Objectives** (0x639820 / 0x66E3A0, evaluators 0x655960, 0x655A10, 0x655AC0, 0x655B60):
+  - finishing place: finished and `pos ≤ objective_details − 1`;
+  - finish: finished;
+  - the "no damage" variants also need the result's no-damage flag (+0x10). What sets that flag was
+    not traced.
+- **Pay** (0x66DB80, 0x652010, 0x642570): per race and per slot, `money_reward × (2 in the major slot)
+  × (player met + teammate met)`.
+  - The teammate's car carries the same sponsors and earns for them too ("pays double" is the major
+    slot).
+  - Multi-race events pay per race.
+- `event.sponsor_id` and `minor_sponsor_id` are the event's trackside branding
+  (`track_sponsors/%s/*.pssg`), not money.
+
+### 5.2 Teammates [V]
+
+- **Pool:** every `driver` row with `can_be_hired` (345 rows, 0x662850); the `team_mate` table is
+  unused.
+  - Each candidate has `signing_fee`, `winnings_percentage`, rank, region and the linked
+    `ai_driver.Virtual_Performance` (0x649320).
+  - Search (0x638A60) filters by fee range (`team_mate_fee_range`), percentage range and region
+    (or Any).
+- **Hiring** (0x6994E0): the signing fee is paid once and added to a spend total. Firing and replacing
+  give no refund.
+- [I] The teammate screen is forced right after the first licence and the second-garage presentation.
+  The "not ready to hire" predicate was not found.
+
+### 5.3 Liveries [D]
+
+The livery designer is shown after the team is named:
+- patterns, three colours and a number (`livery_pattern`, `livery_colour`, `livery_number`);
+- per-car `vehicle_livery` rows have a `livery_price`.
+
+No livery rule was traced.
+
+## 6. Driver offers [V]
+
+- **Slots:** three race-offer slots and three test-offer slots, one per region by `tier.order_index`.
+  - Each slot shows the next uncompleted offer of the current rank in `driver_offer.order_index`
+    order (0x651480, 0x650FA0).
+  - A slot advances after its offer is driven (0x651920 / 0x651A10) and is regenerated at season end.
+  - Whether a failed offer is retried or skipped was not determined.
+- **Pay** (0x674940, 0x652270, 0x637980):
+  - Appearance fee: `per_race_wage × driver_offer_track rows`, for race offers.
+  - Objective bonus: `objective_money_bonus` and `objective_reputation_bonus` when the objective is met.
+  - The reputation goes to the offer tier's region.
+  - [I] No event prize or reputation pot is paid for an offer race; the real (non-editor) path was not
+    settled.
+- **Objectives:**
+  - finishing place (Le Mans: class position): `pos ≤ place − 1`;
+  - no damage;
+  - beat rival (0x6556B0): finish ahead of every car of `objective_team_id`;
+  - time trial (0x655D20): lap faster than `target_time_secs[star level]`;
+  - speed test (0x655C80): top speed ≥ `target_speed_mph[star level]`.
+  - The targets are six comma-separated values, one per difficulty star level [D].
+
+## 7. Leaderboards [V arithmetic, I meaning]
+
+`season_leaderboards_setup.xml` [D] drives the AI teams' season earnings (0x665C50):
+
+```
+t = (N − leaderboard_rank) / N
+s = t^bias
+E = t^(bot + (top − bot)·s) · 0.25 · (max − min) + 0.25 · min
+E is multiplied by 0.8 when 0x62CEB0 is true
+R = (botRand + (topRand − botRand)·s) · E
+```
+
+E is the target earnings and R their random spread. N, the 0.25 factor and the condition are not
+resolved. The player's team is ranked by its accumulated earnings [I].
+
+## 8. Career-only race rules
+
+What a career race adds to the race rules of docs/RACE_RULES_RESEARCH.md:
+- the event's races are a championship with points table 6, and rewards follow the championship rank
+  (§3.1);
+- race settings change reputation (§3.2);
+- pro mode forbids restarting from the pause menu (`help_info_event_options_pro_mode_toggle`) [D];
+- flashbacks are limited by `difficulty.available_flashbacks` (5 … 0 by star level) [D,
+  docs/FLASHBACK.md];
+- a teammate races in the field;
+- sponsor objectives (with no-damage variants) are checked per race;
+- the pause menu shows sponsor objectives (`ScreenPauseSponsorObjectives`);
+- "Retire" can retire from the race or the whole event;
+- [D] the player's grid slot comes from `event_track_pool.player_grid_position_base/range`
+  (docs/RACE_RULES_RESEARCH.md §5);
+- named drivers have their own slots (`event_driver_grid_position`), and the career grid is filled by
+  0x5C7D40 (docs/SERIES.md).
+
+## 9. Save format
+
+### 9.1 Container [V, D]
+
+Every save unit is one file in `Documents\Codemasters\GRID\savegame\Autosave0\`:
+
+```
+u32 checksum   wrapping sum of the u32 words from 0x10 over the unit's capacity (0x7F07D0)
+u32 version    0x1FD
+u64 profile id the PROFILE unit's profile_id
+N × { u32 length (0x400, or 0 if never written), 1024 bytes }   N = capacity / 1024, rounded up
+```
+
+- The 1024-byte chunks are encrypted with **AES-256-ECB** under one static key for every unit and every
+  installation.
+  - The key is an ASCII hex string in the exe at 0xD04C00. It is not reproduced here; the private
+    tools in `local/career/agent-d/` use it.
+  - Encrypting zeros gives the repeated block seen in the files [D].
+- There is no MAC.
+- Unit sizes are fixed capacities, so files do not grow.
+- The tail of the last chunk is stale memory.
+- The private tools decrypt all 15 units of the new-profile backup, and re-encrypt them byte for byte
+  identically [D].
+
+### 9.2 File names and units [V, D]
+
+- A file's name is its unit name upper-cased and shifted letter by letter with the key "YGPNELSQZIK"
+  (0x7F0D00).
+- `CAREER MANAGER SDU NAME` holds the career: `main_career` (0x6501B0) and `garage_career`.
+- The other units:
+  - `RACEHISTORY` (statistics, the `fact_*` screens);
+  - `EBAY_MANAGER_SAVE` (owned cars, about 0x60 bytes each, and auctions);
+  - `REWARDS_SAVE` (season leaderboards);
+  - `UNLOCKS` (52 vehicle and 15 bonus records);
+  - `PROFILE` (a `<PlayerProfile>` XML of typed items: settings, livery, names, once-only presentation
+    flags such as `done_first_career_race`, `presented_first_sponsor`, `unlocked_international`, and
+    `PercentageComplete`, `RacesWon`, `RacesLost`);
+  - `SYSTEMFILE` (slot title "Reputation: 0 pts, Season: 1");
+  - `INPUTDATA` (controls);
+  - seven small counter units.
+
+### 9.3 Career unit, new profile (0x111 bytes) [V, D]
+
+| Offset | Field |
+|---|---|
+| 0x000 | teammates: withdrawn-driver list, hired-teammate list, a map of int pairs, total signing fees |
+| 0x010 | sponsors: received offers {id, new flag}, major {id, value}, 7 minor {id, value}, a progress map |
+| 0x058 | per-region driver-offer board: 3 ints + 2 × 3 `order_index` references |
+| 0x07C | 4 × 2 per-region flag bytes |
+| 0x084 | **money** (i32) |
+| 0x088 | **reputation** i32[5] (europe, united_states, japan, international, le_mans) |
+| 0x09C | current and previous season (48 bytes each: 5 (kind, id) pairs, count, Le Mans refused) [I layout from §2.3] |
+| 0x0FC | **season number** |
+| 0x100 | pending rank promotion (rank, region, licence countdown 7) |
+| 0x10C | event-in-progress flag and optional event snapshot |
+| 0x10D | garage_career field |
+
+The reputation-pot records of §3.2 (0x65F130) live in the career object, but their save path was not
+identified. Only a new profile was available, so no non-empty career field was checked.
+
+### 9.4 The port's save [AUTHORED]
+
+The port does not reuse the container (`grid_tools::career::save`). It writes:
+- a versioned UTF-8 document (`grid-career 1`);
+- one `key value…` line per field, referring to database ids;
+- an FNV-1a 64 checksum line at the end;
+- atomically (a temporary file, then rename).
+
+It holds every field the rules use:
+- money, the five reputations, the season number;
+- the team (founded, name), cars, teammate and signing fees;
+- received and placed sponsors, the reputation pots;
+- completed offers and best event results;
+- the current and previous seasons, the Le Mans refusal;
+- open head-to-heads, game completion, races won and lost.
+
+## 10. Port (F416)
+
+`grid_tools::career`:
+- **`data::Catalogue`** reads the career tables of `database.bin` and `rewards.xml` (ranks, tiers,
+  events with their track pools, cars and sponsor offers, vehicles, sponsors, driver offers with races,
+  teammates, difficulty, points, team-win and head-to-head rewards, global settings).
+- **`rules`** has the traced formulas: `prize`, `reputation_base`, `bonus_factor`, `reputation_bonus`,
+  `standings` (dense ranks), the sponsor objectives, unlocks and per-race pay, `teammate_share`,
+  `player_team_first` [I], the driver-offer objectives and `appearance_fee`.
+- **`state::Career`** holds money, regional reputation, ranks, licences and garages, seasons, the team,
+  cars (buy and sell), the teammate and sponsors. Results are applied with:
+  - `apply_event`: routine A, including pot depletion, sponsor unlocks, head-to-head availability and
+    game completion;
+  - `apply_driver_offer`: the fee and bonus. Money from offers founds the team at 40,000.
+- **`save`**: §9.4.
+
+Tests:
+- worked examples on a small catalogue: prize and reputation, bonus factor, tied standings, pot
+  depletion, sponsor and teammate money, founding, licences, seasons, head-to-head, cars, save round
+  trip and tampering;
+- two ignored tests on the purchased data: the catalogue, and a rookie career from driver offers to a
+  won bmw_si_tour.
+
+AUTHORED or [I] in the port:
+- [I] tier availability and repeatable events;
+- equal-points order in the standings;
+- [I] the team-win test;
+- the offer that founds the team does not count in the season (ordering not traced);
+- [I] head-to-head "won";
+- no routine B, Flashback Bonus or eBay;
+- the race draw from the event pool and the AI field of a career event are left to the app.
+
+## 11. Open questions
+
+1. Routine A vs B (game-mode virtual +0x98) and the class-position flag at run +0x48.
+2. The availability code of tiers and events (0x6766B0, 0x675F40); the "Licences" fact formula.
+3. The writer of event record +0x64 (head-to-head unlock); the `head_to_head_rewards` car branch.
+4. The no-damage flag threshold; 0x652200 (record +0x5C) in the event money.
+5. Driver-offer slot rotation after a failed offer; whether offer races also pay the event pot.
+6. Season leaderboard N, the 0.25 factor and 0x62CEB0; the player team's season rank.
+7. How the event's races are drawn from its track pool; the career AI field (0x5C7D40).
+8. The car record in `EBAY_MANAGER_SAVE`, `RACEHISTORY` statistics, `REWARDS_SAVE`, and where the
+   reputation-pot records are saved.
+9. Live check (owner-driven, not automated): one rookie event's bank and reputation screens against
+   §3, with known settings.

@@ -596,7 +596,8 @@ session: no input to the original), the car-state angular velocity sign, the dri
    two, docs/TRACK_READERS.md §4).
 7. **Le Mans**: Circuit de la Sarthe, LMP/GT field (`lemans_restrictions`), time-limited race type 3,
    class results, time of day and headlights; the largest asset and rendering step.
-8. Head-to-head and driver offers come with a career/front-end layer.
+8. Head-to-head and driver offers come with a career/front-end layer. F416: the career rules and data
+   model are researched and ported as `grid_tools::career` (docs/CAREER_RESEARCH.md); no app front end yet.
 
 ## 6. Verification
 
