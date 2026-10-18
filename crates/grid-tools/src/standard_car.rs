@@ -78,6 +78,26 @@ impl Car {
         self.random_state = result.random_state;
         Ok(())
     }
+    /// The engine reset `996C70`, the first step of the original's car reset
+    /// `A09CE0` (BRAKING_REFERENCE.md, F417). Engine +E0/+E4 (car +0x1880,
+    /// +0x1884) scale the closed-throttle engine friction; the constructor
+    /// leaves them zero, so without this reset the engine never brakes.
+    pub fn reset_engine(&mut self) {
+        for o in [0x1880, 0x1884, 0x1888, 0x1864] {
+            self.set(o, 1.);
+        }
+        for o in [
+            0x18c4, 0x189c, 0x18a0, 0x18a4, 0x1f60, 0x1894, 0x1890, 0x185c, 0x1878, 0x1898,
+            0x1868,
+        ] {
+            self.set(o, 0.);
+        }
+        self.set(0x187c, 9999.);
+        self.bytes[0x1860] = 0;
+        self.bytes[0x1861] = 0;
+        self.word(0x18c0, 0);
+        self.word(0x1858, 0);
+    }
     fn word(&mut self, offset: usize, value: u32) {
         self.bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }

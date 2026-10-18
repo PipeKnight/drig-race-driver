@@ -298,6 +298,7 @@ impl Runtime {
         car.configure_suspension(geometry)?;
         car.configure_damage_regions(&ned)?;
         car.configure_handling(&settings, true)?;
+        car.reset_engine();
         let mut owner = car.bytes().to_vec();
         owner.resize(source_physical::CAR_BYTES, 0);
         let factory = source_physical::initialize(
@@ -1464,11 +1465,12 @@ mod tests {
             runtime.reset();
             let drive=|runtime:&mut Runtime,geometry:&mut crate::body_geometry::BodyGeometry|{
                 let mut contacts=0;
-                // First mid-run tick (>=165) with pending deformed geometry
-                // (C7F2). The idling launch changed its exact timing.
+                // First mid-run tick (>=150) with pending deformed geometry
+                // (C7F2). Its timing follows the launch (165 before the F417
+                // engine reset; now 160).
                 let mut checked=None;
                 for _ in 0..600 {
-                    if checked.is_none() && runtime.ticks>=165 && runtime.state.car.owner.vehicle[0xc7f0/4]&0xff0000!=0 {
+                    if checked.is_none() && runtime.ticks>=150 && runtime.state.car.owner.vehicle[0xc7f0/4]&0xff0000!=0 {
                         let tick=runtime.ticks;checked=Some(tick);
                         let good_lap=runtime.lap.clone();
                         runtime.lap.as_mut().unwrap().next_gate=71;

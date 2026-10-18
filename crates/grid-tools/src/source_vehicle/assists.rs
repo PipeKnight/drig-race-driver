@@ -769,27 +769,28 @@ mod tests {
                     assert_eq!(hundred.state.car.owner.vehicle, default.state.car.owner.vehicle);
                     assert_eq!(hundred.state.car.owner.physical, default.state.car.owner.physical);
                 }
-                // Stability control off: less front grip, a lower yaw rate in a
-                // steady powered turn.
+                // Stability control off: less front grip (Lacetti x0.6), a lower yaw
+                // rate while turning in under power. (Measured in the steady turn
+                // before F417, where on/off differed by under 1 % either way.)
                 let turn = |a: Assists| {
                     let mut r = new(a);
                     let mut yaw = 0f32;
-                    for t in 0..500 {
+                    for t in 0..260 {
                         let c = if t < 190 {
                             throttle
                         } else {
                             Controls {
                                 throttle: 0.7,
-                                steering: 0.5,
+                                steering: 1.,
                                 ..Default::default()
                             }
                         };
                         r.tick(c).unwrap();
-                        if t >= 375 {
+                        if (190..260).contains(&t) {
                             yaw += r.angular_velocity()[1].abs();
                         }
                     }
-                    yaw / 125.
+                    yaw / 70.
                 };
                 let on = turn(Assists::default());
                 let off = turn(Assists {
