@@ -69,3 +69,11 @@ Final pre-F427 checkpoint: quick soak24/24pass120000ticks/6.7min wall,0auto-rese
 Play GRID Graphics Curbs.cmd selects this private curb pilot plus source-alpha surface reflectance; ordinary Play GRID Graphics.cmd keeps source RGB. It requires a graphics executable advertising --surface-rgb-overrides and the private surface-textures01 manifest/source DDS/carrier. Older b9 rejects this opt-in deliberately; don't interpret that as an installed new build until the manifest records promotion.
 
 Extracted actual CMD flow passes five cases with help/spawn stubbed: ordinary, Surfaces, Curbs, unsupported older build, missing files. First draft's nested error exit returned success; flattened guard fixes it, retry passes. No game window/input during these checks.
+
+## F427 integration acceptance
+
+Runtime2c5f9cadd020/SHA2197f800...12ee122 passes727tests, workspace feature/default Clippy, the incoming F417 canonical baseline and24/24quick stress scenarios (120000ticks; seed24 has2known expected losses). Native4K source, seam and forced-RGBA PNGs are byte-identical to the corresponding pre-merge captures. Current6500tick source/pilot pair completes a valid91.208764765slap with4equal physical exits;60unique virtual30FPS frames/ticks6204..6327 inspected. Default static4K car differs from b9 in54pixels/max45/mean0.000029296875byte, cause not isolated; not labelled exact.
+
+The full38-edge source curb perimeter has one non-batch neighbour per edge. All12asphalt edges support the chosen track1 donor; other grass/curb end joins remain separate quality checks. Default renderer excludes batchmaterial, so raw duplicate batch edges are not proof of rendered z-fighting. Private source/validation retained.
+
+For a material-only comparison use **Play GRID Graphics Surfaces.cmd versus Play GRID Graphics Curbs.cmd**: both select the same source-alpha surface reflectance mode. Ordinary Graphics also keeps that optional reflection mask off. Curbs remains a selected private experiment, not a globally accepted neural texture replacement.

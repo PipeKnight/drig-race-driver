@@ -1,5 +1,19 @@
 # GRID engine project log
 
+## G146 — F427 graphics runtime accepted, delivery next (19 October 2026)
+
+Pinned clean runtime Rust2c5f9cadd020/paint-specular executable SHA2197f800c1b30dfba5f4973feeaa8e6670b932b36b2171663c610585c12ee122 from actual app compiler artifact. App release8m02s under shared contention, not FPS evidence. Later commits alter only launcher/Markdown, no Rust delta. Full worktree HEAD at app compile start was not separately sampled; provenance does not invent a full-tree stamp.
+
+Final727tests, both alltargetClippy, raw canonical1ee81525...7267 matching incoming main, fresh24/24quick120000ticks/9.9min wall pass;0auto-resets and known expected losses seed24=2 (do not claim zero losses). All three native4K curb/source/edge/forcedRGBA PNGs equal their respective prior2591 captures BYTE-FOR-BYTE;0BC assets/537images527decoded fallback, not phone parity. Current6500tick/1080p/fixed30FPS source versus seam+60frame pair has4exact physical exits,1valid91.208764765slap.60unique frames at ticks6204..6327, first/last inspected. Default4K car reference against installed b9 differs in54pixels/max45/mean0.000029296875byte: retained as bounded unexplained variation, not image identity.
+
+A temporary read-only topology probe linked the existing grid-formats library with installed Rust1.99 (no new Cargo/runtime source edit or install). All38curb!SQ boundary edges have exactly1non-batch neighbour;12asphalt edges all use track1 donor at U0.9116211 against curb U0.875..0.8754883. Remaining edges include grass/other curb end joins; batchmaterial duplicated edges are excluded by the actual default renderer, not interpreted as visible overlap. Endcap visual quality is still separate. Private curb-all-neighbours-validation01.json/source audit retains full evidence.
+
+Acceptance f427-release-acceptance01.json is complete; installed b9/3e unchanged until guarded promotion. Reuse existing immutable3e b9 archive, no extra copy. Completed owned surface captures deduplicated:41files/0.17GiB linked,0errors, citations preserved, no Cargo target hardlinks. Optional Curbs stays explicit, normal/source texture default unchanged. Next publish checked merge, safe primary fast-forward, guarded dedicated graphics delivery, then reflection work.
+
+Reflection follow-up (read-only now): source_trees::present explicitly expands source billboards for ViewerCamera and streams that mesh to all views. This known approximation also applies to six probe views; camera-only rotation/HDR cube invariance is a useful next experiment before choosing per-view vertex expansion. No GPU proof of that new hypothesis and no foliage/shader change in this accepted build.
+
+
+
 ## G145 — Combined F427 source checks pass; executable acceptance pending (19 October 2026)
 
 Rust snapshot2c5f9cadd020 (later722a981 changes only launcher/Markdown) passes727workspace tests/19result harnesses0failed0ignored. Both alltarget workspace Clippy modes pass: feature8m25 including package-cache lock wait, default9.43s; not a performance benchmark. Installed tooling unchanged, Cargo2jobs/test2threads; other owners' active Cargo/rustc processes preserved during shared-cache contention.
