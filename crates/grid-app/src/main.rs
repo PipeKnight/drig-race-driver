@@ -14,6 +14,8 @@ macro_rules! log_line {
 mod android;
 #[cfg(target_os = "android")]
 mod android_display;
+// Mapping tested on the desktop; the JNI bridge is Android-only.
+mod android_pad;
 #[cfg(target_os = "android")]
 mod android_sensor;
 mod assists;
@@ -2571,8 +2573,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             let variant = menu.variant;
             input::install(&mut app, actions);
+            #[cfg(target_os = "android")]
+            android_pad::install(&mut app);
             if let Some(tilt) = drive_touch {
-                touch_controls::install(&mut app, tilt);
+                // device=auto: a connected pad hides the touch zones and tilt.
+                touch_controls::install(
+                    &mut app,
+                    tilt,
+                    input_settings.device == input::Device::Auto,
+                );
             }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
             perf_test::install(&mut app);

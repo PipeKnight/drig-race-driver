@@ -4,6 +4,8 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.os.Process;
 import android.util.Log;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -17,12 +19,38 @@ public class MainActivity extends GameActivity {
     }
 
     private volatile String logPath;
+    private final PadBridge pads = new PadBridge(this);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         // A lap has no touch input yet (P11); keep the screen on while driving.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        pads.start();
+    }
+
+    @Override
+    protected void onStop() {
+        pads.stop();
+        super.onStop();
+    }
+
+    // Gamepads (P11b): winit would turn stick motion into fake touches and
+    // drop the other axes, so pad events go to android_pad.rs instead and
+    // never reach GameActivity, winit or Android's DPAD/BACK fallbacks.
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        return pads.key(event) || super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        return pads.motion(event) || super.dispatchGenericMotionEvent(event);
     }
 
     @Override

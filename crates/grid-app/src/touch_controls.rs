@@ -178,6 +178,10 @@ pub struct Mobile {
     /// Touches that were down when the layer last changed; ignored until lifted.
     blocked: Vec<u64>,
     pub tilt: Option<Tilt>,
+    /// `device=auto`: a connected gamepad takes over (P11b).
+    pub pad_takeover: bool,
+    /// A gamepad has taken over: zones hidden, touches and tilt ignored.
+    pub pad: bool,
 }
 
 impl Mobile {
@@ -189,13 +193,17 @@ impl Mobile {
             previous: Held::default(),
             blocked: Vec::new(),
             tilt: tilt.map(Tilt::new),
+            pad_takeover: false,
+            pad: false,
         }
     }
 
-    /// Bi-axis raw steering for the action layer; `None` until a reading.
+    /// Bi-axis raw steering for the action layer; `None` until a reading
+    /// and while a gamepad has taken over.
     pub fn tilt_raw(&self) -> Option<f32> {
         self.tilt
             .as_ref()
+            .filter(|_| !self.pad)
             .filter(|t| t.neutral().is_some())
             .map(Tilt::raw)
     }
@@ -213,7 +221,17 @@ fn update(
     replay: Option<Res<crate::replay::Replay>>,
     reading: Option<Res<TiltReading>>,
     time: Res<Time<Real>>,
+    pads: Query<(), (With<crate::input::PlayerPad>, With<Gamepad>)>,
 ) {
+    let pad = mobile.pad_takeover && !pads.is_empty();
+    let pad_changed = pad != mobile.pad;
+    if pad_changed {
+        mobile.pad = pad;
+        log_line!(
+            "drive_input_pad takeover={}",
+            if pad { "on" } else { "off" }
+        );
+    }
     let menu = driving.as_ref().is_none_or(|d| d.paused)
         || post.as_ref().is_some_and(|p| p.active())
         || replay.as_ref().is_some_and(|r| r.owns_input());
@@ -221,7 +239,12 @@ fn update(
     let ids: Vec<u64> = touches
         .as_ref()
         .map_or_else(Vec::new, |t| t.iter().map(|t| t.id()).collect());
-    mobile.blocked = carry_block(&mobile.blocked, &ids, layer != mobile.layer);
+    // Fingers down when a pad comes or goes wait until lifted, like a layer change.
+    mobile.blocked = carry_block(
+        &mobile.blocked,
+        &ids,
+        layer != mobile.layer || pad_changed,
+    );
     mobile.layer = layer;
     mobile.manual = driving.as_ref().is_some_and(|d| {
         d.runtime.assists.transmission == grid_tools::source_vehicle::assists::Transmission::Manual
@@ -231,7 +254,7 @@ fn update(
         .next()
         .map(|w| Vec2::new(w.width(), w.height()));
     let points = match (touches.as_ref(), size) {
-        (Some(touches), Some(size)) if size.x > 0. && size.y > 0. => touches
+        (Some(touches), Some(size)) if size.x > 0. && size.y > 0. && !mobile.pad => touches
             .iter()
             .filter(|t| !mobile.blocked.contains(&t.id()))
             .map(|t| (t.position().x / size.x, t.position().y / size.y))
@@ -258,6 +281,9 @@ struct ZoneNode(usize);
 
 #[derive(Component)]
 struct TiltMarker;
+
+#[derive(Component)]
+struct TiltBar;
 
 const IDLE: Color = Color::srgba(1., 1., 1., 0.10);
 const HELD: Color = Color::srgba(1., 1., 1., 0.32);
@@ -319,6 +345,7 @@ fn spawn(
                     height: percent(2.),
                     ..default()
                 },
+                TiltBar,
                 BackgroundColor(IDLE),
                 GlobalZIndex(-1),
                 UiTargetCamera(camera),
@@ -343,16 +370,23 @@ fn present(
     mobile: Res<Mobile>,
     mut zones: Query<(&ZoneNode, &mut Visibility, &mut BackgroundColor)>,
     mut marker: Query<&mut Node, With<TiltMarker>>,
+    mut bar: Query<&mut Visibility, (With<TiltBar>, Without<ZoneNode>)>,
 ) {
     let tilt = mobile.tilt.is_some();
-    for (node, mut visibility, mut colour) in &mut zones {
-        let zone = &ZONES[node.0];
-        let show = shown(zone, mobile.layer, mobile.manual, tilt);
-        visibility.set_if_neq(if show {
+    let hidden = |show: bool| {
+        if show {
             Visibility::Inherited
         } else {
             Visibility::Hidden
-        });
+        }
+    };
+    for mut visibility in &mut bar {
+        visibility.set_if_neq(hidden(!mobile.pad));
+    }
+    for (node, mut visibility, mut colour) in &mut zones {
+        let zone = &ZONES[node.0];
+        let show = !mobile.pad && shown(zone, mobile.layer, mobile.manual, tilt);
+        visibility.set_if_neq(hidden(show));
         let held = show && mobile.held.down(zone.button);
         colour.set_if_neq(BackgroundColor(if held { HELD } else { IDLE }));
     }
@@ -393,8 +427,10 @@ fn ui_scale(
     }
 }
 
-pub fn install(app: &mut App, tilt: Option<tilt::Settings>) {
-    app.insert_resource(Mobile::new(tilt))
+pub fn install(app: &mut App, tilt: Option<tilt::Settings>, pad_takeover: bool) {
+    let mut mobile = Mobile::new(tilt);
+    mobile.pad_takeover = pad_takeover;
+    app.insert_resource(mobile)
         .add_systems(
             PreUpdate,
             update.after(InputSystems).before(crate::input::sample),
@@ -492,5 +528,10 @@ mod tests {
         m.tilt.as_mut().unwrap().update(Some([1., 0., 0.]), 0.016);
         assert_eq!(m.tilt_raw(), Some(0.5));
         assert_eq!(Mobile::new(None).tilt_raw(), None);
+        // A gamepad that took over silences tilt until it disconnects.
+        m.pad = true;
+        assert_eq!(m.tilt_raw(), None);
+        m.pad = false;
+        assert_eq!(m.tilt_raw(), Some(0.5));
     }
 }
