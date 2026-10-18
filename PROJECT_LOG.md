@@ -25,7 +25,12 @@ C: free went to 125.3 GiB. Three test builds were running in live worktrees duri
 
 AGENTS.md now has the rule.
 
-Not done: the pre-move `%TEMP%\claude` session folders, about 7.4 GiB of task-output logs, Ghidra copies and `vd-target`, all dated 16.10 or earlier. The permission classifier refused deleting other sessions' scratch folders, so the owner decides.
+Pre-move `%TEMP%\claude` session folders: task-output logs, Ghidra copies and `vd-target`, all dated 16.10 or earlier. The permission classifier first refused deleting other sessions' scratch folders. After the owner's approval ("Да, удали старые временные папки сессий"), 20 folders were deleted:
+- `C--Users-debros-OneDrive-*`;
+- `C--Users-debros-AppData-Roaming-Claude-scratch-workspaces-*`;
+- `vd-target`.
+
+That freed 6.81 GiB, and C: had 131.7 GiB free.
 
 Not ours, untouched: NVIDIA DXCache 64.3 GiB (driver shader cache, growing since April); Google Play Games `userdata.img` (512 GiB logical, sparse, 0.66 GiB on disk); Codex worktrees 18.0 GiB.
 
