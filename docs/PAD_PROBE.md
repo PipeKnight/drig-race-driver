@@ -17,7 +17,7 @@
 
 The owner ran `Тест геймпада.cmd` on 19 October 2026. The pad was wired by USB, the probe was the F415 build (sha256 f355077d…ec34), and its window had the focus.
 
-- **At rest** (first 3 s, untouched): no axis or button event. All four stick axes read 0.0000; every button and both triggers have sent no event, so the game reads them as released. So there is no drift.
+- **At rest** (first 3 s, untouched): no axis or button event. All four stick axes read 0.0000; every button and both triggers have sent no event, so the game reads them as released. No stick drift above the probe's filter (caveat below).
 - **Caveat: that build filtered.** It built gilrs with its default filters, while bevy_gilrs uses `with_default_filters(false)` [V bevy_gilrs 0.19.1 `lib.rs`]. The default filters add a radial stick dead zone (the driver's, or gilrs's `DEFAULT_DEADZONE` 0.1 when WGI gives none, as here [V gilrs-core 0.6.8 `windows_wgi`: `deadzone: None`]) and a jitter filter. So "0.0000 at rest" means **any stick drift is below 0.1**, not that the raw value the game reads is 0. Where that matters: preset 4 gives steering a 0.2 dead zone (F321), so stick drift below 0.1 cannot steer.
 - **Triggers:** LT reached 0.9956 and RT 1.0000. 0.9956 = 255/256, the original's XInput trigger scale `b/256` (maximum 0.996, docs/PLATFORMS_AND_INPUT_RESEARCH.md); RT's 1.0000 presumably comes from WGI's own scaling [I]. Neither trigger rests at −1: WGI reports them as 0..1 `ButtonChanged` values, and the smallest value seen while moving was 0.0414.
 - **Sticks:** full −1..1 on all four axes. Small off-axis values while moving one axis (for example LeftStickY −0.06 while LeftStickX went to −1) are normal cross-talk.
