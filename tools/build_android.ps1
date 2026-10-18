@@ -28,6 +28,12 @@ param(
     # -Profile: grid-app feature `profile` (on-device per-system tables in the
     # log, docs/PERFORMANCE.md "Phone bisection"); the APK name ends in -profile.
     [switch]$Profile,
+    # -Event: the bundled event profile (push_android_data.ps1 -Event); a
+    # non-default event adds -<event> to the APK name.
+    [ValidateSet('donington', 'drift-nurburgring')]
+    [string]$Event = 'donington',
+    # The private AI characteristics table copied into a drift bundle.
+    [string]$Characteristics = (Join-Path $PSScriptRoot '..' | Join-Path -ChildPath 'local' | Join-Path -ChildPath 'ai-driver-characteristics.tsv'),
     [string]$GameRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Grid'
 )
 $ErrorActionPreference = 'Stop'
@@ -62,7 +68,7 @@ function Stage-Bundle([string]$bundleRoot) {
     if ($LASTEXITCODE -ne 0) { throw "$bundleRoot is not ignored by git; refusing to stage game data there" }
     $data = Join-Path $bundleRoot 'grid-data'
     if (Test-Path -LiteralPath $bundleRoot) { Remove-Item -LiteralPath $bundleRoot -Recurse -Force }
-    & powershell -NoProfile -File (Join-Path $root 'tools\push_android_data.ps1') -GameRoot $GameRoot -Stage $data -NoAutopilot | Out-Host
+    & powershell -NoProfile -File (Join-Path $root 'tools\push_android_data.ps1') -GameRoot $GameRoot -Stage $data -NoAutopilot -Event $Event -Characteristics $Characteristics | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'staging the game data failed' }
     $prefix = $data.TrimEnd('\').Length + 1
     $files = Get-ChildItem -LiteralPath $data -Recurse -File -Force |
@@ -117,6 +123,7 @@ try {
     $outDir = Join-Path $root 'local\android\apk'
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
     $variant = if ($Profile) { '-profile' } else { '' }
+    if ($bundle -and $Event -ne 'donington') { $variant = "-$Event$variant" }
     $name = if ($bundle) { "grid-$($env:GRID_BUILD_REVISION)-bundled-PRIVATE$variant-debug.apk" } else { "grid-$($env:GRID_BUILD_REVISION)$variant-debug.apk" }
     $out = Join-Path $outDir $name
     Copy-Item -LiteralPath $apk -Destination $out -Force
@@ -131,6 +138,7 @@ try {
         so_bytes = (Get-Item -LiteralPath $so).Length
         bundled_data = $bundle
         profile = [bool]$Profile
+        event = $(if ($bundle) { $Event } else { $null })
         rustc = (& rustc --version)
         ndk = $ndk
         gradle = $gradle

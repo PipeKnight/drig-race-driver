@@ -81,14 +81,15 @@ fn spawn(
         return;
     };
     *done = true;
-    // Top edge between the P11 II button (x <= 55 %) and the race HUD's
-    // position panel (top right).
+    // Right edge under the original-look HUD's race position (F383) and
+    // above its dial; the top centre holds the Drift Battle score panel and
+    // the P11 II / CENTRE buttons (a phone render showed the overlap).
     commands.spawn((
         FpsText,
         Node {
             position_type: PositionType::Absolute,
-            left: percent(57.),
-            top: px(4.),
+            right: percent(1.),
+            top: percent(12.),
             padding: UiRect::axes(px(6.), px(2.)),
             ..default()
         },
