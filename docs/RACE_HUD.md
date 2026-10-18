@@ -280,6 +280,8 @@ the repository. Private evidence: worktree `local/race-hud-look/` (`dial2-tree.t
 - Touch zones (P11, AUTHORED): they fill the lower half's sides, so with touch controls the minimap
   and the dial move up to end at 48 % screen height, and the app's help strip moves under the top
   buttons. Without touch the help strip is a small bottom-centre line (it used to cover the lap group).
+- Phone: `tools/push_android_data.ps1` (and so `build_android.ps1 -BundleData`) now also copies
+  `Osd/` and the five OSD fonts (about 3.6 MB); without them the app falls back to the panels.
 - Not ported: boost, drift groups, chat, penalty pills, driver name tags, offers, the brake light,
   the needle blur sweep, the stacker re-flow (hidden groups leave their gap), the cutscene/post-race
   and pause-menu art (front-end packages, not this scene).

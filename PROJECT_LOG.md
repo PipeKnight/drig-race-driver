@@ -1,5 +1,40 @@
 # GRID engine project log
 
+F383 Race HUD in the original's look: the OSD scene `Osd/dial2.pssg`, its fonts and animations read at run time (2026-10-18, Claude Code; owner-approved task). Details: docs/RACE_HUD.md section 6. Evidence: worktree gracious-wilson-34e056 `local/race-hud-look/` (`dial2-tree.txt`, `osd-dump.txt`, `decomp/`, `tex/` private texture decodes, `app/data/*.png` renders and logs, `checks/`).
+- Research [D]:
+  - `Osd/dial2.pssg` holds the whole HUD as one scene: 423 nodes (244 quads/meshes), 206 shader instances of 11 effect files, 53 textures, two DXT1 cubemaps, 101 Bezier animations with named time ranges, and the camera `camera_dialcam` (vertical FOV 12.3068 degrees at z 3320).
+  - Stored positions are the groups' off-screen positions; the `on` ranges slide them in.
+  - The five OSD fonts carry `NEFONTMETRICS`/`NEGLYPHMETRICS`/`NEGLYPHKERN`; `sceneconfig.xml` assigns each text node a font.
+  - grid.exe (decompiled privately): the `aspectratio` attach plays the layout range named `%1.2f` of the aspect cut to three characters (0x8D5CB0); a missing name changes nothing (0x8D5900), so 20:9 keeps the 16:9 layout.
+- Change:
+  - grid-formats `osd`: scene, materials, meshes (float/half streams), cubemaps, animations (Bezier keys, ranges), camera, `sceneconfig.xml` text fonts, fonts with metrics and kerning. PSSG reader: `NEANIMKEYS` read as raw data.
+  - grid-app `osd_scene` (+ `osd.wgsl`, `osd_display.wgsl`): the scene renders through its camera into a transparent image, drawn as the lowest UI node with premultiplied blending. The pause menu, post-race, front end and touch zones stay above it. Animation sampling, metric text layout, one shader for the effect families [I].
+  - `race_osd` drives texts and ranges from the shared `race_hud::HudView`: lap group, position and split pills, dial (speed digits, gear, needle, red zone, lights, unit, odometer, pedals), countdown box, wrong-way pill, flag.
+  - Authored minimap: the route line plus the original player and opponent markers.
+  - The OSD is off in the pause menu, post-race, replays and the front end.
+  - `race_hud` keeps the plain panels only as the fallback when the files do not load.
+  - `tyre_smoke` now queries the ViewerCamera (a second `Camera3d` exists).
+  - `tools/push_android_data.ps1` also bundles `Osd/` and the five fonts (about 3.6 MB).
+- Authored layout: beyond 16:9 the groups follow the layout's own slope (297 units per aspect unit). With touch zones (P11) the minimap and dial end at 48 % screen height, and the help strip sits under the top buttons. Without touch, the help strip is a small bottom-centre line.
+- Checks [V], release, cargo/rustc 1.99.0, on the tree rebased onto 03a8fa4 (F381):
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 623 passed, 0 failed, 0 ignored. After the clippy-only edits, the grid-formats and grid-app tests were rerun: grid-formats 61 and grid-app 169 passed, 0 failed.
+  - `cargo clippy --workspace --all-targets --release -- -D warnings` clean; `cargo ndk -t arm64-v8a -P 31 clippy --release --lib -p grid-app -- -D warnings` clean.
+  - Solo identity (no DF01) sha256 aad9a07a…e41b, unchanged; `grid-soak quick` 20/20.
+  - After the rebase onto b80a72c (F382, grid-tools prop loading only): clippy workspace clean, grid-app tests 169 passed, 0 failed, solo identity aad9a07a…e41b.
+  - After the rebase onto 22363aa (Codex graphics G113, main.rs/graphics.rs/car numbers): clippy workspace clean, grid-app tests 177 passed, 0 failed, solo identity aad9a07a…e41b, 20:9 touch render unchanged (`r6-20x9-touch.png`).
+  - Offscreen renders inspected (Donington, 11 AI, autopilot, tick 1500): 1920 × 1080, 2400 × 1080, and 2400 × 1080 with touch zones; no zone overlapped.
+- Failed first:
+  - Text set from the quads alone put `.` and `:` at the top of the line; fixed by finding the fonts' metric tables.
+  - The red zone showed its whole quad until its ramp map was decoded (red = shape, green = angle).
+  - An empty text mesh tripped Bevy's mesh allocator; empty texts now use one degenerate triangle.
+  - A first commit stopped mid-rebase on a missing identity.
+- Not done:
+  - the original's post-race and pause-menu art (front-end packages, not this scene);
+  - boost, drift groups, penalty pills and name tags;
+  - the stacker re-flow, the needle-blur sweep and the brake light;
+  - the shaders are interpretations.
+  - Not checked on a phone. Playable not rebuilt (coordinator).
+
 ## G113 — Source numbers accepted through a full4K lap; graphics playable refreshed (18 October 2026)
 
 Repeated off/source6500tick native4K captures finish0errors, each one valid89.955257484s lap; four final physics/handling/deformation/lap lines equal excluding walltime. Final images inspected,01roof in saved quarter-turn orientation. Known nilUUID warning only. Private numbers-source-f381-full4k02-validation.json contains both image/log hashes and states. Prior600s timeout retained. Walltimes449.49/672.89s under changing CPU load do not establish performance. F381 source31e74b689b19/SHAbee2138a... is the verified executable.

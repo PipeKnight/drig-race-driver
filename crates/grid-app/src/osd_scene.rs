@@ -437,11 +437,12 @@ impl Osd {
     }
     /// A flat colour material (`osd3d_flat_colour`) for authored additions.
     pub fn colour_material(&self, colour: Vec3, alpha: f32) -> OsdMaterial {
-        let mut params = Params::default();
-        params.colour = colour.extend(alpha);
-        params.b.x = 1.;
-        params.c.x = 1.;
-        params.c.w = 1.;
+        let params = Params {
+            colour: colour.extend(alpha),
+            a: Vec4::ZERO,
+            b: Vec4::new(1., 0.01, 1., 1.),
+            c: Vec4::new(1., 0., 0., 1.),
+        };
         OsdMaterial {
             diffuse: Handle::default(),
             glow: Handle::default(),

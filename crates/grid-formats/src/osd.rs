@@ -252,9 +252,7 @@ fn children<'t>(tree: &'t Tree<'_>, node: usize, name: &'t [u8]) -> impl Iterato
 }
 
 fn floats_be(data: &[u8]) -> Vec<f32> {
-    data.chunks_exact(4)
-        .map(|c| f32::from_be_bytes(c.try_into().unwrap()))
-        .collect()
+    data.as_chunks::<4>().0.iter().map(|c| f32::from_be_bytes(*c)).collect()
 }
 
 /// Shader instances with their parameters named from the shader group.
@@ -345,8 +343,10 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
                 let raw = &data[at..at + width];
                 match format {
                     b"half2" | b"half4" => raw
-                        .chunks_exact(2)
-                        .map(|c| half_to_f32(u16::from_be_bytes([c[0], c[1]])))
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|c| half_to_f32(u16::from_be_bytes(*c)))
                         .collect(),
                     _ => floats_be(raw),
                 }
@@ -368,10 +368,7 @@ fn sources(tree: &Tree<'_>) -> Result<BTreeMap<String, Mesh>> {
             .next()
             .and_then(|d| tree.nodes[d].data)
             .unwrap_or_default();
-        mesh.indices = data
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
-            .collect();
+        mesh.indices = data.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
         let n = mesh.positions.len();
         if mesh.indices.iter().any(|&i| usize::from(i) >= n)
             || (!mesh.uvs.is_empty() && mesh.uvs.len() != n)
