@@ -39,6 +39,7 @@ public class LauncherActivity extends Activity {
 
     private ProgressBar bar;
     private TextView status;
+    private boolean gameStarted;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -84,6 +85,14 @@ public class LauncherActivity extends Activity {
         }
         ImportFlow.detach(this);
         super.onDestroy();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // An import that finished while the app was in the background could
+        // not start the game then (background activity starts are blocked).
+        ImportFlow.resumed(this);
     }
 
     @Override
@@ -201,6 +210,11 @@ public class LauncherActivity extends Activity {
     }
 
     void startGame() {
+        // Once: the import's worker and onResume may both get here.
+        if (gameStarted) {
+            return;
+        }
+        gameStarted = true;
         startActivity(new Intent(this, MainActivity.class));
         finish();
     }

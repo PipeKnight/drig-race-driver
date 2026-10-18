@@ -93,6 +93,13 @@ final class ImportFlow {
         }
     }
 
+    static void resumed(LauncherActivity activity) {
+        if (shown == activity && worker == null && manifest != null && dataDir != null
+                && GridImporter.upToDate(dataDir, manifest)) {
+            activity.startGame();
+        }
+    }
+
     static void detach(LauncherActivity activity) {
         synchronized (ImportFlow.class) {
             if (shown == activity) {
