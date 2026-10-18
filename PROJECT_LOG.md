@@ -1,5 +1,15 @@
 # GRID engine project log
 
+## G140 — Diagnose curb seam and test a local RGB transition (19 October 2026)
+
+Read current journal/status; preserve clean graphics sourcee4fa336 and peer primary work. Extended grid-surface-texture with bounded read-only single/all triangle attribute audit. Exact source locator logical lines unchanged; real triangles/draws succeed, bounds/parse negatives exit1, release probe Clippy clean. Initial locator byte-text check failed only LF/CRLF; normalized lines pass. Private Python audit initially shadowed regex module with a dict, corrected. No new tool installed or original-install writes.
+
+[CURB_SURFACE_SEAMS.md](docs/CURB_SURFACE_SEAMS.md): source and both upscale controls already show junction;12 shared exact-world edges across453road/56curb triangles have identical normals. Six CPU rays each have one selected hit; this is bounded evidence against a gap/overlap at the sampled strip, not circuit-wide proof. Distinct texture bindings/UV origins, scale and small V-phase differences explain a material transition candidate. No broad import/normal/physics fix justified.
+
+Two private RGB edge pilots use purchased asphalt donor in a narrow smoothstep strip, preserve white line/paint base bytes, keep source packed-alpha restoration and all shared upload paths. Mapping0.7 authored/approximate. Both native4K renders pass; inspected native comparison has a less conspicuous join, still not an invisible/source-identical seam. Motion/second-view/RGBA acceptance pending. Stable installed b9/3e remains unchanged; no default/launcher adoption. Source candidate2591 remains unpromoted. No camera or weather detour.
+
+
+
 ## G139 — CSP/PP research and reflection status (18 October 2026)
 
 Owner asks for CSP-like graphics ambition and explanation of CSP + PP filters. Read public primary CSP configuration/wiki/Lua SDK, default WeatherFX and author Pure pages online; independently summarized in [CSP_GRAPHICS_RESEARCH_RU.md](docs/CSP_GRAPHICS_RESEARCH_RU.md). Distinguish actual lighting/material/reflection passes from HDR exposure/tonemapping and subsequent grading; Pure is a separate weather/graphics implementation. Public configs include hidden/commented options and obsolete SSGI, not evidence of universal current-preview capabilities or RTX. No copied proprietary code/resources, install or rendering changes.

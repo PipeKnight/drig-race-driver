@@ -3,8 +3,11 @@ use grid_formats::{material, mesh, pssg, scene};
 use std::{error::Error, path::Path};
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 2 {
-        return Err("usage: grid-surface-texture GAME_ROOT TEXTURE_ID".into());
+    if args.len() != 2 && !(args.len() == 4 && args[1] == "--triangle") {
+        return Err(
+            "usage: grid-surface-texture GAME_ROOT TEXTURE_ID | GAME_ROOT --triangle DRAW TRIANGLE|all"
+                .into(),
+        );
     }
     let path = Path::new(&args[0]).join("tracks/europe/donington/tracksplit.pssg");
     if path.metadata()?.len() > 256 * 1024 * 1024 {
@@ -15,6 +18,57 @@ fn run() -> Result<(), Box<dyn Error>> {
     let bindings = material::read_texture_bindings(&tree)?;
     let meshes = mesh::read_meshes(&tree)?;
     let draws = scene::read_static_draws(&tree, &meshes)?;
+    if args.len() == 4 {
+        let draw = draws
+            .iter()
+            .find(|d| d.id == args[2].as_bytes())
+            .ok_or("selected draw absent")?;
+        let triangles = draw.indices.as_chunks::<3>().0;
+        let selection = if args[3] == "all" {
+            if triangles.len() > 50_000 {
+                return Err("draw exceeds diagnostic triangle bound".into());
+            }
+            0..triangles.len()
+        } else {
+            let index: usize = args[3].parse()?;
+            if index >= triangles.len() {
+                return Err("triangle outside selected draw".into());
+            }
+            index..index + 1
+        };
+        let source = &meshes[draw.source];
+        for triangle in selection {
+            let ix = &triangles[triangle];
+            println!(
+                "surface_triangle draw={:?} material={:?} triangle={triangle} indices={ix:?} scope=static-source-not-GPU-visibility",
+                String::from_utf8_lossy(draw.id),
+                String::from_utf8_lossy(draw.material)
+            );
+            for &index in ix {
+                let i = usize::from(index);
+                println!(
+                    "surface_vertex index={i} world={:?} uv0={:?} uv_extra={:?} argb={:?} normal={:?}",
+                    scene::transform_point(&draw.transform, source.positions[i]),
+                    source.texcoords.get(i),
+                    source
+                        .additional_texcoords
+                        .iter()
+                        .map(|uv| uv.get(i))
+                        .collect::<Vec<_>>(),
+                    source.colors_argb.get(i),
+                    source.normals.get(i)
+                );
+            }
+        }
+        for b in bindings.iter().filter(|b| b.shader == draw.material) {
+            println!(
+                "surface_binding sampler={:?} texture={:?}",
+                String::from_utf8_lossy(b.sampler),
+                String::from_utf8_lossy(b.texture)
+            );
+        }
+        return Ok(());
+    }
     let mut count = 0;
     for b in bindings.iter().filter(|b| {
         b.texture == args[1].as_bytes()
