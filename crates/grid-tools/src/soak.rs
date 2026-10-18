@@ -135,11 +135,11 @@ pub struct Scenario {
 const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
 /// Quick seeds 1..=12 keep their F326 routes; 13..=16 run Istanbul Park and
 /// 17..=20 Long Beach (in the default set since its barrier stand-ins were
-/// fixed, docs/LONG_BEACH.md section 5). Seeds 21..=24 run Jarama; they stay out of
-/// the default set until its two recorded piece losses are fixed (docs/JARAMA.md
-/// section 5); run them with `--seeds 21..24`. Seeds 25..=28 run Yokohama,
-/// also outside the default set for now (docs/YOKOHAMA.md); `--seeds 25..28`.
-pub const QUICK_SEEDS: (u64, u64) = (1, 20);
+/// fixed, docs/LONG_BEACH.md section 5) and 21..=24 Jarama (in the default set
+/// since its two piece losses count as expected losses,
+/// docs/ROBUSTNESS_RESEARCH.md). Seeds 25..=28 run Yokohama, outside the
+/// default set for now (docs/YOKOHAMA.md); `--seeds 25..28`.
+pub const QUICK_SEEDS: (u64, u64) = (1, 24);
 
 impl Scenario {
     /// Pure function of (seed, profile, availability, max cars).
@@ -627,6 +627,22 @@ pub struct Session {
     pub auto_reset: PlayerReset,
     /// Auto-resets performed in the whole session.
     pub auto_resets: u64,
+    /// Expected losses: world bodies that fell below the world after the
+    /// original's own static geometry pressed them down at their spawn pose
+    /// (`PropWorld::pressed_down_at_spawn`, docs/ROBUSTNESS_RESEARCH.md).
+    /// They are reported, not failed. Body indices are reused after a reset,
+    /// so each entry carries its segment (`resets` at the time).
+    pub expected_losses: std::cell::RefCell<Vec<ExpectedLoss>>,
+}
+
+/// A body counted as an expected loss: segment, session tick, body and position.
+#[derive(Clone, Debug)]
+pub struct ExpectedLoss {
+    pub segment: u64,
+    pub tick: u64,
+    pub body: usize,
+    pub position: [f32; 3],
+    pub pressed: crate::dynamic_props::Pressed,
 }
 
 /// Snapshot used by the chaos driver and the failure checks.
@@ -808,6 +824,7 @@ impl Session {
             resets: 0,
             auto_reset: PlayerReset::default(),
             auto_resets: 0,
+            expected_losses: Default::default(),
         })
     }
 
@@ -975,6 +992,39 @@ impl Session {
         self.race.as_ref().map_or(1, |r| r.multi.cars.len())
     }
 
+    /// Whether prop body `i`, found below the world or falling through it,
+    /// is an expected loss (see `expected_losses`); records it the first time.
+    fn expected_loss(&self, i: usize, position: [f32; 3]) -> bool {
+        if self
+            .expected_losses
+            .borrow()
+            .iter()
+            .any(|l| l.body == i && l.segment == self.resets)
+        {
+            return true;
+        }
+        let (Some(props), Some(geometry)) = (self.props(), &self.geometry) else {
+            return false;
+        };
+        let car = match &self.race {
+            Some(race) => &race.multi.cars[0],
+            None => &self.runtime,
+        };
+        let Ok(Some(pressed)) =
+            props.pressed_down_at_spawn(i, car.track(), car.surfaces(), geometry.query())
+        else {
+            return false;
+        };
+        self.expected_losses.borrow_mut().push(ExpectedLoss {
+            segment: self.resets,
+            tick: self.total_ticks,
+            body: i,
+            position,
+            pressed,
+        });
+        true
+    }
+
     /// Distance (xz) to the nearest route centreline point and its height.
     fn line_note(&self, position: [f32; 3]) -> String {
         self.centreline
@@ -1024,6 +1074,12 @@ impl Session {
                 ));
             }
             let position = [pose[12], pose[13], pose[14]];
+            let lost = (0..3)
+                .any(|k| position[k] < self.bounds[k] || position[k] > self.bounds[k + 3])
+                || velocity[1] < -MAX_FALL_SPEED;
+            if lost && i >= snapshot.cars && self.expected_loss(i, position) {
+                continue;
+            }
             if (0..3).any(|k| position[k] < self.bounds[k] || position[k] > self.bounds[k + 3]) {
                 let way = if position[1] < self.bounds[1] {
                     "fell below the world"
@@ -1791,7 +1847,7 @@ mod tests {
         let istanbul: Vec<_> = (13..=16).map(quick).collect();
         assert!(istanbul.iter().all(|s| s.route == ISTANBUL_PARK));
         assert_eq!(istanbul.iter().map(|s| s.cars).collect::<Vec<_>>(), [2, 12, 9, 4]);
-        assert_eq!(QUICK_SEEDS, (1, 20));
+        assert_eq!(QUICK_SEEDS, (1, 24));
         let long_beach: Vec<_> = (17..=20).map(quick).collect();
         assert!(long_beach.iter().all(|s| s.route == LONG_BEACH));
         assert_eq!(
