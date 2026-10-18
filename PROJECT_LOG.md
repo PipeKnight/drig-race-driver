@@ -1,5 +1,10 @@
 # GRID engine project log
 
+F396 Phone bisection APKs built from 5f86252 (F395) (2026-10-18, Claude Code): `tools/build_android.ps1 -BundleData`, then `-BundleData -Profile`. Both are labelled `-dirty` only because docs/PERFORMANCE.md had an unstaged section number (pushed afterwards as ad81473); the code is 5f86252. cargo/rustc 1.99.0, NDK 30.0.16248370, Gradle 9.8.1, JDK 21.0.12.1+1; bundle version 85acf6d9… (395 files). Not committed (private data); not yet run on the phone.
+- Normal: `local/android/apk/grid-5f862525392c-dirty-bundled-PRIVATE-debug.apk` (worktree focused-torvalds-7a0b54), 235,805,681 bytes, sha256 a5807779cc746257e14be6f9a07a9f659bf7e23ddeb6d310435f9d3fab67be94, built in 641 s.
+- Profile: `local/android/apk/grid-5f862525392c-dirty-bundled-PRIVATE-profile-debug.apk`, 241,898,513 bytes, sha256 87ecf86f670d15924452c5c514bbdcbbb4c21dcd01623f9308a6dbabc48caf5f, built in 481 s.
+- Next: the owner runs the normal APK with Race Options → Performance test → Auto cycle = On (drive about 2 minutes), then the profile APK (about 20 s in Race Options, then about a minute of driving), and sends both Download/GRID-Reassembly logs.
+
 F395 Phone bisection tools: Performance test screen, on-device per-system profile APK, buffered Android log (2026-10-18, Claude Code; coordinator's request after F392 left the phone at about 30 FPS). Details: docs/PERFORMANCE.md "Phone bisection (F395)". Evidence: worktree focused-torvalds-7a0b54 `local/perf/measure/` (perftest-auto, sim-none/auto, profile-desktop), `local/perf/shots/`.
 - Phone logs [V] (owner, APK dca690b773e4, log-20261018-093253/-093621, kept privately): render 2308 × 1080, display_hz 120, mean 36 and 31 FPS. The front end with `sim_ticks_per_s=0.0` sits at 30.5 FPS with `max_ms` exactly 33.33, so the frame's work is real and not simulation; AutoNoVsync gave the same [I: probably a Fifo fallback]. The desktop cannot show the phone's cost.
 - Performance test (normal APK; `perf_test.rs`, AUTHORED diagnostics). Race Options gets a first item, Performance test, with live switches, never saved:
