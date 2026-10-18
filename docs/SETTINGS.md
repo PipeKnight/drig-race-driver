@@ -40,6 +40,8 @@ Grammar:
 | `[ai]` | `difficulty` (0..1 or `normal`), `catchup` (`rd_N_star`, `on` = `rd_3_star`, `off`), `choreographer`, `mistakes` (`on`/`off`) | 0.606, `rd_3_star`, on, on (AI_DRIVER_PORT.md, "Mistakes, failures and race pacing") | `--ai` |
 | `[sound]` | `effects` | 0..100, percent (default 100): the pause menu's Effects Volume, engine and tyre sound | none |
 | `[front_end]` | `show` | `on` (default) / `off`: the Race Options front end with Driver Aids before the race ([DRIVER_AIDS.md](DRIVER_AIDS.md)); never shown for scripted or autopilot runs | none |
+| `[front_end]` | `event_menu` | `on` (default) / `off`: Android starts in the event menu ([EVENT_MENU.md](EVENT_MENU.md)); off = the old direct start. The desktop opens the menu with `--menu` only | none |
+| `[event]` | `type`, `route`, `car`, `laps`, `opponents`, `time`, `direction` | the event menu's last choice, written by the menu and read only by it ([EVENT_MENU.md](EVENT_MENU.md)) | none |
 | `[osd]` | `lap_timer`, `position`, `minimap`, `dials` | `on` (default) / `off`: the pause menu's Screen Setup, the HUD's lap group, race position, minimap and dial (docs/RACE_HUD.md) | none |
 | `[osd]` | `fps` | `on` / `off`: frame-rate counter at the top (FPS, mean and worst frame time of the last second) and one `frame_stats` log line per second; default `on` on Android, `off` on the desktop, where F9 toggles it ([ANDROID.md](ANDROID.md) "Frame rate") | none |
 | `[video]` | `render_height` | `native` or rows 240..4320: the 3D view renders at most this many rows (window aspect) and is stretched over the window; HUD and touch zones are scaled with it; never above native. Default 1080 on Android, `native` on the desktop ([ANDROID.md](ANDROID.md) "Frame rate") | none |
@@ -119,6 +121,8 @@ Verified [V] on 2026-10-16 (evidence `local/p5-portability/` in the main checkou
 CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_directions` reads 119 `.rdata` words named by an address recipe that was traced once from the `C7DAE0` initializer. Its output is byte-identical to the prepared `local/body-contact-directions.bin`. The profiles say `body_contacts = derive`. `grid-private-parameters GRID_EXE BP01_OUT DF01_OUT [CD01_OUT]` writes all three files.
 
 ## 5. Launchers
+
+`Play GRID.cmd [GAME_FOLDER]` runs `grid-app --menu`: the in-game event menu (Race Day, [EVENT_MENU.md](EVENT_MENU.md)); leaving a race returns to it. The launchers below start their event directly, as before.
 
 `Play GRID Prototype.cmd [GAME_FOLDER] [PROFILE]` runs `grid-app --settings settings\PROFILE.ini` (default `practice`). The other launchers are thin wrappers that pass a profile; since F359 none needs a prepared private file:
 

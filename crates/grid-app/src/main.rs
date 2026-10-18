@@ -34,6 +34,7 @@ mod damage_parts;
 mod drift_event;
 mod dynamic_props;
 mod engine_sound;
+mod event_menu;
 mod flashback;
 mod free_look;
 mod geometry_ray;
@@ -1079,7 +1080,30 @@ fn append_entities(
 fn main() {
     #[cfg(target_os = "android")]
     android::init();
-    if let Err(error) = run() {
+    #[cfg(not(target_os = "android"))]
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // No command line on Android: the event menu, or the race it chose.
+    #[cfg(target_os = "android")]
+    let args = event_menu::android_args();
+    // `--menu`: the event menu and the races it starts, each its own
+    // process (event_menu.rs).
+    #[cfg(not(target_os = "android"))]
+    if args.first().is_some_and(|a| a == "--menu") {
+        match event_menu::supervise(&args[1..]) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("grid-app: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    let result = if args.iter().any(|a| a == "--menu-screen") {
+        let rest: Vec<String> = args.into_iter().filter(|a| a != "--menu-screen").collect();
+        event_menu::screen(&rest)
+    } else {
+        run(args)
+    };
+    if let Err(error) = result {
         eprintln!("grid-app: {error}");
         #[cfg(target_os = "android")]
         {
@@ -1090,6 +1114,22 @@ fn main() {
         }
         std::process::exit(1);
     }
+}
+/// The game folder: `[game] root` / `--game-root`, else on Android the data
+/// pushed or imported into the app's storage (docs/ANDROID.md), else the
+/// Steam libraries.
+fn game_root(root: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(match root {
+        Some(root) => root,
+        None if cfg!(target_os = "android") => settings::data_dir().join("Grid"),
+        None => grid_tools::install::discover(&grid_tools::install::steam_roots()).map_err(
+            |tried| {
+                format!(
+                    "GRID was not found in the Steam libraries ({tried:?}); set [game] root in the settings file or pass --game-root"
+                )
+            },
+        )?,
+    })
 }
 fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error::Error>> {
     let bytes = read(&root.join(route.file("track.jpk")))?;
@@ -1267,9 +1307,8 @@ fn series_seed() -> u32 {
                 .map_or(0, |d| d.as_millis() as u32)
         })
 }
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     println!("prototype_build revision={BUILD_REVISION}");
-    let args: Vec<String> = std::env::args().skip(1).collect();
     // Settings files first (docs/SETTINGS.md); the flags below override them.
     let profile = settings::load(&args)?;
     let mut root = profile.root.clone();
@@ -1300,6 +1339,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut lod = String::from("LOD0_");
     let mut track = false;
     let mut include_batches = false;
+    let mut from_menu = false;
     let mut reference = false;
     let mut collision = false;
     let mut start_view = false;
@@ -1337,6 +1377,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 args.next();
             }
             "--drive" => drive = true,
+            // Started by the event menu: leaving the event goes back to it.
+            "--from-menu" => from_menu = true,
             "--audio-check" => audio_check = true,
             "--graphics" => {
                 graphics.preset =
@@ -1848,18 +1890,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             _ => return Err(format!("unknown argument {arg}").into()),
         }
     }
-    let root = match root {
-        Some(root) => root,
-        // Android: the game data pushed into the app's storage (docs/ANDROID.md).
-        None if cfg!(target_os = "android") => settings::data_dir().join("Grid"),
-        None => grid_tools::install::discover(&grid_tools::install::steam_roots()).map_err(
-            |tried| {
-                format!(
-                    "GRID was not found in the Steam libraries ({tried:?}); set [game] root in the settings file or pass --game-root"
-                )
-            },
-        )?,
-    };
+    let root = game_root(root)?;
     println!("game_root path={}", root.display());
     // The first loader's error names only an OS error; say what is missing.
     #[cfg(target_os = "android")]
@@ -2910,6 +2941,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(feature = "paint-specular")]
     app.insert_resource(body_specular);
+    if from_menu {
+        app.insert_resource(event_menu::FromMenu);
+    }
     let exit = app
         .insert_resource(body_occlusion)
         .insert_resource(field)
@@ -2921,6 +2955,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(PreStartup, texture_upload::configure)
         .add_systems(Startup, setup)
         .run();
+    // Leaving an event started from the menu (event_menu::leave).
+    if exit == AppExit::from_code(event_menu::BACK_TO_MENU as u8) {
+        std::process::exit(event_menu::BACK_TO_MENU);
+    }
     if !matches!(exit, AppExit::Success) {
         return Err("renderer exited with an error".into());
     }

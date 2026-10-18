@@ -2882,9 +2882,11 @@ dependencies = [
 name = "grid-probes"
 version = "0.1.0"
 dependencies = [
+ "gilrs",
  "grid-formats",
  "grid-tools",
  "grid-world",
+ "winit",
 ]
 
 [[package]]

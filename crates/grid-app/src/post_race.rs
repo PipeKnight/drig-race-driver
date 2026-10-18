@@ -23,8 +23,10 @@
 //! (the same four pills; Continue opens the results) → `post_race_results_drift`;
 //! Retire → the scoreboard.
 //!
-//! The app has no front end, so leaving the event (Continue, Exit, Retire
-//! from the wreck screen, Finish Test Drive) closes it, back to the launcher.
+//! Leaving the event (Continue, Exit, Retire from the wreck screen, Finish
+//! Test Drive) returns to the event menu when the race was started from it
+//! (event_menu.rs), as the original returns to its front end; a race started
+//! by a launcher closes the app, back to the launcher.
 //! The cutscene, replays and the original's look are not ported.
 use crate::input::{Actions, ShiftQueue};
 use crate::pause_menu::{Confirm, Labels, Nav, Repeat, Variant};
@@ -404,7 +406,10 @@ pub fn update(
     actions: Res<Actions>,
     mut shifts: ResMut<ShiftQueue>,
     mut trial: Option<ResMut<crate::time_trial::Trial>>,
-    time: Option<Res<Time<Real>>>,
+    (time, from_menu): (
+        Option<Res<Time<Real>>>,
+        Option<Res<crate::event_menu::FromMenu>>,
+    ),
     mut exit: MessageWriter<AppExit>,
     mut replay: Option<ResMut<crate::replay::Replay>>,
     touge: Option<Res<crate::touge_event::TougeEvent>>,
@@ -474,12 +479,12 @@ pub fn update(
             }
         }
         Command::Restart => crate::restart(&mut driving, trial.as_deref_mut()),
-        Command::Exit => {
-            exit.write(AppExit::Success);
-        }
+        // Back to the event menu when the race came from it (the original's
+        // `end_race_finish_race` returns to its front end).
+        Command::Exit => crate::event_menu::leave(&mut exit, from_menu.is_some()),
         Command::RetireAndExit => {
             crate::pause_menu::retire_player(&mut driving, trial.as_deref());
-            exit.write(AppExit::Success);
+            crate::event_menu::leave(&mut exit, from_menu.is_some());
         }
         Command::Replay(kind) => {
             if let Some(replay) = replay.as_mut() {

@@ -33,6 +33,14 @@
                 android:name="android.app.lib_name"
                 android:value="grid_android" />
         </activity>
+        <!-- Restarts the game process (event menu, docs/EVENT_MENU.md); its own
+             process waits for the game's to end. -->
+        <activity
+            android:name=".RelaunchActivity"
+            android:exported="false"
+            android:process=":relaunch"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
         <!-- Start-up errors and panics; its own process outlives the game's. -->
         <activity
             android:name=".ErrorActivity"

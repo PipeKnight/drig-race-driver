@@ -18,6 +18,10 @@ hw-sse = ["grid-tools/hw-sse"]
 grid-formats = { path = "../grid-formats" }
 grid-world = { path = "../grid-world" }
 grid-tools = { path = "../grid-tools" }
+# The game's gamepad backend (bevy_gilrs uses gilrs 0.11), for grid-pad-probe.
+gilrs = "0.11"
+# Its window for the guided test (the version Bevy uses).
+winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 
 # Every probe: no unit-test harness (none has a #[test]). A new probe works
 # without an entry here; add one to keep `cargo test --workspace` lean.
@@ -825,4 +829,9 @@ test = false
 [[bin]]
 name = "grid-pro-touge"
 path = "src/bin/grid-pro-touge.rs"
+test = false
+
+[[bin]]
+name = "grid-pad-probe"
+path = "src/bin/grid-pad-probe.rs"
 test = false
