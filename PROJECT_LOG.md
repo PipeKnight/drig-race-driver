@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G132 — Completed surface checks; correct missing build label before delivery (18 October 2026)
+
+New surface pre-push quicksoak24/24pass120000ticks,5.9min wall,0newfailures/auto-resets; separately classified expected losses seed22=1/seed24=14. Fresh native canonical SHAaad9a07a...e41b unchanged. Feature675tests/Clippy and defaultClippy all clean; accepted candidate remains private pending delivery.
+
+Final provenance review found the1f858a1b candidate logs revision=unversioned: GRID_BUILD_REVISION was omitted from the release command. Source at build was clean5b5d408 and Cargo executable artifact/hash recorded, but it was not an embedded source-stamped build. Preserve all actual checks under that hash; do not relabel it as stamped. Rebuild the unchanged Rust sources at8b25887 with explicit GRID_BUILD_REVISION, then verify rendered parity/physical endpoints before promotion. Ordinary/verified owner graphics remains6aec/SHAddf26b5... . Meanwhile main advanced throughF413/ b851721, including peer collision/event/Android work; preserve all of it, do not replace the main executable with an older graphics build or force-push. Current bounded pilot source may publish to its own branch before a later careful source merge.
+
+Offline next texture candidate: reused installed validated export helper and official20220424 x4plus tool/model hashes. Purchased curb03BC3 256x512/all10mips SHA50936cab... exported privately, RGB-only4x with64pixel periodic context/RTX4070/tile256/threads1:1:1/OMP2. Corrected mean-linear RGB by0.9675/0.9614/0.9281,0clipped channel samples; original packed alpha is untouched in source DDS, no upload-ready derivative yet. Native comparison shows cleaner large edges but inferred cracks and lost grain, so not accepted as a default/source-faithful replacement. Private surface-textures01 provenance/images; no new install/Steam edit.
+
 ## G131 — Surface pilot passes native4K, movement and a complete lap (18 October 2026)
 
 Candidate5b5d408 release4m20s/SHA1f858a1b...: off/white native4K match each other and6aec paint control bytes exactly. Source blended-alpha mode reduces uniform road sheen; source/RGBA mean0.104973byte/max150,0BC fallback559images, not phone parity. Three negative CLI checks pass.198initial app tests followed by exact-source675workspace tests/12harnesses0failed0ignored, alltargetfeatureClippy3.01s/default25.35s clean.30unique virtual30FPSframes/1200ticks match4physical exits; native4K6500ticks completes valid89.955257484slap with4physical exits exactly equal6aec excludingwallclock. Static comparison/first/last motion/final lap inspected; no GPU/shader errors. See docs/DONINGTON_SURFACE_LAYERS.md and private surface-specular-* evidence.
