@@ -1,5 +1,13 @@
 # GRID engine project log
 
+## G142 — Surface pipeline checkpoint ready for branch publication (19 October 2026)
+
+Fresh pre-push quick soak at81aff6e/F415 runtime:24/24pass120000ticks/6.7min wall,0auto-resets/0expected losses. With704tests, both workspace Clippy modes, canonicalaad9a07a...e41b and4Python preparation tests/actual byte-exact reproduction, this completes checks for the existing surface-RGB/diagnostic/preparation checkpoint. No new Rust runtime changes after81aff6e; subsequent commits are Python preparation and Markdown. Evidence seam-source-checks01.json/seam-canonical-validation01.json/seam-soak01/summary.md. No result is assigned to the still-unmerged F427 runtime.
+
+Current primary remainsca25409 with only owner's untracked choreography note. Normal exe8762e64d... and note c4d52b9e... hashes verified unchanged. Current graphics installed b9/3e is preserved. Publish focused work on its existing origin graphics branch, then merge remote main30d5b33/F427 into isolated graphics worktree; main must not be force-pushed to discard new engine/audio/career/track work. New combined checks/build promotion remain a separate stage.
+
+
+
 ## G141 — Reproducible edge preparation and driving/fallback validation (19 October 2026)
 
 Added bounded independently authored tools/prepare_surface_edge_candidate.py and4synthetic checks: linear-light colours/full opaque mip packing, periodic donor sampling, packed alpha/truncated chain and invalid mapping rejection. SHA-pinned inputs, existing-output/private-output guards; source masks stay separately runtime-restored. Actual command reproduces tested701ec63f... DDS bytes; bad-hash/public-destination/existing-file negatives reject without output replacement. No installed dependencies/Steam changes.

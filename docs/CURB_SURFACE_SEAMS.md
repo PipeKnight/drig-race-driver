@@ -61,3 +61,5 @@ Additional evidence:
 - Source81aff6e:704workspace tests/19result harnesses including empty/doctest harnesses,0failed0ignored; feature/default alltarget workspace Clippy clean11.78s/2.85s. Solo canonical raw stdout SHAaad9a07a...e41b unchanged. Quick soak still pending at this checkpoint.
 
 Current result remains optional: neural inferred grain/cracks and all adjacent material pairs still need broader acceptance. No launcher/default or installed executable change is implied by these tests. New remote F416–F427 must be preserved in a later integration; these checks do not cover that future merge.
+
+Final pre-F427 checkpoint: quick soak24/24pass120000ticks/6.7min wall,0auto-resets/0expected losses. This completes that source checkpoint's pre-push checks. New main F416–F427 integration is separate; source texture acceptance is still optional.
