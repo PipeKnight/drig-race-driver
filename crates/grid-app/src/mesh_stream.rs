@@ -6,15 +6,24 @@
 //! render world writes them over the mesh's existing allocation. The asset
 //! itself is left unchanged, so it must already have the final vertex count,
 //! attribute set and indices. Presentation only.
+//!
+//! Bevy sorts alpha-blended meshes by the centre of the mesh asset's bounding
+//! box (`RenderMesh::aabb_center`), taken when the asset is prepared and
+//! copied into the retained `Transparent3d` item when the entity is queued.
+//! A streamed asset is neither, so its padding and its old vertices would set
+//! the order. [`MeshStream::sort_centre`] gives the centre a replaced asset
+//! would have had; it is written into the queued item before Bevy sorts.
 use bevy::{
     asset::RenderAssetUsages,
+    core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d},
     mesh::{Indices, MeshVertexAttribute, MeshVertexAttributeId, PrimitiveTopology},
     prelude::*,
     render::{
-        Render, RenderApp, RenderSystems,
+        Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
         mesh::allocator::{MeshAllocator, allocate_and_free_meshes},
+        render_phase::{ViewSortedRenderPhases, sort_phase_system},
         renderer::RenderQueue,
-        Extract, ExtractSchedule,
+        sync_world::MainEntity,
     },
 };
 use std::{
@@ -29,6 +38,16 @@ use std::{
 struct Writes {
     bytes: Vec<u8>,
     meshes: Vec<(AssetId<Mesh>, Range<usize>)>,
+    /// World-space transparent sort centres by main-world entity.
+    centres: Vec<(Entity, Vec3)>,
+}
+
+impl Writes {
+    fn clear(&mut self) {
+        self.bytes.clear();
+        self.meshes.clear();
+        self.centres.clear();
+    }
 }
 
 #[derive(Resource, Clone, Default)]
@@ -48,6 +67,23 @@ impl MeshStream {
         writes.meshes.push((mesh, start..end));
     }
 
+    /// Sort the alpha-blended `entity` this frame as if its mesh asset had
+    /// just been replaced: `centre` is the world-space centre of the
+    /// bounding box of the drawn vertices (`Aabb::enclosing`, without the
+    /// padding), transformed like Bevy's queue does.
+    pub(crate) fn sort_centre(&self, entity: Entity, centre: Vec3) {
+        let mut writes = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        writes.centres.push((entity, centre));
+    }
+
+    /// Sort centre queued for `entity` since the last extraction (tests).
+    #[cfg(test)]
+    pub(crate) fn queued_centre(&self, entity: Entity) -> Option<Vec3> {
+        let writes = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let (_, centre) = writes.centres.iter().rev().find(|(e, _)| *e == entity)?;
+        Some(*centre)
+    }
+
     /// Bytes queued for `mesh` since the last extraction (tests).
     #[cfg(test)]
     pub(crate) fn queued(&self, mesh: AssetId<Mesh>) -> Option<Vec<u8>> {
@@ -65,16 +101,19 @@ pub(crate) fn install(app: &mut App) {
             .add_systems(ExtractSchedule, extract)
             .add_systems(
                 Render,
-                upload
-                    .in_set(RenderSystems::PrepareAssets)
-                    .after(allocate_and_free_meshes),
+                (
+                    upload
+                        .in_set(RenderSystems::PrepareAssets)
+                        .after(allocate_and_free_meshes),
+                    resort
+                        .in_set(RenderSystems::PhaseSort)
+                        .before(sort_phase_system::<Transparent3d>),
+                ),
             );
     } else {
         // Nothing extracts without a render world: drop each frame's bytes.
         app.add_systems(First, |stream: Res<MeshStream>| {
-            let mut writes = stream.0.lock().unwrap_or_else(|e| e.into_inner());
-            writes.bytes.clear();
-            writes.meshes.clear();
+            stream.0.lock().unwrap_or_else(|e| e.into_inner()).clear();
         });
     }
 }
@@ -83,8 +122,7 @@ fn extract(main: Extract<Option<Res<MeshStream>>>, mut render: ResMut<RenderWrit
     let Some(main) = main.as_ref() else { return };
     let mut writes = main.0.lock().unwrap_or_else(|e| e.into_inner());
     // The render side consumed its buffers last frame; swap them back empty.
-    render.0.bytes.clear();
-    render.0.meshes.clear();
+    render.0.clear();
     std::mem::swap(&mut *writes, &mut render.0);
 }
 
@@ -103,6 +141,26 @@ fn upload(writes: Res<RenderWrites>, allocator: Res<MeshAllocator>, queue: Res<R
         }
         let stride = (bytes.len() / vertices as usize) as u64;
         queue.write_buffer(slice.buffer, slice.range.start as u64 * stride, bytes);
+    }
+}
+
+/// After the queue systems (which re-add an entity whose asset changed, with
+/// the prepared asset's centre) and before the transparent sort, which
+/// recomputes every item's distance from its stored centre.
+fn resort(writes: Res<RenderWrites>, mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>) {
+    if writes.0.centres.is_empty() {
+        return;
+    }
+    for phase in phases.values_mut() {
+        for (entity, centre) in &writes.0.centres {
+            // Mesh items are keyed with a placeholder render entity (queue_material_meshes).
+            let key = (Entity::PLACEHOLDER, MainEntity::from(*entity));
+            if let Some(item) = phase.items.get_mut(&key)
+                && let TransparentSortingInfo3d::Sorted { mesh_center, .. } = &mut item.sorting_info
+            {
+                *mesh_center = *centre;
+            }
+        }
     }
 }
 
@@ -293,6 +351,25 @@ mod tests {
         quads.update(&one[..2], [0, 1, 2, 0, 2, 3], &handle, &mut meshes, &stream);
         assert_eq!(meshes.get(&handle).unwrap().count_vertices(), 20);
         assert_eq!(stream.queued(handle.id()).unwrap().len(), 20 * (12 + 12 + 8 + 16));
+    }
+
+    #[test]
+    fn padding_moves_the_sort_centre_so_it_is_queued_separately() {
+        use bevy::camera::primitives::MeshAabb;
+        let quad = Quad {
+            positions: [[10., 2., -30.], [12., 2., -30.], [12., 4., -30.], [10., 4., -30.]],
+            ..PAD
+        };
+        let centre = |mesh: Mesh| Vec3::from(mesh.compute_aabb().unwrap().center);
+        let drawn = centre(quad_mesh(&[quad], 1, [0, 1, 2, 0, 2, 3]));
+        assert_eq!(drawn, Vec3::new(11., 3., -30.));
+        // Bevy sorts blended meshes by this centre: the padding at the origin
+        // moves it, which reordered the smoke groups (F394).
+        assert_ne!(centre(quad_mesh(&[quad], 4, [0, 1, 2, 0, 2, 3])), drawn);
+        let stream = MeshStream::default();
+        let entity = Entity::from_raw_u32(7).unwrap();
+        stream.sort_centre(entity, drawn);
+        assert_eq!(stream.queued_centre(entity), Some(drawn));
     }
 
     #[test]

@@ -3,9 +3,10 @@
 //! tick for the player and every opponent; this module draws its sprites as
 //! camera-facing (or horizon-aligned) quads, one alpha-blended mesh per shipped
 //! texture, sorted back to front. Presentation only, never feeds physics.
+use super::mesh_stream::{MeshStream, Quad, QuadMesh};
 use bevy::{
     asset::RenderAssetUsages,
-    camera::visibility::NoFrustumCulling,
+    camera::{primitives::Aabb, visibility::NoFrustumCulling},
     image::ImageSampler,
     light::{NotShadowCaster, NotShadowReceiver},
     mesh::{Indices, PrimitiveTopology},
@@ -19,8 +20,12 @@ pub(crate) struct TyreSmoke {
     smoke: Smoke,
     last: Option<(u64, u64)>,
     meshes: Vec<Handle<Mesh>>,
+    /// The group entities (identity transform), for their sort centre.
+    entities: Vec<Entity>,
+    /// Each group's capacity: the sprites are streamed into it (F394).
+    quads: Vec<QuadMesh>,
     /// Groups whose mesh already draws nothing: an empty group leaves it
-    /// untouched instead of replacing it every frame (F392).
+    /// untouched instead of rewriting it every frame (F392).
     hidden: Vec<bool>,
     /// Camera position of the last drawn frame (distance level of detail).
     eye: [f32; 3],
@@ -45,6 +50,8 @@ pub(crate) fn install(app: &mut App, root: &std::path::Path) {
                 smoke: Smoke::new(library.clone()),
                 last: None,
                 meshes: Vec::new(),
+                entities: Vec::new(),
+                quads: Vec::new(),
                 hidden: Vec::new(),
                 eye: [0.; 3],
                 frames: 0,
@@ -104,7 +111,7 @@ fn setup(
             fog_enabled: false,
             ..default()
         });
-        commands.spawn((
+        let entity = commands.spawn((
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material),
             Transform::IDENTITY,
@@ -112,20 +119,12 @@ fn setup(
             NotShadowCaster,
             NotShadowReceiver,
         ));
+        state.entities.push(entity.id());
+        state.quads.push(QuadMesh::default());
         state.meshes.push(mesh);
         state.hidden.push(true);
     }
 }
-
-static HIDDEN: Sprite = Sprite {
-    position: [0.; 3],
-    size: [0.; 2],
-    rotation: 0.,
-    colour: [0.; 4],
-    texture: 0,
-    frame: 0,
-    horizon: false,
-};
 
 fn empty_mesh() -> Mesh {
     let mut mesh = Mesh::new(
@@ -189,6 +188,7 @@ fn draw(
     mut state: ResMut<TyreSmoke>,
     camera: Single<&GlobalTransform, With<crate::ViewerCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    stream: Res<MeshStream>,
 ) {
     let state = &mut *state;
     let eye = camera.translation();
@@ -204,25 +204,15 @@ fn draw(
         }
     }
     let mut total = 0;
-    for ((group, handle), hidden) in groups.iter_mut().zip(&state.meshes).zip(&mut state.hidden) {
+    let mut quads = Vec::new();
+    for (k, group) in groups.iter_mut().enumerate() {
         group.sort_by(|a, b| b.0.total_cmp(&a.0));
         total += group.len();
-        if group.is_empty() && *hidden {
+        if group.is_empty() && state.hidden[k] {
             continue;
         }
-        *hidden = group.is_empty();
-        let Some(mut mesh) = meshes.get_mut(handle) else {
-            continue;
-        };
-        let mut positions = Vec::with_capacity(group.len() * 4);
-        let mut normals = Vec::with_capacity(group.len() * 4);
-        let mut uvs = Vec::with_capacity(group.len() * 4);
-        let mut colours = Vec::with_capacity(group.len() * 4);
-        let mut indices = Vec::with_capacity(group.len() * 6);
-        if group.is_empty() {
-            // One transparent degenerate quad: never upload an empty buffer.
-            group.push((0., &HIDDEN));
-        }
+        state.hidden[k] = group.is_empty();
+        quads.clear();
         for (_, s) in group.iter() {
             let centre = Vec3::from_array(s.position);
             let (axis_x, axis_y, normal) = if s.horizon {
@@ -238,26 +228,27 @@ fn draw(
             let [u0, v0, u1, v1] = library.frame_uv(s.texture, s.frame);
             // Data colours are display-referred; vertex colours are linear.
             let c = Color::srgba(s.colour[0], s.colour[1], s.colour[2], s.colour[3]).to_linear();
-            let colour = [c.red, c.green, c.blue, c.alpha];
-            let base = positions.len() as u32;
-            for (corner, uv) in [
-                (-hx - hy, [u0, v1]),
-                (hx - hy, [u1, v1]),
-                (hx + hy, [u1, v0]),
-                (-hx + hy, [u0, v0]),
-            ] {
-                positions.push((centre + corner).to_array());
-                normals.push(normal.to_array());
-                uvs.push(uv);
-                colours.push(colour);
-            }
-            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            quads.push(Quad {
+                positions: [-hx - hy, hx - hy, hx + hy, -hx + hy]
+                    .map(|corner| (centre + corner).to_array()),
+                normal: normal.to_array(),
+                uvs: [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
+                colour: [c.red, c.green, c.blue, c.alpha],
+            });
         }
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
-        mesh.insert_indices(Indices::U32(indices));
+        state.quads[k].update(
+            &quads,
+            [0, 1, 2, 0, 2, 3],
+            &state.meshes[k],
+            &mut meshes,
+            &stream,
+        );
+        // The order between the groups (and other blended meshes) is that of
+        // a mesh holding only these sprites; an empty group was one
+        // transparent degenerate quad at the origin.
+        let corners = quads.iter().flat_map(|q| q.positions.map(Vec3::from_array));
+        let centre = Aabb::enclosing(corners).map_or(Vec3::ZERO, |aabb| aabb.center.into());
+        stream.sort_centre(state.entities[k], centre);
     }
     state.frames += 1;
     if state.frames.is_multiple_of(600) {

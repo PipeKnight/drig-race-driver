@@ -445,12 +445,12 @@ Other sessions kept the CPU at 42–96 % load throughout:
   phone log (F378 build: 2308 × 1080, still 34 FPS) supports a CPU limit. Check: the next
   `frame_stats` log.
 
-**Not done.** Smoke groups while sprites exist: streaming them with the same padded capacity
-gave a slightly different picture at 1,300 and 3,000 ticks (2.6 % of pixels, at most 25
-levels, all in the smoke). Replacing the asset instead of streaming gives the same
-difference, so the cause is the padding, not the streaming. The cause is not identified:
-the smoke entities have `NoFrustumCulling`, so no bounding box enters their sort. Left as
-it was.
+**Not done here.** Smoke groups while sprites exist: streaming them with the same padded
+capacity gave a slightly different picture at 1,300 and 3,000 ticks (2.6 % of pixels, at
+most 25 levels, all in the smoke). Replacing the asset instead of streaming gives the same
+difference, so the cause is the padding, not the streaming. Cause found and fixed in F394
+(see "Tyre-smoke streaming"): Bevy sorts blended meshes by the mesh asset's bounding-box
+centre, not the entity's bounding box.
 
 **Merge with Codex's graphics work.** While this was under way, main merged
 codex/grid-graphics, including e075319 (`append` gains `sheet_colours` and a COLOR
@@ -471,11 +471,81 @@ branches:
   arithmetic into the closure. Do not write to the mesh asset there: that would bring back
   the per-frame reallocation.
 
+## Tyre-smoke streaming (F394)
+
+18 October 2026, Claude Code. Evidence: worktree objective-darwin-d70888 `local/f393/`
+(img/, field/, time/, census, logs; the folder name predates the renumbering to F394).
+
+**Why the padding changed the picture [V].** Bevy 0.19 sorts alpha-blended items
+(`Transparent3d`) by `TransparentSortingInfo3d::Sorted::mesh_center`: the entity's
+world-from-local transform applied to `RenderMesh::aabb_center`, the centre of the *mesh
+asset's* bounding box (`Mesh::compute_aabb`, taken in `RenderMesh::prepare_asset`;
+bevy_pbr `material.rs` `queue_material_meshes`, bevy_render `mesh/mod.rs`). The entity's
+`Aabb` component and `NoFrustumCulling` play no part. All smoke groups have the identity
+transform, so the centre of each group's sprites decides which group draws first. Padding
+quads at the origin pull that centre towards the origin and reorder the groups. Streaming
+has a second problem: the transparent phase is retained, and an entity is re-queued (with a
+fresh centre) only when `AssetChanged<Mesh3d>` marks it dirty, so a streamed asset would
+keep the centre of its last replacement.
+
+**Change.**
+
+- `mesh_stream.rs`: `MeshStream::sort_centre(entity, centre)` hands a world-space sort
+  centre to the render world with the vertex bytes. A render system (`resort`, in
+  `RenderSystems::PhaseSort` before `sort_phase_system::<Transparent3d>`) writes it into the
+  entity's retained `Transparent3d` item, after the queue systems and before Bevy computes
+  each item's distance from it. Items are keyed `(Entity::PLACEHOLDER, main entity)`, as
+  `queue_material_meshes` adds them.
+- `tyre_smoke.rs`: each texture group streams its sprites through `QuadMesh` (capacity +25 %,
+  AUTHORED, zero-area padding), with the same vertex arithmetic as before. Each frame it
+  passes the centre that the old unpadded mesh would have had: `Aabb::enclosing` over the
+  drawn corners (Bevy's own function), or the origin for an empty group (formerly one
+  degenerate quad at the origin). An empty group that is already empty is still skipped.
+
+**Picture [V].** Offscreen `--render-fixed-step` captures, current main (dca690b, exe
+sha256 03180c24…) against this change (d2af88bf…): **byte-identical PNGs** at Baseline 600,
+1,300 (219 sprites) and 3,000 ticks, Enhanced `--trees source` 1,300, and a 12-car field
+(`--opponents 11`) at 1,300 (224 sprites). Control: the same streaming without
+`sort_centre` (sha256 2b8996e6…) differs from main at 1,300 (0.32 % of pixels, at most 80
+levels) and 3,000 (2.63 %, at most 25, which is F392's difference).
+
+**Meshes replaced [V]** (F392's temporary census patch, solo Baseline, 3,000 ticks): unnamed
+entities, which include the smoke groups, went from 512 + 1,620 (frames 0–600 + 600–1,200)
+on main to 510 + 620 with this change. About 1,000 smoke replacements in 600 frames are
+gone. The remaining ~1 unnamed replacement per frame is also there before any sprite
+appears; it is probably the HUD text meshes (`osd_scene::texts` replaces a text mesh
+whenever its string changes, e.g. the lap timer) [I, not checked].
+
+**Render thread [V]: no measurable change on the desktop.** `GRID_PERF_TIMING=1
+GRID_CPU_CLUSTERING=1`, offscreen 60 Hz, 3,000 ticks, steady state from frame 600, ms per
+frame:
+
+| Run | Main | This change | Note |
+|---|---|---|---|
+| Solo Baseline, 6 interleaved rounds | 4.14, 3.99, 3.90, 4.85, 3.86, 3.82 (median 3.94) | 3.92, 3.94, 3.92, 4.05, 3.83, 3.85 (median 3.92) | median per-pair saving 0.04 ms; smoke in 45 of 51 samples, ~180 particles |
+| 12 cars, rounds 1–3 (main first) | 4.07, 4.91, 5.00 | 4.22, 5.20, 6.06 | the main thread rose by about as much, so this was drifting load from other sessions, not the change |
+| 12 cars, rounds 4–7 (ABBA, 55–83 % load) | 5.83, 6.34, 5.31, 5.15 | 5.44, 5.29, 4.98, 5.86 | |
+
+Over all seven 12-car rounds, change minus main has a median of +0.16 ms with a spread of
+±1 ms: noise. The smoke groups are a few meshes with about 200 sprites (≈ 1,000 vertices),
+so replacing them costs little on this CPU. F392's trace put `allocate_and_free_meshes`,
+mostly smoke, at 1.2 ms/frame, but that run was heavily disturbed. Phone [I, not measured]:
+the saving is at most a fraction of a millisecond unless the phone's mesh allocation is
+much slower than F380's 3–4× ratio suggests.
+
+**Found in passing [I, not fixed here].** Ground cover and wheel debris (F392) are also
+`AlphaMode::Blend` meshes streamed with padding, so since F392 they sort by the centre of
+the padded asset at their last replacement, not by their current vertices. F392's captures
+were byte-identical, so it did not show there. Passing their centres to `sort_centre` would
+restore the order they had before F392. That could change today's picture compared with
+main, so it needs its own before/after check.
+
 ## Follow-ups (not done here)
 
 1. **Mesh re-uploads every frame.** Done in F392 for foliage, ground cover, wheel debris
-   and empty smoke groups (see "Per-frame mesh uploads"). Smoke groups with sprites are
-   still replaced every frame.
+   and empty smoke groups (see "Per-frame mesh uploads"), and in F394 for smoke groups with
+   sprites. Still replaced: probably the HUD text meshes when their string changes [I].
+   Ground cover and wheel debris sort by a stale centre (see F394).
 2. **Loading 12 cars.** Done in F382: the route props are parsed once per field (see
    "Loading a field").
 3. **GPU and render resolution on the phone.** 4× MSAA at the full surface, the render-height
