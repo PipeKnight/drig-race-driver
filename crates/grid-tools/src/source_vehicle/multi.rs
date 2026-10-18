@@ -1802,7 +1802,12 @@ mod tests {
                 // Approach, initiation and drifting all occur, on the drift line.
                 assert!(states[1] > 0 && states[2] > 0 && states[3] > 0, "{states:?}");
                 assert!(slip > 20., "{slip}");
-                assert!(detected > 0, "{detected}");
+                // F406: with the original's collision floor lift the car holds
+                // slides of about 22 degrees without spinning and the scorer's
+                // detector does not latch in these 2600 ticks (states
+                // [0, 846, 459, 156, 6]). Before, the body scraped the road,
+                // the car spun (179 degrees) and those ticks were detected.
+                assert!(slip < 90., "the car spun: {slip} (detected {detected})");
                 assert!(drift_line > 2400, "{drift_line}");
                 // Deterministic: an identical second run.
                 assert_eq!(run().4, first.4);

@@ -75,6 +75,40 @@ impl Route {
     pub fn track_file(&self, name: &str) -> String {
         format!("{}/{name}", self.track())
     }
+    /// The track's `additional_ground_clearance` (database `track`, through
+    /// its `track_model` rows by folder and file) [D]: 0.05 on the city
+    /// tracks (Long Beach, ...), 0 elsewhere. The original stores it in a
+    /// global (0x997280, called from 0x60BEF0) that lifts every car's collision
+    /// floor (F406, `body_geometry::FloorLift`).
+    pub fn additional_ground_clearance(
+        &self,
+        root: &std::path::Path,
+    ) -> Result<f32, Box<dyn std::error::Error>> {
+        let schema = std::fs::read(root.join("database/schema.bin"))?;
+        let data = std::fs::read(root.join("database/database.bin"))?;
+        let db = grid_formats::database::read(&schema, &data)?;
+        let mut parts = self.path().split('/');
+        let (Some("tracks"), Some(folder), Some(file)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Err(format!("route {} is not tracks/<region>/<track>/<route>", self.path()).into());
+        };
+        let models = db.table("track_model").ok_or("database track_model absent")?;
+        let tracks = db.table("track").ok_or("database track absent")?;
+        let track_id = models
+            .rows()
+            .find(|m| {
+                m.text("folder_string").is_some_and(|f| f.eq_ignore_ascii_case(folder))
+                    && m.text("file_string").is_some_and(|f| f.eq_ignore_ascii_case(file))
+            })
+            .and_then(|m| m.int("track_id"))
+            .ok_or(format!("no database track model for {folder}/{file}"))?;
+        tracks
+            .rows()
+            .find(|t| t.int("id") == Some(track_id))
+            .and_then(|t| t.float("additional_ground_clearance"))
+            .ok_or_else(|| format!("database track {track_id} absent").into())
+    }
+
     pub fn is_default(&self) -> bool {
         self.path == DONINGTON
     }
@@ -89,6 +123,25 @@ impl Default for Route {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn additional_ground_clearance_comes_from_the_track_row() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        for (path, expected) in [
+            (DONINGTON, 0.),
+            (NURBURGRING, 0.),
+            (ISTANBUL_PARK, 0.),
+            (LONG_BEACH, 0.05),
+            ("tracks/usa/long_beach/route_5", 0.05),
+            (JARAMA, 0.),
+            (YOKOHAMA, 0.05),
+        ] {
+            let route = Route::new(path).unwrap();
+            assert_eq!(route.additional_ground_clearance(root).unwrap(), expected, "{path}");
+        }
+    }
     #[test]
     fn route_folders() {
         let r = Route::default();

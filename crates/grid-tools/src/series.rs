@@ -46,10 +46,14 @@ pub const SURVEYED_TRACKS: [&str; 5] = [
 ];
 
 /// Cars of the circuit series that race 12-car fields on our circuits
-/// (AUTHORED port limitation, docs/SERIES.md "Car survey"). The GT1, GT2 and
-/// Le Mans cars load but leave the track or wreck in fields; a series event
-/// that draws one of them needs GRID_SERIES_EXPERIMENTAL=1.
-pub const RACEABLE: [&str; 6] = ["lac", "bmw", "sup", "sky", "nsx", "350"];
+/// (AUTHORED port limitation, docs/SERIES.md "Car survey"). The GT1 and GT2
+/// cars race since the collision floor lift (F406); the LMP1 prototypes
+/// (lc7, b06) still ground at speed and the Le Mans Series field builder is
+/// separate, so a series event that draws another car needs
+/// GRID_SERIES_EXPERIMENTAL=1.
+pub const RACEABLE: [&str; 14] = [
+    "lac", "bmw", "sup", "sky", "nsx", "350", "dbr", "c6r", "sal", "ccg", "c5r", "lam", "spk", "esp",
+];
 
 fn table<'a>(
     db: &'a Database,
@@ -478,10 +482,10 @@ mod tests {
         assert_eq!(stems(&touring), ["bmw", "lac"]);
         let gt1 = Series::load(&root, "gt1").unwrap();
         assert_eq!(stems(&gt1), ["dbr", "c6r", "sal", "ccg", "c5r", "lam"]);
-        assert!(gt1.raceable_cars().is_empty());
+        assert_eq!(gt1.raceable_cars().len(), 6);
         let gt2 = Series::load(&root, "gt2").unwrap();
         assert_eq!(stems(&gt2), ["spk", "esp"]);
-        assert!(gt2.raceable_cars().is_empty());
+        assert_eq!(gt2.raceable_cars().len(), 2);
         let lms = Series::load(&root, "le_mans_series").unwrap();
         assert_eq!(lms.cars.len(), 13);
         for name in CIRCUIT_SERIES {

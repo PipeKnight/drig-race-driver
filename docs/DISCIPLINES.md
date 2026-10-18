@@ -553,6 +553,9 @@ Checks against the original, none of which showed a port difference that a 1:1 c
   semantics are the original's; the flicker comes from the shared on_track test.
 - The touring BMW uses the `default` drift values (driftGripFront 10); the original's drift grids
   use the `drift*` classes (§4.1).
+F406 (docs/SERIES.md, collision floor lift): the port's car body floor sat 7 cm too low, so bodies
+scraped the road. With the original's lift the Long Beach field spins far less (25.1 → 9.4 spins/lap),
+Nürburgring and Istanbul about as before; scores differ (see SERIES.md).
 The fields stay chaotic. Next candidates: a live drift trace of the original (not allowed in this
 session: no input to the original), the car-state angular velocity sign, the drift classes.
 

@@ -552,7 +552,12 @@ impl Runtime {
         let ned = read(root, &self.car.file(".ned"), 16 * 1024 * 1024)?;
         let offset =
             std::array::from_fn(|j| f32::from_bits(self.state.car.owner.vehicle[0x1630 / 4 + j]));
-        let geometry = crate::body_geometry::BodyGeometry::read(&ned, offset, table)?;
+        let geometry = crate::body_geometry::BodyGeometry::read_on_track(
+            &ned,
+            offset,
+            table,
+            self.route.additional_ground_clearance(root)?,
+        )?;
         let boundary = crate::cqtc_geometry::Geometry::read(&read(
             root,
             &self.route.file("boundarylines.cqtc"),

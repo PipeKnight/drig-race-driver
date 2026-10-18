@@ -14,9 +14,9 @@ image (`local/compatibility/grid-unpacked.exe`) or verified by a run; **[I]** in
 |---|---|---|
 | Touring | bmw, lac | races (as before) |
 | Pro Tuned | sup, sky, nsx, 350 | **races**: 12-car fields on all 20 layouts |
-| GT1 | dbr, c6r, sal, ccg, c5r, lam | loads; solo ccg/c5r lap, fields wreck — experimental only |
-| GT2 | spk, esp | loads; cars leave the track — experimental only |
-| Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | loads; prototypes ground out — experimental only; its field builder (0x663860) is not traced |
+| GT1 | dbr, c6r, sal, ccg, c5r, lam | **races since F406** (collision floor lift): 12-car fields on all 20 layouts |
+| GT2 | spk, esp | **races since F406**: 12-car fields on all 20 layouts |
+| Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | c65, cre, b05 lap solo since F406; LMP1 lc7/b06 still ground; field recovered (15–17 cars incl. 2–3 LC70s, no 12-car cap) — no launcher |
 
 New code:
 - `grid_formats::database`: the whole NDBS `database.bin` decoded by `schema.bin` (78 tables).
@@ -79,6 +79,120 @@ Skyline beside it, HUD "Toyota Supra / Donington race", damage parts read for al
 
 `series::RACEABLE` (AUTHORED) lists the cars that race fields: lac, bmw, sup, sky, nsx, 350. A series
 event that draws another car stops with a message unless `GRID_SERIES_EXPERIMENTAL=1`.
+
+## GT and Le Mans cars: the collision floor lift (F406) [V unless marked]
+
+The F401 cars that failed (GT1, GT2, prototypes) touched the road with their body hull at speed. The
+cause is a missing step of the original body collision shape, found statically (Ghidra 12.1.4
+headless read-only, Capstone 5.0.6; decompilations in the worktree's `local/gtfix/decomp/`).
+
+**The original body shape.** Car factory 0xA01960 builds the body collision pieces with 0x9E0240 (three
+call sites, 0xA01D1D/0xA01DBB/0xA01DFB) and only then adjusts them with 0x9B8B70 and builds the meshes
+(0xB23E40 → 0xB44E80, which the port verified on raw input). 0x9E0240:
+- starts from a synthetic 16-point car hull built by 0x995D10 from the description extents (body
+  +0xED64..+0xEDA4: centre, bottom, front/rear, sides, corner Zs, mid/roof heights);
+- with body +0xBA0 = 2 (every Standard car) splits it into `m_subdivX` × `m_subdivZ` slabs (3 × 3 on
+  every car [D]) at `m_subdivX_pos`/`m_subdivZ_pos` (+0xED48..+0xED5C) and builds each slab's polytope
+  from planes (0x9BF7D0, 0xA15F50);
+- snaps every polytope vertex to the nearest point of the `collision_main` mesh (0x99D080 on body
+  +0xE300, the copied mesh; 0xAE0010 point–triangle distance);
+- **lifts the floor** (0x9E0674..0x9E072A): with bottom = +0xED68, roof = +0xED94, h = roof − bottom,
+  clearance = +0xED60 and track = global 0xE85FC8,
+  `g = clamp((track + 0.176) − (clearance + bottom), 0, 9999)`, `a = (g + clearance) / h`,
+  `y' = (((y − bottom) / h) · (1 − a) + a) · h + bottom` — the hull's floor moves to
+  bottom + clearance + g and the roof stays;
+- rebuilds the planes from the lifted points and applies `m_flatten_bottom/front/back` (all 0 except
+  the C6-R's flatten_back [D]).
+
+**Inputs.** `m_groundClearence` (NED COLLISION) is read by 0x9EFB30 into description +0x1B20 = body
++0xED60, preset 0.17 (0xCE770C); every shipped car declares 0.07 or 0.05 [D]. The global 0xE85FC8 is set
+only by 0x997280, called once from 0x60BEF0 right after it reads the database column
+`additional_ground_clearance` (0x60C00E) [V; that the passed value is that column is [I], the
+decompiler's stack view is confused there]: 0.05 on the city tracks (Long Beach, Yokohama, ...), 0
+elsewhere [D]. Constants 0xD1728C = 0x3E343958 (0.176), 0xCB0D94 = 9999 [V]. So on our circuits every
+car's collision floor sits at max(bottom + clearance, 0.176) in NED space (0.226 at Long Beach): the
+Lacetti's raw floor 0.103 rises 7 cm, the LC70's 0.047 rises 13 cm.
+
+**What the port did.** `BodyGeometry::read` fed the raw `collision_main` points to 0x9B8B70/0xB44E80
+(docs/SOURCE_COLLISION_MESH.md says so: "not proof that the entire original outer factory produces
+these exact settings"). **Port (F406):** `body_geometry::FloorLift` applies the lift with the original's
+operation order and f32 rounding to the raw points (`BodyGeometry::read_on_track`, used by
+`Runtime::prepare_body_geometry_with`, so every car, single and multi runtimes, and the app);
+`car_collision::ground_clearance` and `Route::additional_ground_clearance` read the inputs. The same
+bottom and roof enter the remap as in the original, so the lifted floor and roof heights equal the
+original's exactly; the hull's sides still come from the raw mesh. **Not ported (open):** the
+synthetic hull, the 3 × 3 pieces, the vertex snap and the flatten options — the body is still one convex
+mesh. `BodyGeometry::read` keeps the raw hull for the existing raw-mesh comparisons.
+
+**Results** (release, Donington GP solo, 12000 ticks, `local/gtfix/survey/`) [V]:
+
+| Car | Before (F401) | Floor lift |
+|---|---|---|
+| lac, bmw | 2 laps | 2 laps, **identical** times (88.420 / 86.282 s) |
+| sup | 2 laps | 2 laps (86.58 / 84.73 s) |
+| sal, ccg, c5r, c6r, dbr, lam (GT1) | sal/ccg/c5r 1 lap in 6000 ticks; c6r wrecked, lam DNF, dbr 0.66 lap | all 2 laps, 75.3–82.9 s |
+| spk, esp (GT2) | no lap | 2 laps (77.6 / 94.0 s) |
+| 911 | stalled | 1 lap (98.4 s), understeers |
+| c65, cre, b05 (LMP2/LMP1) | under 0.35 lap | 2 laps, 70.6–73.1 s |
+| lc7, b06 (LMP1) | under 0.15 lap | still wrecked |
+
+Controls: with the lift switched off in a test build, Pro Tuned soak seed 10 (solo Supra at the
+Nürburgring, F401's open fall-through) fails again; with it, it passes — the same low floor caused it.
+
+**LMP1 (open).** The LC70 (downforce 9) and B06 (15) compress their suspension 0.15–0.26 m at 55–66 m/s
+(`GRID_SOAK_TRACE_BODY`; travel 0.23–0.25 m), so even the lifted floor touches the road. Checked and
+ruled out [V]: the downforce scale body +0x2268 is a cold 1.0 (+0xD1AC), so the verified aero path
+gives 18·v² N for the B06 in the original too; column 193 (`visual_limit_max_wheel_height`, body
++0x1F84) is read only by the wheel presentation 0x9FA6E0; the body–road material is already the
+original CAR_ row (friction 0.4, equal to the mixed pair). Next: the synthetic 9-piece hull through a
+native probe of 0x9E0240, and suspension travel stops.
+
+**Fields, launchers and checks (F406)** [V], release, cargo/rustc 1.99.0, on 9d9398b (tests and clippy again on be41b7b):
+- 12-car fields, 20000 ticks, all 20 layouts (`local/gtfix/routes/`): GT1 (sal, ccg, c5r, c6r, dbr,
+  lam cycled) 10–12 of 12 finish 2 laps on 16 layouts, 8 at Donington GP, 5 and 9 at Jarama; GT2
+  (spk, esp) 10–12 on 17 layouts, 9 at both Jarama layouts, 2 at Long Beach GP. Lacetti control:
+  12/12 on 17 layouts, 11 at Jarama route_1, 8 and 10 on the Long Beach reverse layouts (F401: 0, 5
+  and 3 — F402's robustness work also landed in between).
+- `series::RACEABLE` now includes the six GT1 and two GT2 cars; launchers
+  `Play GRID Series GT1.cmd` (settings/series-gt1.ini, Nürburgring GP, DBR9) and
+  `Play GRID Series GT2.cmd` (settings/series-gt2.ini, Istanbul Park route_1, Spyker). App run of the
+  GT1 profile (GRID_AUTOPILOT, seed 3, 9000 ticks): field dbr_05, dbr_06, dbr_07, c6r_04, c6r_04,
+  sal_02..04, ccg_00..02, valid lap 1:52.759 (`local/gtfix/series-gt1*`).
+- Tests 674 passed, 0 failed (`--include-ignored`, absolute GRID_* paths); new: `FloorLift`,
+  purchased ground clearances, track clearances. `a_drift_battle_ai_car_drifts_and_is_scored`
+  changed: on Long Beach route_1 the BMW now slides up to 22° without spinning and the drift
+  detector does not latch within the test's 2600 ticks (before: a 179° spin, 50 detected ticks); the
+  test now asserts slip > 20° and no spin.
+- Clippy workspace all targets clean.
+- Identity: solo `grid-opponent-race ROOT CD01 BP01 1 11200 ai` sha256 aad9a07a…e41b unchanged (the
+  Lacetti's floor never touches the road on a clean lap). 12-car `… 12 11200 ai` changed from
+  54abbecb…2a2b to **290589bbe6387834235a646b50b92eb82fb70b5fd0961a6ed2dea5729f7c18d0**: the lifted
+  hulls meet each other differently (car contacts 681 → 461; winner car0 2:56.576 → 2:56.720).
+- `grid-soak quick` (default, 24 seeds since F402): 23/24 — seed 14 (12 cars, Istanbul GP): prop
+  piece 36, at rest off the track (57 m from the centreline), is nudged at tick ~1350 and sinks
+  through the ground. It passes with the lift switched off: the lift changes the chaos trajectories
+  and exposes the open prop-piece family (docs/ROBUSTNESS_RESEARCH.md §3).
+- GT soaks (`--car dbr --opponent-cars sal,ccg,c5r,c6r,dbr,lam`, `--car spk --opponent-cars
+  spk,esp`, Pro Tuned): 23/24, 21/24, 23/24. Failures: Long Beach seed 17 prop piece sinks (GT1, Pro
+  Tuned); GT2 seeds 7, 8, 22: the player's Spyker, driven into a wall at full throttle and lock by the
+  chaos driver at 47 m/s, ends on its nose and sinks through the road (contacts 3–5 → 0). Without the
+  lift the GT2 cars hardly reached speed, so these runs were not exercised before. Open robustness
+  residuals; the AI-driven fields above do not show them.
+- Pro Tuned seed 10 (F401's open fall-through): passes; fails with the lift off.
+- Drift Battle (F389's measure, 8 BMWs, 16000 ticks, `local/gtfix/drift/`): spins/lap Long Beach
+  25.1 → 9.4, Nürburgring 11.1 → 10.1, Istanbul 12.0 → 13.5; stalled seconds 544 → 212, 343 → 276,
+  316 → 321; score sums 2,566 → 443, 64,381 → 109,871, 44,980 → 83,312. Other changes landed since
+  F389, so this is an observation, not an attribution.
+
+**Le Mans Series field** (research subagent, static; decompilations in the worktree's
+`local/gtfix/lms/`) [V unless marked]: 0x676F50 calls 0x663860 for mode `le_mans_series`. The field is
+every `lemans_restrictions` row with `player_vehicle_id` = the player's vehicle and `lemans_24` = 0, in
+storage order, each an AI car in its entrant livery, skipping the row in the player's own livery; no
+RNG, and `max_cars` is not used, so fields have 12–17 cars [D: 15–17 for our cars, each with 2–3
+LC70s]. Grid 0x5BDF10: one MT19937 draw `genrand() % n` per car swaps it with that index, then a
+stable bubble sort by `vehicle_class.lemans_sort_order` (LMP1 1, LMP2 2, GT1 3, GT2 4) and the player
+goes to the front/back/middle of its class group (or stays). Not ported: the port's grids hold at most
+12 cars and the LC70 does not race yet.
 
 ## Layouts
 
@@ -200,7 +314,12 @@ Release, cargo/rustc 1.99.0 [V]:
   `bmw_00,bmw_03,lac_00,lac_01,lac_02,bmw_00,bmw_02,bmw_03,lac_00,lac_01,lac_02`, runs.
 - Not checked: windowed play with sound and input, the new cars' engine sound by ear, a phone build.
 
-## Next
+## Next (after F406)
+
+- LMP1 grounding (above); the synthetic 9-piece body hull; then the Le Mans Series field and grid
+  (recovered above) with more than 12 cars.
+
+## Next (F401)
 
 - GT2/Le Mans/GT1 cars: why the body grounds and grip goes at speed (body–road contact filtering,
   body friction, ride height; shared vehicle/contact code).
