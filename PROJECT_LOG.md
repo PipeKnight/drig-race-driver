@@ -1,5 +1,9 @@
 # GRID engine project log
 
+F423 Archive of the track-readers and audio sessions; evidence moved (2026-10-19, Claude Code coordinator). Both sessions finished with everything on main (track-readers F412 Pro Touge, F421 Demolition Derby; audio F422) and no next task.
+- Evidence: track-readers' worktree `admiring-swartz-2f8287/local/` (142 MB: dd, p2p, playtest, replay-cache, touge, track-readers) moved to the main checkout's `local/worktree-evidence/admiring-swartz-2f8287/`. The audio worktree `competent-lewin-6bf086/local/` held no files (an empty playtest folder), so nothing was moved.
+- Also on 2026-10-18: the coordinator paused all child sessions near the 5-hour usage limit at the owner's request, killing the robustness session's `eval5.sh` grid-soak loops (owner: "А можно прибить grid soak exe процессы?"). Robustness reran the cut San Francisco forced/chaos runs alone afterwards (24/24, 20/20) and cites no interrupted run.
+
 F422 Audio audit and the original group mix: engine, tyres and AI cars at the original levels (2026-10-18, Claude Code; coordinator's audio-fidelity task, static analysis only, GRID not launched). Details: docs/AUDIO_RESEARCH.md (inventory, gap table). Evidence: Ghidra 12.1.4 headless pseudocode `local/behavior/20261018T1805095405303Z`, `…T1806256670212Z`, `…T1807357765524Z`, `…T1809287455802Z`, `…T1817507475196Z` (main checkout).
 - Original [O]: `audio/GroupModeVolumes.bin` is the mixer table: 21 groups (order from 41F570; Wheels 6, Skids 7, AI 17 match the tyre/engine constructors), PC master -3, platform modifier, 9 modes with attackTime, 6 audio cameras. 427ED0 publishes mode + platform + camera + trim + master per group. Normal/Chase gives Engine -14, Exhaust -7 (exactly F275's "observed" offsets), Wheels -9, Skids -8, AI -9.
 - Audio camera [O] (4139F0, camera class constructors via 817D60): Chase views → Chase, Mounted (bumper/bonnet) → Bonnet, Head → Internal, trackside → DetachedMultiCar.
