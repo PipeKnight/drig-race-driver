@@ -249,6 +249,8 @@ pub struct Settings {
     pub osd_dials: Option<bool>,
     /// `[osd] fps`: the frame-rate counter (default on Android only).
     pub osd_fps: Option<bool>,
+    /// `[video] render_height`: `native` or rows (render_scale.rs).
+    pub render_height: Option<crate::render_scale::RenderHeight>,
     /// `[front_end] show`: the Race Options front end before the race
     /// (docs/DRIVER_AIDS.md); default on.
     pub front_end: Option<bool>,
@@ -326,6 +328,7 @@ impl Settings {
                     "sound",
                     "osd",
                     "front_end",
+                    "video",
                     "diagnostics",
                 ]
                 .contains(&section.as_str())
@@ -412,6 +415,9 @@ impl Settings {
                 ("osd", "minimap") => self.osd_minimap = Some(on(&key, value).map_err(at)?),
                 ("osd", "dials") => self.osd_dials = Some(on(&key, value).map_err(at)?),
                 ("osd", "fps") => self.osd_fps = Some(on(&key, value).map_err(at)?),
+                ("video", "render_height") => {
+                    self.render_height = Some(crate::render_scale::RenderHeight::parse(value).map_err(at)?)
+                }
                 ("osd", "speed_units") => {
                     self.osd_mph = Some(match value.to_ascii_lowercase().as_str() {
                         "kph" | "km/h" => false,
@@ -728,7 +734,7 @@ prop_script_speed = 12.5
     fn bad_settings_are_refused_with_the_line() {
         let dir = Path::new("d");
         for (text, error) in [
-            ("[video]\n", "line 1: unknown settings section [video]"),
+            ("[audio]\n", "line 1: unknown settings section [audio]"),
             (
                 "[drive]\nspeed = 3\n",
                 "line 2: unknown setting `speed` in [drive]",

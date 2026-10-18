@@ -108,6 +108,7 @@ fn update(
     driving: Option<Res<crate::Driving>>,
     windows: Query<&bevy::window::Window, With<PrimaryWindow>>,
     monitors: Query<&Monitor>,
+    scale: Option<Res<crate::render_scale::RenderScale>>,
     mut text: Query<(&mut Text, &mut Visibility), With<FpsText>>,
 ) {
     // F9 toggles the display (desktop); the log line follows it.
@@ -158,12 +159,23 @@ fn update(
         _ => "-".into(),
     };
     counter.last_ticks = ticks;
+    // Render size of the 3D view against the window (render_scale.rs).
+    let sizes = scale
+        .as_ref()
+        .filter(|s| s.render != UVec2::ZERO)
+        .map(|s| (s.render, s.screen));
+    let res = sizes.map_or(String::new(), |(r, s)| {
+        format!(" render={}x{} screen={}x{}", r.x, r.y, s.x, s.y)
+    });
     println!(
-        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} frames={} sim_ticks_per_s={rate}",
+        "frame_stats fps={:.1} avg_ms={:.2} max_ms={:.2} frames={} sim_ticks_per_s={rate}{res}",
         stats.fps, stats.mean_ms, stats.worst_ms, stats.frames
     );
     for (mut t, _) in &mut text {
-        t.0 = stats.label();
+        t.0 = match sizes {
+            Some((r, s)) => format!("{}\n{}x{} of {}x{}", stats.label(), r.x, r.y, s.x, s.y),
+            None => stats.label(),
+        };
     }
 }
 

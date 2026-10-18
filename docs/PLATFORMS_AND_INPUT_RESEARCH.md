@@ -811,7 +811,7 @@ All of it is AUTHORED: GRID has no tilt or touch input. Where an original rule e
 ### 7.8 P12 groundwork: frame-rate counter (docs/ANDROID.md "Frame rate")
 
 - `fps_counter.rs`: `[osd] fps` (on by default on Android, F9 on the desktop) shows FPS, mean and worst frame time of the last second; `frame_stats` log line once per second with `sim_ticks_per_s`; a `frame_setup` line with present mode, window size, scale and reported refresh rate. Read-only on the simulation.
-- Current Android frame pacing [V code]: AutoVsync (FifoRelaxed/Fifo), no frame cap, no requested refresh rate (Android/HyperOS choose, likely 60 Hz [I]), full native resolution with no render scale, `baseline` preset with Bevy's default 4× MSAA. No change made: tuning is P12 after the phone numbers.
+- Current Android frame pacing [V code]: Bevy default `PresentMode::Fifo` (strict vsync; F374 wrongly said AutoVsync), no frame cap, no requested refresh rate (Android/HyperOS choose, likely 60 Hz [I]), full native resolution (since F375 capped at 1080 rows by `[video] render_height`), `baseline` preset with Bevy's default 4× MSAA. No change made: tuning is P12 after the phone numbers.
 
 ## 8. Open questions and tests that need hardware
 

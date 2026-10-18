@@ -37,6 +37,7 @@ mod particles;
 mod pause_menu;
 mod post_race;
 mod race_hud;
+mod render_scale;
 mod replay;
 mod scene_probe;
 mod settings;
@@ -2371,6 +2372,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if !drive {
             app.add_systems(Update, update_orbit);
         }
+        // [video] render_height: the 3D view renders at most that many rows
+        // (Android default 1080) and is stretched over the window.
+        render_scale::install(
+            &mut app,
+            profile
+                .render_height
+                .unwrap_or_else(render_scale::RenderHeight::platform_default),
+        );
     }
     if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
