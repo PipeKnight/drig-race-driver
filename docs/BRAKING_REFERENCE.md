@@ -24,6 +24,29 @@ user-file snapshot and after-state).
   Memory access is read-only: `tools/capture_grid_braking.py` opens VM_READ | QUERY_LIMITED
   only. The game was closed with WM_CLOSE afterwards.
 
+## Frame rate of live captures (F419)
+
+The original steps its world once per rendered frame with the real frame delta (world `+7C8`;
+maxfps 10000 at runtime, WORLD_STEPPING_RESEARCH.md); its config has `vsync="0"`. The unlocked
+captures so far ran at 57–164 Hz: runs 1/3/4 about 6.1 ms per step (163–164 Hz, the display
+limit), run 2 9.1 ms, runs 5–9 12–18 ms, the LC70 10.3 ms, with up to ±30 % spread inside one
+run when other work loads the machine. [V]
+
+Braking is barely sensitive to this: k = stop distance / v0² × 1000 is 29.04 (run 1, 164 Hz)
+against 29.18 (run 5, 71 Hz) with Braking Assist on, and 22.34 / 22.37 / 22.48 (runs 4/2/6 at
+163/110/57 Hz) with it off, all within about 1 %. Fast transients (crashes, drifts, car
+contacts) may be more sensitive. [V]
+
+**Rule from now on:** lock the original to 60 Hz for captures.
+
+1. In the snapshotted `Documents\Codemasters\GRID\hardwaresettings\hardware_settings_config.xml`
+   set `vsync="1"` and `<refreshRate rate="60" />` before launch; the normal restore puts the
+   original back afterwards. The Steam install is not touched.
+2. Verify on the first capture: world `+7C8` ≈ 0.01667 s (the braking sampler records world
+   `+7C4..+7CB`); record the median step of every capture next to its result.
+3. If the config route does not hold 60 Hz (unverified on the 165 Hz monitor), ask the owner
+   to switch the display to 60 Hz for the session.
+
 ## Scenario
 
 Race Day, Touring Cars, Chevrolet Lacetti, Donington Park Grand Prix, Normal, grid position
