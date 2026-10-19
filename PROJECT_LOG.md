@@ -111,6 +111,7 @@ F450 Live 12-car captures of the original at Milan and Spa: launch, hold and mix
   - The AI field is mixed BMW 320si / Lacetti by grid slot. Slots 0, 1, 5, 6 and 7 are the faster launchers [I: BMW] on every track (17.0–17.6 against 15.0–15.7 m/s at 1 s). This explains field02's two launch groups.
   - The launch is barely step-sensitive (13.5 ms against about 6 ms: within 3 %).
   - Spa, mixed field, port (F444 + F447) against original: matched at 0.5 s (9.0/6.4 against 9.3/6.9 m/s); behind at 1 s (15.7/13.1 against 17.0/15.0).
+    - Correction (F460): the 1 s gap was the test setup. The port run lacked the race manager (`GRID_REFERENCE_CAR`), which the original's Race Day always has; with it the port matches within 0.3 m/s (docs/FIRST_CORNER_LIVE.md §8).
   - Milan launch steering: the original's AI steers ±0.32–0.40 at the go, decaying to 0 in 0.5 s. The port's AI goes to full lock, slots 7 and 9 to the opposite side, and slots 9 and 10 brake at 1.5 s. The standstill look-ahead target differs (open).
   - Car +0xE30 is the steering; +0xE3C equals the throttle.
 - Next: the standstill look-ahead target at the Milan grid; the 0.5–1 s launch gap; port comparisons with the mixed field (`--cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`).
