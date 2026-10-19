@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G162 — Final material runtime matches selected native controls (19 October 2026)
+
+3362fd0 app compiled/stamped, SHA c1052c4c..., front/rear default4K PNGs byte-identical to8949 explicit0.35/0.18+source-road controls. Actual help corrected. Full resource tests executing; final side-view default smoke and TAA diagnostic pending; installed3bfc still stable. docs/LACETTI_CLEARCOAT_STUDY.md has exact source/artifact scope. Private numerical audit draft passes cached-Bevy metadata/Naga checks only, not application/GPU acceptance; docs/TEMPORAL_AA_DIAGNOSTICS.md records that boundary. Upstream5004cf9 merge preview has2conflicted files; both graphics and LeMans blocks retained in a syntax-checked private resolution, no checkout merge performed.
+
 ## G161 — Selected-coat movement and shared RGBA path pass (19 October 2026)
 
 8949 explicit0.20/0.35 coat paired600tick drives pass,30unique virtual30FPS frames each,4identical physical exit records excluding wall time. Motion first/last and forcedRGBA native4K frame inspected:0BCassets,559images/547decoded, no new input/physics change. Final3362 source build/full checks continue; installed3bfc remains unchanged. Fresh origin/main5004cf9/F454 not merged during the fixed comparison. docs/LACETTI_CLEARCOAT_STUDY.md records limits; docs/TEMPORAL_AA_DIAGNOSTICS.md specifies the next main-view numerical audit from installed Bevy0.19.1 sources without claiming it exists yet.

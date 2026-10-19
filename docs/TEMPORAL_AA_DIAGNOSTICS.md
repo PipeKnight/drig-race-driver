@@ -29,3 +29,9 @@ For depth reconstruction use the actual jittered projection used to rasterize th
 5. Add a pinned optional native-resolution DLAA path with runtime support checks and SMAA fallback; test history resets, dimensions, jitter and custom-pass resolution. The existing bridge cargo-check is not GPU acceptance. Keep optional SDK/DLL files private.
 
 Local sources inspected: bevy_core_pipeline0.19.1/src/{prepass/mod.rs,schedule.rs}; bevy_pbr0.19.1/src/prepass/{mod.rs,prepass.wgsl}; bevy_render0.19.1/src/{camera.rs,view/mod.rs,gpu_readback.rs}; bevy_anti_alias0.19.1/src/taa/{mod.rs,taa.wgsl}; Bevy shader_prepass and gpu_readback examples. No installed crate was edited.
+
+## Private draft preparation
+
+During the frozen material checks, a private draft shader and capture module were prepared under lacquer01. Direct Rust metadata checking against the actual cached Bevy0.19.1 app rlib passes with minimal Driving/ViewerCamera stand-ins; first attempt lacked Cargo's manifest environment, corrected on retry. Naga from the actual app build parses and validates the compute entry point. No Cargo dependency/project source was changed for these probes. This is not full-app typechecking, linking, GPU dispatch/readback or a temporal fix. Shader insertion, real-world metadata/error/completion gates and GPU measurements remain required. Private temporal-draft-checks01.json records exact scope and hashes.
+
+Final3362 TAA straight-chase control rendered600ticks and30virtual30FPS motion images without GPU errors. Compared native frames0/20/29 to SMAA: TAA softens the background and thin detail; these near-constant chase-car views do not establish a reproducible whole-body trail. A side-view pair is being collected before drawing a cause/conclusion. No AA default change.
