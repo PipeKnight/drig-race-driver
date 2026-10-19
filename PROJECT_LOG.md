@@ -1,5 +1,13 @@
 # GRID engine project log
 
+F491 Playable 293914533e9c with F485–F490 and Codex's local graphics commits (2026-10-19, Claude Code; owner: "Да, пересобери ПК-сборку (слиянием в основной папке, как раньше) и оба APK").
+- Local merge in the main checkout, as in F486. origin/main 593ad7b (F490) was merged into Codex's local `main` (caa680f) as 2939145. It merged without conflicts. The merge is **not pushed**, and Codex's commits are unchanged.
+- Built with `tools/update_prototype.ps1` from Bash. Manifest `local/playtest/build-20261019T2123529571464Z`, built 2026-10-19T21:39:07Z. Executable sha256 750cc3aac8fe8ea7e15492afea5d69cff55e7ae02d6c60675f236b6dc81d9c70, cargo/rustc 1.99.0. Source driving and Bevy checks passed. The tree is dirty only through untracked files: docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md and Codex's two DLAA launchers.
+- New since F486: F487 career eBay Motors (used-car market and auctions); F488 per-car scrape loop; F489 soak seeds 39/54 traced (no fix); F490 collision mix (silent sweeteners, their cooldown, no false roof hits).
+- Known in this build: row 36 autopilot stall with 1st ↔ R toggling; soak seeds 39/54 (F489); an opponent can sound louder than the player within 10 m, which matches the original's mix table (F490).
+- Not checked here: a manual windowed lap, or the new collision mix by ear.
+- The phone APKs for 593ad7b are being built by the Android session and will be logged separately.
+
 F490 Collision mix: silent sweeteners, their cooldown, roof test without the offset; opponent engine loudness diagnosed (2026-10-20, Claude Code; the owner via the coordinator: "Звук столкновений очень громкий и когда несколько столкновений одновременно или почти одновременно происходят, прямо неприятно слушать. В оригинале микшер точно по-другому работает", and an opponent's engine is sometimes louder than the player's own). Details: docs/AUDIO_RESEARCH.md §11. Evidence: Capstone 5.0.6 listings (session scratchpad), worktree kind-pike-df38cc `local/mix/` (`race12.tsv` before, `race12-fix.tsv` after, `gmv.txt` GroupModeVolumes tree, `checks/`). The original was not run.
 - From the image [O]:
   - The sweetener infos play the info's own variety `dummy`. The name lookup is case-insensitive (`_stricmp`), so that resolves to the sample-less `Dummy`, and nothing plays. LowSweeteners/HighSweeteners are looked up but never played.
