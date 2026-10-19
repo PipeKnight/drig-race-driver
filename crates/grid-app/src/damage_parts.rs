@@ -1034,9 +1034,9 @@ fn present(
     }
     if damage.reset {
         damage.reset = false;
-        for (entity, .., mut visibility, mut material, original) in &mut parts {
+        for (entity, .., mut visibility, material, original) in &mut parts {
             *visibility = Visibility::Inherited;
-            if let Some(original) = original {
+            if let (Some(original), Some(mut material)) = (original, material) {
                 material.0 = original.0.clone();
                 commands.entity(entity).remove::<Original>();
             }
@@ -1156,7 +1156,7 @@ fn present(
         ..,
         mut transform,
         mut visibility,
-        mut material,
+        material,
         original,
     ) in &mut parts
     {
@@ -1221,7 +1221,9 @@ fn present(
                 .iter()
                 .zip(&car.lights)
                 .any(|((joints, _), smashed)| *smashed && joints.iter().any(|j| j == name));
-        if (glass == Glass::Cracked || light) && original.is_none() {
+        if (glass == Glass::Cracked || light) && original.is_none()
+            && let Some(mut material) = material
+        {
             let base = material.0.clone();
             let texture = if light { &images[m].1 } else { &images[m].0 };
             if *texture == Handle::default() {
@@ -1326,10 +1328,10 @@ type PartQuery<'w, 's> = Query<
         &'static Aabb,
         &'static mut Transform,
         &'static mut Visibility,
-        &'static mut MeshMaterial3d<StandardMaterial>,
+        Option<&'static mut MeshMaterial3d<StandardMaterial>>,
         Option<&'static Original>,
     ),
-    (Without<Shard>, Without<crate::ViewerCamera>),
+    (With<Mesh3d>, Without<Shard>, Without<crate::ViewerCamera>),
 >;
 
 /// Joint bounds from the player's draws (mesh bounds through each draw's rest
@@ -1443,6 +1445,39 @@ fn present_lost_wheels(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layout_includes_meshes_without_standard_material() {
+        #[derive(Resource, Default)]
+        struct Observed(BTreeMap<String, (Vec3, Vec3)>);
+        fn observe(parts: PartQuery, mut output: ResMut<Observed>) {
+            output.0 = layout(&parts, 0, &[0]).bounds;
+        }
+        let mut app = App::new();
+        app.init_resource::<Observed>().add_systems(Update, observe);
+        for (name, x, standard) in [("x0_door_fl", 2., false), ("x0_boot", 0., true)] {
+            let mut entity = app.world_mut().spawn((
+                Joint::new(name),
+                crate::MovingPart {
+                    rest: Mat4::from_translation(Vec3::new(x, 0., 0.)),
+                    wheel: None,
+                    lost_with_wheel: false,
+                },
+                Aabb::from_min_max(Vec3::splat(-1.), Vec3::ONE),
+                Transform::default(),
+                Visibility::Inherited,
+                Mesh3d(Handle::default()),
+            ));
+            if standard {
+                entity.insert(MeshMaterial3d(Handle::<StandardMaterial>::default()));
+            }
+        }
+        app.update();
+        let observed = app.world().resource::<Observed>();
+        assert_eq!(observed.0["door_fl"], (Vec3::new(1., -1., -1.), Vec3::new(3., 1., 1.)));
+        assert_eq!(observed.0["boot"], (Vec3::splat(-1.), Vec3::ONE));
+    }
+
 
     fn config() -> Config {
         Config {

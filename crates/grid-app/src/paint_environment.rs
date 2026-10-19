@@ -82,7 +82,7 @@ fn attach(
         count += 1;
     }
     println!(
-        "paint_environment attached_parts={count} gain={} scope=player-paint-environment-only source_parity=false direct_lighting=retained depth_motion=stock textures=shared",
+        "paint_environment attached_parts={count} gain={} scope=player-paint-environment-only source_parity=false stock_brdf=retained top_layer=blend depth_motion=stock textures=shared",
         settings.paint_environment
     );
 }
