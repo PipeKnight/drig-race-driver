@@ -69,6 +69,12 @@ count the piece as pressed down at spawn. So the road is there and the piece get
 from it. Not explained yet: a contact-level trace of body 3 at ticks 3088–3093 is the next step.
 It is the only Spa chaos failure.
 
+[V] F465: quick seed 38 loses the upper half of the same board, and there the cause is a hole in
+the packed road collision: no triangle of any chunk covers xz (579.0..580.0, 967.6..970.0), about
+4 m from the board, where the piece slides off and falls (SOAK_TESTING.md, "Known failure on
+main"). The chaos seeds' fall point (575.83, 965.33) does have ground, so they may be a different
+cause.
+
 ## 3. App
 
 - Launcher `Play GRID Race Spa.cmd` runs `settings/race-spa.ini`: three laps, 11 opponents,

@@ -458,6 +458,26 @@ F448 adds two more cases (docs/ROBUSTNESS_RESEARCH.md §9):
   - It is debt for the open step-size family (FIDELITY_BACKLOG row 88), not a fix. Jarama seeds 21..24 then pass 4/4 and join the default quick set. Long Beach
 forced seed 59 (a thin tyre landing through the road) is not covered and still fails.
 
+## Known failure on main: Spa quick seed 38 (F465)
+
+`grid-soak quick --seeds 37..40` fails seed 38 (12 cars, Spa): `out-of-bounds: prop piece
+falling through the world (body 13 at 582,5,977)` at tick 4557, digest 8d725584c0d3a5fd.
+[V] A build of main 75b6910 (before F462) gives the same tick and digest, so it predates the
+round-shape work.
+
+Cause [V]: a hole in the purchased road collision. Body 13 is the upper half of the brake
+board at (575.8, 40.6, 965.3) (SPA.md §2.1, the board that the chaos seeds 1, 10 and 18 lose).
+A car knocks it at tick 4349; it slides along the grass at y 40.28 and from tick 4384, at
+(579.45, 40.27, 968.2), it falls with no contact at all (`GRID_SOAK_TRACE_BODY=12,13:4300`).
+Vertical `Track::query` segments find the GRAS chunk `qt_11_11_10_10_01_00` at (575.8, 965.3),
+(578.6, 967.3) and (581.6, 977.0), but nothing at (579.0, 967.6), (579.4, 968.0), (579.45,
+968.2), (579.6, 968.8) or (580.0, 970.0). A brute-force point-in-triangle test over every
+triangle of every packed chunk finds none covering (579.45, 968.2) or (579.6, 968.8), while it
+finds the ground at the board. So no packed road triangle exists there; it is not a query or
+candidate gap. Whether the original has other collision there (or loses the piece too) is not
+known. Evidence: this worktree's `local/r20/spa38/` (trace, failure report, inputs). The seed
+stays outside the default quick set.
+
 ## Follow-ups
 
 - Car against piece still uses the car-to-car hull-triangle path, and piece against

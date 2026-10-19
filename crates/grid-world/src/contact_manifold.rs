@@ -266,7 +266,7 @@ pub(crate) fn mesh_feature(
         dot(direction, matrix[2]),
         0.,
     ];
-    let cache = context.feature_support(mesh, matrix, direction)?;
+    let cache = context.feature_support(mesh.into(), matrix, direction)?;
     let b = mesh.bytes();
     let vertex = 0x60 + cache[6] * 32;
     let faces = word(b, vertex + 0x14);

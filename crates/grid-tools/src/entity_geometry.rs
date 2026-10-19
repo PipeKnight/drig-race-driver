@@ -444,29 +444,31 @@ impl Props {
     /// Contacts against every enabled box whose bounds overlap the body's
     /// margin-inflated world bounds, in data order, up to `capacity` (<=16 per
     /// box), each with its box index.
-    pub fn contacts(
+    pub fn contacts<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         matrix: grid_world::physical_pose::Matrix,
         query: &grid_world::convex_distance::ContactSettings,
         bounds: [[f32; 4]; 2],
         capacity: usize,
     ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
+        let mesh = mesh.into();
         self.contacts_known(mesh, matrix, query, bounds, capacity, None)
     }
 
     /// [`Self::contacts`] with a [`BoxIndex`] the caller holds for these
     /// boxes; `bounds` must be `mesh.world_bounds(matrix, query.margin)`.
     /// Identical results.
-    pub fn contacts_known(
+    pub fn contacts_known<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         matrix: grid_world::physical_pose::Matrix,
         query: &grid_world::convex_distance::ContactSettings,
         bounds: [[f32; 4]; 2],
         capacity: usize,
         known: Option<KnownBoxes<'_>>,
     ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
+        let mesh = mesh.into();
         if known
             .as_ref()
             .is_some_and(|k| k.index.boxes != self.boxes.len())

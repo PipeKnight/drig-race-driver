@@ -14,9 +14,8 @@
 //! mesh frame, where the original evaluates them, into the world.
 use crate::{
     Error,
-    collision_mesh::Mesh,
     contact_manifold::{self, Contact, Face, Settings},
-    convex_distance::{ContactSettings, Context, Extra},
+    convex_distance::{ContactSettings, Context, Extra, Hull},
     physical_pose::Matrix,
 };
 
@@ -118,13 +117,14 @@ impl BoxShape {
 /// Contacts of `mesh` at `matrix` (margin `query.margin`, sampled directions
 /// in the mesh frame) against `shape`, at most `capacity` (<= 16). Empty when
 /// the shapes are farther apart than their margins.
-pub fn contacts(
-    mesh: &Mesh,
+pub fn contacts<'m>(
+    mesh: impl Into<Hull<'m>>,
     matrix: Matrix,
     shape: &BoxShape,
     query: &ContactSettings,
     capacity: usize,
 ) -> Result<Vec<Contact>, Error> {
+    let mesh = mesh.into();
     if capacity > 16 || !shape.valid() {
         return Err(Error("invalid box contact controls"));
     }
@@ -184,7 +184,6 @@ pub fn contacts(
         fallback_depth: depth,
         capacity,
     };
-    let (mesh_feature, _) = contact_manifold::mesh_feature(&mut context, mesh, matrix, &s)?;
     let (box_normal, box_vertices, oriented) = shape.face(normal);
     let box_face = Face {
         normal: box_normal,
@@ -192,12 +191,18 @@ pub fn contacts(
         oriented,
         margin: shape.margin,
     };
+    let Hull::Mesh(mesh) = mesh else {
+        // A round piece: its B47590 feature (or a sphere's fallback).
+        return crate::round_contacts::moving_round_polygon(mesh, matrix, box_face, &s, &[]);
+    };
+    let (mesh_feature, _) = contact_manifold::mesh_feature(&mut context, mesh, matrix, &s)?;
     contact_manifold::assemble_faces([mesh_feature.face(), box_face], &s, &[])
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collision_mesh::Mesh;
 
     fn cube(half: f32) -> Mesh {
         let points: Vec<V> = (0..8)

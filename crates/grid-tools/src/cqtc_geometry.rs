@@ -83,12 +83,13 @@ impl Geometry {
             leaves: &self.leaves,
         }
     }
-    pub fn contacts(
+    pub fn contacts<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         matrix: grid_world::physical_pose::Matrix,
         settings: &grid_world::packed_contacts::Settings,
     ) -> Result<grid_world::packed_contacts::Output, Error> {
+        let mesh = mesh.into();
         grid_world::packed_contacts::calculate_decoded(
             mesh,
             matrix,
@@ -103,13 +104,14 @@ impl Geometry {
     }
     /// The contacts of [`Self::contacts`], reusing values the caller holds for
     /// this unchanged geometry and pose (see [`grid_world::packed_contacts::Known`]).
-    pub fn contacts_known(
+    pub fn contacts_known<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         matrix: grid_world::physical_pose::Matrix,
         settings: &grid_world::packed_contacts::Settings,
         known: &grid_world::packed_contacts::Known,
     ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        let mesh = mesh.into();
         grid_world::packed_contacts::calculate_decoded_known(
             mesh,
             matrix,

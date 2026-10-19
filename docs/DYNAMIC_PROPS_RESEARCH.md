@@ -254,7 +254,9 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
   query as the car (piece margin = shape shell 0.02); car vs piece through the
   car-to-car hull path; piece vs piece through an authored separating-axis generator
   (face axes of both hulls; the triangle-soup pair query lost stacked tyres once they
-  overlapped beyond the margin). Cylinders are 12-sided prisms. Authored budgets: 8
+  overlapped beyond the margin). Cylinders are 12-sided prisms (F465: only in the
+  piece-pair test; the world, cars and road see round kind-5/3 shapes, BOX_CONTACTS.md
+  "Round pieces"). Authored budgets: 8
   track and 4 pair contacts per piece, pool +12 slots per piece up to 256. [I]
 - **Single car.** `vehicle_world` now admits further dynamic bodies after the car
   (shapes after the statics, deformation registration slot None, body events skip

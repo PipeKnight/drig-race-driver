@@ -356,6 +356,47 @@ impl BodyGeometry {
         )
     }
 
+    /// The car hull against a round piece (kind 5 or 3) at its world pose:
+    /// AE8AD0 with the piece as the static side (`round_contacts`).
+    pub fn car_contacts_round(
+        &self,
+        body: &contact_groups::Body,
+        shape: &grid_world::round_contacts::RoundShape,
+        capacity: usize,
+    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        if capacity == 0 {
+            return Ok(Vec::new());
+        }
+        let matrix = self.pose(body)?;
+        let car = self.shape.mesh().world_bounds(matrix, self.query.margin)?;
+        let (pose, hull, margin) = match shape {
+            grid_world::round_contacts::RoundShape::Cylinder(c) => (
+                c.matrix,
+                convex_distance::Hull::Cylinder {
+                    radius: c.radius,
+                    half_height: c.half_height,
+                },
+                c.margin,
+            ),
+            grid_world::round_contacts::RoundShape::Sphere(s) => (
+                s.matrix,
+                convex_distance::Hull::Sphere { radius: s.radius },
+                s.margin,
+            ),
+        };
+        let other = hull.world_bounds(pose, margin)?;
+        if (0..3).any(|j| car[0][j] > other[1][j] || car[1][j] < other[0][j]) {
+            return Ok(Vec::new());
+        }
+        grid_world::round_contacts::contacts(
+            self.shape.mesh(),
+            matrix,
+            shape,
+            &self.query,
+            capacity.min(16),
+        )
+    }
+
     /// World points/normals retain the generator's publication orientation.
     /// Material IDs zero select the prototype's explicit shared solver material.
     pub fn contacts(

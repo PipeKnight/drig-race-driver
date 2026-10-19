@@ -328,3 +328,32 @@ Nürburgring 2911 (71 round), Jarama 2251 (16), Yokohama 1631 (128), Spa 1552
 San Francisco 1309 (1), Le Mans 2510 (97), Haruna route 1 2034 (524). Donington,
 Istanbul, Long Beach and the Detroit stadium have none. Breakables change only on
 Yokohama (0 to 77).
+
+### Round pieces (F465)
+
+[D] The pieces' cylinders and spheres are the same kinds 5 and 3, so the moving side of
+every query can be round too. 0x7DB060 gives a sphere template's volume as r³ x 4.18879
+(CFAAF4) x density; the cylinder's (0x7DAFC0) is r² h π x density.
+
+Port:
+- `convex_distance::Hull` is the moving body: a collision mesh, a cylinder (axis = local y,
+  B47A70's local support) or a sphere (its centre; the radius joins the body margin, B4B0A0).
+  Every mesh path takes it (`packed_contacts`, `box_contacts`, `round_contacts`,
+  `continuous::sweep_packed`, `Track::body_contacts`/`sweep_road`, `Props`, the boundary).
+  Mesh bodies run the same operations as before.
+- The manifold for a round body is the cylinder dispatcher above with the roles swapped:
+  B47590 gets -n (A's direction), the polygon (a packed triangle or box face) is feature B,
+  and when both are references the static polygon keeps its flag. Records of a moving
+  cylinder are not flipped. A sphere gives the fallback contact.
+- A car against a round piece is AE8AD0 with the piece as the static side
+  (`BodyGeometry::car_contacts_round`, `round_contacts::contacts`). Box pieces keep the
+  hull-triangle path ("Tried and not adopted" above).
+- Not ported: two round shapes (a cylinder piece on a cone, or piece against piece) give
+  AE2FA0's fallback contact only (AEBC00 disk/disk and the segment pairs are not ported);
+  piece against piece stays the AUTHORED face-axis test over the 12-sided prism or, for a
+  sphere, an inscribed icosahedron. The continuous stage's radius for a round body is its
+  smaller half extent [I]. The lost wheel (9A8BB0) keeps its prism (FIDELITY_BACKLOG row 24).
+- `dynamic_props`: sphere pieces are accepted (`Primitive::Sphere`, mass from 0x7DB060,
+  inertia 0.4 m r² [I]). No route's catalog changes: the templates with sphere or cylinder
+  pieces that stay static (Haruna's poles and signs, cones, foam posts, drift flags) have more
+  than one shape behaviour per entity, which `Catalog::read` refuses (row 16 work).

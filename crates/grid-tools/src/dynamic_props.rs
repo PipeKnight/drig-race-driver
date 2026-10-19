@@ -20,6 +20,7 @@ use grid_formats::{entities, jpk, physparams, pssg};
 use grid_world::{
     Error, collision_mesh, contact_groups, convex_distance, grouped_physical_frame,
     physical_constructor, physical_pose::Matrix,
+    round_contacts::{CylinderShape, RoundShape, SphereShape},
 };
 use std::{collections::BTreeMap, path::Path};
 
@@ -45,6 +46,7 @@ const CYLINDER_SIDES: usize = 12;
 pub enum Primitive {
     Box([f32; 3]),
     Cylinder { radius: f32, height: f32 },
+    Sphere { radius: f32 },
 }
 
 /// One dynamic piece a breakable entity turns into.
@@ -66,6 +68,9 @@ pub struct PieceSpec {
     hull: collision_mesh::Mesh,
     points: Vec<[f32; 4]>,
     triangles: Vec<[u32; 3]>,
+    /// Entity cylinders and spheres collide as the original's round kinds 5
+    /// and 3 ([`Self::collider`]); `hull` then serves the piece-pair test only.
+    round: bool,
 }
 
 #[derive(Clone)]
@@ -226,6 +231,36 @@ fn hull(primitive: Primitive) -> (Vec<[f32; 4]>, Vec<[u32; 3]>) {
             let triangles = orient(&points, triangles);
             (points, triangles)
         }
+        // An icosahedron through the sphere: the AUTHORED piece-pair test
+        // only (the world, the cars and the road see the round sphere).
+        Primitive::Sphere { radius } => {
+            let phi = (1. + 5f32.sqrt()) * 0.5;
+            let scale = radius / (1. + phi * phi).sqrt();
+            let mut points = Vec::with_capacity(12);
+            for (a, b) in [(1., phi), (-1., phi), (1., -phi), (-1., -phi)] {
+                points.push([0., a * scale, b * scale, 1.]);
+                points.push([a * scale, b * scale, 0., 1.]);
+                points.push([b * scale, 0., a * scale, 1.]);
+            }
+            // Every triple of mutually adjacent vertices (edge length 2).
+            let edge = 2. * scale;
+            let near = |i: usize, j: usize| {
+                let d: f32 = (0..3).map(|k| (points[i][k] - points[j][k]).powi(2)).sum();
+                (d.sqrt() - edge).abs() < 1e-3 * edge
+            };
+            let mut triangles = Vec::new();
+            for i in 0..12 {
+                for j in i + 1..12 {
+                    for k in j + 1..12 {
+                        if near(i, j) && near(j, k) && near(i, k) {
+                            triangles.push([i as u32, j as u32, k as u32]);
+                        }
+                    }
+                }
+            }
+            let triangles = orient(&points, triangles);
+            (points, triangles)
+        }
     }
 }
 
@@ -250,6 +285,13 @@ fn mass_properties(primitive: Primitive, density: f32) -> (f32, [f32; 3]) {
             let m = density * std::f32::consts::PI * radius * radius * height;
             let side = m * (3. * radius * radius + height * height) / 12.;
             (m, [side, m * radius * radius * 0.5, side])
+        }
+        // 0x7DB060: r^3 x 4.18879 (CFAAF4) x density; a solid sphere's
+        // inertia [I].
+        Primitive::Sphere { radius } => {
+            let m = radius * radius * radius * f32::from_bits(0x4086_0a92) * density;
+            let i = 0.4 * m * radius * radius;
+            (m, [i; 3])
         }
     }
 }
@@ -350,10 +392,7 @@ impl Catalog {
                     entities::Primitive::Cylinder { radius, height } => {
                         Primitive::Cylinder { radius, height }
                     }
-                    entities::Primitive::Sphere { .. } => {
-                        *catalog.unported.entry(template).or_default() += 1;
-                        continue 'entities;
-                    }
+                    entities::Primitive::Sphere { radius } => Primitive::Sphere { radius },
                 };
                 let (mass, inertia) = mass_properties(primitive, density);
                 if !(mass.is_finite() && mass > 0.) {
@@ -387,6 +426,7 @@ impl Catalog {
                     hull,
                     points,
                     triangles,
+                    round: !matches!(primitive, Primitive::Box(_)),
                 });
             }
             let intact = boxes.get(&index).cloned().unwrap_or_default();
@@ -552,7 +592,42 @@ impl PieceSpec {
             hull,
             points,
             triangles,
+            // The lost wheel keeps its prism (FIDELITY_BACKLOG row 24).
+            round: false,
         })
+    }
+
+    /// The piece's collision shape for the world, the cars and the road.
+    pub fn collider(&self) -> convex_distance::Hull<'_> {
+        match (self.round, self.primitive) {
+            (true, Primitive::Cylinder { radius, height }) => convex_distance::Hull::Cylinder {
+                radius,
+                half_height: height * 0.5,
+            },
+            (true, Primitive::Sphere { radius }) => convex_distance::Hull::Sphere { radius },
+            _ => convex_distance::Hull::Mesh(&self.hull),
+        }
+    }
+
+    /// The round shape at world `pose`, for queries in which the piece is
+    /// the static side (a car hull against it).
+    fn round_shape(&self, pose: &Matrix) -> Option<RoundShape> {
+        match (self.round, self.primitive) {
+            (true, Primitive::Cylinder { radius, height }) => {
+                Some(RoundShape::Cylinder(CylinderShape {
+                    matrix: *pose,
+                    radius,
+                    half_height: height * 0.5,
+                    margin: self.shell,
+                }))
+            }
+            (true, Primitive::Sphere { radius }) => Some(RoundShape::Sphere(SphereShape {
+                matrix: *pose,
+                radius,
+                margin: self.shell,
+            })),
+            _ => None,
+        }
     }
 }
 
@@ -597,7 +672,7 @@ fn pressing_at(
     };
     let boxes = track.props().map(|p| &p.boxes);
     let hits = track.body_contacts(
-        &spec.hull,
+        spec.collider(),
         pose,
         &query,
         TRACK_CONTACTS,
@@ -1048,7 +1123,7 @@ impl PropWorld {
                 break;
             }
             for hit in
-                track.body_contacts(&spec.hull, pose, &query, TRACK_CONTACTS, room, |code| {
+                track.body_contacts(spec.collider(), pose, &query, TRACK_CONTACTS, room, |code| {
                     surfaces.sheet(code)
                 })?
             {
@@ -1114,13 +1189,17 @@ impl PropWorld {
                     break;
                 }
                 let body = bodies.get(car.body).ok_or(Error("missing car body"))?;
-                let hull = hull.get_or_insert_with(|| {
-                    crate::body_geometry::WorldHull::new(&world_triangles(spec, &pose))
-                });
-                for hit in car
-                    .geometry
-                    .car_contacts_hull(body, hull, room.min(TRACK_CONTACTS))?
-                {
+                let hits = if let Some(shape) = spec.round_shape(&pose) {
+                    car.geometry
+                        .car_contacts_round(body, &shape, room.min(TRACK_CONTACTS))?
+                } else {
+                    let hull = hull.get_or_insert_with(|| {
+                        crate::body_geometry::WorldHull::new(&world_triangles(spec, &pose))
+                    });
+                    car.geometry
+                        .car_contacts_hull(body, hull, room.min(TRACK_CONTACTS))?
+                };
+                for hit in hits {
                     out.push(pair_record(
                         &hit,
                         [car.body, piece_body],
@@ -1151,7 +1230,7 @@ impl PropWorld {
         for (spec, index, _) in self.parts() {
             let body = bodies.get(index).ok_or(Error("missing prop piece body"))?;
             let (displacement, previous, start, end) = grid_world::continuous::step(body);
-            if !grid_world::continuous::is_fast(grid_world::continuous::radius(&spec.hull), displacement) {
+            if !grid_world::continuous::is_fast(grid_world::continuous::radius(spec.collider()), displacement) {
                 continue;
             }
             let query = convex_distance::ContactSettings {
@@ -1159,7 +1238,7 @@ impl PropWorld {
                 directions: directions.directions,
             };
             let room = grid_world::continuous::MAX_RECORDS - records;
-            let hits = track.sweep_road(&spec.hull, start, end, &query, room, |code| {
+            let hits = track.sweep_road(spec.collider(), start, end, &query, room, |code| {
                 surfaces.sheet(code)
             })?;
             records += hits.len();
@@ -1589,6 +1668,7 @@ mod tests {
             let height = match primitive {
                 Primitive::Cylinder { height, .. } => height,
                 Primitive::Box(s) => s[1],
+                Primitive::Sphere { radius } => 2. * radius,
             };
             let mut lower = [[0.; 4]; 4];
             for (i, row) in lower.iter_mut().enumerate() {
@@ -1792,7 +1872,7 @@ mod tests {
             };
             let ground = track
                 .body_contacts(
-                    &lower.hull,
+                    lower.collider(),
                     lower.pose,
                     &query,
                     TRACK_CONTACTS,
@@ -1838,7 +1918,7 @@ mod tests {
                         directions: geometry.query().directions,
                     };
                     let hits = track
-                        .body_contacts(&p.hull, p.pose, &query, TRACK_CONTACTS, 4096, |code| {
+                        .body_contacts(p.collider(), p.pose, &query, TRACK_CONTACTS, 4096, |code| {
                             runtime.surfaces().sheet(code)
                         })
                         .unwrap();
@@ -1990,6 +2070,7 @@ mod tests {
             shell: 0.02,
             limit: DESCRIPTOR_EC,
             hull: collision_mesh::build(&points, &triangles, 0).unwrap(),
+            round: false,
             points,
             triangles,
         };

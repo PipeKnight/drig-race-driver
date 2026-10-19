@@ -21,9 +21,8 @@
 //! triangle (AE2210) and polygon clipping (AEB630).
 use crate::{
     Error,
-    collision_mesh::Mesh,
     contact_manifold::{self, Contact, Face, Settings},
-    convex_distance::{ContactSettings, Context, Extra, Static},
+    convex_distance::{ContactSettings, Context, Extra, Hull, Static},
     physical_pose::Matrix,
 };
 
@@ -277,27 +276,28 @@ fn cut(origin: V, delta: V, frame: &[V; 3], centre: V, h: f32, r: f32) -> Option
     Some(out)
 }
 
-/// Remaining-capacity publication shared by the handlers: AE2FA0's records
-/// for a cylinder-first call are flipped and carry `-normal` in their own
-/// frame (the published normal pushes the mesh).
+/// Remaining-capacity publication shared by the handlers (AE2710,
+/// AEB8D0). Their records are cylinder-first with the normal `into` the
+/// cylinder; the port publishes the normal pushing the moving body and
+/// flags a record whose first shape is the static one.
 struct Sink<'a> {
     contacts: &'a mut Vec<Contact>,
     limit: usize,
     normal: V,
+    into: V,
+    flipped: bool,
 }
 
 impl Sink<'_> {
-    #[allow(clippy::neg_multiply)] // Original multiply preserves signed zeros.
     fn push(&mut self, point: V, depth: f32) {
-        let own = self.normal.map(|x| -1. * x);
         if self.contacts.len() < self.limit
-            && !contact_manifold::duplicate(self.contacts, point, own, depth)
+            && !contact_manifold::duplicate(self.contacts, point, self.into, depth)
         {
             self.contacts.push(Contact {
                 point,
                 normal: self.normal,
                 penetration: depth,
-                flipped: true,
+                flipped: self.flipped,
             });
         }
     }
@@ -306,16 +306,15 @@ impl Sink<'_> {
     }
 }
 
-/// AE2710: mesh face edges (`polygon`, margin-shifted) against the side.
-/// `normal` is the published normal (from the cylinder to the mesh).
+/// AE2710: polygon edges (margin-shifted) against the side.
 fn side_contacts(side: &Side, polygon: &[V], sink: &mut Sink<'_>) -> Result<(), Error> {
     let h = side.height * 0.5;
     let tangent = contact_manifold::normalize(cross(side.normal, side.axis))?;
     let frame = [side.normal, side.axis, tangent];
     let centre = along(side.bottom, h, side.axis);
     let r = side.radius;
-    // AE2710 probes along its own (cylinder-first) normal times -2r.
-    let probe = sink.normal.map(|x| r * 2. * x);
+    // AE2710 probes along its normal (into the cylinder) times -2r.
+    let probe = sink.into.map(|x| r * -2. * x);
     let edges = if polygon.len() < 3 { 1 } else { polygon.len() };
     for i in 0..edges {
         if sink.full() {
@@ -426,7 +425,7 @@ fn disk_triangle(
     ])
 }
 
-/// The fallback contact AE2FA0 adds after a short manifold.
+/// AE2FA0's fallback contact after a short manifold.
 fn fallback(contacts: &mut Vec<Contact>, s: &Settings, limit: usize) {
     if contacts.len() < limit
         && !contact_manifold::duplicate(contacts, s.fallback_point, s.normal, s.fallback_depth)
@@ -440,24 +439,30 @@ fn fallback(contacts: &mut Vec<Contact>, s: &Settings, limit: usize) {
     }
 }
 
-/// AE2FA0 for the mesh face against the cylinder feature.
+/// AE2FA0 for a polygon feature (a mesh face, triangle or box face) against
+/// a cylinder. The moving body comes first in the port's records: with a
+/// static cylinder the polygon is feature A, with a moving one the cylinder
+/// is. The static shape is the reference when both features are (its
+/// +0xD8 body slot is empty). `existing` contacts stay in front.
 #[allow(clippy::neg_multiply)] // Original margin/sign operations retain -0 lanes.
-fn cylinder_manifold(
-    mesh_face: Face<'_>,
+fn cylinder_polygon(
+    poly: Face<'_>,
     cylinder: &CylinderShape,
     s: &Settings,
+    existing: &[Contact],
+    moving: bool,
 ) -> Result<Vec<Contact>, Error> {
-    let limit = s.capacity;
-    let segment_face = |vertices: &[V; 2], margin: f32| -> Result<Vec<Contact>, Error> {
-        let face = Face {
-            normal: [0., 0., 0., 1.],
-            vertices,
-            oriented: false,
-            margin,
+    let limit = existing.len() + s.capacity;
+    let order = |cylinder_face: Face<'_>, segment: bool| {
+        let faces = if moving {
+            [cylinder_face, poly]
+        } else {
+            [poly, cylinder_face]
         };
-        contact_manifold::assemble_rule([mesh_face, face], s, &[], true)
+        contact_manifold::assemble_rule(faces, s, existing, segment)
     };
-    // Common normal: the reference's, signed along the query normal.
+    // Common normal: the reference's, signed along the query normal (from
+    // the static shape to the moving body).
     let signed = |n: V| {
         if dot(n, s.normal) < 0. {
             n.map(|x| -1. * x)
@@ -465,38 +470,55 @@ fn cylinder_manifold(
             n
         }
     };
-    let shifted = |n: V| -> Vec<V> {
-        let negative = n.map(|x| -1. * x);
-        mesh_face
-            .vertices
+    // From the polygon into the cylinder, and the polygon moved by its
+    // margin towards the cylinder.
+    let into = |common: V| {
+        if moving {
+            common
+        } else {
+            common.map(|x| -1. * x)
+        }
+    };
+    let shifted = |into: V| -> Vec<V> {
+        poly.vertices
             .iter()
-            .map(|p| std::array::from_fn(|j| p[j] + mesh_face.margin * negative[j]))
+            .map(|p| std::array::from_fn(|j| p[j] + poly.margin * into[j]))
             .collect()
     };
-    let mut contacts = Vec::new();
-    match cylinder.feature(s.normal)? {
-        Feature::Side(side) if mesh_face.oriented => {
+    let mut contacts = existing.to_vec();
+    // B47590 for A gets -n, for B +n.
+    let direction = if moving {
+        s.normal.map(|x| -1. * x)
+    } else {
+        s.normal
+    };
+    match cylinder.feature(direction)? {
+        Feature::Side(side) if poly.oriented => {
             // AE2F10: the generator nearest the direction.
             let p0 = along(side.bottom, side.radius, side.normal);
             let p1 = along(p0, side.height, side.axis);
-            return segment_face(&[p0, p1], 0.);
+            let vertices = [p0, p1];
+            return order(segment_face(&vertices, 0.), true);
         }
         Feature::Side(side) => {
-            let normal = signed(side.normal);
-            let polygon = shifted(normal);
+            let common = signed(side.normal);
+            let into = into(common);
+            let polygon = shifted(into);
             let mut sink = Sink {
                 contacts: &mut contacts,
                 limit,
-                normal,
+                normal: common,
+                into,
+                flipped: !moving,
             };
             side_contacts(&side, &polygon, &mut sink)?;
         }
         Feature::Segment(vertices) => {
-            if !mesh_face.oriented {
+            if !poly.oriented {
                 fallback(&mut contacts, s, limit);
                 return Ok(contacts);
             }
-            return segment_face(&vertices, cylinder.margin);
+            return order(segment_face(&vertices, cylinder.margin), true);
         }
         Feature::Disk {
             normal,
@@ -505,27 +527,31 @@ fn cylinder_manifold(
             radius,
             oriented,
         } => {
-            if !mesh_face.oriented && !oriented {
+            if !poly.oriented && !oriented {
                 fallback(&mut contacts, s, limit);
                 return Ok(contacts);
             }
-            let common = signed(if oriented { normal } else { mesh_face.normal });
-            if oriented {
-                // AEB8D0 with a reference disk: the face inside the circle,
-                // then below the cap plane.
-                let disk_centre = along(centre, cylinder.margin, common);
+            // Both references: the static shape keeps its flag.
+            let reference = oriented && (!moving || !poly.oriented);
+            let common = signed(if reference { normal } else { poly.normal });
+            let into = into(common);
+            if reference {
+                // AEB8D0 with a reference disk: the polygon inside the
+                // circle, then inside the cap plane.
+                let disk_centre = along(centre, cylinder.margin, into.map(|x| -1. * x));
                 let v = contact_manifold::normalize(cross(x_axis, normal))?;
-                let inside = circle_clip(&shifted(common), disk_centre, x_axis, v, radius);
+                let inside = circle_clip(&shifted(into), disk_centre, x_axis, v, radius);
                 if inside.len() > 1 {
-                    let plane = common.map(|x| -1. * x);
-                    let below = contact_manifold::clip(&inside, disk_centre, plane)?;
+                    let below = contact_manifold::clip(&inside, disk_centre, into)?;
                     let mut sink = Sink {
                         contacts: &mut contacts,
                         limit,
                         normal: common,
+                        into,
+                        flipped: !moving,
                     };
                     for p in below {
-                        let depth = dot(sub(p, disk_centre), plane).max(0.);
+                        let depth = dot(sub(p, disk_centre), into).max(0.);
                         sink.push(p, depth);
                         if sink.full() {
                             break;
@@ -537,14 +563,15 @@ fn cylinder_manifold(
                     return Ok(contacts);
                 }
             }
-            let triangle = disk_triangle(normal, x_axis, centre, radius, oriented, common)?;
+            let toward = into.map(|x| -1. * x);
+            let triangle = disk_triangle(normal, x_axis, centre, radius, reference, toward)?;
             let face = Face {
                 normal,
                 vertices: &triangle,
-                oriented,
+                oriented: reference,
                 margin: cylinder.margin,
             };
-            return contact_manifold::assemble_faces([mesh_face, face], s, &[]);
+            return order(face, false);
         }
     }
     if contacts.len() <= 2 {
@@ -553,17 +580,101 @@ fn cylinder_manifold(
     Ok(contacts)
 }
 
-/// Contacts of `mesh` at `matrix` (margin `query.margin`, sampled directions
-/// in the mesh frame) against `shape`, at most `capacity` (<= 16). Empty when
-/// the shapes are farther apart than their margins. The published normal
-/// pushes the mesh, as for boxes.
-pub fn contacts(
-    mesh: &Mesh,
+/// A two-vertex generator as a never-reference polygon feature.
+fn segment_face(vertices: &[V; 2], margin: f32) -> Face<'_> {
+    Face {
+        normal: [0., 0., 0., 1.],
+        vertices,
+        oriented: false,
+        margin,
+    }
+}
+
+/// The moving round body `hull` at `matrix` against a static polygon
+/// feature (a packed triangle or a box face): AE2FA0 with the cylinder's
+/// B47590 feature, or the sphere's single fallback contact. `s.margin` is
+/// the body's shell.
+pub(crate) fn moving_round_polygon(
+    hull: Hull<'_>,
+    matrix: Matrix,
+    poly: Face<'_>,
+    s: &Settings,
+    existing: &[Contact],
+) -> Result<Vec<Contact>, Error> {
+    match hull {
+        Hull::Cylinder {
+            radius,
+            half_height,
+        } => {
+            let cylinder = CylinderShape {
+                matrix,
+                radius,
+                half_height,
+                margin: s.margin,
+            };
+            cylinder_polygon(poly, &cylinder, s, existing, true)
+        }
+        _ => {
+            let mut contacts = existing.to_vec();
+            fallback(&mut contacts, s, existing.len() + s.capacity);
+            Ok(contacts)
+        }
+    }
+}
+
+/// [`moving_round_polygon`] for a packed triangle after AEE640's
+/// orientation, as `contact_manifold::calculate_oriented_append` does for a
+/// mesh.
+pub(crate) fn round_triangle_append(
+    hull: Hull<'_>,
+    matrix: Matrix,
+    triangle: [V; 3],
+    s: &Settings,
+    existing: &[Contact],
+    triangle_witness: V,
+) -> Result<Vec<Contact>, Error> {
+    let (normal, witnesses) = contact_manifold::orient(
+        triangle[0],
+        matrix[3],
+        s.normal,
+        [triangle_witness, s.fallback_point],
+    )?;
+    let s = Settings {
+        margin: s.margin,
+        shape_margin: s.shape_margin,
+        normal,
+        fallback_point: witnesses[1],
+        fallback_depth: s.fallback_depth,
+        capacity: s.capacity,
+    };
+    let face_normal = contact_manifold::normalize(cross(
+        sub(triangle[1], triangle[0]),
+        sub(triangle[2], triangle[0]),
+    ))?;
+    let poly = Face {
+        normal: face_normal,
+        vertices: &triangle,
+        oriented: f32::from_bits(0x3f7d_70a4) < dot(normal, face_normal).abs(),
+        margin: s.shape_margin,
+    };
+    moving_round_polygon(hull, matrix, poly, &s, existing)
+}
+
+/// Contacts of the body `hull` at `matrix` (margin `query.margin`, sampled
+/// directions in the body frame) against the static `shape`, at most
+/// `capacity` (<= 16). Empty when the shapes are farther apart than their
+/// margins. The published normal pushes the body, as for boxes. Two round
+/// shapes (a cylinder piece against a cone) give AE2FA0's single fallback
+/// contact here: the disk and segment pairs (AEBC00 and friends) are not
+/// ported.
+pub fn contacts<'m>(
+    hull: impl Into<Hull<'m>>,
     matrix: Matrix,
     shape: &RoundShape,
     query: &ContactSettings,
     capacity: usize,
 ) -> Result<Vec<Contact>, Error> {
+    let hull = hull.into();
     let valid = match shape {
         RoundShape::Cylinder(c) => c.valid(),
         RoundShape::Sphere(s) => s.valid(),
@@ -598,7 +709,7 @@ pub fn contacts(
     };
     let mut context = Context::new();
     let query = context.contact_static(
-        mesh,
+        hull,
         matrix,
         support,
         margin,
@@ -633,15 +744,15 @@ pub fn contacts(
         fallback_depth: depth,
         capacity,
     };
-    match shape {
-        RoundShape::Sphere(_) => {
+    match (shape, hull) {
+        (RoundShape::Cylinder(c), Hull::Mesh(mesh)) => {
+            let (mesh_feature, _) = contact_manifold::mesh_feature(&mut context, mesh, matrix, &s)?;
+            cylinder_polygon(mesh_feature.face(), c, &s, &[], false)
+        }
+        _ => {
             let mut contacts = Vec::new();
             fallback(&mut contacts, &s, capacity);
             Ok(contacts)
-        }
-        RoundShape::Cylinder(c) => {
-            let (mesh_feature, _) = contact_manifold::mesh_feature(&mut context, mesh, matrix, &s)?;
-            cylinder_manifold(mesh_feature.face(), c, &s)
         }
     }
 }
@@ -649,6 +760,7 @@ pub fn contacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collision_mesh::Mesh;
 
     fn cube(half: f32) -> Mesh {
         let points: Vec<V> = (0..8)
@@ -786,5 +898,47 @@ mod tests {
         let hit = cut([0.5, 2., 0., 1.], [0., -4., 0., 0.], &frame, centre, 1., 1.).unwrap();
         assert_eq!(hit.code, [2, -2]);
         assert!(cut([2., 0., 0., 1.], [0., 1., 0., 0.], &frame, centre, 1., 1.).is_none());
+    }
+    /// Round pieces on a floor box (the moving side of AE8AD0): an upright
+    /// cylinder stands on its cap (the box face is the reference, the cap a
+    /// rim triangle), a lying one on its generator, a sphere on one point.
+    #[test]
+    fn round_bodies_rest_on_a_box() {
+        let floor = crate::box_contacts::BoxShape {
+            matrix: at(0., -0.5, 0.),
+            half: [5., 0.5, 5.],
+            margin: 0.02,
+        };
+        let upright = Hull::Cylinder {
+            radius: 0.3,
+            half_height: 0.45,
+        };
+        let hits = crate::box_contacts::contacts(upright, at(0., 0.44, 0.), &floor, &settings(), 16)
+            .unwrap();
+        assert!(hits.len() >= 3, "{hits:?}");
+        for c in &hits {
+            assert!(c.normal[1] > 0.99 && c.point[1] < 0.05, "{c:?}");
+        }
+        let lying = [
+            [1., 0., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., -1., 0., 0.],
+            [0., 0.29, 0., 1.],
+        ];
+        let hits = crate::box_contacts::contacts(upright, lying, &floor, &settings(), 16).unwrap();
+        assert!(!hits.is_empty() && hits.len() <= 2, "{hits:?}");
+        for c in &hits {
+            assert!(c.normal[1] > 0.99, "{c:?}");
+        }
+        let ball = Hull::Sphere { radius: 0.4 };
+        let hits =
+            crate::box_contacts::contacts(ball, at(1., 0.39, 0.), &floor, &settings(), 16).unwrap();
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert!(hits[0].normal[1] > 0.99 && (hits[0].penetration - 0.05).abs() < 0.01);
+        assert!(
+            crate::box_contacts::contacts(ball, at(1., 0.5, 0.), &floor, &settings(), 16)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
