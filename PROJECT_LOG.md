@@ -1,5 +1,15 @@
 # GRID engine project log
 
+F449 Redgate corner speed: cause located in the line-following curvature, not ported yet (2026-10-19, Claude Code; coordinator's task "Redgate: corner speed and brake-line braking"). Details: docs/AI_CHOREOGRAPHER_PORT.md "Redgate corner speed (F449 …)". Evidence: main checkout `local/driving/redgate-20261019/` (port solo trace, κ comparison, read-only Ghidra 12.1.4 decompiles cs1–cs5 of 0x777940, 0x9AD500, 0x98DB40, 0x998690, 0x798E90, 0x788410, 0x7878F0, 0x779C40); live field comparison in worktree fervent-napier-50814b `local/firstcorner/field02.dec.tsv`. The original was not launched for this entry. **No engine change.**
+- [V] Original leader at Redgate: brakes from x≈−460 at 0.55–0.78, releases at 37.3 m/s, holds 37.0–37.6 with throttle 0.45–0.6. Port leader (also solo): brakes from x≈−478 at 0.92–1.0, drops to ~35.7, sags to 33–34 with steering sawing ±1 and the corner lift holding throttle at 0.2.
+- [V] Port cause: κ = heading difference of racing-line **segment** directions over the look-ahead is exactly 0 for 10–20 ticks in the hairpin (1 309 of 6 000 solo ticks), so the look-ahead grows ~1 m/tick, the heading error jumps to −0.43 and steering slams to −1.
+- [V static] 0x798E90: κ = acos(clamp(lateral_here · lateral_ahead)) / look-ahead, sign from (point_here − point_ahead) · lateral_ahead; records at +0x90 and +0x150 (point, lateral, offset point, offset; layout from 0x779C40).
+- [V] Tried and reverted: the same formula on the port's gate-normal laterals gives a smooth |κ| but its sign agrees with the old κ in only 525 of 1 823 rows. Open: how 0x7878F0 builds the original's lateral.
+- Ruled out [V]: the brake-table grip +0x144 (0x9AD500; the Lacetti's tables for grip 2.0 and 2.2 both give 45.4 m from 57 to 39 m/s).
+- Tool: `tools/dump_grid_car.py`, a read-only one-shot dump of an original car object (same guards as capture_grid_braking.py; used for F447's dumps).
+- Correction to F419 [V]: the config vsync/60 Hz lock does not hold (world +7C8 6.10 / 6.37 ms in two captures); docs/BRAKING_REFERENCE.md now says to ask the owner for a 60 Hz display.
+- Checks: docs and a Python tool only; no Rust change, so no cargo checks run.
+
 F448 grid-soak: lost prop bodies that left the collision ground are expected losses; bodies an entity box drove into the ground get their own counter (2026-10-19, Claude Code; coordinator's decision on quick seeds 17 and 23 after F444). Details: docs/ROBUSTNESS_RESEARCH.md §9, docs/SOAK_TESTING.md "Expected losses", FIDELITY_BACKLOG row 88. Evidence: worktree fervent-napier-50814b `local/firstcorner/props/` (quick-all, long-100, kinds, checks). **Harness only; physics unchanged.**
 - Seed 23 (Jarama) [V]: a piece hit at 29 m/s flies off the edge of the road chunks (a vertical query finds none from x 221, z −337 on).
 - Seed 17 (Long Beach) [V]: a car hits a tyre into the neighbouring intact stack (entity box 144). The box's minimum-penetration exit is its bottom face (normal y −1, 0.38 m), so in one 16 ms step the tyre is driven into the grass and falls. This is the open step-size family (F320/F351).

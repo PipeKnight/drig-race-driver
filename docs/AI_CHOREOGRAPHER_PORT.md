@@ -93,6 +93,26 @@ are unchanged.
   original's back markers keep 25–28 m/s through Redgate, the port's slow to 18–22. The
   race-start grip factor matches the original, so the cause is elsewhere in the AI's braking
   in traffic (follow brake 0x77A1E0 is the first candidate); not traced here.
+- **Redgate corner speed (F449 analysis, not ported).** The original's leader brakes ~18 m
+  earlier with partial pressure (0.55–0.78), releases at 37 m/s and holds 37.0–37.6 m/s through
+  Redgate with 0.45–0.6 throttle (live field02). The port's leader brakes later at 0.92–1.0, falls
+  to ~35 and then sags to 33–34 m/s while its steering saws between −1 and +1. Causes found [V]:
+  - The port's line-following curvature is `wrap(heading(ahead) − heading(here)) / look_ahead`
+    from the racing-line **segment** directions, which are constant within a segment. In a
+    hairpin it is exactly 0 for 10–20 ticks whenever the car and its look-ahead point are on one
+    segment (1 309 of 6 000 solo ticks); the look-ahead then grows (0x779A20 reads |κ|), the
+    target point jumps and the steering slams to ±1.
+  - The original's 0x798E90 instead takes `acos(lateral_here · lateral_ahead)` (double, clamped
+    to ±1) over the look-ahead, with the sign from `(point_here − point_ahead) · lateral_ahead`.
+    The two line-point records are at track view +0x90 (point +0xB0, lateral +0xC0, offset point
+    +0xD0, offset +0xE0) and +0x150 (+0x170 / +0x180 / +0x190); layout from 0x779C40 (offset point
+    = point + offset × lateral). The +0x144 braking-table grip is `0x9AD500(vehicle)` (wheel grip
+    × surface × ¼, × an aero/mass term), but the Lacetti's two brake tables (grip 2.0 / 2.2) give
+    the same 45.4 m from 57 to 39 m/s, so it does not explain the gap.
+  - Open: what the original's lateral is. With the port's laterals (raw gate normals, skewed
+    against the racing line in a hairpin) the sign test flips inside one bend, so the original
+    must build it differently, in 0x7878F0 (not yet decoded). Porting stops there; evidence in
+    main checkout `local/driving/redgate-20261019/`.
 - **GRID World names.** The career's `gw_%d_star` and `_h2h` names follow the same rule; the
   career session wires them when its races run.
 
