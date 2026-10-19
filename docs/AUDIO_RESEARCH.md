@@ -346,7 +346,7 @@ GRID was not launched.
   touchdown.
 - Scrape loop (453710, per frame 458780): one voice per car on the other
   surface's `carscrapeColInfo` (audio material); gates by mode (horizontal
-  speed > 0.3 / 0.1 / 1.0), a contact this step and x > 1; envelope g = x,
+  speed > 0.3 / 0.1 / 1.0), a contact this step and x > 1; envelope g = 0 at the start (§10),
   refreshed (g = 1 above 15 m/s, else +0.1) and halved per frame when slow or
   the impulse accumulator < 5; player volume lin2dB(|v|·0.04·gv) with 5 %
   −24 dB drops and −(rand % 9) dB jitter, smoothed by 1/3 per frame; pitch
@@ -519,3 +519,69 @@ at 455D7A (roof: local y > roof − 0.7, 0xCB0834) and 455DAD (floor: −floor >
   `shipped_collision_data_and_listener` (the hard front hit plays carFBHard plus both
   sweeteners, the cooldown skips a repeat, the mixer plays).
 - Not heard in a windowed race.
+
+## 10. Scrape loop (F488)
+
+19 October 2026, Claude Code. Static analysis: Capstone 5.0.6 listings of 0x453710, 0x4563F0,
+0x436170, 0xA69930 and 0x413890 from `local/compatibility/grid-unpacked.exe`, the Ghidra
+pseudocode of §7.3 (worktree `local/gtfix/decomp/coll4/{453931,455ebd,458c84}`,
+`wind3/448810`), and constants read from the shipped `grid.exe`. GRID was not launched.
+
+**Call site [O].** 4559C0 calls 453710 *before* the impact one-shot, and only when 436170 maps
+the listener's material argument to an AudioMaterial. That argument is the other side's
+material word of the event (9EF360 passes event[3 − side], which B0CFC0 fills from contact
++0x30/+0x34). The info is that AudioMaterial's preset `carscrapeColInfo`
+(`*(*(material+0x28)+0x28)`); the roof passes a fixed entry of the car's impact table instead
+(`*(…+0x18)+0xC`, taken as CarScrapeRoof [I]). Modes: sides 0 when the longitudinal cosine
+is > 0 (0xD85A50 = 0), else 1; roof 2; front 3; back 4.
+
+**Which info [O, data].** The AudioMaterial loop reads only `preset` (TYRE_AUDIO_RESEARCH §1),
+so WALL, CAR_* and the other per-material `carscrapeColInfo` attributes are ignored. Every
+preset names CarScrapeSideRoad except `grass` (CarScrapeSideOther). All three scrape infos use
+the `scraping` preset (minVel 0, maxVel 1, minVol −24, maxVol −18 dB).
+
+**453710 [O].**
+- Speed gate by mode: horizontal speed (the car velocity with y masked, mask 0xCAF410) ≥ 0.3
+  (modes 0/1, 0xCB0DCC), 1.0 (mode 2) or 0.1 (others). It also needs the audio car's body
+  (+0x24), A69930 true (body +0x40C set this step; it returns the impulse accumulator +0x240,
+  to which B0FC00 adds each solved contact's +3C × normal) and x > 1.
+- No voice yet: the envelope +0xA328 = 0, the info is stored at +0xA324, the voice starts on its
+  variety at the contact, the mode is stored, return. The info is never replaced, so a car
+  keeps the surface of its first scrape for the race.
+- Otherwise: if g < 1 it becomes 1 at a horizontal speed above 15 (0xCB3BA8), else g + 0.1;
+  the position is the contact, replaced for mode 0 by 1.5 × the pose row at +0xA3F0 (the x
+  axis), mode 1 by −1.5 × it, mode 2 by the +0xA400 row (y axis); then 448810 and the
+  pitch/volume/position setters.
+
+**458780, every frame for every car [O].** With a voice: g ≤ 0.1 sets the voice to −48 dB
+(0xCB0BC0) and nothing else; otherwise g halves when |v| < 0.5 or |impulse| < 5 (0xCB093C),
+the position is placed by the stored mode, and 448810 and the setters run.
+
+**448810, the player only (+0xA4D8) [O].** t = the envelope's place between the info's minVol
+(+0x5C) and maxVol (+0x60), 1 above both, so 1 for the shipped data. Pitch: s = |v|/45
+(0xCB4AA0); 0 for s ≤ 0.8, (s − 0.8)/0.7 below 1.5, else 1 (the setter raises it to 0.5).
+Level: lin2dB(|v| × 0.04 × t) (0x413890: −48 at or below 0, 0 at or above 1), −24 dB when
+rand % 100 < 5, − (rand % 9) dB, then +0xA31C += (target − +0xA31C) / 3.
+
+**Port** (`grid_tools::collision_audio` Listener/Mixer, grid-app `collision_sound`):
+- Per vehicle tick: contacts first (453710 inside the listener), then `scrape_frame` (458780),
+  as the original's step then frame order; the per-frame rules run per tick [I, F453 pacing].
+- The other side's AudioMaterial: the port's contact material words are solver indices (always
+  0), so for a packed track contact the triangle under it is queried again with a 0.25 m ray
+  along the normal (`Runtime::track_surface_at`) and its mechanics name is the AudioMaterial;
+  another car is CAR_; the boundary sheet and route props are taken as WALL [I]. All of these
+  except grass resolve to CarScrapeSideRoad, so the choice only matters on grass.
+- The impulse accumulator is summed from the car's solved records (impact × side normal), set
+  when the car has any [I].
+- AI cars run the same level and pitch rules [I: the original updates neither for AI voices,
+  their level is not traced]. Emitter: the car plus the mode's offset for every car (the
+  player is measured from the car, the AI group from the camera) [I: for AI cars the original
+  writes the offset as a world position].
+- One looping voice per car in the collision mixer, one sample picked at start; gain and pitch
+  glide to the tick's targets over about 10 ms [I].
+- Tests: `scrapes_follow_453710_and_458780` (start at 0, +0.1 / 1 above 15 m/s, offsets by
+  mode, halving without impulse, gates, the AI group, roof info);
+  `shipped_collision_data_and_listener` also checks the material → info map and that the loop
+  keeps playing.
+- Not yet: landing (PrimaryBot by airtime), yaw/pitch displacement, Crashed mix mode, stereo.
+- Not heard in a windowed race (no rendered app runs at the coordinator's request).

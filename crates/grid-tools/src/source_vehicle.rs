@@ -1213,6 +1213,43 @@ impl Runtime {
         )
     }
 
+    /// [`Self::impacts`] with what each record touched (packed track chunk
+    /// or other static geometry; the solo world has no other cars).
+    pub fn contact_impacts(&self) -> Vec<(crate::body_impacts::Impact, multi::Contacted)> {
+        let contacts = &self.state.world.groups.contacts;
+        contacts[..self.last_active_contacts.min(contacts.len())]
+            .iter()
+            .filter_map(|c| {
+                let impact = crate::body_impacts::collect(std::slice::from_ref(c), 1).pop()?;
+                let other = if c[0x28 / 4] == 1 { c[0x2c / 4] } else { c[0x28 / 4] };
+                let contacted = if self.track.is_chunk_token(other) {
+                    multi::Contacted::Track
+                } else {
+                    multi::Contacted::Static
+                };
+                Some((impact, contacted))
+            })
+            .collect()
+    }
+
+    /// Mechanics name of the packed track triangle under a body contact
+    /// (presentation only): a short ray through `point` along `normal`, both
+    /// ways. Body contact records keep no triangle (their material words are
+    /// solver indices), so the surface is queried again.
+    pub fn track_surface_at(&self, point: [f32; 3], normal: [f32; 3]) -> Option<&str> {
+        let mut cache = grid_world::rectangle_cull::Cache::default();
+        let at = |s: f32| [point[0] + normal[0] * s, point[1] + normal[1] * s, point[2] + normal[2] * s, 1.];
+        for (a, b) in [(0.25, -0.25), (-0.25, 0.25)] {
+            if let Ok(q) = self.track.query(at(a), at(b), &mut cache)
+                && let Some(hit) = q.hit
+                && let Ok((index, _)) = self.surfaces.contact(hit.contact.material)
+            {
+                return self.surfaces.mechanics_name(index as u32 + 1);
+            }
+        }
+        None
+    }
+
     /// [`Self::impacts`] without the records against packed track chunks,
     /// which the drift collision listener 0x64D840 skips (type 11).
     pub fn impacts_off_track(&self) -> Vec<crate::body_impacts::Impact> {
@@ -1471,6 +1508,37 @@ mod tests {
                         "{stem}"
                     );
                 }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires purchased GRID car and route resources"]
+    fn track_surface_under_a_body_contact() {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let car = Car::new("lac").unwrap();
+                let runtime =
+                    Runtime::load(root, &Route::default(), &car, "slot_01", 200679).unwrap();
+                let p = runtime.pose();
+                let (start, end) = ([p[12], p[13] + 1., p[14], 1.], [p[12], p[13] - 4., p[14], 1.]);
+                let mut cache = rectangle_cull::Cache::default();
+                let hit = runtime.track.query(start, end, &mut cache).unwrap().hit.unwrap();
+                let t = hit.contact.fraction;
+                let ground = std::array::from_fn(|j| start[j] + (end[j] - start[j]) * t);
+                let name = runtime.track_surface_at(ground, [0., 1., 0.]).unwrap();
+                println!("grid_slot_surface name={name}");
+                let bank = crate::collision_audio::Bank::load(root).unwrap();
+                assert_eq!(bank.car_scrape.get(name).map(String::as_str), Some("CarScrapeSideRoad"));
+                // A metre off the surface the short ray finds nothing.
+                let above = [ground[0], ground[1] + 1., ground[2]];
+                assert_eq!(runtime.track_surface_at(above, [0., 1., 0.]), None);
+                assert!(runtime.contact_impacts().is_empty());
             })
             .unwrap()
             .join()

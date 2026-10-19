@@ -2,15 +2,16 @@
 //! (as the engine and tyre parameters, F453) every car's solved contacts go
 //! through the original's collision listener (`grid_tools::collision_audio`)
 //! and the one-shots play on the player's Panel Coll group or the AI group,
-//! with the A23B70 distance law. Presentation only, never feeds physics.
+//! with the A23B70 distance law; each car's scrape loop (453710/458780)
+//! follows on the same groups. Presentation only, never feeds physics.
 use bevy::{
     audio::{AddAudioSource, ChannelCount, SampleRate, Source},
     prelude::*,
 };
 use grid_tools::{
     audio_mix::{self, Table},
-    collision_audio::{Bank, Car, Contact, Listener, Mixer},
-    source_vehicle::{DELTA, Runtime},
+    collision_audio::{Bank, Car, Contact, Listener, Mixer, classify},
+    source_vehicle::{DELTA, Runtime, multi::Contacted},
 };
 use std::{
     sync::{
@@ -22,8 +23,12 @@ use std::{
 
 const RATE: u32 = grid_tools::engine_audio::RATE;
 
-/// One one-shot for the audio thread: variety, pitch, linear gain.
-type Start = (String, f32, f32);
+/// For the audio thread: a one-shot (variety, pitch, linear gain) or car
+/// k's scrape loop level.
+enum Start {
+    Shot(String, f32, f32),
+    Scrape(usize, String, f32, f32),
+}
 
 /// A car model's description heights (lowest and highest `collision_main` y).
 #[derive(Clone, Copy)]
@@ -60,8 +65,13 @@ impl Iterator for Decoder {
         if self.count.is_multiple_of(64)
             && let Some(starts) = &self.starts
         {
-            while let Ok((variety, pitch, gain)) = starts.try_recv() {
-                self.mixer.start(&variety, pitch, gain);
+            while let Ok(start) = starts.try_recv() {
+                match start {
+                    Start::Shot(variety, pitch, gain) => {
+                        self.mixer.start(&variety, pitch, gain);
+                    }
+                    Start::Scrape(car, variety, pitch, gain) => self.mixer.scrape(car, &variety, pitch, gain),
+                }
             }
         }
         self.count = self.count.wrapping_add(1);
@@ -135,13 +145,34 @@ fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets:
         // ONCE: the decoder never ends; LOOP's rodio `repeat_infinite` would
         // keep every sample played to replay it (F482).
         commands.spawn((AudioPlayer(assets.add(source)), PlaybackSettings::ONCE));
-        println!("collision_audio version=1 event=queued rate={RATE} groups=PanelColl,AI impacts=front_back,sides,roof sweeteners=low,high");
+        println!(
+            "collision_audio version=2 event=queued rate={RATE} groups=PanelColl,AI impacts=front_back,sides,roof sweeteners=low,high scrapes=loop"
+        );
     }
 }
 
-fn car_of(runtime: &Runtime, heights: Heights, player: bool) -> Car {
+/// The AudioMaterial name of what a contact touched: the packed track
+/// triangle under it, CAR_ for another car; the boundary sheet and route
+/// props are taken as WALL [I: their per-triangle/template materials are
+/// not in the contact; every such AudioMaterial gives CarScrapeSideRoad].
+fn surface(runtime: &Runtime, contacted: Contacted, point: [f32; 3], normal: [f32; 3]) -> Option<String> {
+    match contacted {
+        Contacted::Track => runtime.track_surface_at(point, normal).map(str::to_owned),
+        Contacted::Car(_) => Some("CAR_".into()),
+        Contacted::Prop(_) | Contacted::Static => Some("WALL".into()),
+    }
+}
+
+fn car_of(runtime: &Runtime, heights: Heights, player: bool, impacts: &[grid_tools::body_impacts::Impact]) -> Car {
     let v = &runtime.state.car.owner.vehicle;
     let f = |o: usize| f32::from_bits(v[o / 4]);
+    let velocity = runtime.velocity();
+    // A69930: the body's impulse accumulator (+0x240, B0FC00 adds each solved
+    // contact's +3C times its normal) when a contact flagged it (+0x40C)
+    // [I: summed here from the solved records of the car].
+    let impulse = (!impacts.is_empty()).then(|| {
+        impacts.iter().fold([0.; 3], |a, x| std::array::from_fn(|j| a[j] + x.impact * x.normal[j]))
+    });
     Car {
         pose: runtime.pose(),
         offset: [f(0x1630), f(0x1634), f(0x1638)],
@@ -149,6 +180,8 @@ fn car_of(runtime: &Runtime, heights: Heights, player: bool) -> Car {
         bottom: heights.bottom,
         roof: heights.roof,
         player,
+        velocity: [velocity[0], velocity[1], velocity[2]],
+        impulse,
     }
 }
 
@@ -162,61 +195,65 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
     sound.last = Some(now);
     let sound = &mut *sound;
     sound.listener.tick(DELTA);
-    let mut cars: Vec<(&Runtime, Vec<Contact>)> = Vec::new();
+    let mut cars: Vec<(&Runtime, Vec<(grid_tools::body_impacts::Impact, Contacted)>)> = Vec::new();
     match &driving.opponents {
         Some(o) => {
             for (k, runtime) in std::iter::once(&driving.runtime).chain(o.multi.cars.iter().skip(1)).enumerate() {
-                let contacts = o
-                    .multi
-                    .contact_impacts(k)
-                    .iter()
-                    .map(|(x, _)| Contact { point: x.point, impact: x.impact })
-                    .collect();
-                cars.push((runtime, contacts));
+                cars.push((runtime, o.multi.contact_impacts(k)));
             }
         }
-        None => {
-            let contacts = driving
-                .runtime
-                .impacts()
-                .iter()
-                .map(|x| Contact { point: x.point, impact: x.impact })
-                .collect();
-            cars.push((&driving.runtime, contacts));
-        }
+        None => cars.push((&driving.runtime, driving.runtime.contact_impacts())),
     }
     let (trim, camera) = (listening.trim(), listening.camera());
     let ear = listening.ear(&driving.runtime.pose());
-    for (k, (runtime, contacts)) in cars.into_iter().enumerate() {
-        if contacts.is_empty() {
-            continue;
-        }
+    let group_db = |sound: &CollisionSound, group: usize| {
+        sound.table.as_ref().map_or(-9., |t| t.group_db(audio_mix::NORMAL, camera, group, trim))
+    };
+    for (k, (runtime, impacts)) in cars.into_iter().enumerate() {
         let model = sound.car_model.get(k).copied().unwrap_or(0);
         let Some(&heights) = sound.heights.get(model) else { continue };
-        let car = car_of(runtime, heights, k == 0);
+        let solved: Vec<_> = impacts.iter().map(|(x, _)| *x).collect();
+        let car = car_of(runtime, heights, k == 0, &solved);
+        let position = Vec3::new(car.pose[12], car.pose[13], car.pose[14]);
+        // The player's groups use the Car listener (the car itself), the
+        // AI group the camera (433AA0) [I: car pose as the Car listener].
+        let listener = if k == 0 { position } else { ear };
         let mut plays = Vec::new();
-        sound.listener.contacts(&car, &contacts, &mut plays);
+        if !impacts.is_empty() {
+            let contacts: Vec<Contact> = impacts
+                .iter()
+                .map(|(x, contacted)| Contact {
+                    point: x.point,
+                    impact: x.impact,
+                    // Floor contacts make no sound: skip their surface query.
+                    surface: classify(&car, x.point)
+                        .and_then(|_| surface(runtime, *contacted, x.point, x.normal)),
+                })
+                .collect();
+            sound.listener.contacts(k, &car, &contacts, &mut plays);
+        }
+        // 458780 after the step: the scrape loop's level, pitch and place.
+        if let Some(voice) = sound.listener.scrape_frame(k, &car)
+            && let Some(variety) = sound.bank.varieties.get(&voice.variety)
+        {
+            let distance = (position + Vec3::from_array(voice.offset)).distance(listener);
+            let gain = audio_mix::backend_gain(
+                voice.volume_db,
+                group_db(sound, voice.group),
+                audio_mix::distance_db(distance, variety.min_distance, variety.max_distance),
+            );
+            let _ = sound.starts.send(Start::Scrape(k, voice.variety, voice.pitch, gain));
+        }
         for play in plays {
             let Some(variety) = sound.bank.varieties.get(&play.variety) else { continue };
-            // The player's groups use the Car listener (the car itself), the
-            // AI group the camera (433AA0) [I: car pose as the Car listener].
-            let listener = if k == 0 {
-                Vec3::new(car.pose[12], car.pose[13], car.pose[14])
-            } else {
-                ear
-            };
             let distance = Vec3::from_array(play.position).distance(listener);
-            let group_db = sound
-                .table
-                .as_ref()
-                .map_or(-9., |t| t.group_db(audio_mix::NORMAL, camera, play.group, trim));
             let gain = audio_mix::backend_gain(
                 play.volume_db,
-                group_db,
+                group_db(sound, play.group),
                 audio_mix::distance_db(distance, variety.min_distance, variety.max_distance),
             );
             if gain > 0. {
-                let _ = sound.starts.send((play.variety, play.pitch, gain));
+                let _ = sound.starts.send(Start::Shot(play.variety, play.pitch, gain));
             }
         }
     }
