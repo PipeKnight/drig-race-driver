@@ -27,6 +27,7 @@ mod body_occlusion;
 mod body_specular;
 mod camera;
 mod car_materials;
+mod paint_environment;
 mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
@@ -1759,6 +1760,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--race-number" => {
                 graphics.race_number(&args.next().ok_or("--race-number needs 0..999")?)?;
             }
+            "--paint-environment" => {
+                let value: f32 = args.next().ok_or("--paint-environment needs 0..1")?.parse()?;
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err("--paint-environment needs finite 0..1".into());
+                }
+                graphics.paint_environment = value;
+            }
             "--paint-clearcoat" => {
                 graphics.paint_clearcoat(&args.next().ok_or("--paint-clearcoat needs 0..1")?)?;
                 paint_response_explicit = true;
@@ -1911,6 +1919,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" => {
                 #[cfg(feature = "paint-specular")]
+                println!("--paint-environment 0..1: default-off authored environment-only player-paint layer, requires enhanced forward/source IBL/source body mask; not original shader parity.");
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
                 println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
@@ -2020,6 +2029,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
         return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges) require an enhanced non-collision track scene with --track-materials source".into());
+    }
+    if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !track || collision) {
+        return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
     }
     if graphics.thin_motion_antenna && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive) {
         return Err("--thin-motion antenna requires enhanced driving with native --aa dlaa".into());
@@ -3110,6 +3122,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
+    }
+    if graphics.paint_environment > 0. {
+        paint_environment::install(&mut app)?;
     }
     perf_timing::install(&mut app);
     #[cfg(feature = "profile")]

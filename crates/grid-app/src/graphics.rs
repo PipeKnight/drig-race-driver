@@ -79,6 +79,8 @@ pub struct Settings {
     pub window_reflectance: f32,
     /// Authored player-paint coat controls, independent of base mask and glass.
     pub paint_clearcoat: f32,
+    /// Default-off authored environment-only paint layer; not original shader parity.
+    pub paint_environment: f32,
     pub paint_coat_roughness: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
@@ -144,6 +146,7 @@ impl Default for Settings {
             window_roughness: 0.08,
             window_reflectance: 0.5,
             paint_clearcoat: 0.35,
+            paint_environment: 0.,
             paint_coat_roughness: 0.18,
             tree_sheet_colours: false,
             ambient_occlusion: true,
