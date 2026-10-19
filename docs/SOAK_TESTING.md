@@ -490,10 +490,34 @@ Bisect [V] (release `grid-soak`, each seed run alone, evidence worktree fervent-
 `local/r20/bisect-39-54/`): F475 (c583aae) passes both; F476 (375e262) fails both at the same
 ticks, bodies and positions as main bdda5de and as F484 (4f8cd6f). F476 changes only the AI
 (brake-line ratio on the cruise tables, the Derby avoid window), so the cars now hit
-different props. [I] The AI change exposes the failure rather than causes it: a broken piece
-falling through the ground is the same failure family as Spa seed 38 (a hole in the packed
-road collision, above); whether these two spots are holes too is not traced. Spa seed 38,
-which failed from F465, passes on main bdda5de and F484 (when it stopped failing is not bisected).
+different props: the AI change exposes the two losses, it does not cause them. Spa seed 38,
+which failed from F465, passes on main bdda5de and F484 (when it stopped failing is not
+bisected).
+
+Traces (F489; replays with `GRID_SOAK_TRACE_BODY`, ground with the `grid-road-hole` probe:
+the packed world's vertical query, a brute-force test of every packed triangle, and the
+`boundarylines.cqtc` sheet near the point; evidence `local/r21/trace39/`, `trace54/`):
+
+- **Seed 39, Spa: data gap [V].** Body 10 is a brake-board piece a car knocks at tick 4694
+  at 18 m/s. At tick 4706 it hits the boundary sheet (the vertical sheet from (544.9, 855.2)
+  through (550.8, 874.3) to (556.8, 893.4), y 25..126) and slows to 3 m/s, then slides along
+  it on the track side, 0.1-0.6 m from it, and falls freely from tick 4708 at
+  (549.9, 36.55, 871.7). The packed road collision (GRAS, chunks `qt_11_10_11_01`/`_11`, y
+  about 35.5) ends along a line 0.3-0.8 m short of the sheet there: no packed triangle covers
+  (549.9, 871.7) .. (552.5, 882), and none for 50 m east of the edge. The piece fell into the
+  strip between the road's edge and the sheet. The original has the same data; whether it
+  loses the piece too is not verified. Like seed 38, a known data hole.
+- **Seed 54, Le Mans: car over a piece [V trace, I mechanism].** Body 42 is a tyre of a tyre
+  stack (bodies 36-44 stacked at y 25.4-26.2) that car 0 breaks at tick 4105 (ground y 25.10, tyre centre 25.73). The
+  car drives over it: at ticks 4110-4113 the car's centre is 0.6-0.75 m from the tyre's (xz)
+  while the tyre drops 0.16 m and 0.47 m in single ticks, far more than its velocity
+  (-2.6 m/s) moves it, and its axis turns 70 degrees in a tick; by tick 4112 its centre is
+  below the road (25.02 against 25.05) and it falls through. The road is there all along
+  (`qt_00_10_10_10_00`/`_10`, y 25.10 down to 24.45). This is the port's car-against-piece
+  contact (the car-to-car hull-triangle path, not the original's AE8AD0 with summed margins;
+  "Follow-ups" below) pressing the piece through the road, a known deviation. The 1:1 port
+  was tried and lost more pieces at the port's fixed 16 ms step (BOX_CONTACTS.md, "Tried and
+  not adopted"), so it waits for the world-step work.
 
 ## Follow-ups
 
