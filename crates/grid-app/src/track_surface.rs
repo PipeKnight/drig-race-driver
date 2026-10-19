@@ -67,6 +67,9 @@ pub struct Surface {
     skid_colour: Vec4,
     #[uniform(111)]
     skid_colour2: Vec4,
+    // Per-layer dry soil/grass weights; authored GGX response, not source alpha.
+    #[uniform(112)]
+    dry_ground: Vec4,
 }
 impl MaterialExtension for Surface {
     fn fragment_shader() -> ShaderRef {
@@ -78,6 +81,7 @@ impl MaterialExtension for Surface {
 }
 
 struct Definition {
+    dry_ground: Vec4,
     textures: [String; 4],
     scales: Vec4,
     controls: Vec4,
@@ -175,6 +179,12 @@ fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error
         let macro_map = texture_name(b"TMacroColour").ok_or("surface macro absent")?;
         let skids = texture_name(b"TSkidsMap");
         let definition = Definition {
+            dry_ground: Vec4::new(
+                dry_ground_layer(&first, !skidded),
+                dry_ground_layer(&second, !skidded),
+                1.,   // authored dry-ground perceptual roughness
+                0.25, // dielectric normal-incidence F0 = 0.16 * 0.25^2 = 1%
+            ),
             textures: [
                 first,
                 second,
@@ -318,6 +328,26 @@ pub fn install(
     Ok(())
 }
 
+// Select only known standalone terrain layers. Mixed road-edge atlases are not
+// classified wholesale: that would also dull their asphalt/paint texels.
+fn dry_ground_layer(texture: &str, infield_shader: bool) -> f32 {
+    let texture = texture.strip_prefix("land/").unwrap_or(texture);
+    f32::from(
+        infield_shader
+            || matches!(
+                texture,
+                "don_infield1_d.tga"
+                    | "don_infield2_d.tga"
+                    | "don_infield2_varb_d.tga"
+                    | "don_infield3_d.tga"
+                    | "don_infield4_d.tga"
+                    | "don_infield5_d.tga"
+                    | "don_outfield_terrain_01_d.tga"
+                    | "don_outfield_terrain_02_d.tga"
+            ),
+    )
+}
+
 // uint_color_argb is stored A,R,G,B. It is a linear control, not sRGB albedo.
 fn mask([a, r, g, b]: [u8; 4]) -> [f32; 4] {
     let mut controls = [r, g, b, a].map(|v| f32::from(v) / 255.);
@@ -412,6 +442,7 @@ fn attach(
                         ),
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
+                        dry_ground: d.dry_ground,
                     },
                 })
             })

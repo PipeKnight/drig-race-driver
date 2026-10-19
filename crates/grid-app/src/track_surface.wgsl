@@ -20,6 +20,8 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(110) var<uniform> skid_colour: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var<uniform> skid_colour2: vec4<f32>;
 
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> dry_ground: vec4<f32>;
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr = pbr_input_from_standard_material(in, is_front);
@@ -44,6 +46,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let weight = select(clamp(layer.a, 0.0, 1.0), 1.0, controls.w > 1.5);
         pbr.material.reflectance *= sqrt(weight);
     }
+    // Follow the same authored vertex blend as the diffuse layers. This keeps
+    // road/curb response unchanged while dry terrain loses the broad wet sheen.
+    // Do not derive roughness from source specular alpha or albedo brightness.
+    let ground = clamp(mix(dry_ground.x, dry_ground.y, in.color.r), 0.0, 1.0);
+    pbr.material.perceptual_roughness = mix(pbr.material.perceptual_roughness, dry_ground.z, ground);
+    // Preserve optional source-mask weighting, applied above.
+    pbr.material.reflectance *= mix(1.0, dry_ground.w / 0.5, ground);
     // Original AO-scale uniform is not recovered; scale=1 is an explicit choice.
     let ao = mix(1.0, macro_sample.a, controls.z);
     pbr.diffuse_occlusion *= ao;
