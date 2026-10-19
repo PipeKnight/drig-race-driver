@@ -9,7 +9,8 @@
 //! grid-soak replay FILE.inputs.tsv     exact replay of recorded inputs
 //! grid-soak replay-log FILE.log        replay a grid-app --drive playtest log
 //!
-//! Options: --out local/soak/DIR, --seeds A..B, --jobs J, --timeout SECONDS,
+//! Options: --out local/soak/DIR, --seeds A..B, --jobs J (default: quick a
+//! third of the hardware threads, 2..6; long 2), --timeout SECONDS,
 //! --max-cars N, --cars N, --route ROUTE, --ticks N, --grid-position P,
 //! --assists SPEC, --chaos MODE, --props on|off, --car STEM, --opponent-cars
 //! STEM[,STEM...] (the app's car options; long runs also mix BMW and Lacetti
@@ -40,7 +41,8 @@ struct Options {
     root: PathBuf,
     out: Option<PathBuf>,
     seeds: Option<(u64, u64)>,
-    jobs: usize,
+    /// Scenario processes at a time; `None`: [`default_jobs`].
+    jobs: Option<usize>,
     timeout: Option<u64>,
     hours: f64,
     max_cars: usize,
@@ -69,7 +71,7 @@ impl Default for Options {
             ),
             out: None,
             seeds: None,
-            jobs: 2,
+            jobs: None,
             timeout: None,
             hours: 8.,
             max_cars: grid_tools::soak::MAX_SHARED_CARS,
@@ -1014,10 +1016,24 @@ struct Child {
     stderr: std::sync::Arc<Mutex<VecDeque<String>>>,
 }
 
+/// Scenario processes at a time when `--jobs` is not given. Quick: a third of
+/// the hardware threads, 2..=6 (6 on the owner's 20-thread PC: 417 s instead of
+/// 1279 s with 2, the same per-seed digests; a scenario peaks at about 320 MB;
+/// docs/TOOLCHAIN.md "Build and test cost"). Long: 2, as before.
+fn default_jobs(profile: Profile) -> usize {
+    match profile {
+        Profile::Quick => {
+            std::thread::available_parallelism().map_or(2, |n| (n.get() / 3).clamp(2, 6))
+        }
+        Profile::Long => 2,
+    }
+}
+
 /// Runs scenarios in child processes (isolates aborts, stack overflows and
 /// hangs), `jobs` at a time, rewriting the summary after each one.
 fn orchestrate(options: Options, name: &str) -> Result<i32> {
     let private = load_private()?;
+    let jobs = options.jobs.unwrap_or_else(|| default_jobs(options.profile)).max(1);
     let out = output_dir(&options, name)?;
     let exe = std::env::current_exe()?;
     let started = Instant::now();
@@ -1036,7 +1052,7 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
         } else {
             last.to_string()
         },
-        options.jobs,
+        jobs,
         private.available()
     );
     let mut rows: Vec<Row> = Vec::new();
@@ -1044,7 +1060,7 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
     let mut next = first;
     loop {
         let open = next <= last && deadline.is_none_or(|d| Instant::now() < d);
-        while open && running.len() < options.jobs.max(1) && next <= last {
+        while open && running.len() < jobs && next <= last {
             let scenario = scenario_for(&options, next, &private)?;
             let mut command = std::process::Command::new(&exe);
             command
@@ -1261,7 +1277,7 @@ fn parse_options(args: &[String]) -> Result<(Options, Vec<String>)> {
                 o.seeds = Some((a.parse()?, b.parse()?));
             }
             "--seed" => o.seed = Some(value(&mut i)?.parse()?),
-            "--jobs" => o.jobs = value(&mut i)?.parse()?,
+            "--jobs" => o.jobs = Some(value(&mut i)?.parse()?),
             "--timeout" => o.timeout = Some(value(&mut i)?.parse()?),
             "--hours" => o.hours = value(&mut i)?.parse()?,
             "--max-cars" => o.max_cars = value(&mut i)?.parse()?,

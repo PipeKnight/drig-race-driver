@@ -35,12 +35,16 @@ try {
     $taskStamp=[DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffffffZ')
     $taskEvidence=Join-Path $taskRoot "local/playtest/build-$taskStamp"
     New-Item -ItemType Directory -Path $taskEvidence | Out-Null
-    & $taskCargo test -p grid-tools --lib --release --offline source_driving -- --ignored *> (Join-Path $taskEvidence 'source-tests.txt')
-    if($LASTEXITCODE -ne 0){throw "Source driving checks failed; see $taskEvidence"}
-    & $taskCargo test -p grid-app --release --offline -- --ignored *> (Join-Path $taskEvidence 'app-tests.txt')
-    if($LASTEXITCODE -ne 0){throw "App checks failed; see $taskEvidence"}
-    & $taskCargo build -p grid-app --release --offline *> (Join-Path $taskEvidence 'build.txt')
-    if($LASTEXITCODE -ne 0){throw "Prototype build failed; see $taskEvidence"}
+    # cmd.exe does the redirection: in Windows PowerShell 5.1, `*>` with
+    # $ErrorActionPreference='Stop' turns cargo's first stderr line ("Compiling ...")
+    # into a terminating NativeCommandError.
+    function Invoke-TaskCargo([string]$taskLog, [string]$taskArguments) {
+        & $env:ComSpec /d /s /c "`"`"$taskCargo`" $taskArguments > `"$taskLog`" 2>&1`""
+        return $LASTEXITCODE
+    }
+    if((Invoke-TaskCargo (Join-Path $taskEvidence 'source-tests.txt') 'test -p grid-tools --lib --release --offline source_driving -- --ignored') -ne 0){throw "Source driving checks failed; see $taskEvidence"}
+    if((Invoke-TaskCargo (Join-Path $taskEvidence 'app-tests.txt') 'test -p grid-app --release --offline -- --ignored') -ne 0){throw "App checks failed; see $taskEvidence"}
+    if((Invoke-TaskCargo (Join-Path $taskEvidence 'build.txt') 'build -p grid-app --release --offline') -ne 0){throw "Prototype build failed; see $taskEvidence"}
     $taskRecord=[ordered]@{
         built_utc=[DateTime]::UtcNow.ToString('o')
         revision=$taskRevision
