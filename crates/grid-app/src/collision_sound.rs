@@ -178,7 +178,9 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
         let mut plays = Vec::new();
         if !impacts.is_empty() {
             let contacts = contacts_of(runtime, &car, &impacts);
-            sound.listener.contacts(k, &car, &contacts, &mut plays);
+            let table = sound.table.clone();
+            let mut crash = || table.as_deref().is_some_and(|t| listening.crash(t));
+            sound.listener.contacts_crashing(k, &car, &contacts, &mut crash, &mut plays);
         }
         // 458780 after the step: the scrape loop's level, pitch and place.
         if let Some(voice) = sound.listener.scrape_frame(k, &car)

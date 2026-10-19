@@ -1,5 +1,19 @@
 # GRID engine project log
 
+F496 Crashed mix mode: the player's hard hits duck engine, exhaust and wheels (2026-10-20, Claude Code; coordinator's overnight order: "the Crashed mode next"). Details: docs/AUDIO_RESEARCH.md §13.1. Evidence: Capstone 5.0.6 listings of 4535A0, 435EA0/435B20, 436300, 411C10, 427ED0 (session scratchpad); Crashed row in worktree kind-pike-df38cc `local/mix/gmv.txt`. The original was not run.
+- From the image and data [O]:
+  - 4535A0 asks for Crashed for 0.2 s when the player's hit exceeds the hard info's minVel. If the mode is set, that one-shot skips its cooldown (435B20's flag).
+  - 411C10 refuses during pause, pause replay, transition, or when already Crashed. It remembers the interrupted mode and holds for 0.2 s minus that remembered mode's attack (the stale +C24): 0.05 s after Normal. 427ED0 then returns to it.
+  - Crashed row: attack 0.01 s; −24 dB on Exhaust, Engine, Turbo, Gearbox, Wheels, Ambience, Sense Of Speed; AI −6.
+  - Result: about a 0.05 s drop by 24 dB, then a linear 0.15 s return (1.5 s when returning to StartLine).
+- Port: `ModeMix::set_for` and the 427ED0 return; `Listener::contacts_crashing` with a crash closure; grid-app `AudioMode` behind a lock, the flow mode set only on change. The broadcaster path 436300 is not ported.
+- Tests: `crashed_ducks_the_engine_and_returns`, crash checks in `shipped_collision_data_and_listener`. Not heard.
+- Checks [V], release, cargo/rustc 1.99.0, on 3b42e3b7 (F493) + this change, started with no other rustc running:
+  - `cargo t -- --include-ignored` with absolute GRID_* paths: 822 passed, 0 failed, grid-app included;
+  - `cargo clippy --workspace --all-targets -D warnings` clean (again after the rebase onto F494/F495 career);
+  - identities (rebuilt `grid-opponent-race`): solo 79a990f6…4bcc and 12-car 40cd67ca…ab8d, unchanged;
+  - `grid-soak quick` 24/24 (`local/crashed/checks/`).
+
 F495 Career routine B and class positions: the Le Mans 24 Hours pays by class position from the whole reputation pot (2026-10-20, Claude Code; coordinator's order, FIDELITY_BACKLOG row 60). Research: docs/CAREER_RESEARCH.md §3.4 (same static study as F494; notes `local/career/notes/BANK_ROUTINEB.md` §3–§5, Capstone dumps `local/career/agent-f/dis_6779c0.txt`, `dis_6781f0.txt`, `dis_66bba0.txt`). Screen: docs/CAREER_SCREEN.md "Routine B and class positions (F495)".
 - Found [V]: routine B is chosen by the game virtual 0x69B290, which tests the current tier's region index for 4, `le_mans`. Only tiers 10–13 are in that region, and their only events are the Le Mans 24 Hours, 13–16. The Le Mans Series events 31, 35, 50 and 51 use routine A, with class positions because their `use_lemans_selection` is set.
 - The class position 0x66BBA0 keeps the drivers whose `vehicle_livery` vehicle has the placed driver's `vehicle_class_id`, sorts them by points, and puts the player first on equal points.

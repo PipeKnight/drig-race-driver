@@ -56,9 +56,11 @@ pub const MODE_NAMES: [&str; 10] = [
     "PlatformModifier",
 ];
 pub const NORMAL: usize = 0;
+pub const CRASHED: usize = 2;
 pub const PAUSED: usize = 3;
 pub const START_LINE: usize = 4;
 pub const END_OF_RACE: usize = 6;
+pub const PAUSED_REPLAY: usize = 7;
 pub const TRANSITION: usize = 8;
 const PLATFORM: usize = 9;
 
@@ -213,6 +215,10 @@ impl Table {
 /// platform, camera, master and trim), which evolves the same while those
 /// stay constant [I]. The original steps once per game frame; here the step
 /// is a fixed 60 Hz so the fade does not depend on the frame rate [I].
+///
+/// A mode set with a duration (Crashed, 0.2 s from 4535A0) is transient: the
+/// mode it interrupts is remembered (+C24) and 427ED0 sets it again once the
+/// timer passes the hold (+C18), the duration minus that mode's attack.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModeMix {
     mode: usize,
@@ -221,12 +227,30 @@ pub struct ModeMix {
     elapsed: f32,
     pending: f32,
     levels: Option<[f32; GROUPS]>,
+    /// +C21: the current mode was set without a duration.
+    persistent: bool,
+    /// +C24: the mode a transient one returns to [I: Normal at start].
+    back: usize,
+    /// +C18: how long a transient mode holds.
+    hold: f32,
 }
 impl Default for ModeMix {
     fn default() -> Self {
-        Self { mode: NORMAL, from: NORMAL, extra: 0., elapsed: 0., pending: 0., levels: None }
+        Self {
+            mode: NORMAL,
+            from: NORMAL,
+            extra: 0.,
+            elapsed: 0.,
+            pending: 0.,
+            levels: None,
+            persistent: true,
+            back: NORMAL,
+            hold: 0.,
+        }
     }
 }
+/// 4535A0's Crashed duration (CB0830).
+pub const CRASH_SECONDS: f32 = 0.2;
 /// 427ED0's step once the mode fade has ended (CB0BC4).
 const SETTLE: f32 = 1.5;
 /// Fixed step of the fade [I: the original runs it per frame].
@@ -235,21 +259,41 @@ impl ModeMix {
     pub fn mode(&self) -> usize {
         self.mode
     }
-    /// 411C10 with a zero duration (a persistent mode). The extra fade time
-    /// of CB092C (2.5 s, Transition to Paused) and CB0BC4 (1.5 s, EndOfRace to
-    /// StartLine) depends on the mode the previous fade left.
+    /// 411C10 with a zero duration (a persistent mode).
     pub fn set(&mut self, mode: usize) {
+        self.change(mode, 0., 0.);
+    }
+    /// 411C10 with `seconds` > 0 (a transient mode, Crashed from 4535A0).
+    /// Refused while paused, in a pause replay or a transition, or when the
+    /// mode is already current; returns whether it was set.
+    pub fn set_for(&mut self, table: &Table, mode: usize, seconds: f32) -> bool {
+        if matches!(self.mode, PAUSED | PAUSED_REPLAY | TRANSITION) {
+            return false;
+        }
+        let attack = table.attack.get(self.back).copied().unwrap_or(0.);
+        self.change(mode, seconds, attack)
+    }
+    /// The common part of 411C10. The extra fade time of CB092C (2.5 s,
+    /// Transition to Paused) and CB0BC4 (1.5 s, EndOfRace to StartLine)
+    /// depends on the mode the previous fade left.
+    fn change(&mut self, mode: usize, seconds: f32, attack: f32) -> bool {
         if mode == self.mode || mode >= PLATFORM {
-            return;
+            return false;
         }
         if self.from == TRANSITION && mode == PAUSED {
             self.extra = 2.5;
         } else if self.from == END_OF_RACE && mode == START_LINE {
             self.extra = SETTLE;
         }
+        self.hold = if seconds > attack { seconds - attack } else { seconds };
+        if self.persistent && !matches!(self.mode, PAUSED | END_OF_RACE | PAUSED_REPLAY | TRANSITION) {
+            self.back = self.mode;
+        }
+        self.persistent = seconds == 0.;
         self.from = self.mode;
         self.mode = mode;
         self.elapsed = 0.;
+        true
     }
     /// Advance the fade by `seconds`.
     pub fn advance(&mut self, table: &Table, seconds: f32) {
@@ -265,6 +309,12 @@ impl ModeMix {
     }
     /// One 427ED0 frame on the mode terms.
     fn frame(&mut self, table: &Table) {
+        // A transient mode past its hold sets the remembered mode again; the
+        // groups keep their levels this frame.
+        if !self.persistent && self.elapsed > self.hold {
+            self.set(self.back);
+            return;
+        }
         let mut levels = self.levels.unwrap_or(table.modes[self.from]);
         let mut settled = 0;
         for (g, level) in levels.iter_mut().enumerate() {
@@ -458,5 +508,55 @@ mod tests {
         let before = mix.clone();
         mix.set(NORMAL);
         assert_eq!(mix, before);
+    }
+
+    #[test]
+    fn crashed_ducks_the_engine_and_returns() {
+        let mut t = Table {
+            master: 0.,
+            modes: [[0.; GROUPS]; 10],
+            attack: [0.15, 0.2, 0.01, 0.5, 1.5, 0.5, 1., 1., 1., 0.],
+            cameras: [[0.; GROUPS]; 6],
+        };
+        for g in [EXHAUST, ENGINE, 2, GEARBOX, WHEELS, 12, 20] {
+            t.modes[CRASHED][g] = -24.;
+        }
+        t.modes[CRASHED][AI] = -6.;
+        t.modes[START_LINE][AI] = -3.;
+        let engine = |m: &ModeMix| m.group_db(&t, Camera::Chase, ENGINE, 0.);
+        let mut mix = ModeMix::default();
+        assert!(mix.set_for(&t, CRASHED, CRASH_SECONDS));
+        // Already crashed: refused.
+        assert!(!mix.set_for(&t, CRASHED, CRASH_SECONDS));
+        // Attack 0.01 s: at -24 dB on the first frame.
+        mix.advance(&t, MODE_STEP);
+        assert_eq!(engine(&mix), -24.);
+        // Hold 0.2 - attack(Normal) 0.15 = 0.05 s, then Normal again.
+        mix.advance(&t, MODE_STEP);
+        assert_eq!(mix.mode(), CRASHED);
+        mix.advance(&t, 3. * MODE_STEP);
+        assert_eq!(mix.mode(), NORMAL);
+        // Back over Normal's 0.15 s attack, linearly from the Crashed level.
+        let back = engine(&mix);
+        assert!(back > -24. && back < 0., "{back}");
+        mix.advance(&t, 0.2);
+        assert_eq!(engine(&mix), 0.);
+        // From StartLine: the hold uses the attack of the mode remembered
+        // before (+C24 is read before it is updated: Normal, 0.05 s again);
+        // the return takes StartLine's 1.5 s, linearly.
+        mix.set(START_LINE);
+        mix.advance(&t, 2.);
+        assert!(mix.set_for(&t, CRASHED, CRASH_SECONDS));
+        mix.advance(&t, 5. * MODE_STEP);
+        assert_eq!(mix.mode(), START_LINE);
+        mix.advance(&t, 0.75);
+        let half = engine(&mix);
+        assert!(half > -14. && half < -10., "{half}");
+        mix.advance(&t, 1.);
+        assert_eq!(engine(&mix), 0.);
+        assert_eq!(mix.group_db(&t, Camera::Chase, AI, 0.), -3.);
+        // Paused refuses a crash.
+        mix.set(PAUSED);
+        assert!(!mix.set_for(&t, CRASHED, CRASH_SECONDS));
     }
 }

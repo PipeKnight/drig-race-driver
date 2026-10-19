@@ -213,30 +213,38 @@ pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<
         .add_systems(Update, (mix_mode, update).chain().after(super::drive_present));
 }
 /// The mix mode (411C10/427ED0, `audio_mix::ModeMix`) shared by the car,
-/// collision and HUD sounds.
+/// collision and HUD sounds; behind a lock so the collision tick can switch
+/// to Crashed while it reads the levels.
 #[derive(Resource, Default)]
-pub(crate) struct AudioMode(pub(crate) audio_mix::ModeMix);
+pub(crate) struct AudioMode(pub(crate) Mutex<audio_mix::ModeMix>);
 /// The race flow's `StateAudioSetState` (docs/AUDIO_RESEARCH.md §13):
 /// StartLine through the start sequence (also after a restart), Normal from
 /// the green light (`set_audio_normal_start_race`). Free practice has no
-/// start sequence and stays Normal. Pause keeps its existing silence; the
-/// Paused, Crashed and EndOfRace modes are not driven here [I].
+/// start sequence and stays Normal. Like the flow's states, a mode is set
+/// when the flow changes, so a Crashed in between (collision_sound) returns
+/// by itself. Pause keeps its existing silence; the Paused and EndOfRace
+/// modes are not driven here [I].
 fn mix_mode(
-    mut mode: ResMut<AudioMode>,
+    mode: Res<AudioMode>,
     sound: Res<EngineSound>,
     trial: Option<Res<super::time_trial::Trial>>,
     time: Res<Time<Real>>,
+    mut flow: Local<Option<usize>>,
 ) {
     let start_line = trial
         .as_ref()
         .is_some_and(|t| matches!(t.state.phase(), grid_tools::time_trial::Phase::Countdown(_)));
     let next = if start_line { audio_mix::START_LINE } else { audio_mix::NORMAL };
-    if next != mode.0.mode() {
-        mode.0.set(next);
-        log_line!("audio_mode version=1 event=set mode={}", audio_mix::MODE_NAMES[next]);
+    let Ok(mut mix) = mode.0.lock() else { return };
+    if *flow != Some(next) {
+        *flow = Some(next);
+        if next != mix.mode() {
+            mix.set(next);
+            log_line!("audio_mode version=1 event=set mode={}", audio_mix::MODE_NAMES[next]);
+        }
     }
     if let Some(table) = sound.table.as_deref() {
-        mode.0.advance(table, time.delta_secs());
+        mix.advance(table, time.delta_secs());
     }
 }
 fn start(
@@ -331,7 +339,16 @@ impl Listening<'_, '_> {
     }
     /// The mix mode's current group terms.
     pub(crate) fn modes(&self) -> audio_mix::ModeMix {
-        self.mode.as_ref().map(|m| m.0.clone()).unwrap_or_default()
+        self.mode.as_ref().and_then(|m| m.0.lock().ok().map(|m| m.clone())).unwrap_or_default()
+    }
+    /// 4535A0's request for the Crashed mix (0.2 s); whether it was set.
+    pub(crate) fn crash(&self, table: &Table) -> bool {
+        let Some(Ok(mut mix)) = self.mode.as_ref().map(|m| m.0.lock()) else { return false };
+        let set = mix.set_for(table, audio_mix::CRASHED, audio_mix::CRASH_SECONDS);
+        if set {
+            log_line!("audio_mode version=1 event=set mode=Crashed seconds={}", audio_mix::CRASH_SECONDS);
+        }
+        set
     }
     pub(crate) fn camera(&self) -> Camera {
         self.cameras

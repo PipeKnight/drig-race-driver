@@ -556,14 +556,27 @@ impl Listener {
     }
 
     /// 4535A0: the ImpactVariety's soft, med or hard CollisionInfo by range;
-    /// nothing below the soft range. Returns whether it played.
-    fn impact(&mut self, variety: &str, x: f32, position: [f32; 3], group: usize, out: &mut Vec<Play>) {
+    /// nothing below the soft range. A player hit above the hard info's
+    /// minVel asks for the Crashed mix (`crash`, 411C10 for 0.2 s); when that
+    /// is accepted the one-shot skips its cooldown (435B20's flag).
+    #[allow(clippy::too_many_arguments)]
+    fn impact(
+        &mut self,
+        variety: &str,
+        x: f32,
+        position: [f32; 3],
+        group: usize,
+        player: bool,
+        crash: &mut dyn FnMut() -> bool,
+        out: &mut Vec<Play>,
+    ) {
         let Some(three) = self.bank.impacts.get(variety).cloned() else { return };
         let curves: Vec<Option<Curve>> = three.iter().map(|n| self.bank.infos.get(n).cloned()).collect();
         let Some(soft) = &curves[0] else { return };
         if x < soft.min_vel {
             return;
         }
+        let crashed = player && curves[2].as_ref().is_some_and(|hard| x > hard.min_vel) && crash();
         let pick = if soft.contains(x) {
             0
         } else if curves[1].as_ref().is_some_and(|c| c.contains(x)) {
@@ -571,11 +584,25 @@ impl Listener {
         } else {
             2
         };
-        self.one_shot(&three[pick], x, position, group, true, out);
+        self.one_shot(&three[pick], x, position, group, !crashed, out);
     }
 
-    /// Car `k`'s contacts of this tick (4563F0 per contact).
+    /// Car `k`'s contacts of this tick (4563F0 per contact), with no mix to
+    /// switch to Crashed.
     pub fn contacts(&mut self, k: usize, car: &Car, contacts: &[Contact], out: &mut Vec<Play>) {
+        self.contacts_crashing(k, car, contacts, &mut || false, out);
+    }
+
+    /// `contacts` with `crash` asking the mix for the Crashed mode
+    /// (`audio_mix::ModeMix::set_for`); it returns whether the mode was set.
+    pub fn contacts_crashing(
+        &mut self,
+        k: usize,
+        car: &Car,
+        contacts: &[Contact],
+        crash: &mut dyn FnMut() -> bool,
+        out: &mut Vec<Play>,
+    ) {
         let group = if car.player { PANEL_COLL } else { AI };
         for c in contacts {
             if car.mass <= 0. {
@@ -604,7 +631,7 @@ impl Listener {
                 let offset = [c.point[0] - p[12], c.point[1] - p[13], c.point[2] - p[14]];
                 self.scrape_contact(k, car, &info, x, offset, mode);
             }
-            self.impact(variety, x, c.point, group, out);
+            self.impact(variety, x, c.point, group, car.player, crash, out);
             // Sweeteners from the info's minVel (x >= 40 high, >= 15 low),
             // played through 44F010 -> 435940 with its cooldown flag set
             // (4535A0 passes 1): the same per-variety cooldown as impacts,
@@ -962,6 +989,21 @@ mod tests {
         out.clear();
         listener.contacts(0, &c, &[contact([0., 0.4, 2.], 5400., None)], &mut out);
         assert_eq!(out[0].variety, "carFBHard");
+        // Above the hard info's minVel (30) the player's hit asks for
+        // Crashed; when the mix accepts, the one-shot skips its cooldown.
+        let mut asked = 0;
+        out.clear();
+        listener.contacts_crashing(0, &c, &[contact([0., 0.4, 2.], 5400., None)], &mut || { asked += 1; true }, &mut out);
+        assert_eq!((asked, out[0].variety.as_str()), (1, "carFBHard"));
+        out.clear();
+        listener.contacts_crashing(0, &c, &[contact([0., 0.4, 2.], 5400., None)], &mut || false, &mut out);
+        assert_eq!(out.iter().filter(|p| p.variety == "carFBHard").count(), 0);
+        // Medium hits and AI cars never ask.
+        let mut ai = c;
+        ai.player = false;
+        listener.contacts_crashing(1, &ai, &[contact([0., 0.4, 2.], 5400., None)], &mut || { asked += 1; true }, &mut out);
+        listener.contacts_crashing(0, &c, &[contact([0., 0.4, 2.], 2400., None)], &mut || { asked += 1; true }, &mut out);
+        assert_eq!(asked, 1);
         // Too soft: nothing.
         out.clear();
         listener.contacts(0, &c, &[contact([0.9, 0.4, 0.3], 100., None)], &mut out);

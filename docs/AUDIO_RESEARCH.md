@@ -755,3 +755,40 @@ the 3 dB within 0.5 s at 60 frames per second, exact by 0.8 s.
   Transition, master start-up smoothing.
 - Tests: `start_line_lowers_ai_with_the_427ed0_fade` (first frame, 0.5 s, settle, back to
   Normal, idempotent set) and the asset test (StartLine = Normal except AI, attack 1.5).
+
+### 13.1 Crashed (F496)
+
+Static: 4535A0, 435EA0/435B20, 436300, 411C10, 427ED0; the Crashed row of `GroupModeVolumes.bin`
+(`local/mix/gmv.txt`). GRID was not launched.
+
+**Trigger [O].** 4535A0, after the soft-range test and only for the player's listener (+A4D8):
+when x > the hard info's minVel it calls 411C10(Crashed, 0.2 s) (CB0830). If that returns true,
+the one-shot's flag to 435EA0 becomes 0; 435EA0 passes it to 435B20 as its ninth argument, and
+435B20 checks the per-variety cooldown only when that flag and its seventh are set. So the
+crash hit itself is never cooled down. The other call site, 436300 (the "game broadcaster"
+handler of queued play messages, registered at 45DB99), sets Crashed for a message whose +24
+flag is set; that path is not ported.
+
+**411C10 with a duration [O].** Refused (false) while the current mode is Paused, PausedReplay
+or Transition, or when the mode is already current. The hold +C18 is the duration minus the
+attack of the remembered mode +C24 when the duration is longer, else the duration; +C24 is
+read before it is updated. +C24 then becomes the interrupted mode when that one was
+persistent and not Paused, EndOfRace, PausedReplay or Transition. +C21 = (duration == 0).
+427ED0, while +C21 is false and the timer passes the hold, calls 411C10(+C24, 0) and publishes
+nothing that frame.
+
+**Crashed row [O].** attackTime 0.01; −24 dB on Exhaust, Engine, Turbo, Gearbox, Wheels,
+Ambience and Sense Of Speed; AI −6 dB; the rest 0. Eight groups differ, so the attack-time fade
+runs fully.
+
+**Consequence.** From Normal (attack 0.15): the engine, exhaust and wheels drop by 24 dB within
+one frame, hold for 0.05 s (0.2 − 0.15), then return linearly over 0.15 s from the Crashed
+level. From StartLine the hold is also 0.05 s (+C24 still Normal), and the return takes 1.5 s.
+A hit while Crashed neither extends it nor bypasses the cooldown.
+
+**Port.** `ModeMix::set_for` (the transient 411C10) and the 427ED0 return; `Listener::
+contacts_crashing` asks for Crashed through a closure (the app's `Listening::crash`), and the
+accepted hit skips its cooldown. `AudioMode` holds the mix behind a lock, and `mix_mode` sets
+the flow's mode only when the flow changes, so a Crashed in between returns by itself.
+`grid-opponent-race` keeps `contacts` (no mix). Tests: `crashed_ducks_the_engine_and_returns`
+and the crash part of `shipped_collision_data_and_listener`. Not heard.
