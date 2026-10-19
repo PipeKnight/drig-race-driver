@@ -67,7 +67,8 @@ pub struct Surface {
     skid_colour: Vec4,
     #[uniform(111)]
     skid_colour2: Vec4,
-    // Per-layer dry soil/grass weights; authored GGX response, not source alpha.
+    // Per-layer response codes:0road,1standalone terrain,2optional U-band.
+    // Z/W are authored roughness/reflectance, not recovered source values.
     #[uniform(112)]
     dry_ground: Vec4,
 }
@@ -348,6 +349,26 @@ fn dry_ground_layer(texture: &str, infield_shader: bool) -> f32 {
     )
 }
 
+// Code2 requests an authored U-band, not a whole-atlas terrain classification.
+// Native source atlas review puts ground/gravel left of the white road line.
+fn edge_ground_layer(texture: &str, standalone: f32, enabled: bool) -> f32 {
+    let texture = texture.strip_prefix("land/").unwrap_or(texture);
+    if enabled
+        && standalone < 0.5
+        && matches!(
+            texture,
+            "don_edge1to1_d.tga"
+                | "don_edge1to1varb_d.tga"
+                | "don_edge2to2_d.tga"
+                | "don_edge3to1_d.tga"
+        )
+    {
+        2.
+    } else {
+        standalone
+    }
+}
+
 // uint_color_argb is stored A,R,G,B. It is a linear control, not sRGB albedo.
 fn mask([a, r, g, b]: [u8; 4]) -> [f32; 4] {
     let mut controls = [r, g, b, a].map(|v| f32::from(v) / 255.);
@@ -442,7 +463,20 @@ fn attach(
                         ),
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
-                        dry_ground: d.dry_ground,
+                        dry_ground: Vec4::new(
+                            edge_ground_layer(
+                                &d.textures[0],
+                                d.dry_ground.x,
+                                settings.ground_edge_pilot,
+                            ),
+                            edge_ground_layer(
+                                &d.textures[1],
+                                d.dry_ground.y,
+                                settings.ground_edge_pilot,
+                            ),
+                            d.dry_ground.z,
+                            d.dry_ground.w,
+                        ),
                     },
                 })
             })

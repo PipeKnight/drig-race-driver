@@ -1,0 +1,11 @@
+# Optional dry response in mixed edge atlases
+
+19October2026. Following the ordered surface-material work; physics/performance/camera features unchanged. Private evidence local/graphics/edge-material01/.
+
+Read-only purchased tracksplit.pssg base-DDS exports from existing grid-tools identify four256x512 mixed atlases:don_edge1to1_d,don_edge1to1varb_d,don_edge2to2_d anddon_edge3to1_d. Native source atlas review shows ground/gravel on the left, white line/right asphalt on the right. Treating their whole material as terrain would dull the line/asphalt too; inferring roughness from source alpha or RGB brightness remains unjustified.
+
+Opt-in --ground-edges atlas-pilot (defaultoff) assigns a special per-layer code only to these four known atlases when they were not already standalone terrain. The shader evaluates an authored smooth transition U0.60..0.70:dry left side, existing response on the road/line side. UV repeats match the diffuse lookup. This is an approximate authored material partition, not recovered source semantics or an exact terrain/line segmentation at every mip. Existing vertex-red layer blend still combines both responses. No RGB/alpha modification, extra textures/samplers, geometry change, foliage density or light/exposure adjustment; existing texture_upload path retained. Invalid modes and incompatible scene/layer profiles reject.
+
+Initial real app all-target releaseClippy with paint-specular,dlaa passes. Native GPU acceptance still pending: matched off/pilot4K near audited atlas draws, unchanged-off parity against7569901, road/line controls and low-angle motion. Keep both ordinary3362 and separate native756 installations unchanged until checks pass. Long-distance filtering of the authored U-band remains a visual risk to inspect, not a solved issue.
+
+Six CPU rays from the existing sun-facing ground camera identify the prominent near patch as track1/2!3(!MQ), with nearby infield2/2varb!3(!GQ), not these mixed atlases. Sampled source normals point upward and TRS error is0. Therefore this particular patch must not be relabelled or removed as an atlas fix; original geometry/reference matching remains separate. Rays select CPU triangles, not exact GPU visibility, and do not prove absence of other overlaps.

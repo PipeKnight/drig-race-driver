@@ -22,6 +22,15 @@
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> dry_ground: vec4<f32>;
 
+// Independently authored dry response confined to the audited ground band.
+// Source RGB/alpha, road/line texels and the existing layer blend are preserved.
+fn ground_weight(code: f32, uv: vec2<f32>) -> f32 {
+    if code > 1.5 {
+        return 1.0 - smoothstep(0.60, 0.70, fract(uv.x));
+    }
+    return code;
+}
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr = pbr_input_from_standard_material(in, is_front);
@@ -49,7 +58,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // Follow the same authored vertex blend as the diffuse layers. This keeps
     // road/curb response unchanged while dry terrain loses the broad wet sheen.
     // Do not derive roughness from source specular alpha or albedo brightness.
-    let ground = clamp(mix(dry_ground.x, dry_ground.y, in.color.r), 0.0, 1.0);
+    let ground = clamp(mix(ground_weight(dry_ground.x, in.uv), ground_weight(dry_ground.y, in.uv), in.color.r), 0.0, 1.0);
     pbr.material.perceptual_roughness = mix(pbr.material.perceptual_roughness, dry_ground.z, ground);
     // Preserve optional source-mask weighting, applied above.
     pbr.material.reflectance *= mix(1.0, dry_ground.w / 0.5, ground);

@@ -1839,6 +1839,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--surface-rgb-overrides" => {
                 surface_rgb_override = Some(PathBuf::from(args.next().ok_or("--surface-rgb-overrides needs a private manifest")?));
             }
+            "--ground-edges" => {
+                graphics.ground_edge_pilot = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("atlas-pilot") => true,
+                    _ => return Err("--ground-edges needs off or atlas-pilot".into()),
+                };
+            }
             "--surface-specular" => {
                 graphics.surface_specular = track_surface::Specular::parse(
                     &args.next().ok_or("--surface-specular needs off, source-base or white-control")?,
@@ -1898,7 +1905,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
                 println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
-                println!("--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
+                println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
                     "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
@@ -2000,10 +2007,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         graphics.surface_specular = track_surface::Specular::SourceBase;
     }
-    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some())
+    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some() || graphics.ground_edge_pilot)
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
-        return Err("surface controls (--surface-specular/--surface-rgb-overrides) require an enhanced non-collision track scene with --track-materials source".into());
+        return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges) require an enhanced non-collision track scene with --track-materials source".into());
+    }
+    if graphics.ground_edge_pilot {
+        println!("graphics_ground_edges mode=atlas-pilot authored=true terrain_u=0.60..0.70 scope=four-audited-atlases default=false");
     }
     if graphics.enhanced() && graphics.layered_car {
         println!("graphics_paint clearcoat={} coat_roughness={} scope=player-paint base_mask=independent authored=true",
