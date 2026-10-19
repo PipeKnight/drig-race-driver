@@ -424,7 +424,7 @@ impl AssistRewards {
 }
 
 /// The whole career catalogue.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Catalogue {
     pub ranks: Vec<Rank>,
     pub tiers: Vec<Tier>,
@@ -466,6 +466,11 @@ pub struct Catalogue {
     pub initial_vehicle_id: i32,
     pub start_money: i64,
     pub assist_rewards: AssistRewards,
+    /// `currency.conversion_rate` of every row: the price rounding step
+    /// (`ebay::currency_round`, 0x639A80) [D].
+    pub currency_rates: Vec<f64>,
+    /// `gameconfig/ebay.xml` (the shipped values when absent).
+    pub ebay: super::ebay::Settings,
 }
 
 impl Catalogue {
@@ -480,6 +485,11 @@ impl Catalogue {
             let bytes = std::fs::read(rewards)?;
             catalogue.assist_rewards =
                 AssistRewards::from_document(&grid_formats::binxml::read(&bytes)?)?;
+        }
+        let ebay = root.join("gameconfig/ebay.xml");
+        if ebay.exists() {
+            let bytes = std::fs::read(ebay)?;
+            catalogue.ebay = super::ebay::Settings::from_document(&grid_formats::binxml::read(&bytes)?)?;
         }
         Ok(catalogue)
     }
@@ -861,6 +871,11 @@ impl Catalogue {
             initial_vehicle_id: int(&global, "initial_vehicle_id")?,
             start_money: int(&global, "start_race_team")? as i64,
             assist_rewards: AssistRewards::default(),
+            currency_rates: table(db, "currency")?
+                .rows()
+                .map(|r| float(&r, "conversion_rate").map(f64::from))
+                .collect::<Result<_>>()?,
+            ebay: super::ebay::Settings::default(),
         })
     }
 

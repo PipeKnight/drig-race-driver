@@ -995,6 +995,12 @@ fn present(
     if shown.as_ref() == Some(&view) {
         return;
     }
+    // The shown table, one line per row (unattended runs check it).
+    if matches!(post.stage, Stage::Results) {
+        for (i, row) in view.table.iter().enumerate() {
+            log_line!("drive_post_race_table version=1 row={i} cells={}", row.join("|"));
+        }
+    }
     for (part, mut text, mut colour, mut node) in &mut parts {
         let value = match part {
             Part::Title => view.title.clone(),

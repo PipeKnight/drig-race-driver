@@ -36,10 +36,17 @@ pub struct HiredTeamMate {
 
 /// A car the team owns. AUTHORED: the original keeps more per car (eBay
 /// condition, mileage) in `EBAY_MANAGER_SAVE`, not decoded.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OwnedCar {
     pub vehicle_id: i32,
     pub livery: i32,
+    /// The garage car's history (car +0x2C race wins, +0x30 event wins,
+    /// +0x3C major crashes, +0x08 odometer in metres) [V 0x65F540]. Set for
+    /// eBay cars; the port does not count races into it yet [open].
+    pub race_wins: u32,
+    pub event_wins: u32,
+    pub major_crashes: u32,
+    pub odometer_m: f64,
 }
 
 /// The career's state between events.
@@ -91,6 +98,8 @@ pub struct Career {
     /// incremented after every race at 0x61017D) [V]: the race draw's key
     /// on a repeated event.
     pub layout_races: BTreeMap<i32, u32>,
+    /// The eBay used-car market (`EBAY_MANAGER_SAVE`, docs/CAREER_RESEARCH.md §13).
+    pub ebay: super::ebay::Ebay,
 }
 
 impl Career {
@@ -121,6 +130,7 @@ impl Career {
             races_won: 0,
             races_lost: 0,
             layout_races: BTreeMap::new(),
+            ebay: super::ebay::Ebay::new(),
         }
     }
 
@@ -177,6 +187,10 @@ impl Career {
                 self.cars.push(OwnedCar {
                     vehicle_id: catalogue.initial_vehicle_id,
                     livery: 0,
+                    race_wins: 0,
+                    event_wins: 0,
+                    major_crashes: 0,
+                    odometer_m: 0.0,
                 });
             }
             return true;
@@ -356,6 +370,10 @@ impl Career {
         self.cars.push(OwnedCar {
             vehicle_id,
             livery: 0,
+            race_wins: 0,
+            event_wins: 0,
+            major_crashes: 0,
+            odometer_m: 0.0,
         });
         Ok(())
     }

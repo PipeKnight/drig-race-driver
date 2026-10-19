@@ -289,7 +289,15 @@ pub fn offers(
                 field_cars.push(vehicle.stem.clone());
             }
         }
-        let Some(car) = field_cars.first().cloned() else {
+        // A model the team owns comes first (the garage's car), else the
+        // first raceable one (AUTHORED: the port does not require owning it).
+        let owned = |stem: &String| {
+            career
+                .cars
+                .iter()
+                .any(|c| cat.vehicles.get(&c.vehicle_id).is_some_and(|v| &v.stem == stem))
+        };
+        let Some(car) = field_cars.iter().find(|s| owned(s)).or(field_cars.first()).cloned() else {
             continue;
         };
         // The original's draw [V 0x67BC80]: by order_index on a first entry,
@@ -884,6 +892,19 @@ pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
     lines
 }
 
+/// A sale listing's state in words (the `ebay_msg_*` popups [D]).
+fn listing_state(state: grid_tools::career::ebay::ListingState) -> &'static str {
+    use grid_tools::career::ebay::ListingState as S;
+    match state {
+        S::Listed => "listed",
+        S::Bidding => "bidding in progress",
+        S::FixedPriceMet => "sold at the fixed price",
+        S::Sold => "sold at the last bid",
+        S::Unsold => "the auction ended without a bid at the start price",
+        S::NoBids => "no bids yet",
+    }
+}
+
 fn thousands(v: i64) -> String {
     let digits = v.unsigned_abs().to_string();
     let mut out = String::new();
@@ -1100,6 +1121,10 @@ enum Page {
     Team,
     /// Received sponsor offers and their slots.
     Sponsors,
+    /// eBay Motors: used cars of the open events' models.
+    Ebay,
+    /// eBay Motors: the team's cars for sale.
+    EbaySell,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1113,6 +1138,12 @@ enum Action {
     Hire(i32),
     /// Moves a received sponsor offer to its next slot.
     CycleSponsor(i32),
+    OpenEbay,
+    OpenEbaySell,
+    /// Buys `used[i]`.
+    BuyUsed(usize),
+    /// Lists the team's car `i` on eBay.
+    ListCar(usize),
     Home,
     NextRace,
     Abandon,
@@ -1137,6 +1168,8 @@ struct Screen {
     /// Teammate search filters (None = any).
     team_region: Option<Region>,
     team_fee: Option<usize>,
+    /// The eBay used cars on show (`Ebay::offers` of the shown models).
+    used: Vec<grid_tools::career::ebay::UsedCar>,
 }
 
 impl Screen {
@@ -1182,6 +1215,11 @@ impl Screen {
                                 + self.career.minor_sponsors.iter().flatten().count()
                         ),
                         Action::OpenSponsors,
+                    ));
+                    rows.push(("eBay Motors: used cars".into(), Action::OpenEbay));
+                    rows.push((
+                        format!("eBay Motors: sell a car ({} listed)", self.career.ebay.listings.len()),
+                        Action::OpenEbaySell,
                     ));
                 }
                 rows.push(("Quit".into(), Action::Quit));
@@ -1263,7 +1301,132 @@ impl Screen {
                 rows
             }
             Page::Payout(_) => vec![("Continue".into(), Action::Continue)],
+            Page::Ebay => {
+                let mut rows: Vec<(String, Action)> = self
+                    .used
+                    .iter()
+                    .enumerate()
+                    .take(ROWS - 1)
+                    .map(|(i, u)| (self.used_row(u), Action::BuyUsed(i)))
+                    .collect();
+                rows.push(("Back".into(), Action::Home));
+                rows
+            }
+            Page::EbaySell => {
+                let mut rows: Vec<(String, Action)> = self
+                    .career
+                    .cars
+                    .iter()
+                    .enumerate()
+                    .take(ROWS - 1)
+                    .map(|(i, c)| (self.sell_row(c), Action::ListCar(i)))
+                    .collect();
+                rows.push(("Back".into(), Action::Home));
+                rows
+            }
         }
+    }
+
+    fn stem(&self, vehicle_id: i32) -> String {
+        self.cat.vehicles.get(&vehicle_id).map_or(format!("car {vehicle_id}"), |v| v.stem.clone())
+    }
+
+    /// One eBay offer: the history the buy screen shows (`ebay_buy_screen_*`
+    /// [D]) and the Buy It Now price.
+    fn used_row(&self, u: &grid_tools::career::ebay::UsedCar) -> String {
+        format!(
+            "{}: {} miles, {} events, {} event wins, {} race wins, {} wrecked, performance {:+.1}% - ${} (seller {})",
+            self.stem(u.vehicle_id),
+            thousands(u.miles as i64),
+            u.events,
+            u.event_wins,
+            u.race_wins,
+            u.major_crashes,
+            u.performance_percent,
+            thousands(u.price),
+            u.seller.map_or("?".into(), |d| self.driver_name(d))
+        )
+    }
+
+    /// A team car on the sell page: its listing, or the AUTHORED listing
+    /// the row creates.
+    fn sell_row(&self, c: &grid_tools::career::state::OwnedCar) -> String {
+        let v = self.cat.vehicles.get(&c.vehicle_id);
+        match self.career.ebay.listings.iter().find(|l| l.vehicle_id == c.vehicle_id) {
+            Some(l) => format!(
+                "{}: listed, {} - bid ${}, {} event(s) left (start ${}, fixed ${})",
+                self.stem(c.vehicle_id),
+                listing_state(l.state),
+                thousands(l.bid),
+                l.remaining,
+                thousands(l.start_price),
+                thousands(l.fixed_price)
+            ),
+            None => format!(
+                "Sell {} on eBay: {} events, start ${}, fixed ${}",
+                self.stem(c.vehicle_id),
+                self.cat.ebay.max_auction_length,
+                thousands(v.map_or(0, |v| v.sale_price)),
+                thousands(v.map_or(0, |v| v.purchase_price))
+            ),
+        }
+    }
+
+    /// The used cars of the models the open events race and the team does
+    /// not own (the original offers "Buy On eBay" for a model the player
+    /// does not own on the event's car list [D]; which models its eBay list
+    /// shows was not traced).
+    fn refresh_used(&mut self) {
+        let mut models: Vec<i32> = Vec::new();
+        for o in &self.offers {
+            for &v in self.cat.event(o.event_id).map(|e| e.vehicles.as_slice()).unwrap_or_default() {
+                let raceable = self
+                    .cat
+                    .vehicles
+                    .get(&v)
+                    .is_some_and(|x| x.purchasable && o.field_cars.contains(&x.stem));
+                if raceable && !models.contains(&v) && !self.career.cars.iter().any(|c| c.vehicle_id == v) {
+                    models.push(v);
+                }
+            }
+        }
+        let mate = self.career.team_mate.as_ref().map(|t| t.driver_id);
+        self.used = models
+            .into_iter()
+            .flat_map(|v| self.career.ebay.offers(&self.cat, v, mate))
+            .collect();
+    }
+
+    /// The eBay lines of a career event's end (the popups, `ebay_msg_*`).
+    fn ebay_lines(&mut self) -> Vec<String> {
+        let outcomes = self.career.ebay_after_event(&self.cat);
+        outcomes
+            .iter()
+            .map(|o| {
+                let l = &o.listing;
+                log_line!(
+                    "drive_career version=1 event=ebay vehicle={} state={:?} bid={} paid={:?} money={}",
+                    l.vehicle_id,
+                    l.state,
+                    l.bid,
+                    o.paid,
+                    self.career.money
+                );
+                match o.paid {
+                    Some(amount) => format!(
+                        "eBay: your {} sold for ${}; it has been removed from your garage.",
+                        self.stem(l.vehicle_id),
+                        thousands(amount)
+                    ),
+                    None => format!(
+                        "eBay: {} - {}{}",
+                        self.stem(l.vehicle_id),
+                        listing_state(l.state),
+                        if l.remaining > 0 { format!(", {} event(s) left", l.remaining) } else { String::new() }
+                    ),
+                }
+            })
+            .collect()
     }
 
     fn driver_name(&self, driver_id: i32) -> String {
@@ -1415,6 +1578,22 @@ impl Screen {
                     "Select an offer to move it: not on the car, Major (pays double), Minor 1-7.".into()
                 });
             }
+            Page::Ebay => {
+                lines.push(String::new());
+                lines.push(if self.used.is_empty() {
+                    "No used cars of the open events' models on offer (or you own them all).".into()
+                } else {
+                    "Used cars at their Buy It Now price; select one to buy it. The offers change after every event.".into()
+                });
+            }
+            Page::EbaySell => {
+                lines.push(String::new());
+                lines.push(format!(
+                    "Select a car to list it. Each event a bid of 70, 80, 90, 100 % of its value comes in; at the fixed price it sells at once. Sold so far: {} for ${}.",
+                    self.career.ebay.sold,
+                    thousands(self.career.ebay.earned)
+                ));
+            }
         }
         if !self.message.is_empty() {
             lines.push(self.message.clone());
@@ -1468,6 +1647,7 @@ impl Screen {
             let out = e.last_out().ok_or("driver offer without a result")?;
             let met = offer_met(&self.cat, offer_id, &out, e.field.is_empty());
             let payout = apply_driver_offer(&self.cat, &mut self.career, offer_id, met)?;
+            let ebay = self.ebay_lines();
             self.save()?;
             let _ = std::fs::remove_file(&event_path);
             log_line!(
@@ -1486,12 +1666,14 @@ impl Screen {
                 if met { "achieved" } else { "failed" }
             )];
             lines.extend(payout_lines(&payout, &self.career));
+            lines.extend(ebay);
             self.current = None;
             self.page = Page::Payout(lines);
             return Ok(());
         }
         let settings = e.settings.unwrap_or_default();
         let payout = apply_event(&self.cat, &mut self.career, e.event_id, &e.results, &settings)?;
+        let ebay = self.ebay_lines();
         self.save()?;
         let _ = std::fs::remove_file(&event_path);
         log_line!(
@@ -1507,7 +1689,9 @@ impl Screen {
             self.career.total_reputation()
         );
         self.current = None;
-        self.page = Page::Payout(payout_lines(&payout, &self.career));
+        let mut lines = payout_lines(&payout, &self.career);
+        lines.extend(ebay);
+        self.page = Page::Payout(lines);
         Ok(())
     }
 
@@ -1722,6 +1906,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         root: root.clone(),
         team_region: None,
         team_fee: None,
+        used: Vec::new(),
     };
     screen.collect()?;
     screen.refresh_offers(&routes, &labels, &root);
@@ -1889,7 +2074,7 @@ fn update(
                     Action::NextRace
                 }
                 Page::Event | Page::Payout(_) => Action::Quit,
-                Page::Team | Page::Sponsors => Action::Home,
+                Page::Team | Page::Sponsors | Page::Ebay | Page::EbaySell => Action::Home,
             });
         }
     }
@@ -1923,6 +2108,59 @@ fn update(
             screen.page = Page::Sponsors;
             screen.cursor = 0;
             Ok(false)
+        }
+        Action::OpenEbay => {
+            screen.refresh_used();
+            screen.page = Page::Ebay;
+            screen.cursor = 0;
+            Ok(false)
+        }
+        Action::OpenEbaySell => {
+            screen.page = Page::EbaySell;
+            screen.cursor = 0;
+            Ok(false)
+        }
+        Action::BuyUsed(i) => {
+            let s = &mut *screen;
+            match s.used.get(i).cloned() {
+                Some(u) => s.career.buy_used(&s.cat, &u).and_then(|()| s.save()).map(|()| {
+                    log_line!(
+                        "drive_career version=1 event=ebay_bought vehicle={} price={} money={}",
+                        u.vehicle_id,
+                        u.price,
+                        s.career.money
+                    );
+                    s.message = format!("Bought a used {} for ${}.", s.stem(u.vehicle_id), thousands(u.price));
+                    s.refresh_used();
+                    false
+                }),
+                None => Ok(false),
+            }
+        }
+        Action::ListCar(i) => {
+            let s = &mut *screen;
+            match s.career.cars.get(i).cloned() {
+                Some(car) => {
+                    // AUTHORED: the port has no price entry; start at the
+                    // dealer's sale price, fixed at the new price, the
+                    // longest duration.
+                    let (start, fixed) = s
+                        .cat
+                        .vehicles
+                        .get(&car.vehicle_id)
+                        .map_or((0, 0), |v| (v.sale_price, v.purchase_price));
+                    let duration = s.cat.ebay.max_auction_length;
+                    s.career.list_on_ebay(&s.cat, i, start, fixed, duration).and_then(|()| s.save()).map(|()| {
+                        log_line!(
+                            "drive_career version=1 event=ebay_listed vehicle={} start={start} fixed={fixed} duration={duration}",
+                            car.vehicle_id
+                        );
+                        s.message = format!("{} listed on eBay.", s.stem(car.vehicle_id));
+                        false
+                    })
+                }
+                None => Ok(false),
+            }
         }
         Action::CycleRegion => {
             screen.team_region = match screen.team_region {
@@ -2396,6 +2634,37 @@ mod tests {
         let lines = payout_lines(&p, &win);
         assert_eq!(lines[0], "Head-to-head: won");
         assert!(lines.contains(&format!("Prize Money: ${}", thousands(event.prize_money_for_first))));
+    }
+
+    /// eBay on the purchased data: a used Lacetti bought for the team
+    /// becomes euro_touring's car (event 36 races the BMW and the Lacetti).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn an_ebay_car_becomes_the_events_car() {
+        let (cat, routes, root) = catalogue();
+        let exists = |p: &str| root.join(p).exists();
+        let mut c = new_career(&cat);
+        c.add_money(&cat, cat.start_money);
+        c.reputation[Region::Europe as usize] = 80000;
+        c.money = 500_000;
+        let event = |c: &Career| {
+            offers(&cat, c, &routes, &Labels::default(), exists)
+                .into_iter()
+                .find(|o| o.event_id == 36)
+                .unwrap()
+        };
+        let before = event(&c);
+        assert_eq!(before.car, "bmw");
+        assert!(before.field_cars.contains(&"lac".to_owned()));
+        let lac = cat.event(36).unwrap().vehicles.iter().copied().find(|v| cat.vehicles[v].stem == "lac").unwrap();
+        let used = c.ebay.offers(&cat, lac, None);
+        assert_eq!(used.len(), 3);
+        let cheapest = used.iter().min_by_key(|u| u.price).unwrap().clone();
+        assert!(cheapest.price < cat.vehicles[&lac].purchase_price);
+        c.buy_used(&cat, &cheapest).unwrap();
+        assert_eq!(event(&c).car, "lac");
+        // The offers changed with the purchase (a seed refresh).
+        assert_ne!(c.ebay.offers(&cat, lac, None), used);
     }
 
     /// A new career on the purchased data: no team, no own events, and the

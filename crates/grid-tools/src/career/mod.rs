@@ -1,6 +1,7 @@
 //! The original's career ("GRID World"): catalogue, state, results and
 //! saves (docs/CAREER_RESEARCH.md).
 pub mod data;
+pub mod ebay;
 pub mod field;
 pub mod rules;
 pub mod save;
@@ -210,6 +211,8 @@ mod tests {
             initial_vehicle_id: 43,
             start_money: 40000,
             assist_rewards: AssistRewards::default(),
+            currency_rates: vec![1.0, 2.0, 1.5, 230.0],
+            ebay: super::ebay::Settings::default(),
         }
     }
 

@@ -93,6 +93,26 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
 - **Event standings.** During an event the event page lists the standings so far: `rules::standings` over the results with the event's points table, dense ranks, names from the career field ("You", the team mate's name, "Car N" for the F424 field). The original's strings are `driver_event_standings_title` "Event Standings" and `_subtitle` "Drivers" [D]. The original's standings screen and its Teams page are not ported.
 - **Bank lines.** After the Total, the payout page shows "Balance:" (`bank_rewards_balance_desc`) and "Season's Earnings:" (`bank_rewards_season_earnings_desc`) [D strings]. `Career::season_earnings` is new and saved (key `season_earnings`; older saves read 0). Each event, head-to-head and driver-offer payout adds its money total, and `end_season` clears it. Where the original keeps this sum and when it resets were not traced [I].
 
+## eBay Motors (F487)
+
+- Once the team is founded, the home page has "eBay Motors: used cars" and "eBay Motors: sell a car".
+- **Used cars:** the three Buy It Now offers (CAREER_RESEARCH §13.2) for every purchasable model
+  that the open events race and the team does not own. Each row shows mileage, events, wins,
+  wrecked count, performance and price. Selecting a row buys the car (`Career::buy_used`).
+  Which models the original lists was not traced (AUTHORED: the open events' cars, as its
+  "Buy On eBay" on an event's car list [D]).
+- **Sell a car:** each team car is listed for 4 events, starting at the dealer's `sale_price`,
+  with the new price as the fixed price (AUTHORED: the port has no price entry; the original lets
+  the player choose). A listed car shows its state and current bid.
+- **After every paid event and driver offer** the auctions step (`Career::ebay_after_event`) and
+  the payout page lists each listing's news ("sold for $…", "no bids yet", …). The original shows
+  these as popups and completes a sale when its popup is acknowledged; the port completes it at
+  once.
+- **Event car:** an owned model among an event's raceable cars is the player's car. Otherwise the
+  first raceable model is used, as before (AUTHORED: the port does not require owning one).
+- The free founding car (`bos`) therefore drives events 1 and 27.
+- Not ported: the bought car's performance and damageability effect (§13.4).
+
 ## Head-to-heads (F478)
 
 - **Offered** once `Career::event_open` opens them: after every other event of the tier is won (0x656D40) [V; I "won"]. The label reads "Head-to-head: <event>". On the purchased data the port can run 69, 70, 71, 72, 78 (the International final) and 79. 73, 75 and 77 drop out because their layout or car cannot be raced in the port. 76 is a drift battle (`competition_format` 3).

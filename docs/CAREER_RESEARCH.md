@@ -401,7 +401,7 @@ N × { u32 length (0x400, or 0 if never written), 1024 bytes }   N = capacity / 
 - `CAREER MANAGER SDU NAME` holds the career: `main_career` (0x6501B0) and `garage_career`.
 - The other units:
   - `RACEHISTORY` (statistics, the `fact_*` screens);
-  - `EBAY_MANAGER_SAVE` (owned cars, about 0x60 bytes each, and auctions);
+  - `EBAY_MANAGER_SAVE` (eBay sale listings, 0x60 bytes each, and the bought cars' records; §13);
   - `REWARDS_SAVE` (season leaderboards);
   - `UNLOCKS` (52 vehicle and 15 bonus records);
   - `PROFILE` (a `<PlayerProfile>` XML of typed items: settings, livery, names, once-only presentation
@@ -541,3 +541,72 @@ Static research (agent pass, `local/career/notes/DRAW_FIELD.md` with every addre
   - named drivers from `event_driver_grid_position` (same formula);
   - everyone else ranked into the free slots by
     `n − 1 − trunc((n − 1) · clamp(driver.skill + U(−0.2, 0.2), 0, 1))`.
+
+## 13. eBay Motors used-car market (19 October 2026)
+
+Static analysis of the eBay manager (ctor 0x675210, item vtable 0xCEA68C); private notes and
+addresses in the main checkout's `local/career/notes/EBAY.md` (Ghidra 12.1.4 headless, read-only, on
+the hash-pinned image; Capstone checks of the float code). Ported as `grid_tools::career::ebay`.
+
+### 13.1 Settings and generators [V, D]
+- `gameconfig/ebay.xml` (`EbaySettings`, parser 0x631E60) holds 32 values [D]. Among them:
+  3 cars per model, 10..100 events, crash chances 3 % / 40 %, Buy It Now 88..100 %, auction
+  length 4, value 70..130 % with noise −10..0 %, bids from 70 % in steps of 10 %, and
+  0.33 / 3.0 / 500.0 "for one percent".
+- `winningChancePercentage` is parsed but never read [V by absence].
+- Two MT19937 generators, seeded by the original's rule (`mt[0] = seed | 1`, `mt[i] = mt[i−1]·69069`; `series::Mt`).
+  - #1 makes the offers, the value noise and the buyers. #2 makes only the per-model seeds.
+  - Reset seeds: 0x6529A9 and 0x221C63.
+- `int(lo, hi)` = `lo + genrand % (hi − lo)`; `float(lo, hi)` = `lo + genrand·2⁻³²·(hi − lo)`.
+
+### 13.2 Buying: fixed-price offers [V]
+- There is no bidding for the buyer.
+- Per-model seeds (0x65E9E0): `int(0, 0xFFFF)` per `vehicle` row in table order. They are redrawn:
+  - after each career event (hook 0x587580);
+  - after each eBay purchase;
+  - at load, by replaying the saved refresh count from the reset seed.
+- Showing a model's offers (0x668BB0) reseeds #1 with the model's seed and generates 3 cars
+  (0x653360). The draws, in order:
+  1. a seller among the `can_be_hired` drivers;
+  2. N = 10..100 events;
+  3. miles = U[250, 499]·N;
+  4. event wins = trunc(U(0, 0.5)·N);
+  5. race wins = U[1, 5]·event wins;
+  6. per event, a major crash below 3 %, capped at N − wins;
+  7. per event, a minor crash below 40 % (unused).
+- Performance %, with f = wins / N:
+  - f > 0.3: `1 + (f − 0.3)·10`, at most 5;
+  - f < 0.2: `−(1 + (0.2 − f)·9/0.19)`, at most −10;
+  - otherwise 0.
+- Damageability %, with g = major / N, when g > 0.01: `1 + (g − 0.01)·(10 − 0.01)/0.49`, at most 10.
+  The numerator `max − minMajorDamageFraction` is the original's own, kept.
+- Price: `trunc(purchase_price · f32((100 − (miles − 500)·12/49500 + 0.33·wins − 3·major)·0.01))`,
+  floored to the currency step (0x639A80: 50000 / gcd of the `currency` rates ×100 = 1000).
+- Buying (0x65F540) is refused for a model already owned or a price above the bank. Otherwise
+  the car joins the garage with its history (odometer in metres = miles·1609.344), the
+  {model, performance, damageability} record is kept, and the seeds are redrawn.
+
+### 13.3 Selling: an auction over career events [V]
+- The player sets the duration (at most 4), a start price and a fixed price (0x65F390).
+- Value (0x631B60) = `trunc((clamp(100 + race wins·0.6/0.33 − major·10/3 − miles·0.5/500, 70, 130) + U(−10, 0))
+  · purchase_price·0.01f)`. The value is redrawn every event.
+- Each event (0x64E760) `bid = trunc(value·(70 + 10k)·0.01f)` for k = 0..duration − 1, chop rounding
+  (control word | 0xC00), floored to 1000.
+  - Below the start price there is no bid.
+  - At or above the fixed price the car sells at the fixed price.
+  - At the end it sells at the last bid if the start price was ever reached, else it stays unsold.
+  - Each step draws a random buyer.
+- States 1 bid in progress, 2 fixed price met, 3 sold, 4 ended unsold, 5 no bids. Each has an
+  `ebay_msg_*` popup.
+- Completion (0x655F60) removes the car and its record, pays the money, and counts sold and earned
+  (`fact_ebay_earnings`).
+- Saved (`EBAY_MANAGER_SAVE`): sold count, spent, earned, refresh count, the bought cars' records
+  and the active listings (the 0x60-byte list is the listings, not garage cars as §9 said).
+
+### 13.4 Not traced / not ported
+- What the bought car's percentages change: race setup 0x5F8940 writes `(100 + perf)/100` to
+  physics +0x188C and `dmg/100` to damage model +0x434 (meanings unknown). The port keeps the
+  record but does not apply it.
+- Which models the eBay list shows (unlock, licence, region filters), the event-22 eBay unlock,
+  whether the hook runs per race or per event (the port: per event and per driver offer), and
+  how the garage car's history grows with races (the port: only eBay cars carry one).
