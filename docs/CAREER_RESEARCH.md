@@ -486,8 +486,58 @@ AUTHORED or [I] in the port:
 4. The no-damage flag threshold; 0x652200 (record +0x5C) in the event money.
 5. Driver-offer slot rotation after a failed offer; whether offer races also pay the event pot.
 6. Season leaderboard N, the 0.25 factor and 0x62CEB0; the player team's season rank.
-7. How the event's races are drawn from its track pool; the career AI field (0x5C7D40).
+7. Answered in §12: the race draw and the career field. Still open there: whether the drawn race
+   list is saved; the Le Mans 24 Hours flag (+0x98); the tie order of the grid ranking 0x5B6340; the
+   player's car and livery in an own-team field.
 8. The car record in `EBAY_MANAGER_SAVE`, `RACEHISTORY` statistics, `REWARDS_SAVE`, and where the
    reputation-pot records are saved.
 9. Live check (owner-driven, not automated): one rookie event's bank and reputation screens against
    §3, with known settings.
+
+## 12. Race draw and career field (19 October 2026)
+
+Static research (agent pass, `local/career/notes/DRAW_FIELD.md` with every address and worked examples).
+
+### 12.1 Race draw [V 0x67BC80, 0x664E30, 0x66D800]
+
+- `N` races: `event.num_competitions`; for a driver offer, its number of `driver_offer_track` rows
+  (0x637980).
+- The event's pool rows (table order) are sorted, stably (pools have at most 11 rows, so only the
+  insertion sort of std::sort runs):
+  - an event never completed (profile event record +0x60 == 0): by `order_index`;
+  - an event completed before, and every driver offer: by the profile's race count on each
+    `track_model` (incremented after every race, 0x61017D).
+- Pick: first every entry whose venue (`track_id`) is not taken yet, then fill from the sorted list.
+- No RNG. The list is built when the event is entered (0x67BE50).
+- bmw_si_tour on a first entry: Nürburgring Sprint (3 laps), then Nürburgring GP reverse (2 laps).
+  All four layouts share one venue.
+
+### 12.2 Career field [V 0x676A80, 0x673F20, 0x663D40, 0x66D350]
+
+- One AI car per `event_driver` row of the event, in table order (driver, `vehicle_livery_id`). The
+  car count is the row count (mostly 12; 20 for events 7, 28, 29, 34).
+- Each AI car's team is `driver.team_id` (0x62AC70). The beat-rival objective and the Team Win
+  Bonus use it.
+- **The player's team takes over a team's cars:**
+  - The candidate teams are those with at least as many eligible cars as the group (player, plus the
+    team mate if hired), in team id order, excluding `key` and `primary_key` team types.
+  - One is drawn with the field generator: `cand[rng(0, k)]`, MT19937 seeded in milliseconds.
+  - The player overwrites that team's lowest-index car, and the team mate the next one.
+- **Legend substitution:** if an event driver is the player's hired team mate, a random `event_legend`
+  driver of the event takes the seat and keeps the original driver's team.
+- **Ravenwest guest cars** [I meaning]: once a region has a finished event, Ravenwest's two drivers
+  (team 1, `primary_key`) take over a team's cars in `_hero` liveries. This lasts until an event with
+  them in the field is completed.
+- **Race offers** (0x674020): the offer event's `event_driver` field. The player takes the offer's
+  livery and overwrites the lowest-index car of `driver_offer.team_id` (key teams allowed). That
+  team's other cars are the player's team mates, and the own hired team mate does not race.
+- **Other formats:**
+  - Test offers: the player alone.
+  - Head-to-head: the rows plus the player.
+  - `use_lemans_selection` events and offers: `lemans_restrictions` rows for the player's vehicle
+    (0x663860).
+- **Grid** (0x5C7D40):
+  - the player's slot from the current layout's pool row (§RACE_RULES 5);
+  - named drivers from `event_driver_grid_position` (same formula);
+  - everyone else ranked into the free slots by
+    `n − 1 − trunc((n − 1) · clamp(driver.skill + U(−0.2, 0.2), 0, 1))`.

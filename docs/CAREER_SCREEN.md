@@ -70,6 +70,24 @@ Driver offers on the home page, after the open events:
 
 AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`) has no screen yet, and the `bos` is not an entry car of any raceable rookie event.
 
+## Team mate and sponsors (F466)
+
+Two home-page rows once the team exists: "Team mate: NAME" and "Sponsors: N received, M placed".
+
+**Team mate page** (`Career::can_hire`, `search`, `hire_driver`):
+- **When** [I]: hiring opens with the first licence (two garages). The original forces its team mate screen at that point (flow.xml `force_buy_team_mates`); its access predicate was not found. Before that the page says "We're not ready to hire a team mate yet…" (`team_mate_noccess_subtitle` [D]).
+- **Applicants** [V 0x662850, 0x649320]: every `driver` row with `can_be_hired` (345 [D]). The `team_mate` table is not read by the original.
+- **Filters** [V filter 0x638A60]: Region (Any, Europe, United States, Japan) and Signing fee (Any or one `team_mate_fee_range` row). AUTHORED: the list is sorted by fee, then driver id, and capped to the rows that fit.
+- **Hiring** [V 0x6994E0]: pays the `signing_fee` once (only if affordable) and replaces any current team mate with no refund. The team mate keeps `winnings_percentage` % of his own prize money [V], so the team gets the rest (Teammate Prize Money).
+- **In the race** (AUTHORED until the career field, item 3): the hired team mate is AI car 1 of an own-team event (`TEAMMATE_CAR`). The race shows that car's AI name. The result marks it `Entrant::TeamMate` (token `t`), so his prize share, the team standings and his sponsor objectives count. Driver offers have no own team mate [V 0x674020].
+
+**Sponsors page**:
+- Every received offer (`event_sponsor_offer`, unlocked by finishing 1st–3rd in an event [V]) with its sponsor (`db_<sponsor>` when the language has it), objective, money per race and slot.
+- Selecting an offer moves it: not on the car → Major (pays double) → Minor 1 … 7 → off the car. A slot's previous occupant leaves it.
+- AUTHORED: the original's sponsor designer (carousel, swap, best-sponsor fill) is not ported, and the logos are not drawn on the car.
+
+**Per-race sponsor pay**: after each race of an own-team event, the event page lists each placed sponsor's objective for the player and the team mate, and the money that race earned (`Career::sponsor_pay`, [V 0x66DB80, 0x652010]: `money_reward × 2 in the major slot × (player met + team mate met)`). The money is paid with the event, as Sponsorship Money on the payout page. The no-damage objectives use the port's damage rule: a car still classified counts as undamaged (AUTHORED; the original's no-damage flag is not traced).
+
 ## Processes
 
 The same process model as the event menu (winit allows one event loop per process):
@@ -109,6 +127,6 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
 
 ## Not done
 
-- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, car buying and selling, teammates, sponsor placement, head-to-heads, Le Mans entry, season-end screens, and the original's career look.
+- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, the sponsor designer and logos, car buying and selling, head-to-heads, Le Mans entry, season-end screens, and the original's career look.
 - The original's race draw, career grid fill, named drivers and the teammate in the field.
 - Flashback limits per difficulty and pro mode's restart ban (§8).

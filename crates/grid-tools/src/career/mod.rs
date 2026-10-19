@@ -7,7 +7,9 @@ pub mod state;
 
 pub use data::{Catalogue, Event, Region};
 pub use rules::{Classified, Entrant, RaceResult, RaceSettings};
-pub use state::{Career, Payout, SeasonEntry, SeasonState, apply_driver_offer, apply_event};
+pub use state::{
+    Career, Payout, SeasonEntry, SeasonState, SponsorPay, apply_driver_offer, apply_event,
+};
 
 #[cfg(test)]
 mod tests {
@@ -165,6 +167,18 @@ mod tests {
             driver_offers: BTreeMap::from([(12, offer)]),
             teams: BTreeMap::new(),
             team_mates: Vec::new(),
+            hireable: vec![Hireable {
+                driver_id: 8,
+                first_name: "Ann".into(),
+                surname: "Example".into(),
+                rank_id: 1,
+                region_id: 1,
+                signing_fee: 10000,
+                winnings_percentage: 20,
+                skill: 0.6,
+                team_id: 0,
+            }],
+            fee_ranges: vec![(0, 10000), (10000, 50000)],
             difficulties,
             reputation_fractions: vec![
                 0.5, 0.4, 0.3, 0.2, 0.17, 0.14, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01,
@@ -332,6 +346,44 @@ mod tests {
     }
 
     #[test]
+    fn sponsors_pay_per_race_for_player_and_teammate() {
+        let cat = tiny();
+        let mut c = founded();
+        c.sponsor_offers = vec![71, 72];
+        c.place_sponsor(71, None).unwrap();
+        c.place_sponsor(72, Some(2)).unwrap();
+        // 71 finish undamaged (major, 3000 x2), 72 top 3 (2150).
+        c.team_mate = Some(state::HiredTeamMate {
+            driver_id: 8,
+            winnings_percentage: 20,
+        });
+        let pay = c.sponsor_pay(&cat, &result(&[ai(1), ai(2), P, ai(3), T]));
+        assert_eq!(pay.len(), 2);
+        assert_eq!((pay[0].offer_id, pay[0].major, pay[0].money), (71, true, 12000));
+        assert!(pay[0].player_met && pay[0].teammate_met);
+        assert_eq!((pay[1].offer_id, pay[1].player_met, pay[1].teammate_met), (72, true, false));
+        assert_eq!(pay[1].money, 2150);
+    }
+
+    #[test]
+    fn hiring_waits_for_the_first_licence() {
+        let cat = tiny();
+        let mut c = founded();
+        c.money = 50000;
+        assert!(!c.can_hire(&cat));
+        assert!(c.hire_driver(&cat, 8).is_err());
+        c.reputation[Region::Europe as usize] = 80000;
+        assert!(c.can_hire(&cat));
+        assert_eq!(c.search(&cat, Some(Region::Europe), Some(0)).len(), 1);
+        assert!(c.search(&cat, Some(Region::Japan), None).is_empty());
+        assert!(c.search(&cat, None, Some(1)).len() == 1, "10,000 is in both ranges");
+        c.hire_driver(&cat, 8).unwrap();
+        assert_eq!(c.money, 40000);
+        assert_eq!(c.team_mate.as_ref().unwrap().winnings_percentage, 20);
+        assert!(c.search(&cat, None, None).is_empty(), "the current one is left out");
+    }
+
+    #[test]
     fn a_driven_offer_moves_its_slot_on() {
         let cat = tiny();
         let mut c = Career::new();
@@ -486,6 +538,10 @@ mod tests {
         assert_eq!(c.difficulties.len(), 24);
         let offer = &c.driver_offers[&16];
         assert_eq!(offer.target_times, [108.0, 107.0, 106.0, 105.0, 104.0, 103.0]);
+        // The hire pool is `driver.can_be_hired` (345 rows) [D, V 0x662850].
+        assert_eq!(c.hireable.len(), 345);
+        assert_eq!(c.fee_ranges.len(), 7);
+        assert_eq!(c.fee_ranges[6], (5000000, 10000000));
         assert_eq!(c.assist_rewards, AssistRewards::default());
         let offers: usize = c.events.values().map(|e| e.sponsor_offers.len()).sum();
         assert_eq!(offers, 156);

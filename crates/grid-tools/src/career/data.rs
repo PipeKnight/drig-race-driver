@@ -286,7 +286,26 @@ pub struct DriverOffer {
     pub races: Vec<EventRace>,
 }
 
-/// A hireable teammate (`team_mate` row joined to `driver`) [D].
+/// A driver the player can hire: a `driver` row with `can_be_hired` (the
+/// candidate pool 0x662850, object 0x649320) [V]. The `team_mate` table is
+/// not read by the original [V by absence], see [`TeamMate`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hireable {
+    pub driver_id: i32,
+    pub first_name: String,
+    pub surname: String,
+    pub rank_id: i32,
+    /// `driver.region_id`; 0 (none) for some rows [D].
+    pub region_id: i32,
+    pub signing_fee: i64,
+    pub winnings_percentage: i32,
+    /// `driver.skill`: the grid key of the career field (0x5C2E48) [V].
+    pub skill: f32,
+    pub team_id: i32,
+}
+
+/// A `team_mate` row joined to `driver` [D]. Unused by the original (no
+/// table-name string in the exe), kept for reference.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TeamMate {
     pub id: i32,
@@ -386,6 +405,10 @@ pub struct Catalogue {
     /// `team.name_string_id` by team id (driver-offer teams and rivals) [D].
     pub teams: BTreeMap<i32, String>,
     pub team_mates: Vec<TeamMate>,
+    /// Hireable drivers in `driver` row order.
+    pub hireable: Vec<Hireable>,
+    /// `team_mate_fee_range` (min, max) by `index` [D]: the search ranges.
+    pub fee_ranges: Vec<(i64, i64)>,
     pub difficulties: Vec<Difficulty>,
     /// `event_reputation_reward.percentage_string`: the reputation share per
     /// finishing place (index 0 = winner).
@@ -651,6 +674,34 @@ impl Catalogue {
             });
         }
         team_mates.sort_by_key(|t| t.id);
+        let mut hireable = Vec::new();
+        for d in drivers.rows() {
+            if d.int("can_be_hired") != Some(1) {
+                continue;
+            }
+            hireable.push(Hireable {
+                driver_id: int(&d, "id")?,
+                first_name: text(&d, "first_name_string_id")?,
+                surname: text(&d, "surname_string_id")?,
+                rank_id: int(&d, "rank_id")?,
+                region_id: int(&d, "region_id")?,
+                signing_fee: int(&d, "signing_fee")? as i64,
+                winnings_percentage: int(&d, "winnings_percentage")?,
+                skill: float(&d, "skill")?,
+                team_id: int(&d, "team_id")?,
+            });
+        }
+        let mut ranges: Vec<(i32, (i64, i64))> = table(db, "team_mate_fee_range")?
+            .rows()
+            .map(|r| {
+                Ok((
+                    int(&r, "index")?,
+                    (int(&r, "teammate_fee_min")? as i64, int(&r, "teammate_fee_max")? as i64),
+                ))
+            })
+            .collect::<Result<_>>()?;
+        ranges.sort_by_key(|r| r.0);
+        let fee_ranges = ranges.into_iter().map(|r| r.1).collect();
 
         let mut difficulties = table(db, "difficulty")?
             .rows()
@@ -699,6 +750,8 @@ impl Catalogue {
             driver_offers,
             teams,
             team_mates,
+            hireable,
+            fee_ranges,
             difficulties,
             reputation_fractions,
             points,
@@ -712,6 +765,14 @@ impl Catalogue {
 
     pub fn event(&self, id: i32) -> Option<&Event> {
         self.events.get(&id)
+    }
+
+    /// An `event_sponsor_offer` row by id.
+    pub fn sponsor_offer(&self, id: i32) -> Option<&SponsorOffer> {
+        self.events
+            .values()
+            .flat_map(|e| e.sponsor_offers.iter())
+            .find(|o| o.id == id)
     }
 
     pub fn tier(&self, id: i32) -> Option<&Tier> {

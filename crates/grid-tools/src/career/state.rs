@@ -399,6 +399,88 @@ impl Career {
         Ok(())
     }
 
+    /// Each placed sponsor's objective and pay in one race (0x66DB80 per
+    /// slot, 0x652010 pay) [V]: the player and the teammate are checked
+    /// separately, the major slot pays double.
+    pub fn sponsor_pay(&self, catalogue: &Catalogue, race: &RaceResult) -> Vec<SponsorPay> {
+        let met = |who: Entrant, offer: &super::data::SponsorOffer| {
+            race.order
+                .iter()
+                .enumerate()
+                .find(|(_, c)| c.entrant == who)
+                .is_some_and(|(pos, c): (usize, &Classified)| rules::sponsor_objective_met(offer, pos, c))
+        };
+        self.sponsor_slots()
+            .filter_map(|(offer_id, major)| {
+                let offer = catalogue.sponsor_offer(offer_id)?;
+                let player_met = met(Entrant::Player, offer);
+                let teammate_met = self.team_mate.is_some() && met(Entrant::TeamMate, offer);
+                Some(SponsorPay {
+                    offer_id,
+                    sponsor_id: offer.sponsor_id,
+                    major,
+                    player_met,
+                    teammate_met,
+                    money: rules::sponsor_race_pay(offer, major, player_met, teammate_met),
+                })
+            })
+            .collect()
+    }
+
+    /// Whether the teammate screen is open. [I] The original forces it
+    /// right after the first licence (second garage, flow.xml
+    /// `force_buy_team_mates`); its own access predicate was not found.
+    pub fn can_hire(&self, catalogue: &Catalogue) -> bool {
+        self.team_founded && self.garages(catalogue) >= 2
+    }
+
+    /// The teammate search (0x638A60) [V filter]: fee within the chosen
+    /// `team_mate_fee_range` (all when `None`) and the region (any when
+    /// `None`). AUTHORED: sorted by fee, then driver id; the current
+    /// teammate is left out.
+    pub fn search<'a>(
+        &self,
+        catalogue: &'a Catalogue,
+        region: Option<Region>,
+        fee_range: Option<usize>,
+    ) -> Vec<&'a super::data::Hireable> {
+        let range = fee_range.and_then(|i| catalogue.fee_ranges.get(i)).copied();
+        let mut out: Vec<&super::data::Hireable> = catalogue
+            .hireable
+            .iter()
+            .filter(|h| range.is_none_or(|(lo, hi)| h.signing_fee >= lo && h.signing_fee <= hi))
+            .filter(|h| region.is_none_or(|r| h.region_id == r.id()))
+            .filter(|h| self.team_mate.as_ref().is_none_or(|t| t.driver_id != h.driver_id))
+            .collect();
+        out.sort_by_key(|h| (h.signing_fee, h.driver_id));
+        out
+    }
+
+    /// Hires a driver of the pool by id (0x6994E0) [V].
+    pub fn hire_driver(&mut self, catalogue: &Catalogue, driver_id: i32) -> Result<(), String> {
+        if !self.can_hire(catalogue) {
+            return Err("not ready to hire a team mate yet".into());
+        }
+        let h = catalogue
+            .hireable
+            .iter()
+            .find(|h| h.driver_id == driver_id)
+            .ok_or(format!("driver {driver_id} cannot be hired"))?;
+        self.hire(h.driver_id, h.signing_fee, h.winnings_percentage)
+    }
+
+    /// Takes a received offer off the car.
+    pub fn remove_sponsor(&mut self, offer_id: i32) {
+        if self.major_sponsor == Some(offer_id) {
+            self.major_sponsor = None;
+        }
+        for s in &mut self.minor_sponsors {
+            if *s == Some(offer_id) {
+                *s = None;
+            }
+        }
+    }
+
     fn sponsor_slots(&self) -> impl Iterator<Item = (i32, bool)> + '_ {
         self.major_sponsor
             .map(|o| (o, true))
@@ -411,6 +493,17 @@ impl Default for Career {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// One placed sponsor's result in one race.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SponsorPay {
+    pub offer_id: i32,
+    pub sponsor_id: i32,
+    pub major: bool,
+    pub player_met: bool,
+    pub teammate_met: bool,
+    pub money: i64,
 }
 
 /// The money and reputation an event paid, item by item (the bank screen's
@@ -480,28 +573,12 @@ pub fn apply_event(
     };
 
     // Sponsors pay per race (0x66DB80, 0x652010) [V].
-    let offers: BTreeMap<i32, &super::data::SponsorOffer> = catalogue
-        .events
-        .values()
-        .flat_map(|e| e.sponsor_offers.iter())
-        .map(|o| (o.id, o))
-        .collect();
     for race in races {
-        let met = |who: Entrant, offer: &super::data::SponsorOffer| {
-            race.order
-                .iter()
-                .enumerate()
-                .find(|(_, c)| c.entrant == who)
-                .is_some_and(|(pos, c): (usize, &Classified)| rules::sponsor_objective_met(offer, pos, c))
-        };
-        for (offer_id, major) in career.sponsor_slots() {
-            let Some(offer) = offers.get(&offer_id) else {
-                continue;
-            };
-            let teammate = career.team_mate.is_some() && met(Entrant::TeamMate, offer);
-            payout.sponsor_money +=
-                rules::sponsor_race_pay(offer, major, met(Entrant::Player, offer), teammate);
-        }
+        payout.sponsor_money += career
+            .sponsor_pay(catalogue, race)
+            .iter()
+            .map(|p| p.money)
+            .sum::<i64>();
         match race.position(Entrant::Player) {
             Some(0) => career.races_won += 1,
             _ => career.races_lost += 1,
