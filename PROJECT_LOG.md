@@ -1,3 +1,7 @@
+## G167 — Native DLAA executes; merged core and raw velocity checks pass (19 October2026)
+
+Source7569901 feature paint-specular,dlaa linked and ran on RTX4070/Vulkan at native1280x800,600ticks,30 distinct virtual30FPS frames. SMAA/TAA controls completed with the same four physical exit records. GPU depth/motion audit and independent matrix reconstruction pass conservative upper-body and road checks (<0.01/<0.06pixel p99); these are limited volumes, not complete temporal/quality acceptance. Full767tests/21harnesses pass, feature/default workspaceClippy pass; fresh F454canonical7b01ee41…81cd and24/24quick soak pass. Analyzer signs/frame mismatch checked analytically. Private candidate091f108…ab1e remains separate from installed3362/c1052.300virtualFPS,4K, backend fallback, restart/camera-cut and separate playable delivery still require evidence. See docs/NATIVE_DLAA.md and docs/TEMPORAL_AA_DIAGNOSTICS.md. Main local3b42379 does not yet include latest graphics22c00be; graphics branch safely merges upstream5004cf9 via db60e5e, primary checkout untouched.
+
 # GRID engine project log
 
 ## G166 — Optional native DLAA source integration checks pass (19 October 2026)
