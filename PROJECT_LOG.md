@@ -1,5 +1,17 @@
 # GRID engine project log
 
+F458 Wheel rays keep the original's tolerance fractions: the Sarthe "invalid contact material inputs" retirement; the identity procedure (2026-10-19, Claude Code; le-mans' finding and the coordinator's identity question). Details: docs/ROBUSTNESS_RESEARCH.md §10, docs/TOOLCHAIN.md "Identity check". Evidence: this worktree's `local/firstcorner/mat-checks*/`; replay main checkout `local/lemans/soak/quick-37-40/seed-39.inputs.tsv`.
+- [V] Reproduced on 592430d in a temporary worktree (since removed; its build dir was pruned with `tools/prune_build_dirs.ps1`): car 5 lies upside down; wheel 2's ray hits the road at its start with fraction −8.5e−8; `contact_material::resolve` rejected anything outside 0..1 and the car retired at tick 2419. The seed passes on current main (other trajectories).
+- [D/V] The port's ray test `triangle::query` keeps GRID's f32 tolerances: fractions from −1e−6 to just above 1 are accepted and kept. So the original uses such a fraction; only the port's guard was stricter.
+  - Fix: the guard accepts the ray test's own range (`triangle::FRACTION_LOW..=FRACTION_HIGH`); anything outside it still fails.
+  - [V] The same replay on 592430d with the fix passes 2419/2419 ticks. Unit test in `contact_material::tests`.
+- Identity procedure (docs/TOOLCHAIN.md, pointer in AGENTS.md's pre-push checks): rebuild `grid-opponent-race` explicitly first, because `cargo test` does not rebuild bin targets.
+  - The inputs and their sha256 are recorded there.
+  - car-series confirmed that its F447/F452/F453 hashes came from a stale binary.
+- `tools/capture_grid_field.py`: the comment now names +0xE30 as the steering; +0xE3C equals the throttle (F450).
+- Checks [V], release, cargo/rustc 1.99.0:
+  - tests 751 passed, 0 failed (on 0c57228 + F448 + this change).
+  - On 467f4c3 (F455) + this change: clippy clean; identities unchanged at F455's values (solo 6d7184ac…0063, 12-car a08171c2…e400, 12-car with DF01 and characteristics 7f03a755…db0f); `grid-soak quick` 24/24.
 F457 Five more circuit series: prototype, pro_muscle, open_wheel, gt_club, prestige (2026-10-19, Claude Code; coordinator's task "back to the circuit-race series: more cars and layouts"). Details: docs/SERIES.md "More series (F457)". Evidence: worktree kind-pike-df38cc `local/series2/` (solo and field runs, checks), `local/gtfix/decomp/bosmesh` (Ghidra 12.1.4, read-only). The original was not run.
 - Survey: new probe `grid-series-survey ROOT` lists every free-race discipline with its cars and layouts. Five circuit series were missing; 14 of their cars were not raceable.
 - [V] Solo, 2 laps at Donington GP: 13 of 14 finish (787 2:25.7 … ply 3:17.4). The Mustang Boss fails to load: its collision mesh has zero-area faces 11/47. [O] The original's normal pass 0xB444D0 normalises with rsqrtps and no zero test, so such a face gets a NaN normal and construction continues; not ported (NaN planes in the shared contact code), and `pro_muscle` stays experimental.

@@ -21,6 +21,25 @@ Checked first: no Android SDK, NDK, adb, Gradle, `JAVA_HOME` or `ANDROID_HOME` e
 
 Licences: on 17 October 2026 the owner approved, in chat, accepting the Android SDK License and the Android SDK Preview License. `yes | sdkmanager --licenses` accepted all eight offered licences. The six that were not approved (Google TV, Android XR, ARM DBT, Glass GDK, microXR, MIPS system image) were withdrawn at once by deleting their files from `android-sdk\licenses`. Only `android-sdk-license` and `android-sdk-preview-license` remain. None of the six covers an installed package.
 
+## Identity check (F458)
+
+The solo and 12-car identities in PROJECT_LOG are the sha256 of the race tool's standard output.
+- Rebuild the binary first: `cargo test` builds test harnesses, not the bin targets, so a
+  `target/release/grid-opponent-race.exe` from before a rebase silently gives the old hash
+  (19 October 2026: a post-F444 tree reported the pre-F444 solo hash).
+- Inputs: the purchased ROOT `C:/Program Files (x86)/Steam/steamapps/common/Grid`; CD01
+  `local/body-contact-directions.bin` (sha256 ea8d8bff…79c7); BP01
+  `local/body-impact-parameters.bin` (sha256 493380e1…946d). No other GRID_* variable affects the
+  race tool unless named below.
+
+```
+cargo build --release -p grid-tools --bin grid-opponent-race
+# GRID_DEFORMATION_PARAMETERS and GRID_AI_CHARACTERISTICS unset:
+target/release/grid-opponent-race "$ROOT" CD01 BP01 1 11200 ai | sha256sum    # solo
+target/release/grid-opponent-race "$ROOT" CD01 BP01 12 11200 ai | sha256sum   # 12-car
+# and the 12-car again with both variables set (DF01 and the characteristics)
+```
+
 ## Build and test cost — 16 October 2026
 
 Owner request: parallel sessions build slowly and load the CPU. Findings and changes:

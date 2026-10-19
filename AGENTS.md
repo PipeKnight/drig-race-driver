@@ -31,7 +31,7 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 - Build dirs outlive worktrees. Before any `git worktree remove`, including temporary worktrees made for checks, run `powershell -NoProfile -File tools\prune_build_dirs.ps1 -ForWorktree <path> -Apply`. The coordinator also runs `tools\prune_build_dirs.ps1 -Apply` regularly. It deletes build dirs that no live checkout uses (docs/DISK_USAGE.md section 9).
 - Check levels (docs/TOOLCHAIN.md, "Build and test cost"):
   - while working: tests of the changed package only (`cargo td -p CRATE`). One-off research probes live in `crates/grid-probes` and build only with `-p grid-probes` or `--workspace`;
-  - before a push: `cargo t -- --include-ignored` with absolute GRID_* paths, `cargo clippy --workspace --all-targets -- -D warnings`, the solo-lap identity check and `grid-soak quick`, all in the release profile;
+  - before a push: `cargo t -- --include-ignored` with absolute GRID_* paths, `cargo clippy --workspace --all-targets -- -D warnings`, the solo-lap identity check (docs/TOOLCHAIN.md "Identity check": rebuild `grid-opponent-race` explicitly first, `cargo test` does not rebuild bin targets) and `grid-soak quick`, all in the release profile;
   - long soak runs and the separate `soak` profile: only overnight, or when the change targets robustness.
   Avoid building extra profiles you do not need.
 - Check for existing tools before installing duplicates. Prefer official sources, pin and record versions, verify signatures/hashes where supplied, and prove useful operation against the actual GRID reference.
