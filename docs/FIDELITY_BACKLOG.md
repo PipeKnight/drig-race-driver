@@ -131,6 +131,7 @@ Columns:
 | 86 | platform | About 88 asset readers open exact-case paths (no `FileIndex::resolve`); libm sin/tan/atan/acos/pow may differ off Windows. | SETTINGS §3; F321 | M on Linux | S | M | coordinator |
 | 87 | physics/vehicle | Earlier F13 acceleration (81→106 mph) unexplained; game-time alignment with the original open (status unclear after F417/F419). | REFERENCE_DRIVING_INPUT; NEXT_MILESTONES | L–M | L | M | drift-battle-ai |
 | 88 | robustness | grid-soak's counter (ii) exempts a prop body that a route entity box drove into the ground in one step (the box contact in the same or the previous step as its first deep road contact). This is debt, not a fix: the open 16 ms step-size family (rows 11, 19; F320, F351). Counted separately (`box_losses`): 1 body in quick 1..56 (Long Beach seed 17), 0 in long 1001..1100. | ROBUSTNESS_RESEARCH §9; F448 | L–M: hides pieces lost in hard hits | S | M | robustness |
+| 89 | AI | Autopilot (player car driven by the ported AI) is wrecked at Jarama route_1 turn 1 (tick 1013) on the Catmull-Rom line: brake line 0 (42.6–71.0 m/s) gives 55.4 m/s for a radius of about 180 m (about 1.6 g); full lock from tick 950, 18 m wide (chord line: 8.9 m, survives). No non-1:1 step found; asset test `a_race_finishing_at_a_later_gate_is_classified` is known failing. | AI_DRIVER_RESEARCH §3 item 2; F497 | M: autopilot test coverage; AI may run wide there | L | M | AI |
 
 ## Closed in this sweep
 

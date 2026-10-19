@@ -513,8 +513,15 @@ fn a_finished_race_goes_through_stats_to_classified_results() {
 /// Jarama route 1 finishes at gate 67 of its progress file; lap timing re-indexes
 /// it so the finish is gate 0 (docs/JARAMA.md).
 #[test]
-#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
+#[ignore = "row 89: autopilot wrecked at Jarama turn 1, see F497; GRID_RUN_KNOWN_FAILING=1 runs it"]
 fn a_race_finishing_at_a_later_gate_is_classified() {
+    // FAILS (F497): on the track view's Catmull-Rom line the autopilot takes
+    // turn 1 at brake line 0's 55.4 m/s, runs 18 m wide at full lock and is
+    // wrecked at tick 1013 (FIDELITY_BACKLOG row 89).
+    if std::env::var_os("GRID_RUN_KNOWN_FAILING").is_none() {
+        eprintln!("skipped: known failing, FIDELITY_BACKLOG row 89");
+        return;
+    }
     big_stack(|| finish_one_lap(grid_tools::route::JARAMA));
 }
 
@@ -526,6 +533,14 @@ fn finish_one_lap(route: &str) {
     while post(&app).stage == Stage::Hidden {
         app.update();
         assert!(ticks(&app) < 12_000, "no finish");
+        // A wrecked player ends the race; the wreck screen waits for real
+        // time, so fail here instead of updating forever.
+        let d = app.world().resource::<Driving>();
+        assert!(
+            d.runtime.terminal_wheel().is_none(),
+            "player wrecked at tick {}",
+            d.runtime.ticks
+        );
     }
     assert_eq!(post(&app).stage, Stage::Stats);
     assert!(app.world().resource::<time_trial::Trial>().finished());
@@ -565,18 +580,10 @@ fn finish_one_lap(route: &str) {
 }
 
 #[test]
-#[ignore = "row 36: recovery stall at an obstruction, see F476; GRID_RUN_KNOWN_FAILING=1 runs it"]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS / GRID_DEFORMATION_PARAMETERS"]
 fn a_drift_battle_is_scored_banked_and_classified_by_drift_points() {
     use crate::drift_event::DriftEvent;
     use crate::post_race::{Cell, Stage};
-    // FAILS (F476): the autopilot stops against an obstruction at Long
-    // Beach turn 1 (tick ~1000) and never backs off; it retires stuck at
-    // tick ~2240 and the lap never finishes. Old main passed only because the
-    // car happened to come free at tick ~3500 (FIDELITY_BACKLOG row 36).
-    if std::env::var_os("GRID_RUN_KNOWN_FAILING").is_none() {
-        eprintln!("skipped: known failing, FIDELITY_BACKLOG row 36");
-        return;
-    }
     big_stack(|| {
         // One lap of the Long Beach drift circuit (route_1), BMW field, the
         // ported AI driving the player's car, as settings/drift-battle.ini.

@@ -264,6 +264,71 @@ impl Line {
         )
     }
 
+    /// Racing-line point and lateral at arc length `s` as the track view
+    /// evaluates them (line vfunc +0x14 = 0x791DE0, from 0x779C40): a
+    /// Catmull-Rom segment (0x7786B0, basis 0xE7A230 set by 0xC79D60) through
+    /// the link's gates G1, G2 and outer control points G0', G3'. The outer
+    /// gates G0, G3 (the link's start or end where none exists, 0x7804B0)
+    /// are moved by 0x780520 to G2 + 2·proj(G1 − G2 on G0 − G2) and
+    /// G1 + 2·proj(G2 − G1 on G3 − G1). The lateral is the curve's tangent
+    /// (0x7787A0) turned to (−t_z, 0, t_x), normalised. Past an open line's
+    /// ends this keeps the straight continuation of [`Self::at`] (AUTHORED).
+    fn curve(&self, s: f32) -> ([f32; 3], [f32; 3]) {
+        let n = self.points.len();
+        let (i, j, t) = if self.open {
+            self.open_place(s)
+        } else {
+            let s = s.rem_euclid(self.length);
+            let i = self.start.partition_point(|&x| x <= s).saturating_sub(1);
+            (i, (i + 1) % n, ((s - self.start[i]) / self.segment(i).max(1e-6)).clamp(0., 1.))
+        };
+        if n < 3 || !(0. ..=1.).contains(&t) {
+            let (point, _, lateral, _) = self.at(s);
+            return (point, lateral);
+        }
+        let (h, k) = if self.open {
+            (i.saturating_sub(1), (j + 1).min(n - 1))
+        } else {
+            ((i + n - 1) % n, (j + 1) % n)
+        };
+        // 0x780520: p3 + 2·((p1 − p3)·(p2 − p3))/|p1 − p3|² · (p1 − p3).
+        let reflect = |p1: [f32; 3], p2: [f32; 3], p3: [f32; 3]| -> [f32; 3] {
+            let v = sub(p1, p3);
+            let square = dot3(v, v);
+            if square <= 0. {
+                return p3;
+            }
+            let scale = 2. * dot3(v, sub(p2, p3)) / square;
+            std::array::from_fn(|c| p3[c] + scale * v[c])
+        };
+        let (g1, g2) = (self.points[i], self.points[j]);
+        let g0 = reflect(self.points[h], g1, g2);
+        let g3 = reflect(self.points[k], g2, g1);
+        // 0.5·[t³ t² t 1] × [[−1 3 −3 1] [2 −5 4 −1] [−1 0 1 0] [0 2 0 0]].
+        let (t2, t3) = (t * t, t * t * t);
+        let w = [
+            0.5 * (-t3 + 2. * t2 - t),
+            0.5 * (3. * t3 - 5. * t2 + 2.),
+            0.5 * (-3. * t3 + 4. * t2 + t),
+            0.5 * (t3 - t2),
+        ];
+        let dw = [
+            -1.5 * t2 + 2. * t - 0.5,
+            4.5 * t2 - 5. * t,
+            -4.5 * t2 + 4. * t + 0.5,
+            1.5 * t2 - t,
+        ];
+        let g = [g0, g1, g2, g3];
+        let point = std::array::from_fn(|c| (0..4).map(|m| w[m] * g[m][c]).sum());
+        let tangent: [f32; 3] = std::array::from_fn(|c| (0..4).map(|m| dw[m] * g[m][c]).sum());
+        let length = (tangent[0] * tangent[0] + tangent[2] * tangent[2]).sqrt();
+        if length <= 0. {
+            let (_, _, lateral, _) = self.at(s);
+            return (point, lateral);
+        }
+        (point, [-tangent[2] / length, 0., tangent[0] / length])
+    }
+
     /// Link `i` of the track view's 32-link window that starts one link
     /// behind `segment`, and the next gate (`None` past an open road's end).
     fn window_link(&self, segment: usize, k: usize) -> Option<(usize, usize)> {
@@ -897,6 +962,11 @@ const AVOID_FOLLOW_DISTANCE: f32 = 3.;
 const BRAKE_LINE_CANCEL_FACTOR: f32 = 0.8;
 const SLOW_SPEED: f32 = 3.;
 const MINIMUM_MOVING_SPEED: f32 = 1.;
+/// The assisted automatic gearbox selects reverse below this vehicle speed
+/// (+0x1648 < 3) when the brake exceeds the throttle by this margin
+/// (0x3D4CCCCD, `vehicle_controls`); AUTHORED pedal boundary only.
+const REVERSE_SELECT_SPEED: f32 = 3.;
+const REVERSE_SELECT_MARGIN: f32 = 0.05;
 const SLIDE_LIFT_MIN_SPEED: f32 = 5.;
 /// Grip input for the speed->distance tables. The AI car-view grip (+0x144)
 /// is not yet traced; the lowest shipped grip is used.
@@ -2344,8 +2414,8 @@ impl AiDriver {
         // point and lateral at the car (+0x170/+0x180) and the lateral position
         // of our front (0x40AE90).
         let rs = p.rescue.clone();
-        let (here_point, _, here_lateral, _) = data.line.at(arc);
-        let (la_point, _, la_lateral, _) = data.line.at(arc + self.look_ahead);
+        let (here_point, here_lateral) = data.line.curve(arc);
+        let (la_point, la_lateral) = data.line.curve(arc + self.look_ahead);
         let planned: [f32; 3] = std::array::from_fn(|k| la_point[k] + la_lateral[k] * self.offset);
         // Angles from our forward, positive clockwise seen from above (toward
         // the car's right). The original's sign convention is not confirmed;
@@ -3096,7 +3166,8 @@ impl AiDriver {
 
         // Look-ahead, target point and curvature (0x779A20, 0x798E90).
         self.update_look_ahead(speed);
-        let (point, _, lateral, limits) = data.line.at(arc + self.look_ahead);
+        let (_, _, _, limits) = data.line.at(arc + self.look_ahead);
+        let (point, lateral) = data.line.curve(arc + self.look_ahead);
         // Limit types 1/2 (racing limits), or 3/4 (track limits) for avoid
         // and the race start.
         let limits = if request.track_limits {
@@ -3495,12 +3566,28 @@ impl AiDriver {
             drift_line: self.on_drift_line,
             drift_room,
         };
+        // Packet handbrake byte +0x1C (0x77A110): request +0xB3, or a forced
+        // brake below minimumMovingSpeed. +0xB3 is set only by race_start's
+        // launch delay, which is not ported (0 with the shipped data).
+        let mut handbrake = request.force_brake && speed < MINIMUM_MOVING_SPEED;
         // AUTHORED reverse boundary: the car-side consumer of the reverse
         // byte is not traced (§5, §7.3). The assisted automatic gearbox
         // selects reverse when the brake pedal is held near rest and then
         // swaps the pedal roles, so the request is mapped onto the pedal that
-        // drives the wanted direction in the current gear.
+        // drives the wanted direction in the current gear. Without a reverse
+        // request no pedal may select reverse: in a forward gear below the
+        // gearbox's brake-to-reverse speed, a brake that would select it is
+        // published as the handbrake (otherwise first and reverse alternate
+        // every tick while rolling back or held against a wall).
         let (throttle, brake) = match (view.reverse_gear, reverse) {
+            (_, false) if handbrake => (self.throttle, 0.),
+            (false, false)
+                if speed < REVERSE_SELECT_SPEED
+                    && self.brake > self.throttle + REVERSE_SELECT_MARGIN =>
+            {
+                handbrake = true;
+                (self.throttle, 0.)
+            }
             (false, false) => (self.throttle, self.brake),
             (false, true) => (0., self.throttle.max(self.brake)),
             (true, true) => (self.brake, self.throttle),
@@ -3513,7 +3600,7 @@ impl AiDriver {
             throttle,
             brake,
             steering: self.steering,
-            handbrake: false,
+            handbrake,
         }
     }
 }
@@ -3906,6 +3993,39 @@ mod tests {
         // Spin beyond tcMaxWheelSpin holds the level.
         let full = traction_control(&tc, 10.5, &[0., 0., 40., 1.], &front);
         assert!((full - 0.25).abs() < 1e-6, "{full}");
+    }
+
+    #[test]
+    fn the_track_view_curve_passes_the_gates_and_bows_out_of_the_chords() {
+        // A 20 m square loop, clockwise seen from above (+y up).
+        let points = vec![[0., 0., 0.], [20., 0., 0.], [20., 0., 20.], [0., 0., 20.]];
+        let line = Line {
+            open: false,
+            lateral: vec![[0., 0., 1.]; 4],
+            limits: vec![[-5., 5.]; 4],
+            track_limits: vec![[-8., 8.]; 4],
+            start: vec![0., 20., 40., 60.],
+            length: 80.,
+            gate_index: (0..4).collect(),
+            points,
+        };
+        // At a gate the curve is the gate itself (t = 0).
+        let (p, lateral) = line.curve(20.);
+        assert!(p.iter().zip([20., 0., 0.]).all(|(a, b)| (a - b).abs() < 1e-5), "{p:?}");
+        // Phantom points (0x780520) on the link (20,0,0)→(20,0,20): G0' = G2 +
+        // 2·proj(G1 − G2 on G0 − G2) = (0, 0, 0) and G3' = (0, 0, 20), here the
+        // neighbours themselves; the tangent at G1 is ½(G2 − G0') = (10, 0, 10),
+        // so the lateral (−t_z, 0, t_x) is (−0.707, 0, 0.707).
+        assert!((lateral[0] + 0.70710677).abs() < 1e-5 && (lateral[2] - 0.70710677).abs() < 1e-5, "{lateral:?}");
+        // An unequal neighbour moves its phantom: with G0 at (0, 0, −20) the
+        // projection is shorter and the tangent turns toward the link.
+        let mut skew = line.clone();
+        skew.points[0] = [0., 0., -20.];
+        let (_, l2) = skew.curve(20.);
+        assert!(l2[0] < lateral[0] && l2[2] < lateral[2], "{l2:?}");
+        // Mid-link the curve bows outward of the chord x = 20 by 2.5 m.
+        let (mid, _) = line.curve(30.);
+        assert!((mid[0] - 22.5).abs() < 1e-4 && (mid[2] - 10.).abs() < 1e-4, "{mid:?}");
     }
 
     #[test]
