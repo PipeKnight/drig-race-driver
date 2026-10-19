@@ -93,6 +93,13 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
 - **Event standings.** During an event the event page lists the standings so far: `rules::standings` over the results with the event's points table, dense ranks, names from the career field ("You", the team mate's name, "Car N" for the F424 field). The original's strings are `driver_event_standings_title` "Event Standings" and `_subtitle` "Drivers" [D]. The original's standings screen and its Teams page are not ported.
 - **Bank lines.** After the Total, the payout page shows "Balance:" (`bank_rewards_balance_desc`) and "Season's Earnings:" (`bank_rewards_season_earnings_desc`) [D strings]. `Career::season_earnings` is new and saved (key `season_earnings`; older saves read 0). Each event, head-to-head and driver-offer payout adds its money total, and `end_season` clears it. Where the original keeps this sum and when it resets were not traced [I].
 
+## Head-to-heads (F478)
+
+- **Offered** once `Career::event_open` opens them: after every other event of the tier is won (0x656D40) [V; I "won"]. The label reads "Head-to-head: <event>". On the purchased data the port can run 69, 70, 71, 72, 78 (the International final) and 79. 73, 75 and 77 drop out because their layout or car cannot be raced in the port. 76 is a drift battle (`competition_format` 3).
+- **Field** [V 0x66D1C0]: the event's `event_driver` rows, one rival in every shipped head-to-head, plus the player. Nobody's car is taken over and the hired team mate does not race (`field::field`). The grid uses the usual `field::grid`, so the race is a 2-car race with `opponents = 1`. No `points` key is written.
+- **Payout** [V 0x6788D0]: a win pays `prize_money_for_first` and no reputation; the International head-to-head completes the game (`game_completed`). The payout page starts with "Head-to-head: won" or "lost" (AUTHORED text; `Payout::head_to_head`), then Prize Money, Sponsorship Money, Total, Balance and Season's Earnings.
+- Not ported: the `head_to_head_rewards` car or its `alt_reward_amount` (the branch through 0x65AD90 was not traced), and the completion video.
+
 ## Team mate and sponsors (F466)
 
 Two home-page rows once the team exists: "Team mate: NAME" and "Sponsors: N received, M placed".
@@ -150,6 +157,6 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
 
 ## Not done
 
-- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, the sponsor designer and logos, car buying and selling, head-to-heads, Le Mans entry, season-end screens, and the original's career look.
+- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, the sponsor designer and logos, car buying and selling, the head-to-head reward cars, Le Mans entry, season-end screens, and the original's career look.
 - The Ravenwest guest cars, Le Mans selection fields (`lemans_restrictions`) and the original's player car and livery choice in an own-team field.
 - Flashback limits per difficulty and pro mode's restart ban (§8).

@@ -1,5 +1,14 @@
 # GRID engine project log
 
+F478 Career head-to-heads: the open head-to-head events are offered, raced against the event's rival alone, and paid by the prize for a win (2026-10-19, Claude Code; coordinator's career order, FIDELITY_BACKLOG row 61). Docs: docs/CAREER_SCREEN.md "Head-to-heads (F478)"; research: CAREER_RESEARCH §3.3, §12.2 (main checkout `local/career/notes/DRAW_FIELD.md` 0x66D1C0, `REWARDS.md` 0x6788D0).
+- `field::field` [V 0x66D1C0]: for a head-to-head, the event's rows plus the player. Nobody's car is taken over and there is no team mate. `Payout::head_to_head` is new and set by `apply_event`'s head-to-head branch.
+- Career screen: `offers` no longer filters head-to-heads out, and the label is prefixed "Head-to-head: ". The payout lines say won or lost, then Prize Money, Sponsorship Money, Total, Balance and Season's Earnings, with reputation 0 (AUTHORED text). No `points` key.
+- Row 61's driver-offer half was already done in F464 (all five objectives, solo test offers). The row now lists what is still open: 73, 75 and 77 (layout or car), 76 (drift battle), the reward car.
+- Checks [V], release, `--offline`, on c583aae (F475) + this change:
+  - new asset test `head_to_heads_race_the_rival_alone`: closed before the tier's other events are won; runnable 69, 70, 71, 72, 78, 79; a 2-car field (player + rival, team mate hired but absent), `opponents = 1`, no points; a loss pays 0, a win pays `prize_money_for_first` with 0 reputation, with the payout text;
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 796 passed, 0 failed; clippy clean; `grid-soak quick` 24/24; identities without DF01/characteristics solo 6d7184ac…0063 and 12-car a08171c2…e400, unchanged.
+- Not run in the app (no rendered runs until the render-leak fix).
+
 F477 Joints, phase 2: world joints in the solver, islands merged through them, impulse sums and breaking, correction rows; write-back and correction bit-for-bit against the original (2026-10-19, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, phase 2 of 3). Details: docs/JOINTS_RESEARCH.md "Phase 2". Evidence: worktree fervent-napier-50814b `local/joint/` (JNT1 cases and outputs, modes 0..4), `local/robust/decomp/r16e`, `r16f` (Ghidra 12.1.4 headless, read-only), `local/r20/*.asm` (capstone 5.0.6), checks in `local/r20/p2/`. Static analysis and native probes on the hash-pinned analysis image; the original game was not launched.
 - Port:
   - `joint_rows::write_back` (AFB280/AFB800, AF47C0, AFCD90/AFCC80): impulse sums +0x140..+0x17C, re-seat request +0x32D, break flag +0x48;

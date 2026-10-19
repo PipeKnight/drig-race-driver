@@ -570,6 +570,7 @@ mod tests {
         let before = c.total_reputation();
         let p = apply_event(&cat, &mut c, 69, &win, &plain()).unwrap();
         assert_eq!(p.prize, 500000);
+        assert!(p.head_to_head && p.position == Some(0));
         assert_eq!(c.total_reputation(), before);
         assert!(!c.game_completed);
         c.head_to_heads.insert(78);

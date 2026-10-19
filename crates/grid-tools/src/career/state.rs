@@ -539,6 +539,8 @@ pub struct Payout {
     pub region: Option<Region>,
     pub new_sponsor_offers: Vec<i32>,
     pub team_founded: bool,
+    /// A head-to-head event (paid by 0x6788D0): won when `position` is 0.
+    pub head_to_head: bool,
 }
 
 impl Payout {
@@ -601,6 +603,7 @@ pub fn apply_event(
     }
 
     if event.head_to_head {
+        payout.head_to_head = true;
         let won = races
             .last()
             .and_then(|r| r.order.first())

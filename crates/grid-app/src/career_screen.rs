@@ -4,7 +4,7 @@
 //!
 //! - The screen shows money, the five regional reputations, the licences and
 //!   the season, and lists the open events (`Career::event_open`) that the
-//!   port can run: circuit races (`competition_format` 1, no head-to-head,
+//!   port can run: circuit races (`competition_format` 1, head-to-heads too,
 //!   no Le Mans selection) with a raceable car (`series::RACEABLE`) and
 //!   enough surveyed layouts in their `event_track_pool`.
 //! - An event's races are the first `num_competitions` pool layouts by
@@ -273,7 +273,6 @@ pub fn offers(
     let mut out = Vec::new();
     for event in cat.events.values() {
         if !career.event_open(cat, event.id)
-            || event.head_to_head
             || event.use_lemans_selection
             || event.competition_format_id != 1
             || event.num_competitions < 1
@@ -318,7 +317,10 @@ pub fn offers(
         }
         let key = format!("db_{}", event.name);
         let text = labels.get(&key);
-        let label = if text == key { event.name.clone() } else { text.to_owned() };
+        let mut label = if text == key { event.name.clone() } else { text.to_owned() };
+        if event.head_to_head {
+            label = format!("Head-to-head: {label}");
+        }
         out.push(Offer {
             event_id: event.id,
             label,
@@ -836,7 +838,13 @@ pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
     let money = |v: i64| format!("${}", thousands(v));
     let offer = p.driver_offer_wages != 0 || p.driver_offer_bonus != 0 || p.driver_offer_reputation != 0;
     let mut lines = Vec::new();
-    if offer || p.position.is_none() && p.prize == 0 && p.sponsor_money == 0 {
+    if p.head_to_head {
+        // A head-to-head pays its prize for a win and no reputation
+        // [V 0x6788D0]; the text is AUTHORED.
+        lines.push(format!("Head-to-head: {}", if p.position == Some(0) { "won" } else { "lost" }));
+        lines.push(format!("Prize Money: {}", money(p.prize)));
+        lines.push(format!("Sponsorship Money: {}", money(p.sponsor_money)));
+    } else if offer || p.position.is_none() && p.prize == 0 && p.sponsor_money == 0 {
         // A driver offer pays its own lines (bank_rewards_do_*) [D].
         lines.push(format!("Driver Offer Wages: {}", money(p.driver_offer_wages)));
         lines.push(format!("Driver Offer Rewards: {}", money(p.driver_offer_bonus)));
@@ -860,7 +868,7 @@ pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
         .region
         .and_then(|r| REGIONS.iter().find(|(x, _)| *x == r))
         .map_or("", |(_, n)| *n);
-    lines.push(if offer {
+    lines.push(if offer || p.head_to_head {
         format!("Reputation: {} pts to {region}", thousands(p.reputation()))
     } else {
         format!(
@@ -2325,6 +2333,69 @@ mod tests {
         let off = out(&[0, 1, 2], true);
         let p = apply_event(&cat, &mut c, 7, &[off.result.clone(), off.result], &off.settings).unwrap();
         assert_eq!(p.reputation(), 22000);
+    }
+
+    /// Head-to-heads on the purchased data: offered once open, raced
+    /// against the event's one rival with no team mate, and paid by the
+    /// prize for a win only (docs/CAREER_SCREEN.md, F478).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn head_to_heads_race_the_rival_alone() {
+        let (cat, routes, root) = catalogue();
+        let exists = |p: &str| root.join(p).exists();
+        let mut c = new_career(&cat);
+        c.add_money(&cat, cat.start_money);
+        c.reputation = [2_000_000; 5];
+        c.team_mate = Some(grid_tools::career::state::HiredTeamMate { driver_id: -1, winnings_percentage: 20 });
+        let all = |c: &Career| -> Vec<Offer> {
+            offers(&cat, c, &routes, &Labels::default(), exists)
+                .into_iter()
+                .filter(|o| cat.event(o.event_id).unwrap().head_to_head)
+                .collect()
+        };
+        assert!(all(&c).is_empty(), "closed until the tier's other events are won");
+        c.head_to_heads = cat.events.values().filter(|e| e.head_to_head).map(|e| e.id).collect();
+        let h2h = all(&c);
+        let ids: Vec<i32> = h2h.iter().map(|o| o.event_id).collect();
+        eprintln!("runnable head-to-heads: {ids:?}");
+        assert!(!h2h.is_empty());
+        let o = &h2h[0];
+        assert!(o.label.starts_with("Head-to-head: "));
+        let event = cat.event(o.event_id).unwrap();
+        let (field, planned) = career_plan(
+            &cat,
+            &c,
+            grid_tools::career::field::Entry::Event(o.event_id),
+            &o.car,
+            0,
+            &o.races,
+            exists,
+            1,
+        );
+        // The rows plus the player [V 0x66D1C0]: one rival, no team mate.
+        assert_eq!(field.len(), event.drivers.len() + 1);
+        assert_eq!(field.len(), 2);
+        assert_eq!(field[0].entrant, Entrant::Player);
+        assert!(matches!(field[1].entrant, Entrant::Ai { .. }) && !field[1].name.is_empty());
+        assert_eq!(planned.len(), 1);
+        assert_eq!(planned[0].cars, [1]);
+        let mut s = crate::settings::Settings::new();
+        s.apply(&field_profile(&field, &planned[0]), Path::new(".")).unwrap();
+        assert_eq!((s.opponents, s.points.as_ref()), (Some(1), None));
+        // Lost: nothing but sponsor money; won: the prize, no reputation.
+        let rival = field[1].entrant;
+        let lost = grid_tools::career::state::result(&[rival, Entrant::Player]);
+        let mut lose = c.clone();
+        let p = apply_event(&cat, &mut lose, o.event_id, &[lost], &RaceSettings::default()).unwrap();
+        assert_eq!((p.prize, p.reputation()), (0, 0));
+        assert_eq!(payout_lines(&p, &lose)[0], "Head-to-head: lost");
+        let won = grid_tools::career::state::result(&[Entrant::Player, rival]);
+        let mut win = c.clone();
+        let p = apply_event(&cat, &mut win, o.event_id, &[won], &RaceSettings::default()).unwrap();
+        assert_eq!((p.prize, p.reputation()), (event.prize_money_for_first, 0));
+        let lines = payout_lines(&p, &win);
+        assert_eq!(lines[0], "Head-to-head: won");
+        assert!(lines.contains(&format!("Prize Money: ${}", thousands(event.prize_money_for_first))));
     }
 
     /// A new career on the purchased data: no team, no own events, and the

@@ -117,7 +117,9 @@ fn ai_cars(catalogue: &Catalogue, career: &Career, event_id: i32, rng: &mut Mt) 
 /// - race offer (0x674020): the player overwrites the lowest-index car of
 ///   `driver_offer.team_id` (key teams allowed), else a random team's car;
 ///   no own team mate;
-/// - test offer: the player alone (0x663470).
+/// - test offer: the player alone (0x663470);
+/// - head-to-head (0x66D1C0): the event's rows plus the player; nobody's
+///   car is taken over and the hired team mate does not race.
 ///
 /// The player's car is `player_livery` (an own-team event: the port's
 /// AUTHORED choice; an offer: `driver_offer.vehicle_livery_id`). Not
@@ -141,6 +143,10 @@ pub fn field(
     let mut cars = ai_cars(catalogue, career, event_id, rng);
     if cars.is_empty() {
         return vec![player];
+    }
+    if offer.is_none() && catalogue.event(event_id).is_some_and(|e| e.head_to_head) {
+        cars.insert(0, player);
+        return cars;
     }
     let mut group = vec![player];
     if offer.is_none()
