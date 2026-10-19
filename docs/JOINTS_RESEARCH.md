@@ -62,9 +62,10 @@ the post joint breaks at impulse 10 and overrides the post with `_rbArmcoPost` (
 
 Phase 1 (F473): the joint itself is ported and verified. Phase 2 (F477): the solver runs
 world joints (islands merged through them, rows beside the contact rows, impulse sums,
-breaking, the correction pass). Nothing creates a joint yet: `dynamic_props::Catalog::read`
-keeps every template with constraints, or with more than one shape behaviour, static, so
-the game's solve is unchanged until phase 3 adds the entities.
+breaking, the correction pass). Phase 3a (F484): a breakable whose damage state joins its
+own pieces (tyre walls, Milan's green cushions) breaks into pieces with their joints.
+Constraints to the world or to a linked entity, body overrides and uproots (armco), and the
+close-drift flags are phase 3b; those entities stay static (`Catalog::unported`).
 
 ### Phase 1: constructor, prepare, rows (F473)
 
@@ -175,6 +176,123 @@ Verification:
 - Limits: the manager's row capacity is not grown for joint rows yet (a full pool gives
   status 1 as before); a fixed B (static object) is accepted but nothing builds one yet.
 
+### Phase 3a: joints from the entity templates (F484)
+
+Original path [D] (decompiles `local/robust/decomp/r16g`, `r16h`; asm `local/r20/*.asm`):
+
+- Props, 0x7B7FC0 / 0x7D00F0, schema 0xE4D390.. (names read from the table): +0x30/+0x40
+  `linearLimitAABBMin/Max`, +0x50/+0x60 `linearSpringAABBMin/Max` (the reader writes lane 3
+  as zero), +0x70 `linearSpringK`, +0x7C `linearSpringS`, +0x88 `rotationType` ("cone" 2,
+  "plane" 1, else 0; default 2), +0x8C..+0x9C limit angle (default 0.5236), spring angle, K,
+  S, tangent S, +0xA0 `twistType` ("circle" 1, else 0; default 1), +0xA4..+0xB0 twist,
+  +0xB4/+0xB8 `breakLinearImpulse`/`breakAngularImpulse` (0x7D8600: "+inf" is FLT_MAX,
+  "-inf" -FLT_MAX, else atof; default FLT_MAX), +0xBC `softRotationalFriction`, +0xC0
+  `hardRotationalFriction`, +0xC4 `softImpulseFactor`, +0xC8 `breakIfAngExtentHit`, +0xCC /
+  +0xDC / +0xEC `linearRotation` / `angularRotation0/1` (quaternions; default all zero),
+  +0xFC `uprootProps` (other constraint props, 0x7B7F80 picks them for an uprooted joint),
+  bytes +0x100 `dontCollideWithAny`, +0x101 `dontCollideWithFixedObjects`, +0x102
+  `specificPostCollision`, +0x104 `bodyOverride`, +0x108 `bodyOverridePriority` (default -1).
+- Template, 0x7CF4B0: +0x2C/+0x30 `body1uri`/`body2uri`, +0x140 `display`, +0x148 the props,
+  +0x100..+0x13F the `TEMPLATETRANSFORM` with rows 0 and 1 normalised (RSQRTPS and one
+  Newton step over all four lanes) and row 2 the normalised cross product 0x67C200 of the
+  new rows. 0x7C7C00 then keeps three frames: +0x40, +0x80, +0xC0 = the transform times the
+  rotation matrices of the three quaternions (0x7C06B0, 0x7C08E0, 0x7C0B10, one routine:
+  rows (C0, B1, D2), (D0, C1, B2), (B0, D1, C2) with C the diagonal (1 - 2y y) - 2z z..., B
+  2y w + z 2x..., D y 2x - 2z w...).
+- Component, 0x7D3AF0 (once per constraint of the entity) resolves the bodies (A the
+  template body; B the template's `body2uri` body, or for `link1` the linked entity's body
+  through the entity's link list +0xD8) and calls 0x7CC1E0:
+  - B absent: the world's fixed object (0x958200), joint byte +0xC set by 0xA74670.
+  - `dontCollideWithAny` (when the component has no explicit pair lists +0xB4..+0xC0): every
+    shape of A and B gets the pair filter 0x7B62C0 (shape +0x188). The narrow phase's pair
+    test 0xB38D80 skips a pair whose filter returns non-zero, and a pair an unbroken joint
+    joins directly (each body's joint list +0x320/+0x324). 0x7B62C0 returns non-zero for two
+    shapes of the same entity whose bodies are joined through unbroken joints (0xAD68F0,
+    depth-first over the joint lists with the world +0x7D0 visit stamp).
+  - `dontCollideWithFixedObjects`: A's and a dynamic B's body byte +0x416 cleared
+    (0xA69560); B18300 / B15B70 schedule a pair with static geometry (the road included)
+    only while it is set.
+  - `specificPostCollision` (phantom posts) and a soft rotational friction different from
+    the hard one (shape callback 0x7C5210) have their own paths.
+  - The request (0x7D8C40 defaults; +0x170 point flag clear): 0x7C7B10 copies the three
+    frames to +0x70/+0xB0/+0xF0 and 0x7C04D0 the props: limit and spring boxes, spring K
+    and S times the entity scale, the rotation and twist words raw, the break impulses
+    times the scale unless FLT_MAX (+0x15C/+0x160), `hardRotationalFriction` (+0x164), the
+    callback 0x7B81A0 for `breakIfAngExtentHit` (+0x168); +0xC = `display`.
+  - Each frame's position row is multiplied lane by lane by the entity's scale vector
+    (+0x80, 0x4B1BD0), then the frame by the entity matrix (the inlined SSE row product).
+  - 0xA74670 maps the request to AEFEB0's descriptor: frames to +0x10/+0x50/+0x90, boxes to
+    +0xD0.., K and S to +0x110.., rotation type (0, 1, else 2) to +0x128, the rotation words
+    to +0x12C.., twist type != 0 to +0x140, twist words to +0x144.., break impulses to
+    +0x154/+0x158, friction to +0x15C, callback to +0x160, point flag to +0x164; byte +0xC
+    fixed B, +0xD `display`.
+  - After the joint, a break callback is registered (0x7C45C0) when either break impulse is
+    finite.
+
+Port: `grid_formats::entities::Constraint` (typed `TEMPLATECONSTRAINT`s of a damage state),
+`grid_formats::physparams::Constraint` (typed props with the constructor's defaults),
+`grid_world::joint_template` (`template_transform`, `quaternion_matrix`, `template_frames`,
+`request`, `descriptor`), and `grid_tools::dynamic_props`:
+
+- `Catalog::read` keeps a breakable whose constraints join two of its own pieces
+  (`JointSpec`: the pieces, the request at unit scale, the two collision flags). Still
+  static: a constraint to the world or `link1`, a body override, uproot props, a phantom
+  post filter, soft friction different from the hard friction, or a placement with a
+  non-unit scale (0x7CC1E0's lane choice for the props' scale is not ported).
+- `PropWorld::apply` builds each joint after the entity's pieces, in the damage state's
+  order: the descriptor from the request and the placement, `joint::construct` on the
+  pieces' spawn poses, appended to the world's joint list (B825E0), with body byte +0x416
+  cleared for `dontCollideWithFixedObjects`. Each committed step it reads back which joints
+  broke.
+- `PropWorld::contacts` skips piece pairs as 0xB38D80 and 0x7B62C0 do, and track contacts
+  (and `continuous` the road sweep) of a body without byte +0x416.
+- `reserve` grows the solver rows by 16 per live joint (authored bound).
+
+Verification:
+
+- [V] Template stage: `tools/probe_joint_template.c` runs 0x7C7C00 and 0x7C7B10 (with
+  0x7C04D0) in-process on random props and template transforms (unit and non-unit
+  quaternions, scales 0.5..2, FLT_MAX and finite break impulses); `grid-joint-template`
+  runs the port; `tools/validate_joint_template.py`: 8192 cases, 0 mismatched words (the
+  callback compared as an image address).
+- [D] The reader's renormalisation and 0x7CC1E0's frame product use the joint's verified
+  normalise, cross product and row product in the same operation order (asm); not run
+  natively.
+- Unit test: a Donington tyre wall breaks into 22 pieces and 7 joints; after five seconds
+  the springs keep the blocks within 0.03 m of their rest distances, no joint breaks and
+  every piece is at rest (`a_broken_tyre_wall_stays_joined_and_settles`).
+- [V data] Breakables with joints: Donington 588 `tyre_wall` (7 joints each, all
+  `cDeformableRubber*`, `dontCollideWithAny`, unbreakable), Istanbul Park 221
+  `tyrewall_black`, Le Mans 208 tyre walls, Spa 55 `tyrewall_b_*`, Milan 113
+  `green_cushion_a`, San Francisco 171 `tyrewall_black`. Still static: armco everywhere
+  and Spa's 709 `tyrewall_a_*` (a piece with a static or phantom shape).
+- Not verified: the whole break against a live capture of the original (needs the
+  coordinator's go), the narrow phase's pair filter in a live world.
+
+### Open for phase 3b [D, partly read]
+
+- Armco (`armco_*_main*`): post to world (`body2uri="none"`, `cArmcoPost`, breaks at 10,
+  `bodyOverride` `_rbArmcoPost` priority 1), rail 1 to post and rail 4 to `link1`
+  (`cArmcoEnd`), three rail-to-rail (`cArmcoMiddle`), all `bodyOverride` `_rbArmcoMiddle`
+  priority 0 (sphericalised 7000 kg, damping 14, gravity 0, `uprootProps` `rbDefault` only
+  without gravity). The port's body constructor has no sphericalised bodies yet.
+- B absent: 0x958200 returns the world's fixed object, 0xA74670 hands 0xA7D330's body with
+  joint byte +0xC; the port's `IslandJoint`/`WorldJoint` take its body record (`fixed`), not
+  yet built from the world object.
+- `link1`: 0x7D3AF0 finds B through the entity's link list (+0xD8, next +0x38): the link whose
+  +0x2C is this template constraint and +0x34 the linked entity, then 0x7B6D10 its body.
+- 0x7D5540 (entity, other, propagate): over the entity's outgoing (+0xBC, next +0x40) and
+  incoming (+0xC0, next +0x44) ENS links. When both linked entities are broken it creates the
+  cross-entity constraint (0x7D3AF0 with both sides' bodies, after moving them to the
+  entity's collision group 0xA696F0); otherwise, with `propagate` and the other entity's
+  flag +0xEB, it breaks the other entity too (0x7D5180) and recurses without propagation.
+  With byte +0x2C of `other` set it instead re-runs the incoming links' joint (0x7D2D90).
+- `breakIfAngExtentHit`: callback 0x7B81A0 (joint +0x254), called when the angular limit is
+  hit; posts (`c*PostBase`).
+- Uproot: 0x7B7F80 picks the constraint props' `uprootProps` (+0xFC) for an uprooted
+  component (+0x14); the rigid-body side switches to its `uprootProps`.
+- Close-drift flags (drift routes) are jointed entities of the same kind.
+
 ## Size [D]
 
 Decompiled lines (Ghidra, `local/robust/decomp/r16a..r16c`): joint constructor 0xAEFEB0 1569;
@@ -196,7 +314,8 @@ bit-for-bit comparison the impact pools have.
 1. ~~Constructor, prepare and rows (0xAEFEB0, 0xAF4890, 0xAF71C0/0xAF9430)~~: F473.
 2. ~~The joint pools in the island solve (0xB7ACC0, 0xB7B850), islands merged through joints,
    the correction solvers 0xAEF930/0xAEFBB0, and breaking~~: F477.
-3. Breaking (break impulses, `breakIfAngExtentHit`), body overrides and uproot.
+3. ~~Breaking (break impulses)~~: F477. Joints between a breakable's own pieces: F484.
+   Still open: `breakIfAngExtentHit` (0x7B81A0), body overrides and uproot.
 4. Entities: constraint components in `dynamic_props`, `link1` across entities, and the ENS
    link propagation 0x7D5540; the close-drift flags as the original builds them. Props to
    descriptor ([D]): the reader 0x7D00F0 and 0x7C04D0/0x7C7B10/0xA74670 map

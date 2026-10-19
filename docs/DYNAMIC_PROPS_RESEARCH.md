@@ -233,9 +233,10 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
 / `MultiRuntime::enable_dynamic_props`, `grid-app` `dynamic_props.rs`.
 
 - **Which props.** All 190 constraint-free breakables: 34 brake marker boards,
-  8 tyre stacks, 148 cushions. Tyre walls (588) and armco (243) need the joint rows
-  the port lacks and stay static (`Catalog::unported`). Everything without a shape
-  behaviour stays static. [V data, D mechanism]
+  8 tyre stacks, 148 cushions. Since F484 also the 588 tyre walls, whose six blocks are
+  joined by seven springs (docs/JOINTS_RESEARCH.md "Phase 3a"). Armco (243) needs joints to
+  the world and to the neighbouring entity and stays static (`Catalog::unported`).
+  Everything without a shape behaviour stays static. [V data, D mechanism]
 - **Contact limit.** An armed intact box writes its threshold into contact +0x3C
   (`BodyContact::limit`); the ported solver caps the row at `dt x limit` and writes the
   solved force back. Unarmed boxes keep FLT_MAX, so nothing changes until a breakable
@@ -396,10 +397,11 @@ original's AE8AD0 pairing for it was tried and lost more boards at the port's fi
 
 ## Not yet established
 
-- Exact constraint (joint) solver, so tyre walls and armco stay static: tyre-wall springs (`cDeformableRubber*`,
-  `dontCollideWithAny`), armco hinges with `bodyOverride` rail bodies (gravityScale 0,
-  sphericalmass 7000, damping 14), post-to-world joint breaking at 10, ENS link
-  propagation. The port has no joint rows.
+- Armco stays static: hinges with `bodyOverride` rail bodies (gravityScale 0,
+  sphericalmass 7000, damping 14), the post-to-world joint breaking at 10, `link1` to the
+  neighbouring entity and ENS link propagation (0x7D5540). Tyre-wall springs
+  (`cDeformableRubber*`, `dontCollideWithAny`) are ported since F484
+  (docs/JOINTS_RESEARCH.md).
 - Sleeping: the ported grouped frame only admits `turnOffTime = MAX`.
 - Whether routes override the ENTITYMANAGER defaults; the farthest-first restore of
   broken entities when a pool is full (recovered, not ported, unreachable with the

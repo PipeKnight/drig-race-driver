@@ -313,10 +313,11 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Brake boards and double tyre walls break; armco and single tyre walls
-        // need the joint rows the port lacks and stay static, as on Donington.
+        // Brake boards and tyre walls break (the single walls' blocks are
+        // joined, F484); armco stays static, as on Donington.
         assert_eq!(props.boxes.len(), 1689);
         assert_eq!(templates["tyrewall_black_double.max"], 222);
+        assert_eq!(templates["tyrewall_black.max"], 221);
         assert_eq!(
             templates
                 .keys()
@@ -326,7 +327,7 @@ mod tests {
         );
         assert_eq!(
             catalog.unported.keys().collect::<Vec<_>>(),
-            ["armco_main_section.max", "tyrewall_black.max"]
+            ["armco_main_section.max"]
         );
     }
 
@@ -532,12 +533,18 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // 22 brake-marker boards break; armco, tyre walls and cones stay static
-        // (the 37 cones are cylinder route shapes).
+        // 22 brake-marker boards and 55 joined tyre walls (`tyrewall_b_*`,
+        // F484) break; armco, the `tyrewall_a_*` walls (a static or phantom
+        // piece) and cones stay static (the 37 cones are cylinder route shapes).
         assert_eq!(props.boxes.len(), 1552);
-        assert_eq!(templates.values().sum::<usize>(), 22);
-        assert!(templates.keys().all(|t| t.starts_with("gg_brake_marker")));
-        assert_eq!(catalog.unported.values().sum::<usize>(), 1136);
+        assert_eq!(templates.values().sum::<usize>(), 77);
+        assert_eq!(templates["tyrewall_b_red.max"] + templates["tyrewall_b_white.max"], 55);
+        assert!(
+            templates
+                .keys()
+                .all(|t| t.starts_with("gg_brake_marker") || t.starts_with("tyrewall_b_"))
+        );
+        assert_eq!(catalog.unported.values().sum::<usize>(), 1081);
         assert_eq!(catalog.unported["tyrewall_a_red.max"], 360);
     }
 
@@ -556,9 +563,9 @@ mod tests {
         // (route, name, gates, distance, time splits, grid slots, AI line,
         // route boxes, breakable entities, unported placements)
         for (path, name, gates, distance, splits, slots, line, boxes, breakables, unported) in [
-            (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2340, 251, 1212),
+            (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2340, 364, 1099),
             (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 1212, 0, 382),
-            (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 1309, 68, 172),
+            (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 1309, 239, 1),
         ] {
             let route = Route::new(path).unwrap();
             assert_eq!(route.track_name(), name);
@@ -583,7 +590,11 @@ mod tests {
             let catalog = Catalog::read(root, &route, &props).unwrap();
             assert_eq!(props.boxes.len(), boxes, "{path}");
             assert_eq!(catalog.breakables.len(), breakables, "{path}");
-            assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")));
+            // Tyre stacks, and the joined Milan green cushions and San
+            // Francisco tyre walls (F484).
+            assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")
+                || b.template == "green_cushion_a.max"
+                || b.template == "tyrewall_black.max"));
             assert_eq!(catalog.unported.values().sum::<usize>(), unported, "{path}");
         }
     }
@@ -629,19 +640,20 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Brake boards and tyre stacks break; armco, foam posts and tyre walls
-        // stay static, as on the other circuits (the 97 foam posts are
-        // cylinder route shapes).
+        // Brake boards, tyre stacks and the joined tyre walls (F484) break;
+        // armco and foam posts stay static, as on the other circuits (the 97
+        // foam posts are cylinder route shapes).
         assert_eq!(props.boxes.len(), 2510);
-        assert_eq!(templates.values().sum::<usize>(), 211);
+        assert_eq!(templates.values().sum::<usize>(), 419);
         assert_eq!(templates["tyrestack_black.max"], 173);
-        assert!(templates
+        assert!(templates.keys().all(|t| t.starts_with("gg_brake_marker")
+            || t.starts_with("tyrestack_")
+            || t.starts_with("tyrewall_")));
+        assert_eq!(catalog.unported.values().sum::<usize>(), 812);
+        assert!(catalog
+            .unported
             .keys()
-            .all(|t| t.starts_with("gg_brake_marker") || t.starts_with("tyrestack_")));
-        assert_eq!(catalog.unported.values().sum::<usize>(), 1020);
-        assert!(catalog.unported.keys().all(|t| t.starts_with("armco_")
-            || t.starts_with("tyrewall_")
-            || *t == "post_foam_green.max"));
+            .all(|t| t.starts_with("armco_") || *t == "post_foam_green.max"));
     }
 
     /// Haruna route 1 (`haruna_ill_mid_bot`), both directions: one run from

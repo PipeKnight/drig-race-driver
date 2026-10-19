@@ -840,3 +840,8 @@ test = false
 name = "grid-joint"
 path = "src/bin/grid-joint.rs"
 test = false
+
+[[bin]]
+name = "grid-joint-template"
+path = "src/bin/grid-joint-template.rs"
+test = false

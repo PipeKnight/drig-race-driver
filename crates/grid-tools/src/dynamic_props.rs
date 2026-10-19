@@ -8,9 +8,11 @@
 //! bodies built by the ported body constructor from the rigid-body and shape
 //! properties (0x7CDCD0 / 0x7B8F40). Pieces stay until the world is reset.
 //!
-//! Selected scope: entities whose damage state adds constraints (tyre walls,
-//! armco) have no joint rows in the port and stay static; see `unported`.
-//! Pieces never deactivate (the ported grouped frame admits only
+//! A damage state's constraints between its own pieces (tyre walls) become
+//! world joints when the entity breaks (0x7D3AF0/0x7CC1E0,
+//! docs/JOINTS_RESEARCH.md); constraints to the world or a linked entity, body
+//! overrides (armco) and uproots are not ported, so those entities stay
+//! static; see `unported`. Pieces never deactivate (the ported grouped frame admits only
 //! turnOffTime = FLT_MAX); cylinders are twelve-sided prisms.
 use crate::{
     body_geometry::BodyGeometry, contact_surfaces::Surfaces, entity_geometry::Props, route::Route,
@@ -18,8 +20,8 @@ use crate::{
 };
 use grid_formats::{entities, jpk, physparams, pssg};
 use grid_world::{
-    Error, collision_mesh, contact_groups, convex_distance, grouped_physical_frame,
-    physical_constructor, physical_pose::Matrix,
+    Error, collision_mesh, contact_groups, convex_distance, grouped_physical_frame, joint,
+    joint_template, physical_constructor, physical_pose::Matrix,
     round_contacts::{CylinderShape, RoundShape, SphereShape},
 };
 use std::{collections::BTreeMap, path::Path};
@@ -41,6 +43,13 @@ pub const LOST_DEPTH: f32 = 100.;
 /// Body words 0x1C0..0x230: mass centre, pose, angular and linear velocity.
 const KINEMATICS: std::ops::Range<usize> = 0x1c0 / 4..0x230 / 4;
 const CYLINDER_SIDES: usize = 12;
+/// AUTHORED: solver rows reserved per live joint (three linear degrees of
+/// freedom with a limit and a spring row each, the rotation and twist rows
+/// and the friction rows stay below it).
+const JOINT_ROWS: usize = 16;
+/// Body byte +0x416: pairs with static geometry are scheduled (B18300,
+/// B15B70); `dontCollideWithFixedObjects` clears it (0xA69560).
+const COLLIDES_WITH_FIXED: usize = 0x416;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Primitive {
@@ -83,6 +92,35 @@ pub struct Breakable {
     pub threshold: f32,
     pub explosion: f32,
     pub pieces: Vec<PieceSpec>,
+    /// The damage state's constraints between its pieces, in change order.
+    pub joints: Vec<JointSpec>,
+}
+
+/// A `TEMPLATECONSTRAINT` between two pieces of a breakable.
+#[derive(Clone)]
+pub struct JointSpec {
+    /// Piece indices of `body1uri` (A) and `body2uri` (B).
+    pub a: usize,
+    pub b: usize,
+    /// The joint request (0x7C7B10) at the entity's unit scale.
+    pub request: joint_template::Request,
+    /// `dontCollideWithAny`: the shapes of A and B get the pair filter
+    /// 0x7B62C0 (pieces of the entity joined through joints do not collide).
+    pub dont_collide_with_any: bool,
+    /// `dontCollideWithFixedObjects`: A and B lose body byte +0x416.
+    pub dont_collide_with_fixed: bool,
+}
+
+/// A live world joint of a broken breakable.
+#[derive(Clone, Debug)]
+pub struct PropJoint {
+    pub breakable: usize,
+    /// Index in the world's joint list and the world bodies of A and B.
+    pub world: usize,
+    pub bodies: [usize; 2],
+    pub dont_collide_with_any: bool,
+    /// Byte +0x48 after the last committed step.
+    pub broken: bool,
 }
 
 #[derive(Clone, Default)]
@@ -125,6 +163,7 @@ pub struct PropWorld {
     by_box: std::sync::Arc<BTreeMap<usize, usize>>,
     pub broken: Vec<bool>,
     pub pieces: Vec<Piece>,
+    pub joints: Vec<PropJoint>,
     pub events: Vec<BreakEvent>,
     pending: Vec<(usize, [f32; 4], f32)>,
     base_slots: Option<usize>,
@@ -139,6 +178,14 @@ fn f(b: &[u32], o: usize) -> f32 {
 }
 fn set(b: &mut [u32], o: usize, v: f32) {
     b[o / 4] = v.to_bits();
+}
+fn byte(b: &[u32], o: usize) -> u8 {
+    b[o / 4].to_le_bytes()[o % 4]
+}
+fn set_byte(b: &mut [u32], o: usize, v: u8) {
+    let mut w = b[o / 4].to_le_bytes();
+    w[o % 4] = v;
+    b[o / 4] = u32::from_le_bytes(w);
 }
 fn finite_or_max(v: f32) -> f32 {
     if v.is_finite() { v } else { f32::MAX }
@@ -264,6 +311,14 @@ fn hull(primitive: Primitive) -> (Vec<[f32; 4]>, Vec<[u32; 3]>) {
     }
 }
 
+/// Unit-length placement rows (no entity scale).
+fn unit_scale(m: &[f32; 16]) -> bool {
+    (0..3).all(|r| {
+        let l = (m[4 * r] * m[4 * r] + m[4 * r + 1] * m[4 * r + 1] + m[4 * r + 2] * m[4 * r + 2]).sqrt();
+        (l - 1.).abs() < 1e-4
+    })
+}
+
 fn reference(uri: &[u8]) -> Result<&str, &'static str> {
     physparams::reference(uri).ok_or("invalid physics property reference")
 }
@@ -351,10 +406,7 @@ impl Catalog {
                 }
                 continue;
             };
-            if behaviour.constraints != 0
-                || !behaviour.deleted.contains(&owner.component)
-                || behaviour.added.is_empty()
-            {
+            if !behaviour.deleted.contains(&owner.component) || behaviour.added.is_empty() {
                 *catalog.unported.entry(template).or_default() += 1;
                 continue;
             }
@@ -429,6 +481,61 @@ impl Catalog {
                     round: !matches!(primitive, Primitive::Box(_)),
                 });
             }
+            let mut joints = Vec::new();
+            if !behaviour.constraints.is_empty() && !unit_scale(&e.transform) {
+                // 0x7CC1E0 scales the joint by the entity's scale vector (the
+                // lane choice is not ported): scaled joined entities stay static.
+                *catalog.unported.entry(template).or_default() += 1;
+                continue;
+            }
+            for c in &behaviour.constraints {
+                let body = |uri: &[u8]| {
+                    let id = uri.strip_prefix(b"#")?;
+                    behaviour.added.iter().position(|a| a.body == id)
+                };
+                // A joint to the world ("none") or to a linked entity
+                // ("link1"): armco, not ported.
+                let (Some(a), Some(b)) = (body(c.body1), body(c.body2)) else {
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
+                };
+                let props = parameters.constraint(reference(c.properties)?)?;
+                // Body overrides, uproots, the post collision filter and the
+                // soft rotational friction callback (0x7C5210) are not ported.
+                if a == b
+                    || props.body_override.is_some()
+                    || props.uproot.is_some()
+                    || props.specific_post_collision
+                    || props.soft_friction != props.hard_friction
+                {
+                    *catalog.unported.entry(template).or_default() += 1;
+                    continue 'entities;
+                }
+                let template_props = joint_template::Props {
+                    linear_limit: props.linear_limit,
+                    linear_spring: props.linear_spring,
+                    spring_k: props.spring_k,
+                    spring_s: props.spring_s,
+                    rotation_type: props.rotation_type,
+                    rotation: props.rotation,
+                    twist_type: props.twist_type,
+                    twist: props.twist,
+                    break_linear: props.break_linear,
+                    break_angular: props.break_angular,
+                    hard_friction: props.hard_friction,
+                    break_at_angular_extent: props.break_at_angular_extent,
+                    rotations: props.rotations,
+                };
+                let transform = joint_template::template_transform(&c.transform);
+                let frames = joint_template::template_frames(&transform, &template_props);
+                joints.push(JointSpec {
+                    a,
+                    b,
+                    request: joint_template::request(&frames, &template_props, 1., c.display),
+                    dont_collide_with_any: props.dont_collide_with_any,
+                    dont_collide_with_fixed: props.dont_collide_with_fixed,
+                });
+            }
             let intact = boxes.get(&index).cloned().unwrap_or_default();
             if intact.is_empty() {
                 // No solid intact route shape (only phantom ones): the
@@ -444,6 +551,7 @@ impl Catalog {
                 threshold,
                 explosion,
                 pieces,
+                joints,
             });
         }
         Ok(catalog)
@@ -963,6 +1071,46 @@ fn append(
     Ok((id - 1, shapes.len() as u32))
 }
 
+/// Unbroken joint links, the bodies whose shapes carry the
+/// `dontCollideWithAny` filter and each piece's entity.
+struct Exclusion {
+    links: BTreeMap<usize, Vec<usize>>,
+    filtered: std::collections::BTreeSet<usize>,
+    entity: BTreeMap<usize, usize>,
+}
+
+impl Exclusion {
+    /// B38D80 skips a pair an unbroken joint joins directly; the filter
+    /// 0x7B62C0 on either body's shapes skips two pieces of the same entity
+    /// joined through unbroken joints (0xAD68F0 walks them).
+    fn excluded(&self, x: usize, y: usize) -> bool {
+        let neighbours = |k: usize| self.links.get(&k).map_or(&[][..], Vec::as_slice);
+        if neighbours(x).contains(&y) {
+            return true;
+        }
+        if !self.filtered.contains(&x) && !self.filtered.contains(&y) {
+            return false;
+        }
+        if !self.entity.contains_key(&x) || self.entity.get(&x) != self.entity.get(&y) {
+            return false;
+        }
+        let mut seen = vec![x];
+        let mut stack = vec![x];
+        while let Some(k) = stack.pop() {
+            for &next in neighbours(k) {
+                if next == y {
+                    return true;
+                }
+                if !seen.contains(&next) {
+                    seen.push(next);
+                    stack.push(next);
+                }
+            }
+        }
+        false
+    }
+}
+
 /// A car hull taking part in piece contacts.
 pub struct CarHull<'a> {
     pub geometry: &'a BodyGeometry,
@@ -983,6 +1131,7 @@ impl PropWorld {
             catalog: std::sync::Arc::new(catalog),
             by_box: std::sync::Arc::new(by_box),
             pieces: Vec::new(),
+            joints: Vec::new(),
             events: Vec::new(),
             pending: Vec::new(),
             base_slots: None,
@@ -1042,6 +1191,25 @@ impl PropWorld {
         }
     }
 
+    /// The narrow phase's pair exclusion (see [`Exclusion::excluded`]) for
+    /// the joint states after the last committed step.
+    fn exclusion(&self) -> Exclusion {
+        let mut links: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for j in self.joints.iter().filter(|j| !j.broken) {
+            let [a, b] = j.bodies;
+            links.entry(a).or_default().push(b);
+            links.entry(b).or_default().push(a);
+        }
+        Exclusion {
+            links,
+            filtered: (self.joints.iter())
+                .filter(|j| j.dont_collide_with_any)
+                .flat_map(|j| j.bodies)
+                .collect(),
+            entity: self.pieces.iter().map(|p| (p.body, p.breakable)).collect(),
+        }
+    }
+
     /// Whether piece `k` has been lost below the world and is held.
     pub fn is_lost(&self, k: usize) -> bool {
         self.lost.contains_key(&k)
@@ -1081,6 +1249,7 @@ impl PropWorld {
     ) -> Result<Vec<contact_groups::Contact>, Error> {
         let mut out = Vec::new();
         let parts = self.parts();
+        let exclusion = self.exclusion();
         let poses = parts
             .iter()
             .map(|p| {
@@ -1122,11 +1291,18 @@ impl PropWorld {
             if room == 0 {
                 break;
             }
-            for hit in
+            // Pairs with static geometry need body byte +0x416 (B18300).
+            let fixed = bodies
+                .get(piece_body)
+                .is_some_and(|b| byte(b, COLLIDES_WITH_FIXED) != 0);
+            let track_hits = if fixed {
                 track.body_contacts(spec.collider(), pose, &query, TRACK_CONTACTS, room, |code| {
                     surfaces.sheet(code)
                 })?
-            {
+            } else {
+                Vec::new()
+            };
+            for hit in track_hits {
                 let mut c = [0; 32];
                 c[1] = piece_body as u32 + 1;
                 c[0xc / 4] = 0x01000000;
@@ -1172,6 +1348,9 @@ impl PropWorld {
                 ];
                 let reach = a_reach + b_reach + margin + 0.01;
                 if dot3(d, d) > 3. * reach * reach {
+                    continue;
+                }
+                if exclusion.excluded(piece_body, other_body) {
                     continue;
                 }
                 for hit in convex_contacts(a, b, margin, room.min(PAIR_CONTACTS)) {
@@ -1229,6 +1408,10 @@ impl PropWorld {
         let mut moved = 0;
         for (spec, index, _) in self.parts() {
             let body = bodies.get(index).ok_or(Error("missing prop piece body"))?;
+            // B15B70 sweeps against the road only with body byte +0x416.
+            if byte(body, COLLIDES_WITH_FIXED) == 0 {
+                continue;
+            }
             let (displacement, previous, start, end) = grid_world::continuous::step(body);
             if !grid_world::continuous::is_fast(grid_world::continuous::radius(spec.collider()), displacement) {
                 continue;
@@ -1322,6 +1505,13 @@ impl PropWorld {
         shapes: &mut Vec<contact_groups::Shape>,
         tick: u64,
     ) -> Result<Vec<usize>, Error> {
+        for j in &mut self.joints {
+            j.broken = world
+                .groups
+                .joints
+                .get(j.world)
+                .is_none_or(|w| w.joint.byte(0x48) != 0);
+        }
         if self.pending.is_empty() {
             return Ok(Vec::new());
         }
@@ -1337,6 +1527,7 @@ impl PropWorld {
                 continue;
             }
             disabled.extend(entry.intact.iter().copied());
+            let mut spawned = Vec::with_capacity(entry.pieces.len());
             for (spec_index, spec) in entry.pieces.iter().enumerate() {
                 let linear = explosion_velocity(
                     [spec.pose[3][0], spec.pose[3][1], spec.pose[3][2]],
@@ -1344,11 +1535,50 @@ impl PropWorld {
                 );
                 let (body, properties) = piece_body(spec, linear, [0.; 4])?;
                 let (body, token) = append(world, shapes, body, properties)?;
+                spawned.push(body);
                 self.pieces.push(Piece {
                     breakable,
                     spec: spec_index,
                     body,
                     token,
+                });
+            }
+            // 0x7D3AF0 per constraint, after the subentities: 0x7CC1E0 sets the
+            // collision flags and A74670 builds the joint (AEFEB0) on the
+            // pieces' spawn poses; B825E0 links it into the world list.
+            let placement = matrix(&entry.placement);
+            for spec in &entry.joints {
+                let [a, b] = [spawned[spec.a], spawned[spec.b]];
+                if spec.dont_collide_with_fixed {
+                    for k in [a, b] {
+                        set_byte(&mut world.groups.bodies[k], COLLIDES_WITH_FIXED, 0);
+                    }
+                }
+                let mut descriptor =
+                    joint_template::descriptor(&spec.request, &placement, [1.; 3], false);
+                let mut made = joint::Joint::filled(0);
+                joint::construct(
+                    &mut made,
+                    &mut descriptor,
+                    &joint::Bodies {
+                        a: &world.groups.bodies[a],
+                        b: Some(&world.groups.bodies[b]),
+                        fixed: false,
+                    },
+                    0,
+                );
+                self.joints.push(PropJoint {
+                    breakable,
+                    world: world.groups.joints.len(),
+                    bodies: [a, b],
+                    dont_collide_with_any: spec.dont_collide_with_any,
+                    broken: false,
+                });
+                world.groups.joints.push(contact_groups::WorldJoint {
+                    joint: made,
+                    a: a as u32 + 1,
+                    b: b as u32 + 1,
+                    fixed: None,
                 });
             }
             self.broken[breakable] = true;
@@ -1368,13 +1598,16 @@ impl PropWorld {
         let base = *self.base_slots.get_or_insert(world.groups.contacts.len());
         let count = self.pieces.len() + self.wheels.len();
         let slots = (base + SLOTS_PER_PIECE * count).min(grid_world::MAX_WORLD_CONTACTS);
+        let rows = (slots * 4 + JOINT_ROWS * self.joints.len()).min(grid_world::MAX_SOLVER_ROWS);
         if slots > world.groups.contacts.len() {
             world
                 .groups
                 .contacts
                 .resize(slots, grid_world::contact_groups::EMPTY_CONTACT);
-            world.manager.rows.resize(slots * 4, [0; 48]);
-            world.manager.capacity = slots * 4;
+        }
+        if rows > world.manager.rows.len() {
+            world.manager.rows.resize(rows, [0; 48]);
+            world.manager.capacity = rows;
         }
     }
 
@@ -1437,6 +1670,7 @@ impl PropWorld {
     pub fn reset(&mut self, tracks: &mut [&mut Track]) -> Result<(), Error> {
         self.broken.iter_mut().for_each(|b| *b = false);
         self.pieces.clear();
+        self.joints.clear();
         self.wheels.clear();
         self.events.clear();
         self.pending.clear();
@@ -1717,7 +1951,9 @@ mod tests {
                 .or_insert((0, b.threshold, b.pieces.len()));
             e.0 += 1;
             assert_eq!((e.1, e.2), (b.threshold, b.pieces.len()));
-            assert_eq!(b.explosion, 0.);
+            let walls = b.template == "tyre_wall.max";
+            assert_eq!(b.explosion, if walls { 0.35 } else { 0. });
+            assert_eq!(b.joints.len(), if walls { 7 } else { 0 });
             assert!(
                 b.intact
                     .iter()
@@ -1728,7 +1964,10 @@ mod tests {
         assert_eq!(by_template["gg_brake_marker"], (34, 50., 2));
         assert_eq!(by_template["tyrestack_black.max"], (8, 50., 12));
         assert_eq!(by_template["cushion_blue.max"], (148, 250., 1));
-        assert_eq!(catalog.unported["tyre_wall.max"], 588);
+        // Each wall: six blocks joined by seven cDeformableRubber springs,
+        // and sixteen loose tyres.
+        assert_eq!(by_template["tyre_wall.max"], (588, 1000., 22));
+        assert!(!catalog.unported.contains_key("tyre_wall.max"));
         assert_eq!(
             catalog.unported["armco_white_main.max"] + catalog.unported["armco_blue_main.max"],
             243

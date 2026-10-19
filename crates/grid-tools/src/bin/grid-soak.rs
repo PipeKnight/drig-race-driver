@@ -723,6 +723,9 @@ fn command_run(options: Options) -> Result<i32> {
         )
     });
     println!("{line}");
+    if grid_tools::perf::enabled() {
+        eprintln!("{}", grid_tools::perf::report());
+    }
     Ok(i32::from(failed))
 }
 

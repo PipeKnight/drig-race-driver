@@ -1518,6 +1518,73 @@ mod tests {
             .unwrap();
     }
 
+    /// F484: a broken Donington tyre wall's six blocks stay joined by their
+    /// seven springs (cDeformableRubber*, unbreakable) and settle; joined
+    /// blocks do not collide with each other (dontCollideWithAny).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_broken_tyre_wall_stays_joined_and_settles() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let mut multi = MultiRuntime::lacetti(root, &["slot_00"], &table, events).unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let wall = (props.catalog.breakables.iter())
+                    .position(|b| b.template == "tyre_wall.max")
+                    .unwrap();
+                props.queue_break(wall);
+                let drive = [Controls::default(); 1];
+                multi.tick(&drive).unwrap();
+                let pose = |multi: &MultiRuntime, body: usize| {
+                    crate::dynamic_props::body_pose(&multi.bodies()[body])[3]
+                };
+                let distance = |a: [f32; 4], b: [f32; 4]| {
+                    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+                };
+                let joints = multi.dynamic_props().unwrap().joints.clone();
+                assert_eq!(joints.len(), 7);
+                assert_eq!(multi.world.groups.joints.len(), 7);
+                let rest: Vec<f32> = joints
+                    .iter()
+                    .map(|j| distance(pose(&multi, j.bodies[0]), pose(&multi, j.bodies[1])))
+                    .collect();
+                for _ in 0..300 {
+                    multi.tick(&drive).unwrap();
+                }
+                let props = multi.dynamic_props().unwrap();
+                assert_eq!(props.pieces.len(), 22);
+                for (j, rest) in props.joints.iter().zip(&rest) {
+                    assert!(!j.broken);
+                    let now = distance(pose(&multi, j.bodies[0]), pose(&multi, j.bodies[1]));
+                    eprintln!("tyre_wall joint {:?} rest={rest:.3} now={now:.3}", j.bodies);
+                    assert!((now - rest).abs() < 0.3, "{j:?} {rest} {now}");
+                }
+                for piece in &props.pieces {
+                    let spawn =
+                        props.catalog.breakables[piece.breakable].pieces[piece.spec].pose[3];
+                    let now = pose(&multi, piece.body);
+                    assert!(now.iter().all(|v| v.is_finite()));
+                    assert!((now[1] - spawn[1]).abs() < 1.5, "{piece:?} {spawn:?} {now:?}");
+                    // Settled: no piece still moving fast after five seconds.
+                    let v = &multi.bodies()[piece.body][0x220 / 4..0x22c / 4];
+                    let speed = v.iter().map(|&w| f32::from_bits(w).powi(2)).sum::<f32>().sqrt();
+                    assert!(speed < 1., "{piece:?} {speed}");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Playtest 7f22c32: a side-swiped board in a 12-car race stopped physics
     /// ("invalid contact-group counts or selector") because the pieces pushed
     /// the shared world past the port's old 16-body guard.

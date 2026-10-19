@@ -46,8 +46,26 @@ pub struct ShapeBehaviour<'a> {
     /// Subentities the behaviour type adds (their own shape behaviours are
     /// not resolved).
     pub added: Vec<Renderable<'a>>,
-    /// Constraint components the behaviour type adds.
-    pub constraints: usize,
+    /// Constraint components the behaviour type adds, in its change order.
+    pub constraints: Vec<Constraint<'a>>,
+}
+/// A `TEMPLATECONSTRAINT` (the template reader 0x7CF4B0): the joint between
+/// two rigid bodies of the template, its properties and its frame in the
+/// entity.
+#[derive(Debug)]
+pub struct Constraint<'a> {
+    pub id: &'a [u8],
+    /// `#id` of a template rigid body (`body1uri`; "none" is an error in the
+    /// original).
+    pub body1: &'a [u8],
+    /// `#id`, `none`/`world` (the world) or `link1` (the linked entity's body).
+    pub body2: &'a [u8],
+    /// Qualified constraint properties (`physparams.xml#cXxx`).
+    pub properties: &'a [u8],
+    /// `TEMPLATETRANSFORM` as read (the reader renormalises it).
+    pub transform: [f32; 16],
+    /// `display` (+0x140): a non-empty value.
+    pub display: bool,
 }
 #[derive(Debug)]
 pub enum Primitive {
@@ -378,7 +396,7 @@ fn shape_behaviour<'a>(
         behaviour_type,
         deleted: Vec::new(),
         added: Vec::new(),
-        constraints: 0,
+        constraints: Vec::new(),
     };
     for &change in &types.nodes[kind].children {
         if types.name(change) != b"TEMPLATECOMPONENTCHANGE" {
@@ -408,7 +426,16 @@ fn shape_behaviour<'a>(
                     .added
                     .push(subentity(types, type_ids, template, component, false)?);
             }
-            (b"add", b"TEMPLATECONSTRAINT") => result.constraints += 1,
+            (b"add", b"TEMPLATECONSTRAINT") => result.constraints.push(Constraint {
+                id,
+                body1: types.string(component, b"body1uri")?,
+                body2: types.string(component, b"body2uri")?,
+                properties: types.string(component, b"props")?,
+                transform: transform(types, component)?,
+                display: types
+                    .attribute(component, b"display")
+                    .is_ok_and(|v| v.iter().any(|&b| b != 0)),
+            }),
             _ => {
                 return fail(
                     types.nodes[change].offset,

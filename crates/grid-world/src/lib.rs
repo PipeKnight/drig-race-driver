@@ -7,6 +7,7 @@ pub mod body_impact;
 pub mod box_contacts;
 pub mod joint;
 pub mod joint_rows;
+pub mod joint_template;
 pub mod round_contacts;
 pub mod candidate_grid;
 pub mod collision_callback;

@@ -41,6 +41,66 @@ pub struct Body {
     pub gravity_scale: f32,
 }
 
+/// `TEMPLATECONSTRAINTPROPS` as the original's props object holds it
+/// (constructor 0x7B7FC0, reader 0x7D00F0; docs/JOINTS_RESEARCH.md).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Constraint {
+    /// `linearLimitAABBMin/Max`.
+    pub linear_limit: [[f32; 3]; 2],
+    /// `linearSpringAABBMin/Max`.
+    pub linear_spring: [[f32; 3]; 2],
+    pub spring_k: [f32; 3],
+    pub spring_s: [f32; 3],
+    /// `linearRotation`, `angularRotation0`, `angularRotation1` (x y z w).
+    pub rotations: [[f32; 4]; 3],
+    /// `rotationType`: 2 `cone`, 1 `plane`, 0 anything else (free).
+    pub rotation_type: u32,
+    /// Limit angle, spring angle, spring K, spring S, tangent spring S.
+    pub rotation: [f32; 5],
+    /// `twistType`: 1 `circle`, 0 anything else.
+    pub twist_type: u32,
+    /// Limit angle, spring angle, spring K, spring S.
+    pub twist: [f32; 4],
+    /// `+inf` reads as FLT_MAX (0x7D8600); absent is FLT_MAX.
+    pub break_linear: f32,
+    pub break_angular: f32,
+    pub hard_friction: f32,
+    pub soft_friction: f32,
+    pub soft_impulse_factor: f32,
+    pub break_at_angular_extent: bool,
+    /// `uprootProps`: other constraint props after an uproot.
+    pub uproot: Option<String>,
+    pub dont_collide_with_any: bool,
+    pub dont_collide_with_fixed: bool,
+    pub specific_post_collision: bool,
+    /// `bodyOverride` (rigid-body props id) and its priority (-1 absent).
+    pub body_override: Option<String>,
+    pub body_override_priority: i32,
+}
+
+/// 0x7D8600: `+inf`/`-inf` are FLT_MAX and -FLT_MAX, otherwise the number.
+fn impulse(text: &str) -> Option<f32> {
+    match text.trim() {
+        "+inf" => Some(f32::MAX),
+        "-inf" => Some(-f32::MAX),
+        t => number(t).filter(|v| v.is_finite()),
+    }
+}
+
+fn constraint_vector<const N: usize>(c: &BTreeMap<String, String>, k: &str) -> Result<[f32; N]> {
+    let v: Vec<f32> = c
+        .get(k)
+        .map(|v| v.split_whitespace().filter_map(number).collect())
+        .unwrap_or_default();
+    v.try_into()
+        .ok()
+        .filter(|v: &[f32; N]| v.iter().all(|x| x.is_finite()))
+        .ok_or(Error {
+            offset: 0,
+            message: "invalid constraint vector",
+        })
+}
+
 /// Original numeric token: `+inf`, `-inf`, a trailing `f` suffix (`10.0f`).
 fn number(text: &str) -> Option<f32> {
     match text.trim() {
@@ -164,6 +224,95 @@ impl Properties {
         }
     }
 
+    pub fn constraint(&self, id: &str) -> Result<Constraint> {
+        let c = self.constraints.get(id).ok_or(Error {
+            offset: 0,
+            message: "unresolved constraint properties",
+        })?;
+        let invalid = || Error {
+            offset: 0,
+            message: "invalid constraint property",
+        };
+        let get = |k: &str| -> Result<f32> {
+            c.get(k)
+                .and_then(|v| number(v))
+                .filter(|v| v.is_finite())
+                .ok_or_else(invalid)
+        };
+        let optional = |k: &str| -> Result<f32> {
+            if c.contains_key(k) { get(k) } else { Ok(0.) }
+        };
+        let flag = |k: &str| -> Result<bool> {
+            match c.get(k).map(|v| v.trim()) {
+                None | Some("0") => Ok(false),
+                Some("1") => Ok(true),
+                _ => Err(invalid()),
+            }
+        };
+        let uri = |k: &str| -> Result<Option<String>> {
+            match c.get(k) {
+                None => Ok(None),
+                Some(v) => reference(v.as_bytes())
+                    .map(|r| Some(r.to_owned()))
+                    .ok_or_else(invalid),
+            }
+        };
+        let limit = |k: &str| -> Result<f32> {
+            match c.get(k) {
+                None => Ok(f32::MAX),
+                Some(v) => impulse(v).ok_or_else(invalid),
+            }
+        };
+        let kind = |k: &str| c.get(k).map(String::as_str);
+        let vector3 = |k: &str| constraint_vector::<3>(c, k);
+        let vector4 = |k: &str| constraint_vector::<4>(c, k);
+        Ok(Constraint {
+            linear_limit: [vector3("linearLimitAABBMin")?, vector3("linearLimitAABBMax")?],
+            linear_spring: [vector3("linearSpringAABBMin")?, vector3("linearSpringAABBMax")?],
+            spring_k: vector3("linearSpringK")?,
+            spring_s: vector3("linearSpringS")?,
+            rotations: [
+                vector4("linearRotation")?,
+                vector4("angularRotation0")?,
+                vector4("angularRotation1")?,
+            ],
+            rotation_type: match kind("rotationType") {
+                Some("cone") => 2,
+                Some("plane") => 1,
+                _ => 0,
+            },
+            rotation: [
+                get("rotationLimitAngle")?,
+                get("rotationSpringAngle")?,
+                get("rotationSpringK")?,
+                get("rotationSpringS")?,
+                get("rotationTanSpringS")?,
+            ],
+            twist_type: u32::from(kind("twistType") == Some("circle")),
+            twist: [
+                get("twistLimitAngle")?,
+                get("twistSpringAngle")?,
+                get("twistSpringK")?,
+                get("twistSpringS")?,
+            ],
+            break_linear: limit("breakLinearImpulse")?,
+            break_angular: limit("breakAngularImpulse")?,
+            hard_friction: optional("hardRotationalFriction")?,
+            soft_friction: optional("softRotationalFriction")?,
+            soft_impulse_factor: optional("softImpulseFactor")?,
+            break_at_angular_extent: flag("breakIfAngExtentHit")?,
+            uproot: uri("uprootProps")?,
+            dont_collide_with_any: flag("dontCollideWithAny")?,
+            dont_collide_with_fixed: flag("dontCollideWithFixedObjects")?,
+            specific_post_collision: flag("specificPostCollision")?,
+            body_override: uri("bodyOverride")?,
+            body_override_priority: match c.get("bodyOverridePriority") {
+                None => -1,
+                Some(v) => v.trim().parse().map_err(|_| invalid())?,
+            },
+        })
+    }
+
     pub fn body(&self, id: &str) -> Result<Body> {
         let b = self.bodies.get(id).ok_or(Error {
             offset: 0,
@@ -221,6 +370,16 @@ mod tests {
  wakeUpForce="0.0" wakeUpTorque="0.0" turnOffTime="1.0" gravityScale="1.0"/>
 <TEMPLATEBEHAVIOURPROPS id="b" impulse="50" explosion="0.35"/>
 <TEMPLATECONSTRAINTPROPS id="c" breakLinearImpulse="10.0f"/>
+<TEMPLATECONSTRAINTPROPS id="cWall" linearLimitAABBMin="0.0 0.0 -1.0"
+ linearLimitAABBMax="0.0 0.0 0.0" linearSpringAABBMin="0.0 0.0 0"
+ linearSpringAABBMax="0.0 0.0 0.0" linearSpringK="0.0 0.0 100000.0"
+ linearSpringS="0.0 0.0 10000.0" linearRotation="0.0 0.0 0.0 1.0"
+ angularRotation0="0.0 0.0 0.0 1.0" angularRotation1="0.0 0.0 0.0 1.0"
+ rotationType="plane" rotationLimitAngle="0.1" rotationSpringAngle="0.0"
+ rotationSpringK="0.0" rotationSpringS="0.0" rotationTanSpringS="0.0" twistType="circle"
+ twistLimitAngle="0.1" twistSpringAngle="0.0" twistSpringK="0.0" twistSpringS="0.0"
+ breakLinearImpulse="+inf" breakAngularImpulse="10.0f" dontCollideWithAny="1"
+ bodyOverride="physparams.xml#_rbX" bodyOverridePriority="1"/>
 </PSSGDATABASE></PSSGFILE>"#;
 
     #[test]
@@ -237,6 +396,15 @@ mod tests {
         assert_eq!(number(&p.constraints["c"]["breakLinearImpulse"]), Some(10.));
         assert_eq!(reference(b"physparams.xml#bRubber"), Some("bRubber"));
         assert!(p.behaviour("missing").is_err());
+        let wall = p.constraint("cWall").unwrap();
+        assert_eq!(wall.linear_limit, [[0., 0., -1.], [0.; 3]]);
+        assert_eq!(wall.rotations[2], [0., 0., 0., 1.]);
+        assert_eq!((wall.rotation_type, wall.twist_type), (1, 1));
+        assert_eq!((wall.break_linear, wall.break_angular), (f32::MAX, 10.));
+        assert!(wall.dont_collide_with_any && !wall.dont_collide_with_fixed);
+        assert_eq!(wall.body_override.as_deref(), Some("_rbX"));
+        assert_eq!(wall.body_override_priority, 1);
+        assert!(p.constraint("c").is_err());
     }
 
     #[test]
