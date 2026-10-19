@@ -1,5 +1,25 @@
 # GRID engine project log
 
+F499 Camera look input: Look Left/Right/Up/Down turn the chase, bumper/bonnet and head-cam views as in the original (2026-10-20, Claude Code; coordinator's overnight task "port the next camera item 1:1 from static analysis", owner away, nothing launched). Details: docs/CAMERA_VIEWS.md §2 "Look input", §3, §4 "Look capture". Evidence: worktree camera-dynamics-11a55d `local/cam/look/` (`look-findings.md`, `look_emu.py`, `results.txt`, `check_cols.py`, `live_turn.py`).
+- Why this item: the remaining chase items (drift blend weight, shake, the second impact envelope, gear +0x2E4) have no effect with the shipped data, while the shipped presets bind look (keyboard Delete/PageDown, the pad's right stick). The port read those actions but no view used them.
+- Traced [D] and emulated function by function in Unicorn 2.1.4 against reference models [E]:
+  - controller 0x8348F0 sends x = left − right, y = up − down (analog) to every view each frame while its look byte +0x1C is on (setter 0x7EE8F0: off at the race reset 0x584810, on from race-state slot 10 0x5849F0);
+  - chase 0x7FE690 moves the look point (record +0xA4/+0xA8) in polar form (blend 0.1 + 0.4w, snap at 3.2(1 − w) + w, w = clamp(0.2·speed)); 0x7FEC40 turns view and eye by atan2(A4, A8 + 0.1) about the vertical through the car's model origin;
+  - Mounted 0x840A30 (`bumper`/`bonnet` only) B0 += (x − B0)·0.2, yaw + B0; the bonnet eye rises and moves forward by 0.05·|B0| (0x822510; this corrects F461's "turn about two axes");
+  - head 0x801230 smooths D8/DC by 0.2 per message and decays them by 0.8 when idle; the known 0x801D10 turns up to maxHeadLook 40° sideways and 12° up at ≤ 180°/s;
+  - a newly shown view zeroes its look state.
+- [V] Live check of the chase turn on the F470 run C records: A4 = A8 = 0 throughout, and the emulated 0x7FEC40 reproduces the recorded quaternion and eye (4e-6). An apparent contradiction (record +0xA4 rising with speed) was my one-based column read of +0xA0, the roll weight of 0x800100.
+- Port: `camera::Look`, `Cameras::frame(…, look, …)`, `shot(…, look, …)`; `chase_look_message`, the chase turn, `MountedLook` (bumper Turn, bonnet TurnAndLift, others Fixed), `head_look_message`, `head_look_step`, the head view's look yaw/pitch. Keyboard Delete/PageDown bound to Look Left/Right (preset 0); main.rs passes the calibrated values; replays pass none.
+- Decision (AUTHORED): the original applies the look messages once per rendered frame without dt, so its look speed follows the frame rate. The port applies them once per physics tick (0.016 s), as it does the head-cam springs. The step counter moved from the head state into `History`.
+- Tests: 4 new tests against the emulated sequences: chase eases in (0.0279, 0.0884) … and snaps at speed; the turn about the car; bonnet B0 0.2/0.36, lift 0.018, bumper without lift; head 0.2, 0.36 … 0.9885, release 0.6326, 0.4049; curve 0.125/0.875; 2.88° per tick to 40°/12°.
+- Not live-checked: no look input was ever captured. The capture list is in CAMERA_VIEWS §4 "Look capture".
+- Checks [V], release, cargo/rustc 1.99.0, rust-lld, on 8de3af7 (F498) + this change, after `seed_build_dir.ps1 -Reseed`:
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 831 passed, 0 failed;
+  - `cargo clippy --release --workspace --all-targets -- -D warnings` clean;
+  - identities (`grid-opponent-race` rebuilt first): solo 18b369f9…a6ee, 12-car c235bab2…8552, 12-car with DF01 and characteristics 00650c09…28bd, equal to F497's recorded values (the race tool does not depend on grid-app);
+  - `grid-soak quick` 24/24;
+  - Playable not rebuilt (coordinator).
+
 F498 Kick-ups: the player's wheels throw up stones and grass (2026-10-20, Claude Code; coordinator's overnight order: "then the following items from your note (wind, crowd, kick-ups...)"). Details: docs/AUDIO_RESEARCH.md §14. Evidence: Ghidra 4443D0 (worktree kind-pike-df38cc `local/gtfix/decomp/coll3/44465e.c.txt`), Capstone 44F330; data dumps `local/kick/` (audioMaterials, ImpactVarieties, CollisionInfos). The original was not run.
 - From the image and data [O]:
   - 4443D0 runs for the player's wheels after skid/scrub. p = W+16C·0.05v·(token ≠ 0 ? 10·kickupMultiplier : 1)·scale, with the scale 0.005·(rand%200) redrawn every 60 + rand%180 frames, and W+16C = 1 + 20·peel² (wobbled peel, 44FD88).

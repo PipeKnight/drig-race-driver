@@ -74,9 +74,29 @@ const FRAME_RATE: f32 = 60.;
 /// 0xCAFEC4); a speed below the root of 0xCFF550 stops.
 const SPRING_MIN_STEP: f32 = 1e-4;
 const SPRING_MIN_SQUARE: f32 = 1e-9;
-/// At most this many spring steps per shot; a longer gap (a replay seek) drops
+/// At most this many camera steps per shot; a longer gap (a replay seek) drops
 /// the rest [AUTHORED].
-const SPRING_MAX_STEPS: f32 = 30.;
+const MAX_STEPS: f32 = 30.;
+/// Look input (0x8348F0 → slot 7 messages): the bumper/bonnet turn and the
+/// head-cam's look follow the input by 0.2 per message (0xCB870C, 0xE4DD9C);
+/// the bonnet eye rises and moves forward by 0.05 · |turn| (0xE4DDA0,
+/// 0xE4DDA4); the head's look pitch is maxHeadLook · 0.00523599 (0xCFFDBC)
+/// and its angles move at most 180°/s (object +0x294, constructor).
+const LOOK_BLEND: f32 = f32::from_bits(0x3e4c_cccd);
+const BONNET_LOOK_LIFT: f32 = f32::from_bits(0x3d4c_cccd);
+const HEAD_LOOK_PITCH: f32 = f32::from_bits(0x3bab_92a7);
+const HEAD_LOOK_RATE: f32 = 180.;
+/// Chase look (0x7FE690): the look point's blend per message is 0.1 + 0.4 w
+/// (0xCAFCD4, 0xCB22A4) and it snaps when the angle step reaches
+/// 3.2 (1 − w) + w (0xCE6590), w = clamp(0.2 · speed) (0xCB870C); the point
+/// sits 0.1 ahead (0xCAFCD4); angles wrap at ±3.141592 (0xCFF570) by
+/// 6.2831855 (0xCB0DE0).
+const CHASE_LOOK_BLEND: f32 = f32::from_bits(0x3dcc_cccd);
+const CHASE_LOOK_SPEED_BLEND: f32 = f32::from_bits(0x3ecc_cccd);
+const CHASE_LOOK_SNAP: f32 = f32::from_bits(0x404c_cccd);
+const CHASE_LOOK_AHEAD: f32 = f32::from_bits(0x3dcc_cccd);
+const CHASE_LOOK_PI: f32 = f32::from_bits(0x4049_0fd8);
+const CHASE_LOOK_TAU: f32 = f32::from_bits(0x40c9_0fdb);
 /// Default view of the original profile (0x5F1100: `current_camera`).
 pub const DEFAULT_VIEW: &str = "chase_close";
 
@@ -131,6 +151,19 @@ pub struct Mounted {
     pub axis_scale_for_tilt: Vec3,
     pub twist_scale: Vec3,
     pub tilt_distance: f32,
+    /// What the look input does (Mounted slot 7, 0x840A30, by ident).
+    pub look: MountedLook,
+}
+
+/// The Mounted views that take the look input: only the idents `bumper`
+/// (turn) and `bonnet` (turn and eye lift) do, not their reverses (0x840A30,
+/// 0x822510).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MountedLook {
+    #[default]
+    Fixed,
+    Turn,
+    TurnAndLift,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -145,6 +178,8 @@ pub struct Head {
     /// The eye's spring (object +0x110) and the view's (object +0x190).
     pub body: Spring,
     pub head: Spring,
+    /// Largest look turn, degrees (maxHeadLook, object +0x28C).
+    pub max_look: f32,
 }
 
 /// A head-cam spring's parameters as the reset 0x82C0E0 copies them.
@@ -234,6 +269,11 @@ impl Views {
                     axis_scale_for_tilt: vec("axisScaleForTilt")?,
                     twist_scale: vec("twistScale")?,
                     tilt_distance: s("tiltDistance")?,
+                    look: match v.ident.as_str() {
+                        "bumper" => MountedLook::Turn,
+                        "bonnet" => MountedLook::TurnAndLift,
+                        _ => MountedLook::Fixed,
+                    },
                 }),
                 Kind::Head => {
                     // Binder 0x7F3A70 over the constructor's defaults (0x820A40).
@@ -260,6 +300,7 @@ impl Views {
                             centering: o("headCenteringForce", 0.6),
                             max_offset: o("maxHeadOffset", 0.1),
                         },
+                        max_look: o("maxHeadLook", 90.),
                     })
                 }
             };
@@ -496,6 +537,8 @@ pub struct ChaseState {
     /// Gear drop-back envelope (record +0x90).
     pub drop_back: f32,
     pub spin: Spin,
+    /// Look point (record +0xA4, +0xA8).
+    pub look: Vec2,
     /// Eye height of the last update (record +0xB4) and the latch of its
     /// speed blend (record +0xE0).
     eye_height: Option<f32>,
@@ -511,6 +554,8 @@ pub struct MountedState {
     /// Eye shift (record +0x80) and tilt state (record +0x70).
     pub shift: Vec3,
     pub tilt: Vec3,
+    /// Look turn, radians (record +0xB0).
+    pub look: f32,
     velocity: Option<Vec3>,
 }
 
@@ -530,10 +575,13 @@ pub struct SpringState {
 pub struct HeadState {
     pub body: SpringState,
     pub head: SpringState,
+    /// Smoothed look input x, y (record +0xD8, +0xDC), the look yaw and
+    /// pitch (+0xE4, +0xE8, radians) and the looking state (+0xF4 = 1).
+    pub look: Vec2,
+    pub look_angle: Vec2,
+    looking: bool,
     /// Seat velocity of the last step; None until the reset.
     input: Option<Vec3>,
-    /// Simulation time not yet stepped.
-    pending: f32,
 }
 
 /// Filter histories, one per view, reset on a car reset or a view change.
@@ -542,6 +590,28 @@ pub struct History {
     pub chase: ChaseState,
     pub mounted: MountedState,
     pub head: HeadState,
+    /// Simulation time not yet stepped.
+    pending: f32,
+}
+
+/// The look input of a frame: x = Look Left − Look Right, y = Look Up − Look
+/// Down, the calibrated action values (0x8348F0, sent every frame).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Look {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Whole physics ticks covered by `dt` plus what was left over [AUTHORED]:
+/// the original updates its look and head-cam state once per rendered frame
+/// without dt in places, the port once per tick (0.016 s), as the original at
+/// 62.5 fps.
+fn steps(pending: &mut f32, dt: f32) -> u32 {
+    let step = grid_tools::source_vehicle::DELTA;
+    *pending += dt.max(0.);
+    let steps = (*pending / step + 1e-3).floor();
+    *pending = if steps > MAX_STEPS { 0. } else { (*pending - steps * step).max(0.) };
+    steps.min(MAX_STEPS) as u32
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -848,7 +918,19 @@ fn facing_forward() -> Quat {
 /// follow (blended with the previous height until 5 m/s is first reached);
 /// then the spin envelope; the view looks at the file target (raised by the
 /// heave) on the car and rolls with the yaw rate.
-fn chase_shot(c: &Chase, h: &mut ChaseState, sample: &Sample, dt: f32, orbit: impl Fn(Vec3) -> Vec3) -> Shot {
+fn chase_shot(
+    c: &Chase,
+    h: &mut ChaseState,
+    sample: &Sample,
+    dt: f32,
+    steps: u32,
+    look: Look,
+    orbit: impl Fn(Vec3) -> Vec3,
+) -> Shot {
+    // The frame's look messages (0x8348F0 → 0x7FE690), one per step.
+    for _ in 0..steps {
+        h.look = chase_look_message(h.look, look, sample.speed);
+    }
     let pose = &sample.pose;
     let yaw = heading(pose);
     let turn = h.heading.map_or(0., |prev| wrap(yaw - prev));
@@ -901,14 +983,68 @@ fn chase_shot(c: &Chase, h: &mut ChaseState, sample: &Sample, dt: f32, orbit: im
     let offset = frame.inverse().transform_vector3(eye - target);
     eye += frame.transform_vector3(orbit(offset) - offset);
     let direction = (target - eye).normalize();
-    Shot {
+    let mut shot = Shot {
         eye,
         rotation: Transform::from_translation(eye)
             .looking_to(direction, rolled_up(direction, roll_angle(c, h)))
             .rotation,
         fov: c.fov.to_radians(),
         near: None,
+    };
+    chase_look_turn(&mut shot, h.look, pose.w_axis.truncate());
+    shot
+}
+
+/// The original's double-precision CRT `atan2` (0xBF877D) on f32 operands.
+fn atan2(y: f32, x: f32) -> f32 {
+    f64::from(y).atan2(f64::from(x)) as f32
+}
+
+/// One chase look message (0x7FE690; emulated, 4000 cases): the look point
+/// (A4, A8 + 0.1) follows the input point (x, y + 0.1) in polar form by the
+/// blend 0.1 + 0.4 w per message, snapping to it when the angle step reaches
+/// 3.2 (1 − w) + w, with w = clamp(0.2 · speed, 0, 1) of the signed car speed.
+/// Above 5 m/s a full key snaps to 84.3°; at rest the turn eases in.
+pub fn chase_look_message(point: Vec2, look: Look, speed: f32) -> Vec2 {
+    let w = (speed * 0.2).clamp(0., 1.);
+    let w = if w.is_nan() { 0. } else { w };
+    let snap = (1. - w) * CHASE_LOOK_SNAP + w;
+    let blend = w * CHASE_LOOK_SPEED_BLEND + CHASE_LOOK_BLEND;
+    let q = point.y + CHASE_LOOK_AHEAD;
+    let yy = look.y + CHASE_LOOK_AHEAD;
+    let a1 = atan2(point.x, q);
+    let a2 = atan2(look.x, yy);
+    let mut d = a2 - a1;
+    if -CHASE_LOOK_PI > d {
+        d += CHASE_LOOK_TAU;
     }
+    if d > CHASE_LOOK_PI {
+        d -= CHASE_LOOK_TAU;
+    }
+    if snap > d.abs() {
+        let angle = d * blend + a1;
+        let r1 = (q * q + point.x * point.x).sqrt();
+        let r2 = (yy * yy + look.x * look.x).sqrt();
+        let r = (r2 - r1) * blend + r1;
+        let (sin, cos) = (f64::from(angle).sin() as f32, f64::from(angle).cos() as f32);
+        Vec2::new(sin * r, cos * r - CHASE_LOOK_AHEAD)
+    } else {
+        Vec2::new(look.x, yy - CHASE_LOOK_AHEAD)
+    }
+}
+
+/// The chase look turn after the chase update (0x7FEC40; emulated and
+/// live-checked): view and eye turn by atan2(A4, A8 + 0.1) about the world
+/// vertical through the car's model origin (record +0x110); toward +X for a
+/// positive angle. No input leaves the point at (0, 0) and the turn at 0.
+fn chase_look_turn(shot: &mut Shot, point: Vec2, origin: Vec3) {
+    let a = atan2(point.x, point.y + CHASE_LOOK_AHEAD);
+    if a == 0. {
+        return;
+    }
+    let turn = Quat::from_rotation_y(a);
+    shot.rotation = turn * shot.rotation;
+    shot.eye = origin + turn * (shot.eye - origin);
 }
 
 /// The Mounted view's twist frame (0x803270, any twistScale component non-zero;
@@ -993,11 +1129,46 @@ pub fn head_step(c: &Head, h: &mut HeadState, dt: f32, rotation: Mat3, input: Ve
     spring_step(&c.head, &mut h.head, dt, rotation, input + rotation * h.body.vel);
 }
 
+/// The head-cam's look messages of one frame (0x801230, emulated): the type 1
+/// message moves the smoothed input toward (x, y) by 0.2 and marks looking
+/// while the input is not zero; the type 2 message (look back, x = 0 while
+/// the head-cam shows) then decays it by 0.8 unless looking.
+pub fn head_look_message(h: &mut HeadState, look: Look) {
+    let k = LOOK_BLEND;
+    h.look.x = h.look.x * (1. - k) + look.x * k;
+    h.look.y = (1. - k) * h.look.y + k * look.y;
+    h.looking = look.x != 0. || look.y != 0.;
+    if !h.looking {
+        h.look *= 1. - k;
+    }
+}
+
+/// The look curve of 0x814BC0: 0.5 (2|x|)² below |x| = 0.5, else
+/// 1 − 0.5 (2 (1 − |x|))², with the sign of x.
+fn look_curve(x: f32) -> f32 {
+    let a = x.abs();
+    let v = if a < 0.5 { 0.5 * pow(2. * a, 2.) } else { 1. - 0.5 * pow(2. * (1. - a), 2.) };
+    if x < 0. { -v } else { v }
+}
+
+/// The head-cam's look angles of one frame (0x814BC0 → 0x801D10, emulated):
+/// yaw toward maxHeadLook · curve(x) degrees and pitch toward maxHeadLook ·
+/// curve(y) · 0.3, each at most 180°/s.
+pub fn head_look_step(c: &Head, h: &mut HeadState, dt: f32) {
+    let goal = Vec2::new(
+        c.max_look * look_curve(h.look.x) * DEGREES,
+        c.max_look * look_curve(h.look.y) * HEAD_LOOK_PITCH,
+    );
+    let rate = HEAD_LOOK_RATE * dt * DEGREES;
+    h.look_angle += (goal - h.look_angle).clamp(Vec2::splat(-rate), Vec2::splat(rate));
+}
+
 /// The head-cam's view of its state (0x820D10 steps 8–9 and 14): the eye at
 /// the seat raised by bodyLength and moved by the body offset; the view turned
 /// by the head offset h about (h.z, 0, −h.x) by |h| radians (a forward offset
-/// looks down, emulated), then pitched by the tilt. Look, buffeting, TrackIR
-/// and transitions are inactive in a race (docs/CAMERA_VIEWS.md).
+/// looks down, emulated), then by the look yaw (toward +X) and pitched by the
+/// look pitch (up) and the tilt. Buffeting, TrackIR and transitions are
+/// inactive in a race (docs/CAMERA_VIEWS.md).
 pub fn head_view(c: &Head, h: &HeadState, pose: &Mat4) -> Shot {
     let (_, rotation, _) = pose.to_scale_rotation_translation();
     let eye = pose.transform_point3(c.position + Vec3::Y * c.body_length + h.body.off);
@@ -1010,7 +1181,11 @@ pub fn head_view(c: &Head, h: &HeadState, pose: &Mat4) -> Shot {
     };
     Shot {
         eye,
-        rotation: rotation * turn * facing_forward() * Quat::from_rotation_x(c.tilt.to_radians()),
+        rotation: rotation
+            * turn
+            * Quat::from_rotation_y(h.look_angle.x)
+            * facing_forward()
+            * Quat::from_rotation_x(c.tilt.to_radians() + h.look_angle.y),
         fov: c.fov.to_radians(),
         near: Some(c.near),
     }
@@ -1020,8 +1195,9 @@ pub fn head_view(c: &Head, h: &HeadState, pose: &Mat4) -> Shot {
 /// springs from the car's velocity at rest. The original steps once per
 /// rendered frame, so its springs stiffen with the frame rate; the port steps
 /// once per physics tick (0.016 s), as the original at 62.5 fps, and spreads a
-/// shot's input change evenly over its steps [AUTHORED].
-fn head_shot(c: &Head, h: &mut HeadState, sample: &Sample, dt: f32) -> Shot {
+/// shot's input change evenly over its steps [AUTHORED]. Each step takes the
+/// frame's look messages first (the controller runs before the views [I]).
+fn head_shot(c: &Head, h: &mut HeadState, sample: &Sample, steps: u32, look: Look) -> Shot {
     let rotation = Mat3::from_mat4(sample.pose);
     let input = head_input(c, rotation, sample.velocity, sample.angular_velocity);
     let from = *h.input.get_or_insert_with(|| {
@@ -1030,12 +1206,10 @@ fn head_shot(c: &Head, h: &mut HeadState, sample: &Sample, dt: f32) -> Shot {
         input
     });
     let step = grid_tools::source_vehicle::DELTA;
-    h.pending += dt.max(0.);
-    let steps = (h.pending / step + 1e-3).floor();
-    h.pending = if steps > SPRING_MAX_STEPS { 0. } else { (h.pending - steps * step).max(0.) };
-    let steps = steps.min(SPRING_MAX_STEPS) as u32;
     for k in 1..=steps {
+        head_look_message(h, look);
         head_step(c, h, step, rotation, from.lerp(input, k as f32 / steps as f32));
+        head_look_step(c, h, step);
     }
     if steps > 0 {
         h.input = Some(input);
@@ -1043,18 +1217,21 @@ fn head_shot(c: &Head, h: &mut HeadState, sample: &Sample, dt: f32) -> Shot {
     head_view(c, h, &sample.pose)
 }
 
-/// Advances `history` by the simulation time `dt` and frames the view.
-/// `orbit` rotates a chase eye about its target (AUTHORED free look).
+/// Advances `history` by the simulation time `dt` with the look input `look`
+/// and frames the view. `orbit` rotates a chase eye about its target (AUTHORED
+/// free look).
 pub fn shot(
     rig: &Rig,
     history: &mut History,
     sample: &Sample,
     dt: f32,
+    look: Look,
     orbit: impl Fn(Vec3) -> Vec3,
 ) -> Shot {
     let (_, rotation, position) = sample.pose.to_scale_rotation_translation();
+    let steps = steps(&mut history.pending, dt);
     match rig {
-        Rig::Chase(c) => chase_shot(c, &mut history.chase, sample, dt, orbit),
+        Rig::Chase(c) => chase_shot(c, &mut history.chase, sample, dt, steps, look, orbit),
         Rig::Mounted(m) => {
             let h = &mut history.mounted;
             if m.movement_speed != 0. && dt > 0. {
@@ -1067,15 +1244,29 @@ pub fn shot(
                 h.tilt += (tilt - h.tilt) * m.movement_speed * 2. * dt;
             }
             h.velocity = Some(sample.velocity);
+            // Look turn: 0.2 of the way to the input per message (0x840A30).
+            if m.look != MountedLook::Fixed {
+                for _ in 0..steps {
+                    h.look += (look.x - h.look) * LOOK_BLEND;
+                }
+            }
+            // The bonnet's eye rises and moves forward with the turn (0x822510).
+            let lift = if m.look == MountedLook::TurnAndLift {
+                let lift = h.look.abs() * BONNET_LOOK_LIFT;
+                Vec3::new(0., lift, lift)
+            } else {
+                Vec3::ZERO
+            };
             // offsetOnly places the bare offset at the car's position.
             let eye = if m.offset_only {
                 position + m.offset
             } else {
-                position + rotation * (m.offset + h.shift * m.final_movement_scale)
+                position + rotation * (m.offset + h.shift * m.final_movement_scale + lift)
             };
             // Positive pitch looks down, positive yaw turns toward +X, yaw π
-            // looks back (0x803270: R(roll) · P(pitch) · Y(yaw), emulated).
-            let view = Quat::from_rotation_y(m.yaw)
+            // looks back (0x803270: R(roll) · P(pitch) · Y(yaw + look),
+            // emulated).
+            let view = Quat::from_rotation_y(m.yaw + h.look)
                 * facing_forward()
                 * Quat::from_rotation_x(-m.pitch)
                 * Quat::from_rotation_z(m.roll);
@@ -1086,7 +1277,7 @@ pub fn shot(
                 near: Some(m.near),
             }
         }
-        Rig::Head(c) => head_shot(c, &mut history.head, sample, dt),
+        Rig::Head(c) => head_shot(c, &mut history.head, sample, steps, look),
     }
 }
 
@@ -1135,7 +1326,7 @@ impl Cameras {
     }
 
     /// Frames the current (or, looking back, its reverse) view for `sample`.
-    pub fn frame(&mut self, sample: &Sample, back: bool, orbit: impl Fn(Vec3) -> Vec3) -> Shot {
+    pub fn frame(&mut self, sample: &Sample, back: bool, look: Look, orbit: impl Fn(Vec3) -> Vec3) -> Shot {
         let view = &self.views.0[self.current];
         let shown = if back {
             view.reverse.unwrap_or(self.current)
@@ -1154,7 +1345,7 @@ impl Cameras {
         let ticks = self.last.map_or(0, |(_, t)| sample.ticks - t);
         self.last = Some((sample.segment, sample.ticks));
         let dt = ticks as f32 * grid_tools::source_vehicle::DELTA;
-        let shot = shot(&self.views.0[shown].rig, &mut self.history, sample, dt, orbit);
+        let shot = shot(&self.views.0[shown].rig, &mut self.history, sample, dt, look, orbit);
         if reset && cfg!(not(test)) {
             println!(
                 "drive_camera event=start view={} tick={} eye={:?} model_origin={:?}",
@@ -1277,6 +1468,7 @@ mod tests {
             axis_scale_for_tilt: Vec3::splat(0.2),
             twist_scale: Vec3::ZERO,
             tilt_distance: 1.,
+            look: MountedLook::Fixed,
         }
     }
 
@@ -1343,7 +1535,7 @@ mod tests {
                         head_step(c, h, dt, rotation, head_input(c, rotation, s.velocity, s.angular_velocity));
                         head_view(c, h, &s.pose)
                     }
-                    rig => shot(rig, &mut histories[k], &s, dt, |o| o),
+                    rig => shot(rig, &mut histories[k], &s, dt, Look::default(), |o| o),
                 };
                 row.extend(shot.eye.to_array());
                 row.extend((shot.rotation * Vec3::NEG_Z).to_array());
@@ -1387,8 +1579,8 @@ mod tests {
         let rig = Rig::Mounted(m.clone());
         let mut history = History::default();
         let dt = 0.016;
-        shot(&rig, &mut history, &sample(Mat4::IDENTITY, Vec3::Z * 30., 0), dt, |v| v);
-        shot(&rig, &mut history, &sample(Mat4::IDENTITY, Vec3::Z * (30. - 30. * dt), 1), dt, |v| v);
+        shot(&rig, &mut history, &sample(Mat4::IDENTITY, Vec3::Z * 30., 0), dt, Look::default(), |v| v);
+        shot(&rig, &mut history, &sample(Mat4::IDENTITY, Vec3::Z * (30. - 30. * dt), 1), dt, Look::default(), |v| v);
         assert!((history.mounted.tilt.z - 0.0999 * 1.7264 * 2. * dt).abs() < 1e-7, "{}", history.mounted.tilt);
         // At speed (weight 1) L = (0.05 · −0.1423, 1, 0.1 · 0.4107).
         let h = MountedState { tilt: Vec3::new(0.05, 0., 0.1), ..MountedState::default() };
@@ -1418,6 +1610,7 @@ mod tests {
             body_length: 0.01,
             body: Spring { scale: Vec2::new(0.9, 1.5), damping: 1.2, inertia: 0.1, centering: 2., max_offset: 0.07 },
             head: Spring { scale: Vec2::new(1., 0.), damping: 5.4045, inertia: 0.3399, centering: 3.8697, max_offset: 0.179 },
+            max_look: 40.,
         }
     }
 
@@ -1492,14 +1685,14 @@ mod tests {
     fn chase_at_rest_matches_the_shipped_position_and_target() {
         let pose = Mat4::from_rotation_translation(Quat::from_rotation_y(0.7), Vec3::new(10., 2., -5.));
         let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
-        let shot = cameras.frame(&sample(pose, Vec3::ZERO, 5), false, |v| v);
+        let shot = cameras.frame(&sample(pose, Vec3::ZERO, 5), false, Look::default(), |v| v);
         let eye = pose.transform_point3(Vec3::new(0., 1.7227, -4.7393));
         let target = pose.transform_point3(Vec3::new(0., 1.2552, 1.9141));
         assert!(shot.eye.distance(eye) < 1e-4);
         assert!(forward(&shot).dot((target - eye).normalize()) > 0.99999);
         assert_eq!(shot.fov, 52f32.to_radians());
         // Look Back: the reverse chase sits ahead of the car looking back.
-        let back = cameras.frame(&sample(pose, Vec3::ZERO, 5), true, |v| v);
+        let back = cameras.frame(&sample(pose, Vec3::ZERO, 5), true, Look::default(), |v| v);
         let ahead = pose.transform_vector3(Vec3::Z);
         assert!((back.eye - pose.w_axis.truncate()).dot(ahead) > 5.);
         assert!(forward(&back).dot(ahead) < -0.9);
@@ -1538,8 +1731,8 @@ mod tests {
         let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
         let straight = Mat4::IDENTITY;
         let turned = Mat4::from_rotation_y(0.2);
-        cameras.frame(&sample(straight, Vec3::Z * 30., 0), false, |v| v);
-        let shot = cameras.frame(&sample(turned, Vec3::Z * 30., 1), false, |v| v);
+        cameras.frame(&sample(straight, Vec3::Z * 30., 0), false, Look::default(), |v| v);
+        let shot = cameras.frame(&sample(turned, Vec3::Z * 30., 1), false, Look::default(), |v| v);
         // The eye has not yet swung behind the turned car: still near -Z.
         let behind = turned.transform_point3(Vec3::new(0., 1.7227, -4.7393));
         assert!(shot.eye.x.abs() < behind.x.abs());
@@ -1552,8 +1745,8 @@ mod tests {
         assert!(uphill.z_axis.y > 0.);
         // Above 5 m/s the eye height follows the car; the first update sets
         // the follow state directly (record +0xAC).
-        let first = cameras.frame(&sample(uphill, Vec3::Z * 30., 0), false, |v| v);
-        let later = cameras.frame(&sample(uphill, Vec3::Z * 30., 1), false, |v| v);
+        let first = cameras.frame(&sample(uphill, Vec3::Z * 30., 0), false, Look::default(), |v| v);
+        let later = cameras.frame(&sample(uphill, Vec3::Z * 30., 1), false, Look::default(), |v| v);
         let drop = first.eye.y - later.eye.y;
         assert!((drop - 5. * 0.1f32.sin()).abs() < 1e-5, "{drop}");
     }
@@ -1576,7 +1769,7 @@ mod tests {
     }
 
     fn cameras_frame_y(cameras: &mut Cameras, pose: Mat4, velocity: Vec3, ticks: u64) -> f32 {
-        cameras.frame(&sample(pose, velocity, ticks), false, |v| v).eye.y
+        cameras.frame(&sample(pose, velocity, ticks), false, Look::default(), |v| v).eye.y
     }
 
     #[test]
@@ -1595,9 +1788,9 @@ mod tests {
         let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
         let mut s = sample(Mat4::IDENTITY, Vec3::ZERO, 0);
         s.wheels = wheels;
-        cameras.frame(&s, false, |v| v);
+        cameras.frame(&s, false, Look::default(), |v| v);
         s.ticks = 1;
-        let shot = cameras.frame(&s, false, |v| v);
+        let shot = cameras.frame(&s, false, Look::default(), |v| v);
         let target = Vec3::new(0., 1.2552 + 3. * expected, 1.9141);
         assert!(forward(&shot).dot((target - shot.eye).normalize()) > 0.999_999);
     }
@@ -1628,7 +1821,7 @@ mod tests {
         assert_eq!(fall_back(&c, 90., Some((2, 1.5)), &mut drop), 1.);
         // In the view: 30 m/s pushes the eye 0.5 m back.
         let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
-        let shot = cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * 30., 0), false, |v| v);
+        let shot = cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * 30., 0), false, Look::default(), |v| v);
         assert!(shot.eye.distance(Vec3::new(0., 1.7227, -5.2393)) < 1e-5, "{}", shot.eye);
     }
 
@@ -1651,10 +1844,10 @@ mod tests {
         let mut s = sample(Mat4::IDENTITY, Vec3::Z * 48., 0);
         s.speed = 60.;
         s.angular_velocity = Vec3::Y * 0.5;
-        let mut shot = cameras.frame(&s, false, |v| v);
+        let mut shot = cameras.frame(&s, false, Look::default(), |v| v);
         for t in 1..30 {
             s.ticks = t;
-            shot = cameras.frame(&s, false, |v| v);
+            shot = cameras.frame(&s, false, Look::default(), |v| v);
         }
         let up = shot.rotation * Vec3::Y;
         let side = Vec3::Y.cross(forward(&shot)).normalize();
@@ -1750,15 +1943,15 @@ mod tests {
         let pose = Mat4::from_rotation_translation(Quat::from_rotation_y(-1.2), Vec3::new(-3., 1., 4.));
         let mut cameras = Cameras::new(lacetti(), "bumper", None);
         let v = pose.transform_vector3(Vec3::Z) * 40.;
-        cameras.frame(&sample(pose, Vec3::ZERO, 0), false, |v| v);
-        let shot = cameras.frame(&sample(pose, v, 1), false, |v| v);
+        cameras.frame(&sample(pose, Vec3::ZERO, 0), false, Look::default(), |v| v);
+        let shot = cameras.frame(&sample(pose, v, 1), false, Look::default(), |v| v);
         assert!(shot.eye.distance(pose.transform_point3(Vec3::new(0., 0.7275, 1.7706))) < 1e-4);
         let f = forward(&shot);
         assert!(f.dot(pose.transform_vector3(Vec3::Z)) > 0.99);
         assert!(f.y < 0.);
         assert_eq!(shot.near, Some(0.1));
         // Its reverse looks backwards.
-        let back = cameras.frame(&sample(pose, v, 2), true, |v| v);
+        let back = cameras.frame(&sample(pose, v, 2), true, Look::default(), |v| v);
         assert!(forward(&back).dot(pose.transform_vector3(Vec3::Z)) < -0.9);
     }
 
@@ -1774,7 +1967,7 @@ mod tests {
         // 3 s at 30 m/s² deceleration (≈3 g, the full scale of 0x822510).
         while speed > 0. {
             let s = sample(Mat4::IDENTITY, Vec3::Z * speed, ticks);
-            last = shot(&rig, &mut history, &s, dt, |v| v).eye;
+            last = shot(&rig, &mut history, &s, dt, Look::default(), |v| v).eye;
             speed -= 30. * dt;
             ticks += 1;
         }
@@ -1786,7 +1979,7 @@ mod tests {
     fn head_cam_sits_in_the_seat() {
         let pose = Mat4::from_translation(Vec3::new(1., 2., 3.));
         let mut cameras = Cameras::new(lacetti(), "head-cam", None);
-        let shot = cameras.frame(&sample(pose, Vec3::Z * 30., 0), false, |v| v);
+        let shot = cameras.frame(&sample(pose, Vec3::Z * 30., 0), false, Look::default(), |v| v);
         // The seat raised by bodyLength 0.01; tilt −7.3736° looks down.
         assert!(shot.eye.distance(Vec3::new(1.3604, 3.1147, 2.8077)) < 1e-4);
         let down = (-7.3736f32).to_radians();
@@ -1795,7 +1988,7 @@ mod tests {
         // Driving straight at a steady speed leaves both springs at rest.
         for t in 1..100 {
             let pose = Mat4::from_translation(Vec3::new(1., 2., 3. + 0.48 * t as f32));
-            cameras.frame(&sample(pose, Vec3::Z * 30., t), false, |v| v);
+            cameras.frame(&sample(pose, Vec3::Z * 30., t), false, Look::default(), |v| v);
         }
         assert_eq!(cameras.history.head.body.off, Vec3::ZERO);
         assert_eq!(cameras.history.head.head.off, Vec3::ZERO);
@@ -1877,7 +2070,7 @@ mod tests {
         let mut speed = 30.;
         let mut z = 0.;
         for t in 0..40u64 {
-            cameras.frame(&sample(Mat4::from_translation(Vec3::Z * z), Vec3::Z * speed, t), false, |v| v);
+            cameras.frame(&sample(Mat4::from_translation(Vec3::Z * z), Vec3::Z * speed, t), false, Look::default(), |v| v);
             speed -= 20. * 0.016;
             z += speed * 0.016;
         }
@@ -1887,10 +2080,112 @@ mod tests {
         // The head's equilibrium: (20 · 0.3399 − 5.4045) · 0.016 / 3.8697 ≈ 0.0058.
         assert!(h.head.off.z > 0.004 && h.head.off.z < 0.007, "{}", h.head.off);
         for t in 40..200u64 {
-            cameras.frame(&sample(Mat4::from_translation(Vec3::Z * z), Vec3::Z * speed, t), false, |v| v);
+            cameras.frame(&sample(Mat4::from_translation(Vec3::Z * z), Vec3::Z * speed, t), false, Look::default(), |v| v);
         }
         let h = cameras.history.head;
         assert!(h.body.off.length() < 1e-4 && h.head.off.length() < 1e-4, "{h:?}");
+    }
+
+    #[test]
+    fn chase_look_point_follows_the_input() {
+        // Emulated 0x7FE690 (local/cam/look/results.txt): Look Left held at
+        // 0 m/s gives (A4, A8) (0.0279, 0.0884), (0.075, 0.1614), (0.134,
+        // 0.2182); frame 10 (0.6104, 0.2838); released after 25 frames
+        // (0.8065, 0.1869), (0.6976, 0.2498).
+        let left = Look { x: 1., y: 0. };
+        let mut point = Vec2::ZERO;
+        let mut seen = Vec::new();
+        for frame in 0..27 {
+            point = chase_look_message(point, if frame < 25 { left } else { Look::default() }, 0.);
+            seen.push(point);
+        }
+        for (frame, a4, a8) in [(0, 0.0279, 0.0884), (1, 0.075, 0.1614), (2, 0.134, 0.2182), (10, 0.6104, 0.2838), (24, 0.9203, 0.0916), (25, 0.8065, 0.1869), (26, 0.6976, 0.2498)] {
+            assert!(seen[frame].abs_diff_eq(Vec2::new(a4, a8), 1e-4), "{frame} {}", seen[frame]);
+        }
+        // Above 5 m/s (w = 1: blend 0.5, snap at 1 rad) the 84.29° step snaps
+        // both ways; no input keeps the point at rest.
+        let held = chase_look_message(Vec2::ZERO, left, 20.);
+        assert_eq!(held, Vec2::new(1., 0.));
+        assert_eq!(chase_look_message(held, Look::default(), 20.), Vec2::ZERO);
+        assert_eq!(chase_look_message(Vec2::ZERO, Look::default(), 0.), Vec2::ZERO);
+    }
+
+    #[test]
+    fn chase_look_turns_the_view_about_the_car() {
+        let run = |look: Look| {
+            let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
+            cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * 20., 0), false, look, |v| v);
+            cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * 20., 1), false, look, |v| v)
+        };
+        let still = run(Look::default());
+        let left = run(Look { x: 1., y: 0. });
+        // atan2(1, 0.1) = 84.29° toward +X about the vertical through the car.
+        let turn = Quat::from_rotation_y(1f32.atan2(0.1));
+        assert!(left.eye.abs_diff_eq(turn * still.eye, 1e-5), "{} {}", left.eye, still.eye);
+        assert!(forward(&left).abs_diff_eq(turn * forward(&still), 1e-5));
+        assert!(left.eye.x < -4. && forward(&left).x > 0.9);
+    }
+
+    #[test]
+    fn bonnet_turns_and_lifts_with_the_look_input() {
+        let mut bonnet = mounted(Vec3::new(0., 1.1055, 0.8556), 0., 0.);
+        bonnet.look = MountedLook::TurnAndLift;
+        let rig = Rig::Mounted(bonnet.clone());
+        let mut history = History::default();
+        let left = Look { x: 1., y: 0. };
+        // Two ticks: B0 = 0.2, then 0.36 (0x840A30); the eye rises and moves
+        // forward by 0.05 · 0.36 = 0.018 (0x822510).
+        let shot = shot(&rig, &mut history, &sample(Mat4::IDENTITY, Vec3::ZERO, 0), 0.032, left, |v| v);
+        assert!((history.mounted.look - 0.36).abs() < 1e-6, "{}", history.mounted.look);
+        assert!(shot.eye.abs_diff_eq(Vec3::new(0., 1.1055 + 0.018, 0.8556 + 0.018), 1e-6), "{}", shot.eye);
+        let yaw = forward(&shot);
+        assert!((yaw.x.atan2(yaw.z) - 0.36).abs() < 1e-5, "{yaw}");
+        // The bumper turns without the lift; other views ignore the input.
+        bonnet.look = MountedLook::Turn;
+        let mut history = History::default();
+        let eye = shot_eye(&Rig::Mounted(bonnet.clone()), &mut history, left);
+        assert!((history.mounted.look - 0.36).abs() < 1e-6 && eye.abs_diff_eq(Vec3::new(0., 1.1055, 0.8556), 1e-6));
+        bonnet.look = MountedLook::Fixed;
+        let mut history = History::default();
+        shot_eye(&Rig::Mounted(bonnet), &mut history, left);
+        assert_eq!(history.mounted.look, 0.);
+    }
+
+    fn shot_eye(rig: &Rig, history: &mut History, look: Look) -> Vec3 {
+        shot(rig, history, &sample(Mat4::IDENTITY, Vec3::ZERO, 0), 0.032, look, |v| v).eye
+    }
+
+    #[test]
+    fn head_look_smooths_the_input_and_turns_at_most_180_degrees_a_second() {
+        // Emulated 0x801230: held 0.2, 0.36 … 0.9885 after 20 frames; release
+        // 0.6326, 0.4049 (× 0.64 per frame).
+        let mut h = HeadState::default();
+        let mut seen = Vec::new();
+        for frame in 0..22 {
+            head_look_message(&mut h, if frame < 20 { Look { x: 1., y: 0. } } else { Look::default() });
+            seen.push(h.look.x);
+        }
+        for (frame, d8) in [(0, 0.2), (1, 0.36), (19, 0.9885), (20, 0.6326), (21, 0.4049)] {
+            assert!((seen[frame] - d8).abs() < 1e-4, "{frame} {}", seen[frame]);
+        }
+        // Curve: 0.5 (2 · 0.25)² = 0.125; 1 − 0.5 (2 · 0.25)² = 0.875.
+        assert!((look_curve(0.25) - 0.125).abs() < 1e-7 && (look_curve(-0.75) + 0.875).abs() < 1e-7);
+        // Full left and up: yaw → 40°, pitch → 12°, by at most 2.88° a tick.
+        let c = head();
+        let mut h = HeadState { look: Vec2::ONE, ..HeadState::default() };
+        head_look_step(&c, &mut h, 0.016);
+        assert!((h.look_angle.x - 2.88f32.to_radians()).abs() < 1e-6, "{}", h.look_angle);
+        for _ in 0..20 {
+            head_look_step(&c, &mut h, 0.016);
+        }
+        assert!(h.look_angle.abs_diff_eq(Vec2::new(40f32.to_radians(), 12f32.to_radians()), 1e-5), "{}", h.look_angle);
+        // The view turns toward +X and up from the tilted seat view.
+        let mut flat = c.clone();
+        flat.tilt = 0.;
+        let f = forward(&head_view(&flat, &h, &Mat4::IDENTITY));
+        let up = 12f32.to_radians();
+        let side = 40f32.to_radians();
+        assert!(f.abs_diff_eq(Vec3::new(side.sin() * up.cos(), up.sin(), side.cos() * up.cos()), 1e-5), "{f}");
     }
 
     #[test]
@@ -1902,7 +2197,7 @@ mod tests {
             let mut t = 0;
             while t <= 60 {
                 let v = 30. - 20. * 0.016 * t as f32;
-                cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * v, t), false, |v| v);
+                cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * v, t), false, Look::default(), |v| v);
                 t += stride;
             }
             cameras.history.head
@@ -1926,7 +2221,7 @@ mod tests {
                 if t == 120 {
                     cameras.change_view();
                 }
-                let s = cameras.frame(&sample(pose, Vec3::new(a, 0., 30.), t), t % 50 > 40, |v| v);
+                let s = cameras.frame(&sample(pose, Vec3::new(a, 0., 30.), t), t % 50 > 40, Look::default(), |v| v);
                 out.push((s.eye.to_array(), s.rotation.to_array()));
             }
             out
@@ -1937,12 +2232,12 @@ mod tests {
     #[test]
     fn reset_clears_the_history() {
         let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
-        cameras.frame(&sample(Mat4::IDENTITY, Vec3::ZERO, 0), false, |v| v);
-        cameras.frame(&sample(Mat4::from_rotation_y(0.3), Vec3::ZERO, 1), false, |v| v);
+        cameras.frame(&sample(Mat4::IDENTITY, Vec3::ZERO, 0), false, Look::default(), |v| v);
+        cameras.frame(&sample(Mat4::from_rotation_y(0.3), Vec3::ZERO, 1), false, Look::default(), |v| v);
         assert!(cameras.history.chase.lag > 0.);
         let mut s = sample(Mat4::IDENTITY, Vec3::ZERO, 0);
         s.segment = 1;
-        cameras.frame(&s, false, |v| v);
+        cameras.frame(&s, false, Look::default(), |v| v);
         assert_eq!(cameras.history.chase.lag, 0.);
     }
 }

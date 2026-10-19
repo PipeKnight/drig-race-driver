@@ -848,7 +848,7 @@ pub fn frame_camera(
                 return;
             };
             let sample = crate::camera::Sample::moving(car.pose.to_mat4(), car.velocity, shown.tick, 0);
-            let shot = crate::camera::shot(&views.0[index].rig, &mut session.history, &sample, dt, |o| o);
+            let shot = crate::camera::shot(&views.0[index].rig, &mut session.history, &sample, dt, crate::camera::Look::default(), |o| o);
             (shot.eye, shot.rotation, shot.fov, shot.near)
         }
     };

@@ -4419,9 +4419,15 @@ fn drive_present(
         log_line!("drive_camera event=change view={} tick={}", cameras.ident(), driving.runtime.ticks);
     }
     let sample = camera::Sample::of(&driving.runtime, driving.segment);
+    // Look Left/Right/Up/Down (Delete/PageDown, pad right stick) turn the
+    // view as in the original (0x8348F0, docs/CAMERA_VIEWS.md "Look input").
+    let look = actions.as_ref().map_or_else(camera::Look::default, |a| camera::Look {
+        x: a.value(input::Action::LookLeft) - a.value(input::Action::LookRight),
+        y: a.value(input::Action::LookUp) - a.value(input::Action::LookDown),
+    });
     // Right mouse button orbits a chase view (AUTHORED free look).
     let side = if back { -1. } else { 1. };
-    let shot = cameras.frame(&sample, back, |o| free_look::offset(free_look.as_deref(), o, side));
+    let shot = cameras.frame(&sample, back, look, |o| free_look::offset(free_look.as_deref(), o, side));
     let (transform, projection) = &mut *camera;
     **transform = Transform::from_translation(shot.eye).with_rotation(shot.rotation);
     if let Some(Projection::Perspective(p)) = projection.as_deref_mut() {
