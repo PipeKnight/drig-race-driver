@@ -64,6 +64,22 @@ The port's solver refuses bodies with constraint lists (`contact_groups`: body +
 must be zero) and has no joint pools; `dynamic_props::Catalog::read` keeps every template
 with constraints, or with more than one shape behaviour, static.
 
+## Size [D]
+
+Decompiled lines (Ghidra, ): joint constructor 0xAEFEB0 1569;
+prepare 0xAF4890 1997; two-body row initialisation 0xAF71C0 1834; one-body 0xAF9430 1523;
+correction solvers 0xAEF930 151 and 0xAEFBB0 136; ENS link propagation 0x7D5540 489; props
+reader 0x7D00F0 334; descriptor 0x7C7B10 and header 0x7C04D0 170. The main response 0xB7ACC0
+handles the joint pools beside the contact pools: AF4890 counts each joint's rows into the
+island totals (+0xBC/+0xC4), AF71C0/AF9430 write them after the contact rows, and the shared
+row solver runs them all. The port's frame pipeline has no joint pools, so the solver
+integration (contact groups, grouped and impact frames) is part of the work, as are islands
+merged through joints, breaking, body overrides and the entity side.
+
+Verification: the native probes () run original functions in-process on
+supplied state; a joint probe (constructor, prepare, row initialisation) gives the same
+bit-for-bit comparison the impact pools have.
+
 ## Plan
 
 1. Joint descriptor and constructor (0x7C7B10, 0xAEFEB0) as data: frames, limits, springs.
