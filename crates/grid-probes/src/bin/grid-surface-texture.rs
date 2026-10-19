@@ -1,13 +1,89 @@
 //! Read-only static texture/draw audit for private matched-camera captures.
 use grid_formats::{material, mesh, pssg, scene};
 use std::{error::Error, path::Path};
+/// Selected rest geometry only; callers keep purchased-resource output private.
+fn car_material(root: &Path, car: &str, selected: &str) -> Result<(), Box<dyn Error>> {
+    if !(2..=8).contains(&car.len())
+        || !car.bytes().all(|b| b.is_ascii_alphanumeric())
+        || selected.is_empty()
+        || selected.len() > 64
+    {
+        return Err("invalid bounded car/material selector".into());
+    }
+    let path = root.join(format!("cars/{car}/{car}_highLOD.pssg"));
+    if path.metadata()?.len() > 64 * 1024 * 1024 {
+        return Err("car resource exceeds64MiB".into());
+    }
+    let bytes = std::fs::read(path)?;
+    let tree = pssg::read_tree(&bytes)?;
+    let meshes = mesh::read_meshes(&tree)?;
+    let draws = scene::read_draws(&tree, &meshes, b"LOD0_")?;
+    let mut count = 0;
+    for draw in draws.iter().filter(|d| d.material == selected.as_bytes()) {
+        if draw.vertices.len() > 65_536 {
+            return Err("selected car part exceeds vertex bound".into());
+        }
+        let source = &meshes[draw.source];
+        println!(
+            "car_part car={car} draw={:?} joint={:?} material={selected:?} source={:?} vertices={} triangles={} transform={:?}",
+            String::from_utf8_lossy(draw.id),
+            String::from_utf8_lossy(draw.joint),
+            String::from_utf8_lossy(source.id),
+            draw.vertices.len(),
+            draw.indices.len() / 3,
+            draw.transform,
+        );
+        let mut low = [f32::INFINITY; 3];
+        let mut high = [f32::NEG_INFINITY; 3];
+        for i in draw.vertices.clone() {
+            let rest = scene::transform_point(&draw.transform, source.positions[i]);
+            if rest.iter().any(|v| !v.is_finite()) {
+                return Err("nonfinite car rest position".into());
+            }
+            for axis in 0..3 {
+                low[axis] = low[axis].min(rest[axis]);
+                high[axis] = high[axis].max(rest[axis]);
+            }
+            println!(
+                "car_vertex index={i} rest={rest:?} source={:?} uv={:?}",
+                source.positions[i],
+                source.texcoords.get(i)
+            );
+        }
+        println!("car_part_bounds low={low:?} high={high:?}");
+        count += 1;
+    }
+    if count == 0 {
+        return Err("selected LOD0 car material absent".into());
+    }
+    if car == "lac" {
+        let runtime = grid_tools::source_vehicle::Runtime::lacetti(root, "slot_00", 200679)?;
+        let b = &runtime.state.car.owner.vehicle;
+        let offset = [
+            f32::from_bits(b[0x1630 / 4]),
+            f32::from_bits(b[0x1634 / 4]) - f32::from_bits(b[0x1564 / 4]),
+            f32::from_bits(b[0x1638 / 4]),
+        ];
+        println!(
+            "car_runtime_model_offset translation={offset:?} scope=fresh-Lacetti-constructor-not-live-pose"
+        );
+    }
+    println!("car_parts={count} scope=source-rest-not-live-GPU-visibility");
+    Ok(())
+}
+
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 2 && !(args.len() == 4 && args[1] == "--triangle") {
+    if args.len() != 2
+        && !(args.len() == 4 && matches!(args[1].as_str(), "--triangle" | "--car-material"))
+    {
         return Err(
-            "usage: grid-surface-texture GAME_ROOT TEXTURE_ID | GAME_ROOT --triangle DRAW TRIANGLE|all"
+            "usage: grid-surface-texture GAME_ROOT TEXTURE_ID | GAME_ROOT --triangle DRAW TRIANGLE|all | GAME_ROOT --car-material CAR MATERIAL"
                 .into(),
         );
+    }
+    if args.len() == 4 && args[1] == "--car-material" {
+        return car_material(Path::new(&args[0]), &args[2], &args[3]);
     }
     let path = Path::new(&args[0]).join("tracks/europe/donington/tracksplit.pssg");
     if path.metadata()?.len() > 256 * 1024 * 1024 {
