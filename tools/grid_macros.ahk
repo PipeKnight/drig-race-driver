@@ -60,6 +60,7 @@ Pulse(name, milliseconds) {
             case "left": codes := ["sc14B"]
             case "right": codes := ["sc14D"]
             case "confirm": codes := ["sc01C"]
+            case "view": codes := ["sc02E"]
             case "pause": codes := ["sc001"]
             case "throttle_left": codes := ["sc148", "sc14B"]
             case "throttle_right": codes := ["sc148", "sc14D"]
@@ -124,6 +125,20 @@ BrakeTest() {
     Log("sample_end", "paused_brake_test", HoldMs * 4, 0, "normal sequence ended with pause key-up")
 }
 
+CameraRun() {
+    ; Camera comparison run (docs/CAMERA_VIEWS.md): from an observed paused
+    ; race with Continue selected, unpause, throttle 4 x HOLD_MS, full brake
+    ; 2000 ms, throttle and right 2500 ms, throttle 1500 ms, then pause.
+    global HoldMs
+    Log("sample_begin", "paused_camera_run", HoldMs * 4)
+    if !Pulse("pause", 150) || !Pulse("throttle", HoldMs * 4) || !Pulse("brake", 2000)
+        || !Pulse("throttle_right", 2500) || !Pulse("throttle", 1500) || !Pulse("pause", 150) {
+        Log("sample_cancelled", "paused_camera_run", HoldMs * 4)
+        return
+    }
+    Log("sample_end", "paused_camera_run", HoldMs * 4, 0, "normal sequence ended with pause key-up")
+}
+
 if Action = "inspect" {
     Log("inspect", "", 0, 0, "AutoHotkey " A_AhkVersion "; GRID foreground=" GridActive() "; no input sent")
     ExitApp()
@@ -149,6 +164,9 @@ if Action = "serve" {
     Log("ready", "serve", 0, 0, "F1 paused 2000ms throttle/left sample; F2 paused 2000ms throttle/right sample; F3 left; F4 right; F5 paused 2000ms throttle sample; F6 down; F7 up; F8 confirm; F9 throttle; F10 brake; F11 pause; F12 stop; F13 paused 2000ms brake sample; F14 paused 2000ms no-input coast sample")
 } else if Action = "brake_test" {
     BrakeTest()
+    ExitApp()
+} else if Action = "camera_run" {
+    CameraRun()
     ExitApp()
 } else {
     Pulse(Action, HoldMs)

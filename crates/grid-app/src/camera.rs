@@ -366,14 +366,19 @@ impl Sample {
         }
     }
 
-    /// The player's car after the tick.
+    /// The player's car after the tick, posed in its model frame.
     pub fn of(runtime: &grid_tools::source_vehicle::Runtime, segment: u64) -> Self {
         let b = &runtime.state.car.owner.vehicle;
         let f = |o: usize| f32::from_bits(b[o / 4]);
         let [vx, vy, vz, _] = runtime.velocity();
         let [wx, wy, wz, _] = runtime.angular_velocity();
+        let rows = std::array::from_fn(|r| Vec3::new(f(0x10 + 16 * r), f(0x14 + 16 * r), f(0x18 + 16 * r)));
         Self {
-            pose: Mat4::from_cols_array(&runtime.pose()),
+            pose: model_frame(
+                Mat4::from_cols_array(&runtime.pose()),
+                rows,
+                Vec3::new(f(0x1630), f(0x1634), f(0x1638)),
+            ),
             velocity: Vec3::new(vx, vy, vz),
             angular_velocity: Vec3::new(wx, wy, wz),
             speed: f(0x1648),
@@ -386,6 +391,26 @@ impl Sample {
             segment,
         }
     }
+}
+
+/// The car's model frame, which the camera target answers (0x9AE3A0; target
+/// +0x14/+0x18/+0x1C): the physics pose (car +0xDB0 → +8, body +0x1D0)
+/// rotated by the car's 3×3 at +0x10 (rows, nearly the identity) with its
+/// origin moved by that rotation times car +0x1630 (the Lacetti's
+/// (0, −0.39144, −0.14642): the model origin lies below and behind the body
+/// origin). A rotation that is not one keeps the pose's rotation.
+pub fn model_frame(pose: Mat4, rows: [Vec3; 3], offset: Vec3) -> Mat4 {
+    let local = Mat3::from_cols(rows[0], rows[1], rows[2]);
+    let local = if local.is_finite() && (local.determinant() - 1.).abs() < 1e-3 { local } else { Mat3::IDENTITY };
+    // Row vectors: pose rows × the +0x10 rows; the translation is not turned.
+    let rotation = local * Mat3::from_mat4(pose);
+    let origin = pose.w_axis.truncate() + rotation * offset;
+    Mat4::from_cols(
+        rotation.x_axis.extend(0.),
+        rotation.y_axis.extend(0.),
+        rotation.z_axis.extend(0.),
+        origin.extend(1.),
+    )
 }
 
 /// Spin hold (impact envelope 1, 0x81EC90 with 0x7FF3E0).
@@ -949,7 +974,17 @@ impl Cameras {
         let ticks = self.last.map_or(0, |(_, t)| sample.ticks - t);
         self.last = Some((sample.segment, sample.ticks));
         let dt = ticks as f32 * grid_tools::source_vehicle::DELTA;
-        shot(&self.views.0[shown].rig, &mut self.history, sample, dt, orbit)
+        let shot = shot(&self.views.0[shown].rig, &mut self.history, sample, dt, orbit);
+        if reset && cfg!(not(test)) {
+            println!(
+                "drive_camera event=start view={} tick={} eye={:?} model_origin={:?}",
+                self.views.0[shown].ident,
+                sample.ticks,
+                shot.eye.to_array(),
+                sample.pose.w_axis.truncate().to_array()
+            );
+        }
+        shot
     }
 
     /// Writes the original's saved name (0x584E70) to the profile file.
@@ -1063,6 +1098,81 @@ mod tests {
             twist_scale: Vec3::ZERO,
             tilt_distance: 1.,
         }
+    }
+
+    /// Diagnostic: the port's views driven by a decoded live trace of the
+    /// original (local/cam/live/decode.py: t, step, speed, state, wheels x4,
+    /// pose, angular, velocity, ...). Writes per row and view: eye, forward,
+    /// up. GRID_CAMERA_TRACE=IN, GRID_CAMERA_OUT=OUT, GRID_GAME_ROOT.
+    #[test]
+    #[ignore]
+    fn replay_live_trace() {
+        let (Ok(input), Ok(output)) = (std::env::var("GRID_CAMERA_TRACE"), std::env::var("GRID_CAMERA_OUT")) else {
+            return;
+        };
+        let root = std::env::var("GRID_GAME_ROOT").expect("GRID_GAME_ROOT");
+        let views = Views::load(Path::new(&root), "lac").unwrap();
+        let idents = ["chase_close", "chase_far", "bumper", "bonnet", "head-cam"];
+        let mut histories = vec![History::default(); idents.len()];
+        let mut out = String::new();
+        let mut previous: Option<f64> = None;
+        for line in std::fs::read_to_string(input).unwrap().lines() {
+            let t: f64 = line.split('\t').next().unwrap().parse().unwrap();
+            let v: Vec<f32> = line.split('\t').map(|x| x.parse().unwrap()).collect();
+            // Car +0x10 rows from CM02 captures (columns 73..), else the identity;
+            // the Lacetti's +0x1630 from the live grid dump (docs/SERIES.md, F447).
+            let rows = if v.len() >= 89 {
+                std::array::from_fn(|r| Vec3::new(v[73 + 4 * r], v[74 + 4 * r], v[75 + 4 * r]))
+            } else {
+                [Vec3::X, Vec3::Y, Vec3::Z]
+            };
+            let s = Sample {
+                pose: model_frame(
+                    Mat4::from_cols_array(&std::array::from_fn(|i| v[12 + i])),
+                    rows,
+                    Vec3::new(0., -0.39144, -0.14642),
+                ),
+                angular_velocity: Vec3::new(v[28], v[29], v[30]),
+                velocity: Vec3::new(v[31], v[32], v[33]),
+                speed: v[2],
+                wheels: std::array::from_fn(|i| (v[4 + 2 * i], v[5 + 2 * i])),
+                controls_disabled: v[3] != 7.,
+                ticks: 0,
+                segment: 0,
+            };
+            // The camera runs on the frame time (the sampler's row gap), not on
+            // the physics step +0x7C8.
+            let dt = previous.map_or(0., |p| (t - p) as f32);
+            previous = Some(t);
+            let mut row = vec![v[0]];
+            for (k, ident) in idents.iter().enumerate() {
+                let i = views.0.iter().position(|x| &x.ident == ident).unwrap();
+                let shot = shot(&views.0[i].rig, &mut histories[k], &s, dt, |o| o);
+                row.extend(shot.eye.to_array());
+                row.extend((shot.rotation * Vec3::NEG_Z).to_array());
+                row.extend((shot.rotation * Vec3::Y).to_array());
+            }
+            // States: chase_close lag and spin blend, bonnet tilt and shift.
+            row.extend([histories[0].chase.lag, histories[0].chase.spin.blend]);
+            row.extend(histories[3].mounted.tilt.to_array());
+            row.extend(histories[3].mounted.shift.to_array());
+            out += &row.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\t");
+            out.push('\n');
+        }
+        std::fs::write(output, out).unwrap();
+    }
+
+    #[test]
+    fn cameras_mount_on_the_model_frame() {
+        // 0x9AE3A0: body origin (10, 0, 0) turned π/2 about Y; the model
+        // origin is R · (0, −0.39144, −0.14642) = (−0.14642, −0.39144, 0) away.
+        let pose = Mat4::from_rotation_translation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), Vec3::new(10., 0., 0.));
+        let model = model_frame(pose, [Vec3::X, Vec3::Y, Vec3::Z], Vec3::new(0., -0.39144, -0.14642));
+        assert!(model.w_axis.truncate().abs_diff_eq(Vec3::new(10. - 0.14642, -0.39144, 0.), 1e-6));
+        assert!(Mat3::from_mat4(model).abs_diff_eq(Mat3::from_mat4(pose), 1e-7));
+        // A broken +0x10 block keeps the pose's rotation.
+        let broken = model_frame(pose, [Vec3::ZERO; 3], Vec3::ZERO);
+        assert_eq!(broken, pose);
     }
 
     #[test]

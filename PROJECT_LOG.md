@@ -1,5 +1,28 @@
 # GRID engine project log
 
+F470 Live camera comparison with the original: the views mount on the car's model frame; chase and bonnet then match frame by frame (2026-10-19, Claude Code; owner's go "запускай" in this session after the coordinator relayed the owner's request "запускай записи оригинала: Redgate и камеру"). Details: docs/CAMERA_VIEWS.md §2 "Live comparison with the original (F470)". Evidence: worktree camera-dynamics-11a55d `local/cam/live/` (session, user-file snapshot and hashes, `runA/B/C` captures and decodes, port replays, `compare.py`, `compare2.py`, `states.py`, `tilt.py`, screenshots and sheets, macro logs).
+- Session [V]: research copy b1da1b2d…aece34a6, PID 33556, 11:14–~11:55 UTC. Race Day, Touring Cars, Lacetti, Donington GP, 3 laps. Three runs of the new bounded macro `camera_run` (`tools/grid_macros.ahk`: throttle 8 s, brake 2 s into Redgate, throttle+right 2.5 s over the exit kerb, throttle 1.5 s; plus a `view` key action) through the guarded runner.
+  - Memory reads only: new `tools/capture_grid_camera.py` (`scan` finds the player's 20 view records; `capture` records car state and records per physics change). 2676/2212/2589 rows; world +0x7C8 median 6.49/7.62/6.06 ms, frame gaps 6.05/6.93/5.92 ms (unlocked).
+  - All 19 user files match the snapshot hashes; none changed. Closed with WM_CLOSE; Steam install untouched.
+- Method: the port's camera code driven with the original's per-frame car state (ignored test `camera::tests::replay_live_trace`), compared with the original's records (`compare2.py`; rows where the record lags the pose by a frame are skipped).
+- Findings:
+  - [D/V] **Bug fixed:** the original mounts every view on the car's model frame (0x9AE3A0: the physics pose turned by car +0x10, origin moved by R · car +0x1630 = (0, −0.39144, −0.14642) for the Lacetti). The port used the physics pose, so all views sat 0.42 m off. New `camera::model_frame`, used by `Sample::of`. In the app the port's bumper eye at rest now equals the original's recorded one (−183.644, −11.532, 19.311 against −183.639, −11.522, 19.309; same grid slot).
+  - [V] Car +0x10 is dynamic, a body rotation up to ~0.2° (run C). Without it the residual is ≤ 0.5° pitch under acceleration and ~1° roll in slides (runs A/B). The port does not compute it [I]; `Sample::of` falls back to the identity when the words are not a rotation. Open.
+  - [V] The original's camera integrates with the rendered-frame time, not world +0x7C8: with +7C8 the bonnet tilt state reaches 77–82 % of the original's; with the frame gap it matches to 4 digits. No port change: the port uses its own tick time, consistent with its own Δv.
+  - [V] **Agreement** (run C, frame-time dt, with car +0x10):
+    - chase_close/chase_far eye 0–2.5 cm (4 cm at the end of the slide), direction ≤ 0.1°;
+    - bumper exact; bonnet eye ≤ 0.6 cm, direction ≤ 0.07°;
+    - chase lag, bonnet tilt state and shift equal to 3–4 digits; the eye-height hold below 5 m/s at the start reproduced;
+    - head-cam: 1 cm lower and ≤ 0.3° roll in the slide (its untraced dynamics, row 67).
+  - Not exercised: the spin hold did not start in either game (blend 0 in all runs); chase roll < 0.05° in both.
+- Also: app log line `drive_camera event=start view=… eye=… model_origin=…` at each camera history reset.
+- Checks [V], release, cargo/rustc 1.99.0, rust-lld, on 53a0c92 (F468) + this change, after `seed_build_dir.ps1 -Reseed`:
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 781 passed, 0 failed;
+  - `cargo clippy --release --workspace --all-targets -- -D warnings` clean;
+  - `grid-soak quick` 24/24;
+  - identities (`grid-opponent-race` rebuilt first, TOOLCHAIN "Identity check"): solo 6d7184ac…0063, 12-car a08171c2…e400, 12-car with DF01 and characteristics 7f03a755…db0f, equal to main's F465 values. The race tool does not depend on grid-app.
+  - Playable not rebuilt (coordinator).
+
 F469 Redgate braking: two live captures of the original's AI; the decompiled brake-line formula does not explain its part pedal (2026-10-19, Claude Code; coordinator's task, the owner approved the launch in this session). Details: docs/AI_CHOREOGRAPHER_PORT.md "Live captures (F469)". Evidence: main checkout `local/driving/redgate-live-20261019/`. **No engine change.**
 - Live runs [V]: research copy only (SHA-256 b1da1b2d…aece34a6), PIDs 36060 and 43220, memory reads plus menu key macros; Race Day, Touring Cars, Lacetti, Donington GP, Normal, grid Back; world +7C8 6.1–9 ms recorded per row; 0 of the 19 user files changed (hash-verified); the game closed on the close request both times.
 - [V] All 11 AI cars: published brake ramps at 5/s to 0.27–0.45, then creeps to 0.6–0.75 (no chatter). Live inputs (distance, target, modifier, grip 2.2, speed, wheel speeds within 1 %, cap +0xA0 = 1, flags 0, no mistake) put the decompiled 0x7886C0 at raw 1 throughout; no braking table or trigger factor reproduces the pedal in simulation.

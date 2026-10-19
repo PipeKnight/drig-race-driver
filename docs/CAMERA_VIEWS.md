@@ -88,6 +88,35 @@ Per frame, 0x8435D0 calls 0x81EC90, which does, in order:
 
 0x8435D0 then applies fixedRoll (0 in all views), stores fov · 0.0174533, and calls the shake 0x810490 (shakeScaleX/Y 0 in the chase views; not ported). Because 0xE4DD54 = 1 it finally calls 0x7FEC40, which turns the eye and orientation about Y by atan2(record +0xA4, record +0xA8 + 0.1). Those two words are zeroed by the record reset 0x831D20; their writers (0x7FE88E, an angle interpolation, and others at 0x819AF2..0x837B85) were found but not identified [I]. Not ported: treated as 0 in races.
 
+### Live comparison with the original (F470) [V]
+
+19 October 2026, owner's go ("запускай"). The research copy (SHA-256 b1da1b2d…aece34a6), PID 33556. Race Day, Touring Cars, Lacetti, Donington GP. Three runs (A, B, C) of the bounded macro `camera_run`: from rest, throttle 8 s, full brake 2 s into Redgate, throttle and right 2.5 s over the exit kerb, throttle 1.5 s. Run A slid into the gravel after a touch with an AI car; run B ended against the barrier; run C slid wide.
+- Memory was only read, with the new `tools/capture_grid_camera.py`:
+  - `scan` finds the 20 view records of the player's camera manager: the camera objects with target vtable 0xCFF640, then the manager entries that hold them, record at entry +0x10. FOV is checked against the object.
+  - `capture` writes a row each time the car's physical block changes: world +0x7C4, car +0x1640, +0xD230, the wheels, physical +0x1D0, car +0x10..+0x4F (from CM02, run C), and per view the record +0x00..+0x14F and object +0x190/+0x220.
+  - Every view record updates every frame; the one on screen is just the one drawn.
+- The user files (all 19) match their snapshot hashes after the session; none changed. The game was closed with WM_CLOSE. Evidence: worktree camera-dynamics-11a55d `local/cam/live/` (captures, decodes, `compare*.py`, `states.py`, `tilt.py`, shots, sheets, macro logs, session).
+
+The port's camera code was then driven with the original's per-frame car state: the ignored test `camera::tests::replay_live_trace`, run with GRID_CAMERA_TRACE, GRID_CAMERA_OUT and GRID_GAME_ROOT. The output was compared with the original's records frame by frame (`compare2.py`). Rows where the record lags the pose by a frame are skipped (sync check on the rigid bumper).
+
+Findings:
+1. **Mount frame** [D]. The camera target answers the car's model frame, not the physics pose. 0x9AE3A0 takes the physics pose (body +0x1D0), turns it by the car's 3×3 at +0x10 (rows), and moves the origin by that rotation times car +0x1630. For the Lacetti that is (0, −0.39144, −0.14642): the model origin lies 0.39 m below and 0.15 m behind the body origin. The port mounted its views on the physics pose, 0.42 m off; fixed in `camera::model_frame`, used by `Sample::of`.
+   - Car +0x10 is dynamic. It held up to 0.2° of roll mid-run (run C); without it the error is up to ~0.5° of pitch under acceleration and ~1° of roll in the slide (runs A/B). The port does not compute it [I]; `Sample::of` reads the port's words and falls back to the identity when they are not a rotation.
+2. **Camera time.** The original's camera integrates with the rendered-frame time. Here that is the gap between physics changes, about 5.9 ms median, not the world step +0x7C8 (6.06 ms median in run C, about 4 % more in total). With +7C8 the bonnet tilt state reached only 77–82 % of the original's; with the frame time it matches to 4 digits (`tilt.py`). The port feeds its own simulation time, consistent with its own Δv.
+3. **Agreement with the frame-time dt and car +0x10** (run C, synced rows, 2-s bins):
+
+   | view | eye | direction | roll |
+   |---|---|---|---|
+   | chase_close | 0–2.5 cm (4 cm at the end of the slide) | ≤ 0.1° | 0.00° |
+   | chase_far | 0–2.3 cm (4 cm at the end of the slide) | ≤ 0.08° | 0.00° |
+   | bumper | 0 | 0.00° | 0.00° |
+   | bonnet | ≤ 0.6 cm | ≤ 0.07° | ≤ 0.01° |
+   | head-cam | 1 cm lower | ≤ 0.12° | ≤ 0.3° in the slide |
+
+   The internal states match too: chase lag (e.g. −0.367 against −0.369 in the slide), bonnet tilt state and shift to 3–4 digits, the eye-height hold below 5 m/s at the start. The head-cam differences are its own untraced dynamics (0x842DD0, backlog row 67).
+4. **Not exercised.** The spin hold did not start in either game; the slides were not violent enough (blend 0 in all three runs). The chase roll stayed below 0.05° in both.
+5. **Run conditions.** The frame rate was unlocked (world +0x7C8 about 6 ms, ~170 Hz). The chase lag and follow are frame-rate sensitive in the original; the port uses its 1/60-s normalisation for the follow damp (§3).
+
 ### Chase yaw lag [D, 0x8114B0]
 
 Per frame:
@@ -156,7 +185,7 @@ Camera time is simulation time: committed ticks × 0.016 s between frames. So pa
 
 Per-frame coefficients are AUTHORED: the original applies the close-follow damp once per rendered frame, and the port applies it per 1/60 s, so the result does not depend on the frame rate. The spin hold counts frames as the original does; the port counts only updates that advance the simulation (AUTHORED).
 
-The camera's inputs are read from the car words after the tick (`camera::Sample::of`: pose, velocity, angular velocity, car +0x1648, wheel +0x40/+0x4C, car +0xD234); nothing is written back. Replays have only pose and velocity (`Sample::moving`: speed |v|, no rotation, suspension at rest).
+The camera's inputs are read from the car words after the tick (`camera::Sample::of`: the model frame of 0x9AE3A0 from the physics pose, car +0x10 and +0x1630 (F470); velocity, angular velocity, car +0x1648, wheel +0x40/+0x4C, car +0xD234); nothing is written back. At each history reset the app logs `drive_camera event=start view=… eye=… model_origin=…`. Replays have only pose and velocity (`Sample::moving`: speed |v|, no rotation, suspension at rest).
 
 Persistence: `<data dir>/camera.ini` holds `current_camera = IDENT`. It is read at startup, with the same fallback, and written on exit, with the same reverse-to-owner mapping (log lines `drive_camera event=restore|change|save`). This is the port's stand-in for the original's profile. It is not a `settings.ini` key, so the user's settings files are never rewritten.
 
@@ -181,7 +210,7 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
   - transitions (all switch);
   - drift and replay views.
 - Cockpit rendering: head-cam needs the high-detail interior (`interiors/lac/int_lac.pssg`, `highResInterior`), which the app does not load yet. From the seat the exterior body is seen from inside.
-- The FOV and head behaviour have not been compared with the running original.
+- The chase, Mounted and head views were compared with the running original in F470 (section 2, "Live comparison"); the FOV values match the records, and the head dynamics differ as expected. Open after F470: the car body rotation at car +0x10 (the port does not compute it), and the spin hold (not triggered live).
 - Renders (main checkout `local/cameras/renders/`, both cars) show the bonnet view without a visible hood. The eye may sit at or under the hood surface, which is back-face culled. This is not compared with the original.
 
 ## 5. Tests
@@ -203,6 +232,7 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
 - the lagged frame;
 - the close-follow drop of 5·sin(slope), set directly on the first update;
 - F461, against hand-computed values: the eye height latch at 5 m/s (0.4 blend at 2 m/s); suspension heave (0.0127649 for 0.05 m on every wheel, then decay by 1 − 0.533801) and the raised target; fall-back 0.5 m at 30 m/s and the gear drop-back envelope (0.7125, rise keeps the larger value, fall 0.5); roll steps of 0.08 to the goal 1.114085 with weight 0.75 and the view's up tilt; the spin hold (arming, start, √0.08 rise, plateau restart, quiet jump to 1.2 s, 0.125 ease, held while controls are disabled, the half pitch/roll rates); the spin frame (held forward, halfway turn, straight blend near 0.97, unset held forward); the drift blend (−π/4 · 0.914214); the bonnet tilt state step and twist frame (moving and at a standstill);
+- F470: the model-frame mount (`cameras_mount_on_the_model_frame`); the ignored diagnostic `replay_live_trace` (live trace in, port views out);
 - rigid, pitched-down bumper and its reverse;
 - bonnet braking shift within the limit;
 - head seat position;
