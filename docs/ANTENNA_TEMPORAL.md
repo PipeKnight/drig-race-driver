@@ -1,0 +1,21 @@
+# Thin antenna temporal reconstruction
+
+19October2026. Owner accepts native DLAA clarity overall but reports a significant trail behind the roof antenna, with no comparable issue elsewhere. Preserve the approved image and diagnose this localized failure.
+
+## Purchased geometry and actual inputs
+
+The read-only grid-surface-texture probe now supports GAME_ROOT --car-material CAR MATERIAL for bounded selectedLOD0 rest geometry. Lacetti Aerials is drawMPJRI, jointx0_aerial_fl, sourcex0_RDS:21vertices/25triangles, identity rest transform, xwidth0.00317745m and height0.241001m. The ordinary material isOpaque (not blended glass), moving with the source car; it is excluded from body deformation. Mesh rest bounds alone are not physical local coordinates. The constructor's NED-to-local offset is[0,-0.39143702,-0.14642298]. First candidate-volume query ignored that offset and found0samples; it was not accepted as evidence of bad/good antenna motion.
+
+Corrected native1280x800/tick502 audit projects the antenna to about0.628pixels wide and45.7pixels tall. SMAA's unjittered frame has no candidate-depth samples; TAA/DLAA's selected jitter phase has41. Their candidate-pixel99th-percentile velocity residual is0.00278pixels. The generic100sample acceptance threshold is inapplicable to this tiny object; raw tool threshold_pass remainsfalse rather than being relabelled. These facts support intermittent raster coverage as a concrete mechanism, not an all-frame proof of the sole trail cause. Private actual-aerial-part02.log/actual-antenna-motion30-01.json retain exact transformed geometry and projections.
+
+## Pinned primary guidance
+
+NVIDIA SDK310.5.3's Programming Guide,18December2025, sections3.6.4/pages19–21 recommends conservative rasterization of motion vectors only for thin features missed by ordinary color rasterization. It explicitly does not promise a complete cure. Section3.15/page30 says the older bias-current-color mask is not intended for the latest models (only presetF mentioned); therefore no framework/SDK fork for a reactive mask is justified here. Installed Bevy0.19.1's SR node currently passes bias=None and its render context is private. Guide extracts stay private; no vendor code/binary is copied into source.
+
+## Default-off motion-only pilot
+
+--thin-motion antenna requires enhanced nativeDLAA driving; defaultoff. A narrow additional pass draws the actual player's Aerials mesh with conservative raster into the existingRg16Float motion attachment after stock prepass, before main color. It uses the main depth attachment read-only/GreaterEqual (reverseZ), not the sampling-only depth copy. No color target, depth writes, thickness/vertex change, new texture upload, global sharpening, SDK modification, physics or input change. Current jittered raster projection and unjittered current/previous motion projections follow the already verified temporal audit convention. Actual per-part GlobalTransform includes model offset; previous rendered frame is extracted separately. Hidden/absent parts do not draw; the ECS regression covers history and visibility. Unsupported conservative-raster devices skip with an explicit log.
+
+This is source/typecheck evidence until GPU comparisons pass. Required: exact off-mode parity to the accepted pipeline, raw depth byte identity, bounded changed velocity near projected antenna, finite values, motion-frame inspection at30/300virtualFPS and native4K; paired physical state/full-lap checks and resource tests. Keep approved756DLAA and ordinary3362 installed until a candidate is verified.
+
+Initial compile rejected old wgpu API assumptions (ownedVertexBufferLayout namespace, optional depth fields and raw buffer slice types). Fixed with installed Bevy/wgpu29 APIs. Also replaced sampling-depth view with actual ViewDepthTexture read-only attachment before GPU. A visibility edit first aborted on a stale multiline-query anchor; the following nominalClippy checked the old source only. The exact one-line retry integrates the test/visibility and actual all-target featureClippy04 passes. No failed compile or aborted edit is treated as runtime acceptance.
