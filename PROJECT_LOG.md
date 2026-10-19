@@ -1,5 +1,17 @@
 # GRID engine project log
 
+F450 Live 12-car captures of the original at Milan and Spa: launch, hold and mixed field (2026-10-19, Claude Code; owner's desktop window via the coordinator, the owner's request that captures be done now). Details: docs/FIRST_CORNER_LIVE.md §8. Evidence: main checkout `local/driving/field-20261019/` (two 60 s FD01 field captures, manager scans, world +7C8 samples, screenshots, user-file snapshot); this worktree's `local/firstcorner/launch.py`, `live2/`. Docs only.
+- Session [V]: research copy b1da1b2d…aece34a6, PID 37284, 02:39–02:55 UTC; memory reads only; Steam install untouched; 11 of 19 user files changed and were restored, all 19 hash-verified; closed on the close request.
+- Setup: Touring Cars, Lacetti, Normal, grid Back, 3 laps; each capture 60 s from a restart. Jarama route 1 could not be captured: Touring Cars Race Day does not offer Jarama, so Spa GP was taken instead. Touring Cars does offer Le Mans.
+- Frame rate: unlocked; world +0x7C8 6.1–7.4 ms (median step 6.3 ms Milan, 5.7 ms Spa).
+- Findings [V]:
+  - The hold repeats on Donington, Milan and Spa: throttle 0, then exactly 1.0 for the last 3.02–3.06 s; 6.3–6.8 s in all.
+  - The AI field is mixed BMW 320si / Lacetti by grid slot. Slots 0, 1, 5, 6 and 7 are the faster launchers [I: BMW] on every track (17.0–17.6 against 15.0–15.7 m/s at 1 s). This explains field02's two launch groups.
+  - The launch is barely step-sensitive (13.5 ms against about 6 ms: within 3 %).
+  - Spa, mixed field, port (F444 + F447) against original: matched at 0.5 s (9.0/6.4 against 9.3/6.9 m/s); behind at 1 s (15.7/13.1 against 17.0/15.0).
+  - Milan launch steering: the original's AI steers ±0.32–0.40 at the go, decaying to 0 in 0.5 s. The port's AI goes to full lock, slots 7 and 9 to the opposite side, and slots 9 and 10 brake at 1.5 s. The standstill look-ahead target differs (open).
+  - Car +0xE30 is the steering; +0xE3C equals the throttle.
+- Next: the standstill look-ahead target at the Milan grid; the 0.5–1 s launch gap; port comparisons with the mixed field (`--cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`).
 F449 Redgate corner speed: cause located in the line-following curvature, not ported yet (2026-10-19, Claude Code; coordinator's task "Redgate: corner speed and brake-line braking"). Details: docs/AI_CHOREOGRAPHER_PORT.md "Redgate corner speed (F449 …)". Evidence: main checkout `local/driving/redgate-20261019/` (port solo trace, κ comparison, read-only Ghidra 12.1.4 decompiles cs1–cs5 of 0x777940, 0x9AD500, 0x98DB40, 0x998690, 0x798E90, 0x788410, 0x7878F0, 0x779C40); live field comparison in worktree fervent-napier-50814b `local/firstcorner/field02.dec.tsv`. The original was not launched for this entry. **No engine change.**
 - [V] Original leader at Redgate: brakes from x≈−460 at 0.55–0.78, releases at 37.3 m/s, holds 37.0–37.6 with throttle 0.45–0.6. Port leader (also solo): brakes from x≈−478 at 0.92–1.0, drops to ~35.7, sags to 33–34 with steering sawing ±1 and the corner lift holding throttle at 0.2.
 - [V] Port cause: κ = heading difference of racing-line **segment** directions over the look-ahead is exactly 0 for 10–20 ticks in the hairpin (1 309 of 6 000 solo ticks), so the look-ahead grows ~1 m/tick, the heading error jumps to −0.43 and steering slams to −1.

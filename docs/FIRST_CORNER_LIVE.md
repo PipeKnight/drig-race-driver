@@ -159,3 +159,59 @@ The launch gap of section 3 was the missing AI traction control 0x77AA10
   follow brake 0x77A1E0 matches the port 1:1 [D]. Left to the AI braking session.
 - [V] Jarama route 1, 12 cars, DF01 and characteristics, 12,000 ticks: no retirement (the
   pile-up of ROBUSTNESS_RESEARCH §4 retired cars 5, 6, 7 and 10).
+
+## 8. Milan and Spa captures (F450)
+
+2026-10-19, 02:39–02:55 UTC. Research copy only (SHA-256 b1da1b2d…aece34a6), PID 37284.
+- Memory reads only; Steam install untouched. 11 of the 19 user files changed and were restored;
+  all 19 are hash-verified. The game closed on the close request.
+- Evidence: main checkout `local/driving/field-20261019/` (`milan01.tsv`, `spa01.tsv`, manager
+  scans, `world-*.json`, `shots/`, `user-before*`), decoded and compared in this worktree's
+  `local/firstcorner/` (`launch.py`, `live2/`).
+- Setup: Race Day, Touring Cars, Chevrolet Lacetti, Normal, grid Back, 3 laps; each 60 s from a
+  restart. Spa replaces the planned Jarama route 1: **Touring Cars does not offer Jarama**. Its
+  locations are Okutama, Detroit, Washington, Spa, Milan, Nürburgring, Donington, Le Mans,
+  Yokohama and Shibuya.
+- Frame rate: unlocked. World +0x7C8 was 6.1–7.4 ms; the median step after the go was 6.3 ms
+  (Milan) and 5.7 ms (Spa), against 13.5 ms in field02.
+- The manager scan ran from a scratch copy of `tools/find_reference_vehicle_manager.ps1`, with
+  `[Convert]::ToHexString` swapped for `BitConverter` (no PowerShell 7 on the machine).
+
+**Findings [V]:**
+1. **The hold is the same on all three tracks.** Throttle 0 from the placement, then exactly 1.0
+   for the last 3.02–3.06 s before the go. The whole hold lasts 6.3–6.8 s (§2's start states 1
+   and 0).
+2. **The AI field is mixed, by grid slot.** The race results list BMW 320si and Chevrolet
+   Lacetti. On every track slots 0, 1, 5, 6 and 7 launch to 17.0–17.6 m/s at 1 s and slots 2, 3,
+   4, 8, 9 and 10 to 15.0–15.7 m/s. The faster group is the BMW [I]: the port's BMW is the faster
+   launcher of the two as well. This also explains §3's "two launch groups".
+3. **The launch is barely step-sensitive.** Donington at 13.5 ms and Milan/Spa at 5.7–6.3 ms give
+   the same speeds within about 3 %.
+4. **Port against original, Spa, mixed field** (BMW / Lacetti means, the field held as in the
+   captures):
+
+   | After the go | Original | Port (F444 + F447) |
+   |---|---|---|
+   | 0.5 s | 9.3 / 6.9 m/s | 9.0 / 6.4 |
+   | 1.0 s | 17.0 / 15.0 | 15.7 / 13.1 |
+   | 3.0 s | 36.1 / 35.3 | 34.0 / 33.0 |
+
+   The first half second matches. The port falls behind between 0.5 and 1 s, when the
+   original's traction-control throttle ramps back to 0.9.
+5. **Milan launch steering.**
+   - In the original, steering (car +0xE30) is 0 through the hold. At the go it reaches about
+     ±0.32–0.40 within two frames and decays to 0 by 0.5 s. All cars launch alike (14.7–17.6 m/s
+     at 1 s).
+   - In the port several cars steer to full lock (±1.0), slots 7 and 9 to the opposite side.
+     Slots 9 and 10 brake at 1.5 s, and the field is at 11.9–12.8 m/s at 1 s.
+   - Below 3 m/s both plan at the car's own lateral offset. The port's heading error to the
+     look-ahead target at standstill is therefore at least 12° against about 4° in the
+     original: the standstill look-ahead target differs (open).
+6. Car +0xE3C equals the throttle in all captures. The steering is +0xE30. The decoder's
+   `steer` column reads +0xE3C and is relabelled in the notes.
+
+Next:
+- the standstill look-ahead and target point (`update_look_ahead` below laSpeedMin) against the
+  original at the Milan grid;
+- the 0.5–1 s launch gap (traction-control level and the 1→2 shift);
+- the port field for these comparisons should be mixed: `--cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`.
