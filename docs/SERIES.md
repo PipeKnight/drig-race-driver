@@ -19,7 +19,7 @@ image (`local/compatibility/grid-unpacked.exe`) or verified by a run; **[I]** in
 | Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | **races since F420** (default setup's downforce limit): original field and grid, 15–17 cars, launcher |
 | Le Mans (24 Hours, free race `Le_Mans`) | lam, 911, dbr, c6r, c5r, sal, spk, esp, r10, cre, b06, b05, lc7, c65 | **F429: series `le_mans`, `lemans_24` = 1 field (DBR9: 16 cars with two R10s), time-limited race on Circuit de la Sarthe (docs/LE_MANS.md)** |
 | Prototype | r10, cre, b06, b05, lc7, 787, 390, je4, c65 | **F457: races**, launcher |
-| Pro Muscle | ply, cha, gtr, bos, vip, cam | F457: races without the Mustang Boss; **experimental** (bos mesh, see F457) |
+| Pro Muscle | ply, cha, gtr, bos, vip, cam | **F463: races** (the Mustang Boss keeps the original NaN planes of its zero-area faces) |
 | Open Wheel | df3, fmj | **F457: races**, launcher |
 | GT Club | tch | **F457: races**, launcher |
 | Prestige | ccx, zon | **F457: races**, launcher |
@@ -416,6 +416,43 @@ limit, not in wrecks. The open-wheel pile-up is the known traffic family (FIDELI
   `is_experimental("pro_muscle")` is true.
 - Launchers `Play GRID Series {Prototype,Open Wheel,GT Club,Prestige}.cmd` with
   `settings/series-{prototype,open-wheel,gt-club,prestige}.ini` (3 laps, back of the grid).
+
+## More layouts and the Mustang Boss (F463) [V unless marked]
+
+**Layouts.** The circuit series pool has 50 layouts that F457 did not cover. Each was raced solo
+with a Lacetti (`grid-opponent-race --route R … 1 14000 ai`, rebuilt binary on 75b6910;
+30000 ticks for the long ones; worktree `local/series2/layouts/`):
+- **35 complete two clean laps** and join `series::SURVEYED_ROUTES`:
+  - San Francisco 1/4/5/6, Detroit 1/3/4/5/6/7, Washington 1/4/6/9;
+  - Milan 1–5, Spa 1/2/3, Le Mans classic (route_1);
+  - Yokohama 1/2/7/8/9, Shibuya 1–7.
+- **The solo car wrecks** on Detroit 0 (0.97 lap) and 2 (0.27), Washington 3 (0.51) and 8
+  (0.32), and San Francisco 2 (1.74). These stay out (AI driving; FIDELITY_BACKLOG row 41).
+- **Do not load**: all six Okutama routes ("expected one typed entity child") and Washington
+  0/2/5/7 ("unsupported entity collision box count"). These stay out (FIDELITY_BACKLOG row 82).
+
+`series::route_supported` (CIRCUITS, surveyed tracks, surveyed routes) is now the one rule
+used by `Series::supported_layouts`, the event menu and the career screen. Every circuit series
+now offers 61 of its 76 layouts.
+
+**Mustang Boss.** [O] The mesh builder 0xB44E80 tests the squared face length against 0: for a
+zero-area face it forces the length to 0, so the factor is −1/0 = −∞ and the plane normal is
+(−∞)·0 = NaN in all four lanes. The attach-time recompute 0xB444D0 (rsqrtps(0) = ∞, Newton step)
+also gives NaN, and the sign test (dot < 0) is false for NaN. Construction goes on in both
+functions. The port now does the same for faces whose squared length is exactly 0
+(`collision_mesh::build` and the shape initialisation); other out-of-range faces stay rejected,
+and no shipped mesh has one. Unit test: coincident vertices give NaN planes for the faces
+through both vertices and finite planes for the others.
+
+Results:
+- Boss solo, Donington GP, 2 laps: 97.6 s / 95.9 s.
+- 12-car muscle field with two Bosses, Donington GP: 6 wrecked or DNF (one Boss DNF, the other
+  finished), 6797 car contacts.
+- The same field without the Boss on the same base: 4 wrecked or DNF, 14077 contacts. So the
+  Donington pile-ups come from the current AI, not from the NaN planes.
+- Istanbul route_1 with the Bosses: 12 of 12 finish.
+
+`bos` joins `RACEABLE`, and `pro_muscle` is no longer experimental.
 
 ## Layouts
 

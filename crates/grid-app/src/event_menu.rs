@@ -190,10 +190,7 @@ fn supported(kind: Kind, route: &str) -> bool {
     match kind {
         Kind::Race | Kind::TimeTrial => route::CIRCUITS.contains(&route),
         Kind::Series | Kind::DriftBattle | Kind::DriftGp => {
-            route::CIRCUITS.contains(&route)
-                || grid_tools::series::SURVEYED_TRACKS
-                    .iter()
-                    .any(|t| route.starts_with(&format!("{t}/")))
+            grid_tools::series::route_supported(route)
         }
         Kind::Freestyle => route.starts_with("tracks/japan/yokohama_docks/"),
         Kind::Touge | Kind::ProTouge => route == route::HARUNA,

@@ -102,10 +102,7 @@ pub fn track_routes(db: &grid_formats::database::Database) -> BTreeMap<i32, Stri
 
 /// A layout the port has raced (the rule of `Series::supported_layouts`).
 pub fn surveyed(route: &str) -> bool {
-    grid_tools::route::CIRCUITS.contains(&route)
-        || grid_tools::series::SURVEYED_TRACKS
-            .iter()
-            .any(|t| route.starts_with(&format!("{t}/")))
+    grid_tools::series::route_supported(route)
 }
 
 /// The open events this port can run, in tier then event order.
