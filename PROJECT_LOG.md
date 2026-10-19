@@ -1,5 +1,17 @@
 # GRID engine project log
 
+F440 Archive of the le-mans session; evidence moved (2026-10-19, Claude Code coordinator).
+
+le-mans pushed F428–F430 (f652609) and has no next task. Its worktree upbeat-galileo-7cb1a5 was clean, with nothing outside origin/main.
+
+Evidence: the worktree's `local/` (`lemans/`: data, decomp, identity*, runs, soak, race-type3.md, time-of-day.md; and `playtest/`; 77 files, 280 874 251 bytes, the same count and size after the move) moved to the main checkout's `local/worktree-evidence/upbeat-galileo-7cb1a5/`. Worktree-local paths cited in F428–F430 now resolve there. The Sarthe "invalid contact material inputs" replay le-mans mentioned is in the main checkout's `local/lemans/soak/quick-37-40/` (not moved); it went to robustness.
+
+Its build dir `C:\cargo-build\dd\8aa7250127ad6f` (2.94 GiB) was deleted with `tools/prune_build_dirs.ps1 -ForWorktree` before `git worktree remove`.
+
+The first archive attempt was refused for live work. The cause was a background Ghidra run `local/lemans/decomp.sh … decomp/t0 90E1B0`, hung since 18.10 19:45: shells and an `analyzeHeadless.bat` cmd, with no Java process. I killed it, then archived the session and removed the worktree.
+
+The push hold for route/soak/series files is lifted. Told: drift-battle-ai (F439), robustness, car-series, replay-weather, minimal-career-screen-ru.
+
 F430 Le Mans time of day: the 24 h clock, the daynight.xml curves and the headlight state recovered and ported as logic and a renderer hand-off (2026-10-18, Claude Code; DISCIPLINES.md §5 item 7). Details: docs/LE_MANS.md §3. Evidence: main checkout `local/lemans/` (`time-of-day.md`, `decomp/b1..b9`: Ghidra 12.1.4 headless, read-only, copy of the drift-ai project; `scripts-b/tod_model.py`; `data/daynight.txt`, `street_lights.txt`). Nothing installed; the original game was not run.
 - Static analysis [V]: mode from `track_model` at load (1 `supports_time_of_day`, 2 `headlights_on`, else 0; only le_mans Route_0 is 1); start 15:00 fixed (0xCB3BA8, 0x911DC3); in a type-3 race the time of day is the scaled race clock, `t = fmod(µs·scale/86400e6 + 15/24, 1)` (0x90D5A0), otherwise frozen at 15:00; daynight.xml reader 0x9DD900 (every attribute its own sparse curve, case-insensitive), finalise 0x98CE20 (midnight wrap; unwrap only rotationangle 360 and skyTime 1), linear evaluation 0x9ACE90; headlight fade 0x73B890 (threshold 0.5, F ± dt, 9 s cap, 0.25 s snap after a start) with per-car 3–9 s delays (0x727B20, 0x736020); sky texture pair from skyTime (0x95FCE0); attribute → consumer table.
 - Port: `grid_formats::daynight`; `grid_tools::time_of_day` (Mode, clock_scale, day_fraction, is_day, Curve, Timeline with `values` as the renderer hand-off, sky_textures, Headlights); grid-app `le_mans_event` keeps the clock and headlight state, logs `drive_time_of_day`, shows its own HUD line. Nothing is drawn (graphics side; hand-off table in docs/LE_MANS.md §3.5). AUTHORED: the per-car delay generator.
