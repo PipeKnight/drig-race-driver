@@ -1,6 +1,6 @@
 # Optional native-resolution DLAA
 
-19 October2026. Owner prioritizes a clearer DLAA experiment; TAA is considered soft but playable/close to the original. Installed graphics3362/c1052 still uses SMAA Ultra. This document starts with source/typecheck evidence, not a claim DLAA renders yet.
+19 October2026. Owner prioritizes a clearer DLAA experiment; TAA is considered soft but playable/close to the original. Installed graphics3362/c1052 still uses SMAA Ultra. Native DLAA now runs in the separately installed optional7569901 build; the ordinary3362 build remains unchanged. Initial implementation notes below are historical; verified controls and remaining limits follow them.
 
 ## Implementation candidate
 
@@ -16,7 +16,7 @@ Private SDK310.5.3 commit982b0d19f9e35fef8e1b3109efa6b95470563866; release DLL S
 
 First offline Cargo resolution lacked bevy_solari index metadata. Online resolution downloaded that pinned0.19.1 package and resolved the new bridge/bindgen dependencies; existing dependency versions were not upgraded (lockfile disambiguates duplicate itertools/shlex/rustc-hash versions). Real grid-app all-target releaseClippy with paint-specular,dlaa passes in1m04s including native wrapper compilation. This is not final linking, initialization or DLAA image quality. Logs under local/graphics/dlaa01 plus the initial lacquer01 offline-resolution log.
 
-## Next verification
+## Initial verification plan (completed controls below)
 
 Build and archive an exact source-stamped optional executable with the pinned DLL/license alongside it; keep accepted3362 separate. Run Vulkan/RTX static and fixed-clock driving controls with SMAA/TAA/DLAA using unchanged materials/light and no sharpening. Verify the log actually selects/prepares native DLAA and both sizes match; a fallback PNG is not a DLAA result. Collect bounded raw motion/depth and frozen-matrix data at30 and300virtualFPS. Check restarts/cuts and an unsupported-backend fallback. Full resource tests/default+feature Clippy, fresh merged-core canonical/quick evidence and guarded separate delivery follow actual runtime acceptance. No performance optimization or quality claim before these results.
 
@@ -39,3 +39,6 @@ All three AA modes pass600ticks at300virtualFPS with30 distinct motion captures 
 Adjacent pinned release DLL works without DLSS_SDK in the process environment. A fresh executable-only private directory without the DLL or SDK variable completes a requested-DLAA600tick capture using the explicit supported=false/effective=smaa fallback. This proves missing-runtime fallback on this RTX/Vulkan setup, not arbitrary non-RTX hardware. An attempted WGPU_BACKEND=dx12 negative control instead still selected Vulkan because the raw Vulkan initialization path is active; its assertion failed and is retained as runtime-path-fallback01.json/log. It is not DX12 fallback evidence, and no unsupported-backend acceptance is claimed.
 
 `Play GRID Graphics DLAA.cmd` is a separate optional launcher for local/graphics/dlaa/grid-app.exe plus adjacent nvngx_dlss.dll. Defaults1920x1080/DLAA; optional arguments are game-root, resolution, and smaa/taa (dlaa otherwise). It uses source light/sky/number/paint and the same dry terrain defaults, with no extra sharpening, upscaling or frame generation. Ordinary graphics launcher stays on its accepted executable. SDK release DLL/license/guide/full extracted notices remain private and are not included in Git. Camera cuts/restarts have source reset handling; interactive acceptance of those operations is still pending.
+
+
+Separate local delivery completed at documentation checkpoint53ac4dc: immutable source7569901 executable SHA091f108132ebbf4be6af00fa4cd11586b1b9a1b04d759211a5a6e9134b37ab1e is hard-linked into each checkout's local/graphics/dlaa/ with the pinned release DLL and license/guide/notices. Primary root launcher was added without overwriting any existing file. Hash guards preserve both ordinary graphics executable links, primary normal game executable and the other agent's untracked research note. An additional600tick GPU smoke from the exact installed primary path succeeds with nativeDLAA and no SDK environment variable. The private delivery01.json records before/after guards and paths. Manual logs use local/graphics/manual-dlaa-*.log. No source assets, SDK binaries or captures committed.
