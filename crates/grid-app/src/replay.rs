@@ -847,12 +847,7 @@ pub fn frame_camera(
             let Some((index, views)) = index.zip(views) else {
                 return;
             };
-            let sample = crate::camera::Sample {
-                pose: car.pose.to_mat4(),
-                velocity: car.velocity,
-                ticks: shown.tick,
-                segment: 0,
-            };
+            let sample = crate::camera::Sample::moving(car.pose.to_mat4(), car.velocity, shown.tick, 0);
             let shot = crate::camera::shot(&views.0[index].rig, &mut session.history, &sample, dt, |o| o);
             (shot.eye, shot.rotation, shot.fov, shot.near)
         }

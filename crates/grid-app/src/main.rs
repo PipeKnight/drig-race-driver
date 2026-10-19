@@ -4377,13 +4377,7 @@ fn drive_present(
         cameras.change_view();
         log_line!("drive_camera event=change view={} tick={}", cameras.ident(), driving.runtime.ticks);
     }
-    let v = driving.runtime.velocity();
-    let sample = camera::Sample {
-        pose,
-        velocity: Vec3::new(v[0], v[1], v[2]),
-        ticks: driving.runtime.ticks,
-        segment: driving.segment,
-    };
+    let sample = camera::Sample::of(&driving.runtime, driving.segment);
     // Right mouse button orbits a chase view (AUTHORED free look).
     let side = if back { -1. } else { 1. };
     let shot = cameras.frame(&sample, back, |o| free_look::offset(free_look.as_deref(), o, side));
