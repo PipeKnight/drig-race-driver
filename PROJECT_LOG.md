@@ -1,5 +1,21 @@
 # GRID engine project log
 
+## G152 — Ground candidate accepted; DLAA native bindings compile (19 October 2026)
+
+3bfc2d1/SHA bbc1dc55... complete workspace728tests/19results,0failed/ignored; feature/default workspace all-targetClippy pass. Matchednative4K ground views/source-mask/RGBA/paired240tick drive checks pass, with4equal physical exits. Core e0/F438 canonical+quick evidence is scoped to source-identical core libraries, not described as a new graphics full lap. local/graphics/ground-aa01/acceptance01.json preserves provenance/limitations. Candidate now eligible for guarded dedicated-executable delivery; normal primary executable/owner note must remain intact.
+
+Private native dlss_wgpu4 cargo check04 succeeded after resolving NDK DLL dependency PATH, existing Windows C header roots and explicit MSVC target/compatibility flags. Failed attempts01–03 retained; no new compiler/fullVulkanSDK or global environment modification. This validates bindings/native wrapper compilation only; no app DLAA linking/runtime/rendering claim. Actual AA remainsSMAAUltra. SDK/hash/tool versions and exact constraints recorded in docs/DRY_GROUND_AND_AA.md. Next graphics step: remaining ground-edge mask and temporal motion/history diagnostics, with performance/crowns still deferred.
+
+
+## G151 — Matte ground GPU/drive validation; private DLAA SDK prepared (19 October 2026)
+
+Runtime3bfc2d1/SHA bbc1dc55... candidate built stamped; no runtime Rust delta through later2ec docs. Both matched native4K ground views inspected, source-mask variant and forcedRGBA fallback pass. Dry ground sheen is reduced; native comparison retains detail and density/exposure. Mixed terrain-edge atlases still show old bright response, documented rather than classified wholesale. Paired240tick/30FPS driving smoke gives4matching physical exits. Package all-target feature Clippy passes. Full workspace tests/Clippy still in progress before push/delivery; installed dedicated runtime remains2197/F427.
+
+Already checked F438/e0e76 source integration pushed to origin graphics. Remote main advanced to26cac51 (Le Mans F428–F430/archiveF440); no forced merge/main push, no primary checkout change. Freeze candidate snapshot rather than attributing new upstream work to its tests.
+
+Pinned official DLSS310.5.3 SDK privately, NVIDIA DLL signatureValid, commit/hash/version in docs/DRY_GROUND_AND_AA.md and local evidence. Reused installed NDK clang21/libclang and staged its Vulkan1.4.335 header subset; no duplicate compiler/full SDK installation. Private dlss_wgpu4 native compile check pending, no app DLAA enabled. User's performance and crown-detail deferrals remain in effect.
+
+
 ## G150 — Ground repro and bounded F438 validation (19 October 2026)
 
 Fresh F438/e0e76 source checks completed:728tests across19harness results,0failed/ignored; feature/default workspace Clippy pass. Canonical SHA1ee8152565eb08c1048093881897999ea7a8ac0f0f0fcc92e084f841f1e77267 matches incoming F417/F425 baseline. Quick soak24/24,120000ticks,0resets, two expected seed24 losses,16.2min wall under shared load. These validate F438 source, not the installedF427 executable or the new ground shader. Private surface-textures01/f438-* evidence retained.
