@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G166 — Optional native DLAA source integration checks pass (19 October 2026)
+
+Added feature-gated main-camera DLAA via Bevy0.19.1/dlss_wgpu4.0.0/SDK310.5.3; shared plugin identity precedes renderer initialization, supported native mode or explicit SMAA runtime fallback, initial/cut/reset history requests, native-size/prepass readiness gate. No sharpening/material/physics changes. Feature all-target appClippy passes with reused SDK/NDK/MSVC tools; initial offline resolution needed one pinned Solari metadata download, no active ray-tracing dependency or dependency-version upgrades. docs/NATIVE_DLAA.md records implementation, scope and runtime gates. Still no linked/rendering DLAA or owner-build replacement claim; accepted3362 remains installed.
+
 ## G165 — Wire opt-in raw temporal input capture (19 October 2026)
 
 Mergeddb60 source passed all-target workspace paintClippy. Added bounded main-view motion/depth+frozen-matrix capture behind --temporal-audit TICK, with private path/overwrite guards, matching GPU header, finite data checks and capture completion/error gate. Real app all-target paintClippy03 passes; binary/GPU evidence pending. First wiring guard and lint retries preserved honestly in docs/TEMPORAL_AA_DIAGNOSTICS.md; installed3362 unchanged. Owner localmain3b42379 combines F454 with an older graphics checkpoint, whereas origin/main remains5004; latest22c00be not yet there. No primary checkout mutation.

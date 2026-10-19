@@ -52,6 +52,8 @@ mod input;
 mod mesh_stream;
 mod motion_capture;
 mod temporal_audit;
+#[cfg(feature = "dlaa")]
+mod native_dlaa;
 mod particles;
 mod pause_menu;
 mod post_race;
@@ -1676,7 +1678,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     Some("taa") => 0,
                     Some("smaa") => 1,
                     Some("off") => 2,
-                    _ => return Err("--aa needs taa, smaa or off".into()),
+                    Some("dlaa") if cfg!(feature = "dlaa") => 3,
+                    Some("dlaa") => return Err("DLAA needs an optional --features dlaa native SDK build".into()),
+                    _ => return Err("--aa needs taa, smaa, dlaa or off".into()),
                 };
             }
             "--wheel-motion" => {
@@ -1923,6 +1927,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--car STEM: purchased car folder cars/STEM for the player and the car scene (default lac; bmw is the other Touring_cars model). --opponent-cars STEM[,STEM...]: opponent models, cycled over the field (default: the player's car; bmw,lac alternates as in the euro_touring 6+6 roster)."
                 );
+                println!("--aa taa|smaa|dlaa|off: SMAA default; experimental native DLAA requires optional dlaa SDK feature and Vulkan RTX, otherwise runtime SMAA fallback. No sharpening added.");
                 println!("--temporal-audit TICK: bounded raw main-view motion/depth plus frozen matrices; live enhanced offscreen --drive/--render-fps only; evidence under ignored local/.");
                 println!("{}", settings::HELP);
                 println!("{}", assists::HELP);
@@ -1978,6 +1983,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
+    }
+    if graphics.anti_aliasing == 3 && !graphics.enhanced() {
+        return Err("DLAA is an experimental enhanced-graphics mode".into());
     }
     if paint_response_explicit && (!graphics.enhanced() || !graphics.layered_car) {
         return Err("paint coat controls require enhanced graphics with layered car materials".into());
@@ -2830,6 +2838,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.refresh_hz.flatten());
     }
+    #[cfg(feature = "dlaa")]
+    native_dlaa::install(&mut app);
     if let (Some(tick), Some(directory)) = (temporal_audit_tick, temporal_audit_directory) {
         temporal_audit::install(&mut app, tick, &directory)?;
     }
@@ -3667,6 +3677,7 @@ fn capture(
     graphics: Res<graphics::Settings>,
     motion: Option<Res<motion_capture::Motion>>,
     temporal: Option<Res<temporal_audit::Audit>>,
+    #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
     replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
@@ -3695,6 +3706,15 @@ fn capture(
     if capture.started.elapsed() > Duration::from_secs_f64(limit) {
         error!("render capture timed out");
         exit.write(AppExit::error());
+        return;
+    }
+    #[cfg(feature = "dlaa")]
+    if native.as_ref().is_some_and(|state| state.failed()) {
+        exit.write(AppExit::error());
+        return;
+    }
+    #[cfg(feature = "dlaa")]
+    if native.as_ref().is_some_and(|state| !state.ready()) {
         return;
     }
     if temporal.as_ref().is_some_and(|audit| audit.failed()) {
@@ -4825,6 +4845,8 @@ fn update_orbit(
 /// Bevy's plugins; with the `profile` feature its log plugin also carries the
 /// per-system span profile (docs/PERFORMANCE.md "Phone bisection").
 fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGroupBuilder {
+    #[cfg(feature = "dlaa")]
+    let plugins = native_dlaa::plugins(plugins);
     #[cfg(feature = "profile")]
     let plugins = plugins.set(bevy::log::LogPlugin {
         custom_layer: |_| Some(Box::new(span_profile::SpanProfile)),
