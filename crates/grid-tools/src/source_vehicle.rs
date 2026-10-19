@@ -343,6 +343,7 @@ impl Runtime {
         owner[0x188c / 4] = 1f32.to_bits();
         // The default car setup's downforce and drag (F414).
         standard_car::apply_default_downforce_setup(&mut owner);
+        standard_car::apply_default_wheel_setup(&mut owner);
         // Running engine on the grid. The native no-input stationary reference
         // (F275 stationary-idle01) holds 232.6573..232.6873, the idle governor
         // target idle*1.01 that the reconstructed post-force stage maintains
@@ -2509,6 +2510,7 @@ mod tests {
                 leaves: &leaves,
             };
             let mut baseline = Vec::new();
+            let mut damaged = false;
             for pass in 0..if label == "deep" { 3 } else { 1 } {
                 enabled.reset();
                 let legacy_guard = pass == 2;
@@ -2595,8 +2597,9 @@ mod tests {
                     );
                 }
                 if legacy_guard {
-                    assert!(
-                        rejected,
+                    // The guard is reached exactly when the enabled run damages.
+                    assert_eq!(
+                        rejected, damaged,
                         "paired None control must reach the old damage guard"
                     );
                     continue;
@@ -2617,12 +2620,11 @@ mod tests {
                     enabled.state.car.owner.damage_random_state != damage_rng_before,
                     enabled.velocity()
                 );
-                if label == "deep" {
-                    assert_ne!(
-                        enabled.state.car.owner.damage_random_state,
-                        damage_rng_before
-                    );
-                }
+                damaged |= enabled.state.car.owner.damage_random_state != damage_rng_before;
+                // F447: the deep wall used to change the damage RNG within 20
+                // ticks; with the original's damper speed threshold (0.14, live
+                // dumps) it no longer does. That expectation was authored, not
+                // measured against the original, so it is logged above only.
             }
         }
     }
@@ -2856,6 +2858,34 @@ mod default_setup_tests {
                 assert_eq!(words("lc7"), (1.5f32.to_bits(), 0x3eea_aaac));
                 assert_eq!(words("b06").0, 1.5f32.to_bits());
                 assert_eq!(words("sal").0, 1.2f32.to_bits());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// F447: the default setup's wheel records against read-only dumps of the
+    /// original's Lacetti (grid slot 9) and Courage LC70 (slot 0) on the
+    /// Donington grid: camber/toe-like +0xE8/+0xEC re-interpolated in f32 and
+    /// the damper speed threshold +0x64 at setup value 11 (0.14).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn default_setup_wheel_records_match_the_live_original() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+                let words = |stem: &str, slot: &str, wheel: usize| {
+                    let car = crate::car::Car::new(stem).unwrap();
+                    let rt = super::Runtime::load(&root, &crate::route::Route::default(), &car, slot, 200679)
+                        .unwrap();
+                    let w = |o: usize| rt.state.car.owner.vehicle[(0x1990 + wheel * 0x150 + o) / 4];
+                    [w(0xe8), w(0xec), w(0x64)]
+                };
+                assert_eq!(words("lac", "slot_09", 0), [0x3b03_1280, 0xbc03_1260, 0x3e0f_5c29]);
+                assert_eq!(words("lac", "slot_09", 2), [0xbac4_9c00, 0xbc8b_4390, 0x3e0f_5c29]);
+                assert_eq!(words("lc7", "slot_00", 0), [0x3c23_d6e0, 0, 0x3e0f_5c29]);
+                assert_eq!(words("lc7", "slot_00", 2), [0, 0, 0x3e0f_5c29]);
             })
             .unwrap()
             .join()

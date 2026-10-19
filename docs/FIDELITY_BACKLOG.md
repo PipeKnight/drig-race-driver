@@ -42,7 +42,7 @@ Columns:
 
 | # | area | discrepancy | evidence | impact | needs | size | owner |
 |---|---|---|---|---|---|---|---|
-| 1 | physics/vehicle | Only downforce (slot 27) of the original default car setup 0x9C32F0 is applied; the other 29 values (suspension, dampers, gears, castor, anti-roll, ride-height loop, 0x9AE8F0/0x9AD6B0) are not. | F420; SERIES.md "downforce limit" | M: per-car handling may differ slightly | L | M | series |
+| 1 | physics/vehicle | Default car setup: downforce (F420) and the wheel records (F447, damper speed threshold 0.14 instead of 400) match live dumps; wheel +0x4C travel clip (0.1534/0.0970 live, 0.3 port), car +0x1568 and wheel +0xBC/+0x140 differ on the original's grid, writer not found. | F420; F447; SERIES.md "wheel records" | M: bottoming / travel stop may differ | S | M | series |
 | 2 | physics/vehicle | Porsche 911 is weak solo (0/1/1 laps, understeers); cause not traced, independent of the floor. | F409; F420 | L–M: one GT car barely laps | S+L | M | series |
 | 3 | physics/vehicle | Of the car reset A09CE0 only the engine reset 996C70 is ported; Braking Assist off verified at one onset speed only. | F417; BRAKING_REFERENCE "Next" | L–M: residual reset/braking differences | S+L | M | drift-battle-ai |
 | 4 | physics/vehicle | The original writes the clutch slot +E34 = 0 every frame; the port keeps the previous value; manual clutch is rejected. | F309; DRIVING_ASSISTS_RESEARCH | L | S | S | drift-battle-ai |
