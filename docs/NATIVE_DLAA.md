@@ -45,3 +45,7 @@ Separate local delivery completed at documentation checkpoint53ac4dc: immutable 
 
 
 Full-lap follow-up at unchanged runtime7569901: pairedDLAA/SMAA6500tick virtual30FPS runs each complete1valid lap91.475311491s,30late motion frames and all four physical exit records match (excluding wallclock). This is the mergedF454 simulation baseline, not the earlier3362 lap. Both logs clean; private full-lap-controls01.json. Separate installed runtime remains7569901 while subsequent surface experiments are developed.
+
+## Open moving-asphalt detail issue
+
+19October2026 owner report and controlled9abb921 comparison identify a sharp car-adjacent asphalt patch in DLAA that is absent with SMAA at the same physical state. This is additional to the thin-antenna issue; earlier sampled temporal acceptance was not universal artifact freedom. See [ASPHALT_TEMPORAL_DETAIL.md](ASPHALT_TEMPORAL_DETAIL.md). Runtime/default unchanged pending an isolated fix.
