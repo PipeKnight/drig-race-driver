@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G165 — Wire opt-in raw temporal input capture (19 October 2026)
+
+Mergeddb60 source passed all-target workspace paintClippy. Added bounded main-view motion/depth+frozen-matrix capture behind --temporal-audit TICK, with private path/overwrite guards, matching GPU header, finite data checks and capture completion/error gate. Real app all-target paintClippy03 passes; binary/GPU evidence pending. First wiring guard and lint retries preserved honestly in docs/TEMPORAL_AA_DIAGNOSTICS.md; installed3362 unchanged. Owner localmain3b42379 combines F454 with an older graphics checkpoint, whereas origin/main remains5004; latest22c00be not yet there. No primary checkout mutation.
+
 ## G164 — Integrate upstream F454 into the graphics worktree (19 October 2026)
 
 Merged origin/main5004cf9 after delivering/pushing the separately checked3362 material runtime. Resolved two expected conflicts: retain both graphics guard/default/log block and the complete LeMans race-limit block with independent closing braces; preserve both journal histories. No primary checkout changes. Integrated source checks pending; installed dedicated runtime remains3362/c1052 with rollback3bfc. Next optional DLAA work follows owner clarity preference while retaining SMAA fallback; no new source/binary acceptance claimed yet.

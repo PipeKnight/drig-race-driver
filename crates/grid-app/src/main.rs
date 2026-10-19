@@ -51,6 +51,7 @@ mod ground_effect_assets;
 mod input;
 mod mesh_stream;
 mod motion_capture;
+mod temporal_audit;
 mod particles;
 mod pause_menu;
 mod post_race;
@@ -1381,6 +1382,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut render_fps = None;
     let mut capture_orbit_rate = None;
     let mut motion_sequence = None;
+    let mut temporal_audit_tick = None;
     let mut texture_override_path = None;
     let mut surface_rgb_override = None;
     let mut surface_specular_explicit = false;
@@ -1608,6 +1610,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 texture_override_path = Some(PathBuf::from(
                     args.next().ok_or("missing private texture manifest")?,
                 ))
+            }
+            "--temporal-audit" => {
+                let tick: u64 = args.next().ok_or("--temporal-audit needs a positive tick")?.parse()?;
+                if !(1..=1_000_000).contains(&tick) {
+                    return Err("temporal audit tick must be 1..1000000".into());
+                }
+                temporal_audit_tick = Some(tick);
             }
             "--motion-capture" => {
                 motion_sequence = Some(motion_capture::Config::parse(
@@ -1914,6 +1923,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--car STEM: purchased car folder cars/STEM for the player and the car scene (default lac; bmw is the other Touring_cars model). --opponent-cars STEM[,STEM...]: opponent models, cycled over the field (default: the player's car; bmw,lac alternates as in the euro_touring 6+6 roster)."
                 );
+                println!("--temporal-audit TICK: bounded raw main-view motion/depth plus frozen matrices; live enhanced offscreen --drive/--render-fps only; evidence under ignored local/.");
                 println!("{}", settings::HELP);
                 println!("{}", assists::HELP);
                 println!("{}", input::HELP);
@@ -2681,6 +2691,17 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if render_fixed_step && render_fps.is_some() {
         return Err("choose --render-fixed-step or --render-fps, not both".into());
     }
+    let temporal_audit_directory = if let Some(tick) = temporal_audit_tick {
+        if !drive || !graphics.enhanced() || output.is_none() || render_fps.is_none()
+            || drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))
+            || settings::diagnostics().replay_capture.is_some()
+            || settings::diagnostics().flashback_capture.is_some()
+        {
+            return Err("temporal audit needs enhanced live --drive, --render-fps, --render and eight ticks of headroom".into());
+        }
+        let path = output.as_ref().unwrap();
+        Some(path.with_file_name(format!("{}-temporal", path.file_stem().ok_or("audit output stem absent")?.to_string_lossy())))
+    } else { None };
     let mut app = App::new();
     app.insert_resource(start_sequence.clone());
     if let Some(keys) = texture_override_keys { app.insert_resource(texture_overrides::Active(keys)); }
@@ -2808,6 +2829,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         // Window size from the native surface, optional refresh-rate hint.
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.refresh_hz.flatten());
+    }
+    if let (Some(tick), Some(directory)) = (temporal_audit_tick, temporal_audit_directory) {
+        temporal_audit::install(&mut app, tick, &directory)?;
     }
     if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
@@ -3642,6 +3666,7 @@ fn capture(
     probe: Option<Res<scene_probe::Cube>>,
     graphics: Res<graphics::Settings>,
     motion: Option<Res<motion_capture::Motion>>,
+    temporal: Option<Res<temporal_audit::Audit>>,
     replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
@@ -3672,6 +3697,10 @@ fn capture(
         exit.write(AppExit::error());
         return;
     }
+    if temporal.as_ref().is_some_and(|audit| audit.failed()) {
+        exit.write(AppExit::error());
+        return;
+    }
     if graphics.reflection_mode == 3 && probe.as_ref().is_none_or(|p| !p.ready()) {
         // Keep the normal warm-up after activation as well, so TAA/shadows do
         // not retain the pre-probe state in the comparison image.
@@ -3699,7 +3728,9 @@ fn capture(
     if benchmark.as_ref().is_some_and(|b| !b.finished) {
         return;
     }
-    if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished()) {
+    if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
+        && temporal.as_ref().is_none_or(|audit| audit.ready())
+    {
         capture.requested = true;
         let path = capture.path.clone();
         commands
