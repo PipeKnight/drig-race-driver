@@ -17,7 +17,9 @@
 //!   It looks at the file target on the car, raised by the suspension heave,
 //!   and rolls with the yaw rate. docs/CAMERA_VIEWS.md §2.
 //!   Mounted: offset and yaw/pitch/roll on the body, with the
-//!   acceleration-driven eye shift (0x822510). Head: seat position and tilt.
+//!   acceleration-driven eye shift (0x822510). Head (0x842DD0 → 0x820D10):
+//!   seat position and tilt, the eye carried by a body spring and the view
+//!   turned by a head spring, both driven by the seat's acceleration (0x83E6D0).
 use bevy::prelude::*;
 use grid_formats::vehicle_views::{self, Kind};
 use std::path::{Path, PathBuf};
@@ -67,6 +69,14 @@ const MOUNTED_ACCELERATION: f32 = 30.;
 /// applies those coefficients per 1/60 s so the result does not depend on the
 /// frame rate (AUTHORED normalisation, docs/CAMERA_VIEWS.md).
 const FRAME_RATE: f32 = 60.;
+/// Head-cam springs (0x83E6D0): a step shorter than 0xCFDD14 only takes the
+/// input velocity; the acceleration filter halves per 1/60 s (0xCBC4F8,
+/// 0xCAFEC4); a speed below the root of 0xCFF550 stops.
+const SPRING_MIN_STEP: f32 = 1e-4;
+const SPRING_MIN_SQUARE: f32 = 1e-9;
+/// At most this many spring steps per shot; a longer gap (a replay seek) drops
+/// the rest [AUTHORED].
+const SPRING_MAX_STEPS: f32 = 30.;
 /// Default view of the original profile (0x5F1100: `current_camera`).
 pub const DEFAULT_VIEW: &str = "chase_close";
 
@@ -128,8 +138,25 @@ pub struct Head {
     pub fov: f32,
     pub near: f32,
     pub position: Vec3,
-    /// Degrees; negative looks down [I].
+    /// Degrees; negative looks down (0x801D10, emulated).
     pub tilt: f32,
+    /// Eye lift above the seat position (bodyLength, object +0x218).
+    pub body_length: f32,
+    /// The eye's spring (object +0x110) and the view's (object +0x190).
+    pub body: Spring,
+    pub head: Spring,
+}
+
+/// A head-cam spring's parameters as the reset 0x82C0E0 copies them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spring {
+    /// Car-frame x and y scale of the offset limit (+0x60, +0x64); 0 keeps
+    /// that component at zero.
+    pub scale: Vec2,
+    pub damping: f32,
+    pub inertia: f32,
+    pub centering: f32,
+    pub max_offset: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -208,12 +235,33 @@ impl Views {
                     twist_scale: vec("twistScale")?,
                     tilt_distance: s("tiltDistance")?,
                 }),
-                Kind::Head => Rig::Head(Head {
-                    fov: s("fov")?,
-                    near: s("nearPlane")?,
-                    position: vec("position")?,
-                    tilt: s("tilt")?,
-                }),
+                Kind::Head => {
+                    // Binder 0x7F3A70 over the constructor's defaults (0x820A40).
+                    let o = |n: &str, d: f32| v.scalar(n).unwrap_or(d);
+                    Rig::Head(Head {
+                        fov: s("fov")?,
+                        near: s("nearPlane")?,
+                        position: vec("position")?,
+                        tilt: s("tilt")?,
+                        body_length: o("bodyLength", 0.01),
+                        body: Spring {
+                            scale: Vec2::new(o("maxBodyOffsetScaleSide", 1.), o("maxBodyOffsetScaleUp", 0.)),
+                            damping: o("bodyDamping", 0.7),
+                            inertia: o("bodyInertia", 0.1),
+                            centering: o("bodyCenteringForce", 0.6),
+                            max_offset: o("maxBodyOffset", 0.1),
+                        },
+                        // The head's scale is the constructor's (1, 0): its
+                        // offset is a turn about the car's x and z.
+                        head: Spring {
+                            scale: Vec2::new(1., 0.),
+                            damping: o("headDamping", 0.7),
+                            inertia: o("headInertia", 0.2),
+                            centering: o("headCenteringForce", 0.6),
+                            max_offset: o("maxHeadOffset", 0.1),
+                        },
+                    })
+                }
             };
             views.push(View {
                 ident: v.ident.clone(),
@@ -377,6 +425,7 @@ impl Sample {
             pose: model_frame(
                 Mat4::from_cols_array(&runtime.pose()),
                 rows,
+                Vec3::new(f(0x40), f(0x44), f(0x48)),
                 Vec3::new(f(0x1630), f(0x1634), f(0x1638)),
             ),
             velocity: Vec3::new(vx, vy, vz),
@@ -395,16 +444,19 @@ impl Sample {
 
 /// The car's model frame, which the camera target answers (0x9AE3A0; target
 /// +0x14/+0x18/+0x1C): the physics pose (car +0xDB0 → +8, body +0x1D0)
-/// rotated by the car's 3×3 at +0x10 (rows, nearly the identity) with its
-/// origin moved by that rotation times car +0x1630 (the Lacetti's
-/// (0, −0.39144, −0.14642): the model origin lies below and behind the body
-/// origin). A rotation that is not one keeps the pose's rotation.
-pub fn model_frame(pose: Mat4, rows: [Vec3; 3], offset: Vec3) -> Mat4 {
+/// rotated by the chassis-motion matrix at car +0x10 (rows, 0x9BE1E0 via
+/// 0x9BDF30, ported as grid_world::vehicle_chassis), its origin moved by the
+/// matrix's translation row car +0x40 (unturned) and then by the rotation
+/// times car +0x1630 (the Lacetti's (0, −0.39144, −0.14642): the model origin
+/// lies below and behind the body origin). A rotation that is not one keeps
+/// the pose's rotation.
+pub fn model_frame(pose: Mat4, rows: [Vec3; 3], translation: Vec3, offset: Vec3) -> Mat4 {
     let local = Mat3::from_cols(rows[0], rows[1], rows[2]);
     let local = if local.is_finite() && (local.determinant() - 1.).abs() < 1e-3 { local } else { Mat3::IDENTITY };
+    let translation = if translation.is_finite() { translation } else { Vec3::ZERO };
     // Row vectors: pose rows × the +0x10 rows; the translation is not turned.
     let rotation = local * Mat3::from_mat4(pose);
-    let origin = pose.w_axis.truncate() + rotation * offset;
+    let origin = pose.w_axis.truncate() + translation + rotation * offset;
     Mat4::from_cols(
         rotation.x_axis.extend(0.),
         rotation.y_axis.extend(0.),
@@ -462,11 +514,34 @@ pub struct MountedState {
     velocity: Option<Vec3>,
 }
 
+/// One head-cam spring's state (record +0x110.. body, +0x170.. head).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SpringState {
+    /// Last input velocity, world.
+    pub prev: Vec3,
+    /// Filtered acceleration, world.
+    pub acc: Vec3,
+    /// Offset and its velocity, car frame.
+    pub off: Vec3,
+    pub vel: Vec3,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HeadState {
+    pub body: SpringState,
+    pub head: SpringState,
+    /// Seat velocity of the last step; None until the reset.
+    input: Option<Vec3>,
+    /// Simulation time not yet stepped.
+    pending: f32,
+}
+
 /// Filter histories, one per view, reset on a car reset or a view change.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct History {
     pub chase: ChaseState,
     pub mounted: MountedState,
+    pub head: HeadState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -858,6 +933,116 @@ fn mounted_twist(m: &Mounted, h: &MountedState, sample: &Sample) -> Quat {
     Quat::from_mat3(&Mat3::from_cols(right.normalize(), up, forward.normalize()))
 }
 
+/// One step of a head-cam spring (0x83E6D0; emulated and live-checked,
+/// docs/CAMERA_VIEWS.md §2): the input velocity's change, filtered with a
+/// half-life of 1/60 s, pushes the car-frame offset back by inertia; damping
+/// takes a constant speed off per step (Coulomb), centering pulls the offset
+/// back once per step (no dt: the original's spring is per rendered frame),
+/// and the offset stays inside the ellipsoid max · (x scale, y scale, 1), where
+/// an outward velocity is halved and loses its radial part. `rotation` turns
+/// car to world.
+pub fn spring_step(p: &Spring, s: &mut SpringState, dt: f32, rotation: Mat3, input: Vec3) {
+    if dt.is_nan() || dt <= SPRING_MIN_STEP {
+        s.prev = input;
+        return;
+    }
+    let raw = (input - s.prev) / dt;
+    s.prev = input;
+    let q = pow(0.5, f64::from(FRAME_RATE * dt));
+    s.acc = (1. - q) * raw + q * s.acc;
+    s.vel -= rotation.transpose() * s.acc * p.inertia * dt;
+    let stop = p.damping * dt;
+    let speed2 = s.vel.length_squared();
+    s.vel = if stop * stop < speed2 && speed2 >= SPRING_MIN_SQUARE {
+        let speed = speed2.sqrt();
+        (speed - stop) * (s.vel / speed)
+    } else {
+        Vec3::ZERO
+    };
+    s.vel -= p.centering * s.off;
+    s.off += dt * s.vel;
+    let scale = p.scale.extend(1.);
+    let divide = Vec3::select(scale.cmpne(Vec3::ZERO), scale, Vec3::ONE);
+    s.off /= divide;
+    s.vel /= divide;
+    let r2 = s.off.length_squared();
+    if r2 > p.max_offset * p.max_offset {
+        let n = s.off / r2.sqrt();
+        let e = s.off - p.max_offset * n;
+        s.off = p.max_offset * n;
+        if 0. < s.vel.dot(e) {
+            s.vel *= 0.5;
+            let n = e.normalize();
+            s.vel -= s.vel.dot(n) * n;
+        }
+    }
+    s.off *= scale;
+    s.vel *= scale;
+}
+
+/// The seat's world velocity, the head-cam's input (0x820D10 step 5):
+/// v + ω × (position turned to world).
+pub fn head_input(c: &Head, rotation: Mat3, velocity: Vec3, angular_velocity: Vec3) -> Vec3 {
+    velocity + angular_velocity.cross(rotation * c.position)
+}
+
+/// One head-cam frame (0x820D10 steps 6–7): the body spring, then the head
+/// spring driven by the input plus the body's new velocity in world.
+pub fn head_step(c: &Head, h: &mut HeadState, dt: f32, rotation: Mat3, input: Vec3) {
+    spring_step(&c.body, &mut h.body, dt, rotation, input);
+    spring_step(&c.head, &mut h.head, dt, rotation, input + rotation * h.body.vel);
+}
+
+/// The head-cam's view of its state (0x820D10 steps 8–9 and 14): the eye at
+/// the seat raised by bodyLength and moved by the body offset; the view turned
+/// by the head offset h about (h.z, 0, −h.x) by |h| radians (a forward offset
+/// looks down, emulated), then pitched by the tilt. Look, buffeting, TrackIR
+/// and transitions are inactive in a race (docs/CAMERA_VIEWS.md).
+pub fn head_view(c: &Head, h: &HeadState, pose: &Mat4) -> Shot {
+    let (_, rotation, _) = pose.to_scale_rotation_translation();
+    let eye = pose.transform_point3(c.position + Vec3::Y * c.body_length + h.body.off);
+    let o = h.head.off;
+    let axis = Vec3::new(o.z, 0., -o.x);
+    let turn = if axis.length_squared() > SPRING_MIN_SQUARE {
+        Quat::from_axis_angle(axis.normalize(), o.length())
+    } else {
+        Quat::IDENTITY
+    };
+    Shot {
+        eye,
+        rotation: rotation * turn * facing_forward() * Quat::from_rotation_x(c.tilt.to_radians()),
+        fov: c.fov.to_radians(),
+        near: Some(c.near),
+    }
+}
+
+/// The head-cam (0x842DD0 → 0x820D10). The reset (0x82C0E0) starts both
+/// springs from the car's velocity at rest. The original steps once per
+/// rendered frame, so its springs stiffen with the frame rate; the port steps
+/// once per physics tick (0.016 s), as the original at 62.5 fps, and spreads a
+/// shot's input change evenly over its steps [AUTHORED].
+fn head_shot(c: &Head, h: &mut HeadState, sample: &Sample, dt: f32) -> Shot {
+    let rotation = Mat3::from_mat4(sample.pose);
+    let input = head_input(c, rotation, sample.velocity, sample.angular_velocity);
+    let from = *h.input.get_or_insert_with(|| {
+        h.body.prev = sample.velocity;
+        h.head.prev = sample.velocity;
+        input
+    });
+    let step = grid_tools::source_vehicle::DELTA;
+    h.pending += dt.max(0.);
+    let steps = (h.pending / step + 1e-3).floor();
+    h.pending = if steps > SPRING_MAX_STEPS { 0. } else { (h.pending - steps * step).max(0.) };
+    let steps = steps.min(SPRING_MAX_STEPS) as u32;
+    for k in 1..=steps {
+        head_step(c, h, step, rotation, from.lerp(input, k as f32 / steps as f32));
+    }
+    if steps > 0 {
+        h.input = Some(input);
+    }
+    head_view(c, h, &sample.pose)
+}
+
 /// Advances `history` by the simulation time `dt` and frames the view.
 /// `orbit` rotates a chase eye about its target (AUTHORED free look).
 pub fn shot(
@@ -901,12 +1086,7 @@ pub fn shot(
                 near: Some(m.near),
             }
         }
-        Rig::Head(c) => Shot {
-            eye: position + rotation * c.position,
-            rotation: rotation * facing_forward() * Quat::from_rotation_x(c.tilt.to_radians()),
-            fov: c.fov.to_radians(),
-            near: Some(c.near),
-        },
+        Rig::Head(c) => head_shot(c, &mut history.head, sample, dt),
     }
 }
 
@@ -1103,7 +1283,9 @@ mod tests {
     /// Diagnostic: the port's views driven by a decoded live trace of the
     /// original (local/cam/live/decode.py: t, step, speed, state, wheels x4,
     /// pose, angular, velocity, ...). Writes per row and view: eye, forward,
-    /// up. GRID_CAMERA_TRACE=IN, GRID_CAMERA_OUT=OUT, GRID_GAME_ROOT.
+    /// up, then chase lag and spin blend, bonnet tilt and shift, head-cam body
+    /// and head offsets. GRID_CAMERA_TRACE=IN, GRID_CAMERA_OUT=OUT,
+    /// GRID_GAME_ROOT.
     #[test]
     #[ignore]
     fn replay_live_trace() {
@@ -1130,6 +1312,7 @@ mod tests {
                 pose: model_frame(
                     Mat4::from_cols_array(&std::array::from_fn(|i| v[12 + i])),
                     rows,
+                    if v.len() >= 89 { Vec3::new(v[85], v[86], v[87]) } else { Vec3::ZERO },
                     Vec3::new(0., -0.39144, -0.14642),
                 ),
                 angular_velocity: Vec3::new(v[28], v[29], v[30]),
@@ -1147,7 +1330,21 @@ mod tests {
             let mut row = vec![v[0]];
             for (k, ident) in idents.iter().enumerate() {
                 let i = views.0.iter().position(|x| &x.ident == ident).unwrap();
-                let shot = shot(&views.0[i].rig, &mut histories[k], &s, dt, |o| o);
+                let shot = match &views.0[i].rig {
+                    // The original's head-cam: one spring step per rendered
+                    // frame of the row's dt, from the reset at the first row.
+                    Rig::Head(c) => {
+                        let h = &mut histories[k].head;
+                        let rotation = Mat3::from_mat4(s.pose);
+                        if h.input.is_none() {
+                            (h.body.prev, h.head.prev) = (s.velocity, s.velocity);
+                            h.input = Some(s.velocity);
+                        }
+                        head_step(c, h, dt, rotation, head_input(c, rotation, s.velocity, s.angular_velocity));
+                        head_view(c, h, &s.pose)
+                    }
+                    rig => shot(rig, &mut histories[k], &s, dt, |o| o),
+                };
                 row.extend(shot.eye.to_array());
                 row.extend((shot.rotation * Vec3::NEG_Z).to_array());
                 row.extend((shot.rotation * Vec3::Y).to_array());
@@ -1156,6 +1353,9 @@ mod tests {
             row.extend([histories[0].chase.lag, histories[0].chase.spin.blend]);
             row.extend(histories[3].mounted.tilt.to_array());
             row.extend(histories[3].mounted.shift.to_array());
+            // Head-cam body and head offsets.
+            row.extend(histories[4].head.body.off.to_array());
+            row.extend(histories[4].head.head.off.to_array());
             out += &row.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\t");
             out.push('\n');
         }
@@ -1167,11 +1367,14 @@ mod tests {
         // 0x9AE3A0: body origin (10, 0, 0) turned π/2 about Y; the model
         // origin is R · (0, −0.39144, −0.14642) = (−0.14642, −0.39144, 0) away.
         let pose = Mat4::from_rotation_translation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), Vec3::new(10., 0., 0.));
-        let model = model_frame(pose, [Vec3::X, Vec3::Y, Vec3::Z], Vec3::new(0., -0.39144, -0.14642));
+        let model = model_frame(pose, [Vec3::X, Vec3::Y, Vec3::Z], Vec3::ZERO, Vec3::new(0., -0.39144, -0.14642));
         assert!(model.w_axis.truncate().abs_diff_eq(Vec3::new(10. - 0.14642, -0.39144, 0.), 1e-6));
         assert!(Mat3::from_mat4(model).abs_diff_eq(Mat3::from_mat4(pose), 1e-7));
+        // The chassis translation row (car +0x40) is added unturned.
+        let lifted = model_frame(pose, [Vec3::X, Vec3::Y, Vec3::Z], Vec3::new(0., 0.02, 0.), Vec3::new(0., -0.39144, -0.14642));
+        assert!(lifted.w_axis.truncate().abs_diff_eq(Vec3::new(10. - 0.14642, -0.37144, 0.), 1e-6));
         // A broken +0x10 block keeps the pose's rotation.
-        let broken = model_frame(pose, [Vec3::ZERO; 3], Vec3::ZERO);
+        let broken = model_frame(pose, [Vec3::ZERO; 3], Vec3::ZERO, Vec3::ZERO);
         assert_eq!(broken, pose);
     }
 
@@ -1205,6 +1408,19 @@ mod tests {
         assert_eq!(mounted_twist(&m, &h, &still), Quat::IDENTITY);
     }
 
+    /// The Lacetti's head-cam (shipped cameras.xml, docs/CAMERA_VIEWS.md).
+    fn head() -> Head {
+        Head {
+            fov: 48.,
+            near: 0.075,
+            position: Vec3::new(0.3604, 1.1047, -0.1923),
+            tilt: -7.3736,
+            body_length: 0.01,
+            body: Spring { scale: Vec2::new(0.9, 1.5), damping: 1.2, inertia: 0.1, centering: 2., max_offset: 0.07 },
+            head: Spring { scale: Vec2::new(1., 0.), damping: 5.4045, inertia: 0.3399, centering: 3.8697, max_offset: 0.179 },
+        }
+    }
+
     /// The Lacetti's five visible views and their reverse twins, in file order.
     fn lacetti() -> Views {
         let c = |p, t| Rig::Chase(chase(p, t));
@@ -1218,7 +1434,7 @@ mod tests {
             ("bumper_reverse", true, None, m(Vec3::new(0., 0.7275, -1.77), std::f32::consts::PI)),
             ("bonnet", false, Some(7), m(Vec3::new(0., 1.1055, 0.8556), 0.)),
             ("bonnet_reverse", true, None, m(Vec3::new(0., 1.24, -1.437), std::f32::consts::PI)),
-            ("head-cam", false, Some(9), Rig::Head(Head { fov: 48., near: 0.075, position: Vec3::new(0.3604, 1.1047, -0.1923), tilt: -7.3736 })),
+            ("head-cam", false, Some(9), Rig::Head(head())),
             ("head-cam_reverse", true, None, m(Vec3::new(0., 1.24, -1.437), std::f32::consts::PI)),
             ("replay_wing1", true, None, m(Vec3::ZERO, 0.)),
         ];
@@ -1570,10 +1786,130 @@ mod tests {
     fn head_cam_sits_in_the_seat() {
         let pose = Mat4::from_translation(Vec3::new(1., 2., 3.));
         let mut cameras = Cameras::new(lacetti(), "head-cam", None);
-        let shot = cameras.frame(&sample(pose, Vec3::ZERO, 0), false, |v| v);
-        assert!(shot.eye.distance(Vec3::new(1.3604, 3.1047, 2.8077)) < 1e-4);
-        assert!(forward(&shot).z > 0.99 && forward(&shot).y < 0.);
+        let shot = cameras.frame(&sample(pose, Vec3::Z * 30., 0), false, |v| v);
+        // The seat raised by bodyLength 0.01; tilt −7.3736° looks down.
+        assert!(shot.eye.distance(Vec3::new(1.3604, 3.1147, 2.8077)) < 1e-4);
+        let down = (-7.3736f32).to_radians();
+        assert!(forward(&shot).abs_diff_eq(Vec3::new(0., down.sin(), down.cos()), 1e-6));
         assert_eq!(shot.fov, 48f32.to_radians());
+        // Driving straight at a steady speed leaves both springs at rest.
+        for t in 1..100 {
+            let pose = Mat4::from_translation(Vec3::new(1., 2., 3. + 0.48 * t as f32));
+            cameras.frame(&sample(pose, Vec3::Z * 30., t), false, |v| v);
+        }
+        assert_eq!(cameras.history.head.body.off, Vec3::ZERO);
+        assert_eq!(cameras.history.head.head.off, Vec3::ZERO);
+    }
+
+    #[test]
+    fn head_spring_step_under_braking() {
+        // Body spring, car at rest frame, input velocity drops 0.5 m/s in one
+        // 0.016 s step: a = −31.25 m/s² (z); q = 0.5^0.96 = 0.514057;
+        // acc = 0.485943 · a = −15.18572; vel = 15.18572 · 0.1 · 0.016 =
+        // 0.0242972, less damping 1.2 · 0.016 = 0.0050972; off = 0.016 · vel.
+        let c = head();
+        let mut s = SpringState { prev: Vec3::Z * 10., ..SpringState::default() };
+        spring_step(&c.body, &mut s, 0.016, Mat3::IDENTITY, Vec3::Z * 9.5);
+        assert!((s.acc.z + 15.18572).abs() < 1e-4, "{}", s.acc);
+        assert!((s.vel.z - 0.0050972).abs() < 1e-6, "{}", s.vel);
+        assert!((s.off.z - 8.15545e-5).abs() < 1e-9, "{}", s.off);
+        assert_eq!((s.off.x, s.off.y, s.prev), (0., 0., Vec3::Z * 9.5));
+        // Below damping/inertia (12 m/s² here) the offset does not move.
+        let mut s = SpringState { prev: Vec3::Z * 10., ..SpringState::default() };
+        spring_step(&c.body, &mut s, 0.016, Mat3::IDENTITY, Vec3::Z * 9.9);
+        assert_eq!(s.off, Vec3::ZERO);
+        // A car turned π/2 about Y feels the world −x braking as its own z.
+        let turned = Mat3::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let mut s = SpringState { prev: Vec3::X * 10., ..SpringState::default() };
+        spring_step(&c.body, &mut s, 0.016, turned, Vec3::X * 9.5);
+        assert!((s.off.z - 8.15545e-5).abs() < 1e-9 && s.off.x.abs() < 1e-9, "{}", s.off);
+        // Too short a step only takes the input.
+        let mut s = SpringState { prev: Vec3::Z, ..SpringState::default() };
+        spring_step(&c.body, &mut s, 1e-5, Mat3::IDENTITY, Vec3::ZERO);
+        assert_eq!(s, SpringState::default());
+    }
+
+    #[test]
+    fn head_spring_limit_is_an_ellipsoid() {
+        // Body offset 0.06 sideways moving out at 1 m/s, no acceleration:
+        // vel 1 − 0.0192 − 2 · 0.06 = 0.8608, off 0.06 + 0.016 · 0.8608 =
+        // 0.0737728; scaled by 1/0.9 that is 0.0819698 > 0.07, so off = 0.07 ·
+        // 0.9 = 0.063 and the outward velocity is halved, then its radial part
+        // (all of it) removed.
+        let c = head();
+        let mut s = SpringState { off: Vec3::X * 0.06, vel: Vec3::X, ..SpringState::default() };
+        spring_step(&c.body, &mut s, 0.016, Mat3::IDENTITY, Vec3::ZERO);
+        assert!((s.off.x - 0.063).abs() < 1e-7, "{}", s.off);
+        assert_eq!(s.vel, Vec3::ZERO);
+        // Upward the limit is 0.07 · 1.5; the head's y scale 0 keeps y at zero.
+        let mut s = SpringState { off: Vec3::Y * 0.2, ..SpringState::default() };
+        spring_step(&c.body, &mut s, 0.016, Mat3::IDENTITY, Vec3::ZERO);
+        assert!((s.off.y - 0.105).abs() < 1e-7, "{}", s.off);
+        let mut s = SpringState { off: Vec3::Y * 0.05, vel: Vec3::Y, ..SpringState::default() };
+        spring_step(&c.head, &mut s, 0.016, Mat3::IDENTITY, Vec3::ZERO);
+        assert_eq!((s.off.y, s.vel.y), (0., 0.));
+    }
+
+    #[test]
+    fn head_offset_turns_the_view() {
+        let mut c = head();
+        c.tilt = 0.;
+        // Forward 0.1 rad pitches the view down by 0.1 rad.
+        let mut h = HeadState::default();
+        h.head.off = Vec3::Z * 0.1;
+        let shot = head_view(&c, &h, &Mat4::IDENTITY);
+        assert!(forward(&shot).abs_diff_eq(Vec3::new(0., -0.0998334, 0.9950042), 1e-6), "{}", forward(&shot));
+        // Right 0.1 rad rolls the right axis down: (0, 0, 0.1) → axis (0, 0, −1).
+        h.head.off = Vec3::X * 0.1;
+        let shot = head_view(&c, &h, &Mat4::IDENTITY);
+        assert!((shot.rotation * Vec3::NEG_X).abs_diff_eq(Vec3::new(0.9950042, -0.0998334, 0.), 1e-6));
+        // The body offset moves the eye in the car frame.
+        h.body.off = Vec3::new(0.01, 0.02, 0.03);
+        let pose = Mat4::from_rotation_translation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), Vec3::new(5., 0., 0.));
+        let eye = head_view(&c, &h, &pose).eye;
+        let seat = c.position + Vec3::new(0.01, 0.03, 0.03);
+        assert!(eye.abs_diff_eq(Vec3::new(5. + seat.z, seat.y, -seat.x), 1e-6), "{eye}");
+    }
+
+    #[test]
+    fn head_cam_leans_into_braking_and_settles() {
+        let mut cameras = Cameras::new(lacetti(), "head-cam", None);
+        let mut speed = 30.;
+        let mut z = 0.;
+        for t in 0..40u64 {
+            cameras.frame(&sample(Mat4::from_translation(Vec3::Z * z), Vec3::Z * speed, t), false, |v| v);
+            speed -= 20. * 0.016;
+            z += speed * 0.016;
+        }
+        // 20 m/s² is above the body's 12 and the head's 15.9 m/s².
+        let h = cameras.history.head;
+        assert!(h.body.off.z > 0.005 && h.body.off.z <= 0.07 + 1e-6, "{}", h.body.off);
+        // The head's equilibrium: (20 · 0.3399 − 5.4045) · 0.016 / 3.8697 ≈ 0.0058.
+        assert!(h.head.off.z > 0.004 && h.head.off.z < 0.007, "{}", h.head.off);
+        for t in 40..200u64 {
+            cameras.frame(&sample(Mat4::from_translation(Vec3::Z * z), Vec3::Z * speed, t), false, |v| v);
+        }
+        let h = cameras.history.head;
+        assert!(h.body.off.length() < 1e-4 && h.head.off.length() < 1e-4, "{h:?}");
+    }
+
+    #[test]
+    fn head_cam_steps_per_tick_whatever_the_frame_rate() {
+        // One shot per tick and one per two ticks give the same springs when
+        // the input changes evenly.
+        let run = |stride: u64| {
+            let mut cameras = Cameras::new(lacetti(), "head-cam", None);
+            let mut t = 0;
+            while t <= 60 {
+                let v = 30. - 20. * 0.016 * t as f32;
+                cameras.frame(&sample(Mat4::IDENTITY, Vec3::Z * v, t), false, |v| v);
+                t += stride;
+            }
+            cameras.history.head
+        };
+        let (a, b) = (run(1), run(2));
+        assert!(a.body.off.abs_diff_eq(b.body.off, 1e-6) && a.head.off.abs_diff_eq(b.head.off, 1e-6), "{a:?} {b:?}");
+        assert!(a.head.off.z > 0.004);
     }
 
     #[test]
