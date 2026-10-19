@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G157 — Road lap and exact-source lacquer comparisons running (19 October 2026)
+
+Candidate8949dd0 build and workspace checks running/queued with2Cargo jobs/2test threads; no source edits during compile and no executable promotion. Source code contains the planned track-only road default and diagnostic coat controls; docs/LACETTI_CLEARCOAT_STUDY.md records capture matrix and acceptance. A stale surfaceOff help string was noticed and is a required final-release follow-up, not hidden from provenance. Installed3bfc masked-road6500tick/30FPS full lap is still progressing normally with no GPU errors, under a900second cap during shared heavy compilation; no completed-lap claim yet. Preserve any deadline failure before adapting the diagnostic budget. The first Python edit guard abort for coat controls was corrected before any file write; actual8949source committed separately from1fbroad behavior.
+
+
 ## G156 — Bounded lacquer controls for one-variable comparisons (19 October 2026)
 
 Added --paint-clearcoat0..1 and --paint-coat-roughness0.04..1, finite validation preserving prior values on error, explicit enhanced/layered guard, and effective-value logging. Apply only to the existing player Car Body Paint branch; source base mask, base roughness, glass, wheel materials, physics and opponents are unchanged. Defaults remain0.20/0.18: no stronger paint setting accepted yet. Regression test covers bounds/nonfinite inputs and glass independence. Pending tests/build/native legacy parity, strength-only and roughness-only captures, then motion/drive checks. This is a diagnostic material interface, not recovered original GRID scalar packing. Initial edit guard used the wrong Rust field terminator and aborted before any write; corrected against the actual comma-delimited struct.
