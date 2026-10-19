@@ -28,8 +28,9 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
 2. Race offsets: alone (no car within 70 m, off at 60 m) -> ±deviation_small every 5 s,
    merge 0.2 m/s; in traffic ±deviation_large, merge 1.0 (0.5 above crMaxTrackCurvature);
    below 3 m/s the offset follows the car. Clamped to the racing limits.
-3. Look-ahead 0x779A20 (exact formula, rate limit, low-speed blend); curvature = heading
-   change line(car) -> line(look-ahead) / look-ahead.
+3. Look-ahead 0x779A20 (exact formula, rate limit, low-speed blend); curvature 0x798E90 =
+   ±acos(lateral(car) · lateral(look-ahead)) / look-ahead, positive when the look-ahead point
+   lies on the positive-offset side of the car's lateral (F454).
 4. Lateral PID 0x7892E0: target shifted by PID(error from the desired offset) with the
    shipped gains (P -1, I -0.5, D -0.3) and limits (2/1/3, output 15).
 5. Corner speed 0x792C80 for the next brake line: min + (max − min)·f·S, S =

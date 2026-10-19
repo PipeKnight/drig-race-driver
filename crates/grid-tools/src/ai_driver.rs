@@ -2022,7 +2022,7 @@ impl AiDriver {
         // Track view: progress along the racing line (0x79C360).
         let (segment, arc, line_distance) = data.line.project(position, self.segment);
         self.segment = Some(segment);
-        let (_, here, _, limits_here) = data.line.at(arc);
+        let (_, _, _, limits_here) = data.line.at(arc);
         let tr = p.traffic.clone();
         let own = Other::from_pose(0, view.pose, view.velocity, view.extents);
         let f = horizontal(forward);
@@ -2582,12 +2582,13 @@ impl AiDriver {
                                 let toward_negative = self.overtake.state == 1;
                                 request.desired_offset = self.offset
                                     + if toward_negative { -dt } else { dt } * tr.ov_merge;
-                                // Positive curvature is a left-hand bend here [I]:
-                                // moving left widens a right-hand bend.
+                                // State 1 with bend flag +0x45 (κ > min), state 2
+                                // with +0x44 (κ < −min). κ is positive for a bend
+                                // toward positive offsets, so either move widens it.
                                 let outside = if toward_negative {
-                                    self.curvature < -tr.ov_corner[0]
-                                } else {
                                     self.curvature > tr.ov_corner[0]
+                                } else {
+                                    self.curvature < -tr.ov_corner[0]
                                 };
                                 let c = if speed > tr.ov_slow_speed && outside {
                                     corner
@@ -2842,7 +2843,7 @@ impl AiDriver {
 
         // Look-ahead, target point and curvature (0x779A20, 0x798E90).
         self.update_look_ahead(speed);
-        let (point, ahead, lateral, limits) = data.line.at(arc + self.look_ahead);
+        let (point, _, lateral, limits) = data.line.at(arc + self.look_ahead);
         // Limit types 1/2 (racing limits), or 3/4 (track limits) for avoid.
         let limits = if request.track_limits {
             data.line.track_limits_at(arc + self.look_ahead)
@@ -2850,7 +2851,18 @@ impl AiDriver {
             limits
         };
         self.offset = self.offset.clamp(limits[0], limits[1]);
-        self.curvature = wrap(heading(ahead) - heading(here)) / self.look_ahead.max(1e-3);
+        // 0x798E90: the angle between the line laterals at the car (+0x180)
+        // and at the look-ahead (+0xC0), acos of their clamped dot product,
+        // negative when the look-ahead point lies on the car lateral's
+        // negative side; kept when the look-ahead is not positive.
+        let cos = dot2(here_lateral, lateral).clamp(-1., 1.);
+        let mut angle = f64::from(cos).acos() as f32;
+        if dot2(sub(point, here_point), here_lateral) < 0. {
+            angle = -angle;
+        }
+        if self.look_ahead > 0. {
+            self.curvature = angle / self.look_ahead;
+        }
         // Lateral PID (0x7892E0): error of the car from its desired line offset.
         let error = line_distance - self.offset;
         let [kp, ki, kd, lp, li, ld, lo] = p.pid;

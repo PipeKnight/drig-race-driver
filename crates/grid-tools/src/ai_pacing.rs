@@ -299,8 +299,9 @@ pub fn torque_factor(f: f32) -> f32 {
 /// Off-line grip assist and race-start grip factor (0x404C90): `distance`
 /// is the car's race distance, `lateral` its front's signed offset from the
 /// racing line (positive right) and `curvature` the look-ahead curvature
-/// (positive left). Inside the bend gets max_assist_inside [I which side the
-/// original calls inside].
+/// (0x798E90, positive for a bend toward positive offsets). The original
+/// takes max_assist_inside when `lateral · curvature >= 0`, the inside of
+/// the bend.
 pub fn grip_factor(
     m: &ai::Manager,
     speed: f32,
@@ -317,7 +318,7 @@ pub fn grip_factor(
     if curvature.abs() <= m.min_curve_offline {
         return 1.;
     }
-    let assist = if lateral * curvature < 0. {
+    let assist = if lateral * curvature >= 0. {
         m.max_assist_inside
     } else {
         m.max_assist_outside
@@ -1101,10 +1102,10 @@ mod tests {
         };
         assert_eq!(grip_factor(&m, 30., 500., 2., 0.01), 1.25);
         assert_eq!(grip_factor(&m, 9., 500., 2., 0.01), 1.);
-        // Left bend (curvature > 0): left of the line (negative) is inside.
-        assert_eq!(grip_factor(&m, 30., 1000., -2., 0.01), 1.125);
-        assert_eq!(grip_factor(&m, 30., 1000., 2., 0.01), 1.25);
-        assert_eq!(grip_factor(&m, 30., 1000., 6., 0.01), 1.5);
+        // Right-hand bend (curvature > 0): right of the line (positive) is inside.
+        assert_eq!(grip_factor(&m, 30., 1000., 2., 0.01), 1.125);
+        assert_eq!(grip_factor(&m, 30., 1000., -2., 0.01), 1.25);
+        assert_eq!(grip_factor(&m, 30., 1000., -6., 0.01), 1.5);
         assert_eq!(grip_factor(&m, 30., 1000., 2., 0.0005), 1.);
     }
 

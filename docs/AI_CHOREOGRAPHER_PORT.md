@@ -103,16 +103,29 @@ are unchanged.
     segment (1 309 of 6 000 solo ticks); the look-ahead then grows (0x779A20 reads |κ|), the
     target point jumps and the steering slams to ±1.
   - The original's 0x798E90 instead takes `acos(lateral_here · lateral_ahead)` (double, clamped
-    to ±1) over the look-ahead, with the sign from `(point_here − point_ahead) · lateral_ahead`.
+    to ±1) over the look-ahead, negated when `(point_ahead − point_here) · lateral_here < 0`
+    (F454 correction: F449 had the two points' roles swapped).
     The two line-point records are at track view +0x90 (point +0xB0, lateral +0xC0, offset point
     +0xD0, offset +0xE0) and +0x150 (+0x170 / +0x180 / +0x190); layout from 0x779C40 (offset point
     = point + offset × lateral). The +0x144 braking-table grip is `0x9AD500(vehicle)` (wheel grip
     × surface × ¼, × an aero/mass term), but the Lacetti's two brake tables (grip 2.0 / 2.2) give
     the same 45.4 m from 57 to 39 m/s, so it does not explain the gap.
-  - Open: what the original's lateral is. With the port's laterals (raw gate normals, skewed
-    against the racing line in a hairpin) the sign test flips inside one bend, so the original
-    must build it differently, in 0x7878F0 (not yet decoded). Porting stops there; evidence in
-    main checkout `local/driving/redgate-20261019/`.
+  - **Ported in F454** [V]. 0x7878F0 fills the look-ahead block from the line object's vfunc
+    +0x14 (point and lateral at link/fraction) and projects the planned offset on that lateral, so
+    the lateral is the line's own lateral; the port uses its interpolated gate normals. With the
+    sign test the right way round κ is smooth and positive for a bend toward positive offsets
+    (right), the original's convention. The F449 sign flips came from the swapped test. A few
+    single-tick flips remain at bend ends (Redgate arc 505, 525) where the look-ahead point sits
+    almost on the car's lateral; whether the original's laterals do the same is not checked [I].
+  - Result, solo Lacetti, Redgate (arc 450–560): lowest speed 35.5 m/s (was 32.8), throttle no
+    longer pinned at the corner lift's 0.2, κ no longer 0 inside the bend. Still below the
+    original's 37.0–37.6, and the braking is unchanged (0.92 from x≈−478 against 0.55–0.78 from
+    x≈−460): that part remains open.
+  - The κ sign consumers now follow the original literally: overtake state 1 widens with bend
+    flag +0x45 (κ > ovMin), state 2 with +0x44 (κ < −ovMin); the off-line assist (0x404C90)
+    takes max_assist_inside when `lat · κ ≥ 0`; drift state 3 takes the left room (+0x218) for
+    κ ≥ 0 (unchanged). The drift next-corner side (0x792580) keeps its own heading-difference
+    estimate (not traced).
 - **GRID World names.** The career's `gw_%d_star` and `_h2h` names follow the same rule; the
   career session wires them when its races run.
 
