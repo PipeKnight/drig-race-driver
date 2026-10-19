@@ -1,5 +1,15 @@
 # GRID engine project log
 
+F500 EndOfRace mix mode on the results screen (2026-10-20, Claude Code; coordinator's overnight audio list). Details: docs/AUDIO_RESEARCH.md §13.2. Evidence: `local/pause-menu/flow.xml` (`c_post_set_audio_endofrace`), the EndOfRace row in worktree kind-pike-df38cc `local/mix/gmv.txt`. The original was not run.
+- [O] The flow enters EndOfRace as the parent state of the results screen. Attack 1 s; cars −4 to −13 dB; ambience −48. A restart from the results fades to StartLine over 1.5 + 1.5 s (CB0BC4).
+- Port: `mix_mode` sets EndOfRace while the post-race stage is Results or a confirmation over it.
+- Test: the EndOfRace part of `crashed_ducks_the_engine_and_returns`. Not heard.
+- Checks [V], release, cargo/rustc 1.99.0, on 8de3af71 (F498) + this change, started with no other rustc running:
+  - `cargo t -- --include-ignored` with absolute GRID_* paths: 827 passed, 0 failed, grid-app included;
+  - `cargo clippy --workspace --all-targets -D warnings` clean (again after the rebase onto F499);
+  - identities (rebuilt `grid-opponent-race`): solo 18b369f9…a6ee and 12-car c235bab2…8552, F497's new baselines, unchanged;
+  - `grid-soak quick` 24/24 (`local/eor/checks/`).
+
 F499 Camera look input: Look Left/Right/Up/Down turn the chase, bumper/bonnet and head-cam views as in the original (2026-10-20, Claude Code; coordinator's overnight task "port the next camera item 1:1 from static analysis", owner away, nothing launched). Details: docs/CAMERA_VIEWS.md §2 "Look input", §3, §4 "Look capture". Evidence: worktree camera-dynamics-11a55d `local/cam/look/` (`look-findings.md`, `look_emu.py`, `results.txt`, `check_cols.py`, `live_turn.py`).
 - Why this item: the remaining chase items (drift blend weight, shake, the second impact envelope, gear +0x2E4) have no effect with the shipped data, while the shipped presets bind look (keyboard Delete/PageDown, the pad's right stick). The port read those actions but no view used them.
 - Traced [D] and emulated function by function in Unicorn 2.1.4 against reference models [E]:

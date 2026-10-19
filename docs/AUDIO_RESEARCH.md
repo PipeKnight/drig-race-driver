@@ -793,6 +793,27 @@ the flow's mode only when the flow changes, so a Crashed in between returns by i
 `grid-opponent-race` keeps `contacts` (no mix). Tests: `crashed_ducks_the_engine_and_returns`
 and the crash part of `shipped_collision_data_and_listener`. Not heard.
 
+### 13.2 EndOfRace (F500)
+
+Static: `local/pause-menu/flow.xml`, the EndOfRace row (`local/mix/gmv.txt`), 411C10. GRID was not
+launched.
+
+- [O] `c_post_set_audio_endofrace` (`set_audio_endofrace`) is the parent state of
+  `results_show_screen` and the results screens. Entering the results through any link
+  enters it, so the mix changes when the results appear, not at the finish line. Restart
+  goes `restart_race` → `set_audio_startline`. The replays from the results use Transition
+  and PausedReplay instead.
+- [O] Row: attackTime 1.0; Exhaust and Engine −4, Turbo, Gearbox and Other Mech −13, Panel
+  and World Coll −7, Wheels −10, Skids −7, Displacement −10, Crowd −3, Ambience −48,
+  speech groups and AI −4, Sense Of Speed −7; Race Music, Global Ambience, HUD and Music 0.
+  So the cars drop by 4 to 13 dB over 1 s, and the ambience goes.
+- [O] 411C10 adds CB0BC4 (1.5 s) when the fade being left came from EndOfRace and the new
+  mode is StartLine: a restart from the results fades back over 1.5 + 1.5 s.
+- Port: `mix_mode` sets EndOfRace while the app's post-race stage is Results or a
+  confirmation over it; the stats screen, drift scoreboard and wreck screen stay in the
+  previous mode [I: their flow nodes lie outside the EndOfRace state]. Test: the EndOfRace
+  part of `crashed_ducks_the_engine_and_returns`. Not heard.
+
 ## 14. Kick-ups (F498)
 
 20 October 2026, Claude Code. Static: 4443D0 (Ghidra `local/gtfix/decomp/coll3/44465e.c.txt`),

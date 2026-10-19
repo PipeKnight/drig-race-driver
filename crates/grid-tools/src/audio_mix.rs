@@ -523,6 +523,7 @@ mod tests {
         }
         t.modes[CRASHED][AI] = -6.;
         t.modes[START_LINE][AI] = -3.;
+        t.modes[END_OF_RACE] = [-4.; GROUPS];
         let engine = |m: &ModeMix| m.group_db(&t, Camera::Chase, ENGINE, 0.);
         let mut mix = ModeMix::default();
         assert!(mix.set_for(&t, CRASHED, CRASH_SECONDS));
@@ -555,6 +556,20 @@ mod tests {
         mix.advance(&t, 1.);
         assert_eq!(engine(&mix), 0.);
         assert_eq!(mix.group_db(&t, Camera::Chase, AI, 0.), -3.);
+        // Results (EndOfRace, attack 1) then a restart: StartLine fades over
+        // its attack plus CB0BC4's extra 1.5 s, linearly, as many groups differ.
+        mix.set(END_OF_RACE);
+        mix.advance(&t, 0.75);
+        mix.advance(&t, 0.75);
+        assert_eq!(engine(&mix), -4.);
+        mix.set(START_LINE);
+        mix.advance(&t, 0.75);
+        mix.advance(&t, 0.75);
+        let midway = engine(&mix);
+        assert!((midway + 2.).abs() < 0.1, "{midway}");
+        mix.advance(&t, 0.8);
+        mix.advance(&t, 0.8);
+        assert_eq!(engine(&mix), 0.);
         // Paused refuses a crash.
         mix.set(PAUSED);
         assert!(!mix.set_for(&t, CRASHED, CRASH_SECONDS));

@@ -219,22 +219,35 @@ pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<
 pub(crate) struct AudioMode(pub(crate) Mutex<audio_mix::ModeMix>);
 /// The race flow's `StateAudioSetState` (docs/AUDIO_RESEARCH.md §13):
 /// StartLine through the start sequence (also after a restart), Normal from
-/// the green light (`set_audio_normal_start_race`). Free practice has no
-/// start sequence and stays Normal. Like the flow's states, a mode is set
-/// when the flow changes, so a Crashed in between (collision_sound) returns
-/// by itself. Pause keeps its existing silence; the Paused and EndOfRace
-/// modes are not driven here [I].
+/// the green light (`set_audio_normal_start_race`), EndOfRace on the results
+/// screen (`c_post_set_audio_endofrace`, the parent of
+/// `results_show_screen`). Free practice has no start sequence and stays
+/// Normal. Like the flow's states, a mode is set when the flow changes, so a
+/// Crashed in between (collision_sound) returns by itself. Pause keeps its
+/// existing silence; Paused, PausedReplay and Transition (replays) are not
+/// driven here [I].
 fn mix_mode(
     mode: Res<AudioMode>,
     sound: Res<EngineSound>,
     trial: Option<Res<super::time_trial::Trial>>,
+    post: Option<Res<super::post_race::PostRace>>,
     time: Res<Time<Real>>,
     mut flow: Local<Option<usize>>,
 ) {
+    use super::post_race::{Return, Stage};
     let start_line = trial
         .as_ref()
         .is_some_and(|t| matches!(t.state.phase(), grid_tools::time_trial::Phase::Countdown(_)));
-    let next = if start_line { audio_mix::START_LINE } else { audio_mix::NORMAL };
+    let results = post
+        .as_ref()
+        .is_some_and(|p| matches!(p.stage, Stage::Results | Stage::Confirm(_, Return::Results)));
+    let next = if start_line {
+        audio_mix::START_LINE
+    } else if results {
+        audio_mix::END_OF_RACE
+    } else {
+        audio_mix::NORMAL
+    };
     let Ok(mut mix) = mode.0.lock() else { return };
     if *flow != Some(next) {
         *flow = Some(next);
