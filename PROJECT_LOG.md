@@ -1,5 +1,11 @@
 # GRID engine project log
 
+## G163 — Road/paint material update delivered; DLAA next (19 October 2026)
+
+729tests/19harness results pass,0failed/ignored, feature/default Clippy pass. Final3362/c1052c4c... dedicated executable atomically installed with exact process/hash guards; ordinary primary Play GRID Graphics.cmd now selects source road mask and coat0.35/0.18. Previous3bfc/bbc1 remains rollback; main normal8762/owner notec4d52 and working status preserved. Nativefront/rear exact parity, final600tick smoke and explicit-setting RGBA checks accepted with scopes in docs/LACETTI_CLEARCOAT_STUDY.md. No new final6500tick lap claim; same shader full lap uses installed3bfc control.
+
+Owner finds TAA soft but playable/close to original and wants DLAA clarity. Prioritize optional DLAA with support checks/SMAA fallback, alongside a bounded motion/depth audit; avoid endless TAA tuning. Current1200tick rotating-camera SMAA/TAA controls pass/4identical physical exits; images inspected, no numerical temporal fix claimed. docs/TEMPORAL_AA_DIAGNOSTICS.md records prepared private metadata/Naga checks and remaining real-GPU work. Next: publish this checked graphics checkpoint, safely integrate upstream, then wire the audit and optional DLAA without replacing the accepted build prematurely.
+
 ## G162 — Final material runtime matches selected native controls (19 October 2026)
 
 3362fd0 app compiled/stamped, SHA c1052c4c..., front/rear default4K PNGs byte-identical to8949 explicit0.35/0.18+source-road controls. Actual help corrected. Full resource tests executing; final side-view default smoke and TAA diagnostic pending; installed3bfc still stable. docs/LACETTI_CLEARCOAT_STUDY.md has exact source/artifact scope. Private numerical audit draft passes cached-Bevy metadata/Naga checks only, not application/GPU acceptance; docs/TEMPORAL_AA_DIAGNOSTICS.md records that boundary. Upstream5004cf9 merge preview has2conflicted files; both graphics and LeMans blocks retained in a syntax-checked private resolution, no checkout merge performed.
