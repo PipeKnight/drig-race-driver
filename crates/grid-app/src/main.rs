@@ -3062,6 +3062,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             return Err("--career-result requires a race".into());
         }
         app.insert_resource(career_screen::ResultPath(path))
+            .init_resource::<career_screen::TopSpeed>()
+            .add_systems(Update, career_screen::track_top_speed)
             .add_systems(Last, career_screen::write_result);
     }
     let exit = app

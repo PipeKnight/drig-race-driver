@@ -37,11 +37,38 @@ Mapping to `career` types:
 - A car that is out (retired, wrecked, stopped, disqualified) is classified at its place with `finished = false`. `undamaged` is false only for a wrecked car (AUTHORED; the original's no-damage flag is not traced).
 - `RaceSettings`: traction control on unless Off, steering assist = Stability Control, braking assist on unless Off, manual gears = manual gearbox (25 % and 50 % count as on). The star level is the race difficulty's: the level whose `ai_ratio` is nearest 0.606 (`flashback::star_level`, as F439's catch-up), which is Normal, level 1. Its `rep_bonus_factor` is −0.1 [D], so F has −10 points (AUTHORED: the career's own difficulty choice is not ported). No head camera, no pro mode: neither exists in the port.
 
-## New career (Arc 1 stub)
+## New career and driver offers (Arc 1, F464)
 
-AUTHORED: driver offers (Arc 1) have no front end yet. A new save therefore runs the original's founding at once: `Career::new()`, then `add_money(start_money)`. Founding [V 0x674610 → 0x66F640] spends the 40,000, activates the team, grants the rookie licences in all three regions and gives the free `initial_vehicle_id` 43 (`bos`). The bank starts at 0.
+A new save starts as the original's does [V 0x674610]: `Career::new()`, no team and no money. Own-team events stay closed until the team exists. The player drives **driver offers** for other teams, and the money they pay founds the team when the bank reaches `start_race_team` (40,000). Founding [V 0x674610 → 0x66F640] spends the 40,000, activates the team, grants the rookie licences in all three regions and gives the free `initial_vehicle_id` 43 (`bos`). The payout page then says so. Saves made with F424 (team already founded) load unchanged.
 
-Also AUTHORED: the event's car is lent to the player. Buying a car (`Career::buy_car`) has no screen yet, and the `bos` is not an entry car of any raceable rookie event.
+Driver offers on the home page, after the open events:
+- **Which** (`Career::driver_offers_shown`, CAREER_RESEARCH.md §6) [V partial, I]:
+  - three region slots (`tier.order_index` 0 US, 1 Europe, 2 Japan);
+  - each shows one race offer and one test offer: the first offer by `driver_offer.order_index` not driven yet, in the region's driver-offer tier of the player's rank there (the International offer tiers at overall rank 3);
+  - a driven offer moves its slot on, whether its objective was met or not [I];
+  - the Le Mans offer tiers are not shown (no Le Mans entry yet).
+- **Which the port runs** (`offer_runs`, AUTHORED filter):
+  - the offer's car (`vehicle_livery` → `vehicle`) is in `series::RACEABLE`;
+  - its one `driver_offer_track` race is a lap race on a surveyed layout.
+  - Others are not listed. On F463's main a new career has four: 2 (Lacetti, Washington), 15 (Porsche 911 at Jarama, finish 3rd or better), 16 (BMW 320si time trial at the Nürburgring) and 25 (350Z, Yokohama, beat a rival team).
+- **Row text:** "Race/Test for TEAM: EVENT - OBJECTIVE (fee, bonus) [car]". The team and event names are `db_*` language strings when present. The objective is in English (AUTHORED wording after `db_race_offer_*`).
+- **Race offers:** a 12-car race, the offer's car for the player, the offer event's raceable cars for the field (AUTHORED). The grid slot comes from `driver_offer_track` `player_grid_position_base/range`.
+- **Test offers** (time trial, speed test): the port's Time Trial (no opponents) on the layout. AUTHORED: the original's test session is a separate mode.
+- **Objective** (`rules::offer_objective_met`, [V] objective classes):
+  - finishing place, including Le Mans: `place ≤ objective`;
+  - no damage: finished and not wrecked (AUTHORED damage rule, as for sponsors);
+  - beat rival: **AUTHORED: AI cars 1 and 2 drive for the rival team** (`RIVAL_CARS`); the career field's teams are not traced;
+  - time trial: the player's best lap below `target_time_secs[star level]`;
+  - speed test: the top speed at least `target_speed_mph[star level]`. AUTHORED: sampled once per frame from the player's velocity (`TopSpeed`).
+  - The star level is the race difficulty's (Normal = 1).
+- **Pay** (`career::apply_driver_offer`) [V 0x674940, 0x652270]:
+  - race offers pay the appearance fee `per_race_wage × races` (each offer has one race [D]);
+  - with the objective met, `objective_money_bonus` and `objective_reputation_bonus` to the offer tier's region;
+  - [I] no event prize or reputation pot for an offer race.
+  - The payout page shows "Objective: achieved/failed", Driver Offer Wages, Driver Offer Rewards, Total and Reputation.
+- **Files:** the event file has an `offer ID` line, and `best`/`top` lines after the race. The race result file adds `best SECONDS` and `top MPH`.
+
+AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`) has no screen yet, and the `bos` is not an entry car of any raceable rookie event.
 
 ## Processes
 
@@ -78,10 +105,10 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
   - ignored, on the purchased data: bmw_si_tour is offered with the BMW; its plan is route_1 × 3 laps and route_2 × 2 laps from slot 12; wins, 2nd places and aids-off wins pay as above.
 - The in-app run of bmw_si_tour is recorded in PROJECT_LOG F424.
 - Unattended runs: diagnostics `results_continue = SECONDS` (or `GRID_RESULTS_CONTINUE`) makes a scripted run (`--drive-ticks` with `autopilot`) select Continue on the stats and results screens after that many seconds. A career race then runs and returns its result with no input.
-- Fully unattended career: `GRID_CAREER_AUTO=EVENT_ID` with `GRID_AUTOPILOT=1` and `GRID_RESULTS_CONTINUE=3`, then `grid-app --career`. Each screen page acts by itself after 3 s: it enters the event, starts each next race, and quits after the payout. The supervisor runs the races with `--drive-ticks 36000`, so the autopilot drives. No keyboard or mouse input reaches the desktop. Driving is unchanged; it acts only on the post-race screens of scripted runs.
+- Fully unattended career: `GRID_CAREER_AUTO=EVENT_ID` (or `o` and a driver offer id, e.g. `o15`) with `GRID_AUTOPILOT=1` and `GRID_RESULTS_CONTINUE=3`, then `grid-app --career`. Each screen page acts by itself after 3 s: it enters the event, starts each next race, and quits after the payout. The supervisor runs the races with `--drive-ticks 36000`, so the autopilot drives. No keyboard or mouse input reaches the desktop. Driving is unchanged; it acts only on the post-race screens of scripted runs.
 
 ## Not done
 
-- Driver offers, team naming and livery, car buying and selling, teammates, sponsor placement, head-to-heads, Le Mans entry, season-end screens, and the original's career look.
+- Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, car buying and selling, teammates, sponsor placement, head-to-heads, Le Mans entry, season-end screens, and the original's career look.
 - The original's race draw, career grid fill, named drivers and the teammate in the field.
 - Flashback limits per difficulty and pro mode's restart ban (§8).

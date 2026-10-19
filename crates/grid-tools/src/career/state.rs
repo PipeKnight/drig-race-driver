@@ -233,6 +233,46 @@ impl Career {
             && (!event.head_to_head || self.head_to_heads.contains(&event_id))
     }
 
+    /// The driver offers on show (0x651480, 0x650FA0) [V partial]: three
+    /// region slots by `tier.order_index` (0 US, 1 Europe, 2 Japan), each
+    /// with one race offer and one test offer (time trial or speed test,
+    /// separate slots +0x80..+0x88): the first offer by
+    /// `driver_offer.order_index` not driven yet, in the driver-offer tier of
+    /// the player's rank in that region (the International offer tiers at
+    /// overall rank 3). [I] The slot's tier choice (0x67E450) and that a
+    /// driven offer, met or not, moves the slot on (0x651920 after the race)
+    /// follow the research notes; the Le Mans offer tiers are not slots here.
+    pub fn driver_offers_shown(&self, catalogue: &Catalogue) -> Vec<i32> {
+        let international = self.overall_rank(catalogue) == 3;
+        let mut shown = Vec::new();
+        for slot in 0..3 {
+            let tier = catalogue.tiers.iter().find(|t| {
+                t.driver_offers
+                    && t.order_index == slot
+                    && match t.region {
+                        Region::LeMans => false,
+                        Region::International => international && t.rank_id == 4,
+                        region => !international && t.rank_id as usize == self.rank(catalogue, region) + 1,
+                    }
+            });
+            let Some(tier) = tier else {
+                continue;
+            };
+            let mut offers: Vec<&super::data::DriverOffer> = catalogue
+                .driver_offers
+                .values()
+                .filter(|o| o.tier_id == tier.id && !self.completed_offers.contains(&o.id))
+                .collect();
+            offers.sort_by_key(|o| (o.order_index, o.id));
+            for test in [false, true] {
+                if let Some(o) = offers.iter().find(|o| rules::is_test_offer(o) == test) {
+                    shown.push(o.id);
+                }
+            }
+        }
+        shown
+    }
+
     /// The season state (0x62C140) [V].
     pub fn season_state(&self) -> SeasonState {
         match (self.season.len(), self.lemans_refused) {
@@ -557,10 +597,7 @@ pub fn apply_driver_offer(
     let tier = catalogue
         .tier(offer.tier_id)
         .ok_or(format!("tier {} absent", offer.tier_id))?;
-    let test = matches!(
-        offer.objective,
-        super::data::OfferObjective::TimeTrial | super::data::OfferObjective::SpeedTest
-    );
+    let test = rules::is_test_offer(offer);
     let mut payout = Payout {
         region: Some(tier.region),
         ..Payout::default()

@@ -258,6 +258,12 @@ pub fn offer_objective_met(
     }
 }
 
+/// A test offer (time trial or speed test) has its own slots and pays no
+/// appearance fee (0x4F10B0, 0x674940) [V].
+pub fn is_test_offer(offer: &DriverOffer) -> bool {
+    matches!(offer.objective, OfferObjective::TimeTrial | OfferObjective::SpeedTest)
+}
+
 /// The appearance fee of a driver offer: `per_race_wage × races`
 /// (0x637980, 0x674CC2) [V].
 pub fn appearance_fee(offer: &DriverOffer) -> i64 {

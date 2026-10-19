@@ -126,6 +126,8 @@ mod tests {
             event_id: 22,
             team_id: 91,
             vehicle_livery_id: 201,
+            vehicle_id: Some(10),
+            livery: "lac_02".into(),
             order_index: 1,
             per_race_wage: 4500,
             objective: OfferObjective::FinishingPlace,
@@ -161,6 +163,7 @@ mod tests {
             )]),
             sponsors: BTreeMap::new(),
             driver_offers: BTreeMap::from([(12, offer)]),
+            teams: BTreeMap::new(),
             team_mates: Vec::new(),
             difficulties,
             reputation_fractions: vec![
@@ -326,6 +329,28 @@ mod tests {
         assert!(c.season.is_empty());
         apply_driver_offer(&cat, &mut c, 12, false).unwrap();
         assert_eq!(c.season, [SeasonEntry::DriverOffer(12)]);
+    }
+
+    #[test]
+    fn a_driven_offer_moves_its_slot_on() {
+        let cat = tiny();
+        let mut c = Career::new();
+        assert_eq!(c.driver_offers_shown(&cat), [12]);
+        apply_driver_offer(&cat, &mut c, 12, false).unwrap();
+        assert!(c.driver_offers_shown(&cat).is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn a_new_career_shows_one_race_and_one_test_offer_per_region() {
+        let cat = catalogue();
+        let c = Career::new();
+        // US rookie: 2 (race), 7 (time trial); Europe rookie: 15, 16;
+        // Japan rookie: 25, 27 (speed test) - first by order_index [D].
+        assert_eq!(c.driver_offers_shown(&cat), [2, 7, 15, 16, 25, 27]);
+        let bmw = &cat.driver_offers[&23];
+        assert_eq!(cat.vehicles[&bmw.vehicle_id.unwrap()].stem, "bmw");
+        assert_eq!(bmw.races.len(), 1);
     }
 
     #[test]

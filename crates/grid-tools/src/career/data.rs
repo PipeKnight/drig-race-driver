@@ -267,6 +267,10 @@ pub struct DriverOffer {
     pub event_id: i32,
     pub team_id: i32,
     pub vehicle_livery_id: i32,
+    /// The offered car: `vehicle_livery.vehicle_id` of `vehicle_livery_id` [D].
+    pub vehicle_id: Option<i32>,
+    /// `vehicle_livery.file_string` (`bmw_02`: car stem and livery) [D].
+    pub livery: String,
     pub order_index: i32,
     pub per_race_wage: i64,
     pub objective: OfferObjective,
@@ -379,6 +383,8 @@ pub struct Catalogue {
     pub vehicles: BTreeMap<i32, Vehicle>,
     pub sponsors: BTreeMap<i32, Sponsor>,
     pub driver_offers: BTreeMap<i32, DriverOffer>,
+    /// `team.name_string_id` by team id (driver-offer teams and rivals) [D].
+    pub teams: BTreeMap<i32, String>,
     pub team_mates: Vec<TeamMate>,
     pub difficulties: Vec<Difficulty>,
     /// `event_reputation_reward.percentage_string`: the reputation share per
@@ -583,6 +589,10 @@ impl Catalogue {
                 .or_default()
                 .push(x);
         }
+        let liveries: BTreeMap<i32, (i32, String)> = table(db, "vehicle_livery")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, (int(&r, "vehicle_id")?, text(&r, "file_string")?))))
+            .collect::<Result<_>>()?;
         let mut driver_offers = BTreeMap::new();
         for r in table(db, "driver_offer")?.rows() {
             let id = int(&r, "id")?;
@@ -590,6 +600,8 @@ impl Catalogue {
             races.sort_by_key(|x| (x.order_index, x.id));
             // The target columns are string lists; empty when unused [D].
             let targets = |c: &str| parse_list::<f32>(r.text(c).unwrap_or(""));
+            let livery_id = int(&r, "vehicle_livery_id")?;
+            let livery = liveries.get(&livery_id);
             driver_offers.insert(
                 id,
                 DriverOffer {
@@ -597,7 +609,9 @@ impl Catalogue {
                     tier_id: int(&r, "tier_id")?,
                     event_id: int(&r, "event_id")?,
                     team_id: int(&r, "team_id")?,
-                    vehicle_livery_id: int(&r, "vehicle_livery_id")?,
+                    vehicle_livery_id: livery_id,
+                    vehicle_id: livery.map(|l| l.0),
+                    livery: livery.map(|l| l.1.clone()).unwrap_or_default(),
                     order_index: int(&r, "order_index")?,
                     per_race_wage: int(&r, "per_race_wage")? as i64,
                     objective: OfferObjective::from_id(int(&r, "objective_type_id")?)?,
@@ -612,6 +626,10 @@ impl Catalogue {
             );
         }
 
+        let teams = table(db, "team")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, text(&r, "name_string_id")?)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
         let drivers = table(db, "driver")?;
         let mut team_mates = Vec::new();
         for r in table(db, "team_mate")?.rows() {
@@ -679,6 +697,7 @@ impl Catalogue {
             vehicles,
             sponsors,
             driver_offers,
+            teams,
             team_mates,
             difficulties,
             reputation_fractions,
