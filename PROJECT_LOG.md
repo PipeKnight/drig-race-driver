@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G160 — Select moderate paint coat from native controlled views (19 October 2026)
+
+Front/rear native4K controls show a modest highlight improvement at0.35/0.18; select this enhanced player-only coat, keeping source base masks, glass, exposure and base roughness. Rear0.20 control is byte-identical to installed3bfc. Sharper0.12 roughness remains experimental. Corrected the effective source-road default in CLI help. Final source frozen for a fresh build/full release checks; motion/RGBA evidence still pending and stable installed3bfc unchanged. docs/LACETTI_CLEARCOAT_STUDY.md distinguishes source selection from delivered status.
+
 ## G159 — Candidate native legacy/default parity and CLI guards pass (19 October 2026)
 
 8949 diagnostic app built/stamped, SHA359b1e50..., feature all-target workspaceClippy passes; NaN strength/zero roughness/baseline coat override reject as intended. Native4K explicitOff/prior-coat exactly equals installed3bfc Off PNG; implicit source-road/prior-coat exactly equals installed3bfc explicitSourceBase PNG. This verifies the automatic road default and unchanged accepted paint control without attributing test data to the wrong build. New coat variants still capturing.

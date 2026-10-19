@@ -139,7 +139,7 @@ impl Default for Settings {
             exposure_ev100: 13.,
             window_roughness: 0.08,
             window_reflectance: 0.5,
-            paint_clearcoat: 0.2,
+            paint_clearcoat: 0.35,
             paint_coat_roughness: 0.18,
             tree_sheet_colours: false,
             ambient_occlusion: true,
@@ -508,7 +508,7 @@ mod graphics_settings_tests {
     #[test]
     fn paint_coat_controls_preserve_defaults_and_reject_nonfinite_values() {
         let mut settings = Settings::default();
-        assert_eq!((settings.paint_clearcoat, settings.paint_coat_roughness), (0.2, 0.18));
+        assert_eq!((settings.paint_clearcoat, settings.paint_coat_roughness), (0.35, 0.18));
         for value in ["0", "0.35", "1"] {
             settings.paint_clearcoat(value).unwrap();
         }

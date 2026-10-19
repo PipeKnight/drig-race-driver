@@ -1854,9 +1854,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--help" => {
                 #[cfg(feature = "paint-specular")]
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
-                println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.2/0.18, enhanced layered materials only.");
+                println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
-                println!("--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source layers required; off default, not original Phong parity.");
+                println!("--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
                     "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
