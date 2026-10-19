@@ -53,6 +53,8 @@ mod mesh_stream;
 mod motion_capture;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
+mod thin_motion;
+#[cfg(feature = "dlaa")]
 mod native_dlaa;
 mod particles;
 mod pause_menu;
@@ -1839,6 +1841,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--surface-rgb-overrides" => {
                 surface_rgb_override = Some(PathBuf::from(args.next().ok_or("--surface-rgb-overrides needs a private manifest")?));
             }
+            "--thin-motion" => {
+                graphics.thin_motion_antenna = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("antenna") => true,
+                    _ => return Err("--thin-motion needs off or antenna".into()),
+                };
+            }
             "--ground-edges" => {
                 graphics.ground_edge_pilot = match args.next().as_deref() {
                     Some("off") => false,
@@ -1934,7 +1943,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "--car STEM: purchased car folder cars/STEM for the player and the car scene (default lac; bmw is the other Touring_cars model). --opponent-cars STEM[,STEM...]: opponent models, cycled over the field (default: the player's car; bmw,lac alternates as in the euro_touring 6+6 roster)."
                 );
-                println!("--aa taa|smaa|dlaa|off: SMAA default; experimental native DLAA requires optional dlaa SDK feature and Vulkan RTX, otherwise runtime SMAA fallback. No sharpening added.");
+                println!("--thin-motion off|antenna: optional conservative antenna motion pass; native DLAA driving only.\n--aa taa|smaa|dlaa|off: SMAA default; experimental native DLAA requires optional dlaa SDK feature and Vulkan RTX, otherwise runtime SMAA fallback. No sharpening added.");
                 println!("--temporal-audit TICK: bounded raw main-view motion/depth plus frozen matrices; live enhanced offscreen --drive/--render-fps only; evidence under ignored local/.");
                 println!("{}", settings::HELP);
                 println!("{}", assists::HELP);
@@ -2011,6 +2020,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
         return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges) require an enhanced non-collision track scene with --track-materials source".into());
+    }
+    if graphics.thin_motion_antenna && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive) {
+        return Err("--thin-motion antenna requires enhanced driving with native --aa dlaa".into());
     }
     if graphics.ground_edge_pilot {
         println!("graphics_ground_edges mode=atlas-pilot authored=true terrain_u=0.60..0.70 scope=four-audited-atlases default=false");
@@ -3073,6 +3085,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if track && graphics.source_trees {
         source_trees::install(&mut app);
     }
+    #[cfg(feature = "dlaa")]
+    if graphics.thin_motion_antenna {
+        thin_motion::install(&mut app)?;
+    }
+
     if track
         && !collision
         && ground_effect_assets::enabled()

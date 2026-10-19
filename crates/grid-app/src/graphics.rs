@@ -59,6 +59,7 @@ pub struct Settings {
     pub layered_track: bool,
     /// Source blended-alpha base-F0 adaptation; CLI resolves eligible track defaults.
     pub surface_specular: super::track_surface::Specular,
+    pub thin_motion_antenna: bool,
     pub ground_edge_pilot: bool,
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
@@ -130,6 +131,7 @@ impl Default for Settings {
             ssr_thickness: 0.05,
             layered_track: true,
             surface_specular: super::track_surface::Specular::Off,
+            thin_motion_antenna: false,
             ground_edge_pilot: false,
             source_land: true,
             source_trees: false,

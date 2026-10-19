@@ -38,7 +38,7 @@ pub fn plugins(plugins: PluginGroupBuilder) -> PluginGroupBuilder {
     plugins.add_before::<DlssInitPlugin>(ProjectIdentity)
 }
 #[derive(Component, Clone, ExtractComponent)]
-struct DlaaView;
+pub(super) struct DlaaView;
 #[derive(Resource, Clone, ExtractResource)]
 pub struct State {
     ready: Arc<AtomicBool>,
