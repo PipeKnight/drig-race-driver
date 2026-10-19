@@ -500,7 +500,11 @@ fn reseat_edge(j: &Joint, upper: usize, lower: usize, value: f32) -> Option<f32>
 /// for the current body poses (+0x14 rows, +0x18 rows of the first pass,
 /// +0x54 the angular rows).
 // Original multiplies by -1.0; negated compares keep NaN outcomes.
-#[allow(clippy::neg_multiply, clippy::neg_cmp_op_on_partial_ord, clippy::needless_range_loop)]
+#[allow(
+    clippy::neg_multiply,
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::needless_range_loop
+)]
 pub fn prepare(joint: &mut Joint, bodies: &Bodies<'_>) {
     let j = joint;
     let a = bodies.a;
@@ -679,10 +683,10 @@ pub fn prepare(joint: &mut Joint, bodies: &Bodies<'_>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn body_at(p: [f32; 3]) -> Body {
+    pub(crate) fn body_at(p: [f32; 3]) -> Body {
         let mut b = [0u32; 0x424 / 4];
         for (k, row) in [
             [1., 0., 0., 0.],
@@ -702,7 +706,7 @@ mod tests {
 
     /// A descriptor whose three frames are the identity at `at`, with
     /// linear limits `lower..upper` on every axis.
-    fn descriptor(at: [f32; 3], lower: f32, upper: f32) -> [u32; DESCRIPTOR / 4] {
+    pub(crate) fn descriptor(at: [f32; 3], lower: f32, upper: f32) -> [u32; DESCRIPTOR / 4] {
         let mut d = [0u32; DESCRIPTOR / 4];
         for frame in 0..3 {
             for k in 0..4 {
@@ -738,7 +742,10 @@ mod tests {
         construct(&mut j, &mut d, &bodies, 0);
         // RSQRTPS normalisation: one ulp short of 1.
         let x = j.vec(0x70);
-        assert!((x[0] - 1.).abs() < 1e-6 && x[1] == 0. && x[2] == 0., "{x:?}");
+        assert!(
+            (x[0] - 1.).abs() < 1e-6 && x[1] == 0. && x[2] == 0.,
+            "{x:?}"
+        );
         assert_eq!(j.vec(0xa0), [0., 0., 1., 1.]);
         assert_eq!(j.vec(0xf0), [0., 0., -1., 1.]);
         assert_eq!(j.words[0x1c / 4], u32::MAX);
@@ -777,6 +784,7 @@ mod tests {
             inverse_step: 60.,
             reduction: 0.2,
             step: 1. / 60.,
+            impulse_scale: 1.,
             two_batch: 0,
             one_batch: 0,
             total: 0,
@@ -796,8 +804,14 @@ mod tests {
             },
         );
         assert_eq!((ctx.total, ctx.two_cursor, ctx.two_head), (1, 1, Some(0)));
-        let axis = two[0][0..4].iter().map(|&w| f32::from_bits(w)).collect::<Vec<_>>();
-        assert!((axis[0] - 1.).abs() < 1e-6 && axis[1] == 0. && axis[2] == 0., "{axis:?}");
+        let axis = two[0][0..4]
+            .iter()
+            .map(|&w| f32::from_bits(w))
+            .collect::<Vec<_>>();
+        assert!(
+            (axis[0] - 1.).abs() < 1e-6 && axis[1] == 0. && axis[2] == 0.,
+            "{axis:?}"
+        );
         assert!((f32::from_bits(two[0][32]) - 60. * 0.2 * 0.45).abs() < 1e-4);
     }
 }

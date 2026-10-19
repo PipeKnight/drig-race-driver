@@ -107,7 +107,19 @@ def case(rng, mode, i):
     return (struct.pack('<IIII', mode, flags, world, reseat) + bytes(d) + body(rng, poses[0])
             + body(rng, poses[1]) + b''.join(struct.pack('<16f', *(v for row in m for v in row)) for m in after)
             + struct.pack('<4f4I', rng.choice([60., 1 / 0.0166]), rng.choice([0.2, 0.8, 1.0]), rng.choice([1 / 60, 0.0166]),
-                          rng.choice([0.0, 0.01]), rng.randrange(8), 8 + rng.randrange(8), rng.randrange(3), rng.getrandbits(32)))
+                          rng.choice([0.0, 0.01]), rng.randrange(8), 8 + rng.randrange(8), rng.randrange(3), rng.getrandbits(32))
+            + (solved(rng) if mode >= 3 else b'')
+            + (struct.pack('<2fI', rng.choice([1., 0.8, 0.2]), rng.choice([0.02, 0., 0.5]), int(rng.random() < 0.1))
+               if mode == 4 else b''))
+
+
+def solved(rng):
+    """Mode 3: the impulse scale, then each pool row's impulse and denominator."""
+    def impulse():
+        return rng.choice([0., rng.uniform(-1, 1), rng.uniform(-100, 100), rng.uniform(-2e4, 2e4), 1e4, -1e4])
+    rows = (struct.pack('<2f', impulse(), rng.choice([1., rng.uniform(0.01, 10.), rng.uniform(10., 1e4)]))
+            for _ in range(32))
+    return struct.pack('<f', rng.choice([1., 0.5, 1 / 60])) + b''.join(rows)
 
 
 def run(command, source, target):

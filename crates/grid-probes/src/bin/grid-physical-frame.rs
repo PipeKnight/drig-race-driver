@@ -231,6 +231,7 @@ pub(crate) fn run(deformation: bool, active: bool) -> Result<(), Failure> {
                 workspace,
                 cached_pair,
                 cached_material,
+                joints: Default::default(),
             },
         };
         let mut descriptor = None;

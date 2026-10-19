@@ -403,6 +403,29 @@ fn calculate_impl(
                 }
             })
             .collect();
+        // B7B850's joint pools: the group's joints with their bodies' local
+        // indices (body +0x404 is the position in `ids`).
+        let local = |id: u32| groups.bodies[id as usize - 1][0x404 / 4] as usize;
+        let joint_ids = &groups.joint_groups[root];
+        let joints = impact_step::Joints {
+            bodies: if joint_ids.is_empty() {
+                Vec::new()
+            } else {
+                ids.iter().map(|&i| groups.bodies[i]).collect()
+            },
+            list: joint_ids
+                .iter()
+                .map(|&k| {
+                    let w = &groups.joints[k];
+                    impact_step::IslandJoint {
+                        joint: w.joint.clone(),
+                        a: local(w.a),
+                        b: (w.b != 0 && w.joint.byte(0xc) == 0).then(|| local(w.b)),
+                        fixed: w.fixed.clone(),
+                    }
+                })
+                .collect(),
+        };
         let frame_input = impact_frame::Input {
             bodies: settings,
             gravity: manager.gravity,
@@ -421,6 +444,7 @@ fn calculate_impl(
                 workspace: manager.workspace[..ids.len()].to_vec(),
                 cached_pair: manager.cached_pair,
                 cached_material: manager.cached_material,
+                joints,
             },
         };
         // Selected scope: a registered car alone in its group (static peers) runs
@@ -488,6 +512,12 @@ fn calculate_impl(
             return Err(Error(
                 "unsupported grouped physical sleep or capacity status",
             ));
+        }
+        for (&k, j) in groups.joint_groups[root]
+            .iter()
+            .zip(&frame.step.joints.list)
+        {
+            groups.joints[k].joint = j.joint.clone();
         }
         visits.push((
             root,
@@ -588,6 +618,7 @@ mod tests {
             contacts: vec![],
             active_order: vec![0, 1],
             selector: 0,
+            joints: vec![],
         };
         let manager = Manager {
             parameters: [0.1, 1., 1., 1., 1., 0.2, 0.1, 0., 1., 1., 0.5],
@@ -671,5 +702,86 @@ mod tests {
         assert_eq!(contact[0x18 / 4], 1);
         assert!(!flag(&contact, 0xe));
         assert!(flag(&contact, 0x73));
+    }
+
+    /// Two free bodies with no contact between them form one island through
+    /// a joint (AD6C40 groups the joints first), whose rows then hold them.
+    #[test]
+    fn a_joint_merges_two_bodies_into_one_solved_island() {
+        use crate::joint::{
+            self, Bodies, Joint,
+            tests::{body_at, descriptor},
+        };
+        let identity =
+            std::array::from_fn(|r| std::array::from_fn(|c| if r == c { 1. } else { 0. }));
+        let mut bodies = vec![[0; 0x424 / 4]; 2];
+        for body in &mut bodies {
+            body[0x334 / 4] = 0x1c0;
+            for o in [0x90, 0x110, 0x150, 0x190] {
+                store_matrix(body, o, identity);
+            }
+            body[0x3b4 / 4] = f32::MAX.to_bits();
+            for o in [0x3b8, 0x3bc, 0x3c0, 0x3c4] {
+                body[o / 4] = f32::MAX.to_bits();
+            }
+            body[0x3f0 / 4] = 1f32.to_bits();
+            body[0x3f4 / 4] = 1f32.to_bits();
+        }
+        bodies[1][0x1c0 / 4] = 2.5f32.to_bits();
+        bodies[1][0x220 / 4] = 1f32.to_bits();
+        let (ra, rb) = (body_at([0., 0., 0.]), body_at([2., 0., 0.]));
+        let mut d = descriptor([1., 0., 0.], -0.05, 0.05);
+        let mut j = Joint::filled(0);
+        joint::construct(
+            &mut j,
+            &mut d,
+            &Bodies {
+                a: &ra,
+                b: Some(&rb),
+                fixed: false,
+            },
+            0,
+        );
+        let input = contact_groups::Input {
+            bodies,
+            contacts: vec![],
+            active_order: vec![0, 1],
+            selector: 0,
+            joints: vec![contact_groups::WorldJoint {
+                joint: j,
+                a: 1,
+                b: 2,
+                fixed: None,
+            }],
+        };
+        let manager = Manager {
+            parameters: [1. / 60., 1., 1., 1., 1., 0., 0.2, 0.003, 1., 0.2, 0.2],
+            gravity: [0.; 4],
+            correction: None,
+            materials: vec![[0.; 13]],
+            rows: vec![[0; 48]; 8],
+            capacity: 8,
+            iterations: 5,
+            ends: [0; 4],
+            properties: vec![(1., identity); 2],
+            workspace: vec![[[0.; 4]; 2]; 2],
+            cached_pair: None,
+            cached_material: [0.; 13],
+        };
+        let out = calculate(&input, &manager).unwrap();
+        assert_eq!(out.visits.len(), 1);
+        assert_eq!((out.visits[0].1, out.visits[0].2), (2, 0));
+        let j = &out.groups.joints[0].joint;
+        assert_eq!(out.groups.joint_groups[out.visits[0].0], vec![0]);
+        assert_ne!(j.words[0x1c / 4], j.words[0x20 / 4]);
+        assert!(j.words[0x20 / 4] < 2);
+        assert!(f(&out.groups.bodies[1], 0x220) < 1.);
+        assert!(f(&out.groups.bodies[0], 0x220) > 0.);
+        // Without the joint the bodies stay apart and keep their velocities.
+        let mut free = input.clone();
+        free.joints.clear();
+        let apart = calculate(&free, &manager).unwrap();
+        assert_eq!(apart.visits.len(), 2);
+        assert_eq!(f(&apart.groups.bodies[1], 0x220), 1.);
     }
 }

@@ -28,6 +28,8 @@ pub struct Context {
     pub reduction: f32,
     /// +0x14, the step the impulse bounds scale by.
     pub step: f32,
+    /// +0x18, the impulse scale the write-back multiplies by.
+    pub impulse_scale: f32,
     /// +0x24 / +0x28: rows in the current two-body / one-body batch.
     pub two_batch: u32,
     pub one_batch: u32,
@@ -442,4 +444,230 @@ pub fn write(
             );
         }
     }
+}
+
+/// AFCD90 (two bodies) / AFCC80 (one): the row's impulse along its
+/// Jacobians, by RCPPS of the row's denominator (word 43), into the joint's
+/// sums (+0x140 linear A, +0x150 angular A, +0x160 linear B, +0x170 angular B).
+fn accumulate(j: &mut Joint, row: &Row, two_body: bool) {
+    let n = rf(row, 43);
+    let impulse = rf(row, 37);
+    for k in 0..if two_body { 4 } else { 2 } {
+        let o = 0x140 + 0x10 * k;
+        let r = crate::sse_approx::rcp(n);
+        for lane in 0..4 {
+            let x = r * rf(row, 4 * k + lane);
+            let sum = ((1. - r * n) * x + x) * impulse + j.get(o + 4 * lane);
+            j.set(o + 4 * lane, sum);
+        }
+    }
+}
+
+/// The row's impulse as a force, 1.01 x |impulse x scale / inverse step|.
+fn force(row: &Row, ctx: &Context) -> f32 {
+    ((rf(row, 37) * ctx.impulse_scale / ctx.inverse_step) * f32::from_bits(0x3f81_47ae)).abs()
+}
+
+fn take(two_body: bool, ctx: &mut Context) -> usize {
+    if two_body {
+        ctx.two_cursor += 1;
+        ctx.two_cursor - 1
+    } else {
+        ctx.one_cursor += 1;
+        ctx.one_cursor - 1
+    }
+}
+
+/// AF47C0: one degree of freedom's limit and spring rows into the sums,
+/// breaking the joint (+0x48) past `limit`.
+fn dof_back(
+    j: &mut Joint,
+    dof: usize,
+    two_body: bool,
+    ctx: &mut Context,
+    pools: &Pools<'_>,
+    limit: f32,
+) {
+    for part in 0..2 {
+        if j.byte(dof + 2 + part) == 0 {
+            continue;
+        }
+        let i = take(two_body, ctx);
+        let row = if two_body {
+            &pools.two[i]
+        } else {
+            &pools.one[i]
+        };
+        accumulate(j, row, two_body);
+        if limit < force(row, ctx) {
+            j.set_byte(0x48, 1);
+        }
+    }
+}
+
+/// AFB280 (`two_body`) or AFB800: after the solve, the joint's impulse sums
+/// from its rows (in the order `write` wrote them), the re-seat request
+/// when a friction row saturates, and the break flag (+0x48) when a sum
+/// passes `breakLinearImpulse` (+0x248) or `breakAngularImpulse` (+0x24C).
+pub fn write_back(j: &mut Joint, two_body: bool, ctx: &mut Context, pools: &Pools<'_>) {
+    if j.byte(0x32e) != 0 {
+        let rows = j.words[0x18 / 4] as usize;
+        if two_body {
+            ctx.two_cursor += rows;
+        } else {
+            ctx.one_cursor += rows;
+        }
+        return;
+    }
+    let sums = if two_body { 0x140..0x180 } else { 0x140..0x160 };
+    for o in sums.clone().step_by(4) {
+        j.words[o / 4] = 0;
+    }
+    if 0. < j.get(0x250) {
+        let i = if two_body {
+            ctx.two_cursor
+        } else {
+            ctx.one_cursor
+        };
+        let pool: &[Row] = if two_body { pools.two } else { pools.one };
+        let threshold = j.get(0x258) * ctx.step * f32::from_bits(0x3f73_3333);
+        let count = if j.words[0x25c / 4] == 1 { 2 } else { 3 };
+        if (0..count).any(|k| threshold <= rf(&pool[i + k], 37).abs()) {
+            j.set_byte(0x32d, 1);
+        }
+        if two_body {
+            ctx.two_cursor += count;
+        } else {
+            ctx.one_cursor += count;
+        }
+    }
+    let angular = j.get(0x24c);
+    let extra = match j.words[0x25c / 4] {
+        1 => {
+            dof_back(j, 0x2dc, two_body, ctx, pools, angular);
+            true
+        }
+        2 => {
+            dof_back(j, 0x2dc, two_body, ctx, pools, angular);
+            !(j.get(0x244) == 0. && j.byte(0x32c) == 0)
+        }
+        _ => false,
+    };
+    if extra {
+        let i = take(two_body, ctx);
+        let row = if two_body {
+            &pools.two[i]
+        } else {
+            &pools.one[i]
+        };
+        accumulate(j, row, two_body);
+        if force(row, ctx) > angular {
+            j.set_byte(0x48, 1);
+        }
+    }
+    if j.words[0x260 / 4] == 1 {
+        dof_back(j, 0x304, two_body, ctx, pools, angular);
+    }
+    let active = (0..3).any(|k| j.byte(0x266 + 0x28 * k) != 0 || j.byte(0x267 + 0x28 * k) != 0);
+    if active {
+        let linear = j.get(0x248);
+        for k in 0..3 {
+            dof_back(j, 0x264 + 0x28 * k, two_body, ctx, pools, linear);
+        }
+    }
+    for o in sums.step_by(0x10) {
+        let scale = ctx.impulse_scale / ctx.inverse_step;
+        for lane in 0..4 {
+            let v = j.get(o + 4 * lane);
+            j.set(o + 4 * lane, scale * v);
+        }
+    }
+    let square = |j: &Joint, o: usize| {
+        let v = j.vec(o);
+        (v[0] * v[0] + v[1] * v[1]) + (v[2] * v[2] + v[3] * v[3])
+    };
+    let linear = j.get(0x248);
+    if linear != MAX
+        && (linear * linear < square(j, 0x140) || (two_body && linear * linear < square(j, 0x160)))
+    {
+        j.set_byte(0x48, 1);
+    }
+    if angular != MAX
+        && (angular * angular < square(j, 0x150)
+            || (two_body && angular * angular < square(j, 0x170)))
+    {
+        j.set_byte(0x48, 1);
+    }
+}
+
+/// AEF930 (`two_body`) or AEFBB0: the joint's rows in the optional
+/// correction pass (B7B5E0), at `cursor` in its pool after the pass reset
+/// them (bias 0). A broken (+0x48) or disabled (+0xE) joint keeps no
+/// response; otherwise the angular rows (+0x54) lose theirs, and the point
+/// row and each linear limit row get a position bias, `scale` times the error
+/// beyond `threshold` (the point row's rest distance plus 0.1). Returns true
+/// when the pass must solve; the one-body frame joint always asks for it.
+pub fn correct(
+    j: &Joint,
+    two_body: bool,
+    scale: f32,
+    threshold: f32,
+    pool: &mut [Row],
+    cursor: &mut usize,
+) -> bool {
+    let start = *cursor;
+    let rows = j.words[0x18 / 4] as usize;
+    *cursor += rows;
+    let response = if two_body { 16..32 } else { 16..24 };
+    if j.byte(0xe) != 0 || j.byte(0x48) != 0 {
+        for row in &mut pool[start..start + rows] {
+            row[response.clone()].fill(0);
+        }
+        return false;
+    }
+    if j.byte(0x32e) != 0 {
+        if rows != 1 {
+            return false;
+        }
+        let v = (j.get(0x244) - (j.get(0x240) + f32::from_bits(0x3dcc_cccd))) * scale;
+        set(&mut pool[start], 36, v);
+        if 0. > v {
+            pool[start][36] = 0;
+            return false;
+        }
+        return true;
+    }
+    let mut active = !two_body;
+    let angular = j.words[0x54 / 4] as usize;
+    for row in &mut pool[start..start + angular] {
+        row[response.clone()].fill(0);
+    }
+    let mut i = start + angular;
+    for k in 0..3 {
+        if j.byte(0x266 + 0x28 * k) == 0 {
+            continue;
+        }
+        let e = j.get(0x26c + 0x28 * k);
+        let row = &mut pool[i];
+        // COMISS: an unordered error or bias takes the second branch.
+        if 0. > e {
+            let v = (threshold + e) * scale;
+            set(row, 36, v);
+            if v > 0. {
+                row[36] = 0;
+            } else {
+                active = true;
+            }
+        } else {
+            let v = (e - threshold) * scale;
+            set(row, 36, v);
+            if 0. > v {
+                row[36] = 0;
+            } else {
+                active = true;
+            }
+        }
+        i += 1;
+    }
+    active
 }

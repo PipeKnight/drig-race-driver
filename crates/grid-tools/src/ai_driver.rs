@@ -264,97 +264,6 @@ impl Line {
         )
     }
 
-    /// Link `i` of the track view's 32-link window that starts one link
-    /// behind `segment`, and the next gate (`None` past an open road's end).
-    fn window_link(&self, segment: usize, k: usize) -> Option<(usize, usize)> {
-        let n = self.points.len();
-        if self.open {
-            let i = (segment + k).checked_sub(1)?;
-            (i + 1 < n).then_some((i, i + 1))
-        } else {
-            let i = (segment + n - 1 + k) % n;
-            Some((i, (i + 1) % n))
-        }
-    }
-
-    /// The avoid behaviour's lookup of a point `p` on the track view's link
-    /// window (0x798C00 / 0x78DCD0, from 0x799B30 and 0x799DE0): `(arc,
-    /// lateral)` on the chosen link, or `None` when no window link holds `p`
-    /// (the original's lateral is then 0).
-    ///
-    /// A link holds `p` when `p` lies between the gate lines of its two gates
-    /// (0x778D00, side test 0x778B40). With `figure_of_eight` the first such
-    /// link from the back of the window is taken (0x78DCD0); otherwise the
-    /// one nearest to `p` (0x798920: 0 inside its track-limit quad, else the
-    /// distance to the nearer limit segment; ties go to the later link). The
-    /// lateral is `p`'s offset from the racing-line point at the first gate
-    /// along the link's own perpendicular (0x798D00 / 0x796CD0), positive on
-    /// the gate normal's side.
-    fn locate_in_window(
-        &self,
-        segment: usize,
-        p: [f32; 3],
-        figure_of_eight: bool,
-    ) -> Option<(f32, f32)> {
-        const WINDOW: usize = 32;
-        let side = |a: [f32; 3], dir: [f32; 3], q: [f32; 3]| {
-            let d = sub(q, a);
-            dir[0] * d[2] - dir[2] * d[0]
-        };
-        let holds = |i: usize, j: usize| {
-            let (a, b) = (self.points[i], self.points[j]);
-            let (na, nb) = (self.lateral[i], self.lateral[j]);
-            side(a, na, p) * side(a, na, b) >= 0. && side(b, nb, p) * side(b, nb, a) >= 0.
-        };
-        let segment_distance = |a: [f32; 3], b: [f32; 3]| {
-            let d = sub(b, a);
-            let t = (dot2(sub(p, a), d) / dot2(d, d).max(1e-9)).clamp(0., 1.);
-            let e = sub(p, lerp3(a, b, t));
-            dot2(e, e).sqrt()
-        };
-        let limit_point = |i: usize, k: usize| -> [f32; 3] {
-            std::array::from_fn(|c| self.points[i][c] + self.lateral[i][c] * self.track_limits[i][k])
-        };
-        let mut best: Option<(f32, usize, usize)> = None;
-        for k in 0..WINDOW.min(self.points.len()) {
-            let Some((i, j)) = self.window_link(segment, k) else {
-                continue;
-            };
-            if !holds(i, j) {
-                continue;
-            }
-            if figure_of_eight {
-                best = Some((0., i, j));
-                break;
-            }
-            let (l0, l1, r0, r1) = (limit_point(i, 0), limit_point(j, 0), limit_point(i, 1), limit_point(j, 1));
-            // Inside the quad between the left and right limit lines: 0.
-            let inside = side(l0, sub(l1, l0), p) * side(l0, sub(l1, l0), r0) >= 0.
-                && side(r0, sub(r1, r0), p) * side(r0, sub(r1, r0), l0) >= 0.;
-            let distance = if inside {
-                0.
-            } else {
-                segment_distance(l0, l1).min(segment_distance(r0, r1))
-            };
-            if best.is_none_or(|b| distance <= b.0) {
-                best = Some((distance, i, j));
-            }
-        }
-        let (_, i, j) = best?;
-        let (a, b) = (self.points[i], self.points[j]);
-        let along = horizontal(sub(b, a));
-        let mut perpendicular = [along[2], 0., -along[0]];
-        if dot2(perpendicular, self.lateral[i]) < 0. {
-            perpendicular = [-perpendicular[0], 0., -perpendicular[2]];
-        }
-        let length = dot2(sub(b, a), sub(b, a)).sqrt();
-        let t = (dot2(sub(p, a), along) / length.max(1e-6)).clamp(0., 1.);
-        Some((
-            self.start[i] + t * self.segment(i),
-            dot2(sub(p, a), perpendicular),
-        ))
-    }
-
     /// Track-limit offsets (left <= 0 <= right) at arc length `s`.
     fn track_limits_at(&self, s: f32) -> [f32; 2] {
         if self.open {
@@ -485,9 +394,6 @@ pub struct AiData {
     /// `(arc length of the brake-line gate, class brake data)` per brake-line id.
     brake_lines: Vec<(f32, ai::BrakeData)>,
     brake_tables: Vec<ai::GripTable>,
-    /// The car's cruise (coast-down) tables: the brake-line ratio's distance
-    /// (0x7886C0's second 0x7A6650 call, on vehicle AI data +8).
-    cruise_tables: Vec<ai::GripTable>,
     driver: BTreeMap<String, f32>,
     vehicle: BTreeMap<String, f32>,
     mappings: BTreeMap<String, ai::Mapping>,
@@ -627,8 +533,7 @@ impl AiData {
         }
         let (line, brake_lines) = track_lines(&track, &class_lines)?;
         let bytes = read_doc(&root.join("ai/ai_vehicle_statistics.xml"))?;
-        let statistics = ai::statistics(&binxml::read(&bytes)?, car)?;
-        let (brake_tables, cruise_tables) = (statistics.brake, statistics.cruise);
+        let brake_tables = ai::statistics(&binxml::read(&bytes)?, car)?.brake;
         let bytes = read_doc(&root.join("ai/ai_driver_config.xml"))?;
         let config = binxml::read(&bytes)?;
         let mut driver = ai::config(&config, "ai_driver_config", &[("default", None)])?;
@@ -674,7 +579,6 @@ impl AiData {
             line,
             brake_lines,
             brake_tables,
-            cruise_tables,
             driver,
             vehicle,
             mappings,
@@ -701,12 +605,6 @@ impl AiData {
     /// Braking distance from `from` down to `to` (0x7A6650).
     pub fn braking_distance(&self, grip: f32, from: f32, to: f32) -> f32 {
         grip_distance(&self.brake_tables, grip, from) - grip_distance(&self.brake_tables, grip, to)
-    }
-
-    /// Coasting distance from `from` down to `to` on the cruise tables
-    /// (0x7A6650 on vehicle AI data +8).
-    pub fn cruise_distance(&self, grip: f32, from: f32, to: f32) -> f32 {
-        grip_distance(&self.cruise_tables, grip, from) - grip_distance(&self.cruise_tables, grip, to)
     }
 }
 
@@ -2931,12 +2829,7 @@ impl AiDriver {
                         r.half_length() + rs.av_buffer + own.half_width() + r.half_width();
                     let predicted: [f32; 3] =
                         std::array::from_fn(|k| r.position[k] + eta * r.velocity[k]);
-                    // P on the track view's link window (0x798C00, or
-                    // 0x78DCD0 with avFigureOfEightTrack); lateral 0 off it.
-                    let (p_arc, lat) = data
-                        .line
-                        .locate_in_window(segment, predicted, rs.av_figure_of_eight)
-                        .unwrap_or((arc, 0.));
+                    let (_, p_arc, lat) = data.line.project(predicted, None);
                     let x = own_lateral;
                     self.avoid.side = if closing > speed {
                         1
@@ -3274,17 +3167,10 @@ impl AiDriver {
                 self.lines.active = Some(id);
             }
             if self.lines.active == Some(id) {
-                // 0x7886C0 measures the ratio against the coasting distance
-                // (the cruise tables), not the braking distance b: with the
-                // coasting distance far beyond d the ratio sits just under 1
-                // and `ratio^24` gives a part pedal that rises as the car
-                // closes on the line (live: 0.012 RMS over 6 699 raw samples,
-                // docs/AI_CHOREOGRAPHER_PORT.md "Redgate", F476).
-                let coast = data.cruise_distance(TABLE_GRIP, speed, line_target);
-                let ratio = if coast == d {
+                let ratio = if b == d {
                     0.
                 } else {
-                    clamp01((distance - coast) / (d - coast))
+                    clamp01((distance - b) / (d - b))
                 };
                 line_brake = ratio.powf(p.brake_cruise_exponent);
                 if line_brake > 0. {

@@ -176,6 +176,7 @@ fn run() -> Result<(), Failure> {
             workspace,
             cached_pair,
             cached_material,
+            joints: Default::default(),
         })?;
         output.extend(u32::from(o.success).to_le_bytes());
         for e in o.ends {

@@ -1,6 +1,6 @@
-//! Whole optional correction pass with impact-contact pools only.
-//! Multirow/joint pools, row creation and main velocity integration are external.
-use crate::{Error, contact_bias, physical_pose, physical_response};
+//! Whole optional correction pass (B7B5E0) over the impact-contact and joint
+//! pools. Row creation and main velocity integration are external.
+use crate::{Error, contact_bias, joint::Joint, joint_rows, physical_pose, physical_response};
 
 #[derive(Clone, Copy)]
 pub struct Contact {
@@ -9,10 +9,14 @@ pub struct Contact {
 }
 
 pub struct Input {
-    /// One existing row per supplied impact contact, two-body pool first.
+    /// The normal rows: one per two-body contact, the two-body joints' rows,
+    /// one per single-body contact, the single-body joints' rows.
     pub rows: Vec<physical_response::Row>,
     pub two_body_contacts: Vec<Contact>,
     pub single_body_contacts: Vec<Contact>,
+    /// The joints after the main response, each pool in group order.
+    pub two_body_joints: Vec<Joint>,
+    pub single_body_joints: Vec<Joint>,
     /// Input correction vectors in these poses must be zero. Solver supplies them.
     pub poses: Vec<physical_pose::Input>,
     pub workspace: Vec<[[f32; 4]; 2]>,
@@ -36,10 +40,52 @@ pub struct Output {
     pub active: bool,
 }
 
+/// AEF930 / AEFBB0 over one pool's joint rows (only their response and bias
+/// change).
+fn joint_pass(
+    joints: &[Joint],
+    two_body: bool,
+    rows: &mut [physical_response::Row],
+    scale: f32,
+    threshold: f32,
+) -> bool {
+    let mut raw: Vec<crate::contact_rows::Row> = rows
+        .iter()
+        .map(|r| {
+            let mut w = [0; 48];
+            for (i, v) in r.response.iter().flatten().enumerate() {
+                w[16 + i] = v.to_bits();
+            }
+            w[36] = r.bias.to_bits();
+            w
+        })
+        .collect();
+    let mut cursor = 0;
+    let mut active = false;
+    for j in joints {
+        active |= joint_rows::correct(j, two_body, scale, threshold, &mut raw, &mut cursor);
+    }
+    for (r, w) in rows.iter_mut().zip(&raw) {
+        for (i, v) in r.response.iter_mut().flatten().enumerate() {
+            *v = f32::from_bits(w[16 + i]);
+        }
+        r.bias = f32::from_bits(w[36]);
+    }
+    active
+}
+
+fn joint_rows(joints: &[Joint]) -> usize {
+    joints.iter().map(|j| j.words[0x18 / 4] as usize).sum()
+}
+
 pub fn calculate(input: &Input) -> Result<Output, Error> {
-    let split = input.two_body_contacts.len();
-    let n = split + input.single_body_contacts.len();
-    if n > crate::MAX_WORLD_CONTACTS
+    let contacts = input.two_body_contacts.len() + input.single_body_contacts.len();
+    let two_joint_rows = joint_rows(&input.two_body_joints);
+    let split = input.two_body_contacts.len() + two_joint_rows;
+    let n = contacts + two_joint_rows + joint_rows(&input.single_body_joints);
+    let items = contacts + input.two_body_joints.len() + input.single_body_joints.len();
+    if contacts > crate::MAX_WORLD_CONTACTS
+        || n > crate::MAX_SOLVER_ROWS
         || n != input.rows.len()
         || input.poses.len() > crate::MAX_WORLD_BODIES
         || input.workspace.len() != input.poses.len()
@@ -86,18 +132,24 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
     let mut rows = input.rows.clone();
     let mut span_ends = input.span_ends;
     let mut active = false;
-    if n != 0 {
+    if items != 0 {
         span_ends = [n; 2];
+    }
+    if n != 0 {
         for row in &mut rows {
             row.bias = 0.;
             row.softness_input = input.softness;
         }
-        for (i, contact) in input
-            .two_body_contacts
-            .iter()
-            .chain(&input.single_body_contacts)
-            .enumerate()
-        {
+        // B0CE10 / B0CEC0 for the contacts; AEF930 / AEFBB0 for the joints
+        // (the original interleaves the pools; each only adds to `active`).
+        let two_contacts = input.two_body_contacts.len();
+        let indices = (0..two_contacts).chain(split..split + input.single_body_contacts.len());
+        for (i, contact) in indices.zip(
+            input
+                .two_body_contacts
+                .iter()
+                .chain(&input.single_body_contacts),
+        ) {
             let row = &mut rows[i];
             let bias = contact_bias::calculate(&contact_bias::Input {
                 two_bodies: i < split,
@@ -120,6 +172,20 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
             row.bias = bias.constraint.bias;
             active = bias.active;
         }
+        active |= joint_pass(
+            &input.two_body_joints,
+            true,
+            &mut rows[two_contacts..split],
+            input.scale,
+            input.threshold,
+        );
+        active |= joint_pass(
+            &input.single_body_joints,
+            false,
+            &mut rows[split + input.single_body_contacts.len()..],
+            input.scale,
+            input.threshold,
+        );
     }
     let (rows, workspace, poses) = if active {
         let solved = physical_response::calculate(&physical_response::Input {
@@ -173,6 +239,8 @@ mod tests {
             rows: vec![],
             two_body_contacts: vec![],
             single_body_contacts: vec![],
+            two_body_joints: vec![],
+            single_body_joints: vec![],
             poses: vec![physical_pose::Input {
                 basis: identity,
                 offset: [0.; 4],

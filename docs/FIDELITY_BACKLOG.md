@@ -28,8 +28,8 @@ Columns:
 3. Career (GRID World) has no playable front end (row 60).
 4. No force feedback, wheel input layer or rumble (row 22).
 5. Flat grey road on every non-Donington circuit from unresolved road batches (row 80).
-6. ~~Demolition Derby AI pile-ups (row 33)~~: the avoid lookup on the link window and the
-   figure-of-eight variant are ported (F476); 2–6 of 12 cars now finish (was none).
+6. Demolition Derby AI has no figure-of-eight or oncoming avoidance, so every field piles up and
+   is disqualified (row 33).
 7. Drift Battle uses touring stand-in cars with `default` drift values; AI drift scores are one to
    two orders of magnitude low (rows 36, 52).
 8. Le Mans 24 Hours (time-limited race, class results, time of day, headlights) is not supported
@@ -75,10 +75,10 @@ Columns:
 | 30 | AI | Three alongside parts missing (empty-slot gap 0x795C00, far-side squeeze 0x799630, both-sides mean); the measured patch was not adopted. | AI_DRIVER_PORT; AI_OVERTAKING §8; F402 | H: first-corner pile-ups | S+D | M | drift-battle-ai |
 | 31 | AI | 12-car pile-ups at Jarama, Long Beach GP/cl and reverse, Detroit route 1, Nürburgring also with all-Lacetti fields. | F401; F402; SERIES "Layouts" | H: races there lose several cars | S+L | L | drift-battle-ai |
 | 32 | AI | Record state derived from motion ("moving against its nose" = 2) instead of participant status (player 0, AI 1, retired 2), so side checks needing state 0 differ. | AI_MISTAKES_PACING_RESEARCH §1, §8 Q1; ai_driver.rs `backwards()` | M: AI pass/alongside choices | S | M | drift-battle-ai |
-| 33 | AI | ~~No figure-of-eight or oncoming avoidance~~: F476 ports the avoid lookup on the 32-link window (0x798C00) and its figure-of-eight variant (0x78DCD0); `avOncomingTraffic` has no AI reader. Derby fields still lose half or more of the cars to contacts (F476: route 8 2 finishers, route 9 5). | F421; DEMOLITION_DERBY §5 | H for Demolition Derby | S | L | drift-battle-ai |
+| 33 | AI | No figure-of-eight or oncoming avoidance (`avFigureOfEightTrack`, `avOncomingTraffic` read, not ported). | F421; DEMOLITION_DERBY §5 | H for Demolition Derby | S | L | drift-battle-ai |
 | 34 | AI | Path-obstacle scan 0x78B560 is an authored straight corridor; brake_for_vehicle's different-heading branch and contacted_vehicle's two-corner refinement not recovered; avoid never fired in traffic. | AI_DRIVER_PORT; AI_OVERTAKING §12; AI_AVOID_RECOVERY_RESEARCH §8 | M: traffic choices differ | S+L | M | drift-battle-ai |
 | 35 | AI | Start-light reaction and the in-air steering blend not ported (traction control 0x77AA10 and the ABS cap 0x77A2E0 ported in F444). The launch is still short of the live original's (13.9 against 15.4–17.1 m/s at 1 s). | AI_DRIVER_PORT; FIRST_CORNER_LIVE §7; F391; F444 | L–M | S | M | robustness |
-| 36 | AI | AI drift quality: spins, barrier hits, stalls (recovery flicker at the track limit; F476: on track against a non-frontal obstruction recovery does not fire and race pushes forward until the 20 s retire; the drift-battle asset test is marked known failing), scores one to two orders below the virtual race. | F367; F389; DISCIPLINES §4.5 | M: weak Drift Battle opponents | L | L | drift-battle-ai |
+| 36 | AI | AI drift quality: spins, barrier hits, stalls (recovery flicker at the track limit), scores one to two orders below the virtual race. | F367; F389; DISCIPLINES §4.5 | M: weak Drift Battle opponents | L | L | drift-battle-ai |
 | 37 | AI | Failure modes AUTHORED: crash PID, flip, inertia +0x21C0, wobble, failed-wheel grip 0.1 (spins instead of limping), spun-and-fast lost_control (coSpinSpeed), visibility_loss absent; blow_engine does not reduce power. | F336; AI_DRIVER_PORT | M: AI mistakes look different | S+L | M | drift-battle-ai |
 | 38 | AI | Race manager measures along the AI line, not the progress track; conveyor slots, catch-up config name (default rd_3_star AUTHORED), race-start factors and "inside" side are [I]; half of armed mistakes abort; paced fields have 4.7× the contacts. | AI_DRIVER_PORT "Race manager"; AI_MISTAKES §8; F336 | M: rubber-banding differs | L | M | drift-battle-ai |
 | 39 | AI | Reverse-request consumer untraced (AUTHORED pedal mapping); obstruction magnitude [I]; controlled_stop has no trigger; retired car held with no braking phase. | F301; F336; F332 | L | S | M | drift-battle-ai |

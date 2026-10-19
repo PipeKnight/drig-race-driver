@@ -9,6 +9,7 @@ use std::{
     io::Write,
 };
 const BODY: usize = 0x424;
+const SOLVED: usize = 4 + 2 * 16 * 8;
 fn word(data: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
 }
@@ -28,7 +29,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("invalid header".into());
     }
     let count = word(&data, 4) as usize;
-    let record = 16 + joint::DESCRIPTOR + 2 * BODY + 0x80 + 32;
+    // Mode 3 cases carry the impulse scale and each pool row's impulse and
+    // denominator after the tail.
+    let first = if data.len() > 8 { word(&data, 8) } else { 0 };
+    let solved = first >= 3;
+    let record = 16
+        + joint::DESCRIPTOR
+        + 2 * BODY
+        + 0x80
+        + 32
+        + match first {
+            3 => SOLVED,
+            4 => SOLVED + 12,
+            _ => 0,
+        };
     if !(1..=16384).contains(&count) || data.len() != 8 + count * record {
         return Err("invalid case framing".into());
     }
@@ -38,7 +52,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let reseat = word(c, 12);
         let tail = 16 + joint::DESCRIPTOR + 2 * BODY + 0x80;
         let t: [u32; 8] = words(&c[tail..tail + 32]);
-        if mode > 2 || flags > 3 || reseat > 1 || t[6] > 2 {
+        if mode > 4 || (mode >= 3) != solved || mode != first && solved || flags > 3 || reseat > 1 || t[6] > 2 {
             return Err("unsupported case".into());
         }
         let mut descriptor: [u32; joint::DESCRIPTOR / 4] = words(&c[16..16 + joint::DESCRIPTOR]);
@@ -81,7 +95,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         let mut extra = Vec::new();
-        if mode == 2 {
+        if mode >= 2 {
             let mut pools = [[[0u32; 48]; 16], [[0u32; 48]; 16]];
             for (q, pool) in pools.iter_mut().enumerate() {
                 for (r, row) in pool.iter_mut().enumerate() {
@@ -105,6 +119,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 inverse_step: f32::from_bits(t[0]),
                 reduction: f32::from_bits(t[1]),
                 step: f32::from_bits(t[2]),
+                impulse_scale: 0.,
                 two_batch: 0,
                 one_batch: 0,
                 total: 0,
@@ -140,9 +155,77 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     two: two_pool,
                 },
             );
+            if mode >= 3 {
+                let s = tail + 32;
+                ctx.impulse_scale = f32::from_bits(word(c, s));
+                for (q, pool) in pools.iter_mut().enumerate() {
+                    for (r, row) in pool.iter_mut().enumerate() {
+                        let o = s + 4 + (q * 16 + r) * 8;
+                        row[37] = word(c, o);
+                        row[43] = word(c, o + 4);
+                    }
+                }
+                ctx.one_cursor = start;
+                ctx.two_cursor = start;
+                let [one_pool, two_pool] = &mut pools;
+                joint_rows::write_back(
+                    &mut j,
+                    two,
+                    &mut ctx,
+                    &Pools {
+                        one: one_pool,
+                        two: two_pool,
+                    },
+                );
+            }
+            let mut correction = [0u32; 3];
+            if mode == 4 {
+                // B7B5E0: rows reset, then the joint's correction rows.
+                let s = tail + 32 + SOLVED;
+                correction = [word(c, s), word(c, s + 4), word(c, s + 8)];
+                let w = j.words[0xc / 4].to_le_bytes();
+                j.words[0xc / 4] = u32::from_le_bytes([w[0], w[1], correction[2] as u8, w[3]]);
+                for pool in pools.iter_mut() {
+                    for row in pool.iter_mut() {
+                        row[32] = 0;
+                        row[36] = 0;
+                        row[33] = t[3];
+                    }
+                }
+                let cursor = if two {
+                    &mut ctx.two_cursor
+                } else {
+                    &mut ctx.one_cursor
+                };
+                *cursor = start;
+                let [one_pool, two_pool] = &mut pools;
+                let active = joint_rows::correct(
+                    &j,
+                    two,
+                    f32::from_bits(correction[0]),
+                    f32::from_bits(correction[1]),
+                    if two { two_pool } else { one_pool },
+                    cursor,
+                );
+                correction[2] = u32::from(active);
+                if two {
+                    ctx.one_cursor = start;
+                } else {
+                    ctx.two_cursor = start;
+                }
+            }
             let mut context = [0u32; 0x60 / 4];
-            context[1] = ctx.inverse_step.to_bits();
-            context[2] = ctx.reduction.to_bits();
+            context[6] = ctx.impulse_scale.to_bits();
+            if mode == 4 {
+                context[1] = 1f32.to_bits();
+                context[2] = correction[0];
+                context[4] = correction[1];
+                context[8] = correction[2];
+            }
+            if mode != 4 {
+                context[1] = ctx.inverse_step.to_bits();
+                context[2] = ctx.reduction.to_bits();
+            }
             context[5] = ctx.step.to_bits();
             context[9] = ctx.two_batch;
             context[10] = ctx.one_batch;

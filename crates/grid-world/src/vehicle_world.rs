@@ -63,6 +63,8 @@ pub fn from_registered(
                 bodies: vec![car.owner.physical],
                 contacts: vec![contact_groups::EMPTY_CONTACT; 4],
                 world: [0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0],
+                joints: vec![],
+                joint_groups: vec![vec![]],
             },
             manager,
             pool_used: 0,

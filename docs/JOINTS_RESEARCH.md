@@ -60,10 +60,11 @@ the post joint breaks at impulse 10 and overrides the post with `_rbArmcoPost` (
 
 ## The port today
 
-Phase 1 (F473): the joint itself is ported and verified, not yet wired into the solver.
-The port's solver still refuses bodies with constraint lists (`contact_groups`: body
-+0x320.. must be zero) and has no joint pools; `dynamic_props::Catalog::read` keeps every
-template with constraints, or with more than one shape behaviour, static.
+Phase 1 (F473): the joint itself is ported and verified. Phase 2 (F476): the solver runs
+world joints (islands merged through them, rows beside the contact rows, impulse sums,
+breaking, the correction pass). Nothing creates a joint yet: `dynamic_props::Catalog::read`
+keeps every template with constraints, or with more than one shape behaviour, static, so
+the game's solve is unchanged until phase 3 adds the entities.
 
 ### Phase 1: constructor, prepare, rows (F473)
 
@@ -109,6 +110,71 @@ frame and point joints, one and two bodies, rotation types 0..2, twist, friction
 and spring rows, re-seats and aligned rest frames. Evidence: this worktree's
 `local/joint/` (cases, original and Rust outputs).
 
+### Phase 2: island pools, merging, breaking (F476)
+
+Original path [D] (decompiles `local/robust/decomp/r16e`, `r16f`; asm `local/r20/*.asm`):
+
+- Grouping, AD6C40: before the contacts, every active body pushes its unbroken joints
+  (byte +0x48 clear) from its A list (+0x320, newest first, B825E0 prepends) onto a stack;
+  a joint enters from B's list (+0x324) only while A is inactive. The stack is grouped with
+  AD6250, the contacts' union routine: the joint joins its bodies' groups (a fixed B, +0xC,
+  does not) and goes to the head of the group's list. B24C90 then sets each item's solver
+  indices (B82850: +0x1C = A's +0x404, +0x20 = B's or -1 when B is fixed or absent) and,
+  for a joint (byte +0xF clear), clears +0xE (AEEC80).
+- B7B850 sorts the group list into four pools by +0xF and by bodies: two-body contacts
+  +0xA0, two-body joints +0xA4, one-body contacts +0x98, one-body joints +0x9C, each in list
+  order.
+- B7ACC0: AF4890 prepares every joint while counting its rows into the normal spans
+  (joints have +0x14 = +0x18: no friction rows), so the normal pools are two-body contacts,
+  two-body joints, one-body contacts, one-body joints; AF71C0/AF9430 continue the contacts'
+  batches; B7ACC0 closes each pool's last batch. Context: +4 inverse time, +8 error
+  reduction (manager parameter 6), +0x14 compliance scale (parameter 3), +0x18 impulse
+  scale (parameter 4), +0x1C default softness.
+- After the solve, AFB280 (two-body) / AFB800 (one-body) walk the joint's rows in the order
+  they were written: friction rows ask for a re-seat (byte +0x32D) when |impulse| reaches
+  0.95 x +0x258 x context +0x14; every limit and spring row (AF47C0) and the extra rotation row add
+  impulse x (rcp(n) J refined once) into the sums +0x140 (linear A), +0x150 (angular A),
+  +0x160/+0x170 (B) and break the joint (+0x48) when 1.01 x |impulse x scale / inverse
+  time| passes the row's limit (`breakAngularImpulse` +0x24C for angular rows,
+  `breakLinearImpulse` +0x248 for linear ones); finally the sums are scaled by scale /
+  inverse time and the joint breaks when a sum's squared length (four lanes,
+  (x0^2 + x1^2) + (x2^2 + x3^2)) passes the limit squared (FLT_MAX, 0xE51D40, means none).
+  A point joint only skips its rows.
+- Correction, B7B5E0 (manager correction iterations > 0): every normal row is reset (bias 0,
+  the correction softness) and the pools get their position biases in order; AEF930 /
+  AEFBB0: a broken or disabled joint keeps no response (words 16..31, one body 16..23); the
+  angular rows (+0x54) lose theirs; each linear degree of freedom with its limit flag
+  (state +2) biases the next row by (error -/+ threshold) x scale, zeroed when it points
+  the wrong way, and asks for the pass; the point row uses distance - (rest + 0.1). The
+  one-body frame joint always asks for the pass. The limit loop advances one row per
+  flagged degree of freedom, so a degree of freedom with spring rows shifts the later
+  biases by a row: ported as the original does it.
+
+Port: `joint_rows::write_back` (AFB280/AFB800 with AF47C0, AFCD90/AFCC80), `joint_rows::correct`
+(AEF930/AEFBB0); `contact_groups::WorldJoint` in `Input`/`Output.joints` with
+`Output.joint_groups` (each root's joints in list order); `grouped_physical_frame` hands each
+island's joints to `impact_step::Input.joints` (`Joints`: the island's body records in local
+order and the joints) and writes the solved joints back; `impact_step` prepares, counts,
+writes and writes back the joint rows; `impact_frame`/`impact_correction` add the joint rows
+to the correction pass.
+
+Verification:
+
+- [V] Probe modes 3 (write-back after supplied row impulses and denominators) and 4
+  (B7B5E0's row reset, then the correction rows) against the original, 8192 cases each,
+  0 mismatched words; mode 3 breaks 5556 joints and re-seats 2947, mode 4 activates the pass
+  in 1316 cases (most others are broken by mode 3). Modes 0..2 still pass.
+- Unit tests: `impact_step` a joint alone (no contacts) holds a leaving body and breaks
+  with a small `breakLinearImpulse`; `grouped_physical_frame` two bodies with no contact
+  form one island through a joint, and two without it.
+- Not verified against the original: the whole island solve with joints (B7ACC0 end to end)
+  and the grouping order with several joints and contacts; those follow from the verified
+  parts and the decompiled order. [I] The correction context gives contacts +0xC (island +0xE8) and
+  joints +0x10 (island +0xEC); the port uses one threshold for both (both 0.02 in the captured race,
+  `source_vehicle`).
+- Limits: the manager's row capacity is not grown for joint rows yet (a full pool gives
+  status 1 as before); a fixed B (static object) is accepted but nothing builds one yet.
+
 ## Size [D]
 
 Decompiled lines (Ghidra, `local/robust/decomp/r16a..r16c`): joint constructor 0xAEFEB0 1569;
@@ -128,8 +194,8 @@ bit-for-bit comparison the impact pools have.
 ## Plan
 
 1. ~~Constructor, prepare and rows (0xAEFEB0, 0xAF4890, 0xAF71C0/0xAF9430)~~: F473.
-2. The joint pools in the island solve (0xB7ACC0, 0xB7B850), islands merged through joints,
-   the correction solvers 0xAEF930/0xAEFBB0, and breaking.
+2. ~~The joint pools in the island solve (0xB7ACC0, 0xB7B850), islands merged through joints,
+   the correction solvers 0xAEF930/0xAEFBB0, and breaking~~: F476.
 3. Breaking (break impulses, `breakIfAngExtentHit`), body overrides and uproot.
 4. Entities: constraint components in `dynamic_props`, `link1` across entities, and the ENS
    link propagation 0x7D5540; the close-drift flags as the original builds them. Props to

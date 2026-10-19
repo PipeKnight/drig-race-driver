@@ -206,24 +206,6 @@ are unchanged.
       - Next (static): the values behind ctx+0x14 (mapped holders) and ctx+0x24 (statistics
         object) of 0x7886C0 in the driver update 0x7929D0/0x794310, against the slew's holder
         table (0x779F70 param_4).
-    - **Resolved and ported (F476).** Static: 0x7886C0's two 0x7A6650 calls use different
-      `this` objects, ctx+0x24 for the trigger (first call, `ecx = [esp+0x20]`) and ctx+0x28 for
-      the ratio (second call, `ecx = [esp+0x28]`). Live read (fourth short run, owner-approved in
-      this session, PID 1868, read-only, 0 of 19 user files changed; evidence `run4/`): both come
-      from the vehicle AI data at updater header +0x28: **+4 = the car's brake tables, +8 = its
-      cruise (coast-down) tables**, equal to `ai_vehicle_statistics.xml`. The field is the
-      BMW/Lacetti mix (drivers 1, 2, 6, 7, 8 = grid slots 0, 1, 5, 6, 7 carry the `bmw` tables).
-      - Formula [V]: `ratio = (dist − c)/(d − c)` clamped to 0..1 (0 when `c == d`), with `c` the
-        coasting distance from v to the target on the cruise tables and `d` as before from the
-        brake tables; brake = `ratio^24`. The coasting distance lies far beyond d, so the ratio sits
-        just under 1 and the pedal is partial, rising as the car closes on the line.
-      - Check [V]: with each car's own tables the formula reproduces the original's raw brake at
-        **0.012 RMS over 6 699 samples** (every car 0.007–0.019, bias −0.001).
-      - Port: `AiData::cruise_distance` (cruise tables, grip 2.0 clamps to the single 2.2 table);
-        solo Lacetti at Redgate now brakes 0.32 → 0.5 → 0.75 from x −476 and releases at 39.4 m/s
-        (low point 38.2), the original's shape; the remaining target difference (39.7 against
-        37.3) is the driver's corner_speed_in_ratio. The table grip stays 2.0 (live 2.18–2.20;
-        the Lacetti's 2.0/2.2 brake tables differ by < 0.1 %).
   - The κ sign consumers now follow the original literally: overtake state 1 widens with bend
     flag +0x45 (κ > ovMin), state 2 with +0x44 (κ < −ovMin); the off-line assist (0x404C90)
     takes max_assist_inside when `lat · κ ≥ 0`; drift state 3 takes the left room (+0x218) for
