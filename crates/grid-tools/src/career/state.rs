@@ -84,6 +84,10 @@ pub struct Career {
     pub game_completed: bool,
     pub races_won: i32,
     pub races_lost: i32,
+    /// Races driven per `track_model` (the per-layout record 0x4F8B30 +8,
+    /// incremented after every race at 0x61017D) [V]: the race draw's key
+    /// on a repeated event.
+    pub layout_races: BTreeMap<i32, u32>,
 }
 
 impl Career {
@@ -112,7 +116,13 @@ impl Career {
             game_completed: false,
             races_won: 0,
             races_lost: 0,
+            layout_races: BTreeMap::new(),
         }
+    }
+
+    /// Counts one race driven on a layout (0x61017D) [V].
+    pub fn count_race(&mut self, track_model_id: i32) {
+        *self.layout_races.entry(track_model_id).or_default() += 1;
     }
 
     /// Total reputation: the sum of the five region values (0x62C4A0) [V].

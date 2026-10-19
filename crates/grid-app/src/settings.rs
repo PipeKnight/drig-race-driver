@@ -232,6 +232,12 @@ pub struct Settings {
     /// `[game] car` / `opponent_cars` (docs/CAR_GENERALIZATION.md).
     pub car: Option<String>,
     pub opponent_cars: Option<String>,
+    /// `[game] opponent_liveries`: each opponent's livery package index
+    /// (`livery_NN`), in car order (the career field, docs/CAREER_SCREEN.md).
+    pub opponent_liveries: Option<Vec<usize>>,
+    /// `[game] opponent_names`: each opponent's name on the HUD and the
+    /// results, comma separated, in car order (the career field).
+    pub opponent_names: Option<Vec<String>>,
     /// `[game] series`: a free-race circuit series (`pro_tuned`, `touring`,
     /// `gt1`, ...; docs/SERIES.md): its cars and grid fill.
     pub series: Option<String>,
@@ -416,6 +422,18 @@ impl Settings {
                 }
                 ("game", "car") => self.car = Some(value.into()),
                 ("game", "opponent_cars") => self.opponent_cars = Some(value.into()),
+                ("game", "opponent_liveries") => {
+                    self.opponent_liveries = Some(
+                        value
+                            .split(',')
+                            .map(|v| v.trim().parse::<usize>())
+                            .collect::<Result<_, _>>()
+                            .map_err(|_| at("[game] opponent_liveries needs numbers".into()))?,
+                    )
+                }
+                ("game", "opponent_names") => {
+                    self.opponent_names = Some(value.split(',').map(|v| v.trim().to_owned()).collect())
+                }
                 ("game", "series") => {
                     let name = value.to_ascii_lowercase();
                     if !grid_tools::series::CIRCUIT_SERIES.contains(&name.as_str()) {

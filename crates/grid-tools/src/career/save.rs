@@ -90,6 +90,9 @@ pub fn write(c: &Career) -> Result<String, Error> {
         put(format!("head_to_head {e}"));
     }
     put(format!("game_completed {}", c.game_completed as u8));
+    for (layout, n) in &c.layout_races {
+        put(format!("layout_races {layout} {n}"));
+    }
     put(format!("races_won {}", c.races_won));
     put(format!("races_lost {}", c.races_lost));
     let mut body = lines.join("\n");
@@ -196,6 +199,10 @@ pub fn read(text: &str) -> Result<Career, Error> {
                 c.head_to_heads.insert(num(f.next(), key)?);
             }
             "game_completed" => c.game_completed = flag(f.next(), key)?,
+            "layout_races" => {
+                let layout = num(f.next(), key)?;
+                c.layout_races.insert(layout, num(f.next(), key)?);
+            }
             "races_won" => c.races_won = num(f.next(), key)?,
             "races_lost" => c.races_lost = num(f.next(), key)?,
             "" => {}

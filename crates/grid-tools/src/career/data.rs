@@ -175,6 +175,34 @@ pub struct SponsorOffer {
     pub money_reward: i64,
 }
 
+/// An `event_driver` row: one AI car of the event's field [D, V 0x663D40].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventDriver {
+    pub driver_id: i32,
+    pub livery_id: i32,
+}
+
+/// A `driver` row's career fields [D].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Driver {
+    pub id: i32,
+    pub first_name: String,
+    pub surname: String,
+    pub team_id: i32,
+    /// The grid key's skill (0x5C2E48) [V].
+    pub skill: f32,
+}
+
+/// An `event_driver_grid_position` row: a named driver's grid slot on one
+/// pool layout [D, V 0x5C2AC0].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NamedSlot {
+    pub pool_id: i32,
+    pub driver_id: i32,
+    pub base: i32,
+    pub range: i32,
+}
+
 /// A career event (`event` row with its races, cars and sponsor offers) [D].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
@@ -204,6 +232,8 @@ pub struct Event {
     /// `event_vehicle.vehicle_id` in row order: the cars allowed.
     pub vehicles: Vec<i32>,
     pub sponsor_offers: Vec<SponsorOffer>,
+    /// `event_driver` rows in table order: the AI field [V 0x663D40].
+    pub drivers: Vec<EventDriver>,
 }
 
 /// A `vehicle` row's career fields [D].
@@ -404,6 +434,19 @@ pub struct Catalogue {
     pub driver_offers: BTreeMap<i32, DriverOffer>,
     /// `team.name_string_id` by team id (driver-offer teams and rivals) [D].
     pub teams: BTreeMap<i32, String>,
+    /// `team.team_type_id` by team id: 1 normal, 2 key, 3 primary_key,
+    /// 4 various_team [D].
+    pub team_types: BTreeMap<i32, i32>,
+    /// `driver` rows by id.
+    pub drivers: BTreeMap<i32, Driver>,
+    /// `vehicle_livery` (vehicle id, file string) by livery id [D].
+    pub liveries: BTreeMap<i32, (i32, String)>,
+    /// `track_model.track_id` (the venue) by track model id [D].
+    pub venues: BTreeMap<i32, i32>,
+    /// `event_driver_grid_position` rows [D].
+    pub named_slots: Vec<NamedSlot>,
+    /// `event_legend` drivers by event id, table order [D].
+    pub legends: BTreeMap<i32, Vec<i32>>,
     pub team_mates: Vec<TeamMate>,
     /// Hireable drivers in `driver` row order.
     pub hireable: Vec<Hireable>,
@@ -508,6 +551,16 @@ impl Catalogue {
                 .or_default()
                 .push(int(&r, "vehicle_id")?);
         }
+        let mut event_drivers: BTreeMap<i32, Vec<EventDriver>> = BTreeMap::new();
+        for r in table(db, "event_driver")?.rows() {
+            event_drivers
+                .entry(int(&r, "event_id")?)
+                .or_default()
+                .push(EventDriver {
+                    driver_id: int(&r, "driver_id")?,
+                    livery_id: int(&r, "vehicle_livery_id")?,
+                });
+        }
         let mut event_offers: BTreeMap<i32, Vec<SponsorOffer>> = BTreeMap::new();
         for r in table(db, "event_sponsor_offer")?.rows() {
             let offer = SponsorOffer {
@@ -556,6 +609,7 @@ impl Catalogue {
                     races,
                     vehicles: event_vehicles.remove(&id).unwrap_or_default(),
                     sponsor_offers,
+                    drivers: event_drivers.remove(&id).unwrap_or_default(),
                 },
             );
         }
@@ -653,6 +707,47 @@ impl Catalogue {
             .rows()
             .map(|r| Ok((int(&r, "id")?, text(&r, "name_string_id")?)))
             .collect::<Result<BTreeMap<_, _>>>()?;
+        let team_types = table(db, "team")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, int(&r, "team_type_id")?)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let all_drivers = table(db, "driver")?
+            .rows()
+            .map(|r| {
+                Ok((
+                    int(&r, "id")?,
+                    Driver {
+                        id: int(&r, "id")?,
+                        first_name: text(&r, "first_name_string_id")?,
+                        surname: text(&r, "surname_string_id")?,
+                        team_id: int(&r, "team_id")?,
+                        skill: float(&r, "skill")?,
+                    },
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let venues = table(db, "track_model")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, int(&r, "track_id")?)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let named_slots = table(db, "event_driver_grid_position")?
+            .rows()
+            .map(|r| {
+                Ok(NamedSlot {
+                    pool_id: int(&r, "event_track_pool_id")?,
+                    driver_id: int(&r, "driver_id")?,
+                    base: int(&r, "grid_position_base")?,
+                    range: int(&r, "grid_position_range")?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut legends: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
+        for r in table(db, "event_legend")?.rows() {
+            legends
+                .entry(int(&r, "event_id")?)
+                .or_default()
+                .push(int(&r, "driver_id")?);
+        }
         let drivers = table(db, "driver")?;
         let mut team_mates = Vec::new();
         for r in table(db, "team_mate")?.rows() {
@@ -749,6 +844,12 @@ impl Catalogue {
             sponsors,
             driver_offers,
             teams,
+            team_types,
+            drivers: all_drivers,
+            liveries,
+            venues,
+            named_slots,
+            legends,
             team_mates,
             hireable,
             fee_ranges,

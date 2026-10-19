@@ -1,6 +1,7 @@
 //! The original's career ("GRID World"): catalogue, state, results and
 //! saves (docs/CAREER_RESEARCH.md).
 pub mod data;
+pub mod field;
 pub mod rules;
 pub mod save;
 pub mod state;
@@ -82,6 +83,7 @@ mod tests {
                     money_reward: [3000, 2150, 1350][p as usize - 1],
                 })
                 .collect(),
+            drivers: (1..=12).map(|d| EventDriver { driver_id: d, livery_id: 100 + d }).collect(),
         }
     }
 
@@ -166,6 +168,25 @@ mod tests {
             sponsors: BTreeMap::new(),
             driver_offers: BTreeMap::from([(12, offer)]),
             teams: BTreeMap::new(),
+            team_types: BTreeMap::from([(5, 2)]),
+            drivers: (1..=12)
+                .map(|i| {
+                    (
+                        i,
+                        Driver {
+                            id: i,
+                            first_name: format!("D{i}"),
+                            surname: String::new(),
+                            team_id: if i <= 2 { 5 } else { 100 + (i + 1) / 2 },
+                            skill: i as f32 / 12.0,
+                        },
+                    )
+                })
+                .collect(),
+            liveries: BTreeMap::new(),
+            venues: BTreeMap::from([(1, 6), (2, 6), (3, 7)]),
+            named_slots: Vec::new(),
+            legends: BTreeMap::from([(7, vec![50])]),
             team_mates: Vec::new(),
             hireable: vec![Hireable {
                 driver_id: 8,
@@ -384,6 +405,89 @@ mod tests {
     }
 
     #[test]
+    fn races_are_drawn_by_order_then_by_layout_count_venues_first() {
+        let cat = tiny();
+        let pool = |tm: i32, order: i32| EventRace {
+            track_model_id: tm,
+            order_index: order,
+            ..race(tm)
+        };
+        // Layouts 1 and 2 share venue 6, layout 3 is venue 7.
+        let p = [pool(1, 2), pool(2, 1), pool(3, 3)];
+        let ids = |v: Vec<EventRace>| v.iter().map(|r| r.track_model_id).collect::<Vec<_>>();
+        let none = BTreeMap::new();
+        assert_eq!(ids(field::draw_races(&cat, &p, 2, true, &none)), [2, 3]);
+        // A repeat: fewest races first, venues first, then fill.
+        let counts = BTreeMap::from([(2, 1), (3, 1)]);
+        assert_eq!(ids(field::draw_races(&cat, &p, 2, false, &counts)), [1, 3]);
+        assert_eq!(ids(field::draw_races(&cat, &p, 3, false, &counts)), [1, 3, 2]);
+    }
+
+    #[test]
+    fn the_player_team_takes_over_a_non_key_team() {
+        let cat = tiny();
+        let mut c = founded();
+        let mut rng = crate::series::Mt::new(7);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 999, &mut rng);
+        assert_eq!(f.len(), 12);
+        assert_eq!((f[0].entrant, f[0].livery_id), (Entrant::Player, 999));
+        assert!((102..=107).contains(&f[0].team_id), "{}", f[0].team_id);
+        // The key team's cars (drivers 1 and 2) stay.
+        for d in [1, 2] {
+            assert!(f.iter().any(|x| x.driver_id == Some(d)));
+        }
+        // With a team mate: both take one team's two cars; a team mate who
+        // is an event driver gives his seat to a legend.
+        c.team_mate = Some(state::HiredTeamMate {
+            driver_id: 3,
+            winnings_percentage: 20,
+        });
+        let mut rng = crate::series::Mt::new(7);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 999, &mut rng);
+        assert_eq!(f.len(), 12);
+        let mate = f.iter().find(|x| x.entrant == Entrant::TeamMate).unwrap();
+        assert_eq!(mate.team_id, f[0].team_id);
+        let legend_or_overwritten = f.iter().any(|x| x.driver_id == Some(50)) || f[0].team_id == 102;
+        assert!(legend_or_overwritten);
+        assert!(f.iter().filter(|x| x.driver_id == Some(3)).count() == 1, "only as the team mate");
+    }
+
+    #[test]
+    fn a_race_offer_puts_the_player_in_the_offer_team() {
+        let mut cat = tiny();
+        let o = cat.driver_offers.get_mut(&12).unwrap();
+        o.event_id = 7;
+        o.team_id = 5;
+        let c = Career::new();
+        let mut rng = crate::series::Mt::new(1);
+        let f = field::field(&cat, &c, field::Entry::Offer(12), 201, &mut rng);
+        assert_eq!(f.len(), 12);
+        assert_eq!((f[0].entrant, f[0].team_id), (Entrant::Player, 5));
+        // Driver 1 (lowest index of team 5) is replaced; driver 2 stays.
+        assert!(!f.iter().any(|x| x.driver_id == Some(1)));
+        assert!(f.iter().any(|x| x.driver_id == Some(2) && x.team_id == 5));
+    }
+
+    #[test]
+    fn the_grid_places_the_player_then_ranks_by_skill() {
+        let cat = tiny();
+        let c = founded();
+        let mut rng = crate::series::Mt::new(3);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 999, &mut rng);
+        let g = field::grid(&cat, &f, None, 12, 0, &mut rng);
+        assert_eq!(g.len(), 12);
+        assert_eq!(g[11], 0, "player at the back");
+        let mut seen = g.clone();
+        seen.sort_unstable();
+        assert_eq!(seen, (0..12).collect::<Vec<_>>());
+        // The most skilled drivers start near the front.
+        let pos = |d: i32| g.iter().position(|&i| f[i].driver_id == Some(d));
+        if let (Some(fast), Some(slow)) = (pos(12), pos(1)) {
+            assert!(fast < slow);
+        }
+    }
+
+    #[test]
     fn a_driven_offer_moves_its_slot_on() {
         let cat = tiny();
         let mut c = Career::new();
@@ -494,7 +598,10 @@ mod tests {
         c.completed_offers.insert(12);
         c.previous_season.push(SeasonEntry::DriverOffer(12));
         c.head_to_heads.insert(69);
+        c.count_race(24);
+        c.count_race(24);
         let text = save::write(&c).unwrap();
+        assert!(text.contains("layout_races 24 2\n"));
         assert_eq!(save::read(&text).unwrap(), c);
         let forged = text.replace("money 1", "money 9");
         assert!(save::read(&forged).is_err());
@@ -562,6 +669,41 @@ mod tests {
         {
             let h2h = c.tier_events(t.id).iter().filter(|e| e.head_to_head).count();
             assert_eq!(h2h, 1, "tier {}", t.name);
+        }
+    }
+
+    /// bmw_si_tour (DRAW_FIELD worked example): the first entry draws the
+    /// Nurburgring Sprint then the GP reverse; the field is its 20
+    /// `event_driver` cars, Victor Rossi's (key team) untouched, the player
+    /// in one of the 9 other teams.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn bmw_si_tour_draw_and_field_follow_the_original() {
+        let cat = catalogue();
+        let e = cat.event(7).unwrap();
+        let races = field::draw_races(&cat, &e.races, 2, true, &BTreeMap::new());
+        let layouts: Vec<i32> = races.iter().map(|r| r.track_model_id).collect();
+        assert_eq!(layouts, [24, 99]);
+        assert_eq!(races.iter().map(|r| r.laps).collect::<Vec<_>>(), [3, 2]);
+        let mut c = Career::new();
+        c.team_founded = true;
+        let teams = [116, 117, 119, 120, 121, 123, 124, 125, 368];
+        for seed in 0..20 {
+            let mut rng = crate::series::Mt::new(seed);
+            let f = field::field(&cat, &c, field::Entry::Event(7), 140, &mut rng);
+            assert_eq!(f.len(), 20);
+            assert!(teams.contains(&f[0].team_id), "{}", f[0].team_id);
+            assert_eq!(f.iter().filter(|x| x.team_id == 5).count(), 2);
+            let g = field::grid(&cat, &f, Some(150), 14, 2, &mut rng);
+            let slot = g.iter().position(|&i| i == 0).unwrap();
+            assert!(slot == 13 || slot == 14, "player slot {slot}");
+        }
+        // Race 2 (pool row 39): Fraga (driver 11) is named to slots 1-3.
+        let mut rng = crate::series::Mt::new(5);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 140, &mut rng);
+        if let Some(i) = f.iter().position(|x| x.driver_id == Some(11)) {
+            let g = field::grid(&cat, &f, Some(39), 14, 2, &mut rng);
+            assert!(g.iter().position(|&k| k == i).unwrap() < 3);
         }
     }
 

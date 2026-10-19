@@ -1353,7 +1353,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut series = profile.series.clone();
     let mut car_chosen = profile.car.is_some();
     // Opponent k's livery package in a series event (docs/SERIES.md).
-    let mut series_liveries: Vec<Option<usize>> = Vec::new();
+    let mut series_liveries: Vec<Option<usize>> = profile
+        .opponent_liveries
+        .as_ref()
+        .map(|v| v.iter().map(|&i| Some(i)).collect())
+        .unwrap_or_default();
+    let opponent_names = profile.opponent_names.clone();
     // A Le Mans Series race's class name keys by car (results Class column).
     let mut car_classes: Vec<String> = Vec::new();
     let mut driver_aids = profile.assists()?;
@@ -2337,7 +2342,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     0x5eed,
                 );
                 let names = std::iter::once("You".to_string())
-                    .chain((1..=n).map(|i| format!("AI {i}")))
+                    .chain((1..=n).map(|i| {
+                        opponent_names
+                            .as_ref()
+                            .and_then(|v| v.get(i - 1))
+                            .filter(|s| !s.is_empty())
+                            .cloned()
+                            .unwrap_or_else(|| format!("AI {i}"))
+                    }))
                     .collect();
                 let autopilot = (drive_ticks.is_some()
                     && crate::settings::diagnostics().autopilot)

@@ -20,16 +20,33 @@ Labels: **[D]** read from shipped data; **[V]** verified in the original's code 
 
 ## Running an event
 
-1. **Draw** (AUTHORED, CAREER_RESEARCH.md §11 q7): the first `num_competitions` usable pool rows by `order_index`. The original's draw was not traced.
-2. **Grid slot** [V formula, docs/RACE_RULES_RESEARCH.md §5]: `race::grid_slot(player_grid_position_base, player_grid_position_range, 12, draw)`, with the original's generator (`series::Mt`) and a clock seed (AUTHORED seed).
-3. **Field** (AUTHORED): 12 cars, the player plus 11 AI drivers in the event's raceable models (`opponent_cars`). The career grid fill (0x5C7D40), named drivers and the teammate are not ported. The AI is the free race's: `difficulty 0.606` (Normal) and `catchup = on`, which picks `rd_2_star` from the difficulty (F439).
-4. **Race profile** `<data dir>/career-race.ini`: the event menu's keys for a race (`route`, `car`, `opponent_cars`, `laps`, `opponents 11`, `grid_position`, the AI and `[private]` sections). The race opens with its usual Race Options front end (Driver Aids).
+1. **Draw** (F474, [V 0x67BC80], CAREER_RESEARCH.md §12.1): `career::field::draw_races`.
+   - The pool is sorted stably: by `order_index` on a first entry, by the races driven per layout (`Career::layout_races`, saved) once the event has been paid [I: paid = completed].
+   - Venues not taken yet come first, then the rest fills.
+   - An event whose drawn races are not all runnable in the port is not offered (AUTHORED).
+   - bmw_si_tour on a first entry: Nürburgring Sprint (3 laps), then GP reverse (2 laps).
+2. **Field** (F474, [V 0x673F20, 0x663D40, 0x66D350], §12.2): `career::field::field`, built once when the event is entered.
+   - One AI car per `event_driver` row (driver, team, livery); 20 cars in bmw_si_tour.
+   - The player and the hired team mate take over the two lowest-index cars of a team drawn among the non-key teams with enough cars. The team mate keeps that car's livery; the player drives the event's first raceable model in livery 0 (AUTHORED).
+   - A team mate who is one of the event's drivers gives that seat to an `event_legend` driver.
+   - AUTHORED: an AI car whose model the port cannot race drives the player's model in livery 0.
+   - Not ported: the Ravenwest guest cars, Le Mans selection fields.
+   - The AI is the free race's: `difficulty 0.606` (Normal) and `catchup = on` (F439).
+3. **Grid** (F474, [V 0x5C7D40]): `career::field::grid` per race.
+   - The player's slot from the race's pool row (`player_grid_position_base/range`).
+   - Named drivers from `event_driver_grid_position`.
+   - The others ranked by `n − 1 − trunc((n − 1) · clamp(skill + U(−0.2, 0.2), 0, 1))`.
+   - AUTHORED: the uniform draw's formula, ties in field order, the clock seed of `series::Mt`.
+4. **Race profile** `<data dir>/career-race.ini`: `route`, `car`, then the opponents in grid order (they take the free slots in car order):
+   - `opponent_cars`, plus the new keys `opponent_liveries` (package index per car) and `opponent_names` (the drivers' names on the HUD and results);
+   - `laps`, `opponents` (field − 1), `grid_position`, the AI and `[private]` sections.
+   - The race opens with its usual Race Options front end (Driver Aids). The two new keys apply only when present, so other profiles are unchanged.
 5. **Result**: when the race leaves to the menu (results Continue or Exit, Retire, Retire from Race), `career_screen::write_result` (Bevy `Last`, on the BACK_TO_MENU exit) writes `<data dir>/career-race.result`:
    - the classification in `post_race::table` order;
    - the player's driver aids at the end of the race.
 
    Closing the window writes nothing; the event stays in progress and resumes on the next start.
-6. **Event in progress** `<data dir>/career-event.txt` (AUTHORED text): event, car, field, the planned races and the results so far. The screen adds each result when it starts again.
+6. **Event in progress** `<data dir>/career-event.txt` (AUTHORED text): event, car, the field (`entrant` lines), the planned races (route, laps, slot, layout, field index of each race car) and the results so far. The screen adds each result when it starts again. It maps the race's car k back to its field entrant (AI driver and team, or the team mate) and counts the race for its layout.
 7. **Payout**: after the last race, `career::apply_event(catalogue, career, event, results, settings)`, then `career::save::store` to `<data dir>/career.save`. The event file is removed only after the save is written.
 
 Mapping to `career` types:
@@ -52,12 +69,12 @@ Driver offers on the home page, after the open events:
   - its one `driver_offer_track` race is a lap race on a surveyed layout.
   - Others are not listed. On F463's main a new career has four: 2 (Lacetti, Washington), 15 (Porsche 911 at Jarama, finish 3rd or better), 16 (BMW 320si time trial at the Nürburgring) and 25 (350Z, Yokohama, beat a rival team).
 - **Row text:** "Race/Test for TEAM: EVENT - OBJECTIVE (fee, bonus) [car]". The team and event names are `db_*` language strings when present. The objective is in English (AUTHORED wording after `db_race_offer_*`).
-- **Race offers:** a 12-car race, the offer's car for the player, the offer event's raceable cars for the field (AUTHORED). The grid slot comes from `driver_offer_track` `player_grid_position_base/range`.
+- **Race offers:** since F474 the offer event's `event_driver` field [V 0x674020]. The player takes the lowest-index car of `driver_offer.team_id`, in the offer's livery; that team's other cars are AI team mates; the own team mate does not race. The grid slot comes from `driver_offer_track` `player_grid_position_base/range`. An offer of a Le Mans selection event (e.g. 15, lms_gt2) keeps the F464 field of the event's raceable cars (AUTHORED; `lemans_restrictions` not ported).
 - **Test offers** (time trial, speed test): the port's Time Trial (no opponents) on the layout. AUTHORED: the original's test session is a separate mode.
 - **Objective** (`rules::offer_objective_met`, [V] objective classes):
   - finishing place, including Le Mans: `place ≤ objective`;
   - no damage: finished and not wrecked (AUTHORED damage rule, as for sponsors);
-  - beat rival: **AUTHORED: AI cars 1 and 2 drive for the rival team** (`RIVAL_CARS`); the career field's teams are not traced;
+  - beat rival: every car of `objective_team_id` must finish behind (the field's teams since F474); AUTHORED only in the Le Mans selection fallback, where AI cars 1 and 2 drive for the rival team (`RIVAL_CARS`);
   - time trial: the player's best lap below `target_time_secs[star level]`;
   - speed test: the top speed at least `target_speed_mph[star level]`. AUTHORED: sampled once per frame from the player's velocity (`TopSpeed`).
   - The star level is the race difficulty's (Normal = 1).
@@ -79,7 +96,7 @@ Two home-page rows once the team exists: "Team mate: NAME" and "Sponsors: N rece
 - **Applicants** [V 0x662850, 0x649320]: every `driver` row with `can_be_hired` (345 [D]). The `team_mate` table is not read by the original.
 - **Filters** [V filter 0x638A60]: Region (Any, Europe, United States, Japan) and Signing fee (Any or one `team_mate_fee_range` row). AUTHORED: the list is sorted by fee, then driver id, and capped to the rows that fit.
 - **Hiring** [V 0x6994E0]: pays the `signing_fee` once (only if affordable) and replaces any current team mate with no refund. The team mate keeps `winnings_percentage` % of his own prize money [V], so the team gets the rest (Teammate Prize Money).
-- **In the race** (AUTHORED until the career field, item 3): the hired team mate is AI car 1 of an own-team event (`TEAMMATE_CAR`). The race shows that car's AI name. The result marks it `Entrant::TeamMate` (token `t`), so his prize share, the team standings and his sponsor objectives count. Driver offers have no own team mate [V 0x674020].
+- **In the race:** since F474 the team mate drives the second car of the player's team in the career field, under his own name. The result marks it `Entrant::TeamMate` (token `t`), so his prize share, the team standings and his sponsor objectives count. Event files from F466 keep the AI car 1 rule (`TEAMMATE_CAR`). Driver offers have no own team mate [V 0x674020].
 
 **Sponsors page**:
 - Every received offer (`event_sponsor_offer`, unlocked by finishing 1st–3rd in an event [V]) with its sponsor (`db_<sponsor>` when the language has it), objective, money per race and slot.
@@ -128,5 +145,5 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
 ## Not done
 
 - Test offers cannot run unattended: the scripted autopilot exists only in races with opponents. Team naming and livery, the sponsor designer and logos, car buying and selling, head-to-heads, Le Mans entry, season-end screens, and the original's career look.
-- The original's race draw, career grid fill, named drivers and the teammate in the field.
+- The Ravenwest guest cars, Le Mans selection fields (`lemans_restrictions`) and the original's player car and livery choice in an own-team field.
 - Flashback limits per difficulty and pro mode's restart ban (§8).

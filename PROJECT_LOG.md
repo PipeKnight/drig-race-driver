@@ -1,5 +1,33 @@
 # GRID engine project log
 
+F474 Career field: the original's race draw, event_driver field and grid in the career screen (2026-10-19, Claude Code; coordinator's career item 3). Research: docs/CAREER_RESEARCH.md §12 (static, `local/career/notes/DRAW_FIELD.md`); screen: docs/CAREER_SCREEN.md "Running an event". Evidence: main checkout `local/career/field/` (checks/, mem/, run36/, guard scripts).
+- New `grid_tools::career::field`:
+  - `draw_races` [V 0x67BC80]: a stable sort by `order_index` on a first entry, by `Career::layout_races` (new, saved) afterwards; venues first; no RNG.
+  - `field` [V 0x673F20, 0x663D40, 0x66D350, 0x674020]: the `event_driver` cars. The player and the hired team mate take over a drawn non-key team's two cars. Legend substitution. A race offer puts the player in the offer team's car.
+  - `grid` [V 0x5C7D40]: the player's slot, named slots, the skill key. AUTHORED: the uniform draw's formula, ties, seed.
+  - The catalogue gains `Event::drivers`, `drivers`, `team_types`, `liveries`, `venues`, `named_slots` and `legends`.
+- Career screen:
+  - Events are offered with the original's draw.
+  - The field is built once per event; each race's grid order is in the event file (`entrant` and race lines). Results map back to drivers and teams, so the team win and beat-rival use real teams.
+  - The race profile has the new optional keys `[game] opponent_liveries` and `opponent_names` (grid-app `settings.rs`, `main.rs`: per-opponent livery index and HUD/results names; unchanged when absent).
+  - AUTHORED: an AI car the port cannot race drives the player's model.
+  - Le Mans selection offers keep the F464 field.
+- Checks [V], release, `--offline`, rust-lld, reseeded build dir, on 8b45fc3 (base 53a0c92, F468):
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 784 passed, 0 failed;
+  - clippy clean; `grid-soak quick` 24/24;
+  - identities without DF01/characteristics: solo 6d7184ac…0063 and 12-car a08171c2…e400, unchanged;
+  - new asset tests: bmw_si_tour draws Nürburgring Sprint then GP reverse, has a 20-car field (Victor Rossi's key team intact, the player from slot 14 or 15), named-driver slots, and a 19-opponent profile.
+- In the app (unattended, shortened by the memory problem below): euro_touring (event 36, 12 cars) was entered with the drawn races (Nürburgring GP ×2, Jarama ×3, Istanbul route_1 ×3). Race 1 ran with the event_driver field (lac/bmw in their liveries, 11 named opponents) and finished P9; the result was mapped and added. The run was killed in race 2 at 6.5 GiB by the coordinator, so the payout of a full event in the app is not verified here; it is covered by the unit and asset tests.
+- [V] Memory, measured with guarded runs (`local/career/field/mem/*.mem`, working set every 10 s), plain race profiles, no career code:
+  - 20 cars: about 10 MB/s while racing, and about 9.7 MB/s after `drive_script_complete` with the ticks frozen (1.6 → 2.8 GiB in 110 s);
+  - 12 cars: about 5.7 MB/s after the script end;
+  - the same with and without the new profile keys.
+  - So the growth is per rendered frame and scales with the car count: a pre-existing render-path problem, now the render-leak session's task.
+  - The first unattended bmw_si_tour run reached 64 GiB because the player's autopilot got stuck from P15 of 20 at about tick 3000 (deterministic: the same velocity at tick 6000 in two runs). The race never ended and the app kept rendering.
+  - Guard scripts kill only this run's process tree.
+- After rebasing onto f105f40 (F473): identities solo 6d7184ac…0063 and 12-car a08171c2…e400 unchanged; career tests (grid-tools 23, grid-app 7) and settings tests (20) pass with the asset tests; clippy clean.
+- Not done: the full-length rendered career event (rerun after the render-leak fix), Ravenwest guest cars, Le Mans selection fields. Playable not rebuilt.
+
 F473 Joints, phase 1: the original's six-degree-of-freedom joint ported as library code, constructor, prepare and rows bit-for-bit against the original (2026-10-19, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, phase 1 of 3). Details: docs/JOINTS_RESEARCH.md "Phase 1". Evidence: worktree fervent-napier-50814b `local/robust/decomp/r16a..r16d`, `local/joint/` (JNT1 cases and both outputs per mode), `local/r20/` asm and decompile extracts. Static analysis and native probes on the hash-pinned analysis image; the original game was not launched.
 - Port: `grid_world::joint` (AEFEB0 constructor with B825E0/B827F0 fields; AF4890 prepare with AEED10 limit/spring states, AF1F10 swing axis, `pose::rotation` = 0x772670) and `grid_world::joint_rows` (AF71C0/AF9430 rows with AEF780, B82550, AFCBF0 and B7ACC0's batch bookkeeping). Not wired into the solver: phase 2 adds the island joint pools, phase 3 the entities.
 - [D] Arithmetic follows the disassembly (Ghidra's flattened sums are not the SSE order): row x matrix = (x R0 + z R2) + (w R3 + y R1), dot = (p0 + p1) + (p2 + p3), RSQRTPS/RCPPS via `sse_approx`, CRT acos (0xBF4067, dispatcher 0xBF33B0) as f64; 0x4B4440 writes clamped offsets back into the prepare's offset vector; SUBSS -0 - NaN keeps the NaN (`joint::negate`).
