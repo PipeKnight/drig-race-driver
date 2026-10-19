@@ -28,7 +28,7 @@ use bevy::prelude::*;
 use grid_tools::career::data::EventRace;
 use grid_tools::career::{
     Career, Catalogue, Classified, Entrant, Flashbacks, Payout, RaceResult, RaceSettings, Region,
-    SeasonState, apply_driver_offer, apply_event, save,
+    SeasonState, apply_driver_offer, apply_event_in_classes, save,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -1722,7 +1722,16 @@ impl Screen {
             return Ok(());
         }
         let settings = e.settings.unwrap_or_default();
-        let payout = apply_event(&self.cat, &mut self.career, e.event_id, &e.results, &settings)?;
+        // Each car's class: the `vehicle_class_id` of its model (AUTHORED:
+        // the first vehicle row of the stem; the original reads the
+        // driver's livery row, 0x66BBA0). The F424 field has none.
+        let cat = &self.cat;
+        let class_of = |who: Entrant| {
+            let stem = &e.field.iter().find(|f| f.entrant == who)?.stem;
+            cat.vehicles.values().find(|v| &v.stem == stem).map(|v| v.class_id)
+        };
+        let payout =
+            apply_event_in_classes(cat, &mut self.career, e.event_id, &e.results, &settings, &class_of)?;
         let ebay = self.ebay_lines();
         self.save()?;
         let _ = std::fs::remove_file(&event_path);
@@ -2320,6 +2329,7 @@ fn present(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grid_tools::career::apply_event;
 
     fn out(order: &[i32], aids_off: bool) -> RaceOut {
         RaceOut {

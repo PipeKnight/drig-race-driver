@@ -230,6 +230,49 @@ pub fn teammate_share(prize: i64, winnings_percentage: i32) -> i64 {
     (prize as f64 * (1.0 - winnings_percentage as f64 * 0.01)) as i64
 }
 
+/// The standings of `who`'s vehicle class (0x66BBA0, 0x660E90) [V]: drivers
+/// whose car has another `vehicle_class_id` are removed; `who` always stays.
+/// AUTHORED: a car of unknown class (`class_of` gives none) counts in every
+/// class.
+pub fn in_class(
+    standings: &[Standing],
+    who: Entrant,
+    class_of: &dyn Fn(Entrant) -> Option<i32>,
+) -> Vec<Standing> {
+    let class = class_of(who);
+    standings
+        .iter()
+        .filter(|s| {
+            s.entrant == who
+                || class.is_none()
+                || class_of(s.entrant).is_none_or(|c| Some(c) == class)
+        })
+        .copied()
+        .collect()
+}
+
+/// The 0-based class position of `who` (0x66BBA0) [V]: the drivers of its
+/// class sorted by points, the player first on equal points; so the player's
+/// position is the number of its class's drivers with more points. The
+/// original's sort leaves other ties unordered; AUTHORED: they keep the
+/// standings order. None when `who` ran no race.
+pub fn class_position(
+    standings: &[Standing],
+    who: Entrant,
+    class_of: &dyn Fn(Entrant) -> Option<i32>,
+) -> Option<usize> {
+    let mut class = in_class(standings, who, class_of);
+    if !class.iter().any(|s| s.entrant == who && s.races > 0) {
+        return None;
+    }
+    class.sort_by(|a, b| {
+        b.points
+            .cmp(&a.points)
+            .then((b.entrant == Entrant::Player).cmp(&(a.entrant == Entrant::Player)))
+    });
+    class.iter().position(|s| s.entrant == who)
+}
+
 /// Whether the player's team leads the team standings of the event
 /// (0x660E90 returns 0). [I] The summed value is the event points of each
 /// team's cars; the player and the teammate are one team, AI cars count by

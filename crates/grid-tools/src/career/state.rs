@@ -594,12 +594,37 @@ impl Payout {
 ///
 /// Head-to-head events pay `prize_money_for_first` for a win and no
 /// reputation (0x6788D0) [V].
+///
+/// Every car counts in one class here; [`apply_event_in_classes`] takes the
+/// cars' vehicle classes.
 pub fn apply_event(
     catalogue: &Catalogue,
     career: &mut Career,
     event_id: i32,
     races: &[RaceResult],
     settings: &RaceSettings,
+) -> Result<Payout, String> {
+    apply_event_in_classes(catalogue, career, event_id, races, settings, &|_| None)
+}
+
+/// [`apply_event`] with each entrant's `vehicle_class_id` (none: unknown).
+///
+/// Routine B (0x6781F0) pays the events of `le_mans`-region tiers (the game
+/// virtual 0x69B290 tests the tier's region index 4), so the Le Mans 24 Hours
+/// [V]. It differs from routine A:
+/// - the player's and the teammate's positions are class positions
+///   ([`rules::class_position`]) and the team win counts the class only
+///   (0x660E90); routine A does the same for `use_lemans_selection` events;
+/// - reputation comes from the event's whole `reputation_pot`, which is never
+///   reduced;
+/// - no head-to-head unlock check (0x656D40) and no call of 0x65D440.
+pub fn apply_event_in_classes(
+    catalogue: &Catalogue,
+    career: &mut Career,
+    event_id: i32,
+    races: &[RaceResult],
+    settings: &RaceSettings,
+    class_of: &dyn Fn(Entrant) -> Option<i32>,
 ) -> Result<Payout, String> {
     let event = catalogue
         .event(event_id)
@@ -654,7 +679,12 @@ pub fn apply_event(
         .cloned()
         .unwrap_or_default();
     let table = rules::standings(&points, races);
+    let routine_b = tier.region == Region::LeMans;
+    let by_class = routine_b || event.use_lemans_selection;
     let rank_of = |who: Entrant| {
+        if by_class {
+            return rules::class_position(&table, who, class_of);
+        }
         table
             .iter()
             .find(|s| s.entrant == who && s.races > 0)
@@ -663,22 +693,33 @@ pub fn apply_event(
     payout.position = rank_of(Entrant::Player);
     if let Some(pos) = payout.position {
         payout.prize = rules::prize(event, pos);
-        let pot = *career
-            .reputation_pots
-            .entry(event.id)
-            .or_insert(event.reputation_pot);
+        let pot = if routine_b {
+            event.reputation_pot
+        } else {
+            *career
+                .reputation_pots
+                .entry(event.id)
+                .or_insert(event.reputation_pot)
+        };
         payout.reputation_base = rules::reputation_base(&catalogue.reputation_fractions, pot, pos);
         let factor = rules::bonus_factor(catalogue, tier.rank_id, settings);
         payout.reputation_bonus = rules::reputation_bonus(payout.reputation_base, factor);
-        career.reputation_pots.insert(
-            event.id,
-            (pot - payout.reputation_base).max(event.reputation_pot_min),
-        );
+        if !routine_b {
+            career.reputation_pots.insert(
+                event.id,
+                (pot - payout.reputation_base).max(event.reputation_pot_min),
+            );
+        }
         if let (Some(tm), Some(tm_pos)) = (&career.team_mate, rank_of(Entrant::TeamMate)) {
             payout.team_mate_prize =
                 rules::teammate_share(rules::prize(event, tm_pos), tm.winnings_percentage);
         }
-        if rules::player_team_first(&table) {
+        let teams = if by_class {
+            rules::in_class(&table, Entrant::Player, class_of)
+        } else {
+            table.clone()
+        };
+        if rules::player_team_first(&teams) {
             payout.team_win_bonus = catalogue
                 .team_win_rewards
                 .get(&tier.rank_id)
@@ -693,7 +734,9 @@ pub fn apply_event(
         }
         let best = career.event_results.entry(event.id).or_insert(pos);
         *best = (*best).min(pos);
-        career.update_head_to_head(catalogue, tier.id);
+        if !routine_b {
+            career.update_head_to_head(catalogue, tier.id);
+        }
     }
     career.count_in_season(SeasonEntry::Event(event.id));
     career.reputation[tier.region as usize] += payout.reputation();

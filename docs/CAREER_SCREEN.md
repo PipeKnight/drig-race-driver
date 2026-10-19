@@ -120,6 +120,12 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
 - The free founding car (`bos`) therefore drives events 1 and 27.
 - Not ported: the bought car's performance and damageability effect (§13.4).
 
+## Routine B and class positions (F495)
+
+- `apply_event_in_classes` takes each car's `vehicle_class_id`; the screen gives the class of each field entry's model (AUTHORED: the first vehicle row of the stem; the original reads the driver's livery row). The F424 field has no entries, so every car counts in one class there.
+- Events of `le_mans`-region tiers (the Le Mans 24 Hours, 13–16) are paid by routine B: class position, the team win within the class, reputation from the whole pot without depletion, no head-to-head unlock. `use_lemans_selection` events (routine A) also use class positions (CAREER_RESEARCH §3.4).
+- The screen does not offer Le Mans selection events yet (`offers`: no `lemans_restrictions` field), so this path is checked by tests on the shipped data only, not in the app.
+
 ## Head-to-heads (F478)
 
 - **Offered** once `Career::event_open` opens them: after every other event of the tier is won (0x656D40) [V; I "won"]. The label reads "Head-to-head: <event>". On the purchased data the port can run 69, 70, 71, 72, 78 (the International final) and 79. 73, 75 and 77 drop out because their layout or car cannot be raced in the port. 76 is a drift battle (`competition_format` 3).

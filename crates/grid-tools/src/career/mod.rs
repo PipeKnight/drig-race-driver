@@ -10,7 +10,7 @@ pub mod state;
 pub use data::{Catalogue, Event, Region};
 pub use rules::{Classified, Entrant, Flashbacks, RaceResult, RaceSettings};
 pub use state::{
-    Career, Payout, SeasonEntry, SeasonState, SponsorPay, apply_driver_offer, apply_event,
+    Career, Payout, SeasonEntry, SeasonState, SponsorPay, apply_driver_offer, apply_event, apply_event_in_classes,
 };
 
 #[cfg(test)]
@@ -293,6 +293,23 @@ mod tests {
         assert_eq!(table[1].rank, 0);
         assert_eq!(table[2].rank, 1);
         assert_eq!(table[2].races, 2);
+    }
+
+    #[test]
+    fn class_position_counts_the_players_class_and_wins_its_ties() {
+        // Two races: P and ai(2) tie on 38 points, ai(1) of another class
+        // scores more.
+        let table = rules::standings(
+            &[20, 18, 16],
+            &[result(&[ai(1), P, ai(2)]), result(&[ai(1), ai(2), P])],
+        );
+        let class_of = |e: Entrant| Some(if e == ai(1) { 2 } else { 1 });
+        assert_eq!(rules::class_position(&table, P, &class_of), Some(0));
+        assert_eq!(rules::class_position(&table, ai(2), &class_of), Some(1));
+        assert_eq!(rules::class_position(&table, ai(1), &class_of), Some(0));
+        let one_class = |_| None;
+        assert_eq!(rules::class_position(&table, P, &one_class), Some(1));
+        assert_eq!(rules::class_position(&table, T, &class_of), None);
     }
 
     #[test]
@@ -744,6 +761,39 @@ mod tests {
             let g = field::grid(&cat, &f, Some(39), 14, 2, &mut rng);
             assert!(g.iter().position(|&k| k == i).unwrap() < 3);
         }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn routine_b_pays_the_le_mans_24_hours_by_class_from_the_whole_pot() {
+        let cat = catalogue();
+        let event = cat.event(13).unwrap();
+        assert_eq!(cat.tier(event.tier_id).unwrap().region, Region::LeMans);
+        // Five faster cars of another class, then one of the player's.
+        let order: Vec<Entrant> = (1..=6).map(ai).chain([P, ai(7)]).collect();
+        let class_of = |e: Entrant| Some(if matches!(e, Entrant::Ai { driver: 1..=5, .. }) { 2 } else { 1 });
+        let mut c = founded();
+        let races = [result(&order)];
+        let p = apply_event_in_classes(&cat, &mut c, 13, &races, &plain(), &class_of).unwrap();
+        assert_eq!(p.position, Some(1), "second in class, seventh overall");
+        assert_eq!(p.prize, rules::prize(event, 1));
+        let base = rules::reputation_base(&cat.reputation_fractions, event.reputation_pot, 1);
+        assert_eq!(p.reputation_base, base);
+        assert_eq!(p.team_win_bonus, 0, "ai(6) leads the class");
+        assert!(!c.reputation_pots.contains_key(&13), "routine B keeps the pot");
+        // Again: the same pot; and leading the class wins the team bonus.
+        let order: Vec<Entrant> = (1..=5).map(ai).chain([P, ai(6), ai(7)]).collect();
+        let p = apply_event_in_classes(&cat, &mut c, 13, &[result(&order)], &plain(), &class_of).unwrap();
+        assert_eq!(p.position, Some(0));
+        assert_eq!(
+            p.reputation_base,
+            rules::reputation_base(&cat.reputation_fractions, event.reputation_pot, 0)
+        );
+        assert!(p.team_win_bonus > 0);
+        // Without classes every car counts in one class.
+        let mut a = founded();
+        let p = apply_event(&cat, &mut a, 13, &[result(&order)], &plain()).unwrap();
+        assert_eq!(p.position, Some(5));
     }
 
     #[test]

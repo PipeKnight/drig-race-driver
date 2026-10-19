@@ -1,5 +1,22 @@
 # GRID engine project log
 
+F495 Career routine B and class positions: the Le Mans 24 Hours pays by class position from the whole reputation pot (2026-10-20, Claude Code; coordinator's order, FIDELITY_BACKLOG row 60). Research: docs/CAREER_RESEARCH.md §3.4 (same static study as F494; notes `local/career/notes/BANK_ROUTINEB.md` §3–§5, Capstone dumps `local/career/agent-f/dis_6779c0.txt`, `dis_6781f0.txt`, `dis_66bba0.txt`). Screen: docs/CAREER_SCREEN.md "Routine B and class positions (F495)".
+- Found [V]: routine B is chosen by the game virtual 0x69B290, which tests the current tier's region index for 4, `le_mans`. Only tiers 10–13 are in that region, and their only events are the Le Mans 24 Hours, 13–16. The Le Mans Series events 31, 35, 50 and 51 use routine A, with class positions because their `use_lemans_selection` is set.
+- The class position 0x66BBA0 keeps the drivers whose `vehicle_livery` vehicle has the placed driver's `vehicle_class_id`, sorts them by points, and puts the player first on equal points.
+- Port:
+  - `rules::in_class` and `rules::class_position`;
+  - `apply_event_in_classes`: `apply_event` with each entrant's class (`apply_event` passes none). For `le_mans`-region tiers it takes the player's and teammate's class positions, the team win within the class, reputation from the whole `reputation_pot` with no depletion, and no head-to-head unlock check. Routine A uses class positions for `use_lemans_selection` events.
+  - The career screen gives each field entry's model class: AUTHORED, the first vehicle row of the stem.
+- Verified by tests only. The shipped-data test pays event 13 2nd in class while 7th overall, then 1st in class with the team bonus, both from the full 60,000 pot. The screen does not offer `use_lemans_selection` events yet (13–16 all set it [D]), so no app run covers this path.
+- Not ported: 0x65D440 (routine A only, unidentified), the teammate's reputation (+0x70), and the leaderboards 0x665560 and 0x665890.
+- Checks [V], release, `--offline`, together with F494 on the same base:
+  - head 631962d8 (main 3b42e3b + F494 + F495)
+  - identities unchanged: solo 79a990f6…4bcc, 12-car 40cd67ca…ab8d
+  - workspace tests with `--include-ignored` and absolute GRID_* paths: 824 passed, 0 failed
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean
+  - `grid-soak quick`: 24 scenarios, 0 failed
+  - release grid-app.exe sha256 c7340e76…d0680e
+
 F494 Career Flashback Bonus: unused flashbacks pay career money per race, and the payout lists the original's bank rows (2026-10-20, Claude Code; coordinator's order, FIDELITY_BACKLOG row 60). Research: docs/CAREER_RESEARCH.md §3 (static: Ghidra 12.1.4 headless read-only and Capstone on the hash-pinned image; research agent notes in the main checkout's `local/career/notes/BANK_ROUTINEB.md`, outputs `local/career/agent-f/decomp/f1..f4`). Screen: docs/CAREER_SCREEN.md "Flashback Bonus and bank rows (F494)". Evidence: worktree peaceful-villani-46ea34 `local/career4/` (run1f, checks-493).
 - Found [V]: the per-race recorder 0x66DB80 stores the award 0x6A22A0 of the race's flashback manager when the player's result is final (+0x11, [I] finished). The award is `(maximum − used) × max_award / maximum` (i32 `imul`/`idiv`, checked in the Capstone disassembly), or the whole `max_award` with no flashbacks (Ninja, Pro Mode). 0x652200 sums the event's races into career +0x68, and all five reward routines credit it (A, B, head-to-head, both driver-offer routines). This corrects CAREER_RESEARCH §3.1 and FLASHBACK.md, which said nothing pays it, and the private REWARDS.md, which called +0x68 sponsorship.
 - Also found, not ported: the bank screen class `ScreenRewardsBankAccount` (filler 0x555620) and its row order; Season's Earnings is the player's money-leaderboard entry, added after every event and zeroed at the season end; routine B is chosen only for tiers of the `le_mans` region (the Le Mans 24 Hours events 13–16).

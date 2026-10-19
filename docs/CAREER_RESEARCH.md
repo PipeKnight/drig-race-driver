@@ -178,6 +178,7 @@ The end-of-event dispatcher 0x67B910 runs only in career mode [V]. It calls:
 - driver-offer routines 0x678BD0 and 0x678EE0 for event kinds 1 and 2.
 
 Routines A and B share the arithmetic below; B reads the pot directly, without the depletion of §3.2.
+The differences are listed in §3.4.
 
 ### 3.1 Position and prize [V]
 
@@ -283,6 +284,35 @@ Worked examples (first play):
 A win pays `prize_money_for_first` (500,000 to 10,000,000) and no reputation (0x6788D0). The
 `head_to_head_rewards` car or its alternative money (`alt_reward_amount`) is granted on a branch through
 0x65AD90 that was not traced.
+
+### 3.4 Routine B and class position [V, 20 October 2026]
+
+- **Selection.** The game virtual +0x98 is 0x69B290: the current tier's region index (tier +0x48, from
+  table 0xDB4C4C: europe 0, united_states 1, japan 2, international 3, le_mans 4) equals 4. Only tiers
+  10–13 are in `le_mans`, and their only events are 13–16, the four Le Mans 24 Hours (one race each).
+  The Le Mans Series events 31, 35, 50 and 51 are in Europe tiers and use routine A.
+- **A against B** (Capstone of 0x6779C0 and 0x6781F0):
+
+  | | A | B |
+  |---|---|---|
+  | player position | class position if `use_lemans_selection`, else the dense rank | always class position |
+  | team win | 0x660E90 in the class if `use_lemans_selection`, else the dispatcher's flag | always 0x660E90 in the class |
+  | reputation pot | the event's remaining pot (§3.2) | the event's whole `reputation_pot` |
+  | pot depletion | yes | none |
+  | teammate position | as the player's | class position |
+  | 0x65D440, head-to-head unlock 0x656D40 | called | not called |
+  | leaderboard update | 0x665560 | 0x665890 |
+
+  Prize, team-win amount, Flashback Bonus, sponsors, bonus factor and the money credit are shared.
+- **Class position** (0x66BBA0):
+  1. A driver's class is the `vehicle_class_id` of the vehicle of their `vehicle_livery` row (driver
+     +0x20).
+  2. Standings entries of another class are removed; the driver being placed always stays.
+  3. The rest are sorted by points, descending; on equal points the player (driver type 2 [I]) goes
+     first. Other ties are left to an unstable sort.
+  4. The position is the driver's 0-based index, so the player's class position is the number of
+     same-class drivers with more points.
+- 0x660E90 applies the same class filter before summing points per team.
 
 ## 4. Cars [V, D]
 
