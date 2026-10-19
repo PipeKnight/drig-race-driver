@@ -641,6 +641,12 @@ pub struct Parameters {
     abs: [f32; 4],
     /// Gains P/I/D and limits P/I/D/output (ai_vehicle_config pid*).
     pid: [f32; 7],
+    /// pidPredictionMultiplierLowSpeed/HighSpeed, pidPredictionLowSpeed/
+    /// HighSpeed (vehicle config +0x2AC/+0x2C0/+0x2D4/+0x2E8).
+    pid_prediction: [f32; 4],
+    /// pidAgainstCornerMinAngle/MaxAngle (+0x324/+0x338) in degrees. The
+    /// "with corner" pair (+0x2FC/+0x310) is never selected (see `controls`).
+    pid_corner_angle: [f32; 2],
     pub steering_speed: f32,
     brake_on_speed: f32,
     brake_off_speed: f32,
@@ -664,6 +670,11 @@ pub struct Parameters {
     /// behaviour_race_damaged and behaviour_controlled_stop switches.
     race_damaged: bool,
     controlled_stop: bool,
+    /// behaviour_race_start switch and rsEndSpeed1/2, rsOffsetMergeFactor1/2,
+    /// rsTimeout (driver config +0xACC/+0xAE0/+0xAF4/+0xB08/+0xB1C; built-in
+    /// merge factors 0.25 and 1.0).
+    race_start: bool,
+    rs: [f32; 5],
     /// The drift behaviour and test, when the event's config switches both on.
     pub drift: Option<Drift>,
 }
@@ -761,6 +772,12 @@ const AVOID_SCORE: u8 = 15;
 const RECOVERY_SCORES: [u8; 4] = [11, 16, 17, 19];
 const RECOVER_TBONE_SCORE: u8 = 18;
 const RETIRE_STUCK_SCORE: u8 = 23;
+/// race_start's score while active (its first ai_behaviour_fire.xml value).
+const RACE_START_SCORE: u8 = 14;
+/// race_start side choice: a car more than 2 m to one side of us (0xCB8DA4),
+/// and the random launch lane width (0xCB093C).
+const RACE_START_SIDE_DISTANCE: f32 = 2.;
+const RACE_START_LANE: f32 = 5.;
 /// Spun-test hysteresis (.data 0xE4D0F0 0.1·π, 0xCF6F08 π/3, 0xE4D0EC 3 m/s).
 const SPUN_HOLD_SLIP: f32 = 0.1 * std::f32::consts::PI;
 const SPUN_HOLD_HEADING: f32 = std::f32::consts::FRAC_PI_3;
@@ -870,6 +887,16 @@ impl Parameters {
                 v("pidIntegralLimit")?,
                 v("pidDerivativeLimit")?,
                 v("pidOutputLimit")?,
+            ],
+            pid_prediction: [
+                v_or("pidPredictionMultiplierLowSpeed", -1.),
+                v_or("pidPredictionMultiplierHighSpeed", 0.8),
+                v_or("pidPredictionLowSpeed", 10.),
+                v_or("pidPredictionHighSpeed", 20.),
+            ],
+            pid_corner_angle: [
+                v_or("pidAgainstCornerMinAngle", 0.),
+                v_or("pidAgainstCornerMaxAngle", 30.),
             ],
             steering_speed: m("steering_speed")?,
             brake_on_speed: m("brake_on_speed")?,
@@ -1014,6 +1041,14 @@ impl Parameters {
             tg_non_optimal_speed_factor: d_or("tgNonOptimalSpeedFactor", 0.8),
             race_damaged: on("behaviour_race_damaged"),
             controlled_stop: on("behaviour_controlled_stop"),
+            race_start: on("behaviour_race_start"),
+            rs: [
+                d_or("rsEndSpeed1", 30.),
+                d_or("rsEndSpeed2", 50.),
+                d_or("rsOffsetMergeFactor1", 0.25),
+                d_or("rsOffsetMergeFactor2", 1.),
+                d_or("rsTimeout", 10.),
+            ],
             drift: if data.switch("behaviour_drift") && data.switch("test_drift") {
                 Some(Drift {
                     st_ang_vel_factor: v("driftStAngVelFactor")?,
@@ -1272,6 +1307,8 @@ pub enum Behaviour {
     RetireFailure,
     /// Drift events (score 2/12/13, docs/DISCIPLINES.md §4.1).
     Drift,
+    /// The standing start (0x78A740, score 14 while active).
+    RaceStart,
 }
 
 /// The car's place in the race, read by the drift test (test context +0x14
@@ -1555,6 +1592,20 @@ struct Recovery {
     timer: f32,
 }
 
+/// race_start object (+0x35 active, +0x38 end speed, +0x3C merge factor,
+/// +0x40 desired offset, +0x44 initial phase, +0x48 timeout, +0x4C side).
+#[derive(Clone, Copy, Debug, Default)]
+struct RaceStart {
+    active: bool,
+    end_speed: f32,
+    merge: f32,
+    offset: f32,
+    initial: bool,
+    timer: f32,
+    /// Launch toward positive offsets (the right).
+    right: bool,
+}
+
 /// Overtake behaviour object (+0x30 target, +0x34 state, +0x38 decision timer,
 /// +0x3C minimum-fire timer).
 #[derive(Clone, Copy, Default)]
@@ -1724,11 +1775,14 @@ pub struct AiDriver {
     desired_offset: f32,
     offset_timer: f32,
     alone: bool,
-    /// Lateral PID integral and previous error.
-    pid_integral: f32,
-    pid_error: Option<f32>,
+    /// Lateral PID state (0x7790B0 object +0x20..+0x2C): error, previous
+    /// error, integral. Zeroed while the PID is off.
+    pid_state: [f32; 3],
     behaviour: Behaviour,
     overtake: Overtake,
+    race_start: RaceStart,
+    /// The first update has run (race_start activates on it).
+    started: bool,
     /// Grid revving (0x775BF0): (state, on phase, timer).
     rev: (u8, bool, f32),
     attempt_target: Option<u32>,
@@ -1855,10 +1909,11 @@ impl AiDriver {
             desired_offset: 0.,
             offset_timer: 0.,
             alone: false,
-            pid_integral: 0.,
-            pid_error: None,
+            pid_state: [0.; 3],
             behaviour: Behaviour::Race,
             overtake: Overtake::default(),
+            race_start: RaceStart::default(),
+            started: false,
             rev: (0, false, 0.),
             attempt_target: None,
             alongside_fired: false,
@@ -2366,6 +2421,45 @@ impl AiDriver {
             None => 0,
         };
 
+        // race_start activation (0x78A8F0). The original scores 22 while the
+        // wait_for_start test fires on the grid and activates there; the
+        // port's runners hold the cars without updating the AI, so it
+        // activates on the first update instead [I]. The launch delay
+        // (+0x30: rsMinimumWaitAtLights + U·max_lights_reaction_time, or a
+        // stall) is 0 with the shipped data and is not ported.
+        if !self.started {
+            self.started = true;
+            if p.race_start {
+                // Side choice 0x776740: away from the nearest car if it is more
+                // than 2 m to one side, else toward the larger racing-limit room.
+                let left_axis = [view.pose[0], view.pose[1], view.pose[2]];
+                let nearest = others.iter().min_by(|a, b| {
+                    let da = dot3(sub(a.position, position), sub(a.position, position));
+                    let db = dot3(sub(b.position, position), sub(b.position, position));
+                    da.total_cmp(&db)
+                });
+                let right = match nearest
+                    .map(|o| dot3(sub(o.position, position), left_axis))
+                    .filter(|side| side.abs() > RACE_START_SIDE_DISTANCE)
+                {
+                    Some(side) => side > 0.,
+                    None => self.offset - limits_here[0] > limits_here[1] - self.offset,
+                };
+                let [end_1, end_2, merge_1, merge_2, timeout] = p.rs;
+                let mut between = |a: f32, b: f32| a + (b - a) * (self.uniform() * 0.5 + 0.5);
+                let end_speed = between(end_1, end_2);
+                let merge = between(merge_1, merge_2);
+                self.race_start = RaceStart {
+                    active: true,
+                    end_speed,
+                    merge,
+                    offset: 0.,
+                    initial: true,
+                    timer: timeout,
+                    right,
+                };
+            }
+        }
         // Arbitration (0x79A400): the first strictly greatest score wins.
         let overtake_target = pass_vehicle.or(attempt);
         let scores = [
@@ -2406,6 +2500,14 @@ impl AiDriver {
                     0
                 },
             ),
+            (
+                Behaviour::RaceStart,
+                if self.race_start.active {
+                    RACE_START_SCORE
+                } else {
+                    0
+                },
+            ),
             (Behaviour::Race, 1),
         ];
         let next = scores
@@ -2419,6 +2521,7 @@ impl AiDriver {
             match self.behaviour {
                 Behaviour::Overtake => self.overtake.min_fire = 0.,
                 Behaviour::Recovery => self.recovery.elapsed = 0.,
+                Behaviour::RaceStart => self.race_start.active = false,
                 _ => {}
             }
             match next {
@@ -2528,6 +2631,45 @@ impl AiDriver {
                 request.throttle_cap = p.throttle_confidence;
                 if self.let_pass(others, own_rear, f) {
                     request.throttle_cap = p.throttle_confidence * p.faults.let_pass_throttle;
+                }
+            }
+            Behaviour::RaceStart => {
+                // Drive 0x78A740. Below slowSpeed the request offset is our
+                // front's own (0x7765B0) with an instant merge (applied below).
+                let rs = &mut self.race_start;
+                if speed >= SLOW_SPEED {
+                    request.merge = rs.merge;
+                    if rs.initial {
+                        // Room from the planned path at the car to the chosen
+                        // side's racing limit (view +0x230/+0x234).
+                        let room = if rs.right {
+                            limits_here[1] - self.offset
+                        } else {
+                            self.offset - limits_here[0]
+                        };
+                        if room <= own.half_width() {
+                            rs.offset = 0.;
+                        } else {
+                            rs.initial = false;
+                            let (a, b) = if rs.right {
+                                (self.offset, self.offset + RACE_START_LANE)
+                            } else {
+                                (self.offset - RACE_START_LANE, self.offset)
+                            };
+                            let u = self.uniform() * 0.5 + 0.5;
+                            self.race_start.offset = a + (b - a) * u;
+                        }
+                    }
+                    let rs = &mut self.race_start;
+                    request.desired_offset = rs.offset;
+                    rs.timer -= dt;
+                    if rs.end_speed < speed || rs.timer < 0. {
+                        rs.active = false;
+                    }
+                }
+                // The initial phase plans within the track limits (types 3/4).
+                if self.race_start.initial {
+                    request.track_limits = true;
                 }
             }
             Behaviour::Overtake => {
@@ -2825,7 +2967,11 @@ impl AiDriver {
         }
         // Planned offset moves toward the request at its merge rate.
         if speed < SLOW_SPEED {
-            self.offset = line_distance;
+            self.offset = if self.behaviour == Behaviour::RaceStart {
+                own_lateral
+            } else {
+                line_distance
+            };
         } else {
             self.offset = approach(
                 self.offset,
@@ -2844,13 +2990,29 @@ impl AiDriver {
         // Look-ahead, target point and curvature (0x779A20, 0x798E90).
         self.update_look_ahead(speed);
         let (point, _, lateral, limits) = data.line.at(arc + self.look_ahead);
-        // Limit types 1/2 (racing limits), or 3/4 (track limits) for avoid.
+        // Limit types 1/2 (racing limits), or 3/4 (track limits) for avoid
+        // and the race start.
         let limits = if request.track_limits {
             data.line.track_limits_at(arc + self.look_ahead)
         } else {
             limits
         };
-        self.offset = self.offset.clamp(limits[0], limits[1]);
+        // 0x7878F0 / 0x782D20: a positive offset stops at the right limit and
+        // a negative one at the left, each moved inward by our half width
+        // (view +0x60 = car state +0x110); a limit already past the line
+        // does not move it.
+        let half_width = own.half_width();
+        if self.offset > 0. {
+            let edge = limits[1] - half_width;
+            if 0. < edge && edge < self.offset {
+                self.offset = edge;
+            }
+        } else if self.offset < 0. {
+            let edge = limits[0] + half_width;
+            if edge < 0. && self.offset < edge {
+                self.offset = edge;
+            }
+        }
         // 0x798E90: the angle between the line laterals at the car (+0x180)
         // and at the look-ahead (+0xC0), acos of their clamped dot product,
         // negative when the look-ahead point lies on the car lateral's
@@ -2863,23 +3025,49 @@ impl AiDriver {
         if self.look_ahead > 0. {
             self.curvature = angle / self.look_ahead;
         }
-        // Lateral PID (0x7892E0): error of the car from its desired line offset.
-        let error = line_distance - self.offset;
-        let [kp, ki, kd, lp, li, ld, lo] = p.pid;
-        let proportional = (kp * error).clamp(-lp, lp);
-        if ki != 0. {
-            self.pid_integral =
-                (self.pid_integral + error * dt).clamp(-li / ki.abs(), li / ki.abs());
-        }
-        let integral = (ki * self.pid_integral).clamp(-li, li);
-        let derivative = self
-            .pid_error
-            .map_or(0., |e| (kd * (error - e) / dt.max(1e-6)).clamp(-ld, ld));
-        self.pid_error = Some(error);
-        let shift = (proportional + integral + derivative).clamp(-lo, lo);
-        let target: [f32; 3] =
-            std::array::from_fn(|k| point[k] + lateral[k] * (self.offset + shift));
-        let to_target = sub(target, position);
+        // Lateral PID (0x7892E0), active while on_track (test type 11):
+        // target = planned look-ahead point (+0xD0) + shift along the car's
+        // line lateral (+0x180), shift = (prediction·m(v) + PID(error)) ·
+        // corner factor. Measured from the front (car state +0xF0).
+        let planned: [f32; 3] = std::array::from_fn(|k| point[k] + lateral[k] * self.offset);
+        let target = if on_track {
+            let [kp, ki, kd, lp, li, ld, lo] = p.pid;
+            let error = own_lateral - self.offset;
+            let [previous_error, _, integral] = self.pid_state;
+            // 0x7790B0: the limits clamp the raw terms; the derivative starts
+            // from a zero previous error.
+            let proportional = error.clamp(-lp, lp);
+            let integral = (integral + dt * error).clamp(-li, li);
+            let derivative = if dt == 0. {
+                0.
+            } else {
+                ((error - previous_error) / dt).clamp(-ld, ld)
+            };
+            self.pid_state = [error, previous_error, integral];
+            let output = (kp * proportional + ki * integral + kd * derivative).clamp(-lo, lo);
+            let [m_low, m_high, v_low, v_high] = p.pid_prediction;
+            let multiplier = remap(speed, v_low, v_high, m_low, m_high);
+            let prediction = dot2(sub(planned, own_front), here_lateral);
+            // The angle between our nose and the line direction at the car
+            // (its lateral turned by 90 degrees). The original picks the
+            // "with corner" angles when κ·(direction·lateral) > 0, which is
+            // never true, so the "against corner" pair always applies.
+            let direction = [here_lateral[2], 0., -here_lateral[0]];
+            let cos = dot2(direction, horizontal(forward)).clamp(-1., 1.);
+            let angle = (f64::from(cos).acos() as f32).abs().to_degrees();
+            let [angle_min, angle_max] = p.pid_corner_angle;
+            let factor = if angle > angle_min {
+                remap(angle, angle_min, angle_max, 1., 0.)
+            } else {
+                1.
+            };
+            let shift = (prediction * multiplier + output) * factor;
+            std::array::from_fn(|k| planned[k] + here_lateral[k] * shift)
+        } else {
+            self.pid_state = [0.; 3];
+            planned
+        };
+        let to_target = sub(target, own_front);
         let heading_error = dot2(to_target, right).atan2(dot2(to_target, forward));
 
         // Next brake line ahead and its corner speed (0x792C80) with the

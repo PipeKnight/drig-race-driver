@@ -31,8 +31,12 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
 3. Look-ahead 0x779A20 (exact formula, rate limit, low-speed blend); curvature 0x798E90 =
    ±acos(lateral(car) · lateral(look-ahead)) / look-ahead, positive when the look-ahead point
    lies on the positive-offset side of the car's lateral (F454).
-4. Lateral PID 0x7892E0: target shifted by PID(error from the desired offset) with the
-   shipped gains (P -1, I -0.5, D -0.3) and limits (2/1/3, output 15).
+4. Lateral PID 0x7892E0 / 0x7790B0 (F455): while on_track, target = planned look-ahead
+   point + (prediction·m(v) + PID(front lateral − planned offset))·corner factor along the
+   car's line lateral; raw-term limits; heading error measured from the car front. Planned
+   offset clamped to each limit minus the car's half width. race_start (0x78A740) at the
+   standing start: track limits in its initial phase, front-lateral offset below 3 m/s
+   (docs/AI_DRIVER_RESEARCH.md §3.6–3.9).
 5. Corner speed 0x792C80 for the next brake line: min + (max − min)·f·S, S =
    corner_speed_in_ratio (A=1, B=0), f = remap(off-line 0..4 m -> 1..0.7).
 6. Brake-line braking 0x7886C0: b from the speed->distance table, reaction
@@ -53,8 +57,12 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
 
 ## Authored or not yet recovered
 
-- Corner-speed scale A/B (A=1, B=0 used); lateral PID internals, prediction and corner
-  factor. (The yaw term sign is settled [V] in F391, below.)
+- Corner-speed scale A/B (A=1, B=0 used). (The yaw term sign is settled [V] in F391,
+  below.)
+- race_start activates on the AI's first update: the port's runners hold the grid without
+  updating the AI, so the original's wait_for_start phase and its launch delay (0 with the
+  shipped data) are not run [I]. The line progress still projects the car centre; the
+  original projects the front (0x79C360 → 0x793F60 with car +0xF0).
 - Followed-car choice (nearest car ahead within ±2.2 m of our heading) and follow-brake
   amount (closing speed / thFollowSpeedMedium); the recovered follow throttle uses the
   shipped thFollow* bands.

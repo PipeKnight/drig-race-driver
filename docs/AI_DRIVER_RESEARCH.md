@@ -182,13 +182,56 @@ driver's characteristic list (+0x30F4).
    rate raOffsetMergeFactorAlone 0.2 m/s alone, raOffsetMergeFactor 1.0 /
    raOffsetMergeFactorCornering 0.5 otherwise; below vehicle slowSpeed 3 m/s
    offset = current and merge instant. Overtake etc. set ±1000 (= to limit).
-6. **Lateral PID** 0x7892E0 (optional, behaviour flag): shifts the target
-   point laterally by `(prediction·pidPredictionMultiplier(v) + PID(lateral
-   error))·cornerFactor`, gains from vehicle config (P −1, I −0.5, D −0.3,
-   limits 2/1/3/15, prediction −1 @10 m/s → 0.8 @20 m/s). Exact gating
-   flag and the decompiler-lost factor are **[I]**.
+6. **Lateral PID** 0x7892E0 [V static, F455]. Gate: the PID object is set
+   up (+0x50, cleared only by the retire drive) and the **on_track** test
+   (type 11, test table +0x2C) fires; otherwise target = +0xD0 and the PID
+   state (+0x34..+0x44) is zeroed. Then, with F = car front (+0xF0),
+   L = line lateral at the car (+0x180), D0 = planned look-ahead point (+0xD0):
+   - `pred = (D0 − F)·L`; `m = remap(v, pidPredictionLow/HighSpeed 10/20 →
+     pidPredictionMultiplierLow/HighSpeed −1/0.8)` (0x40BB00, clamped);
+   - `e = (F − P_car)·L` with P_car the planned point at the car (+0x190);
+     PID object 0x7790B0 (vtable 0xCF73C0): `p = clamp(e, ±Lp)`,
+     `I = clamp(I + dt·e, ±Li)`, `D = dt ? clamp((e − e_prev)/dt, ±Ld) : 0`
+     (e_prev starts at 0), `out = clamp(Kp·p + Ki·I + Kd·D, ±Lo)`;
+   - corner factor: `a` = |angle| in degrees between the car forward and the
+     line direction (L turned by 90°, 0x7A2EA0); the "with corner" pair
+     (+0x2FC/+0x310) is chosen when `κ·(direction·L) > 0`, which is identically
+     0, so `pidAgainstCornerMin/MaxAngle` (+0x324/+0x338, 0/30) always apply:
+     factor = 1, or `remap(a, min, max → 1, 0)` when a > min;
+   - `target = D0 + (pred·m + out)·factor·L`.
+   Vehicle config offsets +0x2AC..+0x338 are pidPredictionMultiplierLowSpeed,
+   …HighSpeed, pidPredictionLowSpeed, …HighSpeed, pidWithCornerMin/MaxAngle,
+   pidAgainstCornerMin/MaxAngle (stride 0x14, XML order).
 7. **Heading error** (0x797B50): signed angle between (target − car
-   position) and car forward → request+0x88.
+   front +0xF0) and car forward → request+0x88.
+8. **Limit clamp** 0x7878F0/0x788030 with 0x782FE0/0x782D20 [V static,
+   F455]: a positive planned offset stops at the right limit line, a negative
+   one at the left, each moved inward by view+0x60 = car half width
+   (car state +0x110, copied by 0x79C1F0); a limit on the far side of the line
+   does not move it. Without limit lines: ±tgOffsetMaxNoLimits.
+9. **race_start** (score 0x78A6D0, activate 0x78A8F0, deactivate 0x776730,
+   drive 0x78A740, side 0x776740) [V static, F455]:
+   - score 22 while wait_for_start fires or the launch delay +0x30 runs,
+     14 while active (+0x35), else 0;
+   - activate: launch delay +0x30 = `rsMinimumWaitAtLights + U(0,1)·
+     max_lights_reaction_time` (mapped value 31), or with probability
+     rsStallPercentage a stall `rsStallDuration + U(0, 0.5)` (+0x34) — 0 with
+     the shipped data; end speed `U(rsEndSpeed1, rsEndSpeed2)` (30/50), merge
+     `U(rsOffsetMergeFactor1, 2)` (built-in 0.25/1.0), offset +0x40 = 0,
+     initial phase +0x44 = 1, timeout rsTimeout (10 s); side +0x4C: away from
+     the nearest car when it is more than 2 m to one side (car axis +0x50),
+     else toward the larger racing-limit room;
+   - drive: while the delay runs, brake flags +0xB2/+0xB3; below slowSpeed the
+     request offset is the front's own lateral offset (0x7765B0) with an
+     instant merge; above it merge +0x3C and, in the initial phase, offset 0
+     while the room on the chosen side (view +0x230/+0x234) is at most our half
+     width, else a random lane `U(off, off ± 5)` toward that side and the
+     initial phase ends; ends above the end speed or after the timeout;
+   - the initial phase selects limit types 3/4 (track limits).
+   - Driver config offsets: rsMinimumWaitAtLights +0xA90, rsStallPercentage
+     +0xAA4, rsStallDuration +0xAB8, rsEndSpeed1/2 +0xACC/+0xAE0,
+     rsOffsetMergeFactor1/2 +0xAF4/+0xB08, rsTimeout +0xB1C (record value = name
+     pointer + 4).
 
 ## 4. Speed model [V]
 
