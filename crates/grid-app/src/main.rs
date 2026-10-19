@@ -1359,6 +1359,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         .map(|v| v.iter().map(|&i| Some(i)).collect())
         .unwrap_or_default();
     let opponent_names = profile.opponent_names.clone();
+    let race_points = profile.points.clone();
     // A Le Mans Series race's class name keys by car (results Class column).
     let mut car_classes: Vec<String> = Vec::new();
     let mut driver_aids = profile.assists()?;
@@ -2920,6 +2921,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         if !car_classes.is_empty() {
             app.insert_resource(post_race::CarClasses(std::mem::take(&mut car_classes)));
+        }
+        if let Some(points) = &race_points {
+            app.insert_resource(post_race::RacePoints(points.clone()));
         }
         if demolition {
             let cars = driving.opponents.as_ref().map_or(1, |o| o.multi.cars.len());

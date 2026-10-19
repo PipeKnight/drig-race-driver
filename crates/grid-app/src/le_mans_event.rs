@@ -282,6 +282,7 @@ mod tests {
                 score: None,
                 touge: None,
                 class: None,
+                points: None,
             })
             .collect();
         let out = event.results(Some(&s), rows);

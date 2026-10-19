@@ -60,6 +60,9 @@ pub struct Career {
     pub team_mate: Option<HiredTeamMate>,
     /// Signing fees paid in total (+0xA10) [V].
     pub team_mate_spending: i64,
+    /// The money paid this season (the bank's "Season's Earnings"). [I]
+    /// Every payout adds its total; `end_season` clears it.
+    pub season_earnings: i64,
     /// Received sponsor offers (`event_sponsor_offer.id`), in arrival order.
     pub sponsor_offers: Vec<i32>,
     pub major_sponsor: Option<i32>,
@@ -103,6 +106,7 @@ impl Career {
             cars: Vec::new(),
             team_mate: None,
             team_mate_spending: 0,
+            season_earnings: 0,
             sponsor_offers: Vec::new(),
             major_sponsor: None,
             minor_sponsors: [None; MINOR_SLOTS],
@@ -315,6 +319,7 @@ impl Career {
         }
         self.previous_season = std::mem::take(&mut self.season);
         self.lemans_refused = false;
+        self.season_earnings = 0;
         self.season_number += 1;
         true
     }
@@ -610,6 +615,7 @@ pub fn apply_event(
             }
         }
         career.count_in_season(SeasonEntry::Event(event.id));
+        career.season_earnings += payout.money();
         payout.team_founded = career.add_money(catalogue, payout.money());
         return Ok(payout);
     }
@@ -663,6 +669,7 @@ pub fn apply_event(
     }
     career.count_in_season(SeasonEntry::Event(event.id));
     career.reputation[tier.region as usize] += payout.reputation();
+    career.season_earnings += payout.money();
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }
@@ -699,6 +706,7 @@ pub fn apply_driver_offer(
     career.reputation[tier.region as usize] += payout.reputation();
     career.completed_offers.insert(offer_id);
     career.count_in_season(SeasonEntry::DriverOffer(offer_id));
+    career.season_earnings += payout.money();
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }

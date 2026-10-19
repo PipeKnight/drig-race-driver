@@ -59,6 +59,7 @@ pub fn write(c: &Career) -> Result<String, Error> {
         put(format!("team_mate {} {}", t.driver_id, t.winnings_percentage));
     }
     put(format!("team_mate_spending {}", c.team_mate_spending));
+    put(format!("season_earnings {}", c.season_earnings));
     for o in &c.sponsor_offers {
         put(format!("sponsor_offer {o}"));
     }
@@ -170,6 +171,7 @@ pub fn read(text: &str) -> Result<Career, Error> {
                 })
             }
             "team_mate_spending" => c.team_mate_spending = num(f.next(), key)?,
+            "season_earnings" => c.season_earnings = num(f.next(), key)?,
             "sponsor_offer" => c.sponsor_offers.push(num(f.next(), key)?),
             "major_sponsor" => c.major_sponsor = Some(num(f.next(), key)?),
             "minor_sponsor" => {

@@ -238,6 +238,9 @@ pub struct Settings {
     /// `[game] opponent_names`: each opponent's name on the HUD and the
     /// results, comma separated, in car order (the career field).
     pub opponent_names: Option<Vec<String>>,
+    /// `[game] points`: the event's points table by finishing position
+    /// (career races), shown in the results' Points column.
+    pub points: Option<Vec<i32>>,
     /// `[game] series`: a free-race circuit series (`pro_tuned`, `touring`,
     /// `gt1`, ...; docs/SERIES.md): its cars and grid fill.
     pub series: Option<String>,
@@ -429,6 +432,15 @@ impl Settings {
                             .map(|v| v.trim().parse::<usize>())
                             .collect::<Result<_, _>>()
                             .map_err(|_| at("[game] opponent_liveries needs numbers".into()))?,
+                    )
+                }
+                ("game", "points") => {
+                    self.points = Some(
+                        value
+                            .split(',')
+                            .map(|v| v.trim().parse::<i32>())
+                            .collect::<Result<_, _>>()
+                            .map_err(|_| at("[game] points needs numbers".into()))?,
                     )
                 }
                 ("game", "opponent_names") => {

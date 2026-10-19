@@ -801,8 +801,38 @@ pub fn new_career(_cat: &Catalogue) -> Career {
     Career::new()
 }
 
-/// The payout lines (the original's bank text names, English).
-pub fn payout_lines(p: &Payout) -> Vec<String> {
+/// Adds `[game] points` (the event's points table, the results' Points
+/// column) to a race profile.
+pub fn with_points(profile: &str, points: &[i32]) -> String {
+    let list: Vec<String> = points.iter().map(i32::to_string).collect();
+    profile.replacen("[game]\n", &format!("[game]\npoints = {}\n", list.join(",")), 1)
+}
+
+/// The event standings so far (`driver_event_standings_*` [D]; the lines
+/// are AUTHORED text): rank, name, points, by `rules::standings`.
+pub fn standings_lines(points: &[i32], e: &InProgress, team_mate: &str) -> Vec<String> {
+    grid_tools::career::rules::standings(points, &e.results)
+        .iter()
+        .map(|s| {
+            let name = e
+                .field
+                .iter()
+                .find(|f| f.entrant == s.entrant)
+                .map(|f| f.name.clone())
+                .unwrap_or_else(|| match s.entrant {
+                    Entrant::Player => "You".into(),
+                    Entrant::TeamMate => team_mate.into(),
+                    Entrant::Ai { driver, .. } => format!("Car {driver}"),
+                });
+            format!("    {:>2}. {name} - {} pts", s.rank + 1, s.points)
+        })
+        .collect()
+}
+
+/// The payout lines (the original's bank text names, English): the paid
+/// items, then the balance and the season's earnings
+/// (`bank_rewards_balance_desc`, `bank_rewards_season_earnings_desc` [D]).
+pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
     let money = |v: i64| format!("${}", thousands(v));
     let offer = p.driver_offer_wages != 0 || p.driver_offer_bonus != 0 || p.driver_offer_reputation != 0;
     let mut lines = Vec::new();
@@ -821,6 +851,8 @@ pub fn payout_lines(p: &Payout) -> Vec<String> {
         lines.push(format!("Sponsorship Money: {}", money(p.sponsor_money)));
     }
     lines.push(format!("Total: {}", money(p.money())));
+    lines.push(format!("Balance: {}", money(c.money)));
+    lines.push(format!("Season's Earnings: {}", money(c.season_earnings)));
     if p.team_founded {
         lines.push("Your race team is founded: the founding sum is paid, and the rookie licences and the free car come with it.".into());
     }
@@ -1311,6 +1343,17 @@ impl Screen {
                             place.map_or(String::new(), |p| format!(" - finished {}", p + 1))
                         ));
                     }
+                    if let Some(points) = self.event_points(e)
+                        && !e.results.is_empty()
+                    {
+                        lines.push("Event Standings - Drivers:".into());
+                        let mate = self
+                            .career
+                            .team_mate
+                            .as_ref()
+                            .map_or_else(|| "Team mate".into(), |t| self.driver_name(t.driver_id));
+                        lines.extend(standings_lines(&points, e, &mate));
+                    }
                     // The last race's sponsor objectives (paid with the event).
                     if e.offer.is_none()
                         && let Some(last) = e.results.last()
@@ -1434,7 +1477,7 @@ impl Screen {
                 "Objective: {}",
                 if met { "achieved" } else { "failed" }
             )];
-            lines.extend(payout_lines(&payout));
+            lines.extend(payout_lines(&payout, &self.career));
             self.current = None;
             self.page = Page::Payout(lines);
             return Ok(());
@@ -1456,7 +1499,7 @@ impl Screen {
             self.career.total_reputation()
         );
         self.current = None;
-        self.page = Page::Payout(payout_lines(&payout));
+        self.page = Page::Payout(payout_lines(&payout, &self.career));
         Ok(())
     }
 
@@ -1585,19 +1628,26 @@ impl Screen {
             .is_some_and(grid_tools::career::rules::is_test_offer)
     }
 
+    /// An own-team event's points table (none for driver offers and
+    /// head-to-heads, which pay without standings).
+    fn event_points(&self, e: &InProgress) -> Option<Vec<i32>> {
+        let event = self.cat.event(e.event_id).filter(|ev| e.offer.is_none() && !ev.head_to_head)?;
+        self.cat.points.get(&event.points_id).cloned()
+    }
+
     /// Writes the next race's profile.
     fn go(&self) -> Result<(), String> {
         let e = self.current.as_ref().ok_or("no event")?;
         let next = e.next().ok_or("event finished")?;
-        std::fs::write(
-            self.dir.join(PROFILE),
-            if e.field.is_empty() {
-                race_profile(&e.car, &e.field_cars, next, self.solo(e))
-            } else {
-                field_profile(&e.field, next)
-            },
-        )
-        .map_err(|err| err.to_string())?;
+        let mut profile = if e.field.is_empty() {
+            race_profile(&e.car, &e.field_cars, next, self.solo(e))
+        } else {
+            field_profile(&e.field, next)
+        };
+        if let Some(points) = self.event_points(e) {
+            profile = with_points(&profile, &points);
+        }
+        std::fs::write(self.dir.join(PROFILE), profile).map_err(|err| err.to_string())?;
         log_line!(
             "drive_career version=1 event=go event_id={} race={} route={} laps={} grid={}",
             e.event_id,
@@ -2096,6 +2146,49 @@ mod tests {
     }
 
     #[test]
+    fn points_standings_and_bank_lines() {
+        // The profile carries the event's points table.
+        let race = Planned { route: "tracks/europe/nurburgring/route_1".into(), laps: 3, slot: 11, layout: 0, cars: vec![] };
+        let p = with_points(&race_profile("bmw", &["bmw".into()], &race, false), &[20, 18, 16]);
+        let mut s = crate::settings::Settings::new();
+        s.apply(&p, Path::new(".")).unwrap();
+        assert_eq!(s.points, Some(vec![20, 18, 16]));
+        assert_eq!(s.laps, Some(3));
+        // Standings over two races: names from the field, dense ranks.
+        let mate = Entrant::TeamMate;
+        let rival = Entrant::Ai { driver: 238, team: 116 };
+        let e = InProgress {
+            offer: None,
+            event_id: 7,
+            car: "bmw".into(),
+            field_cars: vec!["bmw".into()],
+            races: vec![race.clone(), race],
+            field: vec![
+                FieldEntry { entrant: Entrant::Player, stem: "bmw".into(), livery: 0, name: "You".into() },
+                FieldEntry { entrant: rival, stem: "bmw".into(), livery: 3, name: "Lee Niven".into() },
+            ],
+            results: vec![
+                grid_tools::career::state::result(&[Entrant::Player, rival, mate]),
+                grid_tools::career::state::result(&[rival, Entrant::Player, mate]),
+            ],
+            settings: None,
+            best_lap: None,
+            top_mph: None,
+        };
+        assert_eq!(
+            standings_lines(&[20, 18, 16], &e, "Ann Example"),
+            ["     1. You - 38 pts", "     1. Lee Niven - 38 pts", "     2. Ann Example - 32 pts"]
+        );
+        // The bank shows the balance and the season's earnings.
+        let mut c = Career::new();
+        c.money = 52000;
+        c.season_earnings = 61500;
+        let lines = payout_lines(&Payout { position: Some(0), prize: 30000, ..Payout::default() }, &c);
+        let at = lines.iter().position(|l| l == "Total: $30,000").unwrap();
+        assert_eq!(lines[at + 1..at + 3], ["Balance: $52,000", "Season's Earnings: $61,500"]);
+    }
+
+    #[test]
     fn the_team_mate_is_car_one_and_round_trips() {
         let mut o = out(&[2, 1, 0, 3], false);
         teammate_car(&mut o.result);
@@ -2197,9 +2290,13 @@ mod tests {
             assert_eq!(r.cars.len(), 19);
         }
         // The profile lists 19 opponents with liveries and names in grid order.
-        let profile = field_profile(&field, &planned[0]);
+        // bmw_si_tour scores with points table 6 (US_Rookie) [D].
+        let points = &cat.points[&cat.event(7).unwrap().points_id];
+        assert_eq!(points[..3], [20, 18, 16]);
+        let profile = with_points(&field_profile(&field, &planned[0]), points);
         let mut s = crate::settings::Settings::new();
         s.apply(&profile, Path::new(".")).unwrap();
+        assert_eq!(s.points.as_ref(), Some(points));
         assert_eq!((s.opponents, s.grid_position), (Some(19), Some(planned[0].slot + 1)));
         assert_eq!(s.opponent_liveries.as_ref().map(Vec::len), Some(19));
         assert_eq!(s.opponent_names.as_ref().map(Vec::len), Some(19));

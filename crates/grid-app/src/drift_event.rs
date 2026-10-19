@@ -654,6 +654,7 @@ mod tests {
             score: None,
             touge: None,
             class: None,
+            points: None,
         };
         let rows = event.results(None, vec![player]);
         assert_eq!(

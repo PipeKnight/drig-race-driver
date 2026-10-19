@@ -66,12 +66,20 @@ pub struct Row {
     /// Le Mans Series: the car's class name key (`db_lmp1`, ...), shown in
     /// the Class column (`post_race_results_lemans`, F413).
     pub class: Option<String>,
+    /// A career race: the points this position scores (the event's points
+    /// table, 0 past it), shown in the Points column.
+    pub points: Option<i32>,
 }
 
 /// Each car's class name key by car index (the player first) in a Le Mans
 /// Series race (docs/SERIES.md).
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CarClasses(pub Vec<String>);
+
+/// A career race's points table by finishing position (`[game] points`,
+/// docs/CAREER_SCREEN.md).
+#[derive(Resource, Clone, Debug, Default)]
+pub struct RacePoints(pub Vec<i32>);
 
 /// Results rows in classification order. `player_best` replaces car 0's
 /// line-timed best lap with its gate-timed one.
@@ -111,6 +119,7 @@ pub fn rows(
                 score: None,
                 touge: None,
                 class: None,
+                points: None,
             }
         })
         .collect()
@@ -135,6 +144,7 @@ pub fn solo_row(name: &str, vehicle: &str, result: Option<&grid_tools::time_tria
         score: None,
         touge: None,
         class: None,
+        points: None,
     }
 }
 
@@ -849,6 +859,11 @@ impl PostRace {
                     // post_race_positions_table_car_class_header; its place
                     // in the layout is I: the team column's].
                     header[4] = l("post_race_positions_table_car_class_header");
+                } else if rows.iter().any(|r| r.points.is_some()) {
+                    // A career race's Points column [D string
+                    // post_race_positions_table_points_column, the first of
+                    // its two entries; its place is I: the team column's].
+                    header[4] = l("post_race_positions_table_points_column");
                 }
                 view.table.push(header);
                 for (i, row) in rows.iter().enumerate() {
@@ -863,10 +878,11 @@ impl PostRace {
                             None => time_text(row, &l),
                         },
                         row.vehicle.clone(),
-                        match (row.touge, &row.class) {
-                            (Some([run, _]), _) => run.map_or_else(|| "DNF".into(), crate::race_hud::lap_time),
-                            (None, Some(class)) => labels.get(class).to_owned(),
-                            (None, None) => "--".into(),
+                        match (row.touge, &row.class, row.points) {
+                            (Some([run, _]), _, _) => run.map_or_else(|| "DNF".into(), crate::race_hud::lap_time),
+                            (None, Some(class), _) => labels.get(class).to_owned(),
+                            (None, None, Some(points)) => points.to_string(),
+                            (None, None, None) => "--".into(),
                         },
                         match (row.touge, row.score) {
                             (Some([_, run]), _) => run.map_or_else(|| "DNF".into(), crate::race_hud::lap_time),
@@ -928,13 +944,14 @@ type Events<'w> = (
     Option<Res<'w, crate::touge_event::TougeEvent>>,
     Option<Res<'w, CarClasses>>,
     Option<Res<'w, crate::le_mans_event::LeMansEvent>>,
+    Option<Res<'w, RacePoints>>,
 );
 
 fn present(
     post: Res<PostRace>,
     labels: Res<Labels>,
     driving: Res<crate::Driving>,
-    (trial, drift, touge, classes, le_mans): Events,
+    (trial, drift, touge, classes, le_mans, points): Events,
     mut panel: Query<&mut Visibility, With<Panel>>,
     mut parts: Query<(&Part, &mut Text, &mut TextColor, &mut Node)>,
     mut shown: Local<Option<View>>,
@@ -968,6 +985,11 @@ fn present(
     }
     if let Some(e) = &le_mans {
         rows = e.results(driving.opponents.as_ref().map(|o| &o.standings), rows);
+    }
+    if let Some(p) = &points {
+        for row in &mut rows {
+            row.points = Some(p.0.get(row.position.saturating_sub(1)).copied().unwrap_or(0));
+        }
     }
     let view = post.view_with(&rows, &labels, board.as_ref());
     if shown.as_ref() == Some(&view) {
@@ -1186,6 +1208,7 @@ mod tests {
             score: None,
             touge: Some(touge),
             class: None,
+            points: None,
         };
         let rows = [
             row(1, 1, Cell::Total(299.136), [Some(152.272), Some(146.864)]),
@@ -1216,6 +1239,7 @@ mod tests {
             score: None,
             touge: None,
             class: Some(class.into()),
+            points: None,
         };
         let rows: Vec<Row> = (0..16)
             .map(|i| row(i + 1, i, if i < 3 { "db_lmp1" } else { "db_gt1" }))
@@ -1226,6 +1250,31 @@ mod tests {
         assert_eq!(view.table[16][4], "db_gt1");
         // Header plus 16 cars fit the table.
         assert!(view.table.len() <= TABLE_ROWS);
+    }
+
+    #[test]
+    fn career_results_show_the_points_column() {
+        let mut post = PostRace::new(Variant::FreeRace);
+        post.stage = Stage::Results;
+        let rows: Vec<Row> = (0..12)
+            .map(|i| Row {
+                position: i + 1,
+                car: i,
+                name: format!("car {i}"),
+                time: Cell::Running,
+                estimated: false,
+                best: None,
+                vehicle: "BMW 320si".into(),
+                score: None,
+                touge: None,
+                class: None,
+                points: Some([20, 18, 16][..].get(i).copied().unwrap_or(0)),
+            })
+            .collect();
+        let view = post.view(&rows, &Labels::default());
+        assert_eq!(view.table[0][4], "post_race_positions_table_points_column");
+        assert_eq!((view.table[1][4].as_str(), view.table[3][4].as_str()), ("20", "16"));
+        assert_eq!(view.table[12][4], "0");
     }
 
     #[test]

@@ -13,8 +13,8 @@ Labels: **[D]** read from shipped data; **[V]** verified in the original's code 
   - circuit races: `competition_format_id` 1, not head-to-head, no `use_lemans_selection`;
   - at least one `event_vehicle` model in `series::RACEABLE` whose `cars/<stem>` folder exists. The first one is the player's car, and every one is used for the field;
   - `num_competitions` usable layouts in the event's `event_track_pool`: lap races (no time limit) on a layout the port has raced (the `Series::supported_layouts` rule: `route::CIRCUITS` or a `series::SURVEYED_TRACKS` circuit), with the route folder present.
-- During an event: its races, each finished place, and the next race (layout, laps, grid slot), or Abandon event.
-- After the last race: the payout lines (Championship position, Prize Money, Teammate Prize Money, Team Win Bonus, Sponsorship Money, total, reputation with its base and bonus, new sponsor offers).
+- During an event: its races, each finished place, the event standings so far, and the next race (layout, laps, grid slot), or Abandon event.
+- After the last race: the payout lines (Championship position, Prize Money, Teammate Prize Money, Team Win Bonus, Sponsorship Money, total, Balance, Season's Earnings, reputation with its base and bonus, new sponsor offers).
 - Text is plain English (AUTHORED). An event's name is `db_<name>` from the language file when that string exists, else the database name.
 - Controls: Up/Down, Select, Back/Escape (quits, or continues from the payout), and mouse: click a row, then click it again.
 
@@ -86,6 +86,12 @@ Driver offers on the home page, after the open events:
 - **Files:** the event file has an `offer ID` line, and `best`/`top` lines after the race. The race result file adds `best SECONDS` and `top MPH`.
 
 AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`) has no screen yet, and the `bos` is not an entry car of any raceable rookie event.
+
+## Points, standings and bank lines (F475)
+
+- **Points column.** An own-team event's race profile carries `[game] points = 20,18,…`: the event's `points` table (`event.points_id`; bmw_si_tour uses table 6, US_Rookie, 20,18,16,…) [D]. Driver offers and head-to-heads write none. grid-app reads the optional key (`Settings::points`) into `post_race::RacePoints`, and the race results show `points[position − 1]` (0 past the table) in column 4, the team column. Le Mans classes keep that column. The header is `post_race_positions_table_points_column` [D]. The language file has two entries for that id, "Points" first and "Penalties " second; the reader keeps the first. Where the column sits is [I].
+- **Event standings.** During an event the event page lists the standings so far: `rules::standings` over the results with the event's points table, dense ranks, names from the career field ("You", the team mate's name, "Car N" for the F424 field). The original's strings are `driver_event_standings_title` "Event Standings" and `_subtitle` "Drivers" [D]. The original's standings screen and its Teams page are not ported.
+- **Bank lines.** After the Total, the payout page shows "Balance:" (`bank_rewards_balance_desc`) and "Season's Earnings:" (`bank_rewards_season_earnings_desc`) [D strings]. `Career::season_earnings` is new and saved (key `season_earnings`; older saves read 0). Each event, head-to-head and driver-offer payout adds its money total, and `end_season` clears it. Where the original keeps this sum and when it resets were not traced [I].
 
 ## Team mate and sponsors (F466)
 

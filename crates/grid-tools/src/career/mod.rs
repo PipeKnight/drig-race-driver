@@ -537,6 +537,7 @@ mod tests {
         let cat = tiny();
         let mut c = founded();
         let races = [result(&[ai(1), P])];
+        let before = c.money;
         for _ in 0..3 {
             apply_event(&cat, &mut c, 34, &races, &plain()).unwrap();
         }
@@ -544,9 +545,13 @@ mod tests {
         apply_event(&cat, &mut c, 34, &races, &plain()).unwrap();
         assert_eq!(c.season_state(), SeasonState::LeMansPending);
         assert!(!c.end_season());
+        // Season's Earnings: every payout of the season, cleared at its end.
+        assert!(c.money > before);
+        assert_eq!(c.season_earnings, c.money - before);
         c.refuse_lemans();
         assert_eq!(c.season_state(), SeasonState::Ended);
         assert!(c.end_season());
+        assert_eq!(c.season_earnings, 0);
         assert_eq!(c.season_number, 2);
         assert_eq!(c.previous_season.len(), 4);
         assert!(c.season.is_empty());
