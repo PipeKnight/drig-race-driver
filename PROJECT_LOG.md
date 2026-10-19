@@ -1,5 +1,7 @@
 # GRID engine project log
 
+F485 Soak: seeds 39 (Spa) and 54 (Le Mans) fail on main since F476 (2026-10-19, Claude Code; coordinator's request). Both are `prop piece falling through the world`. Bisect [V] with a release `grid-soak` per commit: F475 c583aae passes both, F476 375e262 fails both with the same ticks, bodies and positions as main bdda5de and F484. F476 changes only the AI driving, so the cars now break different props. [I] It exposes the failure rather than causes it (the family of Spa seed 38, a hole in the packed road collision); the two spots are not traced. Details: docs/SOAK_TESTING.md "Known failures on main: seeds 39 (Spa) and 54 (Le Mans), from F476". Evidence: worktree fervent-napier-50814b `local/r20/bisect-39-54/`. Docs only.
+
 F484 Joints, phase 3a: tyre walls break into blocks joined by their springs; the constraint template stage bit-for-bit against the original (2026-10-19, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, phase 3 part a). Details: docs/JOINTS_RESEARCH.md "Phase 3a". Evidence: worktree fervent-napier-50814b `local/joint/template-*` (JTP1 cases, outputs, validation.json), `local/robust/decomp/r16g`, `r16h` (Ghidra 12.1.4 headless, read-only), `local/r20/*.asm` (capstone 5.0.6), checks in `local/r20/p3a/`. Static analysis and native probes on the hash-pinned analysis image; the original game was not launched.
 - Port:
   - `grid_formats::entities::Constraint`: a damage state's `TEMPLATECONSTRAINT`s (bodies, props, transform, display) in change order;

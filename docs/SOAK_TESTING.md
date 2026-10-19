@@ -478,6 +478,23 @@ candidate gap. Whether the original has other collision there (or loses the piec
 known. Evidence: this worktree's `local/r20/spa38/` (trace, failure report, inputs). The seed
 stays outside the default quick set.
 
+## Known failures on main: seeds 39 (Spa) and 54 (Le Mans), from F476
+
+`grid-soak quick --seeds 25..56` fails two scenarios on main since F476 (375e262, Redgate
+braking), both `out-of-bounds: prop piece falling through the world`:
+
+- seed 39 (9 cars, Spa, tick 4886): body 10 at (555, 1, 892), 13 m from the centreline;
+- seed 54 (12 cars, Le Mans, tick 4257): body 42 at (461, -9, -2416), 8 m from the centreline.
+
+Bisect [V] (release `grid-soak`, each seed run alone, evidence worktree fervent-napier-50814b
+`local/r20/bisect-39-54/`): F475 (c583aae) passes both; F476 (375e262) fails both at the same
+ticks, bodies and positions as main bdda5de and as F484 (4f8cd6f). F476 changes only the AI
+(brake-line ratio on the cruise tables, the Derby avoid window), so the cars now hit
+different props. [I] The AI change exposes the failure rather than causes it: a broken piece
+falling through the ground is the same failure family as Spa seed 38 (a hole in the packed
+road collision, above); whether these two spots are holes too is not traced. Spa seed 38,
+which failed from F465, passes on main bdda5de and F484 (when it stopped failing is not bisected).
+
 ## Follow-ups
 
 - Car against piece still uses the car-to-car hull-triangle path, and piece against
