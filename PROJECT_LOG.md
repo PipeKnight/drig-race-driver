@@ -1,5 +1,10 @@
 # GRID engine project log
 
+F460 Spa launch gap explained: the comparison ran without the race manager's race-start factors (2026-10-19, Claude Code; coordinator's task "Spa launch, offline"). Details: docs/AI_DRIVER_PORT.md "Comparing launches with the original (F460)". Evidence: main checkout `local/driving/milan-start-20261019/` (`pace-spa.*`, `pace-milan.*`, `r3-spa.*`); original `local/driving/field-20261019/spa01.dec.tsv`. **No code change**; corrects the open item in F450/F455.
+- [V] The AI throttle and the 1→2 shift time already match the original at Spa. With `GRID_REFERENCE_CAR=11` (pacing on, the parked player as reference; race-start power ×1.05 and grip ×1.25 as in the original's Race Day) the port is within 0.1–0.3 m/s of the original at 1, 2 and 3 s (BMW/Lacetti 16.8/14.7, 27.5/26.4, 36.0/35.1 against 17.0/15.0, 27.7/26.6, 36.1/35.3); without pacing it was 0.7–1.2 m/s behind.
+- Milan with pacing: 14.0–17.1 m/s at 1 s (original 14.7–17.6), 34.5–36.6 at 3 s (35.9–37.4), no contacts.
+- Rule for live-capture comparisons: set `GRID_REFERENCE_CAR` to the parked player slot.
+
 F459 Redgate braking: offline analysis, live capture queued (2026-10-19, Claude Code; coordinator's task "Redgate braking 0.92 against 0.55–0.78"). Details: docs/AI_CHOREOGRAPHER_PORT.md "Braking, offline analysis (F459)". Evidence: main checkout `local/driving/redgate-20261019/` (`brk.txt`, `abs.txt`, `solo-f.tsv`, `solo-t.tsv`). **No code change**; the original was not launched (live runs wait for the owner).
 - [V] Same in port and original: formula 0x7886C0, the Lacetti brake tables (b ≈ 45 m for 57.4 → 39.7 m/s), the slewed packet brake as "previous brake" (0x794310/0x7929D0/0x779F70).
 - [V] Not ABS: 0x77A2E0 is a pedal cap inside 0x78E8A0; the port's wheels stay within 1–2 % of the car speed, so 18.7 m/s² is real braking at 0.92–1.0 (raw brake alternating 1/0 once the slewed pedal reaches 1). The original's 11.8 m/s² at 0.55–0.8 is consistent with a pedal-proportional brake.
