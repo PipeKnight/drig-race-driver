@@ -1,5 +1,14 @@
 # GRID engine project log
 
+## G154 — Check asphalt/paint balance against source evidence (19 October 2026)
+
+Owner suspects too-reflective asphalt and too-matte car, requests verification. Inspected original recording frames70/100/225 qualitatively, source mask stats/shader algebra, existing matched sun-facing road pair, plus3new matched native4K static reference controls on installed3bfc/bbc1: roadmaskOff versusSourceBase, then sky versus512static scene-probe. All exit0/noGPUerrors; probe HDRreadback verified/1copy/ready. Native comparison crops inspected, private asphalt-paint-check01 evidence preserves commands/hashes/limits.
+
+Road mask omission in ordinary mode is a concrete cause of excessive pale sheen; source-base returns visible dry asphalt grain without exposure change. Source track diffuse alpha means are ~1–6% (not a roughness map or a rendered-brightness ratio). Existing primary Play GRID Graphics Surfaces.cmd selects this already accepted optional adaptation. Ordinary launcher/executable unchanged by this check.
+
+Paint probe difference is modest in the selected view; this does not justify blindly increasing all body reflectance. Next bounded material experiment is clearcoat strength/roughness A/B with source masks retained. No exact original radiometric/BRDF parity, new paint setting, moving probe quality or performance claim. docs/ASPHALT_PAINT_REFLECTION_CHECK.md records source constants, camera, limitations and next checks. AA backlog retained; owner material-verification request addressed first.
+
+
 ## G153 — Matte-ground graphics build delivered (19 October 2026)
 
 After fresh exact ExecutablePath guard found no active destination, atomically promoted accepted3bfc2d1/SHA bbc1dc552cdd0d0256033f7b08681b3b60750fdd8af85908e1eb52db5a6cd053 to both dedicated gfx paths and primary local/graphics/grid-graphics-app.exe. Usual primary Play GRID Graphics.cmd now selects it. Used atomic hard links to the immutable private candidate to avoid three duplicate binaries; never modify these files in place. Existing2197/F427 archive is rollback. All destination hashes checked; primary normal8762... and owner notec4d52... preserved, no primary source checkout/Steam/legacy peer manifest changes. Owned manifests replaced stale F427 evidence/build-scope fields and distinguish new runtime checks from unchanged-core F438 evidence.
