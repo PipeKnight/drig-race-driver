@@ -2030,7 +2030,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges) require an enhanced non-collision track scene with --track-materials source".into());
     }
-    if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !track || collision) {
+    if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
         return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
     }
     if graphics.thin_motion_antenna && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive) {
