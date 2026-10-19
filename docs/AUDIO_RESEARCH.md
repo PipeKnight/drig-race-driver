@@ -330,8 +330,9 @@ GRID was not launched.
   setters clamp to [−48, 0] dB and [0.5, 2]. Cooldown per variety: skipped
   while elapsed ≤ T; on a play T = (rand % 3 + 1)·0.1 s. Player hits above
   hard.minVel switch the mix to Crashed (411C10, attack 0.2 s). Then
-  sweeteners without cooldown: HighSweetenerInfo (x ≥ 40, swt_*),
-  LowSweetenerInfo (x ≥ 15, lfe_*).
+  sweeteners: HighSweetenerInfo (x ≥ 40), LowSweetenerInfo (x ≥ 15), with
+  the same per-variety cooldown, and silent in the shipped data (§11;
+  corrected in F490, this line first said "without cooldown").
 - Curves (CollisionInfos): FrontBack soft/med/hard 3–10/10–30/30–60,
   −3..0/−2..0/−1..0 dB, pitch 0.85–1.1; Sides/Roof 2–8.9/8.9–22.35/22.35–40,
   same dB, 0.85–1.2; High sweetener 40–75, −20..−9 dB; Low 15–50, 0 dB.
@@ -504,7 +505,7 @@ at 455D7A (roof: local y > roof − 0.7, 0xCB0834) and 455DAD (floor: −floor >
   - x = 10·impact/mass;
   - `classify` (4559C0) uses the car frame of the physical pose, with heights compared in
     model coordinates (body − vehicle +0x1630) [I: the audio object's car matrix taken as the
-    physical pose];
+    physical pose] (F490 removed this conversion, §11);
   - the soft/med/hard pick and curve follow 4535A0/435EA0;
   - one-shots quieter than −42 dB are skipped, and per-variety cooldowns of
     (rand % 3 + 1)·0.1 s are shared by all cars;
@@ -585,3 +586,81 @@ rand % 100 < 5, − (rand % 9) dB, then +0xA31C += (target − +0xA31C) / 3.
   keeps playing.
 - Not yet: landing (PrimaryBot by airtime), yaw/pitch displacement, Crashed mix mode, stereo.
 - Not heard in a windowed race (no rendered app runs at the coordinator's request).
+
+## 11. Collision mix (F490)
+
+20 October 2026, Claude Code. The owner on the F486 build: collisions are very loud, and
+several at once or close together are unpleasant. Static analysis (Capstone 5.0.6 on
+`local/compatibility/grid-unpacked.exe`: 42D580, 435940, 4535A0 tail, 43B9C0–43BAE4,
+45DA46, A66760 → BF5F65) and the shipped data; a 12-car headless race traced through the
+listener (`GRID_COLLISION_AUDIO_TRACE`, worktree `local/mix/`). GRID was not launched.
+
+**Group levels match [O].** GroupModeVolumes, PC: Master −3, PlatformModifier Panel Coll
+−1, AI 0; Normal 0; cameras Panel Coll Chase −6, Bonnet −5, Internal −5; AI −6/−5/−5.5.
+So the player's impacts play at −10 dB (Chase), opponents' at −9, the player's engine at
+−14 and exhaust at −7. The port already used this table.
+
+**Sweeteners are silent in the shipped game [O].** 43B9C0–43BAE4 fill the car audio object:
++0xA6A8 = variety ParticulateMetal (read by 448810), +0xA6B0 = variety LowSweeteners (never
+read again), +0xA6AC = variety HighSweeteners (only its +4 set to 1), +0xA69C =
+CollisionInfo HighSweetenerInfo, +0xA6A0 = LowSweetenerInfo. 4535A0 plays the sweeteners
+through 44F010 with the *info*, so the voice uses the info's variety. Both infos name
+`variety=dummy`. Names are matched with A66760 → BF5F65 (CRT `_stricmp`), so "dummy"
+resolves to `Dummy` (bank env_swooshzing, preset dummy 1/2 m), which has no Samples:
+nothing plays. F479 played LowSweeteners (0 dB, crashlfesweet) and HighSweeteners on every
+hit above x 15/40; that added extra, loud layers on top of the hits.
+
+**Sweetener cooldown [O].** 4535A0 passes 1 as 44F010's seventh argument, which 435940
+reads as its cooldown flag. With it set, the variety's timer (manager +0x50 + idx·0x28) must
+have run past T, and T restarts at (rand % 3 + 1)·0.1 s, as for the impacts. F479 had no
+cooldown here. Both infos share the Dummy variety, so they share one cooldown.
+
+**Roof/floor heights [O, correction].** 4559C0 compares the contact's height in the audio
+pose's frame directly with the description heights (description +0x1B28/+0x1B54). F479
+subtracted the body offset (vehicle +0x1634, −0.39 m on the Lacetti), an assumption the code
+does not make. With it, door-height car-to-car contacts (pose-frame y ≈ 0.38) were "roof"
+hits (y > 1.42 − 0.7) and played carTop alongside carSide from the same crash. Underbody
+contacts also missed the floor test. The 12-car trace (6000 ticks, Donington, DF01 and
+characteristics), before → after:
+- carTop one-shots 11 → 0;
+- sweeteners played 4 → 0 (now "dummy", skipped by the mixer);
+- roof scrape frames 117 → 0;
+- side/front/back one-shots 18 → 21;
+- at most 3 one-shots per tick, none roof.
+
+**Request cap [O, not ported].** 42D580 queues a one-shot only while manager +0x5B4C is
+below 15, and increments it. No reset or decrement was found by displacement search (only
+the constructor zeroes it), so its lifetime is open. It is not ported; per-variety cooldowns
+keep the port well below 15 at a time.
+
+**Still [I] / open.** The −42 dB gate and curves are unchanged. AL_GAIN per source and
+the software mixer's summing and clipping belong to OpenAL. The port sums one-shots linearly
+in one mono source. The Crashed mode (player hit above hard.minVel: engine, exhaust, wheels
+−24 dB, attack 0.01 s) is still not ported, and with it the collisions would stand out
+*more*. No rendered run (at the coordinator's request), so the result is not heard.
+
+**Opponent engines louder than the player's [O table, I conclusion].** The owner reported
+that an opponent sometimes sounds louder than the player's own car. Within the 10 m minimum
+distance every engine emitter is at 0 dB distance attenuation (A23B70 law, Engine/Exhaust
+preset 10/175 m), so the level is the group mix:
+- Chase: player Engine −14, Exhaust −7; every AI voice (engine and exhaust) −9. A close
+  opponent's engine layer is 5 dB above the player's own.
+- Bonnet: player Engine −8, Exhaust −14; AI −8. The opponent's exhaust is 6 dB above the
+  player's.
+- Internal: Engine −9, Exhaust −10, AI −8.5.
+
+So with the original's table a car beside the player can be louder than the player's own
+car, as heard. The port measures the player's emitters from the camera, not the Car
+listener, but both are within 10 m, which gives the same 0 dB. Several opponents within 10 m
+add without a limit in the port; no AI engine voice limit was found in 451770 or 4223D0 (all
+AI engine voices are on group 17). Port gaps that change this:
+- the StartLine mode (AI −3 dB, attack 1.5 s) is not ported (row 71; its trigger and end are
+  not traced). At the start every opponent is within 10 m and plays 3 dB louder than in the
+  original;
+- there is no positional panning (row 71). In the original a car beside the player sits on one
+  side instead of on top of the player's engine.
+
+To settle it live, read from grid.exe with a car alongside at the start and mid-race:
+- the current mode index;
+- the published group volumes of groups 0, 1 and 17 (427ED0's per-group parameter);
+- each engine voice's AL_GAIN (the CMStream_Update 3D path) for the player and that opponent.

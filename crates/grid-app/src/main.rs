@@ -2828,7 +2828,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                         .models
                         .iter()
                         .map(|m| {
-                            collision_sound::heights(&root, m).unwrap_or(collision_sound::Heights {
+                            grid_tools::collision_audio::Heights::of(&root, m).unwrap_or(grid_tools::collision_audio::Heights {
                                 bottom: 0.,
                                 roof: 1.,
                             })

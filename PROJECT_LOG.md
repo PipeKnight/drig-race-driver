@@ -1,5 +1,28 @@
 # GRID engine project log
 
+F490 Collision mix: silent sweeteners, their cooldown, roof test without the offset; opponent engine loudness diagnosed (2026-10-20, Claude Code; the owner via the coordinator: "Звук столкновений очень громкий и когда несколько столкновений одновременно или почти одновременно происходят, прямо неприятно слушать. В оригинале микшер точно по-другому работает", and an opponent's engine is sometimes louder than the player's own). Details: docs/AUDIO_RESEARCH.md §11. Evidence: Capstone 5.0.6 listings (session scratchpad), worktree kind-pike-df38cc `local/mix/` (`race12.tsv` before, `race12-fix.tsv` after, `gmv.txt` GroupModeVolumes tree, `checks/`). The original was not run.
+- From the image [O]:
+  - The sweetener infos play the info's own variety `dummy`. The name lookup is case-insensitive (`_stricmp`), so that resolves to the sample-less `Dummy`, and nothing plays. LowSweeteners/HighSweeteners are looked up but never played.
+  - 435940 applies the per-variety cooldown to the sweeteners (4535A0 passes the flag as 1).
+  - 4559C0 compares pose-frame heights directly; F479's body-offset conversion was my assumption, and it turned door-height car contacts into roof hits.
+  - 42D580 caps queued one-shots at 15 (+0x5B4C; the reset was not found, so this is not ported).
+  - The group levels already matched the original's table.
+- Port: `collision_audio` drops the offset; sweeteners go through the shared cooldown and use the info's variety, which car_collisions lacks, so they play nothing. `Heights::of`, `Car::of` and `contacts_of` moved from grid-app into grid-tools. `grid-opponent-race` gained `GRID_COLLISION_AUDIO_TRACE=local/X.tsv`, which writes the listener's one-shots and scrape levels per tick (stdout unchanged).
+- 12-car trace, 6000 ticks, Donington, before → after:
+  - carTop 11 → 0;
+  - sweeteners 4 → 0;
+  - roof scrape frames 117 → 0;
+  - side/front/back 18 → 21;
+  - at most 3 one-shots per tick.
+- Opponent engine louder [O table, I conclusion]: within 10 m, distance gives 0 dB, and the original's table puts AI at −9 against the player's Engine −14 (Chase) and AI −8 against Exhaust −14 (Bonnet). A car alongside can therefore be louder in the original too. Port gaps: StartLine mode (AI −3 dB at the start) and panning, both row 71. What to read live is listed in §11. Not changed.
+- Not heard (no rendered run).
+- Checks [V], release, cargo/rustc 1.99.0, on 8783d19 (F489) + this change, with no other build running:
+  - `cargo t -- --include-ignored` with absolute GRID_* paths: 817 passed, 0 failed, grid-app included;
+  - `cargo clippy --workspace --all-targets -D warnings` clean;
+  - identities (rebuilt `grid-opponent-race`): solo 79a990f6…4bcc and 12-car 40cd67ca…ab8d, unchanged;
+  - `grid-soak quick` 24/24 (`local/mix/checks/`).
+  - The F488 grid-app exit 0xffffffff did not recur on an idle machine.
+
 F489 Soak seeds 39 and 54 traced: a Spa data gap and a car pressing a tyre through the Le Mans road (2026-10-19, Claude Code; coordinator's request after F485). Details: docs/SOAK_TESTING.md "Known failures on main: seeds 39 (Spa) and 54 (Le Mans), from F476". Evidence: worktree fervent-napier-50814b `local/r21/trace39/`, `local/r21/trace54/` (replays with `GRID_SOAK_TRACE_BODY`, ground maps). New probe `grid-road-hole` (packed vertical query, brute-force triangle test, boundary sheet near a point).
 - Seed 39 [V]: the brake-board piece hits Spa's boundary sheet, slides along it and falls into a 0.3-0.8 m strip where the packed road collision ends short of the sheet (no packed triangle at (549.9, 871.7)..(552.5, 882)). A data hole like seed 38; the original's handling is not verified.
 - Seed 54 [V trace, I mechanism]: car 0 breaks a tyre stack and drives over a tyre; the tyre drops 0.16 m and 0.47 m in single ticks with the car's centre 0.6-0.75 m away and ends below an existing road surface. The port's car-against-piece contact (hull-triangle path, not AE8AD0 with summed margins) is the known deviation; its 1:1 port lost more pieces at the fixed 16 ms step (BOX_CONTACTS.md), so no fix now.

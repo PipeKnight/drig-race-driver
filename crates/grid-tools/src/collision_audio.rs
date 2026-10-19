@@ -4,7 +4,11 @@
 //! (front/back, side, roof; nothing for the floor) whose ImpactVariety curve
 //! (soft/med/hard CollisionInfos) gives one one-shot from `car_collisions`
 //! (0x4535A0), plus the low/high sweeteners of hard hits. Presentation only.
-use crate::hud_audio::{Sound, wip_sound};
+use crate::{
+    body_impacts::Impact,
+    hud_audio::{Sound, wip_sound},
+    source_vehicle::multi::Contacted,
+};
 use grid_formats::{audio_dictionary, binxml};
 use std::{collections::HashMap, path::Path, sync::Arc};
 
@@ -209,8 +213,6 @@ pub struct Contact {
 pub struct Car {
     /// Physical pose, columns: x, y, z axes and position (`Runtime::pose`).
     pub pose: [f32; 16],
-    /// Body offset (vehicle +0x1630): model coordinates = body − offset.
-    pub offset: [f32; 3],
     pub mass: f32,
     /// Lowest and highest `collision_main` y (description +0x1B28/+0x1B54,
     /// body +0xED68/+0xED94).
@@ -222,6 +224,67 @@ pub struct Car {
     /// A69930: the body's impulse accumulator (+0x240) when its contact
     /// flag (+0x40C) is set this step, else `None`.
     pub impulse: Option<[f32; 3]>,
+}
+
+/// A car model's description heights: the lowest and highest
+/// `collision_main` y (the values 0x9E2030 stores at description
+/// +0x1B28/+0x1B54).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Heights {
+    pub bottom: f32,
+    pub roof: f32,
+}
+
+impl Heights {
+    pub fn of(root: &Path, model: &crate::car::Car) -> Result<Self, Box<dyn std::error::Error>> {
+        let bytes = std::fs::read(root.join(model.file(".ned")))?;
+        let doc = binxml::read(&bytes)?;
+        let mesh = grid_formats::car_collision::read(&doc)?;
+        Ok(Self { bottom: mesh.bounds.min[1], roof: mesh.bounds.max[1] })
+    }
+}
+
+impl Car {
+    /// What the listener needs of `runtime`'s car this tick, with its solved
+    /// contact records `impacts`.
+    pub fn of(runtime: &crate::source_vehicle::Runtime, heights: Heights, player: bool, impacts: &[Impact]) -> Self {
+        let velocity = runtime.velocity();
+        // A69930: the body's impulse accumulator (+0x240, B0FC00 adds each
+        // solved contact's +3C times its normal) when a contact flagged it
+        // (+0x40C) [I: summed here from the solved records of the car].
+        let impulse = (!impacts.is_empty())
+            .then(|| impacts.iter().fold([0.; 3], |a, x| std::array::from_fn(|j| a[j] + x.impact * x.normal[j])));
+        Self {
+            pose: runtime.pose(),
+            mass: f32::from_bits(runtime.state.car.owner.physical[0x3f0 / 4]),
+            bottom: heights.bottom,
+            roof: heights.roof,
+            player,
+            velocity: [velocity[0], velocity[1], velocity[2]],
+            impulse,
+        }
+    }
+}
+
+/// The listener's contacts of one car: the AudioMaterial name of what each
+/// touched is looked up only for contacts that can sound (not the floor):
+/// the packed track triangle under it, CAR_ for another car; the boundary
+/// sheet and route props are taken as WALL [I: their per-triangle/template
+/// materials are not in the contact; every such AudioMaterial gives
+/// CarScrapeSideRoad].
+pub fn contacts_of(runtime: &crate::source_vehicle::Runtime, car: &Car, impacts: &[(Impact, Contacted)]) -> Vec<Contact> {
+    impacts
+        .iter()
+        .map(|(x, contacted)| Contact {
+            point: x.point,
+            impact: x.impact,
+            surface: classify(car, x.point).and_then(|_| match contacted {
+                Contacted::Track => runtime.track_surface_at(x.point, x.normal).map(str::to_owned),
+                Contacted::Car(_) => Some("CAR_".into()),
+                Contacted::Prop(_) | Contacted::Static => Some("WALL".into()),
+            }),
+        })
+        .collect()
 }
 
 /// A one-shot to start.
@@ -266,8 +329,10 @@ pub fn classify_mode(car: &Car, point: [f32; 3]) -> Option<(Side, u8)> {
     let p = car.pose;
     let axis = |k: usize| [p[4 * k], p[4 * k + 1], p[4 * k + 2]];
     let d = [point[0] - p[12], point[1] - p[13], point[2] - p[14]];
-    // Car frame (422200), in the model coordinates of the description [I].
-    let local_y = dot(d, axis(1)) - car.offset[1];
+    // Car frame (422200) of the audio pose, compared as it is with the
+    // description heights: 4559C0 converts nothing (F490; F479 subtracted
+    // the body offset, which put door-height car contacts on the roof).
+    let local_y = dot(d, axis(1));
     if local_y > car.roof - 0.7 {
         return Some((Side::Roof, 2));
     }
@@ -484,13 +549,8 @@ impl Listener {
         if volume_db < QUIETEST {
             return;
         }
-        if cooldown {
-            let elapsed = self.cooldown.get(&curve.variety).copied();
-            if elapsed.is_some_and(|(e, limit)| e <= limit) {
-                return;
-            }
-            let limit = (self.rand() % 3 + 1) as f32 * 0.1;
-            self.cooldown.insert(curve.variety.clone(), (0., limit));
+        if cooldown && self.cooling(&curve.variety) {
+            return;
         }
         out.push(Play { variety: curve.variety, volume_db, pitch, position, group });
     }
@@ -545,22 +605,37 @@ impl Listener {
                 self.scrape_contact(k, car, &info, x, offset, mode);
             }
             self.impact(variety, x, c.point, group, out);
-            // Sweeteners, fire-and-forget without cooldown (44F010).
+            // Sweeteners from the info's minVel (x >= 40 high, >= 15 low),
+            // played through 44F010 -> 435940 with its cooldown flag set
+            // (4535A0 passes 1): the same per-variety cooldown as impacts,
+            // no -42 dB gate.
             if x >= 40. {
-                self.sweetener("HighSweetenerInfo", "HighSweeteners", x, c.point, group, out);
+                self.sweetener("HighSweetenerInfo", x, c.point, group, out);
             }
             if x >= 15. {
-                self.sweetener("LowSweetenerInfo", "LowSweeteners", x, c.point, group, out);
+                self.sweetener("LowSweetenerInfo", x, c.point, group, out);
             }
         }
     }
 
-    fn sweetener(&mut self, info: &str, variety: &str, x: f32, position: [f32; 3], group: usize, out: &mut Vec<Play>) {
-        let Some(curve) = self.bank.infos.get(info) else { return };
-        let (volume_db, pitch) = curve.at(x);
-        if volume_db >= QUIETEST {
-            out.push(Play { variety: variety.to_owned(), volume_db, pitch, position, group });
+    fn sweetener(&mut self, info: &str, x: f32, position: [f32; 3], group: usize, out: &mut Vec<Play>) {
+        let Some(curve) = self.bank.infos.get(info).cloned() else { return };
+        if self.cooling(&curve.variety) {
+            return;
         }
+        let (volume_db, pitch) = curve.at(x);
+        out.push(Play { variety: curve.variety, volume_db, pitch, position, group });
+    }
+
+    /// 435940/435B20: a variety still inside its cooldown is skipped;
+    /// otherwise its timer restarts with T = (rand % 3 + 1)·0.1 s.
+    fn cooling(&mut self, variety: &str) -> bool {
+        if self.cooldown.get(variety).is_some_and(|&(e, limit)| e <= limit) {
+            return true;
+        }
+        let limit = (self.rand() % 3 + 1) as f32 * 0.1;
+        self.cooldown.insert(variety.to_owned(), (0., limit));
+        false
     }
 }
 
@@ -719,7 +794,6 @@ mod tests {
         pose[15] = 1.;
         Car {
             pose,
-            offset: [0.; 3],
             mass: 1200.,
             bottom: 0.1,
             roof: 1.4,
@@ -860,10 +934,15 @@ mod tests {
         let mut listener = Listener::new(bank.clone());
         let c = car();
         let mut out = Vec::new();
-        // x = 10·impact/mass = 45: hard front hit, both sweeteners.
+        // x = 10·impact/mass = 45: hard front hit and the sweeteners. Both
+        // sweetener infos name the variety "dummy" (case-insensitively the
+        // sample-less env_swooshzing Dummy), so they share one cooldown and
+        // play nothing: car_collisions has no such variety (F490).
         listener.contacts(0, &c, &[contact([0., 0.4, 2.], 5400., None)], &mut out);
         let names: Vec<&str> = out.iter().map(|p| p.variety.as_str()).collect();
-        assert_eq!(names, ["carFBHard", "HighSweeteners", "LowSweeteners"]);
+        assert_eq!(names, ["carFBHard", "dummy"]);
+        assert_eq!(bank.infos["LowSweetenerInfo"].variety, "dummy");
+        assert!(!bank.varieties.contains_key("dummy"));
         assert!(out.iter().all(|p| p.group == PANEL_COLL));
         // The same variety again within the cooldown is skipped.
         out.clear();
@@ -892,6 +971,7 @@ mod tests {
         }
         let mut mixer = Mixer::new(bank, 48_000);
         assert!(mixer.start("carFBHard", 1., 0.5));
+        assert!(!mixer.start("dummy", 1., 1.));
         let peak = (0..48_000).map(|_| mixer.sample().abs()).fold(0f32, f32::max);
         assert!(peak > 0.01 && peak < 1.);
         mixer.scrape(0, "ScrapeSideRoad", 0.5, 0.5);

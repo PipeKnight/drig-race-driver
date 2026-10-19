@@ -10,7 +10,7 @@ use bevy::{
 };
 use grid_tools::{
     audio_mix::{self, Table},
-    collision_audio::{Bank, Car, Contact, Listener, Mixer, classify},
+    collision_audio::{Bank, Car, Heights, Listener, Mixer, contacts_of},
     source_vehicle::{DELTA, Runtime, multi::Contacted},
 };
 use std::{
@@ -28,13 +28,6 @@ const RATE: u32 = grid_tools::engine_audio::RATE;
 enum Start {
     Shot(String, f32, f32),
     Scrape(usize, String, f32, f32),
-}
-
-/// A car model's description heights (lowest and highest `collision_main` y).
-#[derive(Clone, Copy)]
-pub(crate) struct Heights {
-    pub bottom: f32,
-    pub roof: f32,
 }
 
 #[derive(Resource)]
@@ -104,15 +97,6 @@ impl Decodable for CollisionSource {
     }
 }
 
-/// The description heights of a car model (`collision_main` points, the
-/// values 0x9E2030 stores at description +0x1B28/+0x1B54).
-pub(crate) fn heights(root: &std::path::Path, model: &grid_tools::car::Car) -> Result<Heights, Box<dyn std::error::Error>> {
-    let bytes = std::fs::read(root.join(model.file(".ned")))?;
-    let doc = grid_formats::binxml::read(&bytes)?;
-    let mesh = grid_formats::car_collision::read(&doc)?;
-    Ok(Heights { bottom: mesh.bounds.min[1], roof: mesh.bounds.max[1] })
-}
-
 pub(crate) fn install(
     app: &mut App,
     bank: Arc<Bank>,
@@ -151,40 +135,6 @@ fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets:
     }
 }
 
-/// The AudioMaterial name of what a contact touched: the packed track
-/// triangle under it, CAR_ for another car; the boundary sheet and route
-/// props are taken as WALL [I: their per-triangle/template materials are
-/// not in the contact; every such AudioMaterial gives CarScrapeSideRoad].
-fn surface(runtime: &Runtime, contacted: Contacted, point: [f32; 3], normal: [f32; 3]) -> Option<String> {
-    match contacted {
-        Contacted::Track => runtime.track_surface_at(point, normal).map(str::to_owned),
-        Contacted::Car(_) => Some("CAR_".into()),
-        Contacted::Prop(_) | Contacted::Static => Some("WALL".into()),
-    }
-}
-
-fn car_of(runtime: &Runtime, heights: Heights, player: bool, impacts: &[grid_tools::body_impacts::Impact]) -> Car {
-    let v = &runtime.state.car.owner.vehicle;
-    let f = |o: usize| f32::from_bits(v[o / 4]);
-    let velocity = runtime.velocity();
-    // A69930: the body's impulse accumulator (+0x240, B0FC00 adds each solved
-    // contact's +3C times its normal) when a contact flagged it (+0x40C)
-    // [I: summed here from the solved records of the car].
-    let impulse = (!impacts.is_empty()).then(|| {
-        impacts.iter().fold([0.; 3], |a, x| std::array::from_fn(|j| a[j] + x.impact * x.normal[j]))
-    });
-    Car {
-        pose: runtime.pose(),
-        offset: [f(0x1630), f(0x1634), f(0x1638)],
-        mass: f32::from_bits(runtime.state.car.owner.physical[0x3f0 / 4]),
-        bottom: heights.bottom,
-        roof: heights.roof,
-        player,
-        velocity: [velocity[0], velocity[1], velocity[2]],
-        impulse,
-    }
-}
-
 /// Once per successful vehicle tick: every car's contacts.
 fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listening: super::engine_sound::Listening) {
     let now = (driving.segment, driving.runtime.ticks);
@@ -213,23 +163,14 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
         let model = sound.car_model.get(k).copied().unwrap_or(0);
         let Some(&heights) = sound.heights.get(model) else { continue };
         let solved: Vec<_> = impacts.iter().map(|(x, _)| *x).collect();
-        let car = car_of(runtime, heights, k == 0, &solved);
+        let car = Car::of(runtime, heights, k == 0, &solved);
         let position = Vec3::new(car.pose[12], car.pose[13], car.pose[14]);
         // The player's groups use the Car listener (the car itself), the
         // AI group the camera (433AA0) [I: car pose as the Car listener].
         let listener = if k == 0 { position } else { ear };
         let mut plays = Vec::new();
         if !impacts.is_empty() {
-            let contacts: Vec<Contact> = impacts
-                .iter()
-                .map(|(x, contacted)| Contact {
-                    point: x.point,
-                    impact: x.impact,
-                    // Floor contacts make no sound: skip their surface query.
-                    surface: classify(&car, x.point)
-                        .and_then(|_| surface(runtime, *contacted, x.point, x.normal)),
-                })
-                .collect();
+            let contacts = contacts_of(runtime, &car, &impacts);
             sound.listener.contacts(k, &car, &contacts, &mut plays);
         }
         // 458780 after the step: the scrape loop's level, pitch and place.
