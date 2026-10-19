@@ -60,7 +60,7 @@ the post joint breaks at impulse 10 and overrides the post with `_rbArmcoPost` (
 
 ## The port today
 
-Phase 1 (F473): the joint itself is ported and verified. Phase 2 (F476): the solver runs
+Phase 1 (F473): the joint itself is ported and verified. Phase 2 (F477): the solver runs
 world joints (islands merged through them, rows beside the contact rows, impulse sums,
 breaking, the correction pass). Nothing creates a joint yet: `dynamic_props::Catalog::read`
 keeps every template with constraints, or with more than one shape behaviour, static, so
@@ -110,7 +110,7 @@ frame and point joints, one and two bodies, rotation types 0..2, twist, friction
 and spring rows, re-seats and aligned rest frames. Evidence: this worktree's
 `local/joint/` (cases, original and Rust outputs).
 
-### Phase 2: island pools, merging, breaking (F476)
+### Phase 2: island pools, merging, breaking (F477)
 
 Original path [D] (decompiles `local/robust/decomp/r16e`, `r16f`; asm `local/r20/*.asm`):
 
@@ -195,7 +195,7 @@ bit-for-bit comparison the impact pools have.
 
 1. ~~Constructor, prepare and rows (0xAEFEB0, 0xAF4890, 0xAF71C0/0xAF9430)~~: F473.
 2. ~~The joint pools in the island solve (0xB7ACC0, 0xB7B850), islands merged through joints,
-   the correction solvers 0xAEF930/0xAEFBB0, and breaking~~: F476.
+   the correction solvers 0xAEF930/0xAEFBB0, and breaking~~: F477.
 3. Breaking (break impulses, `breakIfAngExtentHit`), body overrides and uproot.
 4. Entities: constraint components in `dynamic_props`, `link1` across entities, and the ENS
    link propagation 0x7D5540; the close-drift flags as the original builds them. Props to

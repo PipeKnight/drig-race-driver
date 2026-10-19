@@ -225,8 +225,12 @@ through the slewed pedals is small [I]. The offset and merge persist.
 2. If `closing (test +0x18) > own.speed (own+0xD0)` → **mode 1** and return. No prediction
    and no room check (the target has a velocity component toward us [I]).
 3. Predicted position `P = r.centre + ETA (test +0x14) · r.vel (rec+0x90)`.
-4. Locate P: 0x798C00 (all links, nearest by 0x798920) or, when +0x3C is set, 0x78DCD0
-   (first link containing P).
+4. Locate P: 0x798C00 (all links **of the track view's 32-link window**, from one link
+   behind the car's own; nearest by 0x798920) or, when +0x3C is set, 0x78DCD0 (first window
+   link containing P) [V, F476]. A link "contains" P when P lies between the gate lines of its
+   two gates (0x778D00: 2D side test 0x778B40 against gate position → position + gate span);
+   0x798920 gives 0 inside the link's track-limit quad, else the distance to the nearer
+   limit segment (0x796B30), and ties go to the later link.
    - `lat` = 0x798D00(gateA, gateB, racing-line waypoint type 0, P) =
      `dot(P − racing-line waypoint at gate A, segment lateral direction)` (0x796CD0).
    - lat is 0 if a gate is missing.
