@@ -351,3 +351,5 @@ Then on main 9050690 (F408, with F406's collision-floor lift; `local/robust/ccd/
 - First-corner pile-up: the exact 0x795C00 segment test. The live comparison on Donington
   (F433, [FIRST_CORNER_LIVE.md](FIRST_CORNER_LIVE.md)): the original's field also gets through
   Redgate; the main difference is its much harder launch, not the alongside logic.
+  F444 ported the AI traction control and ABS cap (the launch); the Jarama route 1 12-car race
+  now has no retirement.

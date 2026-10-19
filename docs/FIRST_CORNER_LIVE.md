@@ -2,8 +2,7 @@
 
 Status: 2026-10-19, Claude Code. Comparison of the original's 12-car Donington field
 (F417's capture `field-20261018/field02.tsv`, main checkout `local/driving/`) with the
-port's headless field. **No driving change**: the cause of the main difference (the launch,
-§3) is not settled.
+port's headless field. **No driving change** in F433; the launch was ported in F444 (section 7).
 
 Evidence (ignored, worktree fervent-napier-50814b `local/firstcorner/`):
 - `decode_field.py` decodes the FD01 capture into `field02.dec.tsv`;
@@ -134,3 +133,29 @@ characteristics.
 2. A live capture of a normal race start (not a restart) at the 60 Hz lock, adding car-state
    +0xD0 and the wheels' grip scale (+0x80) and slip, to settle the launch.
 3. The deeper braking in Redgate (AI braking session).
+
+## 7. The launch, ported (F444)
+
+The launch gap of section 3 was the missing AI traction control 0x77AA10
+(docs/AI_DRIVER_PORT.md "Traction control and ABS cap").
+- The port's front wheels rolled at about 19.5 m/s while the car did 0.2–6 m/s.
+- The original cuts the throttle on that spin. The live trace shows the cut: 1.0 → 0.50 at
+  0.1 s, then a ramp.
+- Ported with the ABS cap 0x77A2E0, which shares the same wheel inputs.
+
+[V] Port, field held as in the capture (`GRID_GRID_HOLD=3.7,3.04`, `GRID_PARKED_CAR=11`):
+
+| | Original | Port before | Port with TC + ABS |
+|---|---|---|---|
+| Speed 1 s after the go | 15.4–17.1 m/s | 8.4–8.5 | 13.8–14.0 |
+| Speed 3 s after the go | 36.1–37.0 | 30.0–30.5 | 33.5–34.0 |
+| Redgate reached (x < −520) | 8.60–9.93 s | 9.70–11.07 | 9.30–10.68 |
+| Leader's minimum in Redgate | 37.0 m/s | 32.1 | 32.6 |
+
+- The rest of the launch gap is open. Candidates [I]: the race-start grip factor (section 3,
+  a stale pre-restart speed), and the original's two launch groups.
+- Redgate: the leader alone is 4.4 m/s slower than the original's, so the port's deeper
+  braking there is the base corner speed (brake lines and corner speeds), not traffic. The
+  follow brake 0x77A1E0 matches the port 1:1 [D]. Left to the AI braking session.
+- [V] Jarama route 1, 12 cars, DF01 and characteristics, 12,000 ticks: no retirement (the
+  pile-up of ROBUSTNESS_RESEARCH §4 retired cars 5, 6, 7 and 10).

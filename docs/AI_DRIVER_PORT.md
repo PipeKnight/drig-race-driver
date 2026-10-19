@@ -62,8 +62,51 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
   (see "Avoid and recovery").
 - Random offsets use an authored LCG; characteristic values are 1.0 for every car
   (the live player-slot set); difficulty is the live Normal 0.606; table grip is 2.0.
-- Not ported: alongside, overtake, block, avoidance, traction control and AI ABS cap,
+- Not ported: alongside, overtake, block, avoidance (traction control and the AI ABS cap: F444),
   start-light reaction, choreographed mistakes, catch-up, drafting.
+
+## Traction control and ABS cap (F444)
+
+19 October 2026, Claude Code. Static, read-only (Ghidra 12.1.4 headless, worktree
+fervent-napier-50814b `local/robust/decomp/h1`, `h2`, `h5`, `h6`; Capstone 5.0.6 for the car-state
+vtable 0xCAFC54 and the stack layout of 0x402D20). Found by the live first-corner comparison
+(docs/FIRST_CORNER_LIVE.md).
+
+- [D] Car-state wheel inputs. The AI car-state update 0x402D20 stores, per wheel w
+  (vehicle +0x1990 + i·0x150):
+  - the rolling speed w+0xE0 × w+0x104 (0x990FB0 × 0x990DB0) in car state +0x240, via vfunc
+    +0x2C; vfunc +0x10 returns it;
+  - the driven flag (0x990EC0: drive share w+0x10C ≠ 0.0, NaN counts) in +0x250, via +0x30;
+    vfunc +0x14 returns it. Vfunc +0x1C returns 4.
+  - The w+0x7C bytes (0x9910A0) go to +0x254 (vfunc +0x34). They are not the driven flags,
+    and only the reset 0x996BE0 writes w+0x7C.
+- [D] Traction control 0x77AA10 is one more term of the throttle minimum in 0x783180, after the
+  +0x7C cap.
+  - Between tcMinSpeed and tcMaxSpeed (car state +0xD0), with f = the fastest driven wheel's
+    rolling speed and f > speed:
+    - level = lerp(tcMinLevel, tcMaxLevel, (v − min)/(max − min));
+    - limit = 1 + (level − 1) · (f/v − 1)/(tcMaxWheelSpin − 1), clamped between level and 1.
+  - Defaults (vehicle config ctor 0x781AB0) 1, 20, 0, 0.5, 2.
+- [D] ABS cap 0x77A2E0. 0x78E8A0 applies it to the maximum of every brake source:
+  to-desired, follow, forced, brake line, spin and avoidance 0x788A90 (not ported).
+  - Then the full-brake flag +0xB2, which returns 1 before the cap, then the req+0xA0 cap.
+  - Above absMinSpeed, with s = the slowest wheel's rolling speed (all wheels) and s < v:
+    cap = 1 + (absMinBrake − 1) · (s/v − absMinWheelLock)/(absMaxWheelLock − absMinWheelLock),
+    clamped between absMinBrake and 1.
+  - Defaults 5, 0.7, 0.3, 0.2.
+- Port: `View::wheel_speeds` and `View::driven` (`Runtime::wheel_rolling_speeds`,
+  `driven_wheels`), `traction_control`, `abs_cap`. The port's brake order now follows 0x78E8A0:
+  forced and to-desired inside the cap, full brake outside it.
+  Unit tests `traction_control_limits_the_throttle_by_driven_wheel_spin` and
+  `abs_cap_limits_the_brake_by_the_slowest_wheel`.
+- [V] Effect on the launch. With the field held as in the live capture (`GRID_GRID_HOLD=3.7,3.04`):
+  - Speed 1 s after the go: 8.4–8.5 → 13.8–14.0 m/s (original 15.4–17.1); Redgate 0.4 s
+    earlier (9.30 s, original 8.60).
+  - Before the change the front wheels rolled at about 19.5 m/s while the car did 0.2–6 m/s.
+  - The throttle now dips to about 0.54 after the go and ramps up, as the original's does.
+- [V] The ABS cap changes the first corner little. At Redgate the leader, alone, still takes it
+  at 32.6 m/s against the original's 37.0: a base corner speed difference, not traffic. The
+  follow brake 0x77A1E0 matches the port 1:1.
 
 ## Steering sign convention (F391)
 

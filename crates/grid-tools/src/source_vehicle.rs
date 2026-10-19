@@ -1327,6 +1327,25 @@ impl Runtime {
     }
     /// The car's AI traffic extents (AI car state +0x110/+0x114 and bumper
     /// points), from its collision hull and current wheel words.
+    /// Each wheel's rolling speed, wheel +0xE0 × +0x104 (0x990FB0 × 0x990DB0,
+    /// as the AI car-state update 0x402D20 multiplies them).
+    pub fn wheel_rolling_speeds(&self) -> [f32; 4] {
+        let b = &self.state.car.owner.vehicle;
+        let f = |o: usize| f32::from_bits(b[o / 4]);
+        std::array::from_fn(|i| {
+            let w = 0x1990 + i * 0x150;
+            f(w + 0xe0) * f(w + 0x104)
+        })
+    }
+    /// Each wheel's driven flag as the AI car state keeps it (+0x250, filled
+    /// from 0x990EC0): the wheel's drive share +0x10C is not 0.0 (NaN counts).
+    pub fn driven_wheels(&self) -> [bool; 4] {
+        let b = &self.state.car.owner.vehicle;
+        std::array::from_fn(|i| {
+            let share = f32::from_bits(b[(0x1990 + i * 0x150 + 0x10c) / 4]);
+            share != 0.
+        })
+    }
     pub fn ai_extents(&self) -> crate::ai_driver::Extents {
         crate::ai_driver::Extents::from_vehicle(self.hull, &self.state.car.owner.vehicle)
     }
