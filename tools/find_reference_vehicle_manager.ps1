@@ -5,6 +5,7 @@ $ErrorActionPreference='Stop'
 if($ScanLimitBytes -lt 1 -or $ScanLimitBytes -gt 256MB){throw 'Scan limit must be 1..256 MiB'}
 if($IncludeDeformation -and !$IncludeSteering){throw 'Deformation capture requires steering identity checks'}
 if($IncludeImpact -and !$IncludeDeformation){throw 'Impact capture requires deformation identity checks'}
+function Get-TaskHex([byte[]]$Bytes){([BitConverter]::ToString($Bytes) -replace '-','')}  # PowerShell 5.1 has no [Convert]::ToHexString
 $taskRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $taskSessionPath=[IO.Path]::GetFullPath((Join-Path $taskRoot $SessionJson))
 if(!$taskSessionPath.StartsWith((Join-Path $taskRoot 'local')+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Session must remain under local/'}
@@ -51,7 +52,7 @@ function Read-TaskBytes([long]$Address,[int]$Length,[string]$Name){
  if($Address -lt 0x10000 -or $Address -gt 0x7fff0000 -or $Length -lt 1 -or $Length -gt 65536){throw 'Out-of-scope read'}
  $taskBytes=[byte[]]::new($Length);$taskRead=[UIntPtr]::Zero
  $taskSuccess=[GridFindReadOnlyManager]::ReadProcessMemory($taskHandle,[IntPtr]::new($Address),$taskBytes,[UIntPtr]::new([uint64]$Length),[ref]$taskRead)
- if($Name){$taskBlocks.Add([pscustomobject]@{name=$Name;address=$Address.ToString('x');length=$Length;success=$taskSuccess;read=$taskRead.ToUInt64();hex=if($taskSuccess){[Convert]::ToHexString($taskBytes).ToLower()}else{$null}})}
+ if($Name){$taskBlocks.Add([pscustomobject]@{name=$Name;address=$Address.ToString('x');length=$Length;success=$taskSuccess;read=$taskRead.ToUInt64();hex=if($taskSuccess){(Get-TaskHex $taskBytes).ToLower()}else{$null}})}
  if(!$taskSuccess -or $taskRead.ToUInt64() -ne $Length){return $null}
  return ,$taskBytes
 }
@@ -61,7 +62,7 @@ try {
  $taskRaw=[IO.File]::ReadAllBytes($taskSource)
  $taskCode=Read-TaskBytes 0x9ad030 32 'general_vehicle_count_code'
  $taskCodeOffset=0x9ad030-0x400000-0x1000+0x400
- if($null -eq $taskCode -or [Convert]::ToHexString($taskCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskCodeOffset..($taskCodeOffset+31)])){throw 'Live count routine differs'}
+ if($null -eq $taskCode -or (Get-TaskHex $taskCode) -ne (Get-TaskHex ([byte[]]$taskRaw[$taskCodeOffset..($taskCodeOffset+31)]))){throw 'Live count routine differs'}
  if($IncludeSteering){
   $taskSteeringEntries=@(0x9c5b90,0x9bd7f0,0x9f2f80)
   if($IncludeDeformation){$taskSteeringEntries+=@(0x9bb1e0,0x9a39d0,0x9a26f0,0x9a2110,0x9fec70)}
@@ -69,7 +70,7 @@ try {
   foreach($taskEntry in $taskSteeringEntries){
    $taskSteeringCode=Read-TaskBytes $taskEntry 32 ('steering_code_'+$taskEntry.ToString('x'))
    $taskEntryOffset=$taskEntry-0x400000-0x1000+0x400
-   if($null -eq $taskSteeringCode -or [Convert]::ToHexString($taskSteeringCode) -ne [Convert]::ToHexString([byte[]]$taskRaw[$taskEntryOffset..($taskEntryOffset+31)])){throw 'Live steering routine differs'}
+   if($null -eq $taskSteeringCode -or (Get-TaskHex $taskSteeringCode) -ne (Get-TaskHex ([byte[]]$taskRaw[$taskEntryOffset..($taskEntryOffset+31)]))){throw 'Live steering routine differs'}
   }
  }
  if($IncludeImpact){

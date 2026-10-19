@@ -154,6 +154,39 @@ are unchanged.
       - +0x28 shorter by ~15 m → brake-line placement or distance;
       - +0x144 outside the tables' grip range with b ≈ 80 m → table lookup or extrapolation;
       - +0x30 ≈ 37.3 with the same b → driver mapping (difficulty/characteristics) only.
+  - **Live captures (F469)**, 19 October 2026, owner-approved, research copy only, memory reads
+    and menu macros; Race Day, Touring Cars, Lacetti, Donington GP, Normal, grid Back; two
+    sessions (PID 36060, 43220), 4 × 60 s of all 11 AI drivers at ≈ 6–9 ms steps, world +7C8 per
+    row; 0 of 19 user files changed. Tool: `tools/capture_grid_ai_brake.py` (driver discovery by
+    the track-view vtable 0xCF7FAC at driver+0x2DD0; drivers at stride 0x4FE0). Evidence: main
+    checkout `local/driving/redgate-live-20261019/` (`run1/`, `run2/`, decoders `*.py`).
+    - [V] Every AI car brakes into Redgate the same way: the published brake (+E20) rises at the
+      5/s slew (brake_on_speed) to 0.27–0.45, then creeps at ≈ 0.3–1/s to 0.6–0.75 and releases at
+      the target (37–39 m/s). Row by row the creep is smooth (+0.003…+0.015 per step), so the raw
+      demand sits just above the pedal; there is no 1/0 chatter.
+    - [V] Live inputs of 0x7886C0: request +0x28 distance, +0x30 target, +0x20 modifier 1.0,
+      +0x24 hold 1.5, line id +0x34; car-state speed +0xD0 and grip +0x144 = 2.18–2.20 (1.90 on a
+      few frames); wheel speeds (car state +0x240, 4 floats; vfuncs +0x10/+0x1C) within 1 % of
+      the car speed (ABS cap idle); request brake cap +0xA0 = 1.0 and flags +0xA4..+0xB6 = 0; no
+      mistake pending or active (slot drv+0x3100 +0x30/+0x38 = −1).
+    - [V] With those inputs and the decompiled formula (b from the Lacetti table, r =
+      v/brake_on_speed·(1 − published brake), exponent vcfg+0xF4 = brakeCruiseExponent 24) the
+      raw line brake is 1 throughout, and a simulation of formula + slew runs to 1 for any table
+      (lac, default, bmw, …) and any trigger factor 1.1–1.2 (RMS 0.40–0.48 against the live
+      pedal). Solving the creep backwards gives an implied `b ≈ 0.031·(v² − vt²)` (≈ 16 m/s²;
+      the Lacetti table gives 0.027, "default" 0.030), but that alone does not reproduce the
+      early slow-down at 0.27–0.45.
+    - [V] The brake-line object is at **driver+0x4324** (found in 33 whole-driver dumps by its
+      copies of target/modifier/hold): +4 active id, +0x16 braking flag. At part-braking onsets 8
+      of 11 cars had the line active (+0x16 = 1); three (cars 7, 8, 9) braked 0.21–0.24 with
+      **no active line** (one 146 m before it), so another brake source (follow brake 0x77A1E0)
+      acts in traffic. The published (throttle, brake) pair is **not** inside the driver object:
+      the slewed packet that 0x794310 writes (its `[ebp+8]` argument) lives in a separate
+      controller object, and whether the controller (0x828670 getter +4) changes it before the
+      setter 0x996240 writes +E20 is open.
+    - Not ported; the port keeps the decompiled behaviour. Next live step [I]: locate the AI
+      packet by a whole-process search for the (throttle, brake) pair at a part-braking moment,
+      then record it with driver+0x4324 next to +E20.
   - The κ sign consumers now follow the original literally: overtake state 1 widens with bend
     flag +0x45 (κ > ovMin), state 2 with +0x44 (κ < −ovMin); the off-line assist (0x404C90)
     takes max_assist_inside when `lat · κ ≥ 0`; drift state 3 takes the left room (+0x218) for
