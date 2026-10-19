@@ -19,3 +19,7 @@ New source is building with Cargo2jobs. Full resource tests/Clippy queued; no ne
 ## Acceptance remaining
 
 Build exact candidate, actual CLI rejection checks, native legacy parity/source-default equivalence, inspect strength/roughness controls, then rear/motion and RGBA checks. Complete required source checks, source-identical core canonical/quick evidence, exact-path active-process guard, immutable-candidate delivery and rollback. Preserve the primary normal executable and owner's unrelated notes. Keep source/default status distinct from the currently installed3bfc build throughout.
+
+## Installed-runtime road-mask lap acceptance
+
+The existing3bfc runtime with explicitSourceBase completed6500ticks cleanly,1validlap91.208764765s. Four physical exit records match the accepted F427 fixed-clock control exactly after excluding wall_seconds. Source world/tools/formats remain unchanged across the current graphics commits. Thirty requested30FPS images are unique, ticks6202..6262, max frame-time error3.34ns; first/last inspected. This is virtual clock evidence, not monitor FPS or complete temporal-AA acceptance. Source asphalt stays readable; pre-existing raised/black road-edge strips remain outside this material fix. No timeout occurred despite the shared compile load; a speculative resource-deadline concern above is superseded by the clean actual result. Private asphalt-paint-check01/road-mask-full-validation01.json and road-mask-motion-audit01.json preserve exact scope.

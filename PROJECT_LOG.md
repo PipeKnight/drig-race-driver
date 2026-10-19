@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G158 — Road-mask full lap and moving samples pass (19 October 2026)
+
+Installed3bfc +explicitSourceBase completed6500ticks/exit0 with1validlap91.208764765s, four physical exit records exactly equal to F427 control except wall_seconds. Thirty unique motion PNGs at virtual30FPS, tick6202..6262, max request-time error3.34ns; first/last inspected. NoGPU/shader errors or deadline failure. Source shader path is therefore newly checked over a full lap before the candidate's automatic default is promoted; not a claim candidate8949 has completed this drive yet. Existing raised/black road-edge strips remain distinct pre-existing geometry/material-boundary work. Raw/private evidence in asphalt-paint-check01; detailed notes in docs/LACETTI_CLEARCOAT_STUDY.md. Candidate build/resource checks still active; old installed executable remains available.
+
+
 ## G157 — Road lap and exact-source lacquer comparisons running (19 October 2026)
 
 Candidate8949dd0 build and workspace checks running/queued with2Cargo jobs/2test threads; no source edits during compile and no executable promotion. Source code contains the planned track-only road default and diagnostic coat controls; docs/LACETTI_CLEARCOAT_STUDY.md records capture matrix and acceptance. A stale surfaceOff help string was noticed and is a required final-release follow-up, not hidden from provenance. Installed3bfc masked-road6500tick/30FPS full lap is still progressing normally with no GPU errors, under a900second cap during shared heavy compilation; no completed-lap claim yet. Preserve any deadline failure before adapting the diagnostic budget. The first Python edit guard abort for coat controls was corrected before any file write; actual8949source committed separately from1fbroad behavior.
