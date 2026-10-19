@@ -200,6 +200,29 @@ pub fn install(app: &mut App, shown: bool) {
         reported_setup: None,
     })
     .add_systems(Update, (spawn, update).chain());
+    // Diagnostic frame cap (docs/AUDIO_RESEARCH.md 8): GRID_FRAME_CAP_HZ=20
+    // sleeps at the end of each frame so a slow device's frame rate can be
+    // reproduced on the desktop. Off by default.
+    if let Some(hz) = std::env::var("GRID_FRAME_CAP_HZ")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|hz| (1. ..=1000.).contains(hz))
+    {
+        println!("frame_cap_diagnostic hz={hz}");
+        let period = std::time::Duration::from_secs_f64(1. / hz);
+        app.add_systems(
+            Last,
+            move |mut last: Local<Option<std::time::Instant>>| {
+                if let Some(previous) = *last {
+                    let elapsed = previous.elapsed();
+                    if elapsed < period {
+                        std::thread::sleep(period - elapsed);
+                    }
+                }
+                *last = Some(std::time::Instant::now());
+            },
+        );
+    }
 }
 
 #[cfg(test)]

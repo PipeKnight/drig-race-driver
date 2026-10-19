@@ -698,14 +698,21 @@ impl Mixer {
                 slot.gain += (target - slot.gain) * 0.002;
                 let pcm = &self.bank.samples[index];
                 let length = pcm.len() as f64;
+                let step = f64::from(voice.pitch.clamp(0.5, 2.))
+                    * f64::from(self.bank.rates[index])
+                    / f64::from(self.rate);
+                // A silent voice keeps its cursor moving but costs no mixing
+                // (most opponent voices most of the time; docs/AUDIO_RESEARCH.md 8).
+                if target == 0. && slot.gain < 1e-6 {
+                    slot.gain = 0.;
+                    slot.position = (slot.position + step) % length;
+                    continue;
+                }
                 let i = slot.position as usize % pcm.len();
                 let frac = (slot.position - slot.position.floor()) as f32;
                 let a = pcm[i];
                 let b = pcm[(i + 1) % pcm.len()];
                 out += (a + (b - a) * frac) * slot.gain;
-                let step = f64::from(voice.pitch.clamp(0.5, 2.))
-                    * f64::from(self.bank.rates[index])
-                    / f64::from(self.rate);
                 slot.position = (slot.position + step) % length;
             }
         }

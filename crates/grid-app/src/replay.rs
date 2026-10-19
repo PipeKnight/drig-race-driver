@@ -91,13 +91,26 @@ pub struct Session {
     /// those projected into the meshes.
     deformation: Vec<Option<u32>>,
     projected: Option<Vec<Option<u32>>>,
-    activation: Option<director::Activation>,
-    fov: Option<f32>,
+    /// The director's activation and the tick it happened at.
+    activation: Option<(director::Activation, u64)>,
+    shots: Option<Shots>,
     history: crate::camera::History,
     last_time: Option<f64>,
     hidden: Vec<(Entity, Visibility)>,
     idle: f32,
     laps: Vec<f64>,
+}
+
+/// A director shot's camera at the replay samples since its activation: the
+/// original records its camera state at 30 Hz and interpolates it (0x7F7810,
+/// 0x81A110); the port steps it at each sample from the activation, so
+/// seeking and rewinding show the same shot.
+struct Shots {
+    camera: usize,
+    /// Frame of the activation.
+    first: usize,
+    state: director::State,
+    shots: Vec<director::Shot>,
 }
 
 #[derive(Resource)]
@@ -380,14 +393,81 @@ impl Replay {
     }
 
     /// The director's activation at `tick`.
+    #[cfg(test)]
     pub fn activation(&self, tick: u64) -> Option<director::Activation> {
+        self.activation_at(tick).map(|(a, _)| a)
+    }
+
+    /// The director's activation at `tick` and the tick of that activation
+    /// (0 for the initial camera).
+    pub fn activation_at(&self, tick: u64) -> Option<(director::Activation, u64)> {
         let d = self.director.as_ref()?;
         let n = self.entries.partition_point(|&(t, _)| t <= tick);
         self.entries[..n]
             .iter()
             .rev()
-            .find_map(|&(_, z)| d.zones[z].activation.clone())
-            .or_else(|| d.initial.clone())
+            .find_map(|&(t, z)| d.zones[z].activation.clone().map(|a| (a, t)))
+            .or_else(|| d.initial.clone().map(|a| (a, 0)))
+    }
+
+    /// The player's car in frame `frame`: tick, pose and velocity.
+    fn player_in(stream: &mut stream::Stream, frame: usize) -> Option<(u64, Pose, Vec3)> {
+        let f = frame::decode(&stream.read(frame)?)?;
+        let car = f.cars.first()?;
+        Some((f.tick, car.pose, car.velocity))
+    }
+
+    /// The trackside camera `camera` activated at tick `from`, at `time`;
+    /// `true` when the shot is new.
+    fn director_shot(&mut self, camera: usize, from: u64, time: f64) -> Option<(director::Shot, bool)> {
+        let Replay {
+            director,
+            stream,
+            session,
+            ..
+        } = self;
+        let camera = director.as_ref()?.cameras.get(camera).map(|c| (camera, c))?;
+        let session = session.as_mut()?;
+        let tick = time / f64::from(DELTA);
+        let frames = stream.frames();
+        let i = stream.at_or_before(tick.max(0.).floor() as u64)?;
+        let first = stream.at_or_before(from).unwrap_or(frames.start).max(frames.start);
+        let mut shots = session
+            .shots
+            .take()
+            .filter(|s| s.camera == camera.0 && s.first == first && i >= first);
+        let fresh = shots.is_none();
+        if fresh {
+            let (_, pose, velocity) = Self::player_in(stream, first)?;
+            let (state, shot) = camera.1.start(&pose, velocity);
+            shots = Some(Shots {
+                camera: camera.0,
+                first,
+                state,
+                shots: vec![shot],
+            });
+        }
+        let mut s = shots?;
+        let last = (i + 1).min(frames.end - 1).max(first);
+        let mut previous = stream.tick(first + s.shots.len() - 1);
+        while first + s.shots.len() <= last {
+            let Some((tick, pose, velocity)) = Self::player_in(stream, first + s.shots.len()) else {
+                break;
+            };
+            let dt = (tick.saturating_sub(previous)) as f32 * DELTA;
+            s.shots.push(camera.1.step(&mut s.state, &pose, velocity, dt));
+            previous = tick;
+        }
+        let k = (i.max(first) - first).min(s.shots.len() - 1);
+        let mut shot = s.shots[k];
+        if let Some(next) = s.shots.get(k + 1) {
+            let (a, b) = (stream.tick(first + k) as f64, stream.tick(first + k + 1) as f64);
+            if b > a {
+                shot = shot.lerp(*next, ((tick - a) / (b - a)).clamp(0., 1.) as f32);
+            }
+        }
+        session.shots = Some(s);
+        Some((shot, fresh))
     }
 
     /// The readable window for `kind`, simulation seconds.
@@ -447,7 +527,7 @@ impl Replay {
             deformation: Vec::new(),
             projected: None,
             activation: None,
-            fov: None,
+            shots: None,
             history: Default::default(),
             last_time: None,
             hidden: Vec::new(),
@@ -697,13 +777,10 @@ pub fn control(
         .stream
         .at_or_before((time / f64::from(DELTA)).max(0.).floor() as u64);
     let deformation = frame.map(|f| replay.deformation_frames(f)).unwrap_or_default();
-    let activation = shown.as_ref().and_then(|s| replay.activation(s.tick));
+    let activation = shown.as_ref().and_then(|s| replay.activation_at(s.tick));
     let session = replay.session.as_mut().unwrap();
     session.shown = shown;
-    if session.activation != activation {
-        session.activation = activation;
-        session.fov = None;
-    }
+    session.activation = activation;
     if !deformation.is_empty() {
         session.deformation = deformation;
     }
@@ -716,6 +793,16 @@ pub fn frame_camera(
     mut camera: Single<(&mut Transform, Option<&mut Projection>), With<crate::ViewerCamera>>,
 ) {
     let replay = &mut *replay;
+    // Director: its trackside camera at the replay time.
+    let track = replay.session.as_ref().and_then(|s| {
+        match (s.cameras.get(s.camera), &s.activation) {
+            (Some(Choice::Director), Some((director::Activation::Track(c), from))) => {
+                Some((*c, *from, s.player.time))
+            }
+            _ => None,
+        }
+    });
+    let shot = track.and_then(|(c, from, time)| replay.director_shot(c, from, time).map(|s| (c, s)));
     let director = replay.director.as_ref();
     let Some(session) = replay.session.as_mut() else {
         return;
@@ -732,18 +819,17 @@ pub fn frame_camera(
     let choice = session.cameras.get(session.camera).copied();
     let views = cameras.as_ref().map(|c| &c.views);
     let view = |ident: &str| views.and_then(|v| v.0.iter().position(|x| x.ident == ident));
-    // Director: its trackside camera or a view of the car.
-    let (eye, rotation, fov, near) = match (choice, director, &session.activation) {
-        (Some(Choice::Director), Some(d), Some(director::Activation::Track(c))) => {
-            let fresh = session.fov.is_none();
-            let camera = &d.cameras[*c];
-            let shot = camera.shot(&car.pose, car.velocity, &mut session.fov, dt);
+    let activation = session.activation.as_ref().map(|(a, _)| a);
+    let (eye, rotation, fov, near) = match (shot, director) {
+        (Some((c, (shot, fresh))), Some(d)) => {
             if fresh {
+                let camera = &d.cameras[c];
                 log_line!(
-                    "drive_race_replay version=1 event=camera ident={} kind={:?} path_points={} tick={} distance={:.2} fov={:.2}",
+                    "drive_race_replay version=1 event=camera ident={} kind={:?} source_path={} target_path={} tick={} distance={:.2} fov={:.2}",
                     camera.ident,
                     camera.kind,
-                    camera.path.len(),
+                    camera.path.as_ref().map_or("-".to_owned(), |p| format!("{:?}", p.mode)),
+                    camera.target_path.as_ref().map_or("-".to_owned(), |p| format!("{:?}", p.mode)),
                     shown.tick,
                     shot.eye.distance(car.pose.translation()),
                     shot.fov.to_degrees()
@@ -751,7 +837,7 @@ pub fn frame_camera(
             }
             (shot.eye, shot.rotation, shot.fov, None)
         }
-        (choice, _, activation) => {
+        _ => {
             let index = match (choice, activation) {
                 (Some(Choice::View(i)), _) => Some(i),
                 (_, Some(director::Activation::Car(name))) => view(name),

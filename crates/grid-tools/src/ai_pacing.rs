@@ -12,9 +12,8 @@
 //! is computed and no vehicle field is written, so AI-only runs are unchanged.
 //!
 //! AUTHORED where not recovered: race distance is the distance along the AI
-//! racing line (the original uses the progress track); the catch-up config
-//! name defaults to `rd_3_star` (the Race Day star level of Normal is not
-//! traced); the choreographer RNG is a seeded MT19937 (the original uses the
+//! racing line (the original uses the progress track); the choreographer
+//! RNG is a seeded MT19937 (the original uses the
 //! game's global instance, whose stream depends on everything else that
 //! draws from it); the conveyor runs in a single-class field (the live
 //! Touring race showed one car at A = 1.1); places are 0-based.
@@ -39,14 +38,29 @@ pub struct Settings {
     pub mistakes: bool,
 }
 
-/// AUTHORED default catch-up config (Race Day 3 stars).
-pub const DEFAULT_CATCH_UP: &str = "rd_3_star";
+/// The Race Day catch-up config of the default difficulty (Normal, star
+/// level 1): [`race_day_catch_up`]`(NORMAL_DIFFICULTY, false)`.
+pub const DEFAULT_CATCH_UP: &str = "rd_2_star";
+
+/// The catch-up config a Race Day event selects (0x5D5530, game mode 5):
+/// `rd_%d_star` with the event's star level + 1, and `_touge` appended for
+/// the pro/midnight touge formats (enums 5/6). The star level is that of the
+/// AI difficulty (`difficulty.ai_ratio`, [`crate::flashback::star_level`]);
+/// Normal is level 1, so `rd_2_star`
+/// (docs/AI_CHOREOGRAPHER_PORT.md §1).
+pub fn race_day_catch_up(difficulty: f32, touge: bool) -> String {
+    format!(
+        "rd_{}_star{}",
+        crate::flashback::star_level(difficulty) + 1,
+        if touge { "_touge" } else { "" }
+    )
+}
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             difficulty: NORMAL_DIFFICULTY,
-            catch_up: Some(DEFAULT_CATCH_UP.into()),
+            catch_up: Some(race_day_catch_up(NORMAL_DIFFICULTY, false)),
             choreographer: true,
             mistakes: true,
         }
@@ -54,11 +68,13 @@ impl Default for Settings {
 }
 
 impl Settings {
-    pub const HELP: &str = "--ai SPEC (or an [ai] section in a settings file): AI race pacing, comma-separated, e.g. difficulty=0.606,catchup=rd_3_star|on|off,choreographer=on|off,mistakes=on|off (default: difficulty 0.606, catch-up rd_3_star, choreographer and mistakes on).";
+    pub const HELP: &str = "--ai SPEC (or an [ai] section in a settings file): AI race pacing, comma-separated, e.g. difficulty=0.606,catchup=on|touge|off|rd_2_star,choreographer=on|off,mistakes=on|off (default: difficulty 0.606, catch-up on = the Race Day config of the difficulty's star level, rd_2_star at Normal; touge = its _touge variant; choreographer and mistakes on).";
 
     /// `key=value` items separated by commas or new lines; `#` comments.
     pub fn parse(spec: &str) -> Result<Self, String> {
         let mut out = Self::default();
+        // `on`/`touge` follow the final difficulty: Some(touge).
+        let mut auto = Some(false);
         for item in spec
             .lines()
             .map(|l| {
@@ -92,9 +108,17 @@ impl Settings {
                     }
                 }
                 "catchup" => {
+                    auto = None;
                     out.catch_up = match value {
                         "off" | "none" | "false" | "0" => None,
-                        "on" | "true" | "1" => Some(DEFAULT_CATCH_UP.into()),
+                        "on" | "true" | "1" => {
+                            auto = Some(false);
+                            None
+                        }
+                        "touge" => {
+                            auto = Some(true);
+                            None
+                        }
                         name if !name.is_empty()
                             && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') =>
                         {
@@ -107,6 +131,9 @@ impl Settings {
                 "mistakes" => out.mistakes = on()?,
                 _ => return Err(format!("unknown AI setting {key}")),
             }
+        }
+        if let Some(touge) = auto {
+            out.catch_up = Some(race_day_catch_up(out.difficulty, touge));
         }
         Ok(out)
     }
@@ -272,8 +299,9 @@ pub fn torque_factor(f: f32) -> f32 {
 /// Off-line grip assist and race-start grip factor (0x404C90): `distance`
 /// is the car's race distance, `lateral` its front's signed offset from the
 /// racing line (positive right) and `curvature` the look-ahead curvature
-/// (positive left). Inside the bend gets max_assist_inside [I which side the
-/// original calls inside].
+/// (0x798E90, positive for a bend toward positive offsets). The original
+/// takes max_assist_inside when `lateral · curvature >= 0`, the inside of
+/// the bend.
 pub fn grip_factor(
     m: &ai::Manager,
     speed: f32,
@@ -290,7 +318,7 @@ pub fn grip_factor(
     if curvature.abs() <= m.min_curve_offline {
         return 1.;
     }
-    let assist = if lateral * curvature < 0. {
+    let assist = if lateral * curvature >= 0. {
         m.max_assist_inside
     } else {
         m.max_assist_outside
@@ -1074,10 +1102,10 @@ mod tests {
         };
         assert_eq!(grip_factor(&m, 30., 500., 2., 0.01), 1.25);
         assert_eq!(grip_factor(&m, 9., 500., 2., 0.01), 1.);
-        // Left bend (curvature > 0): left of the line (negative) is inside.
-        assert_eq!(grip_factor(&m, 30., 1000., -2., 0.01), 1.125);
-        assert_eq!(grip_factor(&m, 30., 1000., 2., 0.01), 1.25);
-        assert_eq!(grip_factor(&m, 30., 1000., 6., 0.01), 1.5);
+        // Right-hand bend (curvature > 0): right of the line (positive) is inside.
+        assert_eq!(grip_factor(&m, 30., 1000., 2., 0.01), 1.125);
+        assert_eq!(grip_factor(&m, 30., 1000., -2., 0.01), 1.25);
+        assert_eq!(grip_factor(&m, 30., 1000., -6., 0.01), 1.5);
         assert_eq!(grip_factor(&m, 30., 1000., 2., 0.0005), 1.);
     }
 
@@ -1092,6 +1120,13 @@ mod tests {
             Settings::parse("catchup=on").unwrap().catch_up.as_deref(),
             Some(DEFAULT_CATCH_UP)
         );
+        // 0x5D5530: star level + 1, whatever the order of the items.
+        let name = |s: &str| Settings::parse(s).unwrap().catch_up.unwrap();
+        assert_eq!(name("catchup=on, difficulty=0.506"), "rd_1_star");
+        assert_eq!(name("difficulty=0.706, catchup=on"), "rd_3_star");
+        assert_eq!(name("difficulty=1"), "rd_6_star");
+        assert_eq!(name("catchup=touge"), "rd_2_star_touge");
+        assert_eq!(name("catchup=rd_4_star_h2h"), "rd_4_star_h2h");
         assert_eq!(Settings::parse("").unwrap(), Settings::default());
         assert!(Settings::parse("difficulty=2").is_err());
         assert!(Settings::parse("speed=1").is_err());
@@ -1105,7 +1140,8 @@ mod tests {
         let data = Data::load(Path::new(&root), &Settings::default()).unwrap();
         let c = data.catch_up.unwrap();
         assert_eq!((c.min_distance, c.max_distance), (50., 200.));
-        assert_eq!(c.power_at_max_distance, 0.5);
+        // rd_2_star, the Normal Race Day config (F439).
+        assert_eq!(c.power_at_max_distance, 0.45);
         assert!(c.reverse_enabled && c.use_lead_for_max_distance && !c.player_catchup);
         let chor = &data.choreographer;
         assert!(chor.manager.enable);

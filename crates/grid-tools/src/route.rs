@@ -39,8 +39,12 @@ pub const HARUNA: &str = "tracks/japan/haruna/route_1";
 /// and its short variant (`detroit_stad_s`, route 9) (docs/DEMOLITION_DERBY.md).
 pub const DETROIT_STADIUM: &str = "tracks/usa/detroit/route_8";
 pub const DETROIT_STADIUM_SHORT: &str = "tracks/usa/detroit/route_9";
+/// The eleventh circuit: Circuit de la Sarthe route 0 (`le_mans_circuit`,
+/// 13.6 km), the track of the Le Mans 24 Hours with time of day
+/// (docs/LE_MANS.md). Route 1 (`le_mans_classic`) is not raced yet.
+pub const LE_MANS: &str = "tracks/europe/le_mans/route_0";
 /// Every circuit the app, the soak and the cross-circuit tests cover.
-pub const CIRCUITS: [&str; 10] = [
+pub const CIRCUITS: [&str; 11] = [
     DONINGTON,
     NURBURGRING,
     ISTANBUL_PARK,
@@ -51,6 +55,7 @@ pub const CIRCUITS: [&str; 10] = [
     MILAN,
     SHIBUYA,
     SAN_FRANCISCO,
+    LE_MANS,
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,6 +209,7 @@ mod tests {
             (MILAN, 0.05),
             (SHIBUYA, 0.),
             (SAN_FRANCISCO, 0.05),
+            (LE_MANS, 0.),
         ] {
             let route = Route::new(path).unwrap();
             assert_eq!(route.additional_ground_clearance(root).unwrap(), expected, "{path}");
@@ -578,6 +584,61 @@ mod tests {
             assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")));
             assert_eq!(catalog.unported.values().sum::<usize>(), unported, "{path}");
         }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn le_mans_sources_load() {
+        use crate::{
+            ai_driver::AiData, dynamic_props::Catalog, entity_geometry::Props, lap_progress,
+            source_vehicle::Runtime,
+        };
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        let route = Route::new(LE_MANS).unwrap();
+        assert_eq!(route.track_name(), "le_mans");
+        let progress = lap_progress::load_route(root, &route).unwrap();
+        let splits: Vec<_> = progress.progress.routes[0]
+            .splits
+            .iter()
+            .map(|s| (s.kind, s.gate))
+            .collect();
+        // 158 gates over 13630.0 m, finish gate 0, time splits at 57 and 99.
+        use grid_formats::progress::SplitKind::{Finish, Time};
+        assert_eq!(progress.progress.gates.len(), 158);
+        assert!((progress.progress.total_distance - 13629.96).abs() < 0.01);
+        assert_eq!(splits, [(Finish, 0), (Time, 57), (Time, 99)]);
+        // The Le Mans fields fill all 20 grid slots (15–17 cars, docs/SERIES.md).
+        for slot in 0..20 {
+            let mut car =
+                Runtime::lacetti_on(root, &route, &format!("slot_{slot:02}"), 200679).unwrap();
+            car.enable_lap_timing(root).unwrap();
+            assert_eq!(car.lap_gate_count(), progress.progress.gates.len());
+        }
+        let data = AiData::load(root, route.path(), "touring", "lac").unwrap();
+        assert!(
+            (data.line.length - 13519.05).abs() < 1.,
+            "{}",
+            data.line.length
+        );
+        let props = Props::read_route(root, &route).unwrap();
+        let catalog = Catalog::read(root, &route, &props).unwrap();
+        let mut templates = std::collections::BTreeMap::<&str, usize>::new();
+        for b in &catalog.breakables {
+            *templates.entry(&b.template).or_default() += 1;
+        }
+        // Brake boards and tyre stacks break; armco, foam posts and tyre walls
+        // stay static, as on the other circuits.
+        assert_eq!(props.boxes.len(), 2413);
+        assert_eq!(templates.values().sum::<usize>(), 211);
+        assert_eq!(templates["tyrestack_black.max"], 173);
+        assert!(templates
+            .keys()
+            .all(|t| t.starts_with("gg_brake_marker") || t.starts_with("tyrestack_")));
+        assert_eq!(catalog.unported.values().sum::<usize>(), 1020);
+        assert!(catalog.unported.keys().all(|t| t.starts_with("armco_")
+            || t.starts_with("tyrewall_")
+            || *t == "post_foam_green.max"));
     }
 
     /// Haruna route 1 (`haruna_ill_mid_bot`), both directions: one run from

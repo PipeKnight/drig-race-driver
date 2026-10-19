@@ -119,15 +119,7 @@ public class LauncherActivity extends Activity {
 
     /** null when the APK has no bundled data (the default build). */
     private BundleExtractor.Manifest readManifest() throws Exception {
-        InputStream in;
-        try {
-            in = getAssets().open(BundleExtractor.ASSET_ROOT + "/" + BundleExtractor.MANIFEST);
-        } catch (FileNotFoundException e) {
-            return null;
-        }
-        try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-            return BundleExtractor.parse(reader);
-        }
+        return BundleExtractor.bundled(this);
     }
 
     private void copy(BundleExtractor.Manifest manifest, File dataDir) {

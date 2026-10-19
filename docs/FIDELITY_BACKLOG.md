@@ -21,7 +21,8 @@ Columns:
 ## Top 10 by gameplay impact
 
 1. AI first-corner pile-ups (Jarama, Long Beach GP/cl and reverse, Detroit route 1, Nürburgring):
-   the three "alongside" parts and the original's per-island/side logic (rows 30, 31).
+   the three "alongside" parts and the original's per-island/side logic (rows 30, 31). F444 ported the
+   AI traction control (the launch); Jarama route 1's 12-car race no longer loses a car.
 2. Audio: crashes, scrapes, kick-ups, wind, crowd, HUD beeps, speech and music are missing; output
    is mono with no 3D panning or Doppler (rows 70–73).
 3. Career (GRID World) has no playable front end (row 60).
@@ -42,7 +43,7 @@ Columns:
 
 | # | area | discrepancy | evidence | impact | needs | size | owner |
 |---|---|---|---|---|---|---|---|
-| 1 | physics/vehicle | Only downforce (slot 27) of the original default car setup 0x9C32F0 is applied; the other 29 values (suspension, dampers, gears, castor, anti-roll, ride-height loop, 0x9AE8F0/0x9AD6B0) are not. | F420; SERIES.md "downforce limit" | M: per-car handling may differ slightly | L | M | series |
+| 1 | physics/vehicle | Default car setup: downforce (F420) and the wheel records (F447, damper speed threshold 0.14 instead of 400) match live dumps; wheel +0x4C travel clip (0.1534/0.0970 live, 0.3 port), car +0x1568 and wheel +0xBC/+0x140 differ on the original's grid, writer not found. | F420; F447; SERIES.md "wheel records" | M: bottoming / travel stop may differ | S | M | series |
 | 2 | physics/vehicle | Porsche 911 is weak solo (0/1/1 laps, understeers); cause not traced, independent of the floor. | F409; F420 | L–M: one GT car barely laps | S+L | M | series |
 | 3 | physics/vehicle | Of the car reset A09CE0 only the engine reset 996C70 is ported; Braking Assist off verified at one onset speed only. | F417; BRAKING_REFERENCE "Next" | L–M: residual reset/braking differences | S+L | M | drift-battle-ai |
 | 4 | physics/vehicle | The original writes the clutch slot +E34 = 0 every frame; the port keeps the previous value; manual clutch is rejected. | F309; DRIVING_ASSISTS_RESEARCH | L | S | S | drift-battle-ai |
@@ -76,7 +77,7 @@ Columns:
 | 32 | AI | Record state derived from motion ("moving against its nose" = 2) instead of participant status (player 0, AI 1, retired 2), so side checks needing state 0 differ. | AI_MISTAKES_PACING_RESEARCH §1, §8 Q1; ai_driver.rs `backwards()` | M: AI pass/alongside choices | S | M | drift-battle-ai |
 | 33 | AI | No figure-of-eight or oncoming avoidance (`avFigureOfEightTrack`, `avOncomingTraffic` read, not ported). | F421; DEMOLITION_DERBY §5 | H for Demolition Derby | S | L | drift-battle-ai |
 | 34 | AI | Path-obstacle scan 0x78B560 is an authored straight corridor; brake_for_vehicle's different-heading branch and contacted_vehicle's two-corner refinement not recovered; avoid never fired in traffic. | AI_DRIVER_PORT; AI_OVERTAKING §12; AI_AVOID_RECOVERY_RESEARCH §8 | M: traffic choices differ | S+L | M | drift-battle-ai |
-| 35 | AI | AI traction control 0x77AA10, ABS cap 0x77A2E0, start-light reaction and in-air steering blend not ported. | AI_DRIVER_PORT; AI_DRIVER_RESEARCH §4.3/4.4; F391 | M: AI wheelspin, lock-ups, launch | S | M | drift-battle-ai |
+| 35 | AI | Start-light reaction and the in-air steering blend not ported (traction control 0x77AA10 and the ABS cap 0x77A2E0 ported in F444). The launch is still short of the live original's (13.9 against 15.4–17.1 m/s at 1 s). | AI_DRIVER_PORT; FIRST_CORNER_LIVE §7; F391; F444 | L–M | S | M | robustness |
 | 36 | AI | AI drift quality: spins, barrier hits, stalls (recovery flicker at the track limit), scores one to two orders below the virtual race. | F367; F389; DISCIPLINES §4.5 | M: weak Drift Battle opponents | L | L | drift-battle-ai |
 | 37 | AI | Failure modes AUTHORED: crash PID, flip, inertia +0x21C0, wobble, failed-wheel grip 0.1 (spins instead of limping), spun-and-fast lost_control (coSpinSpeed), visibility_loss absent; blow_engine does not reduce power. | F336; AI_DRIVER_PORT | M: AI mistakes look different | S+L | M | drift-battle-ai |
 | 38 | AI | Race manager measures along the AI line, not the progress track; conveyor slots, catch-up config name (default rd_3_star AUTHORED), race-start factors and "inside" side are [I]; half of armed mistakes abort; paced fields have 4.7× the contacts. | AI_DRIVER_PORT "Race manager"; AI_MISTAKES §8; F336 | M: rubber-banding differs | L | M | drift-battle-ai |
@@ -129,6 +130,7 @@ Columns:
 | 85 | platform | Android untested on a phone (data import, tilt/touch, pad bridge, menu relaunch, Drift APK); CPU-bound ~30–34 FPS; audio not paused on suspend [I]; no rumble or pad glyphs. | F363–F405; F418; ANDROID | H for phone play | O | M | android |
 | 86 | platform | About 88 asset readers open exact-case paths (no `FileIndex::resolve`); libm sin/tan/atan/acos/pow may differ off Windows. | SETTINGS §3; F321 | M on Linux | S | M | coordinator |
 | 87 | physics/vehicle | Earlier F13 acceleration (81→106 mph) unexplained; game-time alignment with the original open (status unclear after F417/F419). | REFERENCE_DRIVING_INPUT; NEXT_MILESTONES | L–M | L | M | drift-battle-ai |
+| 88 | robustness | grid-soak's counter (ii) exempts a prop body that a route entity box drove into the ground in one step (the box contact in the same or the previous step as its first deep road contact). This is debt, not a fix: the open 16 ms step-size family (rows 11, 19; F320, F351). Counted separately (`box_losses`): 1 body in quick 1..56 (Long Beach seed 17), 0 in long 1001..1100. | ROBUSTNESS_RESEARCH §9; F448 | L–M: hides pieces lost in hard hits | S | M | robustness |
 
 ## Closed in this sweep
 

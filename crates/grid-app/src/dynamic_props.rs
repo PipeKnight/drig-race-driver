@@ -79,9 +79,14 @@ pub(crate) fn append_pieces(
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let mut drawn = 0;
     let mut missing = 0;
+    // One index of the object library for every piece (F445).
+    let renderables = scene::Renderables::new(objects, sources);
     for (b, breakable) in catalog.breakables.iter().enumerate() {
         for (s, piece) in breakable.pieces.iter().enumerate() {
-            let Ok(draws) = scene::read_renderable_draws(objects, sources, piece.anchor.as_bytes())
+            let Ok(draws) = renderables
+                .as_ref()
+                .map_err(|_| ())
+                .and_then(|r| r.draws(piece.anchor.as_bytes()).map_err(|_| ()))
             else {
                 missing += 1;
                 continue;

@@ -24,8 +24,8 @@ use crate::{
 use std::{collections::BTreeMap, path::Path};
 
 pub use crate::route::{
-    DETROIT_STADIUM, DETROIT_STADIUM_SHORT, DONINGTON, HARUNA, ISTANBUL_PARK, JARAMA, LONG_BEACH,
-    MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
+    DETROIT_STADIUM, DETROIT_STADIUM_SHORT, DONINGTON, HARUNA, ISTANBUL_PARK, JARAMA, LE_MANS,
+    LONG_BEACH, MILAN, NURBURGRING, SAN_FRANCISCO, SHIBUYA, SPA, YOKOHAMA,
 };
 /// Donington's race start-light sequence; every race holds the grid for its
 /// track's shipped sequence time (`start_lights::load`, grid-app StartLights).
@@ -149,6 +149,8 @@ const QUICK_CARS: [usize; 8] = [12, 1, 12, 6, 2, 12, 9, 4];
 /// Seeds 37..=40 run Spa (docs/SPA.md), 41..=44 Milan, 45..=48 Shibuya and
 /// 49..=52 San Francisco (docs/STREET_CIRCUITS.md), also outside it;
 /// `--seeds 37..52`.
+/// Seeds 53..=56 run Circuit de la Sarthe (docs/LE_MANS.md), outside it too;
+/// `--seeds 53..56`.
 pub const QUICK_SEEDS: (u64, u64) = (1, 24);
 
 impl Scenario {
@@ -172,6 +174,8 @@ impl Scenario {
             Profile::Long => 1 + rng.below(max_cars as u64) as usize,
         };
         let route = match profile {
+            // Quick seeds 53..=56 (2, 12, 9 and 4 cars) on Circuit de la Sarthe.
+            Profile::Quick if seed > 52 => LE_MANS,
             // Quick seeds 49..=52 on San Francisco.
             Profile::Quick if seed > 48 => SAN_FRANCISCO,
             // Quick seeds 45..=48 on Shibuya.
@@ -260,6 +264,15 @@ impl Scenario {
             && Rng::new(seed ^ 0x5f40_0000_0000_0000).chance(0.1)
         {
             SAN_FRANCISCO
+        } else {
+            route
+        };
+        // An eleventh of the long runs then move to Circuit de la Sarthe (own
+        // stream too).
+        let route = if profile == Profile::Long
+            && Rng::new(seed ^ 0x1e3a_0000_0000_0000).chance(1. / 11.)
+        {
+            LE_MANS
         } else {
             route
         }
@@ -707,7 +720,28 @@ pub struct Session {
     /// They are reported, not failed. Body indices are reused after a reset,
     /// so each entry carries its segment (`resets` at the time).
     pub expected_losses: std::cell::RefCell<Vec<ExpectedLoss>>,
+    /// Per (segment, moving prop body): the last tick with a downward route
+    /// entity box contact, the first tick with a deep road contact
+    /// (`PropWorld::pressing_now`), and whether that first deep contact came
+    /// in the same or the step after a box contact (the in-run counter (ii)).
+    piece_history: std::cell::RefCell<BTreeMap<(u64, usize), PieceHistory>>,
 }
+
+/// One moving prop body's pressing history (`Session::piece_history`).
+#[derive(Clone, Copy, Debug, Default)]
+struct PieceHistory {
+    /// Last tick with a downward route entity box contact.
+    entity: Option<u64>,
+    /// First tick with a deep road contact.
+    deep: Option<u64>,
+    /// That first deep contact came with or one step after a box contact.
+    boxed: bool,
+}
+
+/// Vertical half span of the no-ground query (expected loss (i)).
+const NO_GROUND_SPAN: f32 = 5000.;
+/// Prop bodies slower than this are not checked for in-run pressing.
+const PRESSING_SPEED: f32 = 0.5;
 
 /// A body counted as an expected loss: segment, session tick, body and position.
 #[derive(Clone, Debug)]
@@ -899,6 +933,7 @@ impl Session {
             auto_reset: PlayerReset::default(),
             auto_resets: 0,
             expected_losses: Default::default(),
+            piece_history: Default::default(),
         })
     }
 
@@ -1084,10 +1119,38 @@ impl Session {
             Some(race) => &race.multi.cars[0],
             None => &self.runtime,
         };
-        let Ok(Some(pressed)) =
-            props.pressed_down_at_spawn(i, car.track(), car.surfaces(), geometry.query())
-        else {
-            return false;
+        let pressed = match props.pressed_down_at_spawn(
+            i,
+            car.track(),
+            car.surfaces(),
+            geometry.query(),
+        ) {
+            Ok(Some(pressed)) => pressed,
+            _ => {
+                // (i) No road chunk under the body: it left the collision
+                // ground, which the original shares [I].
+                let mut cache = grid_world::rectangle_cull::Cache::default();
+                let ground = car.track().query(
+                    [position[0], NO_GROUND_SPAN, position[2], 0.],
+                    [position[0], -NO_GROUND_SPAN, position[2], 0.],
+                    &mut cache,
+                );
+                // (ii) Driven into the ground by a route entity box in one
+                // step: the box contact in the same or the previous step as
+                // the first deep road contact.
+                let in_run = self
+                    .piece_history
+                    .borrow()
+                    .get(&(self.resets, i))
+                    .is_some_and(|h| h.boxed);
+                if matches!(ground, Ok(q) if q.hit.is_none()) {
+                    crate::dynamic_props::Pressed::NoGround
+                } else if in_run {
+                    crate::dynamic_props::Pressed::EntityBoxInRun
+                } else {
+                    return false;
+                }
+            }
         };
         self.expected_losses.borrow_mut().push(ExpectedLoss {
             segment: self.resets,
@@ -1097,6 +1160,43 @@ impl Session {
             pressed,
         });
         true
+    }
+
+    /// Updates `piece_history` for the moving prop bodies (above
+    /// [`PRESSING_SPEED`]) at their current pose.
+    fn record_piece_pressing(&self, snapshot: &Snapshot<'_>) {
+        let (Some(props), Some(geometry)) = (self.props(), &self.geometry) else {
+            return;
+        };
+        let car = match &self.race {
+            Some(race) => &race.multi.cars[0],
+            None => &self.runtime,
+        };
+        let mut history = self.piece_history.borrow_mut();
+        for (i, body) in snapshot.bodies.iter().enumerate().skip(snapshot.cars) {
+            let v = body_floats(body, 0x220, 3);
+            if v[0] * v[0] + v[1] * v[1] + v[2] * v[2] < PRESSING_SPEED * PRESSING_SPEED {
+                continue;
+            }
+            let Ok(Some(p)) = props.pressing_now(
+                i,
+                snapshot.bodies,
+                car.track(),
+                car.surfaces(),
+                geometry.query(),
+            ) else {
+                continue;
+            };
+            let tick = self.total_ticks;
+            let entry = history.entry((self.resets, i)).or_default();
+            if p.deep_road && entry.deep.is_none() {
+                entry.deep = Some(tick);
+                entry.boxed = p.entity_down || entry.entity.is_some_and(|e| e + 1 == tick);
+            }
+            if p.entity_down {
+                entry.entity = Some(tick);
+            }
+        }
     }
 
     /// Distance (xz) to the nearest route centreline point and its height.
@@ -1127,6 +1227,7 @@ impl Session {
             ));
         }
         let snapshot = self.snapshot();
+        self.record_piece_pressing(&snapshot);
         for (i, body) in snapshot.bodies.iter().enumerate() {
             let what = if i < snapshot.cars {
                 format!("car {i}")
@@ -1965,9 +2066,16 @@ mod tests {
             yokohama.iter().map(|s| s.cars).collect::<Vec<_>>(),
             [12, 1, 12, 6]
         );
-        // Long runs: about a sixth each on Istanbul Park (a third, less the later
+        let le_mans: Vec<_> = (53..=56).map(quick).collect();
+        assert!(le_mans.iter().all(|s| s.route == LE_MANS));
+        assert_eq!(
+            le_mans.iter().map(|s| s.cars).collect::<Vec<_>>(),
+            [2, 12, 9, 4]
+        );
+        // Long runs: about a seventh each on Istanbul Park (a third, less the later
         // moves), Long Beach (a quarter, less the later moves), Jarama (a fifth,
-        // less Yokohama's), Yokohama and Spa (a seventh), from their own
+        // less Yokohama's), Yokohama and Spa (a seventh), Milan, Shibuya, San
+        // Francisco and Circuit de la Sarthe (an eleventh), from their own
         // streams, so the other fields of a seed keep their F326 draws.
         let on = |route: &str| {
             (1001..1401)
@@ -1975,9 +2083,9 @@ mod tests {
                 .count()
         };
         for route in [ISTANBUL_PARK, LONG_BEACH, JARAMA, YOKOHAMA, SPA] {
-            assert!((30..95).contains(&on(route)), "{route} {}", on(route));
+            assert!((25..95).contains(&on(route)), "{route} {}", on(route));
         }
-        for route in [MILAN, SHIBUYA, SAN_FRANCISCO] {
+        for route in [MILAN, SHIBUYA, SAN_FRANCISCO, LE_MANS] {
             assert!((25..70).contains(&on(route)), "{route} {}", on(route));
         }
     }

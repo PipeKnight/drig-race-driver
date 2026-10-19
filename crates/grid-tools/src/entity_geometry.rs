@@ -301,7 +301,7 @@ impl Props {
     }
     pub fn read_route(root: &Path, route: &Route) -> Result<Self, Box<dyn std::error::Error>> {
         let read = |p: &str| -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-            let bytes = std::fs::read(root.join(p))?;
+            let bytes = std::fs::read(root.join(p)).map_err(|e| format!("{p}: {e}"))?;
             if bytes.len() > 64 << 20 {
                 return Err("entity source exceeds bound".into());
             }

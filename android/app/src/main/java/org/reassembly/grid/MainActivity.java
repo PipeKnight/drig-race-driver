@@ -92,6 +92,34 @@ public class MainActivity extends GameActivity {
     }
 
     /**
+     * Called by android.rs first at start-up (F451). With bundled game data,
+     * true only when its copy is complete (the version marker matches). Else
+     * the copy screen (LauncherActivity) opens in place of this activity and
+     * false is returned: Android can bring MainActivity back directly, from
+     * Recents or the task after an update, without the copy screen, and the
+     * owner's phone then ran menus and races on half-copied data (19.10).
+     */
+    public boolean dataReady() {
+        try {
+            BundleExtractor.Manifest manifest = BundleExtractor.bundled(this);
+            java.io.File dataDir = getExternalFilesDir(null);
+            if (manifest == null || (dataDir != null && BundleExtractor.upToDate(dataDir, manifest))) {
+                return true;
+            }
+        } catch (Exception e) {
+            Log.e("grid", "dataReady: cannot read the bundled data list", e);
+            return true;
+        }
+        Log.w("grid", "dataReady: bundled data not (fully) copied; opening the copy screen");
+        runOnUiThread(() -> {
+            startActivity(new Intent(this, LauncherActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            finish();
+        });
+        return false;
+    }
+
+    /**
      * Called by android.rs at start-up: a new log file in
      * Download/GRID-Reassembly; returns its file descriptor (now owned by the
      * caller) or -1.

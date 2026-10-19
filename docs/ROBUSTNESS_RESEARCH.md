@@ -342,6 +342,49 @@ Then on main 9050690 (F408, with F406's collision-floor lift; `local/robust/ccd/
 - **The F406 GT2 residual** (a car on its nose sinking through the road) is not covered: cars are
   not swept yet.
 
+## 9. Quick seeds 17 and 23 after F444
+
+F444 (AI traction control and ABS cap) changed the AI's trajectories, so different props are hit.
+`grid-soak quick` went to 22/24. Evidence: worktree fervent-napier-50814b
+`local/firstcorner/checks2/quick/seed-{17,23}.*`, traces `local/firstcorner/checks/seed{17,23}-body*.txt`,
+`local/firstcorner/props/s17-tmp.txt` (per-tick road contacts of the piece, temporary
+instrumentation, removed).
+
+- **Seed 23, Jarama** [V]:
+  - Piece 22 rests on GRAS at (211, −0.9, −312). A car hits it at 29 m/s, and it flies about
+    80 m to (246, −33, −396).
+  - A vertical segment query (`Track::query`) finds no road chunk from about x 221, z −337 on:
+    the piece has left the collision ground.
+  - The original uses the same chunks [I: so it would lose the piece too, unless it culls pieces
+    in a way not found].
+- **Seed 17, Long Beach** [V]:
+  - Piece 15 of a tyre stack rests on GRAS (y 1.10, shape 50 `qt_01_11_01_01`). A car hits it at
+    21 m/s into the neighbouring intact stack, entity box 144 (`tyrestack_white`).
+  - The box contact's minimum-penetration exit is the box's bottom face: normal y −1.0, depth
+    0.38 m. In the next steps the piece is driven to y 0.80, the grass contacts come back with
+    downward normals (−0.42, then −1.0), and it falls.
+  - Original geometry and the ported contact code. The only candidate difference is the 16 ms
+    step against the original's per-frame step (F320; the F351 thin-piece family).
+- Neither has a 1:1 physics fix. The coordinator approved two rules in the manner of section 5
+  (F448; harness only, physics unchanged), checked in this order after the spawn rule:
+  - **(i) Left the ground** (`Pressed::NoGround`, an expected loss):
+    - a vertical segment (±5000 m) at the lost body's xz finds no road chunk;
+    - [I] the original has the same chunks; a culling of such bodies in the original was not
+      looked for.
+  - **(ii) Driven in by an entity box** (`Pressed::EntityBoxInRun`):
+    - a separate counter `box_losses`, not an expected loss in the counts, and debt in
+      FIDELITY_BACKLOG row 88;
+    - `soak::Session` records, each tick, for every prop body moving faster than 0.5 m/s,
+      `PropWorld::pressing_now` at its current pose: a downward route entity box contact
+      (normal y < −0.5, not its own boxes, not a stand-in) and the first road contact deeper
+      than 0.1 m (AUTHORED threshold; resting pieces show about 0.03 m);
+    - the body counts only when that first deep contact comes in the same step as a box
+      contact or the step after one.
+  - Counts [V], on 8f02760 + F444 + this rule: quick 1..56: (i) 3 bodies (seed 23), (ii) 1 body
+    (seed 17); long 1001..1100 (100 scenarios): (i) 3 bodies (seeds 1023, 1089 Le Mans, 1092 Spa), (ii) none,
+    and 37 option A losses (Jarama 1010, 1013). Quick 1..24 passes 24/24 again; Haruna seeds 29 (known since
+    F412) and 32 (a car off an unwalled edge, new with F444's trajectories) fail outside the default set.
+
 ## 8. Open
 
 - The 16 ms step against the original's per-frame step (F320; seeds 22 and 59, the pile-up depth).
@@ -351,3 +394,5 @@ Then on main 9050690 (F408, with F406's collision-floor lift; `local/robust/ccd/
 - First-corner pile-up: the exact 0x795C00 segment test. The live comparison on Donington
   (F433, [FIRST_CORNER_LIVE.md](FIRST_CORNER_LIVE.md)): the original's field also gets through
   Redgate; the main difference is its much harder launch, not the alongside logic.
+  F444 ported the AI traction control and ABS cap (the launch); the Jarama route 1 12-car race
+  now has no retirement.

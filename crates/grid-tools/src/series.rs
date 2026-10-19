@@ -32,8 +32,22 @@ pub struct Series {
     pub layouts: Vec<Layout>,
 }
 
-/// The circuit-race series this port offers.
-pub const CIRCUIT_SERIES: [&str; 5] = ["pro_tuned", "touring", "gt1", "gt2", "le_mans_series"];
+/// The circuit-race series this port offers. `le_mans` is the free race
+/// `Le_Mans` (discipline 18): the 24 Hours on Circuit de la Sarthe, a
+/// time-limited race with the `lemans_24` field (docs/LE_MANS.md).
+pub const CIRCUIT_SERIES: [&str; 6] = [
+    "pro_tuned",
+    "touring",
+    "gt1",
+    "gt2",
+    "le_mans_series",
+    "le_mans",
+];
+
+/// The time-limited Le Mans 24 Hours (free race `Le_Mans` [V 0x62A5D0]).
+pub fn is_le_mans_24(name: &str) -> bool {
+    name.eq_ignore_ascii_case("le_mans")
+}
 
 /// Tracks whose every route was raced with the series cars (F401,
 /// docs/SERIES.md "Layouts").
@@ -81,7 +95,10 @@ impl Series {
     pub fn from_database(db: &Database, name: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let discipline = table(db, "free_race_discipline")?
             .rows()
-            .find(|r| r.text("name_string_id") == Some(name))
+            .find(|r| {
+                r.text("name_string_id")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })
             .and_then(|r| r.int("id"))
             .ok_or(format!("no free-race discipline `{name}`"))?;
         let pools = table(db, "free_race_track_pool")?;
@@ -147,7 +164,8 @@ impl Series {
 
     /// The pool's layouts this port has raced: every route of the five
     /// surveyed circuits ([`SURVEYED_TRACKS`], F401) and the exact
-    /// `route::CIRCUITS` routes of later circuits (Yokohama route_0).
+    /// `route::CIRCUITS` routes of later circuits (Yokohama and Le Mans
+    /// route_0).
     pub fn supported_layouts(&self) -> impl Iterator<Item = &Layout> {
         self.layouts.iter().filter(|l| {
             crate::route::CIRCUITS.contains(&l.route.as_str())
@@ -370,6 +388,17 @@ pub fn build_lemans_field(
     db: &Database,
     player: &Car,
 ) -> Result<Vec<Entry>, Box<dyn std::error::Error>> {
+    build_lemans_field_for(db, player, false)
+}
+
+/// [`build_lemans_field`] for the rows with `lemans_24` = `lemans_24`: the
+/// free race `Le_Mans` (the 24 Hours) asks for 1, `le_mans_series` for 0
+/// [V 0x677009, 0x677040 → 0x663860, compare at 0x663A6F].
+pub fn build_lemans_field_for(
+    db: &Database,
+    player: &Car,
+    lemans_24: bool,
+) -> Result<Vec<Entry>, Box<dyn std::error::Error>> {
     let vehicles = table(db, "vehicle")?;
     let liveries = table(db, "vehicle_livery")?;
     let player_row = vehicles
@@ -401,7 +430,9 @@ pub fn build_lemans_field(
     };
     let mut field = vec![entry(own)?];
     for row in table(db, "lemans_restrictions")?.rows() {
-        if row.int("player_vehicle_id") != vehicle_id || row.int("lemans_24") != Some(0) {
+        if row.int("player_vehicle_id") != vehicle_id
+            || row.int("lemans_24") != Some(i32::from(lemans_24))
+        {
             continue;
         }
         let livery_id = row.int("entrant_vehicle_livery_id");
@@ -446,6 +477,36 @@ pub fn lemans_sort_order(db: &Database, car: &Car) -> Result<i32, Box<dyn std::e
         .find(|c| c.int("id") == row.int("vehicle_class_id"))
         .and_then(|c| c.int("lemans_sort_order"))
         .ok_or_else(|| format!("no vehicle class for {car}").into())
+}
+
+/// A car's `vehicle_class` row as the Le Mans results use it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeMansClass {
+    /// `file_string`, e.g. `lmp1`, `gt2` (the results' class cell
+    /// `le_mans_%s` [V 0x53FE10]).
+    pub name: String,
+    /// `lemans_sort_order` (LMP1 1, LMP2 2, GT1 3, GT2 4, others 0).
+    pub sort_order: i32,
+    /// `lemans_progress_adjustment` (LMP1 1.08, GT1 0.92, GT2 0.84, else 1).
+    pub progress_adjustment: f64,
+}
+
+pub fn lemans_class(db: &Database, car: &Car) -> Result<LeMansClass, Box<dyn std::error::Error>> {
+    let row = table(db, "vehicle")?
+        .rows()
+        .find(|v| v.text("file_string") == Some(car.stem()))
+        .ok_or(format!("no vehicle row for {car}"))?;
+    let class = table(db, "vehicle_class")?
+        .rows()
+        .find(|c| c.int("id") == row.int("vehicle_class_id"))
+        .ok_or(format!("no vehicle class for {car}"))?;
+    Ok(LeMansClass {
+        name: class.text("file_string").unwrap_or_default().into(),
+        sort_order: class.int("lemans_sort_order").unwrap_or(0),
+        progress_adjustment: class
+            .float("lemans_progress_adjustment")
+            .map_or(1., f64::from),
+    })
 }
 
 /// The Le Mans Series grid (0x5BDF10 [V]): car indices in slot order.
@@ -549,10 +610,10 @@ impl Event {
             Some(car) => return Err(format!("{car} is not a {name} car").into()),
             None => series.cars[0].clone(),
         };
-        if name == "le_mans_series" {
+        if name == "le_mans_series" || is_le_mans_24(name) {
             // The whole recovered field and grid (0x663860, 0x5BDF10); the
             // pool's max_cars and the caller's opponent count do not apply.
-            let field = build_lemans_field(&db, &player)?;
+            let field = build_lemans_field_for(&db, &player, is_le_mans_24(name))?;
             let keys = field
                 .iter()
                 .map(|e| lemans_sort_order(&db, &e.car))
@@ -671,9 +732,17 @@ mod tests {
         let supported: Vec<&str> = pro.supported_layouts().map(|l| l.name.as_str()).collect();
         // 20 layouts of the surveyed circuits and the route_0 circuits of
         // Yokohama (yoko_v1), Spa (spa_gp), Milan (milan_gp), Shibuya
-        // (shib_drift_cir) and San Francisco (san_francisco_gp).
-        assert_eq!(supported.len(), 25);
-        for name in ["yoko_v1", "spa_gp", "milan_gp", "shib_drift_cir", "san_francisco_gp"] {
+        // (shib_drift_cir), San Francisco (san_francisco_gp) and Circuit de la
+        // Sarthe (le_mans_circuit).
+        assert_eq!(supported.len(), 26);
+        for name in [
+            "yoko_v1",
+            "spa_gp",
+            "milan_gp",
+            "shib_drift_cir",
+            "san_francisco_gp",
+            "le_mans_circuit",
+        ] {
             assert!(supported.contains(&name), "{name}");
         }
         let nat = pro.layout("donington_nat").unwrap();
@@ -816,5 +885,38 @@ mod tests {
         assert_eq!(lemans_sort_order(&db, &Car::new("esp").unwrap()).unwrap(), 4);
         assert_eq!(class_key(&db, &Car::new("lc7").unwrap()).unwrap(), "db_lmp1");
         assert_eq!(class_key(&db, &Car::new("911").unwrap()).unwrap(), "db_gt2");
+    }
+
+    /// The free race `Le_Mans` (the 24 Hours): its cars, its one layout and
+    /// the `lemans_24` = 1 fields.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn le_mans_24_fields_come_from_the_24_hour_rows() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let series = Series::load(&root, "le_mans").unwrap();
+        let routes: Vec<&str> = series.layouts.iter().map(|l| l.route.as_str()).collect();
+        assert_eq!(routes, [crate::route::LE_MANS]);
+        assert_eq!(series.cars.len(), 14);
+        let schema = std::fs::read(root.join("database/schema.bin")).unwrap();
+        let data = std::fs::read(root.join("database/database.bin")).unwrap();
+        let db = grid_formats::database::read(&schema, &data).unwrap();
+        // DBR9: 16 cars, the 24 Hours entrants (two Audi R10 LMP1s, four
+        // Courage C65 LMP2s) instead of the Le Mans Series field.
+        let dbr = build_lemans_field_for(&db, &Car::new("dbr").unwrap(), true).unwrap();
+        assert_eq!(dbr.len(), 16);
+        assert_eq!(dbr[0].livery, "dbr_00");
+        let count = |f: &[Entry], s: &str| f.iter().filter(|e| e.car.stem() == s).count();
+        assert_eq!(count(&dbr, "r10"), 2);
+        assert_eq!(count(&dbr, "c65"), 4);
+        assert_eq!(count(&dbr, "lc7"), 0);
+        let spk = build_lemans_field_for(&db, &Car::new("spk").unwrap(), true).unwrap();
+        assert_eq!(spk.len(), 17);
+        assert!(is_le_mans_24("Le_Mans") && !is_le_mans_24("le_mans_series"));
+        let class = |stem: &str| lemans_class(&db, &Car::new(stem).unwrap()).unwrap();
+        assert_eq!(class("r10").name, "lmp1");
+        assert!((class("r10").progress_adjustment - 1.08).abs() < 1e-6);
+        assert_eq!((class("c65").name.as_str(), class("c65").sort_order), ("lmp2", 2));
+        assert!((class("esp").progress_adjustment - 0.84).abs() < 1e-6);
+        assert_eq!(class("lac").sort_order, 0);
     }
 }

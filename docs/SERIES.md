@@ -17,6 +17,7 @@ image (`local/compatibility/grid-unpacked.exe`) or verified by a run; **[I]** in
 | GT1 | dbr, c6r, sal, ccg, c5r, lam | **races since F406** (collision floor lift): 12-car fields on all 20 layouts |
 | GT2 | spk, esp | **races since F406**: 12-car fields on all 20 layouts |
 | Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | **races since F420** (default setup's downforce limit): original field and grid, 15–17 cars, launcher |
+| Le Mans (24 Hours, free race `Le_Mans`) | lam, 911, dbr, c6r, c5r, sal, spk, esp, r10, cre, b06, b05, lc7, c65 | **F429: series `le_mans`, `lemans_24` = 1 field (DBR9: 16 cars with two R10s), time-limited race on Circuit de la Sarthe (docs/LE_MANS.md)** |
 
 New code:
 - `grid_formats::database`: the whole NDBS `database.bin` decoded by `schema.bin` (78 tables).
@@ -295,6 +296,72 @@ can change values, so they need their own capture.
   GRID_SERIES_EXPERIMENTAL.
 - The F406 floor lift stays: it is independent and equally 1:1. The +0.15 m diagnostic of F409 is
   explained: the port's suspension compressed under about eight times the original's downforce.
+
+## The default car setup's wheel records (F447) [V unless marked]
+
+**Live dumps** (read-only, taken by drift-battle-ai on 19 October 2026; main checkout
+`local/driving/default-setup-20261019/`): the original's player car object +0x0..+0x2400 for a
+Lacetti (Race Day, Touring Cars, Donington GP, grid slot 9) and a Courage LC70 (Le Mans
+Series, Donington GP, slot 0), paused on the grid at the start with the default setup. The
+research copy grid.exe (SHA-256 b1da1b2d…aece34a6); user files restored and hash-checked
+afterwards. The 60 Hz lock did not hold (world +7C8 about 6.1–6.4 ms), which does not matter
+for a static grid dump.
+
+**Port side**: `grid-car-words ROOT CAR SLOT local/OUT.bin` (crate grid-probes) writes the
+port's car words after `Runtime::load` (optionally after `GRID_CAR_TICKS` ticks at rest); the
+comparison is word by word (`local/setup/diff.py` in this worktree).
+
+**Before the change**: every car-level word that 0x9C32F0 writes already matched on both cars
+(+0x1564, +0x1574..+0x1584, +0x18F8..+0x1914, +0x1F04, +0xE10), and so did the car property
+copy +0xF00..+0x13FF. The wheel records differed in two ways:
+- **+0x64, the damper speed threshold** (`suspension::Wheel::speed_threshold`): 0.14 in the
+  original on every wheel of both cars, the raw property 400 in the port. Above this
+  suspension speed the damper uses its high-speed ratio (+0x68, 0.35/0.4); with 400 the port
+  never did.
+- **+0xE8/+0xEC**: re-interpolated through the setup in f32, e.g. 0x3B031280 against
+  0.002 (0x3B03126F).
+
+**Static** (Ghidra 12.1.4 pseudocode, worktree `local/gtfix/decomp/setup29`, `setup29b`):
+- 0x9C3C30 sets default slider i = (clamp(x_i, B_i, A_i) − B_i)/(A_i − B_i) (0 when
+  B_i ≥ A_i), with A_i at properties +0x40 + 4i, B_i at +0xB8 + 4i and x_i a per-value
+  property:
+  - x0 = (p530 + p534)/2, x1 = (p528 + p52C)/2, x2 = p424, x3 = p428, x4 = p40C, x5 = p410;
+  - x6 = p440, x7 = p440·p438, x8 = p444, x9 = p444·p43C;
+  - x10 = (p454·p444 + p450·p440)/2, x11 = (p44C + p448)/2, x12 = p3E0;
+  - x13..x20 = p31C + 4j (slider −1 when the property is 0), x21 = p3E8/(p3E4 + p3E8),
+    x22 = p518;
+  - x23 and x24 = p350 and p34C through 0xBF53E5 of ·(1/60) (0 when the property is 0);
+  - x25 = p35C, x26 = p358, x27 = p158 (downforce, F420), x28 = p414, x29 = p418.
+- 0x9E5680 clamps the sliders to [−1, 1]. 0x9C32F0 makes value i = (A_i − B_i)·s + B_i
+  (0 for a negative slider) and writes each wheel record, front when the wheel's z (+0x8) is
+  above 0:
+  - +0xEC v0/v1, +0xE8 v2/v3, +0x5C v4/v5, +0x60 v6/v8, +0x114 v7/v6 and v9/v8;
+  - +0x70 v28/v29, +0x108 brake share (v21 with a table multiplier), +0x10C v22 term;
+  - +0x68 and +0x64: the front/rear properties rescaled so that their mean becomes value 10
+    and value 11: t = (v − base)/(mid − base) with base A when mid ≤ v, else B
+    (t = 0 when |mid − base| < 0.001), new = (property − base)·t + base. With equal front
+    and rear properties this is the setup value itself, so +0x64 = value 11 = 0.14 (range
+    0.001–0.14, property 400 above it).
+
+**Port**: `standard_car::apply_default_wheel_setup` after the downforce part in
+`Runtime::load` writes +0xEC, +0xE8, +0x5C, +0x60, +0x114, +0x68, +0x70 and +0x64.
++0x108, +0x10C and the car-level writes stay as constructed, because they already equal the
+live words. After the change every setup-written wheel word equals both dumps bit for bit
+(asset test `default_setup_wheel_records_match_the_live_original`).
+
+**Effect**: solo `grid-opponent-race … 1 11200 ai` Lacetti race 2:58.784 (before 2:58.752);
+the 12-car identity race still classifies all 12 cars. Both identity hashes change (PROJECT_LOG
+F447).
+
+**Open**:
+- Wheel +0x4C (the suspension travel clip): constructed 0.3 in both the original (saved copy
+  +0x2254) and the port, but 0.1534 (Lacetti) and 0.0970 (LC70) on the original's grid. Setup
+  value 12 is 0, so the 0x9C32F0 ride-height loop leaves it alone. No writer was found on the
+  setup path, and the port keeps 0.3 after 300 ticks at rest.
+- Car +0x1568: 13.37 / 6.35 in the original, 0 in the port, with no 0x9C32F0 write.
+- Wheel +0xBC and +0x140 are non-zero on the original's grid and 0 in the port after 300 ticks.
+- The remaining differences are pointers and runtime loads, which agree within about 1 % after
+  300 port ticks at rest.
 
 ## Layouts
 

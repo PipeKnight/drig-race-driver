@@ -5,12 +5,13 @@ use bevy::{
 };
 use grid_tools::{
     audio_mix::{self, Camera, Table},
+    audio_pacing::Paced,
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank as EngineBank, CHASE_BUS_DB, Mixer},
 };
 use std::{
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
@@ -18,7 +19,11 @@ use std::{
 
 #[derive(Resource)]
 pub(crate) struct EngineSound {
-    mailbox: Arc<AtomicU64>,
+    /// Packed controls, one per vehicle tick (`audio_pacing`).
+    mailbox: Mailbox,
+    /// The last player control pushed, and the tick last published.
+    pushed: Option<u64>,
+    ticked: Option<(u64, u64)>,
     /// Engine/exhaust group levels in dB for the audio thread (`pack_bus`).
     bus: Arc<AtomicU64>,
     /// The original group mix (`audio/GroupModeVolumes.bin`).
@@ -35,7 +40,9 @@ impl EngineSound {
     }
     pub(crate) fn with_models(banks: Vec<Arc<EngineBank>>) -> Self {
         Self {
-            mailbox: Arc::new(AtomicU64::new(0)),
+            mailbox: mailbox(),
+            pushed: None,
+            ticked: None,
             bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
             table: None,
             failure: Arc::new(AtomicU32::new(0)),
@@ -57,11 +64,21 @@ impl EngineSound {
         )
     }
 }
+/// Tick-paced packed controls shared with one engine decoder.
+type Mailbox = Arc<Mutex<Paced<u64>>>;
+fn mailbox() -> Mailbox {
+    Arc::new(Mutex::new(Paced::new(0)))
+}
+fn push(mailbox: &Mailbox, control: Control) {
+    if let Ok(mut m) = mailbox.lock() {
+        m.push(control.pack());
+    }
+}
 /// One opponent's engine voice set (car index in the shared world).
 #[derive(Component)]
 pub(crate) struct OpponentEngine {
     car: usize,
-    mailbox: Arc<AtomicU64>,
+    mailbox: Mailbox,
     bus: Arc<AtomicU64>,
     model: usize,
 }
@@ -99,13 +116,13 @@ pub(crate) fn bus_levels(
 #[derive(Asset, TypePath)]
 pub(crate) struct EngineSource {
     bank: Arc<EngineBank>,
-    mailbox: Arc<AtomicU64>,
+    mailbox: Mailbox,
     bus: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
-    mailbox: Arc<AtomicU64>,
+    mailbox: Mailbox,
     bus: Arc<AtomicU64>,
     control: Control,
     count: usize,
@@ -115,13 +132,28 @@ pub(crate) struct Decoder {
 impl Iterator for Decoder {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
-        if self.count.is_multiple_of(64) {
+        // RPM and throttle advance one vehicle tick per 16 ms block, so a
+        // slow frame's ticks are not collapsed into one step; audibility and
+        // the reset generation follow the newest control within 64 samples.
+        let block = self.mixer.block_due();
+        if (block || self.count.is_multiple_of(64))
+            && let Ok(mut mailbox) = self.mailbox.try_lock()
+        {
             let generation = self.control.generation;
-            self.control = Control::unpack(self.mailbox.load(Ordering::Relaxed));
-            self.mixer.bus_db = unpack_bus(self.bus.load(Ordering::Relaxed));
+            let latest = Control::unpack(mailbox.latest());
+            if block || latest.generation != generation {
+                let next = Control::unpack(mailbox.take());
+                self.control.normalized_rpm = next.normalized_rpm;
+                self.control.throttle = next.throttle;
+            }
+            self.control.audible = latest.audible;
+            self.control.generation = latest.generation;
             if generation != self.control.generation {
                 self.reported_failure = false;
             }
+        }
+        if self.count.is_multiple_of(64) {
+            self.mixer.bus_db = unpack_bus(self.bus.load(Ordering::Relaxed));
         }
         self.count = self.count.wrapping_add(1);
         let value = self.mixer.sample(self.control);
@@ -167,6 +199,7 @@ pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<
     app.add_audio_source::<EngineSource>()
         .insert_resource(sound)
         .add_systems(Startup, start)
+        .add_systems(FixedUpdate, publish.after(super::drive_tick))
         .add_systems(Update, update.after(super::drive_present));
 }
 fn start(
@@ -188,7 +221,7 @@ fn start(
         .and_then(|d| d.opponents.as_ref())
         .map_or(0, |o| o.multi.cars.len());
     for car in 1..cars {
-        let mailbox = Arc::new(AtomicU64::new(0));
+        let mailbox = mailbox();
         let bus = Arc::new(AtomicU64::new(pack_bus([f32::NEG_INFINITY; 2])));
         // Each opponent sounds like its own car model.
         let model = field
@@ -302,34 +335,15 @@ fn update(
         *started = true;
         log_line!("engine_audio version=2 event=output_started");
     }
-    let mut control = sound.control(&driving);
-    // The engine idles and may be revved during the countdown; the vehicles no
-    // longer tick once the race is frozen.
+    // Ticks publish their controls (`publish`); a change without a tick
+    // (pause, mute, finish, failure) is published here.
     let finished = listening.stopped(&driving);
-    if finished {
-        control.audible = false;
+    if Some(player_control(&sound, &driving, finished).pack()) != sound.pushed {
+        push_controls(&mut sound, &driving, finished, &opponent_engines);
     }
-    sound.mailbox.store(control.pack(), Ordering::Relaxed);
     if let Some(opponents) = &driving.opponents {
-        let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;
         for engine in &opponent_engines {
             let car = &opponents.multi.cars[engine.car];
-            let throttle = opponents
-                .throttles
-                .get(engine.car - 1)
-                .copied()
-                .unwrap_or(0.);
-            let control = grid_tools::engine_audio::Control::vehicle(
-                &car.state.car.owner.vehicle,
-                if car.terminal_wheel().is_some() {
-                    0.
-                } else {
-                    throttle
-                },
-                audible,
-                driving.segment as u32,
-            );
-            engine.mailbox.store(control.pack(), Ordering::Relaxed);
             let distances = distances(Mat4::from_cols_array(&car.pose()), engine.model);
             engine.bus.store(
                 pack_bus(bus_levels(
@@ -345,20 +359,78 @@ fn update(
     }
 }
 
+/// The player's control; silent once the race is frozen.
+fn player_control(sound: &EngineSound, driving: &super::Driving, finished: bool) -> Control {
+    let mut control = sound.control(driving);
+    // The engine idles and may be revved during the countdown; the vehicles no
+    // longer tick once the race is frozen.
+    if finished {
+        control.audible = false;
+    }
+    control
+}
+/// Queue the current controls for the player's and the opponents' engines.
+fn push_controls(
+    sound: &mut EngineSound,
+    driving: &super::Driving,
+    finished: bool,
+    opponent_engines: &Query<&OpponentEngine>,
+) {
+    let control = player_control(sound, driving, finished);
+    push(&sound.mailbox, control);
+    sound.pushed = Some(control.pack());
+    if let Some(opponents) = &driving.opponents {
+        let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;
+        for engine in opponent_engines {
+            let car = &opponents.multi.cars[engine.car];
+            let throttle = opponents
+                .throttles
+                .get(engine.car - 1)
+                .copied()
+                .unwrap_or(0.);
+            let control = Control::vehicle(
+                &car.state.car.owner.vehicle,
+                if car.terminal_wheel().is_some() {
+                    0.
+                } else {
+                    throttle
+                },
+                audible,
+                driving.segment as u32,
+            );
+            push(&engine.mailbox, control);
+        }
+    }
+}
+/// Once per vehicle tick (FixedUpdate after the tick): queue its controls.
+fn publish(
+    mut sound: ResMut<EngineSound>,
+    driving: Res<super::Driving>,
+    listening: Listening,
+    opponent_engines: Query<&OpponentEngine>,
+) {
+    let now = (driving.segment, driving.runtime.ticks);
+    if sound.ticked == Some(now) {
+        return;
+    }
+    sound.ticked = Some(now);
+    let finished = listening.stopped(&driving);
+    push_controls(&mut sound, &driving, finished, &opponent_engines);
+}
+
 /// Bounded real-device diagnostic, separate from silent offscreen captures.
 pub(crate) fn check(root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let bank = EngineBank::lacetti(root)?;
     let sound = EngineSound::new(bank);
     let mailbox = sound.mailbox.clone();
-    mailbox.store(
+    push(
+        &mailbox,
         Control {
             normalized_rpm: 0.5,
             throttle: 0.3,
             audible: true,
             generation: 0,
-        }
-        .pack(),
-        Ordering::Relaxed,
+        },
     );
     let mut app = App::new();
     app.add_plugins((
@@ -385,7 +457,7 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Box<dyn std::error::Er
         }
         std::thread::sleep(Duration::from_millis(16));
     }
-    mailbox.store(0, Ordering::Relaxed);
+    push(&mailbox, Control::unpack(0));
     std::thread::sleep(Duration::from_millis(30));
     if played.is_none() {
         return Err("engine audio output did not start within four seconds".into());
@@ -399,6 +471,43 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Box<dyn std::error::Er
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A 50 ms frame (20 fps) runs three vehicle ticks back to back; the
+    /// decoder plays them out one per 16 ms block instead of jumping to the
+    /// last (docs/AUDIO_RESEARCH.md 8).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased sources; no audio device used"]
+    fn a_slow_frame_reaches_the_mixer_one_tick_per_block() {
+        std::thread::Builder::new().stack_size(16 * 1024 * 1024).spawn(|| {
+            let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+            let bank = EngineBank::lacetti(std::path::Path::new(&root)).unwrap();
+            let mailbox = mailbox();
+            let mut decoder = EngineSource {
+                bank,
+                mailbox: mailbox.clone(),
+                bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
+                failure: Arc::new(AtomicU32::new(0)),
+            }
+            .decoder();
+            let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0 };
+            push(&mailbox, control(0.3));
+            for _ in 0..grid_tools::engine_audio_continuous::BLOCK {
+                decoder.next();
+            }
+            for rpm in [0.4, 0.5, 0.6] {
+                push(&mailbox, control(rpm));
+            }
+            let mut seen = Vec::new();
+            for _ in 0..3 {
+                decoder.next();
+                seen.push(decoder.control.normalized_rpm);
+                for _ in 1..grid_tools::engine_audio_continuous::BLOCK {
+                    decoder.next();
+                }
+            }
+            let quantised = |rpm: f32| Control::unpack(control(rpm).pack()).normalized_rpm;
+            assert_eq!(seen, [quantised(0.4), quantised(0.5), quantised(0.6)]);
+        }).unwrap().join().unwrap();
+    }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT purchased sources; no audio device used"]
     fn source_engine_sound_pause_mute_reset_and_failure() {
@@ -406,7 +515,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: Arc::new(AtomicU64::new(0)), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)) }.decoder();
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)) }.decoder();
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();
@@ -415,7 +524,7 @@ mod tests {
                 .add_message::<AppExit>()
                 .insert_resource(crate::Driving { runtime: grid_tools::source_vehicle::Runtime::lacetti(root,"slot_00",200679).unwrap(), geometry: None, paused:false, failure:None, notices:Vec::new(), scripted_ticks:None, scripted:Default::default(),handbrake_from:None, last_controls:None, segment:0, started:std::time::Instant::now(), opponents: None, auto_reset: Default::default(), reset_line: None })
                 .insert_resource(crate::input::Actions::new(crate::input::ActionMap::keyboard(),crate::input::Pads::Off)).init_resource::<crate::input::ShiftQueue>().insert_resource(crate::pause_menu::PauseMenu::new(crate::pause_menu::Variant::TestDrive,false,false,Default::default())).add_systems(Update,(crate::input::sample,crate::pause_menu::update,crate::drive_actions,crate::drive_tick,update).chain());
-            let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.load(Ordering::Relaxed));
+            let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.lock().unwrap().latest());
             let press = |app: &mut App,key| {let mut input=app.world_mut().resource_mut::<ButtonInput<KeyCode>>();input.reset_all();input.press(key);};
             press(&mut app,KeyCode::ArrowUp);app.update();
             assert!(control(&app).audible);assert_eq!(control(&app).throttle,1.);

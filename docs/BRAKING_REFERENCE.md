@@ -44,8 +44,9 @@ contacts) may be more sensitive. [V]
    original back afterwards. The Steam install is not touched.
 2. Verify on the first capture: world `+7C8` ≈ 0.01667 s (the braking sampler records world
    `+7C4..+7CB`); record the median step of every capture next to its result.
-3. If the config route does not hold 60 Hz (unverified on the 165 Hz monitor), ask the owner
-   to switch the display to 60 Hz for the session.
+3. **It does not hold** (F449, 19 October): with `vsync="1"` and `refreshRate 60` set, world
+   `+7C8` stayed 6.10 / 6.37 ms (~160 Hz) in two grid captures. For 60 Hz captures ask the owner
+   to switch the display to 60 Hz for the session, and still record `+7C8` per capture.
 
 ## Scenario
 

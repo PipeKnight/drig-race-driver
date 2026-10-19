@@ -27,8 +27,7 @@
 //! (docs/AI_MISTAKES_PACING_RESEARCH.md).
 //!
 //! Selected scope, not recovered or not yet ported: block/draft (data-gated
-//! off), visibility_loss (no smoke value), traction control, AI ABS cap,
-//! start-line reaction. The random offset generator is an authored LCG (the original RNG
+//! off), visibility_loss (no smoke value), start-line reaction. The random offset generator is an authored LCG (the original RNG
 //! stream is not identified). Characteristic values default to 1.0 (the live
 //! player-slot set); the difficulty default is the live Normal value 0.606.
 use crate::source_vehicle::Controls;
@@ -634,6 +633,12 @@ pub struct Parameters {
     st_angle_factor: f32,
     slide_lift: [f32; 3],
     brake_cruise_exponent: f32,
+    /// tcMinSpeed, tcMaxSpeed, tcMinLevel, tcMaxLevel, tcMaxWheelSpin
+    /// (ai_vehicle_config, built-in defaults 1, 20, 0, 0.5, 2).
+    traction: [f32; 5],
+    /// absMinSpeed, absMinWheelLock, absMaxWheelLock, absMinBrake
+    /// (ai_vehicle_config, built-in defaults 5, 0.7, 0.3, 0.2).
+    abs: [f32; 4],
     /// Gains P/I/D and limits P/I/D/output (ai_vehicle_config pid*).
     pid: [f32; 7],
     pub steering_speed: f32,
@@ -844,6 +849,19 @@ impl Parameters {
                 v("throttleSlideLiftMin")?,
             ],
             brake_cruise_exponent: v("brakeCruiseExponent")?,
+            traction: [
+                v_or("tcMinSpeed", 1.),
+                v_or("tcMaxSpeed", 20.),
+                v_or("tcMinLevel", 0.),
+                v_or("tcMaxLevel", 0.5),
+                v_or("tcMaxWheelSpin", 2.),
+            ],
+            abs: [
+                v_or("absMinSpeed", 5.),
+                v_or("absMinWheelLock", 0.7),
+                v_or("absMaxWheelLock", 0.3),
+                v_or("absMinBrake", 0.2),
+            ],
             pid: [
                 v("pidProportionalGain")?,
                 v("pidIntegralGain")?,
@@ -1587,6 +1605,11 @@ pub struct View {
     pub reverse_gear: bool,
     /// The car's AI traffic extents (own car state +0x110/+0x114).
     pub extents: Extents,
+    /// Per wheel: rolling speed (wheel +0xE0 × +0x104) and the driven flag
+    /// (drive share +0x10C ≠ 0), as the AI car-state update 0x402D20 stores
+    /// them (car state +0x240 and +0x250, read by vfuncs +0x10 and +0x14).
+    pub wheel_speeds: [f32; 4],
+    pub driven: [bool; 4],
 }
 
 impl View {
@@ -1610,6 +1633,8 @@ impl View {
             obstruction,
             reverse_gear: car.reverse_gear(),
             extents: car.ai_extents(),
+            wheel_speeds: car.wheel_rolling_speeds(),
+            driven: car.driven_wheels(),
         }
     }
 }
@@ -1745,6 +1770,70 @@ fn approach(current: f32, target: f32, up: f32, down: f32, dt: f32) -> f32 {
         (current - dt * down).max(target)
     }
 }
+/// AI traction control (0x77AA10), a throttle limit: between tcMinSpeed and
+/// tcMaxSpeed, the fastest driven wheel's rolling speed against the car's
+/// speed pulls the throttle from 1 towards a level that runs from tcMinLevel
+/// to tcMaxLevel with speed, reached at tcMaxWheelSpin.
+fn traction_control(tc: &[f32; 5], speed: f32, wheel_speeds: &[f32; 4], driven: &[bool; 4]) -> f32 {
+    let [min_speed, max_speed, min_level, max_level, max_spin] = *tc;
+    if speed <= min_speed || max_speed <= speed {
+        return 1.;
+    }
+    let fastest = wheel_speeds
+        .iter()
+        .zip(driven)
+        .filter(|&(_, &driven)| driven)
+        .fold(0f32, |m, (&w, _)| if m < w { w } else { m });
+    if fastest <= speed {
+        return 1.;
+    }
+    let t = if min_speed == max_speed {
+        0.
+    } else {
+        (speed - min_speed) / (max_speed - min_speed)
+    };
+    let level = ((max_level - min_level) * t + min_level)
+        .clamp(min_level.min(max_level), min_level.max(max_level));
+    let spin = if max_spin == 1. {
+        0.
+    } else {
+        (fastest / speed - 1.) / (max_spin - 1.)
+    };
+    let limit = (level - 1.) * spin + 1.;
+    if level <= 1. {
+        limit.clamp(level, 1.)
+    } else {
+        limit.clamp(1., level)
+    }
+}
+
+/// AI ABS cap (0x77A2E0), a brake limit: above absMinSpeed, the slowest
+/// wheel's rolling speed against the car's speed pulls the brake from 1 at
+/// absMinWheelLock towards absMinBrake at absMaxWheelLock.
+fn abs_cap(abs: &[f32; 4], speed: f32, wheel_speeds: &[f32; 4]) -> f32 {
+    let [min_speed, min_lock, max_lock, min_brake] = *abs;
+    if speed <= min_speed {
+        return 1.;
+    }
+    let slowest = wheel_speeds
+        .iter()
+        .fold(speed, |m, &w| if w < m { w } else { m });
+    if slowest >= speed {
+        return 1.;
+    }
+    let lock = if min_lock == max_lock {
+        0.
+    } else {
+        (slowest / speed - min_lock) / (max_lock - min_lock)
+    };
+    let cap = (min_brake - 1.) * lock + 1.;
+    if min_brake <= 1. {
+        cap.clamp(min_brake, 1.)
+    } else {
+        cap.clamp(1., min_brake)
+    }
+}
+
 /// Linear remap of `x` over `[x0, x1]` onto `[y0, y1]`, clamped to the output range.
 fn remap(x: f32, x0: f32, x1: f32, y0: f32, y1: f32) -> f32 {
     let t = if x1 == x0 { 0. } else { (x - x0) / (x1 - x0) };
@@ -1933,7 +2022,7 @@ impl AiDriver {
         // Track view: progress along the racing line (0x79C360).
         let (segment, arc, line_distance) = data.line.project(position, self.segment);
         self.segment = Some(segment);
-        let (_, here, _, limits_here) = data.line.at(arc);
+        let (_, _, _, limits_here) = data.line.at(arc);
         let tr = p.traffic.clone();
         let own = Other::from_pose(0, view.pose, view.velocity, view.extents);
         let f = horizontal(forward);
@@ -2493,12 +2582,13 @@ impl AiDriver {
                                 let toward_negative = self.overtake.state == 1;
                                 request.desired_offset = self.offset
                                     + if toward_negative { -dt } else { dt } * tr.ov_merge;
-                                // Positive curvature is a left-hand bend here [I]:
-                                // moving left widens a right-hand bend.
+                                // State 1 with bend flag +0x45 (κ > min), state 2
+                                // with +0x44 (κ < −min). κ is positive for a bend
+                                // toward positive offsets, so either move widens it.
                                 let outside = if toward_negative {
-                                    self.curvature < -tr.ov_corner[0]
-                                } else {
                                     self.curvature > tr.ov_corner[0]
+                                } else {
+                                    self.curvature < -tr.ov_corner[0]
                                 };
                                 let c = if speed > tr.ov_slow_speed && outside {
                                     corner
@@ -2753,7 +2843,7 @@ impl AiDriver {
 
         // Look-ahead, target point and curvature (0x779A20, 0x798E90).
         self.update_look_ahead(speed);
-        let (point, ahead, lateral, limits) = data.line.at(arc + self.look_ahead);
+        let (point, _, lateral, limits) = data.line.at(arc + self.look_ahead);
         // Limit types 1/2 (racing limits), or 3/4 (track limits) for avoid.
         let limits = if request.track_limits {
             data.line.track_limits_at(arc + self.look_ahead)
@@ -2761,7 +2851,18 @@ impl AiDriver {
             limits
         };
         self.offset = self.offset.clamp(limits[0], limits[1]);
-        self.curvature = wrap(heading(ahead) - heading(here)) / self.look_ahead.max(1e-3);
+        // 0x798E90: the angle between the line laterals at the car (+0x180)
+        // and at the look-ahead (+0xC0), acos of their clamped dot product,
+        // negative when the look-ahead point lies on the car lateral's
+        // negative side; kept when the look-ahead is not positive.
+        let cos = dot2(here_lateral, lateral).clamp(-1., 1.);
+        let mut angle = f64::from(cos).acos() as f32;
+        if dot2(sub(point, here_point), here_lateral) < 0. {
+            angle = -angle;
+        }
+        if self.look_ahead > 0. {
+            self.curvature = angle / self.look_ahead;
+        }
         // Lateral PID (0x7892E0): error of the car from its desired line offset.
         let error = line_distance - self.offset;
         let [kp, ki, kd, lp, li, ld, lo] = p.pid;
@@ -2914,10 +3015,15 @@ impl AiDriver {
         if slip > std::f32::consts::FRAC_PI_2 && !request.reverse {
             brake = 1.;
         }
-        if request.full_brake
-            || request.force_brake
+        if request.force_brake
             || (request.brake_to_speed && speed - request.desired_speed > rs.target_speed_big)
         {
+            brake = 1.;
+        }
+        // The AI ABS cap (0x77A2E0) limits every source but the full-brake
+        // flag +0xB2, which 0x78E8A0 returns before it.
+        brake = brake.min(abs_cap(&p.abs, speed, &view.wheel_speeds));
+        if request.full_brake {
             brake = 1.;
         }
         brake = brake.min(1.).min(request.brake_cap);
@@ -3002,7 +3108,8 @@ impl AiDriver {
                 .min(follow)
                 .min(slide)
                 .min(corner)
-                .min(request.throttle_cap);
+                .min(request.throttle_cap)
+                .min(traction_control(&p.traction, speed, &view.wheel_speeds, &view.driven));
             // powerout_spin (0x77A450): armed, past the brake line, previous
             // throttle above 0.6 and moving; while active the throttle is full.
             if within_hold && self.throttle > POWEROUT_THROTTLE && speed > POWEROUT_SPEED {
@@ -3482,6 +3589,35 @@ impl AiDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn traction_control_limits_the_throttle_by_driven_wheel_spin() {
+        let tc = [1., 20., 0., 0.5, 2.];
+        let front = [false, false, true, true];
+        // Outside tcMinSpeed..tcMaxSpeed, or no driven wheel faster than the car: 1.
+        assert_eq!(traction_control(&tc, 1., &[0., 0., 9., 9.], &front), 1.);
+        assert_eq!(traction_control(&tc, 20., &[0., 0., 40., 40.], &front), 1.);
+        assert_eq!(traction_control(&tc, 10., &[30., 30., 9., 9.], &front), 1.);
+        // At 10.5 m/s the level is 0.25; 1.5x spin is halfway to tcMaxWheelSpin.
+        let half = traction_control(&tc, 10.5, &[0., 0., 15.75, 1.], &front);
+        assert!((half - 0.625).abs() < 1e-6, "{half}");
+        // Spin beyond tcMaxWheelSpin holds the level.
+        let full = traction_control(&tc, 10.5, &[0., 0., 40., 1.], &front);
+        assert!((full - 0.25).abs() < 1e-6, "{full}");
+    }
+
+    #[test]
+    fn abs_cap_limits_the_brake_by_the_slowest_wheel() {
+        let abs = [5., 0.7, 0.3, 0.2];
+        // At or below absMinSpeed, or no wheel slower than the car: 1.
+        assert_eq!(abs_cap(&abs, 5., &[0.; 4]), 1.);
+        assert_eq!(abs_cap(&abs, 20., &[20., 21., 20., 22.]), 1.);
+        // Ratio 0.7 or more: 1; 0.5 is halfway: 0.6; 0.3 or less: absMinBrake.
+        assert_eq!(abs_cap(&abs, 20., &[15., 20., 20., 20.]), 1.);
+        let half = abs_cap(&abs, 20., &[20., 10., 20., 20.]);
+        assert!((half - 0.6).abs() < 1e-6, "{half}");
+        assert_eq!(abs_cap(&abs, 20., &[20., 20., 0., 20.]), 0.2);
+    }
 
     #[test]
     fn grid_rev_pulses_stay_within_shipped_ranges() {

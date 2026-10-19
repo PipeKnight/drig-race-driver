@@ -637,6 +637,13 @@ impl Run<'_> {
     }
 }
 
+/// Counter (ii): a body driven into the ground by a route entity box during
+/// the run, reported apart from the expected losses (the open step-size
+/// family, docs/ROBUSTNESS_RESEARCH.md §9).
+fn in_run(l: &grid_tools::soak::ExpectedLoss) -> bool {
+    l.pressed == grid_tools::dynamic_props::Pressed::EntityBoxInRun
+}
+
 /// One `soak_expected_loss` line per expected loss, then the result line.
 fn result_line(scenario: &Scenario, outcome: &Outcome) -> String {
     let failure = outcome.failures.first();
@@ -655,7 +662,7 @@ fn result_line(scenario: &Scenario, outcome: &Outcome) -> String {
         );
     }
     lines + &format!(
-        "soak_result seed={} status={} kind={} tick={} ticks={} resets={} auto_resets={} expected_losses={} breaks={} max_bodies={} seconds={:.1} digest={:016x} cars={} route={} error={}",
+        "soak_result seed={} status={} kind={} tick={} ticks={} resets={} auto_resets={} expected_losses={} box_losses={} breaks={} max_bodies={} seconds={:.1} digest={:016x} cars={} route={} error={}",
         scenario.seed,
         if failure.is_some() { "fail" } else { "pass" },
         failure.map_or("-", |f| f.kind.name()),
@@ -663,7 +670,8 @@ fn result_line(scenario: &Scenario, outcome: &Outcome) -> String {
         outcome.ticks,
         outcome.resets,
         outcome.auto_resets,
-        outcome.expected.len(),
+        outcome.expected.iter().filter(|l| !in_run(l)).count(),
+        outcome.expected.iter().filter(|l| in_run(l)).count(),
         outcome.breaks,
         outcome.max_bodies,
         outcome.seconds,
@@ -840,6 +848,7 @@ struct Row {
     digest: String,
     auto_resets: u64,
     expected_losses: u64,
+    box_losses: u64,
 }
 
 fn parse_result(scenario: &Scenario, line: &str) -> Row {
@@ -865,6 +874,7 @@ fn parse_result(scenario: &Scenario, line: &str) -> Row {
         digest: field("digest").into(),
         auto_resets: num("auto_resets"),
         expected_losses: num("expected_losses"),
+        box_losses: num("box_losses"),
     }
 }
 
@@ -889,11 +899,26 @@ fn write_summary(out: &Path, name: &str, rows: &[Row], started: Instant) -> Resu
         .collect();
     writeln!(
         f,
-        "Expected losses (bodies the original's geometry presses down at their spawn pose, docs/ROBUSTNESS_RESEARCH.md): {}.\n",
+        "Expected losses (bodies the original's geometry presses down at their spawn pose, or that left the collision ground, docs/ROBUSTNESS_RESEARCH.md): {}.\n",
         if expected.is_empty() {
             "none".to_string()
         } else {
             expected.join(", ")
+        }
+    )?;
+    let boxed: Vec<String> = rows
+        .iter()
+        .filter(|r| r.box_losses > 0)
+        .map(|r| format!("seed {} ({})", r.scenario.seed, r.box_losses))
+        .collect();
+    writeln!(
+        f,
+        "In-run entity-box losses (counter (ii): bodies a route entity box drove into the ground in one step; open step-size debt, docs/ROBUSTNESS_RESEARCH.md §9, FIDELITY_BACKLOG): {} in total{}.\n",
+        rows.iter().map(|r| r.box_losses).sum::<u64>(),
+        if boxed.is_empty() {
+            String::new()
+        } else {
+            format!(": {}", boxed.join(", "))
         }
     )?;
     let mut groups: BTreeMap<String, Vec<&Row>> = BTreeMap::new();
@@ -954,12 +979,12 @@ fn write_summary(out: &Path, name: &str, rows: &[Row], started: Instant) -> Resu
     let mut tsv = std::io::BufWriter::new(std::fs::File::create(out.join("summary.tsv"))?);
     writeln!(
         tsv,
-        "seed\tstatus\tkind\ttick\tticks\tresets\tbreaks\tmax_bodies\tseconds\tdigest\terror\tscenario"
+        "seed\tstatus\tkind\ttick\tticks\tresets\tbreaks\tmax_bodies\texpected_losses\tbox_losses\tseconds\tdigest\terror\tscenario"
     )?;
     for r in rows {
         writeln!(
             tsv,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.1}\t{}\t{}\t{}",
             r.scenario.seed,
             r.status,
             r.kind,
@@ -968,6 +993,8 @@ fn write_summary(out: &Path, name: &str, rows: &[Row], started: Instant) -> Resu
             r.resets,
             r.breaks,
             r.max_bodies,
+            r.expected_losses,
+            r.box_losses,
             r.seconds,
             r.digest,
             r.error,
@@ -1172,11 +1199,12 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
                             digest: "-".into(),
                             auto_resets: 0,
                             expected_losses: 0,
+                            box_losses: 0,
                         }
                     }
                 };
                 println!(
-                    "soak_done seed={} cars={} route={} {} {} tick={} ticks={} breaks={} max_bodies={} expected_losses={} {:.0}s {}",
+                    "soak_done seed={} cars={} route={} {} {} tick={} ticks={} breaks={} max_bodies={} expected_losses={} box_losses={} {:.0}s {}",
                     row.scenario.seed,
                     row.scenario.cars,
                     row.scenario.route.split('/').nth(2).unwrap_or(""),
@@ -1187,6 +1215,7 @@ fn orchestrate(options: Options, name: &str) -> Result<i32> {
                     row.breaks,
                     row.max_bodies,
                     row.expected_losses,
+                    row.box_losses,
                     row.seconds,
                     row.error
                 );

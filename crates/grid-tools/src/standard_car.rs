@@ -148,8 +148,8 @@ fn f(b: &[u8], o: usize) -> f32 {
 /// +0xE10 becomes `((downforce / +0xFD0)·0.2 + 0.8)·+0xFC4` when +0xFD0 ≠ 0.
 /// A car whose CSV downforce lies inside the range keeps it (Lacetti 0.5,
 /// e10 0x3F4CCCCD live); one above it is limited (Courage LC70 9 → 1.5,
-/// e10 0x3EEAAAAC live) [V: both live captures]. The other 29 setup values
-/// are not applied here (open).
+/// e10 0x3EEAAAAC live) [V: both live captures]. The wheel records follow in
+/// [`apply_default_wheel_setup`].
 pub fn apply_default_downforce_setup(owner: &mut [u32]) {
     let f = |o: usize| f32::from_bits(owner[o / 4]);
     let (a, b, x, drag_base) = (f(0xf24), f(0xf9c), f(0xfd0), f(0xfc4));
@@ -176,6 +176,103 @@ pub fn apply_default_downforce_setup(owner: &mut [u32]) {
         let drag = ((value / x) * f32::from_bits(0x3e4c_cccd) + f32::from_bits(0x3f4c_cccd))
             * drag_base;
         owner[0xe10 / 4] = drag.to_bits();
+    }
+}
+
+/// The default setup's wheel records (0x9C32F0 per wheel; docs/SERIES.md
+/// "The default car setup's wheel records"). Each setup value i is
+/// `(A − B)·s + B` (0 for a negative slider) with the range A (properties
+/// +0x40 + 4i), B (+0xB8 + 4i) and the 0x9C3C30 default slider
+/// `s = (clamp(x, B, A) − B) / (A − B)` clamped to [−1, 1] (0x9E5680), x a
+/// per-value car property. A wheel whose position z (+0x8) is above 0 takes
+/// the front values, otherwise the rear ones:
+/// +0xEC v0/v1, +0xE8 v2/v3, +0x5C v4/v5, +0x60 v6/v8, +0x114 v7/v6 and
+/// v9/v8, +0x70 v28/v29, and +0x68/+0x64 rescaled about values 10 and 11.
+/// Value 11 (range 0.001–0.14 on the explicit layout) puts the damper speed
+/// threshold +0x64 at 0.14 instead of the raw property 400 [V: live dumps of
+/// the Lacetti and the Courage LC70 on the Donington grid, F447]. The brake
+/// share +0x108, the +0x10C term and the car-level writes (+0x1564 ride
+/// height, +0x1574..+0x1584, +0x18F8..+0x1914) already equal the live words
+/// on both cars and are left as constructed.
+pub fn apply_default_wheel_setup(owner: &mut [u32]) {
+    const P: usize = 0xe78;
+    let f = |owner: &[u32], o: usize| f32::from_bits(owner[o / 4]);
+    let p = |o: usize| f(owner, P + o);
+    let value = |i: usize, x: f32| -> f32 {
+        let (a, b) = (p(0x40 + 4 * i), p(0xb8 + 4 * i));
+        let slider = if b < a {
+            let mut v = b;
+            if b <= x {
+                v = if a < x { a } else { x };
+            }
+            (v - b) / (a - b)
+        } else {
+            0.
+        };
+        let slider = slider.clamp(-1., 1.);
+        if 0. <= slider { (a - b) * slider + b } else { 0. }
+    };
+    let half = 0.5f32;
+    let v: [f32; 12] = [
+        value(0, (p(0x534) + p(0x530)) * half),
+        value(1, (p(0x52c) + p(0x528)) * half),
+        value(2, p(0x424)),
+        value(3, p(0x428)),
+        value(4, p(0x40c)),
+        value(5, p(0x410)),
+        value(6, p(0x440)),
+        value(7, p(0x440) * p(0x438)),
+        value(8, p(0x444)),
+        value(9, p(0x444) * p(0x43c)),
+        value(10, (p(0x454) * p(0x444) + p(0x450) * p(0x440)) * half),
+        value(11, (p(0x44c) + p(0x448)) * half),
+    ];
+    let (v28, v29) = (value(28, p(0x414)), value(29, p(0x418)));
+    // 0x9C32F0: rescale a front/rear pair about the setup value; the
+    // threshold 0xCB2294 is 0.001.
+    let rescale = |value: f32, mid: f32, a: f32, b: f32| -> (f32, f32) {
+        let base = if mid <= value { a } else { b };
+        if (mid - base).abs() >= f32::from_bits(0x3a83_126f) {
+            ((value - base) / (mid - base), base)
+        } else {
+            (0., base)
+        }
+    };
+    let (f12, f1) = (p(0x440), p(0x444));
+    let (f18, f13) = (p(0x450) * f12, p(0x454) * f1);
+    let (t10, base10) = rescale(v[10], (f18 + f13) * half, p(0x68), p(0xe0));
+    let (f2, f3) = (p(0x448), p(0x44c));
+    let (t11, base11) = rescale(v[11], (f2 + f3) * half, p(0x6c), p(0xe4));
+    let wheels = owner[0x1620 / 4] as usize;
+    for i in 0..wheels.min(4) {
+        let w = 0x1990 + i * 0x150;
+        let front = f(owner, w + 8) > 0.;
+        let writes: [(usize, f32); 8] = if front {
+            [
+                (0xec, v[0]),
+                (0xe8, v[2]),
+                (0x5c, v[4]),
+                (0x114, v[7] / v[6]),
+                (0x68, ((f18 - base10) * t10 + base10) / f12),
+                (0x70, v28),
+                (0x60, v[6]),
+                (0x64, (f2 - base11) * t11 + base11),
+            ]
+        } else {
+            [
+                (0xec, v[1]),
+                (0xe8, v[3]),
+                (0x5c, v[5]),
+                (0x114, v[9] / v[8]),
+                (0x68, ((f13 - base10) * t10 + base10) / f1),
+                (0x70, v29),
+                (0x60, v[8]),
+                (0x64, (f3 - base11) * t11 + base11),
+            ]
+        };
+        for (o, x) in writes {
+            owner[(w + o) / 4] = x.to_bits();
+        }
     }
 }
 

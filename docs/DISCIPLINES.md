@@ -100,8 +100,11 @@ far); our cars the Chevrolet Lacetti (FWD) and BMW 320si (RWD).
   `lemans_sort_order`; results `post_race_results_lemans` with a Class column [D].
 - Rules: race type 3 — the race is over when the time limit expires [V, RACE_RULES_RESEARCH.md §1];
   classification of time races by progress [V]; day/night cycle.
-- **Engine: not supported** (no Le Mans track, no LMP/GT cars, no time-limited race, no class
-  results, no time of day).
+- **Engine: supported** (F428-F430, docs/LE_MANS.md): Circuit de la Sarthe route 0 is the
+  seventh circuit; race type 3 (the race ends at the time limit, classification by progress,
+  the Le Mans results order); the `lemans_24` field; the 24 h clock from 15:00 with the
+  daynight.xml curves and the headlight fade (state and hand-off; nothing drawn yet). Not
+  yet: the career trigger, the HUD countdown format, rendering the time of day, route 1.
 
 #### Demolition Derby (single_demolition_race)
 
@@ -603,7 +606,10 @@ session: no input to the original), the car-state angular velocity sign, the dri
    disqualification [V], results, soak seeds 33..36; docs/DEMOLITION_DERBY.md); the AI's
    figure-of-eight/oncoming avoidance is the open gap.
 7. **Le Mans**: Circuit de la Sarthe, LMP/GT field (`lemans_restrictions`), time-limited race type 3,
-   class results, time of day and headlights; the largest asset and rendering step.
+   class results, time of day and headlights; the largest asset and rendering step. F428-F430
+   (docs/LE_MANS.md): the track races (route 0), race type 3 and the class results order,
+   the 24 h field, the clock, daynight curves and headlight state; left: rendering the time of
+   day (graphics), route 1, the career trigger.
 8. Head-to-head and driver offers come with a career/front-end layer. F416: the career rules and data
    model are researched and ported as `grid_tools::career` (docs/CAREER_RESEARCH.md); no app front end yet.
 

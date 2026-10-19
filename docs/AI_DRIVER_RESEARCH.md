@@ -163,9 +163,10 @@ driver's characteristic list (+0x30F4).
      per update; final clamp [min(laDistMin, laDistExtraMin), laDistMax].
    - Live constants: 10/45 m, κ 0.002/0.035 rad/m, v 10/60 m/s, step 0.5,
      proportion 0.1, extra 5 m at 0 m/s.
-2. **Curvature κ** (0x798E90): heading change between racing-line direction at
-   the car and at the look-ahead point (`acos(dot)`, signed) divided by the
-   look-ahead distance (rad/m) → +0x6C, copied to request+0x8C.
+2. **Curvature κ** (0x798E90): angle between the racing-line **laterals** at
+   the car (+0x180) and at the look-ahead point (+0xC0), `acos(clamp(dot, −1, 1))`,
+   negated when `(P_ahead − P_car) · lateral_car < 0`, divided by the look-ahead
+   distance (rad/m) when it is positive → +0x6C, copied to request+0x8C (F454).
 3. **Look-ahead point**: 0x788410 walks the link list from the car's current
    link/fraction by the look-ahead distance; link length = `L0 + L1·offset`
    (lateral-offset dependent) — i.e. distance **along the line**, not

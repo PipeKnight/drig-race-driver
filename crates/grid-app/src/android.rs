@@ -9,7 +9,7 @@
 
 use std::ffi::{CString, c_char, c_int};
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,37 +27,62 @@ unsafe extern "C" {
 const ANDROID_LOG_INFO: c_int = 4;
 const ANDROID_LOG_ERROR: c_int = 6;
 
-/// The log file, buffered (P12: about 220 lines per second while driving went
-/// to the shared storage one write each), with the time of its last flush.
-static LOG_FILE: OnceLock<Mutex<(BufWriter<File>, Instant)>> = OnceLock::new();
-/// Longest a line waits in the buffer; errors and panics are written at once.
-const FLUSH_SECONDS: f64 = 0.5;
+/// Lines for the log file's writer thread. F445: the P12 version buffered
+/// the file (64 KiB, flushed at most every 0.5 s from the calling thread) and
+/// the owner's phone then showed every log as 0 bytes; now each line is
+/// written as one write() at once, off the game threads, so a hard kill
+/// (relaunch, swipe away) loses at most the lines still in this channel.
+static LOG_FILE: OnceLock<Mutex<std::sync::mpsc::Sender<String>>> = OnceLock::new();
 static STARTED: OnceLock<Instant> = OnceLock::new();
 static FATAL_SHOWN: AtomicBool = AtomicBool::new(false);
 
 /// Writes one line to logcat and the log file directly (bypasses the stdout
 /// pipe, so it is not lost when the process exits right after).
 pub fn log(priority_error: bool, text: &str) {
-    let priority = if priority_error { ANDROID_LOG_ERROR } else { ANDROID_LOG_INFO };
+    logcat(priority_error, text);
+    if let Some(sender) = LOG_FILE.get() {
+        let seconds = STARTED.get().map_or(0.0, |t| t.elapsed().as_secs_f64());
+        let mark = if priority_error { "E" } else { " " };
+        if let Ok(sender) = sender.lock() {
+            let _ = sender.send(format!("[{seconds:9.3}] {mark} {text}\n"));
+        }
+    }
+}
+
+/// One line to logcat only.
+fn logcat(priority_error: bool, text: &str) {
+    let priority = if priority_error {
+        ANDROID_LOG_ERROR
+    } else {
+        ANDROID_LOG_INFO
+    };
     let line = CString::new(text.replace('\0', " ")).unwrap_or_default();
     // SAFETY: both pointers are valid NUL-terminated strings for the call.
     unsafe {
         __android_log_write(priority, c"grid".as_ptr(), line.as_ptr());
     }
-    if let Some(file) = LOG_FILE.get() {
-        let seconds = STARTED.get().map_or(0.0, |t| t.elapsed().as_secs_f64());
-        let mark = if priority_error { "E" } else { " " };
-        if let Ok(mut guard) = file.lock() {
-            let (file, flushed) = &mut *guard;
-            let _ = writeln!(file, "[{seconds:9.3}] {mark} {text}");
-            // Errors (panics, fatal screens) reach the file at once; the rest
-            // at most FLUSH_SECONDS later.
-            if priority_error || flushed.elapsed().as_secs_f64() >= FLUSH_SECONDS {
-                let _ = file.flush();
-                *flushed = Instant::now();
+}
+
+/// Writes each line to the log file as soon as it arrives, one write() per
+/// line (the kernel keeps it when the process is killed). A failed write is
+/// reported to logcat once, with the error.
+fn start_log_writer(mut file: File) -> Option<std::sync::mpsc::Sender<String>> {
+    let (sender, receiver) = std::sync::mpsc::channel::<String>();
+    std::thread::Builder::new()
+        .name("grid-logfile".into())
+        .spawn(move || {
+            let mut reported = false;
+            for line in receiver {
+                if let Err(error) = file.write_all(line.as_bytes())
+                    && !reported
+                {
+                    reported = true;
+                    logcat(true, &format!("log file: write failed: {error}"));
+                }
             }
-        }
-    }
+        })
+        .ok()?;
+    Some(sender)
 }
 
 /// Opens the log file, redirects stdout and stderr into a pipe read line by
@@ -66,11 +91,14 @@ pub fn init() {
     STARTED.get_or_init(Instant::now);
     match with_activity(|env, activity| env.call_method(activity, "openLogFile", "()I", &[])?.i()) {
         // SAFETY: Java detached the descriptor and handed its ownership over.
-        Some(fd) if fd >= 0 => drop(LOG_FILE.set(Mutex::new((
-            BufWriter::with_capacity(64 * 1024, unsafe { File::from_raw_fd(fd) }),
-            Instant::now(),
-        )))),
-        _ => log(true, "log file: Download/GRID-Reassembly could not be opened; logcat only"),
+        Some(fd) if fd >= 0 => match start_log_writer(unsafe { File::from_raw_fd(fd) }) {
+            Some(sender) => drop(LOG_FILE.set(Mutex::new(sender))),
+            None => log(true, "log file: writer thread failed; logcat only"),
+        },
+        _ => log(
+            true,
+            "log file: Download/GRID-Reassembly could not be opened; logcat only",
+        ),
     }
     log(
         false,
@@ -115,7 +143,10 @@ fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let thread = std::thread::current();
-        fatal(&format!("panic in thread '{}': {info}", thread.name().unwrap_or("unnamed")));
+        fatal(&format!(
+            "panic in thread '{}': {info}",
+            thread.name().unwrap_or("unnamed")
+        ));
         previous(info);
     }));
 }
@@ -130,7 +161,12 @@ pub fn fatal(message: &str) {
     }
     let shown = with_activity(|env, activity| {
         let text = env.new_string(message)?;
-        env.call_method(activity, "showFatal", "(Ljava/lang/String;)V", &[JValue::Object(&text)])?;
+        env.call_method(
+            activity,
+            "showFatal",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&text)],
+        )?;
         Ok(())
     });
     if shown.is_none() {
@@ -199,4 +235,12 @@ pub fn display_refresh_hz() -> Option<f32> {
             .l()?;
         env.call_method(&display, "getRefreshRate", "()F", &[])?.f()
     })
+}
+
+/// `MainActivity.dataReady()` (F451): false when the bundled game data is not
+/// fully copied; the copy screen has then been opened in place of the game,
+/// and the game must not read the data folder.
+pub fn data_ready() -> bool {
+    with_activity(|env, activity| env.call_method(activity, "dataReady", "()Z", &[])?.z())
+        .unwrap_or(true)
 }

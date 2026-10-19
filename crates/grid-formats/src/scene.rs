@@ -51,54 +51,134 @@ pub fn read_renderable_draws<'a>(
     meshes: &[Mesh<'a>],
     id: &[u8],
 ) -> Result<Vec<Draw<'a>>> {
-    let selected: Vec<_> = (0..tree.nodes.len())
-        .filter(|&i| tree.name(i) == b"NODE" && tree.string(i, b"id").is_ok_and(|name| name == id))
-        .collect();
-    if selected.len() != 1 {
-        return fail(0, "expected one selected renderable node");
-    }
-    read_scene_draws(tree, meshes, false, Some(selected[0]))
+    Renderables::new(tree, meshes)?.draws(id)
 }
+
+/// [`read_renderable_draws`] for many ids of one tree: the source, shader and
+/// node-id tables are built once, and each id walks only its own subtree
+/// (F445: the Nurburgring's 11,962 breakable pieces scanned the whole object
+/// library each, minutes of black screen before a race on the phone). Same
+/// draws, order and errors as one call per id.
+pub struct Renderables<'t, 'a> {
+    tree: &'t Tree<'a>,
+    meshes: &'t [Mesh<'a>],
+    context: Context<'a>,
+    nodes: std::collections::HashMap<&'a [u8], Vec<usize>>,
+}
+
+impl<'t, 'a> Renderables<'t, 'a> {
+    pub fn new(tree: &'t Tree<'a>, meshes: &'t [Mesh<'a>]) -> Result<Self> {
+        let mut nodes: std::collections::HashMap<&'a [u8], Vec<usize>> = Default::default();
+        for i in 0..tree.nodes.len() {
+            if tree.name(i) == b"NODE"
+                && let Ok(name) = tree.string(i, b"id")
+            {
+                nodes.entry(name).or_default().push(i);
+            }
+        }
+        Ok(Self {
+            tree,
+            meshes,
+            context: Context::new(tree, meshes)?,
+            nodes,
+        })
+    }
+
+    /// Ordinary draws under the one NODE named `id`.
+    pub fn draws(&self, id: &[u8]) -> Result<Vec<Draw<'a>>> {
+        let selected = match self.nodes.get(id).map(Vec::as_slice) {
+            Some([one]) => *one,
+            _ => return fail(0, "expected one selected renderable node"),
+        };
+        // Descendants in index order: the instances whose ancestor chain
+        // holds `selected`, as the whole-tree scan visits them.
+        let mut instances = Vec::new();
+        let mut stack = self.tree.nodes[selected].children.clone();
+        while let Some(n) = stack.pop() {
+            if self.tree.name(n) == b"RENDERSTREAMINSTANCE" {
+                instances.push(n);
+            }
+            stack.extend_from_slice(&self.tree.nodes[n].children);
+        }
+        instances.sort_unstable();
+        let mut result = Vec::new();
+        for i in instances {
+            if let Some(draw) = instance_draw(
+                self.tree,
+                self.meshes,
+                &self.context,
+                i,
+                false,
+                Some(selected),
+            )? {
+                result.push(draw);
+            }
+        }
+        Ok(result)
+    }
+}
+
+/// Mesh sources by id and the tree's shader instance ids.
+struct Context<'a> {
+    sources: BTreeMap<&'a [u8], usize>,
+    shaders: std::collections::BTreeSet<&'a [u8]>,
+}
+
+impl<'a> Context<'a> {
+    fn new(tree: &Tree<'a>, meshes: &[Mesh<'a>]) -> Result<Self> {
+        let sources: BTreeMap<_, _> = meshes.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
+        if sources.len() != meshes.len() {
+            return fail(0, "duplicate mesh source ID");
+        }
+        let shaders = (0..tree.nodes.len())
+            .filter(|&i| tree.name(i) == b"SHADERINSTANCE")
+            .map(|i| tree.string(i, b"id"))
+            .collect::<Result<_>>()?;
+        Ok(Self { sources, shaders })
+    }
+}
+
 fn read_scene_draws<'a>(
     tree: &Tree<'a>,
     meshes: &[Mesh<'a>],
     object_subset: bool,
     selected: Option<usize>,
 ) -> Result<Vec<Draw<'a>>> {
-    let sources: BTreeMap<_, _> = meshes.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
-    if sources.len() != meshes.len() {
-        return fail(0, "duplicate mesh source ID");
-    }
-    let shaders: std::collections::BTreeSet<_> = (0..tree.nodes.len())
-        .filter(|&i| tree.name(i) == b"SHADERINSTANCE")
-        .map(|i| tree.string(i, b"id"))
-        .collect::<Result<_>>()?;
+    let context = Context::new(tree, meshes)?;
     let mut result = Vec::new();
     for i in 0..tree.nodes.len() {
         if tree.name(i) != b"RENDERSTREAMINSTANCE" {
             continue;
         }
-        if let Some(selected) = selected {
-            let mut ancestor = tree.nodes[i].parent;
-            let mut found = false;
-            while let Some(a) = ancestor {
-                if a == selected {
-                    found = true;
-                    break;
-                }
-                ancestor = tree.nodes[a].parent;
-            }
-            if !found {
-                continue;
-            }
+        if let Some(draw) = instance_draw(tree, meshes, &context, i, object_subset, selected)? {
+            result.push(draw);
         }
+    }
+    if result.is_empty() && selected.is_none() {
+        return fail(0, "no supported static draws");
+    }
+    Ok(result)
+}
+
+/// One RENDERSTREAMINSTANCE `i` (under `selected`, when given): its draw,
+/// `None` when the object subset skips it, or the error that fails the read.
+fn instance_draw<'a>(
+    tree: &Tree<'a>,
+    meshes: &[Mesh<'a>],
+    context: &Context<'a>,
+    i: usize,
+    object_subset: bool,
+    selected: Option<usize>,
+) -> Result<Option<Draw<'a>>> {
+    let Context { sources, shaders } = context;
+    {
         // The same element also occurs inside car palettes; reject that context.
         let parent = tree.nodes[i].parent.ok_or(crate::Error {
             offset: tree.nodes[i].offset,
             message: "static draw parent absent",
         })?;
         if object_subset && tree.name(parent) != b"LODVISIBLERENDERNODE" {
-            continue;
+            return Ok(None);
         }
         if !object_subset && tree.name(parent) != b"RENDERNODE" {
             return fail(
@@ -170,7 +250,7 @@ fn read_scene_draws<'a>(
         if transform.iter().any(|v| !v.is_finite()) {
             return fail(tree.nodes[i].offset, "composed transform nonfinite");
         }
-        result.push(Draw {
+        Ok(Some(Draw {
             id: tree.string(i, b"id")?,
             joint: tree.string(parent, b"id")?,
             material,
@@ -179,12 +259,8 @@ fn read_scene_draws<'a>(
             vertices: 0..meshes[source].positions.len(),
             indices: meshes[source].indices.clone(),
             transform,
-        });
+        }))
     }
-    if result.is_empty() && selected.is_none() {
-        return fail(0, "no supported static draws");
-    }
-    Ok(result)
 }
 
 pub fn matrix(tree: &Tree<'_>, node: usize) -> Result<[f32; 16]> {
@@ -393,4 +469,86 @@ pub fn read_draws<'a>(
         );
     }
     Ok(draws)
+}
+
+#[cfg(test)]
+mod renderables_tests {
+    use super::*;
+
+    /// The pre-F445 per-id read: one whole-tree scan per renderable id.
+    fn one_scan<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>], id: &[u8]) -> Result<Vec<Draw<'a>>> {
+        let selected: Vec<_> = (0..tree.nodes.len())
+            .filter(|&i| {
+                tree.name(i) == b"NODE" && tree.string(i, b"id").is_ok_and(|name| name == id)
+            })
+            .collect();
+        if selected.len() != 1 {
+            return fail(0, "expected one selected renderable node");
+        }
+        // The old loop: every RENDERSTREAMINSTANCE of the tree, kept when
+        // its ancestor chain holds the selected node.
+        let context = Context::new(tree, meshes)?;
+        let mut result = Vec::new();
+        for i in 0..tree.nodes.len() {
+            if tree.name(i) != b"RENDERSTREAMINSTANCE" {
+                continue;
+            }
+            let mut ancestor = tree.nodes[i].parent;
+            let mut found = false;
+            while let Some(a) = ancestor {
+                if a == selected[0] {
+                    found = true;
+                    break;
+                }
+                ancestor = tree.nodes[a].parent;
+            }
+            if found
+                && let Some(draw) =
+                    instance_draw(tree, meshes, &context, i, false, Some(selected[0]))?
+            {
+                result.push(draw);
+            }
+        }
+        Ok(result)
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn renderables_match_one_scan_per_id_on_the_nurburgring_objects() {
+        let root = std::path::PathBuf::from(std::env::var("GRID_GAME_ROOT").unwrap());
+        let bytes = std::fs::read(root.join("tracks/europe/nurburgring/objects.pssg")).unwrap();
+        let tree = crate::pssg::read_tree(&bytes).unwrap();
+        let meshes = crate::mesh::read_static_meshes(&tree).unwrap();
+        let index = Renderables::new(&tree, &meshes).unwrap();
+        let ids: Vec<&[u8]> = (0..tree.nodes.len())
+            .filter(|&i| tree.name(i) == b"NODE")
+            .filter_map(|i| tree.string(i, b"id").ok())
+            .collect();
+        assert!(ids.len() > 500, "{}", ids.len());
+        // Every node id once (the app asks per breakable piece, 11,962 times), plus
+        // an id that is not there.
+        let mut checked = 0;
+        for id in ids.iter().copied().chain([&b"no such node"[..]]) {
+            let (a, b) = (index.draws(id), one_scan(&tree, &meshes, id));
+            assert_eq!(
+                a.as_ref().map(Vec::len).map_err(|e| e.message),
+                b.as_ref().map(Vec::len).map_err(|e| e.message),
+                "{}",
+                String::from_utf8_lossy(id)
+            );
+            if let (Ok(a), Ok(b)) = (a, b) {
+                assert_eq!(a.len(), b.len());
+                for (x, y) in a.iter().zip(&b) {
+                    assert_eq!(
+                        (x.id, x.joint, x.material, x.source, x.prototype),
+                        (y.id, y.joint, y.material, y.source, y.prototype)
+                    );
+                    assert_eq!(x.transform.map(f32::to_bits), y.transform.map(f32::to_bits));
+                    assert_eq!((&x.vertices, &x.indices), (&y.vertices, &y.indices));
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 100, "{checked}");
+    }
 }
