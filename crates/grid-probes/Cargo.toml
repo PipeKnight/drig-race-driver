@@ -835,3 +835,8 @@ test = false
 name = "grid-pad-probe"
 path = "src/bin/grid-pad-probe.rs"
 test = false
+
+[[bin]]
+name = "grid-joint"
+path = "src/bin/grid-joint.rs"
+test = false
