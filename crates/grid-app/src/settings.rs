@@ -269,6 +269,10 @@ pub struct Settings {
     pub ai: String,
     /// `[sound] effects`, percent (the pause menu's Effects Volume).
     pub sound_effects: Option<u8>,
+    /// `[sound] speech` / `music`, percent (the pause menu's Speech and
+    /// Music Volume; the port plays neither yet).
+    pub sound_speech: Option<u8>,
+    pub sound_music: Option<u8>,
     /// `[osd]` Screen Setup of the pause menu: lap timer, race position,
     /// speed unit mph.
     pub osd_lap_timer: Option<bool>,
@@ -495,12 +499,16 @@ impl Settings {
                 ("private", "body_contacts") => self.body_contacts = private(value),
                 ("private", "body_events") => self.body_events = private(value),
                 ("private", "deformation") => self.deformation = private(value),
-                ("sound", "effects") => {
+                ("sound", "effects" | "speech" | "music") => {
                     let v = count(value).map_err(at)?;
                     if v > 100 {
-                        return Err(at("`effects` must be 0..100".into()));
+                        return Err(at(format!("`{key}` must be 0..100")));
                     }
-                    self.sound_effects = Some(v as u8);
+                    *match key.as_str() {
+                        "effects" => &mut self.sound_effects,
+                        "speech" => &mut self.sound_speech,
+                        _ => &mut self.sound_music,
+                    } = Some(v as u8);
                 }
                 ("osd", "lap_timer") => self.osd_lap_timer = Some(on(&key, value).map_err(at)?),
                 ("osd", "position") => self.osd_position = Some(on(&key, value).map_err(at)?),
@@ -805,7 +813,15 @@ pub fn save_options(path: &Path, o: &crate::pause_menu::Options, tunes: bool) ->
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
     let on = |b: bool| Some(if b { "on" } else { "off" }.to_owned());
-    let mut new = with_keys(&old, "sound", &[("effects", Some(o.effects.to_string()))]);
+    let mut new = with_keys(
+        &old,
+        "sound",
+        &[
+            ("effects", Some(o.effects.to_string())),
+            ("speech", Some(o.speech.to_string())),
+            ("music", Some(o.music.to_string())),
+        ],
+    );
     new = with_keys(
         &new,
         "osd",
@@ -824,6 +840,13 @@ pub fn save_options(path: &Path, o: &crate::pause_menu::Options, tunes: bool) ->
             .map(|(i, k)| format!("{k}={}", f32::from(o.tunes[i / 2][i % 2]) / 100.))
             .collect();
         new = with_items(&new, "input", &TUNE_KEYS, items.join(" "));
+        // Steering Linearity is an `[assists]` item (`linearity=`).
+        new = with_items(
+            &new,
+            "assists",
+            &["linearity", "response"],
+            format!("linearity={}", f32::from(o.linearity) / 100.),
+        );
     }
     // The result must still be a valid settings file with these options.
     let mut check = Settings::new();
@@ -839,6 +862,7 @@ pub fn save_options(path: &Path, o: &crate::pause_menu::Options, tunes: bool) ->
         ];
     } else {
         back.tunes = o.tunes;
+        back.linearity = o.linearity;
     }
     if back != *o {
         return Err("saved options do not read back".into());
@@ -1131,6 +1155,9 @@ prop_script_speed = 12.5
     fn pause_options_are_saved_and_read_back() {
         let mut o = crate::pause_menu::Options {
             effects: 40,
+            speech: 30,
+            music: 0,
+            linearity: 55,
             lap_timer: false,
             mph: true,
             ..Default::default()
@@ -1152,15 +1179,25 @@ prop_script_speed = 12.5
             s
         };
         let s = read(&text);
-        assert_eq!(crate::pause_menu::initial_options(&s, None).effects, 40);
+        let back = crate::pause_menu::initial_options(&s, None);
+        assert_eq!((back.effects, back.speech, back.music), (40, 30, 0));
+        // Linearity belongs to the Advanced screen: still the default.
+        assert_eq!(back.linearity, 70);
         assert_eq!((s.osd_lap_timer, s.osd_mph, s.osd_fps), (Some(false), Some(true), Some(true)));
         // Advanced: the tunes replace the old items, the device stays.
         save_options(&file, &o, true).unwrap();
         let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.starts_with("# mine\n[input]\ndevice=wheel # wheel\nsteering_deadzone=0.1 "), "{text}");
+        // Lines before the first header are `[assists]`: linearity goes there.
+        assert!(
+            text.starts_with("# mine\nlinearity=0.55\n[input]\ndevice=wheel # wheel\nsteering_deadzone=0.1 "),
+            "{text}"
+        );
         let input = read(&text).input().unwrap();
         assert_eq!(input.device, crate::input::Device::Wheel);
         assert_eq!((input.steering.dead_zone, input.brake.saturation), (Some(0.1), Some(0.85)));
+        let s = read(&text);
+        assert_eq!(crate::pause_menu::initial_options(&s, None).linearity, 55);
+        assert!((s.assists().unwrap().wheel_response - o.wheel_response()).abs() < 1e-6);
         // Saving again changes nothing.
         save_options(&file, &o, true).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), text);

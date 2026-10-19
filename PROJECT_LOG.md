@@ -1,5 +1,13 @@
 # GRID engine project log
 
+F481 Pause menu: Steering Linearity is live and saved; Speech and Music Volume are selectable and saved (2026-10-19, Claude Code; coordinator's order, FIDELITY_BACKLOG row 62 part 2). Docs: docs/PAUSE_MENU.md §3, docs/SETTINGS.md §1.
+- Steering Linearity: a slider of 20 steps (`wheelLinearity` /20 [D]), default 70 % (14/20 [D]). It sets `Runtime::assists.wheel_response = (L − 0.5)·2` at once, the response of the ported 828670 wheel shaping [D]; only `device=wheel` steering uses it. Replays are snapshots, so a live change cannot desync them. Leaving Advanced saves it as `[assists] linearity=`, and at launch it is read back from the aids.
+- Speech and Music Volume: 10 % sliders saved as the new `[sound] speech` / `music` keys. The original's dB law and groups are known (4124A0/411DE0 [O]); the port plays no speech or music yet, so nothing is trimmed.
+- Still dimmed: Ghost Car (a feature of its own) and the 900 degree wheel (no static evidence of its effect).
+- Checks [V], release, `--offline`, on 4db126b (F480) + this change:
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 802 passed, 0 failed; clippy clean; `grid-soak quick` 24/24; identities (F476 baselines) solo 79a990f6…4bcc, 12-car 40cd67ca…ab8d.
+- Not run in the app (no rendered runs until the render-leak fix).
+
 F480 Pause-menu options are saved: leaving a settings screen writes them to `<data dir>/settings.ini`, the original's profile autosave (2026-10-19, Claude Code; coordinator's order, FIDELITY_BACKLOG row 62 part 1). Docs: docs/PAUSE_MENU.md §3 "Autosave (F480)", docs/SETTINGS.md §1.
 - [D] Every `*_st_*_optionsscreen` has a link to an `*_st_*_autosave` state (PAUSE_MENU §2), which is the trigger the port reproduces. Leaving Sound Setup, Screen Setup or Advanced returns `pause_menu::Command::Save`.
 - `settings::save_options` writes `[sound] effects` and `[osd] lap_timer/position/minimap/dials/speed_units`; after Advanced it also writes the six `[input]` dead zone and saturation items. The new `settings::with_items` (shared with the Driver Aids writer) removes the old items from item-grammar lines, so `device=wheel` stays. The file is read back and compared before it is written. The next launch reads these keys as before (`initial_options`).

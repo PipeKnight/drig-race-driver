@@ -119,10 +119,21 @@ Leaving a settings screen autosaves the profile (`*_st_*_autosave`) [D].
     (docs/SETTINGS.md) and from the live input calibration.
 - **Instant Replay** (F360, docs/REPLAY.md): the last 10 s with the replay controls and cameras;
   the menu stays open underneath and shows again on Replay Exit.
+- **Steering Linearity** (Advanced, F481) is a slider of 20 steps (5 %), matching the option's
+  integer slider `wheelLinearity` /20 [D]. The default is 70 % = 14/20 [D]. It sets the wheel
+  response `(L − 0.5)·2` of the 828670 command shaping (`assists::wheel_command`, [D],
+  docs/DRIVING_ASSISTS_RESEARCH.md §2.5) at once: `Runtime::assists.wheel_response` is read every
+  tick, and replays are snapshots, so the change cannot desync them. Only `device=wheel` steering
+  is shaped. It is saved as `[assists] linearity=` with the Advanced screen; at launch it is read
+  back from the aids.
+- **Speech and Music Volume** (F481) are 10 % sliders like Effects, saved as `[sound] speech` and
+  `music`. The original trims the speech groups 14, 15, 19 and the music groups 10, 18 with the
+  same dB law (4124A0/411DE0 [O], docs/AUDIO_RESEARCH.md). The port plays no speech or music yet,
+  so for now the values are only kept.
 - **Shown but not selectable** (dimmed), because the prototype has no counterpart yet:
-  - Ghost Car;
-  - Speech and Music Volume;
-  - Steering Linearity, 900 degree wheel.
+  - Ghost Car (a test-drive feature of its own);
+  - 900 degree wheel: what it changes was not traced. A search of the decoded front-end strings
+    found only the menu entry, not its effect.
 - **Gear safety:** pad A is both Menu Select and Gear Up. Every menu action clears the gear queue,
   so a menu press never shifts the car.
 - **Pad stick Y:** the original flips XInput Y thumbs (1 − v) when its device flag +0x94 is set
