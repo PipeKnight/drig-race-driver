@@ -792,3 +792,44 @@ accepted hit skips its cooldown. `AudioMode` holds the mix behind a lock, and `m
 the flow's mode only when the flow changes, so a Crashed in between returns by itself.
 `grid-opponent-race` keeps `contacts` (no mix). Tests: `crashed_ducks_the_engine_and_returns`
 and the crash part of `shipped_collision_data_and_listener`. Not heard.
+
+## 14. Kick-ups (F498)
+
+20 October 2026, Claude Code. Static: 4443D0 (Ghidra `local/gtfix/decomp/coll3/44465e.c.txt`),
+44F330 (W+16C), docs/TYRE_AUDIO_RESEARCH.md §1–4; data dumped to worktree `local/kick/`
+(`mat.tsv` audioMaterials, `iv.tsv` ImpactVarieties, `ci.tsv` CollisionInfos). GRID was not
+launched.
+
+**Recipe [O]** (player only, per wheel and frame, after skid/scrub):
+- skipped without a kick-up ImpactVariety (W+178, set from the preset on a material change);
+- v = |W+150| (car speed); surface = 10·kickupMultiplier of the current AudioMaterial when
+  the wheel's raw token (wheel+C8) is non-zero, else 1;
+- W+1B8 counts down; below 1 the scale W+1BC = 0.005·(rand % 200) and the counter
+  60 + rand % 180 are redrawn;
+- p = W+16C · 0.05v · surface · scale, where W+16C is reset to 1 each frame and 44F330 adds
+  20·peel² with the wobbled peel inside its active branch (44FD88..44FDA5);
+- if rand % 100 < (int)p: x = 0.1·(rand % 10); nothing below the first CollisionInfo's minVel,
+  else the first, second or third whose range holds x; 435EA0 with the cooldown flag 0, so only
+  the −42 dB gate; group W+84 (Wheels 6), position W+1A0.
+
+**Data [O].** Every preset names `Kickup` (KickupSmall 0.01–9.42 −8..−3 dB, Med, Big) except
+`grass` (`GrassKik`, whose first child is GrassKikCrunch 0.01–15.65 −10..−7 dB). With
+x ≤ 0.9 only the first info plays, at about −8 dB. Multipliers: TARMAC 0.043, SMOOTHDRYTAR
+0.040, GRASS 3, GRAVEL and GRAVELTRAP 6, METAL 0.001; TARMAC_SPARK spells the attribute
+`KickupMultiplier`, which the loader does not read. Variety preset `kickup` 10/20 m.
+
+**Consequence.** On gravel at 50 m/s p = 150·scale, so a kick-up starts most frames. On
+tarmac p ≈ 1.1·scale, and int(p) is 1 only for the top scales: rare single ticks. Airborne the
+last surface's variety still plays with surface factor 1.
+
+**Port.** `tyre_audio`:
+- `Bank::kick` (preset ImpactVariety + material multiplier; an absent multiplier is 0 [I]);
+- `Driver::kick_up` on the wheel's own draw sequence, once per vehicle tick [I: the original
+  runs per frame];
+- a sixth per-wheel voice `KICK` that the mixer plays once from its start at the level fixed
+  then;
+- `bus_levels` puts it on Wheels with the kickup distances.
+
+The player's tyre source is centred (§12), so kick-ups are too. Tests:
+`kick_ups_follow_4443d0_and_play_once` and the asset checks in
+`source_launch_peels_then_rolls_reproducibly`. Not heard.

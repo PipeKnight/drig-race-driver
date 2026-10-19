@@ -12,7 +12,13 @@ pub const SLIDE: usize = 2;
 pub const SKID: usize = 3;
 pub const SCRUB: usize = 4;
 pub const CATEGORIES: usize = 5;
+/// The kick-up one-shot voice (4443D0), after the five looping categories.
+pub const KICK: usize = 5;
+/// Voices per wheel: the five categories and the kick-up.
+pub const VOICES: usize = 6;
 const SILENT: f32 = -48.;
+/// 435B20 skips a one-shot quieter than this (CB3BAC).
+const QUIETEST: f32 = -42.;
 
 /// CollisionInfo curve (0x74-byte object, 45B700/459D30). Treble is unused by tyres.
 #[derive(Clone, Debug, PartialEq)]
@@ -63,6 +69,17 @@ pub struct Bank {
     pub infos: Vec<ColInfo>,
     /// AudioMaterial name -> preset categories (roll, peel, slide, skid, scrub).
     materials: HashMap<String, [Option<usize>; CATEGORIES]>,
+    /// AudioMaterial name -> its preset's kick-up ImpactVariety and its own
+    /// kickupMultiplier (4443D0).
+    kicks: HashMap<String, Kick>,
+}
+
+/// A material's kick-up: the ImpactVariety's first three CollisionInfos
+/// (indices into `infos`) and the material's `kickupMultiplier`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Kick {
+    pub infos: [Option<usize>; 3],
+    pub multiplier: f32,
 }
 
 fn attr<'a>(e: &binxml::Element<'a>, name: &str) -> Option<&'a str> {
@@ -200,15 +217,51 @@ impl Bank {
                 material_presets.insert(name, set);
             }
         }
+        // ImpactVarieties: the first three children in file order (45B040).
+        let impacts_bytes = read(&audio.join("ImpactVarieties.bin"), 16 << 20)?;
+        let impacts_doc = binxml::read(&impacts_bytes)?;
+        let mut impacts: HashMap<&str, [Option<usize>; 3]> = HashMap::new();
+        for e in &impacts_doc.elements {
+            if e.name != "ImpactVariety" {
+                continue;
+            }
+            let mut three = [None; 3];
+            let children = impacts_doc.elements[e.children.clone()]
+                .iter()
+                .filter_map(|c| attr(c, "collisionInfo"))
+                .take(3);
+            for (slot, info) in three.iter_mut().zip(children) {
+                *slot = info_index.get(info).copied();
+            }
+            if let Some(name) = attr(e, "name") {
+                impacts.entry(name).or_insert(three);
+            }
+        }
+        let kick_presets: HashMap<&str, [Option<usize>; 3]> = materials_doc
+            .elements
+            .iter()
+            .filter(|e| e.name == "Preset")
+            .filter_map(|e| Some((attr(e, "name")?, *impacts.get(attr(e, "kickupImpactVariety")?)?)))
+            .collect();
         // 45C2B8..45C4F3 reads only name/preset/kickupMultiplier/damping, so
         // per-material ColInfo attributes are ignored; first name wins (4361C0).
         let mut materials = HashMap::new();
+        let mut kicks = HashMap::new();
         for e in &materials_doc.elements {
             if e.name == "AudioMaterial"
                 && let (Some(name), Some(preset)) = (attr(e, "name"), attr(e, "preset"))
                 && let Some(set) = material_presets.get(preset)
             {
                 materials.entry(name.to_owned()).or_insert(*set);
+                if let Some(&infos) = kick_presets.get(preset) {
+                    // [I] An absent kickupMultiplier (TARMAC_SPARK spells it
+                    // with a capital K) is taken as 0: no kick-ups.
+                    let multiplier = attr(e, "kickupMultiplier")
+                        .and_then(|v| v.trim().parse::<f32>().ok())
+                        .filter(|v| v.is_finite())
+                        .unwrap_or(0.);
+                    kicks.entry(name.to_owned()).or_insert(Kick { infos, multiplier });
+                }
             }
         }
         Ok(Arc::new(Self {
@@ -216,7 +269,11 @@ impl Bank {
             rates,
             infos,
             materials,
+            kicks,
         }))
+    }
+    pub fn kick(&self, name: &str) -> Option<Kick> {
+        self.kicks.get(name).copied()
     }
     pub fn material(&self, name: &str) -> Option<[Option<usize>; CATEGORIES]> {
         self.materials.get(name).copied()
@@ -246,9 +303,16 @@ impl Random {
 #[derive(Clone, Debug)]
 struct Wheel {
     material: Option<[Option<usize>; CATEGORIES]>,
-    voices: [Voice; CATEGORIES],
-    last_sample: [Option<usize>; CATEGORIES],
-    active: [bool; CATEGORIES],
+    voices: [Voice; VOICES],
+    last_sample: [Option<usize>; VOICES],
+    active: [bool; VOICES],
+    /// W+178 and the material's multiplier (W+48 -> +2C).
+    kick: Option<Kick>,
+    /// W+1B8: ticks until the scale is redrawn; W+1BC: the scale.
+    kick_counter: i32,
+    kick_scale: f32,
+    /// W+16C: 1 + 20·peel² this tick.
+    kick_weight: f32,
     spin: f32,
     skid: f32,
     scrub: f32,
@@ -293,9 +357,13 @@ impl Driver {
                     volume_db: SILENT,
                     pitch: 1.,
                     ..Default::default()
-                }; CATEGORIES],
-                last_sample: [None; CATEGORIES],
-                active: [false; CATEGORIES],
+                }; VOICES],
+                last_sample: [None; VOICES],
+                active: [false; VOICES],
+                kick: None,
+                kick_counter: 0,
+                kick_scale: 0.,
+                kick_weight: 1.,
                 spin: 0.01,
                 skid: 0.,
                 scrub: 0.,
@@ -319,7 +387,7 @@ impl Driver {
             ..Self::new(bank)
         }
     }
-    pub fn voices(&self) -> [[Voice; CATEGORIES]; 4] {
+    pub fn voices(&self) -> [[Voice; VOICES]; 4] {
         self.wheels.each_ref().map(|w| w.voices)
     }
 
@@ -348,6 +416,49 @@ impl Driver {
         voice.sample = sample;
         voice.generation = voice.generation.wrapping_add(1);
         w.active[category] = sample.is_some();
+    }
+    /// 4443D0, player only, once per tick and wheel: p = W+16C · 0.05v ·
+    /// (token ≠ 0 ? 10·kickupMultiplier : 1) · scale, the scale
+    /// 0.005·(rand % 200) redrawn every 60 + rand % 180 ticks. If
+    /// rand % 100 < int(p), x = 0.1·(rand % 10) picks the ImpactVariety's
+    /// CollisionInfo whose range holds it (none below the first's minVel) and
+    /// a one-shot starts: no cooldown, the 435B20 -42 dB gate.
+    fn kick_up(bank: &Bank, w: &mut Wheel, speed: f32, contact: bool) {
+        let Some(kick) = w.kick else { return };
+        let surface = if contact { kick.multiplier * 10. } else { 1. };
+        w.kick_counter -= 1;
+        if w.kick_counter < 1 {
+            w.kick_scale = w.random.next(200) as f32 * 0.005;
+            w.kick_counter = w.random.next(180) as i32 + 60;
+        }
+        let p = w.kick_weight * (0.05 * speed * surface) * w.kick_scale;
+        if (w.random.next(100) as i32) >= p as i32 {
+            return;
+        }
+        let x = w.random.next(10) as f32 * 0.1;
+        let info = |k: usize| kick.infos[k].map(|i| (i, &bank.infos[i]));
+        let Some((first, c0)) = info(0) else { return };
+        if x < c0.min_vel {
+            return;
+        }
+        let holds = |c: &ColInfo| c.min_vel <= x && x <= c.max_vel;
+        let pick = if holds(c0) {
+            Some(first)
+        } else if let Some((i, c1)) = info(1)
+            && holds(c1)
+        {
+            Some(i)
+        } else {
+            info(2).map(|(i, _)| i)
+        };
+        let Some(ci) = pick else { return };
+        let (volume, pitch) = bank.infos[ci].lerp(x);
+        if volume < QUIETEST {
+            return;
+        }
+        Self::start(bank, w, KICK, ci);
+        w.voices[KICK].volume_db = volume;
+        w.voices[KICK].pitch = pitch;
     }
     fn stop(w: &mut Wheel, category: usize) {
         w.active[category] = false;
@@ -409,17 +520,19 @@ impl Driver {
             // 456640: AudioMaterial from the wheel's material token; on change
             // stop current voices so the new preset starts on fresh samples.
             if contact {
-                let material = input
-                    .surfaces
-                    .mechanics_name(token)
-                    .and_then(|n| bank.material(n));
+                let name = input.surfaces.mechanics_name(token);
+                let material = name.and_then(|n| bank.material(n));
                 if material.is_some() && material != w.material {
                     for c in 0..CATEGORIES {
                         Self::stop(w, c);
                     }
                     w.material = material;
                 }
+                if let Some(kick) = name.and_then(|n| bank.kick(n)) {
+                    w.kick = Some(kick);
+                }
             }
+            w.kick_weight = 1.;
             let material = w.material;
             let info = |c: usize| material.and_then(|m| m[c]);
 
@@ -501,6 +614,7 @@ impl Driver {
                     let previous = w.voices[PEEL].volume_db;
                     w.voices[PEEL].volume_db = volume + 0.02 * (volume - previous);
                     w.voices[PEEL].pitch = pitch;
+                    w.kick_weight += 20. * peel * peel;
                 } else if w.active[PEEL] {
                     w.voices[PEEL].volume_db -= 120. * dt;
                     if w.voices[PEEL].volume_db <= SILENT {
@@ -592,6 +706,9 @@ impl Driver {
                     w.voices[SKID].volume_db = -47.;
                 }
             }
+            if player {
+                Self::kick_up(&bank, w, speed, contact);
+            }
             // 42C100/42C150 setter clamps.
             for v in &mut w.voices {
                 v.volume_db = v.volume_db.clamp(SILENT, 0.);
@@ -604,17 +721,19 @@ impl Driver {
     }
 }
 
-/// Group levels per category for the player car (413E50: roll in Wheels,
-/// the others in Skids) at Normal/Chase/PC (`audio_mix::Table::group_db`).
-pub const CHASE_BUS_DB: [f32; CATEGORIES] = [-9., -8., -8., -8., -8.];
-/// Min/max emitter distance per category: the variety presets (roll
-/// `surfaceloops` 15/50, the others `skidloops` 10/20), with the peel and skid
-/// overrides 10/50 of 44F330/44FE60 (ordinary race, W+4D/W+4E clear).
-pub const DISTANCES: [(f32, f32); CATEGORIES] =
-    [(15., 50.), (10., 50.), (10., 20.), (10., 50.), (10., 20.)];
+/// Group levels per voice for the player car (413E50: roll and kick-up in
+/// Wheels, the others in Skids) at Normal/Chase/PC (`audio_mix::Table::group_db`).
+pub const CHASE_BUS_DB: [f32; VOICES] = [-9., -8., -8., -8., -8., -9.];
+/// Min/max emitter distance per voice: the variety presets (roll
+/// `surfaceloops` 15/50, the others `skidloops` 10/20, kick-ups `kickup`
+/// 10/20), with the peel and skid overrides 10/50 of 44F330/44FE60 (ordinary
+/// race, W+4D/W+4E clear).
+pub const DISTANCES: [(f32, f32); VOICES] =
+    [(15., 50.), (10., 50.), (10., 20.), (10., 50.), (10., 20.), (10., 20.)];
 
-/// Backend levels per wheel and category: the group mix (player 413E50: roll
-/// Wheels, others Skids; other cars AI) plus each wheel's distance term.
+/// Backend levels per wheel and voice: the group mix (player 413E50: roll
+/// and kick-up Wheels (W+84), others Skids; other cars AI) plus each wheel's
+/// distance term.
 pub fn bus_levels(
     table: Option<&crate::audio_mix::Table>,
     modes: &crate::audio_mix::ModeMix,
@@ -622,13 +741,13 @@ pub fn bus_levels(
     player: bool,
     trim: f32,
     distances: [f32; 4],
-) -> [[f32; CATEGORIES]; 4] {
+) -> [[f32; VOICES]; 4] {
     use crate::audio_mix::{AI, SKIDS, WHEELS, distance_db};
     distances.map(|d| {
         std::array::from_fn(|c| {
             let group = match (player, c) {
                 (false, _) => AI,
-                (true, ROLL) => WHEELS,
+                (true, ROLL | KICK) => WHEELS,
                 _ => SKIDS,
             };
             let mix = table.map_or(if player { CHASE_BUS_DB[c] } else { -9. }, |t| {
@@ -654,10 +773,10 @@ pub fn wheel_positions(vehicle: &[u32], physical: &[u32]) -> [[f32; 3]; 4] {
 pub struct Mixer {
     bank: Arc<Bank>,
     rate: u32,
-    slots: [[Slot; CATEGORIES]; 4],
-    /// Group level per wheel and category in dB (mix plus distance), added
+    slots: [[Slot; VOICES]; 4],
+    /// Group level per wheel and voice in dB (mix plus distance), added
     /// at the backend (A23B70); `-inf` silences.
-    pub bus_db: [[f32; CATEGORIES]; 4],
+    pub bus_db: [[f32; VOICES]; 4],
 }
 #[derive(Clone, Copy, Default)]
 struct Slot {
@@ -665,21 +784,51 @@ struct Slot {
     generation: u32,
     position: f64,
     gain: f32,
+    /// A one-shot (the kick-up) that reached its sample's end.
+    done: bool,
 }
 impl Mixer {
     pub fn new(bank: Arc<Bank>, rate: u32) -> Self {
         Self {
             bank,
             rate,
-            slots: [[Slot::default(); CATEGORIES]; 4],
+            slots: [[Slot::default(); VOICES]; 4],
             bus_db: [CHASE_BUS_DB; 4],
         }
     }
     /// One output sample. `audible=false` ramps every voice to silence.
-    pub fn sample(&mut self, voices: &[[Voice; CATEGORIES]; 4], audible: bool) -> f32 {
+    pub fn sample(&mut self, voices: &[[Voice; VOICES]; 4], audible: bool) -> f32 {
         let mut out = 0.;
         for ((wheel, targets), buses) in self.slots.iter_mut().zip(voices).zip(self.bus_db) {
-            for ((slot, voice), bus) in wheel.iter_mut().zip(targets).zip(buses) {
+            for (c, ((slot, voice), bus)) in wheel.iter_mut().zip(targets).zip(buses).enumerate() {
+                if c == KICK {
+                    // A one-shot: each new generation plays its sample once
+                    // at the level fixed at its start.
+                    if slot.sample != voice.sample || slot.generation != voice.generation {
+                        *slot = Slot {
+                            sample: voice.sample,
+                            generation: voice.generation,
+                            position: 0.,
+                            gain: crate::audio_mix::backend_gain(voice.volume_db, bus, Some(0.)),
+                            done: false,
+                        };
+                    }
+                    let Some(index) = slot.sample else { continue };
+                    if slot.done || !audible {
+                        continue;
+                    }
+                    let pcm = &self.bank.samples[index];
+                    let i = slot.position as usize;
+                    if i + 1 >= pcm.len() {
+                        slot.done = true;
+                        continue;
+                    }
+                    let frac = (slot.position - slot.position.floor()) as f32;
+                    out += (pcm[i] + (pcm[i + 1] - pcm[i]) * frac) * slot.gain;
+                    slot.position += f64::from(voice.pitch.clamp(0.5, 2.)) * f64::from(self.bank.rates[index])
+                        / f64::from(self.rate);
+                    continue;
+                }
                 if slot.sample != voice.sample || slot.generation != voice.generation {
                     if voice.sample.is_some() && slot.gain > 1e-4 && slot.sample.is_some() {
                         // Let the old voice fade before switching sample.
@@ -749,6 +898,60 @@ mod tests {
     }
 
     #[test]
+    fn kick_ups_follow_4443d0_and_play_once() {
+        let small = ColInfo {
+            name: "KickupSmall".into(),
+            min_vel: 0.01,
+            max_vel: 9.42,
+            min_vol: -8.,
+            max_vol: -3.,
+            min_pitch: 0.85,
+            max_pitch: 1.15,
+            samples: vec![0],
+        };
+        let bank = Arc::new(Bank {
+            samples: vec![vec![0.5f32; 400].into()],
+            rates: vec![40_000],
+            infos: vec![small],
+            materials: HashMap::new(),
+            kicks: HashMap::new(),
+        });
+        let kicks = |multiplier: f32, speed: f32, contact: bool| {
+            let mut driver = Driver::new(bank.clone());
+            let w = &mut driver.wheels[0];
+            w.kick = Some(Kick { infos: [Some(0), None, None], multiplier });
+            let mut starts = 0;
+            for _ in 0..2000 {
+                let before = w.voices[KICK].generation;
+                Driver::kick_up(&bank, w, speed, contact);
+                if w.voices[KICK].generation != before {
+                    starts += 1;
+                    let v = w.voices[KICK];
+                    assert!(v.volume_db >= -8. && v.volume_db < -7.5 && v.sample == Some(0), "{v:?}");
+                }
+            }
+            starts
+        };
+        // Gravel (6) at 50 m/s: p = 150·scale, often above 100.
+        let gravel = kicks(6., 50., true);
+        // Tarmac (0.043): p = 1.075·scale, int(p) is 0 except at the top scales.
+        let tarmac = kicks(0.043, 50., true);
+        assert!(gravel > 500 && tarmac < gravel / 20, "{gravel} {tarmac}");
+        // Standing still, nothing; airborne the surface factor is 1 (p = 2.5·scale).
+        assert_eq!(kicks(6., 0., true), 0);
+        let airborne = kicks(6., 50., false);
+        assert!(airborne > 0 && airborne < gravel / 10, "{airborne}");
+        // The mixer plays a kick once at its start level, then stays silent.
+        let mut mixer = Mixer::new(bank.clone(), 40_000);
+        mixer.bus_db = [[0.; VOICES]; 4];
+        let mut voices = [[Voice { volume_db: SILENT, pitch: 1., ..Default::default() }; VOICES]; 4];
+        voices[0][KICK] = Voice { sample: Some(0), generation: 1, volume_db: -6., pitch: 1. };
+        let out: Vec<f32> = (0..1000).map(|_| mixer.sample(&voices, true)).collect();
+        assert!((out[10] - 0.5 * 10f32.powf(-6. / 20.)).abs() < 1e-4, "{}", out[10]);
+        assert!(out[500..].iter().all(|&s| s == 0.));
+    }
+
+    #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn source_launch_peels_then_rolls_reproducibly() {
         std::thread::Builder::new()
@@ -760,6 +963,15 @@ mod tests {
                 assert_eq!(bank.samples.len(), 185);
                 let tarmac = bank.material("TARMAC").unwrap();
                 assert!(tarmac.iter().all(Option::is_some));
+                // Kick-ups: the preset's ImpactVariety, the material's multiplier.
+                let name = |k: Kick| k.infos.map(|i| i.map(|i| bank.infos[i].name.clone()));
+                let gravel = bank.kick("GRAVEL").unwrap();
+                assert_eq!(gravel.multiplier, 6.);
+                assert_eq!(name(gravel), [Some("KickupSmall".into()), Some("KickupMed".into()), Some("KickupBig".into())]);
+                assert!(!bank.infos[gravel.infos[0].unwrap()].samples.is_empty());
+                assert_eq!(name(bank.kick("GRASS").unwrap())[0].as_deref(), Some("GrassKikCrunch"));
+                assert_eq!(bank.kick("TARMAC").unwrap().multiplier, 0.043);
+                assert_eq!(bank.kick("TARMAC_SPARK").unwrap().multiplier, 0.);
                 let run = || {
                     let mut runtime = Runtime::lacetti(root, "slot_00", 200679).unwrap();
                     let mut driver = Driver::new(bank.clone());

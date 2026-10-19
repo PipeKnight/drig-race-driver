@@ -9,7 +9,7 @@ use grid_tools::{
     car::Car,
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank, Mixer},
-    tyre_audio::{self, CATEGORIES, Voice},
+    tyre_audio::{self, VOICES, Voice},
 };
 use std::{path::Path, time::Instant};
 
@@ -28,7 +28,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut engines: Vec<Mixer> = (0..12).map(|_| Mixer::new(bank.clone())).collect();
     let mut wheels: Vec<tyre_audio::Mixer> = (0..12).map(|_| tyre_audio::Mixer::new(tyres.clone(), RATE)).collect();
     let roll = tyres.material("TARMAC").ok_or("no tarmac")?;
-    let voices: [[Voice; CATEGORIES]; 4] = std::array::from_fn(|_| {
+    let voices: [[Voice; VOICES]; 4] = std::array::from_fn(|_| {
         std::array::from_fn(|c| Voice {
             sample: roll[c],
             generation: 0,

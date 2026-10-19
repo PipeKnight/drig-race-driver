@@ -12,7 +12,7 @@ use grid_tools::{
     audio_pacing::Paced,
     engine_audio_continuous::BLOCK,
     source_vehicle::{DELTA, Runtime},
-    tyre_audio::{self, Bank, CATEGORIES, Driver, Inputs, Mixer, Voice},
+    tyre_audio::{self, Bank, Driver, Inputs, Mixer, VOICES, Voice},
 };
 use super::stereo::{Pan, Stereo};
 use std::{
@@ -24,8 +24,8 @@ use std::{
 };
 
 const RATE: u32 = grid_tools::engine_audio::RATE;
-type Voices = [[Voice; CATEGORIES]; 4];
-type Levels = [[f32; CATEGORIES]; 4];
+type Voices = [[Voice; VOICES]; 4];
+type Levels = [[f32; VOICES]; 4];
 
 /// What one car's audio source reads: voice targets, one set per vehicle
 /// tick (`audio_pacing`), and backend levels.
@@ -157,7 +157,7 @@ fn start(
         let driver = sound.driver(car);
         let shared = Arc::new(Mutex::new(Frame {
             voices: Paced::new(driver.voices()),
-            levels: [[f32::NEG_INFINITY; CATEGORIES]; 4],
+            levels: [[f32::NEG_INFINITY; VOICES]; 4],
         }));
         let pan = Pan::centre();
         let handle = assets.add(TyreSource {
