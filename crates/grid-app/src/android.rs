@@ -237,7 +237,7 @@ pub fn display_refresh_hz() -> Option<f32> {
     })
 }
 
-/// `MainActivity.dataReady()` (F450): false when the bundled game data is not
+/// `MainActivity.dataReady()` (F451): false when the bundled game data is not
 /// fully copied; the copy screen has then been opened in place of the game,
 /// and the game must not read the data folder.
 pub fn data_ready() -> bool {
