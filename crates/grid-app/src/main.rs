@@ -76,6 +76,7 @@ mod texture_upload;
 mod tilt;
 mod time_trial;
 mod touch_controls;
+mod track_environment;
 mod track_grade;
 mod track_surface;
 mod tyre_smoke;
@@ -2941,6 +2942,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
         camera::install(&mut app, &root, field.models[0].stem());
+        track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
             replay::install(&mut app, &root, &route);

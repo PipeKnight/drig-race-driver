@@ -15,6 +15,7 @@ pub mod deformation_parameters;
 pub mod drift;
 pub mod dynamic_props;
 pub mod engine_audio;
+pub mod environment;
 pub mod engine_audio_continuous;
 pub mod engine_audio_control;
 pub mod engine_audio_gain;
