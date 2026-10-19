@@ -1,5 +1,26 @@
 # GRID engine project log
 
+F448 grid-soak: lost prop bodies that left the collision ground are expected losses; bodies an entity box drove into the ground get their own counter (2026-10-19, Claude Code; coordinator's decision on quick seeds 17 and 23 after F444). Details: docs/ROBUSTNESS_RESEARCH.md §9, docs/SOAK_TESTING.md "Expected losses", FIDELITY_BACKLOG row 88. Evidence: worktree fervent-napier-50814b `local/firstcorner/props/` (quick-all, long-100, kinds, checks). **Harness only; physics unchanged.**
+- Seed 23 (Jarama) [V]: a piece hit at 29 m/s flies off the edge of the road chunks (a vertical query finds none from x 221, z −337 on).
+- Seed 17 (Long Beach) [V]: a car hits a tyre into the neighbouring intact stack (entity box 144). The box's minimum-penetration exit is its bottom face (normal y −1, 0.38 m), so in one 16 ms step the tyre is driven into the grass and falls. This is the open step-size family (F320/F351).
+- Rule (i), approved: no road chunk under the lost body's xz → `pressed_by=NoGround`, an expected loss. [I] The original has the same chunks; a culling of such bodies in the original was not looked for.
+- Counter (ii), approved in a visible form:
+  - When: during the run, a downward route entity box contact (normal y < −0.5, not its own boxes, not a stand-in) came in the same step as the body's first deep road contact (> 0.1 m, AUTHORED), or one step before it → `pressed_by=EntityBoxInRun`.
+  - How it is reported: `box_losses=N` in `soak_result`/`soak_done`, its own `summary.md` line and a `summary.tsv` column, never merged into `expected_losses`. grid-soak writes no validation.json.
+  - How it is checked: `PropWorld::pressing_now` per moving prop body (above 0.5 m/s) each tick, recorded by `soak::Session`.
+  - Tracked as debt, not a fix: FIDELITY_BACKLOG row 88.
+- Counts [V] (on 8f02760 + F444 + this rule):
+  - quick 1..56: (i) 3 bodies (seed 23), (ii) 1 body (seed 17);
+  - long 1001..1100 (100 scenarios): (i) 3 (Le Mans 1023, 1089; Spa 1092), (ii) none, option A 37 (Jarama 1010, 1013).
+  - Haruna 29 (known since F412) and 32 (a car off an unwalled edge, new with F444) fail outside the default set; the long run's 4 failures (1006 Jarama, 1033 and 1054 Le Mans, 1061 Yokohama) are prop losses outside these rules.
+- Checks [V], release, cargo/rustc 1.99.0:
+  - tests 745 passed, 0 failed (on 8f02760 + F444 + this change).
+  - On 0c57228 (F447) + this change: clippy clean; `grid-soak quick` **24/24** (seed 23: 3 NoGround; seed 17 passes without counter (ii) on F447's trajectories).
+  - Combined identities on 0c57228 (F444 + F447, not recorded before):
+    - solo without DF01/characteristics 6bc60af8…2cd6;
+    - 12-car `12 11200 ai` without DF01/characteristics 8f932cff…181f;
+    - 12-car with DF01 and characteristics d5eec9ba…1103.
+
 F447 Default car setup: the wheel records, checked against live dumps of the original (2026-10-19, Claude Code; coordinator's task "the 29 default-setup values"; the read-only dumps were taken by drift-battle-ai). Details: docs/SERIES.md "The default car setup's wheel records (F447)". Evidence: main checkout `local/driving/default-setup-20261019/` (Lacetti and Courage LC70, car +0x0..+0x2400 on the Donington grid, research copy b1da1b2d…aece34a6, user files restored); worktree kind-pike-df38cc `local/setup/` (port words, diffs, checks), `local/gtfix/decomp/setup29`, `setup29b`, `setup29c` (Ghidra 12.1.4, read-only). The original was not launched by this session.
 - [V] Before the change every car-level word the default setup 0x9C32F0 writes already equalled both dumps, and so did the property copy +0xF00..+0x13FF. The wheel records differed: the damper speed threshold +0x64 was 0.14 in the original on every wheel of both cars and 400 (the raw property) in the port, so the port's dampers never reached their high-speed ratio; +0xE8/+0xEC differed by f32 re-interpolation (e.g. 0x3B031280 against 0.002).
 - [V static] 0x9C3C30 default sliders s_i = (clamp(x_i, B_i, A_i) − B_i)/(A_i − B_i) with a per-value property x_i (list in SERIES.md), 0x9E5680 clamp, 0x9C32F0 value (A − B)·s + B and the per-wheel writes (front when the wheel's z > 0): +0xEC, +0xE8, +0x5C, +0x60, +0x114, +0x70, and +0x68/+0x64 rescaled so the front/rear mean becomes setup values 10/11.

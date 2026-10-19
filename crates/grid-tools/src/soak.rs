@@ -720,7 +720,28 @@ pub struct Session {
     /// They are reported, not failed. Body indices are reused after a reset,
     /// so each entry carries its segment (`resets` at the time).
     pub expected_losses: std::cell::RefCell<Vec<ExpectedLoss>>,
+    /// Per (segment, moving prop body): the last tick with a downward route
+    /// entity box contact, the first tick with a deep road contact
+    /// (`PropWorld::pressing_now`), and whether that first deep contact came
+    /// in the same or the step after a box contact (the in-run counter (ii)).
+    piece_history: std::cell::RefCell<BTreeMap<(u64, usize), PieceHistory>>,
 }
+
+/// One moving prop body's pressing history (`Session::piece_history`).
+#[derive(Clone, Copy, Debug, Default)]
+struct PieceHistory {
+    /// Last tick with a downward route entity box contact.
+    entity: Option<u64>,
+    /// First tick with a deep road contact.
+    deep: Option<u64>,
+    /// That first deep contact came with or one step after a box contact.
+    boxed: bool,
+}
+
+/// Vertical half span of the no-ground query (expected loss (i)).
+const NO_GROUND_SPAN: f32 = 5000.;
+/// Prop bodies slower than this are not checked for in-run pressing.
+const PRESSING_SPEED: f32 = 0.5;
 
 /// A body counted as an expected loss: segment, session tick, body and position.
 #[derive(Clone, Debug)]
@@ -912,6 +933,7 @@ impl Session {
             auto_reset: PlayerReset::default(),
             auto_resets: 0,
             expected_losses: Default::default(),
+            piece_history: Default::default(),
         })
     }
 
@@ -1097,10 +1119,38 @@ impl Session {
             Some(race) => &race.multi.cars[0],
             None => &self.runtime,
         };
-        let Ok(Some(pressed)) =
-            props.pressed_down_at_spawn(i, car.track(), car.surfaces(), geometry.query())
-        else {
-            return false;
+        let pressed = match props.pressed_down_at_spawn(
+            i,
+            car.track(),
+            car.surfaces(),
+            geometry.query(),
+        ) {
+            Ok(Some(pressed)) => pressed,
+            _ => {
+                // (i) No road chunk under the body: it left the collision
+                // ground, which the original shares [I].
+                let mut cache = grid_world::rectangle_cull::Cache::default();
+                let ground = car.track().query(
+                    [position[0], NO_GROUND_SPAN, position[2], 0.],
+                    [position[0], -NO_GROUND_SPAN, position[2], 0.],
+                    &mut cache,
+                );
+                // (ii) Driven into the ground by a route entity box in one
+                // step: the box contact in the same or the previous step as
+                // the first deep road contact.
+                let in_run = self
+                    .piece_history
+                    .borrow()
+                    .get(&(self.resets, i))
+                    .is_some_and(|h| h.boxed);
+                if matches!(ground, Ok(q) if q.hit.is_none()) {
+                    crate::dynamic_props::Pressed::NoGround
+                } else if in_run {
+                    crate::dynamic_props::Pressed::EntityBoxInRun
+                } else {
+                    return false;
+                }
+            }
         };
         self.expected_losses.borrow_mut().push(ExpectedLoss {
             segment: self.resets,
@@ -1110,6 +1160,43 @@ impl Session {
             pressed,
         });
         true
+    }
+
+    /// Updates `piece_history` for the moving prop bodies (above
+    /// [`PRESSING_SPEED`]) at their current pose.
+    fn record_piece_pressing(&self, snapshot: &Snapshot<'_>) {
+        let (Some(props), Some(geometry)) = (self.props(), &self.geometry) else {
+            return;
+        };
+        let car = match &self.race {
+            Some(race) => &race.multi.cars[0],
+            None => &self.runtime,
+        };
+        let mut history = self.piece_history.borrow_mut();
+        for (i, body) in snapshot.bodies.iter().enumerate().skip(snapshot.cars) {
+            let v = body_floats(body, 0x220, 3);
+            if v[0] * v[0] + v[1] * v[1] + v[2] * v[2] < PRESSING_SPEED * PRESSING_SPEED {
+                continue;
+            }
+            let Ok(Some(p)) = props.pressing_now(
+                i,
+                snapshot.bodies,
+                car.track(),
+                car.surfaces(),
+                geometry.query(),
+            ) else {
+                continue;
+            };
+            let tick = self.total_ticks;
+            let entry = history.entry((self.resets, i)).or_default();
+            if p.deep_road && entry.deep.is_none() {
+                entry.deep = Some(tick);
+                entry.boxed = p.entity_down || entry.entity.is_some_and(|e| e + 1 == tick);
+            }
+            if p.entity_down {
+                entry.entity = Some(tick);
+            }
+        }
     }
 
     /// Distance (xz) to the nearest route centreline point and its height.
@@ -1140,6 +1227,7 @@ impl Session {
             ));
         }
         let snapshot = self.snapshot();
+        self.record_piece_pressing(&snapshot);
         for (i, body) in snapshot.bodies.iter().enumerate() {
             let what = if i < snapshot.cars {
                 format!("car {i}")

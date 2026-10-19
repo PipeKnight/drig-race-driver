@@ -446,7 +446,16 @@ otherwise fail as out of bounds or falling. Authored ornament stand-ins do not c
 unchanged.
 
 Evidence and the [I] grade (the original loses these bodies too): docs/ROBUSTNESS_RESEARCH.md
-sections 1, 2 and 5. Jarama seeds 21..24 then pass 4/4 and join the default quick set. Long Beach
+sections 1, 2 and 5.
+
+F448 adds two more cases (docs/ROBUSTNESS_RESEARCH.md §9):
+- `pressed_by=NoGround`: no road chunk under the lost body's xz (it left the collision ground).
+  It counts as an expected loss.
+- `pressed_by=EntityBoxInRun`: a route entity box drove the body into the ground in one step
+  during the run. It is **not** an expected loss in the counts.
+  - Its own counter: `box_losses=N` in `soak_result` and `soak_done`, its own line in
+    `summary.md` and a column in `summary.tsv`.
+  - It is debt for the open step-size family (FIDELITY_BACKLOG row 88), not a fix. Jarama seeds 21..24 then pass 4/4 and join the default quick set. Long Beach
 forced seed 59 (a thin tyre landing through the road) is not covered and still fails.
 
 ## Follow-ups

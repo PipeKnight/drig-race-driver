@@ -566,6 +566,32 @@ fn spawn_pressed(
     surfaces: &Surfaces,
     directions: &convex_distance::ContactSettings,
 ) -> Result<Option<Pressed>, Error> {
+    let p = pressing_at(spec, spec.pose, own, track, surfaces, directions)?;
+    Ok(if p.road_down {
+        Some(Pressed::Road)
+    } else if p.entity_down {
+        Some(Pressed::EntityBox)
+    } else {
+        None
+    })
+}
+
+/// Road penetration above which a piece counts as driven into the ground
+/// (soak diagnostics, AUTHORED; resting pieces show about 0.03 m).
+const DEEP_ROAD: f32 = 0.1;
+
+/// The world contacts of a piece hull at `pose` that press it down: a road
+/// contact with a downward normal (y < −0.5), a downward contact from a route
+/// entity box other than `own` (authored stand-ins have no entity and do not
+/// count), and whether any road contact is deeper than [`DEEP_ROAD`].
+fn pressing_at(
+    spec: &PieceSpec,
+    pose: Matrix,
+    own: &[usize],
+    track: &Track,
+    surfaces: &Surfaces,
+    directions: &convex_distance::ContactSettings,
+) -> Result<Pressing, Error> {
     let query = convex_distance::ContactSettings {
         margin: spec.shell,
         directions: directions.directions,
@@ -573,25 +599,32 @@ fn spawn_pressed(
     let boxes = track.props().map(|p| &p.boxes);
     let hits = track.body_contacts(
         &spec.hull,
-        spec.pose,
+        pose,
         &query,
         TRACK_CONTACTS,
         grid_world::MAX_WORLD_CONTACTS,
         |code| surfaces.sheet(code),
     )?;
     let down = |h: &&crate::track::BodyContact| h.contact.normal[1] < -0.5;
-    if hits.iter().filter(down).any(|h| h.prop.is_none()) {
-        return Ok(Some(Pressed::Road));
-    }
-    Ok(hits
-        .iter()
-        .filter(down)
-        .any(|h| {
+    Ok(Pressing {
+        road_down: hits.iter().filter(down).any(|h| h.prop.is_none()),
+        entity_down: hits.iter().filter(down).any(|h| {
             h.prop.is_some_and(|i| {
                 !own.contains(&i) && boxes.is_some_and(|b| b[i].entity.is_some())
             })
-        })
-        .then_some(Pressed::EntityBox))
+        }),
+        deep_road: hits
+            .iter()
+            .any(|h| h.prop.is_none() && h.contact.penetration > DEEP_ROAD),
+    })
+}
+
+/// [`PropWorld::pressing_now`]: what presses a body at its current pose.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Pressing {
+    pub road_down: bool,
+    pub entity_down: bool,
+    pub deep_road: bool,
 }
 
 /// What presses a body down at its spawn pose
@@ -602,6 +635,14 @@ pub enum Pressed {
     Road,
     /// A route entity box (armco, tyre wall, another stack).
     EntityBox,
+    /// No road chunk under the body's xz: it left the collision ground,
+    /// which the original shares [I] (grid-soak's expected loss (i)).
+    NoGround,
+    /// During the run, a downward route entity box contact in the same or
+    /// the previous step as the body's first deep road contact: a body
+    /// driven into the ground in one step (grid-soak's separate counter
+    /// (ii); the open step-size family, docs/ROBUSTNESS_RESEARCH.md §9).
+    EntityBoxInRun,
 }
 
 /// A wheel a car lost (car +22E4 + `wheel`) as a dynamic body.
@@ -1355,6 +1396,31 @@ impl PropWorld {
                 return Ok(None);
             };
         spawn_pressed(spec, own, track, surfaces, directions)
+    }
+
+    /// What presses a live piece or lost wheel at its current pose in
+    /// `bodies` (diagnostics only, grid-soak).
+    pub fn pressing_now(
+        &self,
+        body: usize,
+        bodies: &[contact_groups::Body],
+        track: &Track,
+        surfaces: &Surfaces,
+        directions: &convex_distance::ContactSettings,
+    ) -> Result<Option<Pressing>, Error> {
+        let (spec, own): (&PieceSpec, &[usize]) =
+            if let Some(p) = self.pieces.iter().find(|p| p.body == body) {
+                let entry = &self.catalog.breakables[p.breakable];
+                (&entry.pieces[p.spec], &entry.intact)
+            } else if let Some(w) = self.wheels.iter().find(|w| w.body == body) {
+                (&w.spec, &[])
+            } else {
+                return Ok(None);
+            };
+        let Some(state) = bodies.get(body) else {
+            return Ok(None);
+        };
+        pressing_at(spec, body_pose(state), own, track, surfaces, directions).map(Some)
     }
 
     /// Piece world poses for presentation: (breakable, piece, pose).
