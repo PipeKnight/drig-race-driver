@@ -31,6 +31,8 @@ final class BundleExtractor {
     static final String MANIFEST = "bundle.txt";
     /** In the data folder; holds the version of the last complete copy. */
     static final String MARKER = ".bundle-version";
+    /** In the data folder; locked while a copy runs (any process). */
+    static final String LOCK = ".bundle-lock";
     static final String HEADER = "grid-bundle 1";
 
     /** Opens one bundled file; {@code path} is relative to {@link #ASSET_ROOT}. */
@@ -156,6 +158,19 @@ final class BundleExtractor {
         return text != null && text.startsWith("﻿") ? text.substring(1) : text;
     }
 
+    /** The APK's bundle.txt, or null when the APK has no bundled data. */
+    static Manifest bundled(android.content.Context context) throws IOException {
+        InputStream in;
+        try {
+            in = context.getAssets().open(ASSET_ROOT + "/" + MANIFEST);
+        } catch (java.io.FileNotFoundException e) {
+            return null;
+        }
+        try (java.io.Reader reader = new java.io.InputStreamReader(in, StandardCharsets.UTF_8)) {
+            return parse(reader);
+        }
+    }
+
     /** The version of the last complete copy, or null. */
     static String installedVersion(File dataDir) {
         File marker = new File(dataDir, MARKER);
@@ -189,6 +204,22 @@ final class BundleExtractor {
         if (!dataDir.isDirectory() && !dataDir.mkdirs()) {
             throw new IOException("cannot create " + dataDir);
         }
+        // One copy at a time across processes (F448): each event-menu
+        // relaunch is a new process, and two copies replacing the same files
+        // made files vanish under a running race. The lock ends with the
+        // process; a copy that finished meanwhile is not repeated.
+        try (java.io.RandomAccessFile lockFile = new java.io.RandomAccessFile(new File(dataDir, LOCK), "rw");
+                java.nio.channels.FileLock lock = lockFile.getChannel().lock()) {
+            if (upToDate(dataDir, manifest)) {
+                progress.update(manifest.totalBytes(), manifest.totalBytes());
+                return;
+            }
+            copyAll(source, manifest, dataDir, progress);
+        }
+    }
+
+    private static void copyAll(Source source, Manifest manifest, File dataDir, Progress progress)
+            throws IOException {
         File marker = new File(dataDir, MARKER);
         if (marker.exists() && !marker.delete()) {
             throw new IOException("cannot delete " + marker);

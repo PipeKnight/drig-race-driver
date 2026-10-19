@@ -236,3 +236,11 @@ pub fn display_refresh_hz() -> Option<f32> {
         env.call_method(&display, "getRefreshRate", "()F", &[])?.f()
     })
 }
+
+/// `MainActivity.dataReady()` (F448): false when the bundled game data is not
+/// fully copied; the copy screen has then been opened in place of the game,
+/// and the game must not read the data folder.
+pub fn data_ready() -> bool {
+    with_activity(|env, activity| env.call_method(activity, "dataReady", "()Z", &[])?.z())
+        .unwrap_or(true)
+}

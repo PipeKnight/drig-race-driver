@@ -261,7 +261,7 @@ impl Catalog {
         props: &Props,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let read = |p: &str| -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-            let bytes = std::fs::read(root.join(p))?;
+            let bytes = std::fs::read(root.join(p)).map_err(|e| format!("{p}: {e}"))?;
             if bytes.len() > 256 << 20 {
                 return Err("dynamic prop source exceeds bound".into());
             }

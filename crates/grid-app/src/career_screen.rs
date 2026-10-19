@@ -587,6 +587,7 @@ fn auto() -> Option<i32> {
 
 /// Scripted ticks of an unattended career race (the most `--drive-ticks`
 /// allows).
+#[cfg(not(target_os = "android"))]
 const AUTO_TICKS: &str = "36000";
 
 /// `grid-app --career ...` on the desktop: the career screen, then the race

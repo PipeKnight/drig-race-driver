@@ -1083,6 +1083,12 @@ fn append_entities(
 fn main() {
     #[cfg(target_os = "android")]
     android::init();
+    // Bundled data still being copied (F448): the copy screen took over.
+    #[cfg(target_os = "android")]
+    if !android::data_ready() {
+        android::log(false, "data not ready: the copy screen opened instead");
+        return;
+    }
     #[cfg(not(target_os = "android"))]
     let args: Vec<String> = std::env::args().skip(1).collect();
     // No command line on Android: the event menu, or the race it chose.

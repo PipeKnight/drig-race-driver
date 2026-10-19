@@ -122,7 +122,11 @@ pub struct Catalog {
 /// The language text of `id`, or `fallback` when the file lacks it.
 fn label(labels: &Labels, id: &str, fallback: &str) -> String {
     let text = labels.get(id);
-    if text == id { fallback.into() } else { text.into() }
+    if text == id {
+        fallback.into()
+    } else {
+        text.into()
+    }
 }
 
 /// Names of route folders from `track_model` and `track` [D].
@@ -242,7 +246,10 @@ impl Catalog {
                 kind: Kind::Race,
                 key: "race".into(),
                 label: "Race".into(),
-                layouts: layouts(Kind::Race, &mut route::CIRCUITS.iter().map(|r| r.to_string())),
+                layouts: layouts(
+                    Kind::Race,
+                    &mut route::CIRCUITS.iter().map(|r| r.to_string()),
+                ),
                 cars: touring.clone(),
                 stand_in_cars: false,
                 default_laps: Some(3),
@@ -323,21 +330,17 @@ impl Catalog {
                     ),
                     // The drift pool's cars (cor, gto, rx7, ...) are not
                     // ported: the launchers' BMW, and the Lacetti.
-                    Kind::DriftBattle | Kind::DriftGp | Kind::Freestyle => {
-                        (cars(&[grid_tools::car::BMW, grid_tools::car::LACETTI]), true)
-                    }
+                    Kind::DriftBattle | Kind::DriftGp | Kind::Freestyle => (
+                        cars(&[grid_tools::car::BMW, grid_tools::car::LACETTI]),
+                        true,
+                    ),
                     // The event's stock car (`Stock_Car` discipline) [D].
                     Kind::Demolition => (cars(&["stk"]), false),
                     // The pool's raceable cars (350Z, Skyline, Supra) after
                     // the launcher's Lacetti.
                     _ => {
                         let mut list = vec![grid_tools::car::LACETTI.to_string()];
-                        list.extend(
-                            series
-                                .raceable_cars()
-                                .iter()
-                                .map(|c| c.stem().to_string()),
-                        );
+                        list.extend(series.raceable_cars().iter().map(|c| c.stem().to_string()));
                         let stems: Vec<&str> = list.iter().map(String::as_str).collect();
                         (cars(&stems), true)
                     }
@@ -354,7 +357,11 @@ impl Catalog {
                                     let text = r.text("time_string_id")?;
                                     Some((
                                         minutes,
-                                        label(labels, &format!("db_{text}"), &format!("{minutes} min")),
+                                        label(
+                                            labels,
+                                            &format!("db_{text}"),
+                                            &format!("{minutes} min"),
+                                        ),
                                     ))
                                 })
                                 .collect()
@@ -455,7 +462,11 @@ impl EventType {
             laps,
             opponents,
             minutes,
-            subroute: if self.directions { old.subroute.min(1) } else { 0 },
+            subroute: if self.directions {
+                old.subroute.min(1)
+            } else {
+                0
+            },
         }
     }
 }
@@ -483,7 +494,10 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
             ""
         }
         Kind::Series => {
-            game = format!("[game]\nseries = {}\nroute = {}\ncar = {}\n", c.key, c.route, c.car);
+            game = format!(
+                "[game]\nseries = {}\nroute = {}\ncar = {}\n",
+                c.key, c.route, c.car
+            );
             drive += &format!("laps = {}\n{field}", c.laps);
             AI
         }
@@ -500,7 +514,10 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
             "[ai]\ndifficulty = 0.606\n"
         }
         Kind::Freestyle => {
-            drive += &format!("discipline = drift_freestyle\ntime_limit = {}\n", c.minutes * 60);
+            drive += &format!(
+                "discipline = drift_freestyle\ntime_limit = {}\n",
+                c.minutes * 60
+            );
             "[ai]\ndifficulty = 0.606\n"
         }
         Kind::Touge => {
@@ -520,7 +537,11 @@ pub fn profile(kind: Kind, c: &Choice) -> String {
                 c.route,
                 c.car
             );
-            drive += &format!("laps = {}\ntime_limit = {}\n{field}", c.laps, c.minutes * 60);
+            drive += &format!(
+                "laps = {}\ntime_limit = {}\n{field}",
+                c.laps,
+                c.minutes * 60
+            );
             AI
         }
         Kind::Demolition => {
@@ -546,7 +567,17 @@ pub fn keys(c: &Choice) -> Vec<(&'static str, Option<String>)> {
         ("laps", Some(c.laps.to_string())),
         ("opponents", Some(c.opponents.to_string())),
         ("time", Some(c.minutes.to_string())),
-        ("direction", Some(if c.subroute == 1 { "uphill" } else { "downhill" }.into())),
+        (
+            "direction",
+            Some(
+                if c.subroute == 1 {
+                    "uphill"
+                } else {
+                    "downhill"
+                }
+                .into(),
+            ),
+        ),
     ]
 }
 
@@ -773,7 +804,10 @@ impl Menu {
             .enumerate()
             .map(|(i, row)| {
                 let (name, value) = match row {
-                    Row::Discipline => (l("free_race_button_discipline", "Discipline"), t.label.clone()),
+                    Row::Discipline => (
+                        l("free_race_button_discipline", "Discipline"),
+                        t.label.clone(),
+                    ),
                     Row::Car => (
                         l("free_race_button_car", "Car"),
                         Car::new(&c.car).map_or(c.car.clone(), |car| car.label().to_string()),
@@ -782,7 +816,10 @@ impl Menu {
                         l("free_race_button_track_select", "Location"),
                         self.layout().venue.clone(),
                     ),
-                    Row::Route => (l("free_race_button_track_type", "Route"), self.layout().name.clone()),
+                    Row::Route => (
+                        l("free_race_button_track_type", "Route"),
+                        self.layout().name.clone(),
+                    ),
                     Row::Laps => (l("free_race_button_laps", "Laps"), c.laps.to_string()),
                     Row::Time => (
                         l("free_race_button_time", "Time"),
@@ -794,7 +831,12 @@ impl Menu {
                     Row::Opponents => ("Opponents".into(), c.opponents.to_string()),
                     Row::Direction => (
                         "Direction".into(),
-                        if c.subroute == 1 { "Uphill" } else { "Downhill" }.into(),
+                        if c.subroute == 1 {
+                            "Uphill"
+                        } else {
+                            "Downhill"
+                        }
+                        .into(),
                     ),
                     Row::Continue => (l("raceday_buttontext_to_race", "Continue"), String::new()),
                 };
@@ -808,7 +850,8 @@ impl Menu {
             help += " Experimental: some cars of this series cannot race yet.";
         }
         if t.stand_in_cars {
-            help += " The original's cars of this discipline are not ported yet: ported cars stand in.";
+            help +=
+                " The original's cars of this discipline are not ported yet: ported cars stand in.";
         }
         View {
             title: l("free_race_menu_screen_title", "Race Day"),
@@ -845,8 +888,10 @@ pub(crate) fn passed_on(args: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {
-        if matches!(args[i].as_str(), "--game-root" | "--data-dir" | "--settings")
-            && i + 1 < args.len()
+        if matches!(
+            args[i].as_str(),
+            "--game-root" | "--data-dir" | "--settings"
+        ) && i + 1 < args.len()
         {
             out.extend_from_slice(&args[i..i + 2]);
             i += 2;
@@ -924,7 +969,37 @@ pub fn android_args() -> Vec<String> {
     let menu = crate::settings::load(&[])
         .map(|s| s.event_menu != Some(false))
         .unwrap_or(true);
-    if menu { vec!["--menu-screen".into()] } else { Vec::new() }
+    if menu {
+        vec!["--menu-screen".into()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// The menu's starting choice (F448): `settings.ini`'s `[event]` (the last
+/// Continue), unless the bundled APK's `event.ini` is newer than the last
+/// menu profile (`event-menu.ini`). A new bundle (the drift APK) then opens
+/// on its own event even when an earlier APK left a saved Race choice, which
+/// otherwise always wins because `settings.ini` is read after `event.ini`.
+fn starting_event(merged: &[(String, String)], dir: &std::path::Path) -> Vec<(String, String)> {
+    let modified = |name: &str| {
+        std::fs::metadata(dir.join(name))
+            .and_then(|m| m.modified())
+            .ok()
+    };
+    let newer = match (modified("event.ini"), modified(PROFILE)) {
+        (Some(_), None) => true,
+        (Some(event), Some(profile)) => event > profile,
+        _ => false,
+    };
+    if newer && let Ok(text) = std::fs::read_to_string(dir.join("event.ini")) {
+        let mut seed = crate::settings::Settings::default();
+        if seed.apply(text.trim_start_matches('\u{feff}'), dir).is_ok() && !seed.event.is_empty() {
+            log_line!("drive_event_menu version=1 event=start source=event.ini");
+            return seed.event;
+        }
+    }
+    merged.to_vec()
 }
 
 // ---- The menu screen -----------------------------------------------------
@@ -959,7 +1034,8 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let menu = Menu::new(catalog, &saved(&profile.event));
+    let start = starting_event(&profile.event, crate::settings::data_dir());
+    let menu = Menu::new(catalog, &saved(&start));
     let input_settings = profile.input()?;
     #[cfg(target_os = "android")]
     let touch_screen = crate::android::touch_screen();
@@ -1163,7 +1239,8 @@ fn go(saving: &Saving, kind: Kind, choice: &Choice) -> Result<(), String> {
         return Err("saved event choice does not read back".into());
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    std::fs::write(&saving.settings, new).map_err(|e| format!("{}: {e}", saving.settings.display()))?;
+    std::fs::write(&saving.settings, new)
+        .map_err(|e| format!("{}: {e}", saving.settings.display()))?;
     std::fs::write(&saving.profile, profile(kind, choice))
         .map_err(|e| format!("{}: {e}", saving.profile.display()))?;
     #[cfg(target_os = "android")]
@@ -1221,6 +1298,52 @@ fn present(
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_newer_bundled_event_ini_sets_the_starting_choice() {
+        let dir = std::env::temp_dir().join(format!("grid-menu-start-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let saved = vec![("type".to_string(), "race".to_string())];
+        let at = |name: &str, seconds: u64| {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(dir.join(name))
+                .unwrap();
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+                .unwrap();
+        };
+        // No event.ini: the saved choice.
+        assert_eq!(starting_event(&saved, &dir), saved);
+        std::fs::write(
+            dir.join("event.ini"),
+            "[event]\ntype = drift_battle\nroute = tracks/europe/nurburgring/route_1\n",
+        )
+        .unwrap();
+        // event.ini and no menu profile yet: the bundle's choice.
+        let start = starting_event(&saved, &dir);
+        assert_eq!(saved_choice_key(&start), "drift_battle");
+        // A menu profile written after the install: the owner's choice.
+        std::fs::write(dir.join(PROFILE), "").unwrap();
+        at("event.ini", 1_000);
+        at(PROFILE, 2_000);
+        assert_eq!(starting_event(&saved, &dir), saved);
+        // A newer install (event.ini replaced): the bundle's choice again.
+        at("event.ini", 3_000);
+        assert_eq!(
+            saved_choice_key(&starting_event(&saved, &dir)),
+            "drift_battle"
+        );
+        // An event.ini without [event] (the Donington bundle) keeps the saved one.
+        std::fs::write(dir.join("event.ini"), "# Donington\n").unwrap();
+        at("event.ini", 4_000);
+        assert_eq!(starting_event(&saved, &dir), saved);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn saved_choice_key(event: &[(String, String)]) -> String {
+        saved(event).key
+    }
+
     fn catalog() -> Catalog {
         Catalog::build(None, &Labels::default(), &|_| true)
     }
@@ -1250,12 +1373,23 @@ mod tests {
         let mut m = Menu::new(catalog(), &Choice::default());
         assert_eq!(
             m.rows(),
-            [Row::Discipline, Row::Car, Row::Location, Row::Route, Row::Laps, Row::Opponents, Row::Continue]
+            [
+                Row::Discipline,
+                Row::Car,
+                Row::Location,
+                Row::Route,
+                Row::Laps,
+                Row::Opponents,
+                Row::Continue
+            ]
         );
         let view = m.view(&Labels::default());
         assert_eq!(view.title, "Race Day");
         assert!(view.rows.last().unwrap().3);
-        assert_eq!(m.step(press(|n| n.select = true)), Some(Command::Go(m.choice.clone())));
+        assert_eq!(
+            m.step(press(|n| n.select = true)),
+            Some(Command::Go(m.choice.clone()))
+        );
         // Down wraps to Discipline; Right picks Time Trial, which has no
         // opponents row.
         m.step(press(|n| n.down = true));
@@ -1308,12 +1442,18 @@ mod tests {
         let root = PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
         let labels = Labels::load(&root);
         let catalog = Catalog::load(&root, &labels);
-        let mut names: Vec<String> = std::fs::read_dir(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings"),
-        )
-        .unwrap()
-        .filter_map(|e| e.ok()?.file_name().into_string().ok()?.strip_suffix(".ini").map(String::from))
-        .collect();
+        let mut names: Vec<String> =
+            std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../settings"))
+                .unwrap()
+                .filter_map(|e| {
+                    e.ok()?
+                        .file_name()
+                        .into_string()
+                        .ok()?
+                        .strip_suffix(".ini")
+                        .map(String::from)
+                })
+                .collect();
         names.sort();
         let mut checked = 0;
         for name in names {
@@ -1329,11 +1469,15 @@ mod tests {
                 (None, Some("drift_freestyle"), _) => "Free_Drift".into(),
                 (None, Some("pro_touge"), _) => "legal_touge".into(),
                 (None, Some("demolition_derby"), _) => "Demolition_D".into(),
-                (None, _, _) if ini.route.as_deref() == Some(route::HARUNA) => "illegal_touge".into(),
+                (None, _, _) if ini.route.as_deref() == Some(route::HARUNA) => {
+                    "illegal_touge".into()
+                }
                 (None, _, Some(_)) => "race".into(),
                 (None, _, None) => "time_trial".into(),
             };
-            let t = catalog.find(&key).unwrap_or_else(|| panic!("{name}: no type {key}"));
+            let t = catalog
+                .find(&key)
+                .unwrap_or_else(|| panic!("{name}: no type {key}"));
             let choice = Choice {
                 key: key.clone(),
                 route: ini.route.clone().unwrap(),
@@ -1343,7 +1487,10 @@ mod tests {
                 minutes: ini.time_limit.map_or(0, |s| (s / 60.).round() as u32),
                 subroute: ini.subroute.unwrap_or(0),
             };
-            assert!(t.layouts.iter().any(|l| l.route == choice.route), "{name}: route");
+            assert!(
+                t.layouts.iter().any(|l| l.route == choice.route),
+                "{name}: route"
+            );
             assert!(t.cars.contains(&choice.car), "{name}: car");
             let mut menu = parsed(&profile(t.kind, &choice));
             let mut want = ini.clone();
