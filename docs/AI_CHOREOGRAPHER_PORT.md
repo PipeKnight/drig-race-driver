@@ -121,6 +121,39 @@ are unchanged.
     longer pinned at the corner lift's 0.2, κ no longer 0 inside the bend. Still below the
     original's 37.0–37.6, and the braking is unchanged (0.92 from x≈−478 against 0.55–0.78 from
     x≈−460): that part remains open.
+  - **Braking, offline analysis (F459)** [V unless marked]. Evidence: main checkout
+    `local/driving/redgate-20261019/` (`brk.txt`, `abs.txt`, `solo-f.tsv`, `solo-t.tsv`; port on
+    F458 + temporary traces, not committed).
+    - Original leader (field02 car 1): pedal 0 → 0.47 in 0.09 s from x −458.8, then 0.51 → 0.80
+      over 1 s; 58.1 → 48.2 m/s in 0.84 s (≈ 11.8 m/s²); released at 37.3 m/s.
+    - Port solo: activates at dist 63.3 m, trigger 63.4 (b 45.2, r 11.5, corner_brake_distance_factor
+      1.118, target 39.7 from corner_speed_in_ratio 0.645, difficulty ≈ 0.61 with speed_in 1);
+      ratio (dist − b)/(d − b) ≥ 1 from the first tick, so the raw line brake is 1; once the
+      slewed pedal reaches 1 the reaction r becomes 0, d = b and the raw brake alternates 1/0 tick
+      by tick, which the 5/s slew holds at 0.92–1.0; ≈ 18.7 m/s².
+    - Same in both: the formula 0x7886C0 (decompile drv6), the Lacetti brake tables (grip 2.0 and
+      2.2 both give b ≈ 45 m for 57.4 → 39.7 m/s ≈ 19 m/s²), and the previous brake: context
+      +0x2C is the slewed published packet brake (0x794310 copies the packet that 0x779F70 slews
+      into the local packet before 0x7929D0), as in the port.
+    - **Not ABS**: 0x77A2E0 caps the AI's brake demand inside 0x78E8A0 (a pedal cap before the
+      packet, not a wheel-torque control). In the port the slowest wheel stays within ~1–2 % of
+      the car speed through the stop (one 0.2 cap tick at arc 420), so the cap does not engage,
+      and 19 m/s² is real braking at 0.92–1.0. The original's 11.8 m/s² at 0.55–0.8 is
+      consistent with a pedal-proportional brake on the same car.
+    - Consequence [I]: with this formula a steady part pedal needs the slack `dist − b` to stay
+      near 0.97·r (≈ 5 m at pedal 0.55) for a second while the car decelerates at 11.8 m/s².
+      That needs either b shrinking at the original's real deceleration (a brake table or grip
+      giving ≈ 12 m/s², i.e. b ≈ 80 m for 57 → 37 m/s), or a brake-line distance +0x28 about
+      15 m shorter than the port's at the same place (it would also explain braking ~15 m
+      earlier). The port's line progress projects the car centre; the original projects the
+      front (≈ 2 m), which is too small alone.
+    - Live values that decide it (queued capture, Donington Race Day as field02, leader, 60 Hz
+      through Redgate): request +0x28 (distance) and +0x30 (target) against the port's at the same
+      x; car state +0x144 (table grip) and speed +0xD0 (b recomputed from the table); the four
+      wheel speeds (expected near car speed: ABS idle); the packet's raw and slewed brake.
+      - +0x28 shorter by ~15 m → brake-line placement or distance;
+      - +0x144 outside the tables' grip range with b ≈ 80 m → table lookup or extrapolation;
+      - +0x30 ≈ 37.3 with the same b → driver mapping (difficulty/characteristics) only.
   - The κ sign consumers now follow the original literally: overtake state 1 widens with bend
     flag +0x45 (κ > ovMin), state 2 with +0x44 (κ < −ovMin); the off-line assist (0x404C90)
     takes max_assist_inside when `lat · κ ≥ 0`; drift state 3 takes the left room (+0x218) for
