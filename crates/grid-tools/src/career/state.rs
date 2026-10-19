@@ -548,6 +548,9 @@ pub struct Payout {
     pub prize: i64,
     pub team_mate_prize: i64,
     pub team_win_bonus: i64,
+    /// The races' Flashback Bonus (career +0x68, summed by 0x652200 in all
+    /// five reward routines) [V].
+    pub flashback_bonus: i64,
     pub sponsor_money: i64,
     pub driver_offer_wages: i64,
     pub driver_offer_bonus: i64,
@@ -566,6 +569,7 @@ impl Payout {
         self.prize
             + self.team_mate_prize
             + self.team_win_bonus
+            + self.flashback_bonus
             + self.sponsor_money
             + self.driver_offer_wages
             + self.driver_offer_bonus
@@ -585,6 +589,7 @@ impl Payout {
 /// - reputation bonus for the race settings;
 /// - the teammate's share and the team win bonus;
 /// - each race's sponsor objectives for the player and the teammate;
+/// - each race's Flashback Bonus ([`rules::flashback_bonus`]);
 /// - sponsor offers unlocked by the player's position (0x673B20).
 ///
 /// Head-to-head events pay `prize_money_for_first` for a win and no
@@ -614,6 +619,8 @@ pub fn apply_event(
             .iter()
             .map(|p| p.money)
             .sum::<i64>();
+        payout.flashback_bonus +=
+            rules::flashback_bonus(catalogue, tier.rank_id, settings.star_level, race);
         match race.position(Entrant::Player) {
             Some(0) => career.races_won += 1,
             _ => career.races_lost += 1,
@@ -698,12 +705,16 @@ pub fn apply_event(
 /// Pays a driver offer for another team (0x674940, 0x652270) [V]: the
 /// appearance fee (`per_race_wage × races`, race offers only) and, when the
 /// objective was met, `objective_money_bonus` and `objective_reputation_bonus`.
-/// [I] No event prize or reputation pot is paid for an offer race.
+/// [I] No event prize or reputation pot is paid for an offer race. The
+/// races' Flashback Bonus is paid as in every reward routine (0x678BD0 and
+/// 0x678EE0 call 0x652200) [V].
 pub fn apply_driver_offer(
     catalogue: &Catalogue,
     career: &mut Career,
     offer_id: i32,
     objective_met: bool,
+    races: &[RaceResult],
+    settings: &RaceSettings,
 ) -> Result<Payout, String> {
     let offer = catalogue
         .driver_offers
@@ -720,6 +731,10 @@ pub fn apply_driver_offer(
     if !test {
         payout.driver_offer_wages = rules::appearance_fee(offer);
     }
+    payout.flashback_bonus = races
+        .iter()
+        .map(|r| rules::flashback_bonus(catalogue, tier.rank_id, settings.star_level, r))
+        .sum();
     if objective_met {
         payout.driver_offer_bonus = offer.objective_money_bonus;
         payout.driver_offer_reputation = offer.objective_reputation_bonus;
@@ -743,5 +758,6 @@ pub fn result(order: &[Entrant]) -> RaceResult {
                 undamaged: true,
             })
             .collect(),
+        flashbacks: None,
     }
 }

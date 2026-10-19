@@ -171,7 +171,9 @@ A season is not a calendar.
 
 The end-of-event dispatcher 0x67B910 runs only in career mode [V]. It calls:
 - the head-to-head routine 0x6788D0;
-- routine B 0x6781F0 when a game-mode virtual (+0x98) returns true, which was not identified;
+- routine B 0x6781F0 when the game-mode virtual +0x98 (0x69B290) returns true: the current tier's
+  region index (+0x48) is 4, `le_mans` [V]. Only tiers 10–13 are in that region, so B pays only the
+  Le Mans 24 Hours events 13–16; the Le Mans Series events (31, 35, 50, 51) use A with class position;
 - otherwise routine A 0x6779C0;
 - driver-offer routines 0x678BD0 and 0x678EE0 for event kinds 1 and 2.
 
@@ -199,10 +201,30 @@ Routines A and B share the arithmetic below; B reads the pot directly, without t
     team) and ranks the teams.
   - [I] The value is the event points, and the bonus is paid when the player's team leads.
 - **Money credited** (0x674610) = prize + teammate share + Team Win Bonus + sponsor money (§5.1) +
-  0x652200 (a per-race record field +0x5C that was not identified).
-- Flashback Bonus: `difficulty.flashback_bonus` (3,000 / 12,000 / 30,000 / 60,000 by rank) reaches the
-  race's flashback manager and its UI variables, but **no native code pays it** and it is not in the
-  money total [V by search]. The bank line `bank_rewards_flashback_desc` exists only as text.
+  the Flashback Bonus (career +0x68, the sum 0x652200 of the per-race records' +0x5C).
+- **Flashback Bonus** [V, 20 October 2026; corrects the earlier "not paid"]:
+  - The per-race recorder 0x66DB80 stores the award 0x6A22A0 of the race's flashback manager in the
+    race record (+0x5C) when the player's result is final (result +0x11; [I] finished). There is no
+    position or win condition.
+  - 0x6A22A0: `maximum > 0 ? (maximum − used) × max_award / maximum : max_award` (i32 `imul`, `idiv`,
+    truncated). With no flashbacks at all (Ninja, Pro Mode) the whole award is paid.
+  - `max_award` is the `difficulty` row's `flashback_bonus` (3,000 / 12,000 / 30,000 / 60,000 by the
+    tier's rank), `maximum` its `available_flashbacks` (0x6AF7C0). Example: rank 1, 4 flashbacks,
+    1 used: 3 × 3,000 / 4 = 2,250.
+  - All five reward routines sum it: A 0x677F98, B 0x6786E0, head-to-head 0x6788DD, driver offers
+    0x678CEE and 0x678FFE (calls of 0x652200).
+  - Not traced: where the per-race records (career +0x90, saved) are cleared between events, and a
+    proof that career +0x30 is the manager 0x6AF7C0 sets up.
+- **Bank screen** `ScreenRewardsBankAccount` (factory near 0x571400, constructor 0x5554F0, vtable
+  0xCD4AE8, filler 0x555620) [V]: rows prize (+0x5C), sponsorship (0x652010), Team Win Bonus (+0x64),
+  Flashback Bonus (+0x68), then the teammate's share (+0x60) only with a team mate. A driver offer
+  shows wages (0x4E1B50) and objectives (0x652270) in the first two rows. Total is the rows' sum;
+  balance and Season's Earnings count up from value − total.
+- **Season's Earnings** [V]: the player's entry (id −2, field +4) of the money leaderboard at career
+  +0xB0 (0x4CB040). Routine A (0x665560) and B (0x665890) add the event's credited money after each
+  event; the season end (0x4DBB20 → 0x66E2E0 → 0x665BA0) zeroes every entry. The row shows only while
+  0x4DA430 is true; otherwise the balance shown adds `start_race_team` (40,000) [I: the flag is "own
+  team founded"].
 
 ### 3.2 Reputation [V]
 

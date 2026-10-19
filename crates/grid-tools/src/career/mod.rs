@@ -8,7 +8,7 @@ pub mod save;
 pub mod state;
 
 pub use data::{Catalogue, Event, Region};
-pub use rules::{Classified, Entrant, RaceResult, RaceSettings};
+pub use rules::{Classified, Entrant, Flashbacks, RaceResult, RaceSettings};
 pub use state::{
     Career, Payout, SeasonEntry, SeasonState, SponsorPay, apply_driver_offer, apply_event,
 };
@@ -296,6 +296,36 @@ mod tests {
     }
 
     #[test]
+    fn each_finished_race_pays_the_flashback_bonus_for_unused_flashbacks() {
+        let cat = tiny();
+        let fb = |used| Some(Flashbacks { used, maximum: 3 });
+        let mut first = result(&[P, ai(1)]);
+        first.flashbacks = fb(1);
+        let mut second = result(&[ai(1), P]);
+        second.flashbacks = fb(0);
+        second.order[1].finished = false;
+        let mut plain_races = [first.clone(), second.clone()];
+        for r in &mut plain_races {
+            r.flashbacks = None;
+        }
+        let mut without = founded();
+        let base = apply_event(&cat, &mut without, 7, &plain_races, &plain()).unwrap();
+        let mut c = founded();
+        let p = apply_event(&cat, &mut c, 7, &[first.clone(), second], &plain()).unwrap();
+        // Star 2: 3 flashbacks, award 3000; 1 used -> 2 * 3000 / 3; the
+        // unfinished race pays none.
+        assert_eq!(p.flashback_bonus, 2000);
+        assert_eq!(p.money(), base.money() + 2000);
+        assert_eq!(c.money, without.money + 2000);
+        assert_eq!(c.season_earnings, without.season_earnings + 2000);
+        // A driver offer pays it too (0x678BD0 / 0x678EE0 call 0x652200).
+        let mut c = founded();
+        first.flashbacks = fb(0);
+        let p = apply_driver_offer(&cat, &mut c, 12, false, &[first], &plain()).unwrap();
+        assert_eq!(p.flashback_bonus, 3000);
+    }
+
+    #[test]
     fn an_event_pays_prize_reputation_sponsors_and_drains_the_pot() {
         let cat = tiny();
         let mut c = founded();
@@ -349,14 +379,14 @@ mod tests {
     fn driver_offer_money_founds_the_team() {
         let cat = tiny();
         let mut c = Career::new();
-        let p = apply_driver_offer(&cat, &mut c, 12, true).unwrap();
+        let p = apply_driver_offer(&cat, &mut c, 12, true, &[], &Default::default()).unwrap();
         assert_eq!(p.driver_offer_wages, 13500);
         assert_eq!(p.driver_offer_bonus, 1500);
         assert_eq!(c.reputation[Region::UnitedStates as usize], 150);
         assert!(!c.team_founded);
         assert!(c.season.is_empty(), "seasons start with the team");
-        apply_driver_offer(&cat, &mut c, 12, true).unwrap();
-        let p = apply_driver_offer(&cat, &mut c, 12, false).unwrap();
+        apply_driver_offer(&cat, &mut c, 12, true, &[], &Default::default()).unwrap();
+        let p = apply_driver_offer(&cat, &mut c, 12, false, &[], &Default::default()).unwrap();
         assert!(p.team_founded);
         assert!(c.team_founded);
         // 15000 + 15000 + 13500 - 40000.
@@ -365,7 +395,7 @@ mod tests {
         // [I] The offer whose money founds the team is not counted: the
         // season counter runs before the credit in this port.
         assert!(c.season.is_empty());
-        apply_driver_offer(&cat, &mut c, 12, false).unwrap();
+        apply_driver_offer(&cat, &mut c, 12, false, &[], &Default::default()).unwrap();
         assert_eq!(c.season, [SeasonEntry::DriverOffer(12)]);
     }
 
@@ -495,7 +525,7 @@ mod tests {
         let cat = tiny();
         let mut c = Career::new();
         assert_eq!(c.driver_offers_shown(&cat), [12]);
-        apply_driver_offer(&cat, &mut c, 12, false).unwrap();
+        apply_driver_offer(&cat, &mut c, 12, false, &[], &Default::default()).unwrap();
         assert!(c.driver_offers_shown(&cat).is_empty());
     }
 
@@ -729,7 +759,7 @@ mod tests {
             .map(|o| o.id)
             .collect();
         for id in offers.iter().cycle().take(40) {
-            apply_driver_offer(&cat, &mut c, *id, true).unwrap();
+            apply_driver_offer(&cat, &mut c, *id, true, &[], &Default::default()).unwrap();
             if c.team_founded {
                 break;
             }

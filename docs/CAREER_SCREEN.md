@@ -93,6 +93,13 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
 - **Event standings.** During an event the event page lists the standings so far: `rules::standings` over the results with the event's points table, dense ranks, names from the career field ("You", the team mate's name, "Car N" for the F424 field). The original's strings are `driver_event_standings_title` "Event Standings" and `_subtitle` "Drivers" [D]. The original's standings screen and its Teams page are not ported.
 - **Bank lines.** After the Total, the payout page shows "Balance:" (`bank_rewards_balance_desc`) and "Season's Earnings:" (`bank_rewards_season_earnings_desc`) [D strings]. `Career::season_earnings` is new and saved (key `season_earnings`; older saves read 0). Each event, head-to-head and driver-offer payout adds its money total, and `end_season` clears it. Where the original keeps this sum and when it resets were not traced [I].
 
+## Flashback Bonus and bank rows (F494)
+
+- Each career race writes `flashbacks USED MAXIMUM` to `career-race.result` (the race's flashback manager at the finish), the event file keeps it after the race's `result` line, and the log line `drive_career event=race_result` names both.
+- The payout adds per finished race `(maximum − used) × flashback_bonus / maximum` (the whole bonus with no flashbacks), `flashback_bonus` from the `difficulty` row of the event tier's rank and the race's star level (`rules::flashback_bonus`, `Payout::flashback_bonus`), for own events, head-to-heads and driver offers [V 0x66DB80, 0x6A22A0, 0x652200]. It counts in the money, the Total and Season's Earnings.
+- The payout page lists the bank rows in the original's order (0x555620): Prize Money, Sponsorship Money, Team Win Bonus, Flashback Bonus, then Teammate Prize Money only with a team mate. Head-to-heads and driver offers show their own first rows, then Flashback Bonus.
+- Not ported: the original counts Season's Earnings in a leaderboard entry (CAREER_RESEARCH §3.1); the port's `Career::season_earnings` gives the same sum. The balance shown before the team is founded (+40,000) is not copied.
+
 ## eBay Motors (F487)
 
 - Once the team is founded, the home page has "eBay Motors: used cars" and "eBay Motors: sell a car".

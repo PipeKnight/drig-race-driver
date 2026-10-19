@@ -100,6 +100,39 @@ pub struct Classified {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RaceResult {
     pub order: Vec<Classified>,
+    /// The race's flashback manager at the finish (none: not reported, no
+    /// bonus).
+    pub flashbacks: Option<Flashbacks>,
+}
+
+/// A race's flashbacks: the manager's maximum and how many were used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Flashbacks {
+    pub used: u32,
+    pub maximum: u32,
+}
+
+/// The Flashback Bonus of one race [V]: the per-race recorder 0x66DB80
+/// stores 0x6A22A0 of the race's manager in the race record (+0x5C) when the
+/// player's result is final (+0x11, [I] finished); no position condition.
+/// `max_award` is the `difficulty` row's `flashback_bonus` for the tier's
+/// rank and the star level (0x6AF7C0).
+pub fn flashback_bonus(catalogue: &Catalogue, rank_id: i32, star_level: i32, race: &RaceResult) -> i64 {
+    let (Some(fb), Some((_, player))) = (race.flashbacks, race.entry(Entrant::Player)) else {
+        return 0;
+    };
+    if !player.finished {
+        return 0;
+    }
+    let max_award = catalogue
+        .difficulty(rank_id, star_level)
+        .map_or(0, |d| d.flashback_bonus);
+    crate::flashback::Manager {
+        maximum: fb.maximum,
+        used: fb.used.min(fb.maximum),
+        max_award: max_award.clamp(0, u32::MAX as i64) as u32,
+    }
+    .award()
 }
 
 impl RaceResult {

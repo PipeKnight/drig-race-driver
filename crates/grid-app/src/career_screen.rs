@@ -27,7 +27,7 @@ use crate::pause_menu::{Labels, Nav, Repeat};
 use bevy::prelude::*;
 use grid_tools::career::data::EventRace;
 use grid_tools::career::{
-    Career, Catalogue, Classified, Entrant, Payout, RaceResult, RaceSettings, Region,
+    Career, Catalogue, Classified, Entrant, Flashbacks, Payout, RaceResult, RaceSettings, Region,
     SeasonState, apply_driver_offer, apply_event, save,
 };
 use std::collections::BTreeMap;
@@ -627,7 +627,19 @@ pub fn write_race_out(out: &RaceOut) -> String {
     if let Some(t) = out.top_mph {
         s += &format!("top {t}\n");
     }
+    if let Some(f) = out.result.flashbacks {
+        s += &format!("flashbacks {} {}\n", f.used, f.maximum);
+    }
     s
+}
+
+fn flashbacks<'a>(mut f: impl Iterator<Item = &'a str>) -> Result<Flashbacks, String> {
+    let mut n = || {
+        f.next()
+            .and_then(|v| v.parse::<u32>().ok())
+            .ok_or_else(|| "bad flashbacks".to_string())
+    };
+    Ok(Flashbacks { used: n()?, maximum: n()? })
 }
 
 pub fn read_race_out(text: &str) -> Result<RaceOut, String> {
@@ -635,7 +647,7 @@ pub fn read_race_out(text: &str) -> Result<RaceOut, String> {
     if lines.next() != Some("grid-career-race 1") {
         return Err("not a career race result".into());
     }
-    let (mut result, mut settings, mut best_lap, mut top_mph) = (None, None, None, None);
+    let (mut result, mut settings, mut best_lap, mut top_mph, mut fb) = (None, None, None, None, None);
     for line in lines {
         let mut f = line.split_whitespace();
         match f.next() {
@@ -645,13 +657,16 @@ pub fn read_race_out(text: &str) -> Result<RaceOut, String> {
             Some("order") => {
                 result = Some(RaceResult {
                     order: f.map(classified).collect::<Result<_, _>>()?,
+                    flashbacks: None,
                 })
             }
+            Some("flashbacks") => fb = Some(flashbacks(f)?),
             None => {}
             Some(other) => return Err(format!("unknown line {other}")),
         }
     }
-    let result = result.ok_or("no order")?;
+    let mut result = result.ok_or("no order")?;
+    result.flashbacks = fb;
     if result.position(Entrant::Player).is_none() {
         return Err("the player is not classified".into());
     }
@@ -728,6 +743,9 @@ impl InProgress {
         for r in &self.results {
             let order: Vec<String> = r.order.iter().map(token).collect();
             s += &format!("result {}\n", order.join(" "));
+            if let Some(f) = r.flashbacks {
+                s += &format!("flashbacks {} {}\n", f.used, f.maximum);
+            }
         }
         if let Some(settings) = &self.settings {
             s += &format!("settings {}\n", settings_text(settings));
@@ -788,7 +806,12 @@ impl InProgress {
                 Some("entrant") => e.field.push(FieldEntry::read(f)?),
                 Some("result") => e.results.push(RaceResult {
                     order: f.map(classified).collect::<Result<_, _>>()?,
+                    flashbacks: None,
                 }),
+                Some("flashbacks") => {
+                    let fb = flashbacks(f)?;
+                    e.results.last_mut().ok_or("flashbacks before a result")?.flashbacks = Some(fb);
+                }
                 Some("settings") => e.settings = Some(parse_settings(f)?),
                 Some("offer") => e.offer = Some(num(f.next())? as i32),
                 Some("best") => e.best_lap = f.next().and_then(|v| v.parse().ok()),
@@ -852,19 +875,26 @@ pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
         lines.push(format!("Head-to-head: {}", if p.position == Some(0) { "won" } else { "lost" }));
         lines.push(format!("Prize Money: {}", money(p.prize)));
         lines.push(format!("Sponsorship Money: {}", money(p.sponsor_money)));
+        lines.push(format!("Flashback Bonus: {}", money(p.flashback_bonus)));
     } else if offer || p.position.is_none() && p.prize == 0 && p.sponsor_money == 0 {
         // A driver offer pays its own lines (bank_rewards_do_*) [D].
         lines.push(format!("Driver Offer Wages: {}", money(p.driver_offer_wages)));
         lines.push(format!("Driver Offer Rewards: {}", money(p.driver_offer_bonus)));
+        lines.push(format!("Flashback Bonus: {}", money(p.flashback_bonus)));
     } else {
         lines.push(match p.position {
             Some(pos) => format!("Championship position: {}", pos + 1),
             None => "Not classified".into(),
         });
+        // The bank screen's rows (0x555620) [V]: prize, sponsorship, team
+        // win, flashback, then the teammate's share with a team mate.
         lines.push(format!("Prize Money: {}", money(p.prize)));
-        lines.push(format!("Teammate Prize Money: {}", money(p.team_mate_prize)));
-        lines.push(format!("Team Win Bonus: {}", money(p.team_win_bonus)));
         lines.push(format!("Sponsorship Money: {}", money(p.sponsor_money)));
+        lines.push(format!("Team Win Bonus: {}", money(p.team_win_bonus)));
+        lines.push(format!("Flashback Bonus: {}", money(p.flashback_bonus)));
+        if c.team_mate.is_some() || p.team_mate_prize != 0 {
+            lines.push(format!("Teammate Prize Money: {}", money(p.team_mate_prize)));
+        }
     }
     lines.push(format!("Total: {}", money(p.money())));
     lines.push(format!("Balance: {}", money(c.money)));
@@ -981,7 +1011,12 @@ pub fn track_top_speed(driving: Res<crate::Driving>, mut top: ResMut<TopSpeed>) 
 const MPS_TO_MPH: f32 = 3600. / 1609.344;
 
 /// The race's classification as car tokens (`post_race::table` order).
-pub fn race_out(rows: &[crate::post_race::Row], aids: &grid_tools::source_vehicle::assists::Assists, top_mps: f32) -> RaceOut {
+pub fn race_out(
+    rows: &[crate::post_race::Row],
+    aids: &grid_tools::source_vehicle::assists::Assists,
+    top_mps: f32,
+    flashbacks: Option<Flashbacks>,
+) -> RaceOut {
     use grid_tools::source_vehicle::assists::{Level, Transmission};
     let order = rows
         .iter()
@@ -1002,7 +1037,7 @@ pub fn race_out(rows: &[crate::post_race::Row], aids: &grid_tools::source_vehicl
         })
         .collect();
     RaceOut {
-        result: RaceResult { order },
+        result: RaceResult { order, flashbacks },
         settings: RaceSettings {
             star_level: star_level(),
             manual_gears: aids.transmission == Transmission::Manual,
@@ -1024,22 +1059,29 @@ pub fn write_result(
     driving: Res<crate::Driving>,
     trial: Option<Res<crate::time_trial::Trial>>,
     top: Option<Res<TopSpeed>>,
+    flashback: Option<Res<crate::flashback::Flashback>>,
 ) {
     let back = AppExit::from_code(crate::event_menu::BACK_TO_MENU as u8);
     if !exits.read().any(|e| *e == back) {
         return;
     }
     let rows = crate::post_race::table(&driving, trial.as_deref());
-    let out = race_out(&rows, &driving.runtime.assists, top.map_or(0., |t| t.0));
+    let fb = flashback.map(|f| Flashbacks {
+        used: f.manager.used,
+        maximum: f.manager.maximum,
+    });
+    let out = race_out(&rows, &driving.runtime.assists, top.map_or(0., |t| t.0), fb);
     if out.result.position(Entrant::Player).is_none() {
         log_line!("drive_career version=1 event=race_result_missing");
         return;
     }
     match std::fs::write(&path.0, write_race_out(&out)) {
         Ok(()) => log_line!(
-            "drive_career version=1 event=race_result position={} cars={}",
+            "drive_career version=1 event=race_result position={} cars={} flashbacks_used={} flashbacks_maximum={}",
             out.result.position(Entrant::Player).unwrap_or(0) + 1,
-            out.result.order.len()
+            out.result.order.len(),
+            fb.map_or(-1, |f| f.used as i64),
+            fb.map_or(-1, |f| f.maximum as i64)
         ),
         Err(e) => log_line!("drive_career version=1 event=race_result_failed error={e:?}"),
     }
@@ -1646,17 +1688,25 @@ impl Screen {
         if let Some(offer_id) = e.offer {
             let out = e.last_out().ok_or("driver offer without a result")?;
             let met = offer_met(&self.cat, offer_id, &out, e.field.is_empty());
-            let payout = apply_driver_offer(&self.cat, &mut self.career, offer_id, met)?;
+            let payout = apply_driver_offer(
+                &self.cat,
+                &mut self.career,
+                offer_id,
+                met,
+                &e.results,
+                &e.settings.unwrap_or_default(),
+            )?;
             let ebay = self.ebay_lines();
             self.save()?;
             let _ = std::fs::remove_file(&event_path);
             log_line!(
-                "drive_career version=1 event=offer_paid offer={offer_id} met={met} position={} best_lap={:?} top_mph={:?} wages={} bonus={} reputation={} money={} team_founded={}",
+                "drive_career version=1 event=offer_paid offer={offer_id} met={met} position={} best_lap={:?} top_mph={:?} wages={} bonus={} flashback={} reputation={} money={} team_founded={}",
                 out.result.position(Entrant::Player).map_or(0, |p| p + 1),
                 out.best_lap,
                 out.top_mph,
                 payout.driver_offer_wages,
                 payout.driver_offer_bonus,
+                payout.flashback_bonus,
                 payout.reputation(),
                 self.career.money,
                 self.career.team_founded
@@ -1677,12 +1727,13 @@ impl Screen {
         self.save()?;
         let _ = std::fs::remove_file(&event_path);
         log_line!(
-            "drive_career version=1 event=paid event_id={} position={} prize={} team_mate={} team_win={} sponsors={} reputation={} money={} total_reputation={}",
+            "drive_career version=1 event=paid event_id={} position={} prize={} team_mate={} team_win={} flashback={} sponsors={} reputation={} money={} total_reputation={}",
             e.event_id,
             payout.position.map_or(0, |p| p + 1),
             payout.prize,
             payout.team_mate_prize,
             payout.team_win_bonus,
+            payout.flashback_bonus,
             payout.sponsor_money,
             payout.reputation(),
             self.career.money,
@@ -2274,6 +2325,7 @@ mod tests {
         RaceOut {
             result: RaceResult {
                 order: order.iter().map(|&c| classified(&c.to_string()).unwrap()).collect(),
+                flashbacks: None,
             },
             settings: RaceSettings {
                 star_level: star_level(),
@@ -2292,7 +2344,9 @@ mod tests {
     fn race_results_and_events_round_trip() {
         let mut o = out(&[3, 0, 1, 2], true);
         o.result.order[3].finished = false;
+        o.result.flashbacks = Some(Flashbacks { used: 1, maximum: 4 });
         let back = read_race_out(&write_race_out(&o)).unwrap();
+        assert_eq!(back.result.flashbacks, o.result.flashbacks);
         assert!(!back.result.order[3].finished);
         assert_eq!(back.result.order[3].entrant, Entrant::Ai { driver: 2, team: 2 });
         assert_eq!(back.settings, o.settings);
@@ -2697,7 +2751,7 @@ mod tests {
         lap.best_lap = Some(107.2);
         assert!(!offer_met(&cat, 16, &lap, true));
         // Paying 15 met: 3,000 fee + 2,000 bonus, 180 reputation to Europe.
-        let p = apply_driver_offer(&cat, &mut career, 15, true).unwrap();
+        let p = apply_driver_offer(&cat, &mut career, 15, true, &[], &Default::default()).unwrap();
         assert_eq!((p.driver_offer_wages, p.driver_offer_bonus, p.reputation()), (3000, 2000, 180));
         assert_eq!(career.reputation[Region::Europe as usize], 180);
         // The slot moves on to offer 17, the next Europe race offer by order_index.

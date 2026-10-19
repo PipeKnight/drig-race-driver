@@ -1,5 +1,28 @@
 # GRID engine project log
 
+F494 Career Flashback Bonus: unused flashbacks pay career money per race, and the payout lists the original's bank rows (2026-10-20, Claude Code; coordinator's order, FIDELITY_BACKLOG row 60). Research: docs/CAREER_RESEARCH.md §3 (static: Ghidra 12.1.4 headless read-only and Capstone on the hash-pinned image; research agent notes in the main checkout's `local/career/notes/BANK_ROUTINEB.md`, outputs `local/career/agent-f/decomp/f1..f4`). Screen: docs/CAREER_SCREEN.md "Flashback Bonus and bank rows (F494)". Evidence: worktree peaceful-villani-46ea34 `local/career4/` (run1f, checks-493).
+- Found [V]: the per-race recorder 0x66DB80 stores the award 0x6A22A0 of the race's flashback manager when the player's result is final (+0x11, [I] finished). The award is `(maximum − used) × max_award / maximum` (i32 `imul`/`idiv`, checked in the Capstone disassembly), or the whole `max_award` with no flashbacks (Ninja, Pro Mode). 0x652200 sums the event's races into career +0x68, and all five reward routines credit it (A, B, head-to-head, both driver-offer routines). This corrects CAREER_RESEARCH §3.1 and FLASHBACK.md, which said nothing pays it, and the private REWARDS.md, which called +0x68 sponsorship.
+- Also found, not ported: the bank screen class `ScreenRewardsBankAccount` (filler 0x555620) and its row order; Season's Earnings is the player's money-leaderboard entry, added after every event and zeroed at the season end; routine B is chosen only for tiers of the `le_mans` region (the Le Mans 24 Hours events 13–16).
+- Port:
+  - `flashback::Manager::award`;
+  - `rules::Flashbacks` and `RaceResult::flashbacks`;
+  - `rules::flashback_bonus`, using the `difficulty` row of the tier's rank and the race's star level;
+  - `Payout::flashback_bonus`, which counts in the money, the Total and Season's Earnings; `apply_driver_offer` now takes the races and settings.
+- Each career race writes `flashbacks USED MAXIMUM` to `career-race.result`, and the event file keeps it per race. The payout page lists Prize, Sponsorship, Team Win Bonus, Flashback Bonus, then the teammate's share only with a team mate (0x555620).
+- Not ported: the race's own manager still publishes rank 2's `max_award`, and the career uses the tier's row. Where the original clears its per-race records between events was not traced.
+- In the app (guarded, muted at the owner's request; `guard_career2.sh` now runs `local/mute_grid.ps1` every tick):
+  - unattended event 1 (2 races, rank 1, star 1), finishing 2nd and 4th with 0 of 4 flashbacks used;
+  - paid `flashback=6000` (2 × 3,000) with the other lines unchanged from F487's run: prize 25,000, teammate 10,000, team win 20,000, sponsors 32,600;
+  - money 200,000 + 93,600 + the eBay sale 36,000 = 329,600; Season's Earnings 93,600;
+  - at most 2.2 GB private.
+- Checks [V], release, `--offline`:
+  - head 453231e (main ce6e77e + this change; docs renumbered F491→F494 after)
+  - identities unchanged: solo 79a990f6…4bcc, 12-car 40cd67ca…ab8d
+  - workspace tests with `--include-ignored` and absolute GRID_* paths: 821 passed, 0 failed
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean
+  - `grid-soak quick`: 24 scenarios, 0 failed
+  - release grid-app.exe sha256 c38bf23b…e5fe0f
+
 F493 StartLine mix mode: AI −3 dB through the start sequence (2026-10-20, Claude Code; coordinator's overnight order: "The StartLine mix mode (AI −3 dB at the start)"). Details: docs/AUDIO_RESEARCH.md §13. Evidence: Capstone 5.0.6 listings of 411C10, 427ED0, 5791A0/579210 (session scratchpad), decoded `local/pause-menu/states.xml` and `flow.xml`. The original was not run.
 - From the image and data [O]:
   - no code sets StartLine directly; the race flow's `StateAudioSetState` (vtable CD77E0, attributes `mode` and `start_race`) does;
