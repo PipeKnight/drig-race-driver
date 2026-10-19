@@ -75,6 +75,9 @@ pub struct Settings {
     /// Window-only material control; light lenses are a separate material.
     pub window_roughness: f32,
     pub window_reflectance: f32,
+    /// Authored player-paint coat controls, independent of base mask and glass.
+    pub paint_clearcoat: f32,
+    pub paint_coat_roughness: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
     /// Diagnostic isolation of ambient occlusion and grass shadow reception.
@@ -136,6 +139,8 @@ impl Default for Settings {
             exposure_ev100: 13.,
             window_roughness: 0.08,
             window_reflectance: 0.5,
+            paint_clearcoat: 0.2,
+            paint_coat_roughness: 0.18,
             tree_sheet_colours: false,
             ambient_occlusion: true,
             grass_receive_shadows: true,
@@ -186,6 +191,24 @@ impl Settings {
             return Err("glass roughness must be finite and 0.04..1");
         }
         self.window_roughness = roughness;
+        Ok(())
+    }
+
+    pub fn paint_clearcoat(&mut self, value: &str) -> Result<(), &'static str> {
+        let strength = value.parse::<f32>().map_err(|_| "invalid paint clearcoat")?;
+        if !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
+            return Err("paint clearcoat must be finite and 0..1");
+        }
+        self.paint_clearcoat = strength;
+        Ok(())
+    }
+
+    pub fn paint_coat_roughness(&mut self, value: &str) -> Result<(), &'static str> {
+        let roughness = value.parse::<f32>().map_err(|_| "invalid paint coat roughness")?;
+        if !roughness.is_finite() || !(0.04..=1.0).contains(&roughness) {
+            return Err("paint coat roughness must be finite and 0.04..1");
+        }
+        self.paint_coat_roughness = roughness;
         Ok(())
     }
 
@@ -482,6 +505,27 @@ mod graphics_settings_tests {
             assert_eq!(settings.window_roughness, 0.2);
         }
     }
+    #[test]
+    fn paint_coat_controls_preserve_defaults_and_reject_nonfinite_values() {
+        let mut settings = Settings::default();
+        assert_eq!((settings.paint_clearcoat, settings.paint_coat_roughness), (0.2, 0.18));
+        for value in ["0", "0.35", "1"] {
+            settings.paint_clearcoat(value).unwrap();
+        }
+        for value in ["0.04", "0.12", "1"] {
+            settings.paint_coat_roughness(value).unwrap();
+        }
+        for value in ["", "NaN", "inf", "-inf", "-0.01", "1.01"] {
+            assert!(settings.paint_clearcoat(value).is_err());
+            assert_eq!(settings.paint_clearcoat, 1.);
+        }
+        for value in ["", "NaN", "inf", "-inf", "0", "0.039", "1.01"] {
+            assert!(settings.paint_coat_roughness(value).is_err());
+            assert_eq!(settings.paint_coat_roughness, 1.);
+        }
+        assert_eq!((settings.window_reflectance, settings.window_roughness), (0.5, 0.08));
+    }
+
     #[test]
     fn exposure_is_bounded_and_invalid_values_preserve_previous_setting() {
         let mut settings = Settings::default();

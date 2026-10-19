@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G156 — Bounded lacquer controls for one-variable comparisons (19 October 2026)
+
+Added --paint-clearcoat0..1 and --paint-coat-roughness0.04..1, finite validation preserving prior values on error, explicit enhanced/layered guard, and effective-value logging. Apply only to the existing player Car Body Paint branch; source base mask, base roughness, glass, wheel materials, physics and opponents are unchanged. Defaults remain0.20/0.18: no stronger paint setting accepted yet. Regression test covers bounds/nonfinite inputs and glass independence. Pending tests/build/native legacy parity, strength-only and roughness-only captures, then motion/drive checks. This is a diagnostic material interface, not recovered original GRID scalar packing. Initial edit guard used the wrong Rust field terminator and aborted before any write; corrected against the actual comma-delimited struct.
+
+
 ## G155 — Prepare track-only road-mask default (19 October 2026)
 
 Following the owner's continue request and verified G154 evidence, enhanced non-collision source-layer track scenes now resolve an omitted surface-specular option toSourceBase. ExplicitOff/WhiteControl retain diagnostic meaning; baseline, car-only, collision and single-layer scenes retain their previous settings. This promotes the existing shader path, not new material algebra. Source change pending CLI/GPU/moving validation and delivery; installed3bfc remains unchanged. No primary source/Steam/performance work. Next separate commit adds bounded clearcoat controls while retaining current paint defaults for parity checks.

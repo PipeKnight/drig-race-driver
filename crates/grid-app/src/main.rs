@@ -1359,6 +1359,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut texture_override_path = None;
     let mut surface_rgb_override = None;
     let mut surface_specular_explicit = false;
+    let mut paint_response_explicit = false;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut body_contacts = profile.body_contacts.clone();
@@ -1714,6 +1715,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--race-number" => {
                 graphics.race_number(&args.next().ok_or("--race-number needs 0..999")?)?;
             }
+            "--paint-clearcoat" => {
+                graphics.paint_clearcoat(&args.next().ok_or("--paint-clearcoat needs 0..1")?)?;
+                paint_response_explicit = true;
+            }
+            "--paint-coat-roughness" => {
+                graphics.paint_coat_roughness(&args.next().ok_or("--paint-coat-roughness needs 0.04..1")?)?;
+                paint_response_explicit = true;
+            }
             "--glass-reflectance" => {
                 graphics.glass_reflectance(&args.next().ok_or("--glass-reflectance needs 0..1")?)?;
             }
@@ -1845,6 +1854,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--help" => {
                 #[cfg(feature = "paint-specular")]
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
+                println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.2/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source layers required; off default, not original Phong parity.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
@@ -1930,6 +1940,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         println!("{}", event.log_line());
     }
+    if paint_response_explicit && (!graphics.enhanced() || !graphics.layered_car) {
+        return Err("paint coat controls require enhanced graphics with layered car materials".into());
+    }
     // Only eligible enhanced source-layer track scenes adopt the verified mask.
     // An explicit off/white-control always survives, irrespective of flag order.
     if !surface_specular_explicit
@@ -1944,6 +1957,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
         return Err("surface controls (--surface-specular/--surface-rgb-overrides) require an enhanced non-collision track scene with --track-materials source".into());
+    }
+    if graphics.enhanced() && graphics.layered_car {
+        println!("graphics_paint clearcoat={} coat_roughness={} scope=player-paint base_mask=independent authored=true",
+            graphics.paint_clearcoat, graphics.paint_coat_roughness);
     }
     let start_sequence = StartSequence::load(&root, &route)?;
     if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
@@ -3224,6 +3241,10 @@ fn setup(
                     && (!track || part.material.starts_with("car0/"))
                 {
                     car_materials::apply(name, &mut material);
+                    if name == "Car Body Paint" {
+                        material.clearcoat = graphics.paint_clearcoat;
+                        material.clearcoat_perceptual_roughness = graphics.paint_coat_roughness;
+                    }
                     if name == "Window Glass" {
                         material.perceptual_roughness = graphics.window_roughness;
                         material.reflectance = graphics.window_reflectance;
