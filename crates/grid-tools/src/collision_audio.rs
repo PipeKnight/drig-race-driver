@@ -645,7 +645,8 @@ struct Voice {
     sound: usize,
     position: f64,
     step: f64,
-    gain: f32,
+    /// Left and right gain: level times the voice's pan, fixed at the start.
+    gain: [f32; 2],
 }
 
 /// Mixes collision one-shots at `rate`; gains include the voice level, its
@@ -667,8 +668,8 @@ struct Loop {
     position: f64,
     step: f64,
     target_step: f64,
-    gain: f32,
-    target: f32,
+    gain: [f32; 2],
+    target: [f32; 2],
 }
 
 /// Per-sample approach of a loop's gain and pitch to the tick's targets,
@@ -705,18 +706,18 @@ impl Mixer {
     }
 
     /// Car `car`'s scrape loop this tick: started on its first call (one
-    /// sample of `variety`, looped), then gain and pitch follow.
-    pub fn scrape(&mut self, car: usize, variety: &str, pitch: f32, gain: f32) {
+    /// sample of `variety`, looped), then gain, pan and pitch follow.
+    pub fn scrape(&mut self, car: usize, variety: &str, pitch: f32, gain: f32, pan: [f32; 2]) {
         if self.loops.len() <= car {
             self.loops.resize(car + 1, None);
         }
         if self.loops[car].is_none() {
             let Some(sound) = self.pick(variety) else { return };
             let step = f64::from(pitch) * f64::from(self.bank.sounds[sound].rate) / f64::from(self.rate);
-            self.loops[car] = Some(Loop { sound, position: 0., step, target_step: step, gain: 0., target: 0. });
+            self.loops[car] = Some(Loop { sound, position: 0., step, target_step: step, gain: [0.; 2], target: [0.; 2] });
         }
         if let Some(l) = &mut self.loops[car] {
-            l.target = gain.max(0.);
+            l.target = pan.map(|p| gain.max(0.) * p);
             l.target_step = f64::from(pitch) * f64::from(self.bank.sounds[l.sound].rate) / f64::from(self.rate);
         }
     }
@@ -725,8 +726,9 @@ impl Mixer {
         self.loops.iter().flatten().count()
     }
 
-    /// Start `play` at `gain` (linear, group and distance included).
-    pub fn start(&mut self, variety: &str, pitch: f32, gain: f32) -> bool {
+    /// Start `play` at `gain` (linear, group and distance included) with
+    /// stereo `pan` gains (`audio_mix::pan_gains`).
+    pub fn start(&mut self, variety: &str, pitch: f32, gain: f32, pan: [f32; 2]) -> bool {
         if gain <= 0. || self.voices.len() >= VOICES {
             return false;
         }
@@ -736,7 +738,7 @@ impl Mixer {
             sound,
             position: 0.,
             step: f64::from(pitch) * f64::from(s.rate) / f64::from(self.rate),
-            gain,
+            gain: pan.map(|p| gain * p),
         });
         true
     }
@@ -745,9 +747,9 @@ impl Mixer {
         self.voices.len()
     }
 
-    /// One mono sample.
-    pub fn sample(&mut self) -> f32 {
-        let mut out = 0.;
+    /// One stereo frame (left, right).
+    pub fn sample(&mut self) -> [f32; 2] {
+        let mut out = [0.; 2];
         let bank = &self.bank;
         self.voices.retain_mut(|v| {
             let s = &bank.sounds[v.sound];
@@ -759,7 +761,9 @@ impl Mixer {
             let frac = (v.position - v.position.floor()) as f32;
             let a = s.pcm[i * s.channels];
             let b = s.pcm[(i + 1) * s.channels];
-            out += (a + (b - a) * frac) * v.gain;
+            let value = a + (b - a) * frac;
+            out[0] += value * v.gain[0];
+            out[1] += value * v.gain[1];
             v.position += v.step;
             true
         });
@@ -769,13 +773,17 @@ impl Mixer {
             if frames < 2 {
                 continue;
             }
-            l.gain += (l.target - l.gain) * LOOP_GLIDE;
+            for (g, t) in l.gain.iter_mut().zip(l.target) {
+                *g += (t - *g) * LOOP_GLIDE;
+            }
             l.step += (l.target_step - l.step) * f64::from(LOOP_GLIDE);
             let i = l.position as usize % frames;
             let frac = (l.position - l.position.floor()) as f32;
             let a = s.pcm[i * s.channels];
             let b = s.pcm[(i + 1) % frames * s.channels];
-            out += (a + (b - a) * frac) * l.gain;
+            let value = a + (b - a) * frac;
+            out[0] += value * l.gain[0];
+            out[1] += value * l.gain[1];
             l.position = (l.position + l.step) % frames as f64;
         }
         out
@@ -970,14 +978,18 @@ mod tests {
             assert!(!bank.varieties[&curve.variety].samples.is_empty(), "{info}");
         }
         let mut mixer = Mixer::new(bank, 48_000);
-        assert!(mixer.start("carFBHard", 1., 0.5));
-        assert!(!mixer.start("dummy", 1., 1.));
-        let peak = (0..48_000).map(|_| mixer.sample().abs()).fold(0f32, f32::max);
-        assert!(peak > 0.01 && peak < 1.);
-        mixer.scrape(0, "ScrapeSideRoad", 0.5, 0.5);
+        // Hard right: everything in the right channel.
+        assert!(mixer.start("carFBHard", 1., 0.5, [0., 2f32.sqrt()]));
+        assert!(!mixer.start("dummy", 1., 1., [1., 1.]));
+        let frames: Vec<[f32; 2]> = (0..48_000).map(|_| mixer.sample()).collect();
+        let peak = |c: usize| frames.iter().map(|f| f[c].abs()).fold(0f32, f32::max);
+        assert!(peak(1) > 0.01 && peak(1) < 1. && peak(0) == 0.);
+        mixer.scrape(0, "ScrapeSideRoad", 0.5, 0.5, [1., 1.]);
         assert_eq!(mixer.loops(), 1);
-        // The loop keeps playing past its sample's end.
-        let late = (0..96_000).map(|_| mixer.sample().abs()).skip(72_000).fold(0f32, f32::max);
-        assert!(late > 0.001 && late < 1., "{late}");
+        // The loop keeps playing past its sample's end, centred.
+        let late: Vec<[f32; 2]> = (0..96_000).map(|_| mixer.sample()).skip(72_000).collect();
+        let late_peak = late.iter().map(|f| f[0].abs()).fold(0f32, f32::max);
+        assert!(late_peak > 0.001 && late_peak < 1., "{late_peak}");
+        assert!(late.iter().all(|f| (f[0] - f[1]).abs() < 1e-6));
     }
 }

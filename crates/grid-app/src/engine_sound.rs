@@ -9,6 +9,7 @@ use grid_tools::{
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank as EngineBank, CHASE_BUS_DB, Mixer},
 };
+use super::stereo::{Pan, Stereo};
 use std::{
     sync::{
         Arc, Mutex,
@@ -81,6 +82,8 @@ pub(crate) struct OpponentEngine {
     mailbox: Mailbox,
     bus: Arc<AtomicU64>,
     model: usize,
+    /// Heard from the camera (the AI group's listener, 433AA0).
+    pan: Pan,
 }
 /// audioVarieties presets `Engine`/`Exhaust`: min/max distance in metres.
 const ENGINE_DISTANCE: (f32, f32) = (10., 175.);
@@ -119,6 +122,7 @@ pub(crate) struct EngineSource {
     mailbox: Mailbox,
     bus: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
+    pan: Pan,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
@@ -179,17 +183,21 @@ impl Source for Decoder {
     }
 }
 impl Decodable for EngineSource {
-    type Decoder = Decoder;
-    fn decoder(&self) -> Decoder {
-        Decoder {
-            mixer: Mixer::new(self.bank.clone()),
-            mailbox: self.mailbox.clone(),
-            bus: self.bus.clone(),
-            control: Control::default(),
-            count: 0,
-            failure: self.failure.clone(),
-            reported_failure: false,
-        }
+    type Decoder = Stereo<Decoder>;
+    fn decoder(&self) -> Stereo<Decoder> {
+        Stereo::new(
+            Decoder {
+                mixer: Mixer::new(self.bank.clone()),
+                mailbox: self.mailbox.clone(),
+                bus: self.bus.clone(),
+                control: Control::default(),
+                count: 0,
+                failure: self.failure.clone(),
+                reported_failure: false,
+            },
+            self.pan.clone(),
+            RATE,
+        )
     }
 }
 /// `banks` holds one bank per field car model, the player's first.
@@ -209,11 +217,15 @@ fn start(
     driving: Option<Res<super::Driving>>,
     field: Option<Res<super::Field>>,
 ) {
+    // The player's engine and exhaust (EngineBay (0,0,4), Exhaust (0,0,-4)
+    // in the car) are heard by the Car listener at the car: in front of and
+    // behind it, so centred.
     let handle = assets.add(EngineSource {
         bank: sound.bank.clone(),
         mailbox: sound.mailbox.clone(),
         bus: sound.bus.clone(),
         failure: sound.failure.clone(),
+        pan: Pan::centre(),
     });
     commands.spawn(AudioPlayer(handle));
     let cars = driving
@@ -229,11 +241,13 @@ fn start(
             .and_then(|f| f.car_model.get(car).copied())
             .filter(|&m| m < sound.banks.len())
             .unwrap_or(0);
+        let pan = Pan::centre();
         let handle = assets.add(EngineSource {
             bank: sound.banks[model].clone(),
             mailbox: mailbox.clone(),
             bus: bus.clone(),
             failure: sound.failure.clone(),
+            pan: pan.clone(),
         });
         // Played once, as the player's engine: the decoder never ends. LOOP
         // wraps it in rodio's `repeat_infinite`, which keeps every sample
@@ -246,6 +260,7 @@ fn start(
                 mailbox,
                 bus,
                 model,
+                pan,
             },
         ));
     }
@@ -297,6 +312,15 @@ impl Listening<'_, '_> {
                 t.translation()
             })
     }
+    /// Stereo gains of `emitter` heard at `listener` (A23DC0's listener
+    /// space: the position relative to the listener in its orientation).
+    /// Both listeners face the camera's way [I: the Car listener's chase
+    /// blend 43F7A0 is not reconstructed]; the camera listener sits at the
+    /// camera, the Car listener at the player's car.
+    pub(crate) fn heard(&self, listener: Vec3, emitter: Vec3) -> [f32; 2] {
+        let rotation = self.listener.single().map_or(Quat::IDENTITY, |t| t.rotation());
+        super::stereo::pan_from(rotation, listener, emitter)
+    }
 }
 fn update(
     mut sound: ResMut<EngineSound>,
@@ -347,7 +371,9 @@ fn update(
     if let Some(opponents) = &driving.opponents {
         for engine in &opponent_engines {
             let car = &opponents.multi.cars[engine.car];
-            let distances = distances(Mat4::from_cols_array(&car.pose()), engine.model);
+            let pose = car.pose();
+            engine.pan.set(listening.heard(ear, Vec3::new(pose[12], pose[13], pose[14])));
+            let distances = distances(Mat4::from_cols_array(&pose), engine.model);
             engine.bus.store(
                 pack_bus(bus_levels(
                     table,
@@ -489,8 +515,10 @@ mod tests {
                 mailbox: mailbox.clone(),
                 bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
                 failure: Arc::new(AtomicU32::new(0)),
+                pan: Pan::centre(),
             }
-            .decoder();
+            .decoder()
+            .inner;
             let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0 };
             push(&mailbox, control(0.3));
             for _ in 0..grid_tools::engine_audio_continuous::BLOCK {
@@ -518,7 +546,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)) }.decoder();
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre() }.decoder().inner;
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();

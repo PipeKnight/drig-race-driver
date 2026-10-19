@@ -236,9 +236,39 @@ pub fn backend_gain(voice_db: f32, group_db: f32, distance_db: Option<f32>) -> f
     }
 }
 
+/// Stereo gains of a 3D voice from its position in listener space (x right,
+/// y up, z forward): the game hands OpenAL listener-space positions (A23DC0)
+/// and leaves the panning to the device. "Generic Software"'s pan law is
+/// implementation-defined, so this is an equal-power law on the horizontal
+/// azimuth, p = sin(azimuth), front and back alike [I]. Scaled by √2 so a
+/// centred voice keeps unit gain in both channels, as the mono sources had.
+pub fn pan_gains(listener: [f32; 3]) -> [f32; 2] {
+    let horizontal = listener[0].hypot(listener[2]);
+    let p = if horizontal > 1e-3 && horizontal.is_finite() {
+        (listener[0] / horizontal).clamp(-1., 1.)
+    } else {
+        0.
+    };
+    [(1. - p).sqrt(), (1. + p).sqrt()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pan_is_equal_power_on_the_azimuth() {
+        assert_eq!(pan_gains([0., 0., 5.]), [1., 1.]);
+        assert_eq!(pan_gains([0., 0., -5.]), [1., 1.]);
+        assert_eq!(pan_gains([0., 3., 0.]), [1., 1.]);
+        let right = pan_gains([4., 0., 0.]);
+        assert_eq!(right, [0., 2f32.sqrt()]);
+        assert_eq!(pan_gains([-4., 1., 0.]), [2f32.sqrt(), 0.]);
+        let half = pan_gains([1., 0., 3f32.sqrt()]);
+        // 30 degrees right: p = 0.5; the power sums to 2 like the centre.
+        assert!((half[0] * half[0] + half[1] * half[1] - 2.).abs() < 1e-6);
+        assert!((half[1] * half[1] - 1.5).abs() < 1e-6);
+    }
 
     #[test]
     fn slider_distance_and_floor() {

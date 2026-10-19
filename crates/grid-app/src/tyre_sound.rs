@@ -14,6 +14,7 @@ use grid_tools::{
     source_vehicle::{DELTA, Runtime},
     tyre_audio::{self, Bank, CATEGORIES, Driver, Inputs, Mixer, Voice},
 };
+use super::stereo::{Pan, Stereo};
 use std::{
     sync::{
         Arc, Mutex,
@@ -42,6 +43,8 @@ pub(crate) struct TyreSound {
     /// Car 0 is the player; car k is opponent k of the shared world.
     drivers: Vec<Driver>,
     shared: Vec<Shared>,
+    /// Each car's stereo pan (`stereo`).
+    pans: Vec<Pan>,
     audible: Arc<AtomicBool>,
     last: Option<(u64, u64)>,
 }
@@ -52,6 +55,7 @@ impl TyreSound {
             table,
             drivers: Vec::new(),
             shared: Vec::new(),
+            pans: Vec::new(),
             audible: Arc::new(AtomicBool::new(false)),
             last: None,
         }
@@ -70,6 +74,7 @@ pub(crate) struct TyreSource {
     bank: Arc<Bank>,
     shared: Shared,
     audible: Arc<AtomicBool>,
+    pan: Pan,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
@@ -114,19 +119,20 @@ impl Source for Decoder {
     }
 }
 impl Decodable for TyreSource {
-    type Decoder = Decoder;
-    fn decoder(&self) -> Decoder {
+    type Decoder = Stereo<Decoder>;
+    fn decoder(&self) -> Stereo<Decoder> {
         let frame = self.shared.lock().unwrap().clone();
         let mut mixer = Mixer::new(self.bank.clone(), RATE);
         mixer.bus_db = frame.levels;
-        Decoder {
+        let decoder = Decoder {
             mixer,
             shared: self.shared.clone(),
             audible: self.audible.clone(),
             voices: frame.voices.latest(),
             playing: false,
             count: 0,
-        }
+        };
+        Stereo::new(decoder, self.pan.clone(), RATE)
     }
 }
 
@@ -153,11 +159,14 @@ fn start(
             voices: Paced::new(driver.voices()),
             levels: [[f32::NEG_INFINITY; CATEGORIES]; 4],
         }));
+        let pan = Pan::centre();
         let handle = assets.add(TyreSource {
             bank: sound.bank.clone(),
             shared: shared.clone(),
             audible: sound.audible.clone(),
+            pan: pan.clone(),
         });
+        sound.pans.push(pan);
         // ONCE: the decoder never ends; LOOP's rodio `repeat_infinite` would
         // keep every sample played to replay it (F482).
         commands.spawn((AudioPlayer(handle), PlaybackSettings::ONCE));
@@ -230,6 +239,15 @@ fn audibility(
         .map(|p| Vec3::from_array(p).distance(ear));
         let levels =
             tyre_audio::bus_levels(sound.table.as_deref(), camera, car == 0, trim, distances);
+        // Opponents' tyres (AI group) are heard from the camera; the
+        // player's four wheels are mixed into one source heard by the Car
+        // listener at the car, so centred [I: no per-wheel panning].
+        if car > 0
+            && let Some(pan) = sound.pans.get(car)
+        {
+            let pose = runtime.pose();
+            pan.set(listening.heard(ear, Vec3::new(pose[12], pose[13], pose[14])));
+        }
         if let Ok(mut frame) = shared.lock() {
             frame.levels = levels;
         }

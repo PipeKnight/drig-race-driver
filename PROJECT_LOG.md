@@ -1,5 +1,20 @@
 # GRID engine project log
 
+F492 Stereo panning of the car sounds (2026-10-20, Claude Code; coordinator's overnight order: "Stereo panning (backlog row 71)... the opponent and the impact position relative to the listener"). Details: docs/AUDIO_RESEARCH.md §12. The original was not run.
+- [O] The game passes OpenAL listener-space positions and leaves only the panning to the device: no direction term, its own distance law, no Doppler.
+- Port:
+  - `audio_mix::pan_gains`, an equal-power law on the azimuth [I];
+  - `grid-app::stereo` (`Pan`, `Stereo` wrapper);
+  - opponent engines and tyres panned per car from the camera;
+  - collision one-shots panned by contact point (the player's from the car) and scrape loops per tick;
+  - the player's engine and tyres stay centred [I].
+- Tests: three new ones plus the extended collision mixer test. Not heard.
+- Checks [V], release, cargo/rustc 1.99.0, on 593ad7b (F490) + this change (other sessions were building at the same time):
+  - `cargo t -- --include-ignored` with absolute GRID_* paths: 820 passed, 0 failed, grid-app included;
+  - `cargo clippy --workspace --all-targets -D warnings` clean;
+  - identities (rebuilt `grid-opponent-race`): solo 79a990f6…4bcc and 12-car 40cd67ca…ab8d, unchanged;
+  - `grid-soak quick` 24/24 (`local/pan/checks/`).
+
 F491 Playable 293914533e9c with F485–F490 and Codex's local graphics commits (2026-10-19, Claude Code; owner: "Да, пересобери ПК-сборку (слиянием в основной папке, как раньше) и оба APK").
 - Local merge in the main checkout, as in F486. origin/main 593ad7b (F490) was merged into Codex's local `main` (caa680f) as 2939145. It merged without conflicts. The merge is **not pushed**, and Codex's commits are unchanged.
 - Built with `tools/update_prototype.ps1` from Bash. Manifest `local/playtest/build-20261019T2123529571464Z`, built 2026-10-19T21:39:07Z. Executable sha256 750cc3aac8fe8ea7e15492afea5d69cff55e7ae02d6c60675f236b6dc81d9c70, cargo/rustc 1.99.0. Source driving and Bevy checks passed. The tree is dirty only through untracked files: docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md and Codex's two DLAA launchers.

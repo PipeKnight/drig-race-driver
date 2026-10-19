@@ -664,3 +664,39 @@ To settle it live, read from grid.exe with a car alongside at the start and mid-
 - the current mode index;
 - the published group volumes of groups 0, 1 and 17 (427ED0's per-group parameter);
 - each engine voice's AL_GAIN (the CMStream_Update 3D path) for the player and that opponent.
+
+## 12. Stereo panning (F492)
+
+20 October 2026, Claude Code. Static: §7.2 (A23DC0, CMStream_Update, PolarPattern) and the
+backend's `alDistanceModel(AL_NONE)` with Doppler factor 0 (A2DE87, `audio_mix`). GRID was
+not launched.
+
+**What the original does [O].** The game moves every 3D voice into its listener's space
+itself: rel = (p − L)·M⁻¹ with the listener's orientation. It hands that to OpenAL as
+AL_POSITION, with the OpenAL listener fixed at the origin. The direction term is always 0
+(PolarPattern is never set), distance is the game's own software law, and Doppler is off. The
+only spatial cue left to OpenAL is the panning of that position. With `mixing="software"` that
+is the "Generic Software" device, whose pan law is implementation-defined.
+
+**Port.**
+- `audio_mix::pan_gains` maps a listener-space position (x right, z forward) to equal-power
+  gains on the horizontal azimuth, p = sin(azimuth), front and back alike, scaled by √2 so a
+  centred voice keeps unit gain [I: the law].
+- `grid-app::stereo` turns a mono decoder into interleaved stereo with a shared `Pan`, read
+  every 64 frames, the gains gliding over about 10 ms [I].
+- Listeners (433AA0):
+  - the Camera listener for the AI group (opponent engines, tyres, impacts, scrapes) is the
+    rendered camera;
+  - the Car listener for the player's groups is at the player's car, facing the camera's way
+    [I: 43F7A0's chase blend from the car pose to the camera is not reconstructed].
+- Per source:
+  - opponent engine and tyres: one pan per car, from the car's position;
+  - the player's engine (EngineBay (0, 0, 4), Exhaust (0, 0, −4)) and its mixed four wheels:
+    centred [I: per-emitter and per-wheel panning would need stereo inside those mixers];
+  - collisions: each one-shot is panned by its contact point at its start (the player's from
+    the car, AI cars' from the camera), and each car's scrape loop by its emitter every tick;
+  - HUD: already stereo and 2D (centred).
+- Tests: `pan_is_equal_power_on_the_azimuth`, `mono_frames_become_panned_stereo_pairs`,
+  `pan_follows_the_camera_orientation`, and the collision mixer's hard-right one-shot and
+  centred scrape loop in `shipped_collision_data_and_listener`.
+- Not heard (no rendered run).

@@ -68,6 +68,7 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod stereo;
 mod foliage_mips;
 mod fps_counter;
 mod front_end;

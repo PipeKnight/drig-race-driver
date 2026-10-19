@@ -23,11 +23,11 @@ use std::{
 
 const RATE: u32 = grid_tools::engine_audio::RATE;
 
-/// For the audio thread: a one-shot (variety, pitch, linear gain) or car
-/// k's scrape loop level.
+/// For the audio thread: a one-shot (variety, pitch, linear gain, pan) or
+/// car k's scrape loop level and pan.
 enum Start {
-    Shot(String, f32, f32),
-    Scrape(usize, String, f32, f32),
+    Shot(String, f32, f32, [f32; 2]),
+    Scrape(usize, String, f32, f32, [f32; 2]),
 }
 
 #[derive(Resource)]
@@ -51,25 +51,31 @@ pub(crate) struct Decoder {
     mixer: Mixer,
     starts: Option<Receiver<Start>>,
     count: usize,
+    /// The right channel of the current frame, returned next.
+    right: Option<f32>,
 }
 impl Iterator for Decoder {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
+        if let Some(right) = self.right.take() {
+            return Some(right);
+        }
         if self.count.is_multiple_of(64)
             && let Some(starts) = &self.starts
         {
             while let Ok(start) = starts.try_recv() {
                 match start {
-                    Start::Shot(variety, pitch, gain) => {
-                        self.mixer.start(&variety, pitch, gain);
+                    Start::Shot(variety, pitch, gain, pan) => {
+                        self.mixer.start(&variety, pitch, gain, pan);
                     }
-                    Start::Scrape(car, variety, pitch, gain) => self.mixer.scrape(car, &variety, pitch, gain),
+                    Start::Scrape(car, variety, pitch, gain, pan) => self.mixer.scrape(car, &variety, pitch, gain, pan),
                 }
             }
         }
         self.count = self.count.wrapping_add(1);
-        let value = self.mixer.sample();
-        Some(if value.is_finite() { value } else { 0. })
+        let [left, right] = self.mixer.sample().map(|v| if v.is_finite() { v } else { 0. });
+        self.right = Some(right);
+        Some(left)
     }
 }
 impl Source for Decoder {
@@ -77,7 +83,7 @@ impl Source for Decoder {
         None
     }
     fn channels(&self) -> ChannelCount {
-        ChannelCount::new(1).unwrap()
+        ChannelCount::new(2).unwrap()
     }
     fn sample_rate(&self) -> SampleRate {
         SampleRate::new(RATE).unwrap()
@@ -93,6 +99,7 @@ impl Decodable for CollisionSource {
             mixer: Mixer::new(self.bank.clone(), RATE),
             starts: self.starts.lock().ok().and_then(|mut s| s.take()),
             count: 0,
+            right: None,
         }
     }
 }
@@ -183,7 +190,8 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
                 group_db(sound, voice.group),
                 audio_mix::distance_db(distance, variety.min_distance, variety.max_distance),
             );
-            let _ = sound.starts.send(Start::Scrape(k, voice.variety, voice.pitch, gain));
+            let pan = listening.heard(listener, position + Vec3::from_array(voice.offset));
+            let _ = sound.starts.send(Start::Scrape(k, voice.variety, voice.pitch, gain, pan));
         }
         for play in plays {
             let Some(variety) = sound.bank.varieties.get(&play.variety) else { continue };
@@ -194,7 +202,10 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
                 audio_mix::distance_db(distance, variety.min_distance, variety.max_distance),
             );
             if gain > 0. {
-                let _ = sound.starts.send(Start::Shot(play.variety, play.pitch, gain));
+                // The contact relative to the listener: the player's hits
+                // from the car (Car listener), AI cars' from the camera.
+                let pan = listening.heard(listener, Vec3::from_array(play.position));
+                let _ = sound.starts.send(Start::Shot(play.variety, play.pitch, gain, pan));
             }
         }
     }
