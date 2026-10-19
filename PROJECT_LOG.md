@@ -1,5 +1,19 @@
 # GRID engine project log
 
+F446 Archive of the minimal-career-screen-ru session; evidence moved (2026-10-19, Claude Code coordinator).
+
+The session pushed F424 (0ff82b7), the career screen, and has no next task. Its worktree, priceless-montalcini-fc685d, was clean, with nothing outside origin/main.
+
+Evidence: the worktree's `local/` moved to the main checkout's `local/worktree-evidence/priceless-montalcini-fc685d/`. It holds `career-screen/`, `playtest/` and `soak/`: 101 files, 302 984 696 bytes, the same count and size after the move. Worktree-local paths cited in F424 now resolve there.
+
+Its build dir `C:\cargo-build\8d\cf433f0cbfefeb` (2.93 GiB) was deleted with `tools/prune_build_dirs.ps1 -ForWorktree`. The session was then archived and its worktree folder removed. The career research session (career) stays idle with its context.
+
+The session reported a GUI problem. Its first in-app attempt sent keystrokes while the owner was using the desktop, and it then stopped. Unattended checks now use `GRID_CAREER_AUTO` and `GRID_RESULTS_CONTINUE` with `GRID_AUTOPILOT`, which send no desktop input.
+
+The owner freed the PC for original-GRID captures (19.10, about 04:40 local). car-series (default-setup memory read; Sarthe) and robustness (Milan/Jarama route_1) were told to run their captures now, one original at a time.
+
+The 5-hour usage threshold is now 90%, weekly 99% (owner, 19.10).
+
 F424 Career entry: one career event raced in the app and paid with `grid_tools::career`; `Play GRID Career.cmd` (2026-10-19, Claude Code; career session's task after F416). Details: docs/CAREER_SCREEN.md. Evidence: worktree priceless-montalcini-fc685d `local/career-screen/`: checks3/ (final run: summary.txt, career.out, tests, clippy, identities, soak2), data3/career.save, earlier runs (race-0.log, auto-race2.log, data/, checks/, checks2/, try1/summary.txt) and screenshots 01–13 of the game window. Nothing installed; the original was not run.
 - Port:
   - `crates/grid-app/src/career_screen.rs`: `grid-app --career` supervises `--career-screen` (exit code 22, writes `<data dir>/career-race.ini`) and the race (`--from-menu --career-result PATH`), the event menu's process model. In `event_menu.rs` only `passed_on` was made `pub(crate)`; no menu rows changed.
