@@ -1,5 +1,10 @@
 # GRID engine project log
 
+## G155 — Prepare track-only road-mask default (19 October 2026)
+
+Following the owner's continue request and verified G154 evidence, enhanced non-collision source-layer track scenes now resolve an omitted surface-specular option toSourceBase. ExplicitOff/WhiteControl retain diagnostic meaning; baseline, car-only, collision and single-layer scenes retain their previous settings. This promotes the existing shader path, not new material algebra. Source change pending CLI/GPU/moving validation and delivery; installed3bfc remains unchanged. No primary source/Steam/performance work. Next separate commit adds bounded clearcoat controls while retaining current paint defaults for parity checks.
+
+
 ## G154 — Check asphalt/paint balance against source evidence (19 October 2026)
 
 Owner suspects too-reflective asphalt and too-matte car, requests verification. Inspected original recording frames70/100/225 qualitatively, source mask stats/shader algebra, existing matched sun-facing road pair, plus3new matched native4K static reference controls on installed3bfc/bbc1: roadmaskOff versusSourceBase, then sky versus512static scene-probe. All exit0/noGPUerrors; probe HDRreadback verified/1copy/ready. Native comparison crops inspected, private asphalt-paint-check01 evidence preserves commands/hashes/limits.

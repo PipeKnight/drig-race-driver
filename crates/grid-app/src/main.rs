@@ -1358,6 +1358,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut motion_sequence = None;
     let mut texture_override_path = None;
     let mut surface_rgb_override = None;
+    let mut surface_specular_explicit = false;
     let mut trial_laps = profile.laps;
     let mut drive_ticks = None;
     let mut body_contacts = profile.body_contacts.clone();
@@ -1791,6 +1792,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 graphics.surface_specular = track_surface::Specular::parse(
                     &args.next().ok_or("--surface-specular needs off, source-base or white-control")?,
                 )?;
+                surface_specular_explicit = true;
             }
             "--track-materials" => {
                 graphics.layered_track = match args.next().as_deref() {
@@ -1927,6 +1929,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
+    }
+    // Only eligible enhanced source-layer track scenes adopt the verified mask.
+    // An explicit off/white-control always survives, irrespective of flag order.
+    if !surface_specular_explicit
+        && graphics.enhanced()
+        && graphics.layered_track
+        && (track || drive)
+        && !collision
+    {
+        graphics.surface_specular = track_surface::Specular::SourceBase;
     }
     if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some())
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)

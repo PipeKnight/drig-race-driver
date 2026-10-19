@@ -57,7 +57,7 @@ pub struct Settings {
     pub moving_probe: bool,
     pub ssr_thickness: f32,
     pub layered_track: bool,
-    /// Optional source blended-alpha base-F0 adaptation; default off.
+    /// Source blended-alpha base-F0 adaptation; CLI resolves eligible track defaults.
     pub surface_specular: super::track_surface::Specular,
     pub source_land: bool,
     /// Source forest pilot; off until same-view GPU validation.
