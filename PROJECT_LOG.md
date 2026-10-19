@@ -1,3 +1,7 @@
+## G171 — Integrate F455/F456 without touching primary checkout (19October2026)
+
+Fresh origin/main48d02b3 confirms F456's playable merge contains only six older Codex commits/55lines, not latest materials/DLAA. F455 AI standing-start/PID changes are now merged into graphics. Only PROJECT_LOG conflicted; retain both histories. Graphics Rust edits unchanged from2cb8545, incoming AI source retained exactly. Fresh whole-workspace resource tests, Clippy, source-stamped build, F455canonical6d7184ac…0063 and24quick scenarios queued. Prior F454 identities remain valid only for their archived builds; do not compare new F455 runs against7b01ee41. Installed3362ordinary/756DLAA stay unchanged until new checks. Source-atlas road ROI sample differed up to6code values near a border, so no global road pixel-invariance claim is made for enabled pilot; disabled parity remains exact. Reflection research confirms current CPU foliage expansion uses main camera for every pass; a future per-view change must cover depth/shadow/motion too, using previous camera orientation, rather than only changing colour rendering.
+
 ## G170 — Mixed-edge pilot passes GPU/parity/full lap, stays optional (19October2026)
 
 Exact2cb8545 candidate70e76f96…946d builds1m51s,222app resource tests pass, feature/default workspaceClippy clean. Three4K off controls byte-identical756; pilot's localized dry-ground change is modest, inspected, not a complete seam fix. RGBA4K and negativeCLI pass.6500tick pilot matches all4physical exit records of756SMAA/DLAA and completes91.475311491s validlap. Existing ordinary3362/native756 remain installed unchanged; no new default. One exported varb atlas is unbound in selected locator, negative result retained. Core sources unchanged756: reuse only its core767-suite/F454canonical/24quick scope. Native30/300AA/source evidence deduped byte-identically (~50MiB), no captures lost. Next: broader edge/mip-distance checks, then local reflection quality/per-view vegetation integration; source CPU billboards still face main view for shadow/cubemap passes, a documented limitation rather than missing scene geometry. See docs/EDGE_ATLAS_DRY_RESPONSE.md and private edge-material01/acceptance01.json.
@@ -288,6 +292,44 @@ Optional Surfaces wrapper drafted/tested3actualCMDcapability cases; normal launc
 Added explicit off/source-base/white-control surface mode, default off, enhanced source-track requirement, no launcher changes. Shader reuses sampled/blended diffuse alpha and existing mode uniform; sqrt follows texture filtering/blending to weight Bevy's quadratic dielectric F0. RGB/roughness/opacity/geometry stay unchanged; no new texture upload or mobile bindings. This also weights GGX environment reflection unlike the original direct Phong term, so not source parity.198app tests pass; final CLI validation guard edited during compilation needs exact-source follow-up Clippy/build/negative CLI checks. Native4K off/white/source/RGBA matrix harness prepared privately; all GPU acceptance remains pending.
 
 Publication note: G129 journal commit9d9398b also reached main by explicit fast-forward. An initial PowerShell invocation using an unquoted reflog expression failed parsing before any merge; corrected explicit commit succeeded, no approval decline or content loss. Material audit Pillow12.3.0 checked directly; no original installation changes.
+
+F456 Playable 3b42379d23d9 with F414–F454 and Codex's local graphics commits (2026-10-19, Claude Code; owner: "Да, обнови сборку на ПК").
+
+Local merge in the main checkout (owner's choice over a separate folder):
+- The main checkout's `main` carried 6 of Codex's commits not on origin/main: the opt-in source-alpha surface reflectance pilot, the `Play GRID Graphics Surfaces.cmd` launcher, and docs/G-entries.
+- origin/main 5004cf9 (F454) was merged into it as 3b42379. The merge is **not pushed**, and Codex's commits are unchanged.
+- Two conflicts, both resolved by keeping both sides. In PROJECT_LOG.md the F414–F454 entries come before Codex's G-entries. In `grid-app/src/main.rs`, Codex's `--surface-specular` check and the Le Mans 24 Hours time limit are independent.
+- The merge's diff against origin/main is exactly Codex's 55 lines (44 in PROJECT_LOG.md, 11 in main.rs).
+
+Build:
+- Rebuilt with `tools/update_prototype.ps1`, 2606 s, with other sessions building.
+- Manifest `local/playtest/build-20261019T0541185983294Z`, built 2026-10-19T06:24:42Z.
+- Executable sha256 9d56dcc8c7d96d4ffc5b4fc8f64b27a884f688f169874fc7747bb405425143f5, cargo/rustc 1.99.0.
+- Source driving and Bevy checks passed. The tree is dirty only through the untracked docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md.
+
+Script issue: under Windows PowerShell 5.1 the script's `$ErrorActionPreference='Stop'` plus `*>` redirection turns cargo's stderr progress lines into a terminating NativeCommandError. Two runs failed after about 3 s; the first left `local/playtest/build-20261019T0539438086219Z` with only `source-tests.txt`. The run that worked used `CARGO_TERM_QUIET=true` and `-ExecutionPolicy Bypass` (process scope only; the machine policy is unchanged). This doesn't change what is built. A fix in the script is left to build-speed or a later change.
+
+New since playable df92c27b6a6d (F408):
+- F414 event menu, F416/F424 career data and screen, F417 engine braking, F418/F445/F451 phone fixes, F419 capture frame-rate rule;
+- F420 default downforce setup, F421 Detroit derby, F425 more circuits, F428–F430 Le Mans 24 Hours and the Sarthe;
+- F439 catch-up by star level, F441/F442 replay cameras and weather data;
+- F444 AI traction control and ABS, F447 default wheel setup;
+- F448 soak exemptions, F449/F454 AI drift and line curvature, F452/F453 HUD sounds and low-fps audio.
+- New launchers include Play GRID.cmd, Career, Le Mans 24 Hours, Race Le Mans/Milan/Spa/San Francisco/Shibuya, Demolition Derby, and three reverse Drift Battles.
+
+Not in this playable: F455 (AI standing start, 467f4c3), pushed after the merge.
+
+Not checked here: a manual windowed lap and the new launchers in a running window; the owner is away.
+
+F455 AI standing start: race_start behaviour, lateral PID and limit margin ported 1:1; the Milan field no longer steers to full lock at the go (2026-10-19, Claude Code; coordinator's task from robustness's F450 captures, docs/FIRST_CORNER_LIVE.md §8). Details: docs/AI_DRIVER_RESEARCH.md §3.6–3.9, docs/AI_DRIVER_PORT.md. Evidence: main checkout `local/driving/milan-start-20261019/` (port field traces before/after, `decomp/` ms1–ms5, rs1–rs2, tv1, read-only Ghidra 12.1.4 and capstone on the unpacked research copy; `checks-f455/`). The original was not launched.
+- Causes [V static], all three needed:
+  - **race_start missing** (0x78A6D0/0x78A8F0/0x776730/0x78A740/0x776740): at the standing start the original plans within the **track** limits (types 3/4) in its initial phase, holds the front's own lateral offset below 3 m/s (0x7765B0), then merges at U(0.25, 1) m/s toward 0 until the chosen side has room, picks a lane, and ends at U(30, 50) m/s or after 10 s. The port clamped grid cars to the racing limits, so cars parked outside them aimed 1–3.6 m sideways (≥ 12°) and steered to full lock.
+  - **Lateral PID** 0x7892E0 / 0x7790B0: prediction term `(D0 − front)·L × m(v)` (m = −1 below 10 m/s), PID on the front's lateral error with raw-term limits (first derivative from a zero previous error), corner factor from the nose-to-line angle (pidAgainstCorner 0/30°), shift along the car's line lateral; only while on_track. Heading error from the car front (+0xF0).
+  - **Limit margin**: the planned offset stops at each limit minus the car's half width (view +0x60 = car +0x110), only on the side it points to (0x782D20).
+- Result [V], Milan, mixed field (`GRID_GRID_HOLD=3.5,3.04 GRID_PARKED_CAR=11`, BMW/Lacetti by slot): steering at the go ≤ 0.3 and decaying (was ±1.0, two cars opposite); no contacts and no recoveries in the first 3 s; speeds at 1 s 13.3–16.6 m/s (original 14.7–17.6; before 9.6–15.8), at 3 s 33.3–35.6 (original 35.9–37.4).
+- Spa launch gap is **not** this cause: BMW/Lacetti means at 1 s 16.3/13.8 m/s with this change (16.2/13.6 before; original 17.0/15.0). The 0.5–1 s traction-control/shift gap stays open (robustness's F450 next step).
+- Not ported [I]: race_start activates on the AI's first update (the runners hold the grid without the AI, so wait_for_start and the launch delay, 0 with shipped data, do not run); the line progress still projects the car centre, the original projects the front (0x79C360 → 0x793F60).
+- Checks [V], release, cargo/rustc 1.99.0, on 5004cf9 (F454) + this change: `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths 758 passed, 0 failed (AI drift bounds included); clippy clean; `grid-soak quick` 24/24; identities (bin rebuilt first, DF01/characteristics unset): solo 6d7184ac…0063 (Lacetti 2:58.016, laps 89.290 / 87.194; was 7b01ee41…81cd), 12-car a08171c2…e400 (was e70bc44c…0e59), 12-car with DF01 and characteristics 7f03a755…db0f (was 398be31f…62fb), all 12 classified. Playable not rebuilt.
 
 F454 AI line curvature ported 1:1 (0x798E90): Redgate low point 35.5 m/s instead of 32.8 (2026-10-19, Claude Code; coordinator's task "Redgate: corner speed and brake-line braking", continuing F449). Details: docs/AI_CHOREOGRAPHER_PORT.md "Redgate corner speed", docs/AI_DRIVER_RESEARCH.md §3.2. Evidence: main checkout `local/driving/redgate-20261019/` (`solo-k2.tsv`, `kappa2.txt`, `checks-f454/`, decompiles cs4/cs5; read-only Ghidra 12.1.4). The original was not launched.
 - [V static] κ = ±acos(clamp(lateral_car · lateral_ahead)) / look-ahead (kept when the look-ahead is not positive), negative when (P_ahead − P_car) · lateral_car < 0. F449 had the sign test's points swapped; that caused its sign flips. The laterals are the line's own (0x7878F0 via the line vfunc +0x14); the port uses its interpolated gate normals.
