@@ -9,6 +9,8 @@ use bevy::{
 };
 use grid_tools::{
     audio_mix::Table,
+    audio_pacing::Paced,
+    engine_audio_continuous::BLOCK,
     source_vehicle::{DELTA, Runtime},
     tyre_audio::{self, Bank, CATEGORIES, Driver, Inputs, Mixer, Voice},
 };
@@ -24,10 +26,11 @@ const RATE: u32 = grid_tools::engine_audio::RATE;
 type Voices = [[Voice; CATEGORIES]; 4];
 type Levels = [[f32; CATEGORIES]; 4];
 
-/// What one car's audio source reads: voice targets and backend levels.
-#[derive(Clone, Copy)]
+/// What one car's audio source reads: voice targets, one set per vehicle
+/// tick (`audio_pacing`), and backend levels.
+#[derive(Clone)]
 struct Frame {
-    voices: Voices,
+    voices: Paced<Voices>,
     levels: Levels,
 }
 type Shared = Arc<Mutex<Frame>>;
@@ -81,8 +84,12 @@ impl Iterator for Decoder {
     fn next(&mut self) -> Option<f32> {
         if self.count.is_multiple_of(64) {
             // Never block the audio thread; keep the previous targets if busy.
-            if let Ok(frame) = self.shared.try_lock() {
-                self.voices = frame.voices;
+            if let Ok(mut frame) = self.shared.try_lock() {
+                // One tick's voice targets per 16 ms block, so a slow
+                // frame's ticks are not collapsed into one step.
+                if self.count.is_multiple_of(BLOCK) {
+                    self.voices = frame.voices.take();
+                }
                 self.mixer.bus_db = frame.levels;
             }
             self.playing = self.audible.load(Ordering::Relaxed);
@@ -109,14 +116,14 @@ impl Source for Decoder {
 impl Decodable for TyreSource {
     type Decoder = Decoder;
     fn decoder(&self) -> Decoder {
-        let frame = *self.shared.lock().unwrap();
+        let frame = self.shared.lock().unwrap().clone();
         let mut mixer = Mixer::new(self.bank.clone(), RATE);
         mixer.bus_db = frame.levels;
         Decoder {
             mixer,
             shared: self.shared.clone(),
             audible: self.audible.clone(),
-            voices: frame.voices,
+            voices: frame.voices.latest(),
             playing: false,
             count: 0,
         }
@@ -143,7 +150,7 @@ fn start(
     for car in 0..cars {
         let driver = sound.driver(car);
         let shared = Arc::new(Mutex::new(Frame {
-            voices: driver.voices(),
+            voices: Paced::new(driver.voices()),
             levels: [[f32::NEG_INFINITY; CATEGORIES]; 4],
         }));
         let handle = assets.add(TyreSource {
@@ -197,7 +204,7 @@ fn tick(mut sound: ResMut<TyreSound>, driving: Res<super::Driving>) {
             delta: DELTA,
         });
         if let Ok(mut frame) = shared.lock() {
-            frame.voices = driver.voices();
+            frame.voices.push(driver.voices());
         }
     }
 }

@@ -16,6 +16,8 @@
 //! Field names follow the original's debug strings where it has them
 //! (`totalDriftPoints`, `currentDriftType`, ...).
 
+use crate::hud_audio::Cue;
+
 /// One `DriftType`: a drift that lasts longer than `time` seconds earns
 /// `bonus` and the next rating (`osd_drift` ... `osd_drift_legend`).
 #[derive(Clone, Debug, PartialEq)]
@@ -577,8 +579,10 @@ pub struct Scorer {
     pub last_close_bonus: f32,
     /// Main multiplier, growing every score step of a drift (+0x68).
     pub main_multiplier: f32,
-    /// Plays the player's drift sounds (+0x78); not ported.
+    /// Plays the player's drift sounds (+0x78): HUD cues are queued in
+    /// `cues` for the app to play and drain (docs/AUDIO_RESEARCH.md "HUD").
     pub player: bool,
+    pub cues: Vec<crate::hud_audio::Cue>,
     /// Pending ratings of the open combo (+0x7C) and banked ones (+0xB4).
     pending: [Rating; 7],
     pub ratings: [Rating; 7],
@@ -645,6 +649,7 @@ impl Scorer {
             last_close_bonus: 0.,
             main_multiplier: 1.,
             player,
+            cues: Vec::new(),
             pending: [Rating::default(); 7],
             ratings: [Rating::default(); 7],
             best_combo: 0.,
@@ -726,6 +731,8 @@ impl Scorer {
         if self.step_timer < 0. {
             loop {
                 if scoring {
+                    // 0x643E3D: a tick every score step.
+                    self.cue(Cue::DriftScoreUp);
                     self.combo_failed = false;
                     let step = (((d.angle * d.speed_mph) / s.score_divisor)
                         * self.step_multiplier
@@ -762,6 +769,13 @@ impl Scorer {
             if !self.counted
                 && (self.drift_duration > s.minimum_combo_drift_length || self.combo == 0)
             {
+                // drift_activate on the first drift of a combo, otherwise
+                // drift_combo_x(combo + 1), at most x10.
+                self.cue(if self.combo == 0 {
+                    Cue::DriftActivate
+                } else {
+                    Cue::DriftCombo((self.combo + 1).min(10) as u8)
+                });
                 if self.combo < 99 {
                     self.combo += 1;
                 }
@@ -775,6 +789,8 @@ impl Scorer {
             {
                 let bonus = (t.bonus as f32 * self.step_multiplier * bias) as i32 as f32;
                 self.current = (bonus + self.current).max(1.);
+                // 0x643F78: drift_rating_x{rating before the increment}.
+                self.cue(Cue::DriftRating(self.rating as u8));
                 self.rating += 1;
             }
             if !self.was_close && self.close {
@@ -789,6 +805,7 @@ impl Scorer {
                 self.was_close && self.close_armed
             };
             if leaving {
+                self.cue(Cue::DriftValidClose);
                 let closeness = ((1. - self.close_minimum) * 100.) as i32 as f32 * 0.01;
                 self.close_drifts += 1;
                 let bonus = self.step_multiplier * s.max_close_drift_bonus * closeness * bias;
@@ -800,6 +817,13 @@ impl Scorer {
         }
         self.display = (self.combo_points + self.current) * self.combo as f32 + self.total;
         self.was_drifting = scoring;
+    }
+
+    fn cue(&mut self, cue: Cue) {
+        // Bounded for runs without a HUD player draining the queue.
+        if self.player && self.cues.len() < 64 {
+            self.cues.push(cue);
+        }
     }
 
     /// The current drift ends (0x630560): statistics, and its points join
@@ -846,6 +870,10 @@ impl Scorer {
     /// multiplier. Like the original it closes a drift first, which also
     /// counts towards `numSingleDrifts`.
     fn bank(&mut self, s: &Settings) {
+        // 0x63C552: silent when the race end banks the combo.
+        if !self.banked_at_end {
+            self.cue(Cue::DriftComboBank);
+        }
         self.end_drift(s);
         let combo = self.combo as f32 * self.combo_points;
         for (banked, pending) in self.ratings.iter_mut().zip(&mut self.pending) {
@@ -869,6 +897,7 @@ impl Scorer {
         if self.combo == 0 || self.fail_cooldown >= 0. {
             return;
         }
+        self.cue(Cue::DriftComboFail);
         self.combo_points = 0.;
         self.current = 0.;
         self.combo_timer = 0.;

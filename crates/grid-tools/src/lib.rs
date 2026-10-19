@@ -1,5 +1,6 @@
 //! Resource-to-behavior adapters shared by local diagnostics.
 pub mod audio_mix;
+pub mod audio_pacing;
 pub mod ai_driver;
 pub mod ai_pacing;
 pub mod body_deformation;
@@ -22,6 +23,7 @@ pub mod engine_audio_gain;
 pub mod engine_audio_publication;
 pub mod engine_audio_restart;
 pub mod engine_audio_schedule;
+pub mod hud_audio;
 pub mod entity_geometry;
 pub mod flashback;
 pub mod impact_diagnostic;

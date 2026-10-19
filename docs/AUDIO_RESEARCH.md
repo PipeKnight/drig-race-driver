@@ -170,7 +170,7 @@ stereo/positional while the port mixes mono.
 | Direction term | A23B70 per-group shapes | none | none |
 | Crowd, ambience | env_crowd, loc_*, autoplaybanks | none | none |
 | Track props | env_trackprops/audioProps | none | none |
-| UI / HUD | fe_fx, audiohud (countdown, lights, drift, results) | none | none |
+| UI / HUD | fe_fx, audiohud (countdown, lights, drift, results) | none | none; F452: lights, drift, flashback (§7.6) |
 | Spotter / team radio | speech banks, eventSpeech | none | none |
 | Music | WIM/WIO/WIA streams; Race Music/Music groups | none | none |
 | Mix modes | Paused/StartLine/Crashed/EndOfRace/... with attack | pause silences | pause silences; other modes not driven |
@@ -211,3 +211,273 @@ Interpretations and simplifications **[I]**:
 3. Collision and scrape one-shots from the existing contact events.
 4. Stereo output with the original positional model and Doppler.
 5. Mode triggers (StartLine on the grid, EndOfRace after the finish).
+
+## 7. HUD, collision and output-path research (F452)
+
+19 October 2026, Claude Code. Static analysis of the same unpacked image by
+three read-only research passes (capstone listings; Ghidra 12.1.4 output in the
+worktree `local/gtfix/decomp/pan1`, `pan2`, `coll1`–`coll5`; decoded tables in
+the main checkout `local/audio/` including the new `ImpactVarieties.tsv`).
+GRID was not launched.
+
+### 7.1 HUD (group 16) [O unless marked]
+
+- One manager, `cmr6_audio_h_u_d_manager.cpp`, Play 0x43E770. Names map to
+  sounds through `FEMappings.bin` (loader 0x45D4A0; 165 `Effect` entries
+  `name variety volume pitch pan [monophonic]`; record 0x3C: +0x28 volume dB,
+  +0x2C pitch, +0x30 pan, +0x34 variety, +0x38 monophonic).
+- In a race the wrapper 0x440E10 prefixes `low_` (front-end flag
+  `[mgr+0x29064] == 0`), e.g. `race_light_red` becomes `low_race_light_red`.
+- Every entry has pan 0: group 0x10 (HUD), no position (2D). Pan ≠ 0 would
+  use group 15, distances 1/50 and position (pan·10, 0, 0); the data has none.
+- Volume clamp(v, −48, 0) dB, pitch clamp(p, 0.5, 2) (0xCB0BC0, 0xCAF88C,
+  0xCB8DA4); the race lights' +6 dB therefore play at 0 dB.
+- 20 polyphonic slots (+0x768, 12 bytes); with none free the play is dropped.
+  In-race callers pass (a2 = 0, a3 = 1), so retriggering the same effect is
+  allowed. Monophonic effects ping-pong between +0x864/+0x868; in a race only
+  `low_leaderboard_ud_hover` is monophonic.
+- Sample choice 0x413B80: uniform random without an immediate repeat.
+- `audiohud` bank: 87 samples, 40 kHz. **Format flag 0x20 is interleaved
+  stereo**: A29B0C tests format & 0x200000 and A29B89 selects
+  AL_FORMAT_STEREO16 (0x1103) instead of MONO16 for WIP banks; 0x10 loops.
+- Triggers:
+  - start lights: `StartLightsMessage` handler 0x63E710 (state 0 red, 1 green;
+    skipped if the message's silent byte +8 is set). The sequence
+    0x6CE350/0x6CE260 advances one stage every 1.0 s (0x6CE383) from stage 1;
+    each advance posts red, and green at stage numStages−1. So numStages−2
+    reds at 0, 1, … s and green at numStages−2 s (Donington 4 reds and green
+    at 4 s; 7-stage tracks 5 reds and green at 5 s);
+  - drift scorer (player only, sound object +0x78): `drift_score_up` every
+    score step (0x643E3D); `drift_activate` when a drift is counted with combo
+    0, else `drift_combo_x{min(combo+1, 10)}`; `drift_rating_x{r}` with r the
+    rating before the increment (0x643F78); `drift_valid_close` on leaving the
+    close zone armed (0x644038); `drift_combo_bank` at the bank unless banked by
+    the race end (0x63C552); `drift_combo_fail` in fail_combo past its guard
+    (0x6304BC); `drift_countdown_1` from `sfx` notes on the `Osd/dial2.pssg`
+    combo-timer animations (not in code; not ported);
+  - flashback: `system/states.bin` StateFlashbackTransition `playSample`
+    `flashback_shot_1`, `_2`, `zoomup`, 1.0 s apart;
+  - the OSD "timer" box (0x6AD220): `countdown_timer` on each whole second and
+    `countdown_go` at 0 (which modes show the box was not traced; not ported);
+  - race intro, outro and results screens: front-end code (not traced).
+- There are no lap, split or position beeps (`split_pos` is only in the
+  placeholder FIXMEVAR variety).
+- HUD group levels: Master −3, PlatformModifier −1, modes Intro/Transition +5
+  (Paused 0, so the HUD stays audible when paused), cameras Chase −5,
+  Bonnet/Internal/Detached −6. A race light in Chase plays at −9 dB plus the
+  Effects trim.
+
+### 7.2 Output path, panning and Doppler [O unless marked]
+
+- The game never calls `alListener*` and never sets AL_SOURCE_RELATIVE: the
+  OpenAL listener stays at the origin facing −Z, and the game transforms every
+  voice position into listener space itself (A23DC0): rel = (p − L)·M⁻¹ with M
+  the group listener's orientation (translation zeroed). Orientations are
+  converted with diag(1, 1, −1) (436030 → 42C3A0).
+- AL_POSITION comes from two `alSource3f` sites in CMStream_Update (a2c93a 2D,
+  a2cbd8 3D); AL_GAIN = 10^(level/20), 0 below −48 dB on the 3D path.
+- Four listeners (433AA0): 0 2DFlat, 1 Car, 2 Camera, 3 3D_Speech.
+  - Car listener: Exhaust 0, Engine 1, Turbo 2, Gearbox 3, Panel Coll 4,
+    Wheels 6, Skids 7, Displacement 8, Other Mech 9 (and Codriver 14, 2D).
+  - Camera listener: World Coll 5, Crowd 11, Ambience 12, AI 17.
+  - 3D_Speech: Race Music 10, 3DSpeech 15.
+  - Not3D (group flag +0x1C) on 2DFlat: 13, 14, 16, 18, 19, 20; no distance,
+    direction or Doppler; played centred.
+  - Car listener pose (43F7A0): Internal/Bonnet use the camera orientation with
+    the car's velocity; Chase blends from the car pose to the camera with
+    t = clamp((acos(camFwd·carFwd) − π/6)·3/π, 0, 1) (base point not
+    reconstructed). The port measures player-car emitters from the camera.
+- Direction term: the selector is the listener property `PolarPattern`
+  (descriptor EBF730, +0x64), read by A240D0 inside A23B70; θ = atan2(x, z) in
+  listener space; shapes 1: 10·(cos θ − 1), 2: −20|sin θ|, 4: −20|cos θ|,
+  5: cos θ − 1, others 0. Its only writer is the listener constructor A30200
+  (0) and no data file names it, so in the shipped game every listener is omni
+  and **the term is always 0** [O reading, I conclusion].
+- Doppler (3D path, a2cc1d–a2cd14): v = dot(pos, vel)/(|pos| + 0.01) (positive
+  receding), f = c/(c + v) for v > −c else 0, c = 343; AL_PITCH =
+  clamp(f · rate ratio, 0.5, 2). vel = (voice velocity − listener velocity) in
+  listener space × the voice's Doppler property (+0x58, default 1). Engine
+  voices get the car's rigid-body velocity, with Doppler 0 for the camera's own
+  car outside the detached cameras (42EE20) [I on the condition
+  `[obj+0x110]+0x6C == 0`]. Voices without a velocity (w = 987654) use the
+  per-update position change, not divided by dt.
+- The output layout belongs to OpenAL: the shipped `mixing="software"` opens
+  "Generic Software"; the Speakers option is only logged ("will be over-ridden
+  by Windows"). The pan law, speaker layout and any downmix are
+  implementation-defined and cannot be reproduced 1:1.
+
+### 7.3 Collisions [O unless marked]
+
+- Per-contact listener 4563F0, registered per car (458EE8 → 996150) and called
+  from the body handler 9EF360 with the solved contact: point, side-signed
+  normal, other word, impact (+0x3C). `x = 10·impact/mass` (physical +0x3F0),
+  then 4559C0(x, point, other).
+- 4559C0: d = contact − car position (pose +A420); fdot =
+  normalize(pose row 2)·normalize(d); local = d in the car frame (422200).
+  - local.y > dim[+1B54] − 0.7: roof (PrimaryRoof and CarScrapeRoof, scrape
+    mode 2); local.y < −dim[+1B28]: bottom, no sound. The dimensions come from
+    `car+0x20 → +0x24 → 9960F0()` (meaning open).
+  - Otherwise only when |d| > 0.5: fdot > 0.8 PrimaryFrontBack (mode 3),
+    fdot < −0.8 PrimaryFrontBack (mode 4), else PrimarySides (mode 0 if
+    fdot > 0, else 1).
+  - Side and roof hits zero the airtime accumulator +A4B0.
+- ImpactVarieties.bin (loader 45B040; children in file order give CI soft, med,
+  hard): PrimaryFrontBack = carFBSoft/Med/Hard, PrimarySides = carSide*,
+  PrimaryRoof = carTop*, PrimaryBot = carLand*, YawImpact, PitchImpact, Crump.
+- 4535A0(IV, x, pos): nothing below soft.minVel; soft if x is in its range,
+  else med if in its range, else hard. 435EA0: t = clamp((x − minVel)/(maxVel −
+  minVel)); volume and pitch lerped (no random pitch); skipped below −42 dB;
+  setters clamp to [−48, 0] dB and [0.5, 2]. Cooldown per variety: skipped
+  while elapsed ≤ T; on a play T = (rand % 3 + 1)·0.1 s. Player hits above
+  hard.minVel switch the mix to Crashed (411C10, attack 0.2 s). Then
+  sweeteners without cooldown: HighSweetenerInfo (x ≥ 40, swt_*),
+  LowSweetenerInfo (x ≥ 15, lfe_*).
+- Curves (CollisionInfos): FrontBack soft/med/hard 3–10/10–30/30–60,
+  −3..0/−2..0/−1..0 dB, pitch 0.85–1.1; Sides/Roof 2–8.9/8.9–22.35/22.35–40,
+  same dB, 0.85–1.2; High sweetener 40–75, −20..−9 dB; Low 15–50, 0 dB.
+- Varieties: car{FB,Side,Top,Land}{Soft,Med,Hard} (fb_soft01–06, fb_med01–06,
+  fb_hard01–09, side_/roof_/land_*01–03), preset crashimpact 4/40 m;
+  LowSweeteners crashlfesweet 8/40; HighSweeteners crashimpact.
+- Groups (43B1F0): player Panel Coll 4 (impacts, scrapes, sweeteners, parts)
+  and Displacement 8 (yaw/pitch); AI cars group 17; props World Coll 5.
+- Position: the player uses the car-relative offset d (Car listener); AI cars
+  the world point.
+- Landing: airtime in seconds (while 410850, airborne [I]) into PrimaryBot at
+  touchdown.
+- Scrape loop (453710, per frame 458780): one voice per car on the other
+  surface's `carscrapeColInfo` (audio material); gates by mode (horizontal
+  speed > 0.3 / 0.1 / 1.0), a contact this step and x > 1; envelope g = x,
+  refreshed (g = 1 above 15 m/s, else +0.1) and halved per frame when slow or
+  the impulse accumulator < 5; player volume lin2dB(|v|·0.04·gv) with 5 %
+  −24 dB drops and −(rand % 9) dB jitter, smoothed by 1/3 per frame; pitch
+  clamp((|v|/45 − 0.8)/0.7, 0, 1) (at least 0.5 by the setter). These
+  per-frame rules depend on the frame rate.
+- Displacement (4486E0, player, every frame): yaw = |Δω.z|, pitch = |Δω.x| of
+  the world angular velocity per frame into the Yaw/Pitch varieties on group 8;
+  frame-rate dependent (F320 rule).
+- Not traced: part separation and impact sounds (43BB10, 43C0C0, 44D9D0),
+  crump, glass, AI scrape volume, how the Crashed mode ends.
+
+### 7.4 Wind, swooshes, kick-ups and handbrake [O unless marked]
+
+Evidence: Ghidra output in the worktree `local/gtfix/decomp/wind1`–`wind4`; scratchpad `wind/`.
+
+- **Wind**: CollisionInfos `WindSlow` (minVel 4.4, maxVel 80, −48..−10 dB, pitch 0.5) and
+  `WindFast` (4.4–80, −48..−13 dB, pitch 0.5–0.7); varieties `wind_slow`/`wind_fast` in
+  `env_swooshzing` (loops, preset 4_50: 5/50 m). The car-audio manager constructor 43CF10
+  resolves them into M+0xF8/+0xFC (string references 43D4E8, 43D515), but no reader of those
+  fields was found. The `wind` dev switch (+0x4C8C) is set and registered but never read, and
+  no play call passes group 20 (Sense Of Speed). [I] In the shipped PC build the wind loops are
+  loaded but never started; not ported.
+- **Swooshes** (`cmr6_audio_swoosh_manager.cpp`, constructor 441F40, update 44E860): six
+  varieties and `Swoosh_Info` (1.2–1.75, −12..−2 dB); triggers 44B1D0/44B2F0 on per-direction
+  values whose writer was not found [I: distances from the listener to nearby geometry].
+  Small swooshes play on Ambience 12, the others on World Coll 5. Zingers are −96 dB in the data
+  (silent). Not ported.
+- **Kick-ups** (4443D0, player only, per wheel and audio update):
+  p0 = 0.05·v·(material token ≠ 0 ? kickupMultiplier·10 : 1); a per-wheel counter redraws
+  scale = 0.005·(rand % 200) every 60 + rand % 180 updates; p = weight·p0·scale, where weight
+  is 1 plus 20·peel² while peeling. If rand % 100 < (int)p, x = 0.1·(rand % 10) selects the
+  ImpactVariety's first CollisionInfo (only it can match x ≤ 0.9): KickupSmall (−8..−3 dB,
+  pitch 0.85–1.15) or, on grass, GrassKikCrunch. Samples s_sml1–15 / s_veg_crunch01–06 in
+  `car_surfaces` (one-shots), group 6 (Wheels), preset kickup 10/20 m, no cooldown, Doppler 0.
+  Probability is per frame (frame-rate dependent). Not ported yet.
+- **Handbrake**: hbrakeon/hbrakeoff (car_genmec) are resolved into M+0x128/+0x12C, but no
+  reader was found [I: unused like wind].
+
+### 7.5 Crowd and ambience [O unless marked]
+
+Evidence: worktree `local/audio-crowd-research/`, `local/gtfix/decomp/crowd1`–`crowd8`.
+
+- The location bank comes from `database.bin` `track_model.local_audio_ambience` (Donington
+  and most of Europe `loc_europe`, Le Mans `loc_lemans`, Japan `loc_japan`, Yokohama
+  `loc_yoko`, USA `loc_usa`). The autoplay manager 0x461430 looks up an AutoPlay of that name
+  (case-insensitive); there is none for loc_europe/japan/lemans, so those start silent.
+  `tracks/*/ambience_triggers.xml` boxes (`AMBIENCE_REVERB`, SETTING = AutoPlay name) switch
+  the active AutoPlay when entered [I]; Donington has three boxes, all `loc_britcir`.
+- There is no 2D bed in a race. 0x44D420 spawns at most one voice per tick:
+  `random(0, 50) ≤ density·clamp(10·v, 10, 100)`, then a uniform sample, `random(0, 1) ≤
+  probability`, a free slot of 96 and the maxLoopers limit. The voice is positioned near the
+  listener (spawn geometry partly traced). Gain per tick: lerp(minVol, maxVol, fade·speed
+  band) + `autoplay` CI (0 to −40 dB from 17 to 62 m/s) + lin2dB(fade over 30 ticks).
+  Voices are freed beyond 117 m.
+- Crowd (0x44E220): up to 35 of the visual crowd instances within 150 m of a point ahead of
+  the car (70 m·linstep(1, 120, mph)); NormalCrowd / GrandStandCrowd presets by people count;
+  excitement from `BroadcastMessage_EventMessage` (0x424B60), with overrides at the finish and
+  in replays; gasps on `BroadcastMessage_CrowdRecoil` (0x41BCD0). Groups: Crowd 11,
+  location Ambience 12.
+- The port lacks the inputs (ambience triggers, autoplaybanks, crowd instances, race messages);
+  not ported.
+
+### 7.6 Ported in F452
+
+- `grid_tools::hud_audio`: `FEMappings.bin` and `audioVarieties.bin` readers, the `audiohud`
+  bank including stereo samples, the 20-slot player with the clamps above, and the start-light
+  timing (`light_cue`). Asset test `shipped_hud_effects_load_and_play`.
+- `grid_tools::drift::Scorer` queues the player's HUD cues (score step, activate/combo,
+  rating, valid close, bank unless at race end, fail; at most 64 queued).
+- grid-app `hud_sound`: one stereo source on the HUD group (Normal row, camera, Effects
+  trim; it stays audible when paused, as the Paused row keeps 0 for HUD). Start lights follow
+  the original's 1 s stage timer from the countdown start (red for each second up to
+  stages − 3, green at GO), which differs from the port's visual board cadence. Drift cues come
+  from the player's scorer; flashback flashes play shot 1, shot 2 and zoom up.
+- Not ported: the OSD timer box countdown_timer/go (modes not traced), drift_countdown_1
+  (pssg animation notes), race intro/outro/results screen sounds, the monophonic leaderboard
+  hover.
+- The sample choice uses an authored LCG for the uniform no-repeat pick (0x413B80 uses the game
+  RNG) [I].
+
+## 8. Low frame rates (F453)
+
+19 October 2026, Claude Code. Owner report: on the phone the sound becomes choppy below about
+30 fps (log main checkout `local/android/phone-logs-20261019-0520/log-20261019-052045.txt`: a
+12-car Donington race at 19–23 fps; engine and tyre audio running at 48 kHz). The original was
+not run.
+
+**Cause in the port [V code, V test].** The vehicles tick at 62.5 Hz (16 ms) in FixedUpdate,
+and the engine and tyre mixers run on the audio thread in 16 ms blocks (768 samples). The
+parameters (RPM, throttle, tyre voice targets) were published as one latest value per
+rendered frame. At 20 fps Bevy runs about three ticks back to back per 50 ms frame, so the
+audio thread saw only the last of them: the pitch and level stepped every 50 ms instead of
+every 16 ms. The engine block applies its step and gain abruptly, and tyre pitch is applied
+unsmoothed, so the 20 Hz stepping is audible.
+
+**Audio-thread load [V, desktop].** Probe `grid-audio-load ROOT SECONDS UPDATE_HZ` (grid-probes)
+renders 12 engine mixers and 12 tyre mixers (player 4 wheels × 5 categories, opponents wheel 0
+peel/slide/skid) in 10 ms callbacks. Result: about 10 % of one desktop core (median callback
+1.0 ms, slowest 1.9 ms of 10 ms); with every tyre slot audible, 28 %. The update rate does not
+change the cost. A phone core is slower and competes with a CPU-bound game, so callback
+deadlines are tighter there [I]; this was not measured on the phone. The rodio/Bevy mixing of
+25 sources is not included in the probe.
+
+**The original [O/I].** Its audio parameters are written once per rendered frame (the
+car-audio update and the 427ED0 mix from the game loop; CMStream_Update sets the OpenAL
+source properties), with the engine scheduler stepped by the frame delta. Its world also steps
+once per frame, so no ticks are skipped; OpenAL mixes in its own thread with buffered output
+(§7.2). At 60 fps the original therefore updates engine and tyre parameters every 16.7 ms.
+No extra parameter smoothing beyond OpenAL's own was found [I].
+
+**Fix.**
+- `grid_tools::audio_pacing::Paced`: the game pushes one value per vehicle tick and the audio
+  thread takes one per 16 ms block. When nothing new has arrived the last value holds. More
+  than 4 queued values skip ahead to the last 2, and at most 8 are kept, so the two clocks
+  cannot drift apart.
+- Engine (`engine_sound`): `publish` (FixedUpdate after `drive_tick`) queues the player's and
+  each opponent's control per tick. A change without a tick (pause, mute, finish, failure) is
+  queued from the frame update. RPM and throttle advance per block. Audibility and the reset
+  generation still follow the newest control within 64 samples, so pause and mute stay
+  immediate.
+- Tyres (`tyre_sound`): the per-tick driver pushes its voice targets; the decoder takes one set
+  per 16 ms block. Levels and audibility are unchanged.
+- At 60 fps one tick runs per frame and the mixers see the same values as before; the physics
+  and the identities are unaffected (audio never writes physics).
+- Tyre mixer: a voice with target 0 and gain below 1e-6 only advances its cursor, which saves
+  mixing work for silent voices without changing the output.
+- Diagnostic `GRID_FRAME_CAP_HZ=20` (desktop and Android) sleeps at the end of each frame to
+  reproduce a slow device's frame rate.
+- Tests: `a_slow_frame_reaches_the_mixer_one_tick_per_block` (three ticks pushed in one frame
+  reach three consecutive blocks), `audio_pacing` units, and the existing pause/mute/reset test.
+
+**Not verified**: listening on the phone after the fix; whether the phone's audio callback
+also underruns (an Android log of output underruns would show it). If it does, the next steps
+are a larger output buffer and mixing the 25 sources into fewer.

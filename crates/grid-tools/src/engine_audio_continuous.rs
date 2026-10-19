@@ -18,7 +18,7 @@ pub const LAYERS: [&str; 6] = [
     "up_ex",
     "up_ex_load",
 ];
-const BLOCK: usize = 768; // Explicit presentation cadence: 16ms at48kHz.
+pub const BLOCK: usize = 768; // Explicit presentation cadence: 16ms at48kHz.
 #[derive(Clone)]
 struct Layer {
     pcm: Vec<f32>,
@@ -259,6 +259,11 @@ impl Mixer {
         }
         self.diagnostics.frames += 1;
         Ok(())
+    }
+    /// The next sample starts a 16 ms block, which reads its control
+    /// (`audio_pacing`).
+    pub fn block_due(&self) -> bool {
+        self.remaining == 0
     }
     pub fn sample(&mut self, control: Control) -> f32 {
         let control = Control::unpack(control.pack());

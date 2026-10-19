@@ -38,6 +38,7 @@ mod engine_sound;
 mod event_menu;
 mod flashback;
 mod free_look;
+mod hud_sound;
 mod geometry_ray;
 mod graphics;
 mod graphics_benchmark;
@@ -2805,6 +2806,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             {
                 Ok(banks) => engine_sound::install(&mut app, banks, mix.clone()),
                 Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
+            }
+            match grid_tools::hud_audio::Bank::load(&root) {
+                Ok(bank) => hud_sound::install(&mut app, bank, mix.clone()),
+                Err(error) => warn!("HUD audio unavailable; driving continues: {error}"),
             }
             match grid_tools::tyre_audio::Bank::load(&root) {
                 Ok(bank) => tyre_sound::install(&mut app, bank, mix),
