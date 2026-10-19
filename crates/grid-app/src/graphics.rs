@@ -81,6 +81,8 @@ pub struct Settings {
     pub paint_clearcoat: f32,
     /// Default-off authored environment-only paint layer; not original shader parity.
     pub paint_environment: f32,
+    /// Default-off authored Lacetti reflector pilot; covers and matt remain separate.
+    pub lamp_reflectors: super::lamp_materials::Mode,
     pub paint_coat_roughness: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
@@ -147,6 +149,7 @@ impl Default for Settings {
             window_reflectance: 0.5,
             paint_clearcoat: 0.35,
             paint_environment: 0.,
+            lamp_reflectors: super::lamp_materials::Mode::Off,
             paint_coat_roughness: 0.18,
             tree_sheet_colours: false,
             ambient_occlusion: true,

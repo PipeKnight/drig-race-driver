@@ -27,6 +27,7 @@ mod body_occlusion;
 mod body_specular;
 mod camera;
 mod car_materials;
+mod lamp_materials;
 mod paint_environment;
 mod car_numbers;
 mod career_screen;
@@ -626,7 +627,7 @@ fn load_package(
         }
         if !track
             && lod == "LOD0_"
-            && draw.material == b"Tyre Tread"
+            && matches!(draw.material, b"Tyre Tread" | b"Head Lights Pod" | b"Rear Lights Pod")
             && let Some(tangents) = car_materials::tread_tangents(source, draw.vertices.clone())
         {
             mesh.insert_attribute(Mesh::ATTRIBUTE_TANGENT, tangents);
@@ -1760,6 +1761,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--race-number" => {
                 graphics.race_number(&args.next().ok_or("--race-number needs 0..999")?)?;
             }
+            "--lamp-reflectors" => {
+                graphics.lamp_reflectors = lamp_materials::Mode::parse(&args.next().ok_or("--lamp-reflectors needs off, pbr, normals or combined")?)?;
+            }
             "--paint-environment" => {
                 let value: f32 = args.next().ok_or("--paint-environment needs 0..1")?.parse()?;
                 if !value.is_finite() || !(0.0..=1.0).contains(&value) {
@@ -1918,6 +1922,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--help" => {
+                println!("--lamp-reflectors off|pbr|normals|combined: default-off authored Lacetti inner-reflector pilot; covers/matt unchanged.");
                 #[cfg(feature = "paint-specular")]
                 println!("--paint-environment 0..1: default-off authored environment-only player-paint layer, requires enhanced forward/source IBL/source body mask; not original shader parity.");
                 println!("--body-specular off|source-base|white-control: authored source-alpha base dielectric F0 mask; coat unchanged, off default, not original shader parity.");
@@ -2029,6 +2034,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
         return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges) require an enhanced non-collision track scene with --track-materials source".into());
+    }
+    if graphics.lamp_reflectors != lamp_materials::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
+        return Err("--lamp-reflectors requires enhanced layered Lacetti LOD0 rendering".into());
     }
     if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
         return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
@@ -3123,6 +3131,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
     }
+    lamp_materials::prepare_frames(&mut car, graphics.lamp_reflectors)?;
+    lamp_materials::validate(&car, graphics.lamp_reflectors)?;
+    if graphics.lamp_reflectors != lamp_materials::Mode::Off {
+        lamp_materials::install(&mut app);
+    }
     if graphics.paint_environment > 0. {
         paint_environment::install(&mut app)?;
     }
@@ -3316,6 +3329,8 @@ fn setup(
     } else {
         None
     };
+    let lamp_normal = lamp_materials::upload_normal(&car, graphics.lamp_reflectors, &mut images, graphics.sampler(false));
+    commands.insert_resource(lamp_materials::Prepared(lamp_normal));
     let liveries = std::mem::take(&mut car.liveries);
     let mut livery_images: BTreeMap<(usize, String), Handle<Image>> = BTreeMap::new();
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
