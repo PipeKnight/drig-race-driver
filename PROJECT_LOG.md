@@ -1,5 +1,9 @@
 # GRID engine project log
 
+## G161 — Selected-coat movement and shared RGBA path pass (19 October 2026)
+
+8949 explicit0.20/0.35 coat paired600tick drives pass,30unique virtual30FPS frames each,4identical physical exit records excluding wall time. Motion first/last and forcedRGBA native4K frame inspected:0BCassets,559images/547decoded, no new input/physics change. Final3362 source build/full checks continue; installed3bfc remains unchanged. Fresh origin/main5004cf9/F454 not merged during the fixed comparison. docs/LACETTI_CLEARCOAT_STUDY.md records limits; docs/TEMPORAL_AA_DIAGNOSTICS.md specifies the next main-view numerical audit from installed Bevy0.19.1 sources without claiming it exists yet.
+
 ## G160 — Select moderate paint coat from native controlled views (19 October 2026)
 
 Front/rear native4K controls show a modest highlight improvement at0.35/0.18; select this enhanced player-only coat, keeping source base masks, glass, exposure and base roughness. Rear0.20 control is byte-identical to installed3bfc. Sharper0.12 roughness remains experimental. Corrected the effective source-road default in CLI help. Final source frozen for a fresh build/full release checks; motion/RGBA evidence still pending and stable installed3bfc unchanged. docs/LACETTI_CLEARCOAT_STUDY.md distinguishes source selection from delivered status.
