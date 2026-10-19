@@ -26,6 +26,7 @@ mod body_occlusion;
 #[cfg(feature = "paint-specular")]
 mod body_specular;
 mod camera;
+mod collision_sound;
 mod car_materials;
 mod car_numbers;
 mod career_screen;
@@ -2819,6 +2820,22 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             {
                 Ok(banks) => engine_sound::install(&mut app, banks, mix.clone()),
                 Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
+            }
+            match grid_tools::collision_audio::Bank::load(&root) {
+                Ok(bank) => {
+                    let heights: Vec<_> = field
+                        .models
+                        .iter()
+                        .map(|m| {
+                            collision_sound::heights(&root, m).unwrap_or(collision_sound::Heights {
+                                bottom: 0.,
+                                roof: 1.,
+                            })
+                        })
+                        .collect();
+                    collision_sound::install(&mut app, bank, mix.clone(), heights, field.car_model.clone());
+                }
+                Err(error) => warn!("Collision audio unavailable; driving continues: {error}"),
             }
             match grid_tools::hud_audio::Bank::load(&root) {
                 Ok(bank) => hud_sound::install(&mut app, bank, mix.clone()),

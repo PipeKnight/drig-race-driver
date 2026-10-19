@@ -481,3 +481,41 @@ No extra parameter smoothing beyond OpenAL's own was found [I].
 **Not verified**: listening on the phone after the fix; whether the phone's audio callback
 also underruns (an Android log of output underruns would show it). If it does, the next steps
 are a larger output buffer and mixing the 25 sources into fewer.
+
+## 9. Collision impacts (F479)
+
+19 October 2026, Claude Code. Static analysis (§7.3 and the worktree's
+`local/gtfix/decomp/colldims`). GRID was not launched.
+
+**Dimensions [O].** 4559C0 reads its roof/floor heights through
+`[[audio car +0x20] +0x24]` → 0x9960F0 (`lea eax, [ecx+0xD240]`): the car description copied to
+body +0xD240. Description +0x1B28 / +0x1B54 are body +0xED68 / +0xED94, written by 0x9E2030
+from 0x99D180, the minimum and maximum of the `collision_main` points (CAR_COLLISION.md). So
+the floor height is the lowest point's y and the roof the highest point's y, in model
+coordinates (the Lacetti's floor is +0.103, as read live in BRAKING_REFERENCE). The tests are
+at 455D7A (roof: local y > roof − 0.7, 0xCB0834) and 455DAD (floor: −floor > local y).
+
+**Port** (`grid_tools::collision_audio`, grid-app `collision_sound`):
+- Data: `car_collisions` (307 samples), the car_collisions AudioVarieties with their preset
+  distances, CollisionInfos (presets plus per-info overrides) and ImpactVarieties (soft, med,
+  hard in child order).
+- Listener, once per vehicle tick (FixedUpdate after `drive_tick`, as F453), for every car:
+  - contacts come from `Runtime::impacts()` solo and `multi.contact_impacts(k)` in a field;
+  - x = 10·impact/mass;
+  - `classify` (4559C0) uses the car frame of the physical pose, with heights compared in
+    model coordinates (body − vehicle +0x1630) [I: the audio object's car matrix taken as the
+    physical pose];
+  - the soft/med/hard pick and curve follow 4535A0/435EA0;
+  - one-shots quieter than −42 dB are skipped, and per-variety cooldowns of
+    (rand % 3 + 1)·0.1 s are shared by all cars;
+  - sweeteners at x ≥ 40 (High) and x ≥ 15 (Low).
+- Mix: the player's one-shots play on Panel Coll measured from the car (the Car listener [I:
+  the car's pose]), AI cars' on the AI group measured from the camera; A23B70 distance law
+  with the variety's preset (crashimpact 4/40 m, crashlfesweet 8/40 m). One mono source with
+  up to 32 voices [I]; the level is fixed when a voice starts.
+- Not yet: the scrape loop (needs the other surface's audio material), landing (PrimaryBot by
+  airtime), yaw/pitch displacement, the Crashed mix mode, part/glass sounds, stereo.
+- Tests: `contacts_are_classified_like_4559c0`, `curves_interpolate_and_clamp`,
+  `shipped_collision_data_and_listener` (the hard front hit plays carFBHard plus both
+  sweeteners, the cooldown skips a repeat, the mixer plays).
+- Not heard in a windowed race.
