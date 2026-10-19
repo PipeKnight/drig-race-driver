@@ -1,5 +1,12 @@
 # GRID engine project log
 
+## G159 — Candidate native legacy/default parity and CLI guards pass (19 October 2026)
+
+8949 diagnostic app built/stamped, SHA359b1e50..., feature all-target workspaceClippy passes; NaN strength/zero roughness/baseline coat override reject as intended. Native4K explicitOff/prior-coat exactly equals installed3bfc Off PNG; implicit source-road/prior-coat exactly equals installed3bfc explicitSourceBase PNG. This verifies the automatic road default and unchanged accepted paint control without attributing test data to the wrong build. New coat variants still capturing.
+
+Draft-source full test compile was intentionally cancelled before test execution to freeze final help/default source once material comparisons select it. No failing test result or729-pass claim; exact owned rustc/cargo ancestry guarded and cancellation logged privately. Peers/owner game not stopped. Final release must fix stale help and rerun full checks before delivery. docs/LACETTI_CLEARCOAT_STUDY.md records all status/versions/evidence; installed stable remains3bfc/bbc1.
+
+
 ## G158 — Road-mask full lap and moving samples pass (19 October 2026)
 
 Installed3bfc +explicitSourceBase completed6500ticks/exit0 with1validlap91.208764765s, four physical exit records exactly equal to F427 control except wall_seconds. Thirty unique motion PNGs at virtual30FPS, tick6202..6262, max request-time error3.34ns; first/last inspected. NoGPU/shader errors or deadline failure. Source shader path is therefore newly checked over a full lap before the candidate's automatic default is promoted; not a claim candidate8949 has completed this drive yet. Existing raised/black road-edge strips remain distinct pre-existing geometry/material-boundary work. Raw/private evidence in asphalt-paint-check01; detailed notes in docs/LACETTI_CLEARCOAT_STUDY.md. Candidate build/resource checks still active; old installed executable remains available.
