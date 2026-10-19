@@ -1,3 +1,13 @@
+## G181 — Recovered build runs; 30FPS raw parity and bounded Fresnel linkage (19 October 2026)
+
+Resumed9abb build completes11m56s, SHA827049d7…f9a1e, uninstalled. Both600tick30virtualFPS off/on0.5 moving-probe cases pass; raw motion/depth/header arrays byte-identical at sampled frame.300pair and final full tests remain active; no universal ghost-free/default acceptance. Roadmap navigation now reflects owner’s surfaces/reflections priority; unfinished antenna pilot retained rather than lost.
+
+Read-only/noanalysis Ghidra12.1.4 with768MiB/oneCPU confirms scalar-name fields and one conditional override vector order(Power,Min,Max,0). This is not the normal production binding or active-variant proof; no source model equivalence inferred. Exact private PE hash checked after correcting old worktree-local path to relocated primary copy. docs/CAR_REFLECTION_COMPARISON.md keeps xrefs, decompilation and shader evidence private and states remaining uncertainties. No tools installed or original files modified.
+## G180 — Recover after owner-reported Windows bugcheck/reboot (19 October 2026)
+
+Owner reports computer restarted after an error and authorizes continuation. Read journal/Git first: clean codex/grid-graphics at9abb921, all source commits retained. Windows boot20:12:22 Europe/Kiev; System WER1001 records bugcheck0x1E with0xC0000005 and minidump C:/WINDOWS/Minidump/101926-12859-01.dmp, plus Kernel-Power41. These records do not identify the causal driver or establish a connection to this work. No system/tool installation/driver setting changes.
+
+layer-build04.jsonl stops at376832bytes, stderr empty, no build-finished success, layer-artifact04 absent and no completed motion04 cases. Our capture watcher was waiting for compilation: do not call interrupted final-source tests/GPU controls passed. Retain04 artifacts as interrupted; resume into05 logs with one Cargo job and the same frozen9abb source. Earlier completed239full770tests/bothClippy,bc0staticGPU controls, F455canonical retry and24/24quick remain evidence for their recorded scopes. Peer build/test processes already running after reboot are left untouched. Reseed remains pending only after future upstream integration; current script still lacks that switch.
 ## G179 — Combined resource checks pass; repair driving CLI gate and qualify repeat parity (19 October 2026)
 
 239f4a2 combined release tests770/21harnesses and feature/default workspaceClippy pass. First new movement control off succeeds; enabled mode rejects before GPU because new guard reads !track before drive-derived flags are set. Change that single guard to accept track||drive and rerun the real driving invocation. No enabled driving/render success claimed yet.
