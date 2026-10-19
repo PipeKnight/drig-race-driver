@@ -66,7 +66,7 @@ with constraints, or with more than one shape behaviour, static.
 
 ## Size [D]
 
-Decompiled lines (Ghidra, ): joint constructor 0xAEFEB0 1569;
+Decompiled lines (Ghidra, `local/robust/decomp/r16a..r16c`): joint constructor 0xAEFEB0 1569;
 prepare 0xAF4890 1997; two-body row initialisation 0xAF71C0 1834; one-body 0xAF9430 1523;
 correction solvers 0xAEF930 151 and 0xAEFBB0 136; ENS link propagation 0x7D5540 489; props
 reader 0x7D00F0 334; descriptor 0x7C7B10 and header 0x7C04D0 170. The main response 0xB7ACC0
@@ -76,7 +76,7 @@ row solver runs them all. The port's frame pipeline has no joint pools, so the s
 integration (contact groups, grouped and impact frames) is part of the work, as are islands
 merged through joints, breaking, body overrides and the entity side.
 
-Verification: the native probes () run original functions in-process on
+Verification: the native probes (`tools/probe_*.c`) run original functions in-process on
 supplied state; a joint probe (constructor, prepare, row initialisation) gives the same
 bit-for-bit comparison the impact pools have.
 
