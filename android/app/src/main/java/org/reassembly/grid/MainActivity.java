@@ -92,7 +92,7 @@ public class MainActivity extends GameActivity {
     }
 
     /**
-     * Called by android.rs first at start-up (F448). With bundled game data,
+     * Called by android.rs first at start-up (F450). With bundled game data,
      * true only when its copy is complete (the version marker matches). Else
      * the copy screen (LauncherActivity) opens in place of this activity and
      * false is returned: Android can bring MainActivity back directly, from

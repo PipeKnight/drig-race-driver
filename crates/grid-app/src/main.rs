@@ -1083,7 +1083,7 @@ fn append_entities(
 fn main() {
     #[cfg(target_os = "android")]
     android::init();
-    // Bundled data still being copied (F448): the copy screen took over.
+    // Bundled data still being copied (F450): the copy screen took over.
     #[cfg(target_os = "android")]
     if !android::data_ready() {
         android::log(false, "data not ready: the copy screen opened instead");

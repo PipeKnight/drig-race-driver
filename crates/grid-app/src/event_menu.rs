@@ -976,7 +976,7 @@ pub fn android_args() -> Vec<String> {
     }
 }
 
-/// The menu's starting choice (F448): `settings.ini`'s `[event]` (the last
+/// The menu's starting choice (F450): `settings.ini`'s `[event]` (the last
 /// Continue), unless the bundled APK's `event.ini` is newer than the last
 /// menu profile (`event-menu.ini`). A new bundle (the drift APK) then opens
 /// on its own event even when an earlier APK left a saved Race choice, which
