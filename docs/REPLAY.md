@@ -161,7 +161,7 @@ The replay camera set is separate from the race cameras (F349):
 - The car's `cameras.xml` has hidden replay views: wing1/2, rear1/2, roof1/2, driver1/2 and
   terminal (docs/CAMERA_VIEWS.md) [D]. The results screen uses `replay_roof2` for its "funky"
   camera (`StatePostRaceSetReplayCamera`) [D].
-- The camera classes behind the parameters were not decompiled.
+- The camera classes behind the parameters: docs/REPLAY_DIRECTOR_RESEARCH.md (zoom vtable 0xD001A8, static 0xD000D8).
 
 ## 3. The port
 
@@ -242,19 +242,17 @@ The replay camera set is separate from the race cameras (F349):
   camera is that of the last zone crossed at or before it (else the initial camera), so seeking
   and rewinding show the same shots as playing forward. Ordinary entries are used; `TERMINAL_`
   ones are skipped.
-- Track cameras [I/AUTHORED behaviour, data-driven parameters]:
-  - zoom cameras stand at `Position` or, with a `sourcePath`, at the path point nearest the car;
-    they look at the car plus `targetOffset` and `lookahead` × velocity, and zoom so a sphere of
-    `radius` fills a third of the view: fov = 2·atan(3·radius/distance) in degrees, clamped to
-    the minimum/maximum FOV and rate limited by `|zoomPerSecond|` (one Long Beach camera ships
-    −6). The factor 3 is AUTHORED: with the sphere filling the whole view, a Long Beach render
-    showed only the bonnet. The original's zoom camera parameters bind at 0x7F7590 (radius
-    +0x114, default/minimum/maximum FOV +0x130/+0x128/+0x12C, zoomPerSecond +0x168, zoomEnabled
-    +0x16C) [D], but the behaviour reading them was not found. A cut starts at the framing goal
-    (AUTHORED; starting at `defaultFov` left dolly cameras 5–8 m from the car at 20°);
-  - static cameras keep `Fov` and turn to the car when `turnEnabled`, else keep their
-    orientation;
-  - no shake.
+- Track cameras: the original's zoom and static camera classes, decoded in
+  docs/REPLAY_DIRECTOR_RESEARCH.md (F441 audit). In short:
+  - target = car matrix x `targetOffset`, or a point on `targetPath`;
+  - eye = `Position`, or a point on `sourcePath`. Projection paths never go back and smooth by
+    speed; time paths follow their percentage curve;
+  - FOV = atan(radius/distance) within the limits, from `defaultFov` at `zoomPerSecond`, or fixed;
+  - `turnEnabled` turns with angular dynamics;
+  - static cameras never turn.
+
+  The camera state is stepped at each replay sample from the activation and interpolated, as the
+  original replays its recorded camera state. No shake.
 - `target.NAME` entries use the car's own view NAME through the race camera code (F349).
 - Next/Previous Camera cycle: director, then the car's `replay_*` views, then its race views
   (AUTHORED order).
@@ -298,7 +296,7 @@ used by the flashback path (0xDB4FE4) are in FLASHBACK.md 2.
 
 ## 6. Open items
 
-- The vehicle component's own replay fields, the camera classes, the director's event timeline
+- The vehicle component's own replay fields, the director's event timeline
   and highlight monitors, and the terminal-damage replay's start time were not traced.
 - Not replayed (shown as they are when the replay starts): glass and light damage, shards,
   damage-part swing angles, tyre smoke and other particles, skid marks, sound.

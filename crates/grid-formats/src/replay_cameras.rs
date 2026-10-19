@@ -4,7 +4,7 @@
 //! image). Layout [D]:
 //!
 //! - `<ReplayCameraConfiguration route initialCamera>`;
-//! - `<Camera type=zoom|static ident [sourcePath]>` with `<Parameter name type
+//! - `<Camera type=zoom|static ident [sourcePath] [targetPath]>` with `<Parameter name type
 //!   value|x y z [w]>` children (`Position`, `orientation` quaternion,
 //!   `defaultFov`/`minimumFov`/`maximumFov` or `Fov`, `radius`, `targetOffset`,
 //!   `zoomPerSecond`, `turnEnabled`, `lookahead`, `roll`, shake values …);
@@ -40,6 +40,8 @@ pub struct Camera {
     pub ident: String,
     /// `sourcePath`: the path the camera moves along.
     pub path: Option<String>,
+    /// `targetPath`: the path the camera looks at (instead of the car).
+    pub target_path: Option<String>,
     pub parameters: Vec<(String, Value)>,
 }
 
@@ -109,6 +111,19 @@ impl Camera {
             Value::Quaternion(v) => Some(v),
             _ => None,
         }
+    }
+}
+
+impl Path {
+    pub fn attribute(&self, name: &str) -> Option<&str> {
+        self.attributes
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+    /// A `true`/`false` attribute (absent: false).
+    pub fn flag(&self, name: &str) -> bool {
+        self.attribute(name) == Some("true")
     }
 }
 
@@ -188,6 +203,7 @@ pub fn read(bytes: &[u8]) -> Result<Config> {
                     kind,
                     ident,
                     path: attr(i, "sourcePath").map(str::to_owned),
+                    target_path: attr(i, "targetPath").map(str::to_owned),
                     parameters,
                 });
             }
@@ -315,6 +331,10 @@ mod tests {
                     assert_eq!(path.kind, "spline");
                     // Cubic Bézier chain: four points per segment.
                     assert!(path.points.len() >= 4 && path.points.len().is_multiple_of(4), "{track}");
+                }
+                if let Some(path) = &camera.target_path {
+                    let path = config.path(path).unwrap();
+                    assert_eq!(path.kind, "spline", "{track}");
                 }
             }
         }
