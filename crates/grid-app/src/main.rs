@@ -2859,7 +2859,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(actions) = drive_input.take() {
             // The original's pause menu (docs/PAUSE_MENU.md): Race Day free
             // race for timed events, test drive for free practice.
-            let menu = pause_menu::PauseMenu::new(
+            let mut menu = pause_menu::PauseMenu::new(
                 if trial_laps.is_some() {
                     pause_menu::Variant::FreeRace
                 } else {
@@ -2869,6 +2869,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 driving.reset_line.is_some(),
                 pause_menu::initial_options(&profile, Some(&actions)),
             );
+            // The original autosaves its profile when a settings screen is
+            // left (docs/PAUSE_MENU.md).
+            menu.save_to = Some(settings::data_dir().join("settings.ini"));
             let variant = menu.variant;
             input::install(&mut app, actions);
             #[cfg(target_os = "android")]

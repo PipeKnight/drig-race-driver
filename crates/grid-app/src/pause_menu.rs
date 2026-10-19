@@ -202,6 +202,10 @@ pub enum Command {
     InstantReplay,
     /// Options changed (applied at once).
     Apply(Options),
+    /// A settings screen was left: the original autosaves the profile
+    /// (`*_st_*_autosave` [D]); `true` when the Advanced screen's input
+    /// tunes are part of it.
+    Save(Options, bool),
     /// A button whose feature is not in the prototype.
     Unavailable(&'static str),
 }
@@ -276,6 +280,9 @@ pub struct PauseMenu {
     /// Values on entering a setup screen (Button3 = Undo).
     undo: Options,
     repeat: Repeat,
+    /// Where leaving a settings screen saves the options (the app's
+    /// `<data dir>/settings.ini`); `None` keeps them for the session (tests).
+    pub save_to: Option<std::path::PathBuf>,
 }
 
 impl PauseMenu {
@@ -293,6 +300,7 @@ impl PauseMenu {
             values,
             undo: values,
             repeat: Repeat::default(),
+            save_to: None,
         }
     }
 
@@ -408,7 +416,7 @@ impl PauseMenu {
                 let rows = fields(setup);
                 if back {
                     self.screen = Screen::Options;
-                    return None;
+                    return Some(Command::Save(self.values, setup == Setup::Advanced));
                 }
                 if nav.button3 && self.values != self.undo {
                     self.values = self.undo;
@@ -823,6 +831,14 @@ pub fn update(
         Command::Unavailable(id) => {
             log_line!("drive_menu version=1 action=unavailable button={id}");
         }
+        Command::Save(values, tunes) => {
+            if let Some(path) = &menu.save_to {
+                match crate::settings::save_options(path, &values, tunes) {
+                    Ok(()) => log_line!("drive_menu version=1 action=save tunes={tunes} path={}", path.display()),
+                    Err(error) => log_line!("drive_menu version=1 action=save_failed error={error:?}"),
+                }
+            }
+        }
     }
     // A press that opened, closed or acted in the menu never reaches the car
     // as a gear change (pad A is both Menu Select and Gear Up).
@@ -1141,7 +1157,11 @@ mod tests {
         assert_eq!(menu.step(press(|n| n.right = true)), None);
         menu.step(press(|n| n.down = true));
         assert_eq!(menu.step(press(|n| n.right = true)), None);
-        menu.step(press(|n| n.back = true));
+        // Leaving a settings screen autosaves (`*_st_*_autosave` [D]).
+        assert!(matches!(
+            menu.step(press(|n| n.back = true)),
+            Some(Command::Save(v, false)) if v.effects == 100
+        ));
         assert_eq!(menu.screen, Screen::Options);
         menu.step(press(|n| n.down = true));
         menu.step(press(|n| n.select = true));
@@ -1151,7 +1171,7 @@ mod tests {
         assert!(
             matches!(menu.step(press(|n| n.button3 = true)), Some(Command::Apply(v)) if !v.mph)
         );
-        menu.step(press(|n| n.back = true));
+        assert!(matches!(menu.step(press(|n| n.back = true)), Some(Command::Save(_, false))));
         menu.step(press(|n| n.down = true));
         menu.step(press(|n| n.select = true));
         assert_eq!(menu.screen, Screen::Setup(Setup::Advanced));

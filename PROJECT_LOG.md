@@ -1,5 +1,16 @@
 # GRID engine project log
 
+F480 Pause-menu options are saved: leaving a settings screen writes them to `<data dir>/settings.ini`, the original's profile autosave (2026-10-19, Claude Code; coordinator's order, FIDELITY_BACKLOG row 62 part 1). Docs: docs/PAUSE_MENU.md §3 "Autosave (F480)", docs/SETTINGS.md §1.
+- [D] Every `*_st_*_optionsscreen` has a link to an `*_st_*_autosave` state (PAUSE_MENU §2), which is the trigger the port reproduces. Leaving Sound Setup, Screen Setup or Advanced returns `pause_menu::Command::Save`.
+- `settings::save_options` writes `[sound] effects` and `[osd] lap_timer/position/minimap/dials/speed_units`; after Advanced it also writes the six `[input]` dead zone and saturation items. The new `settings::with_items` (shared with the Driver Aids writer) removes the old items from item-grammar lines, so `device=wheel` stays. The file is read back and compared before it is written. The next launch reads these keys as before (`initial_options`).
+- Fix: a comment kept on a rewritten `[assists]`/`[input]` line now keeps a space before its `#`. Before, `device=wheel # x` became `device=wheel# x`.
+- `PauseMenu::save_to` is set only by the app (`data_dir()/settings.ini`), so unit and race tests never write a settings file.
+- Not ported: the original's profile file format and write timing; Ghost Car, Speech/Music volume, Steering Linearity and 900° wheel are still dimmed (row 62 part 2).
+- Checks [V], release, `--offline`, on e6e5269 (F477) + F478 + this change:
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 799 passed, 0 failed (pause-menu race test included; no settings file was written outside the test temp dirs); clippy clean; `grid-soak quick` 24/24;
+  - identities without DF01/characteristics on the F476 baselines: solo 79a990f6…4bcc, 12-car 40cd67ca…ab8d.
+- Not run in the app (no rendered runs until the render-leak fix).
+
 F479 Collision impacts: the original's collision listener and impact one-shots (2026-10-19, Claude Code; coordinator's audio task, FIDELITY_BACKLOG row 70, first piece). Details: docs/AUDIO_RESEARCH.md §9. Evidence: worktree kind-pike-df38cc `local/gtfix/decomp/colldims`, `coll*` (Ghidra 12.1.4, read-only), `local/coll/checks/`. The original was not run.
 - [O] 4563F0 computes x = 10·impact/mass per contact. 4559C0 classifies front/back, sides and roof against the car description heights: description +0x1B28/+0x1B54 (body +0xED68/+0xED94, written by 0x9E2030) are the lowest and highest `collision_main` y. 4535A0/435EA0 pick soft/med/hard CollisionInfos and lerp volume and pitch. One-shots below −42 dB are skipped, and per-variety cooldowns of (rand%3+1)·0.1 s are shared by all cars. Sweeteners play at x ≥ 40 (High) and x ≥ 15 (Low).
 - Port: `grid_tools::collision_audio` (CMSamples/car_collisions bank, AudioVarieties distances, CollisionInfos, ImpactVarieties, listener, 32-voice mono mixer); grid-app `collision_sound` runs once per vehicle tick after `drive_tick` (as F453). The player's one-shots play on Panel Coll measured from the car, AI cars' on the AI group measured from the camera, with the A23B70 distance law. [I] The car pose is taken as both the audio car matrix and the Car listener.

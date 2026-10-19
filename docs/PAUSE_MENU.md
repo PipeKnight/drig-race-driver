@@ -142,8 +142,23 @@ AUTHORED presentation:
 - slider steps of 10 % (volume) and 5 % (controls);
 - none of the original's animated glyphs, pause blur, paused-world camera or audio ducking.
 
-Not persisted: the original autosaves the profile when a settings screen is left. The port keeps
-changes for the session only; put lasting values in `local/settings.ini`.
+**Autosave (F480).** The original saves the profile whenever a settings screen is left: every
+`*_st_*_optionsscreen` has a link to an `*_st_*_autosave` state [D]. The port does the same.
+Leaving Sound Setup, Screen Setup or Advanced (Back) returns `Command::Save`, and the app writes
+the options to `<data dir>/settings.ini` (`settings::save_options`), the same file the Driver Aids
+and Video screens use:
+- `[sound] effects`;
+- `[osd] lap_timer / position / minimap / dials / speed_units`;
+- after Advanced only, the six `[input]` `*_deadzone` / `*_saturation` items.
+
+Other keys and comments are kept. Earlier tune items are removed from the `[input]` lines, so
+`device=wheel` stays. The written file is read back and compared before it replaces the old one.
+The next launch starts the menu and the HUD from these values. A `--settings` profile that sets the
+same keys still wins, as for every key (docs/SETTINGS.md). The launchers' profiles set none of them.
+`PauseMenu::save_to` is `None` outside the app, so tests never write a settings file. Log:
+`drive_menu version=1 action=save tunes=… path=…` or `action=save_failed`. Not ported: the
+original's profile file and its write timing within the autosave state (only the trigger is
+reproduced).
 
 ## 4. Tests
 
