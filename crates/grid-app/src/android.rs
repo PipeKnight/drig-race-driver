@@ -27,7 +27,7 @@ unsafe extern "C" {
 const ANDROID_LOG_INFO: c_int = 4;
 const ANDROID_LOG_ERROR: c_int = 6;
 
-/// Lines for the log file's writer thread. F440: the P12 version buffered
+/// Lines for the log file's writer thread. F441: the P12 version buffered
 /// the file (64 KiB, flushed at most every 0.5 s from the calling thread) and
 /// the owner's phone then showed every log as 0 bytes; now each line is
 /// written as one write() at once, off the game threads, so a hard kill

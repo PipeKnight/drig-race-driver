@@ -56,7 +56,7 @@ pub fn read_renderable_draws<'a>(
 
 /// [`read_renderable_draws`] for many ids of one tree: the source, shader and
 /// node-id tables are built once, and each id walks only its own subtree
-/// (F440: the Nurburgring's 11,962 breakable pieces scanned the whole object
+/// (F441: the Nurburgring's 11,962 breakable pieces scanned the whole object
 /// library each, minutes of black screen before a race on the phone). Same
 /// draws, order and errors as one call per id.
 pub struct Renderables<'t, 'a> {
@@ -475,7 +475,7 @@ pub fn read_draws<'a>(
 mod renderables_tests {
     use super::*;
 
-    /// The pre-F440 per-id read: one whole-tree scan per renderable id.
+    /// The pre-F441 per-id read: one whole-tree scan per renderable id.
     fn one_scan<'a>(tree: &Tree<'a>, meshes: &[Mesh<'a>], id: &[u8]) -> Result<Vec<Draw<'a>>> {
         let selected: Vec<_> = (0..tree.nodes.len())
             .filter(|&i| {

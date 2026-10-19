@@ -79,7 +79,7 @@ pub(crate) fn append_pieces(
 ) -> Result<usize, Box<dyn std::error::Error>> {
     let mut drawn = 0;
     let mut missing = 0;
-    // One index of the object library for every piece (F440).
+    // One index of the object library for every piece (F441).
     let renderables = scene::Renderables::new(objects, sources);
     for (b, breakable) in catalog.breakables.iter().enumerate() {
         for (s, piece) in breakable.pieces.iter().enumerate() {
