@@ -34,10 +34,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     let radiances = compute_radiances(layer, &ranges, pbr.world_position.xyz, false);
     // Current prepared sqrt-alpha map yields reflectance=.5*sqrt(source alpha).
     // Approximate a doubled-alpha environment gate, not the entire source BRDF.
-    let gate = clamp(8.0 * pbr.material.reflectance * pbr.material.reflectance, 0.0, 1.0);
+    let gate = clamp(8.0 * pbr.material.reflectance * pbr.material.reflectance, vec3<f32>(0.0), vec3<f32>(1.0));
     let response = controls.x * mix(controls.y, controls.z, 1.0 - ndv) * gate;
-    out.color = vec4<f32>(out.color.rgb + radiances.radiance * response
-        * pbr.specular_occlusion * view_bindings::view.exposure, out.color.a);
+    // Bounded top-layer blend: dark reflected objects must be able to darken
+    // paint. Both operands are exposed exactly once before fog/tonemapping.
+    let reflected = radiances.radiance * view_bindings::view.exposure;
+    out.color = vec4<f32>(mix(out.color.rgb, reflected,
+        response * clamp(pbr.specular_occlusion, 0.0, 1.0)), out.color.a);
 #endif
     out.color = main_pass_post_lighting_processing(pbr, out.color);
     return out;
