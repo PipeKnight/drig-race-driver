@@ -42,3 +42,6 @@ Adjacent pinned release DLL works without DLSS_SDK in the process environment. A
 
 
 Separate local delivery completed at documentation checkpoint53ac4dc: immutable source7569901 executable SHA091f108132ebbf4be6af00fa4cd11586b1b9a1b04d759211a5a6e9134b37ab1e is hard-linked into each checkout's local/graphics/dlaa/ with the pinned release DLL and license/guide/notices. Primary root launcher was added without overwriting any existing file. Hash guards preserve both ordinary graphics executable links, primary normal game executable and the other agent's untracked research note. An additional600tick GPU smoke from the exact installed primary path succeeds with nativeDLAA and no SDK environment variable. The private delivery01.json records before/after guards and paths. Manual logs use local/graphics/manual-dlaa-*.log. No source assets, SDK binaries or captures committed.
+
+
+Full-lap follow-up at unchanged runtime7569901: pairedDLAA/SMAA6500tick virtual30FPS runs each complete1valid lap91.475311491s,30late motion frames and all four physical exit records match (excluding wallclock). This is the mergedF454 simulation baseline, not the earlier3362 lap. Both logs clean; private full-lap-controls01.json. Separate installed runtime remains7569901 while subsequent surface experiments are developed.
