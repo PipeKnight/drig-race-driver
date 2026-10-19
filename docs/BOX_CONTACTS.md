@@ -245,3 +245,86 @@ measured. The patches are kept in the main checkout as
 
 The first divergences come from temporary per-tick pose prints and a margin toggle
 (GRID_POSE_TRACE, GRID_ROAD_MARGIN_ZERO). They were removed before the commit.
+
+## Cylinders and spheres (FIDELITY_BACKLOG row 20, F462)
+
+19 October 2026, Claude Code. Static route cylinders (kind 5: cones, foam posts,
+poles, drift flags, Yokohama's barrels and pipes) and spheres (kind 3: the Milan
+balloons) were not route collision; cars drove through them. Pseudocode in this
+worktree's private `local/robust/decomp/r20a..r20m`.
+
+### The original [D]
+
+- Construction: 0x7B96D0 fills the cylinder descriptor with the template radius
+  times the smaller horizontal scale and the template height times scale.y times
+  0.5, so +0x244 is the half height; B46180 stores them at +0x240/+0x244.
+- Support B47A70: the direction in the shape frame (0x770AB0); if its horizontal
+  length is at most 1e-6, `(0, ±h, 0)`, else `(r dx/l, ±h, r dz/l)` (the sign of h
+  follows dy, -0 - h below), back to the world, plus the shell (B41BC0). The
+  cylinder is exactly round in the distance query. Sphere support B4B0A0: the
+  centre pushed by radius plus shell.
+- Feature table 0xE5223C: cylinder B47590, sphere the default ADB8F0 (returns 0).
+  B47590 returns a typed feature from `c = axis . direction`:
+  - `|c| > 0.707` (D11548): type 2, the cap disk facing the direction (centre ±
+    h·axis, radius r, the shell as margin), a clipping reference when `|c| > 0.99`;
+  - `0.044 < |c| <= 0.707` (D19778): type 1 with two vertices, the generator nearest
+    the direction (margin = shell);
+  - otherwise type 3, the side: radial normal, axis, bottom centre, radius plus
+    shell, height 2h, always a reference.
+- AE2FA0 calls the feature functions (A with -n, B with n). A feature function
+  returning 0 sends the pair straight to the single fallback contact. A type-3
+  feature becomes its generator segment (AE2F10) when the other feature is a
+  reference. Flags then decide the common normal (the reference's, signed along
+  n); both features' vertices move by their margins; the pair table 0xD3AD70
+  (`typeB + 4 typeA`, function and swap flag) dispatches: polygon/polygon AEB630,
+  polygon/disk AEB8D0, polygon/side AE2710, disk/disk AEBC00, point types 0 with
+  AE2C90/AE2E80. After the handler the fallback contact joins at most two
+  contacts; when one feature is a two-vertex segment, only an empty result.
+- AE2710 (polygon edges against the side): each edge is cut by the finite cylinder
+  (AE16A0: caps at y = ±h with codes ±2, the side quadratic with code 1, the
+  parameter interval clamped to 0..1). The cut's middle becomes a contact whose
+  depth is probed along 2(r + shell)·n through a cylinder of twice the height;
+  each end becomes a contact with depth 0 when it is a true side crossing, else
+  probed the same way. The end probe starts at the edge start, not at the end
+  (0xAE2B8F passes the edge cut's stack slot); ported as found.
+- AEB8D0 (disk first): a reference disk clips the polygon to its circle (AE1BD0:
+  vertices inside, edge crossings) and then to the cap plane (AE2000, the port's
+  `clip`), depth below the cap. Fewer than two points, or a disk that is not a
+  reference: the disk becomes a rim triangle (AE2210, rotation 2.0944 rad about
+  the normal, first vertex towards the direction in the cap plane, or the shape's
+  x axis) and goes to AEB630.
+- `cylinderFacets` (world config +0x84, 10): copied into the world construction
+  struct by A749A0 (index 0x21), consumer still untraced. Neither the support nor
+  any feature or pair handler above reads it. The kind-5 contact geometry is
+  round, not a 10-gon.
+
+### Port
+
+- `grid_world::round_contacts`: `CylinderShape`, `SphereShape`, `contacts()` (AE8AD0
+  as for boxes, B7ED10 sampling the shape's axes). `convex_distance` takes a
+  `Static` shape (a point set or the cylinder support) in the distance loop, batch
+  depth and penetration; point sets run the same operations as before.
+  `contact_manifold::assemble_rule` adds the segment fallback rule.
+- The mesh face is a type-1 polygon, so the ported pairs are polygon/side,
+  polygon/segment, polygon/disk (both branches) and the sphere's fallback.
+  Floating-point order follows the decompilation where it was read
+  (0x770AB0, B47A70); the AE2210 rotation is Rodrigues' formula (the original
+  builds the matrix in 0x772670, order not compared).
+- `entity_geometry::Props::read_route` adds every solid cylinder and sphere with
+  its entity index (normalised axes, radius x min horizontal scale, half height x
+  scale.y; a sphere takes its smallest scale [I: the sphere scale rule was not
+  read]). `positions` hold the local bounding box corners (bounds, the overlap
+  diagnostic).
+- Breakables: an intact cylinder now counts as the intact route shape, so
+  Yokohama's 77 `gg_barrel.max` break. Sphere pieces stay unported. Pieces keep
+  their 12-sided prism hulls (the original's piece cylinders are the same round
+  kind 5; a round piece needs the body pair paths, not a facet count).
+
+### Counts [V]
+
+Route shapes (boxes plus round shapes) after the change, `route` asset tests:
+Nürburgring 2911 (71 round), Jarama 2251 (16), Yokohama 1631 (128), Spa 1552
+(37), Milan 2340 (104: 65 cones, 39 balloon spheres), Shibuya 1212 (164),
+San Francisco 1309 (1), Le Mans 2510 (97), Haruna route 1 2034 (524). Donington,
+Istanbul, Long Beach and the Detroit stadium have none. Breakables change only on
+Yokohama (0 to 77).

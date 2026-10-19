@@ -17,7 +17,7 @@ fn cross(a: V, b: V) -> V {
         0.,
     ]
 }
-fn normalize(v: V) -> Result<V, Error> {
+pub(crate) fn normalize(v: V) -> Result<V, Error> {
     let square = dot(v, v);
     if !square.is_finite() || square <= 0. {
         return Err(Error("degenerate contact feature"));
@@ -292,7 +292,7 @@ pub(crate) fn mesh_feature(
 }
 
 /// Plane clipping preserves the original rotation of all-inside polygons.
-fn clip(points: &[V], point: V, normal: V) -> Result<Vec<V>, Error> {
+pub(crate) fn clip(points: &[V], point: V, normal: V) -> Result<Vec<V>, Error> {
     let mut out = Vec::with_capacity(points.len() + 1);
     for i in 0..points.len() {
         let a = points[i];
@@ -315,7 +315,7 @@ fn clip(points: &[V], point: V, normal: V) -> Result<Vec<V>, Error> {
     Ok(out)
 }
 
-fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool {
+pub(crate) fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool {
     for c in contacts {
         let score = dot(normal, c.normal);
         let score = if c.flipped { -0. - score } else { score };
@@ -333,6 +333,7 @@ fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool 
 
 /// A polygon feature: unit normal, convex vertices in order, the published
 /// orientation flag and the shape margin.
+#[derive(Clone, Copy)]
 pub(crate) struct Face<'a> {
     pub normal: V,
     pub vertices: &'a [V],
@@ -366,6 +367,19 @@ pub(crate) fn assemble_faces(
     features: [Face<'_>; 2],
     s: &Settings,
     existing: &[Contact],
+) -> Result<Vec<Contact>, Error> {
+    assemble_rule(features, s, existing, false)
+}
+
+/// [`assemble_faces`] with AE2FA0's fallback rule: after a polygon pair the
+/// fallback contact joins at most two contacts; when one feature is a
+/// two-vertex segment (a cylinder generator), only an empty manifold.
+#[allow(clippy::neg_multiply)] // Original margin/sign operations retain -0 lanes.
+pub(crate) fn assemble_rule(
+    features: [Face<'_>; 2],
+    s: &Settings,
+    existing: &[Contact],
+    segment: bool,
 ) -> Result<Vec<Contact>, Error> {
     let [a, b] = &features;
     let mut contacts = existing.to_vec();
@@ -428,7 +442,12 @@ pub(crate) fn assemble_faces(
             }
         }
     }
-    if (!clipping || contacts.len() <= 2)
+    let few = if segment {
+        contacts.is_empty()
+    } else {
+        contacts.len() <= 2
+    };
+    if (!clipping || few)
         && contacts.len() != limit
         && !duplicate(&mut contacts, s.fallback_point, s.normal, s.fallback_depth)
     {

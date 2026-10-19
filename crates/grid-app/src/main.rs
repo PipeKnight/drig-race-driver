@@ -1069,8 +1069,8 @@ fn append_entities(
         println!("entities omitted_unbound_material_draws={omitted_unbound}");
     }
     if spheres > 0 {
-        // Static spheres (Milan and Detroit balloons) are not route collision yet.
-        println!("entities collision_spheres={spheres} route_collision=omitted");
+        // Static spheres (Milan and Detroit balloons) are route collision.
+        println!("entities collision_spheres={spheres}");
     }
     if omitted_empty > 0 {
         println!("entities omitted_empty_renderable_instances={omitted_empty}");

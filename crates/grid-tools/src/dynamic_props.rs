@@ -391,9 +391,8 @@ impl Catalog {
             }
             let intact = boxes.get(&index).cloned().unwrap_or_default();
             if intact.is_empty() {
-                // The intact shape is not a static route box: Yokohama's
-                // gg_barrel.max stands on a cylinder, which route props do not
-                // collide with yet. It stays an unported (static) template.
+                // No solid intact route shape (only phantom ones): the
+                // template stays unported (static).
                 *catalog.unported.entry(template).or_default() += 1;
                 continue;
             }

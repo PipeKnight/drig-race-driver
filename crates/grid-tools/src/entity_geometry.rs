@@ -1,13 +1,19 @@
-//! Static collision boxes of the purchased route entities (objects.ens with
-//! objecttypes.pssg): tyre walls, cushions, armco, tyre stacks and marker boards.
-//! Each box is a box primitive (shape kind 0) queried as a whole against a
-//! body hull, as the original's AE8AD0 does (`grid_world::box_contacts`).
+//! Static collision shapes of the purchased route entities (objects.ens with
+//! objecttypes.pssg): tyre walls, cushions, armco, tyre stacks and marker
+//! boards (box primitives, kind 0), cones, posts, poles and barrels
+//! (cylinders, kind 5) and balloons (spheres, kind 3). Each is queried as a
+//! whole against a body hull, as the original's AE8AD0 does
+//! (`grid_world::box_contacts`, `grid_world::round_contacts`).
 //! All placements start infinite-mass in the data; breakable boxes carry a
 //! contact limit and are disabled when broken (`dynamic_props`,
 //! DYNAMIC_PROPS_RESEARCH.md).
 use crate::route::Route;
 use grid_formats::{entities, pssg};
-use grid_world::{Error, box_contacts::BoxShape};
+use grid_world::{
+    Error,
+    box_contacts::BoxShape,
+    round_contacts::{CylinderShape, RoundShape, SphereShape},
+};
 use std::{collections::BTreeMap, path::Path};
 
 #[derive(Clone)]
@@ -22,8 +28,14 @@ pub struct PropBox {
     pub limit: f32,
     /// Broken boxes no longer collide.
     pub enabled: bool,
-    /// The primitive: axes, centre, half extents and the shape `shell` margin.
-    shape: BoxShape,
+    /// The primitive: axes, centre, extents and the shape `shell` margin.
+    shape: Shape,
+}
+
+#[derive(Clone)]
+enum Shape {
+    Box(BoxShape),
+    Round(RoundShape),
 }
 
 /// Shared between clones until one changes a box (`Arc::make_mut`).
@@ -85,12 +97,35 @@ impl PropBox {
             entity: None,
             limit: f32::MAX,
             enabled: true,
-            shape: BoxShape {
+            shape: Shape::Box(BoxShape {
                 matrix,
                 half,
                 margin,
-            },
+            }),
         })
+    }
+
+    /// A cylinder or sphere at `matrix` (unit axes, centre): `positions`
+    /// are the corners of its local bounding box (for bounds and the
+    /// overlap diagnostic).
+    fn round(template: String, shape: RoundShape) -> Result<Self, Box<dyn std::error::Error>> {
+        let (matrix, half, margin) = match &shape {
+            RoundShape::Cylinder(c) => (c.matrix, [c.radius, c.half_height, c.radius], c.margin),
+            RoundShape::Sphere(s) => (s.matrix, [s.radius; 3], s.margin),
+        };
+        let positions = (0..8)
+            .map(|i| {
+                std::array::from_fn(|j| {
+                    (0..3).fold(matrix[3][j], |p, k| {
+                        let h = if i >> k & 1 == 0 { -half[k] } else { half[k] };
+                        p + h * matrix[k][j]
+                    })
+                })
+            })
+            .collect();
+        let mut b = Self::new(template, positions, margin)?;
+        b.shape = Shape::Round(shape);
+        Ok(b)
     }
 }
 
@@ -315,17 +350,41 @@ impl Props {
         for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
             for r in &e.renderables {
                 for s in &r.shapes {
-                    let entities::Primitive::Box {
-                        width,
-                        height,
-                        length,
-                    } = s.primitive
-                    else {
-                        continue;
-                    };
                     if s.phantom {
                         continue;
                     }
+                    let template = || String::from_utf8_lossy(e.template).into_owned();
+                    let (width, height, length) = match s.primitive {
+                        entities::Primitive::Box {
+                            width,
+                            height,
+                            length,
+                        } => (width, height, length),
+                        entities::Primitive::Cylinder { radius, height } => {
+                            let mut b = PropBox::round(
+                                template(),
+                                round_shape(
+                                    &e.transform,
+                                    &s.transform,
+                                    s.shell,
+                                    radius,
+                                    Some(height),
+                                )?,
+                            )?;
+                            b.entity = Some(index);
+                            boxes.push(b);
+                            continue;
+                        }
+                        entities::Primitive::Sphere { radius } => {
+                            let mut b = PropBox::round(
+                                template(),
+                                round_shape(&e.transform, &s.transform, s.shell, radius, None)?,
+                            )?;
+                            b.entity = Some(index);
+                            boxes.push(b);
+                            continue;
+                        }
+                    };
                     let half = [width * 0.5, height * 0.5, length * 0.5];
                     if !half.iter().all(|h| h.is_finite() && *h > 0. && *h < 100.) {
                         return Err("invalid entity collision box".into());
@@ -338,11 +397,7 @@ impl Props {
                             transform(&e.transform, transform(&s.transform, local))
                         })
                         .collect();
-                    let mut b = PropBox::new(
-                        String::from_utf8_lossy(e.template).into_owned(),
-                        positions,
-                        s.shell,
-                    )?;
+                    let mut b = PropBox::new(template(), positions, s.shell)?;
                     b.entity = Some(index);
                     boxes.push(b);
                 }
@@ -435,17 +490,69 @@ impl Props {
             {
                 continue;
             }
-            let generated = grid_world::box_contacts::contacts(
-                mesh,
-                matrix,
-                &b.shape,
-                query,
-                (capacity - contacts.len()).min(16),
-            )?;
+            let room = (capacity - contacts.len()).min(16);
+            let generated = match &b.shape {
+                Shape::Box(shape) => {
+                    grid_world::box_contacts::contacts(mesh, matrix, shape, query, room)?
+                }
+                Shape::Round(shape) => {
+                    grid_world::round_contacts::contacts(mesh, matrix, shape, query, room)?
+                }
+            };
             contacts.extend(generated.into_iter().map(|c| (index, c)));
         }
         Ok(contacts)
     }
+}
+
+/// A cylinder (`height` given) or sphere primitive placed by the shape and
+/// entity transforms. 0x7B96D0 scales the template radius by the smaller
+/// horizontal scale and the height by the vertical one, and stores half the
+/// height; the axes are normalised (a sphere takes its smallest scale).
+fn round_shape(
+    entity: &[f32; 16],
+    shape: &[f32; 16],
+    shell: f32,
+    radius: f32,
+    height: Option<f32>,
+) -> Result<RoundShape, Box<dyn std::error::Error>> {
+    let origin = transform(entity, transform(shape, [0.; 3]));
+    let mut matrix = [[0.; 4]; 4];
+    let mut scale = [0.; 3];
+    for k in 0..3 {
+        let mut unit = [0.; 3];
+        unit[k] = 1.;
+        let p = transform(entity, transform(shape, unit));
+        let axis = [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]];
+        scale[k] = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        if !(scale[k].is_finite() && scale[k] > 1e-3) {
+            return Err("degenerate entity round shape".into());
+        }
+        matrix[k] = [
+            axis[0] / scale[k],
+            axis[1] / scale[k],
+            axis[2] / scale[k],
+            0.,
+        ];
+    }
+    matrix[3] = [origin[0], origin[1], origin[2], 1.];
+    let valid = |v: f32| v.is_finite() && v > 0. && v < 100.;
+    if !valid(radius) || height.is_some_and(|h| !valid(h)) || !(0. ..=1.).contains(&shell) {
+        return Err("invalid entity round shape".into());
+    }
+    Ok(match height {
+        Some(height) => RoundShape::Cylinder(CylinderShape {
+            matrix,
+            radius: radius * scale[0].min(scale[2]),
+            half_height: height * scale[1] * 0.5,
+            margin: shell,
+        }),
+        None => RoundShape::Sphere(SphereShape {
+            matrix,
+            radius: radius * scale[0].min(scale[1]).min(scale[2]),
+            margin: shell,
+        }),
+    })
 }
 
 /// Values a caller holds for repeated body queries of unchanged boxes: a
@@ -559,11 +666,11 @@ mod tests {
                     entity: None,
                     limit: f32::MAX,
                     enabled: true,
-                    shape: BoxShape {
+                    shape: Shape::Box(BoxShape {
                         matrix: [[0.; 4]; 4],
                         half: [1.; 3],
                         margin: 0.,
-                    },
+                    }),
                 }
             })
             .collect();
@@ -699,7 +806,7 @@ mod tests {
             (
                 // Nuerburgring tyrewall_black_yok, replay tick 2239 (0.9 m deep).
                 "tracks/europe/nurburgring/route_0",
-                1508,
+                1534,
                 [
                     [-0.093455344, -0.023044754, 0.99535704, 0.0],
                     [-0.00970464, 0.9997056, 0.022234295, 0.0],

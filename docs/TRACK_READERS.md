@@ -72,10 +72,10 @@ stride) store normals as four halves. The reader takes x, y, z. Tangent/Binormal
 
 `TEMPLATESHAPESPHERE` with `radius`, `shell` 0.02, `props physparams.xml#sBalloon`
 (Milan 9 nodes: `col_sphere_low/med/top_shape`, radius 0.36-0.91; Detroit 2,
-radius 1.64 and 2.24). `entities::Primitive::Sphere { radius }`. Like cylinders,
-static spheres are not route collision (`Props` keeps boxes only); the app logs
-`entities collision_spheres=N route_collision=omitted`; a sphere as a breakable
-piece is an error (none seen).
+radius 1.64 and 2.24). `entities::Primitive::Sphere { radius }`. Static spheres
+and cylinders are route collision since row 20 (F462, BOX_CONTACTS.md "Cylinders
+and spheres"); the app logs `entities collision_spheres=N`. A sphere as a breakable
+piece leaves the template unported.
 
 ### 3.4 Sixteen VCQTC materials; sheet mask is a dword [V]
 
@@ -112,7 +112,8 @@ Yokohama's `gg_barrel.max` (77) breaks, but its intact shape is a cylinder,
 which is not a static route box, so `Catalog::read` failed with "breakable
 entity without a collision box". Such templates are now counted in
 `Catalog::unported` (kept static, as armco), like other templates the port
-cannot break.
+cannot break. Since row 20 (F462) cylinders are route shapes, so the 77
+barrels break.
 
 ## 4. Survey after
 
@@ -158,4 +159,5 @@ only affects the breakable catalog):
   Francisco route 0 race ([STREET_CIRCUITS.md](STREET_CIRCUITS.md)).
 - Detroit route 0 and the Washington wrecks; Detroit stadium laps.
 - Washington's route box count after the group parts (section 3.6).
-- Static cylinders and spheres are not route collision (all tracks).
+- ~~Static cylinders and spheres are not route collision~~: route shapes since
+  F462 (BOX_CONTACTS.md "Cylinders and spheres").

@@ -475,7 +475,7 @@ impl Context {
         let output = run_query(
             mesh,
             matrix,
-            &triangle,
+            Static::Points(&triangle),
             DistanceOptions {
                 margin,
                 witnesses: true,
@@ -546,11 +546,35 @@ fn points_support(points: &[V], direction: V) -> V {
     points[best]
 }
 
+/// Shape A of the distance query: a convex point set (a triangle, box
+/// corners, a sphere centre) or a kind-5 cylinder with its B47A70 support.
+#[derive(Clone, Copy)]
+pub(crate) enum Static<'a> {
+    Points(&'a [V]),
+    Cylinder(&'a crate::round_contacts::CylinderShape),
+}
+
+impl Static<'_> {
+    fn support(&self, direction: V) -> V {
+        match self {
+            Static::Points(points) => points_support(points, direction),
+            Static::Cylinder(c) => c.support(direction),
+        }
+    }
+    /// Points that bound the input checks: the set, or the cylinder centre.
+    fn anchors(&self) -> &[V] {
+        match self {
+            Static::Points(points) => points,
+            Static::Cylinder(c) => std::slice::from_ref(&c.matrix[3]),
+        }
+    }
+}
+
 #[allow(clippy::neg_multiply)] // Original triangle batch multiplies by -1.
 fn batch_depth(
     mesh: &Mesh,
     matrix: Matrix,
-    triangle: &[V],
+    shape: Static<'_>,
     directions: &[V],
     cache: &mut [usize; 7],
 ) -> Result<(usize, f32), Error> {
@@ -558,7 +582,7 @@ fn batch_depth(
     let mut selected = None;
     for (i, &direction) in directions.iter().enumerate() {
         let opposite = direction.map(|v| -1. * v);
-        let triangle_min = -0. - dot(opposite, points_support(triangle, opposite));
+        let triangle_min = -0. - dot(opposite, shape.support(opposite));
         let point = mesh_support_local(mesh, matrix, direction, cache)?;
         let local = [
             dot(direction, matrix[0]),
@@ -651,7 +675,30 @@ impl Context {
         direction: V,
         settings: &ContactSettings,
     ) -> Result<ContactOutput, Error> {
-        let triangle = points;
+        self.contact_static(
+            mesh,
+            matrix,
+            Static::Points(points),
+            margin,
+            extra,
+            direction,
+            settings,
+        )
+    }
+
+    /// [`Self::contact_points`] for any static shape A.
+    #[allow(clippy::assign_op_pattern, clippy::too_many_arguments)]
+    pub(crate) fn contact_static(
+        &mut self,
+        mesh: &Mesh,
+        matrix: Matrix,
+        shape: Static<'_>,
+        margin: f32,
+        extra: Extra,
+        direction: V,
+        settings: &ContactSettings,
+    ) -> Result<ContactOutput, Error> {
+        let triangle = shape;
         let mut staged = self.clone();
         let mut direction = direction;
         if dot(direction, direction) < EPS {
@@ -727,7 +774,7 @@ impl Context {
         &mut self,
         mesh: &Mesh,
         matrix: Matrix,
-        triangle: &[V],
+        triangle: Static<'_>,
         margin: f32,
         extra: Extra,
         direction: &mut V,
@@ -744,7 +791,7 @@ impl Context {
             self.extra_directions[2 + i * 2] = row;
             self.extra_directions[3 + i * 2] = row.map(|v| -v);
         }
-        if let Extra::Triangle = extra {
+        if let (Extra::Triangle, Static::Points(triangle)) = (extra, triangle) {
             self.extra_directions[8] = normalize_sample(cross(
                 sub(triangle[0], triangle[1]),
                 sub(triangle[0], triangle[2]),
@@ -783,7 +830,7 @@ impl Context {
         }
         axis = normalize_sample(*direction)?;
         let opposite = axis.map(|v| -1. * v);
-        let a = points_support(triangle, opposite);
+        let a = triangle.support(opposite);
         let b = mesh_support(mesh, matrix, axis, &mut self.cache)?;
         let difference = sub(b, a);
         let depth = dot(axis, difference);
@@ -829,7 +876,7 @@ impl Context {
 fn run_query(
     mesh: &Mesh,
     matrix: Matrix,
-    triangle: &[V],
+    triangle: Static<'_>,
     options: DistanceOptions,
     mut direction: V,
     simplex: &mut Simplex,
@@ -839,10 +886,10 @@ fn run_query(
     if matrix
         .iter()
         .flatten()
-        .chain(triangle.iter().flatten())
+        .chain(triangle.anchors().iter().flatten())
         .chain(direction.iter())
         .any(|v| !v.is_finite() || v.abs() > 100000.)
-        || triangle.iter().any(|p| p[3] != 1.)
+        || triangle.anchors().iter().any(|p| p[3] != 1.)
         || direction[3] != 0.
         || !margin.is_finite()
         || !(0. ..=1e6).contains(&margin)
@@ -857,7 +904,7 @@ fn run_query(
     let mut finished = false;
     for _ in 0..256 {
         let opposite = direction.map(|v| -1. * v);
-        let a = points_support(triangle, opposite);
+        let a = triangle.support(opposite);
         let b = mesh_support(mesh, matrix, direction, cache)?;
         let difference = sub(a, b);
         let projection = dot(direction, difference);

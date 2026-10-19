@@ -410,6 +410,9 @@ retired car 5 at tick 2419. Replay: main checkout `local/lemans/soak/quick-37-40
 - Continuous collision (section 7): cars, the boundary sheet, route boxes and piece/car pairs are
   not swept yet.
 - Kind-5 cylinders and `cylinderFacets` (10) against the port's 12-sided prisms.
+  F462: static route cylinders use the round kind-5 support and features; the
+  contact path never reads `cylinderFacets` (BOX_CONTACTS.md "Cylinders and
+  spheres"). Pieces keep the prisms.
 - First-corner pile-up: the exact 0x795C00 segment test. The live comparison on Donington
   (F433, [FIRST_CORNER_LIVE.md](FIRST_CORNER_LIVE.md)): the original's field also gets through
   Redgate; the main difference is its much harder launch, not the alongside logic.
