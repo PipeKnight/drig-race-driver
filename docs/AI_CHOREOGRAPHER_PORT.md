@@ -184,9 +184,28 @@ are unchanged.
       the slewed packet that 0x794310 writes (its `[ebp+8]` argument) lives in a separate
       controller object, and whether the controller (0x828670 getter +4) changes it before the
       setter 0x996240 writes +E20 is open.
-    - Not ported; the port keeps the decompiled behaviour. Next live step [I]: locate the AI
-      packet by a whole-process search for the (throttle, brake) pair at a part-braking moment,
-      then record it with driver+0x4324 next to +E20.
+    - **Third capture (F471)**, PID 7884, same setup, 2 × 60 s; evidence `run3/`.
+      - [V] The AI's published control packet is at **driver−0x94** (updater header +0x04 points
+        to it; +0 throttle, +4 brake, +0x24 gear). Its brake leads +E20 by one frame with the same
+        shape, so the controller (0x828670) does not shape it.
+      - [V] Through the creep the brake-line object (driver+0x4324) is active on the request's
+        line with its braking flag +0x16 = 1. Whenever a step changes the packet by less than the
+        5/s slew, the slew landed on the raw demand, so the raw brake is observable: 0.44–0.46
+        early in Redgate, rising to 0.6–0.8; i.e. the line ratio is ≈ 0.97 (`ratio^24`).
+      - [V, 6 554 such samples on lines 0, 3, 6–10] Solving `ratio = (dist − b)/r` per sample: with
+        the port's reaction `r = v/5·(1 − prev)` the implied b is 1.15 × the Lacetti table (p10–p90
+        1.07–1.25) and 1.05 × the "default" table (1.00–1.14); with the Lacetti table the implied
+        reaction is about twice the port's (`v/c·(1 − prev)`, c median 2.36, per-bin 2.2–2.8).
+        Joint fits `dist = k·b + ratio·v·(1 − prev)/c + e`: Lacetti k 1.16, c 2.75, e −2.6 m
+        (RMS 1.0 m); default k 1.06, c 3.0, e −2.0 m (RMS 1.1 m).
+      - Conclusion [I]: the original plans its line braking with a ≈ 5–15 % longer braking
+        distance and a ≈ 1.7–2 × longer reaction distance than the port computes from the
+        decompile, so it starts earlier and settles at a part pedal. Which term differs (table
+        selection, the mapped brake_on value the formula reads, or the distance reference) is
+        not identified; a fitted factor would not be 1:1, so nothing is ported.
+      - Next (static): the values behind ctx+0x14 (mapped holders) and ctx+0x24 (statistics
+        object) of 0x7886C0 in the driver update 0x7929D0/0x794310, against the slew's holder
+        table (0x779F70 param_4).
   - The κ sign consumers now follow the original literally: overtake state 1 widens with bend
     flag +0x45 (κ > ovMin), state 2 with +0x44 (κ < −ovMin); the off-line assist (0x404C90)
     takes max_assist_inside when `lat · κ ≥ 0`; drift state 3 takes the left room (+0x218) for

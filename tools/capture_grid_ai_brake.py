@@ -226,11 +226,12 @@ def capture(session, disc, seconds, out):
                 full = read(driver + 0x2CE0, 0xC8)
                 extra = b"".join(read(driver + int(o, 16), int(n)) for o, n in d.get("extra", []))
                 parts.append((req + view + beh + cs + pub + wb + full + extra).hex())
+            absb = b"".join(read(int(x, 16), 8) for x in d.get("abs", []))
             key = b"".join(phys)
             if key != last:
                 last = key
                 w = read(world + 0x7C4, 8)
-                f.write(f"{t:.6f}\t{w.hex()}\t" + "\t".join(parts) + "\n")
+                f.write(f"{t:.6f}\t{w.hex()}\t" + "\t".join(parts) + f"\t{absb.hex()}\n")
                 rows += 1
             time.sleep(0.0005)
     print(json.dumps({"rows": rows, "drivers": len(drv), "out": out}))
@@ -271,8 +272,71 @@ def probe(session, disc, seconds, out):
     print(json.dumps({"dumps": dumps, "out": out}))
 
 
+def scan_pattern(h, read, pattern):
+    """Aligned addresses of `pattern` in committed read-write private memory."""
+    found = []
+    addr = 0x10000
+    m = MBI()
+    while addr < 0x7FFE0000 and k32.VirtualQueryEx(h, ctypes.c_void_p(addr), ctypes.byref(m), ctypes.sizeof(m)):
+        base, size = m.BaseAddress or 0, m.RegionSize
+        if m.State == 0x1000 and m.Protect in (0x04, 0x40) and size <= 0x10000000:
+            for off in range(0, size, 0x100000):
+                n = min(0x100000, size - off)
+                try:
+                    chunk = read(base + off, n)
+                except OSError:
+                    continue
+                i = chunk.find(pattern)
+                while i != -1:
+                    if i % 4 == 0:
+                        found.append(base + off + i)
+                    i = chunk.find(pattern, i + 4)
+        addr = base + size
+    return found
+
+
+def findpacket(session, disc, seconds, out):
+    """While a car cruises (brake 0, throttle above 0.9, unchanged over the
+    scan), scan the process for its published (throttle +E1C, brake +E20) pair;
+    every cruising car's control packets match. Three scans in all; capture
+    then reads every hit ("abs" in DISCOVER.json) and the packets are matched
+    to cars offline."""
+    new_local(out)
+    s, h = open_checked(session)
+    read = reader(h)
+    d = json.load(open(disc, encoding="utf-8"))
+    if d["pid"] != s["Pid"]:
+        sys.exit("discovery is from another process")
+    cars = [int(r["car"], 16) for r in d["drivers"]]
+    seen = {}
+    end = time.perf_counter() + seconds
+    vehicle_pairs = {c + 0xE1C for c in cars}
+    while time.perf_counter() < end and sum(len(v) for v in seen.values()) < 3:
+        for i, car in enumerate(cars):
+            pub = read(car + 0xE1C, 8)
+            throttle, brake = struct.unpack("<2f", pub)
+            if brake == 0 and throttle > 0.9:
+                hits = [a for a in scan_pattern(h, read, pub) if a not in vehicle_pairs]
+                if read(car + 0xE1C, 8) == pub:
+                    seen.setdefault(i, []).append(hits)
+                break
+        time.sleep(0.01)
+    result = {}
+    for i, scans in seen.items():
+        common = set(scans[0])
+        for sc in scans[1:]:
+            common &= set(sc)
+        result[i] = {"scans": len(scans), "first": [f"{a:x}" for a in scans[0][:20]],
+                     "common": [f"{a:x}" for a in sorted(common)]}
+    with open(out, "x", encoding="utf-8") as f:
+        json.dump(result, f, indent=1)
+    print(json.dumps({k: (v["scans"], v["common"]) for k, v in result.items()}))
+
+
 def main():
-    if len(sys.argv) == 5 and sys.argv[1] == "discover":
+    if len(sys.argv) == 6 and sys.argv[1] == "findpacket":
+        findpacket(sys.argv[2], sys.argv[3], float(sys.argv[4]), sys.argv[5])
+    elif len(sys.argv) == 5 and sys.argv[1] == "discover":
         discover(sys.argv[2], sys.argv[3], sys.argv[4])
     elif len(sys.argv) == 6 and sys.argv[1] == "probe":
         probe(sys.argv[2], sys.argv[3], float(sys.argv[4]), sys.argv[5])
