@@ -158,7 +158,9 @@ fn start(
             shared: shared.clone(),
             audible: sound.audible.clone(),
         });
-        commands.spawn((AudioPlayer(handle), PlaybackSettings::LOOP));
+        // ONCE: the decoder never ends; LOOP's rodio `repeat_infinite` would
+        // keep every sample played to replay it (F482).
+        commands.spawn((AudioPlayer(handle), PlaybackSettings::ONCE));
         sound.drivers.push(driver);
         sound.shared.push(shared);
     }
@@ -237,4 +239,33 @@ fn audibility(
         && driving.failure.is_none()
         && !listening.stopped(&driving);
     sound.audible.store(audible, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::audio::PlaybackMode;
+
+    /// The voices never end; a looped player would keep every sample played
+    /// so far (F482).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased sources; no audio device used"]
+    fn endless_tyre_voices_play_once() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let bank = Bank::load(std::path::Path::new(&root)).unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<TyreSource>()
+            .insert_resource(TyreSound::new(bank, None))
+            .add_systems(Startup, start);
+        app.update();
+        let world = app.world_mut();
+        let modes: Vec<PlaybackMode> = world
+            .query::<&PlaybackSettings>()
+            .iter(world)
+            .map(|s| s.mode)
+            .collect();
+        assert_eq!(modes.len(), 1);
+        assert!(modes.iter().all(|m| matches!(m, PlaybackMode::Once)));
+    }
 }

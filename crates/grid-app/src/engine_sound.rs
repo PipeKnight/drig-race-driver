@@ -235,9 +235,12 @@ fn start(
             bus: bus.clone(),
             failure: sound.failure.clone(),
         });
+        // Played once, as the player's engine: the decoder never ends. LOOP
+        // wraps it in rodio's `repeat_infinite`, which keeps every sample
+        // played since the start to replay it (F482 memory growth).
         commands.spawn((
             AudioPlayer(handle),
-            PlaybackSettings::LOOP,
+            PlaybackSettings::ONCE,
             OpponentEngine {
                 car,
                 mailbox,

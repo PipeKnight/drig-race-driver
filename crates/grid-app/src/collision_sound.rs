@@ -132,7 +132,9 @@ struct PendingSource(Option<CollisionSource>);
 
 fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets: ResMut<Assets<CollisionSource>>) {
     if let Some(source) = pending.0.take() {
-        commands.spawn((AudioPlayer(assets.add(source)), PlaybackSettings::LOOP));
+        // ONCE: the decoder never ends; LOOP's rodio `repeat_infinite` would
+        // keep every sample played to replay it (F482).
+        commands.spawn((AudioPlayer(assets.add(source)), PlaybackSettings::ONCE));
         println!("collision_audio version=1 event=queued rate={RATE} groups=PanelColl,AI impacts=front_back,sides,roof sweeteners=low,high");
     }
 }

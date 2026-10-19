@@ -122,7 +122,9 @@ struct PendingSource(Option<HudSource>);
 
 fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets: ResMut<Assets<HudSource>>) {
     if let Some(source) = pending.0.take() {
-        commands.spawn((AudioPlayer(assets.add(source)), PlaybackSettings::LOOP));
+        // ONCE: the decoder never ends; LOOP's rodio `repeat_infinite` would
+        // keep every sample played to replay it (F482).
+        commands.spawn((AudioPlayer(assets.add(source)), PlaybackSettings::ONCE));
         println!("hud_audio version=1 event=queued rate={RATE} group=HUD cues=lights,drift,flashback");
     }
 }

@@ -20,6 +20,7 @@ mod android_import;
 mod android_pad;
 #[cfg(target_os = "android")]
 mod android_sensor;
+mod asset_counts;
 mod assists;
 mod body_damage;
 mod body_occlusion;
@@ -3041,6 +3042,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         graphics_benchmark::install(&mut app, frames);
     }
     perf_timing::install(&mut app);
+    asset_counts::install(&mut app);
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
     mesh_stream::install(&mut app);
