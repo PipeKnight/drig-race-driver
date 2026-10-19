@@ -137,9 +137,10 @@ fn update(
     flashback: Option<Res<super::flashback::Flashback>>,
 ) {
     use grid_tools::time_trial::Phase;
-    // HUD group: the Normal row (Paused keeps 0 for HUD), camera and Effects trim.
+    // HUD group: the mode term (Paused keeps 0 for HUD), camera and Effects trim.
+    let modes = listening.modes();
     let level = sound.table.as_ref().map_or(-9., |t| {
-        t.group_db(audio_mix::NORMAL, listening.camera(), hud_audio::GROUP, listening.trim())
+        modes.group_db(t, listening.camera(), hud_audio::GROUP, listening.trim())
     });
     sound.group_db.store(level.to_bits(), Ordering::Relaxed);
     let mut cues = Vec::new();

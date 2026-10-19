@@ -226,7 +226,7 @@ fn audibility(
     engine: Option<Res<super::engine_sound::EngineSound>>,
     listening: super::engine_sound::Listening,
 ) {
-    let (trim, camera) = (listening.trim(), listening.camera());
+    let (trim, camera, modes) = (listening.trim(), listening.camera(), listening.modes());
     let ear = listening.ear(&driving.runtime.pose());
     for (car, shared) in sound.shared.iter().enumerate() {
         let Some(runtime) = runtime(&driving, car) else {
@@ -238,7 +238,7 @@ fn audibility(
         )
         .map(|p| Vec3::from_array(p).distance(ear));
         let levels =
-            tyre_audio::bus_levels(sound.table.as_deref(), camera, car == 0, trim, distances);
+            tyre_audio::bus_levels(sound.table.as_deref(), &modes, camera, car == 0, trim, distances);
         // Opponents' tyres (AI group) are heard from the camera; the
         // player's four wheels are mixed into one source heard by the Car
         // listener at the car, so centred [I: no per-wheel panning].

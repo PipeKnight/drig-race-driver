@@ -700,3 +700,58 @@ is the "Generic Software" device, whose pan law is implementation-defined.
   `pan_follows_the_camera_orientation`, and the collision mixer's hard-right one-shot and
   centred scrape loop in `shipped_collision_data_and_listener`.
 - Not heard (no rendered run).
+
+## 13. Mix modes: StartLine (F493)
+
+20 October 2026, Claude Code. Static: 411C10, 427ED0, 5791A0/579210, 41F9xx and the decoded
+`system/states.bin` / `flow.bin` (`local/pause-menu/`). GRID was not launched.
+
+**Who sets the mode [O].** No code pushes StartLine (4) as a constant; the 18 callers of
+411C10 set Crashed (2, duration 0.2 s, from 4535A0 and 436480), Paused (3), PausedReplay (7),
+Normal (0) or return to the remembered mode (+C24). StartLine comes from the race flow:
+the state class with vtable CD77E0 reads `mode` (name lookup 4709D0 → 411AE0) and
+`start_race` (5791A0); its enter method 579210 calls 411C10 through 470E40 and, with
+`start_race`, 4120E0 (race-started flags, no mix change). `states.bin` defines eight
+`StateAudioSetState` states (Intro, Paused, StartLine, Normal, PausedReplay, Transition,
+Normal with `start_race`, EndOfRace). In the career and test-drive flows of `flow.bin`:
+- `c_pre_set_audio_startline` wraps the pre-race sequence: head-cam decision, pan to the
+  vehicle, then `startseq` (the start lights);
+- `startseq`'s NEXT is `c_pre_set_audio_normal` = `set_audio_normal_start_race`, the green
+  light;
+- a restart from the pause menu goes `restart_race` → `c_pause_set_audio_startline` → the
+  pre-race again.
+
+**411C10 with duration 0 (persistent) [O].** Ignored if the mode is unchanged. Extra fade
+time +C3C: 2.5 s (CB092C) when the fade being left came from Transition and the new mode is
+Paused, 1.5 s (CB0BC4) when it came from EndOfRace and the new mode is StartLine. Then +BF4 =
+old mode, +BF0 = new mode, the +BF8 timer restarts. With a nonzero duration (Crashed) the
+mode is transient: 427ED0 returns to +C24 when the timer passes the duration minus the
+attack.
+
+**427ED0 per frame [O].** For each of the 21 groups, target = mode + platform + camera +
+master' + trim. A group at its target counts as settled. Otherwise:
+- while +BF4 ≠ +BF0: level = lerp(old mode's target, target, e / (attack[new] + extra));
+- after that: level = lerp(current level, target, e / 1.5) (CB0BC4), e the time since the
+  mode change, clamped to the target at t ≥ 1.
+When 20 or more groups are settled the fade ends (+BF4 = +BF0, +C3C = 0).
+
+**Consequence [O].** StartLine differs from Normal only in AI (−3 dB; attack 1.5 s, Normal's
+0.15 s; asset test). On the first frame 20 groups are settled, so the attack-time fade ends at
+once and AI follows the second law, both into StartLine and back to Normal: about 99.8 % of
+the 3 dB within 0.5 s at 60 frames per second, exact by 0.8 s.
+
+**Port.**
+- `audio_mix::ModeMix`: 411C10's persistent set (with both extra times) and 427ED0's two laws
+  on each group's mode term; `group_db` adds platform, camera, master and trim. The terms
+  evolve as the published levels do while camera and trim stay constant [I]. Stepped at a
+  fixed 60 Hz so the fade does not depend on the frame rate [I: the original steps once per
+  frame].
+- `grid-app`: `AudioMode` resource; `mix_mode` sets StartLine while the time trial's phase
+  is Countdown (the start lights, also after a restart) and Normal otherwise, then advances
+  with real time. The engine, tyre, collision and HUD levels use it. Free practice has no
+  start sequence and stays Normal; the pre-race pan to the car is not part of the port, so
+  StartLine starts with the countdown [I].
+- Not driven: Paused (the port's pause keeps its own silence), Crashed, EndOfRace, Intro,
+  Transition, master start-up smoothing.
+- Tests: `start_line_lowers_ai_with_the_427ed0_fade` (first frame, 0.5 s, settle, back to
+  Normal, idempotent set) and the asset test (StartLine = Normal except AI, attack 1.5).

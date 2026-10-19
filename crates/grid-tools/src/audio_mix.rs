@@ -56,6 +56,10 @@ pub const MODE_NAMES: [&str; 10] = [
     "PlatformModifier",
 ];
 pub const NORMAL: usize = 0;
+pub const PAUSED: usize = 3;
+pub const START_LINE: usize = 4;
+pub const END_OF_RACE: usize = 6;
+pub const TRANSITION: usize = 8;
 const PLATFORM: usize = 9;
 
 /// Audio cameras of the 41F570 table.
@@ -188,6 +192,114 @@ impl Table {
     }
 }
 
+/// The mix mode of 411C10 and its per-frame fade 427ED0
+/// (docs/AUDIO_RESEARCH.md §13). The race flow (`system/flow.bin`
+/// `StateAudioSetState`, 5791A0/579210) sets persistent modes: StartLine
+/// before the pan to the car and through the start sequence, Normal with
+/// `start_race` at the green light, StartLine again on a restart.
+///
+/// 427ED0, per frame and group: the target is
+/// `mode + platform + camera + master + trim`. While the mode it left (+BF4)
+/// differs from the current one (+BF0), a group not yet at its target is set
+/// to `lerp(target of the old mode, target, e / (attack[new] + extra))`, e the
+/// time since the change (+BF8 timer). The fade ends (+BF4 = +BF0, extra 0)
+/// once at least 20 of the 21 groups equal their target. After that a group
+/// still off target moves from its current level: `lerp(current, target,
+/// e / 1.5)` each frame. StartLine differs from Normal only in AI (-3 dB),
+/// so the fade ends on its first frame and AI follows that second law, both
+/// into StartLine and back to Normal.
+///
+/// The state holds each group's mode term only (published level minus
+/// platform, camera, master and trim), which evolves the same while those
+/// stay constant [I]. The original steps once per game frame; here the step
+/// is a fixed 60 Hz so the fade does not depend on the frame rate [I].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModeMix {
+    mode: usize,
+    from: usize,
+    extra: f32,
+    elapsed: f32,
+    pending: f32,
+    levels: Option<[f32; GROUPS]>,
+}
+impl Default for ModeMix {
+    fn default() -> Self {
+        Self { mode: NORMAL, from: NORMAL, extra: 0., elapsed: 0., pending: 0., levels: None }
+    }
+}
+/// 427ED0's step once the mode fade has ended (CB0BC4).
+const SETTLE: f32 = 1.5;
+/// Fixed step of the fade [I: the original runs it per frame].
+pub const MODE_STEP: f32 = 1. / 60.;
+impl ModeMix {
+    pub fn mode(&self) -> usize {
+        self.mode
+    }
+    /// 411C10 with a zero duration (a persistent mode). The extra fade time
+    /// of CB092C (2.5 s, Transition to Paused) and CB0BC4 (1.5 s, EndOfRace to
+    /// StartLine) depends on the mode the previous fade left.
+    pub fn set(&mut self, mode: usize) {
+        if mode == self.mode || mode >= PLATFORM {
+            return;
+        }
+        if self.from == TRANSITION && mode == PAUSED {
+            self.extra = 2.5;
+        } else if self.from == END_OF_RACE && mode == START_LINE {
+            self.extra = SETTLE;
+        }
+        self.from = self.mode;
+        self.mode = mode;
+        self.elapsed = 0.;
+    }
+    /// Advance the fade by `seconds`.
+    pub fn advance(&mut self, table: &Table, seconds: f32) {
+        if !seconds.is_finite() || seconds <= 0. {
+            return;
+        }
+        self.pending = (self.pending + seconds).min(1.);
+        while self.pending >= MODE_STEP {
+            self.pending -= MODE_STEP;
+            self.elapsed += MODE_STEP;
+            self.frame(table);
+        }
+    }
+    /// One 427ED0 frame on the mode terms.
+    fn frame(&mut self, table: &Table) {
+        let mut levels = self.levels.unwrap_or(table.modes[self.from]);
+        let mut settled = 0;
+        for (g, level) in levels.iter_mut().enumerate() {
+            let target = table.modes[self.mode][g];
+            if *level == target {
+                settled += 1;
+                continue;
+            }
+            let (from, time) = if self.from != self.mode {
+                (table.modes[self.from][g], table.attack[self.mode] + self.extra)
+            } else {
+                (*level, SETTLE)
+            };
+            let t = self.elapsed / time;
+            *level = if t >= 1. || t.is_nan() {
+                target
+            } else if t <= 0. {
+                from
+            } else {
+                from + (target - from) * t
+            };
+        }
+        if settled >= GROUPS - 1 {
+            self.from = self.mode;
+            self.extra = 0.;
+        }
+        self.levels = Some(levels);
+    }
+    /// The group level of 427ED0 with the current mode term.
+    pub fn group_db(&self, table: &Table, camera: Camera, group: usize, trim: f32) -> f32 {
+        let mode = self.levels.map_or(table.modes[self.from][group], |l| l[group]);
+        table.group_db(NORMAL, camera, group, trim) - table.modes[NORMAL][group] + mode
+    }
+}
+
 /// 4124A0: a volume slider in [0, 1] as a group trim in dB.
 pub fn slider_db(v: f32) -> f32 {
     if v <= 0. {
@@ -303,5 +415,48 @@ mod tests {
         assert_eq!(t.group_db(NORMAL, Camera::Internal, EXHAUST, 0.), -10.);
         assert_eq!(t.modes[3][ENGINE], -48.);
         assert_eq!(t.modes[4][AI], -3.);
+        // StartLine differs from Normal in AI only; its attack is 1.5 s.
+        let differ: Vec<usize> = (0..GROUPS).filter(|&g| t.modes[START_LINE][g] != t.modes[NORMAL][g]).collect();
+        assert_eq!(differ, [AI]);
+        assert_eq!(t.attack[START_LINE], 1.5);
+    }
+
+    #[test]
+    fn start_line_lowers_ai_with_the_427ed0_fade() {
+        let mut t = Table {
+            master: -3.,
+            modes: [[0.; GROUPS]; 10],
+            attack: [0.15, 0., 0.2, 0., 1.5, 0., 0., 0., 0., 0.],
+            cameras: [[0.; GROUPS]; 6],
+        };
+        t.modes[START_LINE][AI] = -3.;
+        let mut mix = ModeMix::default();
+        let ai = |m: &ModeMix| m.group_db(&t, Camera::Chase, AI, 0.);
+        assert_eq!(ai(&mix), -3.);
+        mix.set(START_LINE);
+        // Before the first frame the old level holds.
+        assert_eq!(ai(&mix), -3.);
+        mix.advance(&t, MODE_STEP);
+        // First frame: lerp from Normal over attack 1.5 s; 20 groups are
+        // already at target, so the fade ends and the settle law takes over.
+        let first = ai(&mix);
+        assert!((first - (-3. - 3. * MODE_STEP / 1.5)).abs() < 1e-5, "{first}");
+        assert_eq!(mix.from, START_LINE);
+        // The settle law converges well before 1.5 s, and reaches it by then.
+        mix.advance(&t, 0.5);
+        let half = ai(&mix);
+        assert!(half < -5.9 && half > -6., "{half}");
+        mix.advance(&t, 1.);
+        assert_eq!(ai(&mix), -6.);
+        // Engine untouched.
+        assert_eq!(mix.group_db(&t, Camera::Chase, ENGINE, 0.), -3.);
+        // Back to Normal at the start: the same law from -6 to -3.
+        mix.set(NORMAL);
+        mix.advance(&t, 2.);
+        assert_eq!(ai(&mix), -3.);
+        // Setting the current mode again does not restart anything.
+        let before = mix.clone();
+        mix.set(NORMAL);
+        assert_eq!(mix, before);
     }
 }

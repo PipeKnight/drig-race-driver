@@ -102,6 +102,7 @@ fn unpack_bus(word: u64) -> [f32; 2] {
 /// emitter's distance term (A23B70); `-inf` beyond the maximum distance.
 pub(crate) fn bus_levels(
     table: Option<&Table>,
+    modes: &audio_mix::ModeMix,
     camera: Camera,
     groups: [usize; 2],
     trim: f32,
@@ -109,7 +110,7 @@ pub(crate) fn bus_levels(
 ) -> [f32; 2] {
     std::array::from_fn(|k| {
         let mix = table.map_or(CHASE_BUS_DB[k], |t| {
-            t.group_db(audio_mix::NORMAL, camera, groups[k], 0.)
+            modes.group_db(t, camera, groups[k], 0.)
         }) + trim;
         audio_mix::distance_db(distances[k], ENGINE_DISTANCE.0, ENGINE_DISTANCE.1)
             .map_or(f32::NEG_INFINITY, |d| mix + d)
@@ -206,9 +207,37 @@ pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<
     sound.table = table;
     app.add_audio_source::<EngineSource>()
         .insert_resource(sound)
+        .init_resource::<AudioMode>()
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, publish.after(super::drive_tick))
-        .add_systems(Update, update.after(super::drive_present));
+        .add_systems(Update, (mix_mode, update).chain().after(super::drive_present));
+}
+/// The mix mode (411C10/427ED0, `audio_mix::ModeMix`) shared by the car,
+/// collision and HUD sounds.
+#[derive(Resource, Default)]
+pub(crate) struct AudioMode(pub(crate) audio_mix::ModeMix);
+/// The race flow's `StateAudioSetState` (docs/AUDIO_RESEARCH.md §13):
+/// StartLine through the start sequence (also after a restart), Normal from
+/// the green light (`set_audio_normal_start_race`). Free practice has no
+/// start sequence and stays Normal. Pause keeps its existing silence; the
+/// Paused, Crashed and EndOfRace modes are not driven here [I].
+fn mix_mode(
+    mut mode: ResMut<AudioMode>,
+    sound: Res<EngineSound>,
+    trial: Option<Res<super::time_trial::Trial>>,
+    time: Res<Time<Real>>,
+) {
+    let start_line = trial
+        .as_ref()
+        .is_some_and(|t| matches!(t.state.phase(), grid_tools::time_trial::Phase::Countdown(_)));
+    let next = if start_line { audio_mix::START_LINE } else { audio_mix::NORMAL };
+    if next != mode.0.mode() {
+        mode.0.set(next);
+        log_line!("audio_mode version=1 event=set mode={}", audio_mix::MODE_NAMES[next]);
+    }
+    if let Some(table) = sound.table.as_deref() {
+        mode.0.advance(table, time.delta_secs());
+    }
 }
 fn start(
     mut commands: Commands,
@@ -283,6 +312,7 @@ pub(crate) struct Listening<'w, 's> {
     pub(crate) trial: Option<Res<'w, super::time_trial::Trial>>,
     menu: Option<Res<'w, super::pause_menu::PauseMenu>>,
     cameras: Option<Res<'w, super::camera::Cameras>>,
+    mode: Option<Res<'w, AudioMode>>,
     listener: Query<'w, 's, &'static GlobalTransform, With<super::ViewerCamera>>,
 }
 impl Listening<'_, '_> {
@@ -298,6 +328,10 @@ impl Listening<'_, '_> {
     pub(crate) fn stopped(&self, driving: &super::Driving) -> bool {
         self.trial.as_ref().is_some_and(|t| t.finished())
             && driving.opponents.as_ref().is_none_or(|o| o.standings.over())
+    }
+    /// The mix mode's current group terms.
+    pub(crate) fn modes(&self) -> audio_mix::ModeMix {
+        self.mode.as_ref().map(|m| m.0.clone()).unwrap_or_default()
     }
     pub(crate) fn camera(&self) -> Camera {
         self.cameras
@@ -331,7 +365,7 @@ fn update(
     listening: Listening,
     opponent_engines: Query<&OpponentEngine>,
 ) {
-    let (trim, camera) = (listening.trim(), listening.camera());
+    let (trim, camera, modes) = (listening.trim(), listening.camera(), listening.modes());
     let table = sound.table.clone();
     let table = table.as_deref();
     let ear = listening.ear(&driving.runtime.pose());
@@ -343,6 +377,7 @@ fn update(
     sound.bus.store(
         pack_bus(bus_levels(
             table,
+            &modes,
             camera,
             [audio_mix::ENGINE, audio_mix::EXHAUST],
             trim,
@@ -377,6 +412,7 @@ fn update(
             engine.bus.store(
                 pack_bus(bus_levels(
                     table,
+                    &modes,
                     camera,
                     [audio_mix::AI; 2],
                     trim,

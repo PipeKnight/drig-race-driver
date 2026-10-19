@@ -161,10 +161,10 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
         }
         None => cars.push((&driving.runtime, driving.runtime.contact_impacts())),
     }
-    let (trim, camera) = (listening.trim(), listening.camera());
+    let (trim, camera, modes) = (listening.trim(), listening.camera(), listening.modes());
     let ear = listening.ear(&driving.runtime.pose());
     let group_db = |sound: &CollisionSound, group: usize| {
-        sound.table.as_ref().map_or(-9., |t| t.group_db(audio_mix::NORMAL, camera, group, trim))
+        sound.table.as_ref().map_or(-9., |t| modes.group_db(t, camera, group, trim))
     };
     for (k, (runtime, impacts)) in cars.into_iter().enumerate() {
         let model = sound.car_model.get(k).copied().unwrap_or(0);

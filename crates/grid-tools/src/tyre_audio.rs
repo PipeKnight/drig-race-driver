@@ -617,12 +617,13 @@ pub const DISTANCES: [(f32, f32); CATEGORIES] =
 /// Wheels, others Skids; other cars AI) plus each wheel's distance term.
 pub fn bus_levels(
     table: Option<&crate::audio_mix::Table>,
+    modes: &crate::audio_mix::ModeMix,
     camera: crate::audio_mix::Camera,
     player: bool,
     trim: f32,
     distances: [f32; 4],
 ) -> [[f32; CATEGORIES]; 4] {
-    use crate::audio_mix::{AI, NORMAL, SKIDS, WHEELS, distance_db};
+    use crate::audio_mix::{AI, SKIDS, WHEELS, distance_db};
     distances.map(|d| {
         std::array::from_fn(|c| {
             let group = match (player, c) {
@@ -631,7 +632,7 @@ pub fn bus_levels(
                 _ => SKIDS,
             };
             let mix = table.map_or(if player { CHASE_BUS_DB[c] } else { -9. }, |t| {
-                t.group_db(NORMAL, camera, group, 0.)
+                modes.group_db(t, camera, group, 0.)
             }) + trim;
             distance_db(d, DISTANCES[c].0, DISTANCES[c].1).map_or(f32::NEG_INFINITY, |x| mix + x)
         })
