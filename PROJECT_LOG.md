@@ -1,5 +1,14 @@
 # GRID engine project log
 
+## G150 — Ground repro and bounded F438 validation (19 October 2026)
+
+Fresh F438/e0e76 source checks completed:728tests across19harness results,0failed/ignored; feature/default workspace Clippy pass. Canonical SHA1ee8152565eb08c1048093881897999ea7a8ac0f0f0fcc92e084f841f1e77267 matches incoming F417/F425 baseline. Quick soak24/24,120000ticks,0resets, two expected seed24 losses,16.2min wall under shared load. These validate F438 source, not the installedF427 executable or the new ground shader. Private surface-textures01/f438-* evidence retained.
+
+Ground candidate3bfc2d1: selected surface resource/mask tests2/2passed. First app compile was stopped only for missing GRID_BUILD_REVISION before delivery, then restarted with exact3bfc2d1 stamp; no prototype or peer compiler stopped. No failed candidate was installed. Full workspace checks now queued. Native4K ground-before01 and ground-sun-before01 from installed2197/F427 inspected: the latter reproduces very pale wet-looking ground toward the sun. After images and shader validation remain pending. docs/DRY_GROUND_AND_AA.md records material/AA reasoning and pinned official research.
+
+Owner log SHA9ecc723cc69d268895a5af44d705b1ea0c1cadbdec5812b0b86bf635ca5868d8 has no matchedGPU ERROR/panic/DeviceLost. Final lap sample is running,4538ticks/70.634s,0validlaps; handling sample is terminal status3 with disabled controls and wheel3 damage. Do not treat this as a completed lap or a graphics crash. Raw log remains private; physics changes are another agent's scope.
+
+
 ## G149 — Owner driving feedback: dry ground first, AA next (19 October 2026)
 
 Owner manual-499-28815.log is installed F427/2c5f9cadd020, Enhanced 1920x1080, SMAA Ultra (graphics_aa mode=1), source surface layers, specular=Off. Exit code supplied by owner is0; no claim this was a completed lap. Owner reports sparse grass exposes excessively glossy ground. Next correction targets the underlying dry terrain response, not grass density, exposure or tree crowns. FPS optimization remains another agent's scope. Investigate temporal AA/motion data and optional DLAA after ground validation; do not re-enable the known ghosting TAA by default.
