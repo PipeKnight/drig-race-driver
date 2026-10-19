@@ -35,13 +35,18 @@ pub struct Series {
 /// The circuit-race series this port offers. `le_mans` is the free race
 /// `Le_Mans` (discipline 18): the 24 Hours on Circuit de la Sarthe, a
 /// time-limited race with the `lemans_24` field (docs/LE_MANS.md).
-pub const CIRCUIT_SERIES: [&str; 6] = [
+pub const CIRCUIT_SERIES: [&str; 11] = [
     "pro_tuned",
     "touring",
     "gt1",
     "gt2",
     "le_mans_series",
     "le_mans",
+    "prototype",
+    "pro_muscle",
+    "open_wheel",
+    "gt_club",
+    "prestige",
 ];
 
 /// The time-limited Le Mans 24 Hours (free race `Le_Mans` [V 0x62A5D0]).
@@ -62,18 +67,22 @@ pub const SURVEYED_TRACKS: [&str; 5] = [
 /// Cars of the circuit series that race fields on our circuits (AUTHORED
 /// port list, docs/SERIES.md "Car survey"): Touring, Pro Tuned, GT1, GT2 and,
 /// since the default setup's downforce limit (F414), the Le Mans Series
-/// prototypes and the 911. Another car needs GRID_SERIES_EXPERIMENTAL=1.
-pub const RACEABLE: [&str; 21] = [
+/// prototypes and the 911; since F457 the other prototypes (787, 390, je4),
+/// the muscle cars except the Mustang Boss, the open-wheel cars, gt_club and
+/// prestige. Another car needs GRID_SERIES_EXPERIMENTAL=1.
+pub const RACEABLE: [&str; 34] = [
     "lac", "bmw", "sup", "sky", "nsx", "350", "dbr", "c6r", "sal", "ccg", "c5r", "lam", "spk", "esp",
-    "911", "c65", "b05", "cre", "lc7", "b06", "r10",
+    "911", "c65", "b05", "cre", "lc7", "b06", "r10", "787", "390", "je4", "ply", "cha", "gtr", "vip",
+    "cam", "df3", "fmj", "tch", "ccx", "zon",
 ];
 
 /// Whether a series' events still need GRID_SERIES_EXPERIMENTAL=1 (a car of
-/// its fields outside [`RACEABLE`]). None since F420: the Le Mans Series
-/// prototypes race with the default setup's downforce limit.
+/// its fields outside [`RACEABLE`]): only `pro_muscle`, whose field draw
+/// includes the Mustang Boss (`bos`). Its collision mesh has two zero-area
+/// faces (11, 47) that the port's mesh builder rejects; the original's normal
+/// pass 0xB444D0 gives them NaN normals and carries on (docs/SERIES.md F457).
 pub fn is_experimental(series: &str) -> bool {
-    let _ = series;
-    false
+    series == "pro_muscle"
 }
 
 fn table<'a>(

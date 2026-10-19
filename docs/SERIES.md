@@ -18,6 +18,11 @@ image (`local/compatibility/grid-unpacked.exe`) or verified by a run; **[I]** in
 | GT2 | spk, esp | **races since F406**: 12-car fields on all 20 layouts |
 | Le Mans Series | lam, 911, c65, spk, dbr, lc7, b06, cre, b05, esp, sal, c5r, c6r | **races since F420** (default setup's downforce limit): original field and grid, 15–17 cars, launcher |
 | Le Mans (24 Hours, free race `Le_Mans`) | lam, 911, dbr, c6r, c5r, sal, spk, esp, r10, cre, b06, b05, lc7, c65 | **F429: series `le_mans`, `lemans_24` = 1 field (DBR9: 16 cars with two R10s), time-limited race on Circuit de la Sarthe (docs/LE_MANS.md)** |
+| Prototype | r10, cre, b06, b05, lc7, 787, 390, je4, c65 | **F457: races**, launcher |
+| Pro Muscle | ply, cha, gtr, bos, vip, cam | F457: races without the Mustang Boss; **experimental** (bos mesh, see F457) |
+| Open Wheel | df3, fmj | **F457: races**, launcher |
+| GT Club | tch | **F457: races**, launcher |
+| Prestige | ccx, zon | **F457: races**, launcher |
 
 New code:
 - `grid_formats::database`: the whole NDBS `database.bin` decoded by `schema.bin` (78 tables).
@@ -362,6 +367,55 @@ F447).
 - Wheel +0xBC and +0x140 are non-zero on the original's grid and 0 in the port after 300 ticks.
 - The remaining differences are pointers and runtime loads, which agree within about 1 % after
   300 port ticks at rest.
+
+## More series: prototype, pro_muscle, open_wheel, gt_club, prestige (F457) [V unless marked]
+
+Survey (`grid-series-survey ROOT`, new probe in grid-probes): every free-race discipline of
+`database.bin` with its cars and track pool. Five circuit series were missing from the port:
+- prototype: r10, cre, b06, b05, lc7 and c65 were already raceable; 787, 390 and je4 were new;
+- pro_muscle: ply, cha, gtr, bos, vip, cam;
+- open_wheel: df3, fmj;
+- gt_club: tch;
+- prestige: ccx, zon.
+
+All five use the 26 supported layouts of the other circuit series.
+
+**Solo** (`grid-opponent-race --cars STEM … 1 14000 ai`, Donington GP; worktree
+`local/series2/solo-*.txt`): 13 of the 14 cars finish two laps without failure. 787 2:25.7,
+je4 2:38.8, ccx 2:38.2, zon 2:38.0, fmj 2:45.0, 390 2:54.0, tch 2:57.8, cam 2:59.0, gtr 3:00.5,
+vip 3:02.2, cha 3:04.0, df3 3:15.1, ply 3:17.4. The Mustang Boss (`bos`) does not load:
+"invalid collision mesh normal".
+
+**Mustang Boss**: its collision mesh has two zero-area faces (11 and 47, coincident vertices;
+SOURCE_COLLISION_MESH.md). The port's mesh builder rejects them. [O] The original's normal pass
+0xB444D0 (Ghidra, worktree `local/gtfix/decomp/bosmesh`) normalises each face cross product with
+`rsqrtps` and one Newton step, with no zero test. For a zero cross product that gives
+rsqrt(0) = ∞ and ∞·0 = NaN, so the face keeps a NaN normal and construction continues. Porting
+that means NaN planes in the shared contact code, which is left for the robustness work.
+`pro_muscle` stays behind GRID_SERIES_EXPERIMENTAL, because the original's field draw includes
+the Boss.
+
+**12-car fields**, 14000 ticks on Donington GP, Istanbul GP and Nürburgring GP (worktree
+`local/series2/fields-*`; finished / wrecked or DNF, the rest estimated at the tick limit):
+
+| Field | Donington | Istanbul | Nürburgring |
+|---|---|---|---|
+| prototype (9 models) | 11 / 1 | 11 / 0 | 8 / 0 |
+| muscle (5 models, no Boss) | 12 / 0 | 0 / 0 (1.7–1.95 laps) | 0 / 0 |
+| open_wheel | 12 / 0 | 6 / 5 (one pile-up at 0.64 laps) | 6 / 1 |
+| gt_club | 12 / 0 | 1 / 0 | 0 / 0 |
+| prestige | 10 / 2 | 12 / 0 | 10 / 0 |
+
+The muscle and gt_club cars are slower, so their Istanbul and Nürburgring races end at the tick
+limit, not in wrecks. The open-wheel pile-up is the known traffic family (FIDELITY_BACKLOG rows
+30–31).
+
+**Port**:
+- `series::RACEABLE` gains the 13 cars.
+- `series::CIRCUIT_SERIES` gains the five series, and the event menu offers them;
+  `is_experimental("pro_muscle")` is true.
+- Launchers `Play GRID Series {Prototype,Open Wheel,GT Club,Prestige}.cmd` with
+  `settings/series-{prototype,open-wheel,gt-club,prestige}.ini` (3 laps, back of the grid).
 
 ## Layouts
 

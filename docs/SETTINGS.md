@@ -136,6 +136,10 @@ CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_direct
 | Play GRID Drift Battle Nurburgring.cmd | `settings/drift-battle-nurburgring.ini` | Drift Battle on Nürburgring route_1 (nurburgring_spr) |
 | Play GRID Drift Battle Istanbul.cmd | `settings/drift-battle-istanbul.ini` | Drift Battle on Istanbul Park route_1 (istanbul_int) |
 | Play GRID Drift Battle Jarama.cmd | `settings/drift-battle-jarama.ini` | Drift Battle on Jarama route_1 (jarama_r) |
+| Play GRID Series Prototype.cmd | `settings/series-prototype.ini` | Prototype series, Istanbul Park GP (F457) |
+| Play GRID Series Open Wheel.cmd | `settings/series-open-wheel.ini` | Open Wheel series, Donington GP (F457) |
+| Play GRID Series GT Club.cmd | `settings/series-gt-club.ini` | GT Club series, Donington GP (F457) |
+| Play GRID Series Prestige.cmd | `settings/series-prestige.ini` | Prestige series, Istanbul Park GP (F457) |
 | Play GRID Drift Battle Jarama GP.cmd | `settings/drift-battle-jarama-gp.ini` | Drift Battle on Jarama route_0 (jarama_gp) |
 | Play GRID Drift Battle Long Beach Reverse.cmd | `settings/drift-battle-long-beach-reverse.ini` | Drift Battle on Long Beach route_4 (longbeach_cl_r) |
 | Play GRID Drift Battle Nurburgring Reverse.cmd | `settings/drift-battle-nurburgring-reverse.ini` | Drift Battle on Nürburgring route_3 (nurburgring_spr_r) |

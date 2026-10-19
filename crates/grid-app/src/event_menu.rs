@@ -293,7 +293,8 @@ impl Catalog {
             disciplines.sort();
             for (_, id, name) in disciplines {
                 let kind = match name.as_str() {
-                    "pro_tuned" | "touring" | "gt1" | "gt2" | "le_mans_series" => Kind::Series,
+                    "pro_tuned" | "touring" | "gt1" | "gt2" | "le_mans_series" | "prototype"
+                    | "pro_muscle" | "open_wheel" | "gt_club" | "prestige" => Kind::Series,
                     "drift_battle" => Kind::DriftBattle,
                     "drift_gp" => Kind::DriftGp,
                     "Free_Drift" => Kind::Freestyle,
