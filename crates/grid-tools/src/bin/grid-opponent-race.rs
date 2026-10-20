@@ -775,6 +775,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let contacts = grid_tools::collision_audio::contacts_of(runtime, &car, &impacts);
                     listener.contacts(k, &car, &contacts, &mut plays);
                 }
+                let airborne = grid_tools::collision_audio::airborne(runtime);
+                listener.landing(k, &car, airborne, grid_tools::source_vehicle::DELTA, &mut || false, &mut plays);
                 for p in plays {
                     writeln!(
                         t,

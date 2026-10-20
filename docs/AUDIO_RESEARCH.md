@@ -854,3 +854,28 @@ last surface's variety still plays with surface factor 1.
 The player's tyre source is centred (§12), so kick-ups are too. Tests:
 `kick_ups_follow_4443d0_and_play_once` and the asset checks in
 `source_launch_peels_then_rolls_reproducibly`. Not heard.
+
+## 15. Landing (F502)
+
+20 October 2026, Claude Code. Static: 455FA0 (Ghidra `local/gtfix/decomp/wind3/455FA0.c.txt`), its caller
+457BE0 (458C74), 410850, 990FC0, constants D85A50 and CB0DE4; carBot curves in worktree `local/kick/ci.tsv`.
+GRID was not launched.
+
+- [O] 457BE0 sets +A5EB = 410850(): airborne when no wheel record has a contact (wheel+C0 == 0
+  for every wheel; 990FC0).
+- [O] 455FA0, per frame (skipped when the car's +20 → +6C is 3):
+  - airborne: when +A4B0 == 0 it restarts the timer +A4B8 and sets +A4B0 = 0.01 (CB0DE4);
+    otherwise +A4B0 = the timer's elapsed seconds. With +A614 or +A618 above 0.5 it also
+    calls 454560 (not traced);
+  - grounded: a positive +A4B0 goes to 4535A0(PrimaryBot, x = +A4B0, position), then
+    +A4B0 = 0. The position is the car origin for the player (Car listener) and the pose
+    position for AI cars.
+- [O] 4559C0 zeroes +A4B0 on side and roof contacts, so a scrape in the air restarts the
+  airtime.
+- [O] PrimaryBot: carBotSoft 0.175–0.37 s (−4.5..0 dB), Med 0.37–0.57 s (−3..0), Hard 0.57–2 s
+  (−3..0); varieties carLand*. Below 0.175 s nothing plays. As a 4535A0 call, a player landing
+  after more than 0.57 s also asks for Crashed (§13.1), and the per-variety cooldown applies.
+- Port: `collision_audio::airborne` and `Listener::landing` once per vehicle tick (the clock
+  advances by the tick, [I] for the original's frame timer); the app's collision tick and
+  `grid-opponent-race`'s trace call it after the contacts. Tests: the landing part of
+  `shipped_collision_data_and_listener`. Not heard.

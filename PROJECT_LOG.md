@@ -1,5 +1,15 @@
 # GRID engine project log
 
+F502 Landing sound after airtime (2026-10-20, Claude Code; coordinator's overnight audio list). Details: docs/AUDIO_RESEARCH.md §15. Evidence: Ghidra 455FA0, Capstone 457BE0/410850/990FC0 (session scratchpad), carBot curves in worktree kind-pike-df38cc `local/kick/ci.tsv`. The original was not run.
+- [O] Airborne = no wheel contact (410850). 455FA0 keeps the airtime (0.01 s on the first airborne frame, then the timer's elapsed time). On touchdown it plays PrimaryBot by airtime through 4535A0: carBot soft 0.175–0.37 s, med up to 0.57 s, hard up to 2 s. Side and roof hits reset the airtime (4559C0). A player landing after more than 0.57 s also triggers Crashed.
+- Port: `collision_audio::airborne`, `Listener::landing`, called per vehicle tick by the app and by the `grid-opponent-race` trace. The 454560 call for spinning wheels in the air is not ported.
+- Tests: the landing part of `shipped_collision_data_and_listener`. Not heard.
+- Checks [V], release, cargo/rustc 1.99.0, on 2d1c0400 (F500) + this change, started with no other rustc running:
+  - `cargo t -- --include-ignored` with absolute GRID_* paths: 831 passed, 0 failed, grid-app included;
+  - `cargo clippy --workspace --all-targets -D warnings` clean (again after the rebase onto F501);
+  - identities (rebuilt `grid-opponent-race`): solo 18b369f9…a6ee and 12-car c235bab2…8552, unchanged;
+  - `grid-soak quick` 24/24 (`local/land/checks/`).
+
 F501 Joints, phase 3b: armco breaks, hinged to the world and to the neighbouring section, with its override bodies and link propagation (2026-10-20, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, phase 3 part b). Details: docs/JOINTS_RESEARCH.md "Phase 3b". Evidence: worktree fervent-napier-50814b `local/robust/decomp/r21a..r21g` (Ghidra 12.1.4 headless, read-only), checks and timing in `local/r21/p3b2/`. Static analysis only; the original game was not launched.
 - Original [D]: constraints to "none" join the world's fixed object (0x958200); `link<index>` finds the linked section's body through the held ENS links (0x7B7160) or falls back to the world; a section other sections link to builds its post static (0x7CDCD0: entity +0xF4, body template +0x42) until a broken neighbour joins it (0x7D2D90 rebuilds it dynamic); a section a car breaks also breaks its intact linked neighbours, one level (0x7D5540 from 0x7D64B0); body overrides take the highest `bodyOverridePriority` (0x7B85A0); sphericalise blends mass and inertia towards `sphericalmass` and 0.4 r^2 M (0xB11520).
 - Port: `grid_formats::entities::EntityLink` (`TEMPLATEENTITYLINK`); `grid_tools::dynamic_props`: world and `link<index>` constraints, held links (`LinkSpec`), static link targets (`PropWorld::statics`, `make_dynamic`), propagation (`follow_links`), override bodies with the sphericalise blend, shapeless pieces (posts without a collision shape: Istanbul Park, Le Mans, the Nürburgring; no contacts, grid-soak does not count their fall); `grid-pssg-tree` probe.

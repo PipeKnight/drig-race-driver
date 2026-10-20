@@ -266,6 +266,13 @@ impl Car {
     }
 }
 
+/// 410850: the car is airborne when none of its wheel records has a contact
+/// (wheel +C0 == 0 for every wheel, body +1990 + i·150).
+pub fn airborne(runtime: &crate::source_vehicle::Runtime) -> bool {
+    let vehicle = &runtime.state.car.owner.vehicle;
+    (0..4).all(|i| vehicle.get((0x1990 + i * 0x150 + 0xc0) / 4).is_none_or(|&w| w == 0))
+}
+
 /// The listener's contacts of one car: the AudioMaterial name of what each
 /// touched is looked up only for contacts that can sound (not the floor):
 /// the packed track triangle under it, CAR_ for another car; the boundary
@@ -360,6 +367,8 @@ pub struct Listener {
     random: u32,
     /// The scrape loop of each car (audio car +0xA300..+0xA334).
     scrapes: Vec<Scrape>,
+    /// Each car's airtime (+0xA4B0) and its timer (+0xA4B8).
+    air: Vec<(f32, f32)>,
 }
 
 /// The roof scrape info (4559C0 passes the car's fixed roof entry instead of
@@ -400,7 +409,7 @@ fn length(a: [f32; 3]) -> f32 {
 
 impl Listener {
     pub fn new(bank: Arc<Bank>) -> Self {
-        Self { bank, cooldown: HashMap::new(), random: 0x2545_f491, scrapes: Vec::new() }
+        Self { bank, cooldown: HashMap::new(), random: 0x2545_f491, scrapes: Vec::new(), air: Vec::new() }
     }
 
     pub fn scrape(&self, car: usize) -> Option<&Scrape> {
@@ -613,6 +622,10 @@ impl Listener {
                 continue;
             }
             let Some((side, mode)) = classify_mode(car, c.point) else { continue };
+            // 4559C0: side and roof hits zero the airtime.
+            if side != Side::FrontBack {
+                self.air_mut(k).0 = 0.;
+            }
             let variety = match side {
                 Side::FrontBack => "PrimaryFrontBack",
                 Side::Sides => "PrimarySides",
@@ -642,6 +655,49 @@ impl Listener {
             if x >= 15. {
                 self.sweetener("LowSweetenerInfo", x, c.point, group, out);
             }
+        }
+    }
+
+    fn air_mut(&mut self, k: usize) -> &mut (f32, f32) {
+        if self.air.len() <= k {
+            self.air.resize(k + 1, (0., 0.));
+        }
+        &mut self.air[k]
+    }
+
+    /// 455FA0, once per tick after the step: while `airborne` the airtime
+    /// grows (the first frame restarts the timer at 0.01 s, later frames
+    /// read its elapsed time); on the first grounded tick a positive airtime
+    /// is played as the PrimaryBot impact (carBot soft/med/hard 0.175–2 s,
+    /// through 4535A0, so a long one asks the player's mix for Crashed) at
+    /// the car's position, and cleared. The 454560 call while airborne with
+    /// spinning wheels (+A614/+A618 > 0.5) is not ported.
+    pub fn landing(
+        &mut self,
+        k: usize,
+        car: &Car,
+        airborne: bool,
+        dt: f32,
+        crash: &mut dyn FnMut() -> bool,
+        out: &mut Vec<Play>,
+    ) {
+        let air = self.air_mut(k);
+        if airborne {
+            if air.0 == 0. {
+                air.1 = 0.;
+                air.0 = 0.01;
+            } else {
+                air.1 += dt;
+                air.0 = air.1;
+            }
+            return;
+        }
+        let x = air.0;
+        if x > 0. {
+            air.0 = 0.;
+            let group = if car.player { PANEL_COLL } else { AI };
+            let position = [car.pose[12], car.pose[13], car.pose[14]];
+            self.impact("PrimaryBot", x, position, group, car.player, crash, out);
         }
     }
 
@@ -1004,6 +1060,36 @@ mod tests {
         listener.contacts_crashing(1, &ai, &[contact([0., 0.4, 2.], 5400., None)], &mut || { asked += 1; true }, &mut out);
         listener.contacts_crashing(0, &c, &[contact([0., 0.4, 2.], 2400., None)], &mut || { asked += 1; true }, &mut out);
         assert_eq!(asked, 1);
+        // Landing (455FA0): 30 airborne ticks = 0.01 s, then 29·0.016 s,
+        // carBotMed (0.37–0.57) on touchdown, at the car.
+        out.clear();
+        for _ in 0..30 {
+            listener.landing(0, &c, true, 0.016, &mut || false, &mut out);
+        }
+        assert!(out.is_empty());
+        listener.landing(0, &c, false, 0.016, &mut || false, &mut out);
+        assert_eq!(out.iter().map(|p| p.variety.as_str()).collect::<Vec<_>>(), ["carLandMed"]);
+        assert_eq!(out[0].position, [c.pose[12], c.pose[13], c.pose[14]]);
+        // Once only, and a long flight (0.78 s, Hard) asks for Crashed.
+        out.clear();
+        listener.landing(0, &c, false, 0.016, &mut || false, &mut out);
+        assert!(out.is_empty());
+        for _ in 0..50 {
+            listener.landing(0, &c, true, 0.016, &mut || false, &mut out);
+        }
+        listener.landing(0, &c, false, 0.016, &mut || { asked += 1; true }, &mut out);
+        assert_eq!((asked, out[0].variety.as_str()), (2, "carLandHard"));
+        // A side hit in the air restarts the airtime: a short hop is silent.
+        out.clear();
+        for _ in 0..30 {
+            listener.landing(0, &c, true, 0.016, &mut || false, &mut out);
+        }
+        listener.contacts(0, &c, &[contact([0.9, 0.4, 0.3], 100., None)], &mut out);
+        for _ in 0..5 {
+            listener.landing(0, &c, true, 0.016, &mut || false, &mut out);
+        }
+        listener.landing(0, &c, false, 0.016, &mut || false, &mut out);
+        assert!(out.is_empty(), "{:?}", out.iter().map(|p| &p.variety).collect::<Vec<_>>());
         // Too soft: nothing.
         out.clear();
         listener.contacts(0, &c, &[contact([0.9, 0.4, 0.3], 100., None)], &mut out);

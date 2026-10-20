@@ -182,6 +182,13 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
             let mut crash = || table.as_deref().is_some_and(|t| listening.crash(t));
             sound.listener.contacts_crashing(k, &car, &contacts, &mut crash, &mut plays);
         }
+        // 455FA0: the landing after airtime.
+        {
+            let table = sound.table.clone();
+            let mut crash = || table.as_deref().is_some_and(|t| listening.crash(t));
+            let airborne = grid_tools::collision_audio::airborne(runtime);
+            sound.listener.landing(k, &car, airborne, DELTA, &mut crash, &mut plays);
+        }
         // 458780 after the step: the scrape loop's level, pitch and place.
         if let Some(voice) = sound.listener.scrape_frame(k, &car)
             && let Some(variety) = sound.bank.varieties.get(&voice.variety)
