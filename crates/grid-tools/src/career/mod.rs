@@ -805,6 +805,36 @@ mod tests {
         assert_eq!(p.position, Some(5));
     }
 
+    /// The head-to-heads F520 made raceable pay as the original (0x6788D0,
+    /// 0x674810): `prize_money_for_first` on every win, nothing on a loss,
+    /// no reputation, and the car unlock only in the International region.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn head_to_heads_73_75_77_pay_their_prize_and_78_unlocks_every_car() {
+        let cat = catalogue();
+        let win = [result(&[P, ai(1)])];
+        let lost = [result(&[ai(1), P])];
+        for (id, prize) in [(73, 1_000_000), (75, 500_000), (77, 2_500_000)] {
+            let event = cat.event(id).unwrap();
+            assert!(event.head_to_head);
+            assert_eq!(event.prize_money_for_first, prize, "{id}");
+            let mut c = founded();
+            let p = apply_event(&cat, &mut c, id, &lost, &plain()).unwrap();
+            assert_eq!((p.prize, p.position), (0, None), "{id} lost");
+            let p = apply_event(&cat, &mut c, id, &win, &plain()).unwrap();
+            assert_eq!((p.prize, p.position, p.reputation()), (prize, Some(0), 0), "{id}");
+            assert!(p.unlocked_cars.is_empty() && c.cars.is_empty(), "{id}: no unlock outside International");
+            let p = apply_event(&cat, &mut c, id, &win, &plain()).unwrap();
+            assert_eq!(p.prize, prize, "{id}: every win pays");
+            assert_eq!(c.money, 2 * prize);
+        }
+        let mut c = founded();
+        let p = apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
+        let purchasable = cat.vehicles.values().filter(|v| v.purchasable).count();
+        assert_eq!(p.unlocked_cars.len(), purchasable);
+        assert!(c.game_completed);
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn a_rookie_career_runs_on_the_shipped_data() {

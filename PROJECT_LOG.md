@@ -1,5 +1,20 @@
 # GRID engine project log
 
+F522 Career: head-to-heads 73, 75 and 77 checked from the career side after F520, and paid as the original (2026-10-20, Claude Code; coordinator's order). Screen: docs/CAREER_SCREEN.md "International head-to-head unlock (F514)". Evidence: worktree peaceful-villani-46ea34 `local/career4/` (run75, checks-521).
+- Offers: F520's test covers them (73 Viper on Washington route_0, 75 350Z on Haruna route 9, 77 787B on Haruna route 4).
+- New shipped-data test: `prize_money_for_first` (1,000,000 / 500,000 / 2,500,000) on every win, nothing on a loss, no reputation, and no car unlock outside the International region (0x6788D0, 0x674810). Event 78 unlocks every purchasable car.
+- 75 is a `Midnight_Touge` event. The original runs it with traffic [I]; the port runs it as a plain one-lap point-to-point race, where the first car home wins (AUTHORED).
+- In the app (guarded, muted, save `make_h2h_save.py` with `head_to_head 75`): the player in the 350Z beat Nathan McKane at Haruna route 9 (3:39.472, +20.884).
+  - Paid prize 500,000 and Flashback Bonus 3,000 (rank 1, 0 of 4 used; 0x6788DD sums it) with no reputation, so money went 200,000 → 703,000 and Season's Earnings 503,000.
+  - At most 1.84 GB private.
+- Checks [V], release, `--offline`:
+  - head a12029af (main 1fb36996 + this change; rebased onto 426e6255, a log-only commit, and renumbered F521 → F522 after the checks)
+  - identities equal to the current baselines in the log: solo c908c7e3…c420, 12-car bada73a9…fe17
+  - workspace tests with `--include-ignored` and absolute GRID_* paths: 862 passed, 0 failed
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean
+  - `grid-soak quick`: 24 scenarios, 0 failed
+  - release grid-app.exe sha256 05ece190…564afb
+
 F521 Playable b4e9267f47b1 with F519–F520, the portable copy refreshed, and APKs dcc22d914f21 (2026-10-20, Claude Code; owner: "Хотел протестировать звук, но звука нет").
 - Local merges in the main checkout, **not pushed**; Codex's commits are unchanged. 2f6364dd merged origin/main dcc22d91 (F518–F519). Built 2026-10-20T11:04:40Z, sha256 0904af3d613a898979d75280fd2ac4934ce6a9cc8a5de47c0b4dfb9717bebe26, manifest `local/playtest/build-20261020T1050209319489Z`. Then f54feaa1 merged 1fb36996 (F520), both without conflicts. Rebuilt with `tools/update_prototype.ps1`: manifest `local/playtest/build-20261020T1112390765713Z`, executable sha256 b4e9267f47b1693f00c57140ea95c55431c6555457ea7819596030933f90659d, cargo/rustc 1.99.0. Source driving and Bevy checks passed. "Dirty" only through the untracked Graphics DLAA launchers and docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md.
 - New since F518: F519 every raceable car's engine bank loads, and a failing bank or decoder silences only its car (the F518 build still silenced the whole field with any of 11 cars); F520 Washington route 0 and Haruna routes 9/4 race, for career events 73/75/77.

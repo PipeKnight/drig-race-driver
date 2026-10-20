@@ -144,9 +144,9 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
 - Winning a head-to-head of the International region (event 78, the final) runs `Career::unlock_all_cars` (0x674810 → 0x65AD90). Every purchasable vehicle not yet owned joins the garage with a fresh record. Livery 0 is AUTHORED; the original sets none. The payout page says how many cars joined ("Every car is unlocked: N join your garage.", AUTHORED text; the original shows no popup).
 - Not ported: the bonus unlocks of 0x65ABE0 (`bonus_vehicle_unlock`).
 - There is no per-head-to-head reward car: the original never reads `head_to_head_rewards` (CAREER_RESEARCH §3.3).
-- Events 73, 75 and 77 stay unoffered for layout reasons; their cars (vip, 350, 787) all race in the port:
-  - 73 runs on Washington route_0, which the port keeps out (route-box bound, docs/SERIES.md).
-  - 75 (`Midnight_Touge`) and 77 run on Haruna routes 9 and 4, mountain layouts the career does not race (touge).
+- Events 73, 75 and 77 are offered since F520 (car-series made their layouts race; checked from the career side in F522): 73 Viper on Washington route_0, 75 350Z on Haruna route 9, 77 787B on Haruna route 4, each a single race against one AI car.
+  - Payout as the original: `prize_money_for_first` (1,000,000, 500,000 and 2,500,000) on every win, nothing on a loss, no reputation, and no car unlock outside the International region. Test `head_to_heads_73_75_77_pay_their_prize_and_78_unlocks_every_car` covers this on the shipped data.
+  - 75 is a `Midnight_Touge` event: the original runs a single head-to-head run with traffic (docs/DISCIPLINES.md, touge [I]). The port has no touge traffic, so it runs as a one-lap point-to-point race; the first car home wins (AUTHORED).
 
 ## Head-to-heads (F478)
 
