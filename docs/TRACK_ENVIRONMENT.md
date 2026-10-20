@@ -165,6 +165,6 @@ Read `Res<TrackEnvironment>`:
 
 ## 4. Open
 
-- The loader's search order for route versus track `lighting.xml` and `sky.pssg`.
+- The loader's search order for route versus track `lighting.xml` and `sky.pssg` (F515 uses route first for both, docs/SKY.md §2).
 - The vehicle-light branch order.
 - Where the ambience `condition` / `timeOfDay` XML lives: packed, or unused.

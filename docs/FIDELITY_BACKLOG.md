@@ -27,7 +27,8 @@ Columns:
    is mono with no 3D panning or Doppler (rows 70–73).
 3. Career (GRID World) has no playable front end (row 60).
 4. No force feedback, wheel input layer or rumble (row 22).
-5. Flat grey road on every non-Donington circuit from unresolved road batches (row 80).
+5. ~~Flat grey road on every non-Donington circuit from unresolved road batches (row 80)~~: the
+   layered road and the route's sky draw on every circuit and preset (F515, docs/SKY.md).
 6. ~~Demolition Derby AI pile-ups (row 33)~~: the avoid lookup on the link window and the
    figure-of-eight variant are ported (F476); 2–6 of 12 cars now finish (was none).
 7. Drift Battle uses touring stand-in cars with `default` drift values; AI drift scores are one to
@@ -122,7 +123,7 @@ Columns:
 | 77 | graphics | Original post-process chain (tone scale, bloom, saturation, tint, vignette) not ported; grade/AgX AUTHORED; car shader masks (normal, scratch, damage, source-alpha specular) only as opt-in pilots; track surfaces lack the source alpha specular. | GRAPHICS_REMASTER; GRID_IMAGE_FORMATION; CAR_SHADER_MASKS; DONINGTON_SURFACE_LAYERS | M: look differs from 2008 | S | L | graphics |
 | 78 | graphics | Enhanced profile limited to Lacetti on Donington; other cars/routes fall back to baseline. | GRAPHICS_INTEGRATION; main.rs | M | S | L | graphics |
 | 79 | graphics | Sun/sky lighting AUTHORED by default (source sky, sun and haze opt-in); forest opt-in and incomplete; Donington floating distant strips; reflection-probe exposure provisional. | SOURCE_SKY_LIGHTING; SOURCE_VEGETATION; DONINGTON_ATMOSPHERE; GRAPHICS_DEFECTS | M | S+D | L | graphics |
-| 80 | graphics | Unresolved road batches drawn as flat grey road on every non-Donington circuit (Nürburgring 55, Istanbul 50, Jarama 46, Yokohama 42; NaN UVs); entity draws without a diffuse binding omitted. | F304; F350; F361; F399; YOKOHAMA §4 | H visual | S | M | graphics |
+| 80 | graphics | ~~Unresolved road batches drawn as flat grey road on every non-Donington circuit (Nürburgring 55, Istanbul 50, Jarama 46, Yokohama 42; NaN UVs); entity draws without a diffuse binding omitted.~~ F515: the batches are `batched_track.fx` shadow/depth proxies with no colour pass (correctly omitted); the grey was the baseline preset drawing only the first diffuse. The layered surface (six road/infield groups, Haruna's world-mapped infield) now draws on every circuit and preset; the NaN UV0 sits in wsm infield (unused) and 25 object indices (docs/SKY.md §4-5). Residue: Haruna cloth flag | F304; F350; F361; F399; YOKOHAMA §4 | H visual | S | M | graphics |
 | 81 | graphics | Wheel/lettering strobing at speed (opt-in shutter); TAA car trail (SMAA default); race numbers use an equal-width digit layout. | GRAPHICS_DEFECTS; WHEEL_ROTATION_FILTERING; CAR_LIVERY_DECALS | L–M | O+S | M | graphics |
 | 82 | tracks | Okutama fails to load (`objects.ens` entity with more than one typed child); Washington routes 0/2/5/7 exceed the 8192 route-box bound. | TRACK_READERS §3.6, §4–5 | M: tracks unavailable | S | M | robustness |
 | 83 | robustness | A single-car tick failure (practice, time trial) still pauses; no kill plane/respawn (0xDE4/0xDFC); route traps (`expect("brake lines")`, unsupported breakables, >8 chunk materials) fail at load. | F318 R11/R14; F323; RUNTIME_LIMITS_AUDIT S3/S8 | L–M | S | M | robustness |

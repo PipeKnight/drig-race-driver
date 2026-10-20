@@ -150,7 +150,7 @@ impl Default for Settings {
             benchmark_frames: None,
             capture_timeout_seconds: None,
             source_sky: true,
-            source_sky_tone: false,
+            source_sky_tone: true,
             source_sun: false,
             source_sun_colour: false,
             saved_sun_colour: None,

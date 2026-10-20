@@ -1883,7 +1883,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
                 );
                 println!(
-                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural).\n--sky-tone raw|source: optional saved scale/exponent for the sky and source IBL; raw default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
+                    "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
                 );
                 println!(
                     "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
@@ -3029,16 +3029,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         warn!("Ground cover unavailable; continuing: {error}");
     }
-    if graphics.source_sky_tone && (!graphics.enhanced() || !graphics.source_sky || !track) {
-        return Err("--sky-tone source requires enhanced source-sky track rendering".into());
-    }
     if graphics.source_ibl && (!graphics.enhanced() || !graphics.source_sky || !track) {
         return Err(
-            "--ibl source requires enhanced graphics and a source-sky Donington scene".into(),
+            "--ibl source requires enhanced graphics and a source-sky track scene".into(),
         );
     }
-    if graphics.enhanced() && graphics.source_sky && track {
-        sky::install(&mut app, &root, graphics.source_ibl, graphics.source_sky_tone)?;
+    // The route's own sky on every track and preset (docs/SKY.md).
+    if graphics.source_sky && track {
+        sky::install(&mut app, &root, &route, graphics.source_ibl, graphics.source_sky_tone)?;
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
@@ -3057,8 +3055,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
     }
-    if graphics.enhanced() && graphics.layered_track && track && !collision {
-        track_surface::install(&mut app, &root, graphics.source_land)?;
+    // The route's layered road and infield on every preset (docs/SKY.md);
+    // land.pssg is appended in enhanced only.
+    if graphics.layered_track && track && !collision {
+        let land = graphics.enhanced() && graphics.source_land;
+        track_surface::install(&mut app, &root, &route, land)?;
     }
     if graphics.reflection_mode == 3 {
         if !graphics.enhanced()
