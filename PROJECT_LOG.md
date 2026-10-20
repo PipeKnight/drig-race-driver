@@ -1,5 +1,29 @@
 # GRID engine project log
 
+F530 Contacts whose normal drifted off unit length no longer pause the race (2026-10-20, Claude Code; coordinator's task after career run 13d). Details: docs/RUNTIME_LIMITS_AUDIT.md A27; docs/FIDELITY_BACKLOG.md row 90.
+- Cause:
+  - Career run 13d paused the Le Mans 24 Hours race with "tick 40552: invalid selected manifold controls" (seed 1792463073, lap 3, 649 s of 720 s; worktree peaceful-villani-46ea34 `local/career4/run13d`).
+  - The repro (`local/repro/lemans-manifold-40552`, GRID_AUTOPILOT=1) is deterministic on 6338780c: it paused at the same tick, and its poses equalled run 13d's.
+  - With the guard split into separate errors, the failing check was the existing contacts. A retained contact's normal was a broken tyre-wall piece's basis row, [0.8177123, -0.5296651, -0.22787195].
+  - The port re-orthonormalizes only head bodies, so the row had drifted to |n|² = 1.00112, past the port's 0.001 unit tolerance.
+- Fix:
+  - `contact_manifold::calculate_append` (AE2FA0/B45310) takes existing and selected normals of any finite length, as the original does; it has no unit-length check.
+  - The guard's single error is split into capacity, existing contacts, margins/depth, normal, fallback point, matrix and triangle errors.
+  - New test: `a_retained_normal_off_unit_length_still_merges`.
+- Verification (`local/r25/`; `race2.sh` stops by itself at the post-race stage or a pause):
+  - run8, on 6338780c + this fix with the tick cap raised locally, passed tick 40552 with no pause and reached the post-race stats at tick 45313.
+  - run8 is bit-identical to run 4 up to tick 36000.
+- Found, not fixed (backlog row 90, the next robustness task):
+  - In run8, and so in run 13d, the player was already retired at tick 30431 ("wheel step exceeds supported finite envelope").
+  - Between ticks 30428 and 30430 the car, at about 15 m/s with 3 body contacts at the tyre walls, jumped 450 m at (3549, -525, 5106) m/s. The blow-up is in the body-contact solve; the wheel-step guard only reports it.
+- On current main the repro diverges from tick 1167, the first-lap AI contact. The cause is main's AI changes (F513–F522), not this fix: a manifold refusal always pauses.
+  - run7 (426e6255 + fix): the player wrecks at tick 12221 (wheel 2 terminal). Career follows that up.
+- Checks (release, cargo/rustc 1.99.0, rust-lld, on a551b068 (F528) + this change; F529 is docs only):
+  - Workspace tests with `--include-ignored`: 0 failed.
+  - Clippy `-D warnings`: clean.
+  - Identities: solo c908c7e3…c420, 12-car bada73a9…fe17, DF a9b6684f…6f8e, all equal to main.
+  - grid-soak quick: 24/24; seeds 25..56: 32/32. Evidence: `local/r23/f530/`.
+
 F529 Engine audio research: the Car listener (43F7A0), the gear clunk, the backfire and the whine/turbo wiring (2026-10-20, Claude Code, car-series; task 10 item 2). Docs only. Details: docs/AUDIO_RESEARCH.md §21. Evidence (ignored): kind-pike worktree `local/gtfix/decomp/gear4`, `gear5`, `lis1`, `local/gear/`. Static; GRID was not launched.
 - [O] The Car listener is car-relative: d = camera − car in the default branch; 0.25·d in views 3/4; in view 2, behind the car with the car→camera orientation slerp from 30° to 90° of camera turn. There is no smoothing.
 - [O] The clunk (GearClucks clunk1–3, preset 3.5/4 m) plays at the GearBox emitter (0, 0, 4) of every car. [I] It is silent in chase views and audible only in the interior/bumper-like views 3/4 (bumper −0.7 dB, bonnet −17 dB, head-cam silent); the view mapping of +0x1724 is open.

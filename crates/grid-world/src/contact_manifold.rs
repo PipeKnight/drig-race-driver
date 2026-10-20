@@ -486,43 +486,51 @@ pub fn calculate_append(
     s: &Settings,
     existing: &[Contact],
 ) -> Result<Output, Error> {
-    if existing.len() > 16
-        || s.capacity > 16 - existing.len()
-        || existing.iter().any(|c| {
-            !c.penetration.is_finite()
-                || c.penetration.abs() > 1e6
-                || c.point.iter().any(|x| !x.is_finite() || x.abs() > 1e5)
-                || c.point[3] != 1.
-                || c.normal.iter().any(|x| !x.is_finite())
-                || c.normal[3] != 0.
-                || (dot(c.normal, c.normal) - 1.).abs() > 0.001
-        })
-        || !s.margin.is_finite()
+    if existing.len() > 16 || s.capacity > 16 - existing.len() {
+        return Err(Error("invalid selected manifold capacity"));
+    }
+    // AE2FA0/B45310 take a normal of any length: a contact's normal can be
+    // a body's basis row, which drifts off unit length on a piece that is
+    // never re-orthonormalized (Le Mans 24 Hours tick 40552: |n|^2 =
+    // 1.00112, F530). Only non-finite values are refused.
+    if existing.iter().any(|c| {
+        !c.penetration.is_finite()
+            || c.penetration.abs() > 1e6
+            || c.point.iter().any(|x| !x.is_finite() || x.abs() > 1e5)
+            || c.point[3] != 1.
+            || c.normal.iter().any(|x| !x.is_finite())
+            || c.normal[3] != 0.
+    }) {
+        return Err(Error("invalid selected manifold existing contacts"));
+    }
+    if !s.margin.is_finite()
         || !(0. ..=1e6).contains(&s.margin)
         || !s.shape_margin.is_finite()
         || !(0. ..=1e6).contains(&s.shape_margin)
         || !s.fallback_depth.is_finite()
         || s.fallback_depth.abs() > 10000.
-        || s.normal.iter().any(|x| !x.is_finite() || x.abs() > 10000.)
+    {
+        return Err(Error("invalid selected manifold margins or depth"));
+    }
+    if s.normal.iter().any(|x| !x.is_finite() || x.abs() > 10000.)
         || s.normal[3] != 0.
-        || (dot(s.normal, s.normal) - 1.).abs() > 0.001
-        // Port guards: AE2FA0/B45310 bound no coordinate. World positions
-        // share the 1e5 domain of the triangle and existing points.
-        || s.fallback_point
-            .iter()
-            .any(|x| !x.is_finite() || x.abs() > 1e5)
+    {
+        return Err(Error("invalid selected manifold normal"));
+    }
+    // Port guards: AE2FA0/B45310 bound no coordinate. World positions
+    // share the 1e5 domain of the triangle and existing points.
+    if s.fallback_point.iter().any(|x| !x.is_finite() || x.abs() > 1e5)
         || s.fallback_point[3] != 1.
-        || matrix
-            .iter()
-            .flatten()
-            .any(|x| !x.is_finite() || x.abs() > 1e5)
-        || triangle
-            .iter()
-            .flatten()
-            .any(|x| !x.is_finite() || x.abs() > 1e5)
+    {
+        return Err(Error("invalid selected manifold fallback point"));
+    }
+    if matrix.iter().flatten().any(|x| !x.is_finite() || x.abs() > 1e5) {
+        return Err(Error("invalid selected manifold matrix"));
+    }
+    if triangle.iter().flatten().any(|x| !x.is_finite() || x.abs() > 1e5)
         || triangle.iter().any(|p| p[3] != 1.)
     {
-        return Err(Error("invalid selected manifold controls"));
+        return Err(Error("invalid selected manifold triangle"));
     }
     let mut staged = context.clone();
     let (features, support_vertices) = features(&mut staged, mesh, matrix, triangle, s)?;
@@ -720,6 +728,48 @@ mod tests {
         );
         assert_eq!(context.cached_support(), cache);
         assert_eq!(prior, saved);
+    }
+
+    #[test]
+    fn a_retained_normal_off_unit_length_still_merges() {
+        // Le Mans 24 Hours tick 40552 (F530): a piece's drifted basis row as
+        // the retained contact's normal, |n|^2 = 1.00112.
+        let mesh = crate::collision_mesh::build(
+            &[
+                [1., 1., 1., 1.],
+                [-1., -1., 1., 1.],
+                [-1., 1., -1., 1.],
+                [1., -1., -1., 1.],
+            ],
+            &[[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]],
+            0,
+        )
+        .unwrap();
+        let matrix = [
+            [1., 0., 0., 0.],
+            [0., 1., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., 0.9, 0., 1.],
+        ];
+        let n = [0.8177123f32, -0.5296651, -0.22787195, -0.];
+        assert!((n[0] * n[0] + n[1] * n[1] + n[2] * n[2] - 1.).abs() > 0.001);
+        let prior = vec![Contact {
+            point: [0.5, -0.1, 0., 1.],
+            normal: n,
+            penetration: 0.1,
+            flipped: false,
+        }];
+        let s = Settings {
+            margin: 0.,
+            shape_margin: 0.,
+            normal: [0., 1., 0., 0.],
+            fallback_point: [0., 0., 0., 1.],
+            fallback_depth: 0.1,
+            capacity: 15,
+        };
+        let triangle = [[-5., 0., -5., 1.], [0., 0., 5., 1.], [5., 0., -5., 1.]];
+        let out = calculate_append(&mut Context::new(), &mesh, matrix, triangle, &s, &prior).unwrap();
+        assert!(!out.contacts.is_empty());
     }
 
     #[test]
