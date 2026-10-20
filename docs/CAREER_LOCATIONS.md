@@ -119,9 +119,59 @@ failed to load there (`Engine audio unavailable`); F519 fixes that.
 
 Full pre-push checks: see PROJECT_LOG F520.
 
-## 7. Open
+## 7. Washington after F520 (F523) [O]
 
-- Washington turn-1 braking on flying laps (row 41); the Lacetti wreck 1 km in.
+Evidence (ignored): kind-pike worktree `local/wash/` (survey script, outputs, `lac_pre517.tsv`).
+
+### 7.1 The Lacetti wreck 1 km into route 0: driving, not track data
+
+- At HEAD (03abe520), the Lacetti finishes route 0 solo: 2 laps, 113.9 / 110.5 s, with
+  DF01 and the characteristics as well as without them.
+- With F517 reverted, it wrecks exactly as in the F520 survey: terminal damage at tick 1291,
+  (−364, −44), state hash fadc9569….
+- The two runs are identical up to tick 1199. In both:
+  - the AI leaves the 1 km straight at 65 m/s, full throttle, no brake;
+  - its line error grows to 6 m through the bend at arc ≈ 1015 m;
+  - it enters Recovery at tick ≈ 1214.
+- Before F517, Recovery braked (brake 1, no reverse byte) and the car went into
+  `concrete_block_set_a`/`_b`. Since F517 the reverse byte reaches the gearbox, Recovery
+  reverses, and the car rejoins.
+- The blocks are row 17's barrier stand-ins (whole-extent boxes, 1 m high, 6 m off the line).
+  The F520 per-part split does not touch them (it changes only `chnfen_e_group3b`/`group4`),
+  and they stand where the blocks are drawn.
+- So nothing in the readers is at fault. The entry speed is the AI-braking item (row 41,
+  drift-battle-ai's area). Evidence for that item: no braking at all into the bend after the
+  long straight at arc ≈ 1015 m (`lac_pre517.tsv`, ticks 1064–1199).
+
+### 7.2 Routes 0, 2, 3, 5, 7, 8 re-surveyed
+
+Probe `grid-slots` (new, grid-probes) reads each route's grid against its racing line:
+- every route has slots 00–11 in two staggered columns about 8 m apart, 8 m deep;
+- every slot is aligned with the line (heading · tangent ≥ 0.998);
+- slot 00 is at the front and the grid straddles the line's start;
+- routes 0/1 and 5, 2 and 7, 3 and 8 share a start straight, mirrored.
+
+`grid-opponent-race`, Lacetti, 2 laps, both without and with DF01 and the characteristics:
+
+| Route | Line (m) | Solo laps (s) | 12 cars, plain: winner, retired | 12 cars, DF01 + characteristics: winner, retired |
+| --- | --- | --- | --- | --- |
+| 0 | 5166 | 113.8 / 110.5 (plain 114.0 / 111.0) | 3:41.776, 1 | 3:47.904, 3 |
+| 2 | 4254 | 92.2 / 90.1 | 3:08.928, 4 | 3:07.696, 3 |
+| 3 | 3309 | 75.1 / 72.7 | 2:30.336, 1 | 2:30.304, 1 |
+| 5 | 5173 | 111.0 / 107.8 | 3:44.864, 0 | 3:42.144, 0 |
+| 7 | 4256 | 93.1 / 90.4 | 3:09.552, 3 | 3:11.520, 4 |
+| 8 | 3308 | 74.5 / 72.4 | 2:29.536, 0 | 2:29.584, 3 |
+
+- Every solo run finishes, and every field race runs to a winner and a full classification.
+- The retirements in the field races are car-to-car pile-ups:
+  - they happen at ticks 1085–10,304, with 419 to 148,863 contact records per race;
+  - they cluster at three corners, around (586, 110), (35–60, 180–245) and (886–903, 840).
+- Retirements before tick 1500 (r0 full car3; r2 car8, car0, car4; r8 car1) happen on the
+  first lap's opening corners. That is evidence for row 41, not a track fault.
+
+## 8. Open
+
+- AI braking into Washington's turn 1 and the bend after the 1 km straight (row 41).
 - The touge rules for the head-to-heads: events 75 and 77 run as single races (format 1, as the
   data says). The Midnight Touge catch-up config is used only by the event menu's touge types.
-- Washington routes 2, 3, 5, 7 and 8 get the group rule too. They were not re-surveyed here.
+- ~~Washington routes 2, 3, 5, 7 and 8 not re-surveyed~~: §7.2.

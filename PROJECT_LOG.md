@@ -1,5 +1,16 @@
 # GRID engine project log
 
+F523 Washington after F520: the Lacetti wreck 1 km into route 0 was driving and is gone since F517; routes 0, 2, 3, 5, 7 and 8 re-surveyed (2026-10-20, Claude Code; coordinator's task 5 follow-up). Details: docs/CAREER_LOCATIONS.md §7. Evidence (ignored): kind-pike worktree `local/wash/`. Headless only; the original was not launched. No reader change.
+- [O] At 03abe520 the Lacetti finishes route 0 solo (113.9 / 110.5 s). With F517 reverted it wrecks exactly as in the F520 survey: tick 1291, (−364, −44), hash fadc9569….
+  - Both runs are identical to tick 1199: 65 m/s and no brake into the bend after the 1 km straight, 6 m wide, Recovery.
+  - Before F517, Recovery braked into the row-17 concrete-block stand-ins. With F517's reverse byte it reverses and rejoins.
+  - The blocks are untouched by F520's per-part split and stand where the blocks are drawn. Cause: AI entry speed (row 41, drift-battle-ai's area), not track data.
+- [O] Re-survey, Lacetti, 2 laps, with and without DF01 and the characteristics:
+  - New probe `grid-slots`: slots 00–11 in two staggered columns on every route, aligned with the line (heading · tangent ≥ 0.998).
+  - Every solo run finishes: route 2 92.2 / 90.1 s; 3 75.1 / 72.7; 5 111.0 / 107.8; 7 93.1 / 90.4; 8 74.5 / 72.4.
+  - Every 12-car race runs to a winner. 0–4 cars retire in car-to-car pile-ups at three corners. The early ones (before tick 1500) are evidence for row 41.
+- Checks [V], release, on 03abe520 (F522) + this change, machine idle: `cargo test --workspace --release` with --include-ignored and absolute GRID_* paths 862 passed, 0 failed; workspace clippy -D warnings clean; identities unchanged (solo c908c7e3…c420, 12-car bada73a9…fe17); `grid-soak quick` 24/24 (`local/wash/checks/`).
+
 F522 Career: head-to-heads 73, 75 and 77 checked from the career side after F520, and paid as the original (2026-10-20, Claude Code; coordinator's order). Screen: docs/CAREER_SCREEN.md "International head-to-head unlock (F514)". Evidence: worktree peaceful-villani-46ea34 `local/career4/` (run75, checks-521).
 - Offers: F520's test covers them (73 Viper on Washington route_0, 75 350Z on Haruna route 9, 77 787B on Haruna route 4).
 - New shipped-data test: `prize_money_for_first` (1,000,000 / 500,000 / 2,500,000) on every win, nothing on a loss, no reputation, and no car unlock outside the International region (0x6788D0, 0x674810). Event 78 unlocks every purchasable car.
