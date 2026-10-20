@@ -1,5 +1,16 @@
 # GRID engine project log
 
+F531 Playable e57f2fd391e2 with F521–F530, the portable copy refreshed, APKs a11cddf7de27, and a pause of several days (2026-10-20, Claude Code; owner: "Мы уже съели 50% недельного лимита, нам нужно приостановиться… Останови дочерние сессии после завершение их шага и пересобери сборки").
+- Local merge 6c8b4fad in the main checkout merged origin/main a11cddf7 (F521–F530) without conflicts, **not pushed**; Codex's commits are unchanged. Rebuilt with `tools/update_prototype.ps1`: manifest `local/playtest/build-20261020T1425226416829Z`, executable sha256 e57f2fd391e22b295a161fe3f0cb45ec326379099b75f2e89325061371490d32, cargo/rustc 1.99.0. Source driving and Bevy checks passed. "Dirty" only through the untracked Graphics DLAA launchers and docs/AI_CHOREOGRAPHER_CATCHUP_RESEARCH.md.
+- New since F521: F522 head-to-heads 73/75/77 paid as the original; F523 Washington re-survey; F524 build gate; F526 row 41 explained; F527 opponent engine mix confirmed offline; F528 gear-shift engine audio (RPM dip, off-load crossfade, pitch wobble); F529 audio research only; F530 contacts whose normal drifted off unit length no longer pause the Le Mans 24 Hours.
+- Portable copy `local/portable/GRID-Reassembly/`: only `target/release/grid-app.exe` was replaced (same sha256). The launchers and `settings/*.ini` are unchanged.
+- APKs, built in the android-p11-controls worktree from origin/main a11cddf7de27 with `tools/build_android.ps1 -BundleData [-Event drift-nurburgring | -Profile] -Characteristics local/ai-driver-characteristics.tsv`, copied to `local/android/apk/`:
+  - `grid-a11cddf7de27-bundled-PRIVATE-drift-nurburgring-debug.apk`, 383,321,373 bytes, sha256 16c164da6558013b31723cfaaa3941d764c3e344701ae275c00f55f9cec13eed;
+  - `grid-a11cddf7de27-bundled-PRIVATE-profile-debug.apk`, 244,732,929 bytes, sha256 2a1c2db4dca3186df0d90c8d2056b8828f0f5587f5f01a55eb1a9f57359b675d.
+  The bundle versions are unchanged (drift ecd79770…, profile 659f023c…), so the phone does not copy the data again. `local/android/Порядок тестов APK.txt` is updated; dcc22d914f21 is obsolete.
+- Pause: weekly usage reached 50% with 5.7 days left. car-series stopped after F529 (next: gear clunk, backfire, whine, turbo; `local/handoff/car-series.md`). robustness stopped after F530 (next: backlog row 90, the player thrown 450 m by a tyre-wall body contact at tick 30431 of the run8 repro, then body sleeping and the tyre walls; `local/handoff/robustness.md`). career has not rerun event 13 yet. All other children are idle, and the hourly usage guard is off until new work starts.
+- Not checked: a manual lap and sound on speakers on this build; the APKs on the phone.
+
 F530 Contacts whose normal drifted off unit length no longer pause the race (2026-10-20, Claude Code; coordinator's task after career run 13d). Details: docs/RUNTIME_LIMITS_AUDIT.md A27; docs/FIDELITY_BACKLOG.md row 90.
 - Cause:
   - Career run 13d paused the Le Mans 24 Hours race with "tick 40552: invalid selected manifold controls" (seed 1792463073, lap 3, 649 s of 720 s; worktree peaceful-villani-46ea34 `local/career4/run13d`).
