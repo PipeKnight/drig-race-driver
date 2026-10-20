@@ -43,6 +43,7 @@ pub(super) struct DlaaView;
 pub struct State {
     ready: Arc<AtomicBool>,
     failed: Arc<AtomicBool>,
+    forced_history_reset: Arc<AtomicBool>,
 }
 impl State {
     pub fn ready(&self) -> bool {
@@ -56,6 +57,7 @@ pub fn install(app: &mut App) {
     app.insert_resource(State {
         ready: Arc::new(AtomicBool::new(true)),
         failed: Arc::default(),
+        forced_history_reset: Arc::default(),
     })
     .add_plugins((
         ExtractComponentPlugin::<DlaaView>::default(),
@@ -80,6 +82,7 @@ fn activate(
     if settings.anti_aliasing != 3 {
         return;
     }
+    state.forced_history_reset.store(settings.dlaa_reset_every_frame, Ordering::Release);
     for entity in &views {
         if supported.is_some() {
             state.ready.store(false, Ordering::Release);
@@ -121,7 +124,8 @@ fn report_prepared(
     for (view, resolution, prepass, dlss, mip_bias) in &views {
         let output = UVec2::new(view.viewport.z, view.viewport.w);
         let input = resolution.0;
-        if input != output
+        if (state.forced_history_reset.load(Ordering::Acquire) && !dlss.reset)
+            || input != output
             || dlss.perf_quality_mode != DlssPerfQualityMode::Dlaa
             || prepass.depth.is_none()
             || prepass.motion_vectors.is_none()
@@ -135,8 +139,8 @@ fn report_prepared(
         }
         if *previous != Some(input) {
             println!(
-                "graphics_dlaa prepared=true input={}x{} output={}x{} depth=true motion=true mip_bias={} scope=context-and-completed-render-schedule-not-gpu-readback",
-                input.x, input.y, output.x, output.y, mip_bias.0
+                "graphics_dlaa prepared=true input={}x{} output={}x{} depth=true motion=true mip_bias={} history_reset={} forced_history_reset={} scope=context-and-completed-render-schedule-not-gpu-readback",
+                input.x, input.y, output.x, output.y, mip_bias.0, dlss.reset, state.forced_history_reset.load(Ordering::Acquire)
             );
             *previous = Some(input);
         }
@@ -151,6 +155,7 @@ struct History {
     rotation: Quat,
 }
 fn reset_on_cut(
+    settings: Res<super::graphics::Settings>,
     driving: Option<Res<super::Driving>>,
     cameras: Option<Res<super::camera::Cameras>>,
     mut views: Query<(&GlobalTransform, &mut Dlss), With<super::ViewerCamera>>,
@@ -159,6 +164,12 @@ fn reset_on_cut(
     let Ok((transform, mut dlss)) = views.single_mut() else {
         return;
     };
+    if settings.dlaa_reset_every_frame {
+        if previous.is_none() {
+            println!("graphics_dlaa diagnostic_history_reset_every_frame=true scope=bounded-scripted-capture-not-playable-fix");
+        }
+        dlss.reset = true;
+    }
     let tick = driving.map_or(0, |d| d.runtime.ticks);
     let view = cameras.map_or_else(String::new, |c| c.ident().to_owned());
     let camera = transform.compute_transform();

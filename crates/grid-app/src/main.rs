@@ -1875,6 +1875,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--ground-edges needs off or atlas-pilot".into()),
                 };
             }
+            "--dlaa-history" => {
+                graphics.dlaa_reset_every_frame = match args.next().as_deref() {
+                    Some("normal") => false,
+                    Some("reset-every-frame") => true,
+                    _ => return Err("--dlaa-history needs normal or reset-every-frame".into()),
+                };
+            }
             "--surface-mip-bias" => {
                 graphics.surface_view_mip_bias = match args.next().as_deref() {
                     Some("off") => false,
@@ -1946,6 +1953,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
+                println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
@@ -2058,6 +2066,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
         return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
+    }
+    if graphics.dlaa_reset_every_frame && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive || drive_ticks.is_none() || output.is_none()) {
+        return Err("--dlaa-history reset-every-frame requires enhanced native DLAA scripted driving with --drive-ticks and --render".into());
     }
     if graphics.thin_motion_antenna && (!cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !graphics.enhanced() || !drive) {
         return Err("--thin-motion antenna requires enhanced driving with native --aa dlaa".into());
