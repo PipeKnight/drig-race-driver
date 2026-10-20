@@ -96,6 +96,11 @@ impl Decodable for HudSource {
 }
 
 pub(crate) fn install(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
+    app.add_audio_source::<HudSource>();
+    install_systems(app, bank, table);
+}
+/// `install` without the device playback (the race-start mix test).
+pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
     let (cues, receiver) = channel();
     let group_db = Arc::new(AtomicU32::new(audio_mix::SILENT.to_bits()));
     let source = HudSource {
@@ -103,18 +108,17 @@ pub(crate) fn install(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>)
         cues: std::sync::Mutex::new(Some(receiver)),
         group_db: group_db.clone(),
     };
-    app.add_audio_source::<HudSource>()
-        .insert_resource(HudSound {
-            table,
-            cues,
-            group_db,
-            countdown: None,
-            green: false,
-            flash: None,
-        })
-        .insert_resource(PendingSource(Some(source)))
-        .add_systems(Startup, start)
-        .add_systems(Update, update);
+    app.insert_resource(HudSound {
+        table,
+        cues,
+        group_db,
+        countdown: None,
+        green: false,
+        flash: None,
+    })
+    .insert_resource(PendingSource(Some(source)))
+    .add_systems(Startup, start)
+    .add_systems(Update, update);
 }
 
 #[derive(Resource)]

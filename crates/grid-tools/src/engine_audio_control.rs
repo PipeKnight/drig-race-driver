@@ -92,6 +92,11 @@ pub fn update(
     if (curves[1023] - physical_idle).abs() > 0.39 {
         return Err("engine audio logger-free remap domain");
     }
+    // A voice's carried pitch is the scheduler's clamped [0.5, 2] value, or
+    // the raw pitch a pair restart stores (engine_audio_restart: up to 1.5,
+    // below 0.5 for the BMW 320si at idle, 0.4955; the voice setter 42C150
+    // clamps only what the backend plays). It only advances the position
+    // here before the pitch is recomputed.
     for slot in 0..12 {
         let position = scalar(controller, 0x230 + slot * 4);
         let length = word(controller, 0x2c0 + slot * 4);
@@ -102,7 +107,8 @@ pub fn update(
             || !(1..=10_000_000).contains(&length)
             || !(8000..=192000).contains(&rate)
             || !pitch.is_finite()
-            || !(0.5..=2.).contains(&pitch)
+            || pitch <= 0.
+            || pitch > 2.
         {
             return Err("engine audio voice domain");
         }

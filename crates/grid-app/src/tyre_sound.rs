@@ -137,8 +137,12 @@ impl Decodable for TyreSource {
 }
 
 pub(crate) fn install(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
-    app.add_audio_source::<TyreSource>()
-        .insert_resource(TyreSound::new(bank, table))
+    app.add_audio_source::<TyreSource>();
+    install_systems(app, bank, table);
+}
+/// `install` without the device playback (the race-start mix test).
+pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
+    app.insert_resource(TyreSound::new(bank, table))
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, tick.after(super::drive_tick))
         .add_systems(Update, audibility);

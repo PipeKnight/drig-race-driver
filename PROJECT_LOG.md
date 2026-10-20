@@ -1,5 +1,21 @@
 # GRID engine project log
 
+F516 Silent engine on the F513 playable fixed: BMW engine decoders no longer fail at idle; race-start audio mix test (2026-10-20, Claude Code; coordinator's urgent request from the owner's playtest `local/playtest/menu-23260-1971.log`, Shibuya, BMW, 12 cars).
+- [O] Reproduced muted with the owner's profile (`local/audio-fix/run1.log`). Every engine decoder failed in its first blocks with `engine audio voice domain` (normalized rpm 0.297, throttle 0), and the shared failure flag muted the engine.
+  - Cause: a pair restart (engine_audio_restart) stores the incoming voice's raw pitch, as the original does; only the voice setter 42C150 clamps what is played. For the BMW 320si at idle that pitch is 0.4955. The controller's input check (engine_audio_control) required [0.5, 2] and rejected the carried state.
+  - Not caused by the F492–F504 mix changes: the failure depends only on the BMW bank's curves at idle. The Lacetti's pitches stay at 1.01–1.07.
+- Fix: the input check accepts a finite pitch in (0, 2]. That pitch only advances the voice position before the scheduler recomputes and clamps it.
+- Logging: the decoder's error text is now logged once per failure (`engine_audio version=2 event=decoder_error error=... normalized_rpm=... throttle=...`).
+- Tests (ignored data tests, part of the pre-push `--include-ignored` set):
+  - `engine_audio_continuous::tests::every_loadable_engine_runs_through_the_start` (grid-tools): every loadable raceable bank idles for 1 s, then throttles up, with no failure and audible output.
+  - `driving_tests::race_start_audio_mix_is_audible` (grid-app, owner's four checks): the real engine, HUD, tyre and collision sources and their grid-app systems run offline in a headless app (no device), with the real `drive_tick` and the route's 5 s start sequence on Shibuya route 0, for the BMW and the Lacetti, throttle held from 1 s.
+    - Windowed RMS/peak per source, thresholds about 10x below the measured levels: engine at idle, through the countdown and at full throttle; HUD countdown and green cues; tyres after GO; collision silent (≤ 1e-6) solo.
+    - No decoder failure, not muted.
+  - It fails on the old check (bmw engine and tyres silent, `local/audio-fix/race-start-old-check.log`) and passes with the fix (`race-start-fixed.log`). Runtime about 1 s. Check 4 runs solo only, not with one opponent.
+  - The four sound `install` functions now split into `install` (device playback) and `install_systems` (shared with the test), with the same resources and systems.
+- [O] Open, found here: 12 raceable cars' engine banks fail to load (`unsupported engine curve extent/range`: dbr, esp; `continuous setup/PCM rate or extent mismatch`: sal, lam, spk, lc7, 390, je4, cha, vip, zon). grid-app then installs no engine sound for the whole field ("Engine audio unavailable", main.rs).
+- Checks [V], release, on 0b51d92c (F514) + this change, machine idle: `cargo test --workspace --release` with --include-ignored and absolute GRID_* paths 851 passed, 0 failed (both new tests ok); workspace clippy -D warnings clean; identities unchanged (solo 18b369f9…a6ee, 12-car c235bab2…8552); `grid-soak quick` 24/24 (`local/audio-fix/checks/`). Not heard on speakers (offline render only).
+
 F515 Every circuit draws its own sky and the layered road surface, in both presets; Le Mans' sky follows the time of day; the "unresolved road batches" were shadow/depth proxies (2026-10-20, Claude Code; coordinator's task, owner handed sky and grey roads over from the graphics side; FIDELITY_BACKLOG row 80). Details: docs/SKY.md. Evidence: worktree sky-asphalt-fac786 `local/sky/` (shader assemblies, PSSG trees, before/after renders and contact sheets, logs). Static only: shaderpack D3DDisassemble (`tools/disassemble_packed_grid_shader.py`), Capstone 5.0.6 on the pinned unpacked image; the original was not run.
 - Found:
   - [V] Only Donington had a sky because `sky.rs` read Donington's `sky.pssg`/`lighting.xml` for every route and ran in the enhanced preset only, which `main.rs` allows on Lacetti/Donington route 0 alone. Every other circuit runs baseline, whose dark clear colour was the "black sky". `track_surface.rs` (the layered road) had the same two gates.

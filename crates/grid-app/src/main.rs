@@ -5775,4 +5775,221 @@ mod driving_tests {
         assert_eq!(driving.runtime.terminal_wheel(), None);
         assert_eq!(terminal_damage_message(&driving.runtime), None);
     }
+
+    /// The race start as heard, offline: the real engine, tyre, HUD and
+    /// collision sources fed by their grid-app systems and drive_tick
+    /// through the start-light countdown and 3 s of full throttle, each
+    /// decoder pulled one 16 ms block per vehicle tick (no audio device).
+    /// The player's engine idles and revs on the grid, the lights beep, the
+    /// tyres sound after GO and a solo start makes no collision sound. F515:
+    /// every BMW engine decoder failed in the first ticks (a pair restart's
+    /// raw pitch 0.4955 failed the controller's input check) and the
+    /// prototype raced in silence.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn race_start_audio_mix_is_audible() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+                let route = Route::new("tracks/japan/shibuya/route_0").unwrap();
+                // The failing car and the default car; every failure of both
+                // is reported.
+                let failures: Vec<String> = ["bmw", "lac"]
+                    .into_iter()
+                    .flat_map(|stem| race_start_mix(Path::new(&root), &route, stem))
+                    .collect();
+                assert!(failures.is_empty(), "{failures:#?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// One car's race start (see `race_start_audio_mix_is_audible`); the
+    /// failed checks.
+    fn race_start_mix(root: &Path, route: &Route, stem: &str) -> Vec<String> {
+        use bevy::audio::Source;
+        use grid_tools::{
+            engine_audio::RATE,
+            engine_audio_continuous::BLOCK,
+            source_vehicle::{Controls, DELTA},
+            time_trial::State,
+        };
+        let model = CarModel::new(stem).unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::load(root, route, &model, "slot_00", 200679)
+                .unwrap();
+        runtime.enable_lap_timing(root).unwrap();
+        // Track and prop contacts as in the owner's build, when available.
+        let geometry = std::env::var_os("GRID_CONTACT_DIRECTIONS").map(|path| {
+            runtime
+                .prepare_body_geometry(root, &std::fs::read(path).unwrap())
+                .unwrap()
+        });
+        let start = StartSequence::load(root, route).unwrap();
+        let mut trial =
+            time_trial::Trial::new(1, grid_tools::time_trial::Mode::Wheels, false).unwrap();
+        // The race countdown: the route's start-light time.
+        trial.state = State::new(1, f64::from(DELTA), start.seconds).unwrap();
+        let mix = Some(std::sync::Arc::new(
+            grid_tools::audio_mix::Table::load(root).unwrap(),
+        ));
+        let step = Duration::from_secs_f64(f64::from(DELTA));
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))
+            .insert_resource(Time::<Fixed>::from_duration(step))
+            .insert_resource(start.clone())
+            .insert_resource(trial)
+            .insert_resource(Driving {
+                runtime,
+                geometry,
+                paused: false,
+                failure: None,
+                notices: Vec::new(),
+                // `--drive-ticks N --throttle T`: the scripted controls.
+                scripted_ticks: Some(72_000),
+                scripted: Controls::default(),
+                handbrake_from: None,
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+                opponents: None,
+                auto_reset: Default::default(),
+                reset_line: None,
+            })
+            .insert_resource(input::Actions::new(
+                input::ActionMap::keyboard(),
+                input::Pads::Off,
+            ))
+            .init_resource::<input::ShiftQueue>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(FixedUpdate, drive_tick)
+            .init_asset::<engine_sound::EngineSource>()
+            .init_asset::<tyre_sound::TyreSource>()
+            .init_asset::<hud_sound::HudSource>()
+            .init_asset::<collision_sound::CollisionSource>();
+        engine_sound::install_systems(
+            &mut app,
+            vec![grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap()],
+            mix.clone(),
+        );
+        collision_sound::install_systems(
+            &mut app,
+            grid_tools::collision_audio::Bank::load(root).unwrap(),
+            mix.clone(),
+            vec![grid_tools::collision_audio::Heights::of(root, &model).unwrap()],
+            vec![0],
+        );
+        hud_sound::install_systems(&mut app, grid_tools::hud_audio::Bank::load(root).unwrap(), mix.clone());
+        tyre_sound::install_systems(&mut app, grid_tools::tyre_audio::Bank::load(root).unwrap(), mix);
+        // Startup spawns the players; their decoders play from here on.
+        app.update();
+        fn decoder<T: Asset + Decodable>(app: &mut App) -> T::Decoder {
+            let world = app.world_mut();
+            let handle = world.query::<&AudioPlayer<T>>().single(world).unwrap().0.clone();
+            world.resource::<Assets<T>>().get(&handle).unwrap().decoder()
+        }
+        let mut engine = decoder::<engine_sound::EngineSource>(&mut app);
+        let mut others: [Box<dyn Iterator<Item = f32>>; 3] = [
+            Box::new(decoder::<tyre_sound::TyreSource>(&mut app)),
+            Box::new(decoder::<hud_sound::HudSource>(&mut app)),
+            Box::new(decoder::<collision_sound::CollisionSource>(&mut app)),
+        ];
+        assert_eq!((engine.channels().get(), engine.sample_rate().get()), (2, RATE));
+        const NAMES: [&str; 4] = ["engine", "tyres", "hud", "collision"];
+        // Per vehicle tick and source: sum of squares, peak, samples.
+        let mut blocks: Vec<[(f64, f32, usize); 4]> = Vec::new();
+        let mut failures = Vec::new();
+        let mut green = None;
+        let idle = (1. / DELTA) as u64;
+        let after = (3. / DELTA) as u64;
+        while green.is_none_or(|g| (blocks.len() as u64) < g + after) {
+            let tick = app.world().resource::<Driving>().runtime.ticks;
+            // Idle on the grid for a second, then the throttle held through
+            // the countdown and after GO.
+            app.world_mut().resource_mut::<Driving>().scripted.throttle =
+                if tick < idle { 0. } else { 1. };
+            app.update();
+            let driving = app.world().resource::<Driving>();
+            if let Some(failure) = &driving.failure {
+                failures.push(format!("{stem}: drive failure {failure}"));
+                break;
+            }
+            let ticks = driving.runtime.ticks;
+            if green.is_none() && app.world().resource::<time_trial::Trial>().driving() {
+                green = Some(ticks);
+            }
+            for _ in blocks.len() as u64..ticks {
+                let mut block = [(0., 0f32, 0); 4];
+                for _ in 0..BLOCK * 2 {
+                    let mut add = |k: usize, value: Option<f32>| {
+                        let value = value.unwrap_or(f32::NAN);
+                        let b: &mut (f64, f32, usize) = &mut block[k];
+                        b.0 += f64::from(value) * f64::from(value);
+                        b.1 = b.1.max(value.abs());
+                        b.2 += 1;
+                    };
+                    add(0, engine.next());
+                    for (k, source) in others.iter_mut().enumerate() {
+                        add(k + 1, source.next());
+                    }
+                }
+                blocks.push(block);
+                if let Some(error) = engine.inner.failure()
+                    && !failures.iter().any(|f: &String| f.contains("decoder failed"))
+                {
+                    failures.push(format!("{stem}: engine decoder failed at tick {}: {error}", blocks.len()));
+                }
+            }
+            assert!(blocks.len() < 2000, "{stem}: no green light");
+        }
+        if app.world().resource::<engine_sound::EngineSound>().muted {
+            failures.push(format!("{stem}: engine muted after a decoder failure"));
+        }
+        let green = green.unwrap_or(blocks.len() as u64) as usize;
+        let second = (1. / DELTA) as usize;
+        // (window, from tick, to tick, sources with their minimum RMS and
+        // peak). The minima are about 10x below the levels measured on
+        // Shibuya route 0 (BMW / Lacetti, F515): engine idle RMS 0.058 /
+        // 0.050, revving 0.27 / 0.22, after GO 0.20 / 0.19; lights 0.055,
+        // green light 0.125; tyres after GO 0.099 / 0.082.
+        type Window<'a> = (&'a str, usize, usize, &'a [(usize, f64, f32)]);
+        let windows: [Window; 5] = [
+            ("idle", 8, idle as usize, &[(0, 5e-3, 1e-2)]),
+            ("countdown_throttle", idle as usize, green, &[(0, 2e-2, 5e-2)]),
+            ("countdown_lights", 0, green, &[(2, 5e-3, 3e-2)]),
+            ("green_light", green, green + second / 2, &[(2, 1e-2, 3e-2)]),
+            ("full_throttle", green + second / 2, blocks.len(), &[(0, 1.5e-2, 5e-2), (1, 8e-3, 4e-2)]),
+        ];
+        for (name, from, to, checks) in windows {
+            let from = from.min(blocks.len());
+            let to = to.min(blocks.len());
+            for k in 0..4 {
+                let (sum, peak, count) = blocks[from..to]
+                    .iter()
+                    .fold((0., 0f32, 0), |a, b| (a.0 + b[k].0, a.1.max(b[k].1), a.2 + b[k].2));
+                let rms = (sum / count.max(1) as f64).sqrt();
+                println!(
+                    "race_start_audio car={stem} window={name} ticks={from}..{to} source={} rms={rms:.6} peak={peak:.6}",
+                    NAMES[k]
+                );
+                if let Some(&(_, min_rms, min_peak)) = checks.iter().find(|c| c.0 == k)
+                    && (rms < min_rms || rms.is_nan() || peak < min_peak)
+                {
+                    failures.push(format!(
+                        "{stem}: {} silent in {name} (rms {rms} < {min_rms} or peak {peak} < {min_peak})",
+                        NAMES[k]
+                    ));
+                }
+            }
+        }
+        // No contact on a solo start: the collision source stays silent.
+        let collision = blocks.iter().map(|b| b[3].1).fold(0f32, f32::max);
+        if collision > 1e-6 {
+            failures.push(format!("{stem}: collision sound without contact, peak {collision}"));
+        }
+        failures
+    }
 }

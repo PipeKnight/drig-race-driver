@@ -111,22 +111,32 @@ pub(crate) fn install(
     heights: Vec<Heights>,
     car_model: Vec<usize>,
 ) {
+    app.add_audio_source::<CollisionSource>();
+    install_systems(app, bank, table, heights, car_model);
+}
+/// `install` without the device playback (the race-start mix test).
+pub(crate) fn install_systems(
+    app: &mut App,
+    bank: Arc<Bank>,
+    table: Option<Arc<Table>>,
+    heights: Vec<Heights>,
+    car_model: Vec<usize>,
+) {
     let (starts, receiver) = channel();
     let source = CollisionSource { bank: bank.clone(), starts: Mutex::new(Some(receiver)) };
-    app.add_audio_source::<CollisionSource>()
-        .insert_resource(CollisionSound {
-            listener: Listener::new(bank.clone()),
-            bank,
-            table,
-            heights,
-            car_model,
-            starts,
-            last: None,
-        })
-        .insert_resource(PendingSource(Some(source)))
-        .init_resource::<GlassBreaks>()
-        .add_systems(Startup, start)
-        .add_systems(FixedUpdate, tick.after(super::drive_tick));
+    app.insert_resource(CollisionSound {
+        listener: Listener::new(bank.clone()),
+        bank,
+        table,
+        heights,
+        car_model,
+        starts,
+        last: None,
+    })
+    .insert_resource(PendingSource(Some(source)))
+    .init_resource::<GlassBreaks>()
+    .add_systems(Startup, start)
+    .add_systems(FixedUpdate, tick.after(super::drive_tick));
 }
 
 #[derive(Resource)]

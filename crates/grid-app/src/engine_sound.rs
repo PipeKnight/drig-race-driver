@@ -162,11 +162,26 @@ impl Iterator for Decoder {
         }
         self.count = self.count.wrapping_add(1);
         let value = self.mixer.sample(self.control);
-        if self.mixer.failure.is_some() && !self.reported_failure {
+        if let Some(error) = self.mixer.failure
+            && !self.reported_failure
+        {
+            // The reason, once per failure (the audio thread; the main
+            // thread's decoder_failed line follows).
+            eprintln!(
+                "engine_audio version=2 event=decoder_error error=\"{error}\" normalized_rpm={} throttle={} generation={}",
+                self.control.normalized_rpm, self.control.throttle, self.control.generation
+            );
             self.failure.store(1, Ordering::Relaxed);
             self.reported_failure = true;
         }
         Some(value)
+    }
+}
+#[cfg(test)]
+impl Decoder {
+    /// The mixer's failure (the race-start mix test, main.rs).
+    pub(crate) fn failure(&self) -> Option<&'static str> {
+        self.mixer.failure
     }
 }
 impl Source for Decoder {
@@ -203,10 +218,15 @@ impl Decodable for EngineSource {
 }
 /// `banks` holds one bank per field car model, the player's first.
 pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<Arc<Table>>) {
+    app.add_audio_source::<EngineSource>();
+    install_systems(app, banks, table);
+}
+/// `install` without the device playback: the race-start mix test
+/// (main.rs) registers the asset and pulls the decoders itself.
+pub(crate) fn install_systems(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<Arc<Table>>) {
     let mut sound = EngineSound::with_models(banks);
     sound.table = table;
-    app.add_audio_source::<EngineSource>()
-        .insert_resource(sound)
+    app.insert_resource(sound)
         .init_resource::<AudioMode>()
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, publish.after(super::drive_tick))
