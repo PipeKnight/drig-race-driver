@@ -104,6 +104,12 @@ pub fn from_bounds(transform: [f32; 16], bounds: [f32; 6]) -> Result<Marker> {
         forward: direction.map(|v| v / length),
     })
 }
+/// A scene node a grid marker can be: NODE or RENDERNODE (Haruna route 9's
+/// subroute-0 slots are RENDERNODEs, as are the frontend garages' slots).
+fn scene_node(tree: &Tree<'_>, i: usize) -> bool {
+    matches!(tree.name(i), b"NODE" | b"RENDERNODE")
+}
+
 /// [`read`] of slot `name` (`slot_00`..) for progress subroute `subroute`.
 /// Where `name` itself is absent and the grids are split by subroute
 /// (Haruna: a group `grid_start_standing_subroute_<N>_<id>` holding
@@ -113,7 +119,7 @@ pub fn from_bounds(transform: [f32; 16], bounds: [f32; 6]) -> Result<Marker> {
 pub fn read_slot(tree: &Tree<'_>, name: &[u8], subroute: u8) -> Result<Marker> {
     let named = |id: &[u8]| {
         (0..tree.nodes.len())
-            .filter(|&i| tree.name(i) == b"NODE" && tree.string(i, b"id").is_ok_and(|v| v == id))
+            .filter(|&i| scene_node(tree, i) && tree.string(i, b"id").is_ok_and(|v| v == id))
             .count()
     };
     if named(name) != 0 {
@@ -121,7 +127,7 @@ pub fn read_slot(tree: &Tree<'_>, name: &[u8], subroute: u8) -> Result<Marker> {
     }
     let prefix = format!("grid_start_standing_subroute_{subroute}_");
     let groups: Vec<&[u8]> = (0..tree.nodes.len())
-        .filter(|&i| tree.name(i) == b"NODE")
+        .filter(|&i| scene_node(tree, i))
         .filter_map(|i| tree.string(i, b"id").ok())
         .filter(|id| id.starts_with(prefix.as_bytes()))
         .collect();
@@ -136,7 +142,7 @@ pub fn read_slot(tree: &Tree<'_>, name: &[u8], subroute: u8) -> Result<Marker> {
 
 pub fn read(tree: &Tree<'_>, name: &[u8]) -> Result<Marker> {
     let nodes: Vec<_> = (0..tree.nodes.len())
-        .filter(|&i| tree.name(i) == b"NODE" && tree.string(i, b"id").is_ok_and(|id| id == name))
+        .filter(|&i| scene_node(tree, i) && tree.string(i, b"id").is_ok_and(|id| id == name))
         .collect();
     if nodes.len() != 1 {
         return fail(0, "expected unique grid marker");

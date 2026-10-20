@@ -103,8 +103,10 @@ of the whole extent and failed its 100 m check. When the whole extent fails and
 the prototype has one placement, each connected part (1 mm weld) of at most
 10 m horizontally becomes its own box; longer or flat parts stay non-solid.
 Every prototype of the five earlier circuits passes the old check, so their
-boxes are unchanged. Washington then has more than 8192 route boxes and fails
-`unsupported entity collision box count` on routes 0, 2, 5 and 7 (open).
+boxes are unchanged. Washington then had more than 8192 route boxes and failed
+`unsupported entity collision box count` on routes 0, 2, 5 and 7. Since F520 the bound is the
+original's 10,000 fixed objects, and single placements wider than 10 m both ways
+(`chnfen_e_group3b`, `group4`) get the part rule too ([CAREER_LOCATIONS.md](CAREER_LOCATIONS.md) §3).
 
 ### 3.7 Breakables standing on a cylinder
 
@@ -158,6 +160,6 @@ only affects the breakable catalog):
   at 8 keys; fixed in F425 ([SPA.md](SPA.md)). Spa, Milan, Shibuya and San
   Francisco route 0 race ([STREET_CIRCUITS.md](STREET_CIRCUITS.md)).
 - Detroit route 0 and the Washington wrecks; Detroit stadium laps.
-- Washington's route box count after the group parts (section 3.6).
+- ~~Washington's route box count after the group parts (section 3.6)~~: F520.
 - ~~Static cylinders and spheres are not route collision~~: route shapes since
   F462 (BOX_CONTACTS.md "Cylinders and spheres").

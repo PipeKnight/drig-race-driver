@@ -193,7 +193,7 @@ fn supported(kind: Kind, route: &str) -> bool {
             grid_tools::series::route_supported(route)
         }
         Kind::Freestyle => route.starts_with("tracks/japan/yokohama_docks/"),
-        Kind::Touge | Kind::ProTouge => route == route::HARUNA,
+        Kind::Touge | Kind::ProTouge => route::HARUNA_RACED.contains(&route),
         Kind::Demolition => {
             route == route::DETROIT_STADIUM || route == route::DETROIT_STADIUM_SHORT
         }
@@ -307,10 +307,12 @@ impl Catalog {
                     continue;
                 };
                 // Pro Touge's pool holds the legal Haruna layouts; the port
-                // runs it on route 1, the validated road, as its launcher
-                // does (AUTHORED).
+                // also runs it on route 1, the illegal road its launcher uses
+                // (AUTHORED), ahead of the pool's raced route 4.
                 let pool: Vec<String> = if kind == Kind::ProTouge {
-                    vec![route::HARUNA.to_string()]
+                    std::iter::once(route::HARUNA.to_string())
+                        .chain(series.layouts.iter().map(|l| l.route.clone()))
+                        .collect()
                 } else {
                     series.layouts.iter().map(|l| l.route.clone()).collect()
                 };

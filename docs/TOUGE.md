@@ -46,7 +46,7 @@ The arenas' AI files have no racing line ("AI waypoint absent").
 
 `grids.pssg` names a group `grid_start_standing_subroute_<N>_<id>` per direction, with the slots `slot_00_<id>` and `slot_01_<id>` (two cars). The drift intro group `grid_drift_intro_*` holds `slot_00_dft` and `slot_01_dft`. Exceptions:
 - route 0 has only subroute 0;
-- route 9's subroute-0 group has no slots, so only reverse is drivable.
+- route 9's subroute-0 slots are RENDERNODE elements, not NODE; the reader accepts them since F520 ([CAREER_LOCATIONS.md](CAREER_LOCATIONS.md) §3.3), so both directions drive.
 
 Forward grids stand 3.6 m past their start gate; reverse grids stand 9.3 m behind it. The arenas use plain `slot_00`..`slot_11`.
 

@@ -35,6 +35,10 @@ pub const SAN_FRANCISCO: &str = "tracks/usa/san_fran/route_0";
 /// illegal touge, mid to bottom, 5.86 km), run downhill (subroute 0) or
 /// uphill (subroute 1) (docs/TOUGE.md).
 pub const HARUNA: &str = "tracks/japan/haruna/route_1";
+/// The Haruna roads raced both ways, solo and with two cars: route 1, and
+/// the career head-to-heads' route 4 (`haruna_leg_top_mid`, 6.27 km) and
+/// route 9 (`haruna_ill_all`, 8.64 km) (docs/CAREER_LOCATIONS.md).
+pub const HARUNA_RACED: [&str; 3] = [HARUNA, "tracks/japan/haruna/route_4", "tracks/japan/haruna/route_9"];
 /// The Demolition Derby stadium (`detroit_stad_L`, 2.6 km figure of eight)
 /// and its short variant (`detroit_stad_s`, route 9) (docs/DEMOLITION_DERBY.md).
 pub const DETROIT_STADIUM: &str = "tracks/usa/detroit/route_8";
@@ -671,6 +675,28 @@ mod tests {
     /// Haruna route 1 (`haruna_ill_mid_bot`), both directions: one run from
     /// the subroute's start to its finish over an open AI line, from its own
     /// two-car grid (docs/TOUGE.md).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn career_haruna_roads_seat_two_cars_both_ways() {
+        use crate::{ai_driver::Line, lap_progress, source_vehicle::Runtime};
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        // Route 4 (event 77) and route 9 (event 75); route 9's forward
+        // slots are RENDERNODEs.
+        for (path, length) in [("tracks/japan/haruna/route_4", 6270.76), ("tracks/japan/haruna/route_9", 8638.79)] {
+            for subroute in [0, 1] {
+                let route = Route::new(path).unwrap().with_subroute(subroute).unwrap();
+                let p = lap_progress::load_route(root, &route).unwrap().progress;
+                assert!((p.total_distance - length).abs() < 1., "{path} {subroute}: {}", p.total_distance);
+                assert!(Line::load_route(root, &route).unwrap().is_open());
+                for slot in ["slot_00", "slot_01"] {
+                    Runtime::lacetti_on(root, &route, slot, 200679).unwrap();
+                }
+                assert!(Runtime::lacetti_on(root, &route, "slot_02", 200679).is_err());
+            }
+        }
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
     fn haruna_runs_both_ways_from_their_own_grids() {

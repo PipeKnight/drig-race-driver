@@ -282,6 +282,11 @@ fn barrier_parts(mesh: &PrototypeMesh) -> Vec<Extent> {
     parts.into_values().collect()
 }
 
+/// Bound on a route's prop collision boxes: the original's fixed-object pool
+/// (10,000, AD9220; docs/RUNTIME_LIMITS_AUDIT.md). Washington route 0 has
+/// 8662 with the group-part stand-ins.
+const MAX_BOXES: usize = 10_000;
+
 /// AUTHORED: the longest horizontal side of one part of a group prototype
 /// that gets its own box (a concrete block or fence section, not a run).
 const GROUP_PART_LENGTH: f32 = 10.;
@@ -348,21 +353,25 @@ fn ornament_barriers(
             continue;
         };
         let whole = barrier_extent(mesh);
-        let extents = if valid_extent(&whole) {
-            vec![whole]
-        } else if p.transforms.len() == 1 {
-            // A group prototype: one placement of a mesh laid out in world
-            // space over more than 100 m (Detroit concrete_block_long_01,
-            // 146 m; Washington chnfen_e_group1, 540 m). One box per short
-            // connected part; longer or flat parts stay non-solid.
+        // A group prototype: one placement of a mesh laid out in world
+        // space, either over more than 100 m (Detroit
+        // concrete_block_long_01, 146 m; Washington chnfen_e_group1, 540 m)
+        // or as a layout wider than a part in both horizontal directions
+        // (Washington chnfen_e_group3b, 40 x 43 m; group4, 96 x 67 m), which
+        // one box would close across the road. One box per short connected
+        // part; longer or flat parts stay non-solid.
+        let (lo, hi) = whole;
+        let layout = hi[0] - lo[0] > GROUP_PART_LENGTH && hi[2] - lo[2] > GROUP_PART_LENGTH;
+        let extents = if p.transforms.len() == 1 && (layout || !valid_extent(&whole)) {
             barrier_parts(mesh)
                 .into_iter()
                 .filter(|e| {
                     valid_extent(e) && (e.1[0] - e.0[0]).max(e.1[2] - e.0[2]) <= GROUP_PART_LENGTH
                 })
                 .collect()
+        } else if valid_extent(&whole) {
+            vec![whole]
         } else {
-            let (lo, hi) = whole;
             return Err(format!("invalid barrier ornament extent: {name} {lo:?}..{hi:?}").into());
         };
         for (lo, hi) in extents {
@@ -434,8 +443,8 @@ impl Props {
         }
         boxes.extend(ornament_barriers(root, route)?);
         boxes.extend(damaged);
-        if boxes.is_empty() || boxes.len() > 8192 {
-            return Err("unsupported entity collision box count".into());
+        if boxes.is_empty() || boxes.len() > MAX_BOXES {
+            return Err(format!("unsupported entity collision box count {}", boxes.len()).into());
         }
         Ok(Self {
             boxes: std::sync::Arc::new(boxes),
@@ -790,6 +799,38 @@ mod tests {
         // A post that stays over the base is kept, and so is the whole mesh.
         let (lo, hi) = barrier_extent(&fenced_wall(0.2));
         assert_eq!((lo, hi), ([0., 0., -0.22], [4., 4.09, 0.2]));
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn washington_group_layouts_leave_the_racing_line_open() {
+        // chnfen_e_group3b (40 x 43 m) and group4 (96 x 67 m) are single
+        // placements of a world-space layout; one box of the whole extent
+        // stood across Washington route 0's line at (833, 7, 834).
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let route = Route::new("tracks/usa/washington/route_0").unwrap();
+        let props = Props::read_route(root, &route).unwrap();
+        assert!(props.boxes.len() > 8192 && props.boxes.len() <= MAX_BOXES, "{}", props.boxes.len());
+        let line = crate::ai_driver::Line::load_route(root, &route).unwrap();
+        // The line every metre or so, 0.5 m up.
+        let points = line.points();
+        let lifted: Vec<[f32; 3]> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .flat_map(|(a, b)| {
+                (0..20).map(move |k| {
+                    let t = k as f32 / 20.;
+                    std::array::from_fn(|j| a[j] + (b[j] - a[j]) * t + if j == 1 { 0.5 } else { 0. })
+                })
+            })
+            .collect();
+        let blocked: Vec<String> = lifted
+            .iter()
+            .filter_map(|p| props.deepest_overlap(std::slice::from_ref(p)).map(|(i, _)| props.boxes[i].template.clone()))
+            .filter(|t| t.starts_with("chnfen"))
+            .collect();
+        assert!(blocked.is_empty(), "{blocked:?}");
     }
 
     #[test]

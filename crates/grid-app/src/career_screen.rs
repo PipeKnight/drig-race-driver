@@ -2827,6 +2827,17 @@ opponent_names = Ann Example,Lee Niven
         let ids: Vec<i32> = h2h.iter().map(|o| o.event_id).collect();
         eprintln!("runnable head-to-heads: {ids:?}");
         assert!(!h2h.is_empty());
+        // The locations added for the career (docs/CAREER_LOCATIONS.md): US
+        // pro on Washington GP (Viper), Japan rookie on Haruna route 9 (350Z)
+        // and Japan expert on route 4 (787B).
+        for (id, route, car) in [
+            (73, "tracks/usa/washington/route_0", "vip"),
+            (75, "tracks/japan/haruna/route_9", "350"),
+            (77, "tracks/japan/haruna/route_4", "787"),
+        ] {
+            let o = h2h.iter().find(|o| o.event_id == id).unwrap_or_else(|| panic!("{id} in {ids:?}"));
+            assert_eq!((o.races.len(), o.races[0].1.as_str(), o.car.as_str()), (1, route, car), "{id}");
+        }
         let o = &h2h[0];
         assert!(o.label.starts_with("Head-to-head: "));
         let event = cat.event(o.event_id).unwrap();
@@ -2963,14 +2974,16 @@ opponent_names = Ann Example,Lee Niven
         assert!(offers(&cat, &career, &routes, &Labels::default(), exists).is_empty());
         let runs = offer_runs(&cat, &career, &routes, &Labels::default(), exists);
         let ids: Vec<i32> = runs.iter().map(|r| r.offer_id).collect();
-        // US 2 (Lacetti, Washington), Europe 15 and 16, Japan 25 (350Z,
-        // Yokohama): the offers on show whose car and layout the port races.
-        assert_eq!(ids, [2, 15, 16, 25]);
-        let r15 = &runs[1];
+        // US 2 (Lacetti, Washington) and 7 (time trial, Washington GP),
+        // Europe 15 and 16, Japan 25 (350Z, Yokohama): the offers on show
+        // whose car and layout the port races.
+        assert_eq!(ids, [2, 7, 15, 16, 25]);
+        assert_eq!(runs[1].race.1, "tracks/usa/washington/route_0");
+        let r15 = &runs[2];
         assert_eq!(r15.car, "911");
         assert_eq!(r15.race.1, "tracks/europe/jarama/route_0");
         assert!(r15.field_cars.len() > 1, "race offers have a field");
-        assert_eq!(runs[2].field_cars, ["bmw"], "test offers run solo");
+        assert_eq!(runs[3].field_cars, ["bmw"], "test offers run solo");
         // Offer 15 (finish no lower than 3rd): 2nd meets it, 4th does not.
         assert!(offer_met(&cat, 15, &out(&[1, 0, 2, 3], false), true));
         assert!(!offer_met(&cat, 15, &out(&[1, 2, 3, 0], false), true));

@@ -60,9 +60,15 @@ pub fn is_le_mans_24(name: &str) -> bool {
 /// Lacetti, F463 survey in docs/SERIES.md "More layouts"): the other
 /// layouts of San Francisco, Detroit, Washington, Milan, Spa, Le Mans
 /// (classic), Yokohama and Shibuya. Okutama (entity reader), Washington
-/// routes 0/2/5/7 (route-box bound) and the routes where the solo car wrecks
-/// (Detroit 0/2, Washington 3/8, San Francisco 2) stay out.
-pub const SURVEYED_ROUTES: [&str; 35] = [
+/// routes 2/5/7 and the routes where the solo car wrecks (Detroit 0/2,
+/// Washington 3/8, San Francisco 2) stay out. The career's head-to-head
+/// layouts were raced with their event cars (docs/CAREER_LOCATIONS.md):
+/// Washington route 0 (Viper; the Lacetti wrecks 1 km in) and Haruna
+/// routes 4 (787B) and 9 (350Z).
+pub const SURVEYED_ROUTES: [&str; 38] = [
+    "tracks/usa/washington/route_0",
+    "tracks/japan/haruna/route_4",
+    "tracks/japan/haruna/route_9",
     "tracks/usa/san_fran/route_1",
     "tracks/usa/san_fran/route_4",
     "tracks/usa/san_fran/route_5",
@@ -791,8 +797,9 @@ mod tests {
         // 20 layouts of the surveyed circuits and the route_0 circuits of
         // Yokohama (yoko_v1), Spa (spa_gp), Milan (milan_gp), Shibuya
         // (shib_drift_cir), San Francisco (san_francisco_gp) and Circuit de la
-        // Sarthe (le_mans_circuit), plus the 35 surveyed routes (F463).
-        assert_eq!(supported.len(), 26 + SURVEYED_ROUTES.len());
+        // Sarthe (le_mans_circuit), plus the surveyed routes (F463) except
+        // the two Haruna roads, which are in no circuit pool.
+        assert_eq!(supported.len(), 26 + SURVEYED_ROUTES.len() - 2);
         for name in [
             "yoko_v1",
             "spa_gp",
