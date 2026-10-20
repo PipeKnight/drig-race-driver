@@ -929,16 +929,27 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         if experimental(&dir) {
             race.env("GRID_SERIES_EXPERIMENTAL", "1");
         }
-        let race = race
-            .args(&flags)
+        race.args(&flags)
             .arg("--settings")
             .arg(dir.join(PROFILE))
-            .arg("--from-menu")
-            .status()?;
+            .arg("--from-menu");
+        if let Some(ticks) = auto_ticks() {
+            race.args(["--drive-ticks", &ticks.to_string()]);
+        }
+        let race = race.status()?;
         if race.code() != Some(BACK_TO_MENU) {
             return Ok(race.code().unwrap_or(1));
         }
     }
+}
+
+/// Diagnostics `GRID_MENU_AUTO=TICKS` (unattended checks, desktop; the build
+/// gate's event-menu default, docs/TOOLCHAIN.md "Build gate"): the menu
+/// presses Continue after 3 s with its current choice, and the supervisor
+/// runs that race as a scripted run of TICKS ticks, so `GRID_AUTOPILOT` drives.
+#[cfg(not(target_os = "android"))]
+fn auto_ticks() -> Option<u64> {
+    std::env::var("GRID_MENU_AUTO").ok()?.parse().ok()
 }
 
 /// Whether the saved choice is an experimental event (Le Mans Series).
@@ -1176,6 +1187,13 @@ fn update(
     menu.repeat = repeat;
     // Escape is both Pause and Menu Back.
     nav.back |= nav.pause;
+    // Diagnostics GRID_MENU_AUTO: Continue with the current choice 3 s after
+    // start (each menu is its own process).
+    #[cfg(not(target_os = "android"))]
+    if auto_ticks().is_some() && time.elapsed_secs() >= 3. {
+        menu.cursor = menu.rows().len() - 1;
+        nav.select = true;
+    }
     let mut command = menu.step(nav);
     for (interaction, row) in &clicks {
         if *interaction == Interaction::Pressed {

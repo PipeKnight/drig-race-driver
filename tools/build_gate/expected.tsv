@@ -1,0 +1,8 @@
+# Known failures of the build gate (tools/build_gate.ps1, tools/build_gate_nightly.ps1), reported as xfail.
+# Tab-separated: run (regex over run names), check (paused, panic, audio, error, exit, timeout,
+# memory, fps, realtime, slope, perf), pattern (regex over the reason), reference. Remove a row when its fix lands.
+run	check	pattern	reference
+.*	realtime	prop bodies up to [1-9][0-9]{2,}	F501: broken prop pieces never sleep, so a pile-up's 100+ pieces drop the sim below real time (full-1: Le Mans 24 Hours 538 bodies 20.6 ticks/s, San Francisco 189 bodies 37.3); robustness (piece sleeping, turnOffTime)
+.*	fps	prop bodies up to [1-9][0-9]{2,}	as the realtime row (F501 pieces never sleep); robustness
+.*	timeout	prop bodies up to [1-9][0-9]{2,}	as the realtime row: a race slowed by 100+ prop pieces cannot finish in its time; robustness
+(repro-lemans-.*|le-mans-24.*)	paused	invalid selected manifold controls	F514: career run13d (Le Mans 24 Hours) paused at tick 40552 (local/repro/lemans-manifold-40552); the nightly reproduced it from local/repro/lemans-angular-13445 at tick 27782 (nightly-repro-1, 20.10.2026); robustness

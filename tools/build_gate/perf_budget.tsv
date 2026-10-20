@@ -1,0 +1,18 @@
+# grid-soak perf budget (docs/TOOLCHAIN.md "Build gate"): recorded 2026-10-20 on main dcc22d91 (F519) + the gate change,
+# 3000 ticks per case, GRID_THREADS=1, --affinity FFFF (P-cores), best of two passes, 1 grid-app of another session running.
+# budget = baseline CPU per tick x1.3 and wall p99 x3 (crates/grid-tools/src/soak_perf.rs); a changed digest is checked at 2x the
+# baseline only. Re-record with tools/build_gate.ps1 -RecordBudget after an intended change (evidence local/build-gate/perf-7).
+track	seed	cars	ticks	baseline_cpu_ms	baseline_p99_ms	budget_cpu_ms	budget_p99_ms	digest	max_bodies
+donington	1	12	3000	3.042	6.851	3.955	20.553	505a2a7323febc6d	58
+nurburgring	3	12	3000	1.661	2.815	2.159	8.445	64afb4d34c649450	18
+istanbul	14	12	3000	2.807	6.548	3.649	19.644	381d070024ea0d18	57
+long_beach	17	12	3000	1.526	2.961	1.984	8.883	c140e3cde4ce9aef	12
+jarama	22	12	3000	2.302	5.077	2.993	15.231	5ccc675681c12555	73
+yokohama	25	12	3000	2.068	3.836	2.688	11.508	723f1fe9abd7a665	16
+haruna	30	2	3000	0.370	0.780	0.481	2.340	3501fb24a94d02b8	2
+detroit	33	12	3000	2.042	3.908	2.655	11.724	95840eac8091cc03	12
+spa	37	12	3000	2.630	4.597	3.419	13.791	e679a23d23c8dcc4	12
+milan	41	12	3000	11.354	21.423	14.760	64.269	514a8661f30f8987	111
+shibuya	45	12	3000	2.833	6.390	3.683	19.170	ce004c60c1a169d6	17
+san_francisco	49	12	3000	8.526	20.975	11.084	62.925	4e6659d530e95f95	122
+le_mans	54	12	3000	3.094	4.987	4.022	14.961	bcc32673a97c7a6a	22

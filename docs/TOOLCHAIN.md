@@ -40,6 +40,102 @@ target/release/grid-opponent-race "$ROOT" CD01 BP01 12 11200 ai | sha256sum   # 
 # and the 12-car again with both variables set (DF01 and the characteristics)
 ```
 
+## Build gate (F524)
+
+End-to-end checks of the real app that the coordinator runs before every rebuild of the PC
+playable, the portable copy and the APKs. Unit tests and `grid-soak` drive the simulation
+headless; the gate runs the built `grid-app.exe` itself, so it also sees the audio, rendering,
+the launcher profiles and the event menu. It never runs the original grid.exe.
+
+```
+cargo build --release -p grid-app -p grid-tools --bin grid-app --bin grid-soak
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_gate.ps1            # 1-3, 18-24 min
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_gate_nightly.ps1    # 4, overnight
+```
+
+Exit code 0 when nothing unexpected failed. One line per check (`gate_result NAME
+pass|xfail|noisy|fail DETAIL SECONDS REASONS`), then `gate_end`. `noisy` is a perf case over budget
+while other sessions' compilers ran: not a failure, not verified either; re-run
+`tools\build_gate.ps1 -SkipMemory -SkipSmoke` when no build runs. Evidence goes to
+`local/build-gate/gate-<time>/`:
+`summary.md`, `summary.tsv`, `perf.log` and one folder per app run (its data dir, `stdout.log`,
+`stderr.log`, `command.txt`; the memory run also `memory.tsv`); the replay spool
+(`replay-cache`, up to 190 MB) is kept only for a failed run.
+
+**How the app runs are driven.** Each run gets its own data dir with `[osd] fps = on` (the
+`frame_stats` line every second), `[sound] effects = 0`, `[front_end] show = off` and
+`[diagnostics] autopilot = on`, `results_continue = 3`, plus `GRID_AUTOPILOT=1` and
+`--drive-ticks`, so the ported AI drives the player's car and nothing touches the desktop's
+keyboard or mouse. The windows open minimized. Audio stays on (the decoders and mixer run as in
+play, at zero trim), and the gate also mutes every audio session of its own processes in the
+Windows mixer. Other grid-app processes (the owner's prototype, other sessions) are never
+muted, stopped or counted. Memory is the private bytes (commit) of the process tree, sampled
+every second from `Win32_Process`, with its peak. A run is stopped (process tree killed) 2 s after
+`drive_script_complete`, at once on "driving paused" or a panic, or at its timeout. The AI
+characteristics table comes from `local/` of the main checkout when the worktree has none.
+
+| Part | What runs | Fails on |
+|---|---|---|
+| 1. perf | `grid-soak perf --budget tools/build_gate/perf_budget.tsv`: one full-field quick seed per track (13; Milan seed 41 is the heavy case), 3000 ticks, alone, before the app runs | CPU time per tick over 1.3x the recorded baseline, or wall p99 over 3x. A case whose scenario changed since the budget (another digest, e.g. after a behaviour commit such as F517) is `changed`: checked at 2x the old baseline only, and the gate prints `gate_perf_rerecord` |
+| 2. memory | `tools/build_gate/memory-race.ini`: 12 Lacettis at Donington, 12 laps, for 10 min of driving (`-MemoryMinutes`), stopped on the wall clock. Not the Le Mans 24 Hours: a pile-up there (full-1: 538 prop bodies) drops it to about 1 FPS and 20 ticks/s, and its field had no engine sound before F519. A pile-up can still slow this race too (full-3: 134 bodies, 49.7 ticks/s, xfail); the wall-clock stop keeps the fit at 8 minutes | private bytes growing faster than `-SlopeLimit` 1.0 MB/s (least squares after a 2-min warm-up), plus every smoke check |
+| 3. smoke | every `settings/*.ini` (the `Play GRID*.cmd` launchers; Codex's Graphics launchers are not in it), 60 s of driving each (`-DriveSeconds`), and `menu-default`: `grid-app --menu` with `GRID_MENU_AUTO` (docs/EVENT_MENU.md), i.e. `Play GRID.cmd`'s default event | an `ERROR` log line; "driving paused"; an audio failure (`decoder_failed`, `bank_failed`, "Engine audio unavailable", or a WARN/ERROR from bevy_audio/rodio/cpal or about failed audio); a panic; an early exit; a timeout; peak private bytes over `-MemoryCapMB` 4096; average FPS under `-FpsFloor` 10 (gross only: four gate windows share the GPU, and in full-3 a run at 13 FPS kept real time; the sim rate is the real check); sim rate under `-RealtimeFloor` 56 ticks/s (real time is 62.5) |
+
+Not covered: the career screen (`Play GRID Career.cmd`; the career session's unattended
+`GRID_CAREER_AUTO` runs), the audio race-start test (car-series session) and Android.
+
+**Runtime.** full-4 (20 October 2026, F523 + this gate, 4 jobs, one other grid-app open):
+1084 s in all, perf 161 s, the memory race and 38 smoke runs 922 s; 52 checks, 0 failed, 4 xfail
+(F501 pile-ups). full-3 (other sessions building): 1425 s, perf 401 s. The app runs start only while 4 GB of physical
+memory are free (`-MinFreeGB`), so a loaded PC stretches the phase; `-Only REGEX`,
+`-SkipPerf`, `-SkipMemory` and `-SkipSmoke` select parts.
+
+**Part 4, the nightly soak** (`tools\build_gate_nightly.ps1`, overnight only, `-Hours` 8,
+2 jobs): `repro` replays every private career repro (`local/repro/*/career-race.ini`, 50,000
+scripted ticks, `-ReproRepeats` 2), `events` runs every launcher profile at full length (its
+laps or time limit; the Le Mans 24 Hours' 720 s first) in rounds with
+`GRID_SERIES_SEED = -SeedBase + round` until the deadline, and `soak` runs `grid-soak long`
+for `-SoakHours` (0 skips it). It fails like the smoke runs; a race that ends with its results
+passes. Timeouts allow 20 ticks/s plus 150 s, since a 500-body pile-up runs at about 21.
+`summary.md` is rewritten after each run; the logs of passing runs are trimmed. nightly-repro-1
+(19 min) reproduced the F514 manifold pause from `lemans-angular-13445` at tick 27782; F512
+had removed the angular pauses, and the other two repros ran into 514-body pile-ups.
+
+**Proof that the memory check catches F482.** A build with the F482 leak put back (opponent
+engines on `PlaybackSettings::LOOP`; `local/build-gate/leak-f482/`) grew 4.68 MB/s on
+`memory-race.ini` (2,841 to 3,597 MB in 5 min) and failed; the clean build in full-3 fitted
+-0.11 MB/s over 480 s.
+
+**Why CPU time for perf.** The tick fans out over every core (`grid_tools::parallel`), and the
+gate shares the PC with other sessions' builds. Two multi-threaded runs of the same 3000 ticks
+on 20 October 2026 gave Milan 14.4 and 9.3 ms per tick, Spa 3.2 and 1.4 ms, Long Beach 1.2 and
+1.5 ms: no budget can separate a regression from that. `grid-soak perf` therefore runs each case
+with `GRID_THREADS=1` (bit-identical results, `parallel.rs`) and sums the process CPU time
+(`GetProcessTimes`) inside each `Session::step`. CPU time alone was still not stable:
+- the i7-12700 is hybrid, and logical processors 16–19 (E-cores) spend twice the CPU time of a
+  P-core on the same tick (Haruna seed 30, pinned to one processor: 0.30 and 0.31 ms on 2 and 3,
+  0.62 and 0.66 ms on 17 and 19), so the gate pins perf with `--affinity FFFF`;
+- even pinned, a pass with 8 compiler/grid processes running gave Spa 11.7 ms instead of 1.6–1.9
+  and Milan 23.8 instead of 8.9–10.5 (likely kernel time from page faults on this memory-bound
+  PC; not proven). Such noise does not repeat, a regression does: a case over budget runs again
+  up to `--retries` (2) times and keeps its best.
+
+The budget (`tools/build_gate/perf_budget.tsv`) is the best of two pinned passes on 20 October
+2026 on F519 (perf-7); Milan seed 41 (11.4 ms CPU per tick, 111 prop bodies) and San Francisco
+seed 49 (8.5 ms, 122 bodies) are the heavy cases, the others 0.4–3.1 ms. A row also stores the
+scenario digest and peak body count. The next pass (perf-8) ran beside another session's cargo
+build that started during it: 6 of 13 tracks came out 7–50% over even after the retries. So
+the gate waits up to `-PerfWaitMinutes` (15) for running compilers (rustc, cargo, link,
+rust-lld, clippy-driver) before perf, and names any still running in the reason of a case over
+budget (a compiler that starts and ends inside the perf phase is not seen). Re-record the budget with
+`tools\build_gate.ps1 -RecordBudget` (written to the run folder; copy it over
+`tools/build_gate/perf_budget.tsv`) after an intended cost change.
+
+**Expected failures.** `tools/build_gate/expected.tsv` (run regex, check, reason regex,
+reference) turns a known problem into `xfail`; an entry not seen in a run is listed as
+`gate_expected_not_seen` (fixed, or intermittent). Slowness reasons carry the run's peak prop
+body count ("prop bodies up to N"), so the known cost of broken props is matched only where a
+pile-up happened, and a slow race without one still fails.
+
 ## Build and test cost — 16 October 2026
 
 Owner request: parallel sessions build slowly and load the CPU. Findings and changes:

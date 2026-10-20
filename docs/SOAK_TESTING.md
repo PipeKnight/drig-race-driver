@@ -34,6 +34,9 @@ contacts); BP01, DF01 and the characteristics table are used when present.
 | `grid-soak run --seed N [--profile quick\|long]` | One scenario in-process (the orchestrator runs each scenario this way in a child process). |
 | `grid-soak replay local/soak/.../seed-N.inputs.tsv` | Exact replay of recorded inputs, independent of later chaos-driver changes. |
 | `grid-soak replay-log local/playtest/manual-*.log` | Headless replay of an owner playtest log, with pose verification. |
+| `grid-soak perf [--budget FILE] [--write-budget FILE] [--tracks T,..] [--affinity HEXMASK] [--retries N]` | Tick-cost budget (build gate, docs/TOOLCHAIN.md "Build gate"): one full-field quick seed per track (`grid_tools::soak_perf::CASES`, 13 tracks; Le Mans with 12 cars), each alone in its own `run` process with `GRID_THREADS=1`, `--ticks` (default 3000), pinned to `--affinity` (the gate passes `FFFF`, the P-core threads). Compares CPU time per tick (x1.3) and wall p99 (x3) with the budget file (`tools/build_gate/perf_budget.tsv`); a case over budget runs again up to `--retries` (default 2) times and keeps its best. A budget row also holds the scenario digest and peak body count; a case whose digest changed (a behaviour commit moved the scenario) is `changed`, checked at 2x the old baseline only, and does not fail. `--write-budget` records the best of two passes. Exit code 1 if a track stays over budget or its run gave no times. |
+
+Every `run` (and `replay`) also prints `soak_tick_time seed=N ticks= cpu_ms= mean_ms= p50_ms= p99_ms= max_ms=` before its `soak_result` line: the process CPU time per tick summed over the `Session::step` calls (Windows `GetProcessTimes`), and the wall time of each step, without the soak's own checks.
 
 Options: `--out local/soak/DIR` (must contain a `local` component; default
 `local/soak/<command>-<unix time>`), `--jobs J`, `--seeds A..B`, `--timeout S`

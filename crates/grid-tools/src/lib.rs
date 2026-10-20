@@ -42,6 +42,7 @@ pub mod series;
 pub mod source_deformation;
 pub mod source_physical;
 pub mod soak;
+pub mod soak_perf;
 pub mod source_vehicle;
 pub mod time_of_day;
 pub mod standard_car;

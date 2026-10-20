@@ -8,6 +8,8 @@
 //! grid-soak run --seed N [OPTIONS]     one scenario in this process
 //! grid-soak replay FILE.inputs.tsv     exact replay of recorded inputs
 //! grid-soak replay-log FILE.log        replay a grid-app --drive playtest log
+//! grid-soak perf [--budget FILE]       per-track full-field tick time against a
+//!   [--write-budget FILE] [--tracks T,..] budget (build gate, docs/TOOLCHAIN.md)
 //!
 //! Options: --out local/soak/DIR, --seeds A..B, --jobs J (default: quick a
 //! third of the hardware threads, 2..6; long 2), --timeout SECONDS,
@@ -60,6 +62,15 @@ struct Options {
     car: Option<String>,
     opponent_cars: Option<String>,
     extra: u64,
+    /// perf: budget file to check against, file to record a new budget in,
+    /// and the tracks to run (default all, `grid_tools::soak_perf::CASES`).
+    budget: Option<PathBuf>,
+    write_budget: Option<PathBuf>,
+    tracks: Option<String>,
+    /// perf: logical processor mask (hex) for this process and its cases.
+    affinity: Option<u64>,
+    /// perf: reruns of a case over its budget (default 2).
+    retries: Option<u64>,
 }
 
 impl Default for Options {
@@ -89,6 +100,11 @@ impl Default for Options {
             car: None,
             opponent_cars: None,
             extra: 0,
+            budget: None,
+            write_budget: None,
+            tracks: None,
+            affinity: None,
+            retries: None,
         }
     }
 }
@@ -223,6 +239,10 @@ struct Outcome {
     /// Bodies lost after the original's geometry pressed them down at their
     /// spawn pose: reported, not failed (docs/ROBUSTNESS_RESEARCH.md).
     expected: Vec<grid_tools::soak::ExpectedLoss>,
+    /// Wall time of each `Session::step` in ms (`soak_tick_time`, grid-soak perf).
+    tick_ms: Vec<f32>,
+    /// Process CPU time summed over the steps (None off Windows).
+    cpu_ms: Option<f64>,
 }
 
 fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
@@ -314,6 +334,8 @@ impl Run<'_> {
             verified_poses: 0,
             bodies: Vec::new(),
             expected: Vec::new(),
+            tick_ms: Vec::new(),
+            cpu_ms: grid_tools::soak_perf::process_cpu_ms().map(|_| 0.),
         };
         let mut history: VecDeque<Sample> = VecDeque::with_capacity(HISTORY);
         let mut inputs = self.out.as_ref().and_then(|out| {
@@ -398,7 +420,16 @@ impl Run<'_> {
                         }
                         let tick = session.total_ticks + 1;
                         let segment_tick = session.runtime.ticks + 1;
-                        let failure = match session.step(controls, shift) {
+                        let cpu = grid_tools::soak_perf::process_cpu_ms();
+                        let timer = Instant::now();
+                        let stepped = session.step(controls, shift);
+                        outcome.tick_ms.push(timer.elapsed().as_secs_f32() * 1000.);
+                        if let (Some(total), Some(a), Some(b)) =
+                            (outcome.cpu_ms.as_mut(), cpu, grid_tools::soak_perf::process_cpu_ms())
+                        {
+                            *total += b - a;
+                        }
+                        let failure = match stepped {
                             Err(e) => Some((Kind::WorldError, e.to_string())),
                             Ok(()) => session.check(),
                         };
@@ -663,6 +694,10 @@ fn result_line(scenario: &Scenario, outcome: &Outcome) -> String {
             l.pressed
         );
     }
+    if let Some(t) = grid_tools::soak_perf::TickTimes::of(&outcome.tick_ms, outcome.cpu_ms) {
+        lines += &t.line(scenario.seed);
+        lines.push('\n');
+    }
     lines + &format!(
         "soak_result seed={} status={} kind={} tick={} ticks={} resets={} auto_resets={} expected_losses={} box_losses={} breaks={} max_bodies={} seconds={:.1} digest={:016x} cars={} route={} error={}",
         scenario.seed,
@@ -727,6 +762,231 @@ fn command_run(options: Options) -> Result<i32> {
         eprintln!("{}", grid_tools::perf::report());
     }
     Ok(i32::from(failed))
+}
+
+/// The value of `key=` in a `soak_*` line (up to the next space).
+fn line_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split_whitespace()
+        .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
+}
+
+/// `grid-soak perf`: each `soak_perf::CASES` track in turn, alone in its own
+/// `run` process (no parallel jobs, so the timings do not compete), then the
+/// tick times against `--budget` and/or recorded with `--write-budget`.
+fn command_perf(options: Options) -> Result<i32> {
+    use grid_tools::soak_perf::{self, TickTimes};
+    let out = output_dir(&options, "perf")?;
+    let exe = std::env::current_exe()?;
+    let ticks = options.ticks.unwrap_or(soak_perf::DEFAULT_TICKS);
+    if let Some(mask) = options.affinity {
+        soak_perf::set_affinity(mask)?;
+    }
+    let budgets = match &options.budget {
+        Some(p) => Some(soak_perf::parse_budgets(&std::fs::read_to_string(p)?)?),
+        None => None,
+    };
+    let wanted: Option<Vec<&str>> = options.tracks.as_deref().map(|t| t.split(',').collect());
+    let cases: Vec<_> = soak_perf::CASES
+        .iter()
+        .filter(|c| wanted.as_ref().is_none_or(|w| w.contains(&c.track)))
+        .collect();
+    if cases.is_empty() {
+        return Err("no perf case matches --tracks".into());
+    }
+    let total = cases.len();
+    println!(
+        "soak_perf out={} ticks={ticks} cases={total} affinity={}",
+        out.display(),
+        options.affinity.map_or("-".into(), |m| format!("{m:x}"))
+    );
+    let mut tsv = String::from(
+        "track\tseed\tcars\tticks\tcpu_ms\tmean_ms\tp50_ms\tp99_ms\tmax_ms\tbudget_cpu_ms\tbudget_p99_ms\tstatus\tsoak_status\tseconds\tnote\n",
+    );
+    let mut recorded = Vec::new();
+    let mut failed = 0;
+    // One case in its own process: its tick times, result line, hang flag, seconds.
+    let run_case = |case: &soak_perf::Case| -> Result<(Option<TickTimes>, Option<String>, bool, f64)> {
+        let started = Instant::now();
+        let mut child = std::process::Command::new(&exe)
+            .args(["run", "--seed", &case.seed.to_string(), "--profile", "quick"])
+            .args(["--cars", &case.cars.to_string(), "--ticks", &ticks.to_string()])
+            .arg("--quiet")
+            .arg("--out")
+            .arg(&out)
+            .arg("--game-root")
+            .arg(&options.root)
+            // One worker: CPU per tick without the pool's spread (soak_perf).
+            .env(
+                "GRID_THREADS",
+                std::env::var("GRID_THREADS").unwrap_or_else(|_| "1".into()),
+            )
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        let stdout = child.stdout.take().ok_or("child stdout")?;
+        let reader = std::thread::spawn(move || {
+            std::io::BufReader::new(stdout)
+                .lines()
+                .map_while(|l| l.ok())
+                .filter(|l| !l.starts_with("soak_progress"))
+                .collect::<Vec<String>>()
+        });
+        // As the orchestrator: 25 ms per car-tick plus set-up.
+        let timeout = options
+            .timeout
+            .unwrap_or(120 + ticks * case.cars as u64 * 25 / 1000);
+        let mut hung = false;
+        while child.try_wait()?.is_none() {
+            if started.elapsed() > Duration::from_secs(timeout) {
+                let _ = child.kill();
+                let _ = child.wait();
+                hung = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let lines = reader.join().unwrap_or_default();
+        let times = lines.iter().find_map(|l| TickTimes::parse(l)).map(|(_, t)| t);
+        let result = lines.into_iter().find(|l| l.starts_with("soak_result "));
+        Ok((times, result, hung, started.elapsed().as_secs_f64()))
+    };
+    for case in cases {
+        let budget = budgets.as_ref().and_then(|b| b.get(case.track));
+        // Noise from other work on the PC is not repeatable, a regression is:
+        // a case over its budget runs again (--retries, default 2) and keeps
+        // its best CPU time and best p99. A recorded budget takes the best of
+        // two passes.
+        let attempts = 1 + if budgets.is_none() { 1 } else { options.retries.unwrap_or(2) };
+        let (mut times, mut result, mut hung, mut seconds) = (None::<TickTimes>, None, false, 0.);
+        let mut runs = 0;
+        while runs < attempts {
+            runs += 1;
+            let (t, r, h, s) = run_case(case)?;
+            seconds += s;
+            hung |= h && t.is_none();
+            if result.is_none() || r.as_deref().and_then(|l| line_field(l, "status")) != Some("pass") {
+                result = r.or(result);
+            }
+            times = match (times, t) {
+                (Some(a), Some(b)) => Some(TickTimes {
+                    cpu: a.cpu.min(b.cpu),
+                    p99: a.p99.min(b.p99),
+                    ..if b.cpu < a.cpu { b } else { a }
+                }),
+                (a, b) => a.or(b),
+            };
+            let digest = result.as_deref().and_then(|l| line_field(l, "digest")).unwrap_or("-");
+            let within = match (times, budget) {
+                (Some(t), Some(b)) => b.check(&t, digest).over.is_empty(),
+                (Some(_), None) => budgets.is_some(),
+                (None, _) => false,
+            };
+            if within {
+                break;
+            }
+        }
+        let timeout = options
+            .timeout
+            .unwrap_or(120 + ticks * case.cars as u64 * 25 / 1000);
+        let soak_status = result.as_deref().and_then(|l| line_field(l, "status")).unwrap_or("-");
+        let soak_error = result
+            .as_deref()
+            .and_then(|l| l.split_once(" error="))
+            .map_or("-", |(_, e)| e);
+        let digest = result.as_deref().and_then(|l| line_field(l, "digest")).unwrap_or("-");
+        let bodies: usize = result
+            .as_deref()
+            .and_then(|l| line_field(l, "max_bodies"))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let (status, note) = match (&times, budget) {
+            (None, _) if hung => ("fail", format!("no result after {timeout} s")),
+            (None, _) => ("fail", "the run gave no tick times".into()),
+            (Some(t), Some(b)) => {
+                let verdict = b.check(t, digest);
+                let changed = format!(
+                    "scenario changed since the budget (digest {} -> {digest}, max bodies {} -> {bodies}): checked at {}x the old baseline; re-record the budget",
+                    b.digest,
+                    b.bodies,
+                    soak_perf::CHANGED_FACTOR
+                );
+                match (verdict.over.is_empty(), verdict.changed) {
+                    (true, false) => ("pass", soak_error.to_string()),
+                    (true, true) => ("changed", changed),
+                    (false, false) => ("over", format!("{} (best of {runs} runs)", verdict.over.join("; "))),
+                    (false, true) => (
+                        "over",
+                        format!("{} (best of {runs} runs); {changed}", verdict.over.join("; ")),
+                    ),
+                }
+            }
+            (Some(_), None) if budgets.is_some() => ("pass", "no budget for this track".into()),
+            (Some(_), None) => ("pass", soak_error.to_string()),
+        };
+        if status != "pass" && status != "changed" {
+            failed += 1;
+        }
+        let t = times.unwrap_or(TickTimes {
+            ticks: 0,
+            cpu: f64::NAN,
+            mean: f64::NAN,
+            p50: f64::NAN,
+            p99: f64::NAN,
+            max: f64::NAN,
+        });
+        println!(
+            "soak_perf_case track={} seed={} cars={} ticks={} cpu_ms={:.3} mean_ms={:.3} p99_ms={:.3} max_ms={:.3} budget_cpu_ms={} budget_p99_ms={} status={status} soak={soak_status} digest={digest} max_bodies={bodies} seconds={seconds:.1} note={note}",
+            case.track,
+            case.seed,
+            case.cars,
+            t.ticks,
+            t.cpu,
+            t.mean,
+            t.p99,
+            t.max,
+            budget.map_or("-".into(), |b| format!("{:.3}", b.cpu)),
+            budget.map_or("-".into(), |b| format!("{:.3}", b.p99)),
+        );
+        tsv += &format!(
+            "{}\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{}\t{}\t{status}\t{soak_status}\t{seconds:.1}\t{note}\n",
+            case.track,
+            case.seed,
+            case.cars,
+            t.ticks,
+            t.cpu,
+            t.mean,
+            t.p50,
+            t.p99,
+            t.max,
+            budget.map_or("-".into(), |b| format!("{:.3}", b.cpu)),
+            budget.map_or("-".into(), |b| format!("{:.3}", b.p99)),
+        );
+        if let Some(t) = times {
+            recorded.push(soak_perf::budget_row(case, &t, digest, bodies));
+        }
+    }
+    std::fs::write(out.join("perf.tsv"), tsv)?;
+    if let Some(path) = &options.write_budget {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        std::fs::write(
+            path,
+            format!(
+                "# grid-soak perf budget (docs/TOOLCHAIN.md \"Build gate\"), recorded at unix time {stamp}, {ticks} ticks per case, GRID_THREADS=1.\n# budget = baseline CPU per tick x{} and wall p99 x{} (crates/grid-tools/src/soak_perf.rs).\n{}\n{}\n",
+                soak_perf::CPU_FACTOR,
+                soak_perf::P99_FACTOR,
+                soak_perf::BUDGET_HEADER,
+                recorded.join("\n")
+            ),
+        )?;
+        println!("soak_perf_budget_written path={}", path.display());
+    }
+    println!(
+        "soak_perf_summary cases={total} failed={failed} table={}",
+        out.join("perf.tsv").display()
+    );
+    Ok(i32::from(failed > 0))
 }
 
 fn command_replay(options: Options, file: &Path) -> Result<i32> {
@@ -1302,6 +1562,14 @@ fn parse_options(args: &[String]) -> Result<(Options, Vec<String>)> {
             }
             "--extra" => o.extra = value(&mut i)?.parse()?,
             "--keep" => o.keep = true,
+            "--budget" => o.budget = Some(value(&mut i)?.into()),
+            "--write-budget" => o.write_budget = Some(value(&mut i)?.into()),
+            "--tracks" => o.tracks = Some(value(&mut i)?),
+            "--retries" => o.retries = Some(value(&mut i)?.parse()?),
+            "--affinity" => {
+                let v = value(&mut i)?;
+                o.affinity = Some(u64::from_str_radix(v.trim_start_matches("0x"), 16)?)
+            }
             "--quiet" => o.quiet = true,
             other => rest.push(other.to_string()),
         }
@@ -1310,7 +1578,7 @@ fn parse_options(args: &[String]) -> Result<(Options, Vec<String>)> {
     Ok((o, rest))
 }
 
-const USAGE: &str = "usage: grid-soak quick|long|run --seed N|replay FILE.inputs.tsv|replay-log FILE.log [options] (docs/SOAK_TESTING.md)";
+const USAGE: &str = "usage: grid-soak quick|long|run --seed N|replay FILE.inputs.tsv|replay-log FILE.log|perf [--budget FILE] [--write-budget FILE] [--tracks T,..] [--affinity HEXMASK] [--retries N] [options] (docs/SOAK_TESTING.md)";
 
 fn main() {
     std::panic::set_hook(Box::new(|info| {
@@ -1342,6 +1610,7 @@ fn main() {
                 orchestrate(options, "long")
             }
             Some("run") => command_run(options),
+            Some("perf") => command_perf(options),
             Some("replay") => {
                 let file = rest.get(1).ok_or(USAGE)?;
                 command_replay(options, Path::new(file))
