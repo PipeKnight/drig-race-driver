@@ -1801,6 +1801,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--glass-roughness" => {
                 graphics.glass_roughness(&args.next().ok_or("--glass-roughness needs 0.04..1")?)?;
             }
+            "--post-saturation" => {
+                let value: f32 = args.next().ok_or("--post-saturation needs 0..2")?.parse()?;
+                if !value.is_finite() || !(0.0..=2.0).contains(&value) { return Err("post saturation must be finite 0..2".into()); }
+                graphics.post_saturation_override = Some(value);
+            }
             "--exposure" => {
                 graphics.exposure(&args.next().ok_or("--exposure needs EV100")?)?;
             }
@@ -1961,6 +1966,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
+                println!("--post-saturation 0..2: optional single-variable authored-grade diagnostic; enhanced only, temperature/tint unchanged, not combinable with track grade.");
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
@@ -2048,6 +2054,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             car_classes = event.classes.clone();
         }
         println!("{}", event.log_line());
+    }
+    if graphics.post_saturation_override.is_some() && (!graphics.enhanced() || graphics.track_grade) {
+        return Err("--post-saturation requires enhanced authored grade; do not combine with --grade track".into());
     }
     if graphics.anti_aliasing == 3 && !graphics.enhanced() {
         return Err("DLAA is an experimental enhanced-graphics mode".into());

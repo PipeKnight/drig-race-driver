@@ -169,3 +169,28 @@ Private body-uniform02 retains string-pointer candidates (including an internal 
 Follow-up caller/constructor boundary:99c300 has a direct global reload caller9cbce0 opening cars/materials.xml and a named-node dispatcher9ca3a0 for materials. The latter entry is independently delimited by preceding ret/padding, decompiled only in read-only session memory and discarded. This establishes a material-node parse path, not the active Lacetti resource identity. Existing owner constructorA135C0 also initializes self+0=0.5 and self+4=0.25, and the same nine current scalars; these extra values are constructor defaults, not recovered semantic names or immutable runtime values. Earlier sentence about unresolved initialization is superseded by this bounded constructor observation; their full meaning/setters remain open.
 
 Important control: the already recovered **saved Lacetti instance** uses FresnelPower1/Min0.3/Max0.6 and neutral EnvironmentColour~0.537255, whereas the newly read XML-loader fallbacks use2/0.1/0.9. They demonstrably differ. Do not promote the XML fallbacks into a "source Lacetti" mode or assume the conditional override writer is the ordinary shader-parameter binding path. The selected shader uses a nonlinear angle function, while our environment-layer angular mix remains authored; exact saved-scalar to vector packing outside that override path is the remaining target. Initial exploratory disassembly began mid-instruction at9ca320; its leading fragment is rejected, subsequent9ca3a0 entry has separate boundary/Ghidra proof. No appearance change made.
+
+
+### Single-variable post-saturation and source-sun controls (G204, 20 October2026)
+
+New default-absent `--post-saturation 0..2` isolates the authored camera's perceptual post-tonemapping saturation. Enhanced authored grade only; finite/range checks and --grade track combination reject. Temperature/tint, exposure, paint RGB/masks, clearcoat and reflection gain stay fixed. Bevy0.19.1 tonemapping_shared.wgsl applies this parameter after the tonemapper. This is a diagnostic control, not a new original-colour shader or a retuned default.
+
+Six matched native3840x2160/SMAA static rear-quarter cases use the established G196 camera/source-sun direction/EV13/paint environment0.5: absent(default), explicit0.9,1.0,1.1, plus a separate existing source-sun-colour0.9/1.0 pair. Default, explicit0.9 and the old G196 baseline **entire PNGs are byte-identical**. This establishes default preservation in this pose/profile, not universal GPU determinism. All six readbacks succeed; full/native paint comparison inspected.
+
+Boot red-only ROI2400,1500..2500,1580, mean displayRGB/HSV saturation:
+
+| Case | Mean RGB | Saturation of mean | Hue degrees |
+| --- | --- | ---: | ---: |
+| White sun, default0.9 | 191.86,82.67,95.27 | 0.569 | 353.08 |
+| White sun,1.0 | 198.00,77.46,92.27 | 0.609 | 352.63 |
+| White sun,1.1 | 203.87,71.80,89.16 | 0.648 | 352.11 |
+| Saved sun colour,0.9 | 191.73,80.63,88.34 | 0.579 | 355.83 |
+| Saved sun colour,1.0 | 197.94,75.29,84.46 | 0.620 | 355.51 |
+
+Saturation increases chroma but hardly corrects hue and slightly moves this ROI further toward magenta; **it is not a complete red/pink fix**. Existing saved sun ratio[1,0.85882354,0.57254905] moves hue toward red, modestly, while also warming road/other lit objects. Its linear interpretation and radiometry remain authored adaptation. These are separated controls, not an assertion that changing a global filter alone recovers the original material.
+
+Surroundings controls: road meanRGB126.12/114.45/101.48 becomes127.16/114.25/99.67 at saturation1.0, versus124.44/108.06/86.40 with saved sun colour at0.9. The latter changes lighting colour even at fixed scalar lux/exposure; it is not a luminance-preserving operation. Sky means shift very slightly, so no final-image sky byte-invariance claim. Both red ROIs/selected sky/road regions have zero channels at0/255 in these cases, not proof of no clipping elsewhere or in HDR. Original video pose/light/grade differ; no calibrated RGB fitting or absolute colour parity claim.
+
+All781resource tests/12harnesses,0failed/ignored, feature+default workspace releaseClippy, canonicalF455/quick24/24 pass; five executable guards reject NaN/negative/>2/non-enhanced/track grade. No new unit tests that mirror this reversible parameter were added. Release3m12s/onejob, SHAf41d35994199ef83d9a901bd905b0b578d5a69f72e64519907205b7a1bd15eee; exact frozen source patch verified. Rust1.99.0/Bevy0.19.1/wgpu29.0.4, existing Python3.12.14/Pillow12.3.0/NumPy2.3.5, no installs/dependency version/cache changes. Private body-saturation01 records commands/source/artifact/ROIs/checks, controls and surrounding statistics. Uncited mis-sized first comparison sheet removed after guarded path check; corrected sheet retained. No renderer failure or approval rejection.
+
+Existing Signals and separately delivered DLAA L builds remain unchanged. Owner L feedback is optional/pending. Next isolate the tone-map contribution versus source material response before choosing a permanent grade/material adjustment; preserve accepted reflection detail and keep any original-style global colour work explicit.

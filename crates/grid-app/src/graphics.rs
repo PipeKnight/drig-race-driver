@@ -78,6 +78,8 @@ pub struct Settings {
     pub white_body_specular: bool,
     /// Fixed photographic exposure; +1EV halves scene light before tonemapping.
     pub exposure_ev100: f32,
+    /// Optional single-variable authored-grade diagnostic; default preserves current look.
+    pub post_saturation_override: Option<f32>,
     /// Window-only material control; light lenses are a separate material.
     pub window_roughness: f32,
     pub window_reflectance: f32,
@@ -155,6 +157,7 @@ impl Default for Settings {
             source_body_specular: false,
             white_body_specular: false,
             exposure_ev100: 13.,
+            post_saturation_override: None,
             window_roughness: 0.08,
             window_reflectance: 0.5,
             paint_clearcoat: 0.35,
@@ -386,6 +389,7 @@ pub fn configure(
     }
     println!("graphics_shadow_range metres={} cascades=4 first=18 map_size=4096 mapping=authored", settings.shadow_distance_metres);
     println!("graphics_exposure ev100={} mode=fixed tonemapping=AgX", settings.exposure_ev100);
+    println!("graphics_post_saturation value={} override={} scope=authored-camera-grade temperature_tint=unchanged", settings.post_saturation_override.unwrap_or(if settings.track_grade { 1.0 } else { 0.9 }), settings.post_saturation_override.is_some());
     commands.insert_resource(DirectionalLightShadowMap { size: 4096 });
     commands.insert_resource(GlobalAmbientLight::NONE);
     commands.spawn(Atmosphere::earth(
@@ -400,7 +404,7 @@ pub fn configure(
             global: ColorGradingGlobal {
                 temperature: if settings.track_grade { 0.0 } else { 0.012 },
                 tint: if settings.track_grade { 0.0 } else { -0.003 },
-                post_saturation: if settings.track_grade { 1.0 } else { 0.9 },
+                post_saturation: settings.post_saturation_override.unwrap_or(if settings.track_grade { 1.0 } else { 0.9 }),
                 ..default()
             },
             ..default()
