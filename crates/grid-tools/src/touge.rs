@@ -363,6 +363,9 @@ pub fn run_pro_touge(
                     drivers[i].controls(&data[i], &view, &[others[1 - i]], DELTA)
                 })
                 .collect();
+            for (car, driver) in multi.cars.iter_mut().zip(drivers.iter()) {
+                car.set_ai_packet(driver.reverse_request());
+            }
             multi.tick(&controls)?;
             for &i in multi.newly_retired() {
                 standings.retire(i, crate::race::Out::Wrecked);

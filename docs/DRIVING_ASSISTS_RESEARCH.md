@@ -65,8 +65,8 @@ with every aid on [D].
 | 0 | 1 | 0 | 0 | none found |
 | 1 | 0 | 0 | 0 | none found (manual clutch) |
 | 2 | 0 | 1 | 0 | Manual option |
-| 3 | 1 | 1 | 0 | none found |
-| 4 | 1 | 1 | 1 | Automatic option, all AI cars, race restart (5C63C0/5F8940/60DB40/A0A370) |
+| 3 | 1 | 1 | 0 | every AI packet: 0x794436 writes +0x24 = 3 each tick [V static, 2026-10-20, AI_AVOID_RECOVERY_RESEARCH §5] |
+| 4 | 1 | 1 | 1 | Automatic option, AI packet reset value (0x7EF820), race restart (5C63C0/5F8940/60DB40/A0A370) |
 
 ### 2.3 Gear controls
 

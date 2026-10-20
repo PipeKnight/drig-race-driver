@@ -72,6 +72,9 @@ pub struct Runtime {
     pub assists: assists::Assists,
     /// Pending one-tick gear request and the tick it belongs to.
     shift: Option<(u64, assists::Shift)>,
+    /// Pending one-tick AI control packet (the reverse byte +0x1E) and the
+    /// tick it belongs to.
+    ai_packet: Option<(u64, bool)>,
     /// Opt-in breakable route props (`enable_dynamic_props`).
     props: Option<crate::dynamic_props::PropWorld>,
     /// `collision_main` bounds of the car's `.ned` (description extents).
@@ -498,6 +501,7 @@ impl Runtime {
             car: model.clone(),
             assists: assists::Assists::default(),
             shift: None,
+            ai_packet: None,
             props: None,
             hull: shape.bounds,
             loose_parts,
@@ -1048,6 +1052,7 @@ impl Runtime {
         self.lap = self.initial_lap.clone();
         self.lap_events.clear();
         self.shift = None;
+        self.ai_packet = None;
         // The external geometry may still carry damage. Reconstruct it at the
         // next job publication before any advanced-pose contact query.
         if self.deformation_enabled {
@@ -1201,6 +1206,7 @@ impl Runtime {
         car.owner.physical = placement.physical;
         self.cache = placement.cache;
         self.shift = None;
+        self.ai_packet = None;
     }
 
     /// Solved contact notifications of the last successful solo tick

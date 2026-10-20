@@ -1013,6 +1013,11 @@ impl Session {
                     driver.controls(&race.car_ai[i], &view, &others, DELTA)
                 });
             }
+            if !held {
+                for (car, driver) in race.multi.cars[1..].iter_mut().zip(&race.drivers) {
+                    car.set_ai_packet(driver.reverse_request());
+                }
+            }
             std::mem::swap(&mut self.runtime, &mut race.multi.cars[0]);
             let result = race.multi.tick(&all);
             std::mem::swap(&mut self.runtime, &mut race.multi.cars[0]);

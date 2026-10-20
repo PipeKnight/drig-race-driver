@@ -17,8 +17,7 @@
 //! throttle (0x77A630) and brake (0x77A1E0) consume the request's follow
 //! fields. AUTHORED where not recovered: the path-obstacle scan is a straight
 //! corridor along the own heading, the alongside yield and far-side squeeze
-//! are omitted, cars on both sides hold the planned offset, and a stuck car
-//! reverses briefly (the recovery behaviour is not recovered).
+//! are omitted and cars on both sides hold the planned offset.
 //!
 //! The race manager (`crate::ai_pacing`) sets the corner-speed scale A and
 //! floor B, the let-pass flag, failures and engine damage, and arms
@@ -962,11 +961,6 @@ const AVOID_FOLLOW_DISTANCE: f32 = 3.;
 const BRAKE_LINE_CANCEL_FACTOR: f32 = 0.8;
 const SLOW_SPEED: f32 = 3.;
 const MINIMUM_MOVING_SPEED: f32 = 1.;
-/// The assisted automatic gearbox selects reverse below this vehicle speed
-/// (+0x1648 < 3) when the brake exceeds the throttle by this margin
-/// (0x3D4CCCCD, `vehicle_controls`); AUTHORED pedal boundary only.
-const REVERSE_SELECT_SPEED: f32 = 3.;
-const REVERSE_SELECT_MARGIN: f32 = 0.05;
 const SLIDE_LIFT_MIN_SPEED: f32 = 5.;
 /// Grip input for the speed->distance tables. The AI car-view grip (+0x144)
 /// is not yet traced; the lowest shipped grip is used.
@@ -1823,9 +1817,6 @@ pub struct View {
     /// Last tick's obstruction contact sum (collided_obstruction test);
     /// zero when no contact feed exists.
     pub obstruction: [f32; 3],
-    /// The car's gearbox is in reverse (selects the pedal mapping of the
-    /// AUTHORED reverse boundary).
-    pub reverse_gear: bool,
     /// The car's AI traffic extents (own car state +0x110/+0x114).
     pub extents: Extents,
     /// Per wheel: rolling speed (wheel +0xE0 × +0x104) and the driven flag
@@ -1854,7 +1845,6 @@ impl View {
             maximum_steering_angle: car.maximum_steering_angle(),
             wheels,
             obstruction,
-            reverse_gear: car.reverse_gear(),
             extents: car.ai_extents(),
             wheel_speeds: car.wheel_rolling_speeds(),
             driven: car.driven_wheels(),
@@ -1979,6 +1969,8 @@ pub struct AiDriver {
     /// Request grip multipliers of the last update (read by the grip
     /// application 0x408710).
     grip: [f32; 4],
+    /// Packet reverse byte +0x1E of the last update.
+    reverse: bool,
     /// Race place, set before each update (drift events).
     pub race: RaceView,
     drift: DriftState,
@@ -2110,6 +2102,7 @@ impl AiDriver {
             mistake: Mistake::default(),
             failure: Failure::default(),
             grip,
+            reverse: false,
             race: RaceView::default(),
             drift: DriftState::default(),
             on_drift_line: false,
@@ -3569,36 +3562,13 @@ impl AiDriver {
         // Packet handbrake byte +0x1C (0x77A110): request +0xB3, or a forced
         // brake below minimumMovingSpeed. +0xB3 is set only by race_start's
         // launch delay, which is not ported (0 with the shipped data).
-        let mut handbrake = request.force_brake && speed < MINIMUM_MOVING_SPEED;
-        // AUTHORED reverse boundary: the car-side consumer of the reverse
-        // byte is not traced (§5, §7.3). The assisted automatic gearbox
-        // selects reverse when the brake pedal is held near rest and then
-        // swaps the pedal roles, so the request is mapped onto the pedal that
-        // drives the wanted direction in the current gear. Without a reverse
-        // request no pedal may select reverse: in a forward gear below the
-        // gearbox's brake-to-reverse speed, a brake that would select it is
-        // published as the handbrake (otherwise first and reverse alternate
-        // every tick while rolling back or held against a wall).
-        let (throttle, brake) = match (view.reverse_gear, reverse) {
-            (_, false) if handbrake => (self.throttle, 0.),
-            (false, false)
-                if speed < REVERSE_SELECT_SPEED
-                    && self.brake > self.throttle + REVERSE_SELECT_MARGIN =>
-            {
-                handbrake = true;
-                (self.throttle, 0.)
-            }
-            (false, false) => (self.throttle, self.brake),
-            (false, true) => (0., self.throttle.max(self.brake)),
-            (true, true) => (self.brake, self.throttle),
-            // In reverse gear the throttle pedal brakes a backward roll; at rest
-            // a pure brake request must not select forward drive.
-            (true, false) if moving_back => (self.throttle.max(self.brake), 0.),
-            (true, false) => (self.throttle, 0.),
-        };
+        let handbrake = request.force_brake && speed < MINIMUM_MOVING_SPEED;
+        // The car's input stage FUN_00828670 takes the pedals as they are and
+        // turns the reverse byte into the gear request (set_ai_packet).
+        self.reverse = reverse;
         Controls {
-            throttle,
-            brake,
+            throttle: self.throttle,
+            brake: self.brake,
             steering: self.steering,
             handbrake,
         }
@@ -3667,6 +3637,11 @@ impl AiDriver {
     /// Request grip multipliers of the last update, rear L/R, front L/R.
     pub fn request_grip(&self) -> [f32; 4] {
         self.grip
+    }
+    /// The packet's reverse byte +0x1E of the last update, for
+    /// [`crate::source_vehicle::Runtime::set_ai_packet`].
+    pub fn reverse_request(&self) -> bool {
+        self.reverse
     }
     /// The failure/damage retire drive has stopped the car (retire drive
     /// 0x79C6E0 below rtStoppedSpeed: removal request req+0x38 [I]).

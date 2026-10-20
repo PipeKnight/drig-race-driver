@@ -630,6 +630,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Driver::Pursuit(p) => p.controls(car.pose(), car.velocity()),
             });
         }
+        for (car, driver) in multi.cars.iter_mut().zip(&drivers) {
+            if let Driver::Ai(ai) = driver {
+                car.set_ai_packet(ai.reverse_request());
+            }
+        }
         controls[0].throttle *= slow;
         if let Some(pursuit) = &mut prop_target {
             let broken_at = multi

@@ -769,10 +769,15 @@ fn a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress() {
         let d = app.world().resource::<Driving>();
         let s = &d.opponents.as_ref().unwrap().standings;
         assert!(s.over());
-        // Every car still racing is classified with the limit as its time.
+        // Every car still racing is classified with the limit as its time; a
+        // car may be out (an AI recovery can wreck it within the limit).
+        let out = |car| matches!(s.status(car), grid_tools::race::Status::Out(_));
         for car in 0..=OPPONENTS {
-            assert_eq!(s.finished(car), Some(LIMIT), "car {car} {:?}", s.status(car));
+            if !out(car) {
+                assert_eq!(s.finished(car), Some(LIMIT), "car {car} {:?}", s.status(car));
+            }
         }
+        assert!((0..=OPPONENTS).any(|car| !out(car)));
         // 40 s of a 40 s limit is the whole day: back to 15:00.
         let event = app.world().resource::<LeMansEvent>();
         assert_eq!(grid_tools::time_of_day::clock_text(event.time_of_day), "15:00:00");
@@ -782,7 +787,11 @@ fn a_time_limited_le_mans_race_ends_at_the_limit_and_ranks_by_progress() {
         let mut last = f64::INFINITY;
         for (i, r) in rows.iter().enumerate() {
             assert_eq!(r.position, i + 1);
-            assert_eq!(r.time, Cell::Total(grid_tools::time_of_day::DAY_SECONDS));
+            if out(r.car) {
+                assert!(matches!(r.time, Cell::Out(..)), "{r:?}");
+            } else {
+                assert_eq!(r.time, Cell::Total(grid_tools::time_of_day::DAY_SECONDS));
+            }
             let progress = s.progress(r.car);
             assert!(progress <= last);
             last = progress;

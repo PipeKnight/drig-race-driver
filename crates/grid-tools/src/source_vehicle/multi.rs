@@ -2048,6 +2048,7 @@ mod tests {
                         multi.cars[0].set_ai_grip(driver.request_grip());
                         let view = View::of(&multi.cars[0], multi.obstruction(0));
                         let c = driver.controls(&data, &view, &[], DELTA);
+                        multi.cars[0].set_ai_packet(driver.reverse_request());
                         multi.tick(&[c]).unwrap();
                         standings.update(&data.line, &at(&multi), 0., &[]);
                         let contacts: Vec<_> = multi
@@ -2170,6 +2171,9 @@ mod tests {
                             drivers[i].controls(&data, &view, &seen, DELTA)
                         })
                         .collect();
+                    for (car, d) in multi.cars.iter_mut().zip(drivers.iter()) {
+                        car.set_ai_packet(d.reverse_request());
+                    }
                     if tick == 1 {
                         controls[5].throttle = f32::NAN;
                     }
@@ -2278,6 +2282,9 @@ mod tests {
                             drivers[i].controls(&data, &view, &seen, DELTA)
                         })
                         .collect();
+                    for (car, d) in multi.cars.iter_mut().zip(drivers.iter()) {
+                        car.set_ai_packet(d.reverse_request());
+                    }
                     // Car 5 fails in its vehicle stage and is held on the grid.
                     if tick == 1 {
                         controls[5].throttle = f32::NAN;

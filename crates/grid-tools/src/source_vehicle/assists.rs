@@ -411,6 +411,12 @@ impl Runtime {
         Ok(())
     }
 
+    /// AI control packet for the next tick: the reverse byte +0x1E that the
+    /// AI publishes with gearbox mode 3 (docs/AI_AVOID_RECOVERY_RESEARCH.md §5).
+    pub fn set_ai_packet(&mut self, reverse: bool) {
+        self.ai_packet = Some((self.ticks, reverse));
+    }
+
     /// Current gear: 0 neutral, 1..8 forward, 9 reverse (vehicle +196C).
     pub fn gear(&self) -> u32 {
         self.state.car.owner.vehicle[0x196c / 4]
@@ -426,6 +432,19 @@ impl Runtime {
             .shift
             .filter(|(tick, _)| *tick == self.ticks)
             .map(|s| s.1);
+        let ai = self
+            .ai_packet
+            .filter(|(tick, _)| *tick == self.ticks)
+            .map(|p| p.1);
+        // FUN_00828670 passes the packet's gearbox mode (+0x24) to
+        // FUN_0098F110 every frame: 3 from the AI (0x794310), the player's
+        // option otherwise.
+        let mode = if ai.is_some() {
+            3
+        } else {
+            self.assists.gearbox_mode()
+        };
+        let [automatic, clutch, reverse] = gearbox_bytes(mode);
         for b in [
             &mut staged.owner.vehicle[..],
             &mut staged.frame.body[..],
@@ -436,6 +455,17 @@ impl Runtime {
                 Some(Shift::Gear(g)) => i32::from(g) as u32,
                 _ => 0,
             };
+            // The reverse byte selects reverse (0x98E190 refuses it while
+            // +21F2 is set); without it an AI packet takes a car in reverse
+            // or neutral back to first gear (0x8289EB).
+            match ai {
+                Some(true) if (b[0x21f0 / 4] >> 16) & 255 == 0 => b[0x196c / 4] = 9,
+                Some(false) if matches!(b[0x196c / 4], 0 | 9) => b[0x196c / 4] = 1,
+                _ => {}
+            }
+            byte(b, 0x1970, automatic);
+            byte(b, 0x1971, clutch);
+            byte(b, 0x1972, reverse);
         }
         match self.assists.input {
             Input::Keyboard => steering,
@@ -606,6 +636,62 @@ mod tests {
     fn speed(r: &Runtime) -> f32 {
         let v = r.velocity();
         (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
+    }
+
+    #[test]
+    #[ignore = "requires purchased GRID sources"]
+    fn source_ai_packet_reverse() {
+        use crate::source_vehicle::Controls;
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = std::path::Path::new(&root);
+                let at = |r: &Runtime| {
+                    let p = r.pose();
+                    [p[12], p[13], p[14]]
+                };
+                let mut forward = Runtime::lacetti(root, "slot_00", 200679).unwrap();
+                let mut r = forward.clone();
+                let start = at(&r);
+                let pedal = |throttle, brake| Controls {
+                    throttle,
+                    brake,
+                    ..Default::default()
+                };
+                // Mode 3: braking at rest never selects reverse.
+                for _ in 0..60 {
+                    r.set_ai_packet(false);
+                    r.tick(pedal(0., 1.)).unwrap();
+                    assert_eq!(r.gear(), 1);
+                }
+                assert_eq!(r.state.car.owner.vehicle[0x1970 / 4] & 0xff_ffff, 0x0101);
+                // The reverse byte selects reverse; the throttle drives backwards.
+                for _ in 0..120 {
+                    r.set_ai_packet(true);
+                    r.tick(pedal(0.5, 0.)).unwrap();
+                    assert_eq!(r.gear(), 9);
+                }
+                for _ in 0..180 {
+                    forward.tick(pedal(0.5, 0.)).unwrap();
+                }
+                let d = |p: [f32; 3]| [p[0] - start[0], p[1] - start[1], p[2] - start[2]];
+                let (back, ahead) = (d(at(&r)), d(at(&forward)));
+                assert!(
+                    back[0] * ahead[0] + back[2] * ahead[2] < -1.,
+                    "{back:?} {ahead:?}"
+                );
+                // Clearing the byte returns to first gear; without a packet
+                // the human gearbox mode (4 by default) is back.
+                r.set_ai_packet(false);
+                r.tick(pedal(0., 1.)).unwrap();
+                assert_eq!(r.gear(), 1);
+                r.tick(pedal(0., 0.)).unwrap();
+                assert_eq!(r.state.car.owner.vehicle[0x1970 / 4] & 0xff_ffff, 0x01_0101);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]

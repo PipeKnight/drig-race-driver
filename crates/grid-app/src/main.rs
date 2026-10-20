@@ -3798,12 +3798,14 @@ fn drive_tick(
             cars: opponents.standings.len() as u32,
             progress: opponents.standings.laps_covered(0) as f32,
         };
-        Some(pilot.controls(
+        let controls = pilot.controls(
             &opponents.ai,
             &view,
             &others,
             grid_tools::source_vehicle::DELTA,
-        ))
+        );
+        driving.runtime.set_ai_packet(pilot.reverse_request());
+        Some(controls)
     } else {
         None
     };
@@ -3949,6 +3951,11 @@ fn drive_tick(
                     grid_tools::source_vehicle::DELTA,
                 )
             });
+        }
+        if !held {
+            for (car, driver) in opponents.multi.cars[1..].iter_mut().zip(&opponents.drivers) {
+                car.set_ai_packet(driver.reverse_request());
+            }
         }
         drop(ai_timer);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
