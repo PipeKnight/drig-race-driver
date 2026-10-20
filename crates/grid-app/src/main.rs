@@ -56,6 +56,8 @@ mod mesh_stream;
 mod motion_capture;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
+mod temporal_colour;
+#[cfg(feature = "dlaa")]
 mod thin_motion;
 #[cfg(feature = "dlaa")]
 mod native_dlaa;
@@ -1390,6 +1392,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut capture_orbit_rate = None;
     let mut motion_sequence = None;
     let mut temporal_audit_tick = None;
+    let mut temporal_colour_tick = None;
     let mut texture_override_path = None;
     let mut surface_rgb_override = None;
     let mut surface_specular_explicit = false;
@@ -1617,6 +1620,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 texture_override_path = Some(PathBuf::from(
                     args.next().ok_or("missing private texture manifest")?,
                 ))
+            }
+            "--temporal-colour-audit" => {
+                let tick: u64 = args.next().ok_or("--temporal-colour-audit needs a positive tick")?.parse()?;
+                if !(1..=1_000_000).contains(&tick) { return Err("temporal colour tick must be 1..1000000".into()); }
+                temporal_colour_tick = Some(tick);
             }
             "--temporal-audit" => {
                 let tick: u64 = args.next().ok_or("--temporal-audit needs a positive tick")?.parse()?;
@@ -1953,6 +1961,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
+                println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
@@ -2781,6 +2790,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let path = output.as_ref().unwrap();
         Some(path.with_file_name(format!("{}-temporal", path.file_stem().ok_or("audit output stem absent")?.to_string_lossy())))
     } else { None };
+    let temporal_colour_directory = if let Some(tick) = temporal_colour_tick {
+        if !cfg!(feature = "dlaa") || graphics.anti_aliasing != 3 || !drive || !graphics.enhanced() || output.is_none() || render_fps.is_none() || collision
+            || drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))
+            || settings::diagnostics().replay_capture.is_some() || settings::diagnostics().flashback_capture.is_some()
+        { return Err("temporal colour audit needs enhanced native DLAA live --drive, --render-fps, --render and eight ticks of headroom".into()); }
+        let path=output.as_ref().unwrap();
+        Some(path.with_file_name(format!("{}-colour",path.file_stem().ok_or("colour output stem absent")?.to_string_lossy())))
+    } else {None};
+    #[cfg(not(feature = "dlaa"))]
+    let _ = temporal_colour_directory;
     let mut app = App::new();
     app.insert_resource(start_sequence.clone());
     if let Some(keys) = texture_override_keys { app.insert_resource(texture_overrides::Active(keys)); }
@@ -2913,6 +2932,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     native_dlaa::install(&mut app);
     if let (Some(tick), Some(directory)) = (temporal_audit_tick, temporal_audit_directory) {
         temporal_audit::install(&mut app, tick, &directory)?;
+    }
+    #[cfg(feature = "dlaa")]
+    if let (Some(tick), Some(directory)) = (temporal_colour_tick, temporal_colour_directory) {
+        temporal_colour::install(&mut app, tick, &directory)?;
     }
     if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
@@ -3780,6 +3803,7 @@ fn capture(
     motion: Option<Res<motion_capture::Motion>>,
     temporal: Option<Res<temporal_audit::Audit>>,
     #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
+    #[cfg(feature = "dlaa")] colour: Option<Res<temporal_colour::Audit>>,
     replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
@@ -3819,6 +3843,12 @@ fn capture(
     if native.as_ref().is_some_and(|state| !state.ready()) {
         return;
     }
+    #[cfg(feature = "dlaa")]
+    if colour.as_ref().is_some_and(|audit| audit.failed()) { exit.write(AppExit::error()); return; }
+    #[cfg(feature = "dlaa")]
+    let colour_ready = colour.as_ref().is_none_or(|audit| audit.ready());
+    #[cfg(not(feature = "dlaa"))]
+    let colour_ready = true;
     if temporal.as_ref().is_some_and(|audit| audit.failed()) {
         exit.write(AppExit::error());
         return;
@@ -3851,7 +3881,7 @@ fn capture(
         return;
     }
     if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
-        && temporal.as_ref().is_none_or(|audit| audit.ready())
+        && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
     {
         capture.requested = true;
         let path = capture.path.clone();
