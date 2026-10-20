@@ -147,6 +147,16 @@ Mounted binder 0x7F4BE0: yaw +0x118, pitch +0x11C, roll +0x120, finalMovementSca
 
 The bumper has all movement parameters zero, so it is rigid in the original too.
 
+**Shake 0x815960** [D, E; V on the bonnet, F508]. The last call of 0x822510 (0x822EDF), after orientation, eye and FOV, for every Mounted view each frame (worktree camera-dynamics `local/cam/shake/`: `shake-findings.md`, `shake_emu.py`, `validate.py`):
+- Gate: nothing if shakeAngle, shakeScaleX and shakeScaleY are all 0 (the bumper, the reverses).
+- s = car +0x1648 (signed, m/s) clamped to shakeMinSpeed..shakeMaxSpeed; record +0x94 = shakeDamping; the amplitude +0x98 = max(+0x98, (s − min)/(max − min)); the shake time +0x90 += dt; +0x98 −= shakeDamping · +0x98 · dt, zeroed below 1e-4 (0xCFDD14).
+- With M the record's rows (right, up, forward): if shakeAngle ≠ 0 the rows are pitched by shakeAngle · 0.0174533 · n(0, shakeRotationSpeed) about the view's right axis (positive looks down); if a scale ≠ 0 the eye moves by right · n(0, 1) · shakeScaleX + up · n(0.1, 1) · shakeScaleY.
+- Noise n(a, b) (0x7FE510): u = 300 · |(t + a) · b| (0xCAFBE0); the 6000-entry table at 0xE7B230 linearly interpolated at u (wrapping: a 20 s period, with a jump of 0.344 at the wrap); n = clamp(amplitude · (2v − 1), ±1). The table is filled once by the static initializer 0x7F2B40: T[i] = 0.25 · [(½ sin((x + 0.12) · 42.56) + ½) + (½ cos(7.81 x) + ½) + (½ sin(2.53 x) + ½) + (½ cos(x − 1.54) + ½)], x = i · 0.0033333334, with the f32 constants in x87 precision. **No random source**: the shake is a function of the shake time and amplitude.
+- The view's reset (slot 6, 0x82C3C0) and activation (slot 10, 0x82C460) zero the shake time and amplitude.
+- Shipped: the bonnet of both cars has angle 0, damping 0.1798, min 20.8641, max 90, scaleX 0.0001, scaleY 0.0024, rotationSpeed 0.0022 (cameras.xml stores the values as 4-decimal text). So the bonnet eye bobs vertically by up to 2.4 mm · amplitude (1.2 mm at 55 m/s), sideways by up to 0.1 mm.
+- Live [V] (run C, bonnet record): +0x94 = 0.1798 in every row; the amplitude follows the model (median error 3e-8 while rising); above 40 m/s the bonnet's vertical eye residual against the unshaken port drops from 0.351 to 0.051 mm rms once the modelled shake is subtracted (correlation +0.989, 648 rows). The 4.7 mm rms forward residual is not shake (open).
+- The chase's 0x810490 is the same algorithm on its own words (object +0x244..+0x25C, record +0x60..+0x68) but without the all-zero gate and always with its angle path: chase_close's shakeAngle 0.1 with shakeRotationSpeed 0 gives a constant pitch of amplitude · (2 · T[0] − 1) · 0.1° ≤ 0.0027°. Not ported (negligible).
+
 ### Head [D, emulated, live-checked, F472]
 
 Vtable 0xD00140; slot 11 0x842DD0 jumps to the update 0x820D10, slot 6 0x843E30 to the reset 0x82C0E0. Tags: [D] read in the disassembly, [E] reproduced by running the original function in Unicorn 2.1.4 frame by frame, [V] matches run C of the live comparison. Evidence: worktree camera-dynamics `local/cam/head/` (`head-findings.md`, `head_emu.py`, `head_model.py`, `results.txt`).
@@ -226,7 +236,7 @@ Look (F499): Look Left/Right (Delete/PageDown, pad right stick X) and Look Up/Do
 | view | port |
 |---|---|
 | Chase (close, far, reverses) | The pipeline of section 2 (F461): suspension heave of the target, speed fall-back and gear drop-back of the eye, yaw lag about the car's Y, the car frame with the spin hold, follow height with the 5 m/s latch, look at the target on the car, roll with the yaw rate. FOV from the file. Free look (AUTHORED, F305) still orbits the eye about the target in the car frame. The drift blend weight is 0 (source unknown) and the gear term gets no shift time (car +0x2E4 is not kept), which is exact while gearUpDropBack is 0. |
-| Mounted (bumper, bonnet, reverses) | Offset and acceleration shift as above, on the body pose. Rotation = body · twist · yaw · (face +Z) · pitch down · roll, with the twist frame of 0x803270 (F461; rows normalised, AUTHORED). FOV and near from the file. |
+| Mounted (bumper, bonnet, reverses) | Offset and acceleration shift as above, on the body pose. Rotation = body · twist · yaw · (face +Z) · pitch down · roll, with the twist frame of 0x803270 (F461; rows normalised, AUTHORED). FOV and near from the file. The shake of 0x815960 last (F508: the bonnet's speed-gated bob), its amplitude and time stepped once per physics tick [AUTHORED, as the look]. |
 | Head (head-cam) | The head-cam of section 2 (F472): seat velocity v + ω × r into the body spring (eye offset) and the head spring (view turn), the eye at position + bodyLength + body offset on the model frame, the view turned by the head offset and pitched by the tilt (negative looks down, emulated). FOV and near from the file, the spring parameters from the file over the constructor defaults. Not ported: look, buffeting, crash timer, TrackIR, transitions (all inactive in a race). |
 
 Camera time is simulation time: committed ticks × 0.016 s between frames. So pause holds the camera still, and scripted renders stay reproducible. The filter history resets on R (segment change), when ticks go backwards and on every view change.
@@ -249,7 +259,7 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
 - The yaw lag integrates the heading change per sample instead of dt · ω_y. The result is the same up to the frame's rotation axis.
 - The chase roll is applied as a world up vector rolled about the view direction, so its on-screen direction follows whatever mirroring the port's projection has relative to the original's left-handed one [I].
 - Not ported:
-  - shake (0x810490; shakeScaleX/Y are 0 in the in-race chase views);
+  - the chase shake (0x810490; its scales are 0 in the in-race chase views, its angle path a constant ≤ 0.0027° pitch);
   - the drift blend weight (source not identified; 0 in races [I]);
   - the gear drop-back input car +0x2E4 (exact while gearUpDropBack is 0, as in every in-race view);
   - the second impact envelope (its vector +0x1D0 is always 0);
@@ -287,6 +297,7 @@ Both cars: each car's own file gives its mount points (section 1). If the file c
 - bonnet braking shift within the limit;
 - head seat position (raised by bodyLength) and rest while cruising;
 - F472 head-cam: one spring step under braking (acceleration −15.18572, velocity 0.0050972, offset 8.15545e-5 m; nothing below damping/inertia; the car frame turned π/2; a too-short step), the ellipsoid limit (0.063 sideways with the outward velocity removed, 0.105 up, the head's y kept at 0), the view turned by the head offset (forward 0.1 rad looks down by 0.1 rad, right rolls the right axis down) and the eye moved by the body offset, braking lean and settling, one or two ticks per shot giving the same springs; `replay_live_trace` also writes the head-cam with the original's per-frame step;
+- F508 shake: the noise table against the emulated initializer (four entries; the ignored `shake_table_equals_the_emulated_table` compares all 6000 bit for bit with GRID_SHAKE_TABLE), the bonnet amplitude (0.49896473 after one step at 55.46 m/s, decay at 0.1798/s, zero below 1e-4, no state when all-zero), the noise (0.05897939 up, 0.075486794 side) and the eye moved along the view's up and right, the angle pitching down;
 - F499 look input: the chase look point against the emulated sequence (eases in at rest, snaps at speed, rests without input), the chase turn about the car, the bonnet turn and lift (B0 0.2, 0.36; lift 0.018) and the bumper's turn without it, the head's smoothing (0.2, 0.36 … 0.9885, release 0.6326, 0.4049), its curve and its 180°/s approach to 40° and 12°;
 - bit-identical repeat runs;
 - reset clears the history.

@@ -97,6 +97,13 @@ const CHASE_LOOK_SNAP: f32 = f32::from_bits(0x404c_cccd);
 const CHASE_LOOK_AHEAD: f32 = f32::from_bits(0x3dcc_cccd);
 const CHASE_LOOK_PI: f32 = f32::from_bits(0x4049_0fd8);
 const CHASE_LOOK_TAU: f32 = f32::from_bits(0x40c9_0fdb);
+/// Camera shake noise (0x7FE510): a 6000-entry table (0xE7B230) read at 300
+/// entries per second of shake time (0xCAFBE0), its vertical channel 0.1 s
+/// ahead; amplitudes below 0xCFDD14 stop.
+const SHAKE_TABLE: usize = 6000;
+const SHAKE_RATE: f32 = 300.;
+const SHAKE_LEAD: f32 = f32::from_bits(0x3dcc_cccd);
+const SHAKE_MIN_AMPLITUDE: f32 = 1e-4;
 /// Default view of the original profile (0x5F1100: `current_camera`).
 pub const DEFAULT_VIEW: &str = "chase_close";
 
@@ -153,6 +160,22 @@ pub struct Mounted {
     pub tilt_distance: f32,
     /// What the look input does (Mounted slot 7, 0x840A30, by ident).
     pub look: MountedLook,
+    /// shake* parameters (binder 0x7F4BE0, object +0x134..+0x14C).
+    pub shake: Shake,
+}
+
+/// A view's shake (0x815960): shakeAngle (degrees), shakeDamping (per
+/// second), shakeMinSpeed/MaxSpeed (m/s), shakeScaleX/Y (m) and
+/// shakeRotationSpeed (the angle channel's time scale).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Shake {
+    pub angle: f32,
+    pub damping: f32,
+    pub min_speed: f32,
+    pub max_speed: f32,
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub rotation_speed: f32,
 }
 
 /// The Mounted views that take the look input: only the idents `bumper`
@@ -269,6 +292,19 @@ impl Views {
                     axis_scale_for_tilt: vec("axisScaleForTilt")?,
                     twist_scale: vec("twistScale")?,
                     tilt_distance: s("tiltDistance")?,
+                    // Absent shake parameters leave the shake off [AUTHORED].
+                    shake: {
+                        let o = |n: &str| v.scalar(n).unwrap_or(0.);
+                        Shake {
+                            angle: o("shakeAngle"),
+                            damping: o("shakeDamping"),
+                            min_speed: o("shakeMinSpeed"),
+                            max_speed: o("shakeMaxSpeed"),
+                            scale_x: o("shakeScaleX"),
+                            scale_y: o("shakeScaleY"),
+                            rotation_speed: o("shakeRotationSpeed"),
+                        }
+                    },
                     look: match v.ident.as_str() {
                         "bumper" => MountedLook::Turn,
                         "bonnet" => MountedLook::TurnAndLift,
@@ -556,6 +592,9 @@ pub struct MountedState {
     pub tilt: Vec3,
     /// Look turn, radians (record +0xB0).
     pub look: f32,
+    /// Shake time and amplitude (record +0x90, +0x98).
+    pub shake_time: f32,
+    pub shake_amplitude: f32,
     velocity: Option<Vec3>,
 }
 
@@ -1047,6 +1086,85 @@ fn chase_look_turn(shot: &mut Shot, point: Vec2, origin: Vec3) {
     shot.eye = origin + turn * (shot.eye - origin);
 }
 
+/// The shake noise table (0xE7B230), filled by the static initializer
+/// 0x7F2B40: T[i] = 0.25 · Σ (0.5 · w + 0.5) over w = sin((x + 0.12) ·
+/// 42.56), cos(7.81 x), sin(2.53 x), cos(x − 1.54), x = i · 0.0033333334,
+/// in x87 precision with the f32 constants (0xCB22BC, 0xCFE6E8..0xCFE6F8,
+/// 0xCB01AC, 0xCAF88C); f64 with the constants widened reproduces all 6000
+/// entries of the emulated original.
+fn shake_table() -> &'static [f32; SHAKE_TABLE] {
+    static TABLE: std::sync::OnceLock<[f32; SHAKE_TABLE]> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let c = |v: f32| f64::from(v);
+        std::array::from_fn(|i| {
+            let x = i as f64 * c(0.003_333_333_4);
+            let wave = |w: f64| 0.5 * w + 0.5;
+            (c(0.25)
+                * (wave(((x + c(0.12)) * c(42.56)).sin())
+                    + wave((x * c(7.81)).cos())
+                    + wave((x * c(2.53)).sin())
+                    + wave((x - c(1.54)).cos()))) as f32
+        })
+    })
+}
+
+/// Shake noise n(lead, scale) at shake time `time` (0x7FE510): the table read
+/// at 300 · |(time + lead) · scale|, linearly interpolated and wrapping every
+/// 20 s, as amplitude · (2 v − 1) limited to ±1.
+pub fn shake_noise(time: f32, lead: f32, scale: f32, amplitude: f32) -> f32 {
+    let table = shake_table();
+    let u = ((time + lead) * scale).abs() * SHAKE_RATE;
+    let i = u as usize;
+    let (i0, i1) = (i % SHAKE_TABLE, (i % SHAKE_TABLE + 1) % SHAKE_TABLE);
+    let f = u - i as f32;
+    let v = ((table[i1] - table[i0]) * f + table[i0]) * 2. - 1.;
+    (v * amplitude).clamp(-1., 1.)
+}
+
+/// One shake update (0x815960; emulated, live-checked on the bonnet): the
+/// amplitude jumps up to the speed ramp between shakeMinSpeed and
+/// shakeMaxSpeed of the signed car speed (m/s), the shake time advances and
+/// the amplitude decays at shakeDamping per second. All-zero shakes do
+/// nothing.
+pub fn shake_step(k: &Shake, h: &mut MountedState, speed: f32, dt: f32) {
+    if k.angle == 0. && k.scale_x == 0. && k.scale_y == 0. {
+        return;
+    }
+    let speed = speed.min(k.max_speed).max(k.min_speed);
+    let ramp = (speed - k.min_speed) / (k.max_speed - k.min_speed);
+    if ramp > h.shake_amplitude {
+        h.shake_amplitude = ramp;
+    }
+    h.shake_time += dt;
+    h.shake_amplitude -= k.damping * h.shake_amplitude * dt;
+    if h.shake_amplitude.abs() < SHAKE_MIN_AMPLITUDE {
+        h.shake_amplitude = 0.;
+    }
+}
+
+/// The shake applied to a framed view (end of 0x815960): a pitch of
+/// shakeAngle · n(0, rotationSpeed) degrees about the view's right axis
+/// (positive looks down), and the eye moved along the view's right by
+/// n(0, 1) · shakeScaleX and its up by n(0.1, 1) · shakeScaleY.
+fn shake_shot(k: &Shake, h: &MountedState, shot: &mut Shot) {
+    if k.angle == 0. && k.scale_x == 0. && k.scale_y == 0. {
+        return;
+    }
+    // The original's rows: right is the view's +X of the game frame, the
+    // camera's −X here (facing_forward).
+    let right = shot.rotation * Vec3::NEG_X;
+    let up = shot.rotation * Vec3::Y;
+    if k.angle != 0. {
+        let pitch = k.angle * DEGREES * shake_noise(h.shake_time, 0., k.rotation_speed, h.shake_amplitude);
+        shot.rotation *= Quat::from_rotation_x(-pitch);
+    }
+    if k.scale_x != 0. || k.scale_y != 0. {
+        let vertical = shake_noise(h.shake_time, SHAKE_LEAD, 1., h.shake_amplitude);
+        let side = shake_noise(h.shake_time, 0., 1., h.shake_amplitude);
+        shot.eye += right * (side * k.scale_x) + up * (vertical * k.scale_y);
+    }
+}
+
 /// The Mounted view's twist frame (0x803270, any twistScale component non-zero;
 /// emulated): the up axis leans to L = (T.x · tw.x, T.y · tw.y + tiltDistance,
 /// T.z · tw.z) of the tilt state T, whose x is replaced by
@@ -1270,12 +1388,18 @@ pub fn shot(
                 * facing_forward()
                 * Quat::from_rotation_x(-m.pitch)
                 * Quat::from_rotation_z(m.roll);
-            Shot {
+            // The shake runs last, once per step (0x822EDF → 0x815960).
+            for _ in 0..steps {
+                shake_step(&m.shake, h, sample.speed, grid_tools::source_vehicle::DELTA);
+            }
+            let mut shot = Shot {
                 eye,
                 rotation: rotation * mounted_twist(m, h, sample) * view,
                 fov: m.fov.to_radians(),
                 near: Some(m.near),
-            }
+            };
+            shake_shot(&m.shake, h, &mut shot);
+            shot
         }
         Rig::Head(c) => head_shot(c, &mut history.head, sample, steps, look),
     }
@@ -1469,6 +1593,7 @@ mod tests {
             twist_scale: Vec3::ZERO,
             tilt_distance: 1.,
             look: MountedLook::Fixed,
+            shake: Shake::default(),
         }
     }
 
@@ -2186,6 +2311,91 @@ mod tests {
         let up = 12f32.to_radians();
         let side = 40f32.to_radians();
         assert!(f.abs_diff_eq(Vec3::new(side.sin() * up.cos(), up.sin(), side.cos() * up.cos()), 1e-5), "{f}");
+    }
+
+    /// The shipped bonnet's shake (cameras.xml stores 4-decimal text).
+    fn bonnet_shake() -> Shake {
+        Shake {
+            angle: 0.,
+            damping: 0.1798,
+            min_speed: 20.8641,
+            max_speed: 90.,
+            scale_x: 0.0001,
+            scale_y: 0.0024,
+            rotation_speed: 0.0022,
+        }
+    }
+
+    #[test]
+    fn shake_table_matches_the_original_initializer() {
+        // Entries of the emulated 0x7F2B40 table (local/cam/shake).
+        let t = shake_table();
+        assert_eq!((t[0], t[34], t[35], t[5999]), (0.5134653, 0.5718816, 0.55590683, 0.8572497));
+    }
+
+    /// Diagnostic: the whole table against the emulated original's
+    /// (GRID_SHAKE_TABLE = local/cam/shake/noise_table_emulated.npy, f32).
+    #[test]
+    #[ignore]
+    fn shake_table_equals_the_emulated_table() {
+        let Ok(path) = std::env::var("GRID_SHAKE_TABLE") else {
+            return;
+        };
+        let bytes = std::fs::read(path).unwrap();
+        let header = 10 + u16::from_le_bytes([bytes[8], bytes[9]]) as usize;
+        let emulated: Vec<f32> = bytes[header..].as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect();
+        assert_eq!(emulated.len(), SHAKE_TABLE);
+        let mismatches = shake_table().iter().zip(&emulated).filter(|(a, b)| a.to_bits() != b.to_bits()).count();
+        assert_eq!(mismatches, 0);
+    }
+
+    #[test]
+    fn bonnet_shake_amplitude_follows_the_speed() {
+        let k = bonnet_shake();
+        // 55.46 m/s: ramp (55.46 − 20.8641) / 69.1359 = 0.5004043, decayed
+        // by 0.1798 · 0.016 in the same step: 0.49896473.
+        let mut h = MountedState::default();
+        shake_step(&k, &mut h, 55.46, 0.016);
+        assert!((h.shake_amplitude - 0.49896473).abs() < 1e-7 && h.shake_time == 0.016, "{h:?}");
+        // Noise 0.116 s into the table (u 34.8): 0.05897939 (up), 0.075486794 (side).
+        assert!((shake_noise(h.shake_time, SHAKE_LEAD, 1., h.shake_amplitude) - 0.05897939).abs() < 1e-6);
+        assert!((shake_noise(h.shake_time, 0., 1., h.shake_amplitude) - 0.075486794).abs() < 1e-6);
+        // Below shakeMinSpeed the amplitude only decays, at 0.1798 per second,
+        // and stops below 1e-4.
+        let before = h.shake_amplitude;
+        shake_step(&k, &mut h, 10., 0.016);
+        assert!((h.shake_amplitude - before * (1. - 0.1798 * 0.016)).abs() < 1e-7);
+        for _ in 0..4000 {
+            shake_step(&k, &mut h, 10., 0.016);
+        }
+        assert_eq!(h.shake_amplitude, 0.);
+        // An all-zero shake (bumper) keeps no state.
+        let mut h = MountedState::default();
+        shake_step(&Shake::default(), &mut h, 55.46, 0.016);
+        assert_eq!((h.shake_time, h.shake_amplitude), (0., 0.));
+    }
+
+    #[test]
+    fn bonnet_shake_moves_the_eye_along_the_view() {
+        let mut m = mounted(Vec3::new(0., 1.1055, 0.8556), 0., 0.);
+        let calm = shot(&Rig::Mounted(m.clone()), &mut History::default(), &sample(Mat4::IDENTITY, Vec3::Z * 55.46, 0), 0.016, Look::default(), |v| v);
+        m.shake = bonnet_shake();
+        let mut history = History::default();
+        let shaken = shot(&Rig::Mounted(m.clone()), &mut history, &sample(Mat4::IDENTITY, Vec3::Z * 55.46, 0), 0.016, Look::default(), |v| v);
+        // Up 0.05897939 · 0.0024 m, right (the view's +X, the car's left)
+        // 0.075486794 · 0.0001 m; the view itself does not turn (angle 0).
+        let up = calm.rotation * Vec3::Y;
+        let right = calm.rotation * Vec3::NEG_X;
+        let expected = calm.eye + up * (0.05897939 * 0.0024) + right * (0.075486794 * 0.0001);
+        assert!(shaken.eye.abs_diff_eq(expected, 1e-7), "{} {}", shaken.eye, expected);
+        assert!(right.abs_diff_eq(Vec3::X, 1e-6));
+        assert_eq!(shaken.rotation, calm.rotation);
+        // A shake angle pitches the view down for a positive noise:
+        // 10° · 0.075486794 (time scale 1).
+        m.shake = Shake { angle: 10., rotation_speed: 1., ..bonnet_shake() };
+        let pitched = shot(&Rig::Mounted(m), &mut History::default(), &sample(Mat4::IDENTITY, Vec3::Z * 55.46, 0), 0.016, Look::default(), |v| v);
+        let drop = forward(&calm).y.asin() - forward(&pitched).y.asin();
+        assert!((drop - (10. * 0.075486794f32).to_radians()).abs() < 1e-5, "{drop}");
     }
 
     #[test]
