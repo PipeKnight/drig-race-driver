@@ -1129,3 +1129,79 @@ throttle, second gear at 0.7 of maximum RPM for 1 s, then third at 0.55, against
 - `local/shift/lacetti-{held,upshift}.wav` (sha256 5b7ad9ca…7704, ff14eac2…0b02).
 
 Not compared with the original.
+
+## 21. Car listener, clunk, backfire and whine wiring (research, F529)
+
+20 October 2026, Claude Code (task 10, rest of §3.3 and input for §3.4). Static only: Ghidra
+(`local/gtfix/decomp/gear4`, `gear5`, `lis1`), Capstone, decoded `audioVarieties` and
+`carsetup.bin` (`local/gear/carsetup.tsv`). GRID was not launched. Nothing ported here.
+
+**Car listener 43F7A0 [O unless marked].** It runs for the player vehicle (manager +0x34D88 → +0x24).
+- Inputs:
+  - the car pose (body +0x1D0) and velocity (body +0x220);
+  - the camera rows and position (written by 412100, one call behind);
+  - the camera displacement per frame (kept only below 8 m, CB0C44, as a teleport guard).
+- With d = camera − car, the published position is car-relative and never the absolute camera:
+  - views [+0x1724] 3/4, with +0x34D60 clear and [+0x16F8] ≠ 6: 0.25·d with the camera's
+    orientation;
+  - view 2: t = clamp((θ − π/6)·3/π, 0, 1), with θ the angle between the camera and car forward
+    vectors. Orientation = slerp(car, camera, t). Position = virt + t·(d − virt), where virt is
+    the point at d's height and horizontal distance straight behind the car;
+  - otherwise: d with the camera's orientation.
+- Velocity: the camera's displacement / dt (views 2–4), else the car's velocity. There is no
+  smoothing state.
+- [I] The value of +0x1724 is a view index whose mapping to chase, bonnet, bumper and head-cam is
+  not tied down. 3/4 look like the interior views, 2 the chase.
+- [I] The car's own emitters are then placed relative to the car origin.
+- The listener 2 sibling 43F570 uses the camera position, plus 0.25·d in views 3/4.
+
+Consequences for the port [I]:
+- At the default branch the port's "player emitters measured from the camera" are the same
+  distances.
+- In view 2 the distance from the car is kept (|virt| = |d|), and the orientation follows the car
+  until the camera is turned more than 30° from it. The port pans the player's sounds by the
+  camera's orientation (§12), which matches only while t = 1.
+
+**Clunk (GearClucks, 4511E0).**
+- [O] At the end of a player upshift, GearClucks plays clunk1–3 at the GearBox emitter. The
+  emitter is (0, 0, 4) in every one of the 45 cars, on group +0x120 (Gearbox 3 for the player).
+  The preset GearStick is min 3.5 / max 4.0 m.
+- [I] Heard from the Car listener:
+  - chase views: d is the camera offset (5–7 m behind), so the gearbox is 9–11 m away: silent;
+  - views 3/4 at 0.25·d: bumper (0, 0.73, 1.77) gives 3.56 m, −0.7 dB; bonnet (0, 1.11, 0.86)
+    gives 3.8 m, −17 dB; head-cam (0.36, 1.10, −0.19) gives 4.06 m, silent.
+  So the shipped clunk is an interior/bumper-view sound, which depends on the unresolved view
+  mapping.
+
+**Backfire (Detonations, 451260).** [O] detloop1–3 at the Exhaust emitter, preset ExhaustDet
+10/40 m. It triggers when any of these holds:
+- the throttle drop per frame +0x304 ≤ −0.25 while +0x20 > 0.25;
+- within 0.2 s after an upshift;
+- the rev limiter is active (+0xD0).
+
+It then repeats on a random timer, (rand % 300)·0.01 + 0.1 s, with a chance that falls as the
+timer runs over. Each start also sets vehicle +0x21DC = 8, and 0xB at the end [I: exhaust flames].
+Its inputs need 4148A0 (+0x304 from the applied throttle, vehicle +0xE1C) and 414970.
+
+**Load path inputs [O].** 009961D0(1) is vehicle +0xE1C, the applied throttle. It is the input of
+4148A0 (+0xB0, +0x24, +0x304) and 422CA0 (+0xCC smoothing). 422CA0's neutral-gear and off-throttle
+targets read +0x3C, which 414C70 writes, so a faithful +0xCC needs 414C70 ported too.
+
+**Whine.**
+- [O] carsetup.bin `GearPresets`, read by 4265D0 into +0x268 + 4·preset:
+  - holden (mec_ply), truck (mec_dbr), andy (mec_r10), staff (mec_s15);
+  - each has Gear1..6 (truck 8) with a sample (01_gear…), basePitch and maxPitch;
+  - each car names a `GearPreset`.
+- [O] gear.ini `[GearWhine]` (42F880) stores six floats at car-audio +0xD10…+0xD3C. The five
+  `GearWhineVolume*` keys are read and discarded. The `Gearwhine` AudioVariety has no samples
+  (preset 6/10 m).
+- [O] No float read of +0xD10…+0xD3C was found in 0x410000–0x460000.
+- Whether the whine plays at all is not established. Next: the readers of +0x268 (the preset
+  table) and of the variety table entry +0xB0.
+
+**Turbo.**
+- [O] carsetup `Turbo` Spidle (basePitch 0.75, gradient 1.5) and Hiss (1.0, 0.0) are identical for
+  all 45 cars; readers 41EC91…41ED1B and 4273A1…42742B.
+- [O] The varieties are TurboHiss and TurboSpindle (loops, 6/20 m), TurboDump (dump1–2, 6/60 m)
+  and TurboPip (pip1–2, 5/20 m).
+- The update that plays them is not traced.
