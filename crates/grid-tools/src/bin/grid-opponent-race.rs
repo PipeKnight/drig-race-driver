@@ -777,6 +777,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 let airborne = grid_tools::collision_audio::airborne(runtime);
                 listener.landing(k, &car, airborne, grid_tools::source_vehicle::DELTA, &mut || false, &mut plays);
+                if k == 0 {
+                    listener.displacement(&car, grid_tools::collision_audio::angular_velocity(runtime), &mut plays);
+                }
                 for p in plays {
                     writeln!(
                         t,

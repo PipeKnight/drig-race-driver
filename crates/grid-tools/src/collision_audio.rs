@@ -15,6 +15,8 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 /// Mix groups (41F570): the player's collisions on Panel Coll, AI cars on AI.
 pub const PANEL_COLL: usize = 4;
 pub const AI: usize = 17;
+/// The player's yaw/pitch displacement one-shots (43B1F0).
+pub const DISPLACEMENT: usize = 8;
 /// 435B20 skips a one-shot quieter than this.
 pub const QUIETEST: f32 = -42.;
 
@@ -266,6 +268,12 @@ impl Car {
     }
 }
 
+/// A69820: the physical body's world angular velocity (+0x210).
+pub fn angular_velocity(runtime: &crate::source_vehicle::Runtime) -> [f32; 3] {
+    let p = &runtime.state.car.owner.physical;
+    std::array::from_fn(|i| p.get(0x210 / 4 + i).map_or(0., |&w| f32::from_bits(w)))
+}
+
 /// 410850: the car is airborne when none of its wheel records has a contact
 /// (wheel +C0 == 0 for every wheel, body +1990 + i·150).
 pub fn airborne(runtime: &crate::source_vehicle::Runtime) -> bool {
@@ -369,6 +377,8 @@ pub struct Listener {
     scrapes: Vec<Scrape>,
     /// Each car's airtime (+0xA4B0) and its timer (+0xA4B8).
     air: Vec<(f32, f32)>,
+    /// The player's angular velocity of the previous tick (+0xA2E0).
+    spin: Option<[f32; 3]>,
 }
 
 /// The roof scrape info (4559C0 passes the car's fixed roof entry instead of
@@ -409,7 +419,7 @@ fn length(a: [f32; 3]) -> f32 {
 
 impl Listener {
     pub fn new(bank: Arc<Bank>) -> Self {
-        Self { bank, cooldown: HashMap::new(), random: 0x2545_f491, scrapes: Vec::new(), air: Vec::new() }
+        Self { bank, cooldown: HashMap::new(), random: 0x2545_f491, scrapes: Vec::new(), air: Vec::new(), spin: None }
     }
 
     pub fn scrape(&self, car: usize) -> Option<&Scrape> {
@@ -698,6 +708,36 @@ impl Listener {
             let group = if car.player { PANEL_COLL } else { AI };
             let position = [car.pose[12], car.pose[13], car.pose[14]];
             self.impact("PrimaryBot", x, position, group, car.player, crash, out);
+        }
+    }
+
+    /// 4108B0 and 4486E0, the player only, once per tick: the change of the
+    /// world angular velocity since the previous tick, |Δω.z| into
+    /// YawImpact and |Δω.x| into PitchImpact (soft 0.25–0.6, med 0.6–1.5,
+    /// hard 1.5–3 rad/s). Above the soft info's minVel, the info whose range
+    /// holds it (else the hard one) plays with the cooldown on Displacement
+    /// (group 8) at the car. Per frame in the original, per tick here [I].
+    pub fn displacement(&mut self, car: &Car, omega: [f32; 3], out: &mut Vec<Play>) {
+        let previous = self.spin.replace(omega).unwrap_or([0.; 3]);
+        if !car.player {
+            return;
+        }
+        let position = [car.pose[12], car.pose[13], car.pose[14]];
+        for (variety, x) in [("YawImpact", (previous[2] - omega[2]).abs()), ("PitchImpact", (previous[0] - omega[0]).abs())] {
+            let Some(three) = self.bank.impacts.get(variety).cloned() else { continue };
+            let curves: Vec<Option<Curve>> = three.iter().map(|n| self.bank.infos.get(n).cloned()).collect();
+            let Some(soft) = &curves[0] else { continue };
+            if x <= soft.min_vel || !x.is_finite() {
+                continue;
+            }
+            let pick = if soft.contains(x) {
+                0
+            } else if curves[1].as_ref().is_some_and(|c| c.contains(x)) {
+                1
+            } else {
+                2
+            };
+            self.one_shot(&three[pick], x, position, DISPLACEMENT, true, out);
         }
     }
 
@@ -1090,6 +1130,16 @@ mod tests {
         }
         listener.landing(0, &c, false, 0.016, &mut || false, &mut out);
         assert!(out.is_empty(), "{:?}", out.iter().map(|p| &p.variety).collect::<Vec<_>>());
+        // Displacement (4486E0): a 1 rad/s change of ω.z is a medium yaw
+        // (0.6–1.5) and 2 rad/s of ω.x a hard pitch; no change, nothing.
+        listener.displacement(&c, [0.; 3], &mut out);
+        listener.displacement(&c, [2., 0., 1.], &mut out);
+        let names: Vec<&str> = out.iter().map(|p| p.variety.as_str()).collect();
+        assert_eq!(names, ["YawMed", "PitchHard"]);
+        assert!(out.iter().all(|p| p.group == DISPLACEMENT) && bank.varieties.contains_key("YawMed"));
+        out.clear();
+        listener.displacement(&c, [2., 0., 1.], &mut out);
+        assert!(out.is_empty());
         // Too soft: nothing.
         out.clear();
         listener.contacts(0, &c, &[contact([0.9, 0.4, 0.3], 100., None)], &mut out);

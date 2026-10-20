@@ -189,6 +189,11 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
             let airborne = grid_tools::collision_audio::airborne(runtime);
             sound.listener.landing(k, &car, airborne, DELTA, &mut crash, &mut plays);
         }
+        // 4486E0: the player's yaw/pitch displacement.
+        if k == 0 {
+            let omega = grid_tools::collision_audio::angular_velocity(runtime);
+            sound.listener.displacement(&car, omega, &mut plays);
+        }
         // 458780 after the step: the scrape loop's level, pitch and place.
         if let Some(voice) = sound.listener.scrape_frame(k, &car)
             && let Some(variety) = sound.bank.varieties.get(&voice.variety)

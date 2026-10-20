@@ -879,3 +879,48 @@ GRID was not launched.
   advances by the tick, [I] for the original's frame timer); the app's collision tick and
   `grid-opponent-race`'s trace call it after the contacts. Tests: the landing part of
   `shipped_collision_data_and_listener`. Not heard.
+
+## 16. Yaw and pitch displacement (F504)
+
+20 October 2026, Claude Code. Static: 4108B0 (from 457BE0), 4486E0 (Ghidra `local/gtfix/decomp/wind3/4486E0.c.txt`,
+called at 458C84 for the player only), A69820; Yaw/Pitch curves in worktree `local/kick/ci.tsv`. GRID was not launched.
+
+- [O] 4108B0, per frame: ω = A69820() = the physical body's +0x210, its world angular velocity.
+  +A614 = |ω.x|, +A618 = |ω.z| (455FA0's spinning test). +A610 = |prev.x − ω.x| and
+  +A60C = |prev.z − ω.z| against the previous frame's ω (+A2E0), which is then replaced.
+- [O] 4486E0: +A60C into the car's ImpactVariety slot 1 (YawImpact) and +A610 into slot 2
+  (PitchImpact). For each, when the value exceeds the soft info's minVel, the info whose range
+  holds it, else the hard one, goes to 435EA0 with the cooldown on, at +7E0, group +C
+  (Displacement 8).
+- [O] Curves: Yaw/Pitch Soft 0.25–0.6 (−4..−2.5 dB), Med 0.6–1.5 (−3..−1), Hard 1.5–3 (0 dB).
+  Varieties YawSoft…PitchHard in car_collisions.
+- Consequence: a jolt that changes the angular velocity by more than 0.25 rad/s between frames
+  thumps, for example kerbs, landings and spins. It depends on the frame length, so the port
+  runs it per vehicle tick (16 ms, close to 60 fps) [I, F320 rule].
+- Port: `collision_audio::angular_velocity` and `Listener::displacement` (the player only, at
+  the car). Called by the app's collision tick and by `grid-opponent-race`'s trace. Test: the
+  displacement part of `shipped_collision_data_and_listener`. Not heard.
+
+## 17. Part sounds and the car-audio groups (research, not ported)
+
+20 October 2026, Claude Code. Static: 43B1F0 (car-audio constructor), 458EE0..458F1C, 43D850,
+43BB10, 43BF50, 9FFE7D..A00123. GRID was not launched.
+
+- [O] Group slots set by 43B1F0 (+0..+18): player 4 Panel Coll, 2 Turbo, 9 Other Mech,
+  8 Displacement, 1 Engine, 3 Gearbox, 6 Wheels; AI cars 17 (AI) in every slot. 4486E0 uses
+  +C (Displacement), 43BB10 +0 (Panel Coll), 43BF50 +18 (Wheels).
+- [O] 458EFC registers 43D850 (data: the car-audio object) at body +7BF4/+7BF8. The damage
+  code calls it at 9FFEA0 and A00123 with a part index and the part's record (+0x50 / a
+  transformed position). 43D850 forwards to 43BB10(part, record).
+- [O] 43BB10: if the per-part CollisionInfo at +97BC + 4·part is set, 435EA0 plays it at x = 1.0
+  (so at its curve's level for 1.0) at the part position from record +30 (minus the car
+  position +A420 for the player, flag +A4D8), with the cooldown on, group slot +0. Otherwise it
+  logs an error with the part index. No static writer of +97BC was found; the table probably
+  comes from the per-part ImpactVarieties (CBonnetImpact, CBootImpact, CBumperImpact,
+  CDoorImpact, CExhaustImpact, CWingImpact) by a pointer loop [I].
+- [O] 43BF50(pos): slot 9 of the car's ImpactVariety table (+24) at x = |car velocity|
+  (+A480), no cooldown, group slot +18 (Wheels). Its caller and the slot's variety were not
+  traced.
+- Next: find the +97BC writer (search for stores relative to a pointer into +97BC, or break on
+  it in a capture) and the part order of the damage code, then port part sounds through the
+  port's detached-part events.
