@@ -188,6 +188,40 @@ impl Decoder {
         self.mixer.failure
     }
 }
+/// An extra engine voice outside the ECS (the race-start mix test, main.rs):
+/// its decoder, a control push per vehicle tick, and its group levels.
+#[cfg(test)]
+pub(crate) struct TestVoice {
+    pub(crate) decoder: Stereo<Decoder>,
+    mailbox: Mailbox,
+    bus: Arc<AtomicU64>,
+}
+#[cfg(test)]
+impl TestVoice {
+    pub(crate) fn new(bank: Arc<EngineBank>, pan: Pan) -> Self {
+        let source = EngineSource {
+            bank,
+            mailbox: mailbox(),
+            bus: Arc::new(AtomicU64::new(pack_bus([f32::NEG_INFINITY; 2]))),
+            failure: Arc::new(AtomicU32::new(0)),
+            pan,
+        };
+        Self { decoder: source.decoder(), mailbox: source.mailbox, bus: source.bus }
+    }
+    pub(crate) fn push(&self, control: Control) {
+        push(&self.mailbox, control);
+    }
+    pub(crate) fn set_bus(&self, db: [f32; 2]) {
+        self.bus.store(pack_bus(db), Ordering::Relaxed);
+    }
+}
+#[cfg(test)]
+impl EngineSound {
+    /// The player's published engine and exhaust group levels in dB.
+    pub(crate) fn bus_db(&self) -> [f32; 2] {
+        unpack_bus(self.bus.load(Ordering::Relaxed))
+    }
+}
 impl Source for Decoder {
     fn current_span_len(&self) -> Option<usize> {
         None

@@ -5872,11 +5872,18 @@ mod driving_tests {
             .init_asset::<tyre_sound::TyreSource>()
             .init_asset::<hud_sound::HudSource>()
             .init_asset::<collision_sound::CollisionSource>();
-        engine_sound::install_systems(
-            &mut app,
-            vec![Some(grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap())],
-            mix.clone(),
-        );
+        let bank = grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap();
+        engine_sound::install_systems(&mut app, vec![Some(bank.clone())], mix.clone());
+        // An opponent of the same model on the next grid slot, 3 m to the
+        // side, driven with the player's controls: its engine voice on the AI
+        // group (4223D0), within the 10 m Engine/Exhaust minimum distance
+        // (0 dB), panned from the chase_close camera behind the player
+        // (position (0, 1.72, -4.74) in the car). AUDIO_RESEARCH §11/§19.
+        let beside = [3f32, 0., 0.];
+        let chase_close = [0f32, 1.7227, -4.7393];
+        let opponent_pan = stereo::Pan::centre();
+        opponent_pan.set(grid_tools::audio_mix::pan_gains(std::array::from_fn(|k| beside[k] - chase_close[k])));
+        let mut opponent = engine_sound::TestVoice::new(bank, opponent_pan);
         collision_sound::install_systems(
             &mut app,
             grid_tools::collision_audio::Bank::load(root).unwrap(),
@@ -5903,6 +5910,23 @@ mod driving_tests {
         const NAMES: [&str; 4] = ["engine", "tyres", "hud", "collision"];
         // Per vehicle tick and source: sum of squares, peak, samples.
         let mut blocks: Vec<[(f64, f32, usize); 4]> = Vec::new();
+        // Per vehicle tick: the opponent's left and right sums of squares.
+        let mut opponent_blocks: Vec<[f64; 2]> = Vec::new();
+        // (player engine/exhaust, opponent AI) group levels in dB, sampled
+        // on the last countdown tick and at the end.
+        let mut levels = [([f32::NAN; 2], [f32::NAN; 2]); 2];
+        let opponent_bus = |app: &App| {
+            let table = app.world().resource::<engine_sound::EngineSound>().table.clone().unwrap();
+            let modes = app.world().resource::<engine_sound::AudioMode>().0.lock().unwrap().clone();
+            engine_sound::bus_levels(
+                Some(&table),
+                &modes,
+                grid_tools::audio_mix::Camera::Chase,
+                [grid_tools::audio_mix::AI; 2],
+                0.,
+                [beside[0]; 2],
+            )
+        };
         let mut failures = Vec::new();
         let mut green = None;
         let idle = (1. / DELTA) as u64;
@@ -5920,9 +5944,15 @@ mod driving_tests {
                 break;
             }
             let ticks = driving.runtime.ticks;
+            let control = app.world().resource::<engine_sound::EngineSound>().control(driving);
+            opponent.push(control);
+            let bus = opponent_bus(&app);
+            opponent.set_bus(bus);
+            let player_bus = app.world().resource::<engine_sound::EngineSound>().bus_db();
             if green.is_none() && app.world().resource::<time_trial::Trial>().driving() {
                 green = Some(ticks);
             }
+            levels[usize::from(green.is_some())] = (player_bus, bus);
             for _ in blocks.len() as u64..ticks {
                 let mut block = [(0., 0f32, 0); 4];
                 for _ in 0..BLOCK * 2 {
@@ -5939,6 +5969,14 @@ mod driving_tests {
                     }
                 }
                 blocks.push(block);
+                let mut pair = [0f64; 2];
+                for _ in 0..BLOCK {
+                    for value in &mut pair {
+                        let v = f64::from(opponent.decoder.next().unwrap_or(f32::NAN));
+                        *value += v * v;
+                    }
+                }
+                opponent_blocks.push(pair);
                 if let Some(error) = engine.inner.failure()
                     && !failures.iter().any(|f: &String| f.contains("decoder failed"))
                 {
@@ -5985,6 +6023,49 @@ mod driving_tests {
                         NAMES[k]
                     ));
                 }
+            }
+        }
+        // The original's group table (Chase, PC): player Engine -14, Exhaust
+        // -7, every AI voice -9 in Normal and -12 in StartLine (after its
+        // 1.5 s fade, F493). Sampled on the last countdown tick and the last.
+        let expected = [([-14f32, -7.], [-12f32, -12.]), ([-14., -7.], [-9., -9.])];
+        for ((name, (player, ai)), (want_player, want_ai)) in
+            ["countdown_end", "full_throttle_end"].iter().zip(&levels).zip(expected)
+        {
+            println!(
+                "race_start_audio car={stem} levels={name} player_engine_db={} player_exhaust_db={} opponent_engine_db={} opponent_exhaust_db={}",
+                player[0], player[1], ai[0], ai[1]
+            );
+            let close = |a: [f32; 2], b: [f32; 2]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 0.05);
+            if !close(*player, want_player) || !close(*ai, want_ai) {
+                failures.push(format!(
+                    "{stem}: {name} group levels {player:?}/{ai:?}, the table gives {want_player:?}/{want_ai:?}"
+                ));
+            }
+        }
+        // The opponent beside the player against the player's own engine, as
+        // heard: each channel and the power of both (the pan keeps the power
+        // of a centred voice).
+        for (name, from, to) in [
+            ("countdown_throttle", idle as usize, green),
+            ("full_throttle", green + second / 2, blocks.len()),
+        ] {
+            let to = to.min(blocks.len()).min(opponent_blocks.len());
+            let frames = ((to - from.min(to)) * BLOCK).max(1) as f64;
+            let player: f64 = blocks[from.min(to)..to].iter().map(|b| b[0].0).sum::<f64>() / (2. * frames);
+            let [left, right] = opponent_blocks[from.min(to)..to]
+                .iter()
+                .fold([0f64; 2], |a, b| [a[0] + b[0], a[1] + b[1]])
+                .map(|s| s / frames);
+            let db = |x: f64| 10. * x.max(1e-30).log10();
+            let power = db((left + right) / 2.) - db(player);
+            println!(
+                "race_start_audio car={stem} window={name} opponent_vs_player_db power={power:.2} left={:.2} right={:.2}",
+                db(left) - db(player),
+                db(right) - db(player)
+            );
+            if !power.is_finite() || left + right <= 0. {
+                failures.push(format!("{stem}: opponent engine silent in {name}"));
             }
         }
         // No contact on a solo start: the collision source stays silent.

@@ -1001,3 +1001,45 @@ Static: 43C0C0, 43C250, 43C2B0, 43CE90, 43CF10..43D5A0 (loader), 448F75, 4486E0,
   - `load_banks` loads one bank per field model; a failure logs `engine_audio version=2 event=bank_failed car=<stem> error="..."` and leaves that model `None`. Only that car is silent: the player's source is spawned only with a bank, and opponents without one are skipped.
   - Each opponent's decoder has its own failure flag. Its mixer goes silent until the next reset and the update logs `engine_audio version=2 event=decoder_failed car=<index> muted=car_only`; only the player's failure still mutes the engine mix.
 - Tests: `every_loadable_engine_runs_through_the_start` loads every `series::RACEABLE` car and stk and panics on any load failure; `engine_sound::tests::a_failed_bank_silences_only_its_car` loads lac, a non-existent model and bmw, and checks the spawned sources.
+
+## 19. Opponent mix confirmed offline (F527)
+
+20 October 2026, Claude Code (task 10, item §3.5 of the car-series hand-off). Headless, no audio device;
+GRID was not launched. Evidence (ignored): kind-pike worktree `local/mix19/test.log`.
+
+**Test.** `race_start_audio_mix_is_audible` (grid-app main.rs, `race_start_mix`) now adds an opponent
+of the same model 3 m beside the player. Its engine voice (`engine_sound::TestVoice`, the same
+`EngineSource` decoder as in the app) gets the player's control on every vehicle tick, the AI group
+level from the live `AudioMode` (`engine_sound::bus_levels`, group 17, 3 m → 0 dB distance term), and
+the pan of a car 3 m to the side heard from the chase_close camera ((0, 1.72, −4.74) in the car; azimuth
+32°, `pan_gains`). So the two voices differ only by what the mix gives them.
+
+**Group levels [V against the table].** Chase, PC, both cars:
+- last countdown tick (StartLine after its 1.5 s fade): player Engine −14, Exhaust −7; opponent −12 on
+  both layers;
+- end of the run (Normal): player −14 / −7; opponent −9 / −9.
+The test fails if any of these is off by 0.05 dB.
+
+**As heard [O, port].** Opponent against the player's own engine, in dB (power of both channels; left;
+right, the near side):
+
+| car | window | power | left | right |
+|---|---|---|---|---|
+| BMW | countdown, full throttle (StartLine) | −3.03 | −6.36 | −1.17 |
+| BMW | after GO + 0.5 s, full throttle (Normal) | +0.28 | −3.04 | +2.14 |
+| Lacetti | countdown (StartLine) | −5.82 | −9.14 | −3.96 |
+| Lacetti | after GO (Normal) | −1.84 | −5.17 | +0.02 |
+
+The difference between the cars comes from the engine/exhaust balance of each bank: the player's
+exhaust layer is 2 dB over the opponent's and its engine layer 5 dB under.
+
+**Distance.** The player's emitters are measured from the camera in the port, the Car listener at the
+car in the original (§12). It makes no audible difference: the Engine/Exhaust law (10/175 m, exponent 2)
+gives −48·((d−10)/165)² dB, so the EngineBay emitter 4 m ahead of the car seen from chase_far
+(about 11.3 m away with the full 2 m tilt fall-back) is at −0.003 dB.
+
+**Conclusion [I].** The port plays the original's table. With it, a car of the same model beside
+the player is about as loud as the player's own car after the start, and up to 2 dB louder in the
+near ear; on the grid it is 3–6 dB quieter. The owner's "an opponent sometimes sounds louder than
+my car" is the table, not a port error. Not checked against the original's output (that needs a
+live reading, §11).

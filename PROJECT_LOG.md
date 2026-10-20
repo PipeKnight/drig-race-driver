@@ -1,5 +1,10 @@
 # GRID engine project log
 
+F527 Opponent engine mix confirmed offline against the original's group table (2026-10-20, Claude Code, car-series; task 10 item 1). Details: docs/AUDIO_RESEARCH.md §19. Evidence (ignored): kind-pike worktree `local/mix19/`. Headless; GRID was not launched.
+- Test `race_start_audio_mix_is_audible` now runs an opponent engine voice of the same model 3 m beside the player (same decoder as the app, the player's controls, AI group from the live mix mode, panned from the chase_close camera). It checks the published levels against GroupModeVolumes (Chase, PC): player Engine −14 / Exhaust −7; opponent −12 in StartLine, −9 in Normal [V].
+- [O] Opponent vs the player's own engine, power of both channels: BMW −3.0 dB on the grid, +0.3 dB after GO (near ear +2.1); Lacetti −5.8 / −1.8 (near ear 0.0).
+- [I] The port plays the table; a car beside the player being as loud as the player's own (and louder in the near ear) is the original's mix. The player's camera-measured distance changes nothing (≤ 0.003 dB). Not compared with a live original.
+
 F526 Row 41, Washington route 0: the AI's no-brake bend explained from the shipped data; no 1:1 fix found; row 41 text updated (2026-10-20, Claude Code, drift-battle-ai; coordinator's task 3). Docs only. Details: docs/CAREER_LOCATIONS.md §7.3. Evidence (ignored): admiring-wiles worktree `local/row41/`. Static + headless; the original was not launched.
 - [O] The bend after the 1 km straight spans gates 28–35 (arc 840–1023, ~60°, racing-line radius 137–204 m). Brake line 1 sits at gate 29, inside its entry; the shipped touring data (49.9–83.2 m/s) gives a 65–71 m/s target, above the Lacetti's 65 m/s top speed, so the line never brakes (0x792C80/0x7886C0 as verified).
 - [V static] Corner lift 0x77A940 re-read: speed-gated remap of |track view curvature| over 0.01–0.03; the bend's |κ| ≤ 0.0076, so no lift, as ported. No ported formula differs here; whether the original's car carries this speed needs an original trace.
