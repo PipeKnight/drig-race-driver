@@ -35,3 +35,9 @@ Private local/graphics/dlaa-presets01 retains copied licensed crate/patch/config
 ## Next
 
 Prepare a separate opt-in L graphics launcher after validation, preserving existing builds. Owner live judgement can complement captures without blocking continued research. Longer4K motion, antenna trails, reset/camera-cut and smoke cases remain open. Upstreamable preset exposure with explicit settings and verified model provenance remains future integration work; do not silently patch dependency caches or switch all defaults.
+
+## Separate optional delivery
+
+Installed `Play GRID Graphics DLAA L.cmd` in the graphics worktree and C:/Dev/Reassembly, with immutable local/graphics/dlaa-l-2a4ea21a/grid-app.exe, pinned DLL, original license/notices/guide, wrapper MIT/Apache licenses, README and build manifest. This launcher requestsL in a setlocal environment and otherwise retains Signals options (moving1024probe, paint gain0.5, combined reflectors/live lamps). Normal temporal history; no sharpening/upscale/frame generation. All existing graphics launcher hashes preserved. It is an additional graphics-lab comparison, not a main rebuild.
+
+Actual installed primary-path600tick nativeDLAA smoke succeeds without DLSS_SDK environment: requested/storedL12,12live lamp sections, probe readback, motion/depth and both HDR readbacks pass; no shader/error/panic. Private C:/Dev/Reassembly/local/graphics/dlaa-l-delivery-smoke01/validation.json. Owner live appearance acceptance is pending, not required to continue independent work. Existing Signals build remains available.
