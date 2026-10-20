@@ -8,11 +8,12 @@
 //! bodies built by the ported body constructor from the rigid-body and shape
 //! properties (0x7CDCD0 / 0x7B8F40). Pieces stay until the world is reset.
 //!
-//! A damage state's constraints between its own pieces (tyre walls) become
-//! world joints when the entity breaks (0x7D3AF0/0x7CC1E0,
-//! docs/JOINTS_RESEARCH.md); constraints to the world or a linked entity, body
-//! overrides (armco) and uproots are not ported, so those entities stay
-//! static; see `unported`. Pieces never deactivate (the ported grouped frame admits only
+//! A damage state's constraints become world joints when the entity breaks
+//! (0x7D3AF0/0x7CC1E0, docs/JOINTS_RESEARCH.md): between its own pieces (tyre
+//! walls), to the world's fixed object, and through an ENS link to the linked
+//! entity's piece (armco, 0x7D5540), with the constraints' body overrides
+//! (0x7B85A0). Uproots and other unported cases keep the entity static; see
+//! `unported`. Pieces never deactivate (the ported grouped frame admits only
 //! turnOffTime = FLT_MAX); cylinders are twelve-sided prisms.
 use crate::{
     body_geometry::BodyGeometry, contact_surfaces::Surfaces, entity_geometry::Props, route::Route,
@@ -92,16 +93,36 @@ pub struct Breakable {
     pub threshold: f32,
     pub explosion: f32,
     pub pieces: Vec<PieceSpec>,
-    /// The damage state's constraints between its pieces, in change order.
+    /// Template rigid-body id of each piece.
+    pub bodies: Vec<String>,
+    /// Pieces built static at the break (0x7CDCD0: the entity is a link
+    /// primary, entity +0xF4, and the body a link target, template +0x42);
+    /// 0x7D2D90 rebuilds one dynamic when a holder joins it.
+    pub static_pieces: Vec<bool>,
+    /// The damage state's constraints, in change order.
     pub joints: Vec<JointSpec>,
+    /// The ENS links this entity holds that a `link<index>` constraint of it
+    /// uses, in file order.
+    pub links: Vec<LinkSpec>,
 }
 
-/// A `TEMPLATECONSTRAINT` between two pieces of a breakable.
+/// A held ENS link (`TEMPLATEENTITYLINK`) to a primary breakable.
+#[derive(Clone, Debug)]
+pub struct LinkSpec {
+    pub primary: usize,
+    pub index: u32,
+    /// The primary's piece the `TEMPLATECONSTRAINTLINK` names.
+    pub piece: usize,
+}
+
+/// A `TEMPLATECONSTRAINT` of a breakable's damage state.
 #[derive(Clone)]
 pub struct JointSpec {
-    /// Piece indices of `body1uri` (A) and `body2uri` (B).
+    /// Piece indices of `body1uri` (A) and `body2uri` (B); B `None` for
+    /// "none"/"world" and `link<index>` (resolved when the joint is built).
     pub a: usize,
-    pub b: usize,
+    pub b: Option<usize>,
+    pub link: Option<u32>,
     /// The joint request (0x7C7B10) at the entity's unit scale.
     pub request: joint_template::Request,
     /// `dontCollideWithAny`: the shapes of A and B get the pair filter
@@ -115,9 +136,13 @@ pub struct JointSpec {
 #[derive(Clone, Debug)]
 pub struct PropJoint {
     pub breakable: usize,
-    /// Index in the world's joint list and the world bodies of A and B.
+    /// Its constraint in `Breakable::joints`.
+    pub spec: usize,
+    /// Index in the world's joint list and the world bodies of A and B (B
+    /// `None`: the world's fixed object or a static piece).
     pub world: usize,
-    pub bodies: [usize; 2],
+    pub a: usize,
+    pub b: Option<usize>,
     pub dont_collide_with_any: bool,
     /// Byte +0x48 after the last committed step.
     pub broken: bool,
@@ -163,6 +188,9 @@ pub struct PropWorld {
     by_box: std::sync::Arc<BTreeMap<usize, usize>>,
     pub broken: Vec<bool>,
     pub pieces: Vec<Piece>,
+    /// Pieces of broken entities still static (`Breakable::static_pieces`),
+    /// as (breakable, piece).
+    pub statics: std::collections::BTreeSet<(usize, usize)>,
     pub joints: Vec<PropJoint>,
     pub events: Vec<BreakEvent>,
     pending: Vec<(usize, [f32; 4], f32)>,
@@ -385,11 +413,22 @@ impl Catalog {
                 boxes.entry(e).or_default().push(i);
             }
         }
+        let all = entities::read(&placements, &types)?;
+        let ids: BTreeMap<&[u8], usize> = all.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+        // 0x7BDE30 links each resolved ENS link: the primary gets entity
+        // +0xF4 and every `TEMPLATECONSTRAINTLINK` body template +0x42.
+        let mut primaries = std::collections::BTreeSet::new();
+        let mut targets = std::collections::BTreeSet::new();
+        for e in &all {
+            for l in &e.entity_links {
+                if let Some(&p) = ids.get(l.primary) {
+                    primaries.insert(p);
+                    targets.extend(l.bodies.iter().copied());
+                }
+            }
+        }
         let mut catalog = Self::default();
-        'entities: for (index, e) in entities::read(&placements, &types)?
-            .into_iter()
-            .enumerate()
-        {
+        'entities: for (index, e) in all.iter().enumerate() {
             let template = String::from_utf8_lossy(e.template).into_owned();
             let behaviours: Vec<_> = e
                 .renderables
@@ -413,7 +452,23 @@ impl Catalog {
             let (threshold, explosion) = parameters.behaviour(reference(behaviour.properties)?)?;
             let placement = matrix(&e.transform);
             let mut pieces = Vec::new();
+            let mut static_pieces = Vec::new();
             for added in &behaviour.added {
+                if added.shapes.is_empty() && !added.infinite_mass {
+                    let body = parameters.body(reference(added.body_properties)?)?;
+                    if body.sphericalise != 0. {
+                        *catalog.unported.entry(template).or_default() += 1;
+                        continue 'entities;
+                    }
+                    pieces.push(PieceSpec::shapeless(
+                        String::from_utf8_lossy(added.node).into_owned(),
+                        String::from_utf8_lossy(added.body_node).into_owned(),
+                        placement,
+                        body,
+                    )?);
+                    static_pieces.push(primaries.contains(&index) && targets.contains(added.body));
+                    continue;
+                }
                 // A piece kind the port cannot break (several shapes, static,
                 // sphericalised, fixed mass, a sphere; first seen on Haruna):
                 // the template stays static, like armco.
@@ -480,8 +535,12 @@ impl Catalog {
                     triangles,
                     round: !matches!(primitive, Primitive::Box(_)),
                 });
+                static_pieces.push(primaries.contains(&index) && targets.contains(added.body));
             }
             let mut joints = Vec::new();
+            // Body override per piece (0x7B85A0): the highest
+            // `bodyOverridePriority` above -1 among the constraints on it.
+            let mut overrides: Vec<Option<(i32, String)>> = vec![None; pieces.len()];
             if !behaviour.constraints.is_empty() && !unit_scale(&e.transform) {
                 // 0x7CC1E0 scales the joint by the entity's scale vector (the
                 // lane choice is not ported): scaled joined entities stay static.
@@ -493,23 +552,35 @@ impl Catalog {
                     let id = uri.strip_prefix(b"#")?;
                     behaviour.added.iter().position(|a| a.body == id)
                 };
-                // A joint to the world ("none") or to a linked entity
-                // ("link1"): armco, not ported.
-                let (Some(a), Some(b)) = (body(c.body1), body(c.body2)) else {
+                // B: a piece, the world's fixed object ("none"/"world",
+                // 0x958200) or the linked entity's piece (`link<index>`).
+                let link = (c.body2.strip_prefix(b"link"))
+                    .and_then(|n| std::str::from_utf8(n).ok()?.parse::<u32>().ok());
+                let world = matches!(c.body2, b"none" | b"world");
+                let b = body(c.body2);
+                let (Some(a), true) = (body(c.body1), b.is_some() || world || link.is_some())
+                else {
                     *catalog.unported.entry(template).or_default() += 1;
                     continue 'entities;
                 };
                 let props = parameters.constraint(reference(c.properties)?)?;
-                // Body overrides, uproots, the post collision filter and the
-                // soft rotational friction callback (0x7C5210) are not ported.
-                if a == b
-                    || props.body_override.is_some()
+                // Uproots, the post collision filter and the soft rotational
+                // friction callback (0x7C5210) are not ported.
+                if Some(a) == b
                     || props.uproot.is_some()
                     || props.specific_post_collision
                     || props.soft_friction != props.hard_friction
                 {
                     *catalog.unported.entry(template).or_default() += 1;
                     continue 'entities;
+                }
+                if let Some(id) = &props.body_override {
+                    let priority = props.body_override_priority;
+                    for k in std::iter::once(a).chain(b) {
+                        if priority > overrides[k].as_ref().map_or(-1, |o| o.0) {
+                            overrides[k] = Some((priority, id.clone()));
+                        }
+                    }
                 }
                 let template_props = joint_template::Props {
                     linear_limit: props.linear_limit,
@@ -531,10 +602,28 @@ impl Catalog {
                 joints.push(JointSpec {
                     a,
                     b,
+                    link,
                     request: joint_template::request(&frames, &template_props, 1., c.display),
                     dont_collide_with_any: props.dont_collide_with_any,
                     dont_collide_with_fixed: props.dont_collide_with_fixed,
                 });
+            }
+            for (spec, o) in pieces.iter_mut().zip(overrides) {
+                let Some((_, id)) = o else { continue };
+                let body = parameters.body(&id)?;
+                // 0xB11520 after the shape sums: mass and inertia blend
+                // towards a sphere of `sphericalmass` and `sphericalradius`.
+                let s = body.sphericalise;
+                if s > 0. {
+                    let sphere = body.spherical_radius * body.spherical_radius
+                        * body.spherical_mass
+                        * f32::from_bits(0x3ecc_cccd);
+                    for i in &mut spec.inertia {
+                        *i += (sphere - *i) * s;
+                    }
+                    spec.mass = (body.spherical_mass - spec.mass) * s + spec.mass;
+                }
+                spec.body = body;
             }
             let intact = boxes.get(&index).cloned().unwrap_or_default();
             if intact.is_empty() {
@@ -551,8 +640,42 @@ impl Catalog {
                 threshold,
                 explosion,
                 pieces,
+                bodies: behaviour
+                    .added
+                    .iter()
+                    .map(|a| String::from_utf8_lossy(a.body).into_owned())
+                    .collect(),
+                static_pieces,
                 joints,
+                links: Vec::new(),
             });
+        }
+        // The held links a `link<index>` constraint uses, to ported primaries.
+        let by_entity: BTreeMap<usize, usize> = (catalog.breakables.iter().enumerate())
+            .map(|(i, b)| (b.entity, i))
+            .collect();
+        for i in 0..catalog.breakables.len() {
+            let mut links = Vec::new();
+            for l in &all[catalog.breakables[i].entity].entity_links {
+                let Some(index) = l.index else { continue };
+                if !catalog.breakables[i].joints.iter().any(|j| j.link == Some(index)) {
+                    continue;
+                }
+                let Some(&primary) = ids.get(l.primary).and_then(|p| by_entity.get(p)) else {
+                    continue;
+                };
+                for body in &l.bodies {
+                    let names = &catalog.breakables[primary].bodies;
+                    if let Some(piece) = names.iter().position(|b| b.as_bytes() == *body) {
+                        links.push(LinkSpec {
+                            primary,
+                            index,
+                            piece,
+                        });
+                    }
+                }
+            }
+            catalog.breakables[i].links = links;
         }
         Ok(catalog)
     }
@@ -703,6 +826,39 @@ impl PieceSpec {
             // The lost wheel keeps its prism (FIDELITY_BACKLOG row 24).
             round: false,
         })
+    }
+
+    /// A rigid body without shapes (the armco posts of Istanbul Park, Le
+    /// Mans and the Nürburgring): 0xB11520 finds no shape mass and keeps
+    /// mass 1 and a unit inertia before sphericalising; it collides with
+    /// nothing. Its pose is the entity placement [I: the subentity carries
+    /// no transform].
+    fn shapeless(renderable: String, anchor: String, pose: Matrix, body: physparams::Body) -> Result<Self, Error> {
+        let primitive = Primitive::Sphere { radius: 0. };
+        // A placeholder mesh; `points` stay empty, so the piece never
+        // enters the contact passes.
+        let (points, triangles) = hull(Primitive::Box([0.01; 3]));
+        let hull = collision_mesh::build(&points, &triangles, 0)?;
+        Ok(Self {
+            renderable,
+            anchor,
+            primitive,
+            pose,
+            mass: 1.,
+            inertia: [1.; 3],
+            body,
+            shell: 0.,
+            limit: DESCRIPTOR_EC,
+            hull,
+            points: Vec::new(),
+            triangles: Vec::new(),
+            round: false,
+        })
+    }
+
+    /// Whether the piece has a collision shape.
+    pub fn collides(&self) -> bool {
+        !self.points.is_empty()
     }
 
     /// The piece's collision shape for the world, the cars and the road.
@@ -1111,6 +1267,14 @@ impl Exclusion {
     }
 }
 
+/// The world a break writes into.
+struct Make<'a> {
+    world: &'a mut grouped_physical_frame::Output,
+    shapes: &'a mut Vec<contact_groups::Shape>,
+    tick: u64,
+    disabled: &'a mut Vec<usize>,
+}
+
 /// A car hull taking part in piece contacts.
 pub struct CarHull<'a> {
     pub geometry: &'a BodyGeometry,
@@ -1131,6 +1295,7 @@ impl PropWorld {
             catalog: std::sync::Arc::new(catalog),
             by_box: std::sync::Arc::new(by_box),
             pieces: Vec::new(),
+            statics: Default::default(),
             joints: Vec::new(),
             events: Vec::new(),
             pending: Vec::new(),
@@ -1149,6 +1314,7 @@ impl PropWorld {
     fn parts(&self) -> Vec<(&PieceSpec, usize, u32)> {
         self.pieces
             .iter()
+            .filter(|p| self.catalog.breakables[p.breakable].pieces[p.spec].collides())
             .map(|p| {
                 (
                     &self.catalog.breakables[p.breakable].pieces[p.spec],
@@ -1196,18 +1362,25 @@ impl PropWorld {
     fn exclusion(&self) -> Exclusion {
         let mut links: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for j in self.joints.iter().filter(|j| !j.broken) {
-            let [a, b] = j.bodies;
-            links.entry(a).or_default().push(b);
-            links.entry(b).or_default().push(a);
+            let Some(b) = j.b else { continue };
+            links.entry(j.a).or_default().push(b);
+            links.entry(b).or_default().push(j.a);
         }
         Exclusion {
             links,
             filtered: (self.joints.iter())
                 .filter(|j| j.dont_collide_with_any)
-                .flat_map(|j| j.bodies)
+                .flat_map(|j| std::iter::once(j.a).chain(j.b))
                 .collect(),
             entity: self.pieces.iter().map(|p| (p.body, p.breakable)).collect(),
         }
+    }
+
+    /// Whether world body `body` collides: false only for a live piece
+    /// without a collision shape.
+    pub fn collides(&self, body: usize) -> bool {
+        (self.pieces.iter().find(|p| p.body == body))
+            .is_none_or(|p| self.catalog.breakables[p.breakable].pieces[p.spec].collides())
     }
 
     /// Whether piece `k` has been lost below the world and is held.
@@ -1517,80 +1690,240 @@ impl PropWorld {
         }
         self.base_slots.get_or_insert(world.groups.contacts.len());
         let mut disabled = Vec::new();
+        // 0x7D64B0: each queued entity breaks (0x7D5180), then its ENS links
+        // are followed with propagation (0x7D5540).
         for (breakable, explosion, force) in std::mem::take(&mut self.pending) {
-            let entry = &self.catalog.breakables[breakable];
-            // 0x7D5180 swaps only when 0x7D4940 finds room for the new
-            // components; otherwise the entity stays intact. The original
-            // first restores the farthest broken entities (0x7D4770), which
-            // the port omits: its 312 possible pieces cannot fill the pool.
-            if world.groups.bodies.len() + entry.pieces.len() > grid_world::MAX_WORLD_BODIES {
+            if self.broken[breakable] {
                 continue;
             }
-            disabled.extend(entry.intact.iter().copied());
-            let mut spawned = Vec::with_capacity(entry.pieces.len());
-            for (spec_index, spec) in entry.pieces.iter().enumerate() {
-                let linear = explosion_velocity(
-                    [spec.pose[3][0], spec.pose[3][1], spec.pose[3][2]],
-                    explosion,
-                );
-                let (body, properties) = piece_body(spec, linear, [0.; 4])?;
-                let (body, token) = append(world, shapes, body, properties)?;
-                spawned.push(body);
-                self.pieces.push(Piece {
-                    breakable,
-                    spec: spec_index,
-                    body,
-                    token,
-                });
-            }
-            // 0x7D3AF0 per constraint, after the subentities: 0x7CC1E0 sets the
-            // collision flags and A74670 builds the joint (AEFEB0) on the
-            // pieces' spawn poses; B825E0 links it into the world list.
-            let placement = matrix(&entry.placement);
-            for spec in &entry.joints {
-                let [a, b] = [spawned[spec.a], spawned[spec.b]];
-                if spec.dont_collide_with_fixed {
-                    for k in [a, b] {
-                        set_byte(&mut world.groups.bodies[k], COLLIDES_WITH_FIXED, 0);
-                    }
-                }
-                let mut descriptor =
-                    joint_template::descriptor(&spec.request, &placement, [1.; 3], false);
-                let mut made = joint::Joint::filled(0);
-                joint::construct(
-                    &mut made,
-                    &mut descriptor,
-                    &joint::Bodies {
-                        a: &world.groups.bodies[a],
-                        b: Some(&world.groups.bodies[b]),
-                        fixed: false,
-                    },
-                    0,
-                );
-                self.joints.push(PropJoint {
-                    breakable,
-                    world: world.groups.joints.len(),
-                    bodies: [a, b],
-                    dont_collide_with_any: spec.dont_collide_with_any,
-                    broken: false,
-                });
-                world.groups.joints.push(contact_groups::WorldJoint {
-                    joint: made,
-                    a: a as u32 + 1,
-                    b: b as u32 + 1,
-                    fixed: None,
-                });
-            }
-            self.broken[breakable] = true;
-            self.events.push(BreakEvent {
-                breakable,
-                template: entry.template.clone(),
+            let mut make = Make {
+                world: &mut *world,
+                shapes: &mut *shapes,
                 tick,
-                force,
-            });
+                disabled: &mut disabled,
+            };
+            if self.break_entity(&mut make, breakable, explosion, force)? {
+                self.follow_links(&mut make, breakable, true)?;
+            }
         }
         self.reserve(world);
         Ok(disabled)
+    }
+
+    /// The world body of a live dynamic piece.
+    fn piece_body(&self, breakable: usize, spec: usize) -> Option<usize> {
+        (self.pieces.iter())
+            .find(|p| p.breakable == breakable && p.spec == spec)
+            .map(|p| p.body)
+    }
+
+    fn spawn(
+        &mut self,
+        make: &mut Make<'_>,
+        breakable: usize,
+        spec_index: usize,
+        explosion: [f32; 4],
+    ) -> Result<usize, Error> {
+        let spec = &self.catalog.breakables[breakable].pieces[spec_index];
+        let linear = explosion_velocity(
+            [spec.pose[3][0], spec.pose[3][1], spec.pose[3][2]],
+            explosion,
+        );
+        let (body, properties) = piece_body(spec, linear, [0.; 4])?;
+        let (body, token) = append(make.world, make.shapes, body, properties)?;
+        self.pieces.push(Piece {
+            breakable,
+            spec: spec_index,
+            body,
+            token,
+        });
+        Ok(body)
+    }
+
+    /// 0x7D5180 / 0x7D3C40: the entity's pieces, then its constraints'
+    /// joints. False when 0x7D4940 finds no room (the entity stays intact).
+    fn break_entity(
+        &mut self,
+        make: &mut Make<'_>,
+        breakable: usize,
+        explosion: [f32; 4],
+        force: f32,
+    ) -> Result<bool, Error> {
+        let entry = self.catalog.clone();
+        let entry = &entry.breakables[breakable];
+        // 0x7D5180 swaps only when 0x7D4940 finds room for the new
+        // components; otherwise the entity stays intact. The original
+        // first restores the farthest broken entities (0x7D4770), which
+        // the port omits.
+        let room = entry.pieces.len() + entry.static_pieces.iter().filter(|s| **s).count();
+        if make.world.groups.bodies.len() + room > grid_world::MAX_WORLD_BODIES {
+            return Ok(false);
+        }
+        make.disabled.extend(entry.intact.iter().copied());
+        for spec_index in 0..entry.pieces.len() {
+            if entry.static_pieces[spec_index] {
+                self.statics.insert((breakable, spec_index));
+            } else {
+                self.spawn(make, breakable, spec_index, explosion)?;
+            }
+        }
+        self.broken[breakable] = true;
+        for k in 0..entry.joints.len() {
+            self.make_joint(make, breakable, k)?;
+        }
+        self.events.push(BreakEvent {
+            breakable,
+            template: entry.template.clone(),
+            tick: make.tick,
+            force,
+        });
+        Ok(true)
+    }
+
+    /// 0x7D3AF0 for constraint `k` of `breakable`: resolves A and B
+    /// (0x7B7EE0; `link<index>` through the held links, 0x7B7160, the first
+    /// with a broken primary in the holder's list order, newest link first),
+    /// makes a static link target dynamic (0x7D2D90), then 0x7CC1E0 sets the
+    /// collision flags and A74670 builds the joint (AEFEB0) on the current
+    /// poses; B825E0 links it into the world list. A missing or static B is
+    /// the world's fixed object; a static A makes no joint (its only case is
+    /// a primary's post to the world).
+    fn make_joint(&mut self, make: &mut Make<'_>, breakable: usize, k: usize) -> Result<(), Error> {
+        let catalog = self.catalog.clone();
+        let entry = &catalog.breakables[breakable];
+        let spec = &entry.joints[k];
+        let Some(a) = self.piece_body(breakable, spec.a) else {
+            return Ok(());
+        };
+        let b = match (spec.b, spec.link) {
+            (Some(piece), _) => self.piece_body(breakable, piece),
+            (None, Some(index)) => {
+                match (entry.links.iter().rev())
+                    .find(|l| l.index == index && self.broken[l.primary])
+                {
+                    Some(l) => Some(self.make_dynamic(make, l.primary, l.piece)?),
+                    None => None,
+                }
+            }
+            (None, None) => None,
+        };
+        if spec.dont_collide_with_fixed {
+            for body in std::iter::once(a).chain(b) {
+                set_byte(&mut make.world.groups.bodies[body], COLLIDES_WITH_FIXED, 0);
+            }
+        }
+        let placement = matrix(&entry.placement);
+        let mut descriptor =
+            joint_template::descriptor(&spec.request, &placement, [1.; 3], b.is_none());
+        let mut made = joint::Joint::filled(0);
+        joint::construct(
+            &mut made,
+            &mut descriptor,
+            &joint::Bodies {
+                a: &make.world.groups.bodies[a],
+                b: b.map(|b| &make.world.groups.bodies[b]),
+                fixed: b.is_none(),
+            },
+            0,
+        );
+        self.joints.push(PropJoint {
+            breakable,
+            spec: k,
+            world: make.world.groups.joints.len(),
+            a,
+            b,
+            dont_collide_with_any: spec.dont_collide_with_any,
+            broken: false,
+        });
+        make.world.groups.joints.push(contact_groups::WorldJoint {
+            joint: made,
+            a: a as u32 + 1,
+            b: b.map_or(0, |b| b as u32 + 1),
+            fixed: None,
+        });
+        Ok(())
+    }
+
+    /// Remove a live joint (0xAD9260): the port keeps its record broken.
+    fn remove_joint(&mut self, world: &mut grouped_physical_frame::Output, j: usize) {
+        self.joints[j].broken = true;
+        if let Some(w) = world.groups.joints.get_mut(self.joints[j].world) {
+            set_byte(&mut w.joint.words, 0x48, 1);
+        }
+    }
+
+    /// 0x7D2D90: a static link target becomes a dynamic body at its spawn
+    /// pose; the entity's joints on it are removed and those between two
+    /// bodies that were not broken are made again.
+    fn make_dynamic(
+        &mut self,
+        make: &mut Make<'_>,
+        breakable: usize,
+        piece: usize,
+    ) -> Result<usize, Error> {
+        if !self.statics.remove(&(breakable, piece)) {
+            return self
+                .piece_body(breakable, piece)
+                .ok_or(Error("link target piece missing"));
+        }
+        let catalog = self.catalog.clone();
+        let specs = &catalog.breakables[breakable].joints;
+        let on = |k: usize| specs[k].a == piece || specs[k].b == Some(piece);
+        let mut was_broken = BTreeMap::new();
+        for j in 0..self.joints.len() {
+            let joint = &self.joints[j];
+            if joint.breakable == breakable && on(joint.spec) {
+                was_broken.insert(joint.spec, joint.broken);
+                self.remove_joint(make.world, j);
+            }
+        }
+        let body = self.spawn(make, breakable, piece, [0.; 4])?;
+        for (k, spec) in specs.iter().enumerate() {
+            if on(k) && spec.b.is_some() && was_broken.get(&k) != Some(&true) {
+                self.make_joint(make, breakable, k)?;
+            }
+        }
+        Ok(body)
+    }
+
+    /// 0x7D5540 after `x` broke. Links where `x` is the primary (its +0xBC
+    /// list, newest first): a broken holder's unbroken joint of the link's
+    /// constraint is made again (now to `x`'s piece); an intact holder
+    /// breaks too when `propagate`. Then, with `propagate`, links `x` holds
+    /// (+0xC0): an intact primary breaks. A break by propagation follows
+    /// its own links without propagating.
+    fn follow_links(&mut self, make: &mut Make<'_>, x: usize, propagate: bool) -> Result<(), Error> {
+        let catalog = self.catalog.clone();
+        for h in (0..catalog.breakables.len()).rev() {
+            for link in catalog.breakables[h].links.iter().rev().filter(|l| l.primary == x) {
+                for (k, spec) in catalog.breakables[h].joints.iter().enumerate() {
+                    if spec.link != Some(link.index) {
+                        continue;
+                    }
+                    if self.broken[h] {
+                        let live = (0..self.joints.len()).rev().find(|&j| {
+                            self.joints[j].breakable == h && self.joints[j].spec == k
+                        });
+                        if let Some(j) = live.filter(|&j| !self.joints[j].broken) {
+                            self.remove_joint(make.world, j);
+                            self.make_joint(make, h, k)?;
+                        }
+                    } else if propagate && self.break_entity(make, h, [0.; 4], 0.)? {
+                        self.follow_links(make, h, false)?;
+                    }
+                }
+            }
+        }
+        if propagate {
+            for link in catalog.breakables[x].links.iter().rev() {
+                let p = link.primary;
+                let used = (catalog.breakables[x].joints.iter()).any(|j| j.link == Some(link.index));
+                if used && !self.broken[p] && self.break_entity(make, p, [0.; 4], 0.)? {
+                    self.follow_links(make, p, false)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Contact slots for every live body, beyond the cars' pool.
@@ -1670,6 +2003,7 @@ impl PropWorld {
     pub fn reset(&mut self, tracks: &mut [&mut Track]) -> Result<(), Error> {
         self.broken.iter_mut().for_each(|b| *b = false);
         self.pieces.clear();
+        self.statics.clear();
         self.joints.clear();
         self.wheels.clear();
         self.events.clear();
@@ -1707,6 +2041,9 @@ impl PropWorld {
             } else {
                 return Ok(None);
             };
+        if !spec.collides() {
+            return Ok(None);
+        }
         spawn_pressed(spec, own, track, surfaces, directions)
     }
 
@@ -1729,7 +2066,7 @@ impl PropWorld {
             } else {
                 return Ok(None);
             };
-        let Some(state) = bodies.get(body) else {
+        let Some(state) = bodies.get(body).filter(|_| spec.collides()) else {
             return Ok(None);
         };
         pressing_at(spec, body_pose(state), own, track, surfaces, directions).map(Some)
@@ -1952,8 +2289,32 @@ mod tests {
             e.0 += 1;
             assert_eq!((e.1, e.2), (b.threshold, b.pieces.len()));
             let walls = b.template == "tyre_wall.max";
+            let armco = b.template.starts_with("armco");
             assert_eq!(b.explosion, if walls { 0.35 } else { 0. });
-            assert_eq!(b.joints.len(), if walls { 7 } else { 0 });
+            assert_eq!(
+                b.joints.len(),
+                if walls {
+                    7
+                } else if armco {
+                    6
+                } else {
+                    0
+                }
+            );
+            if armco {
+                // Post to the world, rail 4 to the linked post; the post
+                // (`link1` body, piece 0) and the rails take the overrides.
+                assert_eq!((b.joints[0].a, b.joints[0].b, b.joints[0].link), (0, None, None));
+                assert_eq!((b.joints[5].a, b.joints[5].b, b.joints[5].link), (4, None, Some(1)));
+                assert!(b.links.len() <= 1);
+                for piece in &b.pieces {
+                    assert_eq!(piece.mass, 7000.);
+                    assert_eq!(piece.inertia, [2800.; 3]);
+                    assert_eq!(piece.body.linear_damping, 14.);
+                }
+                assert_eq!(b.pieces[0].body.gravity_scale, 1.);
+                assert_eq!(b.pieces[1].body.gravity_scale, 0.);
+            }
             assert!(
                 b.intact
                     .iter()
@@ -1968,10 +2329,16 @@ mod tests {
         // and sixteen loose tyres.
         assert_eq!(by_template["tyre_wall.max"], (588, 1000., 22));
         assert!(!catalog.unported.contains_key("tyre_wall.max"));
-        assert_eq!(
-            catalog.unported["armco_white_main.max"] + catalog.unported["armco_blue_main.max"],
-            243
-        );
+        // 243 armco sections in two chains; every post that is a link
+        // primary is static at the break.
+        assert!(!catalog.unported.contains_key("armco_white_main.max"));
+        assert!(!catalog.unported.contains_key("armco_blue_main.max"));
+        let armco: Vec<_> =
+            catalog.breakables.iter().filter(|b| b.template.starts_with("armco")).collect();
+        let links: usize = armco.iter().map(|b| b.links.len()).sum();
+        let statics = armco.iter().filter(|b| b.static_pieces[0]).count();
+        eprintln!("armco={} links={links} static posts={statics}", armco.len());
+        assert_eq!(armco.len(), 243);
         let board = &catalog
             .breakables
             .iter()
@@ -2150,7 +2517,8 @@ mod tests {
             let catalog = Catalog::read(root, &route, props).unwrap();
             let (mut pieces, mut touching, mut deepest) = (0, 0, 0f32);
             for b in &catalog.breakables {
-                for p in &b.pieces {
+                // A shapeless post collides with nothing.
+                for p in b.pieces.iter().filter(|p| p.collides()) {
                     pieces += 1;
                     let query = convex_distance::ContactSettings {
                         margin: p.shell,
@@ -2209,7 +2577,7 @@ mod tests {
             let catalog = Catalog::read(root, &route, track.props().unwrap()).unwrap();
             let mut road = Vec::new();
             for b in &catalog.breakables {
-                for (k, p) in b.pieces.iter().enumerate() {
+                for (k, p) in b.pieces.iter().enumerate().filter(|(_, p)| p.collides()) {
                     let pressed =
                         spawn_pressed(p, &b.intact, track, runtime.surfaces(), geometry.query())
                             .unwrap();

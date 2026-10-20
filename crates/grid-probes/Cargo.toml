@@ -850,3 +850,8 @@ test = false
 name = "grid-road-hole"
 path = "src/bin/grid-road-hole.rs"
 test = false
+
+[[bin]]
+name = "grid-pssg-tree"
+path = "src/bin/grid-pssg-tree.rs"
+test = false

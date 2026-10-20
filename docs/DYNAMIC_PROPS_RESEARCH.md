@@ -102,7 +102,9 @@ density x volume (below).
    `v_old + e + (r - (r . e^) e^) |e| x 0.25`, with `r` a pseudo-random unit vector
    seeded by the fractional part of `|x|+|y|+|z|+|e|` of the body position
    (constants 0x00CFAA48..60, 2 pi, moduli 0x1948/0x14F7/0xC54).
-5. **Links.** [D] `0x7D5540` propagates a break along ENS entity links (armco chains).
+5. **Links.** [D] `0x7D5540` breaks the intact sections linked to a section a car broke
+   (one level) and joins broken neighbours' rails to its post (ported F501,
+   docs/JOINTS_RESEARCH.md "Phase 3b").
 
 [I] Consequence: in the break step the car only feels the capped impulse
 (`threshold x dt`: 0.8 N s for a board at 60 Hz, 16.7 N s for a tyre wall), then
@@ -234,9 +236,10 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
 
 - **Which props.** All 190 constraint-free breakables: 34 brake marker boards,
   8 tyre stacks, 148 cushions. Since F484 also the 588 tyre walls, whose six blocks are
-  joined by seven springs (docs/JOINTS_RESEARCH.md "Phase 3a"). Armco (243) needs joints to
-  the world and to the neighbouring entity and stays static (`Catalog::unported`).
-  Everything without a shape behaviour stays static. [V data, D mechanism]
+  joined by seven springs (docs/JOINTS_RESEARCH.md "Phase 3a"), and since F501 the 243
+  armco sections: rails hinged to the post, the world and the neighbouring section's post,
+  with the override bodies (docs/JOINTS_RESEARCH.md "Phase 3b"). Everything without a
+  shape behaviour stays static. [V data, D mechanism]
 - **Contact limit.** An armed intact box writes its threshold into contact +0x3C
   (`BodyContact::limit`); the ported solver caps the row at `dt x limit` and writes the
   solved force back. Unarmed boxes keep FLT_MAX, so nothing changes until a breakable
@@ -397,11 +400,10 @@ original's AE8AD0 pairing for it was tried and lost more boards at the port's fi
 
 ## Not yet established
 
-- Armco stays static: hinges with `bodyOverride` rail bodies (gravityScale 0,
-  sphericalmass 7000, damping 14), the post-to-world joint breaking at 10, `link1` to the
-  neighbouring entity and ENS link propagation (0x7D5540). Tyre-wall springs
-  (`cDeformableRubber*`, `dontCollideWithAny`) are ported since F484
-  (docs/JOINTS_RESEARCH.md).
+- Armco end pieces (`link0`, a rail of three shapes), scaled jointed entities and the
+  close-drift flags stay static; uproot (rail bodies switching to `rbDefault`) is not
+  ported, its trigger is not found. Armco and tyre-wall joints are ported since F501 and
+  F484 (docs/JOINTS_RESEARCH.md).
 - Sleeping: the ported grouped frame only admits `turnOffTime = MAX`.
 - Whether routes override the ENTITYMANAGER defaults; the farthest-first restore of
   broken entities when a pool is full (recovered, not ported, unreachable with the

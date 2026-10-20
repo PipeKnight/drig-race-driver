@@ -64,8 +64,9 @@ Phase 1 (F473): the joint itself is ported and verified. Phase 2 (F477): the sol
 world joints (islands merged through them, rows beside the contact rows, impulse sums,
 breaking, the correction pass). Phase 3a (F484): a breakable whose damage state joins its
 own pieces (tyre walls, Milan's green cushions) breaks into pieces with their joints.
-Constraints to the world or to a linked entity, body overrides and uproots (armco), and the
-close-drift flags are phase 3b; those entities stay static (`Catalog::unported`).
+Phase 3b (F501): armco breaks, with joints to the world's fixed object and through ENS links
+to the neighbouring section, body overrides, static link targets and break propagation.
+Still static (`Catalog::unported`): armco end pieces, the close-drift flags, uproots.
 
 ### Phase 1: constructor, prepare, rows (F473)
 
@@ -269,29 +270,85 @@ Verification:
 - Not verified: the whole break against a live capture of the original (needs the
   coordinator's go), the narrow phase's pair filter in a live world.
 
-### Open for phase 3b [D, partly read]
+### Phase 3b: armco, ENS links, body overrides (F501)
 
-- Armco (`armco_*_main*`): post to world (`body2uri="none"`, `cArmcoPost`, breaks at 10,
-  `bodyOverride` `_rbArmcoPost` priority 1), rail 1 to post and rail 4 to `link1`
-  (`cArmcoEnd`), three rail-to-rail (`cArmcoMiddle`), all `bodyOverride` `_rbArmcoMiddle`
-  priority 0 (sphericalised 7000 kg, damping 14, gravity 0, `uprootProps` `rbDefault` only
-  without gravity). The port's body constructor has no sphericalised bodies yet.
-- B absent: 0x958200 returns the world's fixed object, 0xA74670 hands 0xA7D330's body with
-  joint byte +0xC; the port's `IslandJoint`/`WorldJoint` take its body record (`fixed`), not
-  yet built from the world object.
-- `link1`: 0x7D3AF0 finds B through the entity's link list (+0xD8, next +0x38): the link whose
-  +0x2C is this template constraint and +0x34 the linked entity, then 0x7B6D10 its body.
-- 0x7D5540 (entity, other, propagate): over the entity's outgoing (+0xBC, next +0x40) and
-  incoming (+0xC0, next +0x44) ENS links. When both linked entities are broken it creates the
-  cross-entity constraint (0x7D3AF0 with both sides' bodies, after moving them to the
-  entity's collision group 0xA696F0); otherwise, with `propagate` and the other entity's
-  flag +0xEB, it breaks the other entity too (0x7D5180) and recurses without propagation.
-  With byte +0x2C of `other` set it instead re-runs the incoming links' joint (0x7D2D90).
-- `breakIfAngExtentHit`: callback 0x7B81A0 (joint +0x254), called when the angular limit is
-  hit; posts (`c*PostBase`).
-- Uproot: 0x7B7F80 picks the constraint props' `uprootProps` (+0xFC) for an uprooted
-  component (+0x14); the rigid-body side switches to its `uprootProps`.
-- Close-drift flags (drift routes) are jointed entities of the same kind.
+Original path [D] (decompiles `local/robust/decomp/r21a..r21g`, read-only; asm capstone
+5.0.6 on the hash-pinned analysis image):
+
+- Armco template (all circuits): a post (the `link1` body, `dam_link1`), four rails
+  (`obj01..04`); constraints post to world (`body2uri="none"`, `cArmcoPost`, breaks at 10),
+  rail 1 to post (`cArmcoEnd`), three rail to rail (`cArmcoMiddle`), rail 4 to `link1`
+  (`cArmcoEnd`). Istanbul Park, Le Mans and the Nürburgring posts have no collision shape.
+  End pieces (`armco_end_*`) join the post with `link0` and have a rail of three shapes.
+- Body resolution 0x7B7EE0: each body uri resolves to the entity's body of that template
+  body, or 0 ("none", "link1": no template body); a static A with a dynamic B is swapped.
+  B = 0 becomes the world's fixed object (0x958200 -> world +8 -> +0xDC -> +0x50) with
+  joint byte +0xC; a static B is handed as its fixed object too (0xA7D3C0).
+- `link<index>` (0x7D3AF0 -> 0x7B7160): over the entity's held links (+0xC0, next +0x44),
+  the first whose constraint-link entry has the constraint's index and whose primary has
+  the named body; none found: B stays 0 (the world). The ENS file's `TEMPLATEENTITYLINK`
+  (`primaryentity`, `index`, `TEMPLATECONSTRAINTLINK body`) is the link; 0x7BDE30 puts it
+  at the head of the primary's +0xBC list and the holder's +0xC0 list (newest first), sets
+  the primary's entity +0xF4 and each named body template's +0x42. The +0xB4/+0xB8 lists
+  0x7D5540 also walks have no writer besides their initialisation (0x7B6C76).
+- Static link targets, 0x7CDCD0: a body is built static when its template is infMass
+  (+0x40) or when the entity is a primary (+0xF4) and the body a link target (+0x42). So
+  a section that others link to keeps its post static when it breaks. 0x7D2D90 (called
+  from 0x7D3AF0 when B is such a static body) rebuilds it: removes the entity's joints on
+  it, creates the body dynamic, and makes again those joints with two bodies that were not
+  broken (the post-to-world joint is not made again).
+- Body overrides, 0x7B85A0 (at level load, 0x7D7B00): per template body, a shape's own
+  `bodyOverride` (shape props +0x5C), else the highest `bodyOverridePriority` above -1 among
+  the entity's constraints on it (props from 0x7B7F80: the uproot props when uprooted),
+  into the body template's active props (+0x48, default +0x44).
+- Sphericalise, 0xB11520 (body refresh after the shape sums, only when the inertia is not
+  supplied, body +0x411 = 0): `I += (r r M 0.4 - I) s` lane by lane over the 4x4 tensor
+  (off-diagonals towards 0) and `m = (M - m) s + m`, with s `sphericalise` (+0x394), M
+  `sphericalmass` (+0x398), r `sphericalradius` (+0x39C), 0.4 at 0xCB22A4. A body without
+  shapes starts from mass 1 and a unit tensor (0xCAF888).
+- Propagation, 0x7D5540 (from 0x7D64B0 with `propagate` after 0x7D5180): for each link
+  where the entity is the primary (+0xBC) and each holder constraint of that index, a
+  broken holder's joint for it is removed and made again (0x7D3AF0, now to this entity's
+  body) unless it already broke; an intact holder (+0xEB, set by 0x7D5180 for the default
+  state) breaks too when `propagate`, then 0x7D5540 runs for it without propagation. With
+  `propagate`, for each link the entity holds (+0xC0) an intact primary breaks the same way.
+  0x7B5A70's pool counts and 0x7D4940's room check gate both.
+- `breakIfAngExtentHit` (0x7B81A0, joint +0x254 callback): breaks every unbroken joint of
+  the entity. No armco or tyre-wall props set it. The break callback 0x7C45C0 (finite break
+  impulses) posts an entity event. Uproot (`uprootProps`, `uprootOnlyIfNoGravity` on the
+  rigid-body props; 0x7B7F80 on constraint props): the trigger (component +0x14) is not
+  found.
+
+Port (`grid_formats::entities::EntityLink`, `grid_tools::dynamic_props`):
+
+- `Catalog::read`: constraints to "none"/"world" and `link<index>`; per piece the
+  highest-priority override with the sphericalise blend; shapeless pieces (mass 1, unit
+  inertia, no collision, pose the entity placement [I]); `static_pieces` from the links;
+  each breakable's held links (`LinkSpec`) that a `link<index>` constraint uses, to ported
+  primaries.
+- `PropWorld::apply`: per queued break, `break_entity` (pieces, static pieces kept in
+  `statics`, then the joints in the damage state's order) and `follow_links` (propagate).
+  `make_joint` resolves B as above (a static or missing B: fixed, world frames); a static A
+  makes no joint (only a primary's post to the world, [I]: the original's handling of a
+  static A with no B is not read). `make_dynamic` is 0x7D2D90. A removed joint keeps its
+  record with byte +0x48 set (the solver skips it); a break by propagation records force 0.
+- Link list order follows 0x7BDE30's prepend (newest link first); the original's list
+  order is [D], not observed live.
+
+Verification:
+
+- Unit tests: Donington's 243 sections (238 links, 238 static posts; override masses 7000,
+  inertia 2800, rail gravity 0, damping 14), `a_broken_armco_breaks_its_neighbours_and_hangs_together`
+  (one break takes both linked neighbours; after five seconds every piece is within the test bound of
+  1.5 m of its spawn).
+- Not verified: any of it against a live capture of the original (needs the coordinator's
+  go); the uproot trigger; list orders.
+- [V data] Breakable armco: Donington 243, Jarama 506, Yokohama 42, Spa 296, Milan 1012,
+  Haruna 939, Istanbul Park 802, Le Mans 637, Nürburgring 813. Still static: the end
+  pieces (Jarama 54, Yokohama 7, Spa 39, Milan 22, Haruna 32, Le Mans 78, Nürburgring 6),
+  14 Nürburgring sections with a non-unit placement scale (0x7CC1E0's scale lanes), the close-drift flags (`cPhantomPost`:
+  `specificPostCollision`, override `_rbPhantomPost`; a static infMass piece and two shape
+  behaviours on one body).
 
 ## Size [D]
 
@@ -315,9 +372,11 @@ bit-for-bit comparison the impact pools have.
 2. ~~The joint pools in the island solve (0xB7ACC0, 0xB7B850), islands merged through joints,
    the correction solvers 0xAEF930/0xAEFBB0, and breaking~~: F477.
 3. ~~Breaking (break impulses)~~: F477. Joints between a breakable's own pieces: F484.
-   Still open: `breakIfAngExtentHit` (0x7B81A0), body overrides and uproot.
-4. Entities: constraint components in `dynamic_props`, `link1` across entities, and the ENS
-   link propagation 0x7D5540; the close-drift flags as the original builds them. Props to
+   Body overrides: F501. Still open: `breakIfAngExtentHit` (0x7B81A0, unused by armco and
+   tyre walls) and uproot (trigger not found).
+4. ~~Entities: constraint components in `dynamic_props`, `link1` across entities, and the
+   ENS link propagation 0x7D5540~~: F484, F501. Open: the armco end pieces (`link0`, a
+   rail of three shapes), the close-drift flags as the original builds them. Props to
    descriptor ([D]): the reader 0x7D00F0 and 0x7C04D0/0x7C7B10/0xA74670 map
    `hardRotationalFriction` to joint +0x250, `breakLinearImpulse`/`breakAngularImpulse`
    to +0x248/+0x24C, `breakIfAngExtentHit` to a callback (0x7B81A0).

@@ -1555,7 +1555,7 @@ mod tests {
                 assert_eq!(multi.world.groups.joints.len(), 7);
                 let rest: Vec<f32> = joints
                     .iter()
-                    .map(|j| distance(pose(&multi, j.bodies[0]), pose(&multi, j.bodies[1])))
+                    .map(|j| distance(pose(&multi, j.a), pose(&multi, j.b.unwrap())))
                     .collect();
                 for _ in 0..300 {
                     multi.tick(&drive).unwrap();
@@ -1564,8 +1564,8 @@ mod tests {
                 assert_eq!(props.pieces.len(), 22);
                 for (j, rest) in props.joints.iter().zip(&rest) {
                     assert!(!j.broken);
-                    let now = distance(pose(&multi, j.bodies[0]), pose(&multi, j.bodies[1]));
-                    eprintln!("tyre_wall joint {:?} rest={rest:.3} now={now:.3}", j.bodies);
+                    let now = distance(pose(&multi, j.a), pose(&multi, j.b.unwrap()));
+                    eprintln!("tyre_wall joint {:?} rest={rest:.3} now={now:.3}", (j.a, j.b));
                     assert!((now - rest).abs() < 0.3, "{j:?} {rest} {now}");
                 }
                 for piece in &props.pieces {
@@ -1578,6 +1578,73 @@ mod tests {
                     let v = &multi.bodies()[piece.body][0x220 / 4..0x22c / 4];
                     let speed = v.iter().map(|&w| f32::from_bits(w).powi(2)).sum::<f32>().sqrt();
                     assert!(speed < 1., "{piece:?} {speed}");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// An armco section in the middle of a chain breaks its two linked
+    /// neighbours too (0x7D5540); the rails hang between the posts and the
+    /// world and stay near their places.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_broken_armco_breaks_its_neighbours_and_hangs_together() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let mut multi = MultiRuntime::lacetti(root, &["slot_00"], &table, events).unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let all = &props.catalog.breakables;
+                // A section that holds a link and is itself linked to.
+                let x = (0..all.len())
+                    .find(|&i| {
+                        all[i].template.starts_with("armco")
+                            && !all[i].links.is_empty()
+                            && all.iter().any(|h| h.links.iter().any(|l| l.primary == i))
+                    })
+                    .unwrap();
+                props.queue_break(x);
+                let drive = [Controls::default(); 1];
+                multi.tick(&drive).unwrap();
+                let props = multi.dynamic_props().unwrap();
+                let broken = props.broken.iter().filter(|b| **b).count();
+                eprintln!(
+                    "armco {x}: broken={broken} pieces={} statics={:?} joints={:?}",
+                    props.pieces.len(),
+                    props.statics,
+                    props.joints
+                );
+                assert_eq!(broken, 3);
+                // The middle section's post is dynamic and joined to the
+                // holder's last rail; the outer posts are still static.
+                assert!(!props.statics.iter().any(|s| s.0 == x));
+                assert_eq!(props.statics.len(), 1);
+                for _ in 0..300 {
+                    multi.tick(&drive).unwrap();
+                }
+                let props = multi.dynamic_props().unwrap();
+                for piece in &props.pieces {
+                    let spawn =
+                        props.catalog.breakables[piece.breakable].pieces[piece.spec].pose[3];
+                    let now = crate::dynamic_props::body_pose(&multi.bodies()[piece.body])[3];
+                    assert!(now.iter().all(|v| v.is_finite()));
+                    let moved = ((now[0] - spawn[0]).powi(2)
+                        + (now[1] - spawn[1]).powi(2)
+                        + (now[2] - spawn[2]).powi(2))
+                    .sqrt();
+                    eprintln!("{piece:?} moved {moved:.3}");
+                    assert!(moved < 1.5, "{piece:?} {spawn:?} {now:?}");
                 }
             })
             .unwrap()
