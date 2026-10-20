@@ -85,6 +85,8 @@ pub struct Settings {
     pub lamp_reflectors: super::lamp_materials::Mode,
     /// Independent default-off clear-cover normal/PBR experiment.
     pub lamp_lenses: super::lamp_materials::Mode,
+    /// Independent default-off section emission adaptation.
+    pub lamp_signals: super::lamp_signals::Mode,
     pub paint_coat_roughness: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
@@ -153,6 +155,7 @@ impl Default for Settings {
             paint_environment: 0.,
             lamp_reflectors: super::lamp_materials::Mode::Off,
             lamp_lenses: super::lamp_materials::Mode::Off,
+            lamp_signals: super::lamp_signals::Mode::Off,
             paint_coat_roughness: 0.18,
             tree_sheet_colours: false,
             ambient_occlusion: true,

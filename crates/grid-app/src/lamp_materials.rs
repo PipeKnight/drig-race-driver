@@ -12,7 +12,7 @@ pub fn install(app: &mut App) {
 
 // Clone only the player's draw material after shared-model/opponent setup.
 // Applying this earlier would leak changes into same-model opponents.
-fn attach(
+pub(crate) fn attach(
     mut commands: Commands,
     settings: Res<super::graphics::Settings>,
     normal: Res<Prepared>,

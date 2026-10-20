@@ -460,6 +460,12 @@ pub(crate) struct Saved {
 }
 
 impl DamageParts {
+    /// Read-only lamp cluster state for the optional signal presentation.
+    pub(crate) fn light_smashed(&self, index: usize, joint: &str) -> bool {
+        let Some(car) = self.cars.get(index) else { return false; };
+        let Some(model) = self.car_model.get(index).and_then(|i|self.models.get(*i)) else {return false;};
+        model.layout.as_ref().is_some_and(|layout|layout.lights.iter().enumerate().any(|(i,(joints,_))|car.lights.get(i)==Some(&true)&&joints.iter().any(|name|name==joint)))
+    }
     pub(crate) fn checkpoint(&self) -> Saved {
         Saved {
             cars: self.cars.clone(),
@@ -595,6 +601,9 @@ struct ModelDamage {
     textures: [String; 2],
 }
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct Presented;
+
 #[derive(Resource)]
 pub(crate) struct DamageParts {
     /// Per field model (`crate::Field::models`).
@@ -722,7 +731,7 @@ pub(crate) fn install(
             }),
     })
     .add_systems(FixedUpdate, tick.after(crate::drive_tick))
-    .add_systems(Update, present.after(crate::drive_present))
+    .add_systems(Update, present.after(crate::drive_present).in_set(Presented))
     .add_systems(Update, present_lost_wheels.after(crate::drive_present));
 }
 
@@ -1444,6 +1453,16 @@ fn present_lost_wheels(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lamp_signal_gate_uses_source_cluster_membership_and_reset() {
+        let model=ModelDamage {config:config(),shards:BTreeMap::new(),images:None,textures:Default::default(),layout:Some(Layout {
+            bounds:BTreeMap::new(),windows:[None;6],lights:vec![(vec!["light_brake_pod_bl".into(),"light_brake_glass_bl".into()],Vec3::ZERO),(vec!["light_pod_fl".into()],Vec3::ZERO)]
+        })};
+        let mut damage=DamageParts {models:vec![model],car_model:vec![0,0],cars:vec![CarDamage {lights:vec![true,false],..Default::default()},CarDamage::default()],last_tick:None,reset:false,log_zones:false,cracked:BTreeMap::new(),shard_assets:None,camera:None};
+        assert!(damage.light_smashed(0,"light_brake_pod_bl"));assert!(damage.light_smashed(0,"light_brake_glass_bl"));
+        assert!(!damage.light_smashed(0,"light_pod_fl"));assert!(!damage.light_smashed(1,"light_brake_pod_bl"));assert!(!damage.light_smashed(9,"light_brake_pod_bl"));
+        let saved=damage.checkpoint();damage.restore(&saved);assert!(!damage.light_smashed(0,"light_brake_pod_bl"));
+    }
     use super::*;
 
     #[test]

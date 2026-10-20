@@ -28,6 +28,7 @@ mod body_specular;
 mod camera;
 mod car_materials;
 mod lamp_materials;
+mod lamp_signals;
 mod paint_environment;
 mod car_numbers;
 mod career_screen;
@@ -1761,6 +1762,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--race-number" => {
                 graphics.race_number(&args.next().ok_or("--race-number needs 0..999")?)?;
             }
+            "--lamp-signals" => {
+                graphics.lamp_signals = lamp_signals::Mode::parse(&args.next().ok_or("--lamp-signals needs a mode")?)?;
+            }
             "--lamp-lenses" => {
                 graphics.lamp_lenses = lamp_materials::Mode::parse(&args.next().ok_or("--lamp-lenses needs off, pbr, normals or combined")?)
                     .map_err(|_| "--lamp-lenses needs off, pbr, normals or combined")?;
@@ -1926,6 +1930,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--help" => {
+                println!("--lamp-signals off|live|brake|reverse|headlights: default-off player section emission pilot; authored Bevy radiometry, daytime live controls.");
                 println!("--lamp-lenses off|pbr|normals|combined: independent default-off authored Lacetti cover pilot; source alpha/emission unchanged.");
                 println!("--lamp-reflectors off|pbr|normals|combined: default-off authored Lacetti inner-reflector pilot; covers/matt unchanged.");
                 #[cfg(feature = "paint-specular")]
@@ -2040,8 +2045,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges) require an enhanced non-collision track scene with --track-materials source".into());
     }
-    if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
-        return Err("lamp controls (--lamp-reflectors/--lamp-lenses) require enhanced layered Lacetti LOD0 rendering".into());
+    if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
+        return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());
     }
     if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
         return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
@@ -3136,9 +3141,16 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
     }
+    if graphics.lamp_signals != lamp_signals::Mode::Off {
+        if !(reference || drive) || route.path() != Route::default().path() {
+            return Err("--lamp-signals pilot requires a daytime Donington reference/drive scene".into());
+        }
+        lamp_signals::validate(&car)?;
+        lamp_signals::install(&mut app);
+    }
     lamp_materials::prepare_frames(&mut car, graphics.lamp_reflectors, graphics.lamp_lenses)?;
     lamp_materials::validate(&car, graphics.lamp_reflectors, graphics.lamp_lenses)?;
-    if graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off {
+    if graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off {
         lamp_materials::install(&mut app);
     }
     if graphics.paint_environment > 0. {
@@ -3336,6 +3348,9 @@ fn setup(
     };
     let lamp_normal = lamp_materials::upload_normal(&car, graphics.lamp_reflectors, graphics.lamp_lenses, &mut images, graphics.sampler(false));
     commands.insert_resource(lamp_materials::Prepared(lamp_normal));
+    if graphics.lamp_signals != lamp_signals::Mode::Off {
+        commands.insert_resource(lamp_signals::Atlas(lamp_signals::upload(&car, &mut images, graphics.sampler(false))));
+    }
     let liveries = std::mem::take(&mut car.liveries);
     let mut livery_images: BTreeMap<(usize, String), Handle<Image>> = BTreeMap::new();
     let mut livery_materials: BTreeMap<(usize, String), Handle<StandardMaterial>> = BTreeMap::new();
@@ -3521,6 +3536,12 @@ fn setup(
             }
             if track && let Some(entity) = &mut entity {
                 entity.insert(track_surface::SourcePart(part.material.clone()));
+            }
+            if graphics.lamp_signals != lamp_signals::Mode::Off
+                && let Some(entity) = &mut entity
+                && let Some(section) = lamp_signals::section(&part.material, &part.joint)
+            {
+                entity.insert(section);
             }
             if moving && let Some(entity) = &mut entity {
                 entity.insert((
