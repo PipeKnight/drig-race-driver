@@ -1,6 +1,7 @@
 // Independently expressed source layer arithmetic; Bevy provides lighting.
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
+    mesh_view_bindings::view,
 }
 #ifdef PREPASS_PIPELINE
 #import bevy_pbr::{prepass_io::{VertexOutput, FragmentOutput}, pbr_deferred_functions::deferred_output}
@@ -21,6 +22,7 @@
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var<uniform> skid_colour2: vec4<f32>;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> dry_ground: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(113) var<uniform> sampling: vec4<f32>;
 
 // Independently authored dry response confined to the audited ground band.
 // Source RGB/alpha, road/line texels and the existing layer blend are preserved.
@@ -34,16 +36,17 @@ fn ground_weight(code: f32, uv: vec2<f32>) -> f32 {
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr = pbr_input_from_standard_material(in, is_front);
-    let a = textureSample(first, first_sampler, in.uv);
-    let b = textureSample(second, second_sampler, in.uv);
-    let macro_sample = textureSample(macro_map, macro_sampler, in.uv_b);
+    let mip_bias = select(0.0, view.mip_bias, sampling.x > 0.5);
+    let a = textureSampleBias(first, first_sampler, in.uv, mip_bias);
+    let b = textureSampleBias(second, second_sampler, in.uv, mip_bias);
+    let macro_sample = textureSampleBias(macro_map, macro_sampler, in.uv_b, mip_bias);
     let layer = mix(a, b, in.color.r);
     // Green was limited at each vertex before interpolation, as in the source VS.
     var albedo = mix(layer.rgb, macro_sample.rgb, in.color.g);
     let skid_a_uv = vec2(in.uv_b.x * scales.z, in.uv_b.y * scales.x) + scales.w;
     let skid_b_uv = vec2(-in.uv_b.x * scales.z, in.uv_b.y * scales.y) + controls.x;
-    let skid_a = textureSample(skids, skid_sampler, skid_a_uv).r * in.color.a * 2.0 * controls.y;
-    let skid_b = textureSample(skids, skid_sampler, skid_b_uv).r * in.color.a * controls.y;
+    let skid_a = textureSampleBias(skids, skid_sampler, skid_a_uv, mip_bias).r * in.color.a * 2.0 * controls.y;
+    let skid_b = textureSampleBias(skids, skid_sampler, skid_b_uv, mip_bias).r * in.color.a * controls.y;
     albedo = mix(albedo, skid_colour.rgb, skid_a);
     albedo = mix(albedo, skid_colour2.rgb, skid_b);
     pbr.material.base_color = vec4(albedo, 1.0);

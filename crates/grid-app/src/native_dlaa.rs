@@ -112,12 +112,13 @@ fn report_prepared(
             &MainPassResolutionOverride,
             &ViewPrepassTextures,
             &Dlss,
+            &bevy::render::camera::MipBias,
         ),
         With<DlaaView>,
     >,
     mut previous: Local<Option<UVec2>>,
 ) {
-    for (view, resolution, prepass, dlss) in &views {
+    for (view, resolution, prepass, dlss, mip_bias) in &views {
         let output = UVec2::new(view.viewport.z, view.viewport.w);
         let input = resolution.0;
         if input != output
@@ -134,8 +135,8 @@ fn report_prepared(
         }
         if *previous != Some(input) {
             println!(
-                "graphics_dlaa prepared=true input={}x{} output={}x{} depth=true motion=true scope=context-and-completed-render-schedule-not-gpu-readback",
-                input.x, input.y, output.x, output.y
+                "graphics_dlaa prepared=true input={}x{} output={}x{} depth=true motion=true mip_bias={} scope=context-and-completed-render-schedule-not-gpu-readback",
+                input.x, input.y, output.x, output.y, mip_bias.0
             );
             *previous = Some(input);
         }

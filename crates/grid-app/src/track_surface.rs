@@ -71,6 +71,9 @@ pub struct Surface {
     // Z/W are authored roughness/reflectance, not recovered source values.
     #[uniform(112)]
     dry_ground: Vec4,
+    // X enables the diagnostic view bias; other lanes reserved.
+    #[uniform(113)]
+    sampling: Vec4,
 }
 impl MaterialExtension for Surface {
     fn fragment_shader() -> ShaderRef {
@@ -455,6 +458,7 @@ fn attach(
                         macro_map: textures[&d.textures[2]].clone(),
                         skids: skid_textures[&d.textures[3]].clone(),
                         scales: d.scales,
+                        sampling: Vec4::new(if settings.surface_view_mip_bias { 1. } else { 0. }, 0., 0., 0.),
                         controls: Vec4::new(
                             d.controls.x,
                             d.controls.y,
@@ -487,6 +491,7 @@ fn attach(
             .insert(MeshMaterial3d(handle));
         attached += 1;
     }
+    println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(
         "track_surface attached draws={attached} materials={} uv1=true masks=linear-ARGB-to-RGBA specular={:?}",
         handles.len(),

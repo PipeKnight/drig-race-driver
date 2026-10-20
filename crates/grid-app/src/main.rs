@@ -1875,6 +1875,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--ground-edges needs off or atlas-pilot".into()),
                 };
             }
+            "--surface-mip-bias" => {
+                graphics.surface_view_mip_bias = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("view") => true,
+                    _ => return Err("--surface-mip-bias needs off or view".into()),
+                };
+            }
             "--surface-specular" => {
                 graphics.surface_specular = track_surface::Specular::parse(
                     &args.next().ok_or("--surface-specular needs off, source-base or white-control")?,
@@ -1939,6 +1946,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--paint-clearcoat 0..1 --paint-coat-roughness 0.04..1: authored player-paint lacquer controls; defaults 0.35/0.18, enhanced layered materials only.");
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
+                println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
                     "--numbers source|off: compose saved per-livery race numbers in enhanced graphics; off default.\n--race-number DIGITS: override the player's number with 1..3 decimal digits; leading zeroes are preserved."
@@ -2040,10 +2048,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         graphics.surface_specular = track_surface::Specular::SourceBase;
     }
-    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some() || graphics.ground_edge_pilot)
+    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some() || graphics.ground_edge_pilot || graphics.surface_view_mip_bias)
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
-        return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges) require an enhanced non-collision track scene with --track-materials source".into());
+        return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges/--surface-mip-bias) require an enhanced non-collision track scene with --track-materials source".into());
     }
     if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
         return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());

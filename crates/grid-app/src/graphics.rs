@@ -59,6 +59,8 @@ pub struct Settings {
     pub layered_track: bool,
     /// Source blended-alpha base-F0 adaptation; CLI resolves eligible track defaults.
     pub surface_specular: super::track_surface::Specular,
+    /// Default-off diagnostic: match stock PBR view mip bias on source surface samples.
+    pub surface_view_mip_bias: bool,
     pub thin_motion_antenna: bool,
     pub ground_edge_pilot: bool,
     pub source_land: bool,
@@ -139,6 +141,7 @@ impl Default for Settings {
             ssr_thickness: 0.05,
             layered_track: true,
             surface_specular: super::track_surface::Specular::Off,
+            surface_view_mip_bias: false,
             thin_motion_antenna: false,
             ground_edge_pilot: false,
             source_land: true,
