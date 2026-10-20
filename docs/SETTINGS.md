@@ -26,6 +26,7 @@ Grammar:
 | | `car` | `cars/<stem>` name, e.g. `lac` (default) or `bmw` | `--car` |
 | | `opponent_cars` | `STEM[,STEM...]`, cycled over the opponents (default: the player's car) | `--opponent-cars` |
 | | `series` | `pro_tuned`, `touring`, `gt1`, `gt2`, `le_mans_series`: the free-race series; the route must be in its pool, the opponents are its original free-race field (docs/SERIES.md; GRID_SERIES_SEED fixes the draw) | `--series` |
+| | `series_seed` | the seed of the series' field and grid (career Le Mans races, F507); `GRID_SERIES_SEED` overrides it, else the clock | – |
 | `[drive]` | `enabled` | `on`/`off` | `--drive` |
 | | `laps` | `0` (free practice) or 1..99 | `--time-trial-laps` |
 | | `opponents` | `0` or 1..11 | `--opponents` |

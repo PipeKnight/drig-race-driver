@@ -273,7 +273,7 @@ pub fn offers(
     let mut out = Vec::new();
     for event in cat.events.values() {
         if !career.event_open(cat, event.id)
-            || event.use_lemans_selection
+            || event.use_lemans_selection && event.head_to_head
             || event.competition_format_id != 1
             || event.num_competitions < 1
         {
@@ -314,7 +314,7 @@ pub fn offers(
         // not offered (no substitute layout).
         let races: Vec<(EventRace, String)> = drawn
             .into_iter()
-            .filter(|r| r.laps > 0 && r.time_limit_seconds == 0)
+            .filter(|r| r.laps > 0 && (r.time_limit_seconds == 0 || lemans_series(cat, event) == Some(LE_MANS_24)))
             .filter_map(|r| {
                 let route = routes.get(&r.track_model_id)?.clone();
                 (surveyed(&route) && exists(&route)).then_some((r, route))
@@ -522,6 +522,116 @@ pub fn race_profile(car: &str, field_cars: &[String], race: &Planned, solo: bool
     )
 }
 
+/// The series of a Le Mans selection event (`use_lemans_selection`): the
+/// 24 Hours (`lemans_24` rows) in the `le_mans`-region tiers, else the Le
+/// Mans Series rows. [I] The original passes the career +0x50 byte to
+/// 0x663860 (docs/LE_MANS.md §2.5).
+pub fn lemans_series(cat: &Catalogue, event: &grid_tools::career::data::Event) -> Option<&'static str> {
+    if !event.use_lemans_selection {
+        return None;
+    }
+    let tier = cat.tier(event.tier_id)?;
+    Some(if tier.region == Region::LeMans { LE_MANS_24 } else { "le_mans_series" })
+}
+
+pub const LE_MANS_24: &str = "le_mans";
+
+/// A Le Mans selection event's run: the series whose field and grid the
+/// race builds (`series::Event::prepare_on_grid`: 0x663860, 0x5BDF10) and
+/// the seed of the first race (race `i` uses `seed + i`, AUTHORED).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeMansRun {
+    pub series: String,
+    pub seed: u32,
+}
+
+/// The field and races of a Le Mans selection event. The field is the
+/// player and the series' cars in the first race's grid order; each race
+/// maps its own grid onto it by model and livery. AUTHORED: AI cars are
+/// named "Car N"; no team mate drives (the series field has no entry for
+/// one).
+pub fn lemans_plan(
+    root: &Path,
+    series: &str,
+    car: &str,
+    races: &[(EventRace, String)],
+    seed: u32,
+) -> Result<(Vec<FieldEntry>, Vec<Planned>), String> {
+    let err = |e: Box<dyn std::error::Error>| e.to_string();
+    let player = grid_tools::car::Car::new(car).map_err(err)?;
+    let mut field: Vec<FieldEntry> = vec![FieldEntry {
+        entrant: Entrant::Player,
+        stem: car.to_owned(),
+        livery: 0,
+        name: "You".into(),
+    }];
+    let mut planned = Vec::new();
+    for (i, (race, route)) in races.iter().enumerate() {
+        let r = grid_tools::route::Route::new(route).map_err(err)?;
+        let event = grid_tools::series::Event::prepare_on_grid(
+            root,
+            series,
+            &r,
+            Some(&player),
+            None,
+            true,
+            seed.wrapping_add(i as u32),
+            0,
+        )
+        .map_err(err)?;
+        let key = |stem: &str, livery: usize| (stem.to_owned(), livery);
+        if i == 0 {
+            for (n, o) in event.opponents.iter().enumerate() {
+                let d = n as i32 + 1;
+                field.push(FieldEntry {
+                    entrant: Entrant::Ai { driver: d, team: d },
+                    stem: o.car.stem().to_owned(),
+                    livery: o.livery_index.unwrap_or(0),
+                    name: format!("Car {d}"),
+                });
+            }
+        }
+        let mut used = vec![false; field.len()];
+        let mut cars = Vec::new();
+        for o in &event.opponents {
+            let want = key(o.car.stem(), o.livery_index.unwrap_or(0));
+            let at = (1..field.len())
+                .find(|&k| !used[k] && key(&field[k].stem, field[k].livery) == want)
+                .ok_or(format!("{} not in the first race's field", o.livery))?;
+            used[at] = true;
+            cars.push(at);
+        }
+        planned.push(Planned {
+            route: route.clone(),
+            laps: race.laps,
+            slot: event.player_slot.unwrap_or(cars.len()),
+            layout: race.track_model_id,
+            cars,
+        });
+    }
+    Ok((field, planned))
+}
+
+/// The race profile of a Le Mans selection race: the series builds the
+/// cars, liveries, classes and grid from the seed; the career names them.
+pub fn lemans_profile(field: &[FieldEntry], race: &Planned, run: &LeMansRun, index: usize) -> String {
+    let names: Vec<String> = race.cars.iter().filter_map(|&i| field.get(i)).map(|c| c.name.clone()).collect();
+    format!(
+        "# Written by the career screen (docs/CAREER_SCREEN.md) for the next career race.\n\
+         [game]\nroute = {}\ncar = {}\nseries = {}\nseries_seed = {}\nopponent_names = {}\n\
+         [drive]\nenabled = on\nlaps = {}\n\
+         ai_characteristics = ai-driver-characteristics.tsv\n\
+         [ai]\ndifficulty = {DIFFICULTY}\ncatchup = on\nchoreographer = on\nmistakes = on\n\
+         [private]\nbody_contacts = derive\nbody_events = derive\ndeformation = derive\n",
+        race.route,
+        field[0].stem,
+        run.series,
+        run.seed.wrapping_add(index as u32),
+        names.join(","),
+        race.laps,
+    )
+}
+
 /// A classification token: car index (0 the player), `x` when out.
 fn token(c: &Classified) -> String {
     let out = if c.finished { "" } else { "x" };
@@ -696,6 +806,8 @@ pub struct InProgress {
     /// The last race's best lap and top speed (driver offers).
     pub best_lap: Option<f64>,
     pub top_mph: Option<f32>,
+    /// A Le Mans selection event: the series that builds each race's field.
+    pub lemans: Option<LeMansRun>,
 }
 
 impl InProgress {
@@ -759,6 +871,9 @@ impl InProgress {
         if let Some(t) = self.top_mph {
             s += &format!("top {t}\n");
         }
+        if let Some(l) = &self.lemans {
+            s += &format!("lemans {} {}\n", l.series, l.seed);
+        }
         s
     }
 
@@ -778,6 +893,7 @@ impl InProgress {
             settings: None,
             best_lap: None,
             top_mph: None,
+            lemans: None,
         };
         let num = |v: Option<&str>| -> Result<i64, String> {
             v.and_then(|v| v.parse().ok()).ok_or("bad number".into())
@@ -816,6 +932,10 @@ impl InProgress {
                 Some("offer") => e.offer = Some(num(f.next())? as i32),
                 Some("best") => e.best_lap = f.next().and_then(|v| v.parse().ok()),
                 Some("top") => e.top_mph = f.next().and_then(|v| v.parse().ok()),
+                Some("lemans") => {
+                    let series = f.next().ok_or("no series")?.to_owned();
+                    e.lemans = Some(LeMansRun { series, seed: num(f.next())? as u32 });
+                }
                 None => {}
                 Some(other) => return Err(format!("unknown line {other}")),
             }
@@ -1757,6 +1877,23 @@ impl Screen {
 
     fn refresh_offers(&mut self, routes: &BTreeMap<i32, String>, labels: &Labels, root: &Path) {
         self.offers = offers(&self.cat, &self.career, routes, labels, |p| root.join(p).exists());
+        // A Le Mans selection event needs a car of the series whose field
+        // builds on every drawn layout (AUTHORED: the first that does; the
+        // original lets the player choose an owned eligible car).
+        let cat = &self.cat;
+        self.offers.retain_mut(|o| {
+            let Some(series) = cat.event(o.event_id).and_then(|ev| lemans_series(cat, ev)) else {
+                return true;
+            };
+            let candidates: Vec<String> = std::iter::once(o.car.clone()).chain(o.field_cars.clone()).collect();
+            match candidates.into_iter().find(|c| lemans_plan(root, series, c, &o.races, 1).is_ok()) {
+                Some(car) => {
+                    o.car = car;
+                    true
+                }
+                None => false,
+            }
+        });
         self.driver_offers = offer_runs(&self.cat, &self.career, routes, labels, |p| root.join(p).exists());
     }
 
@@ -1812,6 +1949,7 @@ impl Screen {
             settings: None,
             best_lap: None,
             top_mph: None,
+            lemans: None,
         };
         std::fs::write(self.dir.join(EVENT), e.write()).map_err(|err| err.to_string())?;
         log_line!(
@@ -1834,16 +1972,20 @@ impl Screen {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(1, |d| d.as_secs() as u32);
         let root = self.root.clone();
-        let (field, races) = career_plan(
-            &self.cat,
-            &self.career,
-            grid_tools::career::field::Entry::Event(offer.event_id),
-            &offer.car,
-            0,
-            &offer.races,
-            |p| root.join(p).exists(),
-            seed,
-        );
+        let series = self.cat.event(offer.event_id).and_then(|ev| lemans_series(&self.cat, ev));
+        let (field, races) = match series {
+            Some(series) => lemans_plan(&root, series, &offer.car, &offer.races, seed)?,
+            None => career_plan(
+                &self.cat,
+                &self.career,
+                grid_tools::career::field::Entry::Event(offer.event_id),
+                &offer.car,
+                0,
+                &offer.races,
+                |p| root.join(p).exists(),
+                seed,
+            ),
+        };
         let e = InProgress {
             offer: None,
             event_id: offer.event_id,
@@ -1855,6 +1997,7 @@ impl Screen {
             settings: None,
             best_lap: None,
             top_mph: None,
+            lemans: series.map(|s| LeMansRun { series: s.into(), seed }),
         };
         std::fs::write(self.dir.join(EVENT), e.write()).map_err(|err| err.to_string())?;
         log_line!(
@@ -1891,7 +2034,9 @@ impl Screen {
     fn go(&self) -> Result<(), String> {
         let e = self.current.as_ref().ok_or("no event")?;
         let next = e.next().ok_or("event finished")?;
-        let mut profile = if e.field.is_empty() {
+        let mut profile = if let Some(run) = &e.lemans {
+            lemans_profile(&e.field, next, run, e.results.len())
+        } else if e.field.is_empty() {
             race_profile(&e.car, &e.field_cars, next, self.solo(e))
         } else {
             field_profile(&e.field, next)
@@ -2392,6 +2537,7 @@ mod tests {
             settings: None,
             best_lap: None,
             top_mph: None,
+            lemans: None,
         };
         assert_eq!(InProgress::read(&e.write()).unwrap(), e);
         e.add(back.clone());
@@ -2402,6 +2548,16 @@ mod tests {
         assert!(e.done());
         assert_eq!(e.results.len(), 2);
         assert_eq!(InProgress::read(&e.write()).unwrap(), e);
+        // A Le Mans selection event keeps its series and seed; the race
+        // profile names them, with race i's seed + i.
+        e.lemans = Some(LeMansRun { series: "le_mans_series".into(), seed: 41 });
+        assert_eq!(InProgress::read(&e.write()).unwrap(), e);
+        let profile = lemans_profile(&e.field, &e.races[0], e.lemans.as_ref().unwrap(), 1);
+        assert!(profile.contains("series = le_mans_series
+series_seed = 42
+opponent_names = Ann Example,Lee Niven
+"), "{profile}");
+        assert!(!profile.contains("opponent_cars"));
 
         // A driver offer keeps its id, best lap and top speed.
         let mut o = out(&[0], false);
@@ -2484,6 +2640,7 @@ mod tests {
             settings: None,
             best_lap: None,
             top_mph: None,
+            lemans: None,
         };
         assert_eq!(
             standings_lines(&[20, 18, 16], &e, "Ann Example"),
@@ -2729,6 +2886,60 @@ mod tests {
         assert_eq!(event(&c).car, "lac");
         // The offers changed with the purchase (a seed refresh).
         assert_ne!(c.ebay.offers(&cat, lac, None), used);
+    }
+
+    /// Every Le Mans selection event builds its multi-class field with one
+    /// of its cars on its drawn layouts (`lemans_plan`), and each race's
+    /// grid maps onto the first race's field.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn le_mans_selection_events_build_their_fields() {
+        let (cat, routes, root) = catalogue();
+        let mut report = Vec::new();
+        for id in [13, 14, 15, 16, 31, 35, 50, 51] {
+            let event = cat.event(id).unwrap();
+            let series = lemans_series(&cat, event).unwrap();
+            assert_eq!(series == LE_MANS_24, (13..=16).contains(&id));
+            let drawn = grid_tools::career::field::draw_races(
+                &cat,
+                &event.races,
+                event.num_competitions as usize,
+                true,
+                &Default::default(),
+            );
+            let races: Vec<(EventRace, String)> = drawn
+                .into_iter()
+                .filter_map(|r| Some((r.clone(), routes.get(&r.track_model_id)?.clone())))
+                .collect();
+            let cars: Vec<String> = event
+                .vehicles
+                .iter()
+                .filter_map(|v| cat.vehicles.get(v))
+                .map(|v| v.stem.clone())
+                .filter(|s| grid_tools::series::RACEABLE.contains(&s.as_str()))
+                .collect();
+            let built = cars.iter().find_map(|c| lemans_plan(&root, series, c, &races, 7).ok().map(|p| (c.clone(), p)));
+            let routes: Vec<&str> = races.iter().map(|(_, r)| r.as_str()).collect();
+            match built {
+                Some((car, (field, planned))) => {
+                    report.push(format!("{id} {series} {car} cars={} routes={routes:?}", field.len()));
+                    for p in &planned {
+                        let mut seen = p.cars.clone();
+                        seen.sort();
+                        assert_eq!(seen, (1..field.len()).collect::<Vec<_>>(), "event {id}: one slot per car");
+                    }
+                    let classes: std::collections::BTreeSet<i32> = field
+                        .iter()
+                        .filter_map(|f| cat.vehicles.values().find(|v| v.stem == f.stem).map(|v| v.class_id))
+                        .collect();
+                    assert!(classes.len() > 1, "event {id}: a multi-class field");
+                }
+                None => report.push(format!("{id} {series} none of {cars:?} routes={routes:?}")),
+            }
+        }
+        println!("{}", report.join("
+"));
+        assert!(report.iter().filter(|l| !l.contains(" none of ")).count() >= 1, "{report:?}");
     }
 
     /// A new career on the purchased data: no team, no own events, and the

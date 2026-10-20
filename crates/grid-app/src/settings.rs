@@ -244,6 +244,9 @@ pub struct Settings {
     /// `[game] series`: a free-race circuit series (`pro_tuned`, `touring`,
     /// `gt1`, ...; docs/SERIES.md): its cars and grid fill.
     pub series: Option<String>,
+    /// `[game] series_seed`: the seed of the series' field and grid (career
+    /// Le Mans races; `GRID_SERIES_SEED` overrides it, else the clock).
+    pub series_seed: Option<u32>,
     pub drive: bool,
     pub laps: Option<u32>,
     /// `[drive] time_limit`: seconds of a Freestyle drift event (90 in the
@@ -459,6 +462,9 @@ impl Settings {
                         )));
                     }
                     self.series = Some(name);
+                }
+                ("game", "series_seed") => {
+                    self.series_seed = Some(value.parse::<u32>().map_err(|_| at(number(&key)))?)
                 }
                 ("drive", "enabled") => self.drive = on(&key, value).map_err(at)?,
                 ("drive", "time_limit") => {

@@ -124,7 +124,20 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
 
 - `apply_event_in_classes` takes each car's `vehicle_class_id`; the screen gives the class of each field entry's model (AUTHORED: the first vehicle row of the stem; the original reads the driver's livery row). The F424 field has no entries, so every car counts in one class there.
 - Events of `le_mans`-region tiers (the Le Mans 24 Hours, 13–16) are paid by routine B: class position, the team win within the class, reputation from the whole pot without depletion, no head-to-head unlock. `use_lemans_selection` events (routine A) also use class positions (CAREER_RESEARCH §3.4).
-- The screen does not offer Le Mans selection events yet (`offers`: no `lemans_restrictions` field), so this path is checked by tests on the shipped data only, not in the app.
+- Since F507 the screen offers the Le Mans selection events (next section).
+
+## Le Mans selection events (F507)
+
+- `use_lemans_selection` events are offered: the Le Mans Series (31, 35, 50, 51) and, while Le Mans is pending, the Le Mans 24 Hours (13–16, time-limited, 720 s). `lemans_series` picks the field: the 24 Hours rows (`lemans_24` = 1) for `le_mans`-region tiers, else the Le Mans Series rows [I: the original passes the career +0x50 byte to 0x663860].
+- `lemans_plan` builds the field with `series::Event::prepare_on_grid` (0x663860 field, 0x5BDF10 class-sorted grid) once per race, with seed + race index (AUTHORED; the original seeds from the clock). The event's field is the player and the first race's cars ("Car N", AUTHORED names); later races map their grid onto it by model and livery. No team mate drives in these fields (AUTHORED: the series field has no entry for one).
+- The race profile (`lemans_profile`) names the series and the seed (`[game] series`, `series_seed`) and the AI names, so grid-app rebuilds the same field with its classes, the results' Class column and, for the 24 Hours, the time limit (docs/LE_MANS.md). The event file keeps `lemans SERIES SEED`.
+- The player's car: the offer's car if its series field builds on every drawn layout, else the first event car that does (AUTHORED; the original lets the player pick an eligible owned car).
+- Payout by class position (routine B for 13–16, routine A with class positions for the Series) with each car's model class.
+- Shipped data (test `le_mans_selection_events_build_their_fields`): every one of the eight events builds a multi-class field of 15–17 cars (13 spk, 14 sal, 15 b05, 16 lc7 at Le Mans route_0; 31 spk, 35 c5r, 50 c65, 51 lc7 on 3–4 European layouts).
+- In the app (F507, unattended, muted): event 31 in the Spyker. Each race rebuilt the career's 16-car grid from the profile's seed (player slot 10), and the results showed the Class column (LMP1, LMP2, GT1, GT2).
+  - The player finished 5th and 9th overall, then wrecked on lap 1 of race 3.
+  - With 17 points against 13 for the best other GT2 car, the payout was class position 1: prize 150,000, the class team win 150,000, and a Flashback Bonus of 24,000 (2 finished races × 12,000).
+- Unattended checks: with `GRID_RESULTS_CONTINUE`, a scripted race now retires from the wreck screen and confirms (post_race diagnostics), so a wrecked career race still reports its result.
 
 ## Head-to-heads (F478)
 

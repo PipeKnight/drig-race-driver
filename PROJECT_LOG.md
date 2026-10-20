@@ -1,5 +1,29 @@
 # GRID engine project log
 
+F507 Career: the Le Mans selection events are offered, with their multi-class fields, so class positions and routine B run in the app (2026-10-20, Claude Code; coordinator's order after F495). Screen: docs/CAREER_SCREEN.md "Le Mans selection events (F507)". Evidence: worktree peaceful-villani-46ea34 `local/career4/` (run31, run31b, checks-507).
+- `use_lemans_selection` events are offered:
+  - the Le Mans Series 31, 35, 50 and 51;
+  - the Le Mans 24 Hours 13–16 while Le Mans is pending, time-limited.
+- `lemans_series` chooses the 24 Hours rows for `le_mans`-region tiers, else the Series rows [I: the original passes the career +0x50 byte to 0x663860].
+- `lemans_plan` builds each race's field and class-sorted grid with `series::Event::prepare_on_grid` (0x663860, 0x5BDF10; seed + race index, AUTHORED). The event's field is the first race's grid; later races map onto it by model and livery. AI cars are named "Car N" (AUTHORED), and no team mate drives.
+- `lemans_profile` writes `[game] series` and the new `series_seed` key, which `GRID_SERIES_SEED` overrides. grid-app rebuilds the same field, Class column and 24 Hours time limit, and the event file keeps `lemans SERIES SEED`.
+- The offer's car is the first event car whose series field builds on every drawn layout (AUTHORED).
+- Shipped data (test): all eight events build multi-class fields of 15–17 cars.
+- Diagnostics: with `GRID_RESULTS_CONTINUE`, a scripted race now retires from the wreck screen, so an unattended career race still reports. `guard_career2.sh` can resume a data dir.
+- In the app (guarded, muted), event 31 in the Spyker C8:
+  - Each race had the career's 16-car grid (player slot 10) and the Class column (LMP1/LMP2/GT1/GT2). The player was 5th and 9th overall.
+  - Race 3: the player wrecked on lap 1 at tick 3008. The first run stopped at the 2,400 s cap on the wreck screen; the resumed run (run31b) retired and paid out.
+  - Paid by GT2 class position 1 (17 points against 13 for the next GT2 car, checked by hand with table 6): prize 150,000, class team win 150,000, Flashback Bonus 24,000 (2 finished races × 12,000), sponsors 16,300, reputation 36,000. The pot went from 80,000 to 40,000 (routine A).
+  - Money 200,000 + 340,300 + an eBay sale of 36,000 = 576,300. At most 2.74 GB private.
+- Not run in the app: a Le Mans 24 Hours event, which needs the Le Mans pending state and an eligible car.
+- Checks [V], release, `--offline`:
+  - head 6901d1c3 (main 5d44947 + this change)
+  - identities unchanged from F497's baselines: solo 18b369f9…a6ee, 12-car c235bab2…8552
+  - workspace tests with `--include-ignored` and absolute GRID_* paths: 836 passed, 0 failed
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean
+  - `grid-soak quick`: 24 scenarios, 0 failed
+  - release grid-app.exe sha256 a186c958…2dd626
+
 F506 Close-drift flag post geometry ported and verified bit for bit (2026-10-20, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, after F503). Details: docs/JOINTS_RESEARCH.md "Close-drift flags: the phantom post", plan step 3.
 - Port: new module `grid_world::phantom_post` with `penetration` (0x7BBB70), `closest` (0x7BC370) and `push` (0x7BCDA0).
   - `penetration` is the separating-axis test of the pole segment against the car box: the box's three axes and their cross products with the segment.

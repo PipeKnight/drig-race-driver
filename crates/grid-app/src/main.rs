@@ -1324,10 +1324,11 @@ fn model_offset(runtime: &grid_tools::source_vehicle::Runtime) -> Mat4 {
 }
 /// Grid-fill seed of a series event: GRID_SERIES_SEED, else the clock
 /// (docs/SERIES.md "Grid fill").
-fn series_seed() -> u32 {
+fn series_seed(profile: Option<u32>) -> u32 {
     std::env::var("GRID_SERIES_SEED")
         .ok()
         .and_then(|v| v.parse().ok())
+        .or(profile)
         .unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1939,7 +1940,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             car_chosen.then_some(&player_car),
             opponents,
             opponent_cars.is_none(),
-            series_seed(),
+            series_seed(profile.series_seed),
             if profile.grid_back { 1 } else { 0 },
         )?;
         if let Some(slot) = event.player_slot {

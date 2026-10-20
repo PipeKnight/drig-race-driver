@@ -471,15 +471,23 @@ pub fn update(
         return;
     }
     // Diagnostics results_continue: a scripted run selects Continue on the
-    // stats and results screens by itself (unattended checks).
+    // stats and results screens by itself (unattended checks); on the wreck
+    // screen it retires and confirms, so an unattended career race still
+    // reports a result.
     if let Some(after) = crate::settings::diagnostics().results_continue
         && driving.scripted_ticks.is_some()
-        && matches!(post.stage, Stage::Stats | Stage::Results)
+        && matches!(
+            post.stage,
+            Stage::Stats | Stage::Results | Stage::Wreck | Stage::Confirm(Confirm::RetireRace, Return::Wreck)
+        )
     {
         *waited += dt;
         if f64::from(*waited) >= after {
             *waited = 0.;
-            post.cursor = 0;
+            post.cursor = match post.stage {
+                Stage::Wreck => post.wreck_pills().iter().position(|(p, _)| *p == Pill::Retire).unwrap_or(0),
+                _ => 0,
+            };
             nav.select = true;
         }
     } else {
