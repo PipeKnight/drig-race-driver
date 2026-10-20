@@ -22,7 +22,7 @@ use crate::{
 use grid_formats::{entities, jpk, physparams, pssg};
 use grid_world::{
     Error, collision_mesh, contact_groups, convex_distance, grouped_physical_frame, joint,
-    joint_template, physical_constructor, physical_pose::Matrix,
+    joint_template, phantom_post, physical_constructor, physical_pose::Matrix,
     round_contacts::{CylinderShape, RoundShape, SphereShape},
 };
 use std::{collections::BTreeMap, path::Path};
@@ -90,8 +90,15 @@ pub struct Breakable {
     pub placement: [f32; 16],
     /// Route prop box indices of the intact (static) state.
     pub intact: Vec<usize>,
+    /// Threshold and explosion of each intact box's shape behaviour (a shape
+    /// without one: FLT_MAX); the close-drift flag's pole and base differ.
+    pub limits: Vec<(f32, f32)>,
+    /// The first behaviour's threshold and explosion.
     pub threshold: f32,
     pub explosion: f32,
+    /// Route prop boxes of the damage state's static (`infMass`) pieces,
+    /// switched on at the break.
+    pub damaged: Vec<usize>,
     pub pieces: Vec<PieceSpec>,
     /// Template rigid-body id of each piece.
     pub bodies: Vec<String>,
@@ -104,6 +111,10 @@ pub struct Breakable {
     /// The ENS links this entity holds that a `link<index>` constraint of it
     /// uses, in file order.
     pub links: Vec<LinkSpec>,
+    /// Joints with `specificPostCollision` on a `close_drift_flag` entity
+    /// (0x7CC1E0): their dynamic piece is a phantom post (collision
+    /// cleared, shape +0x15); the post itself is not ported yet.
+    pub posts: Vec<usize>,
 }
 
 /// A held ENS link (`TEMPLATEENTITYLINK`) to a primary breakable.
@@ -164,6 +175,29 @@ pub struct Piece {
     pub token: u32,
 }
 
+/// A registered phantom post (0x7B6B10 / 0x7B6340): a close-drift flag's
+/// pole joint, its pole body and the post geometry.
+#[derive(Clone, Debug)]
+pub struct PropPost {
+    pub breakable: usize,
+    /// Its joint in [`PropWorld::joints`].
+    pub joint: usize,
+    pub body: usize,
+    pub post: phantom_post::Post,
+}
+
+/// A car's box for the post sweep (0x7C4830): the `CAR_` shape's world
+/// matrix and half extents, and the body's motion this tick (centre +0x1C0
+/// minus the previous +0x2A0).
+#[derive(Clone, Copy, Debug)]
+pub struct PostCar {
+    pub shape: phantom_post::Box,
+    pub motion: [f32; 4],
+}
+
+/// The manager's post list holds at most ten (0x7B6340).
+const MAX_POSTS: usize = 10;
+
 /// A break observed this session: the entity and the tick it broke on.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BreakEvent {
@@ -192,6 +226,9 @@ pub struct PropWorld {
     /// as (breakable, piece).
     pub statics: std::collections::BTreeSet<(usize, usize)>,
     pub joints: Vec<PropJoint>,
+    pub posts: Vec<PropPost>,
+    /// The cars the last post update reported, once per touched post.
+    pub post_touches: Vec<usize>,
     pub events: Vec<BreakEvent>,
     pending: Vec<(usize, [f32; 4], f32)>,
     base_slots: Option<usize>,
@@ -408,9 +445,13 @@ impl Catalog {
         let placements = pssg::read_tree(&placements)?;
         let types = pssg::read_tree(&types)?;
         let mut boxes: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut damaged: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for (i, b) in props.boxes.iter().enumerate() {
             if let Some(e) = b.entity {
-                boxes.entry(e).or_default().push(i);
+                if b.damaged { &mut damaged } else { &mut boxes }
+                    .entry(e)
+                    .or_default()
+                    .push(i);
             }
         }
         let all = entities::read(&placements, &types)?;
@@ -439,22 +480,57 @@ impl Catalog {
                         .filter_map(move |s| Some((r, s.behaviour.as_ref()?)))
                 })
                 .collect();
-            let [(owner, behaviour)] = behaviours[..] else {
-                if behaviours.len() > 1 {
-                    *catalog.unported.entry(template).or_default() += 1;
-                }
+            // Several shape behaviours (the close-drift flag's pole and base)
+            // break the same body into the same damage state.
+            let Some(&(owner, behaviour)) = behaviours.first() else {
                 continue;
             };
+            // Only the flags are checked with several (other templates with
+            // them, such as Yokohama's crates and signs, stay intact).
+            if (behaviours.len() > 1 && !crate::entity_geometry::static_damage_ported(&template))
+                || behaviours.iter().any(|(o, b)| {
+                    o.component != owner.component || b.behaviour_type != behaviour.behaviour_type
+                })
+            {
+                *catalog.unported.entry(template).or_default() += 1;
+                continue;
+            }
             if !behaviour.deleted.contains(&owner.component) || behaviour.added.is_empty() {
                 *catalog.unported.entry(template).or_default() += 1;
                 continue;
             }
+            if behaviour.added.iter().any(|a| a.infinite_mass)
+                && !crate::entity_geometry::static_damage_ported(&template)
+            {
+                *catalog.unported.entry(template).or_default() += 1;
+                continue;
+            }
             let (threshold, explosion) = parameters.behaviour(reference(behaviour.properties)?)?;
+            // Per intact box, in the route reader's shape order.
+            let mut limits = Vec::new();
+            for shape in e.renderables.iter().flat_map(|r| &r.shapes).filter(|s| !s.phantom) {
+                limits.push(match &shape.behaviour {
+                    Some(b) => parameters.behaviour(reference(b.properties)?)?,
+                    None => (f32::MAX, 0.),
+                });
+            }
             let placement = matrix(&e.transform);
             let mut pieces = Vec::new();
             let mut static_pieces = Vec::new();
             for added in &behaviour.added {
-                if added.shapes.is_empty() && !added.infinite_mass {
+                // 0x7CDCD0 builds an `infMass` body static: no piece body; its
+                // shapes are route boxes switched on at the break.
+                if added.infinite_mass {
+                    pieces.push(PieceSpec::shapeless(
+                        String::from_utf8_lossy(added.node).into_owned(),
+                        String::from_utf8_lossy(added.body_node).into_owned(),
+                        placement,
+                        parameters.body(reference(added.body_properties)?)?,
+                    )?);
+                    static_pieces.push(true);
+                    continue;
+                }
+                if added.shapes.is_empty() {
                     let body = parameters.body(reference(added.body_properties)?)?;
                     if body.sphericalise != 0. {
                         *catalog.unported.entry(template).or_default() += 1;
@@ -476,7 +552,7 @@ impl Catalog {
                     *catalog.unported.entry(template).or_default() += 1;
                     continue 'entities;
                 };
-                if added.infinite_mass || shape.phantom {
+                if shape.phantom {
                     *catalog.unported.entry(template).or_default() += 1;
                     continue 'entities;
                 }
@@ -538,6 +614,7 @@ impl Catalog {
                 static_pieces.push(primaries.contains(&index) && targets.contains(added.body));
             }
             let mut joints = Vec::new();
+            let mut posts = Vec::new();
             // Body override per piece (0x7B85A0): the highest
             // `bodyOverridePriority` above -1 among the constraints on it.
             let mut overrides: Vec<Option<(i32, String)>> = vec![None; pieces.len()];
@@ -564,15 +641,29 @@ impl Catalog {
                     continue 'entities;
                 };
                 let props = parameters.constraint(reference(c.properties)?)?;
-                // Uproots, the post collision filter and the soft rotational
-                // friction callback (0x7C5210) are not ported.
+                // Uproots and the soft rotational friction callback (0x7C5210)
+                // are not ported.
                 if Some(a) == b
                     || props.uproot.is_some()
-                    || props.specific_post_collision
                     || props.soft_friction != props.hard_friction
                 {
                     *catalog.unported.entry(template).or_default() += 1;
                     continue 'entities;
+                }
+                // 0x7B7EE0: a static A with a dynamic B is swapped.
+                let (a, b) = match b {
+                    Some(k) if static_pieces[a] && !static_pieces[k] => (k, Some(a)),
+                    _ => (a, b),
+                };
+                // 0x7CC1E0: the post path only for an entity whose name holds
+                // `close_drift_flag` (strstr against 0xCE8084; the template
+                // name stands for the entity's [I]). A static A makes no joint,
+                // so no post (the base's own constraint to the world).
+                if props.specific_post_collision
+                    && template.contains("close_drift_flag")
+                    && !static_pieces[a]
+                {
+                    posts.push(joints.len());
                 }
                 if let Some(id) = &props.body_override {
                     let priority = props.body_override_priority;
@@ -608,6 +699,15 @@ impl Catalog {
                     dont_collide_with_fixed: props.dont_collide_with_fixed,
                 });
             }
+            // The post's dynamic body (A after the swap) collides with nothing
+            // (0xA6A290 clears shape +0x15) and its body +0x3FC is FLT_MAX
+            // (0xA692F0).
+            for &k in &posts {
+                let piece = &mut pieces[joints[k].a];
+                piece.points.clear();
+                piece.triangles.clear();
+                piece.limit = f32::MAX;
+            }
             for (spec, o) in pieces.iter_mut().zip(overrides) {
                 let Some((_, id)) = o else { continue };
                 let body = parameters.body(&id)?;
@@ -632,13 +732,18 @@ impl Catalog {
                 *catalog.unported.entry(template).or_default() += 1;
                 continue;
             }
+            if limits.len() != intact.len() {
+                return Err("breakable shape and box counts differ".into());
+            }
             catalog.breakables.push(Breakable {
                 entity: index,
                 template,
                 placement: e.transform,
                 intact,
+                limits,
                 threshold,
                 explosion,
+                damaged: damaged.get(&index).cloned().unwrap_or_default(),
                 pieces,
                 bodies: behaviour
                     .added
@@ -648,6 +753,7 @@ impl Catalog {
                 static_pieces,
                 joints,
                 links: Vec::new(),
+                posts,
             });
         }
         // The held links a `link<index>` constraint uses, to ported primaries.
@@ -993,6 +1099,11 @@ pub struct LooseWheel {
     pub token: u32,
 }
 
+/// A body's centre matrix (+0x190), as the joints and 0xA69740 read it.
+fn body_centre(body: &contact_groups::Body) -> Matrix {
+    std::array::from_fn(|r| std::array::from_fn(|c| f(body, 0x190 + r * 16 + c * 4)))
+}
+
 /// Current world pose of a piece's shape (body published matrix).
 pub fn body_pose(body: &contact_groups::Body) -> Matrix {
     std::array::from_fn(|r| std::array::from_fn(|c| f(body, 0x1d0 + r * 16 + c * 4)))
@@ -1297,6 +1408,8 @@ impl PropWorld {
             pieces: Vec::new(),
             statics: Default::default(),
             joints: Vec::new(),
+            posts: Vec::new(),
+            post_touches: Vec::new(),
             events: Vec::new(),
             pending: Vec::new(),
             base_slots: None,
@@ -1395,12 +1508,18 @@ impl PropWorld {
             .ok_or(Error("dynamic props require route props"))?;
         let boxes = std::sync::Arc::make_mut(&mut props.boxes);
         for (i, b) in self.catalog.breakables.iter().enumerate() {
-            for &k in &b.intact {
+            for (&k, &(limit, _)) in b.intact.iter().zip(&b.limits) {
                 let prop = boxes
                     .get_mut(k)
                     .ok_or(Error("breakable prop box out of range"))?;
-                prop.limit = b.threshold;
+                prop.limit = limit;
                 prop.enabled = !self.broken[i];
+            }
+            for &k in &b.damaged {
+                let prop = boxes
+                    .get_mut(k)
+                    .ok_or(Error("breakable prop box out of range"))?;
+                prop.enabled = self.broken[i];
             }
         }
         Ok(())
@@ -1637,11 +1756,17 @@ impl PropWorld {
                 continue;
             };
             let entry = &self.catalog.breakables[breakable];
+            let Some(&(threshold, explosion)) = (entry.intact.iter())
+                .position(|&k| k == record.prop)
+                .and_then(|i| entry.limits.get(i))
+            else {
+                continue;
+            };
             let force = f(c, 0x3c);
             if self.broken[breakable]
                 || self.pending.iter().any(|p| p.0 == breakable)
                 // NaN never breaks, as in the original comparison.
-                || entry.threshold.partial_cmp(&(force * BREAK_TOLERANCE))
+                || threshold.partial_cmp(&(force * BREAK_TOLERANCE))
                     .is_none_or(|o| o == std::cmp::Ordering::Greater)
             {
                 continue;
@@ -1653,7 +1778,7 @@ impl PropWorld {
                 .map(|b| std::array::from_fn(|k| f(b, 0x220 + 4 * k)))
                 .unwrap_or_default();
             let along = dot3(velocity, normal);
-            let explosion = normal.map(|n| entry.explosion * along * n);
+            let explosion = normal.map(|n| explosion * along * n);
             self.pending.push((breakable, explosion, force));
         }
     }
@@ -1759,7 +1884,7 @@ impl PropWorld {
         if make.world.groups.bodies.len() + room > grid_world::MAX_WORLD_BODIES {
             return Ok(false);
         }
-        make.disabled.extend(entry.intact.iter().copied());
+        make.disabled.extend(entry.intact.iter().chain(&entry.damaged).copied());
         for spec_index in 0..entry.pieces.len() {
             if entry.static_pieces[spec_index] {
                 self.statics.insert((breakable, spec_index));
@@ -1826,6 +1951,15 @@ impl PropWorld {
             },
             0,
         );
+        // 0xAD9220 / 0x7B6B10 / 0x7B6340: the post, while the list has room.
+        if entry.posts.contains(&k) && self.posts.len() < MAX_POSTS {
+            self.posts.push(PropPost {
+                breakable,
+                joint: self.joints.len(),
+                body: a,
+                post: phantom_post::Post::default(),
+            });
+        }
         self.joints.push(PropJoint {
             breakable,
             spec: k,
@@ -1842,6 +1976,58 @@ impl PropWorld {
             fixed: None,
         });
         Ok(())
+    }
+
+    /// 0x7C4830, once per frame after the step and the breaks (0x5F0EE0):
+    /// every post is refreshed from its joint's pivot and its pole's centre
+    /// (0x7BB910); then each car's box sweeps every post (0x7BD240). A post a
+    /// car turned past acos(0.99999) turns its pole about the pivot with zero
+    /// velocity. Returns the cars, by index in `cars`, once per touched post:
+    /// each gets the 1e-6 body contact (0xA01910) the drift listener sees.
+    pub fn update_posts(
+        &mut self,
+        world: &mut grouped_physical_frame::Output,
+        cars: &[PostCar],
+    ) -> Result<Vec<usize>, Error> {
+        // The world joint of each live post (a removed joint drops its post,
+        // 0x7B6390).
+        let worlds: Vec<Option<usize>> = (self.posts.iter())
+            .map(|p| {
+                let j = self.joints.get(p.joint)?;
+                (!j.broken && j.world < world.groups.joints.len()).then_some(j.world)
+            })
+            .collect();
+        let refresh = |world: &grouped_physical_frame::Output, p: &mut PropPost, w: usize| {
+            let words = &world.groups.joints[w].joint.words;
+            let anchor = std::array::from_fn(|k| f32::from_bits(words[0xa0 / 4 + k]));
+            let centre = body_centre(&world.groups.bodies[p.body]);
+            phantom_post::refresh(&mut p.post, phantom_post::pivot(anchor, centre), centre[3]);
+        };
+        for (p, w) in self.posts.iter_mut().zip(&worlds) {
+            if let Some(w) = *w {
+                refresh(world, p, w);
+            }
+        }
+        let mut touched = Vec::new();
+        for (i, car) in cars.iter().enumerate() {
+            let bounds = phantom_post::swept_bounds(&car.shape, car.motion);
+            let start = std::array::from_fn(|k| car.shape.centre[k] - car.motion[k]);
+            for (p, w) in self.posts.iter_mut().zip(&worlds) {
+                let Some(w) = *w else { continue };
+                let Some(touch) = phantom_post::sweep(&mut p.post, &car.shape, start, bounds) else {
+                    continue;
+                };
+                if let Some((axis, cosine)) = touch.turn {
+                    let body = &mut world.groups.bodies[p.body];
+                    let turned =
+                        phantom_post::turn_body(body_centre(body), p.post.pivot, axis, cosine);
+                    phantom_post::place(body, turned)?;
+                }
+                refresh(world, p, w);
+                touched.push(i);
+            }
+        }
+        Ok(touched)
     }
 
     /// Remove a live joint (0xAD9260): the port keeps its record broken.
@@ -1986,13 +2172,14 @@ impl PropWorld {
             .collect()
     }
 
-    /// Stop the broken intact boxes colliding in a track.
+    /// Switch a break's boxes in a track: the intact boxes stop colliding,
+    /// the damage state's static boxes start.
     pub fn disable(track: &mut Track, boxes: &[usize]) {
         if let Some(props) = track.props_mut() {
             let all = std::sync::Arc::make_mut(&mut props.boxes);
             for &k in boxes {
                 if let Some(b) = all.get_mut(k) {
-                    b.enabled = false;
+                    b.enabled = b.damaged;
                 }
             }
         }
@@ -2005,6 +2192,8 @@ impl PropWorld {
         self.pieces.clear();
         self.statics.clear();
         self.joints.clear();
+        self.posts.clear();
+        self.post_touches.clear();
         self.wheels.clear();
         self.events.clear();
         self.pending.clear();
@@ -2350,6 +2539,41 @@ mod tests {
             "{}",
             board.mass
         );
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn jarama_close_drift_flags_break_into_a_static_base_and_a_phantom_pole() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let route = Route::new("tracks/europe/jarama/route_0").unwrap();
+        let props = Props::read_route(root, &route).unwrap();
+        let catalog = Catalog::read(root, &route, &props).unwrap();
+        assert!(!catalog.unported.contains_key("close_drift_flag.max"), "{:?}", catalog.unported);
+        let flags: Vec<_> =
+            catalog.breakables.iter().filter(|b| b.template == "close_drift_flag.max").collect();
+        assert_eq!(flags.len(), 16);
+        for b in flags {
+            // The pole (bPhantom) and the base (bHeavy) of the intact body.
+            assert_eq!(b.limits, vec![(50., 0.), (2000., 0.)]);
+            // The damage state: the static base's two shapes as route boxes,
+            // off until the break.
+            assert_eq!(b.damaged.len(), 2);
+            assert!(b.damaged.iter().all(|&k| props.boxes[k].damaged && !props.boxes[k].enabled));
+            assert_eq!(b.bodies, ["close_drift_flag_obj_02_rigidbody", "close_drift_flag_obj_01_rigidbody"]);
+            assert_eq!(b.static_pieces, [false, true]);
+            // The pole collides with nothing and floats on its spring.
+            let pole = &b.pieces[0];
+            assert!(!pole.collides());
+            assert_eq!(pole.limit, f32::MAX);
+            assert_eq!((pole.body.gravity_scale, pole.body.linear_damping), (0., 0.));
+            assert!((pole.mass - 70. * std::f32::consts::PI * 0.01 * 2.93).abs() < 0.05, "{}", pole.mass);
+            // Base to the world: a static A, no joint. Base to pole: swapped,
+            // the pole held to the base's fixed object; the post.
+            let joints: Vec<_> = b.joints.iter().map(|j| (j.a, j.b, j.link)).collect();
+            assert_eq!(joints, [(1, None, None), (0, Some(1), None)]);
+            assert_eq!(b.posts, [1]);
+        }
     }
 
     #[test]

@@ -268,6 +268,37 @@ impl BodyGeometry {
         .shapes[0])
     }
 
+    /// The car's `CAR_` box for the phantom posts (0xA01960 -> 0x9B8AE0): the
+    /// MINPS/MAXPS AABB of the collision hull points, half its extent, centred
+    /// on it and posed like the hull [D; the port takes the current points].
+    pub fn car_box(
+        &self,
+        body: &contact_groups::Body,
+    ) -> Result<grid_world::phantom_post::Box, Error> {
+        let m = self.pose(body)?;
+        let mesh = self.shape.mesh();
+        let mut low = [f32::MAX; 3];
+        let mut high = [f32::MIN; 3];
+        for p in (0..mesh.point_count()).filter_map(|i| mesh.point(i)) {
+            for k in 0..3 {
+                high[k] = if high[k] > p[k] { high[k] } else { p[k] };
+                low[k] = if low[k] < p[k] { low[k] } else { p[k] };
+            }
+        }
+        if low[0] > high[0] {
+            return Err(Error("car box without hull points"));
+        }
+        let half: [f32; 3] = std::array::from_fn(|k| 0.5 * (high[k] - low[k]));
+        let c: [f32; 3] = std::array::from_fn(|k| half[k] + low[k]);
+        Ok(grid_world::phantom_post::Box {
+            axes: [m[0], m[1], m[2]],
+            centre: std::array::from_fn(|j| {
+                if j == 3 { 1. } else { c[0] * m[0][j] + c[1] * m[1][j] + c[2] * m[2][j] + m[3][j] }
+            }),
+            half: [half[0], half[1], half[2], 0.],
+        })
+    }
+
     /// Diagnostic: current collision hull points in world coordinates.
     pub fn hull_world_points(&self, body: &contact_groups::Body) -> Result<Vec<[f32; 3]>, Error> {
         let m = self.pose(body)?;

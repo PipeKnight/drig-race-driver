@@ -488,10 +488,11 @@ without base results.
 
 - `MultiRuntime::contact_impacts` returns each solved body record with what it touched
   (`Contacted::Prop(box)`, `Car(i)`, `Static`); the body-to-prop slots are recorded every tick.
-- `drift::split_contacts`: a `close_drift_flag` box is a flag touch only (`Detector::touch_flag`:
-  disarms the close-drift bonus) [I: the original's flags are jointed entities, the port keeps them
-  as static boxes, F284]; a car is no collision ([V] 0xA01910 guard); the rest gives the collision
-  impact. grid-app and the headless tool use it.
+- `drift::split_contacts`: a `close_drift_flag` box (the intact flag or a broken flag's static
+  base) is a flag touch only (`Detector::touch_flag`: disarms the close-drift bonus) [I]; a car is
+  no collision ([V] 0xA01910 guard); the rest gives the collision impact. A broken flag's pole is a
+  phantom post (F509): a car that pushes it gets the original's 1e-6 contact as a flag touch
+  (`MultiRuntime::touched_post`). grid-app and the headless tool use both.
 - Road contact (F387) [V unless marked]: the listener 0x64D840 returns before the collision clock
   when 0x958310(other) is true, i.e. the other object's virtual +4 returns 11. The class whose +4
   returns 11 (0xAD9950) has vtable 0xD3A778, built by 0xAD9720 from the body factory 0xA73FD0

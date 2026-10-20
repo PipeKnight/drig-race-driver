@@ -400,8 +400,8 @@ original's AE8AD0 pairing for it was tried and lost more boards at the port's fi
 
 ## Not yet established
 
-- Armco end pieces (`link0`, a rail of three shapes), scaled jointed entities and the
-  close-drift flags stay static; uproot (rail bodies switching to `rbDefault`) is not
+- Armco end pieces (`link0`, a rail of three shapes) and scaled jointed entities stay
+  static (the close-drift flags break since F509); uproot (rail bodies switching to `rbDefault`) is not
   ported, its trigger is not found. Armco and tyre-wall joints are ported since F501 and
   F484 (docs/JOINTS_RESEARCH.md).
 - Sleeping: the ported grouped frame only admits `turnOffTime = MAX`.

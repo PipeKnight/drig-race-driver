@@ -28,6 +28,9 @@ pub struct PropBox {
     pub limit: f32,
     /// Broken boxes no longer collide.
     pub enabled: bool,
+    /// A static (`infMass`) shape of the entity's damage state: off until
+    /// the entity breaks (`dynamic_props`; the close-drift flag's base).
+    pub damaged: bool,
     /// The primitive: axes, centre, extents and the shape `shell` margin.
     shape: Shape,
 }
@@ -97,6 +100,7 @@ impl PropBox {
             entity: None,
             limit: f32::MAX,
             enabled: true,
+            damaged: false,
             shape: Shape::Box(BoxShape {
                 matrix,
                 half,
@@ -127,6 +131,54 @@ impl PropBox {
         b.shape = Shape::Round(shape);
         Ok(b)
     }
+}
+
+/// Whether a template's damage state with static (`infMass`) pieces, or a
+/// body with several shape behaviours, is ported: so far only the close-drift
+/// flags. Others (the Long Beach and Spa tyre walls, Yokohama's crates and
+/// signs) stay intact until their breaks are checked.
+pub fn static_damage_ported(template: &str) -> bool {
+    template.contains("close_drift_flag")
+}
+
+/// The collision box of one entity shape at the entity placement.
+fn entity_box(
+    template: String,
+    placement: &[f32; 16],
+    s: &entities::Shape<'_>,
+) -> Result<PropBox, Box<dyn std::error::Error>> {
+    let (width, height, length) = match s.primitive {
+        entities::Primitive::Box {
+            width,
+            height,
+            length,
+        } => (width, height, length),
+        entities::Primitive::Cylinder { radius, height } => {
+            return PropBox::round(
+                template,
+                round_shape(placement, &s.transform, s.shell, radius, Some(height))?,
+            );
+        }
+        entities::Primitive::Sphere { radius } => {
+            return PropBox::round(
+                template,
+                round_shape(placement, &s.transform, s.shell, radius, None)?,
+            );
+        }
+    };
+    let half = [width * 0.5, height * 0.5, length * 0.5];
+    if !half.iter().all(|h| h.is_finite() && *h > 0. && *h < 100.) {
+        return Err("invalid entity collision box".into());
+    }
+    let positions = (0..8)
+        .map(|i| {
+            let local = std::array::from_fn(|j| {
+                if i >> j & 1 == 0 { -half[j] } else { half[j] }
+            });
+            transform(placement, transform(&s.transform, local))
+        })
+        .collect();
+    PropBox::new(template, positions, s.shell)
 }
 
 /// Visible trackside barrier ornaments (route_0/ornaments.bin instances of
@@ -347,63 +399,41 @@ impl Props {
         let placements = pssg::read_tree(&placements)?;
         let types = pssg::read_tree(&types)?;
         let mut boxes = Vec::new();
+        // Kept after every other box, so the active boxes keep their indices.
+        let mut damaged = Vec::new();
         for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
+            let template = String::from_utf8_lossy(e.template).into_owned();
             for r in &e.renderables {
-                for s in &r.shapes {
-                    if s.phantom {
-                        continue;
-                    }
-                    let template = || String::from_utf8_lossy(e.template).into_owned();
-                    let (width, height, length) = match s.primitive {
-                        entities::Primitive::Box {
-                            width,
-                            height,
-                            length,
-                        } => (width, height, length),
-                        entities::Primitive::Cylinder { radius, height } => {
-                            let mut b = PropBox::round(
-                                template(),
-                                round_shape(
-                                    &e.transform,
-                                    &s.transform,
-                                    s.shell,
-                                    radius,
-                                    Some(height),
-                                )?,
-                            )?;
-                            b.entity = Some(index);
-                            boxes.push(b);
-                            continue;
-                        }
-                        entities::Primitive::Sphere { radius } => {
-                            let mut b = PropBox::round(
-                                template(),
-                                round_shape(&e.transform, &s.transform, s.shell, radius, None)?,
-                            )?;
-                            b.entity = Some(index);
-                            boxes.push(b);
-                            continue;
-                        }
-                    };
-                    let half = [width * 0.5, height * 0.5, length * 0.5];
-                    if !half.iter().all(|h| h.is_finite() && *h > 0. && *h < 100.) {
-                        return Err("invalid entity collision box".into());
-                    }
-                    let positions = (0..8)
-                        .map(|i| {
-                            let local = std::array::from_fn(|j| {
-                                if i >> j & 1 == 0 { -half[j] } else { half[j] }
-                            });
-                            transform(&e.transform, transform(&s.transform, local))
-                        })
-                        .collect();
-                    let mut b = PropBox::new(template(), positions, s.shell)?;
+                for s in r.shapes.iter().filter(|s| !s.phantom) {
+                    let mut b = entity_box(template.clone(), &e.transform, s)?;
                     b.entity = Some(index);
                     boxes.push(b);
                 }
             }
+            // The static pieces of the damage state, once per behaviour type.
+            let mut types = Vec::new();
+            if !static_damage_ported(&template) {
+                continue;
+            }
+            for s in e.renderables.iter().flat_map(|r| &r.shapes) {
+                let Some(behaviour) = &s.behaviour else { continue };
+                if types.contains(&behaviour.behaviour_type) {
+                    continue;
+                }
+                types.push(behaviour.behaviour_type);
+                for added in behaviour.added.iter().filter(|a| a.infinite_mass) {
+                    for s in added.shapes.iter().filter(|s| !s.phantom) {
+                        let mut b = entity_box(template.clone(), &e.transform, s)?;
+                        b.entity = Some(index);
+                        b.enabled = false;
+                        b.damaged = true;
+                        damaged.push(b);
+                    }
+                }
+            }
         }
         boxes.extend(ornament_barriers(root, route)?);
+        boxes.extend(damaged);
         if boxes.is_empty() || boxes.len() > 8192 {
             return Err("unsupported entity collision box count".into());
         }
@@ -668,6 +698,7 @@ mod tests {
                     entity: None,
                     limit: f32::MAX,
                     enabled: true,
+                    damaged: false,
                     shape: Shape::Box(BoxShape {
                         matrix: [[0.; 4]; 4],
                         half: [1.; 3],

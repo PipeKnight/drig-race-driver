@@ -419,11 +419,13 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Brake boards, tyre stacks and the armco sections (F501) break; the
-        // armco ends (a rail of three shapes) and the drift flags stay static. The 16
-        // drift flags stand on cylinders (route shapes since row 20).
-        assert_eq!(props.boxes.len(), 2251);
-        assert_eq!(templates.values().sum::<usize>(), 1171);
+        // Brake boards, tyre stacks, the armco sections (F501) and the 16
+        // drift flags break; the armco ends (a rail of three shapes) stay
+        // static. The flags stand on cylinders (route shapes since row 20);
+        // each adds its damage state's static base, two boxes.
+        assert_eq!(props.boxes.len(), 2283);
+        assert_eq!(templates.values().sum::<usize>(), 1187);
+        assert_eq!(templates["close_drift_flag.max"], 16);
         assert_eq!(
             templates
                 .keys()
@@ -433,12 +435,13 @@ mod tests {
         );
         assert!(templates.keys().all(|t| t.starts_with("gg_brake_marker")
             || t.starts_with("tyrestack_")
-            || t.starts_with("armco_main_section")));
-        assert_eq!(catalog.unported.values().sum::<usize>(), 70);
+            || t.starts_with("armco_main_section")
+            || *t == "close_drift_flag.max"));
+        assert_eq!(catalog.unported.values().sum::<usize>(), 54);
         assert!(catalog
             .unported
             .keys()
-            .all(|t| t.starts_with("armco_") || *t == "close_drift_flag.max"));
+            .all(|t| t.starts_with("armco_")));
     }
 
     #[test]
@@ -482,12 +485,16 @@ mod tests {
             *templates.entry(&b.template).or_default() += 1;
         }
         // The barrels stand on cylinders (128 cylinder route shapes) and
-        // break, and the armco sections (F501); the crates, chevrons, armco
-        // ends and drift flags stay static.
-        assert_eq!(props.boxes.len(), 1631);
-        assert_eq!(templates, [("armco_main_section.max", 42), ("gg_barrel.max", 77)].into());
-        assert_eq!(catalog.unported.values().sum::<usize>(), 450);
-        assert_eq!(catalog.unported["close_drift_flag.max"], 21);
+        // break, and the armco sections (F501) and 17 of the 21 drift flags;
+        // the crates, chevrons and armco ends stay static.
+        assert_eq!(props.boxes.len(), 1673);
+        assert_eq!(
+            templates,
+            [("armco_main_section.max", 42), ("close_drift_flag.max", 17), ("gg_barrel.max", 77)]
+                .into()
+        );
+        assert_eq!(catalog.unported.values().sum::<usize>(), 433);
+        assert_eq!(catalog.unported["close_drift_flag.max"], 4);
     }
 
     #[test]
@@ -565,7 +572,7 @@ mod tests {
         // route boxes, breakable entities, unported placements)
         for (path, name, gates, distance, splits, slots, line, boxes, breakables, unported) in [
             (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2340, 1376, 87),
-            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 1212, 0, 382),
+            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 1250, 19, 363),
             (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 1309, 239, 1),
         ] {
             let route = Route::new(path).unwrap();
@@ -596,7 +603,8 @@ mod tests {
             assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")
                 || b.template == "green_cushion_a.max"
                 || b.template.starts_with("armco_main_section_large")
-                || b.template == "tyrewall_black.max"));
+                || b.template == "tyrewall_black.max"
+                || b.template == "close_drift_flag.max"));
             assert_eq!(catalog.unported.values().sum::<usize>(), unported, "{path}");
         }
     }

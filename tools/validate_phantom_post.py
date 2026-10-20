@@ -1,5 +1,6 @@
 """Original close-drift flag post geometry (0x7BBB70, 0x7BC370, 0x7BCDA0)
-against the Rust port, FPP1.
+and the pole's turn (acos 0xBF4067, axis-angle 0x772670) against the Rust
+port, FPP1.
 
 Random posts (pivot, direction, length) and car-sized oriented boxes around
 them; the probe runs the original functions in-process
@@ -23,6 +24,7 @@ MAGIC = 0x31505046
 IMAGE = ROOT / 'local/compatibility/grid-unpacked.exe'
 if not IMAGE.exists():
     IMAGE = Path('C:/Dev/Reassembly/local/compatibility/grid-unpacked.exe')
+MODES = 5
 CASE = 4 + 0x80 + 0x40 + 0x10 * 3
 RESULT = 4 + 0x10 * 2 + 0x80
 
@@ -83,6 +85,12 @@ def case(rng, mode):
     box = axes[0] + [0.] + axes[1] + [0.] + axes[2] + [0.] + near + [1.]
     a = [rng.uniform(-3, 3) + near[k] for k in range(3)] + [0.]
     b = [rng.uniform(-3, 3) + near[k] for k in range(3)] + [0.]
+    if mode == 3:
+        # The cosine of a turn: near 1 as the sweep sees it, or any.
+        a = [1. - rng.random() ** 3 * 0.01 if rng.random() < 0.5 else rng.uniform(-1, 1), 0., 0., 0.]
+    elif mode == 4:
+        a = [rng.choice([rng.uniform(0., 0.05), rng.uniform(0., math.pi), rng.uniform(-8., 8.)]), 0., 0., 0.]
+        b = unit([rng.gauss(0, 1) for _ in range(3)]) + [0.]
     words = [f32(x) for x in post + box + half + [0.] + a + b]
     return struct.pack('<I', mode) + struct.pack('<60f', *words)
 
@@ -106,20 +114,20 @@ def main():
     rng = random.Random(args.seed)
     out = ROOT / 'local/behavior/phantom-post'
     out.mkdir(parents=True, exist_ok=True)
-    body = b''.join(case(rng, i % 3) for i in range(args.cases))
+    body = b''.join(case(rng, i % MODES) for i in range(args.cases))
     source = out / 'cases.bin'
     source.write_bytes(struct.pack('<II', MAGIC, args.cases) + body)
     probe = ROOT / 'local/behavior/phantom-post-probe.exe'
     original, expected = run([str(probe), str(IMAGE)], source, out / 'original.bin')
     print(original)
-    modes = [0, 0, 0]
+    modes = [0] * MODES
     hits = [0, 0, 0]
     for i in range(args.cases):
         r = expected[8 + i * RESULT: 8 + (i + 1) * RESULT]
-        modes[i % 3] += 1
-        if i % 3 == 0:
+        modes[i % MODES] += 1
+        if i % MODES == 0:
             hits[0] += struct.unpack_from('<I', r)[0]
-        elif i % 3 == 2:
+        elif i % MODES == 2:
             hits[2] += r[4 + 32 + 0x74] != 0
     print('cases by mode', modes, 'test hits', hits[0], 'pushes', hits[2])
     if args.original_only:
@@ -127,13 +135,13 @@ def main():
     rust = ROOT / f'target/{args.profile}/grid-phantom-post.exe'
     port, actual = run([str(rust)], source, out / 'port.bin')
     print(port)
-    mismatched = [0, 0, 0]
+    mismatched = [0] * MODES
     first = None
     for i in range(args.cases):
         a = expected[8 + i * RESULT: 8 + (i + 1) * RESULT]
         b = actual[8 + i * RESULT: 8 + (i + 1) * RESULT]
         if a != b:
-            mismatched[i % 3] += 1
+            mismatched[i % MODES] += 1
             if first is None:
                 first = i
     report = {
@@ -149,7 +157,7 @@ def main():
         b = actual[8 + first * RESULT: 8 + (first + 1) * RESULT]
         for k in range(0, RESULT, 4):
             if a[k:k + 4] != b[k:k + 4]:
-                print(f'case {first} mode {first % 3} word {k:#x}: original {a[k:k + 4].hex()} '
+                print(f'case {first} mode {first % MODES} word {k:#x}: original {a[k:k + 4].hex()} '
                       f'{struct.unpack("<f", a[k:k + 4])[0]!r} port {b[k:k + 4].hex()} '
                       f'{struct.unpack("<f", b[k:k + 4])[0]!r}')
         raise SystemExit(1)

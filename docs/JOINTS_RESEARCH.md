@@ -66,7 +66,9 @@ breaking, the correction pass). Phase 3a (F484): a breakable whose damage state 
 own pieces (tyre walls, Milan's green cushions) breaks into pieces with their joints.
 Phase 3b (F501): armco breaks, with joints to the world's fixed object and through ENS links
 to the neighbouring section, body overrides, static link targets and break propagation.
-Still static (`Catalog::unported`): armco end pieces, the close-drift flags, uproots.
+Close-drift flags (F509) break into a static base and a phantom pole post.
+Still static (`Catalog::unported`): armco end pieces, uproots, templates with static damage
+pieces or several behaviours other than the flags.
 
 ### Phase 1: constructor, prepare, rows (F473)
 
@@ -346,11 +348,10 @@ Verification:
 - [V data] Breakable armco: Donington 243, Jarama 506, Yokohama 42, Spa 296, Milan 1012,
   Haruna 939, Istanbul Park 802, Le Mans 637, Nürburgring 813. Still static: the end
   pieces (Jarama 54, Yokohama 7, Spa 39, Milan 22, Haruna 32, Le Mans 78, Nürburgring 6),
-  14 Nürburgring sections with a non-unit placement scale (0x7CC1E0's scale lanes), the close-drift flags (`cPhantomPost`:
-  `specificPostCollision`, override `_rbPhantomPost`; a static infMass piece and two shape
-  behaviours on one body).
+  14 Nürburgring sections with a non-unit placement scale (0x7CC1E0's scale lanes). The
+  close-drift flags break since F509 (below).
 
-### Close-drift flags: the phantom post (research, F503; not ported)
+### Close-drift flags: the phantom post (research F503; ported F506, F509)
 
 Original path [D] (decompiles `local/robust/decomp/r22a..r22h`, read-only; Ghidra 12.1.4,
 capstone 5.0.6 on the hash-pinned analysis image; constants read from the image):
@@ -432,23 +433,37 @@ So the broken flag is a kinematic pole. Cars sweep it aside with no physical res
 is static geometry. Before the break, the intact pole and base are ordinary static shapes
 whose contact limits are their behaviour thresholds (50 and 2000).
 
-Port plan (not started):
+The port (F506, F509):
 
-1. Catalog:
-   - per-shape thresholds for an intact body with several behaviours (route boxes in
-     shape order);
-   - static `infMass` pieces with shapes: route boxes added at load and enabled at the
-     break;
-   - the swap of a static A with a dynamic B (0x7B7EE0).
-2. Pieces with their collision cleared (shape +0x15): the pole, on the shapeless path.
-3. The post. Its geometry is ported and verified ({F}): `grid_world::phantom_post`
-   covers `penetration` (0x7BBB70), `closest` (0x7BC370) and `push` (0x7BCDA0).
-   - Verification [V]: `tools/probe_phantom_post.c` runs the three original functions
-     in-process on supplied posts and boxes, and `grid-phantom-post` runs the port.
-     `tools/validate_phantom_post.py` found 0 mismatched bytes:
-     - 6,144 cases (seed 20261020; 810 test hits, 636 pushes);
-     - 30,000 cases (seed 7; 3,902 test hits, 3,105 pushes).
-     Evidence: worktree `local/behavior/phantom-post/`.
+1. Catalog (`dynamic_props::Catalog`, `entity_geometry::Props::read_route`):
+   - per-shape thresholds for an intact body with several behaviours
+     (`Breakable::limits`, in the route boxes' shape order): pole 50, base 2000;
+   - static `infMass` pieces of the damage state: no piece body; their shapes are route
+     boxes (`PropBox::damaged`), appended after every other box so the active boxes keep
+     their indices, off until the break (`Breakable::damaged`);
+   - the swap of a static A with a dynamic B (0x7B7EE0);
+   - `specificPostCollision` on a `close_drift_flag` entity with a dynamic A records the
+     joint as a post (`Breakable::posts`); the pole's collision is cleared (no points, so
+     `collides()` is false) and its limit is FLT_MAX.
+   - Gate: only the close-drift flags use static damage pieces or several behaviours on
+     one body (`entity_geometry::static_damage_ported`). Other templates with them stay
+     intact and unported as before: Long Beach's 275 and Spa's 709 tyre walls (static
+     base pieces) and Yokohama's crates, logs, signs and pipes and 91 Shibuya placements
+     (several behaviours). Each needs its own check before it breaks.
+   - Flags now breakable: the Nürburgring 4, Jarama 16, Yokohama 17 of 21 (4 stay
+     unported for another reason), Shibuya 19. Donington has none.
+2. The post geometry, verified bit for bit [V] (`grid_world::phantom_post`):
+   `penetration` (0x7BBB70), `closest` (0x7BC370), `push` (0x7BCDA0), the CRT acos
+   (0xBF4067 as 0x7BD240 calls it: the cosine widened to double, narrowed back) and the
+   axis-angle matrix (0x772670: one quadrant reduction n = trunc(angle x 2/pi +- 0.5)
+   with a two-part pi/2, sine and cosine polynomials, rows (axis_i axis_j)(1 - cos)
+   plus the cosine or the signed sine).
+   - `tools/probe_phantom_post.c` runs the original functions in-process on supplied
+     inputs (modes 0..4) and `grid-phantom-post` runs the port.
+     `tools/validate_phantom_post.py` found 0 mismatched bytes on 6,144 cases (seed
+     20261020) and 30,000 cases (seed 7) for the first three, and on 2 x 30,000 cases
+     (seeds 20261020 and 11, 6,000 per mode) for all five. Evidence: worktree
+     `local/behavior/phantom-post/` (`validation*.json`).
    - 0x7BC370 [D]: in the box frame, each axis is reflected so the segment runs
      non-negative along it and classified against the faces (below, inside, above). The
      squared distance is piecewise quadratic in the segment parameter. It is walked from 0
@@ -458,17 +473,36 @@ Port plan (not started):
      box-to-world sum (q2·r2 + q0·r0) + (q1·r1 + q3·r3).
    - A push needs the pushed segment's closest point to lie off its pivot by at least
      0.1 m. A box that reaches down to the pivot therefore does not bend the pole.
-   Still to port:
-   - the post refresh 0x7BB910 and the sweep and rotation 0x7BD240 (acos 0xBF4067,
-     axis-angle 0x772670, body matrix and velocities);
-   - the runtime: the vehicle box (the AABB of the car's collision hull points, below)
-     with the body's pose and its motion this tick, after the step and the breaks.
-4. The 1e-6 car contact as a flag touch for `drift::Detector` (today the flag boxes give
-   it).
+3. The runtime [D, not probed: its inputs come from the world]:
+   - `refresh` (0x7BB910), `sweep` (0x7BD240), `turn_body` (0x7BD240's matrix product:
+     the pole's centre matrix times the rotation, the translation turned about the
+     pivot), `place` (0xA69780 -> 0xB12910, the centre-matrix mirror of B12710, then the
+     velocities zeroed by 0xA69840/0xA69860), `pivot` and `swept_bounds`.
+   - The pivot is 0xA7E2F0 -> 0xAEFE20: with a B body and joint byte +0xC set it returns
+     the B anchor (+0xF0); otherwise the A anchor (+0xA0) through A's centre matrix. The
+     port's post joint holds the static base as the world's fixed object, so it takes
+     the second branch [I].
+   - `PropWorld` registers up to ten posts (0x7B6340) when it makes the pole joint, and
+     `update_posts` runs them in the multi-car tick after the step and the breaks: every
+     post refreshed, then each car's box sweeps every post. A turned pole is placed
+     about the pivot with zero velocity and the post refreshed again.
+   - The car box (`BodyGeometry::car_box`) is the `CAR_` shape of 0xA01960: the
+     MINPS/MAXPS AABB of the collision hull points, half its extent, centred on it,
+     posed like the hull. The port takes the current hull points [I: the original builds
+     the box when it builds the hull]. The motion is the body's centre +0x1C0 minus the
+     previous +0x2A0 (0xA69880 / 0xA698A0); the AABB of the oriented box grows by minus
+     the motion (0x4B1C40, read as a per-axis union).
+   - The 1e-6 contact (0xA01910) is a flag touch: `PropWorld::post_touches`,
+     `MultiRuntime::touched_post`, read by the drift detectors in grid-app and
+     grid-opponent-race.
+   - Test: `a_car_beside_a_broken_drift_flag_pushes_its_pole_aside` (Jarama): a car 0.7 m
+     beside the pole bends it 15 degrees away about a fixed pivot at constant length,
+     and the car is reported.
+   Not ported: the single-car tick (`source_vehicle::Runtime`) does not run the posts;
+   the touch's contact record (shapes, point, normal) is not built, only the flag touch.
 
-Until then the flags stay unbroken static shapes (`Catalog::unported`) with contact limit
-FLT_MAX. The intact pole is therefore a rigid obstacle in the port, where the original
-breaks it at an impulse of 50.
+Before the break, the intact pole and base are static boxes with contact limits 50 and
+2000. The original breaks the flag at those impulses; so does the port now.
 
 ## Size [D]
 

@@ -1,5 +1,39 @@
 # GRID engine project log
 
+F509 Close-drift flags break into a static base and a phantom pole post (2026-10-20, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, after F506). Details: docs/JOINTS_RESEARCH.md "Close-drift flags: the phantom post", "The port (F506, F509)".
+- Catalog and route boxes:
+  - each intact box has its own threshold and explosion (`Breakable::limits`): pole 50, base 2000;
+  - the damage state's static `infMass` pieces are route boxes (`PropBox::damaged`), appended after all others and switched on at the break (`Breakable::damaged`);
+  - a static A with a dynamic B is swapped (0x7B7EE0);
+  - the `specificPostCollision` joint of a `close_drift_flag` entity is a post; the pole's collision is cleared and its limit is FLT_MAX.
+  - Gate (`entity_geometry::static_damage_ported`): only the flags use static damage pieces or several behaviours on one body. The Long Beach and Spa tyre walls and Yokohama's crates and signs would break too but stay static and unported, as before, until they are checked.
+  - Now breakable: flags on the Nürburgring (4), Jarama (16), Yokohama (17 of 21) and Shibuya (19). Route box counts: Jarama 2283, Yokohama 1673, Shibuya 1250 (two base boxes per flag). Donington unchanged.
+- Post runtime (`grid_world::phantom_post`, `PropWorld::update_posts`):
+  - the CRT acos 0xBF4067 and the axis-angle matrix 0x772670 ported; verified bit for bit [V];
+  - [D, not probed]:
+    - the refresh 0x7BB910, the sweep 0x7BD240 and its pole turn;
+    - the pivot (0xAEFE20, A-anchor branch [I]);
+    - the body placement 0xB12910 with the velocities zeroed;
+    - the `CAR_` box (0xA01960: hull-point AABB; `BodyGeometry::car_box`) and the swept bounds.
+  - The multi-car tick runs up to ten posts after the step and the breaks (0x5F0EE0 order).
+  - A touched car gets a flag touch (`MultiRuntime::touched_post`) in grid-app's drift events and in grid-opponent-race.
+  - Not ported: the posts in the single-car tick; the touch's contact record.
+- Verification [V]:
+  - `tools/probe_phantom_post.c` gained modes 3 (acos as 0x7BD240 calls it) and 4 (0x772670); it makes the lazy-static pages 0xE5A000, 0xE5B000 and 0xE5E000 writable.
+  - `tools/validate_phantom_post.py` (five modes) found 0 mismatched bytes on 30,000 cases, seed 20261020, and on 30,000 cases, seed 11.
+  - Evidence: worktree fervent-napier-50814b, `local/behavior/phantom-post/validation-rot-*.json`.
+  - New ignored test `a_car_beside_a_broken_drift_flag_pushes_its_pole_aside` (Jarama): the pole bends 15 degrees away about a fixed pivot at constant length, and the car is reported. The catalog test `jarama_close_drift_flags_break_into_a_static_base_and_a_phantom_pole` covers the 16 flags.
+- Checks (release, cargo/rustc 1.99.0, rust-lld, on 6da7fcaa (F508) + this change):
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app -- --include-ignored`: 845 passed, 0 failed;
+  - `cargo clippy --workspace --all-targets -- -D warnings` clean (after one test-only fix, a loop over `zip`);
+  - identities (`grid-opponent-race` rebuilt first): solo 18b369f9…a6ee, 12-car c235bab2…8552, 12-car with DF01 and characteristics 00650c09…28bd, unchanged (Donington has no flags);
+  - `grid-soak quick` 24/24 and seeds 25..56 32/32 passed.
+  - Evidence: worktree fervent-napier-50814b `local/r23/f509/`.
+- Next:
+  - the posts in the single-car tick;
+  - the tyre walls with static bases (Long Beach, Spa) and the several-behaviour templates (Yokohama, Shibuya), each with a hanging check;
+  - armco end pieces, uproot, piece sleeping.
+
 F508 Bonnet camera shake: the speed-gated bob of the Mounted views, from a deterministic noise table (2026-10-20, Claude Code; coordinator's overnight camera task, static only, nothing launched). Details: docs/CAMERA_VIEWS.md §2 "Shake 0x815960", §3. Evidence: worktree camera-dynamics-11a55d `local/cam/shake/` (`shake-findings.md`, `shake_emu.py`, `results.txt`, `validate.py`, `validate.txt`, `noise_table_emulated.npy`).
 - Why: the shipped bonnet of both cars has a non-zero shake, which the port lacked:
   - damping 0.1798, min speed 20.8641 m/s, max 90;

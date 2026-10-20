@@ -543,6 +543,12 @@ impl MultiRuntime {
         })
     }
 
+    /// Whether car `i` pushed a broken flag's pole this tick: the 1e-6 body
+    /// contact 0x7C4830 sends the car (0xA01910) for each touched post.
+    pub fn touched_post(&self, i: usize) -> bool {
+        self.props.as_ref().is_some_and(|p| p.post_touches.contains(&i))
+    }
+
     /// World shape token (one-based) of car `i`'s body shape.
     fn token(&self, i: usize) -> u32 {
         if i == 0 {
@@ -964,6 +970,23 @@ impl MultiRuntime {
             let mut changed = self.shapes.clone();
             next.hold_lost(&mut world.groups.bodies, self.cars[0].track.bounds()[1]);
             let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
+            // 0x7C4830: the phantom posts after the step and the breaks.
+            next.post_touches.clear();
+            if !next.posts.is_empty() {
+                let mut boxes = Vec::with_capacity(geometry.len());
+                for (i, g) in geometry.iter().enumerate() {
+                    let body = &world.groups.bodies[i];
+                    let motion = std::array::from_fn(|k| {
+                        f32::from_bits(body[0x1c0 / 4 + k]) - f32::from_bits(body[0x2a0 / 4 + k])
+                    });
+                    boxes.push(crate::dynamic_props::PostCar {
+                        shape: g.car_box(body)?,
+                        motion,
+                    });
+                }
+                // The touched cars' 1e-6 contacts (0xA01910) are not sent yet.
+                next.post_touches = next.update_posts(&mut world, &boxes)?;
+            }
             if !disabled.is_empty() {
                 shapes = Some(changed);
             }
@@ -1646,6 +1669,63 @@ mod tests {
                     eprintln!("{piece:?} moved {moved:.3}");
                     assert!(moved < 1.5, "{piece:?} {spawn:?} {now:?}");
                 }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// A broken close-drift flag's pole is a phantom post: a car beside it
+    /// pushes it aside about its pivot (0x7BD240), the pole keeps zero
+    /// velocity and the car is reported as touching it.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_car_beside_a_broken_drift_flag_pushes_its_pole_aside() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/jarama/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00"], &table, events).unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let flag = (props.catalog.breakables.iter())
+                    .position(|b| b.template == "close_drift_flag.max")
+                    .unwrap();
+                props.queue_break(flag);
+                let drive = [Controls::default(); 1];
+                multi.tick(&drive).unwrap();
+                let props = multi.dynamic_props().unwrap();
+                assert_eq!(props.posts.len(), 1);
+                let post = props.posts[0].clone();
+                let pivot = post.post.pivot;
+                eprintln!("post {post:?}");
+                // Standing on its spring, about upright.
+                assert!(post.post.direction[1] > 0.99, "{post:?}");
+                assert!(props.post_touches.is_empty());
+                // The car beside the pole, its side box over it.
+                multi.place_at_rest(0, [pivot[0] + 0.7, pivot[1], pivot[2]], [0., 0., 1.]).unwrap();
+                multi.tick(&drive).unwrap();
+                let props = multi.dynamic_props().unwrap();
+                let after = &props.posts[0];
+                eprintln!("after {after:?} touches {:?}", props.post_touches);
+                assert_eq!(props.post_touches, [0]);
+                assert!(multi.touched_post(0));
+                assert!(after.post.direction[1] < post.post.direction[1], "{after:?}");
+                // Turned about the pivot: the pivot stays, the pole's centre is
+                // still half the pole away from it.
+                for (now, was) in after.post.pivot.iter().zip(&pivot).take(3) {
+                    assert!((now - was).abs() < 1e-3, "{after:?}");
+                }
+                assert!((after.post.length - post.post.length).abs() < 1e-3, "{after:?}");
             })
             .unwrap()
             .join()

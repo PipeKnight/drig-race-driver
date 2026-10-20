@@ -1,6 +1,7 @@
 //! Private phantom-post diagnostic, FPP1 (tools/validate_phantom_post.py):
 //! the port's post geometry on the cases tools/probe_phantom_post.c runs
-//! through the original (0x7BBB70, 0x7BC370, 0x7BCDA0).
+//! through the original (0x7BBB70, 0x7BC370, 0x7BCDA0; the turn's acos
+//! 0xBF4067 and axis-angle matrix 0x772670).
 use grid_world::phantom_post::{self, Post, V4};
 use std::{
     fs::{self, OpenOptions},
@@ -87,12 +88,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 phantom_post::push(&mut moved, &shape);
                 store(&mut p, &moved);
             }
+            3 => put(&mut record, 4, [phantom_post::angle(a[0]), 0., 0., 0.]),
+            4 => {
+                for (i, row) in phantom_post::axis_angle(a[0], z).into_iter().enumerate() {
+                    put(&mut p, 0x10 * i, row);
+                }
+            }
             _ => return Err("invalid mode".into()),
         }
         out.extend_from_slice(&record);
         out.extend_from_slice(&p);
     }
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&args[1])?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&args[1])?;
     file.write_all(&out)?;
     println!("post_cases={count} port=1");
     Ok(())

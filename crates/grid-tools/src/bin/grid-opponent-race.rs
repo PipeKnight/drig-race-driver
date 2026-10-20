@@ -852,6 +852,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|(x, other)| (x.impact, *other))
                     .collect();
                 let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flag_boxes);
+                let touched = touched || multi.touched_post(i);
                 if std::env::var_os("GRID_TRACE_DRIFT_CONTACTS").is_some() {
                     for (x, prop) in multi.contact_impacts(i) {
                         if x.impact > 100. {

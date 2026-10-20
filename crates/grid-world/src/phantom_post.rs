@@ -3,9 +3,13 @@
 //!
 //! Ported from the original's post geometry in SSE lane order: the
 //! segment-against-box separating-axis test 0x7BBB70, the closest points of
-//! a segment and a box 0x7BC370 and the post push 0x7BCDA0. Verified against
-//! the original in-process (tools/validate_phantom_post.py, FPP1).
-use crate::sse_approx::{rcp, rsqrt};
+//! a segment and a box 0x7BC370, the post push 0x7BCDA0 and the pole's turn
+//! (the CRT acos 0xBF4067 and the axis-angle matrix 0x772670). Verified
+//! against the original in-process (tools/validate_phantom_post.py, FPP1).
+use crate::{
+    Error, contact_groups,
+    sse_approx::{rcp, rsqrt},
+};
 
 pub type V4 = [f32; 4];
 
@@ -122,7 +126,11 @@ pub fn penetration(post: &Post, b: &Box) -> Option<V4> {
         axes[k] = axis;
         let distance = dot(axis, d);
         let reach = dot(axis, post.direction).abs() * post.length;
-        let e = [dot(axis, b.axes[0]), dot(axis, b.axes[1]), dot(axis, b.axes[2])];
+        let e = [
+            dot(axis, b.axes[0]),
+            dot(axis, b.axes[1]),
+            dot(axis, b.axes[2]),
+        ];
         let radius = e[2].abs() * b.half[2] + b.half[0] * e[0].abs() + b.half[1] * e[1].abs();
         depth[3 + k] = interval(distance - reach, distance + reach, -radius, radius)?;
     }
@@ -156,7 +164,13 @@ pub fn penetration(post: &Post, b: &Box) -> Option<V4> {
 /// the distance is a piecewise quadratic in the segment parameter, walked
 /// from 0 through the face crossings until its slope turns non-negative.
 pub fn closest(a: V4, b: V4, shape: &Box) -> (V4, V4) {
-    let to_box = |v: V4| [dot(v, shape.axes[0]), dot(v, shape.axes[1]), dot(v, shape.axes[2])];
+    let to_box = |v: V4| {
+        [
+            dot(v, shape.axes[0]),
+            dot(v, shape.axes[1]),
+            dot(v, shape.axes[2]),
+        ]
+    };
     let offset = sub(a, shape.centre);
     let segment = sub(b, a);
     let mut p = to_box(offset);
@@ -248,6 +262,218 @@ pub fn closest(a: V4, b: V4, shape: &Box) -> (V4, V4) {
     (on_segment, on_box)
 }
 
+/// 0x7BB910: the post from the joint's world point (0xA7E2F0) and the pole
+/// body's centre (0xA69880): tip, half length, direction and the AABB of
+/// pivot and tip ([D]; its inputs come from the world, so it is not in the
+/// in-process probe).
+pub fn refresh(post: &mut Post, pivot: V4, centre: V4) {
+    post.centre = centre;
+    post.pivot = pivot;
+    let d = sub(centre, pivot);
+    post.tip = std::array::from_fn(|k| 2. * d[k] + pivot[k]);
+    post.length = root(dot(d, d));
+    post.direction = divide(d, post.length);
+    // MINPS/MAXPS keep the second operand unless the first is strictly
+    // smaller/larger.
+    post.low = std::array::from_fn(|k| {
+        if pivot[k] < post.tip[k] {
+            pivot[k]
+        } else {
+            post.tip[k]
+        }
+    });
+    post.high = std::array::from_fn(|k| {
+        if pivot[k] > post.tip[k] {
+            pivot[k]
+        } else {
+            post.tip[k]
+        }
+    });
+}
+
+/// What a car's sweep did to a post (0x7BD240 returns 1 when the post was
+/// touched; the caller then sends the car its 1e-6 contact).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Touch {
+    /// The unit rotation axis (old direction x new direction) and the cosine
+    /// of the turn, when the post turned by more than acos(0.99999). The
+    /// caller turns the pole body about the pivot with [`turn_body`] and
+    /// zeroes its velocities.
+    pub turn: Option<(V4, f32)>,
+}
+
+/// 0x7BD240 without the body rotation [D, not probed]: the car box from
+/// `start` (its centre a tick ago) to `shape.centre`, one push per 0.3 m of
+/// motion and the end position, after the AABB test 0x7D8700 of the post
+/// against the car's swept bounds `bounds` (low, high).
+// The negated comparisons keep the original's unordered (NaN) outcome.
+#[allow(clippy::neg_cmp_op_on_partial_ord)]
+pub fn sweep(post: &mut Post, shape: &Box, start: V4, bounds: [V4; 2]) -> Option<Touch> {
+    let overlap = (0..3).all(|k| !(post.high[k] < bounds[0][k]) && !(bounds[1][k] < post.low[k]));
+    if !overlap {
+        return None;
+    }
+    let old = post.direction;
+    post.hit = false;
+    let d = sub(shape.centre, start);
+    // x87 FISTP of |d| x -10/3 (round to nearest even), negated: the steps.
+    let steps = -((root(dot(d, d)) * f32::from_bits(0xc055_5555)).round_ties_even() as i64);
+    let mut step = *shape;
+    for i in 0..=steps.max(0) {
+        step.centre = if i == steps {
+            shape.centre
+        } else {
+            let f = i as f32 / steps as f32;
+            std::array::from_fn(|k| f * d[k] + start[k])
+        };
+        push(post, &step);
+    }
+    if !post.hit {
+        return None;
+    }
+    post.hit = false;
+    let new = post.direction;
+    let cosine = dot(old, new);
+    let turn = (cosine < f32::from_bits(0x3f7f_ff58)).then(|| {
+        let axis = cross(old, new);
+        let n = dot(axis, axis);
+        let r = rsqrt(n);
+        let scale = (1. - r * n * r) * r * 0.5 + r;
+        (axis.map(|x| scale * x), cosine)
+    });
+    Some(Touch { turn })
+}
+
+/// 0xBF4067 as 0x7BD240 calls it: the CRT acos of the cosine widened to a
+/// double (CVTSS2SD), narrowed back (CVTSD2SS).
+pub fn angle(cosine: f32) -> f32 {
+    (f64::from(cosine)).acos() as f32
+}
+
+/// 0x772670: the rotation by `angle` about the unit `axis` as row-vector
+/// matrix rows. Sine and cosine come from one quadrant reduction
+/// (n = trunc(angle x 2/pi +- 0.5), two-part pi/2) and two polynomials; the
+/// rows are (axis_i axis_j)(1 - cos) plus the cosine or the signed sine.
+pub fn axis_angle(angle: f32, axis: V4) -> [V4; 4] {
+    let q = angle * f32::from_bits(0x3f22_f983);
+    // CVTTPS2DQ: out of range or NaN gives the integer indefinite.
+    let rounded = q + 0.5f32.copysign(q);
+    let n = if rounded.abs() < 2_147_483_648. {
+        rounded as i32
+    } else {
+        i32::MIN
+    };
+    let nf = n as f32;
+    let r = (angle - nf * f32::from_bits(0x3fc9_0fda)) - nf * f32::from_bits(0x33a2_2169);
+    let r2 = r * r;
+    let cos = ((f32::from_bits(0xbab2_4993) * r2 + f32::from_bits(0x3d2a_a036)) * r2
+        + f32::from_bits(0xbeff_ffdf))
+        * r2
+        + 1.;
+    let sin = ((f32::from_bits(0xb94c_8c6e) * r2 + f32::from_bits(0x3c08_8342)) * r2
+        + f32::from_bits(0xbe2a_aaa1))
+        * (r * r2)
+        + r;
+    let m = n & 3;
+    let a = if m & 1 == 0 { sin } else { cos };
+    let b = if (m + 1) & 1 == 0 { sin } else { cos };
+    let c = if (m + 1) & 2 == 0 { b } else { -b };
+    let s = if m & 2 == 0 { a } else { -a };
+    let t = 1. - c;
+    let [x, y, z, _] = axis;
+    let v = [x, y, z, 0.];
+    let (sx, sy, sz) = (s * x, s * y, s * z);
+    let row = |w: f32, base: V4| -> V4 { std::array::from_fn(|k| base[k] + w * v[k] * t) };
+    [
+        row(x, [c, sz, -sy, 0.]),
+        row(y, [-sz, c, sx, 0.]),
+        row(z, [sy, -sx, c, 0.]),
+        [0., 0., 0., 1.],
+    ]
+}
+
+/// 0x7BD240's turn of the pole body (rows, translation last) about the
+/// pivot: the matrix times the rotation by acos(`cosine`) about `axis`; the
+/// translation turns about the pivot.
+pub fn turn_body(matrix: [V4; 4], pivot: V4, axis: V4, cosine: f32) -> [V4; 4] {
+    let r = axis_angle(angle(cosine), axis);
+    let turn = |m: V4| -> V4 {
+        std::array::from_fn(|k| {
+            (m[3] * r[3][k] + m[1] * r[1][k]) + (m[2] * r[2][k] + m[0] * r[0][k])
+        })
+    };
+    let moved = turn(sub(matrix[3], pivot));
+    [
+        turn(matrix[0]),
+        turn(matrix[1]),
+        turn(matrix[2]),
+        std::array::from_fn(|k| pivot[k] + moved[k]),
+    ]
+}
+
+/// 0xA7E2F0 -> 0xAEFE20 for a post joint without a B body: the joint's A
+/// anchor (+0xA0) through A's centre matrix (+0x190), (w r3 + y r1) +
+/// (z r2 + x r0). With a B body and joint byte +0xC set it would return the
+/// B anchor (+0xF0) unchanged; the port's post joints hold the static base
+/// as the world's fixed object [I].
+pub fn pivot(anchor: V4, centre: [V4; 4]) -> V4 {
+    let [x, y, z, w] = anchor;
+    std::array::from_fn(|k| {
+        (w * centre[3][k] + y * centre[1][k]) + (z * centre[2][k] + x * centre[0][k])
+    })
+}
+
+/// 0x7C4830: the AABB of a car's oriented box, |axes| x half extents about
+/// its centre, grown along minus the car's motion this tick to cover the
+/// box a tick ago [D; the growth's lane assembly is 0x4B1C40, read as a
+/// per-axis union].
+pub fn swept_bounds(shape: &Box, motion: V4) -> [V4; 2] {
+    let [r0, r1, r2] = shape.axes;
+    let h = shape.half;
+    let e: V4 = std::array::from_fn(|k| {
+        if k == 3 {
+            0.
+        } else {
+            ((r0[k] * h[0]).abs() + (r1[k] * h[1]).abs()) + (r2[k] * h[2]).abs()
+        }
+    });
+    let c = shape.centre;
+    let mut low: V4 = std::array::from_fn(|k| c[k] - e[k]);
+    let mut high: V4 = std::array::from_fn(|k| c[k] + e[k]);
+    for k in 0..3 {
+        let back = -motion[k];
+        if back <= 0. {
+            low[k] += back;
+        } else {
+            high[k] += back;
+        }
+    }
+    [low, high]
+}
+
+/// 0xA69780 -> 0xB12910, then 0xA69840 / 0xA69860: set a body's centre
+/// matrix (+0x190; rows' W cleared, position W one), republish it (+0x1D0
+/// and the derived +0xD0/+0x110, as `continuous::apply`), and zero its linear
+/// (+0x220) and angular (+0x210) velocity.
+pub fn place(body: &mut contact_groups::Body, mut centre: [V4; 4]) -> Result<(), Error> {
+    for row in &mut centre[..3] {
+        row[3] = 0.;
+    }
+    centre[3][3] = 1.;
+    let read = |body: &contact_groups::Body, o: usize| -> [V4; 4] {
+        std::array::from_fn(|r| std::array::from_fn(|c| f32::from_bits(body[o / 4 + r * 4 + c])))
+    };
+    let offset = std::array::from_fn(|k| f32::from_bits(body[0x230 / 4 + k]));
+    let out = crate::physical_pose::publish(centre, offset, [read(body, 0x90), read(body, 0x150)], &[])?;
+    for (o, m) in [(0x190, out.corrected), (0x1d0, out.published), (0xd0, out.derived[0]), (0x110, out.derived[1])] {
+        for (i, v) in m.iter().flatten().enumerate() {
+            body[o / 4 + i] = v.to_bits();
+        }
+    }
+    body[0x210 / 4..0x230 / 4].fill(0);
+    Ok(())
+}
+
 /// 0x7BCDA0: push the post out of the box, at most three passes; each turns
 /// the post about its pivot towards the box point nearest its pushed copy.
 pub fn push(post: &mut Post, shape: &Box) {
@@ -331,10 +557,87 @@ mod tests {
     }
 
     #[test]
+    fn a_car_sweeping_through_the_pole_turns_it_about_the_vertical_plane() {
+        let mut post = upright();
+        let shape = car(-1.8);
+        let start = [-3.3, 0.9, 0., 1.];
+        let bounds = [[-5.5, 0.3, -0.9, 0.], [0.4, 1.5, 0.9, 0.]];
+        let touch = sweep(&mut post, &shape, start, bounds).expect("touched");
+        let (axis, cosine) = touch.turn.expect("turned");
+        // Pushed along +x: the turn is about the z axis.
+        assert!(
+            axis[2].abs() > 0.99 && cosine < 0.99999,
+            "{axis:?} {cosine}"
+        );
+        assert!(!post.hit);
+        // A car well clear of the pole's bounds is not swept at all.
+        let mut clear = upright();
+        let far = [[10., 0.3, 10., 0.], [12., 1.5, 12., 0.]];
+        assert!(sweep(&mut clear, &car(11.), [11., 0.9, 0., 1.], far).is_none());
+        // The pole body turns about the pivot: its centre lands on the new
+        // direction at the old distance.
+        let body = [
+            [1., 0., 0., 0.],
+            [0., 1., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., 1.5, 0., 1.],
+        ];
+        let turned = turn_body(body, [0., 0., 0., 1.], axis, cosine);
+        for k in 0..3 {
+            assert!(
+                (turned[3][k] - 1.5 * post.direction[k]).abs() < 1e-4,
+                "{turned:?} {post:?}"
+            );
+        }
+        assert!((turned[1][0] - post.direction[0]).abs() < 1e-4 && turned[3][3] == 1.);
+    }
+
+    #[test]
+    fn the_axis_angle_matrix_turns_rows_right_handed() {
+        // +y about +z by a quarter turn goes to -x; the reduction keeps the
+        // quadrants exact enough past 2 pi.
+        for (angle, turns) in [
+            (std::f32::consts::FRAC_PI_2, 0.),
+            (0.3, 0.),
+            (0.3 + std::f32::consts::TAU, 1.),
+        ] {
+            let r = axis_angle(angle, [0., 0., 1., 0.]);
+            let a = angle - turns * std::f32::consts::TAU;
+            assert!(
+                (r[1][0] + a.sin()).abs() < 1e-5 && (r[1][1] - a.cos()).abs() < 1e-5,
+                "{r:?}"
+            );
+            assert!(
+                (r[0][1] - a.sin()).abs() < 1e-5
+                    && (r[2][2] - 1.).abs() < 1e-6
+                    && r[3] == [0., 0., 0., 1.]
+            );
+        }
+        assert_eq!(angle(1.), 0.);
+    }
+
+    #[test]
+    fn the_refresh_rebuilds_the_post_from_pivot_and_centre() {
+        let mut post = Post::default();
+        let pivot = [1., 0.08, -2., 1.];
+        refresh(&mut post, pivot, [1.5, 1.08, -2., 1.]);
+        let expected = 1.25f32.sqrt();
+        assert!((post.length - expected).abs() < 1e-6);
+        assert!((post.direction[0] - 0.5 / expected).abs() < 1e-6);
+        assert!((post.direction[1] - 1. / expected).abs() < 1e-6);
+        assert_eq!(post.tip, [2., 2.08, -2., 1.]);
+        assert_eq!(post.low, pivot);
+        assert_eq!(post.high, post.tip);
+    }
+
+    #[test]
     fn the_closest_points_of_a_segment_through_a_box_meet() {
         let (on_segment, on_box) = closest([-5., 0.9, 0., 1.], [5., 0.9, 0., 1.], &car(0.));
         for k in 0..3 {
-            assert!((on_segment[k] - on_box[k]).abs() < 1e-5, "{on_segment:?} {on_box:?}");
+            assert!(
+                (on_segment[k] - on_box[k]).abs() < 1e-5,
+                "{on_segment:?} {on_box:?}"
+            );
         }
     }
 }
