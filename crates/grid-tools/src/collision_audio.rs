@@ -34,10 +34,18 @@ pub struct Curve {
 
 impl Curve {
     /// 435EA0: t = clamp((x − minVel)/(maxVel − minVel)); volume and pitch
-    /// lerped, then clamped by the voice setters (42C100, 42C150).
+    /// lerped, then clamped by the voice setters (42C100, 42C150). With
+    /// minVel = maxVel, t is 0 up to it and 1 above (435EEF; the cracksmash
+    /// preset at x = 1.0).
     pub fn at(&self, x: f32) -> (f32, f32) {
         let span = self.max_vel - self.min_vel;
-        let t = if span != 0. { ((x - self.min_vel) / span).clamp(0., 1.) } else { 1. };
+        let t = if span != 0. {
+            ((x - self.min_vel) / span).clamp(0., 1.)
+        } else if x <= self.max_vel {
+            0.
+        } else {
+            1.
+        };
         let volume = self.min_vol + (self.max_vol - self.min_vol) * t;
         let pitch = self.min_pitch + (self.max_pitch - self.min_pitch) * t;
         (volume.clamp(-48., 0.), pitch.clamp(0.5, 2.))
@@ -675,6 +683,27 @@ impl Listener {
         &mut self.air[k]
     }
 
+    /// 43CE90 → 43C250 (cracked, message type 1) and 43C2B0 (smashed, type
+    /// 2): a window of `WINDOWS` order (part ids 0x4E..0x53; 0x51, the front
+    /// window, is the windscreen) plays WindScreen/Window Crack/Smash at
+    /// x = 1.0 without cooldown, group slot +0, at the window's place of
+    /// 41DC90: ±1 m along the car's z and x axes and 0.5 m up.
+    pub fn glass(&mut self, car: &Car, window: usize, smashed: bool, out: &mut Vec<Play>) {
+        // (z, x) signs of 41DC90 for ids 0x4E..0x53.
+        const PLACES: [(f32, f32); 6] = [(-1., 0.), (-1., -1.), (-1., 1.), (1., 0.), (1., -1.), (1., 1.)];
+        let Some(&(z, x)) = PLACES.get(window) else { return };
+        let info = match (window == 3, smashed) {
+            (true, false) => "WindScreenCrack",
+            (true, true) => "WindScreenSmash",
+            (false, false) => "WindowCrack",
+            (false, true) => "WindowSmash",
+        };
+        let p = car.pose;
+        let position = std::array::from_fn(|i| p[12 + i] + z * p[8 + i] + x * p[i] + 0.5 * p[4 + i]);
+        let group = if car.player { PANEL_COLL } else { AI };
+        self.one_shot(info, 1., position, group, false, out);
+    }
+
     /// 455FA0, once per tick after the step: while `airborne` the airtime
     /// grows (the first frame restarts the timer at 0.01 s, later frames
     /// read its elapsed time); on the first grounded tick a positive airtime
@@ -1045,6 +1074,56 @@ mod tests {
         assert_eq!(c.at(100.), (0., 1.1));
         let (v, p) = c.at(6.5);
         assert!((v + 1.5).abs() < 1e-6 && (p - 0.975).abs() < 1e-6);
+        // minVel = maxVel (cracksmash): t = 0 up to it, 1 above.
+        let flat = Curve { min_vel: 1., max_vel: 1., ..c };
+        assert_eq!(flat.at(1.), (-3., 0.85));
+        assert_eq!(flat.at(1.5), (0., 1.1));
+    }
+
+    #[test]
+    fn glass_follows_43c250_and_43c2b0() {
+        let curve = |variety: &str| Curve {
+            variety: variety.into(),
+            min_vel: 1.,
+            max_vel: 1.,
+            min_vol: -7.,
+            max_vol: -7.,
+            min_pitch: 0.95,
+            max_pitch: 1.1,
+        };
+        let names = ["WindScreenCrack", "WindScreenSmash", "WindowCrack", "WindowSmash"];
+        let bank = Arc::new(Bank {
+            sounds: Vec::new(),
+            varieties: HashMap::new(),
+            infos: names.iter().map(|n| (n.to_string(), curve(n))).collect(),
+            impacts: HashMap::new(),
+            car_scrape: HashMap::new(),
+        });
+        let mut listener = Listener::new(bank);
+        let mut c = car();
+        c.pose[12..15].copy_from_slice(&[10., 0., 20.]);
+        let mut out = Vec::new();
+        // Window 3 (part 0x51, window_f) is the windscreen, 1 m ahead.
+        listener.glass(&c, 3, false, &mut out);
+        listener.glass(&c, 3, true, &mut out);
+        // Window 1 (0x4F, window_bl): back and −x. No cooldown: twice.
+        listener.glass(&c, 1, true, &mut out);
+        listener.glass(&c, 1, true, &mut out);
+        let got: Vec<_> = out.iter().map(|p| (p.variety.as_str(), p.position, p.group)).collect();
+        assert_eq!(
+            got,
+            [
+                ("WindScreenCrack", [10., 0.5, 21.], PANEL_COLL),
+                ("WindScreenSmash", [10., 0.5, 21.], PANEL_COLL),
+                ("WindowSmash", [9., 0.5, 19.], PANEL_COLL),
+                ("WindowSmash", [9., 0.5, 19.], PANEL_COLL),
+            ]
+        );
+        assert!(out.iter().all(|p| (p.volume_db, p.pitch) == (-7., 0.95)));
+        c.player = false;
+        out.clear();
+        listener.glass(&c, 5, false, &mut out);
+        assert_eq!((out[0].variety.as_str(), out[0].position, out[0].group), ("WindowCrack", [11., 0.5, 21.], AI));
     }
 
     #[test]
@@ -1060,6 +1139,11 @@ mod tests {
         let soft = &bank.infos["carFBSoft"];
         assert_eq!((soft.min_vel, soft.max_vel, soft.min_vol, soft.max_vol), (3., 10., -3., 0.));
         assert_eq!(bank.infos["carBotSoft"].variety, "carLandSoft");
+        // The glass infos use the cracksmash preset: −7 dB, pitch 0.95 at x = 1.
+        for name in ["WindScreenCrack", "WindScreenSmash", "WindowCrack", "WindowSmash"] {
+            assert_eq!(bank.infos[name].at(1.), (-7., 0.95), "{name}");
+            assert!(bank.varieties.contains_key(&bank.infos[name].variety), "{name}");
+        }
         let fb = &bank.varieties["carFBHard"];
         assert_eq!((fb.min_distance, fb.max_distance, fb.samples.len()), (4., 40., 9));
         let mut listener = Listener::new(bank.clone());

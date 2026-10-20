@@ -1025,6 +1025,7 @@ fn present(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut glass: Option<ResMut<crate::collision_sound::GlassBreaks>>,
 ) {
     let damage = &mut *damage;
     for m in 0..damage.models.len() {
@@ -1070,6 +1071,9 @@ fn present(
         if car.field_key.as_ref() == Some(&key) {
             continue;
         }
+        // The first look after a start or a checkpoint finds glass anew
+        // without sound.
+        let heard = car.field_key.is_some();
         car.field_key = Some(key);
         let moved = |points: &[Vec3]| -> Option<Vec<Vec3>> {
             let queries: Vec<[f32; 4]> = points.iter().map(|p| [p.x, p.y, p.z, 1.]).collect();
@@ -1096,6 +1100,9 @@ fn present(
                 );
                 if state == Glass::Smashed {
                     new_shards.push((index, WINDOWS[w].0));
+                }
+                if heard && let Some(glass) = glass.as_mut() {
+                    glass.0.push((index, w, state == Glass::Smashed));
                 }
             }
         }

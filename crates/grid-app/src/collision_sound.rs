@@ -124,12 +124,19 @@ pub(crate) fn install(
             last: None,
         })
         .insert_resource(PendingSource(Some(source)))
+        .init_resource::<GlassBreaks>()
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, tick.after(super::drive_tick));
 }
 
 #[derive(Resource)]
 struct PendingSource(Option<CollisionSource>);
+
+/// Windows that cracked or smashed since the last tick, as (car, window in
+/// `WINDOWS` order, smashed): the damage parts' glass found from the
+/// deformation, the "game broadcaster" messages 43CE90 plays.
+#[derive(Resource, Default)]
+pub(crate) struct GlassBreaks(pub(crate) Vec<(usize, usize, bool)>);
 
 fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets: ResMut<Assets<CollisionSource>>) {
     if let Some(source) = pending.0.take() {
@@ -143,7 +150,12 @@ fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets:
 }
 
 /// Once per successful vehicle tick: every car's contacts.
-fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listening: super::engine_sound::Listening) {
+fn tick(
+    mut sound: ResMut<CollisionSound>,
+    mut glass: ResMut<GlassBreaks>,
+    driving: Res<super::Driving>,
+    listening: super::engine_sound::Listening,
+) {
     let now = (driving.segment, driving.runtime.ticks);
     if sound.last == Some(now) || now.1 == 0 || driving.paused || driving.failure.is_some() {
         sound.last = Some(now);
@@ -194,6 +206,10 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
             let omega = grid_tools::collision_audio::angular_velocity(runtime);
             sound.listener.displacement(&car, omega, &mut plays);
         }
+        // 43CE90: cracked and smashed windows.
+        for &(_, window, smashed) in glass.0.iter().filter(|(car, ..)| *car == k) {
+            sound.listener.glass(&car, window, smashed, &mut plays);
+        }
         // 458780 after the step: the scrape loop's level, pitch and place.
         if let Some(voice) = sound.listener.scrape_frame(k, &car)
             && let Some(variety) = sound.bank.varieties.get(&voice.variety)
@@ -223,4 +239,5 @@ fn tick(mut sound: ResMut<CollisionSound>, driving: Res<super::Driving>, listeni
             }
         }
     }
+    glass.0.clear();
 }

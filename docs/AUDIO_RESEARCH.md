@@ -943,3 +943,48 @@ Static: 435B20 (435C5F..435E97), 42D580, 436300, 45DA40..45DB9F. GRID was not la
 - Consequence for the port: the cap of 15 and the 436300 Crashed path do not limit or change
   what an offline player hears. Nothing to port. The FIDELITY_BACKLOG note about the cap is
   closed.
+
+### 17.2 Window glass (F511)
+
+Static: 43C0C0, 43C250, 43C2B0, 43CE90, 43CF10..43D5A0 (loader), 448F75, 4486E0, 41DC90,
+4109F0, 9E9B03..9E9BF8, 435EA0; `CollisionInfos.bin`. GRID was not launched.
+
+- [O] The car-audio manager's loader (43CF10, called at 459448) names its CollisionInfos and
+  ImpactVarieties in order from manager +0x74: YawImpact, PitchImpact, CarScrapeRoof, …,
+  then +0xE0 WindScreenCrack, +0xE4 WindScreenSmash, +0xE8 WindowCrack, +0xEC WindowSmash,
+  +0xF0 HeadLightCrack, +0xF4 HeadLightSmash, +0xF8 WindSlow, +0xFC WindFast,
+  +0x100 ParticulateGlass. A car reads them through [car +0x2C] +0x18 = manager +0x70
+  (4486E0 reads YawImpact at +4).
+- [O] 43CE90 is registered at 448F75 for the "game broadcaster" messages. It finds the car by
+  the message's +4 handle, and then:
+  - type 1 (+0x10) calls 43C250(part +8): WindScreenCrack for part 0x51, else WindowCrack;
+  - type 2 calls 43C2B0(part): it first sets a per-window flag (4109F0, car +A5D8..+A5DD),
+    then plays WindScreenSmash for 0x51, else WindowSmash.
+
+  Both play at x = 1.0, with the cooldown off, on group slot +0 (Panel Coll for the player,
+  AI for others).
+- [O] The window parts are 0x4E..0x53 (the damage code tests 0x4F..0x53 for state 2 at 9E9B06).
+  41DC90 places each one from the car's axes: z·a + x·b + 0.5·y, plus the car position unless
+  the car is the player (whose sounds are car-relative). The (a, b) pairs are:
+
+  | Part | (a, b) |
+  | --- | --- |
+  | 0x4E | (−1, 0) |
+  | 0x4F | (−1, −1) |
+  | 0x50 | (−1, 1) |
+  | 0x51 | (1, 0) |
+  | 0x52 | (1, −1) |
+  | 0x53 | (1, 1) |
+
+  This is the port's WINDOWS order (b, bl, br, f, fl, fr), so 0x51 is window_f, as
+  MECHANICAL_DAMAGE.md already had for 9E99B0.
+- [O] All four infos use the cracksmash preset: minVel = maxVel = 1, −7 dB, pitch 0.95–1.1.
+  For minVel = maxVel, 435EA0 sets t = 0 while x ≤ maxVel (435EEF), so the windows play at
+  −7 dB, pitch 0.95. The port's curve used t = 1 for an empty range and is corrected.
+- [I] The sender of the type 1/2 messages was not found. Type 1 is taken as "the window cracked"
+  and type 2 as "it smashed", by the info names and by 9D12B0's states 1 and 3. The port
+  plays one sound per rise of its window state. A window that goes straight from intact to
+  smashed plays only the smash.
+- Not ported: HeadLightCrack/Smash and ParticulateGlass (the per-part tables +9F0C and +9B64 of
+  43C0C0/44D9D0 have no static writer, like +97BC in §17); WindSlow/WindFast (§7: never
+  started).
