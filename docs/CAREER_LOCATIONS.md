@@ -169,6 +169,27 @@ Probe `grid-slots` (new, grid-probes) reads each route's grid against its racing
 - Retirements before tick 1500 (r0 full car3; r2 car8, car0, car4; r8 car1) happen on the
   first lap's opening corners. That is evidence for row 41, not a track fault.
 
+### 7.3 Route 0's no-brake bend: what the AI is given (row 41, 2026-10-20) [O static + headless]
+
+Evidence (ignored): admiring-wiles worktree `local/row41/` (`grid-binxml` dumps of the route
+XMLs, `line.py` racing-line geometry, `retire.py`, 12-car traces `r0/r2/r8.tsv` at 4469f5ce).
+- Geometry: the bend after the 1 km straight spans gates 28–35 (arc 840–1023), about 60° at a
+  racing-line radius of 137–204 m.
+- Brake line 1 sits at gate 29 (arc 864.6), inside the bend's entry. Its shipped touring data
+  is min 49.9 / max 83.2 m/s (other classes 60–105 m/s max). With corner_speed_in_ratio the
+  target is 65–71 m/s, above the Lacetti's 65 m/s top speed, so 0x7886C0 never brakes (speed
+  below target), as in the original's formula (0x792C80, class data [V]).
+- Corner lift 0x77A940 (disassembly read again): speed-gated remap of |track view +0x8C|
+  between the mapped start/end values 0.01/0.03. The bend's |κ| is 0.006–0.0076 rad/m, so no
+  lift, as ported. Throttle stays at throttle_confidence 0.961; steering saturates and the line
+  error grows to 6 m. No ported formula differs here, so no 1:1 fix was found statically.
+- 12 cars, 4000 ticks, at 4469f5ce: route 0 retires cars 2/0/10 (car 2 in this bend at 56–59 m/s
+  in Alongside); route 2 cars 6 (bend after line 1, arc 484–605, R 84–132 m, 42–44 m/s in
+  Alongside), 0 (arc ≈742, Race → Recovery at 54 m/s), 8 (late); route 8 car 1 (bend after
+  line 2, arc 662–714, R 78–128 m, 50 m/s) and car 5 (late).
+- Open: whether the original's car carries this speed through these bends (no original trace
+  of Washington); the alongside drive's part in the traffic retirements (rows 30/31, parked).
+
 ## 8. Open
 
 - AI braking into Washington's turn 1 and the bend after the 1 km straight (row 41).
