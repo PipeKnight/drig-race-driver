@@ -1,5 +1,27 @@
 # GRID engine project log
 
+F510 Chase drift blend weight read from the car (car +0xFE0, 0 for every shipped car); the bonnet's 4.7 mm forward residual was capture sampling (2026-10-20, Claude Code; coordinator's overnight camera task, static only, nothing launched). Details: docs/CAMERA_VIEWS.md §2 Chase pipeline item 2 and "Shake 0x815960". Evidence: worktree camera-dynamics-11a55d `local/cam/drift/` (`findings.md`, `bonnet_shift.py`).
+- [D] The drift blend weight w of 0x8114B0 is read at `[[[chase+0x64]+0xC]+0x24]` + 0xE78 + 0x168.
+  - The target setter 0x7F6F80(X) stores target +0xC = X (the participant) and target +8 = [X+0x24]. So +0x24 is the car itself, the same pointer whose +0x1648 is the speed.
+  - Car +0xE78 is the car's 0x65C-byte copy of the vehicle-properties record (constructor `rep movsd` at 0xA0F28A).
+  - So w = car +0xFE0 = record +0x168. Its only writer is the CSV decoder 0x9AEC60 (0x9B0EC8: strtod of column 330).
+  - Column 330 is empty in all 45 shipped car CSVs, so w = 0 for every car in every race type. It is not a race mode or drift-event flag. The F461 note that the object "is not the dumped car" was wrong.
+- Port: `Sample::drift_weight` reads car +0xFE0, which the port's properties decoder fills from column 330, and the chase uses it. Replays and the tests' samples pass 0. Shipped behaviour is unchanged.
+- [V] Bonnet forward residual in F470 run C, 4.723 mm rms:
+  - one stale bonnet record (t = 4.12 s, record time not advanced: one frame of travel, 0.184 m) accounts for about 4.2 mm;
+  - 29 start-up rows inside compare2's 3 cm bumper sync account for the rest;
+  - without them the residual is 0.257 mm.
+  - The original's shift step equals the port's: record +0x80 is reproduced to 1.9e-6 m with the record's dt and the physics rotation.
+  - No change is needed. Future comparisons should sync on the view's record time.
+- Tests: `chase_takes_the_drift_weight_from_the_car` (weight 1 turns the chase toward a 45° slip; 0 leaves it).
+- Open: the meaning of CSV column 330 (no editor schema); a direct read of car +0xFE0 in a future capture (expected 0).
+- Checks [V], release, cargo/rustc 1.99.0, rust-lld, on b0d8c9dc (F509) + this change:
+  - `cargo test --workspace --release --lib --test "*" --bin grid-app --no-fail-fast -- --include-ignored` with absolute GRID_* paths: 846 passed, 0 failed;
+  - `cargo clippy --release --workspace --all-targets -- -D warnings` clean;
+  - identities (`grid-opponent-race` rebuilt first): solo 18b369f9…a6ee, 12-car c235bab2…8552, 12-car with DF01 and characteristics 00650c09…28bd, unchanged;
+  - `grid-soak quick` 24/24;
+  - Playable not rebuilt (coordinator).
+
 F509 Close-drift flags break into a static base and a phantom pole post (2026-10-20, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, after F506). Details: docs/JOINTS_RESEARCH.md "Close-drift flags: the phantom post", "The port (F506, F509)".
 - Catalog and route boxes:
   - each intact box has its own threshold and explosion (`Breakable::limits`): pole 50, base 2000;

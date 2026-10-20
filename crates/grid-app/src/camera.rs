@@ -469,6 +469,9 @@ pub struct Sample {
     pub wheels: [(f32, f32); 4],
     /// Car +0xD234 is not 7, the controls are disabled (+0x28, 0x7F7380).
     pub controls_disabled: bool,
+    /// The chase's drift blend weight: car +0xFE0, vehicle-properties record
+    /// +0x168 (CSV column 330, empty in every shipped car, so 0).
+    pub drift_weight: f32,
     /// Committed physics ticks and the reset counter; camera time is the
     /// simulation time between samples, so pause and replays hold still.
     pub ticks: u64,
@@ -486,6 +489,7 @@ impl Sample {
             speed: velocity.length(),
             wheels: [(0., 1.); 4],
             controls_disabled: false,
+            drift_weight: 0.,
             ticks,
             segment,
         }
@@ -513,6 +517,7 @@ impl Sample {
                 (f(w + 0x40), f(w + 0x4c))
             }),
             controls_disabled: b[0xd234 / 4] != 7,
+            drift_weight: f(0xfe0),
             ticks: runtime.ticks,
             segment,
         }
@@ -831,8 +836,9 @@ fn rolled_up(direction: Vec3, angle: f32) -> Vec3 {
 
 /// Drift blend (0x8114B0): with a positive weight the lag angle moves toward
 /// minus the slip angle atan2(v·X, v·Z), weighted by (|v| − 5) · 0.1 in 0..1.
-/// The weight is read from an object behind the target (+0xC → +0x24,
-/// +0xE78 + 0x168) whose source is not identified [I]; races pass 0.
+/// The weight is the car's own vehicle property car +0xFE0 (target +0xC is
+/// the participant, its +0x24 the car; +0xE78 the properties copy, record
+/// +0x168 from CSV column 330 by 0x9AEC60): 0 for every shipped car.
 pub fn drift_lag(lag: f32, velocity: Vec3, pose: &Mat4, weight: f32) -> f32 {
     if weight.is_nan() || weight <= 0. {
         return lag;
@@ -982,7 +988,7 @@ fn chase_shot(
         h.lag = chase_lag(c, h.lag, turn, sample.speed, dt);
         (h.roll, h.roll_weight) = roll_step(c, h.roll, sample.angular_velocity.y, sample.speed, dt);
     }
-    let lag = drift_lag(h.lag, sample.velocity, pose, 0.);
+    let lag = drift_lag(h.lag, sample.velocity, pose, sample.drift_weight);
     let frame = spin_frame(pose, h.spin.blend, h.spin.held);
     let back = if advance {
         fall_back(c, sample.speed, None, &mut h.drop_back)
@@ -1637,6 +1643,7 @@ mod tests {
                 speed: v[2],
                 wheels: std::array::from_fn(|i| (v[4 + 2 * i], v[5 + 2 * i])),
                 controls_disabled: v[3] != 7.,
+                drift_weight: 0.,
                 ticks: 0,
                 segment: 0,
             };
@@ -2061,6 +2068,20 @@ mod tests {
         // Slip 45°, speed weight (14.1421 − 5) · 0.1 = 0.914214.
         let lag = drift_lag(0., v, &Mat4::IDENTITY, 1.);
         assert!((lag + std::f32::consts::FRAC_PI_4 * 0.914_214).abs() < 1e-5, "{lag}");
+    }
+
+    #[test]
+    fn chase_takes_the_drift_weight_from_the_car() {
+        // A car whose properties set column 330 (car +0xFE0) turns the chase
+        // toward its slip; the shipped 0 leaves it alone.
+        let run = |weight: f32| {
+            let mut cameras = Cameras::new(lacetti(), DEFAULT_VIEW, None);
+            let mut s = sample(Mat4::IDENTITY, Vec3::new(10., 0., 10.), 0);
+            s.drift_weight = weight;
+            forward(&cameras.frame(&s, false, Look::default(), |v| v))
+        };
+        assert!(run(0.).x.abs() < 1e-6);
+        assert!(run(1.).x > 0.1, "{}", run(1.));
     }
 
     #[test]
