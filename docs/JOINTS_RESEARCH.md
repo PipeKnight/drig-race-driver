@@ -397,6 +397,13 @@ capstone 5.0.6 on the hash-pinned analysis image; constants read from the image)
       position, 0xA69880 - 0xA698A0).
     - It forms the AABB of the oriented box, grown along the motion, and runs
       0x7BD240 for every post.
+  - The vehicle box [D] is the `CAR_` shape that 0xA01960 makes (0x9B8AE0 -> 0xA72CF0):
+    - half extents are half the extent of the min/max of the car's collision hull points
+      (the points 0x9B8B70 converts for 0xB23E40);
+    - the box is centred on that AABB in the body frame.
+  - Frame order [D], 0x5F0EE0: the world step 0xAB7550, then 0x7CA8F0, the entity breaks
+    0x7D64B0, the posts 0x7C4830 and 0x7BB150. The posts run once per frame, after the
+    step and the breaks.
 - 0x7BD240 (post against one car):
   - Rejects on an AABB test first (0x7D8700).
   - Steps the car box along its motion in n + 1 positions, n = round(|motion| x -3.333)
@@ -434,12 +441,28 @@ Port plan (not started):
      break;
    - the swap of a static A with a dynamic B (0x7B7EE0).
 2. Pieces with their collision cleared (shape +0x15): the pole, on the shapeless path.
-3. The post (0x7BB910, 0x7BD240, 0x7BCDA0, 0x7BBB70, 0x7BC370; about 1,700 decompiled
-   lines). Before it can be ported, it needs:
-   - the vehicle shape at +0xDC8 identified in the port, with its half extents at
-     +0x240;
-   - an in-process probe of 0x7BCDA0, like the joint-template probe, so the SSE order can
-     be checked.
+3. The post. Its geometry is ported and verified ({F}): `grid_world::phantom_post`
+   covers `penetration` (0x7BBB70), `closest` (0x7BC370) and `push` (0x7BCDA0).
+   - Verification [V]: `tools/probe_phantom_post.c` runs the three original functions
+     in-process on supplied posts and boxes, and `grid-phantom-post` runs the port.
+     `tools/validate_phantom_post.py` found 0 mismatched bytes:
+     - 6,144 cases (seed 20261020; 810 test hits, 636 pushes);
+     - 30,000 cases (seed 7; 3,902 test hits, 3,105 pushes).
+     Evidence: worktree `local/behavior/phantom-post/`.
+   - 0x7BC370 [D]: in the box frame, each axis is reflected so the segment runs
+     non-negative along it and classified against the faces (below, inside, above). The
+     squared distance is piecewise quadratic in the segment parameter. It is walked from 0
+     through the face crossings until its slope is non-negative (the root by the secant
+     of the slope), then the point is clamped into the box. Two operation orders came
+     from the assembly: the slope sum (n − t2)c2 + ((n − t1)c1 + (n − t0)c0), and the
+     box-to-world sum (q2·r2 + q0·r0) + (q1·r1 + q3·r3).
+   - A push needs the pushed segment's closest point to lie off its pivot by at least
+     0.1 m. A box that reaches down to the pivot therefore does not bend the pole.
+   Still to port:
+   - the post refresh 0x7BB910 and the sweep and rotation 0x7BD240 (acos 0xBF4067,
+     axis-angle 0x772670, body matrix and velocities);
+   - the runtime: the vehicle box (the AABB of the car's collision hull points, below)
+     with the body's pose and its motion this tick, after the step and the breaks.
 4. The 1e-6 car contact as a flag touch for `drift::Detector` (today the flag boxes give
    it).
 

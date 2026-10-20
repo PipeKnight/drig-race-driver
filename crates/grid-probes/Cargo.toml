@@ -847,6 +847,11 @@ path = "src/bin/grid-joint-template.rs"
 test = false
 
 [[bin]]
+name = "grid-phantom-post"
+path = "src/bin/grid-phantom-post.rs"
+test = false
+
+[[bin]]
 name = "grid-road-hole"
 path = "src/bin/grid-road-hole.rs"
 test = false

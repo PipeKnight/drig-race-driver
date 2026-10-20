@@ -1,5 +1,29 @@
 # GRID engine project log
 
+F506 Close-drift flag post geometry ported and verified bit for bit (2026-10-20, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, after F503). Details: docs/JOINTS_RESEARCH.md "Close-drift flags: the phantom post", plan step 3.
+- Port: new module `grid_world::phantom_post` with `penetration` (0x7BBB70), `closest` (0x7BC370) and `push` (0x7BCDA0).
+  - `penetration` is the separating-axis test of the pole segment against the car box: the box's three axes and their cross products with the segment.
+  - `closest` finds the closest points of a segment and a box by walking face crossings.
+  - `push` turns the post about its pivot, in up to three passes.
+  - Not called at runtime yet: no runtime caller, no catalog change.
+- Verification [V]:
+  - `tools/probe_phantom_post.c` runs the three original functions in-process on supplied posts and boxes. It is compiled 32-bit with the BuildTools 14.44 `cl` and maps the hash-pinned image `aac46a64...4f34514`. Probe SHA-256 `bfd5950c...0998`.
+  - `grid-phantom-post` (crates/grid-probes) runs the port.
+  - `tools/validate_phantom_post.py` found 0 mismatched bytes on 6,144 cases (seed 20261020; 810 test hits, 636 pushes) and 30,000 cases (seed 7; 3,902 hits, 3,105 pushes). Evidence: worktree fervent-napier-50814b `local/behavior/phantom-post/`.
+  - Two operation orders came from the assembly (the slope sum and the box-to-world sum). A first run had one mismatch, a 1-ulp difference from the slope sum's order.
+- Research [D]:
+  - A push needs the pushed segment's closest point to lie at least 0.1 m off the pivot, so a box reaching down to the pivot does not bend the pole.
+  - Static helpers 0x770AB0, 0x67C200, 0x7D8690 and 0x4B1A90 read; decompiles in `local/robust/decomp/r22g..r22n`.
+- Checks (release):
+  - `cargo clippy --workspace --all-targets -- -D warnings` clean;
+  - `cargo test -p grid-world --lib` 220 passed, including 3 new phantom-post tests;
+  - nothing at runtime calls the new code, so identities and soaks are unaffected and were not rerun.
+- Next:
+  - port the post refresh 0x7BB910 and the sweep and rotation 0x7BD240;
+  - the catalog: per-shape thresholds, static base boxes, the A/B swap, the pole with its collision cleared;
+  - the runtime post after the step and the breaks, with the car box from the hull AABB;
+  - the 1e-6 car contact as the drift flag touch.
+
 F505 The 42D580 one-shot queue is network replication, not a mixing cap (2026-10-20, Claude Code; coordinator's overnight audio list). Details: docs/AUDIO_RESEARCH.md §17.1. Evidence: Capstone listings of 435B20, 42D580, 436300, 45DA40 (session scratchpad). The original was not run.
 - [O] 435B20 always plays the one-shot locally (421B70). It then broadcasts the same one-shot through 42D580 ("game broadcaster") only when the manager's role is 0. The counter of 15 is only zeroed at construction and incremented. 436300 plays received messages, and applies their Crashed flag, only when the role is 1.
 - [I] This is one-shot replication for networked play. Offline nothing is capped, so nothing needs porting. This closes the queue-cap gap noted in F490.
