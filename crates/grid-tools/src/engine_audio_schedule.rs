@@ -71,7 +71,9 @@ fn prepare(
     }
     let delta = delta as f32;
     if curves.iter().enumerate().any(|(i, value)| {
-        !value.is_finite() || !(0.0..=1.).contains(value) || (i % 2048 < 1024 && *value <= 0.)
+        !value.is_finite()
+            || !(0.0..=crate::engine_audio::CURVE_MAX).contains(value)
+            || (i % 2048 < 1024 && *value <= 0.)
     }) || !f(controller, 0xc8).is_finite()
         || !(0.0..=1.).contains(&f(controller, 0xc8))
         || !f(controller, 0x30c).is_finite()

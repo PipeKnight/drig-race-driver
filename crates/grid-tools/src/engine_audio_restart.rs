@@ -49,7 +49,7 @@ pub fn restart(
             .iter()
             .any(|v| *v != u32::MAX && *v > 60_000_000)
         || curves.iter().enumerate().any(|(i, v)| {
-            !v.is_finite() || !(0.0..=1.).contains(v) || (i % 2048 < 1024 && *v <= 0.)
+            !v.is_finite() || !(0.0..=crate::engine_audio::CURVE_MAX).contains(v) || (i % 2048 < 1024 && *v <= 0.)
         })
         || !f(controller, 0xc8).is_finite()
         || !(0.0..=1.).contains(&f(controller, 0xc8))

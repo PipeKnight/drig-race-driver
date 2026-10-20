@@ -988,3 +988,16 @@ Static: 43C0C0, 43C250, 43C2B0, 43CE90, 43CF10..43D5A0 (loader), 448F75, 4486E0,
 - Not ported: HeadLightCrack/Smash and ParticulateGlass (the per-part tables +9F0C and +9B64 of
   43C0C0/44D9D0 have no static writer, like +97BC in §17); WindSlow/WindFast (§7: never
   started).
+
+## 18. Engine banks of every raceable car (F519)
+
+- [O] Before F519, eleven raceable cars' banks failed to load (`grid_tools::engine_audio_continuous::Bank::load`), and grid-app then installed no engine sound for the whole field:
+  - `unsupported engine curve extent/range`: dbr (Aston Martin DBR9) and esp (Audi R8). Their idle `RevsFromTime` curves start at 1.0058 and 1.0293; the port required [0, 1].
+  - `continuous setup/PCM rate or extent mismatch`: sal, lam, spk, lc7, 390, je4, cha, vip, zon. One idle or throttle recording is one frame shorter than carsetup's frame count (eng_sal throttle: 454,681 PCM frames, carsetup 454,682).
+- Reader change:
+  - Curve values are accepted in [0, 2] (`engine_audio::CURVE_MAX`), in the INI reader and in the controller, scheduler and pair-restart input checks. [I] The original reads the curves as written; the played pitch is clamped by the voice setter 42C150 to [0.5, 2] (§F516), so a curve slightly above 1 only shifts a lookup.
+  - A recording one frame shorter than carsetup is accepted. The controller's length (0x2C0) is the PCM's own, so the cursor stops at the last real sample. [I] One frame at 32 kHz is inaudible either way.
+- Isolation (grid-app `engine_sound`):
+  - `load_banks` loads one bank per field model; a failure logs `engine_audio version=2 event=bank_failed car=<stem> error="..."` and leaves that model `None`. Only that car is silent: the player's source is spawned only with a bank, and opponents without one are skipped.
+  - Each opponent's decoder has its own failure flag. Its mixer goes silent until the next reset and the update logs `engine_audio version=2 event=decoder_failed car=<index> muted=car_only`; only the player's failure still mutes the engine mix.
+- Tests: `every_loadable_engine_runs_through_the_start` loads every `series::RACEABLE` car and stk and panics on any load failure; `engine_sound::tests::a_failed_bank_silences_only_its_car` loads lac, a non-existent model and bmw, and checks the spawned sources.

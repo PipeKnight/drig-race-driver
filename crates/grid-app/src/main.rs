@@ -2815,15 +2815,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     None
                 }
             };
-            match field
-                .models
-                .iter()
-                .map(|m| grid_tools::engine_audio_continuous::Bank::load(&root, m))
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(banks) => engine_sound::install(&mut app, banks, mix.clone()),
-                Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
-            }
+            // A model whose bank fails to load is silent; the other cars
+            // keep their engines.
+            let banks = engine_sound::load_banks(&root, &field.models);
+            engine_sound::install(&mut app, banks, mix.clone());
             match grid_tools::collision_audio::Bank::load(&root) {
                 Ok(bank) => {
                     let heights: Vec<_> = field
@@ -5879,7 +5874,7 @@ mod driving_tests {
             .init_asset::<collision_sound::CollisionSource>();
         engine_sound::install_systems(
             &mut app,
-            vec![grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap()],
+            vec![Some(grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap())],
             mix.clone(),
         );
         collision_sound::install_systems(

@@ -28,6 +28,8 @@ fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Box<dyn std::error::Err
     }
     Ok(b)
 }
+/// Bound of an engine INI curve value (shipped: 0 to 1.0293).
+pub(crate) const CURVE_MAX: f32 = 2.;
 pub(crate) fn curve(ini: &str, section: &str, key: &str) -> Result<Vec<f32>, &'static str> {
     let mut current = "";
     let mut found = None;
@@ -49,10 +51,13 @@ pub(crate) fn curve(ini: &str, section: &str, key: &str) -> Result<Vec<f32>, &'s
                         .map_err(|_| "invalid engine curve number")
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            // The shipped curves are fractions of the recording; the Aston
+            // Martin DBR9 and Audi R8's idle RevsFromTime start just above 1
+            // (1.0058, 1.0293), which the original reads as written.
             if values.len() != 1024
                 || values
                     .iter()
-                    .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v))
+                    .any(|v| !v.is_finite() || !(0.0..=CURVE_MAX).contains(v))
             {
                 return Err("unsupported engine curve extent/range");
             }

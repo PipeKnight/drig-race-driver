@@ -93,7 +93,11 @@ impl Bank {
             } else {
                 setup.throttle_frames
             };
-            if sample.rate != 32000 || bytes.len() / 2 != frames as usize {
+            // Nine banks' idle or throttle recordings are one frame shorter
+            // than carsetup says (eng_sal throttle 454681 of 454682). The
+            // controller's length (0x2C0) is the PCM's own, below.
+            let pcm_frames = bytes.len() / 2;
+            if sample.rate != 32000 || !(pcm_frames == frames as usize || pcm_frames + 1 == frames as usize) {
                 return Err("continuous setup/PCM rate or extent mismatch".into());
             }
             let pcm = bytes
@@ -364,21 +368,18 @@ mod tests {
     }
 
     /// Idle on the grid for a second, then the throttle up through 3 s:
-    /// no loadable bank's decoder fails. A pair restart stores the raw
+    /// no raceable car's decoder fails. A pair restart stores the raw
     /// pitch, 0.4955 for the BMW 320si at idle; the controller's input check
     /// rejected it below 0.5 and every BMW engine went silent (F516).
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn every_loadable_engine_runs_through_the_start() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
-        let mut loaded = Vec::new();
+        // Every raceable car's bank loads (until F519 eleven failed: curves
+        // above 1, recordings one frame short).
         for stem in crate::series::RACEABLE.iter().chain(&["stk"]) {
-            // Some banks are outside the reader's checks (curve extent, PCM
-            // layout: 12 raceable cars). grid-app then has no engine sound
-            // for the whole field (main.rs; open).
-            let Ok(bank) = Bank::load(std::path::Path::new(&root), &crate::car::Car::new(stem).unwrap()) else {
-                continue;
-            };
+            let bank = Bank::load(std::path::Path::new(&root), &crate::car::Car::new(stem).unwrap())
+                .unwrap_or_else(|e| panic!("{stem}: {e}"));
             let mut m = Mixer::new(bank);
             let mut peak = 0f32;
             for n in 0..48000 * 4 {
@@ -388,8 +389,6 @@ mod tests {
                 assert!(m.failure.is_none(), "{stem} at sample {n}: {:?}", m.failure);
             }
             assert!(peak > 0.01, "{stem} silent");
-            loaded.push(*stem);
         }
-        assert!(loaded.contains(&"bmw") && loaded.contains(&"lac") && loaded.len() >= 20, "{loaded:?}");
     }
 }

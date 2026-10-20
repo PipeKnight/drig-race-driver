@@ -70,7 +70,10 @@ pub fn update(
         return Err("engine audio vehicle domain");
     }
     for (i, &value) in curves.iter().enumerate() {
-        if !value.is_finite() || !(0.0..=1.).contains(&value) || (i % 2048 < 1024 && value <= 0.) {
+        if !value.is_finite()
+            || !(0.0..=crate::engine_audio::CURVE_MAX).contains(&value)
+            || (i % 2048 < 1024 && value <= 0.)
+        {
             return Err("engine audio curve domain");
         }
     }
