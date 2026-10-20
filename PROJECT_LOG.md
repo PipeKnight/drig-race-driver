@@ -1,5 +1,19 @@
 # GRID engine project log
 
+F503 Close-drift flags researched: the original breaks them into a kinematic phantom post (2026-10-20, Claude Code; coordinator's task, FIDELITY_BACKLOG row 16, the step after F501). Details: docs/JOINTS_RESEARCH.md "Close-drift flags: the phantom post". Evidence: worktree fervent-napier-50814b `local/robust/decomp/r22a..r22h` (Ghidra 12.1.4 headless, read-only; capstone 5.0.6 disassembly and constants from the hash-pinned analysis image). Static analysis only; the original game was not launched. No runtime code changed.
+- Original [D]:
+  - Template: an intact static body with two behaviours, the pole (`bPhantom` 50) and the base (`bHeavy` 2000). The damage state has a static base and a dynamic pole, joined by `cPhantomPost` (cone 1.6 with a spring, override `_rbPhantomPost`: no gravity or damping).
+  - 0x7CC1E0 with `specificPostCollision`, for entity names containing `close_drift_flag`: clears shape byte +0x15 on the pole. The narrow phase 0xB39500/0xB3A700 needs that byte on both shapes, so the pole collides with nothing.
+  - It also registers a post (manager list +0xBCB0, at most 10).
+  - 0x7C4830 each tick: steps every car's box (vehicle +0xDC8) along its motion, one position per 0.3 m (0x7BD240). The segment push (0x7BCDA0 with 0x7BBB70/0x7BC370) rotates the pole about its pivot and zeroes its velocities. The car gets a 1e-6 body contact through 0xA01910, which is its flag touch.
+- Port: unchanged. The flags stay unbroken static shapes with contact limit FLT_MAX, so the intact pole is a rigid obstacle where the original breaks it at 50.
+- Plan, in the doc:
+  1. Catalog work: per-shape thresholds, static pieces with shapes, the A/B swap.
+  2. Pieces with collision cleared.
+  3. The post, about 1,700 decompiled lines. It needs the vehicle shape +0xDC8 identified in the port first, and an in-process probe.
+  4. The 1e-6 car contact as the drift flag touch.
+- Checks: none needed for a docs-only change (identities and soaks unaffected).
+
 F502 Landing sound after airtime (2026-10-20, Claude Code; coordinator's overnight audio list). Details: docs/AUDIO_RESEARCH.md §15. Evidence: Ghidra 455FA0, Capstone 457BE0/410850/990FC0 (session scratchpad), carBot curves in worktree kind-pike-df38cc `local/kick/ci.tsv`. The original was not run.
 - [O] Airborne = no wheel contact (410850). 455FA0 keeps the airtime (0.01 s on the first airborne frame, then the timer's elapsed time). On touchdown it plays PrimaryBot by airtime through 4535A0: carBot soft 0.175–0.37 s, med up to 0.57 s, hard up to 2 s. Side and roof hits reset the airtime (4559C0). A player landing after more than 0.57 s also triggers Crashed.
 - Port: `collision_audio::airborne`, `Listener::landing`, called per vehicle tick by the app and by the `grid-opponent-race` trace. The 454560 call for spinning wheels in the air is not ported.

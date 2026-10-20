@@ -350,6 +350,103 @@ Verification:
   `specificPostCollision`, override `_rbPhantomPost`; a static infMass piece and two shape
   behaviours on one body).
 
+### Close-drift flags: the phantom post (research, F503; not ported)
+
+Original path [D] (decompiles `local/robust/decomp/r22a..r22h`, read-only; Ghidra 12.1.4,
+capstone 5.0.6 on the hash-pinned analysis image; constants read from the image):
+
+- Template `close_drift_flag.max` (Istanbul Park, Jarama, the Nürburgring; also Yokohama and
+  the drift routes):
+  - Intact: one static body (`obj_03`, `infMass`) with two shapes and two behaviours:
+    - the pole (`col_03`, cylinder r 0.1, h 2.98, sPlastic) with `bPhantom` (impulse 50);
+    - the base (`col_05`, box 0.96 x 0.26 x 0.96, sStone) with `bHeavy` (2000).
+    Both behaviours lead to the same damage state.
+  - Damage state:
+    - a static base `obj_01` (`infMass`; box 0.285 x 0.02 x 0.285 sMetal and cylinder
+      r 0.295, h 0.08 sStone);
+    - a dynamic pole `obj_02` (cylinder r 0.1, h 2.93, sRubberPole, density 70);
+    - two `cPhantomPost` constraints: base to "none" and base to pole.
+  - `cPhantomPost` constraint: cone limit 1.6 rad with a rotation spring (K 1000, S 100, tangent
+    S 100), twist limit 1.0 (S 100), unbreakable, `specificPostCollision` 1. Its body override
+    `_rbPhantomPost` (priority 0) gives the pole gravity 0, damping 0, max angular velocity 5,
+    max linear speed 2 and sphericalise 0.
+- 0x7B7EE0 swaps the static base A with the dynamic pole B. So the joint holds the pole to
+  the base's fixed object. The base-to-world constraint has a static A and no B (the port
+  makes no joint there, as for armco posts).
+- 0x7CC1E0 with `specificPostCollision` (props +0x102):
+  - Applies only when the entity's name contains `close_drift_flag` (strstr 0xBF8380 against
+    the string at 0xCE8084).
+  - On body A (the pole) it calls 0xA692F0(FLT_MAX), which sets body +0x3FC to FLT_MAX.
+    That body word is otherwise descriptor +0xEC squared (50 squared, 0x7B8F40); the port
+    reads no consumer of it.
+  - On every shape of A it calls 0xA6A290(0), which clears shape byte +0x15. The narrow
+    phase (0xB39500, 0xB3A700) makes a pair only when both shapes have +0x15 set and +0x14
+    clear, so the pole collides with nothing: not cars, not the road, not its base.
+  - After the joint, 0xAD9220 takes a post from the manager's pool (manager +0xBC40), and
+    0x7B6B10 fills it with the joint, body A and the manager. 0x7B6340 registers it in the
+    manager's post list (+0xBCB0, count +0xBCD8, at most 10, no duplicates). 0x7B6390
+    removes a post.
+- The post update, 0x7C4830 (manager, each tick):
+  - Every post: 0x7BB910 takes the pivot (+0x30, the joint's world point, 0xA7E2F0) and
+    the pole body's centre (+0x50). From them it sets the tip (+0x40 = pivot + 2 x
+    (centre - pivot)), the length (+0x70 = |centre - pivot|), the direction (+0x60) and an
+    AABB (+0x10/+0x20).
+  - Then for every car with a vehicle shape (car +0x24 -> vehicle +0xDC8, shape type 0):
+    - It reads the car's box: the shape's world matrix (0xA6A6E0), half extents
+      (shape +0x14 -> +0x240) and the body's motion this tick (current minus previous
+      position, 0xA69880 - 0xA698A0).
+    - It forms the AABB of the oriented box, grown along the motion, and runs
+      0x7BD240 for every post.
+- 0x7BD240 (post against one car):
+  - Rejects on an AABB test first (0x7D8700).
+  - Steps the car box along its motion in n + 1 positions, n = round(|motion| x -3.333)
+    negated (one position per 0.3 m).
+  - At each position, 0x7BCDA0 makes up to three passes:
+    - 0x7BBB70 tests the box against the pole segment and gives a penetration vector.
+    - The segment is pushed by twice that vector.
+    - 0x7BC370 finds the closest points of the pushed segment and the box. The pass
+      stops when the pivot side moved less than 0.1 m or the new point is within 1e-5 of
+      the pivot.
+    - Otherwise the post's direction turns towards the new point; centre and tip follow
+      and the hit flag (+0x74) is set.
+  - With the hit flag set and the direction turned by more than acos(0.99999):
+    - it rotates the pole body's matrix about the pivot by the angle between the old and
+      new directions (axis = their cross product, 0xBF4067 acos, 0x772670 axis-angle);
+    - writes the matrix back (0xA69780) and zeroes the body's linear and angular velocity
+      (0xA69840/0xA69860);
+    - refreshes the post (0x7BB910) and returns 1.
+  - A return of 1 makes 0x7C4830 send the car a body contact through 0xA01910, the car
+    body-impact dispatcher. The record names the pole body's and the car's shapes, the
+    contact point and normal, and an impulse of 1e-6 (0xCB22E4). This is how the car's
+    drift listener sees the flag touch (DISCIPLINES.md 4.3).
+
+So the broken flag is a kinematic pole. Cars sweep it aside with no physical response
+(only the 1e-6 event), and the joint's spring and cone limit stand it back up. The base
+is static geometry. Before the break, the intact pole and base are ordinary static shapes
+whose contact limits are their behaviour thresholds (50 and 2000).
+
+Port plan (not started):
+
+1. Catalog:
+   - per-shape thresholds for an intact body with several behaviours (route boxes in
+     shape order);
+   - static `infMass` pieces with shapes: route boxes added at load and enabled at the
+     break;
+   - the swap of a static A with a dynamic B (0x7B7EE0).
+2. Pieces with their collision cleared (shape +0x15): the pole, on the shapeless path.
+3. The post (0x7BB910, 0x7BD240, 0x7BCDA0, 0x7BBB70, 0x7BC370; about 1,700 decompiled
+   lines). Before it can be ported, it needs:
+   - the vehicle shape at +0xDC8 identified in the port, with its half extents at
+     +0x240;
+   - an in-process probe of 0x7BCDA0, like the joint-template probe, so the SSE order can
+     be checked.
+4. The 1e-6 car contact as a flag touch for `drift::Detector` (today the flag boxes give
+   it).
+
+Until then the flags stay unbroken static shapes (`Catalog::unported`) with contact limit
+FLT_MAX. The intact pole is therefore a rigid obstacle in the port, where the original
+breaks it at an impulse of 50.
+
 ## Size [D]
 
 Decompiled lines (Ghidra, `local/robust/decomp/r16a..r16c`): joint constructor 0xAEFEB0 1569;
