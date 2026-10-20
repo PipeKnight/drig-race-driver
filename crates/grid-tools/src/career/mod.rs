@@ -623,9 +623,18 @@ mod tests {
         assert!(p.head_to_head && p.position == Some(0));
         assert_eq!(c.total_reputation(), before);
         assert!(!c.game_completed);
+        assert!(p.unlocked_cars.is_empty(), "a Europe head-to-head unlocks nothing");
         c.head_to_heads.insert(78);
-        apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
+        let lost = [result(&[ai(1), P])];
+        let p = apply_event(&cat, &mut c, 78, &lost, &plain()).unwrap();
+        assert!(p.unlocked_cars.is_empty() && c.cars.is_empty());
+        let p = apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
         assert!(c.game_completed);
+        // The International win puts every purchasable car in the garage.
+        assert_eq!(p.unlocked_cars, [43]);
+        assert_eq!(c.cars.iter().map(|c| c.vehicle_id).collect::<Vec<_>>(), [43]);
+        let p = apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
+        assert!(p.unlocked_cars.is_empty(), "owned cars stay as they are");
     }
 
     #[test]

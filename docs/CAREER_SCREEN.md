@@ -139,6 +139,15 @@ AUTHORED: an event's car is lent to the player. Buying a car (`Career::buy_car`)
   - With 17 points against 13 for the best other GT2 car, the payout was class position 1: prize 150,000, the class team win 150,000, and a Flashback Bonus of 24,000 (2 finished races × 12,000).
 - Unattended checks: with `GRID_RESULTS_CONTINUE`, a scripted race now retires from the wreck screen and confirms (post_race diagnostics), so a wrecked career race still reports its result.
 
+## International head-to-head unlock (F514)
+
+- Winning a head-to-head of the International region (event 78, the final) runs `Career::unlock_all_cars` (0x674810 → 0x65AD90). Every purchasable vehicle not yet owned joins the garage with a fresh record. Livery 0 is AUTHORED; the original sets none. The payout page says how many cars joined ("Every car is unlocked: N join your garage.", AUTHORED text; the original shows no popup).
+- Not ported: the bonus unlocks of 0x65ABE0 (`bonus_vehicle_unlock`).
+- There is no per-head-to-head reward car: the original never reads `head_to_head_rewards` (CAREER_RESEARCH §3.3).
+- Events 73, 75 and 77 stay unoffered for layout reasons; their cars (vip, 350, 787) all race in the port:
+  - 73 runs on Washington route_0, which the port keeps out (route-box bound, docs/SERIES.md).
+  - 75 (`Midnight_Touge`) and 77 run on Haruna routes 9 and 4, mountain layouts the career does not race (touge).
+
 ## Head-to-heads (F478)
 
 - **Offered** once `Career::event_open` opens them: after every other event of the tier is won (0x656D40) [V; I "won"]. The label reads "Head-to-head: <event>". On the purchased data the port can run 69, 70, 71, 72, 78 (the International final) and 79. 73, 75 and 77 drop out because their layout or car cannot be raced in the port. 76 is a drift battle (`competition_format` 3).
@@ -199,7 +208,7 @@ A win also pays the rookie Team Win Bonus of 20,000 (§3.1), because each AI car
   - ignored, on the purchased data: bmw_si_tour is offered with the BMW; its plan is route_1 × 3 laps and route_2 × 2 laps from slot 12; wins, 2nd places and aids-off wins pay as above.
 - The in-app run of bmw_si_tour is recorded in PROJECT_LOG F424.
 - Unattended runs: diagnostics `results_continue = SECONDS` (or `GRID_RESULTS_CONTINUE`) makes a scripted run (`--drive-ticks` with `autopilot`) select Continue on the stats and results screens after that many seconds. A career race then runs and returns its result with no input.
-- Fully unattended career: `GRID_CAREER_AUTO=EVENT_ID` (or `o` and a driver offer id, e.g. `o15`) with `GRID_AUTOPILOT=1` and `GRID_RESULTS_CONTINUE=3`, then `grid-app --career`. Each screen page acts by itself after 3 s: it enters the event, starts each next race, and quits after the payout. The supervisor runs the races with `--drive-ticks 36000`, so the autopilot drives. No keyboard or mouse input reaches the desktop. Driving is unchanged; it acts only on the post-race screens of scripted runs.
+- Fully unattended career: `GRID_CAREER_AUTO=EVENT_ID` (or `o` and a driver offer id, e.g. `o15`) with `GRID_AUTOPILOT=1` and `GRID_RESULTS_CONTINUE=3`, then `grid-app --career`. Each screen page acts by itself after 3 s: it enters the event, starts each next race, and quits after the payout. The supervisor runs the races with `--drive-ticks 36000` (50000 for the Le Mans 24 Hours, whose 720 s limit outlasts 576 s; grid-app now allows up to 72000), so the autopilot drives. No keyboard or mouse input reaches the desktop. Driving is unchanged; it acts only on the post-race screens of scripted runs.
 
 ## Not done
 

@@ -2018,8 +2018,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         );
         graphics.saved_grade = Some(grade);
     }
-    if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
-        return Err("scripted ticks require --drive and must be <=36000".into());
+    if drive_ticks.is_some_and(|n| n > 72_000) || (drive_ticks.is_some() && !drive) {
+        return Err("scripted ticks require --drive and must be <=72000".into());
     }
     if trial_laps.is_some_and(|n| !(1..=99).contains(&n)) || (trial_laps.is_some() && !drive) {
         return Err("time trial requires --drive and 1..99 laps".into());

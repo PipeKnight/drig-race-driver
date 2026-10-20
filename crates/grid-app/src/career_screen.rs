@@ -1019,6 +1019,10 @@ pub fn payout_lines(p: &Payout, c: &Career) -> Vec<String> {
     lines.push(format!("Total: {}", money(p.money())));
     lines.push(format!("Balance: {}", money(c.money)));
     lines.push(format!("Season's Earnings: {}", money(c.season_earnings)));
+    if !p.unlocked_cars.is_empty() {
+        // AUTHORED text: the original shows no popup for it (0x65AD90).
+        lines.push(format!("Every car is unlocked: {} join your garage.", p.unlocked_cars.len()));
+    }
     if p.team_founded {
         lines.push("Your race team is founded: the founding sum is paid, and the rookie licences and the free car come with it.".into());
     }
@@ -1228,10 +1232,14 @@ enum Auto {
     Offer(i32),
 }
 
-/// Scripted ticks of an unattended career race (the most `--drive-ticks`
-/// allows).
+/// Scripted ticks of an unattended career race: 576 s, and 800 s for the
+/// Le Mans 24 Hours (its 720 s limit and the start).
 #[cfg(not(target_os = "android"))]
-const AUTO_TICKS: &str = "36000";
+fn auto_ticks(profile: &str) -> &'static str {
+    if profile.contains(&format!("
+series = {LE_MANS_24}
+")) { "50000" } else { "36000" }
+}
 
 /// `grid-app --career ...` on the desktop: the career screen, then the race
 /// it chose, again while the race leaves to the menu.
@@ -1263,7 +1271,8 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
             .arg("--career-result")
             .arg(&result);
         if auto().is_some() {
-            race.args(["--drive-ticks", AUTO_TICKS]);
+            let profile = std::fs::read_to_string(dir.join(PROFILE)).unwrap_or_default();
+            race.args(["--drive-ticks", auto_ticks(&profile)]);
         }
         let race = race.status()?;
         if race.code() != Some(crate::event_menu::BACK_TO_MENU) {

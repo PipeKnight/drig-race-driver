@@ -281,9 +281,22 @@ Worked examples (first play):
 
 ### 3.3 Head-to-head [V]
 
-A win pays `prize_money_for_first` (500,000 to 10,000,000) and no reputation (0x6788D0). The
-`head_to_head_rewards` car or its alternative money (`alt_reward_amount`) is granted on a branch through
-0x65AD90 that was not traced.
+A win pays `prize_money_for_first` (500,000 to 10,000,000) and no reputation (0x6788D0), on every win
+(no first-win gate), plus the races' Flashback Bonus (§3.1).
+
+The win and the unlock [V, 20 October 2026; research notes `H2H_REWARD.md`]:
+- 0x6788D0 calls 0x674810(event), which credits the prize. When the event's region is International
+  (index 3), it first calls 0x65AD90.
+- 0x65AD90 runs the bonus unlocks 0x65ABE0, whose `bonus_vehicle_unlock` ids are filled at run time.
+- It then puts every `purchasable` vehicle the team does not own into the garage, at no cost and with
+  a fresh record. No livery is set.
+- So winning the International head-to-head (event 78) unlocks every car.
+- `head_to_head_rewards` (a car and `alt_reward_amount` per head-to-head) is **never read**: neither
+  the table name nor the field names appear in the executable (ASCII or UTF-16), and the database API
+  looks tables up by name [V by absence]. Ten other shipped tables, among them `vehicle_unlock`, are
+  absent too [I: leftover data].
+- Winning the final also plays the speech `Reward_Head_To_Head_Won_Final` once
+  (`played_game_complete_speech`). No car-reward popup exists.
 
 ### 3.4 Routine B and class position [V, 20 October 2026]
 

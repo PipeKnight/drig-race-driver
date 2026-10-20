@@ -355,6 +355,31 @@ impl Career {
 
     /// Buys a car: `purchase_price` from the bank (0x65F652) [V]. The car
     /// must be `purchasable`.
+    /// 0x65AD90 [V]: every `purchasable` vehicle the team does not own joins
+    /// the garage at no cost, with a fresh record (history zero). Returns the
+    /// vehicles added, in table order. AUTHORED: livery 0 (the original
+    /// touches no livery). Not ported: the bonus unlocks it also runs
+    /// (0x65ABE0, `bonus_vehicle_unlock`), whose ids are filled at run time.
+    /// The `head_to_head_rewards` table is never read by the original (its
+    /// name is not in the executable) [V by absence].
+    pub fn unlock_all_cars(&mut self, catalogue: &Catalogue) -> Vec<i32> {
+        let mut added = Vec::new();
+        for v in catalogue.vehicles.values() {
+            if v.purchasable && !self.cars.iter().any(|c| c.vehicle_id == v.id) {
+                self.cars.push(OwnedCar {
+                    vehicle_id: v.id,
+                    livery: 0,
+                    race_wins: 0,
+                    event_wins: 0,
+                    major_crashes: 0,
+                    odometer_m: 0.0,
+                });
+                added.push(v.id);
+            }
+        }
+        added
+    }
+
     pub fn buy_car(&mut self, catalogue: &Catalogue, vehicle_id: i32) -> Result<(), String> {
         let v = catalogue
             .vehicles
@@ -562,6 +587,9 @@ pub struct Payout {
     pub team_founded: bool,
     /// A head-to-head event (paid by 0x6788D0): won when `position` is 0.
     pub head_to_head: bool,
+    /// Vehicles the win of an International head-to-head put in the garage
+    /// ([`Career::unlock_all_cars`]).
+    pub unlocked_cars: Vec<i32>,
 }
 
 impl Payout {
@@ -665,6 +693,11 @@ pub fn apply_event_in_classes(
             // The International head-to-head completes the game (+0x89) [V].
             if tier.rank_id == 4 {
                 career.game_completed = true;
+            }
+            // 0x674810: a won head-to-head of the International region
+            // (index 3) unlocks every car (0x65AD90) [V].
+            if tier.region == Region::International {
+                payout.unlocked_cars = career.unlock_all_cars(catalogue);
             }
         }
         career.count_in_season(SeasonEntry::Event(event.id));
