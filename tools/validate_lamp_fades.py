@@ -45,7 +45,7 @@ def main():
     for dt, start, caps, head, brake, gear in itertools.product(
         (0., 1/300, 1/60, 1/30, .1, -.016),
         ((0., 0., 0.), (.4, .6, .8), (1., 1., 1.), (.99, .01, .25)),
-        ((1., 1., 1.), (.6, 1.5, .8)), (0., 1.), (0., 1.), (1., 9.)
+        ((1., 1., 1.), (.6, 1.5, .8), (.7, .7, 1.)), (0., 1.), (0., 1.), (1., 9.)
     ):
         rows.append(tuple(map(f32, (dt, *start, *caps, head, brake, gear))))
     request = struct.pack('<II', 0x314c5047, len(rows)) + b''.join(struct.pack('<10f', *row) for row in rows)
