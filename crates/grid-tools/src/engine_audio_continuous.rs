@@ -6,6 +6,7 @@ use crate::{
     engine_audio_publication::{Environment, VOICE_BYTES},
     engine_audio_restart::PlaybackService,
     engine_audio_schedule,
+    engine_audio_shift::{self, Shift},
 };
 use grid_formats::{audio_car_setup, audio_dictionary, tuning, vehicle_properties};
 use std::{fs, io::Read, path::Path, sync::Arc};
@@ -32,6 +33,8 @@ pub struct Bank {
     trims: [f32; 2],
     /// carsetup EngineBay and Exhaust emitter offsets in the car frame.
     pub emitters: [[f32; 3]; 2],
+    /// engine.ini [Physics] gear-shift settings.
+    shift: engine_audio_shift::Settings,
 }
 fn bounded(path: &Path, limit: usize) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
@@ -79,6 +82,7 @@ impl Bank {
         )?;
         let ini = bounded(&root.join(setup.engine_ini), 1024 * 1024)?;
         let curves = engine_audio_control::read_curves(std::str::from_utf8(&ini)?)?;
+        let shift = engine_audio_shift::Settings::read(std::str::from_utf8(&ini)?)?;
         let mut layers = Vec::with_capacity(6);
         for (slot, name) in LAYERS.iter().enumerate() {
             let index = source
@@ -130,6 +134,7 @@ impl Bank {
             idle,
             trims: [setup.trims[1], setup.trims[2]],
             emitters: [setup.offsets[0], setup.offsets[1]],
+            shift,
         }))
     }
 }
@@ -161,6 +166,8 @@ pub struct Mixer {
     pub bus_db: [f32; 2],
     pub diagnostics: Diagnostics,
     pub failure: Option<&'static str>,
+    /// 451770's gear-shift state (`engine_audio_shift`).
+    shift: Shift,
 }
 /// Normal/Chase/PC levels of the Engine and Exhaust groups.
 pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
@@ -173,6 +180,7 @@ impl Mixer {
             cursors: [Cursor::default(); 12],
             remaining: 0,
             generation: None,
+            shift: Shift::new(engine_audio_shift::Settings::NONE, 1),
             gain: 0.,
             bus_db: CHASE_BUS_DB,
             diagnostics: Diagnostics::default(),
@@ -188,6 +196,8 @@ impl Mixer {
         self.remaining = 0;
         self.gain = 0.;
         self.failure = None;
+        // The constructor's shift state [I: the seed of A682A0's sequence].
+        self.shift = Shift::new(self.bank.shift, 0x5eed);
         for (at, value) in [
             (0, 1.),
             (0xb0, 1.),
@@ -220,7 +230,12 @@ impl Mixer {
             delta: 0.016,
         };
         engine_audio_control::update(&mut self.controller, engine, &self.bank.curves)?;
-        // Outer451770 load/wobble/gear effects are not yet reconstructed.
+        // 451770 after 422A40: the gear-shift effects (414750, 451580,
+        // 4150D0). The rest of its load effects are not reconstructed.
+        let shift = self.shift.frame(control.gear, engine.delta as f32);
+        put(&mut self.controller, 0, shift.scale);
+        put(&mut self.controller, 0x1a0, shift.load);
+        put(&mut self.controller, 0x2f8, shift.pitch);
         put(&mut self.controller, 0xcc, control.throttle);
         let environment = Environment {
             motion_210: [0.; 4],
@@ -331,6 +346,7 @@ mod tests {
             idle: 240.,
             trims: [0.; 2],
             emitters: [[0., 0., 4.], [0., 0., -4.]],
+            shift: engine_audio_shift::Settings::NONE,
         })
     }
     #[test]
@@ -342,6 +358,7 @@ mod tests {
             throttle: 0.5,
             audible: true,
             generation: 1,
+            gear: 0,
         };
         let wave: Vec<_> = (0..96000).map(|_| a.sample(c)).collect();
         assert_eq!(wave, (0..96000).map(|_| b.sample(c)).collect::<Vec<_>>());
@@ -385,10 +402,67 @@ mod tests {
             for n in 0..48000 * 4 {
                 let (rpm, throttle) =
                     if n < 48000 { (0.297, 0.) } else { (0.297 + (n - 48000) as f32 / (48000. * 3.) * 0.6, 1.) };
-                peak = peak.max(m.sample(Control { normalized_rpm: rpm, throttle, audible: true, generation: 1 }).abs());
+                peak = peak.max(m.sample(Control { normalized_rpm: rpm, throttle, audible: true, generation: 1, gear: 0 }).abs());
                 assert!(m.failure.is_none(), "{stem} at sample {n}: {:?}", m.failure);
             }
             assert!(peak > 0.01, "{stem} silent");
+        }
+    }
+
+    /// An upshift from second to third at full throttle on the Lacetti: the
+    /// same samples as a held gear up to the shift, then the 451770 shift
+    /// effects (RPM dip, off-load crossfade for 0.13 s, the wobble from
+    /// 0.18 s) change the sound. `GRID_ENGINE_SHIFT_WAV=dir` writes both
+    /// renders as 48 kHz mono 16-bit WAVs.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn an_upshift_changes_the_lacetti_only_from_the_shift() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let bank = Bank::lacetti(std::path::Path::new(&root)).unwrap();
+        let render = |shift: bool| {
+            let mut m = Mixer::new(bank.clone());
+            (0..48000 * 2)
+                .map(|n| {
+                    let after = n >= 48000;
+                    let gear = if after && shift { 3 } else { 2 };
+                    let rpm = if after && shift { 0.55 } else { 0.7 };
+                    let v = m.sample(Control { normalized_rpm: rpm, throttle: 1., audible: true, generation: 1, gear });
+                    assert!(m.failure.is_none(), "{:?}", m.failure);
+                    v
+                })
+                .collect::<Vec<f32>>()
+        };
+        let (held, shifted) = (render(false), render(true));
+        assert_eq!(held[..48000], shifted[..48000]);
+        let rms = |x: &[f32]| (x.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>() / x.len() as f64).sqrt();
+        for k in 0..20 {
+            let w = 48000 + k * 2400..48000 + (k + 1) * 2400;
+            println!(
+                "engine_shift lacetti ms={}..{} held_rms={:.4} shifted_rms={:.4}",
+                k * 50,
+                (k + 1) * 50,
+                rms(&held[w.clone()]),
+                rms(&shifted[w])
+            );
+        }
+        assert_ne!(held[48000..48000 + 4800], shifted[48000..48000 + 4800]);
+        if let Some(dir) = std::env::var_os("GRID_ENGINE_SHIFT_WAV") {
+            for (name, pcm) in [("held", &held), ("upshift", &shifted)] {
+                let mut bytes = Vec::new();
+                let data = (pcm.len() * 2) as u32;
+                bytes.extend_from_slice(b"RIFF");
+                bytes.extend_from_slice(&(data + 36).to_le_bytes());
+                bytes.extend_from_slice(b"WAVEfmt ");
+                for v in [16u32, 1 | (1 << 16), 48000, 96000, 2 | (16 << 16)] {
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                }
+                bytes.extend_from_slice(b"data");
+                bytes.extend_from_slice(&data.to_le_bytes());
+                for v in pcm.iter() {
+                    bytes.extend_from_slice(&((v.clamp(-1., 1.) * 32767.).round() as i16).to_le_bytes());
+                }
+                std::fs::write(std::path::Path::new(&dir).join(format!("lacetti-{name}.wav")), bytes).unwrap();
+            }
         }
     }
 }

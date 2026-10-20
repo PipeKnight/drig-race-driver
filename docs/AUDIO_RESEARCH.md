@@ -1043,3 +1043,89 @@ the player is about as loud as the player's own car after the start, and up to 2
 near ear; on the grid it is 3–6 dB quieter. The owner's "an opponent sometimes sounds louder than
 my car" is the table, not a port error. Not checked against the original's output (that needs a
 live reading, §11).
+
+## 20. Gear shifts in 451770 (F528)
+
+20 October 2026, Claude Code (task 10, item §3.3, first part). Static: Ghidra 12.1.4 headless
+(`local/gtfix/decomp/gear1`–`gear3`: 451770 and its helpers), Capstone 5.0.6 on
+`local/compatibility/grid-unpacked.exe` (0x410000–0x460000). GRID was not launched. Render evidence
+(ignored): kind-pike worktree `local/shift/`.
+
+**Layout [O].** The engine-audio controller is the car-audio object +0x8660 (42F770: `lea ecx,
+[esi+0x8660]`); its property pointer +0x118 is the car-audio object +0x1190. The `[Physics]` loader
+423BD6 reads the keys in file order through 416040, a case-insensitive prefix match (`_stricmp`).
+So the 11 files that spell `fGearupShiftTime` (390, 787, b05, b06, c65, cre, df3, fmj, je4, lc7,
+r10; value 0.03) are read. Fields used by the shift code:
+
+| key | controller | property |
+|---|---|---|
+| fGearUpShiftTime | +0x80 | |
+| GearUpMixTime, GearUpMixMinIdle | +0x84, +0x88 | |
+| fUpshiftEffectFadeIn/Out | +0x8C, +0x90 | |
+| fGearDownShiftTime, fGearDownEffectTime | +0x94, +0x98 | |
+| fGearDownMinLoad, fGearDownMinThrottle | +0x9C, +0xA0 | |
+| GearUpMixVolMult, GearUpWobbleLevel, FadeOutTime, Rate | | +0x7D1C, +0x7D20, +0x7D24, +0x7D28 |
+| fGearDownWobbleLoudness, Rate, Length | | +0x7D34, +0x7D38, +0x7D3C |
+| fUpWobbleStartDelay, fDownWobbleStartDelay | | +0x7D40, +0x7D44 |
+| fWobbleRandomDown, fWobbleRandomUp | | +0x7D48, +0x7D4C |
+
+Property +0x7D18 (car-audio +0x8EA8) is the "random" of the wobble. 42F770 sets it to 1.0 and no
+other instruction in the image writes it, so (2r − 1) = 1 and the random terms are fixed: ×1.75
+with the shipped 75 %.
+
+**451770 order [O].** 422A40 (RPM map, C8 = +0x48); +0xC and +8 += |dt|; 414750; 4148A0; 414970;
+the upshift-mix envelope (+0x10, +0xB8); 451580; 422CA0; 4150D0; 414C70; 436640; 451260; 422F60;
+4152A0; 4371C0.
+
+**414750, the gear change [O].** Gear = vehicle +0x196C (0 neutral, 1.. forward, 9 reverse). Every
+frame +0 (the scale of the physical RPM ratio in 422A40) recovers by 0.003, up to 1. On a change:
+- +0x314 (wobble loudness) = fGearDownWobbleLoudness · clamp(1 − gear/6, 0, 1). Until the first
+  change it is GearUpWobbleLevel (constructor);
+- up (new > old): +0 = (rand % 1000) · 0.00005 + 0.95, an RPM dip of up to 5 %; down: +0 = 1;
+- the shift counts unless it is between two of {neutral, first, reverse}. Then +4 = up, +0xC = 0
+  (time since the shift), and for the player (+0x110 +0x6C = 0) +0x310 = 1.
+
+**451580 [O].** +0x1A0 = clamp(0.9 · +0x1A0, −1, 1). During an upshift, for fGearUpShiftTime, 0.5 is
+then subtracted (down to −1.5); during a downshift, for fGearDownShiftTime, 0.1 is added. 42DE60
+adds it to the load crossfade phase ((2·throttle − 1) + offset + 1)/2, clamped. So an upshift
+crossfades to the off-load recordings for 0.13 s (Lacetti), and a downshift leans on-load.
+- The RPM blend of +0x48 with the held +0x58 (t² up, t down) only reaches 414C70/451260, not the
+  pitch: C8 was published before it.
+- +0x19C is only decayed and never read.
+- At the end of a player upshift, 4511E0 plays the car-audio variety table entry +0xB4 at the +0x100
+  emitter: the gear clunk. Not ported; it needs the mec bank.
+
+**4150D0, the wobble [O].** +0x2F8 multiplies every voice pitch in 42DE60. With t = +0xC:
+- up: after fUpWobbleStartDelay, for t' < GearUpWobbleFadeOutTime:
+  1 + sin(1.75 · GearUpWobbleRate · t' · 2π) · (1 − t'/FadeOut) · +0x314;
+- down: after fDownWobbleStartDelay, for t' < fGearDownWobbleLength:
+  1 + sin(fGearDownWobbleRate · t' · 2π) · 1.75 · (1 − t'/Length) · +0x314.
+
+BF4E44 is the CRT SSE2 sine (a tiny argument returns itself). +0x2F4 (GearUpMixVolMult during
+GearUpMixTime) is written and never read. GearUpWobbleLevel only seeds +0x314.
+
+**Port.**
+- `grid_tools::engine_audio_shift` (`Settings::read`, `Shift::frame`) runs 414750, 451580's +0x1A0
+  and 4150D0 after `engine_audio_control::update` in the continuous mixer. It writes +0, +0x1A0 and
+  +0x2F8 for the publication.
+- `Control` carries the gear (bits 25–28). The 42DE60 domain check allows |+0x1A0| ≤ 1.5.
+- [I]: the dip's random sequence (xorshift instead of A682A0); the constructor state again after a
+  reset (so a start counts neutral → gear); one frame per 16 ms block.
+
+**Not ported.**
+- the upshift-mix envelope +0xB8 (it caps 414C70's load +0x44, which the port does not compute);
+- the downshift throttle blip in +0xB0 (4148A0/422CA0; the port keeps +0xB0 at 1);
+- the rev limiter (414970, +0xB4);
+- the throttle smoothing and +0x330 of 422CA0;
+- the clunk (4511E0) and the backfire (451260);
+- all of 414C70, 436640 and 422F60.
+
+**Render [O, port].** Test `an_upshift_changes_the_lacetti_only_from_the_shift`: Lacetti, full
+throttle, second gear at 0.7 of maximum RPM for 1 s, then third at 0.55, against a held second.
+- The samples are equal up to the shift.
+- Afterwards the RMS falls from 0.133 to 0.075 for 50–150 ms (the off-load crossfade).
+- The dominant frequency moves 195 → 160 Hz, with a swing of 155–166 Hz between about 170 and
+  300 ms (the wobble: 8.75 Hz, ±10 % in third).
+- `local/shift/lacetti-{held,upshift}.wav` (sha256 5b7ad9ca…7704, ff14eac2…0b02).
+
+Not compared with the original.

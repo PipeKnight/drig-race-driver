@@ -614,6 +614,7 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Box<dyn std::error::Er
             throttle: 0.3,
             audible: true,
             generation: 0,
+            gear: 0,
         },
     );
     let mut app = App::new();
@@ -674,7 +675,7 @@ mod tests {
             }
             .decoder()
             .inner;
-            let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0 };
+            let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0, gear: 0 };
             push(&mailbox, control(0.3));
             for _ in 0..grid_tools::engine_audio_continuous::BLOCK {
                 decoder.next();

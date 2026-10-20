@@ -55,7 +55,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let total = (seconds * f64::from(RATE)) as usize;
     let per_update = (f64::from(RATE) / hz) as usize;
-    let mut control = Control { normalized_rpm: 0.3, throttle: 0.5, audible: true, generation: 0 };
+    let mut control = Control { normalized_rpm: 0.3, throttle: 0.5, audible: true, generation: 0, gear: 0 };
     let mut worst = Vec::new();
     let start = Instant::now();
     let mut sample = 0;

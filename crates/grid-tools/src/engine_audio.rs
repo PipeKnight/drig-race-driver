@@ -125,6 +125,9 @@ pub struct Control {
     pub throttle: f32,
     pub audible: bool,
     pub generation: u32,
+    /// Gear at vehicle +0x196C (0 neutral, 1.. forward, 9 reverse), for the
+    /// shift effects (`engine_audio_shift`).
+    pub gear: u32,
 }
 impl Control {
     /// One coherent atomic mailbox word. Invalid telemetry always silences.
@@ -134,6 +137,7 @@ impl Control {
         let throttle = (self.throttle.clamp(0., 1.) * 255.).round() as u64;
         rpm | throttle << 16
             | u64::from(self.audible && valid) << 24
+            | u64::from(self.gear.min(15)) << 25
             | u64::from(self.generation) << 32
     }
     pub fn unpack(word: u64) -> Self {
@@ -142,6 +146,7 @@ impl Control {
             throttle: ((word >> 16) & 255) as f32 / 255.,
             audible: word & (1 << 24) != 0,
             generation: (word >> 32) as u32,
+            gear: ((word >> 25) & 15) as u32,
         }
     }
     /// Offsets are established engine angular speed / maximum speed, rad/s.
@@ -165,6 +170,7 @@ impl Control {
             throttle,
             audible: audible && speed > 0.,
             generation,
+            gear: words.get(0x196c / 4).copied().unwrap_or(0),
         }
     }
 }
@@ -274,6 +280,7 @@ mod tests {
             throttle: 0.8,
             audible: true,
             generation: u32::MAX,
+            gear: 0,
         };
         let d = Control::unpack(c.pack());
         assert!((c.normalized_rpm - d.normalized_rpm).abs() < 1. / 65535.);
@@ -314,6 +321,7 @@ mod tests {
             throttle: 1.,
             audible: true,
             generation: 1,
+            gear: 0,
         };
         let wave: Vec<_> = (0..20000).map(|_| a.sample(c)).collect();
         assert!(wave.iter().any(|v| v.abs() > 0.1));

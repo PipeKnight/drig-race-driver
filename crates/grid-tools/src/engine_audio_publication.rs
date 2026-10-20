@@ -55,7 +55,8 @@ pub fn publish(
     }
     if (0..3).any(|i| scalar(controller, 0x140 + i * 4).abs() > 1.)
         || !(0.0..=1.).contains(&scalar(controller, 0xcc))
-        || scalar(controller, 0x1a0).abs() > 1.
+        // 451580 stores the clamped offset minus 0.5 during an upshift.
+        || scalar(controller, 0x1a0).abs() > 1.5
         || scalar(controller, 0x330).abs() > 48.
         || !(0.5..=2.).contains(&scalar(controller, 0x2f8))
         || !(0.0..=1.).contains(&scalar(controller, 0xc8))

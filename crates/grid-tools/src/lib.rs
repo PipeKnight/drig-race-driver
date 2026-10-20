@@ -24,6 +24,7 @@ pub mod engine_audio_gain;
 pub mod engine_audio_publication;
 pub mod engine_audio_restart;
 pub mod engine_audio_schedule;
+pub mod engine_audio_shift;
 pub mod hud_audio;
 pub mod entity_geometry;
 pub mod flashback;
