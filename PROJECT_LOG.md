@@ -1,5 +1,10 @@
 # GRID engine project log
 
+F505 The 42D580 one-shot queue is network replication, not a mixing cap (2026-10-20, Claude Code; coordinator's overnight audio list). Details: docs/AUDIO_RESEARCH.md §17.1. Evidence: Capstone listings of 435B20, 42D580, 436300, 45DA40 (session scratchpad). The original was not run.
+- [O] 435B20 always plays the one-shot locally (421B70). It then broadcasts the same one-shot through 42D580 ("game broadcaster") only when the manager's role is 0. The counter of 15 is only zeroed at construction and incremented. 436300 plays received messages, and applies their Crashed flag, only when the role is 1.
+- [I] This is one-shot replication for networked play. Offline nothing is capped, so nothing needs porting. This closes the queue-cap gap noted in F490.
+- Checks: documentation only; no code changed.
+
 F504 Yaw and pitch displacement thumps (2026-10-20, Claude Code; coordinator's overnight audio list). Details: docs/AUDIO_RESEARCH.md §16. Evidence: Capstone 4108B0, A69820, 458C84; Ghidra 4486E0 (worktree kind-pike-df38cc `local/gtfix/decomp/wind3/`); curves in `local/kick/ci.tsv`. The original was not run.
 - [O] Per frame, for the player: |Δω.z| goes into YawImpact and |Δω.x| into PitchImpact, where ω is the world angular velocity (physical +0x210). Above soft minVel 0.25 rad/s, soft, med (0.6) or hard (1.5–3) plays with the cooldown on Displacement (group 8).
 - Port: `collision_audio::angular_velocity`, `Listener::displacement`, per vehicle tick [I].

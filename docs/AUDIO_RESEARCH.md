@@ -924,3 +924,22 @@ called at 458C84 for the player only), A69820; Yaw/Pitch curves in worktree `loc
 - Next: find the +97BC writer (search for stores relative to a pointer into +97BC, or break on
   it in a capture) and the part order of the damage code, then port part sounds through the
   port's detached-part events.
+
+### 17.1 The 42D580 queue is network replication (F505)
+
+Static: 435B20 (435C5F..435E97), 42D580, 436300, 45DA40..45DB9F. GRID was not launched.
+
+- [O] 435B20 always plays the one-shot locally through 421B70 (bank index from 412E50). After
+  that it calls 42D580 only while the audio manager's role word (+24 → +24) is 0 and its
+  own argument +30 is 0. 42D580 refuses when the role is non-zero, the group is 16 (HUD), the
+  counter +5B4C has reached 15, or the mix mode is Paused. Otherwise it posts a "game
+  broadcaster" message (CB31C0) and adds 1 to +5B4C.
+- [O] +5B4C is written in only two places: set to 0 in the manager's constructor (45DA46)
+  and incremented at 42D627. The counter never goes back down.
+- [O] 436300, the "game broadcaster" handler registered at 45DB99, plays a received message
+  only when the role is 1, and only then applies its Crashed flag (+24).
+- [I] Interpretation: the role is the network side (0 sends, 1 receives) of a replication of
+  one-shots to other machines; in an offline race nothing is received.
+- Consequence for the port: the cap of 15 and the 436300 Crashed path do not limit or change
+  what an offline player hears. Nothing to port. The FIDELITY_BACKLOG note about the cap is
+  closed.
