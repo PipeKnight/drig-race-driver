@@ -29,10 +29,22 @@ fn attach(
     let mut handles = HashMap::new();
     let mut count = 0;
     for (entity, part, original) in &parts {
-        let Some(name) = part.0.strip_prefix("car0/").filter(|s| reflector(s)) else {
+        let Some(name) = part
+            .0
+            .strip_prefix("car0/")
+            .filter(|s| reflector(s) || lens(s))
+        else {
             continue;
         };
-        // A shared base handle can need different head/rear response constants.
+        let mode = if lens(name) {
+            settings.lamp_lenses
+        } else {
+            settings.lamp_reflectors
+        };
+        if mode == Mode::Off {
+            continue;
+        }
+        // A shared base handle can need different head/rear/lens responses.
         let handle = handles
             .entry((original.0.id(), name.to_owned()))
             .or_insert_with(|| {
@@ -40,7 +52,11 @@ fn attach(
                     .get(&original.0)
                     .expect("source lamp material")
                     .clone();
-                apply(name, settings.lamp_reflectors, normal.0.as_ref(), &mut base);
+                if lens(name) {
+                    apply_lens(mode, normal.0.as_ref(), &mut base);
+                } else {
+                    apply(name, mode, normal.0.as_ref(), &mut base);
+                }
                 materials.add(base)
             })
             .clone();
@@ -48,7 +64,8 @@ fn attach(
         count += 1;
     }
     println!(
-        "lamp_reflector_materials attached_parts={count} standard=true opponents=unchanged covers=unchanged matt=unchanged"
+        "lamp_reflector_materials attached_parts={count} standard=true opponents=unchanged matt=unchanged lens_mode={:?}",
+        settings.lamp_lenses
     );
 }
 
@@ -80,6 +97,20 @@ impl Mode {
 fn reflector(name: &str) -> bool {
     matches!(name, "Head Lights Pod" | "Rear Lights Pod")
 }
+fn lens(name: &str) -> bool {
+    matches!(name, "Head Lights Glass" | "Rear Lights Glass")
+}
+fn selected_mode(name: &str, pods: Mode, lenses: Mode) -> Mode {
+    let name = name.strip_prefix("car0/").unwrap_or(name);
+    if reflector(name) {
+        pods
+    } else if lens(name) {
+        lenses
+    } else {
+        Mode::Off
+    }
+}
+#[cfg(test)]
 fn player_part(name: &str) -> bool {
     reflector(name.strip_prefix("car0/").unwrap_or(name))
 }
@@ -92,13 +123,14 @@ fn normal_key(car: &super::Car) -> &'static str {
 }
 /// Keep disabled/PBR-only mesh layouts unchanged. Only the selected player's
 /// normal pilot may repair invalid saved lamp frames from geometry and UV.
-pub fn prepare_frames(car: &mut super::Car, mode: Mode) -> Result<(), String> {
+pub fn prepare_frames(car: &mut super::Car, pods: Mode, lenses: Mode) -> Result<(), String> {
     for part in &mut car.parts {
         let name = part.material.rsplit('/').next().unwrap_or(&part.material);
-        if !reflector(name) {
+        if !reflector(name) && !lens(name) {
             continue;
         }
-        if !mode.normals() || !player_part(&part.material) {
+        let mode = selected_mode(&part.material, pods, lenses);
+        if !mode.normals() {
             part.mesh.remove_attribute(Mesh::ATTRIBUTE_TANGENT);
         } else if part.mesh.attribute(Mesh::ATTRIBUTE_TANGENT).is_none() {
             part.mesh
@@ -113,14 +145,14 @@ pub fn prepare_frames(car: &mut super::Car, mode: Mode) -> Result<(), String> {
     Ok(())
 }
 /// Normal-only comparisons must not silently drop missing tangent frames.
-pub fn validate(car: &super::Car, mode: Mode) -> Result<(), &'static str> {
-    if !mode.normals() {
+pub fn validate(car: &super::Car, pods: Mode, lenses: Mode) -> Result<(), &'static str> {
+    if !pods.normals() && !lenses.normals() {
         return Ok(());
     }
     let parts: Vec<_> = car
         .parts
         .iter()
-        .filter(|p| player_part(&p.material))
+        .filter(|p| selected_mode(&p.material, pods, lenses).normals())
         .collect();
     if parts.is_empty() || !car.textures.contains_key(normal_key(car)) {
         return Err("lamp reflector normal resource/parts absent");
@@ -135,28 +167,42 @@ pub fn validate(car: &super::Car, mode: Mode) -> Result<(), &'static str> {
 }
 pub fn upload_normal(
     car: &super::Car,
-    mode: Mode,
+    pods: Mode,
+    lenses: Mode,
     images: &mut Assets<Image>,
     sampler: ImageSampler,
 ) -> Option<Handle<Image>> {
-    if mode == Mode::Off {
+    if pods == Mode::Off && lenses == Mode::Off {
         return None;
     }
     let parts = car
         .parts
         .iter()
-        .filter(|p| player_part(&p.material))
+        .filter(|p| selected_mode(&p.material, pods, lenses) != Mode::Off)
         .count();
     println!(
-        "lamp_reflectors mode={mode:?} parts={parts} scope=player-inner-pods covers=unchanged matt=unchanged state_material=standard source_parity=false"
+        "lamp_reflectors mode={pods:?} lenses={lenses:?} parts={parts} scope=player-lamp-pilot matt=unchanged state_material=standard source_parity=false"
     );
-    mode.normals().then(|| {
+    (pods.normals() || lenses.normals()).then(|| {
         let image = super::texture_upload::image_linear(
             &car.textures[normal_key(car)], sampler, RenderAssetUsages::default(),
         ).expect("validated linear lamp normal DDS");
         println!("lamp_reflector_normal srgb=false format={:?} frame=source-or-mikktspace approximate=true upload=shared-helper", image.texture_descriptor.format);
         images.add(image)
     })
+}
+// Authored clear plastic response. Do not multiply source alpha or add glow.
+// Dielectric F0 for IOR1.58 is about0.0505; Bevy reflectance=sqrt(F0/0.16).
+fn apply_lens(mode: Mode, normal: Option<&Handle<Image>>, material: &mut StandardMaterial) {
+    if mode.pbr() {
+        material.metallic = 0.0;
+        material.ior = 1.58;
+        material.reflectance = 0.5620155;
+        material.perceptual_roughness = 0.045;
+    }
+    if mode.normals() {
+        material.normal_map_texture = normal.cloned();
+    }
 }
 fn apply(name: &str, mode: Mode, normal: Option<&Handle<Image>>, material: &mut StandardMaterial) {
     if !reflector(name) {
@@ -290,6 +336,98 @@ mod tests {
         assert_eq!(materials.get(&original).unwrap().perceptual_roughness, 0.7);
     }
     #[test]
+    fn lens_response_preserves_source_alpha_emission_and_state_material() {
+        let original = StandardMaterial {
+            base_color: Color::srgba(0.9, 0.1, 0.2, 0.44),
+            alpha_mode: AlphaMode::Blend,
+            emissive: LinearRgba::rgb(0.2, 0.0, 0.0),
+            perceptual_roughness: 0.08,
+            ..default()
+        };
+        let normal = Handle::<Image>::default();
+        for mode in [Mode::Off, Mode::Pbr, Mode::Normals, Mode::Combined] {
+            let mut material = original.clone();
+            apply_lens(mode, Some(&normal), &mut material);
+            assert_eq!(material.alpha_mode, original.alpha_mode);
+            assert_eq!(material.base_color, original.base_color);
+            assert_eq!(material.base_color_texture, original.base_color_texture);
+            assert_eq!(material.emissive, original.emissive);
+            assert_eq!(material.emissive_texture, original.emissive_texture);
+            assert_eq!(material.normal_map_texture.is_some(), mode.normals());
+            if mode.pbr() {
+                let f0 = 0.16 * material.reflectance * material.reflectance;
+                let ior_f0 = ((material.ior - 1.0) / (material.ior + 1.0)).powi(2);
+                assert!((f0 - ior_f0).abs() < 0.000001);
+            }
+        }
+    }
+
+    #[test]
+    fn lens_only_mode_keeps_pods_windows_and_opponents_on_original_handles() {
+        let mut app = App::new();
+        app.insert_resource(super::super::graphics::Settings {
+            lamp_lenses: Mode::Combined,
+            ..default()
+        })
+        .insert_resource(Prepared(Some(Handle::default())))
+        .init_resource::<Assets<StandardMaterial>>()
+        .add_systems(Update, attach);
+        let original = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.08,
+                ..default()
+            });
+        let mut entities = Vec::new();
+        for name in [
+            "car0/Head Lights Glass",
+            "car0/Rear Lights Glass",
+            "car0/Head Lights Pod",
+            "car0/Window Glass",
+            "car0/Lights Pod Matt",
+            "car0/Rear Lights Glass",
+        ] {
+            entities.push(
+                app.world_mut()
+                    .spawn((
+                        super::super::track_surface::SourcePart(name.to_owned()),
+                        MeshMaterial3d(original.clone()),
+                    ))
+                    .id(),
+            );
+        }
+        app.world_mut()
+            .entity_mut(entities[5])
+            .insert(super::super::OpponentPart {
+                car: 1,
+                rest: Mat4::IDENTITY,
+                wheel: None,
+                lost_with_wheel: false,
+            });
+        app.update();
+        for (i, &entity) in entities.iter().enumerate() {
+            let handle = &app
+                .world()
+                .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                .unwrap()
+                .0;
+            if i < 2 {
+                assert_ne!(handle, &original);
+                let material = app
+                    .world()
+                    .resource::<Assets<StandardMaterial>>()
+                    .get(handle)
+                    .unwrap();
+                assert_eq!(material.alpha_mode, AlphaMode::Blend);
+                assert!(material.normal_map_texture.is_some());
+            } else {
+                assert_eq!(handle, &original);
+            }
+        }
+    }
+    #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn lacetti_reflector_frames_and_normal_resource() {
         let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
@@ -302,8 +440,34 @@ mod tests {
             false,
         )
         .unwrap();
-        prepare_frames(&mut car, Mode::Combined).unwrap();
-        validate(&car, Mode::Combined).unwrap();
+        prepare_frames(&mut car, Mode::Combined, Mode::Off).unwrap();
+        validate(&car, Mode::Combined, Mode::Off).unwrap();
+        prepare_frames(&mut car, Mode::Combined, Mode::Combined).unwrap();
+        validate(&car, Mode::Combined, Mode::Combined).unwrap();
+        for part in car
+            .parts
+            .iter()
+            .filter(|p| selected_mode(&p.material, Mode::Combined, Mode::Combined).normals())
+        {
+            let Some(bevy::mesh::VertexAttributeValues::Float32x4(tangents)) =
+                part.mesh.attribute(Mesh::ATTRIBUTE_TANGENT)
+            else {
+                panic!("lamp tangent format");
+            };
+            for index in part.mesh.indices().unwrap().iter() {
+                let tangent = tangents[index];
+                assert!(tangent.into_iter().all(f32::is_finite));
+                assert!(Vec3::new(tangent[0], tangent[1], tangent[2]).length_squared() > 0.5);
+                assert!((tangent[3].abs() - 1.0).abs() < 0.0001);
+            }
+        }
+        assert_eq!(
+            car.parts
+                .iter()
+                .filter(|p| selected_mode(&p.material, Mode::Combined, Mode::Combined) != Mode::Off)
+                .count(),
+            12
+        );
         assert_eq!(
             car.parts
                 .iter()

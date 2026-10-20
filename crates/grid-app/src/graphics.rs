@@ -83,6 +83,8 @@ pub struct Settings {
     pub paint_environment: f32,
     /// Default-off authored Lacetti reflector pilot; covers and matt remain separate.
     pub lamp_reflectors: super::lamp_materials::Mode,
+    /// Independent default-off clear-cover normal/PBR experiment.
+    pub lamp_lenses: super::lamp_materials::Mode,
     pub paint_coat_roughness: f32,
     /// Optional saved RGB gradient on distant treesheets; alpha stays unchanged.
     pub tree_sheet_colours: bool,
@@ -150,6 +152,7 @@ impl Default for Settings {
             paint_clearcoat: 0.35,
             paint_environment: 0.,
             lamp_reflectors: super::lamp_materials::Mode::Off,
+            lamp_lenses: super::lamp_materials::Mode::Off,
             paint_coat_roughness: 0.18,
             tree_sheet_colours: false,
             ambient_occlusion: true,
