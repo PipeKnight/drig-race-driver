@@ -1732,6 +1732,64 @@ mod tests {
             .unwrap();
     }
 
+    /// Career run 13 (Le Mans, F512): a car crashing into a yellow tyre wall
+    /// broke it and its linked neighbours into 68 pieces, and two ticks later
+    /// one piece's angular correction passed the port's old 64 rad bound
+    /// (lifted; the original has none). A Lacetti driven into the same wall
+    /// from either side breaks it and the field keeps stepping; these runs
+    /// stay below 3 rad, so the bound itself is tested in `physical_pose`.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_le_mans_tyre_wall_broken_around_a_car_keeps_stepping() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/le_mans/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let wall = 969;
+                let entry = &props.catalog.breakables[wall];
+                assert_eq!(entry.template, "tyrewall_yellow.max");
+                eprintln!("pieces {} joints {}", entry.pieces.len(), entry.joints.len());
+                let at = entry.placement;
+                let (x, z) = ([at[0], at[1], at[2]], [at[8], at[9], at[10]]);
+                // Into the wall from either side, at speed, across its length.
+                for (side, along) in [(1f32, 0f32), (-1., 0.), (1., 1.5), (-1., -1.5), (1., 3.), (-1., 3.)] {
+                    multi.reset();
+                    let start: [f32; 3] =
+                        std::array::from_fn(|k| [at[12], at[13], at[14]][k] + side * 40. * z[k] + along * x[k]);
+                    let heading = z.map(|v| -side * v);
+                    multi.place_at_rest(0, start, heading).unwrap();
+                    eprintln!("VARIANT side={side} along={along}");
+                    let mut drive = [Controls::default(); 2];
+                    drive[0].throttle = 1.;
+                    for tick in 0..420 {
+                        if let Err(e) = multi.tick(&drive) {
+                            panic!("side {side} along {along} tick {tick}: {}", e.0);
+                        }
+                    }
+                    let props = multi.dynamic_props().unwrap();
+                    eprintln!("VARIANT broken={} pieces={}", props.broken.iter().filter(|b| **b).count(), props.pieces.len());
+                }
+                let props = multi.dynamic_props().unwrap();
+                eprintln!("pieces {}", props.pieces.len());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Playtest 7f22c32: a side-swiped board in a 12-car race stopped physics
     /// ("invalid contact-group counts or selector") because the pieces pushed
     /// the shared world past the port's old 16-body guard.

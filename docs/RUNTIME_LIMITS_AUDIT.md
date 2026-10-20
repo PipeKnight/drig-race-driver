@@ -135,7 +135,7 @@ Score = likelihood (H 3, M 2, L 1) × impact. Impact: race freeze or crash 3, wr
 | R15 | **Wheel ray hits a material with no mechanics** (WARN, RESE, RESD, UNRE, FBND). The tick fails. Chunk usage on Donington is not yet scanned. | C13, B26 | L–M (unverified) | freeze | 3–6 | Mechanics are optional in the original [I] | yes |
 | R16 | **Bookkeeping or presentation errors escalate to a pause:** a zero-length sector; the player pushed across the finish line while held on the grid; a player dent projection error. | B08, D02, D03 | L | freeze | 3 | n/a | yes |
 | R17 | **Exact-zero degeneracies:** surface drag with exactly zero point velocity (stationary damaged car or gravel); singular finalizer, coupling or travel-stop projections (car on its side); a degenerate deformed-mesh triangle in a heavy crush. | A42, B24, B27, A33 | L (A33 L–M) | freeze | 3 | Original divides and propagates inf/NaN [I] | yes |
-| R18 | **Pose correction above 64 rad or rotation above 4000 rad/s** with light pieces wedged under cars. | A23, A24, B40 | L | freeze | 3 | port diagnostic bound | yes |
+| R18 | **[Resolved by F512: angle bounds removed; 0x772670 turns by any finite angle, matched bit for bit from 64 rad to about 3e9 rad]** **Pose correction above 64 rad or rotation above 4000 rad/s** with light pieces wedged under cars (career run 13, Le Mans: a just-broken tyre wall's piece). | A23, A24, B40 | L | freeze | 3 | port diagnostic bound | yes |
 | R19 | **Force-solver event or limit iterations exceed 64.** | B09 | L | freeze | 3 | authored, not measured | yes |
 | R20 | **Frame-rate collapse** when a tick takes more than 16 ms (FixedUpdate catch-up). Pile-ups with pieces, dent reprojection and effect mesh rebuilds can cause it, and it looks like a freeze. | D32, D33 | M | perceived freeze | 2–4 | n/a | yes |
 | R21 | **[Resolved by F434: engines and tyres stay audible until the race is frozen]** **All engine audio is muted after the player finishes,** including AI cars still racing. | D28 | H | audio | 3 | n/a | yes |
@@ -177,8 +177,8 @@ IDs match the per-area work tables. Rows were grouped when several guards share 
 | A20 | `contact_rows.rs:78-427` | subnormal vector, material mixture, degenerate tangent, non-finite row | pause | yes | None/L | port |
 | A21 | `main_contact_response.rs:71-151` | rows > 1024, **bodies > 64**, iterations > 32; singular normalization | pause | yes | masked by A15; next cap after it | MAIN_CONTACT_RESPONSE.md adapter bounds (original B791B0) |
 | A22 | `physical_response.rs:65-241` | 64 bodies; singular or non-finite | pause | yes | L | PHYSICAL_RESPONSE.md port bounds |
-| A23 | `impact_correction.rs:71`, `physical_pose.rs:78`, `contact_bias.rs:40,51` | poses > 64; angular correction > 64 rad | pause | yes | L (light piece wedged deep) | port diagnostic bound (original B7B5E0) |
-| A24 | `pose.rs:36-109`, `physical_pose.rs:34-171` | rotation > 64 rad per step (ω > 4000 rad/s), ranges | pause | yes | L | port |
+| A23 | `impact_correction.rs:71`, `physical_pose.rs:78`, `contact_bias.rs:40,51` | poses > 64; angular correction > 64 rad **[F512: the angle bound removed; non-finite only]** | pause | yes | L (light piece wedged deep) | port diagnostic bound (original B7B5E0) |
+| A24 | `pose.rs:36-109`, `physical_pose.rs:34-171` | rotation > 64 rad per step (ω > 4000 rad/s) **[F512: removed]**, ranges | pause | yes | L | port |
 | A25 | `collision_mesh.rs:552-560,598` (`Mesh::world_bounds`) | **any pose element \|x\| > 1e5** or margin out of range: "invalid mesh bounds controls" | pause, every tick after | yes (every car and piece) | **M** (R06) | port domain guard (F322: documented in code). Original has none: B44E80 has no float compares, B444D0 none on coordinates, and the kind-7 bounds reduction B42050 seeds FLT_MAX accumulators with no domain check |
 | A26 | `convex_distance.rs:408-840` | inputs \|x\| > 1e5, no convergence in 256 iterations, zero penetration normal | pause | yes | L | port; original AE8AD0/AE8DB0 |
 | A27 | `contact_manifold.rs:404-423` and others | matrix or point \|x\| > 1e4 (10 km), existing > 16, clip > 20 | pause | yes | None (all routes < 3 km) | port guard. F322: matrix and fallback point raised from 1e4 to the file's 1e5 domain; AE2FA0/B45310 bound no coordinate (their compares are value/value and \|dot\| vs 0.99) |
@@ -249,7 +249,7 @@ IDs match the per-area work tables. Rows were grouped when several guards share 
 | B37 | `deformation_world.rs:141`, `deforming_group_frame.rs:82` | `expect("registered owner")`, `expect("two-body contact")` | **panic** | yes | None (invariants) | — |
 | B38 | `dynamics.rs:14`, `tyre_friction.rs:65` | delta bounds | Err | dynamics yes | None | diagnostic |
 | B39 | `spawn.rs:67,81` | SSE | pause | yes | None | port |
-| B40 | `pose.rs:34` | rotation > 64 rad | pause | yes | None (B03 only) | port |
+| B40 | `pose.rs:34` | rotation > 64 rad **[F512: removed]** | pause | yes | None (B03 only) | port |
 | B41 | `damage_region.rs:27-48`, `collision_damage.rs:69-124` | levels, gains, thresholds | pause | yes | None (levels clamp at 1) | port scope |
 | B42 | `lap_timing.rs:42-186` | gates ∉ 3..=512, sector gates > 16 | startup Err | no | route | port policy |
 | B43 | `time_trial.rs:41-48` | laps ∉ 1..=99 | startup Err | no | None | authored |
