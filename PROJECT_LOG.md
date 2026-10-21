@@ -110,6 +110,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F545](log/F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
 | [F544](log/F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
 | [F543](log/F0543.md) | 2026-10-21 | Physics steps per rendered frame: original one step of the frame delta, port catch-up, no port |
 | [F542](log/F0542.md) | 2026-10-21 | Playable c4b2673f4cfc with body sleeping (F541), portable copy and APKs ee1880b472d2 |
@@ -169,7 +170,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F487](log/F0487.md) | 2026-10-19 | Career eBay Motors: the original's used-car market (fixed-price used cars, auctions of team cars) ported and on the career screen; the Points column checked in … |
 | [F486](log/F0486.md) | 2026-10-19 | Playable caa680f32ece with F455–F484 and Codex's local graphics commits |
 | [F485](log/F0485.md) | 2026-10-19 | Soak: seeds 39 (Spa) and 54 (Le Mans) fail on main since F476 |
-| [F484](log/F0484.md) | 2026-10-19 | Joints, phase 3a: tyre walls break into blocks joined by their springs; the constraint template stage bit-for-bit against the original |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
