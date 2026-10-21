@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F547](log/F0547.md) | 2026-10-21 | Playable 945575e57651 with the cheaper tick and parking (F546), portable copy and APKs 6087fbcafa30 |
 | [F546](log/F0546.md) | 2026-10-21 | Physics tick cost and parking |
 | [F545](log/F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
 | [F544](log/F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F489](log/F0489.md) | 2026-10-19 | Soak seeds 39 and 54 traced: a Spa data gap and a car pressing a tyre through the Le Mans road |
 | [F488](log/F0488.md) | 2026-10-19 | Scrape loop: the original's per-car scrape voice |
 | [F487](log/F0487.md) | 2026-10-19 | Career eBay Motors: the original's used-car market (fixed-price used cars, auctions of team cars) ported and on the career screen; the Points column checked in … |
-| [F486](log/F0486.md) | 2026-10-19 | Playable caa680f32ece with F455–F484 and Codex's local graphics commits |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
