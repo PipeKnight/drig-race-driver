@@ -105,7 +105,7 @@ DOC_GROUPS = [
     ("Project process, tooling and builds", [
         r"TOOLCHAIN", r"DISK_USAGE", r"PROTOTYPE_BUILD", r"TRY_THE_PROTOTYPE", r"GITHUB", r"PROJECT_RELOCATION",
         r"IMPLEMENTATION_PLAN", r"NEXT_MILESTONES", r"PROGRESS_ASSESSMENT", r"FIDELITY_BACKLOG", r"CAPTURE_BACKLOG",
-        r"SOAK_TESTING", r"RUNTIME_LIMITS", r"ROBUSTNESS", r"PERFORMANCE", r"TICK_PERFORMANCE", r"^re/",
+        r"SOAK_TESTING", r"RUNTIME_LIMITS", r"ROBUSTNESS", r"PERFORMANCE", r"TICK_PERFORMANCE", r"FRAME_STEPPING", r"^re/",
         r"^reference/", r"^templates/", r"INDEX"]),
     ("Original reference, captures and owner sessions", [
         r"PHASE0", r"COMPATIBILITY", r"LOADER_RESEARCH", r"REFERENCE_", r"LIVE_SPAWN", r"MACRO_SETUP",
@@ -138,7 +138,7 @@ DOC_GROUPS = [
         r"PRODUCTION_GRID", r"LEAF_QUERIES", r"RECTANGLE_CULL", r"SOURCE_WORLD", r"PHYSICAL", r"SERIAL",
         r"CQTC", r"BOX_CONTACTS", r"JOINTS", r"OWNER_COLLECTION", r"RESPONSE_CONSUMPTION", r"REGISTERED_POOL",
         r"CARRIED", r"GROUPED", r"GEOMETRIC", r"SCHEDULED", r"HEAVY_CONTACT", r"REPEATED_CONTACT", r"GROUND_",
-        r"ADVANCED_GEOMETRY", r"WORLD"]),
+        r"ADVANCED_GEOMETRY", r"WORLD", r"SLEEPING"]),
     ("Vehicle physics: suspension, tyres, steering, drivetrain", [
         r"VEHICLE", r"SUSPENSION", r"TYRE", r"WHEEL", r"STEERING", r"GRIP", r"SURFACE", r"FORCE", r"COUPLED",
         r"HANDLING", r"SOURCE_", r"STANDARD_CAR", r"MUTABLE", r"CAR_JOB", r"CAR_MANAGER", r"SOURCE_DRIVING"]),

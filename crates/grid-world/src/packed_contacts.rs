@@ -56,7 +56,7 @@ pub fn calculate<'m>(
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Checked {
     materials: bool,
-    mesh: bool,
+    pub(crate) mesh: bool,
     /// Within the narrow (undecoded) collector's vertex bound.
     narrow: bool,
     /// Vertex bounds of all reachable triangles of a structurally sound tree.
@@ -112,20 +112,41 @@ impl Known {
     /// triangle lies more than [`REACH_MARGIN`] beyond the body bounds on
     /// some axis, so no candidate passes the overlap test.
     pub fn misses(&self, settings: &Settings, decoded: bool) -> bool {
-        let b = self.bounds;
-        let Some(reach) = self.checked.reach else {
+        MissTest::new(settings, self.directions, self.bounds).misses(&self.checked, decoded)
+    }
+}
+
+/// [`Known::misses`] for one body against many packed shapes: the body's
+/// terms are evaluated once. `settings` may differ per shape only in
+/// `contact_capacity` (at most 16) and `sheet_mask`, which the test does
+/// not read beyond that bound.
+pub struct MissTest {
+    valid: bool,
+    low: [f32; 3],
+    high: [f32; 3],
+}
+
+impl MissTest {
+    pub fn new(settings: &Settings, directions: bool, bounds: [V; 2]) -> Self {
+        Self {
+            valid: settings.contact_capacity <= 16
+                && settings.candidate_capacity <= 32768
+                && settings.correction_bounds == [f32::MAX; 4]
+                && directions
+                && packed_candidates::bounds_valid(bounds),
+            low: std::array::from_fn(|j| bounds[0][j] - REACH_MARGIN),
+            high: std::array::from_fn(|j| bounds[1][j] + REACH_MARGIN),
+        }
+    }
+    pub fn misses(&self, checked: &Checked, decoded: bool) -> bool {
+        let Some(reach) = checked.reach else {
             return false;
         };
-        settings.contact_capacity <= 16
-            && settings.candidate_capacity <= 32768
-            && settings.correction_bounds == [f32::MAX; 4]
-            && self.checked.materials
-            && self.directions
-            && self.checked.mesh
-            && (decoded || self.checked.narrow)
-            && packed_candidates::bounds_valid(b)
-            && (0..3)
-                .any(|j| reach[j + 3] < b[0][j] - REACH_MARGIN || reach[j] > b[1][j] + REACH_MARGIN)
+        self.valid
+            && checked.materials
+            && checked.mesh
+            && (decoded || checked.narrow)
+            && (0..3).any(|j| reach[j + 3] < self.low[j] || reach[j] > self.high[j])
     }
 }
 

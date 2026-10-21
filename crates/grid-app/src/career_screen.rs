@@ -2085,9 +2085,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let root = crate::game_root(profile.root.clone())?;
     println!("game_root path={}", root.display());
     let labels = Labels::load(&root);
-    let schema = std::fs::read(root.join("database/schema.bin"))?;
-    let data = std::fs::read(root.join("database/database.bin"))?;
-    let db = grid_formats::database::read(&schema, &data)?;
+    let db = grid_tools::read_database(&root)?;
     let routes = track_routes(&db);
     let cat = Catalogue::load(&root)?;
     let dir = crate::settings::data_dir().to_path_buf();

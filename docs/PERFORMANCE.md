@@ -41,7 +41,7 @@ part of the time the owner was playing a game; see "Measurement noise".
 
 | Tool | Version | Use |
 |---|---|---|
-| `GRID_PERF_TIMING=1` (new) | this commit | Wall time per stage, printed by grid-app every 600 frames and at exit, and by grid-opponent-race at exit (stderr). Since F538 the line also gives the mean world size per shared-world tick: `world_bodies` (cars and pieces), `world_pieces` (pieces and lost wheels), and active contacts by kind: `contacts_wheel` (wheel contacts in the shared pool), `contacts_body` (car hulls against the track and props), `contacts_car` (car pairs) and `contacts_piece` (piece contacts). grid-soak `run` prints the same line on stderr. |
+| `GRID_PERF_TIMING=1` (new) | this commit | Wall time per stage, printed by grid-app every 600 frames and at exit, and by grid-opponent-race at exit (stderr). Since F538 the line also gives the mean world size per shared-world tick: `world_bodies` (cars and pieces), `world_pieces` (pieces and lost wheels), and active contacts by kind: `contacts_wheel` (wheel contacts in the shared pool), `contacts_body` (car hulls against the track and props), `contacts_car` (car pairs) and `contacts_piece` (piece contacts); since F546 also `world_asleep` (bodies out of the active list) and `world_parked` (of those, parked). grid-soak `run` prints the same line on stderr. |
 | Bevy `trace_chrome` | Bevy 0.19.1, tracing-chrome 0.7.2, tracing 0.1.44, tracing-subscriber 0.3.23 | Per-system spans. grid-app feature `trace` (off by default). |
 | `tools/chrome_trace_summary.py` (new) | this commit, bundled Python 3.12.14 | Streams a trace (1.5 GB for 33 s) and reports busy time per thread and the largest spans per frame. |
 | `GRID_CPU_CLUSTERING=1` (new, F380) | grid-app | Bevy's CPU light clustering (the Android path) instead of GPU clustering; rendering only. |
@@ -758,8 +758,112 @@ contacts are the window means.
 | 11399 | 54.9 | 31.7 | 16.9 | 2.3 | 1.2 | 0.17 | 57.3 | 408 | 2115 |
 
 The cars cost 1-2 ms per tick throughout; the pieces' advance and contacts
-take 85-90 % once a few hundred pieces lie around. The pieces never sleep in
-the port (the original's turnOffTime, `local/handoff/sleeping-research.md`),
-so the cost only grows: by tick 40489 of the F513 run 872 pieces were alive.
+take 85-90 % once a few hundred pieces lie around. Until F541 the pieces never
+slept, so the cost only grew: by tick 40489 of the F513 run 872 pieces were alive.
 Milan seed 41, 12 cars, grid-soak to tick 3000: world tick 16.5 ms, of which
 advance 9.6, piece contacts 3.7, vehicles 1.2; 72 pieces, 349 piece contacts.
+
+## Piece sleeping (F541)
+
+Pieces at rest now sleep after turnOffTime (1 s) and leave the active list
+([BODY_SLEEPING.md](BODY_SLEEPING.md)). Wall times on the shared PC varied up to
+4× between runs (the same Milan seed measured 16.5 ms in F538 and 6.9 ms here),
+so the cost is compared in one process: a broken Nürburgring pile is cloned,
+one copy sleeps, the other is forced awake, and they tick alternately
+(`sleeping_cost_on_a_broken_nurburgring_field`).
+
+| Pile | Pieces | Asleep | Sleeping ms/tick | All awake ms/tick |
+|---|---:|---:|---:|---:|
+| tyre stacks, settled 3000 ticks | 228 | 161 | 2.87 | 5.53 |
+| armco and tyre stacks | 755 | 746 | 7.58 | 18.00 |
+| armco and tyre stacks | 987 | 856 | 12.18 | 24.85 |
+
+Piece contacts per tick in the Le Mans race fall from about 2,100 (main, 400
+pieces) to 300-500 (500 pieces). An asleep piece still costs about 12 µs per
+tick: a sample profile puts about half of the tick in whole-world memory copies
+(the 0x424-byte body array cloned several times per tick), plus the O(n²)
+piece-pair distance pass and car–piece hull tests in `PropWorld::contacts`.
+Those are the next levers.
+
+## Catch-up cap (F544)
+
+The interactive app runs at most 4 fixed ticks per rendered frame (`Time<Virtual>` max delta
+64 ms instead of Bevy's 250 ms; [FRAME_STEPPING.md](FRAME_STEPPING.md) section 5). While a tick
+costs under 16 ms nothing changes: 62.5 ticks/s, identical drive samples. Above that, the game time
+slows instead of the frame rate collapsing.
+
+Desktop measurements (cap 0 → cap 4):
+- forced 20 ms tick: 3.1 → 11.6 FPS at the same 0.75 game speed;
+- the end of an 8000-tick Nürburgring drift battle, about 480 pieces at about 30 ms per tick:
+  1.8 → 7.8 FPS, at 0.45 → 0.50 game speed.
+
+`GRID_MAX_TICKS_PER_FRAME=0` restores the old clamp for comparisons, and `GRID_TICK_DELAY_MS`
+forces a slow tick.
+
+## Tick cost and parking (F546)
+
+F546 removes per-tick work without changing a result: the identity runs, the grid-soak digests
+(Milan seeds 41 and 53, Nürburgring `--chaos prop` seeds 1 and 2), the headless Le Mans career and
+Nürburgring drift-battle drive samples and the paired probe's world hashes are bit-identical before
+and after each step (evidence `local/r28/`, `signatures.txt` in each run folder). Parking
+(F546, [BODY_SLEEPING.md](BODY_SLEEPING.md) section 8) changes the races once a pile parks.
+
+- **Row buffer copies.** The solver's shared row buffer (`Manager::rows`, 4 × 192 bytes per
+  contact slot of the pool, megabytes once pieces have grown the pool) was cloned for every car's
+  island on every tick: the deformation frames called `impact_frame` by reference
+  (`calculate_with_callbacks`). It now moves through them as through the plain frame
+  (`calculate_with_callbacks_rows`, `deformation_world::calculate_group(…, rows)`). This was most
+  of the Le Mans and Nürburgring world advance (3.5 of 3.9 ms at 164 pieces).
+- **Whole-world copies.** The world moves through the tick by value
+  (`physical_world::advance_with_*_in`, `grouped_physical_frame::tick`, `contact_groups::build`):
+  bodies, contacts and joints are moved, not cloned, and the rows are moved out of the rollback
+  copy. One rollback copy of the bodies per tick remains (`MultiRuntime::tick`), so a failed tick
+  leaves the previous world; that world has no rows and must be reset (every caller already stops
+  or restarts).
+- **Piece pairs and car–piece tests** (`PropWorld::contacts`): an asleep piece only pairs with the
+  awake pieces after it; a conservative reach bound skips far pairs before any hull is built; hulls
+  are built lazily; each car's pose and bounds are computed once per call and boxed against the
+  piece before the hull test.
+- **Road chunks** (`Track::body_contacts`, `Track::sweep_road`): `packed_contacts::MissTest`
+  evaluates the body's terms of `Known::misses` once per body instead of once per chunk, the
+  704-byte chunk settings are built once, and the continuous sweep reuses each chunk's load-time
+  mesh check instead of re-validating every vertex per piece and chunk.
+
+**Paired probe** (`sleeping_cost_on_a_broken_nurburgring_field`, same pile, one process; the
+sleeping copy keeps sleeping, the other has every piece forced awake; base = F543 main c664a9c1,
+new = this work; parking off unless stated, i.e. the pile is near the player). ms per tick:
+
+| Pile | Pieces | Asleep (mean) | Base sleeping | New sleeping | New, parked | Base all awake | New all awake |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| tyre stacks, settled 3000 ticks | 60 | 52 | 0.50 | 0.32 | 0.18 | 1.38 | 1.09 |
+| tyre stacks, settled 3000 ticks | 120 | 120 | 1.05 | 0.20 | 0.21 | 3.10 | 1.96 |
+| tyre stacks, settled 3000 ticks | 228 | 161 | 2.87 | 1.39 | 0.26 | 5.54 | 3.72 |
+| tyre stacks and armco, 300 ticks | 996 | 574 | 17.47 | 9.61 | 1.01 (859 pieces) | 24.62 | 15.87 |
+| tyre stacks and armco, 300 ticks | 995 | 491 | 19.25 | 11.24 | 1.31 | 25.14 | 16.44 |
+
+"New, parked": parking on, the two cars on the grid far from the pile, every piece parked (the
+755-break pile ends with fewer pieces because parked pieces break no neighbours). An asleep piece
+now costs under 2 µs per tick (120 settled tyres: 0.20 ms), down from 9 µs; a parked pile of 1,000
+pieces 1.3 µs per piece. An awake piece costs about 16 µs, down from 25 µs; what remains is the
+real work (road and piece contact queries, the solver) plus the one rollback copy (about 6 % of an
+all-awake tick).
+
+**Races** (headless, autopilot, back to back on the same PC; base F543 → this work with parking):
+
+| Race, window ending at tick | Pieces (base / new) | Asleep / parked (new) | World tick ms, base | World tick ms, new | World advance ms, base → new |
+|---|---|---|---:|---:|---|
+| Le Mans career, 599 | 0 / 0 | 0 / 0 | 1.13 | 0.96 | 0.38 → 0.27 |
+| Le Mans career, 2999 | 32 / 25 | 22 / 17 | 3.77 | 1.69 | 2.14 → 0.48 |
+| Le Mans career, 5399 | 180 / 207 | 203 / 187 | 13.99 | 3.23 | 9.47 → 0.73 |
+| Le Mans career, 6000 | 236 / 304 | 305 / 288 | 16.57 | 4.01 | 11.11 → 0.72 |
+| Nürburgring drift battle, 5399 | 4 / 4 | 4 / 0 | 0.70 | 0.61 | 0.23 → 0.15 |
+| Nürburgring drift battle, 7799 | 64 / 63 | 39 / 33 | 3.83 | 2.01 | 2.00 → 0.57 |
+| Nürburgring drift battle, 10199 | 161 / 141 | 106 / 79 | 8.91 | 2.41 | 4.75 → 0.67 |
+| Nürburgring drift battle, 12000 | 161 / 155 | 138 / 98 | 7.80 | 1.41 | 4.33 → 0.36 |
+
+Windows of 2,400 ticks (`GRID_PERF_TIMING` lines, means over the window); whole runs 67 → 27 s
+(Le Mans, 6,000 ticks) and 67 → 33 s (Nürburgring, 12,000 ticks). The Nürburgring battle is the
+phone-like case the owner named: the player laps away from the crash sites, so at the end 98 of
+155 pieces are parked and 40 more asleep. The races diverge once the first island parks, so the
+piece counts differ; base (which already sleeps, F541) has no asleep or parked counters. The world
+advance at 0 pieces also falls (0.19 → 0.12 ms on the Nürburgring, 8 cars), from the row move.

@@ -22,6 +22,7 @@ pub(crate) fn calculate_group(
     contacts: &[contact_groups::Contact],
     shapes: &[contact_groups::Shape],
     registration: &mut Registration,
+    rows: Option<Vec<crate::contact_rows::Row>>,
 ) -> Result<(impact_frame::Output, Vec<contact_groups::Contact>), Error> {
     let owner = &registration.owner;
     if owner.len() != crate::vehicle_publication::VEHICLE_WORDS
@@ -51,17 +52,20 @@ pub(crate) fn calculate_group(
         &registration.owner,
         &registration.owner[0xd240 / 4..(0xd240 + 0x1054) / 4],
     );
-    let result = deforming_physical_frame::calculate(deforming_physical_frame::Input {
-        frame,
-        owner,
-        physical,
-        contacts: &raw,
-        settings,
-        shapes,
-        limit: registration.limit,
-        bulk: &registration.bulk,
-        random_seed: registration.random_seed,
-    });
+    let result = deforming_physical_frame::calculate_rows(
+        deforming_physical_frame::Input {
+            frame,
+            owner,
+            physical,
+            contacts: &raw,
+            settings,
+            shapes,
+            limit: registration.limit,
+            bulk: &registration.bulk,
+            random_seed: registration.random_seed,
+        },
+        rows,
+    );
     registration.owner[0xc7f8 / 4] = 0xd240;
     let result = result?;
     let mut returned = contacts.to_vec();
@@ -81,6 +85,7 @@ pub(crate) fn calculate_group(
 /// A contact group of several bodies with at least one registration
 /// (`registrations` in local body order). Contacts keep their world tokens;
 /// +38/+3C/+40/+44 and the +0E byte are returned.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn calculate_multi_group(
     frame: &impact_frame::Input,
     bodies: &[&contact_groups::Body],
@@ -89,6 +94,7 @@ pub(crate) fn calculate_multi_group(
     registrations: &mut [Option<&mut Registration>],
     random_seed: u32,
     owner_toggle: bool,
+    rows: Option<Vec<crate::contact_rows::Row>>,
 ) -> Result<
     (
         impact_frame::Output,
@@ -134,6 +140,7 @@ pub(crate) fn calculate_multi_group(
         shapes,
         random_seed,
         owner_toggle,
+        rows,
     )?;
     for o in result.owners {
         let registration = registrations[o.local]

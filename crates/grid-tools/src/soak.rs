@@ -736,6 +736,15 @@ struct PieceHistory {
     deep: Option<u64>,
     /// That first deep contact came with or one step after a box contact.
     boxed: bool,
+    /// Parked (byte +0x413) at the last check.
+    parked: bool,
+    /// The tick of the last park, when a deep road contact pressed the
+    /// body at its frozen pose.
+    parked_deep: Option<u64>,
+    /// The tick it woke from that deep park.
+    woke: Option<u64>,
+    /// A road contact since that wake.
+    road_since_wake: bool,
 }
 
 /// Vertical half span of the no-ground query (expected loss (i)).
@@ -1124,6 +1133,13 @@ impl Session {
             Some(race) => &race.multi.cars[0],
             None => &self.runtime,
         };
+        // (iii) Parked while pressed deep into the road, woken with no road
+        // contact since (F546).
+        let parked_deep = self
+            .piece_history
+            .borrow()
+            .get(&(self.resets, i))
+            .is_some_and(|h| h.parked_deep.is_some() && h.woke.is_some() && !h.road_since_wake);
         let pressed = match props.pressed_down_at_spawn(
             i,
             car.track(),
@@ -1152,6 +1168,8 @@ impl Session {
                     crate::dynamic_props::Pressed::NoGround
                 } else if in_run {
                     crate::dynamic_props::Pressed::EntityBoxInRun
+                } else if parked_deep {
+                    crate::dynamic_props::Pressed::ParkedDeep
                 } else {
                     return false;
                 }
@@ -1200,6 +1218,29 @@ impl Session {
             }
             if p.entity_down {
                 entry.entity = Some(tick);
+            }
+        }
+        // Parks and wakes of every prop body (expected loss ParkedDeep).
+        for (i, body) in snapshot.bodies.iter().enumerate().skip(snapshot.cars) {
+            let parked = (body[0x410 / 4] >> 24) & 255 != 0;
+            let tick = self.total_ticks;
+            let entry = history.entry((self.resets, i)).or_default();
+            let pressing = || {
+                props
+                    .pressing_now(i, snapshot.bodies, car.track(), car.surfaces(), geometry.query())
+                    .ok()
+                    .flatten()
+            };
+            if parked && !entry.parked {
+                entry.parked_deep = pressing().is_some_and(|p| p.deep_road).then_some(tick);
+                entry.woke = None;
+                entry.road_since_wake = false;
+            } else if !parked && entry.parked && entry.parked_deep.is_some() {
+                entry.woke = Some(tick);
+            }
+            entry.parked = parked;
+            if !parked && entry.woke.is_some() && !entry.road_since_wake {
+                entry.road_since_wake = pressing().is_some_and(|p| p.road);
             }
         }
     }

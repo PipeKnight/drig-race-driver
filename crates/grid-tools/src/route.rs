@@ -156,9 +156,7 @@ impl Route {
         &self,
         root: &std::path::Path,
     ) -> Result<f32, Box<dyn std::error::Error>> {
-        let schema = std::fs::read(root.join("database/schema.bin"))?;
-        let data = std::fs::read(root.join("database/database.bin"))?;
-        let db = grid_formats::database::read(&schema, &data)?;
+        let db = crate::read_database(root)?;
         let mut parts = self.path().split('/');
         let (Some("tracks"), Some(folder), Some(file)) = (parts.next(), parts.next(), parts.next())
         else {

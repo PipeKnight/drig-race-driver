@@ -39,6 +39,27 @@ pub struct Input {
     pub gravity: [f32; 4],
     pub bodies: Vec<Body>,
     pub correction: Option<Correction>,
+    /// B7B850's parking test: set when parking is enabled (frame +0x11C)
+    /// and the island has a one-body or static contact.
+    pub park: Option<Park>,
+}
+
+/// The park reference (frame +0x120 point, +0x130 scale) and each body's
+/// squared parking radius (+0x3FC), in island order.
+#[derive(Clone)]
+pub struct Park {
+    pub point: [f32; 4],
+    pub scale: f32,
+    pub radii: Vec<f32>,
+}
+
+/// B106E0: whether a body at `position` (the vector body +0x334 points
+/// to, +0x1C0) is outside its parking radius: (scale * scale) times the
+/// squared distance (four lanes, the shuffle-sum order of `dot`) above the
+/// squared radius; equal or unordered is in range.
+pub fn out_of_range(position: [f32; 4], point: [f32; 4], scale: f32, radius: f32) -> bool {
+    let d = std::array::from_fn(|i| point[i] - position[i]);
+    (scale * scale) * dot(d, d) > radius
 }
 pub struct Output {
     pub status: u32,
@@ -79,6 +100,11 @@ fn asleep(b: &mut Body, s: &impact_step::Body, delta: f32) -> bool {
     }
 }
 pub(crate) fn validate(input: &Input) -> Result<(), Error> {
+    validate_rows(input, &input.step.rows)
+}
+
+/// [`validate`] with the row buffer the step will use.
+fn validate_rows(input: &Input, rows: &[crate::contact_rows::Row]) -> Result<(), Error> {
     let delta = input.step.parameters[0];
     if input.bodies.len() != input.step.bodies.len()
         || input.correction.as_ref().is_some_and(|c| {
@@ -115,7 +141,7 @@ pub(crate) fn validate(input: &Input) -> Result<(), Error> {
     {
         return Err(Error("invalid impact frame input"));
     }
-    impact_step::validate(&input.step)
+    impact_step::validate_rows(&input.step, rows)
 }
 
 pub fn calculate(input: &Input) -> Result<Output, Error> {
@@ -142,6 +168,23 @@ pub(crate) fn calculate_with_callbacks<C: Callbacks>(
 ) -> Result<(Output, C), Error> {
     validate(input)?;
     run(input, None, callbacks)
+}
+
+/// [`calculate_with_callbacks`] with the shared row buffer given away by
+/// the caller (`input.step.rows` is then unused), so it moves through the
+/// step instead of being copied; `None` copies `input.step.rows`.
+pub(crate) fn calculate_with_callbacks_rows<C: Callbacks>(
+    input: &Input,
+    rows: Option<Vec<crate::contact_rows::Row>>,
+    callbacks: &C,
+) -> Result<(Output, C), Error> {
+    match rows {
+        Some(rows) => {
+            validate_rows(input, &rows)?;
+            run(input, Some(rows), callbacks)
+        }
+        None => calculate_with_callbacks(input, callbacks),
+    }
 }
 
 /// [`calculate`] consuming the input, so the shared row buffer moves through
@@ -187,9 +230,18 @@ fn run<C: Callbacks>(
         return Ok((out, callbacks));
     }
     let mut sleeping = 0;
+    let mut outside = 0;
     let mut minimum = f32::MAX;
-    for (b, s) in out.bodies.iter_mut().zip(&mut out.step.bodies) {
+    for (k, (b, s)) in out.bodies.iter_mut().zip(&mut out.step.bodies).enumerate() {
         sleeping += usize::from(asleep(b, s, delta));
+        if let Some(park) = &input.park {
+            outside += usize::from(out_of_range(
+                b.basis[3],
+                park.point,
+                park.scale,
+                park.radii[k],
+            ));
+        }
         if b.gravity_scale != 0. {
             let scale = b.mass * b.gravity_scale;
             let added = input.gravity.map(|v| scale * v);
@@ -238,6 +290,12 @@ fn run<C: Callbacks>(
     }
     if sleeping == out.bodies.len() {
         out.status = 1;
+        out.step.rows = rows.take().unwrap_or_else(|| s.rows.clone());
+        return Ok((out, callbacks));
+    }
+    // Every body outside its radius: status 2, the island parks (B24DF0).
+    if input.park.is_some() && outside == out.bodies.len() {
+        out.status = 2;
         out.step.rows = rows.take().unwrap_or_else(|| s.rows.clone());
         return Ok((out, callbacks));
     }
@@ -473,6 +531,7 @@ mod tests {
     ];
     fn input() -> Input {
         Input {
+            park: None,
             correction: None,
             gravity: [0., -10., 0., 0.],
             bodies: vec![Body {

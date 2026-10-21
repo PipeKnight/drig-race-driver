@@ -23,6 +23,12 @@ pub struct Manager {
     pub workspace: Vec<[[f32; 4]; 2]>,
     pub cached_pair: Option<[usize; 2]>,
     pub cached_material: contact_rows::Material,
+    /// Parking (AD7D60: world +0x7D4 enable, +0x7E0 point, +0x7F0 scale);
+    /// None: disabled.
+    pub park: Option<([f32; 4], f32)>,
+    /// Head of the parked list (manager +0x4C; one-based body id, links
+    /// body +0x308 next and +0x30C previous).
+    pub parked: u32,
 }
 #[derive(Clone)]
 pub struct Output {
@@ -57,6 +63,198 @@ fn store_matrix(row: &mut [u32], offset: usize, value: Matrix) {
         store(row, offset + 16 * i, r);
     }
 }
+/// B24D70 for one body: B0F2F0(-1) unlinks it from the active list
+/// (+0x400 = -1), the velocities are zeroed and the force (B0FCD0), torque
+/// (B0FD10) and impulse (B0FC90) accumulators cleared. The timer stays at
+/// turnOffTime and the island links stay.
+fn sleep_body(groups: &mut contact_groups::Output, i: usize) {
+    let list = groups.bodies[i][0x400 / 4] as usize;
+    if list > 1 {
+        return;
+    }
+    let next = groups.bodies[i][0x300 / 4];
+    let previous = groups.bodies[i][0x304 / 4];
+    if previous == 0 {
+        groups.world[7 + list] = next;
+    } else {
+        groups.bodies[previous as usize - 1][0x300 / 4] = next;
+    }
+    if next == 0 {
+        groups.world[9 + list] = previous;
+    } else {
+        groups.bodies[next as usize - 1][0x304 / 4] = previous;
+    }
+    let raw = &mut groups.bodies[i];
+    raw[0x300 / 4] = 0;
+    raw[0x304 / 4] = 0;
+    raw[0x400 / 4] = contact_groups::ASLEEP;
+    for o in [0x210, 0x220, 0x240, 0x250, 0x260] {
+        store(raw, o, [0.; 4]);
+    }
+    for o in [0x40c, 0x40d, 0x40e] {
+        set_flag(raw, o, false);
+    }
+}
+
+/// B24DF0 for one body: as B24D70, and B0F2F0(-2) marks it parked
+/// (+0x413) at the head of the parked list.
+fn park_body(groups: &mut contact_groups::Output, parked: &mut u32, i: usize) {
+    if groups.bodies[i][0x400 / 4] > 1 {
+        return;
+    }
+    sleep_body(groups, i);
+    let id = i as u32 + 1;
+    let raw = &mut groups.bodies[i];
+    set_flag(raw, 0x413, true);
+    raw[0x30c / 4] = 0;
+    raw[0x308 / 4] = *parked;
+    if *parked != 0 {
+        groups.bodies[*parked as usize - 1][0x30c / 4] = id;
+    }
+    *parked = id;
+}
+
+/// AD6480, at the start of the tick: each parked asleep body back within
+/// its radius of the park reference wakes its island; the walk restarts at
+/// the head when that wake also took the next body off the list.
+fn unpark(input: &mut contact_groups::Input, manager: &mut Manager) {
+    let Some((point, scale)) = manager.park else {
+        return;
+    };
+    let mut id = manager.parked;
+    while id != 0 {
+        let k = id as usize - 1;
+        let mut next = input.bodies[k][0x308 / 4];
+        let b = &input.bodies[k];
+        if flag(b, 0x413)
+            && b[0x400 / 4] == contact_groups::ASLEEP
+            && !impact_frame::out_of_range(v(b, 0x1c0), point, scale, f(b, 0x3fc))
+        {
+            wake_island(input, &mut manager.parked, k);
+            if next != 0 && !flag(&input.bodies[next as usize - 1], 0x413) {
+                next = manager.parked;
+            }
+        }
+        id = next;
+    }
+}
+
+/// B24E70 on the island of asleep body `i` (root +0x18, first +8, next
+/// +0x2FC): each asleep body's velocities are zeroed, it goes to the head of
+/// the current active list (B0F2F0(+0x60), leaving the parked list) and its
+/// timer restarts. Returns whether any body woke.
+pub(crate) fn wake_island(input: &mut contact_groups::Input, parked: &mut u32, i: usize) -> bool {
+    let bodies = &input.bodies;
+    let root = if (bodies[i][0x2c / 4] & 255) != 0 && bodies[i][0x18 / 4] != 0 {
+        bodies[i][0x18 / 4] as usize - 1
+    } else {
+        i
+    };
+    let mut members = Vec::new();
+    let mut id = bodies[root][8 / 4];
+    while id != 0 && members.len() <= bodies.len() {
+        let k = id as usize - 1;
+        if k >= bodies.len() || members.contains(&k) {
+            break;
+        }
+        members.push(k);
+        id = bodies[k][0x2fc / 4];
+    }
+    if !members.contains(&i) {
+        members.push(i);
+    }
+    let mut woke = false;
+    for k in members {
+        if input.bodies[k][0x400 / 4] != contact_groups::ASLEEP {
+            continue;
+        }
+        woke = true;
+        let head = input.active_order.first().map_or(0, |&h| h as u32 + 1);
+        if head != 0 {
+            input.bodies[head as usize - 1][0x304 / 4] = k as u32 + 1;
+        }
+        contact_groups::leave_parked(&mut input.bodies, parked, k);
+        let raw = &mut input.bodies[k];
+        store(raw, 0x210, [0.; 4]);
+        store(raw, 0x220, [0.; 4]);
+        raw[0x300 / 4] = head;
+        raw[0x304 / 4] = 0;
+        raw[0x400 / 4] = input.selector;
+        raw[0x3a0 / 4] = 0;
+        input.active_order.insert(0, k);
+    }
+    woke
+}
+
+/// Whether world body `i` is asleep (+0x400 = -1).
+pub fn asleep(out: &Output, i: usize) -> bool {
+    out.groups.bodies[i][0x400 / 4] == contact_groups::ASLEEP
+}
+
+/// B24E70 between steps, on a completed world: the island of asleep body
+/// `i` goes to the head of the current active list (world selector), its
+/// velocities zeroed and its timers restarted. Joint creation (B825E0) and
+/// removal (B82430) call it.
+pub fn wake(out: &mut Output, i: usize) {
+    let selector = out.groups.world[5];
+    let mut input = contact_groups::Input {
+        bodies: std::mem::take(&mut out.groups.bodies),
+        contacts: Vec::new(),
+        active_order: Vec::new(),
+        selector,
+        joints: Vec::new(),
+    };
+    let head = out.groups.world[7 + selector as usize];
+    let before = input.bodies.len();
+    wake_island(&mut input, &mut out.manager.parked, i);
+    // `wake_island` linked the woken bodies to each other, newest first;
+    // the last of them goes before the old head.
+    if let Some(&last) = input.active_order.last() {
+        input.bodies[last][0x300 / 4] = head;
+        if head != 0 {
+            input.bodies[head as usize - 1][0x304 / 4] = last as u32 + 1;
+        } else {
+            out.groups.world[9 + selector as usize] = last as u32 + 1;
+        }
+        out.groups.world[7 + selector as usize] = input.active_order[0] as u32 + 1;
+    }
+    debug_assert_eq!(before, input.bodies.len());
+    out.groups.bodies = input.bodies;
+}
+
+/// Restart body `i`'s sleep timer (+0x3A0), as B82430 does for an awake
+/// body whose joint goes.
+pub fn restart_timer(out: &mut Output, i: usize) {
+    out.groups.bodies[i][0x3a0 / 4] = 0;
+}
+
+/// Asleep bodies a contact names (A, and B for a two-body contact).
+pub(crate) fn asleep_in(
+    input: &contact_groups::Input,
+    contacts: &[contact_groups::Contact],
+) -> Vec<usize> {
+    let mut out = Vec::new();
+    for c in contacts {
+        let single = (c[0xc / 4] & 255) != 0;
+        let ids = [c[1], if single { 0 } else { c[8 / 4] }];
+        for id in ids {
+            if id == 0 {
+                continue;
+            }
+            let i = id as usize - 1;
+            if input
+                .bodies
+                .get(i)
+                .is_some_and(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+                && !out.contains(&i)
+            {
+                out.push(i);
+            }
+        }
+    }
+    out
+}
+
 fn chain(head: u32, rows: &[[u32; 0x424 / 4]], offset: usize) -> Vec<usize> {
     let mut result = Vec::new();
     let mut id = head;
@@ -81,8 +279,8 @@ pub fn calculate_tick_with_shapes(
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
     tick(
-        input,
-        manager,
+        input.clone(),
+        manager.clone(),
         shapes,
         None,
         input.contacts.len(),
@@ -102,7 +300,15 @@ pub fn calculate_tick_with_geometry(
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    tick(input, manager, shapes, None, external_count, None, &mut [])
+    tick(
+        input.clone(),
+        manager.clone(),
+        shapes,
+        None,
+        external_count,
+        None,
+        &mut [],
+    )
 }
 
 pub(crate) fn calculate_tick_carried(
@@ -116,8 +322,8 @@ pub(crate) fn calculate_tick_carried(
         return Err(Error("invalid external contact prefix"));
     }
     tick(
-        input,
-        manager,
+        input.clone(),
+        manager.clone(),
         shapes,
         Some(carry),
         external_count,
@@ -132,36 +338,38 @@ pub(crate) type GeometryProvider<'a> = dyn FnMut(&mut [contact_groups::Body], us
     + 'a;
 
 pub(crate) fn calculate_tick_carried_with_provider(
-    input: &contact_groups::Input,
-    manager: &Manager,
+    input: contact_groups::Input,
+    manager: Manager,
     shapes: &[contact_groups::Shape],
     carry: &contact_groups::Carry,
     provider: &mut GeometryProvider<'_>,
 ) -> Result<Output, Error> {
+    let external_count = input.contacts.len();
     tick(
         input,
         manager,
         shapes,
         Some(carry),
-        input.contacts.len(),
+        external_count,
         Some(provider),
         &mut [],
     )
 }
 pub(crate) fn calculate_tick_carried_deforming(
-    input: &contact_groups::Input,
-    manager: &Manager,
+    input: contact_groups::Input,
+    manager: Manager,
     shapes: &[contact_groups::Shape],
     carry: &contact_groups::Carry,
     provider: &mut GeometryProvider<'_>,
     registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<Output, Error> {
+    let external_count = input.contacts.len();
     tick(
         input,
         manager,
         shapes,
         Some(carry),
-        input.contacts.len(),
+        external_count,
         Some(provider),
         registrations,
     )
@@ -181,27 +389,30 @@ fn validate(
 
 #[allow(clippy::too_many_arguments)]
 fn tick(
-    input: &contact_groups::Input,
-    manager: &Manager,
+    input: contact_groups::Input,
+    manager: Manager,
     shapes: &[contact_groups::Shape],
     carry: Option<&contact_groups::Carry>,
     external_count: usize,
     provider: Option<&mut GeometryProvider<'_>>,
     registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<Output, Error> {
-    validate(input, shapes, carry)?;
+    validate(&input, shapes, carry)?;
     let delta = manager.parameters[0];
     if !delta.is_finite() || delta <= 0. || delta > 0.25 {
         return Err(Error("invalid grouped tick delta"));
     }
-    let mut next = input.clone();
+    let (mut input, mut manager) = (input, manager);
+    unpark(&mut input, &mut manager);
     let mut update_next = vec![0; input.bodies.len()];
     let mut previous = 0;
     for &i in &input.active_order {
         update_next[i] = previous;
         previous = i as u32 + 1;
     }
-    for &i in input.active_order.iter().rev() {
+    let active_order = input.active_order.clone();
+    let mut next = input;
+    for &i in active_order.iter().rev() {
         let raw = &mut next.bodies[i];
         let basis = m(raw, 0x190);
         let published = m(raw, 0x1d0);
@@ -235,13 +446,39 @@ fn tick(
         let remaining = capacity
             .checked_sub(next.contacts.len())
             .ok_or(Error("invalid geometry capacity"))?;
-        let contacts = provider(&mut next.bodies, remaining)?;
+        let mut contacts = provider(&mut next.bodies, remaining)?;
         if contacts.len() > remaining {
             return Err(Error("geometry provider exceeded remaining capacity"));
         }
+        // B184F0: an asleep body in a pair with an awake one wakes its island
+        // (B24E70 in AD7110) and the pairs are collected again, so the woken
+        // bodies' contacts are solved this tick. A pair the second pass finds
+        // with a body that is still asleep (another island) waits for the
+        // next tick's broad phase.
+        let mut woke = false;
+        for i in asleep_in(&next, &contacts) {
+            woke |= wake_island(&mut next, &mut manager.parked, i);
+        }
+        if woke {
+            contacts = provider(&mut next.bodies, remaining)?;
+            if contacts.len() > remaining {
+                return Err(Error("geometry provider exceeded remaining capacity"));
+            }
+            let still = asleep_in(&next, &contacts);
+            contacts.retain(|c| {
+                let single = (c[0xc / 4] & 255) != 0;
+                let named = |id: u32| id != 0 && still.contains(&(id as usize - 1));
+                !named(c[1]) && (single || !named(c[8 / 4]))
+            });
+        }
         next.contacts.extend(contacts);
     }
-    let mut out = calculate_impl(&next, manager, shapes, carry, external_count, registrations)?;
+    // AD6C40: the external pool's asleep bodies wake their islands.
+    let external = next.contacts[..external_count.min(next.contacts.len())].to_vec();
+    for i in asleep_in(&next, &external) {
+        wake_island(&mut next, &mut manager.parked, i);
+    }
+    let mut out = calculate_impl(next, manager, shapes, carry, external_count, registrations)?;
     for (body, next) in out.groups.bodies.iter_mut().zip(update_next) {
         body[0x318 / 4] = next;
     }
@@ -257,18 +494,25 @@ pub fn calculate_with_shapes(
     manager: &Manager,
     shapes: &[contact_groups::Shape],
 ) -> Result<Output, Error> {
-    calculate_impl(input, manager, shapes, None, input.contacts.len(), &mut [])
+    calculate_impl(
+        input.clone(),
+        manager.clone(),
+        shapes,
+        None,
+        input.contacts.len(),
+        &mut [],
+    )
 }
 
 fn calculate_impl(
-    input: &contact_groups::Input,
-    manager: &Manager,
+    input: contact_groups::Input,
+    manager: Manager,
     shapes: &[contact_groups::Shape],
     carry: Option<&contact_groups::Carry>,
     external_count: usize,
     registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<Output, Error> {
-    validate(input, shapes, carry)?;
+    validate(&input, shapes, carry)?;
     if !registrations.is_empty() && registrations.len() != input.bodies.len() {
         return Err(Error("deformation registrations differ from owned bodies"));
     }
@@ -302,7 +546,6 @@ fn calculate_impl(
             .any(|v| !v.is_finite())
         || input.bodies.iter().any(|b| {
             b[0x28 / 4] != 0
-                || f(b, 0x3b4) != f32::MAX
                 || [0x338, 0x33c, 0x340].iter().any(|&o| b[o / 4] != 0)
                 || (0x40c..=0x410).any(|o| (b[o / 4] >> (o % 4 * 8)) & 255 > 1)
                 || (b[0x390 / 4] & 255) > 1
@@ -314,13 +557,23 @@ fn calculate_impl(
     {
         return Err(Error("unsupported grouped physical manager"));
     }
+    let pool_used = input.contacts.len();
+    let mut manager = manager;
     let mut groups = if let Some(carry) = carry {
-        contact_groups::calculate_carried(input, shapes, carry, external_count)?
+        contact_groups::calculate_carried_owned(
+            input,
+            shapes,
+            carry,
+            external_count,
+            &mut manager.parked,
+        )?
     } else {
-        contact_groups::calculate_with_geometry(input, shapes, external_count)?
+        contact_groups::calculate_with_geometry(&input, shapes, external_count)?
     };
-    let mut manager = manager.clone();
     let mut visits = Vec::new();
+    // AD8130: status 1 sleeps (B24D70), status 2 parks (B24DF0), island by
+    // island after every frame.
+    let mut resting: Vec<(u32, Vec<usize>)> = Vec::new();
     let roots = chain(groups.world[1], &groups.bodies, 0x1c);
     for root in roots {
         let ids = chain(groups.bodies[root][8 / 4], &groups.bodies, 0x2fc);
@@ -426,7 +679,24 @@ fn calculate_impl(
                 })
                 .collect(),
         };
-        let frame_input = impact_frame::Input {
+        // B7B850 tests the park range only for an island held by a one-body
+        // or static contact.
+        let anchored = || {
+            contact_ids.iter().any(|&i| {
+                let c = &groups.contacts[i];
+                flag(c, 0xc) || c[8 / 4] == 0
+            })
+        };
+        let park = manager
+            .park
+            .filter(|_| anchored())
+            .map(|(point, scale)| impact_frame::Park {
+                point,
+                scale,
+                radii: ids.iter().map(|&i| f(&groups.bodies[i], 0x3fc)).collect(),
+            });
+        let mut frame_input = impact_frame::Input {
+            park,
             bodies: settings,
             gravity: manager.gravity,
             correction: manager.correction.clone(),
@@ -462,6 +732,8 @@ fn calculate_impl(
             let mut taken: Vec<_> = ids.iter().map(|&i| registrations[i].take()).collect();
             let raw: Vec<_> = contact_ids.iter().map(|&i| groups.contacts[i]).collect();
             let bodies: Vec<_> = ids.iter().map(|&i| &groups.bodies[i]).collect();
+            // The shared row buffer moves through the frame, as below.
+            let rows = std::mem::take(&mut frame_input.step.rows);
             let result = crate::deformation_world::calculate_multi_group(
                 &frame_input,
                 &bodies,
@@ -470,6 +742,7 @@ fn calculate_impl(
                 &mut taken,
                 shared_seed.expect("registered seed"),
                 shared_toggle,
+                Some(rows),
             );
             for (&i, registration) in ids.iter().zip(taken) {
                 registrations[i] = registration;
@@ -492,12 +765,14 @@ fn calculate_impl(
                 })
                 .collect();
             registration.random_seed = shared_seed.unwrap_or(registration.random_seed);
+            let rows = std::mem::take(&mut frame_input.step.rows);
             let (frame, contacts) = crate::deformation_world::calculate_group(
                 &frame_input,
                 &groups.bodies[body],
                 &raw,
                 shapes,
                 registration,
+                Some(rows),
             )?;
             shared_seed = Some(registration.random_seed);
             for (&i, mut c) in contact_ids.iter().zip(contacts) {
@@ -508,10 +783,22 @@ fn calculate_impl(
         } else {
             impact_frame::calculate_owned(frame_input)?
         };
+        // B77310: a nonzero status clears the island's contacts' written-back
+        // impulse (B0F0A0, +0x3C); AD8130 then sleeps a status-1 island and
+        // parks a status-2 one (below, after every frame). Cars never sleep
+        // (+0x3B4 FLT_MAX), so a status 1 with a car is a capacity overflow.
         if frame.status != 0 {
-            return Err(Error(
-                "unsupported grouped physical sleep or capacity status",
-            ));
+            // A car cannot pass the sleep test (turnOffTime FLT_MAX), so its
+            // status 1 is a capacity overflow; nor leave a FLT_MAX radius.
+            if frame.status == 1 && ids.iter().any(|&i| f(&groups.bodies[i], 0x3b4) == f32::MAX) {
+                return Err(Error(
+                    "unsupported grouped physical sleep or capacity status",
+                ));
+            }
+            for &i in &contact_ids {
+                groups.contacts[i][0x3c / 4] = 0;
+            }
+            resting.push((frame.status, ids.clone()));
         }
         for (&k, j) in groups.joint_groups[root]
             .iter()
@@ -573,6 +860,15 @@ fn calculate_impl(
         manager.cached_pair = frame.step.cached_pair;
         manager.cached_material = frame.step.cached_material;
     }
+    for (status, ids) in &resting {
+        for &i in ids {
+            if *status == 1 {
+                sleep_body(&mut groups, i);
+            } else {
+                park_body(&mut groups, &mut manager.parked, i);
+            }
+        }
+    }
     if let Some(seed) = shared_seed {
         for registration in registrations.iter_mut().flatten() {
             registration.random_seed = seed;
@@ -582,7 +878,7 @@ fn calculate_impl(
     Ok(Output {
         groups,
         manager,
-        pool_used: input.contacts.len(),
+        pool_used,
         visits,
     })
 }
@@ -633,6 +929,8 @@ mod tests {
             workspace: vec![[[0.; 4]; 2]; 2],
             cached_pair: None,
             cached_material: [0.; 13],
+            park: None,
+            parked: 0,
         };
         let before = input.clone();
         let scratch = manager.clone();
@@ -767,6 +1065,8 @@ mod tests {
             workspace: vec![[[0.; 4]; 2]; 2],
             cached_pair: None,
             cached_material: [0.; 13],
+            park: None,
+            parked: 0,
         };
         let out = calculate(&input, &manager).unwrap();
         assert_eq!(out.visits.len(), 1);

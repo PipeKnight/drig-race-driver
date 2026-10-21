@@ -302,6 +302,7 @@ pub(crate) fn calculate(
     shapes: &[Shape],
     random_seed: u32,
     toggle: bool,
+    rows: Option<Vec<crate::contact_rows::Row>>,
 ) -> Result<Output, Error> {
     if frame.bodies.len() != bodies.len()
         || frame.step.bodies.len() != bodies.len()
@@ -346,7 +347,7 @@ pub(crate) fn calculate(
         random_seed,
         toggle,
     };
-    let (frame, c) = impact_frame::calculate_with_callbacks(frame, &context)?;
+    let (frame, c) = impact_frame::calculate_with_callbacks_rows(frame, rows, &context)?;
     Ok(Output {
         frame,
         owners: c.owners,

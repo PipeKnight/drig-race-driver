@@ -212,6 +212,7 @@ fn run() -> Result<(), Failure> {
             .collect();
         let frame = impact_frame::calculate(&impact_frame::Input {
             correction,
+            park: None,
             gravity,
             bodies: settings,
             step: Input {

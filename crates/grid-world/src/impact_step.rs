@@ -110,6 +110,12 @@ fn force_update(body: &mut Body, delta: f32) {
     }
 }
 pub(crate) fn validate(input: &Input) -> Result<(), Error> {
+    validate_rows(input, &input.rows)
+}
+
+/// [`validate`] with the row buffer the step will use (the caller may have
+/// taken it out of `input`).
+pub(crate) fn validate_rows(input: &Input, rows: &[Row]) -> Result<(), Error> {
     let n = input.contacts.len();
     let delta = input.parameters[0] * input.parameters[1];
     if n > crate::MAX_WORLD_CONTACTS
@@ -117,9 +123,9 @@ pub(crate) fn validate(input: &Input) -> Result<(), Error> {
         || input.bodies.len() > crate::MAX_WORLD_BODIES
         || input.materials.is_empty()
         || input.materials.len() > 8
-        || input.rows.is_empty()
-        || input.rows.len() > crate::MAX_SOLVER_ROWS
-        || input.capacity > input.rows.len()
+        || rows.is_empty()
+        || rows.len() > crate::MAX_SOLVER_ROWS
+        || input.capacity > rows.len()
         || input.iterations > 32
         || input.workspace.len() != input.bodies.len()
         || input

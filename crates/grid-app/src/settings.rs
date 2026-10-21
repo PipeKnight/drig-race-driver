@@ -89,6 +89,12 @@ pub struct Diagnostics {
     /// Continue by themselves after this long (unattended career checks,
     /// docs/CAREER_SCREEN.md).
     pub results_continue: Option<f64>,
+    /// Milliseconds slept in every vehicle tick: a forced slow tick for
+    /// frame-rate checks (docs/FRAME_STEPPING.md).
+    pub tick_delay_ms: Option<f64>,
+    /// Catch-up cap of the interactive app: at most this many fixed ticks per
+    /// rendered frame; 0 restores Bevy's 250 ms clamp (docs/FRAME_STEPPING.md).
+    pub max_ticks_per_frame: Option<u32>,
 }
 
 impl Default for Diagnostics {
@@ -108,6 +114,8 @@ impl Default for Diagnostics {
             replay_capture: None,
             flashback_capture: None,
             results_continue: None,
+            tick_delay_ms: None,
+            max_ticks_per_frame: None,
         }
     }
 }
@@ -134,6 +142,8 @@ impl Diagnostics {
             replay_capture: text("GRID_REPLAY_CAPTURE").and_then(|v| v.parse().ok()),
             flashback_capture: text("GRID_FLASHBACK_CAPTURE").and_then(|v| v.parse().ok()),
             results_continue: text("GRID_RESULTS_CONTINUE").and_then(|v| v.parse().ok()),
+            tick_delay_ms: text("GRID_TICK_DELAY_MS").and_then(|v| v.parse().ok()),
+            max_ticks_per_frame: text("GRID_MAX_TICKS_PER_FRAME").and_then(|v| v.parse().ok()),
         }
     }
 
@@ -161,6 +171,10 @@ impl Diagnostics {
             }
             "results_continue" => {
                 self.results_continue = Some(value.parse().map_err(|_| number(key))?)
+            }
+            "tick_delay_ms" => self.tick_delay_ms = Some(value.parse().map_err(|_| number(key))?),
+            "max_ticks_per_frame" => {
+                self.max_ticks_per_frame = Some(value.parse().map_err(|_| number(key))?)
             }
             _ => return Err(format!("unknown diagnostics setting `{key}`")),
         }
@@ -962,6 +976,8 @@ device=pad steering_deadzone=0.1
 ground_effects = off
 autopilot = on
 prop_script_speed = 12.5
+max_ticks_per_frame = 2
+tick_delay_ms = 20
 "#;
 
     #[test]
@@ -999,6 +1015,8 @@ prop_script_speed = 12.5
         assert_eq!(s.input().unwrap().device, crate::input::Device::Pad);
         assert!(!s.diagnostics.ground_effects && s.diagnostics.autopilot);
         assert_eq!(s.diagnostics.prop_script_speed, Some(12.5));
+        assert_eq!(s.diagnostics.max_ticks_per_frame, Some(2));
+        assert_eq!(s.diagnostics.tick_delay_ms, Some(20.));
     }
 
     #[test]

@@ -382,6 +382,7 @@ fn run() -> Result<(), Failure> {
             .collect();
         let input = impact_frame::Input {
             correction,
+            park: None,
             gravity,
             bodies: settings,
             step: Input {
@@ -460,6 +461,8 @@ fn run() -> Result<(), Failure> {
                     .collect(),
                 cached_pair: input.step.cached_pair,
                 cached_material: input.step.cached_material,
+                park: None,
+                parked: 0,
             };
             let result = if geometry_sequence {
                 calculate_carried_geometry(

@@ -58,3 +58,15 @@ pub mod tyre_smoke;
 pub mod tyre_tables;
 pub mod vehicle_world_diagnostic;
 pub mod virtual_race;
+
+/// The installation's NDBS database (`database/schema.bin` with
+/// `database/database.bin`). A missing file is named in the error: a bare
+/// `os error 2` was all a bundled APK without `database/` showed (F539).
+pub fn read_database(
+    root: &std::path::Path,
+) -> Result<grid_formats::database::Database, Box<dyn std::error::Error>> {
+    let file = |name: &str| {
+        std::fs::read(root.join(name)).map_err(|e| format!("{name}: {e}"))
+    };
+    Ok(grid_formats::database::read(&file("database/schema.bin")?, &file("database/database.bin")?)?)
+}

@@ -309,6 +309,8 @@ fn ray_cast(
 /// to `end` (translation only): at most `capacity` hits, triangle by triangle
 /// in candidate order. A triangle the mesh already touches at the start gives
 /// the B7F740 contact with time 0; otherwise the ray cast's time of impact.
+/// `checked`: [`packed_contacts::check`] of this unchanged chunk, when the
+/// caller holds it (its mesh validity is then not recomputed).
 #[allow(clippy::too_many_arguments)]
 pub fn sweep_packed<'m>(
     mesh: impl Into<convex_distance::Hull<'m>>,
@@ -320,6 +322,7 @@ pub fn sweep_packed<'m>(
     shape_margin: f32,
     query: &ContactSettings,
     capacity: usize,
+    checked: Option<&crate::packed_contacts::Checked>,
 ) -> Result<Vec<Hit>, Error> {
     let mesh = mesh.into();
     let mut hits = Vec::new();
@@ -334,7 +337,8 @@ pub fn sweep_packed<'m>(
         std::array::from_fn(|j| a0[j].min(b0[j])),
         std::array::from_fn(|j| a1[j].max(b1[j])),
     ];
-    let candidates = packed_candidates::collect_set(track, bounds, 4096, None, false)?;
+    let candidates =
+        packed_candidates::collect_set(track, bounds, 4096, checked.map(|c| c.mesh), false)?;
     let mut rotation = start;
     rotation[3] = [0., 0., 0., 1.];
     let mut context = convex_distance::Context::new();

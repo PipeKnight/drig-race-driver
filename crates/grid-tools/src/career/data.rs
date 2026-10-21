@@ -477,9 +477,7 @@ impl Catalogue {
     /// Reads `database/database.bin` and `gameconfig/rewards.xml` of an
     /// installation.
     pub fn load(root: &std::path::Path) -> std::result::Result<Self, Box<dyn std::error::Error>> {
-        let schema = std::fs::read(root.join("database/schema.bin"))?;
-        let data = std::fs::read(root.join("database/database.bin"))?;
-        let mut catalogue = Self::from_database(&grid_formats::database::read(&schema, &data)?)?;
+        let mut catalogue = Self::from_database(&crate::read_database(root)?)?;
         let rewards = root.join("gameconfig/rewards.xml");
         if rewards.exists() {
             let bytes = std::fs::read(rewards)?;

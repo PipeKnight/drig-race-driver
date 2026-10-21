@@ -217,6 +217,7 @@ pub(crate) fn run(deformation: bool, active: bool) -> Result<(), Failure> {
             .collect();
         let mut input = impact_frame::Input {
             correction: None,
+            park: None,
             gravity,
             bodies: settings,
             step: Input {

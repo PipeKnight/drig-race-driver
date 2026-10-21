@@ -14,7 +14,7 @@ set "GRID_GRAPHICS_AA=dlaa"
 if /I "%~3"=="smaa" set "GRID_GRAPHICS_AA=smaa"
 if /I "%~3"=="taa" set "GRID_GRAPHICS_AA=taa"
 if not exist "%GRID_GRAPHICS_EXE%" (
-  echo Optional native graphics build is missing. See docs\LAMP_REFLECTOR_RESEARCH.md.
+  echo Optional native graphics build is missing. See docs\ASPHALT_TEMPORAL_DETAIL.md.
   popd
   pause
   exit /b 2
@@ -32,7 +32,7 @@ set "GRID_GRAPHICS_CONTACTS=--body-contacts derive"
 if exist "local\body-contact-directions.bin" set "GRID_GRAPHICS_CONTACTS=--body-contacts local\body-contact-directions.bin"
 if exist "local\body-impact-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --body-events local\body-impact-parameters.bin"
 if exist "local\deformation-parameters.bin" set "GRID_GRAPHICS_CONTACTS=%GRID_GRAPHICS_CONTACTS% --deformation local\deformation-parameters.bin"
-set "GRID_GRAPHICS_LOG=local\graphics\manual-signals-dlaa-%RANDOM%-%RANDOM%.log"
+set "GRID_GRAPHICS_LOG=local\graphics\manual-asphalt-dlaa-%RANDOM%-%RANDOM%.log"
 echo Optional smooth asphalt; AA: %GRID_GRAPHICS_AA%; resolution: %GRID_GRAPHICS_RESOLUTION%.
 echo No upscaling or frame generation. Unsupported devices use SMAA; see log.
 echo Arrows/WASD drive; Space handbrake; Escape/P pause; R restart.

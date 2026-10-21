@@ -50,7 +50,15 @@ pub fn advance_with_geometry(
     shapes: &[contact_groups::Shape],
     external_count: usize,
 ) -> Result<grouped_physical_frame::Output, Error> {
-    advance_owned(previous, slots, used, shapes, external_count, None, &mut [])
+    advance_owned(
+        previous.clone(),
+        Some(slots.to_vec()),
+        used,
+        shapes,
+        external_count,
+        None,
+        &mut [],
+    )
 }
 
 /// Advance poses, then obtain fresh world-space geometry before grouping/solving.
@@ -68,8 +76,32 @@ pub fn advance_with_geometry_provider(
     ) -> Result<Vec<contact_groups::Contact>, Error>,
 ) -> Result<grouped_physical_frame::Output, Error> {
     advance_owned(
-        previous,
-        slots,
+        previous.clone(),
+        Some(slots.to_vec()),
+        external_count,
+        shapes,
+        external_count,
+        Some(&mut provider),
+        &mut [],
+    )
+}
+
+/// `advance_with_geometry_provider` consuming the world: its own contact pool
+/// holds the external prefix (the caller wrote it in place), so neither the
+/// bodies nor the pool are copied. On error the world is gone; a caller that
+/// must keep it passes a copy.
+pub fn advance_with_geometry_provider_in(
+    world: grouped_physical_frame::Output,
+    external_count: usize,
+    shapes: &[contact_groups::Shape],
+    mut provider: impl FnMut(
+        &mut [contact_groups::Body],
+        usize,
+    ) -> Result<Vec<contact_groups::Contact>, Error>,
+) -> Result<grouped_physical_frame::Output, Error> {
+    advance_owned(
+        world,
+        None,
         external_count,
         shapes,
         external_count,
@@ -90,8 +122,8 @@ pub fn advance_with_deformation(
     registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<grouped_physical_frame::Output, Error> {
     advance_owned(
-        previous,
-        slots,
+        previous.clone(),
+        Some(slots.to_vec()),
         external_count,
         shapes,
         external_count,
@@ -100,22 +132,49 @@ pub fn advance_with_deformation(
     )
 }
 
+/// `advance_with_deformation` consuming the world (see
+/// `advance_with_geometry_provider_in`).
+pub fn advance_with_deformation_in(
+    world: grouped_physical_frame::Output,
+    external_count: usize,
+    shapes: &[contact_groups::Shape],
+    provider: &mut grouped_physical_frame::GeometryProvider<'_>,
+    registrations: &mut [Option<&mut crate::deformation_world::Registration>],
+) -> Result<grouped_physical_frame::Output, Error> {
+    advance_owned(
+        world,
+        None,
+        external_count,
+        shapes,
+        external_count,
+        Some(provider),
+        registrations,
+    )
+}
+
+/// `slots`: the contact pool to step with; `None` takes the world's own.
 #[allow(clippy::too_many_arguments)]
 fn advance_owned(
-    previous: &grouped_physical_frame::Output,
-    slots: &[contact_groups::Contact],
+    mut previous: grouped_physical_frame::Output,
+    slots: Option<Vec<contact_groups::Contact>>,
     used: usize,
     shapes: &[contact_groups::Shape],
     external_count: usize,
     provider: Option<&mut grouped_physical_frame::GeometryProvider<'_>>,
     registrations: &mut [Option<&mut crate::deformation_world::Registration>],
 ) -> Result<grouped_physical_frame::Output, Error> {
+    // The retained pool's capacity; `None` steps with the pool itself.
+    let capacity = previous.groups.contacts.len();
+    let mut slots = match slots {
+        Some(slots) => slots,
+        None => std::mem::take(&mut previous.groups.contacts),
+    };
     let world = previous.groups.world;
     let selector = world[5];
     if selector > 1
         || previous.pool_used != 0
-        || previous.groups.contacts.len() > crate::MAX_WORLD_CONTACTS
-        || slots.len() != previous.groups.contacts.len()
+        || capacity > crate::MAX_WORLD_CONTACTS
+        || slots.len() != capacity
         || used > slots.len()
         || external_count > used
         || previous
@@ -136,29 +195,36 @@ fn advance_owned(
         order.push(i);
         id = previous.groups.bodies[i][0x300 / 4];
     }
-    if order.len() != previous.groups.bodies.len()
+    // Bodies outside the active chain are asleep (B24D70: +0x400 = -1).
+    let asleep = previous
+        .groups
+        .bodies
+        .iter()
+        .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+        .count();
+    if order.len() + asleep != previous.groups.bodies.len()
         || world[7 + (1 - selector) as usize] != 0
         || world[9 + (1 - selector) as usize] != 0
-        || order.last().map(|&i| i as u32 + 1) != Some(world[9 + selector as usize])
+        || order.last().map(|&i| i as u32 + 1).unwrap_or(0) != world[9 + selector as usize]
     {
         return Err(Error("inconsistent carried world heads"));
     }
     let input = contact_groups::Input {
-        bodies: previous.groups.bodies.clone(),
+        bodies: std::mem::take(&mut previous.groups.bodies),
         contacts: slots[..used].to_vec(),
         active_order: order,
         selector,
-        joints: previous.groups.joints.clone(),
+        joints: std::mem::take(&mut previous.groups.joints),
     };
     let carry = contact_groups::Carry {
         dirty_head: world[4],
-        contact_capacity: previous.groups.contacts.len(),
+        contact_capacity: capacity,
     };
     let mut out = if let Some(provider) = provider {
         if !registrations.is_empty() {
             grouped_physical_frame::calculate_tick_carried_deforming(
-                &input,
-                &previous.manager,
+                input,
+                previous.manager,
                 shapes,
                 &carry,
                 provider,
@@ -166,8 +232,8 @@ fn advance_owned(
             )?
         } else {
             grouped_physical_frame::calculate_tick_carried_with_provider(
-                &input,
-                &previous.manager,
+                input,
+                previous.manager,
                 shapes,
                 &carry,
                 provider,
@@ -183,8 +249,8 @@ fn advance_owned(
         )?
     };
     let active = out.groups.contacts;
-    out.groups.contacts = slots.to_vec();
-    out.groups.contacts[..active.len()].copy_from_slice(&active);
+    slots[..active.len()].copy_from_slice(&active);
+    out.groups.contacts = slots;
     out.pool_used = 0;
     Ok(out)
 }
@@ -312,6 +378,8 @@ mod tests {
             workspace: vec![[[0.; 4]; 2]; 2],
             cached_pair: None,
             cached_material: [0.; 13],
+            park: None,
+            parked: 0,
         };
         calculate_cold(&input, &manager, &[]).unwrap()
     }

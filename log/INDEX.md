@@ -8,6 +8,15 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F547](F0547.md) | 2026-10-21 | Playable 945575e57651 with the cheaper tick and parking (F546), portable copy and APKs 6087fbcafa30 |
+| [F546](F0546.md) | 2026-10-21 | Physics tick cost and parking |
+| [F545](F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
+| [F544](F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
+| [F543](F0543.md) | 2026-10-21 | Physics steps per rendered frame: original one step of the frame delta, port catch-up, no port |
+| [F542](F0542.md) | 2026-10-21 | Playable c4b2673f4cfc with body sleeping (F541), portable copy and APKs ee1880b472d2 |
+| [F541](F0541.md) | 2026-10-21 | Rigid-body sleeping for prop pieces and lost wheels |
+| [F540](F0540.md) | 2026-10-21 | APKs 239583f319e3: drift and drift-profile builds share one bundle |
+| [F539](F0539.md) | 2026-10-21 | Bundled APK races start: Donington bundle carries the database; profile APK on the drift bundle |
 | [F538](F0538.md) | 2026-10-21 | grid-app --headless: a full event at CPU speed, bit-identical to the window; tick time by stage and world size |
 | [F537](F0537.md) | 2026-10-21 | A held lost wheel no longer teleports the pieces of a later break (row 90) |
 | [F536](F0536.md) | 2026-10-21 | Android seed reuse: build_android.ps1 drops MSYSTEM/CYGWIN so cargo-ndk paths match the seed |
