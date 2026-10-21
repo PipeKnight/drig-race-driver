@@ -52,6 +52,7 @@ mod ground_detail;
 mod ground_effect_assets;
 mod input;
 mod mesh_stream;
+mod mobile;
 mod motion_capture;
 mod particles;
 mod pause_menu;
@@ -1087,6 +1088,9 @@ fn append_entities(
 fn main() {
     #[cfg(target_os = "android")]
     android::init();
+    // Mobile preset: more compute threads, before Bevy creates its pools.
+    #[cfg(target_os = "android")]
+    mobile::init_threads();
     // Bundled data still being copied (F451): the copy screen took over.
     #[cfg(target_os = "android")]
     if !android::data_ready() {
@@ -2926,6 +2930,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
             perf_test::install(&mut app);
+            // Android: the mobile preset (lower resolution, shadows, draw distance).
+            mobile::install(&mut app);
             // The Race Options front end with Driver Aids before the race
             // (docs/DRIVER_AIDS.md); not for scripted runs.
             if profile.front_end != Some(false)

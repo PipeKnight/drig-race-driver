@@ -2,8 +2,9 @@
 //! view renders into an image of at most that many rows, and a second camera
 //! stretches it over the window. Independently authored; GRID's PC renderer
 //! always renders at the window size. On a phone, above Full HD costs GPU
-//! time without a visible gain (owner, 2026-10-18), so Android defaults to
-//! 1080 rows. The HUD, pause menu and touch zones are UI on the 3D camera, so
+//! time without a visible gain (owner, 2026-10-18); the mobile preset (Android
+//! default, `mobile.rs`) renders 720 rows (owner, 2026-10-22: a PS3-era
+//! picture on the phone is fine for a steady 60 FPS). The HUD, pause menu and touch zones are UI on the 3D camera, so
 //! they are drawn into the same image and scaled with it (retargeting every
 //! HUD module to the window camera was not a small change).
 use bevy::camera::RenderTarget;
@@ -28,10 +29,10 @@ impl RenderHeight {
         }
     }
 
-    /// Android: 1080 rows; desktop: native.
+    /// The mobile preset (Android): `mobile::RENDER_ROWS`; desktop: native.
     pub fn platform_default() -> Self {
-        if cfg!(target_os = "android") {
-            Self::Rows(1080)
+        if crate::mobile::enabled() {
+            Self::Rows(crate::mobile::RENDER_ROWS)
         } else {
             Self::Native
         }

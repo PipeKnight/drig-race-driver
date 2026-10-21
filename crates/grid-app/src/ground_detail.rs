@@ -218,7 +218,13 @@ fn load(root: &Path, route: &Route) -> Result<Loaded, Box<dyn std::error::Error>
     let patches =
         ground_cover::read_patches(&super::read(&root.join(route.track_file("grass.grs")))?)?;
     let config = super::read(&root.join(route.track_file("ground_cover.xml")))?;
-    let distances = ground_cover::read_distances(&binxml::read(&config)?)?;
+    let mut distances = ground_cover::read_distances(&binxml::read(&config)?)?;
+    // Mobile preset: shorter cover (the count drops with the square).
+    if super::mobile::enabled() {
+        for lod in &mut distances.lods {
+            *lod *= super::mobile::GROUND_COVER_SCALE;
+        }
+    }
     let package = route.track_file("ground_cover.pssg");
     let bytes = super::read(&root.join(&package))?;
     let types = ground_cover::read_types(&pssg::read_tree(&bytes)?)?;

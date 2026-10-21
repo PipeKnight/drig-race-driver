@@ -867,3 +867,63 @@ phone-like case the owner named: the player laps away from the crash sites, so a
 155 pieces are parked and 40 more asleep. The races diverge once the first island parks, so the
 piece counts differ; base (which already sleeps, F541) has no asleep or parked counters. The world
 advance at 0 pieces also falls (0.19 → 0.12 ms on the Nürburgring, 8 cars), from the row move.
+
+## Mobile preset (F549)
+
+Owner, 2026-10-22: a steady 60 FPS on phones, including weaker ones. The phone picture may drop to
+PS3-era quality, and the desktop picture stays as it is. `crates/grid-app/src/mobile.rs` is the
+Android default. It is off on the desktop unless `GRID_MOBILE_PRESET=1`; `GRID_MOBILE_PRESET=0`
+turns it off on Android for comparisons. It changes presentation only.
+
+**What the phone logs showed** (owner's profile APK 6087fbcafa30, Adreno 740, 2308 × 1080, display
+60/120 Hz, Fifo; `log-20261022-004650.txt` and its siblings):
+
+- **Front end over the 3D grid, simulation off:** 55 ms per frame, steady for 30 s.
+  - `present_frames` waits 21.6 ms per frame: the GPU is the limit.
+  - `drive_tick` takes 10.7 ms per frame at 3.3 calls with no ticks running.
+  - [I] The first profile window's `allocate_and_free_meshes` (4.6 ms) and
+    `prepare_assets<GpuImage>` (3.1 ms) were startup uploads averaged over that window, not
+    steady churn. The second window does not have them, and the new `asset_churn` line reads 0
+    after the first 10 s on the desktop.
+- **Smooth driving:** 25 ms per frame.
+  - `present_frames` waits 1.8 ms: CPU-bound.
+  - The main app takes 19 ms, of which `drive_tick` is 6 ms.
+  - The render thread does 10.4 ms of its own work. The rest of its 23 ms is waiting for
+    visibility tasks on the 4 compute threads, each busy about 7.5 ms.
+  - Core3d runs twice per frame: the main view and the OSD camera.
+- **Entity counts** (desktop, Nürburgring drift battle): 17,785 mesh entities, 15,748 of them
+  small static ones (a bounding radius under 4 m), most of them the 11,962 breakable prop
+  pieces. Every view and shadow cascade visits them.
+
+**The preset:**
+
+| Change | Value | Why |
+|---|---|---|
+| 3D view rows (`render_scale`) | 720, stretched over the screen | the GPU-bound phases; this phone rendered its native 1080 rows before. `[video] render_height` still overrides. |
+| Sun shadows | 1 cascade, 1024 map, to 45 m | one shadow view instead of four (visibility, binning, the shadow pass) |
+| Small static meshes | no shadow; not drawn beyond 110 m (`VisibilityRange`) | most entities are small props; culled ones skip extraction, queueing and batching |
+| Ground cover | 0.4 × the authored LOD distances | about 0.16 × the sprites |
+| Compute threads | cores − 2, at least 4 (6 on an 8-core phone) | Bevy gives 4 of 8 cores to compute and leaves IO and async threads idle |
+
+**Measurement switches.** `perf_test` keeps the per-part switches. The Auto cycle (14 steps of 8 s)
+now ends with `mobile:render1080` (full resolution), `mobile:render540` and `mobile:msaa_off`; under
+the preset, the "normal" step is the preset itself. The Auto cycle also runs in the pre-race menu.
+The cycle labels `light_shadows`, `no_small_casters` and `far_props` are for runs without the preset
+(`GRID_PERF_TEST`).
+
+The new `asset_churn` line, every 10 s, reports Image and Mesh assets added, modified and removed
+per frame, with the most changed meshes named by an entity that draws them.
+
+**Checks:**
+- The desktop default is unchanged: every preset change is behind `mobile::enabled()`. The
+  `asset_churn` line is the only new desktop output.
+- Desktop with `GRID_MOBILE_PRESET=1 GRID_PERF_TEST=auto`: the whole cycle ran without a panic,
+  and `render_scale` logged 1152 × 720, then 1280 × 800 native, then 864 × 540.
+- [Not measured] The phone gain. The owner's next run of the Auto cycle (in the menu and while
+  driving) gives the table.
+
+**Next, by the data:**
+- Draw intact breakable props as one mesh each instead of their pieces (about 12,000 entities on
+  the Nürburgring).
+- Render the OSD only when it changes.
+- A lower preset for weaker phones.
