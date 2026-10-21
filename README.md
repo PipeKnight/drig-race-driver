@@ -70,7 +70,7 @@ The Android build is experimental. It runs the same program on arm64 phones (And
 
 The original `grid.exe` is studied with Ghidra and other reverse-engineering tools. Its behaviour is then written again in Rust and checked against the original: recorded driving, AI and audio traces, plus bit-exact comparisons of individual routines. The port does not reuse original code or bundle original data.
 
-Research notes for each subsystem live in [docs/](docs/). The running record of findings, decisions and verification is [PROJECT_LOG.md](PROJECT_LOG.md).
+Research notes for each subsystem live in [docs/](docs/). The current state is [PROJECT_LOG.md](PROJECT_LOG.md); the running record of findings, decisions and verification is one file per entry in [log/](log/INDEX.md).
 
 ## Repository layout
 

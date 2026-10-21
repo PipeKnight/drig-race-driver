@@ -1,0 +1,3 @@
+### 7 October 2026 — coupled active wheel step, verification in progress
+
+- Added tyre_response tail and coupled comparison using F100prepared matrices, nonzero springs/preloads, actual normal contacts and tyre impulses. Drive/brake/differential increments zero; source tyre/input timing still open. Initial coupled-tyre-20261007-01/ finds560lateral-speed-only differences across221cases; incorrect old-speed-first grouping corrected against instructions. Debug02/ now **240cases/960wheels/12480words exact**. [In-progress contract](docs/COUPLED_TYRE_STEP.md). Release/regression/workspace checks pending; not yet a committed verified milestone. Prior response matrices separatelyacb2653.

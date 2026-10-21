@@ -1,0 +1,4 @@
+### 6 October 2026 — requested timed native input controller
+
+- Owner requested a program allowing agent-controlled buttons and hold durations for more precise reference driving. Implemented an independently authored GRID-only Rust/Win32 scan-code controller using the already installed compiler; native build succeeds. No new software/driver installed. Foreground/path/PID/creation-time guards, bounded holds and release handling are implemented, but input response/timing remain untested. See [timed input experiment](docs/TIMED_INPUT.md).
+- Before the first input test, Computer Use reported a physical Escape stop during refreshed GRID activation. Stopped all app input immediately, including the proposed native controller test; no native key event was sent. Reference still identified as PID 19680 with the same private executable/start time. No load trace has started. Driving and profile-persistence milestones remain confirmed from earlier observations.

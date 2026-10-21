@@ -30,7 +30,7 @@ for r0 in [repo] + extra_roots:
         corpus_files.append(r0)
         continue
     corpus_files += [os.path.join(r0, "PROJECT_LOG.md"), os.path.join(r0, "AGENTS.md")]
-    for base, exts in (("docs", (".md", ".txt", ".tsv", ".json")), ("tools", (".py", ".ps1", ".cmd", ".rs", ".h", ".c", ".cpp", ".md", ".txt", ".json"))):
+    for base, exts in (("log", (".md",)), ("docs", (".md", ".txt", ".tsv", ".json")), ("tools", (".py", ".ps1", ".cmd", ".rs", ".h", ".c", ".cpp", ".md", ".txt", ".json"))):
         for root, dirs, files in os.walk(os.path.join(r0, base)):
             dirs[:] = [d for d in dirs if d != "__pycache__"]
             for f in files:

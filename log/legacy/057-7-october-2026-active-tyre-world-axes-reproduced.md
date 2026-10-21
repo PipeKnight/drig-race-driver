@@ -1,0 +1,4 @@
+### 7 October 2026 — active tyre world axes reproduced
+
+- Added wheel_frame::tyre_axes and optional diagnostic activebranch. Whole9c13d0 runs withsuppliedwheel+20/+24coefficients, preserves SIMDgrouping andnegativezero subtraction. **216cases/17280words exact debug/release**; inactive216/10368regressionexactbothprofiles.24retained contexts were inactive; activebranch deliberatelyenabledforreplay, notobservedactive-inputfidelity. [Contract](docs/TYRE_AXES.md).
+- Final tyre-axes-20261007-01/,02/; wheel-frame-regression-20261007-01/,02/. ProbeSHA7b32dd8bc95e8a10b4b32316a1bf7cff88110242243a9f2fd1dace09881d1762. Constants-tool range syntax corrected; nofailedcomparisons. **86workspace tests**, fmt/warnings-deniedClippy pass tyre-axes-tests/clippy-20261007.txt. No patches/stubs/writablemappedpages/liveinjection; no toolsinstalled/game/userfilechanges. Sourcemechanics separately55891fd. Continue friction/activeforce consumers and coefficient/input provenance.

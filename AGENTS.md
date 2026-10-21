@@ -8,11 +8,18 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
 
 ## Durable records
 
-- Read `PROJECT_LOG.md` at the start of work; use it as the current project state and navigation index.
-- Update `PROJECT_LOG.md` during substantive work and before ending a turn. Record successful work, failed experiments, decisions, exact tool/build versions, evidence paths, uncertainty and next actions.
-- Put detailed research in `docs/`; link it from the project log. Do not rely on conversation memory as the only record of a finding.
+- Read `PROJECT_LOG.md` (the short state file) at the start of work. Entries are one file each in `log/` (`log/F0512.md` holds F512); grep `log/` for details (`grep -rn "F512 " log/`, `grep -rln "Redgate" log/`), never read all of it. `log/INDEX.md` lists every entry in one line.
+- Record substantive work as a log entry before ending a turn: successful work, failed experiments, decisions, exact tool/build versions, evidence paths, uncertainty and next actions. Create it with `py -I tools/log_entry.py new "Title"` (next free number from freshly fetched origin/main and `log/`); do not edit `log/INDEX.md` or the generated index in `PROJECT_LOG.md` by hand. Edit the state sections of `PROJECT_LOG.md` only when an area's status, open problems or next actions change.
+- Push flow: squash the work and its entry into one commit; `git fetch origin && git rebase origin/main` (if it stops on `log/` or `PROJECT_LOG.md`: `py -I tools/log_entry.py check --fix`, then `git rebase --continue`); `py -I tools/log_entry.py check --fix` (renumbers an entry whose number another session took, regenerates the indexes) and `git commit --amend` what it changed; `check` passes; push. On a rejected push, repeat from the fetch.
+- Put detailed research in `docs/`; link it from the log entry. Do not rely on conversation memory as the only record of a finding.
 - Distinguish observations from interpretations. Never promote a skipped test, tool installation or plausible hypothesis into verified compatibility.
 - On 13 October 2026 the owner requested periodic playable prototype updates. Rebuild after verified driving changes, keep both launchers using the current release executable, and record the source revision, executable hash, checks and changes. Do not replace or close a prototype session the owner is currently running; continue independent work until the executable is available.
+
+## Sessions and commits
+
+- Commit as the owner: `git -c user.name='Evgeniy Lupashin' -c user.email=34810566+PipeKnight@users.noreply.github.com commit ...`. No `Co-Authored-By`, "Generated with" or other AI trailers. History was rewritten on 2026-10-21; never merge or push anything with pre-rewrite ancestry.
+- Hand-off notes live in the session's own worktree, `local/handoff/<session-name>.md`. Child sessions cannot write to the main checkout, so do not copy them there.
+- Long runs (builds, soaks, captures): start them in the background, end the turn and let the completion notification wake you once. Do not wake repeatedly to report the same running job.
 
 ## Original reference and provenance
 
