@@ -105,9 +105,7 @@ impl Car {
     /// The car's `vehicle` row. Several rows may share a folder (the BMW has
     /// three); they must agree on every field read here.
     pub fn vehicle(&self, root: &std::path::Path) -> Result<Vehicle, Box<dyn std::error::Error>> {
-        let schema = std::fs::read(root.join("database/schema.bin"))?;
-        let data = std::fs::read(root.join("database/database.bin"))?;
-        let db = grid_formats::database::read(&schema, &data)?;
+        let db = crate::read_database(root)?;
         Self::vehicle_in(&db, &self.stem)
     }
 

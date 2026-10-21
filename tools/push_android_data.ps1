@@ -59,12 +59,17 @@ $items = @(
     'frontend\fonts\micro_drift.pssg',
     'frontend\fonts\micro_lap.pssg',
     'frontend\fonts\swiss_time.pssg',
-    'tracks\europe\donington'
+    'tracks\europe\donington',
+    # The track's floor lift (Route::additional_ground_clearance), read when
+    # body geometry is prepared; without it every race stopped there (F539).
+    'database\schema.bin',
+    'database\database.bin'
 )
 # Extra data per event (checked with -Stage and a desktop run, docs/ANDROID.md "Events").
 if ($Event -eq 'drift-nurburgring') {
     $items += @(
-        'database',              # car and route tables for a non-default car
+        'database\dlc-database-a0.bin',  # with the base list's two files: the whole
+        'database\dlc-database-p0.bin',  # folder as before F539, so the bundle version stays
         'gameconfig',            # drift.xml (drift scoring settings)
         'cars\bmw',
         'audio\eng_bmw.WIP',

@@ -156,9 +156,7 @@ fn table<'a>(
 
 impl Series {
     pub fn load(root: &std::path::Path, name: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let schema = std::fs::read(root.join("database/schema.bin"))?;
-        let data = std::fs::read(root.join("database/database.bin"))?;
-        Self::from_database(&grid_formats::database::read(&schema, &data)?, name)
+        Self::from_database(&crate::read_database(root)?, name)
     }
 
     pub fn from_database(db: &Database, name: &str) -> Result<Self, Box<dyn std::error::Error>> {
@@ -661,9 +659,7 @@ impl Event {
         seed: u32,
         grid_option: u8,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let schema = std::fs::read(root.join("database/schema.bin"))?;
-        let data = std::fs::read(root.join("database/database.bin"))?;
-        let db = grid_formats::database::read(&schema, &data)?;
+        let db = crate::read_database(root)?;
         let series = Series::from_database(&db, name)?;
         let layout = series
             .layout(route.path())

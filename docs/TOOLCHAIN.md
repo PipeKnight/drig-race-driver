@@ -150,7 +150,7 @@ end of the F range, and the previous revision in the no-data-copy lists when the
 is unchanged; the feature summary stays manual; `-NoTestOrder`); and a draft log entry in
 `local/release/<time>.md` (revisions, merged F range and commits, exe sha256, APK sizes and
 sha256, bundle version, step times) with the step logs in `local/release/<time>/`.
-The profile APK carries the default (Donington) bundle as in the earlier releases (`-ProfileEvent`).
+Since F539 the profile APK carries the drift-nurburgring bundle, like the normal APK (`-ProfileEvent`; earlier releases used the Donington bundle, docs/ANDROID.md "Profile APK").
 Merges that conflict stop the script before anything changes. Since F532 this includes
 PROJECT_LOG.md in the main checkout, where Codex's commits still prepend `## Gnnn` entries.
 Resolve by hand: keep origin/main's file and turn each local entry into

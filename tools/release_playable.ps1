@@ -25,7 +25,7 @@ Steps, each skippable:
                                                                                    -NoPortable
   apk        a temporary detached worktree of origin/main in local\release\apk-src-<rev>,
              tools\build_android.ps1 -BundleData -Event drift-nurburgring, and -BundleData -Profile
-             with the default bundle (-ProfileEvent), copied to local\android\apk as grid-<rev>-bundled-PRIVATE-drift-nurburgring-
+             -Event drift-nurburgring (-ProfileEvent), copied to local\android\apk as grid-<rev>-bundled-PRIVATE-drift-nurburgring-
              debug.apk and grid-<rev>-bundled-PRIVATE-profile-debug.apk (with their .json
              manifests); then tools\prune_build_dirs.ps1 -ForWorktree and git worktree remove.
                                                       -NoApk, -NoProfileApk, -KeepApkWorktree
@@ -57,9 +57,10 @@ param(
     [string]$Branch = 'main',
     [ValidateSet('donington', 'drift-nurburgring')]
     [string]$Event = 'drift-nurburgring',
-    # The bundled event of the -Profile APK (the default bundle, as in the earlier releases).
+    # The bundled event of the -Profile APK: the drift bundle since F539, so it profiles the Drift
+    # Battle the owner tests and has the drift APK's bundle version (no new data copy when switching).
     [ValidateSet('donington', 'drift-nurburgring')]
-    [string]$ProfileEvent = 'donington',
+    [string]$ProfileEvent = 'drift-nurburgring',
     # Machine-private folder (inputs, outputs); default local\ of this checkout.
     [string]$Local,
     [string]$GameRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Grid',
@@ -229,8 +230,8 @@ if (-not $NoApk) {
         Invoke-Git worktree add --detach $wt $upRev | Out-Host
         try {
             # build_android.ps1 names a bundle of a non-default event with -<event>; the profile APK
-            # gets -profile after it. The previous releases built the profile APK with the default
-            # (Donington) bundle: -ProfileEvent.
+            # gets -profile after it. Releases before F539 built the profile APK with the default
+            # (Donington) bundle; -ProfileEvent picks it, the release name stays ...-profile-debug.apk.
             $variants = @(@{ Event = $Event; Args = ''; Suffix = $Event; Built = $(if ($Event -eq 'donington') { '' } else { "-$Event" }) })
             if (-not $NoProfileApk) { $variants += @{ Event = $ProfileEvent; Args = '-Profile'; Suffix = 'profile'; Built = $(if ($ProfileEvent -eq 'donington') { '-profile' } else { "-$ProfileEvent-profile" }) } }
             foreach ($v in $variants) {

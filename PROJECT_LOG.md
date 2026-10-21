@@ -108,6 +108,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F539](log/F0539.md) | 2026-10-21 | Bundled APK races start: Donington bundle carries the database; profile APK on the drift bundle |
 | [F538](log/F0538.md) | 2026-10-21 | grid-app --headless: a full event at CPU speed, bit-identical to the window; tick time by stage and world size |
 | [F537](log/F0537.md) | 2026-10-21 | A held lost wheel no longer teleports the pieces of a later break (row 90) |
 | [F536](log/F0536.md) | 2026-10-21 | Android seed reuse: build_android.ps1 drops MSYSTEM/CYGWIN so cargo-ndk paths match the seed |
@@ -167,7 +168,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F481](log/F0481.md) | 2026-10-19 | Pause menu: Steering Linearity is live and saved; Speech and Music Volume are selectable and saved |
 | [F480](log/F0480.md) | 2026-10-19 | Pause-menu options are saved: leaving a settings screen writes them to <data dir>/settings.ini, the original's profile autosave |
 | [F479](log/F0479.md) | 2026-10-19 | Collision impacts: the original's collision listener and impact one-shots |
-| [F478](log/F0478.md) | 2026-10-19 | Career head-to-heads: the open head-to-head events are offered, raced against the event's rival alone, and paid by the prize for a win |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

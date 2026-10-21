@@ -2993,9 +2993,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let mode = grid_tools::time_of_day::Mode::for_route(&root, &route)
             .unwrap_or(grid_tools::time_of_day::Mode::None);
         if race_limit.is_some() || mode == grid_tools::time_of_day::Mode::Timeline {
-            let schema = std::fs::read(root.join("database/schema.bin"))?;
-            let data = std::fs::read(root.join("database/database.bin"))?;
-            let db = grid_formats::database::read(&schema, &data)?;
+            let db = grid_tools::read_database(&root)?;
             let mut cars = vec![driving.runtime.car().clone()];
             if let Some(o) = &driving.opponents {
                 cars.extend(o.multi.cars.iter().skip(1).map(|c| c.car().clone()));

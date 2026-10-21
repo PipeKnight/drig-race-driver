@@ -318,16 +318,15 @@ impl Catalog {
                 };
                 let routes = &mut pool.into_iter();
                 let (cars, stand_in) = match kind {
-                    Kind::Series | Kind::LeMans => (
-                        cars(
-                            &series
-                                .raceable_cars()
-                                .iter()
-                                .map(Car::stem)
-                                .collect::<Vec<_>>(),
-                        ),
-                        false,
-                    ),
+                    // The field draws from every one of them, so a series
+                    // with one missing from the data subset is left out
+                    // (F539: Touring Cars on the Donington bundle needs the BMW).
+                    Kind::Series | Kind::LeMans => {
+                        let raceable = series.raceable_cars();
+                        let stems: Vec<&str> = raceable.iter().map(Car::stem).collect();
+                        let found = cars(&stems);
+                        (if found.len() == stems.len() { found } else { Vec::new() }, false)
+                    }
                     // The drift pool's cars (cor, gto, rx7, ...) are not
                     // ported: the launchers' BMW, and the Lacetti.
                     Kind::DriftBattle | Kind::DriftGp | Kind::Freestyle => (
@@ -1384,6 +1383,31 @@ mod tests {
         });
         assert_eq!(phone.types[0].layouts.len(), 1);
         assert_eq!(phone.types[0].cars, ["lac"]);
+    }
+
+    /// The bundles' subsets with the database (F539): the Donington bundle
+    /// has no BMW, so Touring Cars (whose field draws BMWs) is not offered;
+    /// the drift bundle has both touring cars and offers it.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased source"]
+    fn a_series_with_a_missing_car_is_left_out() {
+        let root = PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let db = grid_tools::read_database(&root).unwrap();
+        let keys = |cars: &[&str]| -> Vec<String> {
+            Catalog::build(Some(&db), &Labels::default(), &|p| {
+                p.starts_with("tracks/europe/donington")
+                    || p.starts_with("tracks/europe/nurburgring")
+                    || cars.iter().any(|c| p == format!("cars/{c}"))
+            })
+            .types
+            .into_iter()
+            .map(|t| t.key)
+            .collect()
+        };
+        let donington = keys(&["lac"]);
+        assert!(donington.contains(&"race".to_string()), "{donington:?}");
+        assert!(!donington.contains(&"touring".to_string()), "{donington:?}");
+        assert!(keys(&["lac", "bmw"]).contains(&"touring".to_string()));
     }
 
     #[test]

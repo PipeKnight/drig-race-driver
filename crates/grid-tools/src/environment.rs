@@ -98,9 +98,7 @@ impl Environment {
 
 /// The route's `track_model` row flags (folder, file and route strings).
 pub fn flags(root: &Path, route: &Route) -> Result<TrackFlags, Box<dyn std::error::Error>> {
-    let schema = std::fs::read(root.join("database/schema.bin"))?;
-    let data = std::fs::read(root.join("database/database.bin"))?;
-    let db = grid_formats::database::read(&schema, &data)?;
+    let db = crate::read_database(root)?;
     let parts: Vec<&str> = route.path().split('/').collect();
     let [_, folder, file, layout] = parts[..] else {
         return Err(format!("route {} is not tracks/<region>/<track>/<route>", route.path()).into());
