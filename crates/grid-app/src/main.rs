@@ -1387,6 +1387,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut reflection_calibration = false;
     let mut geometry_pixel = None;
     let mut render_fixed_step = false;
+    let mut headless = false;
     let mut render_fps = None;
     let mut capture_orbit_rate = None;
     let mut motion_sequence = None;
@@ -1622,6 +1623,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             "--reflection-calibration" => reflection_calibration = true,
             "--render-fixed-step" => render_fixed_step = true,
+            "--headless" => headless = true,
             "--render-fps" => {
                 let fps: u32 = args.next().ok_or("missing render FPS")?.parse()?;
                 if !(30..=300).contains(&fps) {
@@ -1892,7 +1894,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
                 );
                 println!(
-                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; Escape/P (pad Start) pause menu: Continue, Restart, Options, Retire from Race (races) or Finish Test Drive (practice); R restarts. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01|derive: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
+                    "grid-app [--game-root PATH] [--route tracks/REGION/TRACK/ROUTE] [--car STEM] [--scene car|donington|reference|collision] [--lod LOD0_|LOD1_] [--view overview|start] [--camera X,Y,Z --look-at X,Y,Z] [--include-batches] [--render local/PATH.png]\n--drive: source driving prototype of the selected car and route. Arrows/WASD drive; Space handbrake; Escape/P (pad Start) pause menu: Continue, Restart, Options, Retire from Race (races) or Finish Test Drive (practice); R restarts. Free practice is the default.\n--time-trial-laps 1..99: independent finite event, 3-second countdown, results and private personal bests.\n--body-contacts PRIVATE_CD01|derive: experimental Donington packed-track and CQTC boundary contacts with selected collision damage; shared material and boundary-first order. Terminal wheel damage disables driving; R resets.\n--drive-ticks N --throttle 0..1 --steering -1..1 [--handbrake FROM_TICK]: bounded scripted render validation.\n--headless (with --drive-ticks): no window, GPU or audio; one fixed tick per frame as fast as the CPU allows; exits when the race is over, at a driving pause or at the tick limit (docs/SOAK_TESTING.md).\nStatic viewer: arrows orbit; WASD pan; Q/E vertical; Shift faster; PageUp/PageDown zoom; Home reset."
                 );
                 println!(
                     "--route: purchased circuit route folder (default tracks/europe/donington/route_0); the donington/reference/collision scenes and driving use it. Time-trial bests are kept for the default route and car only."
@@ -2692,7 +2694,43 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         app.insert_resource(trial);
     }
-    if let Some(path) = output {
+    if headless && (output.is_some() || !drive || drive_ticks.is_none()) {
+        return Err("--headless requires --drive and --drive-ticks, and no --render".into());
+    }
+    if headless {
+        // The app's own simulation without a window, GPU or audio: the
+        // renderer is never created (no wgpu backend) and every frame
+        // advances exactly one fixed tick, as fast as the CPU allows.
+        app.add_plugins(with_profile(
+            DefaultPlugins
+                .set(bevy::render::RenderPlugin {
+                    render_creation: bevy::render::settings::RenderCreation::Automatic(
+                        Box::new(bevy::render::settings::WgpuSettings {
+                            backends: None,
+                            ..default()
+                        }),
+                    ),
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: ExitCondition::DontExit,
+                    ..default()
+                })
+                .disable::<WinitPlugin>()
+                .disable::<bevy::audio::AudioPlugin>(),
+        ))
+        .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::ZERO))
+        .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            Duration::from_secs_f64(f64::from(grid_tools::source_vehicle::DELTA)),
+        ))
+        .add_systems(FixedLast, headless_exit)
+        // Presentation systems that need the renderer's resources are
+        // skipped (each distinct error is logged once); the simulation
+        // systems need none.
+        .set_error_handler(headless_error);
+        println!("drive_headless version=1 dt={}", grid_tools::source_vehicle::DELTA);
+    } else if let Some(path) = output {
         if let Some(config) = motion_sequence {
             motion_capture::install(
                 &mut app,
@@ -4788,6 +4826,58 @@ fn update_orbit(
 
 /// Bevy's plugins; with the `profile` feature its log plugin also carries the
 /// per-system span profile (docs/PERFORMANCE.md "Phone bisection").
+/// `--headless` error handler: log each distinct system error once, then skip.
+fn headless_error(error: bevy::ecs::error::BevyError, ctx: bevy::ecs::error::ErrorContext) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let text = format!("{} {error}", ctx.name());
+    let mut seen = SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !seen.contains(&text) {
+        println!("drive_headless version=1 event=skipped_system error={:?}", text);
+        seen.push(text);
+    }
+}
+
+/// `--headless`: leave when the race is over (every car finished or out),
+/// at a driving pause or at the scripted tick limit. A race started from the
+/// menu leaves as `event_menu::leave` does, so `--career-result` is written.
+fn headless_exit(
+    driving: Res<Driving>,
+    trial: Option<Res<time_trial::Trial>>,
+    from_menu: Option<Res<event_menu::FromMenu>>,
+    mut exit: MessageWriter<AppExit>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let over = match &driving.opponents {
+        Some(o) => o.standings.over(),
+        None => trial.as_ref().is_some_and(|t| t.finished()),
+    };
+    let limit = driving
+        .scripted_ticks
+        .is_some_and(|n| driving.runtime.ticks >= n);
+    let reason = if driving.failure.is_some() {
+        "pause"
+    } else if over {
+        "race_over"
+    } else if limit {
+        "tick_limit"
+    } else {
+        return;
+    };
+    *done = true;
+    println!(
+        "drive_headless version=1 event=exit reason={reason} tick={}",
+        driving.runtime.ticks
+    );
+    if reason == "pause" {
+        exit.write(AppExit::from_code(2));
+    } else {
+        event_menu::leave(&mut exit, from_menu.is_some());
+    }
+}
+
 fn with_profile(plugins: bevy::app::PluginGroupBuilder) -> bevy::app::PluginGroupBuilder {
     #[cfg(feature = "profile")]
     let plugins = plugins.set(bevy::log::LogPlugin {

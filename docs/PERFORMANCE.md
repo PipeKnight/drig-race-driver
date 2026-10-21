@@ -41,7 +41,7 @@ part of the time the owner was playing a game; see "Measurement noise".
 
 | Tool | Version | Use |
 |---|---|---|
-| `GRID_PERF_TIMING=1` (new) | this commit | Wall time per stage, printed by grid-app every 600 frames and at exit, and by grid-opponent-race at exit (stderr). |
+| `GRID_PERF_TIMING=1` (new) | this commit | Wall time per stage, printed by grid-app every 600 frames and at exit, and by grid-opponent-race at exit (stderr). Since F538 the line also gives the mean world size per shared-world tick: `world_bodies` (cars and pieces), `world_pieces` (pieces and lost wheels), and active contacts by kind: `contacts_wheel` (wheel contacts in the shared pool), `contacts_body` (car hulls against the track and props), `contacts_car` (car pairs) and `contacts_piece` (piece contacts). grid-soak `run` prints the same line on stderr. |
 | Bevy `trace_chrome` | Bevy 0.19.1, tracing-chrome 0.7.2, tracing 0.1.44, tracing-subscriber 0.3.23 | Per-system spans. grid-app feature `trace` (off by default). |
 | `tools/chrome_trace_summary.py` (new) | this commit, bundled Python 3.12.14 | Streams a trace (1.5 GB for 33 s) and reports busy time per thread and the largest spans per frame. |
 | `GRID_CPU_CLUSTERING=1` (new, F380) | grid-app | Bevy's CPU light clustering (the Android path) instead of GPU clustering; rendering only. |
@@ -739,3 +739,27 @@ source while racing, with far less memory. Not measured on a device; no APK buil
    "Loading a field").
 3. **GPU and render resolution on the phone.** 4× MSAA at the full surface, the render-height
    cap (F375) and the render graph are the likely limits of the solo lap.
+
+## Le Mans field (F538)
+
+Where the tick goes in the 24 Hours career race (17 cars, the player on the
+autopilot; `local/repro/lemans-manifold-40552`), current main, `grid-app
+--headless` with `GRID_PERF_TIMING=1`, 600-tick windows from the cumulative
+reports (`local/r26/perf-lm-full`). Milliseconds per tick; pieces and piece
+contacts are the window means.
+
+| tick | drive_tick | world advance | piece contacts | vehicles (17 cars) | commit | AI | frame | pieces | piece contacts |
+|---|---|---|---|---|---|---|---|---|---|
+| 2399 | 5.6 | 1.9 | 1.1 | 1.0 | 0.5 | 0.17 | 8.1 | 26 | 121 |
+| 4199 | 22.9 | 14.4 | 4.8 | 1.0 | 0.9 | 0.16 | 25.2 | 154 | 679 |
+| 5999 | 27.4 | 16.7 | 7.0 | 1.0 | 0.9 | 0.16 | 29.5 | 223 | 1035 |
+| 7799 | 37.8 | 23.1 | 10.7 | 1.0 | 1.0 | 0.15 | 39.9 | 335 | 1676 |
+| 9599 | 44.0 | 27.0 | 12.6 | 1.0 | 1.1 | 0.15 | 46.2 | 403 | 2079 |
+| 11399 | 54.9 | 31.7 | 16.9 | 2.3 | 1.2 | 0.17 | 57.3 | 408 | 2115 |
+
+The cars cost 1-2 ms per tick throughout; the pieces' advance and contacts
+take 85-90 % once a few hundred pieces lie around. The pieces never sleep in
+the port (the original's turnOffTime, `local/handoff/sleeping-research.md`),
+so the cost only grows: by tick 40489 of the F513 run 872 pieces were alive.
+Milan seed 41, 12 cars, grid-soak to tick 3000: world tick 16.5 ms, of which
+advance 9.6, piece contacts 3.7, vehicles 1.2; 72 pieces, 349 piece contacts.
