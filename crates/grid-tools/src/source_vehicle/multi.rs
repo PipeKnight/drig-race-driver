@@ -713,10 +713,14 @@ impl MultiRuntime {
         let mut prop_slots = Vec::new();
         let mut car_normals = Vec::new();
         let mut contact_failed: Vec<Option<Error>> = vec![None; n];
+        let mut provider_calls = 0;
         let mut provider = |bodies: &mut [contact_groups::Body], remaining: usize| {
             let provider_started = crate::perf::enabled().then(std::time::Instant::now);
+            // A second call collects again after a wake (B184F0); the
+            // continuous stage ran in the first.
+            provider_calls += 1;
             // World phase 2 (continuous) before the contacts of phase 3.
-            if let Some(props) = props.filter(|p| p.has_bodies()) {
+            if let Some(props) = props.filter(|p| p.has_bodies() && provider_calls == 1) {
                 props.continuous(
                     &cars[0].track,
                     &cars[0].surfaces,
@@ -1789,6 +1793,202 @@ mod tests {
                 }
                 let props = multi.dynamic_props().unwrap();
                 eprintln!("pieces {}", props.pieces.len());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Sleeping cost, paired in one process: the Nürburgring drift circuit
+    /// with its tyre stacks and armco broken at rest (the owner's phone
+    /// field of 21 October, about 220 pieces), settled, then cloned; one
+    /// copy keeps sleeping, the other has every piece forced awake with
+    /// turnOffTime FLT_MAX. The copies tick alternately so the PC's load
+    /// falls on both; prints the mean tick time of each.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn sleeping_cost_on_a_broken_nurburgring_field() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/nurburgring/route_1").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let limit: usize = std::env::var("GRID_SLEEP_AB_PIECES")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(250);
+                // GRID_SLEEP_AB_KINDS: template prefixes (an armco break takes
+                // its linked run, hundreds of pieces).
+                let kinds = std::env::var("GRID_SLEEP_AB_KINDS")
+                    .unwrap_or_else(|_| "tyrestack,armco".into());
+                let mut pieces = 0;
+                for b in 0..props.catalog.breakables.len() {
+                    let entry = &props.catalog.breakables[b];
+                    if pieces < limit
+                        && kinds.split(',').any(|k| entry.template.starts_with(k))
+                        && !entry.pieces.is_empty()
+                    {
+                        pieces += entry.pieces.len();
+                        props.queue_break(b);
+                    }
+                }
+                let stop = [Controls::default(); 2];
+                let settle: usize = std::env::var("GRID_SLEEP_AB_SETTLE")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(300);
+                let cars = multi.cars.len();
+                for tick in 0..settle {
+                    multi.tick(&stop).unwrap();
+                    if tick % 300 == 299 {
+                        let n = multi.bodies()[cars..]
+                            .iter()
+                            .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+                            .count();
+                        eprintln!("sleep_ab settle tick={} asleep={n}", tick + 1);
+                    }
+                }
+                let asleep = |multi: &MultiRuntime| {
+                    multi.bodies()[cars..]
+                        .iter()
+                        .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+                        .count()
+                };
+                let mut awake = multi.clone();
+                for i in cars..awake.world.groups.bodies.len() {
+                    if grouped_physical_frame::asleep(&awake.world, i) {
+                        grouped_physical_frame::wake(&mut awake.world, i);
+                    }
+                    awake.world.groups.bodies[i][0x3b4 / 4] = f32::MAX.to_bits();
+                }
+                assert_eq!(asleep(&awake), 0);
+                let ticks: usize = std::env::var("GRID_SLEEP_AB_TICKS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(600);
+                let (mut slept, mut kept) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+                let mut sleeping = 0;
+                for _ in 0..ticks {
+                    let t = std::time::Instant::now();
+                    multi.tick(&stop).unwrap();
+                    slept += t.elapsed();
+                    // GRID_SLEEP_AB_ONLY=sleeping: profile the sleeping copy alone.
+                    if std::env::var_os("GRID_SLEEP_AB_ONLY").is_none() {
+                        let t = std::time::Instant::now();
+                        awake.tick(&stop).unwrap();
+                        kept += t.elapsed();
+                    }
+                    sleeping += asleep(&multi);
+                }
+                let ms = |d: std::time::Duration| d.as_secs_f64() * 1e3 / ticks as f64;
+                eprintln!(
+                    "sleep_ab bodies={} pieces={} asleep_mean={:.1} sleeping_ms={:.3} awake_ms={:.3} ratio={:.3}",
+                    multi.bodies().len(),
+                    multi.bodies().len() - cars,
+                    sleeping as f64 / ticks as f64,
+                    ms(slept),
+                    ms(kept),
+                    ms(kept) / ms(slept),
+                );
+                assert!(asleep(&multi) * 2 > multi.bodies().len() - cars);
+                assert_eq!(asleep(&awake), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Sleeping (B0FE60, B24D70, B24E70): the pieces of a broken tyre wall
+    /// that come to rest leave the active list after turnOffTime (1 s); the
+    /// cars never sleep; a car driving into the pile wakes pieces again.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn pieces_at_rest_sleep_and_a_car_wakes_them() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/le_mans/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let at = multi.props.as_ref().unwrap().catalog.breakables[969].placement;
+                let (x, z) = ([at[0], at[1], at[2]], [at[8], at[9], at[10]]);
+                let centre = [at[12], at[13], at[14]];
+                let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);
+                multi.place_at_rest(0, start, z.map(|v| -v)).unwrap();
+                let mut drive = [Controls::default(); 2];
+                drive[0].throttle = 1.;
+                for _ in 0..240 {
+                    multi.tick(&drive).unwrap();
+                }
+                let asleep = |multi: &MultiRuntime| {
+                    multi.bodies()[multi.cars.len()..]
+                        .iter()
+                        .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+                        .count()
+                };
+                let pieces = multi.bodies().len() - multi.cars.len();
+                assert!(pieces > 10, "the wall broke into {pieces} pieces");
+                // Back away and stop; the pile settles.
+                multi.place_at_rest(0, start, z.map(|v| -v)).unwrap();
+                let stop = [Controls::default(); 2];
+                for _ in 0..600 {
+                    multi.tick(&stop).unwrap();
+                }
+                let slept = asleep(&multi);
+                eprintln!("pieces {pieces} asleep {slept}");
+                assert!(slept * 2 > pieces, "{slept} of {pieces} pieces asleep");
+                assert!(
+                    multi.bodies()[..multi.cars.len()]
+                        .iter()
+                        .all(|b| b[0x400 / 4] != contact_groups::ASLEEP)
+                );
+                // The second car (the first is wrecked) drives at an asleep
+                // piece from 20 m away.
+                let n = multi.cars.len();
+                // The asleep piece furthest out on the cars' side of the wall.
+                let along = |p: [f32; 3]| (0..3).map(|k| (p[k] - centre[k]) * z[k]).sum::<f32>();
+                let target = (multi.bodies()[n..].iter())
+                    .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+                    .map(|b| std::array::from_fn::<f32, 3, _>(|k| f32::from_bits(b[(0x1d0 + 48) / 4 + k])))
+                    .max_by(|a, b| along(*a).total_cmp(&along(*b)))
+                    .unwrap();
+                eprintln!("target {:.1} m out", along(target));
+                let side: [f32; 3] = std::array::from_fn(|k| target[k] + 15. * z[k]);
+
+                let away: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k] + 6. * x[k]);
+                multi.place_at_rest(0, away, z.map(|v| -v)).unwrap();
+                multi.place_at_rest(1, side, z.map(|v| -v)).unwrap();
+                let mut drive = [Controls::default(); 2];
+                drive[1].throttle = 1.;
+                let mut fewest = slept;
+                for _ in 0..240 {
+                    multi.tick(&drive).unwrap();
+                    fewest = fewest.min(asleep(&multi));
+                }
+                eprintln!("fewest asleep while driving through {fewest}");
+                assert!(fewest < slept, "no piece woke");
             })
             .unwrap()
             .join()

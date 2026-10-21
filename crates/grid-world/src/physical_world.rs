@@ -136,10 +136,17 @@ fn advance_owned(
         order.push(i);
         id = previous.groups.bodies[i][0x300 / 4];
     }
-    if order.len() != previous.groups.bodies.len()
+    // Bodies outside the active chain are asleep (B24D70: +0x400 = -1).
+    let asleep = previous
+        .groups
+        .bodies
+        .iter()
+        .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+        .count();
+    if order.len() + asleep != previous.groups.bodies.len()
         || world[7 + (1 - selector) as usize] != 0
         || world[9 + (1 - selector) as usize] != 0
-        || order.last().map(|&i| i as u32 + 1) != Some(world[9 + selector as usize])
+        || order.last().map(|&i| i as u32 + 1).unwrap_or(0) != world[9 + selector as usize]
     {
         return Err(Error("inconsistent carried world heads"));
     }

@@ -829,8 +829,9 @@ fn body_settings(spec: &PieceSpec, linear: [f32; 4], angular: [f32; 4]) -> [u32;
     set(&mut s, 0x94, b.wake_up_torque);
     set(&mut s, 0x98, b.linear_stationary);
     set(&mut s, 0x9c, b.angular_stationary);
-    // turnOffTime: the ported frame only admits never-sleeping bodies.
-    set(&mut s, 0xa0, f32::MAX);
+    // turnOffTime (body +0x3B4): pieces and lost wheels sleep after this
+    // long at rest (B0FE60, B24D70).
+    set(&mut s, 0xa0, b.turn_off_time);
     for i in 0..3 {
         set(
             &mut s,
@@ -1587,10 +1588,18 @@ impl PropWorld {
             if room == 0 {
                 break;
             }
-            // Pairs with static geometry need body byte +0x416 (B18300).
+            // Pairs with static geometry need body byte +0x416 (B18300); an
+            // asleep body makes no pair with static geometry or with another
+            // asleep body (B18300 takes pairs only from the active list).
+            let asleep = |body: usize| {
+                bodies
+                    .get(body)
+                    .is_some_and(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+            };
             let fixed = bodies
                 .get(piece_body)
-                .is_some_and(|b| byte(b, COLLIDES_WITH_FIXED) != 0);
+                .is_some_and(|b| byte(b, COLLIDES_WITH_FIXED) != 0)
+                && !asleep(piece_body);
             let track_hits = if fixed {
                 track.body_contacts(spec.collider(), pose, &query, TRACK_CONTACTS, room, |code| {
                     surfaces.sheet(code)
@@ -1646,7 +1655,9 @@ impl PropWorld {
                 if dot3(d, d) > 3. * reach * reach {
                     continue;
                 }
-                if exclusion.excluded(piece_body, other_body) {
+                if exclusion.excluded(piece_body, other_body)
+                    || (asleep(piece_body) && asleep(other_body))
+                {
                     continue;
                 }
                 for hit in convex_contacts(a, b, margin, room.min(PAIR_CONTACTS)) {
@@ -1941,6 +1952,17 @@ impl PropWorld {
                 set_byte(&mut make.world.groups.bodies[body], COLLIDES_WITH_FIXED, 0);
             }
         }
+        // B825E0: a joint between an asleep and an awake body wakes the
+        // asleep one into the awake one's list.
+        if let Some(b) = b {
+            let (sa, sb) = (
+                grouped_physical_frame::asleep(make.world, a),
+                grouped_physical_frame::asleep(make.world, b),
+            );
+            if sa != sb {
+                grouped_physical_frame::wake(make.world, if sa { a } else { b });
+            }
+        }
         let placement = matrix(&entry.placement);
         let mut descriptor =
             joint_template::descriptor(&spec.request, &placement, [1.; 3], b.is_none());
@@ -2036,6 +2058,21 @@ impl PropWorld {
 
     /// Remove a live joint (0xAD9260): the port keeps its record broken.
     fn remove_joint(&mut self, world: &mut grouped_physical_frame::Output, j: usize) {
+        // B82430: an asleep A wakes its island, an awake A and an awake
+        // dynamic B restart their sleep timers.
+        let (a, b) = (self.joints[j].a, self.joints[j].b);
+        if !self.joints[j].broken && a < world.groups.bodies.len() {
+            if grouped_physical_frame::asleep(world, a) {
+                grouped_physical_frame::wake(world, a);
+            } else {
+                grouped_physical_frame::restart_timer(world, a);
+            }
+            if let Some(b) = b.filter(|&b| b < world.groups.bodies.len())
+                && !grouped_physical_frame::asleep(world, b)
+            {
+                grouped_physical_frame::restart_timer(world, b);
+            }
+        }
         self.joints[j].broken = true;
         if let Some(w) = world.groups.joints.get_mut(self.joints[j].world) {
             set_byte(&mut w.joint.words, 0x48, 1);
@@ -2958,7 +2995,7 @@ mod tests {
         assert_eq!(f(&body, 0x224), 1.);
         assert_eq!(f(&body, 0x3f8), 1.);
         assert_eq!(f(&body, 0x3d4), 1.);
-        assert_eq!(f(&body, 0x3b4), f32::MAX);
+        assert_eq!(f(&body, 0x3b4), 1.);
     }
 }
 

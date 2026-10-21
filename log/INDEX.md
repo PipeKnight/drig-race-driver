@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F541](F0541.md) | 2026-10-21 | Rigid-body sleeping for prop pieces and lost wheels |
 | [F540](F0540.md) | 2026-10-21 | APKs 239583f319e3: drift and drift-profile builds share one bundle |
 | [F539](F0539.md) | 2026-10-21 | Bundled APK races start: Donington bundle carries the database; profile APK on the drift bundle |
 | [F538](F0538.md) | 2026-10-21 | grid-app --headless: a full event at CPU speed, bit-identical to the window; tick time by stage and world size |

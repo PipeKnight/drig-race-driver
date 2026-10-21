@@ -252,8 +252,8 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
   is ported but all ported classes have explosion 0, so pieces start at rest. [D]
 - **Bodies.** Ported B11F40 constructor with mass = density x volume, solid
   box/cylinder inertia, rbDefault damping/drag/gravity scale/stationary values in the
-  0x7B8F40 field order. Deviation: turnOffTime is FLT_MAX (the ported grouped frame
-  only admits never-sleeping bodies). [I mass formula, deviation recorded]
+  0x7B8F40 field order. turnOffTime 1 s since F541 (FLT_MAX before; BODY_SLEEPING.md).
+  [I mass formula]
 - **Contacts.** Piece vs track, boundary and enabled props through the same cold body
   query as the car (piece margin = shape shell 0.02); car vs piece through the
   car-to-car hull path; piece vs piece through an authored separating-axis generator
@@ -404,7 +404,7 @@ original's AE8AD0 pairing for it was tried and lost more boards at the port's fi
   static (the close-drift flags break since F509); uproot (rail bodies switching to `rbDefault`) is not
   ported, its trigger is not found. Armco and tyre-wall joints are ported since F501 and
   F484 (docs/JOINTS_RESEARCH.md).
-- Sleeping: the ported grouped frame only admits `turnOffTime = MAX`.
+- Sleeping: ported in F541 (BODY_SLEEPING.md); parking (status 2) is not.
 - Whether routes override the ENTITYMANAGER defaults; the farthest-first restore of
   broken entities when a pool is full (recovered, not ported, unreachable with the
   ported catalog).

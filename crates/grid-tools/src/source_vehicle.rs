@@ -780,9 +780,18 @@ impl Runtime {
                 let mut publication = |owner: &vehicle_publication::State, delta| {
                     resource.borrow_mut().publish_deformation(owner, delta)
                 };
+                let mut provider_calls = 0;
                 let provider = |bodies: &mut [grid_world::contact_groups::Body], remaining| {
+                    // A second call collects again after a wake (B184F0); the
+                    // continuous stage ran in the first.
+                    provider_calls += 1;
+                    recorded.clear();
                     // World phase 2 (continuous) before the contacts.
-                    if let Some(props) = self.props.as_ref().filter(|p| p.has_bodies()) {
+                    if let Some(props) = self
+                        .props
+                        .as_ref()
+                        .filter(|p| p.has_bodies() && provider_calls == 1)
+                    {
                         props.continuous(
                             &self.track,
                             &self.surfaces,

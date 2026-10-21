@@ -74,6 +74,9 @@ pub(crate) struct Carry {
     pub contact_capacity: usize,
 }
 
+/// Body +0x400 of an asleep body: in no active list (B0F2F0(-1), B24D70).
+pub const ASLEEP: u32 = u32::MAX;
+
 fn byte(row: &[u32], offset: usize) -> u8 {
     (row[offset / 4] >> (8 * (offset % 4))) as u8
 }
@@ -109,7 +112,7 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
     if !(1..=crate::MAX_WORLD_BODIES).contains(&n)
         || input.contacts.len() > crate::MAX_WORLD_CONTACTS
         || input.selector > 1
-        || input.active_order.len() != n
+        || input.active_order.len() > n
         || shapes.len() > crate::MAX_WORLD_SHAPES
     {
         return Err(Error("invalid contact-group counts or selector"));
@@ -121,7 +124,9 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
         }
         seen[i] = true;
     }
-    for b in &input.bodies {
+    for (i, b) in input.bodies.iter().enumerate() {
+        // An asleep body (B24D70) is in no active list: +0x400 is -1.
+        let state = if seen[i] { input.selector } else { ASLEEP };
         let cold_links = [
             0, 4, 8, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x2f0, 0x2f4, 0x2fc, 0x300, 0x304, 0x308, 0x30c,
             0x318,
@@ -131,7 +136,7 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
             .any(|&o| field(b, o) != 0)
             || (carry.is_none() && cold_links.iter().any(|&o| field(b, o) != 0))
             || field(b, 0x334) != 0x1c0
-            || field(b, 0x400) != input.selector
+            || field(b, 0x400) != state
             || byte(b, 0x2c) > 1
             || byte(b, 0x2d) != 0
             || byte(b, 0x412) > u8::from(carry.is_some())
@@ -151,6 +156,9 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
             return Err(Error("invalid carried contact capacity or dirty head"));
         }
         for (i, b) in input.bodies.iter().enumerate() {
+            if !seen[i] {
+                continue;
+            }
             if [
                 8, 0xc, 0x10, 0x14, 0x18, 0x1c, 0x2f0, 0x2f4, 0x2fc, 0x300, 0x304, 0x308, 0x30c,
                 0x318,
@@ -226,6 +234,9 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
             || field(c, 0x28) as usize > shapes.len()
             || field(c, 0x2c) as usize > shapes.len()
             || (byte(c, 0x73) != 0 && (field(c, 0x28) == 0 || field(c, 0x2c) == 0))
+            // Woken before grouping (B184F0, AD6C40); none reaches it.
+            || field(&input.bodies[a as usize - 1], 0x400) == ASLEEP
+            || (single == 0 && b != 0 && field(&input.bodies[b as usize - 1], 0x400) == ASLEEP)
             || c[0x50 / 4..0x70 / 4]
                 .iter()
                 .any(|&x| !f32::from_bits(x).is_finite())
@@ -262,22 +273,26 @@ impl Build {
             self.b(id, 0x18)
         }
     }
+    /// B0F2F0: unlink from the current list (none when asleep) and push at
+    /// the head of `destination`.
     fn move_active(&mut self, id: u32, destination: u32) {
         let source = self.b(id, 0x400);
         if source == destination {
             return;
         }
-        let next = self.b(id, 0x300);
-        let previous = self.b(id, 0x304);
-        if previous == 0 {
-            self.heads[source as usize] = next;
-        } else {
-            self.set(previous, 0x300, next);
-        }
-        if next == 0 {
-            self.tails[source as usize] = previous;
-        } else {
-            self.set(next, 0x304, previous);
+        if source != ASLEEP {
+            let next = self.b(id, 0x300);
+            let previous = self.b(id, 0x304);
+            if previous == 0 {
+                self.heads[source as usize] = next;
+            } else {
+                self.set(previous, 0x300, next);
+            }
+            if next == 0 {
+                self.tails[source as usize] = previous;
+            } else {
+                self.set(next, 0x304, previous);
+            }
         }
         let head = self.heads[destination as usize];
         self.set(id, 0x304, 0);
@@ -459,8 +474,8 @@ fn build(
     let source = input.selector as usize;
     let destination = 1 - input.selector;
     let ids: Vec<_> = input.active_order.iter().map(|&i| i as u32 + 1).collect();
-    out.heads[source] = ids[0];
-    out.tails[source] = *ids.last().unwrap();
+    out.heads[source] = ids.first().copied().unwrap_or(0);
+    out.tails[source] = ids.last().copied().unwrap_or(0);
     for (i, &id) in ids.iter().enumerate() {
         out.set(id, 0x300, ids.get(i + 1).copied().unwrap_or(0));
         out.set(id, 0x304, if i == 0 { 0 } else { ids[i - 1] });
@@ -478,14 +493,40 @@ fn build(
     }
     // AD6C40: each active body pushes its unbroken joints (its +0x320 list,
     // newest first) onto a stack; the stack is grouped before the contacts.
-    // A joint reaches the stack through B's list only while A is inactive,
-    // which every body here is not.
+    // A joint reaches the stack through B's list (+0x324) only while A is
+    // asleep; grouping it then moves A into the active list (AD6250: no
+    // velocity or timer reset), so an awake body pulls its jointed partner.
+    let asleep = |id: u32| field(&input.bodies[id as usize - 1], 0x400) == ASLEEP;
     let mut stack = Vec::new();
     for &id in &ids {
         for (k, j) in input.joints.iter().enumerate().rev() {
             if j.a == id && j.joint.byte(0x48) == 0 {
                 stack.push(k);
             }
+        }
+        for (k, j) in input.joints.iter().enumerate().rev() {
+            if j.b == id && j.joint.byte(0xc) == 0 && j.joint.byte(0x48) == 0 && asleep(j.a) {
+                stack.push(k);
+            }
+        }
+    }
+    // A pulled partner starts like the active bodies: island links cleared
+    // and on the dirty chain.
+    let mut pulled = vec![false; input.bodies.len()];
+    for &k in &stack {
+        let id = input.joints[k].a;
+        if asleep(id) && !std::mem::replace(&mut pulled[id as usize - 1], true) {
+            if byte(&out.bodies[id as usize - 1], 0x412) == 0 {
+                out.set(id, 0x2f0, dirty);
+                out.set(id, 0x2f4, 0);
+                if dirty != 0 {
+                    out.set(dirty, 0x2f4, id);
+                }
+                dirty = id;
+                out.flag(id, 0x412, 1);
+            }
+            out.flag(id, 0x2c, 0);
+            out.set(id, 0x2fc, 0);
         }
     }
     for &k in stack.iter().rev() {

@@ -758,8 +758,29 @@ contacts are the window means.
 | 11399 | 54.9 | 31.7 | 16.9 | 2.3 | 1.2 | 0.17 | 57.3 | 408 | 2115 |
 
 The cars cost 1-2 ms per tick throughout; the pieces' advance and contacts
-take 85-90 % once a few hundred pieces lie around. The pieces never sleep in
-the port (the original's turnOffTime, `local/handoff/sleeping-research.md`),
-so the cost only grows: by tick 40489 of the F513 run 872 pieces were alive.
+take 85-90 % once a few hundred pieces lie around. Until F541 the pieces never
+slept, so the cost only grew: by tick 40489 of the F513 run 872 pieces were alive.
 Milan seed 41, 12 cars, grid-soak to tick 3000: world tick 16.5 ms, of which
 advance 9.6, piece contacts 3.7, vehicles 1.2; 72 pieces, 349 piece contacts.
+
+## Piece sleeping (F541)
+
+Pieces at rest now sleep after turnOffTime (1 s) and leave the active list
+([BODY_SLEEPING.md](BODY_SLEEPING.md)). Wall times on the shared PC varied up to
+4× between runs (the same Milan seed measured 16.5 ms in F538 and 6.9 ms here),
+so the cost is compared in one process: a broken Nürburgring pile is cloned,
+one copy sleeps, the other is forced awake, and they tick alternately
+(`sleeping_cost_on_a_broken_nurburgring_field`).
+
+| Pile | Pieces | Asleep | Sleeping ms/tick | All awake ms/tick |
+|---|---:|---:|---:|---:|
+| tyre stacks, settled 3000 ticks | 228 | 161 | 2.87 | 5.53 |
+| armco and tyre stacks | 755 | 746 | 7.58 | 18.00 |
+| armco and tyre stacks | 987 | 856 | 12.18 | 24.85 |
+
+Piece contacts per tick in the Le Mans race fall from about 2,100 (main, 400
+pieces) to 300-500 (500 pieces). An asleep piece still costs about 12 µs per
+tick: a sample profile puts about half of the tick in whole-world memory copies
+(the 0x424-byte body array cloned several times per tick), plus the O(n²)
+piece-pair distance pass and car–piece hull tests in `PropWorld::contacts`.
+Those are the next levers.
