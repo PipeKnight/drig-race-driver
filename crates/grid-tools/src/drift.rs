@@ -350,8 +350,10 @@ impl Sample {
 ///   collision (F387). The boundary sheet is shape kind 10 and still counts
 ///   [I: its wrapper type is not traced].
 /// - The original's flags are jointed entities whose touch the listener
-///   0x64D840 reports through 0x64D7E0; the port keeps them as static boxes
-///   (no joint rows, F284), so their contact is a flag touch only [I].
+///   0x64D840 reports through 0x64D7E0. A contact with a flag's boxes (the
+///   intact flag, or a broken flag's static base) is a flag touch only [I];
+///   a broken flag's pole touches through its post instead
+///   (`MultiRuntime::touched_post`).
 pub fn split_contacts(
     contacts: &[(f32, crate::source_vehicle::multi::Contacted)],
     flags: &[usize],

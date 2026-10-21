@@ -17,7 +17,7 @@ fn cross(a: V, b: V) -> V {
         0.,
     ]
 }
-fn normalize(v: V) -> Result<V, Error> {
+pub(crate) fn normalize(v: V) -> Result<V, Error> {
     let square = dot(v, v);
     if !square.is_finite() || square <= 0. {
         return Err(Error("degenerate contact feature"));
@@ -266,7 +266,7 @@ pub(crate) fn mesh_feature(
         dot(direction, matrix[2]),
         0.,
     ];
-    let cache = context.feature_support(mesh, matrix, direction)?;
+    let cache = context.feature_support(mesh.into(), matrix, direction)?;
     let b = mesh.bytes();
     let vertex = 0x60 + cache[6] * 32;
     let faces = word(b, vertex + 0x14);
@@ -292,7 +292,7 @@ pub(crate) fn mesh_feature(
 }
 
 /// Plane clipping preserves the original rotation of all-inside polygons.
-fn clip(points: &[V], point: V, normal: V) -> Result<Vec<V>, Error> {
+pub(crate) fn clip(points: &[V], point: V, normal: V) -> Result<Vec<V>, Error> {
     let mut out = Vec::with_capacity(points.len() + 1);
     for i in 0..points.len() {
         let a = points[i];
@@ -315,7 +315,7 @@ fn clip(points: &[V], point: V, normal: V) -> Result<Vec<V>, Error> {
     Ok(out)
 }
 
-fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool {
+pub(crate) fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool {
     for c in contacts {
         let score = dot(normal, c.normal);
         let score = if c.flipped { -0. - score } else { score };
@@ -333,6 +333,7 @@ fn duplicate(contacts: &mut [Contact], point: V, normal: V, depth: f32) -> bool 
 
 /// A polygon feature: unit normal, convex vertices in order, the published
 /// orientation flag and the shape margin.
+#[derive(Clone, Copy)]
 pub(crate) struct Face<'a> {
     pub normal: V,
     pub vertices: &'a [V],
@@ -366,6 +367,19 @@ pub(crate) fn assemble_faces(
     features: [Face<'_>; 2],
     s: &Settings,
     existing: &[Contact],
+) -> Result<Vec<Contact>, Error> {
+    assemble_rule(features, s, existing, false)
+}
+
+/// [`assemble_faces`] with AE2FA0's fallback rule: after a polygon pair the
+/// fallback contact joins at most two contacts; when one feature is a
+/// two-vertex segment (a cylinder generator), only an empty manifold.
+#[allow(clippy::neg_multiply)] // Original margin/sign operations retain -0 lanes.
+pub(crate) fn assemble_rule(
+    features: [Face<'_>; 2],
+    s: &Settings,
+    existing: &[Contact],
+    segment: bool,
 ) -> Result<Vec<Contact>, Error> {
     let [a, b] = &features;
     let mut contacts = existing.to_vec();
@@ -428,7 +442,12 @@ pub(crate) fn assemble_faces(
             }
         }
     }
-    if (!clipping || contacts.len() <= 2)
+    let few = if segment {
+        contacts.is_empty()
+    } else {
+        contacts.len() <= 2
+    };
+    if (!clipping || few)
         && contacts.len() != limit
         && !duplicate(&mut contacts, s.fallback_point, s.normal, s.fallback_depth)
     {
@@ -467,43 +486,51 @@ pub fn calculate_append(
     s: &Settings,
     existing: &[Contact],
 ) -> Result<Output, Error> {
-    if existing.len() > 16
-        || s.capacity > 16 - existing.len()
-        || existing.iter().any(|c| {
-            !c.penetration.is_finite()
-                || c.penetration.abs() > 1e6
-                || c.point.iter().any(|x| !x.is_finite() || x.abs() > 1e5)
-                || c.point[3] != 1.
-                || c.normal.iter().any(|x| !x.is_finite())
-                || c.normal[3] != 0.
-                || (dot(c.normal, c.normal) - 1.).abs() > 0.001
-        })
-        || !s.margin.is_finite()
+    if existing.len() > 16 || s.capacity > 16 - existing.len() {
+        return Err(Error("invalid selected manifold capacity"));
+    }
+    // AE2FA0/B45310 take a normal of any length: a contact's normal can be
+    // a body's basis row, which drifts off unit length on a piece that is
+    // never re-orthonormalized (Le Mans 24 Hours tick 40552: |n|^2 =
+    // 1.00112, F530). Only non-finite values are refused.
+    if existing.iter().any(|c| {
+        !c.penetration.is_finite()
+            || c.penetration.abs() > 1e6
+            || c.point.iter().any(|x| !x.is_finite() || x.abs() > 1e5)
+            || c.point[3] != 1.
+            || c.normal.iter().any(|x| !x.is_finite())
+            || c.normal[3] != 0.
+    }) {
+        return Err(Error("invalid selected manifold existing contacts"));
+    }
+    if !s.margin.is_finite()
         || !(0. ..=1e6).contains(&s.margin)
         || !s.shape_margin.is_finite()
         || !(0. ..=1e6).contains(&s.shape_margin)
         || !s.fallback_depth.is_finite()
         || s.fallback_depth.abs() > 10000.
-        || s.normal.iter().any(|x| !x.is_finite() || x.abs() > 10000.)
+    {
+        return Err(Error("invalid selected manifold margins or depth"));
+    }
+    if s.normal.iter().any(|x| !x.is_finite() || x.abs() > 10000.)
         || s.normal[3] != 0.
-        || (dot(s.normal, s.normal) - 1.).abs() > 0.001
-        // Port guards: AE2FA0/B45310 bound no coordinate. World positions
-        // share the 1e5 domain of the triangle and existing points.
-        || s.fallback_point
-            .iter()
-            .any(|x| !x.is_finite() || x.abs() > 1e5)
+    {
+        return Err(Error("invalid selected manifold normal"));
+    }
+    // Port guards: AE2FA0/B45310 bound no coordinate. World positions
+    // share the 1e5 domain of the triangle and existing points.
+    if s.fallback_point.iter().any(|x| !x.is_finite() || x.abs() > 1e5)
         || s.fallback_point[3] != 1.
-        || matrix
-            .iter()
-            .flatten()
-            .any(|x| !x.is_finite() || x.abs() > 1e5)
-        || triangle
-            .iter()
-            .flatten()
-            .any(|x| !x.is_finite() || x.abs() > 1e5)
+    {
+        return Err(Error("invalid selected manifold fallback point"));
+    }
+    if matrix.iter().flatten().any(|x| !x.is_finite() || x.abs() > 1e5) {
+        return Err(Error("invalid selected manifold matrix"));
+    }
+    if triangle.iter().flatten().any(|x| !x.is_finite() || x.abs() > 1e5)
         || triangle.iter().any(|p| p[3] != 1.)
     {
-        return Err(Error("invalid selected manifold controls"));
+        return Err(Error("invalid selected manifold triangle"));
     }
     let mut staged = context.clone();
     let (features, support_vertices) = features(&mut staged, mesh, matrix, triangle, s)?;
@@ -701,6 +728,48 @@ mod tests {
         );
         assert_eq!(context.cached_support(), cache);
         assert_eq!(prior, saved);
+    }
+
+    #[test]
+    fn a_retained_normal_off_unit_length_still_merges() {
+        // Le Mans 24 Hours tick 40552 (F530): a piece's drifted basis row as
+        // the retained contact's normal, |n|^2 = 1.00112.
+        let mesh = crate::collision_mesh::build(
+            &[
+                [1., 1., 1., 1.],
+                [-1., -1., 1., 1.],
+                [-1., 1., -1., 1.],
+                [1., -1., -1., 1.],
+            ],
+            &[[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]],
+            0,
+        )
+        .unwrap();
+        let matrix = [
+            [1., 0., 0., 0.],
+            [0., 1., 0., 0.],
+            [0., 0., 1., 0.],
+            [0., 0.9, 0., 1.],
+        ];
+        let n = [0.8177123f32, -0.5296651, -0.22787195, -0.];
+        assert!((n[0] * n[0] + n[1] * n[1] + n[2] * n[2] - 1.).abs() > 0.001);
+        let prior = vec![Contact {
+            point: [0.5, -0.1, 0., 1.],
+            normal: n,
+            penetration: 0.1,
+            flipped: false,
+        }];
+        let s = Settings {
+            margin: 0.,
+            shape_margin: 0.,
+            normal: [0., 1., 0., 0.],
+            fallback_point: [0., 0., 0., 1.],
+            fallback_depth: 0.1,
+            capacity: 15,
+        };
+        let triangle = [[-5., 0., -5., 1.], [0., 0., 5., 1.], [5., 0., -5., 1.]];
+        let out = calculate_append(&mut Context::new(), &mesh, matrix, triangle, &s, &prior).unwrap();
+        assert!(!out.contacts.is_empty());
     }
 
     #[test]

@@ -179,6 +179,7 @@ fn run<C: Callbacks>(
             workspace: s.workspace.clone(),
             cached_pair: s.cached_pair,
             cached_material: s.cached_material,
+            joints: s.joints.clone(),
         },
     };
     if s.iterations == 0 {
@@ -300,7 +301,22 @@ fn run<C: Callbacks>(
             .collect();
         // Empty contact pools retain the manager's previous span ends. Those
         // ends need not describe the current row allocation on this bypass.
-        let n = out.step.contacts.len();
+        let joints = |two| {
+            out.step
+                .joints
+                .list
+                .iter()
+                .filter(|j| j.two_body() == two)
+                .map(|j| j.joint.clone())
+                .collect::<Vec<_>>()
+        };
+        let (two_body_joints, single_body_joints) = (joints(true), joints(false));
+        let n = out.step.contacts.len()
+            + two_body_joints
+                .iter()
+                .chain(&single_body_joints)
+                .map(|j| j.words[0x18 / 4] as usize)
+                .sum::<usize>();
         let result = impact_correction::calculate(&impact_correction::Input {
             rows: out.step.rows[..n]
                 .iter()
@@ -308,6 +324,8 @@ fn run<C: Callbacks>(
                 .collect(),
             two_body_contacts: contacts(true),
             single_body_contacts: contacts(false),
+            two_body_joints,
+            single_body_joints,
             poses,
             workspace: out.step.workspace.clone(),
             span_ends: [out.step.ends[3], out.step.ends[2]],
@@ -500,6 +518,7 @@ mod tests {
                 workspace: vec![[[7.; 4]; 2]],
                 cached_pair: None,
                 cached_material: [0.; 13],
+                joints: Default::default(),
             },
         }
     }

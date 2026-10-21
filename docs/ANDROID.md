@@ -40,6 +40,8 @@ powershell -NoProfile -File tools\build_android.ps1
 2. `gradle -p android --no-daemon assembleDebug` with the pinned Gradle, JDK and SDK. `GRADLE_USER_HOME` is `C:\Users\debros\Tools\gradle-home`.
 3. The APK is copied to `local/android/apk/grid-<revision>-debug.apk`, with a `.json` manifest: revision, time, SHA-256 of the APK and of `libgrid_android.so`, rustc version and tool paths.
 
+Before step 1 the script adds the seed's Android artifacts to this worktree's build dir (`tools/seed_build_dir.ps1 -Android`; `-NoSeed` skips it), so Bevy for aarch64 is not compiled per worktree. Run the Android Clippy as `tools\build_android.ps1 -Clippy` (add `-Profile` for that variant), not as a bare `cargo ndk … clippy`: jni-sys's build script reruns whenever JAVA_HOME differs, and that rerun makes every Android crate built before it stale (docs/TOOLCHAIN.md "Build speed — 19 October 2026").
+
 "Debug" means signed with this PC's Android debug key (`%USERPROFILE%\.android\debug.keystore`, created by AGP on first use). The key differs per machine, so APK hashes differ between machines; the `.so` hash does not depend on it.
 
 ### Private bundled APK (`-BundleData`)

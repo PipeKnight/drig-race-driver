@@ -74,8 +74,10 @@ pub fn calculate(input: &Input) -> Result<Output, Error> {
         let root = seed * squared;
         (1. - root * seed) * (root * 0.5) + root
     };
-    if !length.is_finite() || length > 64. {
-        return Err(Error("physical angular correction exceeds bound"));
+    // B13B00 turns by any correction angle (no bound, F512); only a
+    // non-finite one is refused.
+    if !length.is_finite() {
+        return Err(Error("physical angular correction exceeds finite range"));
     }
     if length > f32::from_bits(0x2338_77aa) {
         let inverse = 1. / length;
@@ -205,6 +207,19 @@ mod tests {
         assert_eq!(out.published, out.corrected);
         assert_eq!(out.shapes, vec![out.published; 2]);
         assert_eq!(out.derived, [IDENTITY; 2]);
+    }
+    #[test]
+    fn an_angular_correction_past_64_rad_still_turns() {
+        // Career run 13 (Le Mans, F512): a piece of a just-broken tyre wall
+        // got a correction past the port's old 64 rad bound. B13B00 has none.
+        let mut v = input();
+        v.angular = [0., 100., 0., 0.];
+        let out = calculate(&v).unwrap();
+        let turn = crate::pose::rotation([0., 1., 0., 0.], 100.).unwrap();
+        assert_eq!(out.corrected[..3], turn[..3]);
+        assert!((out.corrected[0][0] - 100f32.cos()).abs() < 1e-5);
+        v.angular = [f32::MAX, f32::MAX, 0., 0.];
+        assert!(calculate(&v).is_err());
     }
     #[test]
     fn center_offset_changes_published_position() {

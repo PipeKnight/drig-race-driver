@@ -1,13 +1,17 @@
 //! The original's career ("GRID World"): catalogue, state, results and
 //! saves (docs/CAREER_RESEARCH.md).
 pub mod data;
+pub mod ebay;
+pub mod field;
 pub mod rules;
 pub mod save;
 pub mod state;
 
 pub use data::{Catalogue, Event, Region};
-pub use rules::{Classified, Entrant, RaceResult, RaceSettings};
-pub use state::{Career, Payout, SeasonEntry, SeasonState, apply_driver_offer, apply_event};
+pub use rules::{Classified, Entrant, Flashbacks, RaceResult, RaceSettings};
+pub use state::{
+    Career, Payout, SeasonEntry, SeasonState, SponsorPay, apply_driver_offer, apply_event, apply_event_in_classes,
+};
 
 #[cfg(test)]
 mod tests {
@@ -80,6 +84,7 @@ mod tests {
                     money_reward: [3000, 2150, 1350][p as usize - 1],
                 })
                 .collect(),
+            drivers: (1..=12).map(|d| EventDriver { driver_id: d, livery_id: 100 + d }).collect(),
         }
     }
 
@@ -126,6 +131,8 @@ mod tests {
             event_id: 22,
             team_id: 91,
             vehicle_livery_id: 201,
+            vehicle_id: Some(10),
+            livery: "lac_02".into(),
             order_index: 1,
             per_race_wage: 4500,
             objective: OfferObjective::FinishingPlace,
@@ -161,7 +168,39 @@ mod tests {
             )]),
             sponsors: BTreeMap::new(),
             driver_offers: BTreeMap::from([(12, offer)]),
+            teams: BTreeMap::new(),
+            team_types: BTreeMap::from([(5, 2)]),
+            drivers: (1..=12)
+                .map(|i| {
+                    (
+                        i,
+                        Driver {
+                            id: i,
+                            first_name: format!("D{i}"),
+                            surname: String::new(),
+                            team_id: if i <= 2 { 5 } else { 100 + (i + 1) / 2 },
+                            skill: i as f32 / 12.0,
+                        },
+                    )
+                })
+                .collect(),
+            liveries: BTreeMap::new(),
+            venues: BTreeMap::from([(1, 6), (2, 6), (3, 7)]),
+            named_slots: Vec::new(),
+            legends: BTreeMap::from([(7, vec![50])]),
             team_mates: Vec::new(),
+            hireable: vec![Hireable {
+                driver_id: 8,
+                first_name: "Ann".into(),
+                surname: "Example".into(),
+                rank_id: 1,
+                region_id: 1,
+                signing_fee: 10000,
+                winnings_percentage: 20,
+                skill: 0.6,
+                team_id: 0,
+            }],
+            fee_ranges: vec![(0, 10000), (10000, 50000)],
             difficulties,
             reputation_fractions: vec![
                 0.5, 0.4, 0.3, 0.2, 0.17, 0.14, 0.12, 0.1, 0.08, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01,
@@ -172,6 +211,8 @@ mod tests {
             initial_vehicle_id: 43,
             start_money: 40000,
             assist_rewards: AssistRewards::default(),
+            currency_rates: vec![1.0, 2.0, 1.5, 230.0],
+            ebay: super::ebay::Settings::default(),
         }
     }
 
@@ -255,6 +296,53 @@ mod tests {
     }
 
     #[test]
+    fn class_position_counts_the_players_class_and_wins_its_ties() {
+        // Two races: P and ai(2) tie on 38 points, ai(1) of another class
+        // scores more.
+        let table = rules::standings(
+            &[20, 18, 16],
+            &[result(&[ai(1), P, ai(2)]), result(&[ai(1), ai(2), P])],
+        );
+        let class_of = |e: Entrant| Some(if e == ai(1) { 2 } else { 1 });
+        assert_eq!(rules::class_position(&table, P, &class_of), Some(0));
+        assert_eq!(rules::class_position(&table, ai(2), &class_of), Some(1));
+        assert_eq!(rules::class_position(&table, ai(1), &class_of), Some(0));
+        let one_class = |_| None;
+        assert_eq!(rules::class_position(&table, P, &one_class), Some(1));
+        assert_eq!(rules::class_position(&table, T, &class_of), None);
+    }
+
+    #[test]
+    fn each_finished_race_pays_the_flashback_bonus_for_unused_flashbacks() {
+        let cat = tiny();
+        let fb = |used| Some(Flashbacks { used, maximum: 3 });
+        let mut first = result(&[P, ai(1)]);
+        first.flashbacks = fb(1);
+        let mut second = result(&[ai(1), P]);
+        second.flashbacks = fb(0);
+        second.order[1].finished = false;
+        let mut plain_races = [first.clone(), second.clone()];
+        for r in &mut plain_races {
+            r.flashbacks = None;
+        }
+        let mut without = founded();
+        let base = apply_event(&cat, &mut without, 7, &plain_races, &plain()).unwrap();
+        let mut c = founded();
+        let p = apply_event(&cat, &mut c, 7, &[first.clone(), second], &plain()).unwrap();
+        // Star 2: 3 flashbacks, award 3000; 1 used -> 2 * 3000 / 3; the
+        // unfinished race pays none.
+        assert_eq!(p.flashback_bonus, 2000);
+        assert_eq!(p.money(), base.money() + 2000);
+        assert_eq!(c.money, without.money + 2000);
+        assert_eq!(c.season_earnings, without.season_earnings + 2000);
+        // A driver offer pays it too (0x678BD0 / 0x678EE0 call 0x652200).
+        let mut c = founded();
+        first.flashbacks = fb(0);
+        let p = apply_driver_offer(&cat, &mut c, 12, false, &[first], &plain()).unwrap();
+        assert_eq!(p.flashback_bonus, 3000);
+    }
+
+    #[test]
     fn an_event_pays_prize_reputation_sponsors_and_drains_the_pot() {
         let cat = tiny();
         let mut c = founded();
@@ -308,14 +396,14 @@ mod tests {
     fn driver_offer_money_founds_the_team() {
         let cat = tiny();
         let mut c = Career::new();
-        let p = apply_driver_offer(&cat, &mut c, 12, true).unwrap();
+        let p = apply_driver_offer(&cat, &mut c, 12, true, &[], &Default::default()).unwrap();
         assert_eq!(p.driver_offer_wages, 13500);
         assert_eq!(p.driver_offer_bonus, 1500);
         assert_eq!(c.reputation[Region::UnitedStates as usize], 150);
         assert!(!c.team_founded);
         assert!(c.season.is_empty(), "seasons start with the team");
-        apply_driver_offer(&cat, &mut c, 12, true).unwrap();
-        let p = apply_driver_offer(&cat, &mut c, 12, false).unwrap();
+        apply_driver_offer(&cat, &mut c, 12, true, &[], &Default::default()).unwrap();
+        let p = apply_driver_offer(&cat, &mut c, 12, false, &[], &Default::default()).unwrap();
         assert!(p.team_founded);
         assert!(c.team_founded);
         // 15000 + 15000 + 13500 - 40000.
@@ -324,8 +412,151 @@ mod tests {
         // [I] The offer whose money founds the team is not counted: the
         // season counter runs before the credit in this port.
         assert!(c.season.is_empty());
-        apply_driver_offer(&cat, &mut c, 12, false).unwrap();
+        apply_driver_offer(&cat, &mut c, 12, false, &[], &Default::default()).unwrap();
         assert_eq!(c.season, [SeasonEntry::DriverOffer(12)]);
+    }
+
+    #[test]
+    fn sponsors_pay_per_race_for_player_and_teammate() {
+        let cat = tiny();
+        let mut c = founded();
+        c.sponsor_offers = vec![71, 72];
+        c.place_sponsor(71, None).unwrap();
+        c.place_sponsor(72, Some(2)).unwrap();
+        // 71 finish undamaged (major, 3000 x2), 72 top 3 (2150).
+        c.team_mate = Some(state::HiredTeamMate {
+            driver_id: 8,
+            winnings_percentage: 20,
+        });
+        let pay = c.sponsor_pay(&cat, &result(&[ai(1), ai(2), P, ai(3), T]));
+        assert_eq!(pay.len(), 2);
+        assert_eq!((pay[0].offer_id, pay[0].major, pay[0].money), (71, true, 12000));
+        assert!(pay[0].player_met && pay[0].teammate_met);
+        assert_eq!((pay[1].offer_id, pay[1].player_met, pay[1].teammate_met), (72, true, false));
+        assert_eq!(pay[1].money, 2150);
+    }
+
+    #[test]
+    fn hiring_waits_for_the_first_licence() {
+        let cat = tiny();
+        let mut c = founded();
+        c.money = 50000;
+        assert!(!c.can_hire(&cat));
+        assert!(c.hire_driver(&cat, 8).is_err());
+        c.reputation[Region::Europe as usize] = 80000;
+        assert!(c.can_hire(&cat));
+        assert_eq!(c.search(&cat, Some(Region::Europe), Some(0)).len(), 1);
+        assert!(c.search(&cat, Some(Region::Japan), None).is_empty());
+        assert!(c.search(&cat, None, Some(1)).len() == 1, "10,000 is in both ranges");
+        c.hire_driver(&cat, 8).unwrap();
+        assert_eq!(c.money, 40000);
+        assert_eq!(c.team_mate.as_ref().unwrap().winnings_percentage, 20);
+        assert!(c.search(&cat, None, None).is_empty(), "the current one is left out");
+    }
+
+    #[test]
+    fn races_are_drawn_by_order_then_by_layout_count_venues_first() {
+        let cat = tiny();
+        let pool = |tm: i32, order: i32| EventRace {
+            track_model_id: tm,
+            order_index: order,
+            ..race(tm)
+        };
+        // Layouts 1 and 2 share venue 6, layout 3 is venue 7.
+        let p = [pool(1, 2), pool(2, 1), pool(3, 3)];
+        let ids = |v: Vec<EventRace>| v.iter().map(|r| r.track_model_id).collect::<Vec<_>>();
+        let none = BTreeMap::new();
+        assert_eq!(ids(field::draw_races(&cat, &p, 2, true, &none)), [2, 3]);
+        // A repeat: fewest races first, venues first, then fill.
+        let counts = BTreeMap::from([(2, 1), (3, 1)]);
+        assert_eq!(ids(field::draw_races(&cat, &p, 2, false, &counts)), [1, 3]);
+        assert_eq!(ids(field::draw_races(&cat, &p, 3, false, &counts)), [1, 3, 2]);
+    }
+
+    #[test]
+    fn the_player_team_takes_over_a_non_key_team() {
+        let cat = tiny();
+        let mut c = founded();
+        let mut rng = crate::series::Mt::new(7);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 999, &mut rng);
+        assert_eq!(f.len(), 12);
+        assert_eq!((f[0].entrant, f[0].livery_id), (Entrant::Player, 999));
+        assert!((102..=107).contains(&f[0].team_id), "{}", f[0].team_id);
+        // The key team's cars (drivers 1 and 2) stay.
+        for d in [1, 2] {
+            assert!(f.iter().any(|x| x.driver_id == Some(d)));
+        }
+        // With a team mate: both take one team's two cars; a team mate who
+        // is an event driver gives his seat to a legend.
+        c.team_mate = Some(state::HiredTeamMate {
+            driver_id: 3,
+            winnings_percentage: 20,
+        });
+        let mut rng = crate::series::Mt::new(7);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 999, &mut rng);
+        assert_eq!(f.len(), 12);
+        let mate = f.iter().find(|x| x.entrant == Entrant::TeamMate).unwrap();
+        assert_eq!(mate.team_id, f[0].team_id);
+        let legend_or_overwritten = f.iter().any(|x| x.driver_id == Some(50)) || f[0].team_id == 102;
+        assert!(legend_or_overwritten);
+        assert!(f.iter().filter(|x| x.driver_id == Some(3)).count() == 1, "only as the team mate");
+    }
+
+    #[test]
+    fn a_race_offer_puts_the_player_in_the_offer_team() {
+        let mut cat = tiny();
+        let o = cat.driver_offers.get_mut(&12).unwrap();
+        o.event_id = 7;
+        o.team_id = 5;
+        let c = Career::new();
+        let mut rng = crate::series::Mt::new(1);
+        let f = field::field(&cat, &c, field::Entry::Offer(12), 201, &mut rng);
+        assert_eq!(f.len(), 12);
+        assert_eq!((f[0].entrant, f[0].team_id), (Entrant::Player, 5));
+        // Driver 1 (lowest index of team 5) is replaced; driver 2 stays.
+        assert!(!f.iter().any(|x| x.driver_id == Some(1)));
+        assert!(f.iter().any(|x| x.driver_id == Some(2) && x.team_id == 5));
+    }
+
+    #[test]
+    fn the_grid_places_the_player_then_ranks_by_skill() {
+        let cat = tiny();
+        let c = founded();
+        let mut rng = crate::series::Mt::new(3);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 999, &mut rng);
+        let g = field::grid(&cat, &f, None, 12, 0, &mut rng);
+        assert_eq!(g.len(), 12);
+        assert_eq!(g[11], 0, "player at the back");
+        let mut seen = g.clone();
+        seen.sort_unstable();
+        assert_eq!(seen, (0..12).collect::<Vec<_>>());
+        // The most skilled drivers start near the front.
+        let pos = |d: i32| g.iter().position(|&i| f[i].driver_id == Some(d));
+        if let (Some(fast), Some(slow)) = (pos(12), pos(1)) {
+            assert!(fast < slow);
+        }
+    }
+
+    #[test]
+    fn a_driven_offer_moves_its_slot_on() {
+        let cat = tiny();
+        let mut c = Career::new();
+        assert_eq!(c.driver_offers_shown(&cat), [12]);
+        apply_driver_offer(&cat, &mut c, 12, false, &[], &Default::default()).unwrap();
+        assert!(c.driver_offers_shown(&cat).is_empty());
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn a_new_career_shows_one_race_and_one_test_offer_per_region() {
+        let cat = catalogue();
+        let c = Career::new();
+        // US rookie: 2 (race), 7 (time trial); Europe rookie: 15, 16;
+        // Japan rookie: 25, 27 (speed test) - first by order_index [D].
+        assert_eq!(c.driver_offers_shown(&cat), [2, 7, 15, 16, 25, 27]);
+        let bmw = &cat.driver_offers[&23];
+        assert_eq!(cat.vehicles[&bmw.vehicle_id.unwrap()].stem, "bmw");
+        assert_eq!(bmw.races.len(), 1);
     }
 
     #[test]
@@ -356,6 +587,7 @@ mod tests {
         let cat = tiny();
         let mut c = founded();
         let races = [result(&[ai(1), P])];
+        let before = c.money;
         for _ in 0..3 {
             apply_event(&cat, &mut c, 34, &races, &plain()).unwrap();
         }
@@ -363,9 +595,13 @@ mod tests {
         apply_event(&cat, &mut c, 34, &races, &plain()).unwrap();
         assert_eq!(c.season_state(), SeasonState::LeMansPending);
         assert!(!c.end_season());
+        // Season's Earnings: every payout of the season, cleared at its end.
+        assert!(c.money > before);
+        assert_eq!(c.season_earnings, c.money - before);
         c.refuse_lemans();
         assert_eq!(c.season_state(), SeasonState::Ended);
         assert!(c.end_season());
+        assert_eq!(c.season_earnings, 0);
         assert_eq!(c.season_number, 2);
         assert_eq!(c.previous_season.len(), 4);
         assert!(c.season.is_empty());
@@ -384,11 +620,21 @@ mod tests {
         let before = c.total_reputation();
         let p = apply_event(&cat, &mut c, 69, &win, &plain()).unwrap();
         assert_eq!(p.prize, 500000);
+        assert!(p.head_to_head && p.position == Some(0));
         assert_eq!(c.total_reputation(), before);
         assert!(!c.game_completed);
+        assert!(p.unlocked_cars.is_empty(), "a Europe head-to-head unlocks nothing");
         c.head_to_heads.insert(78);
-        apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
+        let lost = [result(&[ai(1), P])];
+        let p = apply_event(&cat, &mut c, 78, &lost, &plain()).unwrap();
+        assert!(p.unlocked_cars.is_empty() && c.cars.is_empty());
+        let p = apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
         assert!(c.game_completed);
+        // The International win puts every purchasable car in the garage.
+        assert_eq!(p.unlocked_cars, [43]);
+        assert_eq!(c.cars.iter().map(|c| c.vehicle_id).collect::<Vec<_>>(), [43]);
+        let p = apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
+        assert!(p.unlocked_cars.is_empty(), "owned cars stay as they are");
     }
 
     #[test]
@@ -417,7 +663,10 @@ mod tests {
         c.completed_offers.insert(12);
         c.previous_season.push(SeasonEntry::DriverOffer(12));
         c.head_to_heads.insert(69);
+        c.count_race(24);
+        c.count_race(24);
         let text = save::write(&c).unwrap();
+        assert!(text.contains("layout_races 24 2\n"));
         assert_eq!(save::read(&text).unwrap(), c);
         let forged = text.replace("money 1", "money 9");
         assert!(save::read(&forged).is_err());
@@ -461,6 +710,10 @@ mod tests {
         assert_eq!(c.difficulties.len(), 24);
         let offer = &c.driver_offers[&16];
         assert_eq!(offer.target_times, [108.0, 107.0, 106.0, 105.0, 104.0, 103.0]);
+        // The hire pool is `driver.can_be_hired` (345 rows) [D, V 0x662850].
+        assert_eq!(c.hireable.len(), 345);
+        assert_eq!(c.fee_ranges.len(), 7);
+        assert_eq!(c.fee_ranges[6], (5000000, 10000000));
         assert_eq!(c.assist_rewards, AssistRewards::default());
         let offers: usize = c.events.values().map(|e| e.sponsor_offers.len()).sum();
         assert_eq!(offers, 156);
@@ -484,6 +737,104 @@ mod tests {
         }
     }
 
+    /// bmw_si_tour (DRAW_FIELD worked example): the first entry draws the
+    /// Nurburgring Sprint then the GP reverse; the field is its 20
+    /// `event_driver` cars, Victor Rossi's (key team) untouched, the player
+    /// in one of the 9 other teams.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn bmw_si_tour_draw_and_field_follow_the_original() {
+        let cat = catalogue();
+        let e = cat.event(7).unwrap();
+        let races = field::draw_races(&cat, &e.races, 2, true, &BTreeMap::new());
+        let layouts: Vec<i32> = races.iter().map(|r| r.track_model_id).collect();
+        assert_eq!(layouts, [24, 99]);
+        assert_eq!(races.iter().map(|r| r.laps).collect::<Vec<_>>(), [3, 2]);
+        let mut c = Career::new();
+        c.team_founded = true;
+        let teams = [116, 117, 119, 120, 121, 123, 124, 125, 368];
+        for seed in 0..20 {
+            let mut rng = crate::series::Mt::new(seed);
+            let f = field::field(&cat, &c, field::Entry::Event(7), 140, &mut rng);
+            assert_eq!(f.len(), 20);
+            assert!(teams.contains(&f[0].team_id), "{}", f[0].team_id);
+            assert_eq!(f.iter().filter(|x| x.team_id == 5).count(), 2);
+            let g = field::grid(&cat, &f, Some(150), 14, 2, &mut rng);
+            let slot = g.iter().position(|&i| i == 0).unwrap();
+            assert!(slot == 13 || slot == 14, "player slot {slot}");
+        }
+        // Race 2 (pool row 39): Fraga (driver 11) is named to slots 1-3.
+        let mut rng = crate::series::Mt::new(5);
+        let f = field::field(&cat, &c, field::Entry::Event(7), 140, &mut rng);
+        if let Some(i) = f.iter().position(|x| x.driver_id == Some(11)) {
+            let g = field::grid(&cat, &f, Some(39), 14, 2, &mut rng);
+            assert!(g.iter().position(|&k| k == i).unwrap() < 3);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn routine_b_pays_the_le_mans_24_hours_by_class_from_the_whole_pot() {
+        let cat = catalogue();
+        let event = cat.event(13).unwrap();
+        assert_eq!(cat.tier(event.tier_id).unwrap().region, Region::LeMans);
+        // Five faster cars of another class, then one of the player's.
+        let order: Vec<Entrant> = (1..=6).map(ai).chain([P, ai(7)]).collect();
+        let class_of = |e: Entrant| Some(if matches!(e, Entrant::Ai { driver: 1..=5, .. }) { 2 } else { 1 });
+        let mut c = founded();
+        let races = [result(&order)];
+        let p = apply_event_in_classes(&cat, &mut c, 13, &races, &plain(), &class_of).unwrap();
+        assert_eq!(p.position, Some(1), "second in class, seventh overall");
+        assert_eq!(p.prize, rules::prize(event, 1));
+        let base = rules::reputation_base(&cat.reputation_fractions, event.reputation_pot, 1);
+        assert_eq!(p.reputation_base, base);
+        assert_eq!(p.team_win_bonus, 0, "ai(6) leads the class");
+        assert!(!c.reputation_pots.contains_key(&13), "routine B keeps the pot");
+        // Again: the same pot; and leading the class wins the team bonus.
+        let order: Vec<Entrant> = (1..=5).map(ai).chain([P, ai(6), ai(7)]).collect();
+        let p = apply_event_in_classes(&cat, &mut c, 13, &[result(&order)], &plain(), &class_of).unwrap();
+        assert_eq!(p.position, Some(0));
+        assert_eq!(
+            p.reputation_base,
+            rules::reputation_base(&cat.reputation_fractions, event.reputation_pot, 0)
+        );
+        assert!(p.team_win_bonus > 0);
+        // Without classes every car counts in one class.
+        let mut a = founded();
+        let p = apply_event(&cat, &mut a, 13, &[result(&order)], &plain()).unwrap();
+        assert_eq!(p.position, Some(5));
+    }
+
+    /// The head-to-heads F520 made raceable pay as the original (0x6788D0,
+    /// 0x674810): `prize_money_for_first` on every win, nothing on a loss,
+    /// no reputation, and the car unlock only in the International region.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn head_to_heads_73_75_77_pay_their_prize_and_78_unlocks_every_car() {
+        let cat = catalogue();
+        let win = [result(&[P, ai(1)])];
+        let lost = [result(&[ai(1), P])];
+        for (id, prize) in [(73, 1_000_000), (75, 500_000), (77, 2_500_000)] {
+            let event = cat.event(id).unwrap();
+            assert!(event.head_to_head);
+            assert_eq!(event.prize_money_for_first, prize, "{id}");
+            let mut c = founded();
+            let p = apply_event(&cat, &mut c, id, &lost, &plain()).unwrap();
+            assert_eq!((p.prize, p.position), (0, None), "{id} lost");
+            let p = apply_event(&cat, &mut c, id, &win, &plain()).unwrap();
+            assert_eq!((p.prize, p.position, p.reputation()), (prize, Some(0), 0), "{id}");
+            assert!(p.unlocked_cars.is_empty() && c.cars.is_empty(), "{id}: no unlock outside International");
+            let p = apply_event(&cat, &mut c, id, &win, &plain()).unwrap();
+            assert_eq!(p.prize, prize, "{id}: every win pays");
+            assert_eq!(c.money, 2 * prize);
+        }
+        let mut c = founded();
+        let p = apply_event(&cat, &mut c, 78, &win, &plain()).unwrap();
+        let purchasable = cat.vehicles.values().filter(|v| v.purchasable).count();
+        assert_eq!(p.unlocked_cars.len(), purchasable);
+        assert!(c.game_completed);
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn a_rookie_career_runs_on_the_shipped_data() {
@@ -497,7 +848,7 @@ mod tests {
             .map(|o| o.id)
             .collect();
         for id in offers.iter().cycle().take(40) {
-            apply_driver_offer(&cat, &mut c, *id, true).unwrap();
+            apply_driver_offer(&cat, &mut c, *id, true, &[], &Default::default()).unwrap();
             if c.team_founded {
                 break;
             }

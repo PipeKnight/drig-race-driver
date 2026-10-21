@@ -148,6 +148,7 @@ fn advance_owned(
         contacts: slots[..used].to_vec(),
         active_order: order,
         selector,
+        joints: previous.groups.joints.clone(),
     };
     let carry = contact_groups::Carry {
         dirty_head: world[4],
@@ -296,6 +297,7 @@ mod tests {
             contacts: vec![c],
             active_order: vec![0, 1],
             selector: 0,
+            joints: vec![],
         };
         let manager = grouped_physical_frame::Manager {
             parameters: [0.01, 1., 1., 1., 1., 0.2, 0.1, 0., 1., 1., 0.5],

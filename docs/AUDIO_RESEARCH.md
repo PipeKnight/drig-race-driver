@@ -330,8 +330,9 @@ GRID was not launched.
   setters clamp to [−48, 0] dB and [0.5, 2]. Cooldown per variety: skipped
   while elapsed ≤ T; on a play T = (rand % 3 + 1)·0.1 s. Player hits above
   hard.minVel switch the mix to Crashed (411C10, attack 0.2 s). Then
-  sweeteners without cooldown: HighSweetenerInfo (x ≥ 40, swt_*),
-  LowSweetenerInfo (x ≥ 15, lfe_*).
+  sweeteners: HighSweetenerInfo (x ≥ 40), LowSweetenerInfo (x ≥ 15), with
+  the same per-variety cooldown, and silent in the shipped data (§11;
+  corrected in F490, this line first said "without cooldown").
 - Curves (CollisionInfos): FrontBack soft/med/hard 3–10/10–30/30–60,
   −3..0/−2..0/−1..0 dB, pitch 0.85–1.1; Sides/Roof 2–8.9/8.9–22.35/22.35–40,
   same dB, 0.85–1.2; High sweetener 40–75, −20..−9 dB; Low 15–50, 0 dB.
@@ -346,7 +347,7 @@ GRID was not launched.
   touchdown.
 - Scrape loop (453710, per frame 458780): one voice per car on the other
   surface's `carscrapeColInfo` (audio material); gates by mode (horizontal
-  speed > 0.3 / 0.1 / 1.0), a contact this step and x > 1; envelope g = x,
+  speed > 0.3 / 0.1 / 1.0), a contact this step and x > 1; envelope g = 0 at the start (§10),
   refreshed (g = 1 above 15 m/s, else +0.1) and halved per frame when slow or
   the impulse accumulator < 5; player volume lin2dB(|v|·0.04·gv) with 5 %
   −24 dB drops and −(rand % 9) dB jitter, smoothed by 1/3 per frame; pitch
@@ -481,3 +482,726 @@ No extra parameter smoothing beyond OpenAL's own was found [I].
 **Not verified**: listening on the phone after the fix; whether the phone's audio callback
 also underruns (an Android log of output underruns would show it). If it does, the next steps
 are a larger output buffer and mixing the 25 sources into fewer.
+
+## 9. Collision impacts (F479)
+
+19 October 2026, Claude Code. Static analysis (§7.3 and the worktree's
+`local/gtfix/decomp/colldims`). GRID was not launched.
+
+**Dimensions [O].** 4559C0 reads its roof/floor heights through
+`[[audio car +0x20] +0x24]` → 0x9960F0 (`lea eax, [ecx+0xD240]`): the car description copied to
+body +0xD240. Description +0x1B28 / +0x1B54 are body +0xED68 / +0xED94, written by 0x9E2030
+from 0x99D180, the minimum and maximum of the `collision_main` points (CAR_COLLISION.md). So
+the floor height is the lowest point's y and the roof the highest point's y, in model
+coordinates (the Lacetti's floor is +0.103, as read live in BRAKING_REFERENCE). The tests are
+at 455D7A (roof: local y > roof − 0.7, 0xCB0834) and 455DAD (floor: −floor > local y).
+
+**Port** (`grid_tools::collision_audio`, grid-app `collision_sound`):
+- Data: `car_collisions` (307 samples), the car_collisions AudioVarieties with their preset
+  distances, CollisionInfos (presets plus per-info overrides) and ImpactVarieties (soft, med,
+  hard in child order).
+- Listener, once per vehicle tick (FixedUpdate after `drive_tick`, as F453), for every car:
+  - contacts come from `Runtime::impacts()` solo and `multi.contact_impacts(k)` in a field;
+  - x = 10·impact/mass;
+  - `classify` (4559C0) uses the car frame of the physical pose, with heights compared in
+    model coordinates (body − vehicle +0x1630) [I: the audio object's car matrix taken as the
+    physical pose] (F490 removed this conversion, §11);
+  - the soft/med/hard pick and curve follow 4535A0/435EA0;
+  - one-shots quieter than −42 dB are skipped, and per-variety cooldowns of
+    (rand % 3 + 1)·0.1 s are shared by all cars;
+  - sweeteners at x ≥ 40 (High) and x ≥ 15 (Low).
+- Mix: the player's one-shots play on Panel Coll measured from the car (the Car listener [I:
+  the car's pose]), AI cars' on the AI group measured from the camera; A23B70 distance law
+  with the variety's preset (crashimpact 4/40 m, crashlfesweet 8/40 m). One mono source with
+  up to 32 voices [I]; the level is fixed when a voice starts.
+- Not yet: the scrape loop (needs the other surface's audio material), landing (PrimaryBot by
+  airtime), yaw/pitch displacement, the Crashed mix mode, part/glass sounds, stereo.
+- Tests: `contacts_are_classified_like_4559c0`, `curves_interpolate_and_clamp`,
+  `shipped_collision_data_and_listener` (the hard front hit plays carFBHard plus both
+  sweeteners, the cooldown skips a repeat, the mixer plays).
+- Not heard in a windowed race.
+
+## 10. Scrape loop (F488)
+
+19 October 2026, Claude Code. Static analysis: Capstone 5.0.6 listings of 0x453710, 0x4563F0,
+0x436170, 0xA69930 and 0x413890 from `local/compatibility/grid-unpacked.exe`, the Ghidra
+pseudocode of §7.3 (worktree `local/gtfix/decomp/coll4/{453931,455ebd,458c84}`,
+`wind3/448810`), and constants read from the shipped `grid.exe`. GRID was not launched.
+
+**Call site [O].** 4559C0 calls 453710 *before* the impact one-shot, and only when 436170 maps
+the listener's material argument to an AudioMaterial. That argument is the other side's
+material word of the event (9EF360 passes event[3 − side], which B0CFC0 fills from contact
++0x30/+0x34). The info is that AudioMaterial's preset `carscrapeColInfo`
+(`*(*(material+0x28)+0x28)`); the roof passes a fixed entry of the car's impact table instead
+(`*(…+0x18)+0xC`, taken as CarScrapeRoof [I]). Modes: sides 0 when the longitudinal cosine
+is > 0 (0xD85A50 = 0), else 1; roof 2; front 3; back 4.
+
+**Which info [O, data].** The AudioMaterial loop reads only `preset` (TYRE_AUDIO_RESEARCH §1),
+so WALL, CAR_* and the other per-material `carscrapeColInfo` attributes are ignored. Every
+preset names CarScrapeSideRoad except `grass` (CarScrapeSideOther). All three scrape infos use
+the `scraping` preset (minVel 0, maxVel 1, minVol −24, maxVol −18 dB).
+
+**453710 [O].**
+- Speed gate by mode: horizontal speed (the car velocity with y masked, mask 0xCAF410) ≥ 0.3
+  (modes 0/1, 0xCB0DCC), 1.0 (mode 2) or 0.1 (others). It also needs the audio car's body
+  (+0x24), A69930 true (body +0x40C set this step; it returns the impulse accumulator +0x240,
+  to which B0FC00 adds each solved contact's +3C × normal) and x > 1.
+- No voice yet: the envelope +0xA328 = 0, the info is stored at +0xA324, the voice starts on its
+  variety at the contact, the mode is stored, return. The info is never replaced, so a car
+  keeps the surface of its first scrape for the race.
+- Otherwise: if g < 1 it becomes 1 at a horizontal speed above 15 (0xCB3BA8), else g + 0.1;
+  the position is the contact, replaced for mode 0 by 1.5 × the pose row at +0xA3F0 (the x
+  axis), mode 1 by −1.5 × it, mode 2 by the +0xA400 row (y axis); then 448810 and the
+  pitch/volume/position setters.
+
+**458780, every frame for every car [O].** With a voice: g ≤ 0.1 sets the voice to −48 dB
+(0xCB0BC0) and nothing else; otherwise g halves when |v| < 0.5 or |impulse| < 5 (0xCB093C),
+the position is placed by the stored mode, and 448810 and the setters run.
+
+**448810, the player only (+0xA4D8) [O].** t = the envelope's place between the info's minVol
+(+0x5C) and maxVol (+0x60), 1 above both, so 1 for the shipped data. Pitch: s = |v|/45
+(0xCB4AA0); 0 for s ≤ 0.8, (s − 0.8)/0.7 below 1.5, else 1 (the setter raises it to 0.5).
+Level: lin2dB(|v| × 0.04 × t) (0x413890: −48 at or below 0, 0 at or above 1), −24 dB when
+rand % 100 < 5, − (rand % 9) dB, then +0xA31C += (target − +0xA31C) / 3.
+
+**Port** (`grid_tools::collision_audio` Listener/Mixer, grid-app `collision_sound`):
+- Per vehicle tick: contacts first (453710 inside the listener), then `scrape_frame` (458780),
+  as the original's step then frame order; the per-frame rules run per tick [I, F453 pacing].
+- The other side's AudioMaterial: the port's contact material words are solver indices (always
+  0), so for a packed track contact the triangle under it is queried again with a 0.25 m ray
+  along the normal (`Runtime::track_surface_at`) and its mechanics name is the AudioMaterial;
+  another car is CAR_; the boundary sheet and route props are taken as WALL [I]. All of these
+  except grass resolve to CarScrapeSideRoad, so the choice only matters on grass.
+- The impulse accumulator is summed from the car's solved records (impact × side normal), set
+  when the car has any [I].
+- AI cars run the same level and pitch rules [I: the original updates neither for AI voices,
+  their level is not traced]. Emitter: the car plus the mode's offset for every car (the
+  player is measured from the car, the AI group from the camera) [I: for AI cars the original
+  writes the offset as a world position].
+- One looping voice per car in the collision mixer, one sample picked at start; gain and pitch
+  glide to the tick's targets over about 10 ms [I].
+- Tests: `scrapes_follow_453710_and_458780` (start at 0, +0.1 / 1 above 15 m/s, offsets by
+  mode, halving without impulse, gates, the AI group, roof info);
+  `shipped_collision_data_and_listener` also checks the material → info map and that the loop
+  keeps playing.
+- Not yet: landing (PrimaryBot by airtime), yaw/pitch displacement, Crashed mix mode, stereo.
+- Not heard in a windowed race (no rendered app runs at the coordinator's request).
+
+## 11. Collision mix (F490)
+
+20 October 2026, Claude Code. The owner on the F486 build: collisions are very loud, and
+several at once or close together are unpleasant. Static analysis (Capstone 5.0.6 on
+`local/compatibility/grid-unpacked.exe`: 42D580, 435940, 4535A0 tail, 43B9C0–43BAE4,
+45DA46, A66760 → BF5F65) and the shipped data; a 12-car headless race traced through the
+listener (`GRID_COLLISION_AUDIO_TRACE`, worktree `local/mix/`). GRID was not launched.
+
+**Group levels match [O].** GroupModeVolumes, PC: Master −3, PlatformModifier Panel Coll
+−1, AI 0; Normal 0; cameras Panel Coll Chase −6, Bonnet −5, Internal −5; AI −6/−5/−5.5.
+So the player's impacts play at −10 dB (Chase), opponents' at −9, the player's engine at
+−14 and exhaust at −7. The port already used this table.
+
+**Sweeteners are silent in the shipped game [O].** 43B9C0–43BAE4 fill the car audio object:
++0xA6A8 = variety ParticulateMetal (read by 448810), +0xA6B0 = variety LowSweeteners (never
+read again), +0xA6AC = variety HighSweeteners (only its +4 set to 1), +0xA69C =
+CollisionInfo HighSweetenerInfo, +0xA6A0 = LowSweetenerInfo. 4535A0 plays the sweeteners
+through 44F010 with the *info*, so the voice uses the info's variety. Both infos name
+`variety=dummy`. Names are matched with A66760 → BF5F65 (CRT `_stricmp`), so "dummy"
+resolves to `Dummy` (bank env_swooshzing, preset dummy 1/2 m), which has no Samples:
+nothing plays. F479 played LowSweeteners (0 dB, crashlfesweet) and HighSweeteners on every
+hit above x 15/40; that added extra, loud layers on top of the hits.
+
+**Sweetener cooldown [O].** 4535A0 passes 1 as 44F010's seventh argument, which 435940
+reads as its cooldown flag. With it set, the variety's timer (manager +0x50 + idx·0x28) must
+have run past T, and T restarts at (rand % 3 + 1)·0.1 s, as for the impacts. F479 had no
+cooldown here. Both infos share the Dummy variety, so they share one cooldown.
+
+**Roof/floor heights [O, correction].** 4559C0 compares the contact's height in the audio
+pose's frame directly with the description heights (description +0x1B28/+0x1B54). F479
+subtracted the body offset (vehicle +0x1634, −0.39 m on the Lacetti), an assumption the code
+does not make. With it, door-height car-to-car contacts (pose-frame y ≈ 0.38) were "roof"
+hits (y > 1.42 − 0.7) and played carTop alongside carSide from the same crash. Underbody
+contacts also missed the floor test. The 12-car trace (6000 ticks, Donington, DF01 and
+characteristics), before → after:
+- carTop one-shots 11 → 0;
+- sweeteners played 4 → 0 (now "dummy", skipped by the mixer);
+- roof scrape frames 117 → 0;
+- side/front/back one-shots 18 → 21;
+- at most 3 one-shots per tick, none roof.
+
+**Request cap [O, not ported].** 42D580 queues a one-shot only while manager +0x5B4C is
+below 15, and increments it. No reset or decrement was found by displacement search (only
+the constructor zeroes it), so its lifetime is open. It is not ported; per-variety cooldowns
+keep the port well below 15 at a time.
+
+**Still [I] / open.** The −42 dB gate and curves are unchanged. AL_GAIN per source and
+the software mixer's summing and clipping belong to OpenAL. The port sums one-shots linearly
+in one mono source. The Crashed mode (player hit above hard.minVel: engine, exhaust, wheels
+−24 dB, attack 0.01 s) is still not ported, and with it the collisions would stand out
+*more*. No rendered run (at the coordinator's request), so the result is not heard.
+
+**Opponent engines louder than the player's [O table, I conclusion].** The owner reported
+that an opponent sometimes sounds louder than the player's own car. Within the 10 m minimum
+distance every engine emitter is at 0 dB distance attenuation (A23B70 law, Engine/Exhaust
+preset 10/175 m), so the level is the group mix:
+- Chase: player Engine −14, Exhaust −7; every AI voice (engine and exhaust) −9. A close
+  opponent's engine layer is 5 dB above the player's own.
+- Bonnet: player Engine −8, Exhaust −14; AI −8. The opponent's exhaust is 6 dB above the
+  player's.
+- Internal: Engine −9, Exhaust −10, AI −8.5.
+
+So with the original's table a car beside the player can be louder than the player's own
+car, as heard. The port measures the player's emitters from the camera, not the Car
+listener, but both are within 10 m, which gives the same 0 dB. Several opponents within 10 m
+add without a limit in the port; no AI engine voice limit was found in 451770 or 4223D0 (all
+AI engine voices are on group 17). Port gaps that change this:
+- the StartLine mode (AI −3 dB, attack 1.5 s) is not ported (row 71; its trigger and end are
+  not traced). At the start every opponent is within 10 m and plays 3 dB louder than in the
+  original;
+- there is no positional panning (row 71). In the original a car beside the player sits on one
+  side instead of on top of the player's engine.
+
+To settle it live, read from grid.exe with a car alongside at the start and mid-race:
+- the current mode index;
+- the published group volumes of groups 0, 1 and 17 (427ED0's per-group parameter);
+- each engine voice's AL_GAIN (the CMStream_Update 3D path) for the player and that opponent.
+
+## 12. Stereo panning (F492)
+
+20 October 2026, Claude Code. Static: §7.2 (A23DC0, CMStream_Update, PolarPattern) and the
+backend's `alDistanceModel(AL_NONE)` with Doppler factor 0 (A2DE87, `audio_mix`). GRID was
+not launched.
+
+**What the original does [O].** The game moves every 3D voice into its listener's space
+itself: rel = (p − L)·M⁻¹ with the listener's orientation. It hands that to OpenAL as
+AL_POSITION, with the OpenAL listener fixed at the origin. The direction term is always 0
+(PolarPattern is never set), distance is the game's own software law, and Doppler is off. The
+only spatial cue left to OpenAL is the panning of that position. With `mixing="software"` that
+is the "Generic Software" device, whose pan law is implementation-defined.
+
+**Port.**
+- `audio_mix::pan_gains` maps a listener-space position (x right, z forward) to equal-power
+  gains on the horizontal azimuth, p = sin(azimuth), front and back alike, scaled by √2 so a
+  centred voice keeps unit gain [I: the law].
+- `grid-app::stereo` turns a mono decoder into interleaved stereo with a shared `Pan`, read
+  every 64 frames, the gains gliding over about 10 ms [I].
+- Listeners (433AA0):
+  - the Camera listener for the AI group (opponent engines, tyres, impacts, scrapes) is the
+    rendered camera;
+  - the Car listener for the player's groups is at the player's car, facing the camera's way
+    [I: 43F7A0's chase blend from the car pose to the camera is not reconstructed].
+- Per source:
+  - opponent engine and tyres: one pan per car, from the car's position;
+  - the player's engine (EngineBay (0, 0, 4), Exhaust (0, 0, −4)) and its mixed four wheels:
+    centred [I: per-emitter and per-wheel panning would need stereo inside those mixers];
+  - collisions: each one-shot is panned by its contact point at its start (the player's from
+    the car, AI cars' from the camera), and each car's scrape loop by its emitter every tick;
+  - HUD: already stereo and 2D (centred).
+- Tests: `pan_is_equal_power_on_the_azimuth`, `mono_frames_become_panned_stereo_pairs`,
+  `pan_follows_the_camera_orientation`, and the collision mixer's hard-right one-shot and
+  centred scrape loop in `shipped_collision_data_and_listener`.
+- Not heard (no rendered run).
+
+## 13. Mix modes: StartLine (F493)
+
+20 October 2026, Claude Code. Static: 411C10, 427ED0, 5791A0/579210, 41F9xx and the decoded
+`system/states.bin` / `flow.bin` (`local/pause-menu/`). GRID was not launched.
+
+**Who sets the mode [O].** No code pushes StartLine (4) as a constant; the 18 callers of
+411C10 set Crashed (2, duration 0.2 s, from 4535A0 and 436480), Paused (3), PausedReplay (7),
+Normal (0) or return to the remembered mode (+C24). StartLine comes from the race flow:
+the state class with vtable CD77E0 reads `mode` (name lookup 4709D0 → 411AE0) and
+`start_race` (5791A0); its enter method 579210 calls 411C10 through 470E40 and, with
+`start_race`, 4120E0 (race-started flags, no mix change). `states.bin` defines eight
+`StateAudioSetState` states (Intro, Paused, StartLine, Normal, PausedReplay, Transition,
+Normal with `start_race`, EndOfRace). In the career and test-drive flows of `flow.bin`:
+- `c_pre_set_audio_startline` wraps the pre-race sequence: head-cam decision, pan to the
+  vehicle, then `startseq` (the start lights);
+- `startseq`'s NEXT is `c_pre_set_audio_normal` = `set_audio_normal_start_race`, the green
+  light;
+- a restart from the pause menu goes `restart_race` → `c_pause_set_audio_startline` → the
+  pre-race again.
+
+**411C10 with duration 0 (persistent) [O].** Ignored if the mode is unchanged. Extra fade
+time +C3C: 2.5 s (CB092C) when the fade being left came from Transition and the new mode is
+Paused, 1.5 s (CB0BC4) when it came from EndOfRace and the new mode is StartLine. Then +BF4 =
+old mode, +BF0 = new mode, the +BF8 timer restarts. With a nonzero duration (Crashed) the
+mode is transient: 427ED0 returns to +C24 when the timer passes the duration minus the
+attack.
+
+**427ED0 per frame [O].** For each of the 21 groups, target = mode + platform + camera +
+master' + trim. A group at its target counts as settled. Otherwise:
+- while +BF4 ≠ +BF0: level = lerp(old mode's target, target, e / (attack[new] + extra));
+- after that: level = lerp(current level, target, e / 1.5) (CB0BC4), e the time since the
+  mode change, clamped to the target at t ≥ 1.
+When 20 or more groups are settled the fade ends (+BF4 = +BF0, +C3C = 0).
+
+**Consequence [O].** StartLine differs from Normal only in AI (−3 dB; attack 1.5 s, Normal's
+0.15 s; asset test). On the first frame 20 groups are settled, so the attack-time fade ends at
+once and AI follows the second law, both into StartLine and back to Normal: about 99.8 % of
+the 3 dB within 0.5 s at 60 frames per second, exact by 0.8 s.
+
+**Port.**
+- `audio_mix::ModeMix`: 411C10's persistent set (with both extra times) and 427ED0's two laws
+  on each group's mode term; `group_db` adds platform, camera, master and trim. The terms
+  evolve as the published levels do while camera and trim stay constant [I]. Stepped at a
+  fixed 60 Hz so the fade does not depend on the frame rate [I: the original steps once per
+  frame].
+- `grid-app`: `AudioMode` resource; `mix_mode` sets StartLine while the time trial's phase
+  is Countdown (the start lights, also after a restart) and Normal otherwise, then advances
+  with real time. The engine, tyre, collision and HUD levels use it. Free practice has no
+  start sequence and stays Normal; the pre-race pan to the car is not part of the port, so
+  StartLine starts with the countdown [I].
+- Not driven: Paused (the port's pause keeps its own silence), Crashed, EndOfRace, Intro,
+  Transition, master start-up smoothing.
+- Tests: `start_line_lowers_ai_with_the_427ed0_fade` (first frame, 0.5 s, settle, back to
+  Normal, idempotent set) and the asset test (StartLine = Normal except AI, attack 1.5).
+
+### 13.1 Crashed (F496)
+
+Static: 4535A0, 435EA0/435B20, 436300, 411C10, 427ED0; the Crashed row of `GroupModeVolumes.bin`
+(`local/mix/gmv.txt`). GRID was not launched.
+
+**Trigger [O].** 4535A0, after the soft-range test and only for the player's listener (+A4D8):
+when x > the hard info's minVel it calls 411C10(Crashed, 0.2 s) (CB0830). If that returns true,
+the one-shot's flag to 435EA0 becomes 0; 435EA0 passes it to 435B20 as its ninth argument, and
+435B20 checks the per-variety cooldown only when that flag and its seventh are set. So the
+crash hit itself is never cooled down. The other call site, 436300 (the "game broadcaster"
+handler of queued play messages, registered at 45DB99), sets Crashed for a message whose +24
+flag is set; that path is not ported.
+
+**411C10 with a duration [O].** Refused (false) while the current mode is Paused, PausedReplay
+or Transition, or when the mode is already current. The hold +C18 is the duration minus the
+attack of the remembered mode +C24 when the duration is longer, else the duration; +C24 is
+read before it is updated. +C24 then becomes the interrupted mode when that one was
+persistent and not Paused, EndOfRace, PausedReplay or Transition. +C21 = (duration == 0).
+427ED0, while +C21 is false and the timer passes the hold, calls 411C10(+C24, 0) and publishes
+nothing that frame.
+
+**Crashed row [O].** attackTime 0.01; −24 dB on Exhaust, Engine, Turbo, Gearbox, Wheels,
+Ambience and Sense Of Speed; AI −6 dB; the rest 0. Eight groups differ, so the attack-time fade
+runs fully.
+
+**Consequence.** From Normal (attack 0.15): the engine, exhaust and wheels drop by 24 dB within
+one frame, hold for 0.05 s (0.2 − 0.15), then return linearly over 0.15 s from the Crashed
+level. From StartLine the hold is also 0.05 s (+C24 still Normal), and the return takes 1.5 s.
+A hit while Crashed neither extends it nor bypasses the cooldown.
+
+**Port.** `ModeMix::set_for` (the transient 411C10) and the 427ED0 return; `Listener::
+contacts_crashing` asks for Crashed through a closure (the app's `Listening::crash`), and the
+accepted hit skips its cooldown. `AudioMode` holds the mix behind a lock, and `mix_mode` sets
+the flow's mode only when the flow changes, so a Crashed in between returns by itself.
+`grid-opponent-race` keeps `contacts` (no mix). Tests: `crashed_ducks_the_engine_and_returns`
+and the crash part of `shipped_collision_data_and_listener`. Not heard.
+
+### 13.2 EndOfRace (F500)
+
+Static: `local/pause-menu/flow.xml`, the EndOfRace row (`local/mix/gmv.txt`), 411C10. GRID was not
+launched.
+
+- [O] `c_post_set_audio_endofrace` (`set_audio_endofrace`) is the parent state of
+  `results_show_screen` and the results screens. Entering the results through any link
+  enters it, so the mix changes when the results appear, not at the finish line. Restart
+  goes `restart_race` → `set_audio_startline`. The replays from the results use Transition
+  and PausedReplay instead.
+- [O] Row: attackTime 1.0; Exhaust and Engine −4, Turbo, Gearbox and Other Mech −13, Panel
+  and World Coll −7, Wheels −10, Skids −7, Displacement −10, Crowd −3, Ambience −48,
+  speech groups and AI −4, Sense Of Speed −7; Race Music, Global Ambience, HUD and Music 0.
+  So the cars drop by 4 to 13 dB over 1 s, and the ambience goes.
+- [O] 411C10 adds CB0BC4 (1.5 s) when the fade being left came from EndOfRace and the new
+  mode is StartLine: a restart from the results fades back over 1.5 + 1.5 s.
+- Port: `mix_mode` sets EndOfRace while the app's post-race stage is Results or a
+  confirmation over it; the stats screen, drift scoreboard and wreck screen stay in the
+  previous mode [I: their flow nodes lie outside the EndOfRace state]. Test: the EndOfRace
+  part of `crashed_ducks_the_engine_and_returns`. Not heard.
+
+## 14. Kick-ups (F498)
+
+20 October 2026, Claude Code. Static: 4443D0 (Ghidra `local/gtfix/decomp/coll3/44465e.c.txt`),
+44F330 (W+16C), docs/TYRE_AUDIO_RESEARCH.md §1–4; data dumped to worktree `local/kick/`
+(`mat.tsv` audioMaterials, `iv.tsv` ImpactVarieties, `ci.tsv` CollisionInfos). GRID was not
+launched.
+
+**Recipe [O]** (player only, per wheel and frame, after skid/scrub):
+- skipped without a kick-up ImpactVariety (W+178, set from the preset on a material change);
+- v = |W+150| (car speed); surface = 10·kickupMultiplier of the current AudioMaterial when
+  the wheel's raw token (wheel+C8) is non-zero, else 1;
+- W+1B8 counts down; below 1 the scale W+1BC = 0.005·(rand % 200) and the counter
+  60 + rand % 180 are redrawn;
+- p = W+16C · 0.05v · surface · scale, where W+16C is reset to 1 each frame and 44F330 adds
+  20·peel² with the wobbled peel inside its active branch (44FD88..44FDA5);
+- if rand % 100 < (int)p: x = 0.1·(rand % 10); nothing below the first CollisionInfo's minVel,
+  else the first, second or third whose range holds x; 435EA0 with the cooldown flag 0, so only
+  the −42 dB gate; group W+84 (Wheels 6), position W+1A0.
+
+**Data [O].** Every preset names `Kickup` (KickupSmall 0.01–9.42 −8..−3 dB, Med, Big) except
+`grass` (`GrassKik`, whose first child is GrassKikCrunch 0.01–15.65 −10..−7 dB). With
+x ≤ 0.9 only the first info plays, at about −8 dB. Multipliers: TARMAC 0.043, SMOOTHDRYTAR
+0.040, GRASS 3, GRAVEL and GRAVELTRAP 6, METAL 0.001; TARMAC_SPARK spells the attribute
+`KickupMultiplier`, which the loader does not read. Variety preset `kickup` 10/20 m.
+
+**Consequence.** On gravel at 50 m/s p = 150·scale, so a kick-up starts most frames. On
+tarmac p ≈ 1.1·scale, and int(p) is 1 only for the top scales: rare single ticks. Airborne the
+last surface's variety still plays with surface factor 1.
+
+**Port.** `tyre_audio`:
+- `Bank::kick` (preset ImpactVariety + material multiplier; an absent multiplier is 0 [I]);
+- `Driver::kick_up` on the wheel's own draw sequence, once per vehicle tick [I: the original
+  runs per frame];
+- a sixth per-wheel voice `KICK` that the mixer plays once from its start at the level fixed
+  then;
+- `bus_levels` puts it on Wheels with the kickup distances.
+
+The player's tyre source is centred (§12), so kick-ups are too. Tests:
+`kick_ups_follow_4443d0_and_play_once` and the asset checks in
+`source_launch_peels_then_rolls_reproducibly`. Not heard.
+
+## 15. Landing (F502)
+
+20 October 2026, Claude Code. Static: 455FA0 (Ghidra `local/gtfix/decomp/wind3/455FA0.c.txt`), its caller
+457BE0 (458C74), 410850, 990FC0, constants D85A50 and CB0DE4; carBot curves in worktree `local/kick/ci.tsv`.
+GRID was not launched.
+
+- [O] 457BE0 sets +A5EB = 410850(): airborne when no wheel record has a contact (wheel+C0 == 0
+  for every wheel; 990FC0).
+- [O] 455FA0, per frame (skipped when the car's +20 → +6C is 3):
+  - airborne: when +A4B0 == 0 it restarts the timer +A4B8 and sets +A4B0 = 0.01 (CB0DE4);
+    otherwise +A4B0 = the timer's elapsed seconds. With +A614 or +A618 above 0.5 it also
+    calls 454560 (not traced);
+  - grounded: a positive +A4B0 goes to 4535A0(PrimaryBot, x = +A4B0, position), then
+    +A4B0 = 0. The position is the car origin for the player (Car listener) and the pose
+    position for AI cars.
+- [O] 4559C0 zeroes +A4B0 on side and roof contacts, so a scrape in the air restarts the
+  airtime.
+- [O] PrimaryBot: carBotSoft 0.175–0.37 s (−4.5..0 dB), Med 0.37–0.57 s (−3..0), Hard 0.57–2 s
+  (−3..0); varieties carLand*. Below 0.175 s nothing plays. As a 4535A0 call, a player landing
+  after more than 0.57 s also asks for Crashed (§13.1), and the per-variety cooldown applies.
+- Port: `collision_audio::airborne` and `Listener::landing` once per vehicle tick (the clock
+  advances by the tick, [I] for the original's frame timer); the app's collision tick and
+  `grid-opponent-race`'s trace call it after the contacts. Tests: the landing part of
+  `shipped_collision_data_and_listener`. Not heard.
+
+## 16. Yaw and pitch displacement (F504)
+
+20 October 2026, Claude Code. Static: 4108B0 (from 457BE0), 4486E0 (Ghidra `local/gtfix/decomp/wind3/4486E0.c.txt`,
+called at 458C84 for the player only), A69820; Yaw/Pitch curves in worktree `local/kick/ci.tsv`. GRID was not launched.
+
+- [O] 4108B0, per frame: ω = A69820() = the physical body's +0x210, its world angular velocity.
+  +A614 = |ω.x|, +A618 = |ω.z| (455FA0's spinning test). +A610 = |prev.x − ω.x| and
+  +A60C = |prev.z − ω.z| against the previous frame's ω (+A2E0), which is then replaced.
+- [O] 4486E0: +A60C into the car's ImpactVariety slot 1 (YawImpact) and +A610 into slot 2
+  (PitchImpact). For each, when the value exceeds the soft info's minVel, the info whose range
+  holds it, else the hard one, goes to 435EA0 with the cooldown on, at +7E0, group +C
+  (Displacement 8).
+- [O] Curves: Yaw/Pitch Soft 0.25–0.6 (−4..−2.5 dB), Med 0.6–1.5 (−3..−1), Hard 1.5–3 (0 dB).
+  Varieties YawSoft…PitchHard in car_collisions.
+- Consequence: a jolt that changes the angular velocity by more than 0.25 rad/s between frames
+  thumps, for example kerbs, landings and spins. It depends on the frame length, so the port
+  runs it per vehicle tick (16 ms, close to 60 fps) [I, F320 rule].
+- Port: `collision_audio::angular_velocity` and `Listener::displacement` (the player only, at
+  the car). Called by the app's collision tick and by `grid-opponent-race`'s trace. Test: the
+  displacement part of `shipped_collision_data_and_listener`. Not heard.
+
+## 17. Part sounds and the car-audio groups (research, not ported)
+
+20 October 2026, Claude Code. Static: 43B1F0 (car-audio constructor), 458EE0..458F1C, 43D850,
+43BB10, 43BF50, 9FFE7D..A00123. GRID was not launched.
+
+- [O] Group slots set by 43B1F0 (+0..+18): player 4 Panel Coll, 2 Turbo, 9 Other Mech,
+  8 Displacement, 1 Engine, 3 Gearbox, 6 Wheels; AI cars 17 (AI) in every slot. 4486E0 uses
+  +C (Displacement), 43BB10 +0 (Panel Coll), 43BF50 +18 (Wheels).
+- [O] 458EFC registers 43D850 (data: the car-audio object) at body +7BF4/+7BF8. The damage
+  code calls it at 9FFEA0 and A00123 with a part index and the part's record (+0x50 / a
+  transformed position). 43D850 forwards to 43BB10(part, record).
+- [O] 43BB10: if the per-part CollisionInfo at +97BC + 4·part is set, 435EA0 plays it at x = 1.0
+  (so at its curve's level for 1.0) at the part position from record +30 (minus the car
+  position +A420 for the player, flag +A4D8), with the cooldown on, group slot +0. Otherwise it
+  logs an error with the part index. No static writer of +97BC was found; the table probably
+  comes from the per-part ImpactVarieties (CBonnetImpact, CBootImpact, CBumperImpact,
+  CDoorImpact, CExhaustImpact, CWingImpact) by a pointer loop [I].
+- [O] 43BF50(pos): slot 9 of the car's ImpactVariety table (+24) at x = |car velocity|
+  (+A480), no cooldown, group slot +18 (Wheels). Its caller and the slot's variety were not
+  traced.
+- Next: find the +97BC writer (search for stores relative to a pointer into +97BC, or break on
+  it in a capture) and the part order of the damage code, then port part sounds through the
+  port's detached-part events.
+
+### 17.1 The 42D580 queue is network replication (F505)
+
+Static: 435B20 (435C5F..435E97), 42D580, 436300, 45DA40..45DB9F. GRID was not launched.
+
+- [O] 435B20 always plays the one-shot locally through 421B70 (bank index from 412E50). After
+  that it calls 42D580 only while the audio manager's role word (+24 → +24) is 0 and its
+  own argument +30 is 0. 42D580 refuses when the role is non-zero, the group is 16 (HUD), the
+  counter +5B4C has reached 15, or the mix mode is Paused. Otherwise it posts a "game
+  broadcaster" message (CB31C0) and adds 1 to +5B4C.
+- [O] +5B4C is written in only two places: set to 0 in the manager's constructor (45DA46)
+  and incremented at 42D627. The counter never goes back down.
+- [O] 436300, the "game broadcaster" handler registered at 45DB99, plays a received message
+  only when the role is 1, and only then applies its Crashed flag (+24).
+- [I] Interpretation: the role is the network side (0 sends, 1 receives) of a replication of
+  one-shots to other machines; in an offline race nothing is received.
+- Consequence for the port: the cap of 15 and the 436300 Crashed path do not limit or change
+  what an offline player hears. Nothing to port. The FIDELITY_BACKLOG note about the cap is
+  closed.
+
+### 17.2 Window glass (F511)
+
+Static: 43C0C0, 43C250, 43C2B0, 43CE90, 43CF10..43D5A0 (loader), 448F75, 4486E0, 41DC90,
+4109F0, 9E9B03..9E9BF8, 435EA0; `CollisionInfos.bin`. GRID was not launched.
+
+- [O] The car-audio manager's loader (43CF10, called at 459448) names its CollisionInfos and
+  ImpactVarieties in order from manager +0x74: YawImpact, PitchImpact, CarScrapeRoof, …,
+  then +0xE0 WindScreenCrack, +0xE4 WindScreenSmash, +0xE8 WindowCrack, +0xEC WindowSmash,
+  +0xF0 HeadLightCrack, +0xF4 HeadLightSmash, +0xF8 WindSlow, +0xFC WindFast,
+  +0x100 ParticulateGlass. A car reads them through [car +0x2C] +0x18 = manager +0x70
+  (4486E0 reads YawImpact at +4).
+- [O] 43CE90 is registered at 448F75 for the "game broadcaster" messages. It finds the car by
+  the message's +4 handle, and then:
+  - type 1 (+0x10) calls 43C250(part +8): WindScreenCrack for part 0x51, else WindowCrack;
+  - type 2 calls 43C2B0(part): it first sets a per-window flag (4109F0, car +A5D8..+A5DD),
+    then plays WindScreenSmash for 0x51, else WindowSmash.
+
+  Both play at x = 1.0, with the cooldown off, on group slot +0 (Panel Coll for the player,
+  AI for others).
+- [O] The window parts are 0x4E..0x53 (the damage code tests 0x4F..0x53 for state 2 at 9E9B06).
+  41DC90 places each one from the car's axes: z·a + x·b + 0.5·y, plus the car position unless
+  the car is the player (whose sounds are car-relative). The (a, b) pairs are:
+
+  | Part | (a, b) |
+  | --- | --- |
+  | 0x4E | (−1, 0) |
+  | 0x4F | (−1, −1) |
+  | 0x50 | (−1, 1) |
+  | 0x51 | (1, 0) |
+  | 0x52 | (1, −1) |
+  | 0x53 | (1, 1) |
+
+  This is the port's WINDOWS order (b, bl, br, f, fl, fr), so 0x51 is window_f, as
+  MECHANICAL_DAMAGE.md already had for 9E99B0.
+- [O] All four infos use the cracksmash preset: minVel = maxVel = 1, −7 dB, pitch 0.95–1.1.
+  For minVel = maxVel, 435EA0 sets t = 0 while x ≤ maxVel (435EEF), so the windows play at
+  −7 dB, pitch 0.95. The port's curve used t = 1 for an empty range and is corrected.
+- [I] The sender of the type 1/2 messages was not found. Type 1 is taken as "the window cracked"
+  and type 2 as "it smashed", by the info names and by 9D12B0's states 1 and 3. The port
+  plays one sound per rise of its window state. A window that goes straight from intact to
+  smashed plays only the smash.
+- Not ported: HeadLightCrack/Smash and ParticulateGlass (the per-part tables +9F0C and +9B64 of
+  43C0C0/44D9D0 have no static writer, like +97BC in §17); WindSlow/WindFast (§7: never
+  started).
+
+## 18. Engine banks of every raceable car (F519)
+
+- [O] Before F519, eleven raceable cars' banks failed to load (`grid_tools::engine_audio_continuous::Bank::load`), and grid-app then installed no engine sound for the whole field:
+  - `unsupported engine curve extent/range`: dbr (Aston Martin DBR9) and esp (Audi R8). Their idle `RevsFromTime` curves start at 1.0058 and 1.0293; the port required [0, 1].
+  - `continuous setup/PCM rate or extent mismatch`: sal, lam, spk, lc7, 390, je4, cha, vip, zon. One idle or throttle recording is one frame shorter than carsetup's frame count (eng_sal throttle: 454,681 PCM frames, carsetup 454,682).
+- Reader change:
+  - Curve values are accepted in [0, 2] (`engine_audio::CURVE_MAX`), in the INI reader and in the controller, scheduler and pair-restart input checks. [I] The original reads the curves as written; the played pitch is clamped by the voice setter 42C150 to [0.5, 2] (§F516), so a curve slightly above 1 only shifts a lookup.
+  - A recording one frame shorter than carsetup is accepted. The controller's length (0x2C0) is the PCM's own, so the cursor stops at the last real sample. [I] One frame at 32 kHz is inaudible either way.
+- Isolation (grid-app `engine_sound`):
+  - `load_banks` loads one bank per field model; a failure logs `engine_audio version=2 event=bank_failed car=<stem> error="..."` and leaves that model `None`. Only that car is silent: the player's source is spawned only with a bank, and opponents without one are skipped.
+  - Each opponent's decoder has its own failure flag. Its mixer goes silent until the next reset and the update logs `engine_audio version=2 event=decoder_failed car=<index> muted=car_only`; only the player's failure still mutes the engine mix.
+- Tests: `every_loadable_engine_runs_through_the_start` loads every `series::RACEABLE` car and stk and panics on any load failure; `engine_sound::tests::a_failed_bank_silences_only_its_car` loads lac, a non-existent model and bmw, and checks the spawned sources.
+
+## 19. Opponent mix confirmed offline (F527)
+
+20 October 2026, Claude Code (task 10, item §3.5 of the car-series hand-off). Headless, no audio device;
+GRID was not launched. Evidence (ignored): kind-pike worktree `local/mix19/test.log`.
+
+**Test.** `race_start_audio_mix_is_audible` (grid-app main.rs, `race_start_mix`) now adds an opponent
+of the same model 3 m beside the player. Its engine voice (`engine_sound::TestVoice`, the same
+`EngineSource` decoder as in the app) gets the player's control on every vehicle tick, the AI group
+level from the live `AudioMode` (`engine_sound::bus_levels`, group 17, 3 m → 0 dB distance term), and
+the pan of a car 3 m to the side heard from the chase_close camera ((0, 1.72, −4.74) in the car; azimuth
+32°, `pan_gains`). So the two voices differ only by what the mix gives them.
+
+**Group levels [V against the table].** Chase, PC, both cars:
+- last countdown tick (StartLine after its 1.5 s fade): player Engine −14, Exhaust −7; opponent −12 on
+  both layers;
+- end of the run (Normal): player −14 / −7; opponent −9 / −9.
+The test fails if any of these is off by 0.05 dB.
+
+**As heard [O, port].** Opponent against the player's own engine, in dB (power of both channels; left;
+right, the near side):
+
+| car | window | power | left | right |
+|---|---|---|---|---|
+| BMW | countdown, full throttle (StartLine) | −3.03 | −6.36 | −1.17 |
+| BMW | after GO + 0.5 s, full throttle (Normal) | +0.28 | −3.04 | +2.14 |
+| Lacetti | countdown (StartLine) | −5.82 | −9.14 | −3.96 |
+| Lacetti | after GO (Normal) | −1.84 | −5.17 | +0.02 |
+
+The difference between the cars comes from the engine/exhaust balance of each bank: the player's
+exhaust layer is 2 dB over the opponent's and its engine layer 5 dB under.
+
+**Distance.** The player's emitters are measured from the camera in the port, the Car listener at the
+car in the original (§12). It makes no audible difference: the Engine/Exhaust law (10/175 m, exponent 2)
+gives −48·((d−10)/165)² dB, so the EngineBay emitter 4 m ahead of the car seen from chase_far
+(about 11.3 m away with the full 2 m tilt fall-back) is at −0.003 dB.
+
+**Conclusion [I].** The port plays the original's table. With it, a car of the same model beside
+the player is about as loud as the player's own car after the start, and up to 2 dB louder in the
+near ear; on the grid it is 3–6 dB quieter. The owner's "an opponent sometimes sounds louder than
+my car" is the table, not a port error. Not checked against the original's output (that needs a
+live reading, §11).
+
+## 20. Gear shifts in 451770 (F528)
+
+20 October 2026, Claude Code (task 10, item §3.3, first part). Static: Ghidra 12.1.4 headless
+(`local/gtfix/decomp/gear1`–`gear3`: 451770 and its helpers), Capstone 5.0.6 on
+`local/compatibility/grid-unpacked.exe` (0x410000–0x460000). GRID was not launched. Render evidence
+(ignored): kind-pike worktree `local/shift/`.
+
+**Layout [O].** The engine-audio controller is the car-audio object +0x8660 (42F770: `lea ecx,
+[esi+0x8660]`); its property pointer +0x118 is the car-audio object +0x1190. The `[Physics]` loader
+423BD6 reads the keys in file order through 416040, a case-insensitive prefix match (`_stricmp`).
+So the 11 files that spell `fGearupShiftTime` (390, 787, b05, b06, c65, cre, df3, fmj, je4, lc7,
+r10; value 0.03) are read. Fields used by the shift code:
+
+| key | controller | property |
+|---|---|---|
+| fGearUpShiftTime | +0x80 | |
+| GearUpMixTime, GearUpMixMinIdle | +0x84, +0x88 | |
+| fUpshiftEffectFadeIn/Out | +0x8C, +0x90 | |
+| fGearDownShiftTime, fGearDownEffectTime | +0x94, +0x98 | |
+| fGearDownMinLoad, fGearDownMinThrottle | +0x9C, +0xA0 | |
+| GearUpMixVolMult, GearUpWobbleLevel, FadeOutTime, Rate | | +0x7D1C, +0x7D20, +0x7D24, +0x7D28 |
+| fGearDownWobbleLoudness, Rate, Length | | +0x7D34, +0x7D38, +0x7D3C |
+| fUpWobbleStartDelay, fDownWobbleStartDelay | | +0x7D40, +0x7D44 |
+| fWobbleRandomDown, fWobbleRandomUp | | +0x7D48, +0x7D4C |
+
+Property +0x7D18 (car-audio +0x8EA8) is the "random" of the wobble. 42F770 sets it to 1.0 and no
+other instruction in the image writes it, so (2r − 1) = 1 and the random terms are fixed: ×1.75
+with the shipped 75 %.
+
+**451770 order [O].** 422A40 (RPM map, C8 = +0x48); +0xC and +8 += |dt|; 414750; 4148A0; 414970;
+the upshift-mix envelope (+0x10, +0xB8); 451580; 422CA0; 4150D0; 414C70; 436640; 451260; 422F60;
+4152A0; 4371C0.
+
+**414750, the gear change [O].** Gear = vehicle +0x196C (0 neutral, 1.. forward, 9 reverse). Every
+frame +0 (the scale of the physical RPM ratio in 422A40) recovers by 0.003, up to 1. On a change:
+- +0x314 (wobble loudness) = fGearDownWobbleLoudness · clamp(1 − gear/6, 0, 1). Until the first
+  change it is GearUpWobbleLevel (constructor);
+- up (new > old): +0 = (rand % 1000) · 0.00005 + 0.95, an RPM dip of up to 5 %; down: +0 = 1;
+- the shift counts unless it is between two of {neutral, first, reverse}. Then +4 = up, +0xC = 0
+  (time since the shift), and for the player (+0x110 +0x6C = 0) +0x310 = 1.
+
+**451580 [O].** +0x1A0 = clamp(0.9 · +0x1A0, −1, 1). During an upshift, for fGearUpShiftTime, 0.5 is
+then subtracted (down to −1.5); during a downshift, for fGearDownShiftTime, 0.1 is added. 42DE60
+adds it to the load crossfade phase ((2·throttle − 1) + offset + 1)/2, clamped. So an upshift
+crossfades to the off-load recordings for 0.13 s (Lacetti), and a downshift leans on-load.
+- The RPM blend of +0x48 with the held +0x58 (t² up, t down) only reaches 414C70/451260, not the
+  pitch: C8 was published before it.
+- +0x19C is only decayed and never read.
+- At the end of a player upshift, 4511E0 plays the car-audio variety table entry +0xB4 at the +0x100
+  emitter: the gear clunk. Not ported; it needs the mec bank.
+
+**4150D0, the wobble [O].** +0x2F8 multiplies every voice pitch in 42DE60. With t = +0xC:
+- up: after fUpWobbleStartDelay, for t' < GearUpWobbleFadeOutTime:
+  1 + sin(1.75 · GearUpWobbleRate · t' · 2π) · (1 − t'/FadeOut) · +0x314;
+- down: after fDownWobbleStartDelay, for t' < fGearDownWobbleLength:
+  1 + sin(fGearDownWobbleRate · t' · 2π) · 1.75 · (1 − t'/Length) · +0x314.
+
+BF4E44 is the CRT SSE2 sine (a tiny argument returns itself). +0x2F4 (GearUpMixVolMult during
+GearUpMixTime) is written and never read. GearUpWobbleLevel only seeds +0x314.
+
+**Port.**
+- `grid_tools::engine_audio_shift` (`Settings::read`, `Shift::frame`) runs 414750, 451580's +0x1A0
+  and 4150D0 after `engine_audio_control::update` in the continuous mixer. It writes +0, +0x1A0 and
+  +0x2F8 for the publication.
+- `Control` carries the gear (bits 25–28). The 42DE60 domain check allows |+0x1A0| ≤ 1.5.
+- [I]: the dip's random sequence (xorshift instead of A682A0); the constructor state again after a
+  reset (so a start counts neutral → gear); one frame per 16 ms block.
+
+**Not ported.**
+- the upshift-mix envelope +0xB8 (it caps 414C70's load +0x44, which the port does not compute);
+- the downshift throttle blip in +0xB0 (4148A0/422CA0; the port keeps +0xB0 at 1);
+- the rev limiter (414970, +0xB4);
+- the throttle smoothing and +0x330 of 422CA0;
+- the clunk (4511E0) and the backfire (451260);
+- all of 414C70, 436640 and 422F60.
+
+**Render [O, port].** Test `an_upshift_changes_the_lacetti_only_from_the_shift`: Lacetti, full
+throttle, second gear at 0.7 of maximum RPM for 1 s, then third at 0.55, against a held second.
+- The samples are equal up to the shift.
+- Afterwards the RMS falls from 0.133 to 0.075 for 50–150 ms (the off-load crossfade).
+- The dominant frequency moves 195 → 160 Hz, with a swing of 155–166 Hz between about 170 and
+  300 ms (the wobble: 8.75 Hz, ±10 % in third).
+- `local/shift/lacetti-{held,upshift}.wav` (sha256 5b7ad9ca…7704, ff14eac2…0b02).
+
+Not compared with the original.
+
+## 21. Car listener, clunk, backfire and whine wiring (research, F529)
+
+20 October 2026, Claude Code (task 10, rest of §3.3 and input for §3.4). Static only: Ghidra
+(`local/gtfix/decomp/gear4`, `gear5`, `lis1`), Capstone, decoded `audioVarieties` and
+`carsetup.bin` (`local/gear/carsetup.tsv`). GRID was not launched. Nothing ported here.
+
+**Car listener 43F7A0 [O unless marked].** It runs for the player vehicle (manager +0x34D88 → +0x24).
+- Inputs:
+  - the car pose (body +0x1D0) and velocity (body +0x220);
+  - the camera rows and position (written by 412100, one call behind);
+  - the camera displacement per frame (kept only below 8 m, CB0C44, as a teleport guard).
+- With d = camera − car, the published position is car-relative and never the absolute camera:
+  - views [+0x1724] 3/4, with +0x34D60 clear and [+0x16F8] ≠ 6: 0.25·d with the camera's
+    orientation;
+  - view 2: t = clamp((θ − π/6)·3/π, 0, 1), with θ the angle between the camera and car forward
+    vectors. Orientation = slerp(car, camera, t). Position = virt + t·(d − virt), where virt is
+    the point at d's height and horizontal distance straight behind the car;
+  - otherwise: d with the camera's orientation.
+- Velocity: the camera's displacement / dt (views 2–4), else the car's velocity. There is no
+  smoothing state.
+- [I] The value of +0x1724 is a view index whose mapping to chase, bonnet, bumper and head-cam is
+  not tied down. 3/4 look like the interior views, 2 the chase.
+- [I] The car's own emitters are then placed relative to the car origin.
+- The listener 2 sibling 43F570 uses the camera position, plus 0.25·d in views 3/4.
+
+Consequences for the port [I]:
+- At the default branch the port's "player emitters measured from the camera" are the same
+  distances.
+- In view 2 the distance from the car is kept (|virt| = |d|), and the orientation follows the car
+  until the camera is turned more than 30° from it. The port pans the player's sounds by the
+  camera's orientation (§12), which matches only while t = 1.
+
+**Clunk (GearClucks, 4511E0).**
+- [O] At the end of a player upshift, GearClucks plays clunk1–3 at the GearBox emitter. The
+  emitter is (0, 0, 4) in every one of the 45 cars, on group +0x120 (Gearbox 3 for the player).
+  The preset GearStick is min 3.5 / max 4.0 m.
+- [I] Heard from the Car listener:
+  - chase views: d is the camera offset (5–7 m behind), so the gearbox is 9–11 m away: silent;
+  - views 3/4 at 0.25·d: bumper (0, 0.73, 1.77) gives 3.56 m, −0.7 dB; bonnet (0, 1.11, 0.86)
+    gives 3.8 m, −17 dB; head-cam (0.36, 1.10, −0.19) gives 4.06 m, silent.
+  So the shipped clunk is an interior/bumper-view sound, which depends on the unresolved view
+  mapping.
+
+**Backfire (Detonations, 451260).** [O] detloop1–3 at the Exhaust emitter, preset ExhaustDet
+10/40 m. It triggers when any of these holds:
+- the throttle drop per frame +0x304 ≤ −0.25 while +0x20 > 0.25;
+- within 0.2 s after an upshift;
+- the rev limiter is active (+0xD0).
+
+It then repeats on a random timer, (rand % 300)·0.01 + 0.1 s, with a chance that falls as the
+timer runs over. Each start also sets vehicle +0x21DC = 8, and 0xB at the end [I: exhaust flames].
+Its inputs need 4148A0 (+0x304 from the applied throttle, vehicle +0xE1C) and 414970.
+
+**Load path inputs [O].** 009961D0(1) is vehicle +0xE1C, the applied throttle. It is the input of
+4148A0 (+0xB0, +0x24, +0x304) and 422CA0 (+0xCC smoothing). 422CA0's neutral-gear and off-throttle
+targets read +0x3C, which 414C70 writes, so a faithful +0xCC needs 414C70 ported too.
+
+**Whine.**
+- [O] carsetup.bin `GearPresets`, read by 4265D0 into +0x268 + 4·preset:
+  - holden (mec_ply), truck (mec_dbr), andy (mec_r10), staff (mec_s15);
+  - each has Gear1..6 (truck 8) with a sample (01_gear…), basePitch and maxPitch;
+  - each car names a `GearPreset`.
+- [O] gear.ini `[GearWhine]` (42F880) stores six floats at car-audio +0xD10…+0xD3C. The five
+  `GearWhineVolume*` keys are read and discarded. The `Gearwhine` AudioVariety has no samples
+  (preset 6/10 m).
+- [O] No float read of +0xD10…+0xD3C was found in 0x410000–0x460000.
+- Whether the whine plays at all is not established. Next: the readers of +0x268 (the preset
+  table) and of the variety table entry +0xB0.
+
+**Turbo.**
+- [O] carsetup `Turbo` Spidle (basePitch 0.75, gradient 1.5) and Hiss (1.0, 0.0) are identical for
+  all 45 cars; readers 41EC91…41ED1B and 4273A1…42742B.
+- [O] The varieties are TurboHiss and TurboSpindle (loops, 6/20 m), TurboDump (dump1–2, 6/60 m)
+  and TurboPip (pip1–2, 5/20 m).
+- The update that plays them is not traced.

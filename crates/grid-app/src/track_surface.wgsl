@@ -37,12 +37,29 @@ fn ground_weight(code: f32, uv: vec2<f32>) -> f32 {
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr = pbr_input_from_standard_material(in, is_front);
     let mip_bias = select(0.0, view.mip_bias, sampling.x > 0.5);
-    let a = textureSampleBias(first, first_sampler, in.uv, mip_bias);
-    let b = textureSampleBias(second, second_sampler, in.uv, mip_bias);
+    // track_infield_wsm.cg.fp: diffuse UVs are the world position / PScale,
+    // projected along the dominant normal axis (Y wins ties, then X).
+    var uv = in.uv;
+    if controls.w > 0.0 {
+        let n = abs(pbr.world_normal);
+        let p = pbr.world_position.xyz * controls.w;
+        let m = max(max(n.x, n.y), n.z) - 1.0e-4;
+        if n.y >= m {
+            uv = p.xz;
+        } else if n.x >= m {
+            uv = p.yz;
+        } else {
+            uv = p.xy;
+        }
+    }
+    let a = textureSampleBias(first, first_sampler, uv, mip_bias);
+    let b = textureSampleBias(second, second_sampler, uv, mip_bias);
     let macro_sample = textureSampleBias(macro_map, macro_sampler, in.uv_b, mip_bias);
     let layer = mix(a, b, in.color.r);
     // Green was limited at each vertex before interpolation, as in the source VS.
-    var albedo = mix(layer.rgb, macro_sample.rgb, in.color.g);
+    // controls.z < 0: the material saves no macro map (no blend, no AO).
+    let macro_weight = select(in.color.g, 0.0, controls.z < 0.0);
+    var albedo = mix(layer.rgb, macro_sample.rgb, macro_weight);
     let skid_a_uv = vec2(in.uv_b.x * scales.z, in.uv_b.y * scales.x) + scales.w;
     let skid_b_uv = vec2(-in.uv_b.x * scales.z, in.uv_b.y * scales.y) + controls.x;
     let skid_a = textureSampleBias(skids, skid_sampler, skid_a_uv, mip_bias).r * in.color.a * 2.0 * controls.y;
@@ -54,8 +71,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // weights Bevy's dielectric base F0 without changing roughness or opacity.
     // Square-root AFTER texture filtering/blending: F0 is quadratic in reflectance.
     // White control follows the same path and must reproduce feature-off output.
-    if controls.w > 0.5 {
-        let weight = select(clamp(layer.a, 0.0, 1.0), 1.0, controls.w > 1.5);
+    if sampling.y > 0.5 {
+        let weight = select(clamp(layer.a, 0.0, 1.0), 1.0, sampling.y > 1.5);
         pbr.material.reflectance *= sqrt(weight);
     }
     // Follow the same authored vertex blend as the diffuse layers. This keeps
@@ -66,7 +83,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // Preserve optional source-mask weighting, applied above.
     pbr.material.reflectance *= mix(1.0, dry_ground.w / 0.5, ground);
     // Original AO-scale uniform is not recovered; scale=1 is an explicit choice.
-    let ao = mix(1.0, macro_sample.a, controls.z);
+    let ao = mix(1.0, macro_sample.a, max(controls.z, 0.0));
     pbr.diffuse_occlusion *= ao;
     pbr.specular_occlusion *= ao;
 #ifdef PREPASS_PIPELINE

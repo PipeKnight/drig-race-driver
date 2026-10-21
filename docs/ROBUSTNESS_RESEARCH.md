@@ -385,12 +385,34 @@ instrumentation, removed).
     and 37 option A losses (Jarama 1010, 1013). Quick 1..24 passes 24/24 again; Haruna seeds 29 (known since
     F412) and 32 (a car off an unwalled edge, new with F444's trajectories) fail outside the default set.
 
+## 10. Sarthe: "invalid contact material inputs" (F458)
+
+le-mans saw it once on 592430d: the 9-car Sarthe quick scenario of the then seed 39 (stock cars)
+retired car 5 at tick 2419. Replay: main checkout `local/lemans/soak/quick-37-40/seed-39.inputs.tsv`.
+
+- [V] It does not reproduce on current main: F444 and F447 changed the trajectories.
+- [V] Reproduced on 592430d in a temporary worktree, with a print of the rejected input:
+  - car 5 lies upside down (body up y −0.98);
+  - wheel 2's ray hits the road at fraction −8.5e−8, a hit at the ray start;
+  - `contact_material::resolve` rejects any fraction outside 0..1, and the car retires.
+- [V] The port's ray test `triangle::query` keeps the original's f32 tolerances. It accepts
+  fractions from −1e−6 to just above 1 and keeps them, not clamped. The leaf query's running
+  fraction is the product of such hits.
+- So the original passes −8.5e−8 on to the wheel contact. Only the port's guard was stricter.
+- Fix: the guard accepts the ray test's own range (`triangle::FRACTION_LOW..=FRACTION_HIGH`);
+  anything outside it still fails.
+  - [V] With that guard the same replay on 592430d passes 2419/2419 ticks.
+  - Unit test in `contact_material::tests`.
+
 ## 8. Open
 
 - The 16 ms step against the original's per-frame step (F320; seeds 22 and 59, the pile-up depth).
 - Continuous collision (section 7): cars, the boundary sheet, route boxes and piece/car pairs are
   not swept yet.
 - Kind-5 cylinders and `cylinderFacets` (10) against the port's 12-sided prisms.
+  F462: static route cylinders use the round kind-5 support and features; the
+  contact path never reads `cylinderFacets` (BOX_CONTACTS.md "Cylinders and
+  spheres"). Pieces keep the prisms.
 - First-corner pile-up: the exact 0x795C00 segment test. The live comparison on Donington
   (F433, [FIRST_CORNER_LIVE.md](FIRST_CORNER_LIVE.md)): the original's field also gets through
   Redgate; the main difference is its much harder launch, not the alongside logic.

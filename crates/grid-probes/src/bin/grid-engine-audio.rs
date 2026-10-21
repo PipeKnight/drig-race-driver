@@ -69,6 +69,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 throttle,
                 audible,
                 generation,
+                gear: 0,
             },
             RATE as usize * 2,
             &mut pcm,

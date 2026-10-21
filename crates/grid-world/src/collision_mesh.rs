@@ -96,7 +96,9 @@ impl Mesh {
             if dot < 0. {
                 normal = normal.map(|x| -1. * x);
             }
-            if !dot.is_finite() || normal.iter().any(|x| !x.is_finite()) {
+            // A zero-area face keeps the NaN plane B444D0 computes
+            // (rsqrt(0) = inf; see `build`).
+            if sq != 0. && (!dot.is_finite() || normal.iter().any(|x| !x.is_finite())) {
                 return Err(Error("mesh shape normal exceeds range"));
             }
             for (j, x) in normal.iter().enumerate() {
@@ -771,6 +773,15 @@ pub fn build(points: &[[f32; 4]], triangles: &[[u32; 3]], fill: u8) -> Result<Me
         }
         let n = cross(points, tri);
         let sq = squared(n);
+        // A zero-area face (the Mustang Boss's faces 11 and 47): B44E80 masks
+        // the length to 0 when the squared length equals 0, so the factor is
+        // -1/0 = -inf and the plane normal (-inf)·0 is NaN; construction goes
+        // on (docs/SERIES.md "Mustang Boss"). Other out-of-range faces stay
+        // rejected (no shipped mesh has one).
+        if sq == 0. {
+            normals.push(n.map(|x| f32::NEG_INFINITY * x));
+            continue;
+        }
         if !sq.is_finite() || !(1e-20..=1e20).contains(&sq) {
             return Err(Error("invalid collision mesh normal"));
         }
@@ -1176,9 +1187,18 @@ mod tests {
             assert_eq!(n[3], 0.);
         }
         assert!(mesh.point(4).is_none() && mesh.face_normal(4).is_none());
+        // Coincident vertices: the faces through both (0, 1) have zero area
+        // and keep B44E80's NaN plane, as the Mustang Boss's faces 11/47; the
+        // others stay finite.
         let mut bad = p;
         bad[1] = bad[0];
-        assert!(build(&bad, &t, 0).is_err());
+        let degenerate = build(&bad, &t, 0).unwrap();
+        for (i, tri) in t.into_iter().enumerate() {
+            let n = degenerate.face_normal(i).unwrap();
+            let zero = tri.contains(&0) && tri.contains(&1);
+            assert_eq!(n.iter().all(|x| x.is_nan()), zero, "face {i}");
+            assert_eq!(n.iter().all(|x| x.is_finite()), !zero, "face {i}");
+        }
         bad = p;
         bad[0][0] = f32::NAN;
         assert!(build(&bad, &t, 0).is_err());

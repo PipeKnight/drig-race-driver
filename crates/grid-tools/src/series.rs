@@ -35,13 +35,18 @@ pub struct Series {
 /// The circuit-race series this port offers. `le_mans` is the free race
 /// `Le_Mans` (discipline 18): the 24 Hours on Circuit de la Sarthe, a
 /// time-limited race with the `lemans_24` field (docs/LE_MANS.md).
-pub const CIRCUIT_SERIES: [&str; 6] = [
+pub const CIRCUIT_SERIES: [&str; 11] = [
     "pro_tuned",
     "touring",
     "gt1",
     "gt2",
     "le_mans_series",
     "le_mans",
+    "prototype",
+    "pro_muscle",
+    "open_wheel",
+    "gt_club",
+    "prestige",
 ];
 
 /// The time-limited Le Mans 24 Hours (free race `Le_Mans` [V 0x62A5D0]).
@@ -51,6 +56,67 @@ pub fn is_le_mans_24(name: &str) -> bool {
 
 /// Tracks whose every route was raced with the series cars (F401,
 /// docs/SERIES.md "Layouts").
+/// Further single routes the port has raced solo (two clean laps of a
+/// Lacetti, F463 survey in docs/SERIES.md "More layouts"): the other
+/// layouts of San Francisco, Detroit, Washington, Milan, Spa, Le Mans
+/// (classic), Yokohama and Shibuya. Okutama (entity reader), Washington
+/// routes 2/5/7 and the routes where the solo car wrecks (Detroit 0/2,
+/// Washington 3/8, San Francisco 2) stay out. The career's head-to-head
+/// layouts were raced with their event cars (docs/CAREER_LOCATIONS.md):
+/// Washington route 0 (Viper; the Lacetti wrecks 1 km in) and Haruna
+/// routes 4 (787B) and 9 (350Z).
+pub const SURVEYED_ROUTES: [&str; 38] = [
+    "tracks/usa/washington/route_0",
+    "tracks/japan/haruna/route_4",
+    "tracks/japan/haruna/route_9",
+    "tracks/usa/san_fran/route_1",
+    "tracks/usa/san_fran/route_4",
+    "tracks/usa/san_fran/route_5",
+    "tracks/usa/san_fran/route_6",
+    "tracks/usa/detroit/route_1",
+    "tracks/usa/detroit/route_3",
+    "tracks/usa/detroit/route_4",
+    "tracks/usa/detroit/route_5",
+    "tracks/usa/detroit/route_6",
+    "tracks/usa/detroit/route_7",
+    "tracks/usa/washington/route_1",
+    "tracks/usa/washington/route_4",
+    "tracks/usa/washington/route_6",
+    "tracks/usa/washington/route_9",
+    "tracks/europe/milan/route_1",
+    "tracks/europe/milan/route_2",
+    "tracks/europe/milan/route_3",
+    "tracks/europe/milan/route_4",
+    "tracks/europe/milan/route_5",
+    "tracks/europe/spa_francorchamps/route_1",
+    "tracks/europe/spa_francorchamps/route_2",
+    "tracks/europe/spa_francorchamps/route_3",
+    "tracks/europe/le_mans/route_1",
+    "tracks/japan/yokohama_docks/route_1",
+    "tracks/japan/yokohama_docks/route_2",
+    "tracks/japan/yokohama_docks/route_7",
+    "tracks/japan/yokohama_docks/route_8",
+    "tracks/japan/yokohama_docks/route_9",
+    "tracks/japan/shibuya/route_1",
+    "tracks/japan/shibuya/route_2",
+    "tracks/japan/shibuya/route_3",
+    "tracks/japan/shibuya/route_4",
+    "tracks/japan/shibuya/route_5",
+    "tracks/japan/shibuya/route_6",
+    "tracks/japan/shibuya/route_7",
+];
+
+/// Whether series and drift events run on `route`: a `route::CIRCUITS`
+/// route, a route of a [`SURVEYED_TRACKS`] track or a [`SURVEYED_ROUTES`]
+/// route.
+pub fn route_supported(route: &str) -> bool {
+    crate::route::CIRCUITS.contains(&route)
+        || SURVEYED_ROUTES.contains(&route)
+        || SURVEYED_TRACKS
+            .iter()
+            .any(|t| route.starts_with(&format!("{t}/")))
+}
+
 pub const SURVEYED_TRACKS: [&str; 5] = [
     "tracks/europe/donington",
     "tracks/europe/nurburgring",
@@ -62,15 +128,18 @@ pub const SURVEYED_TRACKS: [&str; 5] = [
 /// Cars of the circuit series that race fields on our circuits (AUTHORED
 /// port list, docs/SERIES.md "Car survey"): Touring, Pro Tuned, GT1, GT2 and,
 /// since the default setup's downforce limit (F414), the Le Mans Series
-/// prototypes and the 911. Another car needs GRID_SERIES_EXPERIMENTAL=1.
-pub const RACEABLE: [&str; 21] = [
+/// prototypes and the 911; since F457 the other prototypes (787, 390, je4),
+/// the muscle cars except the Mustang Boss, the open-wheel cars, gt_club and
+/// prestige. Another car needs GRID_SERIES_EXPERIMENTAL=1.
+pub const RACEABLE: [&str; 35] = [
     "lac", "bmw", "sup", "sky", "nsx", "350", "dbr", "c6r", "sal", "ccg", "c5r", "lam", "spk", "esp",
-    "911", "c65", "b05", "cre", "lc7", "b06", "r10",
+    "911", "c65", "b05", "cre", "lc7", "b06", "r10", "787", "390", "je4", "ply", "cha", "gtr", "vip",
+    "cam", "df3", "fmj", "tch", "ccx", "zon", "bos",
 ];
 
 /// Whether a series' events still need GRID_SERIES_EXPERIMENTAL=1 (a car of
-/// its fields outside [`RACEABLE`]). None since F420: the Le Mans Series
-/// prototypes race with the default setup's downforce limit.
+/// its fields outside [`RACEABLE`]). None since F463: the Mustang Boss's
+/// zero-area collision faces keep the original's NaN planes.
 pub fn is_experimental(series: &str) -> bool {
     let _ = series;
     false
@@ -167,12 +236,7 @@ impl Series {
     /// `route::CIRCUITS` routes of later circuits (Yokohama and Le Mans
     /// route_0).
     pub fn supported_layouts(&self) -> impl Iterator<Item = &Layout> {
-        self.layouts.iter().filter(|l| {
-            crate::route::CIRCUITS.contains(&l.route.as_str())
-                || SURVEYED_TRACKS
-                    .iter()
-                    .any(|t| l.route.starts_with(&format!("{t}/")))
-        })
+        self.layouts.iter().filter(|l| route_supported(&l.route))
     }
 
     /// The layout named `name` (`track_model.name_string_id`, e.g.
@@ -733,8 +797,9 @@ mod tests {
         // 20 layouts of the surveyed circuits and the route_0 circuits of
         // Yokohama (yoko_v1), Spa (spa_gp), Milan (milan_gp), Shibuya
         // (shib_drift_cir), San Francisco (san_francisco_gp) and Circuit de la
-        // Sarthe (le_mans_circuit).
-        assert_eq!(supported.len(), 26);
+        // Sarthe (le_mans_circuit), plus the surveyed routes (F463) except
+        // the two Haruna roads, which are in no circuit pool.
+        assert_eq!(supported.len(), 26 + SURVEYED_ROUTES.len() - 2);
         for name in [
             "yoko_v1",
             "spa_gp",

@@ -265,7 +265,7 @@ Static research, all **[D]** unless marked. Full addresses and evidence: `local/
 
   | Preset | Device | Steering / pedals |
   |---|---|---|
-  | 0 | Keyboard | arrows; steer dead zone 0.2, which has no effect on 0/1 keys; Gear Up A, Gear Down Z; Space handbrake; End look back; C view; Esc pause |
+  | 0 | Keyboard | arrows; steer dead zone 0.2, which has no effect on 0/1 keys; Gear Up A, Gear Down Z; Space handbrake; End look back; Delete/PageDown look left/right (F499); C view; Esc pause |
   | 1 | Logitech G25 | X axis split into SteerL/SteerR halves, dead zone 0; pedals Y/Rz uniNegative plus Slider0 split for combined pedals; H-shifter gears 1–6 on buttons 8–13, reverse on 14 |
   | 2 | MOMO | like G25 |
   | 3 | Driving Force Pro | like G25 |

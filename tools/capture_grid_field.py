@@ -11,9 +11,9 @@ tools/capture_grid_braking.py.
 
 Header lines: `#FD01 pid=... cars=N`, then one `#car index grid car physical`
 line per vehicle. Each row: QPC seconds, then per car (in header order) the hex
-of car+0xE00 (0x80: published throttle +E1C, brake +E20, steering requests
-+E3C/+E40.., clutch +E34), car+0x1960 (0x30: gear +196C) and physical+0x1D0
-(0x60: pose matrix, angular +0x40 and linear +0x50 velocity). A row is
+of car+0xE00 (0x80: published throttle +E1C, brake +E20, steering +E30,
+clutch +E34; +E3C equals the throttle in the F450 captures), car+0x1960
+(0x30: gear +196C) and physical+0x1D0 (0x60: pose matrix, angular +0x40 and linear +0x50 velocity). A row is
 written whenever any car's physical block changed (one row per physics step).
 """
 import ctypes

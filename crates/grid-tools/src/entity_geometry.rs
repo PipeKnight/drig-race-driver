@@ -1,13 +1,19 @@
-//! Static collision boxes of the purchased route entities (objects.ens with
-//! objecttypes.pssg): tyre walls, cushions, armco, tyre stacks and marker boards.
-//! Each box is a box primitive (shape kind 0) queried as a whole against a
-//! body hull, as the original's AE8AD0 does (`grid_world::box_contacts`).
+//! Static collision shapes of the purchased route entities (objects.ens with
+//! objecttypes.pssg): tyre walls, cushions, armco, tyre stacks and marker
+//! boards (box primitives, kind 0), cones, posts, poles and barrels
+//! (cylinders, kind 5) and balloons (spheres, kind 3). Each is queried as a
+//! whole against a body hull, as the original's AE8AD0 does
+//! (`grid_world::box_contacts`, `grid_world::round_contacts`).
 //! All placements start infinite-mass in the data; breakable boxes carry a
 //! contact limit and are disabled when broken (`dynamic_props`,
 //! DYNAMIC_PROPS_RESEARCH.md).
 use crate::route::Route;
 use grid_formats::{entities, pssg};
-use grid_world::{Error, box_contacts::BoxShape};
+use grid_world::{
+    Error,
+    box_contacts::BoxShape,
+    round_contacts::{CylinderShape, RoundShape, SphereShape},
+};
 use std::{collections::BTreeMap, path::Path};
 
 #[derive(Clone)]
@@ -22,8 +28,17 @@ pub struct PropBox {
     pub limit: f32,
     /// Broken boxes no longer collide.
     pub enabled: bool,
-    /// The primitive: axes, centre, half extents and the shape `shell` margin.
-    shape: BoxShape,
+    /// A static (`infMass`) shape of the entity's damage state: off until
+    /// the entity breaks (`dynamic_props`; the close-drift flag's base).
+    pub damaged: bool,
+    /// The primitive: axes, centre, extents and the shape `shell` margin.
+    shape: Shape,
+}
+
+#[derive(Clone)]
+enum Shape {
+    Box(BoxShape),
+    Round(RoundShape),
 }
 
 /// Shared between clones until one changes a box (`Arc::make_mut`).
@@ -85,13 +100,85 @@ impl PropBox {
             entity: None,
             limit: f32::MAX,
             enabled: true,
-            shape: BoxShape {
+            damaged: false,
+            shape: Shape::Box(BoxShape {
                 matrix,
                 half,
                 margin,
-            },
+            }),
         })
     }
+
+    /// A cylinder or sphere at `matrix` (unit axes, centre): `positions`
+    /// are the corners of its local bounding box (for bounds and the
+    /// overlap diagnostic).
+    fn round(template: String, shape: RoundShape) -> Result<Self, Box<dyn std::error::Error>> {
+        let (matrix, half, margin) = match &shape {
+            RoundShape::Cylinder(c) => (c.matrix, [c.radius, c.half_height, c.radius], c.margin),
+            RoundShape::Sphere(s) => (s.matrix, [s.radius; 3], s.margin),
+        };
+        let positions = (0..8)
+            .map(|i| {
+                std::array::from_fn(|j| {
+                    (0..3).fold(matrix[3][j], |p, k| {
+                        let h = if i >> k & 1 == 0 { -half[k] } else { half[k] };
+                        p + h * matrix[k][j]
+                    })
+                })
+            })
+            .collect();
+        let mut b = Self::new(template, positions, margin)?;
+        b.shape = Shape::Round(shape);
+        Ok(b)
+    }
+}
+
+/// Whether a template's damage state with static (`infMass`) pieces, or a
+/// body with several shape behaviours, is ported: so far only the close-drift
+/// flags. Others (the Long Beach and Spa tyre walls, Yokohama's crates and
+/// signs) stay intact until their breaks are checked.
+pub fn static_damage_ported(template: &str) -> bool {
+    template.contains("close_drift_flag")
+}
+
+/// The collision box of one entity shape at the entity placement.
+fn entity_box(
+    template: String,
+    placement: &[f32; 16],
+    s: &entities::Shape<'_>,
+) -> Result<PropBox, Box<dyn std::error::Error>> {
+    let (width, height, length) = match s.primitive {
+        entities::Primitive::Box {
+            width,
+            height,
+            length,
+        } => (width, height, length),
+        entities::Primitive::Cylinder { radius, height } => {
+            return PropBox::round(
+                template,
+                round_shape(placement, &s.transform, s.shell, radius, Some(height))?,
+            );
+        }
+        entities::Primitive::Sphere { radius } => {
+            return PropBox::round(
+                template,
+                round_shape(placement, &s.transform, s.shell, radius, None)?,
+            );
+        }
+    };
+    let half = [width * 0.5, height * 0.5, length * 0.5];
+    if !half.iter().all(|h| h.is_finite() && *h > 0. && *h < 100.) {
+        return Err("invalid entity collision box".into());
+    }
+    let positions = (0..8)
+        .map(|i| {
+            let local = std::array::from_fn(|j| {
+                if i >> j & 1 == 0 { -half[j] } else { half[j] }
+            });
+            transform(placement, transform(&s.transform, local))
+        })
+        .collect();
+    PropBox::new(template, positions, s.shell)
 }
 
 /// Visible trackside barrier ornaments (route_0/ornaments.bin instances of
@@ -195,6 +282,11 @@ fn barrier_parts(mesh: &PrototypeMesh) -> Vec<Extent> {
     parts.into_values().collect()
 }
 
+/// Bound on a route's prop collision boxes: the original's fixed-object pool
+/// (10,000, AD9220; docs/RUNTIME_LIMITS_AUDIT.md). Washington route 0 has
+/// 8662 with the group-part stand-ins.
+const MAX_BOXES: usize = 10_000;
+
 /// AUTHORED: the longest horizontal side of one part of a group prototype
 /// that gets its own box (a concrete block or fence section, not a run).
 const GROUP_PART_LENGTH: f32 = 10.;
@@ -261,21 +353,25 @@ fn ornament_barriers(
             continue;
         };
         let whole = barrier_extent(mesh);
-        let extents = if valid_extent(&whole) {
-            vec![whole]
-        } else if p.transforms.len() == 1 {
-            // A group prototype: one placement of a mesh laid out in world
-            // space over more than 100 m (Detroit concrete_block_long_01,
-            // 146 m; Washington chnfen_e_group1, 540 m). One box per short
-            // connected part; longer or flat parts stay non-solid.
+        // A group prototype: one placement of a mesh laid out in world
+        // space, either over more than 100 m (Detroit
+        // concrete_block_long_01, 146 m; Washington chnfen_e_group1, 540 m)
+        // or as a layout wider than a part in both horizontal directions
+        // (Washington chnfen_e_group3b, 40 x 43 m; group4, 96 x 67 m), which
+        // one box would close across the road. One box per short connected
+        // part; longer or flat parts stay non-solid.
+        let (lo, hi) = whole;
+        let layout = hi[0] - lo[0] > GROUP_PART_LENGTH && hi[2] - lo[2] > GROUP_PART_LENGTH;
+        let extents = if p.transforms.len() == 1 && (layout || !valid_extent(&whole)) {
             barrier_parts(mesh)
                 .into_iter()
                 .filter(|e| {
                     valid_extent(e) && (e.1[0] - e.0[0]).max(e.1[2] - e.0[2]) <= GROUP_PART_LENGTH
                 })
                 .collect()
+        } else if valid_extent(&whole) {
+            vec![whole]
         } else {
-            let (lo, hi) = whole;
             return Err(format!("invalid barrier ornament extent: {name} {lo:?}..{hi:?}").into());
         };
         for (lo, hi) in extents {
@@ -312,45 +408,43 @@ impl Props {
         let placements = pssg::read_tree(&placements)?;
         let types = pssg::read_tree(&types)?;
         let mut boxes = Vec::new();
+        // Kept after every other box, so the active boxes keep their indices.
+        let mut damaged = Vec::new();
         for (index, e) in entities::read(&placements, &types)?.into_iter().enumerate() {
+            let template = String::from_utf8_lossy(e.template).into_owned();
             for r in &e.renderables {
-                for s in &r.shapes {
-                    let entities::Primitive::Box {
-                        width,
-                        height,
-                        length,
-                    } = s.primitive
-                    else {
-                        continue;
-                    };
-                    if s.phantom {
-                        continue;
-                    }
-                    let half = [width * 0.5, height * 0.5, length * 0.5];
-                    if !half.iter().all(|h| h.is_finite() && *h > 0. && *h < 100.) {
-                        return Err("invalid entity collision box".into());
-                    }
-                    let positions = (0..8)
-                        .map(|i| {
-                            let local = std::array::from_fn(|j| {
-                                if i >> j & 1 == 0 { -half[j] } else { half[j] }
-                            });
-                            transform(&e.transform, transform(&s.transform, local))
-                        })
-                        .collect();
-                    let mut b = PropBox::new(
-                        String::from_utf8_lossy(e.template).into_owned(),
-                        positions,
-                        s.shell,
-                    )?;
+                for s in r.shapes.iter().filter(|s| !s.phantom) {
+                    let mut b = entity_box(template.clone(), &e.transform, s)?;
                     b.entity = Some(index);
                     boxes.push(b);
                 }
             }
+            // The static pieces of the damage state, once per behaviour type.
+            let mut types = Vec::new();
+            if !static_damage_ported(&template) {
+                continue;
+            }
+            for s in e.renderables.iter().flat_map(|r| &r.shapes) {
+                let Some(behaviour) = &s.behaviour else { continue };
+                if types.contains(&behaviour.behaviour_type) {
+                    continue;
+                }
+                types.push(behaviour.behaviour_type);
+                for added in behaviour.added.iter().filter(|a| a.infinite_mass) {
+                    for s in added.shapes.iter().filter(|s| !s.phantom) {
+                        let mut b = entity_box(template.clone(), &e.transform, s)?;
+                        b.entity = Some(index);
+                        b.enabled = false;
+                        b.damaged = true;
+                        damaged.push(b);
+                    }
+                }
+            }
         }
         boxes.extend(ornament_barriers(root, route)?);
-        if boxes.is_empty() || boxes.len() > 8192 {
-            return Err("unsupported entity collision box count".into());
+        boxes.extend(damaged);
+        if boxes.is_empty() || boxes.len() > MAX_BOXES {
+            return Err(format!("unsupported entity collision box count {}", boxes.len()).into());
         }
         Ok(Self {
             boxes: std::sync::Arc::new(boxes),
@@ -389,29 +483,31 @@ impl Props {
     /// Contacts against every enabled box whose bounds overlap the body's
     /// margin-inflated world bounds, in data order, up to `capacity` (<=16 per
     /// box), each with its box index.
-    pub fn contacts(
+    pub fn contacts<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         matrix: grid_world::physical_pose::Matrix,
         query: &grid_world::convex_distance::ContactSettings,
         bounds: [[f32; 4]; 2],
         capacity: usize,
     ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
+        let mesh = mesh.into();
         self.contacts_known(mesh, matrix, query, bounds, capacity, None)
     }
 
     /// [`Self::contacts`] with a [`BoxIndex`] the caller holds for these
     /// boxes; `bounds` must be `mesh.world_bounds(matrix, query.margin)`.
     /// Identical results.
-    pub fn contacts_known(
+    pub fn contacts_known<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         matrix: grid_world::physical_pose::Matrix,
         query: &grid_world::convex_distance::ContactSettings,
         bounds: [[f32; 4]; 2],
         capacity: usize,
         known: Option<KnownBoxes<'_>>,
     ) -> Result<Vec<(usize, grid_world::contact_manifold::Contact)>, Error> {
+        let mesh = mesh.into();
         if known
             .as_ref()
             .is_some_and(|k| k.index.boxes != self.boxes.len())
@@ -435,17 +531,69 @@ impl Props {
             {
                 continue;
             }
-            let generated = grid_world::box_contacts::contacts(
-                mesh,
-                matrix,
-                &b.shape,
-                query,
-                (capacity - contacts.len()).min(16),
-            )?;
+            let room = (capacity - contacts.len()).min(16);
+            let generated = match &b.shape {
+                Shape::Box(shape) => {
+                    grid_world::box_contacts::contacts(mesh, matrix, shape, query, room)?
+                }
+                Shape::Round(shape) => {
+                    grid_world::round_contacts::contacts(mesh, matrix, shape, query, room)?
+                }
+            };
             contacts.extend(generated.into_iter().map(|c| (index, c)));
         }
         Ok(contacts)
     }
+}
+
+/// A cylinder (`height` given) or sphere primitive placed by the shape and
+/// entity transforms. 0x7B96D0 scales the template radius by the smaller
+/// horizontal scale and the height by the vertical one, and stores half the
+/// height; the axes are normalised (a sphere takes its smallest scale).
+fn round_shape(
+    entity: &[f32; 16],
+    shape: &[f32; 16],
+    shell: f32,
+    radius: f32,
+    height: Option<f32>,
+) -> Result<RoundShape, Box<dyn std::error::Error>> {
+    let origin = transform(entity, transform(shape, [0.; 3]));
+    let mut matrix = [[0.; 4]; 4];
+    let mut scale = [0.; 3];
+    for k in 0..3 {
+        let mut unit = [0.; 3];
+        unit[k] = 1.;
+        let p = transform(entity, transform(shape, unit));
+        let axis = [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]];
+        scale[k] = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        if !(scale[k].is_finite() && scale[k] > 1e-3) {
+            return Err("degenerate entity round shape".into());
+        }
+        matrix[k] = [
+            axis[0] / scale[k],
+            axis[1] / scale[k],
+            axis[2] / scale[k],
+            0.,
+        ];
+    }
+    matrix[3] = [origin[0], origin[1], origin[2], 1.];
+    let valid = |v: f32| v.is_finite() && v > 0. && v < 100.;
+    if !valid(radius) || height.is_some_and(|h| !valid(h)) || !(0. ..=1.).contains(&shell) {
+        return Err("invalid entity round shape".into());
+    }
+    Ok(match height {
+        Some(height) => RoundShape::Cylinder(CylinderShape {
+            matrix,
+            radius: radius * scale[0].min(scale[2]),
+            half_height: height * scale[1] * 0.5,
+            margin: shell,
+        }),
+        None => RoundShape::Sphere(SphereShape {
+            matrix,
+            radius: radius * scale[0].min(scale[1]).min(scale[2]),
+            margin: shell,
+        }),
+    })
 }
 
 /// Values a caller holds for repeated body queries of unchanged boxes: a
@@ -559,11 +707,12 @@ mod tests {
                     entity: None,
                     limit: f32::MAX,
                     enabled: true,
-                    shape: BoxShape {
+                    damaged: false,
+                    shape: Shape::Box(BoxShape {
                         matrix: [[0.; 4]; 4],
                         half: [1.; 3],
                         margin: 0.,
-                    },
+                    }),
                 }
             })
             .collect();
@@ -654,6 +803,38 @@ mod tests {
 
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
+    fn washington_group_layouts_leave_the_racing_line_open() {
+        // chnfen_e_group3b (40 x 43 m) and group4 (96 x 67 m) are single
+        // placements of a world-space layout; one box of the whole extent
+        // stood across Washington route 0's line at (833, 7, 834).
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let route = Route::new("tracks/usa/washington/route_0").unwrap();
+        let props = Props::read_route(root, &route).unwrap();
+        assert!(props.boxes.len() > 8192 && props.boxes.len() <= MAX_BOXES, "{}", props.boxes.len());
+        let line = crate::ai_driver::Line::load_route(root, &route).unwrap();
+        // The line every metre or so, 0.5 m up.
+        let points = line.points();
+        let lifted: Vec<[f32; 3]> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .flat_map(|(a, b)| {
+                (0..20).map(move |k| {
+                    let t = k as f32 / 20.;
+                    std::array::from_fn(|j| a[j] + (b[j] - a[j]) * t + if j == 1 { 0.5 } else { 0. })
+                })
+            })
+            .collect();
+        let blocked: Vec<String> = lifted
+            .iter()
+            .filter_map(|p| props.deepest_overlap(std::slice::from_ref(p)).map(|(i, _)| props.boxes[i].template.clone()))
+            .filter(|t| t.starts_with("chnfen"))
+            .collect();
+        assert!(blocked.is_empty(), "{blocked:?}");
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
     fn only_long_beach_fences_lose_their_leaning_catch_fence() {
         // Long Beach soak seeds 1..12 and 17..20 lost tyre-stack pieces through
         // the road: with the leaning catch fence the stand-in reached 0.63 m in
@@ -699,7 +880,7 @@ mod tests {
             (
                 // Nuerburgring tyrewall_black_yok, replay tick 2239 (0.9 m deep).
                 "tracks/europe/nurburgring/route_0",
-                1508,
+                1534,
                 [
                     [-0.093455344, -0.023044754, 0.99535704, 0.0],
                     [-0.00970464, 0.9997056, 0.022234295, 0.0],

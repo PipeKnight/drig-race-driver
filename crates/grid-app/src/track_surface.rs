@@ -1,5 +1,7 @@
-//! Source surface-layer reconstruction with authored Bevy lighting.
-//! Only the statically examined surface_simple and infield variants are selected.
+//! Source surface-layer reconstruction with authored Bevy lighting, on the
+//! route's track (docs/SKY.md "Road surface"). The six road/infield shader
+//! groups below share the examined albedo arithmetic; their normal and
+//! reflection maps are not reproduced.
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     pbr::{ExtendedMaterial, MaterialExtension},
@@ -8,6 +10,7 @@ use bevy::{
     shader::ShaderRef,
 };
 use grid_formats::{material, mesh, pssg, scene, texture};
+use grid_tools::route::Route;
 use std::{collections::BTreeMap, path::Path};
 
 /// Optional authored GGX base-F0 weighting; not the source Phong model.
@@ -36,6 +39,18 @@ impl Specular {
     }
 }
 
+/// Groups whose pixel programs blend TDiffuseAlphaMap/TDiffuseAlphaMap2 by
+/// mask red, TMacroColour (UV1) by mask green; `true`: also the skid layers.
+/// `track_infield_wsm` takes its diffuse UVs from the world position.
+const GROUPS: [(&[u8], bool); 6] = [
+    (b"#track_surface_simple.fx", true),
+    (b"#track_surface.fx", true),
+    (b"#track_surface_reflective.fx", true),
+    (b"#track_infield.fx", false),
+    (b"#track_infield_dxt5nm.fx", false),
+    (b"#track_infield_wsm.fx", false),
+];
+
 const SHADER: Handle<Shader> = uuid_handle!("ef412ff6-5acc-4977-bdb9-d5f314970b66");
 type SurfaceMaterial = ExtendedMaterial<StandardMaterial, Surface>;
 
@@ -60,7 +75,7 @@ pub struct Surface {
     // A scale, B scale, C scale, A offset.
     #[uniform(108)]
     scales: Vec4,
-    // B offset, skid enabled, authored macro AO strength, specular pilot mode.
+    // B offset, skid enabled, authored macro AO strength, 1/PScale (wsm) or 0.
     #[uniform(109)]
     controls: Vec4,
     #[uniform(110)]
@@ -72,6 +87,8 @@ pub struct Surface {
     #[uniform(112)]
     dry_ground: Vec4,
     // X enables the diagnostic view bias; other lanes reserved.
+    // Camera mip bias opt-in, authored specular mode, reserved, reserved.
+    // controls.w remains the source world-projected UV scale.
     #[uniform(113)]
     sampling: Vec4,
 }
@@ -103,13 +120,21 @@ struct Source {
     textures: BTreeMap<String, Vec<u8>>,
 }
 
-fn read_source(root: &Path) -> Result<Source, Box<dyn std::error::Error>> {
-    read_package(root, "tracksplit.pssg")
+fn read_source(root: &Path, route: &Route) -> Result<Source, Box<dyn std::error::Error>> {
+    read_package(root, route, "tracksplit.pssg")
 }
 
-fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error::Error>> {
-    let bytes = super::read(&root.join("tracks/europe/donington").join(package))?;
-    let tree = pssg::read_tree(&bytes)?;
+fn read_package(
+    root: &Path,
+    route: &Route,
+    package: &str,
+) -> Result<Source, Box<dyn std::error::Error>> {
+    let file = route.track_file(package);
+    read_bytes(&super::read(&root.join(&file))?).map_err(|e| format!("{file}: {e}").into())
+}
+
+fn read_bytes(bytes: &[u8]) -> Result<Source, Box<dyn std::error::Error>> {
+    let tree = pssg::read_tree(bytes)?;
     let bindings = material::read_texture_bindings(&tree)?;
     let mut definitions = BTreeMap::new();
     for i in 0..tree.nodes.len() {
@@ -117,10 +142,10 @@ fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error
             continue;
         }
         let group_ref = tree.string(i, b"shaderGroup")?;
-        let skidded = group_ref == b"#track_surface_simple.fx";
-        if !skidded && group_ref != b"#track_infield.fx" {
+        let Some(&(_, skidded)) = GROUPS.iter().find(|(g, _)| *g == group_ref) else {
             continue;
-        }
+        };
+        let world_mapped = group_ref == b"#track_infield_wsm.fx";
         let id = tree.string(i, b"id")?;
         let group = (0..tree.nodes.len())
             .find(|&j| {
@@ -179,8 +204,13 @@ fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error
                 .map(|b| String::from_utf8_lossy(b.texture).into_owned())
         };
         let first = texture_name(b"TDiffuseAlphaMap").ok_or("surface diffuse absent")?;
-        let second = texture_name(b"TDiffuseAlphaMap2").ok_or("surface second diffuse absent")?;
-        let macro_map = texture_name(b"TMacroColour").ok_or("surface macro absent")?;
+        // Some materials leave inputs unsaved (Jarama's edge strips have no
+        // TMacroColour). AUTHORED [I: the runtime binding of an unsaved
+        // sampler is untraced]: no second layer, or no macro blend and AO.
+        let second = texture_name(b"TDiffuseAlphaMap2").unwrap_or_else(|| first.clone());
+        let macro_map = texture_name(b"TMacroColour");
+        let has_macro = macro_map.is_some();
+        let macro_map = macro_map.unwrap_or_else(|| first.clone());
         let skids = texture_name(b"TSkidsMap");
         let definition = Definition {
             dry_ground: Vec4::new(
@@ -208,8 +238,17 @@ fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error
             controls: Vec4::new(
                 if skidded { scalar(b"B_Offset")? } else { 0. },
                 if skidded && skids.is_some() { 1. } else { 0. },
-                1.,
-                0.,
+                // Macro AO strength; -1 marks a material without a macro map.
+                if has_macro { 1. } else { -1. },
+                if world_mapped {
+                    let scale = scalar(b"PScale")?;
+                    if !scale.is_finite() || scale <= 0. {
+                        return Err("surface PScale not positive".into());
+                    }
+                    1. / scale
+                } else {
+                    0.
+                },
             ),
             colours: if skidded {
                 [colour(b"SkidColour")?, colour(b"SkidColour2")?]
@@ -285,12 +324,13 @@ fn read_package(root: &Path, package: &str) -> Result<Source, Box<dyn std::error
 pub fn install(
     app: &mut App,
     root: &Path,
+    route: &Route,
     land: bool,
     rgb_overrides: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut source = read_source(root)?;
+    let mut source = read_source(root, route)?;
     if land {
-        let land = read_package(root, "land.pssg")?;
+        let land = read_package(root, route, "land.pssg")?;
         for (name, mut definition) in land.definitions {
             for texture in &mut definition.textures {
                 *texture = format!("land/{texture}");
@@ -429,6 +469,7 @@ fn attach(
         .collect();
     let mut handles = BTreeMap::new();
     let mut attached = 0;
+    let mut mismatched = 0;
     for (entity, name, identity, mesh, base) in &query {
         let Some(draw) = source.draws.get(name.as_str()) else {
             continue;
@@ -437,7 +478,12 @@ fn attach(
             continue;
         }
         let mut target = meshes.get_mut(&mesh.0).expect("surface mesh ready");
-        assert_eq!(target.count_vertices(), draw.uv.len());
+        // IDs are package-local: a same-named part of another package with
+        // another vertex count keeps its plain material.
+        if target.count_vertices() != draw.uv.len() {
+            mismatched += 1;
+            continue;
+        }
         target.insert_attribute(Mesh::ATTRIBUTE_UV_1, draw.uv.clone());
         target.insert_attribute(Mesh::ATTRIBUTE_COLOR, draw.masks.clone());
         let handle = handles
@@ -458,13 +504,8 @@ fn attach(
                         macro_map: textures[&d.textures[2]].clone(),
                         skids: skid_textures[&d.textures[3]].clone(),
                         scales: d.scales,
-                        sampling: Vec4::new(if settings.surface_view_mip_bias { 1. } else { 0. }, 0., 0., 0.),
-                        controls: Vec4::new(
-                            d.controls.x,
-                            d.controls.y,
-                            d.controls.z,
-                            settings.surface_specular.control(),
-                        ),
+                        sampling: Vec4::new(if settings.surface_view_mip_bias { 1. } else { 0. }, settings.surface_specular.control(), 0., 0.),
+                        controls: d.controls,
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
                         dry_ground: Vec4::new(
@@ -493,15 +534,18 @@ fn attach(
     }
     println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(
-        "track_surface attached draws={attached} materials={} uv1=true masks=linear-ARGB-to-RGBA specular={:?}",
+        "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} specular={:?} uv1=true masks=linear-ARGB-to-RGBA",
+        source.draws.len(),
         handles.len(),
         settings.surface_specular
     );
-    assert_eq!(
-        attached,
-        source.draws.len(),
-        "surface draw attachment incomplete"
-    );
+    if attached != source.draws.len() {
+        warn!(
+            "track surface: {} of {} source draws attached",
+            attached,
+            source.draws.len()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -510,9 +554,10 @@ mod tests {
     #[test]
     #[ignore = "requires owner's purchased GRID installation"]
     fn purchased_surfaces_resolve_both_uv_sets_and_all_layers() {
-        let source = read_source(Path::new(
-            r"C:\Program Files (x86)\Steam\steamapps\common\Grid",
-        ))
+        let source = read_source(
+            Path::new(r"C:\Program Files (x86)\Steam\steamapps\common\Grid"),
+            &Route::default(),
+        )
         .unwrap();
         assert_eq!(source.definitions.len(), 94);
         assert!(!source.draws.is_empty());
@@ -530,6 +575,48 @@ mod tests {
             source.definitions.len(),
             source.textures.len()
         );
+    }
+
+    #[test]
+    #[ignore = "requires owner's purchased GRID installation"]
+    fn purchased_surfaces_resolve_on_every_track() {
+        let root = Path::new(r"C:\Program Files (x86)\Steam\steamapps\common\Grid");
+        for track in [
+            "europe/istanbul_park",
+            "europe/jarama",
+            "europe/le_mans",
+            "europe/milan",
+            "europe/nurburgring",
+            "europe/spa_francorchamps",
+            "japan/haruna",
+            "japan/okutama",
+            "japan/shibuya",
+            "japan/yokohama_docks",
+            "usa/detroit",
+            "usa/long_beach",
+            "usa/san_fran",
+            "usa/washington",
+        ] {
+            let route = Route::new(&format!("tracks/{track}/route_0")).unwrap();
+            let source = read_source(root, &route).unwrap();
+            // land.pssg is drawn in enhanced only (Donington); Milan's has no
+            // static draws at all.
+            let land = read_package(root, &route, "land.pssg");
+            let world_mapped = source.definitions.values().filter(|d| d.controls.w > 0.).count();
+            let without_macro = source.definitions.values().filter(|d| d.controls.z < 0.).count();
+            println!(
+                "surface {track} materials={} draws={} textures={} wsm={world_mapped} no_macro={without_macro} land={}",
+                source.definitions.len(),
+                source.draws.len(),
+                source.textures.len(),
+                land.map_or_else(|e| e.to_string(), |l| format!("{}/{}", l.definitions.len(), l.draws.len()))
+            );
+            assert!(!source.draws.is_empty(), "{track}");
+            assert!(source.draws.values().all(|d| d.uv.len() == d.masks.len()));
+            if track == "japan/haruna" {
+                assert_eq!(world_mapped, 36);
+            }
+        }
     }
 
     #[test]

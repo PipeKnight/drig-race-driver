@@ -74,6 +74,18 @@ impl Manager {
         self.remaining() >= 1
     }
 
+    /// 0x6A22A0, the Flashback Bonus of a race [V]: the award scaled by the
+    /// unused share, `(maximum - used) * max_award / maximum` (i32 `imul`,
+    /// `idiv`: truncated); with no flashbacks at all (Ninja, Pro Mode) the
+    /// whole award.
+    pub fn award(&self) -> i64 {
+        if self.maximum == 0 {
+            return self.max_award as i64;
+        }
+        let maximum = self.maximum as i64;
+        (maximum - self.used as i64) * self.max_award as i64 / maximum
+    }
+
     /// 0x6A2260, from the jump-in's prepare state.
     pub fn use_one(&mut self) -> bool {
         if !self.available() {
@@ -103,6 +115,20 @@ mod tests {
         assert_eq!(Manager::new(0, 1, false).remaining(), 5);
         assert_eq!(Manager::new(5, 4, false).remaining(), 0);
         assert_eq!(Manager::new(1, 2, true).remaining(), 0, "Pro Mode");
+        // 0x6A22A0: rookie, four flashbacks, one used: 3 * 3000 / 4.
+        let mut m = Manager::new(1, 1, false);
+        assert_eq!(m.award(), 3000);
+        m.use_one();
+        assert_eq!(m.award(), 2250);
+        // Truncated: 3 flashbacks, 1 used, 12000 -> 8000; 2 used -> 4000.
+        let mut m = Manager::new(2, 2, false);
+        m.use_one();
+        assert_eq!(m.award(), 8000);
+        m.use_one();
+        m.use_one();
+        assert_eq!(m.award(), 0);
+        assert_eq!(Manager::new(5, 4, false).award(), 60000, "Ninja: none to use");
+        assert_eq!(Manager::new(0, 3, true).award(), 30000, "Pro Mode");
         assert_eq!(Manager::new(1, 2, false).max_award, 12000);
         assert_eq!(Manager::new(1, 4, false).max_award, 60000);
     }

@@ -22,6 +22,12 @@ fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// Lowest and highest fraction (and barycentric) the query accepts: GRID's
+/// f32 tolerances, so a hit at the segment start can report a tiny negative
+/// fraction.
+pub const FRACTION_LOW: f32 = -1e-6;
+pub const FRACTION_HIGH: f32 = f32::from_bits(0x3f800008);
+
 /// Direction is the finite segment displacement, not a unit ray.
 /// Small accepted negative/above-one fractions are retained, not clamped.
 pub fn query(start: [f32; 3], direction: [f32; 3], vertices: [[f32; 3]; 3]) -> Option<Hit> {
@@ -33,8 +39,8 @@ pub fn query(start: [f32; 3], direction: [f32; 3], vertices: [[f32; 3]; 3]) -> O
     {
         return None;
     }
-    const LOW: f32 = -1e-6;
-    const HIGH: f32 = f32::from_bits(0x3f800008);
+    const LOW: f32 = FRACTION_LOW;
+    const HIGH: f32 = FRACTION_HIGH;
     let [a, b, c] = vertices;
     let ab = sub(b, a);
     let ac = sub(c, a);

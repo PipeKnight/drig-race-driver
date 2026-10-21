@@ -347,8 +347,86 @@ pub struct Output {
     pub simplex_bytes: [u8; 0x120],
 }
 
+/// The moving body B of a query: a one-level collision mesh (kind 7), or a
+/// kind-5 cylinder (axis = local y, B47A70) or kind-3 sphere (B4B0A0) in its
+/// body frame. A sphere's radius joins the body's margin.
+#[derive(Clone, Copy)]
+pub enum Hull<'a> {
+    Mesh(&'a Mesh),
+    Cylinder { radius: f32, half_height: f32 },
+    Sphere { radius: f32 },
+}
+
+impl<'a> From<&'a Mesh> for Hull<'a> {
+    fn from(mesh: &'a Mesh) -> Self {
+        Hull::Mesh(mesh)
+    }
+}
+
+/// B47A70's local support without the shell: `l` is the direction in the
+/// cylinder frame.
+pub(crate) fn cylinder_local(l: V, radius: f32, half_height: f32) -> V {
+    let radial = (l[2] * l[2] + l[0] * l[0]).sqrt();
+    let y = if 0. <= l[1] {
+        half_height
+    } else {
+        -0. - half_height
+    };
+    if radial <= EPS {
+        [0., y, 0., 1.]
+    } else {
+        let scale = radius / radial;
+        [l[0] * scale, y, l[2] * scale, 1.]
+    }
+}
+
+impl Hull<'_> {
+    /// Support-cache bound: the mesh's points, one for a round body.
+    pub fn point_count(&self) -> usize {
+        match self {
+            Hull::Mesh(mesh) => mesh.point_count(),
+            _ => 1,
+        }
+    }
+    /// The radius a sphere adds to the body margin.
+    pub fn extra_margin(&self) -> f32 {
+        match self {
+            Hull::Sphere { radius } => *radius,
+            _ => 0.,
+        }
+    }
+    /// World bounds at `matrix` grown by `margin` (and a sphere's radius).
+    pub fn world_bounds(&self, matrix: Matrix, margin: f32) -> Result<[[f32; 4]; 2], Error> {
+        let extent = match *self {
+            Hull::Mesh(mesh) => return mesh.world_bounds(matrix, margin),
+            Hull::Cylinder {
+                radius,
+                half_height,
+            } => [radius, half_height, radius],
+            Hull::Sphere { .. } => [0.; 3],
+        };
+        if !margin.is_finite()
+            || !(0. ..=1e6).contains(&margin)
+            || matrix.iter().flatten().any(|x| !x.is_finite() || x.abs() > 1e5)
+        {
+            return Err(Error("invalid round body bounds controls"));
+        }
+        let margin = margin + self.extra_margin();
+        let mut out = [[0., 0., 0., 1.]; 2];
+        for j in 0..3 {
+            let reach = (0..3).map(|k| matrix[k][j].abs() * extent[k]).sum::<f32>() + margin;
+            out[0][j] = matrix[3][j] - reach;
+            out[1][j] = matrix[3][j] + reach;
+        }
+        if out.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(Error("nonfinite round body bounds"));
+        }
+        Ok(out)
+    }
+}
+
 pub(crate) fn mesh_support(
-    mesh: &Mesh,
+    mesh: Hull<'_>,
     matrix: Matrix,
     direction: V,
     cache: &mut [usize; 7],
@@ -360,7 +438,7 @@ pub(crate) fn mesh_support(
 }
 
 fn mesh_support_local(
-    mesh: &Mesh,
+    hull: Hull<'_>,
     matrix: Matrix,
     direction: V,
     cache: &mut [usize; 7],
@@ -371,6 +449,14 @@ fn mesh_support_local(
         dot(direction, matrix[2]),
         0.,
     ];
+    let mesh = match hull {
+        Hull::Mesh(mesh) => mesh,
+        Hull::Cylinder {
+            radius,
+            half_height,
+        } => return Ok(cylinder_local(local, radius, half_height)),
+        Hull::Sphere { .. } => return Ok([0., 0., 0., 1.]),
+    };
     let mut slot = 0;
     let mut score = dot(local, mesh.point(cache[0]).unwrap());
     for (i, &cached_vertex) in cache.iter().enumerate().take(6).skip(1) {
@@ -410,14 +496,14 @@ fn mesh_support_local(
 
 /// Source-owned triangle versus a one-level constructed collision mesh.
 /// This does not run the outer feature test, penetration search or manifold.
-pub fn calculate(
-    mesh: &Mesh,
+pub fn calculate<'m>(
+    mesh: impl Into<Hull<'m>>,
     matrix: Matrix,
     triangle: [V; 3],
     margin: f32,
     direction: V,
 ) -> Result<Output, Error> {
-    Context::new().query(mesh, matrix, triangle, margin, direction)
+    Context::new().query(mesh.into(), matrix, triangle, margin, direction)
 }
 
 /// Owned per-mesh-pair distance state. Queries preserve the support cache and
@@ -440,7 +526,7 @@ impl Context {
 
     pub(crate) fn feature_support(
         &mut self,
-        mesh: &Mesh,
+        mesh: Hull<'_>,
         matrix: Matrix,
         direction: V,
     ) -> Result<[usize; 7], Error> {
@@ -460,14 +546,15 @@ impl Context {
     }
     /// Use one context per mesh pair; reset it if the mesh/topology changes.
     /// Failure leaves its complete state intact.
-    pub fn query(
+    pub fn query<'m>(
         &mut self,
-        mesh: &Mesh,
+        mesh: impl Into<Hull<'m>>,
         matrix: Matrix,
         triangle: [V; 3],
         margin: f32,
         direction: V,
     ) -> Result<Output, Error> {
+        let mesh = mesh.into();
         if self.cache.iter().any(|&v| v >= mesh.point_count()) {
             return Err(Error("distance cache index outside supplied mesh"));
         }
@@ -475,7 +562,7 @@ impl Context {
         let output = run_query(
             mesh,
             matrix,
-            &triangle,
+            Static::Points(&triangle),
             DistanceOptions {
                 margin,
                 witnesses: true,
@@ -546,11 +633,35 @@ fn points_support(points: &[V], direction: V) -> V {
     points[best]
 }
 
+/// Shape A of the distance query: a convex point set (a triangle, box
+/// corners, a sphere centre) or a kind-5 cylinder with its B47A70 support.
+#[derive(Clone, Copy)]
+pub(crate) enum Static<'a> {
+    Points(&'a [V]),
+    Cylinder(&'a crate::round_contacts::CylinderShape),
+}
+
+impl Static<'_> {
+    fn support(&self, direction: V) -> V {
+        match self {
+            Static::Points(points) => points_support(points, direction),
+            Static::Cylinder(c) => c.support(direction),
+        }
+    }
+    /// Points that bound the input checks: the set, or the cylinder centre.
+    fn anchors(&self) -> &[V] {
+        match self {
+            Static::Points(points) => points,
+            Static::Cylinder(c) => std::slice::from_ref(&c.matrix[3]),
+        }
+    }
+}
+
 #[allow(clippy::neg_multiply)] // Original triangle batch multiplies by -1.
 fn batch_depth(
-    mesh: &Mesh,
+    mesh: Hull<'_>,
     matrix: Matrix,
-    triangle: &[V],
+    shape: Static<'_>,
     directions: &[V],
     cache: &mut [usize; 7],
 ) -> Result<(usize, f32), Error> {
@@ -558,7 +669,7 @@ fn batch_depth(
     let mut selected = None;
     for (i, &direction) in directions.iter().enumerate() {
         let opposite = direction.map(|v| -1. * v);
-        let triangle_min = -0. - dot(opposite, points_support(triangle, opposite));
+        let triangle_min = -0. - dot(opposite, shape.support(opposite));
         let point = mesh_support_local(mesh, matrix, direction, cache)?;
         let local = [
             dot(direction, matrix[0]),
@@ -582,29 +693,30 @@ impl Context {
     /// Selected scope: untransformed source triangle, supplied mesh matrix,
     /// zero triangle margin and finite nondegenerate triangle winding.
     /// A failed/invalid operation leaves the context intact.
-    pub fn contact(
+    pub fn contact<'m>(
         &mut self,
-        mesh: &Mesh,
+        mesh: impl Into<Hull<'m>>,
         matrix: Matrix,
         triangle: [V; 3],
         direction: V,
         settings: &ContactSettings,
     ) -> Result<ContactOutput, Error> {
-        self.contact_triangle(mesh, matrix, triangle, 0., direction, settings)
+        self.contact_triangle(mesh.into(), matrix, triangle, 0., direction, settings)
     }
 
     /// [`Self::contact`] with a triangle margin: AEA1F0 gives every
     /// candidate triangle its packed shape's +0x220 margin (B212D0).
     #[allow(clippy::assign_op_pattern)] // Preserve the original operand order.
-    pub fn contact_triangle(
+    pub fn contact_triangle<'m>(
         &mut self,
-        mesh: &Mesh,
+        mesh: impl Into<Hull<'m>>,
         matrix: Matrix,
         triangle: [V; 3],
         margin: f32,
         direction: V,
         settings: &ContactSettings,
     ) -> Result<ContactOutput, Error> {
+        let mesh = mesh.into();
         if self.cache.iter().any(|&v| v >= mesh.point_count())
             || !margin.is_finite()
             || !(0. ..=1e6).contains(&margin)
@@ -643,7 +755,7 @@ impl Context {
     #[allow(clippy::assign_op_pattern, clippy::too_many_arguments)]
     pub(crate) fn contact_points(
         &mut self,
-        mesh: &Mesh,
+        mesh: Hull<'_>,
         matrix: Matrix,
         points: &[V],
         margin: f32,
@@ -651,7 +763,41 @@ impl Context {
         direction: V,
         settings: &ContactSettings,
     ) -> Result<ContactOutput, Error> {
-        let triangle = points;
+        self.contact_static(
+            mesh,
+            matrix,
+            Static::Points(points),
+            margin,
+            extra,
+            direction,
+            settings,
+        )
+    }
+
+    /// [`Self::contact_points`] for any static shape A.
+    #[allow(clippy::assign_op_pattern, clippy::too_many_arguments)]
+    pub(crate) fn contact_static(
+        &mut self,
+        mesh: Hull<'_>,
+        matrix: Matrix,
+        shape: Static<'_>,
+        margin: f32,
+        extra: Extra,
+        direction: V,
+        settings: &ContactSettings,
+    ) -> Result<ContactOutput, Error> {
+        // B4B0A0: a sphere body is its centre with radius plus shell.
+        let grown;
+        let settings = if let Hull::Sphere { radius } = mesh {
+            grown = ContactSettings {
+                margin: settings.margin + radius,
+                directions: settings.directions,
+            };
+            &grown
+        } else {
+            settings
+        };
+        let triangle = shape;
         let mut staged = self.clone();
         let mut direction = direction;
         if dot(direction, direction) < EPS {
@@ -725,9 +871,9 @@ impl Context {
     )]
     fn penetration(
         &mut self,
-        mesh: &Mesh,
+        mesh: Hull<'_>,
         matrix: Matrix,
-        triangle: &[V],
+        triangle: Static<'_>,
         margin: f32,
         extra: Extra,
         direction: &mut V,
@@ -744,7 +890,7 @@ impl Context {
             self.extra_directions[2 + i * 2] = row;
             self.extra_directions[3 + i * 2] = row.map(|v| -v);
         }
-        if let Extra::Triangle = extra {
+        if let (Extra::Triangle, Static::Points(triangle)) = (extra, triangle) {
             self.extra_directions[8] = normalize_sample(cross(
                 sub(triangle[0], triangle[1]),
                 sub(triangle[0], triangle[2]),
@@ -783,7 +929,7 @@ impl Context {
         }
         axis = normalize_sample(*direction)?;
         let opposite = axis.map(|v| -1. * v);
-        let a = points_support(triangle, opposite);
+        let a = triangle.support(opposite);
         let b = mesh_support(mesh, matrix, axis, &mut self.cache)?;
         let difference = sub(b, a);
         let depth = dot(axis, difference);
@@ -827,9 +973,9 @@ impl Context {
 
 #[allow(clippy::neg_multiply)] // Preserve the original multiply-by-minus-one.
 fn run_query(
-    mesh: &Mesh,
+    mesh: Hull<'_>,
     matrix: Matrix,
-    triangle: &[V],
+    triangle: Static<'_>,
     options: DistanceOptions,
     mut direction: V,
     simplex: &mut Simplex,
@@ -839,10 +985,10 @@ fn run_query(
     if matrix
         .iter()
         .flatten()
-        .chain(triangle.iter().flatten())
+        .chain(triangle.anchors().iter().flatten())
         .chain(direction.iter())
         .any(|v| !v.is_finite() || v.abs() > 100000.)
-        || triangle.iter().any(|p| p[3] != 1.)
+        || triangle.anchors().iter().any(|p| p[3] != 1.)
         || direction[3] != 0.
         || !margin.is_finite()
         || !(0. ..=1e6).contains(&margin)
@@ -857,7 +1003,7 @@ fn run_query(
     let mut finished = false;
     for _ in 0..256 {
         let opposite = direction.map(|v| -1. * v);
-        let a = points_support(triangle, opposite);
+        let a = triangle.support(opposite);
         let b = mesh_support(mesh, matrix, direction, cache)?;
         let difference = sub(a, b);
         let projection = dot(direction, difference);

@@ -3,11 +3,11 @@
 //! AE4700 -> B80CE0/B801C0), applied by B18220 -> B10680/B14550 before the
 //! ordinary narrow phase (phase 3, B18300). docs/ROBUSTNESS_RESEARCH.md.
 //!
-//! Scope: the moving shape is a collision mesh (kind 7) and the other shape a
+//! Scope: the moving shape is a collision mesh (kind 7) or a round piece
+//! (kind 5/3, `convex_distance::Hull`) and the other shape a
 //! packed road chunk (kind 11, swept callback AE4700, matrix entry +8).
 use crate::{
     Error,
-    collision_mesh::Mesh,
     contact_manifold,
     convex_distance::{self, ContactSettings},
     packed_candidates, packed_query,
@@ -59,9 +59,20 @@ fn normalize(v: V) -> Result<V, Error> {
 /// The shape radius B15B70 compares against: the mesh shape's vtable +0x18
 /// (B41F50) returns mesh data +0x5C, the least absolute coordinate among
 /// the six extrema (B42540).
-pub fn radius(mesh: &Mesh) -> f32 {
-    let b = mesh.bytes();
-    f32::from_bits(u32::from_le_bytes(b[0x5c..0x60].try_into().unwrap()))
+/// For a round body the least half extent [I: the kind-5/3 vtable +0x18 was
+/// not read].
+pub fn radius<'m>(hull: impl Into<convex_distance::Hull<'m>>) -> f32 {
+    match hull.into() {
+        convex_distance::Hull::Mesh(mesh) => {
+            let b = mesh.bytes();
+            f32::from_bits(u32::from_le_bytes(b[0x5c..0x60].try_into().unwrap()))
+        }
+        convex_distance::Hull::Cylinder {
+            radius,
+            half_height,
+        } => radius.min(half_height),
+        convex_distance::Hull::Sphere { radius } => radius,
+    }
 }
 
 /// B15B70: a body is swept when (0.75 r)^2 < |d|^2 for one of its shapes
@@ -221,7 +232,7 @@ pub struct Hit {
 /// miss. Time 0 means the shapes already touch at the start.
 fn ray_cast(
     triangle: [V; 3],
-    mesh: &Mesh,
+    mesh: convex_distance::Hull<'_>,
     rotation: Matrix,
     from: V,
     to: V,
@@ -237,7 +248,17 @@ fn ray_cast(
                 t = p;
             }
         }
-        let m = convex_distance::mesh_support(mesh, rotation, v.map(|x| -x), &mut cache)?;
+        let mut m = convex_distance::mesh_support(mesh, rotation, v.map(|x| -x), &mut cache)?;
+        // B4B0A0's support carries the sphere's radius.
+        if let convex_distance::Hull::Sphere { radius } = mesh {
+            let length = dot(v, v).sqrt();
+            if length > 0. {
+                let scale = radius / length;
+                for j in 0..3 {
+                    m[j] -= scale * v[j];
+                }
+            }
+        }
         let mut p = sub(t, m);
         p[3] = 1.;
         Ok(p)
@@ -289,8 +310,8 @@ fn ray_cast(
 /// in candidate order. A triangle the mesh already touches at the start gives
 /// the B7F740 contact with time 0; otherwise the ray cast's time of impact.
 #[allow(clippy::too_many_arguments)]
-pub fn sweep_packed(
-    mesh: &Mesh,
+pub fn sweep_packed<'m>(
+    mesh: impl Into<convex_distance::Hull<'m>>,
     start: Matrix,
     end: Matrix,
     track: &packed_query::Mesh<'_>,
@@ -300,6 +321,7 @@ pub fn sweep_packed(
     query: &ContactSettings,
     capacity: usize,
 ) -> Result<Vec<Hit>, Error> {
+    let mesh = mesh.into();
     let mut hits = Vec::new();
     if capacity == 0 {
         return Ok(hits);
@@ -472,6 +494,7 @@ pub fn apply(body: &mut crate::contact_groups::Body, position: V) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collision_mesh::Mesh;
 
     fn cube(half: f32) -> Mesh {
         let points: Vec<V> = (0..8)
@@ -530,7 +553,7 @@ mod tests {
             [0., 0., 10., 1.],
         ];
         // Bottom face at 0.1 - 0.075 = 0.025 at the start, -0.135 at the end.
-        let (time, _, normal) = ray_cast(floor, &mesh, at(0.), [0., 0.1, 0., 1.], [0., -0.06, 0., 1.])
+        let (time, _, normal) = ray_cast(floor, (&mesh).into(), at(0.), [0., 0.1, 0., 1.], [0., -0.06, 0., 1.])
             .unwrap()
             .unwrap();
         // B801C0 stops at |v|^2 <= 1e-6 x the largest |w|^2 (about 1 cm for
@@ -540,7 +563,7 @@ mod tests {
         assert!(n[1] > 0.999, "{n:?}");
         // Moving away misses.
         assert!(
-            ray_cast(floor, &mesh, at(0.), [0., 0.1, 0., 1.], [0., 0.3, 0., 1.])
+            ray_cast(floor, (&mesh).into(), at(0.), [0., 0.1, 0., 1.], [0., 0.3, 0., 1.])
                 .unwrap()
                 .is_none()
         );

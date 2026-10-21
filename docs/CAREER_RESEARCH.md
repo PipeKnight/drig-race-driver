@@ -171,11 +171,14 @@ A season is not a calendar.
 
 The end-of-event dispatcher 0x67B910 runs only in career mode [V]. It calls:
 - the head-to-head routine 0x6788D0;
-- routine B 0x6781F0 when a game-mode virtual (+0x98) returns true, which was not identified;
+- routine B 0x6781F0 when the game-mode virtual +0x98 (0x69B290) returns true: the current tier's
+  region index (+0x48) is 4, `le_mans` [V]. Only tiers 10–13 are in that region, so B pays only the
+  Le Mans 24 Hours events 13–16; the Le Mans Series events (31, 35, 50, 51) use A with class position;
 - otherwise routine A 0x6779C0;
 - driver-offer routines 0x678BD0 and 0x678EE0 for event kinds 1 and 2.
 
 Routines A and B share the arithmetic below; B reads the pot directly, without the depletion of §3.2.
+The differences are listed in §3.4.
 
 ### 3.1 Position and prize [V]
 
@@ -199,10 +202,30 @@ Routines A and B share the arithmetic below; B reads the pot directly, without t
     team) and ranks the teams.
   - [I] The value is the event points, and the bonus is paid when the player's team leads.
 - **Money credited** (0x674610) = prize + teammate share + Team Win Bonus + sponsor money (§5.1) +
-  0x652200 (a per-race record field +0x5C that was not identified).
-- Flashback Bonus: `difficulty.flashback_bonus` (3,000 / 12,000 / 30,000 / 60,000 by rank) reaches the
-  race's flashback manager and its UI variables, but **no native code pays it** and it is not in the
-  money total [V by search]. The bank line `bank_rewards_flashback_desc` exists only as text.
+  the Flashback Bonus (career +0x68, the sum 0x652200 of the per-race records' +0x5C).
+- **Flashback Bonus** [V, 20 October 2026; corrects the earlier "not paid"]:
+  - The per-race recorder 0x66DB80 stores the award 0x6A22A0 of the race's flashback manager in the
+    race record (+0x5C) when the player's result is final (result +0x11; [I] finished). There is no
+    position or win condition.
+  - 0x6A22A0: `maximum > 0 ? (maximum − used) × max_award / maximum : max_award` (i32 `imul`, `idiv`,
+    truncated). With no flashbacks at all (Ninja, Pro Mode) the whole award is paid.
+  - `max_award` is the `difficulty` row's `flashback_bonus` (3,000 / 12,000 / 30,000 / 60,000 by the
+    tier's rank), `maximum` its `available_flashbacks` (0x6AF7C0). Example: rank 1, 4 flashbacks,
+    1 used: 3 × 3,000 / 4 = 2,250.
+  - All five reward routines sum it: A 0x677F98, B 0x6786E0, head-to-head 0x6788DD, driver offers
+    0x678CEE and 0x678FFE (calls of 0x652200).
+  - Not traced: where the per-race records (career +0x90, saved) are cleared between events, and a
+    proof that career +0x30 is the manager 0x6AF7C0 sets up.
+- **Bank screen** `ScreenRewardsBankAccount` (factory near 0x571400, constructor 0x5554F0, vtable
+  0xCD4AE8, filler 0x555620) [V]: rows prize (+0x5C), sponsorship (0x652010), Team Win Bonus (+0x64),
+  Flashback Bonus (+0x68), then the teammate's share (+0x60) only with a team mate. A driver offer
+  shows wages (0x4E1B50) and objectives (0x652270) in the first two rows. Total is the rows' sum;
+  balance and Season's Earnings count up from value − total.
+- **Season's Earnings** [V]: the player's entry (id −2, field +4) of the money leaderboard at career
+  +0xB0 (0x4CB040). Routine A (0x665560) and B (0x665890) add the event's credited money after each
+  event; the season end (0x4DBB20 → 0x66E2E0 → 0x665BA0) zeroes every entry. The row shows only while
+  0x4DA430 is true; otherwise the balance shown adds `start_race_team` (40,000) [I: the flag is "own
+  team founded"].
 
 ### 3.2 Reputation [V]
 
@@ -258,9 +281,51 @@ Worked examples (first play):
 
 ### 3.3 Head-to-head [V]
 
-A win pays `prize_money_for_first` (500,000 to 10,000,000) and no reputation (0x6788D0). The
-`head_to_head_rewards` car or its alternative money (`alt_reward_amount`) is granted on a branch through
-0x65AD90 that was not traced.
+A win pays `prize_money_for_first` (500,000 to 10,000,000) and no reputation (0x6788D0), on every win
+(no first-win gate), plus the races' Flashback Bonus (§3.1).
+
+The win and the unlock [V, 20 October 2026; research notes `H2H_REWARD.md`]:
+- 0x6788D0 calls 0x674810(event), which credits the prize. When the event's region is International
+  (index 3), it first calls 0x65AD90.
+- 0x65AD90 runs the bonus unlocks 0x65ABE0, whose `bonus_vehicle_unlock` ids are filled at run time.
+- It then puts every `purchasable` vehicle the team does not own into the garage, at no cost and with
+  a fresh record. No livery is set.
+- So winning the International head-to-head (event 78) unlocks every car.
+- `head_to_head_rewards` (a car and `alt_reward_amount` per head-to-head) is **never read**: neither
+  the table name nor the field names appear in the executable (ASCII or UTF-16), and the database API
+  looks tables up by name [V by absence]. Ten other shipped tables, among them `vehicle_unlock`, are
+  absent too [I: leftover data].
+- Winning the final also plays the speech `Reward_Head_To_Head_Won_Final` once
+  (`played_game_complete_speech`). No car-reward popup exists.
+
+### 3.4 Routine B and class position [V, 20 October 2026]
+
+- **Selection.** The game virtual +0x98 is 0x69B290: the current tier's region index (tier +0x48, from
+  table 0xDB4C4C: europe 0, united_states 1, japan 2, international 3, le_mans 4) equals 4. Only tiers
+  10–13 are in `le_mans`, and their only events are 13–16, the four Le Mans 24 Hours (one race each).
+  The Le Mans Series events 31, 35, 50 and 51 are in Europe tiers and use routine A.
+- **A against B** (Capstone of 0x6779C0 and 0x6781F0):
+
+  | | A | B |
+  |---|---|---|
+  | player position | class position if `use_lemans_selection`, else the dense rank | always class position |
+  | team win | 0x660E90 in the class if `use_lemans_selection`, else the dispatcher's flag | always 0x660E90 in the class |
+  | reputation pot | the event's remaining pot (§3.2) | the event's whole `reputation_pot` |
+  | pot depletion | yes | none |
+  | teammate position | as the player's | class position |
+  | 0x65D440, head-to-head unlock 0x656D40 | called | not called |
+  | leaderboard update | 0x665560 | 0x665890 |
+
+  Prize, team-win amount, Flashback Bonus, sponsors, bonus factor and the money credit are shared.
+- **Class position** (0x66BBA0):
+  1. A driver's class is the `vehicle_class_id` of the vehicle of their `vehicle_livery` row (driver
+     +0x20).
+  2. Standings entries of another class are removed; the driver being placed always stays.
+  3. The rest are sorted by points, descending; on equal points the player (driver type 2 [I]) goes
+     first. Other ties are left to an unstable sort.
+  4. The position is the driver's 0-based index, so the player's class position is the number of
+     same-class drivers with more points.
+- 0x660E90 applies the same class filter before summing points per team.
 
 ## 4. Cars [V, D]
 
@@ -401,7 +466,7 @@ N × { u32 length (0x400, or 0 if never written), 1024 bytes }   N = capacity / 
 - `CAREER MANAGER SDU NAME` holds the career: `main_career` (0x6501B0) and `garage_career`.
 - The other units:
   - `RACEHISTORY` (statistics, the `fact_*` screens);
-  - `EBAY_MANAGER_SAVE` (owned cars, about 0x60 bytes each, and auctions);
+  - `EBAY_MANAGER_SAVE` (eBay sale listings, 0x60 bytes each, and the bought cars' records; §13);
   - `REWARDS_SAVE` (season leaderboards);
   - `UNLOCKS` (52 vehicle and 15 bonus records);
   - `PROFILE` (a `<PlayerProfile>` XML of typed items: settings, livery, names, once-only presentation
@@ -486,8 +551,127 @@ AUTHORED or [I] in the port:
 4. The no-damage flag threshold; 0x652200 (record +0x5C) in the event money.
 5. Driver-offer slot rotation after a failed offer; whether offer races also pay the event pot.
 6. Season leaderboard N, the 0.25 factor and 0x62CEB0; the player team's season rank.
-7. How the event's races are drawn from its track pool; the career AI field (0x5C7D40).
+7. Answered in §12: the race draw and the career field. Still open there: whether the drawn race
+   list is saved; the Le Mans 24 Hours flag (+0x98); the tie order of the grid ranking 0x5B6340; the
+   player's car and livery in an own-team field.
 8. The car record in `EBAY_MANAGER_SAVE`, `RACEHISTORY` statistics, `REWARDS_SAVE`, and where the
    reputation-pot records are saved.
 9. Live check (owner-driven, not automated): one rookie event's bank and reputation screens against
    §3, with known settings.
+
+## 12. Race draw and career field (19 October 2026)
+
+Static research (agent pass, `local/career/notes/DRAW_FIELD.md` with every address and worked examples).
+
+### 12.1 Race draw [V 0x67BC80, 0x664E30, 0x66D800]
+
+- `N` races: `event.num_competitions`; for a driver offer, its number of `driver_offer_track` rows
+  (0x637980).
+- The event's pool rows (table order) are sorted, stably (pools have at most 11 rows, so only the
+  insertion sort of std::sort runs):
+  - an event never completed (profile event record +0x60 == 0): by `order_index`;
+  - an event completed before, and every driver offer: by the profile's race count on each
+    `track_model` (incremented after every race, 0x61017D).
+- Pick: first every entry whose venue (`track_id`) is not taken yet, then fill from the sorted list.
+- No RNG. The list is built when the event is entered (0x67BE50).
+- bmw_si_tour on a first entry: Nürburgring Sprint (3 laps), then Nürburgring GP reverse (2 laps).
+  All four layouts share one venue.
+
+### 12.2 Career field [V 0x676A80, 0x673F20, 0x663D40, 0x66D350]
+
+- One AI car per `event_driver` row of the event, in table order (driver, `vehicle_livery_id`). The
+  car count is the row count (mostly 12; 20 for events 7, 28, 29, 34).
+- Each AI car's team is `driver.team_id` (0x62AC70). The beat-rival objective and the Team Win
+  Bonus use it.
+- **The player's team takes over a team's cars:**
+  - The candidate teams are those with at least as many eligible cars as the group (player, plus the
+    team mate if hired), in team id order, excluding `key` and `primary_key` team types.
+  - One is drawn with the field generator: `cand[rng(0, k)]`, MT19937 seeded in milliseconds.
+  - The player overwrites that team's lowest-index car, and the team mate the next one.
+- **Legend substitution:** if an event driver is the player's hired team mate, a random `event_legend`
+  driver of the event takes the seat and keeps the original driver's team.
+- **Ravenwest guest cars** [I meaning]: once a region has a finished event, Ravenwest's two drivers
+  (team 1, `primary_key`) take over a team's cars in `_hero` liveries. This lasts until an event with
+  them in the field is completed.
+- **Race offers** (0x674020): the offer event's `event_driver` field. The player takes the offer's
+  livery and overwrites the lowest-index car of `driver_offer.team_id` (key teams allowed). That
+  team's other cars are the player's team mates, and the own hired team mate does not race.
+- **Other formats:**
+  - Test offers: the player alone.
+  - Head-to-head: the rows plus the player.
+  - `use_lemans_selection` events and offers: `lemans_restrictions` rows for the player's vehicle
+    (0x663860).
+- **Grid** (0x5C7D40):
+  - the player's slot from the current layout's pool row (§RACE_RULES 5);
+  - named drivers from `event_driver_grid_position` (same formula);
+  - everyone else ranked into the free slots by
+    `n − 1 − trunc((n − 1) · clamp(driver.skill + U(−0.2, 0.2), 0, 1))`.
+
+## 13. eBay Motors used-car market (19 October 2026)
+
+Static analysis of the eBay manager (ctor 0x675210, item vtable 0xCEA68C); private notes and
+addresses in the main checkout's `local/career/notes/EBAY.md` (Ghidra 12.1.4 headless, read-only, on
+the hash-pinned image; Capstone checks of the float code). Ported as `grid_tools::career::ebay`.
+
+### 13.1 Settings and generators [V, D]
+- `gameconfig/ebay.xml` (`EbaySettings`, parser 0x631E60) holds 32 values [D]. Among them:
+  3 cars per model, 10..100 events, crash chances 3 % / 40 %, Buy It Now 88..100 %, auction
+  length 4, value 70..130 % with noise −10..0 %, bids from 70 % in steps of 10 %, and
+  0.33 / 3.0 / 500.0 "for one percent".
+- `winningChancePercentage` is parsed but never read [V by absence].
+- Two MT19937 generators, seeded by the original's rule (`mt[0] = seed | 1`, `mt[i] = mt[i−1]·69069`; `series::Mt`).
+  - #1 makes the offers, the value noise and the buyers. #2 makes only the per-model seeds.
+  - Reset seeds: 0x6529A9 and 0x221C63.
+- `int(lo, hi)` = `lo + genrand % (hi − lo)`; `float(lo, hi)` = `lo + genrand·2⁻³²·(hi − lo)`.
+
+### 13.2 Buying: fixed-price offers [V]
+- There is no bidding for the buyer.
+- Per-model seeds (0x65E9E0): `int(0, 0xFFFF)` per `vehicle` row in table order. They are redrawn:
+  - after each career event (hook 0x587580);
+  - after each eBay purchase;
+  - at load, by replaying the saved refresh count from the reset seed.
+- Showing a model's offers (0x668BB0) reseeds #1 with the model's seed and generates 3 cars
+  (0x653360). The draws, in order:
+  1. a seller among the `can_be_hired` drivers;
+  2. N = 10..100 events;
+  3. miles = U[250, 499]·N;
+  4. event wins = trunc(U(0, 0.5)·N);
+  5. race wins = U[1, 5]·event wins;
+  6. per event, a major crash below 3 %, capped at N − wins;
+  7. per event, a minor crash below 40 % (unused).
+- Performance %, with f = wins / N:
+  - f > 0.3: `1 + (f − 0.3)·10`, at most 5;
+  - f < 0.2: `−(1 + (0.2 − f)·9/0.19)`, at most −10;
+  - otherwise 0.
+- Damageability %, with g = major / N, when g > 0.01: `1 + (g − 0.01)·(10 − 0.01)/0.49`, at most 10.
+  The numerator `max − minMajorDamageFraction` is the original's own, kept.
+- Price: `trunc(purchase_price · f32((100 − (miles − 500)·12/49500 + 0.33·wins − 3·major)·0.01))`,
+  floored to the currency step (0x639A80: 50000 / gcd of the `currency` rates ×100 = 1000).
+- Buying (0x65F540) is refused for a model already owned or a price above the bank. Otherwise
+  the car joins the garage with its history (odometer in metres = miles·1609.344), the
+  {model, performance, damageability} record is kept, and the seeds are redrawn.
+
+### 13.3 Selling: an auction over career events [V]
+- The player sets the duration (at most 4), a start price and a fixed price (0x65F390).
+- Value (0x631B60) = `trunc((clamp(100 + race wins·0.6/0.33 − major·10/3 − miles·0.5/500, 70, 130) + U(−10, 0))
+  · purchase_price·0.01f)`. The value is redrawn every event.
+- Each event (0x64E760) `bid = trunc(value·(70 + 10k)·0.01f)` for k = 0..duration − 1, chop rounding
+  (control word | 0xC00), floored to 1000.
+  - Below the start price there is no bid.
+  - At or above the fixed price the car sells at the fixed price.
+  - At the end it sells at the last bid if the start price was ever reached, else it stays unsold.
+  - Each step draws a random buyer.
+- States 1 bid in progress, 2 fixed price met, 3 sold, 4 ended unsold, 5 no bids. Each has an
+  `ebay_msg_*` popup.
+- Completion (0x655F60) removes the car and its record, pays the money, and counts sold and earned
+  (`fact_ebay_earnings`).
+- Saved (`EBAY_MANAGER_SAVE`): sold count, spent, earned, refresh count, the bought cars' records
+  and the active listings (the 0x60-byte list is the listings, not garage cars as §9 said).
+
+### 13.4 Not traced / not ported
+- What the bought car's percentages change: race setup 0x5F8940 writes `(100 + perf)/100` to
+  physics +0x188C and `dmg/100` to damage model +0x434 (meanings unknown). The port keeps the
+  record but does not apply it.
+- Which models the eBay list shows (unlock, licence, region filters), the event-22 eBay unlock,
+  whether the hook runs per race or per event (the port: per event and per driver offer), and
+  how the garage car's history grows with races (the port: only eBay cars carry one).

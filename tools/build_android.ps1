@@ -28,6 +28,14 @@ param(
     # -Profile: grid-app feature `profile` (on-device per-system tables in the
     # log, docs/PERFORMANCE.md "Phone bisection"); the APK name ends in -profile.
     [switch]$Profile,
+    # -NoSeed: do not add the seed's Android artifacts to the build dir first
+    # (tools/seed_build_dir.ps1 -Android; tools/build_seed.ps1 uses this).
+    [switch]$NoSeed,
+    # -Clippy: only `cargo ndk ... clippy --release --lib -p grid-app -- -D warnings`,
+    # in this script's environment. Run the Android Clippy this way: jni-sys's
+    # build script reruns when JAVA_HOME changes, and that rerun makes every
+    # Android crate built before it stale (docs/TOOLCHAIN.md "Build speed").
+    [switch]$Clippy,
     # -Event: the bundled event profile (push_android_data.ps1 -Event); a
     # non-default event adds -<event> to the APK name.
     [ValidateSet('donington', 'drift-nurburgring')]
@@ -38,6 +46,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $PSScriptRoot 'build_lock.ps1')
+$lock = $null
 
 function Pick([string]$name, [string]$default) {
     $value = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -57,6 +67,12 @@ $env:ANDROID_NDK_HOME = $ndk
 $env:JAVA_HOME = $jdk
 $env:GRADLE_USER_HOME = Pick 'GRADLE_USER_HOME' (Join-Path $Tools 'gradle-home')
 $env:PATH = "$cargoNdkBin;$env:USERPROFILE\.cargo\bin;$jdk\bin;$env:PATH"
+# cargo-ndk 4.1.2 writes CC_/CXX_/AR_<target> etc. with forward slashes when MSYSTEM or CYGWIN
+# is set (Git Bash sets MSYSTEM, and a PowerShell started from it inherits it). android-activity's
+# build script tracks those variables, so a value in the other slash style than the seed's
+# (backslashes) reran it and rebuilt android-activity and about 30 Bevy crates in every fresh
+# build dir (F536). Without them the paths are the same whatever shell started this script.
+Remove-Item Env:\MSYSTEM, Env:\CYGWIN -ErrorAction SilentlyContinue
 
 # Stages the private asset folder and writes grid-data/bundle.txt:
 #   grid-bundle 1
@@ -108,7 +124,20 @@ try {
     $jni = Join-Path $root 'android\app\build\rust-jniLibs'
     if (Test-Path -LiteralPath $jni) { Remove-Item -LiteralPath $jni -Recurse -Force }
     $started = Get-Date
+    # One build at a time on this PC (tools/build_lock.ps1): cargo ndk and Gradle under one lock.
+    $lock = Enter-BuildLock -Purpose $(if ($Clippy) { 'build_android -Clippy' } elseif ($Profile) { 'build_android -Profile' } else { 'build_android' })
+    # Without the seed a build dir compiles Bevy for aarch64 once per variant,
+    # about 15 min each (docs/TOOLCHAIN.md, "Build and test cost").
+    if (-not $NoSeed) {
+        & powershell -NoProfile -File (Join-Path $root 'tools\seed_build_dir.ps1') -Android | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'seeding the Android build artifacts failed' }
+    }
     $features = if ($Profile) { @('--features', 'profile') } else { @() }
+    if ($Clippy) {
+        & cargo ndk -t arm64-v8a -P 31 clippy --release --lib -p grid-app @features -- -D warnings
+        if ($LASTEXITCODE -ne 0) { throw 'cargo ndk clippy failed' }
+        return
+    }
     & cargo ndk -t arm64-v8a -P 31 -o $jni build --release --lib -p grid-app @features
     if ($LASTEXITCODE -ne 0) { throw 'cargo ndk build failed' }
     $so = Join-Path $jni 'arm64-v8a\libgrid_android.so'
@@ -147,5 +176,6 @@ try {
     $manifest | ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath "$out.json"
     $manifest | ConvertTo-Json
 } finally {
+    Exit-BuildLock $lock
     Pop-Location
 }

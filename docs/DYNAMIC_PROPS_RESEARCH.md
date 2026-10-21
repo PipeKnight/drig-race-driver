@@ -102,7 +102,9 @@ density x volume (below).
    `v_old + e + (r - (r . e^) e^) |e| x 0.25`, with `r` a pseudo-random unit vector
    seeded by the fractional part of `|x|+|y|+|z|+|e|` of the body position
    (constants 0x00CFAA48..60, 2 pi, moduli 0x1948/0x14F7/0xC54).
-5. **Links.** [D] `0x7D5540` propagates a break along ENS entity links (armco chains).
+5. **Links.** [D] `0x7D5540` breaks the intact sections linked to a section a car broke
+   (one level) and joins broken neighbours' rails to its post (ported F501,
+   docs/JOINTS_RESEARCH.md "Phase 3b").
 
 [I] Consequence: in the break step the car only feels the capped impulse
 (`threshold x dt`: 0.8 N s for a board at 60 Hz, 16.7 N s for a tyre wall), then
@@ -233,9 +235,11 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
 / `MultiRuntime::enable_dynamic_props`, `grid-app` `dynamic_props.rs`.
 
 - **Which props.** All 190 constraint-free breakables: 34 brake marker boards,
-  8 tyre stacks, 148 cushions. Tyre walls (588) and armco (243) need the joint rows
-  the port lacks and stay static (`Catalog::unported`). Everything without a shape
-  behaviour stays static. [V data, D mechanism]
+  8 tyre stacks, 148 cushions. Since F484 also the 588 tyre walls, whose six blocks are
+  joined by seven springs (docs/JOINTS_RESEARCH.md "Phase 3a"), and since F501 the 243
+  armco sections: rails hinged to the post, the world and the neighbouring section's post,
+  with the override bodies (docs/JOINTS_RESEARCH.md "Phase 3b"). Everything without a
+  shape behaviour stays static. [V data, D mechanism]
 - **Contact limit.** An armed intact box writes its threshold into contact +0x3C
   (`BodyContact::limit`); the ported solver caps the row at `dt x limit` and writes the
   solved force back. Unarmed boxes keep FLT_MAX, so nothing changes until a breakable
@@ -254,7 +258,9 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
   query as the car (piece margin = shape shell 0.02); car vs piece through the
   car-to-car hull path; piece vs piece through an authored separating-axis generator
   (face axes of both hulls; the triangle-soup pair query lost stacked tyres once they
-  overlapped beyond the margin). Cylinders are 12-sided prisms. Authored budgets: 8
+  overlapped beyond the margin). Cylinders are 12-sided prisms (F465: only in the
+  piece-pair test; the world, cars and road see round kind-5/3 shapes, BOX_CONTACTS.md
+  "Round pieces"). Authored budgets: 8
   track and 4 pair contacts per piece, pool +12 slots per piece up to 256. [I]
 - **Single car.** `vehicle_world` now admits further dynamic bodies after the car
   (shapes after the statics, deformation registration slot None, body events skip
@@ -394,10 +400,10 @@ original's AE8AD0 pairing for it was tried and lost more boards at the port's fi
 
 ## Not yet established
 
-- Exact constraint (joint) solver, so tyre walls and armco stay static: tyre-wall springs (`cDeformableRubber*`,
-  `dontCollideWithAny`), armco hinges with `bodyOverride` rail bodies (gravityScale 0,
-  sphericalmass 7000, damping 14), post-to-world joint breaking at 10, ENS link
-  propagation. The port has no joint rows.
+- Armco end pieces (`link0`, a rail of three shapes) and scaled jointed entities stay
+  static (the close-drift flags break since F509); uproot (rail bodies switching to `rbDefault`) is not
+  ported, its trigger is not found. Armco and tyre-wall joints are ported since F501 and
+  F484 (docs/JOINTS_RESEARCH.md).
 - Sleeping: the ported grouped frame only admits `turnOffTime = MAX`.
 - Whether routes override the ENTITYMANAGER defaults; the farthest-first restore of
   broken entities when a pool is full (recovered, not ported, unreachable with the

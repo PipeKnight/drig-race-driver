@@ -96,6 +96,11 @@ impl Decodable for HudSource {
 }
 
 pub(crate) fn install(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
+    app.add_audio_source::<HudSource>();
+    install_systems(app, bank, table);
+}
+/// `install` without the device playback (the race-start mix test).
+pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
     let (cues, receiver) = channel();
     let group_db = Arc::new(AtomicU32::new(audio_mix::SILENT.to_bits()));
     let source = HudSource {
@@ -103,18 +108,17 @@ pub(crate) fn install(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>)
         cues: std::sync::Mutex::new(Some(receiver)),
         group_db: group_db.clone(),
     };
-    app.add_audio_source::<HudSource>()
-        .insert_resource(HudSound {
-            table,
-            cues,
-            group_db,
-            countdown: None,
-            green: false,
-            flash: None,
-        })
-        .insert_resource(PendingSource(Some(source)))
-        .add_systems(Startup, start)
-        .add_systems(Update, update);
+    app.insert_resource(HudSound {
+        table,
+        cues,
+        group_db,
+        countdown: None,
+        green: false,
+        flash: None,
+    })
+    .insert_resource(PendingSource(Some(source)))
+    .add_systems(Startup, start)
+    .add_systems(Update, update);
 }
 
 #[derive(Resource)]
@@ -122,7 +126,9 @@ struct PendingSource(Option<HudSource>);
 
 fn start(mut commands: Commands, mut pending: ResMut<PendingSource>, mut assets: ResMut<Assets<HudSource>>) {
     if let Some(source) = pending.0.take() {
-        commands.spawn((AudioPlayer(assets.add(source)), PlaybackSettings::LOOP));
+        // ONCE: the decoder never ends; LOOP's rodio `repeat_infinite` would
+        // keep every sample played to replay it (F482).
+        commands.spawn((AudioPlayer(assets.add(source)), PlaybackSettings::ONCE));
         println!("hud_audio version=1 event=queued rate={RATE} group=HUD cues=lights,drift,flashback");
     }
 }
@@ -135,9 +141,10 @@ fn update(
     flashback: Option<Res<super::flashback::Flashback>>,
 ) {
     use grid_tools::time_trial::Phase;
-    // HUD group: the Normal row (Paused keeps 0 for HUD), camera and Effects trim.
+    // HUD group: the mode term (Paused keeps 0 for HUD), camera and Effects trim.
+    let modes = listening.modes();
     let level = sound.table.as_ref().map_or(-9., |t| {
-        t.group_db(audio_mix::NORMAL, listening.camera(), hud_audio::GROUP, listening.trim())
+        modes.group_db(t, listening.camera(), hud_audio::GROUP, listening.trim())
     });
     sound.group_db.store(level.to_bits(), Ordering::Relaxed);
     let mut cues = Vec::new();

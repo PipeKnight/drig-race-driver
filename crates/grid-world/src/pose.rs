@@ -4,7 +4,9 @@ use crate::{Error, dynamics::BodyState, spawn::reference_seed};
 fn sin_cos(angle: f32) -> (f32, f32) {
     let scaled = f32::from_bits(0x3f22_f983) * angle;
     let half = f32::from_bits(0x3f00_0000 | (scaled.to_bits() & 0x8000_0000));
-    let quadrant = (half + scaled) as i32;
+    // CVTTPS2DQ: out of range or NaN gives the integer indefinite.
+    let rounded = half + scaled;
+    let quadrant = if rounded.abs() < 2_147_483_648. { rounded as i32 } else { i32::MIN };
     let q = quadrant as f32;
     let r = (angle - f32::from_bits(0x3fc9_0fda) * q) - f32::from_bits(0x33a2_2169) * q;
     let z = r * r;
@@ -29,10 +31,13 @@ fn sin_cos(angle: f32) -> (f32, f32) {
     )
 }
 
-/// Reference polynomial Rodrigues rotation, bounded to ±64 radians for diagnostics.
-/// The supplied axis is not normalized here; its fourth lane is masked away.
+/// Reference polynomial Rodrigues rotation (0x772670) for any finite angle:
+/// the original has no angle bound, and matches bit for bit from 64 rad to
+/// about 3e9 rad (`tools/validate_phantom_post.py` cases, F512). A non-finite
+/// result is refused. The supplied axis is not normalized here; its fourth
+/// lane is masked away.
 pub fn rotation(axis: [f32; 4], angle: f32) -> Result<[[f32; 4]; 4], Error> {
-    if !angle.is_finite() || angle.abs() > 64. || axis.iter().any(|v| !v.is_finite()) {
+    if !angle.is_finite() || axis.iter().any(|v| !v.is_finite()) {
         return Err(Error("invalid bounded rotation input"));
     }
     let (s, c) = sin_cos(angle);
@@ -133,7 +138,13 @@ mod tests {
         let turn = rotation([0., 1., 0., 0.], std::f32::consts::FRAC_PI_2).unwrap();
         assert!((turn[0][2] + 1.).abs() < 0.000001);
         assert!((turn[2][0] - 1.).abs() < 0.000001);
-        assert!(rotation([0.; 4], 65.).is_err());
+        // Any finite angle turns, as 0x772670 does; the same matrix as the
+        // phantom post's verified port.
+        for angle in [65f32, -1.0e4, 3.0e6, 2.0e9] {
+            let axis = [0.6, 0., -0.8, 0.];
+            assert_eq!(rotation(axis, angle).unwrap(), crate::phantom_post::axis_angle(angle, axis));
+        }
+        assert!(rotation([0.; 4], f32::INFINITY).is_err());
         assert!(predict(identity, state, -0.01).is_err());
     }
 }

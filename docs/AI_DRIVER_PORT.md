@@ -55,6 +55,28 @@ touring 28.8/46 m/s, 132.48 m from 70.28 m/s at grip 2.0.
    "Steering sign convention (F391)").
 10. Output slew 0x779F70 (steering 15/s, pedals by mapped on/off rates).
 
+## Comparing launches with the original (F460)
+
+The original's Race Day races always run the race manager with the player as reference, so its
+race-start factors apply to the AI: power ×1.05 while the AI car is ahead of the player within
+100 m of race distance, grip ×1.25 for the first 750 m (docs/AI_MISTAKES_PACING_RESEARCH.md).
+`grid-opponent-race` runs that pacing only with `GRID_REFERENCE_CAR`. Field comparisons against
+live captures with a parked player car must therefore set both, e.g.
+`GRID_REFERENCE_CAR=11 GRID_PARKED_CAR=11 GRID_GRID_HOLD=3.5,3.04`.
+
+Spa (F450 capture, mixed field, BMW / Lacetti means) [V]:
+
+| After the go | Original | Port, pacing on | Port, pacing off |
+|---|---|---|---|
+| 1 s | 17.0 / 15.0 | 16.8 / 14.7 | 16.3 / 13.8 |
+| 2 s | 27.7 / 26.6 | 27.5 / 26.4 | 26.7 / 25.4 |
+| 3 s | 36.1 / 35.3 | 36.0 / 35.1 | 35.0 / 34.0 |
+
+The AI throttle (traction control 0x77A3C0 dip to ≈ 0.5 at 0.1–0.2 s, back to 1.0 by 0.7 s BMW /
+1.07 s Lacetti) and the 1→2 shift time already matched; the F450 "0.5–1 s gap" came from the
+missing race-start factors. Milan with pacing: 14.0–17.1 m/s at 1 s (original 14.7–17.6),
+34.5–36.6 at 3 s (35.9–37.4), no contacts.
+
 ## Authored or not yet recovered
 
 - Corner-speed scale A/B (A=1, B=0 used). (The yaw term sign is settled [V] in F391,

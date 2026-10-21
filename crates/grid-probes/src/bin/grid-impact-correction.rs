@@ -130,6 +130,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             rows,
             two_body_contacts: contact_values[..two].to_vec(),
             single_body_contacts: contact_values[two..].to_vec(),
+            two_body_joints: vec![],
+            single_body_joints: vec![],
             poses,
             workspace: workspace
                 .as_chunks::<32>()

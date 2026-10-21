@@ -12,8 +12,9 @@ use grid_tools::{
     audio_pacing::Paced,
     engine_audio_continuous::BLOCK,
     source_vehicle::{DELTA, Runtime},
-    tyre_audio::{self, Bank, CATEGORIES, Driver, Inputs, Mixer, Voice},
+    tyre_audio::{self, Bank, Driver, Inputs, Mixer, VOICES, Voice},
 };
+use super::stereo::{Pan, Stereo};
 use std::{
     sync::{
         Arc, Mutex,
@@ -23,8 +24,8 @@ use std::{
 };
 
 const RATE: u32 = grid_tools::engine_audio::RATE;
-type Voices = [[Voice; CATEGORIES]; 4];
-type Levels = [[f32; CATEGORIES]; 4];
+type Voices = [[Voice; VOICES]; 4];
+type Levels = [[f32; VOICES]; 4];
 
 /// What one car's audio source reads: voice targets, one set per vehicle
 /// tick (`audio_pacing`), and backend levels.
@@ -42,6 +43,8 @@ pub(crate) struct TyreSound {
     /// Car 0 is the player; car k is opponent k of the shared world.
     drivers: Vec<Driver>,
     shared: Vec<Shared>,
+    /// Each car's stereo pan (`stereo`).
+    pans: Vec<Pan>,
     audible: Arc<AtomicBool>,
     last: Option<(u64, u64)>,
 }
@@ -52,6 +55,7 @@ impl TyreSound {
             table,
             drivers: Vec::new(),
             shared: Vec::new(),
+            pans: Vec::new(),
             audible: Arc::new(AtomicBool::new(false)),
             last: None,
         }
@@ -70,6 +74,7 @@ pub(crate) struct TyreSource {
     bank: Arc<Bank>,
     shared: Shared,
     audible: Arc<AtomicBool>,
+    pan: Pan,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
@@ -114,25 +119,30 @@ impl Source for Decoder {
     }
 }
 impl Decodable for TyreSource {
-    type Decoder = Decoder;
-    fn decoder(&self) -> Decoder {
+    type Decoder = Stereo<Decoder>;
+    fn decoder(&self) -> Stereo<Decoder> {
         let frame = self.shared.lock().unwrap().clone();
         let mut mixer = Mixer::new(self.bank.clone(), RATE);
         mixer.bus_db = frame.levels;
-        Decoder {
+        let decoder = Decoder {
             mixer,
             shared: self.shared.clone(),
             audible: self.audible.clone(),
             voices: frame.voices.latest(),
             playing: false,
             count: 0,
-        }
+        };
+        Stereo::new(decoder, self.pan.clone(), RATE)
     }
 }
 
 pub(crate) fn install(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
-    app.add_audio_source::<TyreSource>()
-        .insert_resource(TyreSound::new(bank, table))
+    app.add_audio_source::<TyreSource>();
+    install_systems(app, bank, table);
+}
+/// `install` without the device playback (the race-start mix test).
+pub(crate) fn install_systems(app: &mut App, bank: Arc<Bank>, table: Option<Arc<Table>>) {
+    app.insert_resource(TyreSound::new(bank, table))
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, tick.after(super::drive_tick))
         .add_systems(Update, audibility);
@@ -151,14 +161,19 @@ fn start(
         let driver = sound.driver(car);
         let shared = Arc::new(Mutex::new(Frame {
             voices: Paced::new(driver.voices()),
-            levels: [[f32::NEG_INFINITY; CATEGORIES]; 4],
+            levels: [[f32::NEG_INFINITY; VOICES]; 4],
         }));
+        let pan = Pan::centre();
         let handle = assets.add(TyreSource {
             bank: sound.bank.clone(),
             shared: shared.clone(),
             audible: sound.audible.clone(),
+            pan: pan.clone(),
         });
-        commands.spawn((AudioPlayer(handle), PlaybackSettings::LOOP));
+        sound.pans.push(pan);
+        // ONCE: the decoder never ends; LOOP's rodio `repeat_infinite` would
+        // keep every sample played to replay it (F482).
+        commands.spawn((AudioPlayer(handle), PlaybackSettings::ONCE));
         sound.drivers.push(driver);
         sound.shared.push(shared);
     }
@@ -215,7 +230,7 @@ fn audibility(
     engine: Option<Res<super::engine_sound::EngineSound>>,
     listening: super::engine_sound::Listening,
 ) {
-    let (trim, camera) = (listening.trim(), listening.camera());
+    let (trim, camera, modes) = (listening.trim(), listening.camera(), listening.modes());
     let ear = listening.ear(&driving.runtime.pose());
     for (car, shared) in sound.shared.iter().enumerate() {
         let Some(runtime) = runtime(&driving, car) else {
@@ -227,7 +242,16 @@ fn audibility(
         )
         .map(|p| Vec3::from_array(p).distance(ear));
         let levels =
-            tyre_audio::bus_levels(sound.table.as_deref(), camera, car == 0, trim, distances);
+            tyre_audio::bus_levels(sound.table.as_deref(), &modes, camera, car == 0, trim, distances);
+        // Opponents' tyres (AI group) are heard from the camera; the
+        // player's four wheels are mixed into one source heard by the Car
+        // listener at the car, so centred [I: no per-wheel panning].
+        if car > 0
+            && let Some(pan) = sound.pans.get(car)
+        {
+            let pose = runtime.pose();
+            pan.set(listening.heard(ear, Vec3::new(pose[12], pose[13], pose[14])));
+        }
         if let Ok(mut frame) = shared.lock() {
             frame.levels = levels;
         }
@@ -237,4 +261,33 @@ fn audibility(
         && driving.failure.is_none()
         && !listening.stopped(&driving);
     sound.audible.store(audible, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::audio::PlaybackMode;
+
+    /// The voices never end; a looped player would keep every sample played
+    /// so far (F482).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased sources; no audio device used"]
+    fn endless_tyre_voices_play_once() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let bank = Bank::load(std::path::Path::new(&root)).unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<TyreSource>()
+            .insert_resource(TyreSound::new(bank, None))
+            .add_systems(Startup, start);
+        app.update();
+        let world = app.world_mut();
+        let modes: Vec<PlaybackMode> = world
+            .query::<&PlaybackSettings>()
+            .iter(world)
+            .map(|s| s.mode)
+            .collect();
+        assert_eq!(modes.len(), 1);
+        assert!(modes.iter().all(|m| matches!(m, PlaybackMode::Once)));
+    }
 }

@@ -840,3 +840,28 @@ test = false
 name = "grid-surface-texture"
 path = "src/bin/grid-surface-texture.rs"
 test = false
+
+[[bin]]
+name = "grid-joint"
+path = "src/bin/grid-joint.rs"
+test = false
+
+[[bin]]
+name = "grid-joint-template"
+path = "src/bin/grid-joint-template.rs"
+test = false
+
+[[bin]]
+name = "grid-phantom-post"
+path = "src/bin/grid-phantom-post.rs"
+test = false
+
+[[bin]]
+name = "grid-road-hole"
+path = "src/bin/grid-road-hole.rs"
+test = false
+
+[[bin]]
+name = "grid-pssg-tree"
+path = "src/bin/grid-pssg-tree.rs"
+test = false

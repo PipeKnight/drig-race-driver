@@ -226,6 +226,7 @@ fn run() -> Result<(), Failure> {
                 workspace,
                 cached_pair,
                 cached_material,
+                joints: Default::default(),
             },
         })?;
         let started = frame.started;

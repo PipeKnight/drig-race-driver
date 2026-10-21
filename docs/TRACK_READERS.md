@@ -72,10 +72,10 @@ stride) store normals as four halves. The reader takes x, y, z. Tangent/Binormal
 
 `TEMPLATESHAPESPHERE` with `radius`, `shell` 0.02, `props physparams.xml#sBalloon`
 (Milan 9 nodes: `col_sphere_low/med/top_shape`, radius 0.36-0.91; Detroit 2,
-radius 1.64 and 2.24). `entities::Primitive::Sphere { radius }`. Like cylinders,
-static spheres are not route collision (`Props` keeps boxes only); the app logs
-`entities collision_spheres=N route_collision=omitted`; a sphere as a breakable
-piece is an error (none seen).
+radius 1.64 and 2.24). `entities::Primitive::Sphere { radius }`. Static spheres
+and cylinders are route collision since row 20 (F462, BOX_CONTACTS.md "Cylinders
+and spheres"); the app logs `entities collision_spheres=N`. A sphere as a breakable
+piece leaves the template unported.
 
 ### 3.4 Sixteen VCQTC materials; sheet mask is a dword [V]
 
@@ -103,8 +103,10 @@ of the whole extent and failed its 100 m check. When the whole extent fails and
 the prototype has one placement, each connected part (1 mm weld) of at most
 10 m horizontally becomes its own box; longer or flat parts stay non-solid.
 Every prototype of the five earlier circuits passes the old check, so their
-boxes are unchanged. Washington then has more than 8192 route boxes and fails
-`unsupported entity collision box count` on routes 0, 2, 5 and 7 (open).
+boxes are unchanged. Washington then had more than 8192 route boxes and failed
+`unsupported entity collision box count` on routes 0, 2, 5 and 7. Since F520 the bound is the
+original's 10,000 fixed objects, and single placements wider than 10 m both ways
+(`chnfen_e_group3b`, `group4`) get the part rule too ([CAREER_LOCATIONS.md](CAREER_LOCATIONS.md) §3).
 
 ### 3.7 Breakables standing on a cylinder
 
@@ -112,7 +114,8 @@ Yokohama's `gg_barrel.max` (77) breaks, but its intact shape is a cylinder,
 which is not a static route box, so `Catalog::read` failed with "breakable
 entity without a collision box". Such templates are now counted in
 `Catalog::unported` (kept static, as armco), like other templates the port
-cannot break.
+cannot break. Since row 20 (F462) cylinders are route shapes, so the 77
+barrels break.
 
 ## 4. Survey after
 
@@ -131,7 +134,7 @@ only affects the breakable catalog):
 | usa/detroit 0 | yes | wrecked, 0 laps |
 | usa/detroit 8-9 (stadium) | yes | 1 valid of 2 |
 | usa/san_fran 0, 1, 6 | yes | 2 valid; 2, 5 DNF; 4 wrecked |
-| usa/washington 1, 4, 6, 9 | yes | 2 valid; 3, 8 wrecked; 0, 2, 5, 7 box bound |
+| usa/washington 1, 4, 6, 9 | yes | 2 valid; 3, 8 wrecked; 0, 2, 5, 7 box bound (all 2 valid since F520/F523, [CAREER_LOCATIONS.md](CAREER_LOCATIONS.md) §7) |
 | spa_francorchamps 0-3 | yes | retired, 0 laps (AI, not a reader; open) |
 | le_mans 0-1, jarama 0 | yes | wrecked, 0 laps (as before) |
 | haruna 0-9 | no | `grids.pssg` `expected unique grid marker`; progress `point_to_point`; AI `links do not form one loop`; `tracksplit.pssg` NaN UVs now read |
@@ -156,6 +159,7 @@ only affects the breakable catalog):
 - ~~Spa: the solo AI retires~~: the packed-contact material check still stopped
   at 8 keys; fixed in F425 ([SPA.md](SPA.md)). Spa, Milan, Shibuya and San
   Francisco route 0 race ([STREET_CIRCUITS.md](STREET_CIRCUITS.md)).
-- Detroit route 0 and the Washington wrecks; Detroit stadium laps.
-- Washington's route box count after the group parts (section 3.6).
-- Static cylinders and spheres are not route collision (all tracks).
+- Detroit route 0; Detroit stadium laps. (~~Washington wrecks~~: every route laps solo since F517/F520, CAREER_LOCATIONS §7.)
+- ~~Washington's route box count after the group parts (section 3.6)~~: F520.
+- ~~Static cylinders and spheres are not route collision~~: route shapes since
+  F462 (BOX_CONTACTS.md "Cylinders and spheres").

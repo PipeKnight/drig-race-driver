@@ -9,7 +9,7 @@ use grid_tools::{
     car::Car,
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank, Mixer},
-    tyre_audio::{self, CATEGORIES, Voice},
+    tyre_audio::{self, VOICES, Voice},
 };
 use std::{path::Path, time::Instant};
 
@@ -28,7 +28,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut engines: Vec<Mixer> = (0..12).map(|_| Mixer::new(bank.clone())).collect();
     let mut wheels: Vec<tyre_audio::Mixer> = (0..12).map(|_| tyre_audio::Mixer::new(tyres.clone(), RATE)).collect();
     let roll = tyres.material("TARMAC").ok_or("no tarmac")?;
-    let voices: [[Voice; CATEGORIES]; 4] = std::array::from_fn(|_| {
+    let voices: [[Voice; VOICES]; 4] = std::array::from_fn(|_| {
         std::array::from_fn(|c| Voice {
             sample: roll[c],
             generation: 0,
@@ -55,7 +55,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let total = (seconds * f64::from(RATE)) as usize;
     let per_update = (f64::from(RATE) / hz) as usize;
-    let mut control = Control { normalized_rpm: 0.3, throttle: 0.5, audible: true, generation: 0 };
+    let mut control = Control { normalized_rpm: 0.3, throttle: 0.5, audible: true, generation: 0, gear: 0 };
     let mut worst = Vec::new();
     let start = Instant::now();
     let mut sample = 0;

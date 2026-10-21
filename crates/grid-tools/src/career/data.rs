@@ -175,6 +175,34 @@ pub struct SponsorOffer {
     pub money_reward: i64,
 }
 
+/// An `event_driver` row: one AI car of the event's field [D, V 0x663D40].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EventDriver {
+    pub driver_id: i32,
+    pub livery_id: i32,
+}
+
+/// A `driver` row's career fields [D].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Driver {
+    pub id: i32,
+    pub first_name: String,
+    pub surname: String,
+    pub team_id: i32,
+    /// The grid key's skill (0x5C2E48) [V].
+    pub skill: f32,
+}
+
+/// An `event_driver_grid_position` row: a named driver's grid slot on one
+/// pool layout [D, V 0x5C2AC0].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NamedSlot {
+    pub pool_id: i32,
+    pub driver_id: i32,
+    pub base: i32,
+    pub range: i32,
+}
+
 /// A career event (`event` row with its races, cars and sponsor offers) [D].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
@@ -204,6 +232,8 @@ pub struct Event {
     /// `event_vehicle.vehicle_id` in row order: the cars allowed.
     pub vehicles: Vec<i32>,
     pub sponsor_offers: Vec<SponsorOffer>,
+    /// `event_driver` rows in table order: the AI field [V 0x663D40].
+    pub drivers: Vec<EventDriver>,
 }
 
 /// A `vehicle` row's career fields [D].
@@ -267,6 +297,10 @@ pub struct DriverOffer {
     pub event_id: i32,
     pub team_id: i32,
     pub vehicle_livery_id: i32,
+    /// The offered car: `vehicle_livery.vehicle_id` of `vehicle_livery_id` [D].
+    pub vehicle_id: Option<i32>,
+    /// `vehicle_livery.file_string` (`bmw_02`: car stem and livery) [D].
+    pub livery: String,
     pub order_index: i32,
     pub per_race_wage: i64,
     pub objective: OfferObjective,
@@ -282,7 +316,26 @@ pub struct DriverOffer {
     pub races: Vec<EventRace>,
 }
 
-/// A hireable teammate (`team_mate` row joined to `driver`) [D].
+/// A driver the player can hire: a `driver` row with `can_be_hired` (the
+/// candidate pool 0x662850, object 0x649320) [V]. The `team_mate` table is
+/// not read by the original [V by absence], see [`TeamMate`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hireable {
+    pub driver_id: i32,
+    pub first_name: String,
+    pub surname: String,
+    pub rank_id: i32,
+    /// `driver.region_id`; 0 (none) for some rows [D].
+    pub region_id: i32,
+    pub signing_fee: i64,
+    pub winnings_percentage: i32,
+    /// `driver.skill`: the grid key of the career field (0x5C2E48) [V].
+    pub skill: f32,
+    pub team_id: i32,
+}
+
+/// A `team_mate` row joined to `driver` [D]. Unused by the original (no
+/// table-name string in the exe), kept for reference.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TeamMate {
     pub id: i32,
@@ -371,7 +424,7 @@ impl AssistRewards {
 }
 
 /// The whole career catalogue.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Catalogue {
     pub ranks: Vec<Rank>,
     pub tiers: Vec<Tier>,
@@ -379,7 +432,26 @@ pub struct Catalogue {
     pub vehicles: BTreeMap<i32, Vehicle>,
     pub sponsors: BTreeMap<i32, Sponsor>,
     pub driver_offers: BTreeMap<i32, DriverOffer>,
+    /// `team.name_string_id` by team id (driver-offer teams and rivals) [D].
+    pub teams: BTreeMap<i32, String>,
+    /// `team.team_type_id` by team id: 1 normal, 2 key, 3 primary_key,
+    /// 4 various_team [D].
+    pub team_types: BTreeMap<i32, i32>,
+    /// `driver` rows by id.
+    pub drivers: BTreeMap<i32, Driver>,
+    /// `vehicle_livery` (vehicle id, file string) by livery id [D].
+    pub liveries: BTreeMap<i32, (i32, String)>,
+    /// `track_model.track_id` (the venue) by track model id [D].
+    pub venues: BTreeMap<i32, i32>,
+    /// `event_driver_grid_position` rows [D].
+    pub named_slots: Vec<NamedSlot>,
+    /// `event_legend` drivers by event id, table order [D].
+    pub legends: BTreeMap<i32, Vec<i32>>,
     pub team_mates: Vec<TeamMate>,
+    /// Hireable drivers in `driver` row order.
+    pub hireable: Vec<Hireable>,
+    /// `team_mate_fee_range` (min, max) by `index` [D]: the search ranges.
+    pub fee_ranges: Vec<(i64, i64)>,
     pub difficulties: Vec<Difficulty>,
     /// `event_reputation_reward.percentage_string`: the reputation share per
     /// finishing place (index 0 = winner).
@@ -394,6 +466,11 @@ pub struct Catalogue {
     pub initial_vehicle_id: i32,
     pub start_money: i64,
     pub assist_rewards: AssistRewards,
+    /// `currency.conversion_rate` of every row: the price rounding step
+    /// (`ebay::currency_round`, 0x639A80) [D].
+    pub currency_rates: Vec<f64>,
+    /// `gameconfig/ebay.xml` (the shipped values when absent).
+    pub ebay: super::ebay::Settings,
 }
 
 impl Catalogue {
@@ -408,6 +485,11 @@ impl Catalogue {
             let bytes = std::fs::read(rewards)?;
             catalogue.assist_rewards =
                 AssistRewards::from_document(&grid_formats::binxml::read(&bytes)?)?;
+        }
+        let ebay = root.join("gameconfig/ebay.xml");
+        if ebay.exists() {
+            let bytes = std::fs::read(ebay)?;
+            catalogue.ebay = super::ebay::Settings::from_document(&grid_formats::binxml::read(&bytes)?)?;
         }
         Ok(catalogue)
     }
@@ -479,6 +561,16 @@ impl Catalogue {
                 .or_default()
                 .push(int(&r, "vehicle_id")?);
         }
+        let mut event_drivers: BTreeMap<i32, Vec<EventDriver>> = BTreeMap::new();
+        for r in table(db, "event_driver")?.rows() {
+            event_drivers
+                .entry(int(&r, "event_id")?)
+                .or_default()
+                .push(EventDriver {
+                    driver_id: int(&r, "driver_id")?,
+                    livery_id: int(&r, "vehicle_livery_id")?,
+                });
+        }
         let mut event_offers: BTreeMap<i32, Vec<SponsorOffer>> = BTreeMap::new();
         for r in table(db, "event_sponsor_offer")?.rows() {
             let offer = SponsorOffer {
@@ -527,6 +619,7 @@ impl Catalogue {
                     races,
                     vehicles: event_vehicles.remove(&id).unwrap_or_default(),
                     sponsor_offers,
+                    drivers: event_drivers.remove(&id).unwrap_or_default(),
                 },
             );
         }
@@ -583,6 +676,10 @@ impl Catalogue {
                 .or_default()
                 .push(x);
         }
+        let liveries: BTreeMap<i32, (i32, String)> = table(db, "vehicle_livery")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, (int(&r, "vehicle_id")?, text(&r, "file_string")?))))
+            .collect::<Result<_>>()?;
         let mut driver_offers = BTreeMap::new();
         for r in table(db, "driver_offer")?.rows() {
             let id = int(&r, "id")?;
@@ -590,6 +687,8 @@ impl Catalogue {
             races.sort_by_key(|x| (x.order_index, x.id));
             // The target columns are string lists; empty when unused [D].
             let targets = |c: &str| parse_list::<f32>(r.text(c).unwrap_or(""));
+            let livery_id = int(&r, "vehicle_livery_id")?;
+            let livery = liveries.get(&livery_id);
             driver_offers.insert(
                 id,
                 DriverOffer {
@@ -597,7 +696,9 @@ impl Catalogue {
                     tier_id: int(&r, "tier_id")?,
                     event_id: int(&r, "event_id")?,
                     team_id: int(&r, "team_id")?,
-                    vehicle_livery_id: int(&r, "vehicle_livery_id")?,
+                    vehicle_livery_id: livery_id,
+                    vehicle_id: livery.map(|l| l.0),
+                    livery: livery.map(|l| l.1.clone()).unwrap_or_default(),
                     order_index: int(&r, "order_index")?,
                     per_race_wage: int(&r, "per_race_wage")? as i64,
                     objective: OfferObjective::from_id(int(&r, "objective_type_id")?)?,
@@ -612,6 +713,51 @@ impl Catalogue {
             );
         }
 
+        let teams = table(db, "team")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, text(&r, "name_string_id")?)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let team_types = table(db, "team")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, int(&r, "team_type_id")?)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let all_drivers = table(db, "driver")?
+            .rows()
+            .map(|r| {
+                Ok((
+                    int(&r, "id")?,
+                    Driver {
+                        id: int(&r, "id")?,
+                        first_name: text(&r, "first_name_string_id")?,
+                        surname: text(&r, "surname_string_id")?,
+                        team_id: int(&r, "team_id")?,
+                        skill: float(&r, "skill")?,
+                    },
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let venues = table(db, "track_model")?
+            .rows()
+            .map(|r| Ok((int(&r, "id")?, int(&r, "track_id")?)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let named_slots = table(db, "event_driver_grid_position")?
+            .rows()
+            .map(|r| {
+                Ok(NamedSlot {
+                    pool_id: int(&r, "event_track_pool_id")?,
+                    driver_id: int(&r, "driver_id")?,
+                    base: int(&r, "grid_position_base")?,
+                    range: int(&r, "grid_position_range")?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut legends: BTreeMap<i32, Vec<i32>> = BTreeMap::new();
+        for r in table(db, "event_legend")?.rows() {
+            legends
+                .entry(int(&r, "event_id")?)
+                .or_default()
+                .push(int(&r, "driver_id")?);
+        }
         let drivers = table(db, "driver")?;
         let mut team_mates = Vec::new();
         for r in table(db, "team_mate")?.rows() {
@@ -633,6 +779,34 @@ impl Catalogue {
             });
         }
         team_mates.sort_by_key(|t| t.id);
+        let mut hireable = Vec::new();
+        for d in drivers.rows() {
+            if d.int("can_be_hired") != Some(1) {
+                continue;
+            }
+            hireable.push(Hireable {
+                driver_id: int(&d, "id")?,
+                first_name: text(&d, "first_name_string_id")?,
+                surname: text(&d, "surname_string_id")?,
+                rank_id: int(&d, "rank_id")?,
+                region_id: int(&d, "region_id")?,
+                signing_fee: int(&d, "signing_fee")? as i64,
+                winnings_percentage: int(&d, "winnings_percentage")?,
+                skill: float(&d, "skill")?,
+                team_id: int(&d, "team_id")?,
+            });
+        }
+        let mut ranges: Vec<(i32, (i64, i64))> = table(db, "team_mate_fee_range")?
+            .rows()
+            .map(|r| {
+                Ok((
+                    int(&r, "index")?,
+                    (int(&r, "teammate_fee_min")? as i64, int(&r, "teammate_fee_max")? as i64),
+                ))
+            })
+            .collect::<Result<_>>()?;
+        ranges.sort_by_key(|r| r.0);
+        let fee_ranges = ranges.into_iter().map(|r| r.1).collect();
 
         let mut difficulties = table(db, "difficulty")?
             .rows()
@@ -679,7 +853,16 @@ impl Catalogue {
             vehicles,
             sponsors,
             driver_offers,
+            teams,
+            team_types,
+            drivers: all_drivers,
+            liveries,
+            venues,
+            named_slots,
+            legends,
             team_mates,
+            hireable,
+            fee_ranges,
             difficulties,
             reputation_fractions,
             points,
@@ -688,11 +871,24 @@ impl Catalogue {
             initial_vehicle_id: int(&global, "initial_vehicle_id")?,
             start_money: int(&global, "start_race_team")? as i64,
             assist_rewards: AssistRewards::default(),
+            currency_rates: table(db, "currency")?
+                .rows()
+                .map(|r| float(&r, "conversion_rate").map(f64::from))
+                .collect::<Result<_>>()?,
+            ebay: super::ebay::Settings::default(),
         })
     }
 
     pub fn event(&self, id: i32) -> Option<&Event> {
         self.events.get(&id)
+    }
+
+    /// An `event_sponsor_offer` row by id.
+    pub fn sponsor_offer(&self, id: i32) -> Option<&SponsorOffer> {
+        self.events
+            .values()
+            .flat_map(|e| e.sponsor_offers.iter())
+            .find(|o| o.id == id)
     }
 
     pub fn tier(&self, id: i32) -> Option<&Tier> {

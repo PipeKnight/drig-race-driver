@@ -9,6 +9,8 @@ struct SkyOutput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var sky_sampler: sampler;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> sky_tone: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var sky_second: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var sky_second_sampler: sampler;
 
 @vertex
 fn vertex(input: Vertex) -> SkyOutput {
@@ -22,6 +24,10 @@ fn vertex(input: Vertex) -> SkyOutput {
 
 @fragment
 fn fragment(input: SkyOutput) -> @location(0) vec4<f32> {
-    let colour = textureSample(sky_texture, sky_sampler, input.uv).rgb;
+    // nightsky_main.psh: lerp(TFirstMap, TSecondMap, timeOfDay.z) * scale; sky.fx
+    // binds one map to both with blend 0.
+    let first = textureSample(sky_texture, sky_sampler, input.uv).rgb;
+    let second = textureSample(sky_second, sky_second_sampler, input.uv).rgb;
+    let colour = mix(first, second, sky_tone.z);
     return vec4(pow(max(colour * sky_tone.x, vec3(0.0)), vec3(sky_tone.y)), 1.0);
 }

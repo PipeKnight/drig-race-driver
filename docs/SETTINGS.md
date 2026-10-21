@@ -26,6 +26,7 @@ Grammar:
 | | `car` | `cars/<stem>` name, e.g. `lac` (default) or `bmw` | `--car` |
 | | `opponent_cars` | `STEM[,STEM...]`, cycled over the opponents (default: the player's car) | `--opponent-cars` |
 | | `series` | `pro_tuned`, `touring`, `gt1`, `gt2`, `le_mans_series`: the free-race series; the route must be in its pool, the opponents are its original free-race field (docs/SERIES.md; GRID_SERIES_SEED fixes the draw) | `--series` |
+| | `series_seed` | the seed of the series' field and grid (career Le Mans races, F507); `GRID_SERIES_SEED` overrides it, else the clock | – |
 | `[drive]` | `enabled` | `on`/`off` | `--drive` |
 | | `laps` | `0` (free practice) or 1..99 | `--time-trial-laps` |
 | | `opponents` | `0` or 1..11 | `--opponents` |
@@ -39,6 +40,7 @@ Grammar:
 | `[input]` | `device`, `*_deadzone`, `*_saturation`; phone controls `touch`, `tilt`, `tilt_max_angle`, `tilt_neutral`, `tilt_smoothing` ([ANDROID.md](ANDROID.md) "Controls") | as `--input` | `--input` |
 | `[ai]` | `difficulty` (0..1 or `normal`), `catchup` (`on` = `rd_{star+1}_star` of the difficulty, `touge` = its `_touge` variant, an explicit `rd_N_star`, `off`), `choreographer`, `mistakes` (`on`/`off`) | 0.606, `on` (`rd_2_star`), on, on (AI_DRIVER_PORT.md, "Mistakes, failures and race pacing") | `--ai` |
 | `[sound]` | `effects` | 0..100, percent (default 100): the pause menu's Effects Volume, engine and tyre sound | none |
+| | `speech`, `music` | 0..100, percent (default 100): the pause menu's Speech and Music Volume, saved for later (the port plays no speech or music yet) | none |
 | `[front_end]` | `show` | `on` (default) / `off`: the Race Options front end with Driver Aids before the race ([DRIVER_AIDS.md](DRIVER_AIDS.md)); never shown for scripted or autopilot runs | none |
 | `[front_end]` | `event_menu` | `on` (default) / `off`: Android starts in the event menu ([EVENT_MENU.md](EVENT_MENU.md)); off = the old direct start. The desktop opens the menu with `--menu` only | none |
 | `[event]` | `type`, `route`, `car`, `laps`, `opponents`, `time`, `direction` | the event menu's last choice, written by the menu and read only by it ([EVENT_MENU.md](EVENT_MENU.md)) | none |
@@ -66,7 +68,7 @@ Notes:
 - The `GRID_*` diagnostic variables are still read on desktop as the base that `[diagnostics]` overrides, so the research commands recorded in other docs keep working. No runtime code reads environment variables any more except through `settings::Diagnostics::from_env` (tests still use `GRID_GAME_ROOT` and the private-file variables).
 - The run log records `settings_file path=…` for every file read, `data_dir path=…`, `game_root path=…` and `drive_private_parameters kind=… source=file|derived-from-grid.exe sha256=…`.
 
-The pause menu (Escape/P, pad Start; [PAUSE_MENU.md](PAUSE_MENU.md)) starts from the `[sound]`, `[osd]` and `[input]` values and changes them for the session only; the original's profile autosave is not ported. The pre-race Race Options **Video** screen (AUTHORED, F390) changes `[osd] fps` and the `[video]` keys and saves them in `<data dir>/settings.ini` when it is left, keeping the other keys and comments.
+The pause menu (Escape/P, pad Start; [PAUSE_MENU.md](PAUSE_MENU.md)) starts from the `[sound]`, `[osd]` and `[input]` values. Since F480 it saves them in `<data dir>/settings.ini` whenever a settings screen is left, like the original's profile autosave. It writes `[sound] effects` and the `[osd]` Screen Setup keys, plus the `[input]` dead zones and saturations after the Advanced screen. The pre-race Race Options **Video** screen (AUTHORED, F390) changes `[osd] fps` and the `[video]` keys and saves them in `<data dir>/settings.ini` when it is left, keeping the other keys and comments.
 
 Example `local/settings.ini`:
 
@@ -136,6 +138,10 @@ CD01 is derived too since F359 (P6, docs/CONTACT_DIRECTIONS.md). `contact_direct
 | Play GRID Drift Battle Nurburgring.cmd | `settings/drift-battle-nurburgring.ini` | Drift Battle on Nürburgring route_1 (nurburgring_spr) |
 | Play GRID Drift Battle Istanbul.cmd | `settings/drift-battle-istanbul.ini` | Drift Battle on Istanbul Park route_1 (istanbul_int) |
 | Play GRID Drift Battle Jarama.cmd | `settings/drift-battle-jarama.ini` | Drift Battle on Jarama route_1 (jarama_r) |
+| Play GRID Series Prototype.cmd | `settings/series-prototype.ini` | Prototype series, Istanbul Park GP (F457) |
+| Play GRID Series Open Wheel.cmd | `settings/series-open-wheel.ini` | Open Wheel series, Donington GP (F457) |
+| Play GRID Series GT Club.cmd | `settings/series-gt-club.ini` | GT Club series, Donington GP (F457) |
+| Play GRID Series Prestige.cmd | `settings/series-prestige.ini` | Prestige series, Istanbul Park GP (F457) |
 | Play GRID Drift Battle Jarama GP.cmd | `settings/drift-battle-jarama-gp.ini` | Drift Battle on Jarama route_0 (jarama_gp) |
 | Play GRID Drift Battle Long Beach Reverse.cmd | `settings/drift-battle-long-beach-reverse.ini` | Drift Battle on Long Beach route_4 (longbeach_cl_r) |
 | Play GRID Drift Battle Nurburgring Reverse.cmd | `settings/drift-battle-nurburgring-reverse.ini` | Drift Battle on Nürburgring route_3 (nurburgring_spr_r) |

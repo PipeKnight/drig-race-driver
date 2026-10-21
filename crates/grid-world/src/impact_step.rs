@@ -1,9 +1,10 @@
 //! Impact-contact-only main manager: construction, solve, writeback and velocity update.
 //! The caller supplies contacts, inverse properties and the five step scalars.
 use crate::{
-    Error,
+    Error, contact_groups,
     contact_rows::{self, Contact, Material, Row},
-    main_contact_response,
+    joint::{self, Bodies, Joint},
+    joint_rows, main_contact_response,
 };
 
 #[derive(Clone)]
@@ -20,6 +21,42 @@ pub struct Body {
     pub apply_torque: bool,
     pub apply_force: bool,
 }
+/// One of the island's joints (B7B850's joint pools).
+#[derive(Clone)]
+pub struct IslandJoint {
+    pub joint: Joint,
+    /// Local index of body A, and of B when B is a dynamic island body.
+    pub a: usize,
+    pub b: Option<usize>,
+    /// B's record when B is a fixed object (joint +0xC).
+    pub fixed: Option<Box<contact_groups::Body>>,
+}
+
+impl IslandJoint {
+    /// B7B850's pool: two dynamic bodies, or one.
+    pub fn two_body(&self) -> bool {
+        self.joint.byte(0xc) == 0 && self.b.is_some()
+    }
+}
+
+/// The island's joints in group order, with the island's body records in
+/// local order (the joints read their poses).
+#[derive(Clone, Default)]
+pub struct Joints {
+    pub bodies: Vec<contact_groups::Body>,
+    pub list: Vec<IslandJoint>,
+}
+
+impl Joints {
+    pub(crate) fn bodies<'a>(&'a self, j: &'a IslandJoint) -> Bodies<'a> {
+        Bodies {
+            a: &self.bodies[j.a],
+            b: j.b.map(|i| &self.bodies[i]).or(j.fixed.as_deref()),
+            fixed: j.joint.byte(0xc) != 0,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Input {
     /// Delta, time factor, bias factor, compliance scale, writeback scale,
@@ -37,6 +74,7 @@ pub struct Input {
     pub workspace: Vec<[[f32; 4]; 2]>,
     pub cached_pair: Option<[usize; 2]>,
     pub cached_material: Material,
+    pub joints: Joints,
 }
 pub struct Output {
     pub success: bool,
@@ -49,6 +87,9 @@ pub struct Output {
     pub workspace: Vec<[[f32; 4]; 2]>,
     pub cached_pair: Option<[usize; 2]>,
     pub cached_material: Material,
+    /// The joints after prepare and, when solved, their impulse sums and
+    /// break flags.
+    pub joints: Joints,
 }
 fn transform(v: [f32; 4], m: [[f32; 4]; 4]) -> [f32; 4] {
     std::array::from_fn(|i| (v[3] * m[3][i] + v[1] * m[1][i]) + (v[2] * m[2][i] + v[0] * m[0][i]))
@@ -127,6 +168,13 @@ pub(crate) fn validate(input: &Input) -> Result<(), Error> {
                     .any(|v| !v.is_finite())
                 || c.previous_impulse < 0.
         })
+        || input.joints.list.iter().any(|j| {
+            j.a >= input.bodies.len()
+                || j.b.is_some_and(|b| b >= input.bodies.len() || b == j.a)
+                || (j.joint.byte(0xc) != 0 && j.b.is_some())
+                || (j.joint.byte(0xc) == 0 && j.fixed.is_some())
+        })
+        || (!input.joints.list.is_empty() && input.joints.bodies.len() != input.bodies.len())
     {
         return Err(Error("invalid impact step input"));
     }
@@ -160,6 +208,7 @@ impl Input {
             workspace: self.workspace.clone(),
             cached_pair: self.cached_pair,
             cached_material: self.cached_material,
+            joints: self.joints.clone(),
         }
     }
 }
@@ -178,8 +227,22 @@ fn solve(input: &Input, rows: Vec<Row>) -> Result<Output, Error> {
         workspace: input.workspace.clone(),
         cached_pair: input.cached_pair,
         cached_material: input.cached_material,
+        joints: input.joints.clone(),
     };
-    if n != 0 {
+    if n != 0 || !out.joints.list.is_empty() {
+        // B7ACC0 prepares every joint (AF4890) while counting its rows into
+        // the normal spans after the contacts' (joints have no friction rows).
+        let mut joint_rows = [0usize; 2];
+        let joints = &mut out.joints;
+        for k in 0..joints.list.len() {
+            let mut j = joints.list[k].joint.clone();
+            // B82850: the solver indices of the joint's bodies.
+            j.words[0x1c / 4] = joints.list[k].a as u32;
+            j.words[0x20 / 4] = joints.list[k].b.map_or(u32::MAX, |b| b as u32);
+            joint::prepare(&mut j, &joints.bodies(&joints.list[k]));
+            joint_rows[usize::from(joints.list[k].two_body())] += j.words[0x18 / 4] as usize;
+            joints.list[k].joint = j;
+        }
         let mut order = Vec::with_capacity(n);
         let mut counts = [0usize; 4];
         for two in [true, false] {
@@ -205,6 +268,9 @@ fn solve(input: &Input, rows: Vec<Row>) -> Result<Output, Error> {
                 order.push(index);
             }
         }
+        let contact_counts = counts;
+        counts[2] += joint_rows[1];
+        counts[0] += joint_rows[0];
         out.ends = [
             counts[2],
             counts[2] + counts[0],
@@ -225,41 +291,90 @@ fn solve(input: &Input, rows: Vec<Row>) -> Result<Output, Error> {
             row[42] = 0;
             row[45] = 0;
         }
-        let mut builder_rows: [Vec<Row>; 4] =
-            std::array::from_fn(|p| vec![[0; 48]; n * if p % 2 == 0 { 1 } else { 3 }]);
+        let mut offsets = [0usize; 4];
         let mut start = 0;
         for p in [2, 0, 3, 1] {
-            builder_rows[p][..counts[p]].copy_from_slice(&out.rows[start..start + counts[p]]);
+            offsets[p] = start;
             start += counts[p];
         }
         let inverse = 1. / delta;
         let time = inverse * input.parameters[1];
-        let built = contact_rows::calculate(&contact_rows::Input {
-            parameters: [
-                time,
-                input.parameters[6],
-                input.parameters[7],
-                input.parameters[3],
-                input.parameters[9],
-                input.parameters[10],
-            ],
-            bodies: input.bodies.iter().map(|b| b.contact.clone()).collect(),
-            materials: input.materials.clone(),
-            contacts: order.iter().map(|&i| out.contacts[i].clone()).collect(),
-            rows: builder_rows,
-            cached_pair: input.cached_pair,
-            cached_material: input.cached_material,
-        })?;
-        out.cached_pair = built.cached_pair;
-        out.cached_material = built.cached_material;
-        let mut built_rows = built.rows;
-        start = 0;
-        for p in [2, 0, 3, 1] {
-            if let Some(head) = built.heads[p] {
-                built_rows[p][head][45] = built.batch_counts[p];
+        let mut heads = [None; 4];
+        let mut batch_counts = [0; 4];
+        if n != 0 {
+            let mut builder_rows: [Vec<Row>; 4] =
+                std::array::from_fn(|p| vec![[0; 48]; n * if p % 2 == 0 { 1 } else { 3 }]);
+            for p in [2, 0, 3, 1] {
+                builder_rows[p][..contact_counts[p]]
+                    .copy_from_slice(&out.rows[offsets[p]..offsets[p] + contact_counts[p]]);
             }
-            out.rows[start..start + counts[p]].copy_from_slice(&built_rows[p][..counts[p]]);
-            start += counts[p];
+            let built = contact_rows::calculate(&contact_rows::Input {
+                parameters: [
+                    time,
+                    input.parameters[6],
+                    input.parameters[7],
+                    input.parameters[3],
+                    input.parameters[9],
+                    input.parameters[10],
+                ],
+                bodies: input.bodies.iter().map(|b| b.contact.clone()).collect(),
+                materials: input.materials.clone(),
+                contacts: order.iter().map(|&i| out.contacts[i].clone()).collect(),
+                rows: builder_rows,
+                cached_pair: input.cached_pair,
+                cached_material: input.cached_material,
+            })?;
+            out.cached_pair = built.cached_pair;
+            out.cached_material = built.cached_material;
+            let built_rows = built.rows;
+            for p in [2, 0, 3, 1] {
+                out.rows[offsets[p]..offsets[p] + contact_counts[p]]
+                    .copy_from_slice(&built_rows[p][..contact_counts[p]]);
+            }
+            heads = built.heads;
+            batch_counts = built.batch_counts;
+        }
+        // AF71C0 / AF9430 continue the normal pools' batches after the
+        // contacts' rows; B7ACC0 then closes each pool's last batch.
+        let mut context = joint_rows::Context {
+            inverse_step: time,
+            reduction: input.parameters[6],
+            step: input.parameters[3],
+            impulse_scale: input.parameters[4],
+            two_batch: batch_counts[2],
+            one_batch: batch_counts[0],
+            total: 0,
+            one_cursor: contact_counts[0],
+            two_cursor: contact_counts[2],
+            one_head: heads[0],
+            two_head: heads[2],
+        };
+        {
+            let (two, rest) = out.rows.split_at_mut(counts[2]);
+            let mut pools = joint_rows::Pools {
+                one: &mut rest[..counts[0]],
+                two,
+            };
+            for two_body in [true, false] {
+                for j in out.joints.list.iter().filter(|j| j.two_body() == two_body) {
+                    joint_rows::write(
+                        &j.joint,
+                        &out.joints.bodies(j),
+                        two_body,
+                        &mut context,
+                        &mut pools,
+                    );
+                }
+            }
+        }
+        heads[2] = context.two_head;
+        heads[0] = context.one_head;
+        batch_counts[2] = context.two_batch;
+        batch_counts[0] = context.one_batch;
+        for p in [2, 0, 3, 1] {
+            if let Some(head) = heads[p] {
+                out.rows[offsets[p] + head][45] = batch_counts[p];
+            }
         }
         let mut references = vec![None; out.ends[3]];
         for (i, row) in out.rows[..out.ends[3]]
@@ -332,6 +447,26 @@ fn solve(input: &Input, rows: Vec<Row>) -> Result<Output, Error> {
                 }
             }
         }
+        // AFB280 / AFB800: the joints' impulse sums and break flags.
+        context.two_cursor = contact_counts[2];
+        context.one_cursor = contact_counts[0];
+        {
+            let (two, rest) = out.rows.split_at_mut(counts[2]);
+            let pools = joint_rows::Pools {
+                one: &mut rest[..counts[0]],
+                two,
+            };
+            for two_body in [true, false] {
+                for j in out
+                    .joints
+                    .list
+                    .iter_mut()
+                    .filter(|j| j.two_body() == two_body)
+                {
+                    joint_rows::write_back(&mut j.joint, two_body, &mut context, &pools);
+                }
+            }
+        }
         for (b, workspace) in out.bodies.iter_mut().zip(&out.workspace) {
             for (v, &correction) in b.contact.linear.iter_mut().zip(&workspace[0]) {
                 *v = delta * correction + *v;
@@ -392,6 +527,7 @@ mod tests {
             workspace: vec![[[7.; 4]; 2]],
             cached_pair: None,
             cached_material: [0.; 13],
+            joints: Joints::default(),
         }
     }
     #[test]
@@ -442,6 +578,65 @@ mod tests {
         let o = calculate(&input).unwrap();
         assert_eq!(o.bodies[0].contact.linear, [1.; 4]);
         assert_eq!(o.bodies[0].contact.angular, [0.; 4]);
+    }
+    /// Two bodies joined by a locked joint and no contacts: the island still
+    /// solves, the limit row holds the leaving body, and a small
+    /// `breakLinearImpulse` breaks the joint in the write-back.
+    #[test]
+    fn a_joint_alone_holds_its_bodies_and_breaks_past_its_impulse() {
+        use crate::joint::tests::{body_at, descriptor};
+        let run = |break_linear: f32| {
+            let mut i = input();
+            let mut a = i.bodies[0].clone();
+            a.apply_force = false;
+            a.apply_torque = false;
+            a.contact.linear = [0.; 4];
+            let mut b = a.clone();
+            b.contact.position = [2.5, 0., 0., 1.];
+            b.contact.linear = [1., 0., 0., 0.];
+            i.bodies = vec![a, b];
+            i.workspace = vec![[[0.; 4]; 2]; 2];
+            i.parameters = [1. / 60., 1., 1., 1., 1., 0., 0.2, 0.003, 1., 0.2, 0.2];
+            i.iterations = 5;
+            i.capacity = 8;
+            let (ra, rb) = (body_at([0., 0., 0.]), body_at([2., 0., 0.]));
+            let mut d = descriptor([1., 0., 0.], -0.05, 0.05);
+            d[0x154 / 4] = break_linear.to_bits();
+            let mut j = Joint::filled(0);
+            joint::construct(
+                &mut j,
+                &mut d,
+                &Bodies {
+                    a: &ra,
+                    b: Some(&rb),
+                    fixed: false,
+                },
+                0,
+            );
+            i.joints = Joints {
+                bodies: vec![ra, body_at([2.5, 0., 0.])],
+                list: vec![IslandJoint {
+                    joint: j,
+                    a: 0,
+                    b: Some(1),
+                    fixed: None,
+                }],
+            };
+            calculate(&i).unwrap()
+        };
+        let held = run(f32::MAX);
+        assert!(held.success);
+        assert_eq!(held.ends, [1, 1, 1, 1]);
+        assert!(
+            held.bodies[1].contact.linear[0] < 1.,
+            "{:?}",
+            held.bodies[1].contact.linear
+        );
+        assert!(held.bodies[0].contact.linear[0] > 0.);
+        assert_eq!(held.joints.list[0].joint.byte(0x48), 0);
+        assert!(held.joints.list[0].joint.get(0x160) != 0.);
+        let broken = run(1e-3);
+        assert_eq!(broken.joints.list[0].joint.byte(0x48), 1);
     }
     #[test]
     fn invalid_time_is_rejected_even_on_empty_path() {

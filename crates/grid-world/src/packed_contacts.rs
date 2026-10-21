@@ -1,6 +1,6 @@
 //! Fresh cold body/packed contacts for the selected inactive correction bounds.
 use crate::{
-    Error, collision_mesh::Mesh, contact_manifold, convex_distance, packed_candidates,
+    Error, contact_manifold, convex_distance, packed_candidates,
     packed_query, physical_pose::Matrix, spawn::reference_seed,
 };
 type V = [f32; 4];
@@ -41,14 +41,14 @@ pub struct Output {
 }
 /// One fresh pair query, preserving its support cache and manifold across triangles.
 /// Source face normals must already have undergone moving-shape initialization.
-pub fn calculate(
-    mesh: &Mesh,
+pub fn calculate<'m>(
+    mesh: impl Into<convex_distance::Hull<'m>>,
     matrix: Matrix,
     track: &packed_query::Mesh<'_>,
     materials: &[u8],
     settings: &Settings,
 ) -> Result<Output, Error> {
-    calculate_owned(mesh, matrix, track, materials, settings, false)
+    calculate_owned(mesh.into(), matrix, track, materials, settings, false)
 }
 
 /// Checks of one packed mesh and its material indices that do not depend on
@@ -131,8 +131,8 @@ impl Known {
 
 /// [`calculate`] reusing [`Known`] values: the same contacts, without the
 /// carried direction and candidate stores.
-pub fn calculate_known(
-    mesh: &Mesh,
+pub fn calculate_known<'m>(
+    mesh: impl Into<convex_distance::Hull<'m>>,
     matrix: Matrix,
     track: &packed_query::Mesh<'_>,
     materials: &[u8],
@@ -140,14 +140,14 @@ pub fn calculate_known(
     known: &Known,
 ) -> Result<Vec<contact_manifold::Contact>, Error> {
     Ok(
-        generate(mesh, matrix, track, materials, settings, false, Some(known))?
+        generate(mesh.into(), matrix, track, materials, settings, false, Some(known))?
             .map_or_else(Vec::new, |g| g.contacts),
     )
 }
 
 /// [`calculate_decoded`] reusing [`Known`] values: the same contacts.
-pub fn calculate_decoded_known(
-    mesh: &Mesh,
+pub fn calculate_decoded_known<'m>(
+    mesh: impl Into<convex_distance::Hull<'m>>,
     matrix: Matrix,
     track: &packed_query::Mesh<'_>,
     materials: &[u8],
@@ -155,25 +155,25 @@ pub fn calculate_decoded_known(
     known: &Known,
 ) -> Result<Vec<contact_manifold::Contact>, Error> {
     Ok(
-        generate(mesh, matrix, track, materials, settings, true, Some(known))?
+        generate(mesh.into(), matrix, track, materials, settings, true, Some(known))?
             .map_or_else(Vec::new, |g| g.contacts),
     )
 }
 
 /// Selected source-decoded wider-vertex tree using the shared cold query and
 /// manifold path. The adapter must retain child order and material sheet flags.
-pub fn calculate_decoded(
-    mesh: &Mesh,
+pub fn calculate_decoded<'m>(
+    mesh: impl Into<convex_distance::Hull<'m>>,
     matrix: Matrix,
     track: &packed_query::Mesh<'_>,
     materials: &[u8],
     settings: &Settings,
 ) -> Result<Output, Error> {
-    calculate_owned(mesh, matrix, track, materials, settings, true)
+    calculate_owned(mesh.into(), matrix, track, materials, settings, true)
 }
 
 fn calculate_owned(
-    mesh: &Mesh,
+    mesh: convex_distance::Hull<'_>,
     matrix: Matrix,
     track: &packed_query::Mesh<'_>,
     materials: &[u8],
@@ -204,7 +204,7 @@ struct Generated {
 
 /// The pair query; `None` when the controls disable generation.
 fn generate(
-    mesh: &Mesh,
+    mesh: convex_distance::Hull<'_>,
     matrix: Matrix,
     track: &packed_query::Mesh<'_>,
     materials: &[u8],
@@ -285,23 +285,37 @@ fn generate(
                 let inverse = ((1. - (seed * square) * seed) * seed) * 0.5 + seed;
                 n.map(|x| inverse * x)
             };
-            let manifold = contact_manifold::calculate_oriented_append(
-                &mut context,
-                mesh,
-                matrix,
-                triangle,
-                &contact_manifold::Settings {
-                    margin: settings.query.margin,
-                    shape_margin: settings.shape_margin,
-                    normal,
-                    fallback_point: witnesses[1],
-                    fallback_depth: depth,
-                    capacity: settings.contact_capacity - result.contacts.len(),
-                },
-                &result.contacts,
-                witnesses[0],
-            )?;
-            result.contacts = manifold.manifold.contacts;
+            let manifold_settings = contact_manifold::Settings {
+                margin: settings.query.margin,
+                shape_margin: settings.shape_margin,
+                normal,
+                fallback_point: witnesses[1],
+                fallback_depth: depth,
+                capacity: settings.contact_capacity - result.contacts.len(),
+            };
+            result.contacts = match mesh {
+                convex_distance::Hull::Mesh(mesh) => {
+                    contact_manifold::calculate_oriented_append(
+                        &mut context,
+                        mesh,
+                        matrix,
+                        triangle,
+                        &manifold_settings,
+                        &result.contacts,
+                        witnesses[0],
+                    )?
+                    .manifold
+                    .contacts
+                }
+                round => crate::round_contacts::round_triangle_append(
+                    round,
+                    matrix,
+                    triangle,
+                    &manifold_settings,
+                    &result.contacts,
+                    witnesses[0],
+                )?,
+            };
             if result.contacts.len() == settings.contact_capacity {
                 break;
             }

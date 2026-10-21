@@ -225,8 +225,12 @@ through the slewed pedals is small [I]. The offset and merge persist.
 2. If `closing (test +0x18) > own.speed (own+0xD0)` → **mode 1** and return. No prediction
    and no room check (the target has a velocity component toward us [I]).
 3. Predicted position `P = r.centre + ETA (test +0x14) · r.vel (rec+0x90)`.
-4. Locate P: 0x798C00 (all links, nearest by 0x798920) or, when +0x3C is set, 0x78DCD0
-   (first link containing P).
+4. Locate P: 0x798C00 (all links **of the track view's 32-link window**, from one link
+   behind the car's own; nearest by 0x798920) or, when +0x3C is set, 0x78DCD0 (first window
+   link containing P) [V, F476]. A link "contains" P when P lies between the gate lines of its
+   two gates (0x778D00: 2D side test 0x778B40 against gate position → position + gate span);
+   0x798920 gives 0 inside the link's track-limit quad, else the distance to the nearer
+   limit segment (0x796B30), and ties go to the later link.
    - `lat` = 0x798D00(gateA, gateB, racing-line waypoint type 0, P) =
      `dot(P − racing-line waypoint at gate A, segment lateral direction)` (0x796CD0).
    - lat is 0 if a gate is missing.
@@ -469,6 +473,11 @@ Fields:
 
    While +0x3C > 0: req+0xAF = +0x36 and +0x3C −= dt. Net effect: each obstruction contact
    flips between reversing and driving forward for 2 s.
+
+   Nothing gates this by own speed (2026-10-20) [V static]: 0x4022F0 counts walls always,
+   and the input stage writes gear 9 directly (§5 item 8). A car that brushes a barrier at
+   speed while off track engages reverse at speed. The port does the same; in the grid-app
+   Le Mans test, one AI car was wrecked this way (PROJECT_LOG F517).
 6. **Timeout**: +0x38 += dt. If rcResetAllowed (cfg+0x554; built-in false, not in the
    shipped XML) and +0x38 > rcRecoveryTimeOut (cfg+0x568, 10 s): req+0xB0 = 1 (reset, copied
    to packet +0x20) and +0x38 = 0. **Disabled by default** [D].
@@ -549,10 +558,29 @@ of scope for the port's recovery work.
    - +0x1F = 0, +0x24 = 3.
 6. 0x779F70 slews throttle, brake and steering and copies bytes +0x1C, +0x1E, +0x20, +0x21.
    0x7FC030 clamps (bytes to 0/1, [3] −1..6, [9] 1..4).
-7. The only caller of 0x7FC030 is the AI (0x79443D). **The car-side consumer of byte +0x1E
-   was not traced** [I]: it is presumably a reverse-gear request, consistent with the
-   player's automatic gearbox, which selects reverse near rest when braking and then
-   publishes the brake key as throttle (REFERENCE_DRIVING_INPUT.md).
+7. The only caller of 0x7FC030 is the AI (0x79443D).
+8. **Car-side consumer of byte +0x1E** (2026-10-20) [V static]:
+   - The packet lives at +8 of the AI input device (constructor 0x774DE0, vtable 0xCF7218,
+     type name "ai"). Device slots +4/+8 (0x560750, shared with the other input devices)
+     return `&packet`. Slot +0xC (0x792260) runs the AI update that fills it.
+   - The per-frame input stage **0x828670** (vtable 0xD01290) walks the cars' input devices.
+     For each one it calls slot +0xC, then slot +4, and applies the packet to the car:
+     - [0] throttle to channels 1 and 9 (+E1C/+E3C), [1] brake to channels 2 and 10
+       (+E20/+E40), handbrake byte +0x1C to channel 8;
+     - **if +0x1E == 1 → 0x98E190(car, 9)**, which writes the selected gear +196C = 9
+       (reverse). It refuses 9 while car +21F2 is set;
+     - otherwise, if the gear (0x98E340) is 9 or 0 **and packet +0x24 == 3**, it calls
+       0x98E190(car, 1) (back to first gear);
+     - then **0x98F110(car+18C8, packet+0x24)** sets the gearbox bytes +1970/+1971/+1972 from
+       the packet's mode.
+   - The AI writes +0x24 = 3 every tick (0x794436). Mode 3 is automatic + clutch assistance
+     **without brake-to-reverse**: an AI car never selects reverse by braking, only through
+     the byte. In reverse gear the plain throttle drives backwards; the pedals are not
+     swapped.
+   - The packet getter 0x7EE890 / setter 0x7EE8F0 (masks 1 → +0x1C, 8 → +0x1D, 2 → +0x1E,
+     4 → +0x1F) are not used by the AI path. The getter has no caller.
+   - Evidence: `local/ai-overtaking/dis_828670.txt`, `dis_reverse_consumer.txt`; scan of all
+     byte reads of +0x1E: `scripts/r1e.py` (40 reads; only 0x8289EB is the car side).
 
 ## 6. Per-tick order relevant to the port [V]
 
@@ -622,6 +650,11 @@ Apply them where the original does:
   `track_limits` is set.
 
 ### 7.3 Reverse at the vehicle boundary
+
+**Done (2026-10-20), as §5 item 8:** `Runtime::set_ai_packet(reverse)` is applied after each
+AI update. The input stage (`stage_driver`) then sets gearbox mode 3 and the gear rule of
+0x828670. `AiDriver` publishes plain |throttle| and brake. The AUTHORED pedal mapping below
+is gone. History:
 
 The original sends |throttle| plus a reverse flag. `source_vehicle::Controls` has no
 reverse channel, and the port's automatic gearbox selects reverse when braking near rest and
@@ -707,8 +740,8 @@ would be an AUTHORED deviation to label.
 
 ## 8. Open questions
 
-1. Car-side consumer of packet byte +0x1E (reverse request) and of +0x20 (reset); the role
-   of packet [9] = 3. F332: the AI never sets +0x20 (rcResetAllowed is false). The game's reset
+1. ~~Car-side consumer of packet byte +0x1E~~ answered in §5 item 8 (0x828670). Open: the
+   consumer of +0x20 (reset; 0x828A4B branch, not followed) and the role of packet [9] = 3. F332: the AI never sets +0x20 (rcResetAllowed is false). The game's reset
    path is the player-only ResetLinesManager, see
    [RESET_AND_RESPAWN_RESEARCH.md](RESET_AND_RESPAWN_RESEARCH.md).
 2. Exact semantics of own+0xD4 (slip angle assumed) and own+0xC0 (angular velocity assumed).

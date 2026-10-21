@@ -1,0 +1,14 @@
+### 6 October 2026 — durable log and Phase 1 setup
+
+- Owner explicitly requested Markdown tracking and authorized reasonable research/rewrite actions and needed tool installation.
+- Created this log and project working instructions so later sessions read and update the same durable record.
+- Started selecting official Ghidra, x86 debugger and Process Monitor releases. Installation and validation results will be appended to this entry and the toolchain record.
+- Installed Ghidra 12.1.4 and x64dbg release 2026.05.27 with SHA-256 values matching their official release metadata. Installed Microsoft-signed Process Monitor 4.11.
+- Reused the existing JDK 21.0.9 after checking Ghidra 12.1.4's pinned requirements. Ghidra's development branch requires JDK 25; it is not the selected release's requirement.
+- Exported a private 15,925,248-byte runtime memory image; 8,192 uncaptured bytes in the `.extra` region are explicitly zero-filled and recorded. Ghidra successfully decompiled four known functions from captured pages. Its Log4j configuration emitted a Cyrillic-path warning; generated decompilation results exist and agree with the small formatting helper's observed instructions.
+- Captured 20 seconds of Process Monitor activity: 2,052,174 total events, 1,006,217 GRID events for PID 3444. Successfully observed memory-map and hardware-settings reads. Capture ended during display-registry enumeration, before process exit; this is not a complete crash trace.
+- First x32dbg attachment reached the already-faulting instruction at `0xc01796`; native debugging and exception inspection worked, but the earlier breakpoint was not hit. Preserved this failed timing experiment in `local/phase1/x32dbg-startup.log` and `x32dbg-probe.json`. Started a revised pre-initialized debugger attempt using a hardware execution breakpoint to avoid loader overwrite.
+- Revised debugger attached earlier at `0x76fa8ae9` to PID 34196, but the cleanup hardware breakpoint was not reached within the bounded wait. Preserved both attempts; neither establishes the first initialization failure.
+- Moved Ghidra itself to `C:\Users\debros\Tools\grid-research\ghidra_12.1.4_PUBLIC` to fix the demonstrated Cyrillic-path Log4j error. Reopened the same project and verified four decompilation outputs with normal logging.
+- The decompiled small format helper agrees with the observed 32-byte buffer and terminating NUL. Larger functions have inferred-type artifacts/warnings; useful output does not make those types confirmed.
+- Immediate analysis tools are installed and useful decompilation/resource access/native exception inspection are demonstrated. Full Phase 1 remains in progress because Rust/MSVC and the earlier failure trace are still pending. No original executable patch or engine implementation was made.

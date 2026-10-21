@@ -20,12 +20,14 @@ mod android_import;
 mod android_pad;
 #[cfg(target_os = "android")]
 mod android_sensor;
+mod asset_counts;
 mod assists;
 mod body_damage;
 mod body_occlusion;
 #[cfg(feature = "paint-specular")]
 mod body_specular;
 mod camera;
+mod collision_sound;
 mod car_materials;
 mod lamp_materials;
 mod lamp_signals;
@@ -76,6 +78,7 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod stereo;
 mod foliage_mips;
 mod fps_counter;
 mod front_end;
@@ -1080,8 +1083,8 @@ fn append_entities(
         println!("entities omitted_unbound_material_draws={omitted_unbound}");
     }
     if spheres > 0 {
-        // Static spheres (Milan and Detroit balloons) are not route collision yet.
-        println!("entities collision_spheres={spheres} route_collision=omitted");
+        // Static spheres (Milan and Detroit balloons) are route collision.
+        println!("entities collision_spheres={spheres}");
     }
     if omitted_empty > 0 {
         println!("entities omitted_empty_renderable_instances={omitted_empty}");
@@ -1332,10 +1335,11 @@ fn model_offset(runtime: &grid_tools::source_vehicle::Runtime) -> Mat4 {
 }
 /// Grid-fill seed of a series event: GRID_SERIES_SEED, else the clock
 /// (docs/SERIES.md "Grid fill").
-fn series_seed() -> u32 {
+fn series_seed(profile: Option<u32>) -> u32 {
     std::env::var("GRID_SERIES_SEED")
         .ok()
         .and_then(|v| v.parse().ok())
+        .or(profile)
         .unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1364,7 +1368,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut series = profile.series.clone();
     let mut car_chosen = profile.car.is_some();
     // Opponent k's livery package in a series event (docs/SERIES.md).
-    let mut series_liveries: Vec<Option<usize>> = Vec::new();
+    let mut series_liveries: Vec<Option<usize>> = profile
+        .opponent_liveries
+        .as_ref()
+        .map(|v| v.iter().map(|&i| Some(i)).collect())
+        .unwrap_or_default();
+    let opponent_names = profile.opponent_names.clone();
+    let race_points = profile.points.clone();
     // A Le Mans Series race's class name keys by car (results Class column).
     let mut car_classes: Vec<String> = Vec::new();
     let mut driver_aids = profile.assists()?;
@@ -1981,7 +1991,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--benchmark-frames 1..3600: main-schedule wall intervals after 240 warmup frames; requires --render; stops scripted driving early at benchmark completion. Not GPU/presentation FPS."
                 );
                 println!(
-                    "--sky source|procedural: enhanced Donington background (source is default; sky IBL remains procedural).\n--sky-tone raw|source: optional saved scale/exponent for the sky and source IBL; raw default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
+                    "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
                 );
                 println!(
                     "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
@@ -2040,7 +2050,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             car_chosen.then_some(&player_car),
             opponents,
             opponent_cars.is_none(),
-            series_seed(),
+            series_seed(profile.series_seed),
             if profile.grid_back { 1 } else { 0 },
         )?;
         if let Some(slot) = event.player_slot {
@@ -2161,8 +2171,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         );
         graphics.saved_grade = Some(grade);
     }
-    if drive_ticks.is_some_and(|n| n > 36_000) || (drive_ticks.is_some() && !drive) {
-        return Err("scripted ticks require --drive and must be <=36000".into());
+    if drive_ticks.is_some_and(|n| n > 72_000) || (drive_ticks.is_some() && !drive) {
+        return Err("scripted ticks require --drive and must be <=72000".into());
     }
     if trial_laps.is_some_and(|n| !(1..=99).contains(&n)) || (trial_laps.is_some() && !drive) {
         return Err("time trial requires --drive and 1..99 laps".into());
@@ -2490,7 +2500,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     0x5eed,
                 );
                 let names = std::iter::once("You".to_string())
-                    .chain((1..=n).map(|i| format!("AI {i}")))
+                    .chain((1..=n).map(|i| {
+                        opponent_names
+                            .as_ref()
+                            .and_then(|v| v.get(i - 1))
+                            .filter(|s| !s.is_empty())
+                            .cloned()
+                            .unwrap_or_else(|| format!("AI {i}"))
+                    }))
                     .collect();
                 let autopilot = (drive_ticks.is_some()
                     && crate::settings::diagnostics().autopilot)
@@ -2981,14 +2998,25 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     None
                 }
             };
-            match field
-                .models
-                .iter()
-                .map(|m| grid_tools::engine_audio_continuous::Bank::load(&root, m))
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(banks) => engine_sound::install(&mut app, banks, mix.clone()),
-                Err(error) => warn!("Engine audio unavailable; driving continues: {error}"),
+            // A model whose bank fails to load is silent; the other cars
+            // keep their engines.
+            let banks = engine_sound::load_banks(&root, &field.models);
+            engine_sound::install(&mut app, banks, mix.clone());
+            match grid_tools::collision_audio::Bank::load(&root) {
+                Ok(bank) => {
+                    let heights: Vec<_> = field
+                        .models
+                        .iter()
+                        .map(|m| {
+                            grid_tools::collision_audio::Heights::of(&root, m).unwrap_or(grid_tools::collision_audio::Heights {
+                                bottom: 0.,
+                                roof: 1.,
+                            })
+                        })
+                        .collect();
+                    collision_sound::install(&mut app, bank, mix.clone(), heights, field.car_model.clone());
+                }
+                Err(error) => warn!("Collision audio unavailable; driving continues: {error}"),
             }
             match grid_tools::hud_audio::Bank::load(&root) {
                 Ok(bank) => hud_sound::install(&mut app, bank, mix.clone()),
@@ -3012,7 +3040,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(actions) = drive_input.take() {
             // The original's pause menu (docs/PAUSE_MENU.md): Race Day free
             // race for timed events, test drive for free practice.
-            let menu = pause_menu::PauseMenu::new(
+            let mut menu = pause_menu::PauseMenu::new(
                 if trial_laps.is_some() {
                     pause_menu::Variant::FreeRace
                 } else {
@@ -3022,6 +3050,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 driving.reset_line.is_some(),
                 pause_menu::initial_options(&profile, Some(&actions)),
             );
+            // The original autosaves its profile when a settings screen is
+            // left (docs/PAUSE_MENU.md).
+            menu.save_to = Some(settings::data_dir().join("settings.ini"));
             let variant = menu.variant;
             input::install(&mut app, actions);
             #[cfg(target_os = "android")]
@@ -3091,6 +3122,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         if !car_classes.is_empty() {
             app.insert_resource(post_race::CarClasses(std::mem::take(&mut car_classes)));
+        }
+        if let Some(points) = &race_points {
+            app.insert_resource(post_race::RacePoints(points.clone()));
         }
         if demolition {
             let cars = driving.opponents.as_ref().map_or(1, |o| o.multi.cars.len());
@@ -3178,16 +3212,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         warn!("Ground cover unavailable; continuing: {error}");
     }
-    if graphics.source_sky_tone && (!graphics.enhanced() || !graphics.source_sky || !track) {
-        return Err("--sky-tone source requires enhanced source-sky track rendering".into());
-    }
     if graphics.source_ibl && (!graphics.enhanced() || !graphics.source_sky || !track) {
         return Err(
-            "--ibl source requires enhanced graphics and a source-sky Donington scene".into(),
+            "--ibl source requires enhanced graphics and a source-sky track scene".into(),
         );
     }
-    if graphics.enhanced() && graphics.source_sky && track {
-        sky::install(&mut app, &root, graphics.source_ibl, graphics.source_sky_tone)?;
+    // The route's own sky on every track and preset (docs/SKY.md).
+    if graphics.source_sky && track {
+        sky::install(&mut app, &root, &route, graphics.source_ibl, graphics.source_sky_tone)?;
     }
     if let Some(frames) = graphics.benchmark_frames {
         graphics_benchmark::install(&mut app, frames);
@@ -3208,6 +3240,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         paint_environment::install(&mut app)?;
     }
     perf_timing::install(&mut app);
+    asset_counts::install(&mut app);
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
     mesh_stream::install(&mut app);
@@ -3220,8 +3253,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
         app.insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred());
     }
-    if graphics.enhanced() && graphics.layered_track && track && !collision {
-        track_surface::install(&mut app, &root, graphics.source_land, surface_rgb_override.as_deref())?;
+    // The route's layered road and infield on every preset (docs/SKY.md);
+    // land.pssg is appended in enhanced only.
+    if graphics.layered_track && track && !collision {
+        let land = graphics.enhanced() && graphics.source_land;
+        track_surface::install(&mut app, &root, &route, land, surface_rgb_override.as_deref())?;
     }
     if graphics.reflection_mode == 3 {
         if !graphics.enhanced()
@@ -3265,6 +3301,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             return Err("--career-result requires a race".into());
         }
         app.insert_resource(career_screen::ResultPath(path))
+            .init_resource::<career_screen::TopSpeed>()
+            .add_systems(Update, career_screen::track_top_speed)
             .add_systems(Last, career_screen::write_result);
     }
     let exit = app
@@ -3997,12 +4035,14 @@ fn drive_tick(
             cars: opponents.standings.len() as u32,
             progress: opponents.standings.laps_covered(0) as f32,
         };
-        Some(pilot.controls(
+        let controls = pilot.controls(
             &opponents.ai,
             &view,
             &others,
             grid_tools::source_vehicle::DELTA,
-        ))
+        );
+        driving.runtime.set_ai_packet(pilot.reverse_request());
+        Some(controls)
     } else {
         None
     };
@@ -4148,6 +4188,11 @@ fn drive_tick(
                     grid_tools::source_vehicle::DELTA,
                 )
             });
+        }
+        if !held {
+            for (car, driver) in opponents.multi.cars[1..].iter_mut().zip(&opponents.drivers) {
+                car.set_ai_packet(driver.reverse_request());
+            }
         }
         drop(ai_timer);
         std::mem::swap(&mut driving.runtime, &mut opponents.multi.cars[0]);
@@ -4619,16 +4664,16 @@ fn drive_present(
         cameras.change_view();
         log_line!("drive_camera event=change view={} tick={}", cameras.ident(), driving.runtime.ticks);
     }
-    let v = driving.runtime.velocity();
-    let sample = camera::Sample {
-        pose,
-        velocity: Vec3::new(v[0], v[1], v[2]),
-        ticks: driving.runtime.ticks,
-        segment: driving.segment,
-    };
+    let sample = camera::Sample::of(&driving.runtime, driving.segment);
+    // Look Left/Right/Up/Down (Delete/PageDown, pad right stick) turn the
+    // view as in the original (0x8348F0, docs/CAMERA_VIEWS.md "Look input").
+    let look = actions.as_ref().map_or_else(camera::Look::default, |a| camera::Look {
+        x: a.value(input::Action::LookLeft) - a.value(input::Action::LookRight),
+        y: a.value(input::Action::LookUp) - a.value(input::Action::LookDown),
+    });
     // Right mouse button orbits a chase view (AUTHORED free look).
     let side = if back { -1. } else { 1. };
-    let shot = cameras.frame(&sample, back, |o| free_look::offset(free_look.as_deref(), o, side));
+    let shot = cameras.frame(&sample, back, look, |o| free_look::offset(free_look.as_deref(), o, side));
     let (transform, projection) = &mut *camera;
     **transform = Transform::from_translation(shot.eye).with_rotation(shot.rotation);
     if let Some(Projection::Perspective(p)) = projection.as_deref_mut() {
@@ -5975,5 +6020,303 @@ mod driving_tests {
         assert_eq!(driving.runtime.ticks, 1);
         assert_eq!(driving.runtime.terminal_wheel(), None);
         assert_eq!(terminal_damage_message(&driving.runtime), None);
+    }
+
+    /// The race start as heard, offline: the real engine, tyre, HUD and
+    /// collision sources fed by their grid-app systems and drive_tick
+    /// through the start-light countdown and 3 s of full throttle, each
+    /// decoder pulled one 16 ms block per vehicle tick (no audio device).
+    /// The player's engine idles and revs on the grid, the lights beep, the
+    /// tyres sound after GO and a solo start makes no collision sound. F515:
+    /// every BMW engine decoder failed in the first ticks (a pair restart's
+    /// raw pitch 0.4955 failed the controller's input check) and the
+    /// prototype raced in silence.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn race_start_audio_mix_is_audible() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required");
+                let route = Route::new("tracks/japan/shibuya/route_0").unwrap();
+                // The failing car and the default car; every failure of both
+                // is reported.
+                let failures: Vec<String> = ["bmw", "lac"]
+                    .into_iter()
+                    .flat_map(|stem| race_start_mix(Path::new(&root), &route, stem))
+                    .collect();
+                assert!(failures.is_empty(), "{failures:#?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// One car's race start (see `race_start_audio_mix_is_audible`); the
+    /// failed checks.
+    fn race_start_mix(root: &Path, route: &Route, stem: &str) -> Vec<String> {
+        use bevy::audio::Source;
+        use grid_tools::{
+            engine_audio::RATE,
+            engine_audio_continuous::BLOCK,
+            source_vehicle::{Controls, DELTA},
+            time_trial::State,
+        };
+        let model = CarModel::new(stem).unwrap();
+        let mut runtime =
+            grid_tools::source_vehicle::Runtime::load(root, route, &model, "slot_00", 200679)
+                .unwrap();
+        runtime.enable_lap_timing(root).unwrap();
+        // Track and prop contacts as in the owner's build, when available.
+        let geometry = std::env::var_os("GRID_CONTACT_DIRECTIONS").map(|path| {
+            runtime
+                .prepare_body_geometry(root, &std::fs::read(path).unwrap())
+                .unwrap()
+        });
+        let start = StartSequence::load(root, route).unwrap();
+        let mut trial =
+            time_trial::Trial::new(1, grid_tools::time_trial::Mode::Wheels, false).unwrap();
+        // The race countdown: the route's start-light time.
+        trial.state = State::new(1, f64::from(DELTA), start.seconds).unwrap();
+        let mix = Some(std::sync::Arc::new(
+            grid_tools::audio_mix::Table::load(root).unwrap(),
+        ));
+        let step = Duration::from_secs_f64(f64::from(DELTA));
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(step))
+            .insert_resource(Time::<Fixed>::from_duration(step))
+            .insert_resource(start.clone())
+            .insert_resource(trial)
+            .insert_resource(Driving {
+                runtime,
+                geometry,
+                paused: false,
+                failure: None,
+                notices: Vec::new(),
+                // `--drive-ticks N --throttle T`: the scripted controls.
+                scripted_ticks: Some(72_000),
+                scripted: Controls::default(),
+                handbrake_from: None,
+                last_controls: None,
+                segment: 0,
+                started: Instant::now(),
+                opponents: None,
+                auto_reset: Default::default(),
+                reset_line: None,
+            })
+            .insert_resource(input::Actions::new(
+                input::ActionMap::keyboard(),
+                input::Pads::Off,
+            ))
+            .init_resource::<input::ShiftQueue>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(FixedUpdate, drive_tick)
+            .init_asset::<engine_sound::EngineSource>()
+            .init_asset::<tyre_sound::TyreSource>()
+            .init_asset::<hud_sound::HudSource>()
+            .init_asset::<collision_sound::CollisionSource>();
+        let bank = grid_tools::engine_audio_continuous::Bank::load(root, &model).unwrap();
+        engine_sound::install_systems(&mut app, vec![Some(bank.clone())], mix.clone());
+        // An opponent of the same model on the next grid slot, 3 m to the
+        // side, driven with the player's controls: its engine voice on the AI
+        // group (4223D0), within the 10 m Engine/Exhaust minimum distance
+        // (0 dB), panned from the chase_close camera behind the player
+        // (position (0, 1.72, -4.74) in the car). AUDIO_RESEARCH §11/§19.
+        let beside = [3f32, 0., 0.];
+        let chase_close = [0f32, 1.7227, -4.7393];
+        let opponent_pan = stereo::Pan::centre();
+        opponent_pan.set(grid_tools::audio_mix::pan_gains(std::array::from_fn(|k| beside[k] - chase_close[k])));
+        let mut opponent = engine_sound::TestVoice::new(bank, opponent_pan);
+        collision_sound::install_systems(
+            &mut app,
+            grid_tools::collision_audio::Bank::load(root).unwrap(),
+            mix.clone(),
+            vec![grid_tools::collision_audio::Heights::of(root, &model).unwrap()],
+            vec![0],
+        );
+        hud_sound::install_systems(&mut app, grid_tools::hud_audio::Bank::load(root).unwrap(), mix.clone());
+        tyre_sound::install_systems(&mut app, grid_tools::tyre_audio::Bank::load(root).unwrap(), mix);
+        // Startup spawns the players; their decoders play from here on.
+        app.update();
+        fn decoder<T: Asset + Decodable>(app: &mut App) -> T::Decoder {
+            let world = app.world_mut();
+            let handle = world.query::<&AudioPlayer<T>>().single(world).unwrap().0.clone();
+            world.resource::<Assets<T>>().get(&handle).unwrap().decoder()
+        }
+        let mut engine = decoder::<engine_sound::EngineSource>(&mut app);
+        let mut others: [Box<dyn Iterator<Item = f32>>; 3] = [
+            Box::new(decoder::<tyre_sound::TyreSource>(&mut app)),
+            Box::new(decoder::<hud_sound::HudSource>(&mut app)),
+            Box::new(decoder::<collision_sound::CollisionSource>(&mut app)),
+        ];
+        assert_eq!((engine.channels().get(), engine.sample_rate().get()), (2, RATE));
+        const NAMES: [&str; 4] = ["engine", "tyres", "hud", "collision"];
+        // Per vehicle tick and source: sum of squares, peak, samples.
+        let mut blocks: Vec<[(f64, f32, usize); 4]> = Vec::new();
+        // Per vehicle tick: the opponent's left and right sums of squares.
+        let mut opponent_blocks: Vec<[f64; 2]> = Vec::new();
+        // (player engine/exhaust, opponent AI) group levels in dB, sampled
+        // on the last countdown tick and at the end.
+        let mut levels = [([f32::NAN; 2], [f32::NAN; 2]); 2];
+        let opponent_bus = |app: &App| {
+            let table = app.world().resource::<engine_sound::EngineSound>().table.clone().unwrap();
+            let modes = app.world().resource::<engine_sound::AudioMode>().0.lock().unwrap().clone();
+            engine_sound::bus_levels(
+                Some(&table),
+                &modes,
+                grid_tools::audio_mix::Camera::Chase,
+                [grid_tools::audio_mix::AI; 2],
+                0.,
+                [beside[0]; 2],
+            )
+        };
+        let mut failures = Vec::new();
+        let mut green = None;
+        let idle = (1. / DELTA) as u64;
+        let after = (3. / DELTA) as u64;
+        while green.is_none_or(|g| (blocks.len() as u64) < g + after) {
+            let tick = app.world().resource::<Driving>().runtime.ticks;
+            // Idle on the grid for a second, then the throttle held through
+            // the countdown and after GO.
+            app.world_mut().resource_mut::<Driving>().scripted.throttle =
+                if tick < idle { 0. } else { 1. };
+            app.update();
+            let driving = app.world().resource::<Driving>();
+            if let Some(failure) = &driving.failure {
+                failures.push(format!("{stem}: drive failure {failure}"));
+                break;
+            }
+            let ticks = driving.runtime.ticks;
+            let control = app.world().resource::<engine_sound::EngineSound>().control(driving);
+            opponent.push(control);
+            let bus = opponent_bus(&app);
+            opponent.set_bus(bus);
+            let player_bus = app.world().resource::<engine_sound::EngineSound>().bus_db();
+            if green.is_none() && app.world().resource::<time_trial::Trial>().driving() {
+                green = Some(ticks);
+            }
+            levels[usize::from(green.is_some())] = (player_bus, bus);
+            for _ in blocks.len() as u64..ticks {
+                let mut block = [(0., 0f32, 0); 4];
+                for _ in 0..BLOCK * 2 {
+                    let mut add = |k: usize, value: Option<f32>| {
+                        let value = value.unwrap_or(f32::NAN);
+                        let b: &mut (f64, f32, usize) = &mut block[k];
+                        b.0 += f64::from(value) * f64::from(value);
+                        b.1 = b.1.max(value.abs());
+                        b.2 += 1;
+                    };
+                    add(0, engine.next());
+                    for (k, source) in others.iter_mut().enumerate() {
+                        add(k + 1, source.next());
+                    }
+                }
+                blocks.push(block);
+                let mut pair = [0f64; 2];
+                for _ in 0..BLOCK {
+                    for value in &mut pair {
+                        let v = f64::from(opponent.decoder.next().unwrap_or(f32::NAN));
+                        *value += v * v;
+                    }
+                }
+                opponent_blocks.push(pair);
+                if let Some(error) = engine.inner.failure()
+                    && !failures.iter().any(|f: &String| f.contains("decoder failed"))
+                {
+                    failures.push(format!("{stem}: engine decoder failed at tick {}: {error}", blocks.len()));
+                }
+            }
+            assert!(blocks.len() < 2000, "{stem}: no green light");
+        }
+        if app.world().resource::<engine_sound::EngineSound>().muted {
+            failures.push(format!("{stem}: engine muted after a decoder failure"));
+        }
+        let green = green.unwrap_or(blocks.len() as u64) as usize;
+        let second = (1. / DELTA) as usize;
+        // (window, from tick, to tick, sources with their minimum RMS and
+        // peak). The minima are about 10x below the levels measured on
+        // Shibuya route 0 (BMW / Lacetti, F515): engine idle RMS 0.058 /
+        // 0.050, revving 0.27 / 0.22, after GO 0.20 / 0.19; lights 0.055,
+        // green light 0.125; tyres after GO 0.099 / 0.082.
+        type Window<'a> = (&'a str, usize, usize, &'a [(usize, f64, f32)]);
+        let windows: [Window; 5] = [
+            ("idle", 8, idle as usize, &[(0, 5e-3, 1e-2)]),
+            ("countdown_throttle", idle as usize, green, &[(0, 2e-2, 5e-2)]),
+            ("countdown_lights", 0, green, &[(2, 5e-3, 3e-2)]),
+            ("green_light", green, green + second / 2, &[(2, 1e-2, 3e-2)]),
+            ("full_throttle", green + second / 2, blocks.len(), &[(0, 1.5e-2, 5e-2), (1, 8e-3, 4e-2)]),
+        ];
+        for (name, from, to, checks) in windows {
+            let from = from.min(blocks.len());
+            let to = to.min(blocks.len());
+            for k in 0..4 {
+                let (sum, peak, count) = blocks[from..to]
+                    .iter()
+                    .fold((0., 0f32, 0), |a, b| (a.0 + b[k].0, a.1.max(b[k].1), a.2 + b[k].2));
+                let rms = (sum / count.max(1) as f64).sqrt();
+                println!(
+                    "race_start_audio car={stem} window={name} ticks={from}..{to} source={} rms={rms:.6} peak={peak:.6}",
+                    NAMES[k]
+                );
+                if let Some(&(_, min_rms, min_peak)) = checks.iter().find(|c| c.0 == k)
+                    && (rms < min_rms || rms.is_nan() || peak < min_peak)
+                {
+                    failures.push(format!(
+                        "{stem}: {} silent in {name} (rms {rms} < {min_rms} or peak {peak} < {min_peak})",
+                        NAMES[k]
+                    ));
+                }
+            }
+        }
+        // The original's group table (Chase, PC): player Engine -14, Exhaust
+        // -7, every AI voice -9 in Normal and -12 in StartLine (after its
+        // 1.5 s fade, F493). Sampled on the last countdown tick and the last.
+        let expected = [([-14f32, -7.], [-12f32, -12.]), ([-14., -7.], [-9., -9.])];
+        for ((name, (player, ai)), (want_player, want_ai)) in
+            ["countdown_end", "full_throttle_end"].iter().zip(&levels).zip(expected)
+        {
+            println!(
+                "race_start_audio car={stem} levels={name} player_engine_db={} player_exhaust_db={} opponent_engine_db={} opponent_exhaust_db={}",
+                player[0], player[1], ai[0], ai[1]
+            );
+            let close = |a: [f32; 2], b: [f32; 2]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 0.05);
+            if !close(*player, want_player) || !close(*ai, want_ai) {
+                failures.push(format!(
+                    "{stem}: {name} group levels {player:?}/{ai:?}, the table gives {want_player:?}/{want_ai:?}"
+                ));
+            }
+        }
+        // The opponent beside the player against the player's own engine, as
+        // heard: each channel and the power of both (the pan keeps the power
+        // of a centred voice).
+        for (name, from, to) in [
+            ("countdown_throttle", idle as usize, green),
+            ("full_throttle", green + second / 2, blocks.len()),
+        ] {
+            let to = to.min(blocks.len()).min(opponent_blocks.len());
+            let frames = ((to - from.min(to)) * BLOCK).max(1) as f64;
+            let player: f64 = blocks[from.min(to)..to].iter().map(|b| b[0].0).sum::<f64>() / (2. * frames);
+            let [left, right] = opponent_blocks[from.min(to)..to]
+                .iter()
+                .fold([0f64; 2], |a, b| [a[0] + b[0], a[1] + b[1]])
+                .map(|s| s / frames);
+            let db = |x: f64| 10. * x.max(1e-30).log10();
+            let power = db((left + right) / 2.) - db(player);
+            println!(
+                "race_start_audio car={stem} window={name} opponent_vs_player_db power={power:.2} left={:.2} right={:.2}",
+                db(left) - db(player),
+                db(right) - db(player)
+            );
+            if !power.is_finite() || left + right <= 0. {
+                failures.push(format!("{stem}: opponent engine silent in {name}"));
+            }
+        }
+        // No contact on a solo start: the collision source stays silent.
+        let collision = blocks.iter().map(|b| b[3].1).fold(0f32, f32::max);
+        if collision > 1e-6 {
+            failures.push(format!("{stem}: collision sound without contact, peak {collision}"));
+        }
+        failures
     }
 }

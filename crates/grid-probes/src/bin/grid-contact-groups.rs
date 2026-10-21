@@ -56,6 +56,7 @@ fn run() -> Result<(), Failure> {
             contacts,
             active_order,
             selector,
+            joints: vec![],
         })?;
         for v in out
             .world

@@ -19,7 +19,7 @@ Evidence (ignored, this worktree's `local/track-readers/`): `survey-*/japan_yoko
 | Lap timing | 57 gates over 2528.63 m; one forward route, finish gate 0, time splits at gates 21 and 35 | `route::tests::sixth_circuit_sources_load` |
 | Start grid | `slot_00`..`slot_11` all build a Lacetti runtime with lap timing | same |
 | AI line | `touring`/`lac` optimal line 2328.57 m | same |
-| Props | 1503 route boxes; **no breakables ported**: barrels (`gg_barrel.max`, 77) stand on cylinders, crates, chevrons, direction barriers, armco and 21 close-drift flags need the joint rows the port lacks; 569 static placements | same |
+| Props | 1503 route boxes; **no breakables ported** (F462: 1631 route shapes with the 128 cylinders, the 77 barrels break): barrels (`gg_barrel.max`, 77) stand on cylinders, crates, chevrons, direction barriers, armco and 21 close-drift flags need the joint rows the port lacks; 569 static placements | same |
 | Start lights | `start_lights.xml`: object `startlights_lights`, **4 stages over 2.0 s** (textures 1, 2, 3, 7), so races count down 2.0 s | `start_lights::tests::circuits_ship_their_own_start_sequences` |
 | Reset | a flipped player car is put back on the route's AI line | `player_reset::tests::a_flipped_player_car_is_reset_on_yokohama` |
 | Loose wheel | a lost front-left wheel rolls off for the Lacetti and the BMW | `wheel_detach::a_lost_wheel_rolls_off_on_the_other_circuits` |
@@ -68,7 +68,9 @@ Evidence (ignored, this worktree's `local/track-readers/`): `survey-*/japan_yoko
 - Freestyle arenas (routes 3-6, `Free_Drift`): route 3's progress has a `start`
   split, routes 4-6 are `point_to_point`; neither is read (TRACK_READERS.md
   section 5). Freestyle itself ignores progress [I, DISCIPLINES.md §5].
-- Breakable barrels, crates and chevrons (cylinder intacts, joint rows).
+- ~~Breakable barrels~~ (F462: the 128 cylinders are route shapes and the 77
+  `gg_barrel.max` break, BOX_CONTACTS.md "Cylinders and spheres"). Crates and
+  chevrons still need joint rows.
 - Rendering: 42 unresolved road batches (flat grey road as on the other
   non-default circuits); NaN texture coordinates are passed through
   (TRACK_READERS.md section 3.1). Left for the graphics work.

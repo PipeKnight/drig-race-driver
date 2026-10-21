@@ -115,7 +115,11 @@ pub fn resolve(input: Input) -> Result<Output, Error> {
         .iter()
         .any(|v| !v.is_finite())
         || m.wavelength <= 0.
-        || !(0. ..=1.).contains(&input.fraction)
+        // The wheel ray keeps the query's tolerance fractions (a hit at the
+        // ray start can be -8.5e-8 for an upside-down car, F458); only the
+        // port's own guard rejected them.
+        || !(crate::triangle::FRACTION_LOW..=crate::triangle::FRACTION_HIGH)
+            .contains(&input.fraction)
     {
         return Err(Error("invalid contact material inputs"));
     }
@@ -230,6 +234,23 @@ mod tests {
             })
             .unwrap()
             .accepted
+        );
+        // The wheel ray keeps the query's tolerance fractions: a hit at the
+        // ray start of an upside-down car (Sarthe soak, F458) is accepted;
+        // fractions outside the query's range are still rejected.
+        assert!(
+            resolve(Input {
+                fraction: -8.527_584e-8,
+                ..input
+            })
+            .is_ok()
+        );
+        assert!(
+            resolve(Input {
+                fraction: -2e-6,
+                ..input
+            })
+            .is_err()
         );
     }
 }

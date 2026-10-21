@@ -35,6 +35,10 @@ pub const SAN_FRANCISCO: &str = "tracks/usa/san_fran/route_0";
 /// illegal touge, mid to bottom, 5.86 km), run downhill (subroute 0) or
 /// uphill (subroute 1) (docs/TOUGE.md).
 pub const HARUNA: &str = "tracks/japan/haruna/route_1";
+/// The Haruna roads raced both ways, solo and with two cars: route 1, and
+/// the career head-to-heads' route 4 (`haruna_leg_top_mid`, 6.27 km) and
+/// route 9 (`haruna_ill_all`, 8.64 km) (docs/CAREER_LOCATIONS.md).
+pub const HARUNA_RACED: [&str; 3] = [HARUNA, "tracks/japan/haruna/route_4", "tracks/japan/haruna/route_9"];
 /// The Demolition Derby stadium (`detroit_stad_L`, 2.6 km figure of eight)
 /// and its short variant (`detroit_stad_s`, route 9) (docs/DEMOLITION_DERBY.md).
 pub const DETROIT_STADIUM: &str = "tracks/usa/detroit/route_8";
@@ -313,10 +317,12 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Brake boards and double tyre walls break; armco and single tyre walls
-        // need the joint rows the port lacks and stay static, as on Donington.
+        // Brake boards, tyre walls (the single walls' blocks are joined,
+        // F484) and armco (shapeless posts, F501) break.
         assert_eq!(props.boxes.len(), 1689);
+        assert_eq!(templates["armco_main_section.max"], 802);
         assert_eq!(templates["tyrewall_black_double.max"], 222);
+        assert_eq!(templates["tyrewall_black.max"], 221);
         assert_eq!(
             templates
                 .keys()
@@ -324,10 +330,7 @@ mod tests {
                 .count(),
             6
         );
-        assert_eq!(
-            catalog.unported.keys().collect::<Vec<_>>(),
-            ["armco_main_section.max", "tyrewall_black.max"]
-        );
+        assert!(catalog.unported.is_empty());
     }
 
     #[test]
@@ -420,10 +423,13 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Brake boards and tyre stacks break; armco and the drift flags need the
-        // joint rows the port lacks and stay static, as on Donington.
-        assert_eq!(props.boxes.len(), 2235);
-        assert_eq!(templates.values().sum::<usize>(), 665);
+        // Brake boards, tyre stacks, the armco sections (F501) and the 16
+        // drift flags break; the armco ends (a rail of three shapes) stay
+        // static. The flags stand on cylinders (route shapes since row 20);
+        // each adds its damage state's static base, two boxes.
+        assert_eq!(props.boxes.len(), 2283);
+        assert_eq!(templates.values().sum::<usize>(), 1187);
+        assert_eq!(templates["close_drift_flag.max"], 16);
         assert_eq!(
             templates
                 .keys()
@@ -431,14 +437,15 @@ mod tests {
                 .count(),
             8
         );
-        assert!(templates
-            .keys()
-            .all(|t| t.starts_with("gg_brake_marker") || t.starts_with("tyrestack_")));
-        assert_eq!(catalog.unported.values().sum::<usize>(), 576);
+        assert!(templates.keys().all(|t| t.starts_with("gg_brake_marker")
+            || t.starts_with("tyrestack_")
+            || t.starts_with("armco_main_section")
+            || *t == "close_drift_flag.max"));
+        assert_eq!(catalog.unported.values().sum::<usize>(), 54);
         assert!(catalog
             .unported
             .keys()
-            .all(|t| t.starts_with("armco_") || *t == "close_drift_flag.max"));
+            .all(|t| t.starts_with("armco_")));
     }
 
     #[test]
@@ -481,13 +488,17 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Nothing breaks yet: the barrels stand on cylinders and the crates,
-        // chevrons, armco and drift flags need joint rows (all static).
-        assert_eq!(props.boxes.len(), 1503);
-        assert!(templates.is_empty(), "{templates:?}");
-        assert_eq!(catalog.unported.values().sum::<usize>(), 569);
-        assert_eq!(catalog.unported["gg_barrel.max"], 77);
-        assert_eq!(catalog.unported["close_drift_flag.max"], 21);
+        // The barrels stand on cylinders (128 cylinder route shapes) and
+        // break, and the armco sections (F501) and 17 of the 21 drift flags;
+        // the crates, chevrons and armco ends stay static.
+        assert_eq!(props.boxes.len(), 1673);
+        assert_eq!(
+            templates,
+            [("armco_main_section.max", 42), ("close_drift_flag.max", 17), ("gg_barrel.max", 77)]
+                .into()
+        );
+        assert_eq!(catalog.unported.values().sum::<usize>(), 433);
+        assert_eq!(catalog.unported["close_drift_flag.max"], 4);
     }
 
     #[test]
@@ -531,11 +542,21 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // 22 brake-marker boards break; armco, tyre walls and cones stay static.
-        assert_eq!(props.boxes.len(), 1515);
-        assert_eq!(templates.values().sum::<usize>(), 22);
-        assert!(templates.keys().all(|t| t.starts_with("gg_brake_marker")));
-        assert_eq!(catalog.unported.values().sum::<usize>(), 1136);
+        // 22 brake-marker boards, 55 joined tyre walls (`tyrewall_b_*`,
+        // F484) and 296 armco sections (F501) break; the armco ends, the
+        // `tyrewall_a_*` walls (a static or phantom piece) and cones stay
+        // static (the 37 cones are cylinder route shapes).
+        assert_eq!(props.boxes.len(), 1552);
+        assert_eq!(templates.values().sum::<usize>(), 373);
+        assert_eq!(templates["tyrewall_b_red.max"] + templates["tyrewall_b_white.max"], 55);
+        assert!(
+            templates
+                .keys()
+                .all(|t| t.starts_with("gg_brake_marker")
+                    || t.starts_with("tyrewall_b_")
+                    || t.starts_with("armco_main_section"))
+        );
+        assert_eq!(catalog.unported.values().sum::<usize>(), 785);
         assert_eq!(catalog.unported["tyrewall_a_red.max"], 360);
     }
 
@@ -554,9 +575,9 @@ mod tests {
         // (route, name, gates, distance, time splits, grid slots, AI line,
         // route boxes, breakable entities, unported placements)
         for (path, name, gates, distance, splits, slots, line, boxes, breakables, unported) in [
-            (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2236, 251, 1212),
-            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 1048, 0, 382),
-            (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 1308, 68, 172),
+            (MILAN, "milan", 59, 4876.555, [23, 48], 16, 4821.81, 2340, 1376, 87),
+            (SHIBUYA, "shibuya", 28, 2064.051, [7, 16], 12, 1865.68, 1250, 19, 363),
+            (SAN_FRANCISCO, "san_fran", 61, 5292.376, [31, 46], 16, 5178.88, 1309, 239, 1),
         ] {
             let route = Route::new(path).unwrap();
             assert_eq!(route.track_name(), name);
@@ -581,7 +602,13 @@ mod tests {
             let catalog = Catalog::read(root, &route, &props).unwrap();
             assert_eq!(props.boxes.len(), boxes, "{path}");
             assert_eq!(catalog.breakables.len(), breakables, "{path}");
-            assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")));
+            // Tyre stacks, the joined Milan green cushions and San
+            // Francisco tyre walls (F484), and Milan's armco (F501).
+            assert!(catalog.breakables.iter().all(|b| b.template.starts_with("tyrestack_")
+                || b.template == "green_cushion_a.max"
+                || b.template.starts_with("armco_main_section_large")
+                || b.template == "tyrewall_black.max"
+                || b.template == "close_drift_flag.max"));
             assert_eq!(catalog.unported.values().sum::<usize>(), unported, "{path}");
         }
     }
@@ -627,23 +654,49 @@ mod tests {
         for b in &catalog.breakables {
             *templates.entry(&b.template).or_default() += 1;
         }
-        // Brake boards and tyre stacks break; armco, foam posts and tyre walls
-        // stay static, as on the other circuits.
-        assert_eq!(props.boxes.len(), 2413);
-        assert_eq!(templates.values().sum::<usize>(), 211);
+        // Brake boards, tyre stacks, the joined tyre walls (F484) and the
+        // armco sections (shapeless posts, F501) break; the armco ends and
+        // foam posts stay static (the 97 foam posts are cylinder route shapes).
+        assert_eq!(props.boxes.len(), 2510);
+        assert_eq!(templates.values().sum::<usize>(), 1056);
+        assert_eq!(templates["armco_02_main_section.max"], 637);
         assert_eq!(templates["tyrestack_black.max"], 173);
-        assert!(templates
-            .keys()
-            .all(|t| t.starts_with("gg_brake_marker") || t.starts_with("tyrestack_")));
-        assert_eq!(catalog.unported.values().sum::<usize>(), 1020);
-        assert!(catalog.unported.keys().all(|t| t.starts_with("armco_")
+        assert!(templates.keys().all(|t| t.starts_with("gg_brake_marker")
+            || t.starts_with("tyrestack_")
             || t.starts_with("tyrewall_")
-            || *t == "post_foam_green.max"));
+            || t.starts_with("armco_")));
+        assert_eq!(catalog.unported.values().sum::<usize>(), 175);
+        assert!(catalog
+            .unported
+            .keys()
+            .all(|t| t.starts_with("armco_") || *t == "post_foam_green.max"));
     }
 
     /// Haruna route 1 (`haruna_ill_mid_bot`), both directions: one run from
     /// the subroute's start to its finish over an open AI line, from its own
     /// two-car grid (docs/TOUGE.md).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn career_haruna_roads_seat_two_cars_both_ways() {
+        use crate::{ai_driver::Line, lap_progress, source_vehicle::Runtime};
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = std::path::Path::new(&root);
+        // Route 4 (event 77) and route 9 (event 75); route 9's forward
+        // slots are RENDERNODEs.
+        for (path, length) in [("tracks/japan/haruna/route_4", 6270.76), ("tracks/japan/haruna/route_9", 8638.79)] {
+            for subroute in [0, 1] {
+                let route = Route::new(path).unwrap().with_subroute(subroute).unwrap();
+                let p = lap_progress::load_route(root, &route).unwrap().progress;
+                assert!((p.total_distance - length).abs() < 1., "{path} {subroute}: {}", p.total_distance);
+                assert!(Line::load_route(root, &route).unwrap().is_open());
+                for slot in ["slot_00", "slot_01"] {
+                    Runtime::lacetti_on(root, &route, slot, 200679).unwrap();
+                }
+                assert!(Runtime::lacetti_on(root, &route, "slot_02", 200679).is_err());
+            }
+        }
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
     fn haruna_runs_both_ways_from_their_own_grids() {
@@ -744,6 +797,3 @@ mod tests {
         }
     }
 }
-
-
-

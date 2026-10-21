@@ -100,6 +100,39 @@ pub struct Classified {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RaceResult {
     pub order: Vec<Classified>,
+    /// The race's flashback manager at the finish (none: not reported, no
+    /// bonus).
+    pub flashbacks: Option<Flashbacks>,
+}
+
+/// A race's flashbacks: the manager's maximum and how many were used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Flashbacks {
+    pub used: u32,
+    pub maximum: u32,
+}
+
+/// The Flashback Bonus of one race [V]: the per-race recorder 0x66DB80
+/// stores 0x6A22A0 of the race's manager in the race record (+0x5C) when the
+/// player's result is final (+0x11, [I] finished); no position condition.
+/// `max_award` is the `difficulty` row's `flashback_bonus` for the tier's
+/// rank and the star level (0x6AF7C0).
+pub fn flashback_bonus(catalogue: &Catalogue, rank_id: i32, star_level: i32, race: &RaceResult) -> i64 {
+    let (Some(fb), Some((_, player))) = (race.flashbacks, race.entry(Entrant::Player)) else {
+        return 0;
+    };
+    if !player.finished {
+        return 0;
+    }
+    let max_award = catalogue
+        .difficulty(rank_id, star_level)
+        .map_or(0, |d| d.flashback_bonus);
+    crate::flashback::Manager {
+        maximum: fb.maximum,
+        used: fb.used.min(fb.maximum),
+        max_award: max_award.clamp(0, u32::MAX as i64) as u32,
+    }
+    .award()
 }
 
 impl RaceResult {
@@ -197,6 +230,49 @@ pub fn teammate_share(prize: i64, winnings_percentage: i32) -> i64 {
     (prize as f64 * (1.0 - winnings_percentage as f64 * 0.01)) as i64
 }
 
+/// The standings of `who`'s vehicle class (0x66BBA0, 0x660E90) [V]: drivers
+/// whose car has another `vehicle_class_id` are removed; `who` always stays.
+/// AUTHORED: a car of unknown class (`class_of` gives none) counts in every
+/// class.
+pub fn in_class(
+    standings: &[Standing],
+    who: Entrant,
+    class_of: &dyn Fn(Entrant) -> Option<i32>,
+) -> Vec<Standing> {
+    let class = class_of(who);
+    standings
+        .iter()
+        .filter(|s| {
+            s.entrant == who
+                || class.is_none()
+                || class_of(s.entrant).is_none_or(|c| Some(c) == class)
+        })
+        .copied()
+        .collect()
+}
+
+/// The 0-based class position of `who` (0x66BBA0) [V]: the drivers of its
+/// class sorted by points, the player first on equal points; so the player's
+/// position is the number of its class's drivers with more points. The
+/// original's sort leaves other ties unordered; AUTHORED: they keep the
+/// standings order. None when `who` ran no race.
+pub fn class_position(
+    standings: &[Standing],
+    who: Entrant,
+    class_of: &dyn Fn(Entrant) -> Option<i32>,
+) -> Option<usize> {
+    let mut class = in_class(standings, who, class_of);
+    if !class.iter().any(|s| s.entrant == who && s.races > 0) {
+        return None;
+    }
+    class.sort_by(|a, b| {
+        b.points
+            .cmp(&a.points)
+            .then((b.entrant == Entrant::Player).cmp(&(a.entrant == Entrant::Player)))
+    });
+    class.iter().position(|s| s.entrant == who)
+}
+
 /// Whether the player's team leads the team standings of the event
 /// (0x660E90 returns 0). [I] The summed value is the event points of each
 /// team's cars; the player and the teammate are one team, AI cars count by
@@ -256,6 +332,12 @@ pub fn offer_objective_met(
             }
         }
     }
+}
+
+/// A test offer (time trial or speed test) has its own slots and pays no
+/// appearance fee (0x4F10B0, 0x674940) [V].
+pub fn is_test_offer(offer: &DriverOffer) -> bool {
+    matches!(offer.objective, OfferObjective::TimeTrial | OfferObjective::SpeedTest)
 }
 
 /// The appearance fee of a driver offer: `per_race_wage × races`

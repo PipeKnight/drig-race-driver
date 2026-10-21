@@ -190,13 +190,10 @@ fn supported(kind: Kind, route: &str) -> bool {
     match kind {
         Kind::Race | Kind::TimeTrial => route::CIRCUITS.contains(&route),
         Kind::Series | Kind::DriftBattle | Kind::DriftGp => {
-            route::CIRCUITS.contains(&route)
-                || grid_tools::series::SURVEYED_TRACKS
-                    .iter()
-                    .any(|t| route.starts_with(&format!("{t}/")))
+            grid_tools::series::route_supported(route)
         }
         Kind::Freestyle => route.starts_with("tracks/japan/yokohama_docks/"),
-        Kind::Touge | Kind::ProTouge => route == route::HARUNA,
+        Kind::Touge | Kind::ProTouge => route::HARUNA_RACED.contains(&route),
         Kind::Demolition => {
             route == route::DETROIT_STADIUM || route == route::DETROIT_STADIUM_SHORT
         }
@@ -293,7 +290,8 @@ impl Catalog {
             disciplines.sort();
             for (_, id, name) in disciplines {
                 let kind = match name.as_str() {
-                    "pro_tuned" | "touring" | "gt1" | "gt2" | "le_mans_series" => Kind::Series,
+                    "pro_tuned" | "touring" | "gt1" | "gt2" | "le_mans_series" | "prototype"
+                    | "pro_muscle" | "open_wheel" | "gt_club" | "prestige" => Kind::Series,
                     "drift_battle" => Kind::DriftBattle,
                     "drift_gp" => Kind::DriftGp,
                     "Free_Drift" => Kind::Freestyle,
@@ -309,10 +307,12 @@ impl Catalog {
                     continue;
                 };
                 // Pro Touge's pool holds the legal Haruna layouts; the port
-                // runs it on route 1, the validated road, as its launcher
-                // does (AUTHORED).
+                // also runs it on route 1, the illegal road its launcher uses
+                // (AUTHORED), ahead of the pool's raced route 4.
                 let pool: Vec<String> = if kind == Kind::ProTouge {
-                    vec![route::HARUNA.to_string()]
+                    std::iter::once(route::HARUNA.to_string())
+                        .chain(series.layouts.iter().map(|l| l.route.clone()))
+                        .collect()
                 } else {
                     series.layouts.iter().map(|l| l.route.clone()).collect()
                 };
@@ -929,16 +929,27 @@ pub fn supervise(args: &[String]) -> Result<i32, Box<dyn std::error::Error>> {
         if experimental(&dir) {
             race.env("GRID_SERIES_EXPERIMENTAL", "1");
         }
-        let race = race
-            .args(&flags)
+        race.args(&flags)
             .arg("--settings")
             .arg(dir.join(PROFILE))
-            .arg("--from-menu")
-            .status()?;
+            .arg("--from-menu");
+        if let Some(ticks) = auto_ticks() {
+            race.args(["--drive-ticks", &ticks.to_string()]);
+        }
+        let race = race.status()?;
         if race.code() != Some(BACK_TO_MENU) {
             return Ok(race.code().unwrap_or(1));
         }
     }
+}
+
+/// Diagnostics `GRID_MENU_AUTO=TICKS` (unattended checks, desktop; the build
+/// gate's event-menu default, docs/TOOLCHAIN.md "Build gate"): the menu
+/// presses Continue after 3 s with its current choice, and the supervisor
+/// runs that race as a scripted run of TICKS ticks, so `GRID_AUTOPILOT` drives.
+#[cfg(not(target_os = "android"))]
+fn auto_ticks() -> Option<u64> {
+    std::env::var("GRID_MENU_AUTO").ok()?.parse().ok()
 }
 
 /// Whether the saved choice is an experimental event (Le Mans Series).
@@ -1176,6 +1187,13 @@ fn update(
     menu.repeat = repeat;
     // Escape is both Pause and Menu Back.
     nav.back |= nav.pause;
+    // Diagnostics GRID_MENU_AUTO: Continue with the current choice 3 s after
+    // start (each menu is its own process).
+    #[cfg(not(target_os = "android"))]
+    if auto_ticks().is_some() && time.elapsed_secs() >= 3. {
+        menu.cursor = menu.rows().len() - 1;
+        nav.select = true;
+    }
     let mut command = menu.step(nav);
     for (interaction, row) in &clicks {
         if *interaction == Interaction::Pressed {

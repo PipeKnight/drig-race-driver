@@ -155,6 +155,8 @@ fn calculate_owned(
                     bodies: vec![car.owner.physical],
                     contacts: pool.slots.clone(),
                     world: [0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0],
+                    joints: vec![],
+                    joint_groups: vec![vec![]],
                 },
                 manager,
                 pool_used: 0,

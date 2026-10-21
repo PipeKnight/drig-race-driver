@@ -1,0 +1,5 @@
+### 7 October 2026 — reference run h opened for grid capture
+
+- Leaf logic committed b5ef6fe. New private run h preparation backs up all17user files and temporarily selects800x600windowed; originals retained at local/reference-race/resume-20261007h/user-before/ with hashes.
+- Computer Use26.1002.52244 plain path launch resolves Steam URI and exposes no GRID window; fresh inventory/native read-only process check confirms no GRID. Documented explicit process identifier retry succeeds. New verified GRID29672 start2026-10-07T16:39:07.6084095Z, private exeSHA b1da1b2d9469fb0c973dbaaad29b230c1567f212c54de849326f80b4aece34a6; session.json retained. Owned macro16808 start2026-10-07T16:39:30.8319327Z, targets exact GRID session, original authored script hash unchanged; macro evidence20261007T1639305386833Z-server.json.
+- **Outstanding cleanup run h:** close owned game/listener after capture, compare all17files, preserve new saves and restore only temporary config after game exit. No original Steam files edited. Production grid capture not yet performed.

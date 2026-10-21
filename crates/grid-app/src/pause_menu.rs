@@ -130,12 +130,21 @@ pub enum Screen {
     Setup(Setup),
 }
 
-/// The values the pause options change. Speech and music volume, steering
-/// linearity and 900 degree mode have no counterpart in the prototype.
+/// The values the pause options change. The 900 degree mode has no
+/// counterpart in the prototype; speech and music are saved but the port
+/// plays neither yet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Options {
     /// `volume_soundfx`, percent: engine and tyre sound.
     pub effects: u8,
+    /// Speech and Music Volume, percent (trims of the speech and music
+    /// groups, 4124A0/411DE0 [O]; the port has no speech or music yet).
+    pub speech: u8,
+    pub music: u8,
+    /// `wheelLinearity`, percent of the option's range: the wheel response
+    /// `(L - 0.5) * 2` of the 828670 command shaping [D]; 70 = 14/20, the
+    /// original's default.
+    pub linearity: u8,
     /// `osd_laptimer`: lap and times block of the HUD.
     pub lap_timer: bool,
     /// `osd_position`: race position block of the HUD.
@@ -157,6 +166,9 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             effects: 100,
+            speech: 100,
+            music: 100,
+            linearity: 70,
             lap_timer: true,
             position: true,
             mph: false,
@@ -171,6 +183,11 @@ impl Options {
     /// Effects volume as a linear gain.
     pub fn gain(&self) -> f32 {
         f32::from(self.effects) / 100.
+    }
+
+    /// The wheel response record +14 for the linearity option.
+    pub fn wheel_response(&self) -> f32 {
+        (f32::from(self.linearity) / 100. - 0.5) * 2.
     }
 }
 
@@ -202,6 +219,10 @@ pub enum Command {
     InstantReplay,
     /// Options changed (applied at once).
     Apply(Options),
+    /// A settings screen was left: the original autosaves the profile
+    /// (`*_st_*_autosave` [D]); `true` when the Advanced screen's input
+    /// tunes are part of it.
+    Save(Options, bool),
     /// A button whose feature is not in the prototype.
     Unavailable(&'static str),
 }
@@ -276,6 +297,9 @@ pub struct PauseMenu {
     /// Values on entering a setup screen (Button3 = Undo).
     undo: Options,
     repeat: Repeat,
+    /// Where leaving a settings screen saves the options (the app's
+    /// `<data dir>/settings.ini`); `None` keeps them for the session (tests).
+    pub save_to: Option<std::path::PathBuf>,
 }
 
 impl PauseMenu {
@@ -293,6 +317,7 @@ impl PauseMenu {
             values,
             undo: values,
             repeat: Repeat::default(),
+            save_to: None,
         }
     }
 
@@ -408,7 +433,7 @@ impl PauseMenu {
                 let rows = fields(setup);
                 if back {
                     self.screen = Screen::Options;
-                    return None;
+                    return Some(Command::Save(self.values, setup == Setup::Advanced));
                 }
                 if nav.button3 && self.values != self.undo {
                     self.values = self.undo;
@@ -459,10 +484,11 @@ fn change(values: &mut Options, field: Field, up: bool) {
                 [dz, step_percent(sat, TUNE_STEP, up, dz + TUNE_STEP, 100)]
             };
         }
-        Field::Speech
-        | Field::Music
-        | Field::Linearity
-        | Field::MultiTurn => {}
+        Field::Speech => values.speech = step_percent(values.speech, VOLUME_STEP, up, 0, 100),
+        Field::Music => values.music = step_percent(values.music, VOLUME_STEP, up, 0, 100),
+        // 20 steps, as the option's integer slider (`wheelLinearity` /20) [D].
+        Field::Linearity => values.linearity = step_percent(values.linearity, TUNE_STEP, up, 0, 100),
+        Field::MultiTurn => {}
     }
 }
 
@@ -635,6 +661,9 @@ impl PauseMenu {
                     .map(|(i, (id, field))| {
                         let value = match field {
                             Field::Effects => Some(format!("{}%", v.effects)),
+                            Field::Speech => Some(format!("{}%", v.speech)),
+                            Field::Music => Some(format!("{}%", v.music)),
+                            Field::Linearity => Some(format!("{}%", v.linearity)),
                             Field::LapTimer => Some(on(v.lap_timer)),
                             Field::Position => Some(on(v.position)),
                             Field::MiniMap => Some(on(v.minimap)),
@@ -671,6 +700,11 @@ pub fn initial_options(settings: &crate::settings::Settings, actions: Option<&Ac
     let base = Options::default();
     let mut values = Options {
         effects: settings.sound_effects.unwrap_or(base.effects),
+        speech: settings.sound_speech.unwrap_or(base.speech),
+        music: settings.sound_music.unwrap_or(base.music),
+        linearity: settings.assists().map_or(base.linearity, |a| {
+            ((a.wheel_response / 2. + 0.5) * 100.).round().clamp(0., 100.) as u8
+        }),
         lap_timer: settings.osd_lap_timer.unwrap_or(base.lap_timer),
         position: settings.osd_position.unwrap_or(base.position),
         mph: settings.osd_mph.unwrap_or(base.mph),
@@ -809,8 +843,11 @@ pub fn update(
         }
         Command::Apply(values) => {
             log_line!(
-                "drive_menu version=1 action=apply effects={} lap_timer={} position={} mph={} minimap={} dials={} tunes={:?}",
+                "drive_menu version=1 action=apply effects={} speech={} music={} linearity={} lap_timer={} position={} mph={} minimap={} dials={} tunes={:?}",
                 values.effects,
+                values.speech,
+                values.music,
+                values.linearity,
                 values.lap_timer,
                 values.position,
                 values.mph,
@@ -819,9 +856,20 @@ pub fn update(
                 values.tunes
             );
             apply_tunes(&mut actions, &values);
+            // Only a wheel's steering is shaped (828670); the record is read
+            // every tick, and replays are snapshots (docs/REPLAY.md).
+            driving.runtime.assists.wheel_response = values.wheel_response();
         }
         Command::Unavailable(id) => {
             log_line!("drive_menu version=1 action=unavailable button={id}");
+        }
+        Command::Save(values, tunes) => {
+            if let Some(path) = &menu.save_to {
+                match crate::settings::save_options(path, &values, tunes) {
+                    Ok(()) => log_line!("drive_menu version=1 action=save tunes={tunes} path={}", path.display()),
+                    Err(error) => log_line!("drive_menu version=1 action=save_failed error={error:?}"),
+                }
+            }
         }
     }
     // A press that opened, closed or acted in the menu never reaches the car
@@ -1133,7 +1181,7 @@ mod tests {
             panic!()
         };
         assert_eq!(v.effects, 90);
-        // At 100 % right changes nothing; speech is not in the prototype.
+        // At 100 % right changes nothing.
         assert!(matches!(
             menu.step(press(|n| n.right = true)),
             Some(Command::Apply(_))
@@ -1141,7 +1189,14 @@ mod tests {
         assert_eq!(menu.step(press(|n| n.right = true)), None);
         menu.step(press(|n| n.down = true));
         assert_eq!(menu.step(press(|n| n.right = true)), None);
-        menu.step(press(|n| n.back = true));
+        // Speech volume is a slider too (saved; the port plays no speech).
+        assert!(matches!(menu.step(press(|n| n.left = true)), Some(Command::Apply(v)) if v.speech == 90));
+        menu.step(press(|n| n.button3 = true));
+        // Leaving a settings screen autosaves (`*_st_*_autosave` [D]).
+        assert!(matches!(
+            menu.step(press(|n| n.back = true)),
+            Some(Command::Save(v, false)) if v.effects == 100
+        ));
         assert_eq!(menu.screen, Screen::Options);
         menu.step(press(|n| n.down = true));
         menu.step(press(|n| n.select = true));
@@ -1151,7 +1206,7 @@ mod tests {
         assert!(
             matches!(menu.step(press(|n| n.button3 = true)), Some(Command::Apply(v)) if !v.mph)
         );
-        menu.step(press(|n| n.back = true));
+        assert!(matches!(menu.step(press(|n| n.back = true)), Some(Command::Save(_, false))));
         menu.step(press(|n| n.down = true));
         menu.step(press(|n| n.select = true));
         assert_eq!(menu.screen, Screen::Setup(Setup::Advanced));

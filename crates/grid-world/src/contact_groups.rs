@@ -1,7 +1,8 @@
 //! Rebuild cold, all-active impact groups from a supplied collision pool.
 //! Geometry detection, existing links, sleeping bodies and parallel assignment
 //! remain caller responsibilities. All identities below are owned one-based tokens.
-use crate::Error;
+use crate::{Error, joint::Joint};
+use std::collections::VecDeque;
 
 pub type Body = [u32; 0x424 / 4];
 pub type Contact = [u32; 0x80 / 4];
@@ -31,12 +32,26 @@ pub struct Shape {
     pub flag230: bool,
 }
 
+/// A world joint (B825E0 links it into its bodies' constraint lists, body
+/// +0x320 for A and +0x324 for B; here the link is the body ids).
+#[derive(Clone)]
+pub struct WorldJoint {
+    pub joint: Joint,
+    /// One-based body ids of A and of a dynamic B (0: none).
+    pub a: u32,
+    pub b: u32,
+    /// B's record when B is a fixed object (joint +0xC).
+    pub fixed: Option<Box<Body>>,
+}
+
 #[derive(Clone)]
 pub struct Input {
     pub bodies: Vec<Body>,
     pub contacts: Vec<Contact>,
     pub active_order: Vec<usize>,
     pub selector: u32,
+    /// In creation order (each body's list holds its joints newest first).
+    pub joints: Vec<WorldJoint>,
 }
 
 #[derive(Clone)]
@@ -46,6 +61,10 @@ pub struct Output {
     /// Group head, manager head, largest group, visited bodies, dirty head,
     /// new selector, new destination, active heads0/1 and active tails0/1.
     pub world: [u32; 11],
+    /// The joints with their group's solver indices (+0x1C/+0x20) and +0xE.
+    pub joints: Vec<WorldJoint>,
+    /// Per root body: its group's unbroken joints in the group list's order.
+    pub joint_groups: Vec<Vec<usize>>,
 }
 
 /// Retained ownership from the preceding completed world step. Contact links
@@ -180,6 +199,18 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
             return Err(Error("inconsistent carried dirty membership"));
         }
     }
+    for j in &input.joints {
+        let fixed = j.joint.byte(0xc) != 0;
+        if j.a == 0
+            || j.a as usize > n
+            || j.b as usize > n
+            || j.b == j.a
+            || (fixed && j.b != 0)
+            || (!fixed && j.fixed.is_some())
+        {
+            return Err(Error("unsupported contact-group joint"));
+        }
+    }
     for c in &input.contacts {
         let a = field(c, 4);
         let b = field(c, 8);
@@ -208,6 +239,8 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
 struct Build {
     bodies: Vec<Body>,
     contacts: Vec<Contact>,
+    /// Each root's joints, in the order the original's group list holds them.
+    joint_lists: Vec<VecDeque<usize>>,
     heads: [u32; 2],
     tails: [u32; 2],
     group_head: u32,
@@ -309,6 +342,8 @@ impl Build {
         }
         self.set(a, 0x20, self.b(a, 0x20) + self.b(b, 0x20));
         self.set(a, 0x24, self.b(a, 0x24) + self.b(b, 0x24));
+        let moved = std::mem::take(&mut self.joint_lists[b as usize - 1]);
+        self.joint_lists[a as usize - 1].extend(moved);
         let mut id = self.b(b, 8);
         while id != 0 {
             self.set(id, 0x18, a);
@@ -326,6 +361,25 @@ impl Build {
         } else {
             0
         };
+        self.join(a, b, destination);
+        let root = self.root(a);
+        let old = self.b(root, 0);
+        put(&mut self.contacts[index], 0x10, old);
+        self.set(root, 0, index as u32 + 1);
+        self.set(root, 0x24, self.b(root, 0x24) + 1);
+        if self.b(root, 4) == 0 {
+            self.set(root, 4, index as u32 + 1);
+        }
+    }
+    /// AD6250 for a joint: the same union, then the joint goes to the head of
+    /// its group's list (kept apart from the contacts here: B7B850 sorts the
+    /// list into separate contact and joint pools, keeping each one's order).
+    fn joint(&mut self, index: usize, a: u32, b: u32, destination: u32) {
+        self.join(a, b, destination);
+        let root = self.root(a);
+        self.joint_lists[root as usize - 1].push_front(index);
+    }
+    fn join(&mut self, a: u32, b: u32, destination: u32) {
         self.move_active(a, destination);
         if b != 0 {
             self.move_active(b, destination);
@@ -348,14 +402,6 @@ impl Build {
                     self.merge(x, y);
                 }
             }
-        }
-        let root = self.root(a);
-        let old = self.b(root, 0);
-        put(&mut self.contacts[index], 0x10, old);
-        self.set(root, 0, index as u32 + 1);
-        self.set(root, 0x24, self.b(root, 0x24) + 1);
-        if self.b(root, 4) == 0 {
-            self.set(root, 4, index as u32 + 1);
         }
     }
 }
@@ -405,6 +451,7 @@ fn build(
     let mut out = Build {
         bodies: input.bodies.clone(),
         contacts: input.contacts.clone(),
+        joint_lists: vec![VecDeque::new(); input.bodies.len()],
         heads: [0; 2],
         tails: [0; 2],
         group_head: 0,
@@ -429,6 +476,23 @@ fn build(
         out.flag(id, 0x2c, 0);
         out.set(id, 0x2fc, 0);
     }
+    // AD6C40: each active body pushes its unbroken joints (its +0x320 list,
+    // newest first) onto a stack; the stack is grouped before the contacts.
+    // A joint reaches the stack through B's list only while A is inactive,
+    // which every body here is not.
+    let mut stack = Vec::new();
+    for &id in &ids {
+        for (k, j) in input.joints.iter().enumerate().rev() {
+            if j.a == id && j.joint.byte(0x48) == 0 {
+                stack.push(k);
+            }
+        }
+    }
+    for &k in stack.iter().rev() {
+        let j = &input.joints[k];
+        let b = if j.joint.byte(0xc) == 0 { j.b } else { 0 };
+        out.joint(k, j.a, b, destination);
+    }
     for i in 0..out.contacts.len() {
         if i < external_count {
             let id = field(&out.contacts[i], 4);
@@ -450,6 +514,7 @@ fn build(
         out.create(id);
         id = next;
     }
+    let mut joints = input.joints.clone();
     let mut root = out.group_head;
     let mut manager = 0;
     let mut largest = 0;
@@ -486,6 +551,17 @@ fn build(
         }
         out.set(root, 0x1c, manager);
         manager = root;
+        // B82850 and AEEC80: the joint's solver indices, and it is enabled.
+        for &k in &out.joint_lists[root as usize - 1] {
+            let j = &mut joints[k];
+            j.joint.words[0x1c / 4] = out.b(j.a, 0x404);
+            j.joint.words[0x20 / 4] = if j.b != 0 && j.joint.byte(0xc) == 0 {
+                out.b(j.b, 0x404)
+            } else {
+                u32::MAX
+            };
+            j.joint.set_byte(0xe, 0);
+        }
         root = out.b(root, 0x10);
     }
     let world = [
@@ -505,6 +581,8 @@ fn build(
         bodies: out.bodies,
         contacts: out.contacts,
         world,
+        joints,
+        joint_groups: out.joint_lists.into_iter().map(Vec::from).collect(),
     })
 }
 
@@ -538,6 +616,7 @@ mod tests {
             contacts,
             active_order: vec![0],
             selector: 0,
+            joints: vec![],
         };
         let before = input.clone();
         let out = calculate_with_geometry(&input, &[], 1).unwrap();
@@ -569,6 +648,7 @@ mod tests {
             contacts,
             active_order: vec![1, 0],
             selector: 0,
+            joints: vec![],
         };
         let before = input.clone();
         validate(&input).unwrap();

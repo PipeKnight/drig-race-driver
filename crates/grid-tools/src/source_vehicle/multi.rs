@@ -543,6 +543,12 @@ impl MultiRuntime {
         })
     }
 
+    /// Whether car `i` pushed a broken flag's pole this tick: the 1e-6 body
+    /// contact 0x7C4830 sends the car (0xA01910) for each touched post.
+    pub fn touched_post(&self, i: usize) -> bool {
+        self.props.as_ref().is_some_and(|p| p.post_touches.contains(&i))
+    }
+
     /// World shape token (one-based) of car `i`'s body shape.
     fn token(&self, i: usize) -> u32 {
         if i == 0 {
@@ -964,6 +970,23 @@ impl MultiRuntime {
             let mut changed = self.shapes.clone();
             next.hold_lost(&mut world.groups.bodies, self.cars[0].track.bounds()[1]);
             let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
+            // 0x7C4830: the phantom posts after the step and the breaks.
+            next.post_touches.clear();
+            if !next.posts.is_empty() {
+                let mut boxes = Vec::with_capacity(geometry.len());
+                for (i, g) in geometry.iter().enumerate() {
+                    let body = &world.groups.bodies[i];
+                    let motion = std::array::from_fn(|k| {
+                        f32::from_bits(body[0x1c0 / 4 + k]) - f32::from_bits(body[0x2a0 / 4 + k])
+                    });
+                    boxes.push(crate::dynamic_props::PostCar {
+                        shape: g.car_box(body)?,
+                        motion,
+                    });
+                }
+                // The touched cars' 1e-6 contacts (0xA01910) are not sent yet.
+                next.post_touches = next.update_posts(&mut world, &boxes)?;
+            }
             if !disabled.is_empty() {
                 shapes = Some(changed);
             }
@@ -1518,6 +1541,255 @@ mod tests {
             .unwrap();
     }
 
+    /// F484: a broken Donington tyre wall's six blocks stay joined by their
+    /// seven springs (cDeformableRubber*, unbreakable) and settle; joined
+    /// blocks do not collide with each other (dontCollideWithAny).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_broken_tyre_wall_stays_joined_and_settles() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let mut multi = MultiRuntime::lacetti(root, &["slot_00"], &table, events).unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let wall = (props.catalog.breakables.iter())
+                    .position(|b| b.template == "tyre_wall.max")
+                    .unwrap();
+                props.queue_break(wall);
+                let drive = [Controls::default(); 1];
+                multi.tick(&drive).unwrap();
+                let pose = |multi: &MultiRuntime, body: usize| {
+                    crate::dynamic_props::body_pose(&multi.bodies()[body])[3]
+                };
+                let distance = |a: [f32; 4], b: [f32; 4]| {
+                    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+                };
+                let joints = multi.dynamic_props().unwrap().joints.clone();
+                assert_eq!(joints.len(), 7);
+                assert_eq!(multi.world.groups.joints.len(), 7);
+                let rest: Vec<f32> = joints
+                    .iter()
+                    .map(|j| distance(pose(&multi, j.a), pose(&multi, j.b.unwrap())))
+                    .collect();
+                for _ in 0..300 {
+                    multi.tick(&drive).unwrap();
+                }
+                let props = multi.dynamic_props().unwrap();
+                assert_eq!(props.pieces.len(), 22);
+                for (j, rest) in props.joints.iter().zip(&rest) {
+                    assert!(!j.broken);
+                    let now = distance(pose(&multi, j.a), pose(&multi, j.b.unwrap()));
+                    eprintln!("tyre_wall joint {:?} rest={rest:.3} now={now:.3}", (j.a, j.b));
+                    assert!((now - rest).abs() < 0.3, "{j:?} {rest} {now}");
+                }
+                for piece in &props.pieces {
+                    let spawn =
+                        props.catalog.breakables[piece.breakable].pieces[piece.spec].pose[3];
+                    let now = pose(&multi, piece.body);
+                    assert!(now.iter().all(|v| v.is_finite()));
+                    assert!((now[1] - spawn[1]).abs() < 1.5, "{piece:?} {spawn:?} {now:?}");
+                    // Settled: no piece still moving fast after five seconds.
+                    let v = &multi.bodies()[piece.body][0x220 / 4..0x22c / 4];
+                    let speed = v.iter().map(|&w| f32::from_bits(w).powi(2)).sum::<f32>().sqrt();
+                    assert!(speed < 1., "{piece:?} {speed}");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// An armco section in the middle of a chain breaks its two linked
+    /// neighbours too (0x7D5540); the rails hang between the posts and the
+    /// world and stay near their places.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_broken_armco_breaks_its_neighbours_and_hangs_together() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let mut multi = MultiRuntime::lacetti(root, &["slot_00"], &table, events).unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let all = &props.catalog.breakables;
+                // A section that holds a link and is itself linked to.
+                let x = (0..all.len())
+                    .find(|&i| {
+                        all[i].template.starts_with("armco")
+                            && !all[i].links.is_empty()
+                            && all.iter().any(|h| h.links.iter().any(|l| l.primary == i))
+                    })
+                    .unwrap();
+                props.queue_break(x);
+                let drive = [Controls::default(); 1];
+                multi.tick(&drive).unwrap();
+                let props = multi.dynamic_props().unwrap();
+                let broken = props.broken.iter().filter(|b| **b).count();
+                eprintln!(
+                    "armco {x}: broken={broken} pieces={} statics={:?} joints={:?}",
+                    props.pieces.len(),
+                    props.statics,
+                    props.joints
+                );
+                assert_eq!(broken, 3);
+                // The middle section's post is dynamic and joined to the
+                // holder's last rail; the outer posts are still static.
+                assert!(!props.statics.iter().any(|s| s.0 == x));
+                assert_eq!(props.statics.len(), 1);
+                for _ in 0..300 {
+                    multi.tick(&drive).unwrap();
+                }
+                let props = multi.dynamic_props().unwrap();
+                for piece in &props.pieces {
+                    let spawn =
+                        props.catalog.breakables[piece.breakable].pieces[piece.spec].pose[3];
+                    let now = crate::dynamic_props::body_pose(&multi.bodies()[piece.body])[3];
+                    assert!(now.iter().all(|v| v.is_finite()));
+                    let moved = ((now[0] - spawn[0]).powi(2)
+                        + (now[1] - spawn[1]).powi(2)
+                        + (now[2] - spawn[2]).powi(2))
+                    .sqrt();
+                    eprintln!("{piece:?} moved {moved:.3}");
+                    assert!(moved < 1.5, "{piece:?} {spawn:?} {now:?}");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// A broken close-drift flag's pole is a phantom post: a car beside it
+    /// pushes it aside about its pivot (0x7BD240), the pole keeps zero
+    /// velocity and the car is reported as touching it.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_car_beside_a_broken_drift_flag_pushes_its_pole_aside() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/jarama/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00"], &table, events).unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let flag = (props.catalog.breakables.iter())
+                    .position(|b| b.template == "close_drift_flag.max")
+                    .unwrap();
+                props.queue_break(flag);
+                let drive = [Controls::default(); 1];
+                multi.tick(&drive).unwrap();
+                let props = multi.dynamic_props().unwrap();
+                assert_eq!(props.posts.len(), 1);
+                let post = props.posts[0].clone();
+                let pivot = post.post.pivot;
+                eprintln!("post {post:?}");
+                // Standing on its spring, about upright.
+                assert!(post.post.direction[1] > 0.99, "{post:?}");
+                assert!(props.post_touches.is_empty());
+                // The car beside the pole, its side box over it.
+                multi.place_at_rest(0, [pivot[0] + 0.7, pivot[1], pivot[2]], [0., 0., 1.]).unwrap();
+                multi.tick(&drive).unwrap();
+                let props = multi.dynamic_props().unwrap();
+                let after = &props.posts[0];
+                eprintln!("after {after:?} touches {:?}", props.post_touches);
+                assert_eq!(props.post_touches, [0]);
+                assert!(multi.touched_post(0));
+                assert!(after.post.direction[1] < post.post.direction[1], "{after:?}");
+                // Turned about the pivot: the pivot stays, the pole's centre is
+                // still half the pole away from it.
+                for (now, was) in after.post.pivot.iter().zip(&pivot).take(3) {
+                    assert!((now - was).abs() < 1e-3, "{after:?}");
+                }
+                assert!((after.post.length - post.post.length).abs() < 1e-3, "{after:?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Career run 13 (Le Mans, F512): a car crashing into a yellow tyre wall
+    /// broke it and its linked neighbours into 68 pieces, and two ticks later
+    /// one piece's angular correction passed the port's old 64 rad bound
+    /// (lifted; the original has none). A Lacetti driven into the same wall
+    /// from either side breaks it and the field keeps stepping; these runs
+    /// stay below 3 rad, so the bound itself is tested in `physical_pose`.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn a_le_mans_tyre_wall_broken_around_a_car_keeps_stepping() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/le_mans/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let props = multi.props.as_mut().unwrap();
+                let wall = 969;
+                let entry = &props.catalog.breakables[wall];
+                assert_eq!(entry.template, "tyrewall_yellow.max");
+                eprintln!("pieces {} joints {}", entry.pieces.len(), entry.joints.len());
+                let at = entry.placement;
+                let (x, z) = ([at[0], at[1], at[2]], [at[8], at[9], at[10]]);
+                // Into the wall from either side, at speed, across its length.
+                for (side, along) in [(1f32, 0f32), (-1., 0.), (1., 1.5), (-1., -1.5), (1., 3.), (-1., 3.)] {
+                    multi.reset();
+                    let start: [f32; 3] =
+                        std::array::from_fn(|k| [at[12], at[13], at[14]][k] + side * 40. * z[k] + along * x[k]);
+                    let heading = z.map(|v| -side * v);
+                    multi.place_at_rest(0, start, heading).unwrap();
+                    eprintln!("VARIANT side={side} along={along}");
+                    let mut drive = [Controls::default(); 2];
+                    drive[0].throttle = 1.;
+                    for tick in 0..420 {
+                        if let Err(e) = multi.tick(&drive) {
+                            panic!("side {side} along {along} tick {tick}: {}", e.0);
+                        }
+                    }
+                    let props = multi.dynamic_props().unwrap();
+                    eprintln!("VARIANT broken={} pieces={}", props.broken.iter().filter(|b| **b).count(), props.pieces.len());
+                }
+                let props = multi.dynamic_props().unwrap();
+                eprintln!("pieces {}", props.pieces.len());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Playtest 7f22c32: a side-swiped board in a 12-car race stopped physics
     /// ("invalid contact-group counts or selector") because the pieces pushed
     /// the shared world past the port's old 16-body guard.
@@ -1776,6 +2048,7 @@ mod tests {
                         multi.cars[0].set_ai_grip(driver.request_grip());
                         let view = View::of(&multi.cars[0], multi.obstruction(0));
                         let c = driver.controls(&data, &view, &[], DELTA);
+                        multi.cars[0].set_ai_packet(driver.reverse_request());
                         multi.tick(&[c]).unwrap();
                         standings.update(&data.line, &at(&multi), 0., &[]);
                         let contacts: Vec<_> = multi
@@ -1898,6 +2171,9 @@ mod tests {
                             drivers[i].controls(&data, &view, &seen, DELTA)
                         })
                         .collect();
+                    for (car, d) in multi.cars.iter_mut().zip(drivers.iter()) {
+                        car.set_ai_packet(d.reverse_request());
+                    }
                     if tick == 1 {
                         controls[5].throttle = f32::NAN;
                     }
@@ -2006,6 +2282,9 @@ mod tests {
                             drivers[i].controls(&data, &view, &seen, DELTA)
                         })
                         .collect();
+                    for (car, d) in multi.cars.iter_mut().zip(drivers.iter()) {
+                        car.set_ai_packet(d.reverse_request());
+                    }
                     // Car 5 fails in its vehicle stage and is held on the grid.
                     if tick == 1 {
                         controls[5].throttle = f32::NAN;

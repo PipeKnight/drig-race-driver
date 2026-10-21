@@ -36,10 +36,17 @@ pub struct HiredTeamMate {
 
 /// A car the team owns. AUTHORED: the original keeps more per car (eBay
 /// condition, mileage) in `EBAY_MANAGER_SAVE`, not decoded.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OwnedCar {
     pub vehicle_id: i32,
     pub livery: i32,
+    /// The garage car's history (car +0x2C race wins, +0x30 event wins,
+    /// +0x3C major crashes, +0x08 odometer in metres) [V 0x65F540]. Set for
+    /// eBay cars; the port does not count races into it yet [open].
+    pub race_wins: u32,
+    pub event_wins: u32,
+    pub major_crashes: u32,
+    pub odometer_m: f64,
 }
 
 /// The career's state between events.
@@ -60,6 +67,9 @@ pub struct Career {
     pub team_mate: Option<HiredTeamMate>,
     /// Signing fees paid in total (+0xA10) [V].
     pub team_mate_spending: i64,
+    /// The money paid this season (the bank's "Season's Earnings"). [I]
+    /// Every payout adds its total; `end_season` clears it.
+    pub season_earnings: i64,
     /// Received sponsor offers (`event_sponsor_offer.id`), in arrival order.
     pub sponsor_offers: Vec<i32>,
     pub major_sponsor: Option<i32>,
@@ -84,6 +94,12 @@ pub struct Career {
     pub game_completed: bool,
     pub races_won: i32,
     pub races_lost: i32,
+    /// Races driven per `track_model` (the per-layout record 0x4F8B30 +8,
+    /// incremented after every race at 0x61017D) [V]: the race draw's key
+    /// on a repeated event.
+    pub layout_races: BTreeMap<i32, u32>,
+    /// The eBay used-car market (`EBAY_MANAGER_SAVE`, docs/CAREER_RESEARCH.md §13).
+    pub ebay: super::ebay::Ebay,
 }
 
 impl Career {
@@ -99,6 +115,7 @@ impl Career {
             cars: Vec::new(),
             team_mate: None,
             team_mate_spending: 0,
+            season_earnings: 0,
             sponsor_offers: Vec::new(),
             major_sponsor: None,
             minor_sponsors: [None; MINOR_SLOTS],
@@ -112,7 +129,14 @@ impl Career {
             game_completed: false,
             races_won: 0,
             races_lost: 0,
+            layout_races: BTreeMap::new(),
+            ebay: super::ebay::Ebay::new(),
         }
+    }
+
+    /// Counts one race driven on a layout (0x61017D) [V].
+    pub fn count_race(&mut self, track_model_id: i32) {
+        *self.layout_races.entry(track_model_id).or_default() += 1;
     }
 
     /// Total reputation: the sum of the five region values (0x62C4A0) [V].
@@ -163,6 +187,10 @@ impl Career {
                 self.cars.push(OwnedCar {
                     vehicle_id: catalogue.initial_vehicle_id,
                     livery: 0,
+                    race_wins: 0,
+                    event_wins: 0,
+                    major_crashes: 0,
+                    odometer_m: 0.0,
                 });
             }
             return true;
@@ -233,6 +261,46 @@ impl Career {
             && (!event.head_to_head || self.head_to_heads.contains(&event_id))
     }
 
+    /// The driver offers on show (0x651480, 0x650FA0) [V partial]: three
+    /// region slots by `tier.order_index` (0 US, 1 Europe, 2 Japan), each
+    /// with one race offer and one test offer (time trial or speed test,
+    /// separate slots +0x80..+0x88): the first offer by
+    /// `driver_offer.order_index` not driven yet, in the driver-offer tier of
+    /// the player's rank in that region (the International offer tiers at
+    /// overall rank 3). [I] The slot's tier choice (0x67E450) and that a
+    /// driven offer, met or not, moves the slot on (0x651920 after the race)
+    /// follow the research notes; the Le Mans offer tiers are not slots here.
+    pub fn driver_offers_shown(&self, catalogue: &Catalogue) -> Vec<i32> {
+        let international = self.overall_rank(catalogue) == 3;
+        let mut shown = Vec::new();
+        for slot in 0..3 {
+            let tier = catalogue.tiers.iter().find(|t| {
+                t.driver_offers
+                    && t.order_index == slot
+                    && match t.region {
+                        Region::LeMans => false,
+                        Region::International => international && t.rank_id == 4,
+                        region => !international && t.rank_id as usize == self.rank(catalogue, region) + 1,
+                    }
+            });
+            let Some(tier) = tier else {
+                continue;
+            };
+            let mut offers: Vec<&super::data::DriverOffer> = catalogue
+                .driver_offers
+                .values()
+                .filter(|o| o.tier_id == tier.id && !self.completed_offers.contains(&o.id))
+                .collect();
+            offers.sort_by_key(|o| (o.order_index, o.id));
+            for test in [false, true] {
+                if let Some(o) = offers.iter().find(|o| rules::is_test_offer(o) == test) {
+                    shown.push(o.id);
+                }
+            }
+        }
+        shown
+    }
+
     /// The season state (0x62C140) [V].
     pub fn season_state(&self) -> SeasonState {
         match (self.season.len(), self.lemans_refused) {
@@ -265,6 +333,7 @@ impl Career {
         }
         self.previous_season = std::mem::take(&mut self.season);
         self.lemans_refused = false;
+        self.season_earnings = 0;
         self.season_number += 1;
         true
     }
@@ -286,6 +355,31 @@ impl Career {
 
     /// Buys a car: `purchase_price` from the bank (0x65F652) [V]. The car
     /// must be `purchasable`.
+    /// 0x65AD90 [V]: every `purchasable` vehicle the team does not own joins
+    /// the garage at no cost, with a fresh record (history zero). Returns the
+    /// vehicles added, in table order. AUTHORED: livery 0 (the original
+    /// touches no livery). Not ported: the bonus unlocks it also runs
+    /// (0x65ABE0, `bonus_vehicle_unlock`), whose ids are filled at run time.
+    /// The `head_to_head_rewards` table is never read by the original (its
+    /// name is not in the executable) [V by absence].
+    pub fn unlock_all_cars(&mut self, catalogue: &Catalogue) -> Vec<i32> {
+        let mut added = Vec::new();
+        for v in catalogue.vehicles.values() {
+            if v.purchasable && !self.cars.iter().any(|c| c.vehicle_id == v.id) {
+                self.cars.push(OwnedCar {
+                    vehicle_id: v.id,
+                    livery: 0,
+                    race_wins: 0,
+                    event_wins: 0,
+                    major_crashes: 0,
+                    odometer_m: 0.0,
+                });
+                added.push(v.id);
+            }
+        }
+        added
+    }
+
     pub fn buy_car(&mut self, catalogue: &Catalogue, vehicle_id: i32) -> Result<(), String> {
         let v = catalogue
             .vehicles
@@ -301,6 +395,10 @@ impl Career {
         self.cars.push(OwnedCar {
             vehicle_id,
             livery: 0,
+            race_wins: 0,
+            event_wins: 0,
+            major_crashes: 0,
+            odometer_m: 0.0,
         });
         Ok(())
     }
@@ -359,6 +457,88 @@ impl Career {
         Ok(())
     }
 
+    /// Each placed sponsor's objective and pay in one race (0x66DB80 per
+    /// slot, 0x652010 pay) [V]: the player and the teammate are checked
+    /// separately, the major slot pays double.
+    pub fn sponsor_pay(&self, catalogue: &Catalogue, race: &RaceResult) -> Vec<SponsorPay> {
+        let met = |who: Entrant, offer: &super::data::SponsorOffer| {
+            race.order
+                .iter()
+                .enumerate()
+                .find(|(_, c)| c.entrant == who)
+                .is_some_and(|(pos, c): (usize, &Classified)| rules::sponsor_objective_met(offer, pos, c))
+        };
+        self.sponsor_slots()
+            .filter_map(|(offer_id, major)| {
+                let offer = catalogue.sponsor_offer(offer_id)?;
+                let player_met = met(Entrant::Player, offer);
+                let teammate_met = self.team_mate.is_some() && met(Entrant::TeamMate, offer);
+                Some(SponsorPay {
+                    offer_id,
+                    sponsor_id: offer.sponsor_id,
+                    major,
+                    player_met,
+                    teammate_met,
+                    money: rules::sponsor_race_pay(offer, major, player_met, teammate_met),
+                })
+            })
+            .collect()
+    }
+
+    /// Whether the teammate screen is open. [I] The original forces it
+    /// right after the first licence (second garage, flow.xml
+    /// `force_buy_team_mates`); its own access predicate was not found.
+    pub fn can_hire(&self, catalogue: &Catalogue) -> bool {
+        self.team_founded && self.garages(catalogue) >= 2
+    }
+
+    /// The teammate search (0x638A60) [V filter]: fee within the chosen
+    /// `team_mate_fee_range` (all when `None`) and the region (any when
+    /// `None`). AUTHORED: sorted by fee, then driver id; the current
+    /// teammate is left out.
+    pub fn search<'a>(
+        &self,
+        catalogue: &'a Catalogue,
+        region: Option<Region>,
+        fee_range: Option<usize>,
+    ) -> Vec<&'a super::data::Hireable> {
+        let range = fee_range.and_then(|i| catalogue.fee_ranges.get(i)).copied();
+        let mut out: Vec<&super::data::Hireable> = catalogue
+            .hireable
+            .iter()
+            .filter(|h| range.is_none_or(|(lo, hi)| h.signing_fee >= lo && h.signing_fee <= hi))
+            .filter(|h| region.is_none_or(|r| h.region_id == r.id()))
+            .filter(|h| self.team_mate.as_ref().is_none_or(|t| t.driver_id != h.driver_id))
+            .collect();
+        out.sort_by_key(|h| (h.signing_fee, h.driver_id));
+        out
+    }
+
+    /// Hires a driver of the pool by id (0x6994E0) [V].
+    pub fn hire_driver(&mut self, catalogue: &Catalogue, driver_id: i32) -> Result<(), String> {
+        if !self.can_hire(catalogue) {
+            return Err("not ready to hire a team mate yet".into());
+        }
+        let h = catalogue
+            .hireable
+            .iter()
+            .find(|h| h.driver_id == driver_id)
+            .ok_or(format!("driver {driver_id} cannot be hired"))?;
+        self.hire(h.driver_id, h.signing_fee, h.winnings_percentage)
+    }
+
+    /// Takes a received offer off the car.
+    pub fn remove_sponsor(&mut self, offer_id: i32) {
+        if self.major_sponsor == Some(offer_id) {
+            self.major_sponsor = None;
+        }
+        for s in &mut self.minor_sponsors {
+            if *s == Some(offer_id) {
+                *s = None;
+            }
+        }
+    }
+
     fn sponsor_slots(&self) -> impl Iterator<Item = (i32, bool)> + '_ {
         self.major_sponsor
             .map(|o| (o, true))
@@ -373,6 +553,17 @@ impl Default for Career {
     }
 }
 
+/// One placed sponsor's result in one race.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SponsorPay {
+    pub offer_id: i32,
+    pub sponsor_id: i32,
+    pub major: bool,
+    pub player_met: bool,
+    pub teammate_met: bool,
+    pub money: i64,
+}
+
 /// The money and reputation an event paid, item by item (the bank screen's
 /// lines, career +0x5C..+0x70) [V].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -382,6 +573,9 @@ pub struct Payout {
     pub prize: i64,
     pub team_mate_prize: i64,
     pub team_win_bonus: i64,
+    /// The races' Flashback Bonus (career +0x68, summed by 0x652200 in all
+    /// five reward routines) [V].
+    pub flashback_bonus: i64,
     pub sponsor_money: i64,
     pub driver_offer_wages: i64,
     pub driver_offer_bonus: i64,
@@ -391,6 +585,11 @@ pub struct Payout {
     pub region: Option<Region>,
     pub new_sponsor_offers: Vec<i32>,
     pub team_founded: bool,
+    /// A head-to-head event (paid by 0x6788D0): won when `position` is 0.
+    pub head_to_head: bool,
+    /// Vehicles the win of an International head-to-head put in the garage
+    /// ([`Career::unlock_all_cars`]).
+    pub unlocked_cars: Vec<i32>,
 }
 
 impl Payout {
@@ -398,6 +597,7 @@ impl Payout {
         self.prize
             + self.team_mate_prize
             + self.team_win_bonus
+            + self.flashback_bonus
             + self.sponsor_money
             + self.driver_offer_wages
             + self.driver_offer_bonus
@@ -417,16 +617,42 @@ impl Payout {
 /// - reputation bonus for the race settings;
 /// - the teammate's share and the team win bonus;
 /// - each race's sponsor objectives for the player and the teammate;
+/// - each race's Flashback Bonus ([`rules::flashback_bonus`]);
 /// - sponsor offers unlocked by the player's position (0x673B20).
 ///
 /// Head-to-head events pay `prize_money_for_first` for a win and no
 /// reputation (0x6788D0) [V].
+///
+/// Every car counts in one class here; [`apply_event_in_classes`] takes the
+/// cars' vehicle classes.
 pub fn apply_event(
     catalogue: &Catalogue,
     career: &mut Career,
     event_id: i32,
     races: &[RaceResult],
     settings: &RaceSettings,
+) -> Result<Payout, String> {
+    apply_event_in_classes(catalogue, career, event_id, races, settings, &|_| None)
+}
+
+/// [`apply_event`] with each entrant's `vehicle_class_id` (none: unknown).
+///
+/// Routine B (0x6781F0) pays the events of `le_mans`-region tiers (the game
+/// virtual 0x69B290 tests the tier's region index 4), so the Le Mans 24 Hours
+/// [V]. It differs from routine A:
+/// - the player's and the teammate's positions are class positions
+///   ([`rules::class_position`]) and the team win counts the class only
+///   (0x660E90); routine A does the same for `use_lemans_selection` events;
+/// - reputation comes from the event's whole `reputation_pot`, which is never
+///   reduced;
+/// - no head-to-head unlock check (0x656D40) and no call of 0x65D440.
+pub fn apply_event_in_classes(
+    catalogue: &Catalogue,
+    career: &mut Career,
+    event_id: i32,
+    races: &[RaceResult],
+    settings: &RaceSettings,
+    class_of: &dyn Fn(Entrant) -> Option<i32>,
 ) -> Result<Payout, String> {
     let event = catalogue
         .event(event_id)
@@ -440,28 +666,14 @@ pub fn apply_event(
     };
 
     // Sponsors pay per race (0x66DB80, 0x652010) [V].
-    let offers: BTreeMap<i32, &super::data::SponsorOffer> = catalogue
-        .events
-        .values()
-        .flat_map(|e| e.sponsor_offers.iter())
-        .map(|o| (o.id, o))
-        .collect();
     for race in races {
-        let met = |who: Entrant, offer: &super::data::SponsorOffer| {
-            race.order
-                .iter()
-                .enumerate()
-                .find(|(_, c)| c.entrant == who)
-                .is_some_and(|(pos, c): (usize, &Classified)| rules::sponsor_objective_met(offer, pos, c))
-        };
-        for (offer_id, major) in career.sponsor_slots() {
-            let Some(offer) = offers.get(&offer_id) else {
-                continue;
-            };
-            let teammate = career.team_mate.is_some() && met(Entrant::TeamMate, offer);
-            payout.sponsor_money +=
-                rules::sponsor_race_pay(offer, major, met(Entrant::Player, offer), teammate);
-        }
+        payout.sponsor_money += career
+            .sponsor_pay(catalogue, race)
+            .iter()
+            .map(|p| p.money)
+            .sum::<i64>();
+        payout.flashback_bonus +=
+            rules::flashback_bonus(catalogue, tier.rank_id, settings.star_level, race);
         match race.position(Entrant::Player) {
             Some(0) => career.races_won += 1,
             _ => career.races_lost += 1,
@@ -469,6 +681,7 @@ pub fn apply_event(
     }
 
     if event.head_to_head {
+        payout.head_to_head = true;
         let won = races
             .last()
             .and_then(|r| r.order.first())
@@ -481,8 +694,14 @@ pub fn apply_event(
             if tier.rank_id == 4 {
                 career.game_completed = true;
             }
+            // 0x674810: a won head-to-head of the International region
+            // (index 3) unlocks every car (0x65AD90) [V].
+            if tier.region == Region::International {
+                payout.unlocked_cars = career.unlock_all_cars(catalogue);
+            }
         }
         career.count_in_season(SeasonEntry::Event(event.id));
+        career.season_earnings += payout.money();
         payout.team_founded = career.add_money(catalogue, payout.money());
         return Ok(payout);
     }
@@ -493,7 +712,12 @@ pub fn apply_event(
         .cloned()
         .unwrap_or_default();
     let table = rules::standings(&points, races);
+    let routine_b = tier.region == Region::LeMans;
+    let by_class = routine_b || event.use_lemans_selection;
     let rank_of = |who: Entrant| {
+        if by_class {
+            return rules::class_position(&table, who, class_of);
+        }
         table
             .iter()
             .find(|s| s.entrant == who && s.races > 0)
@@ -502,22 +726,33 @@ pub fn apply_event(
     payout.position = rank_of(Entrant::Player);
     if let Some(pos) = payout.position {
         payout.prize = rules::prize(event, pos);
-        let pot = *career
-            .reputation_pots
-            .entry(event.id)
-            .or_insert(event.reputation_pot);
+        let pot = if routine_b {
+            event.reputation_pot
+        } else {
+            *career
+                .reputation_pots
+                .entry(event.id)
+                .or_insert(event.reputation_pot)
+        };
         payout.reputation_base = rules::reputation_base(&catalogue.reputation_fractions, pot, pos);
         let factor = rules::bonus_factor(catalogue, tier.rank_id, settings);
         payout.reputation_bonus = rules::reputation_bonus(payout.reputation_base, factor);
-        career.reputation_pots.insert(
-            event.id,
-            (pot - payout.reputation_base).max(event.reputation_pot_min),
-        );
+        if !routine_b {
+            career.reputation_pots.insert(
+                event.id,
+                (pot - payout.reputation_base).max(event.reputation_pot_min),
+            );
+        }
         if let (Some(tm), Some(tm_pos)) = (&career.team_mate, rank_of(Entrant::TeamMate)) {
             payout.team_mate_prize =
                 rules::teammate_share(rules::prize(event, tm_pos), tm.winnings_percentage);
         }
-        if rules::player_team_first(&table) {
+        let teams = if by_class {
+            rules::in_class(&table, Entrant::Player, class_of)
+        } else {
+            table.clone()
+        };
+        if rules::player_team_first(&teams) {
             payout.team_win_bonus = catalogue
                 .team_win_rewards
                 .get(&tier.rank_id)
@@ -532,10 +767,13 @@ pub fn apply_event(
         }
         let best = career.event_results.entry(event.id).or_insert(pos);
         *best = (*best).min(pos);
-        career.update_head_to_head(catalogue, tier.id);
+        if !routine_b {
+            career.update_head_to_head(catalogue, tier.id);
+        }
     }
     career.count_in_season(SeasonEntry::Event(event.id));
     career.reputation[tier.region as usize] += payout.reputation();
+    career.season_earnings += payout.money();
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }
@@ -543,12 +781,16 @@ pub fn apply_event(
 /// Pays a driver offer for another team (0x674940, 0x652270) [V]: the
 /// appearance fee (`per_race_wage × races`, race offers only) and, when the
 /// objective was met, `objective_money_bonus` and `objective_reputation_bonus`.
-/// [I] No event prize or reputation pot is paid for an offer race.
+/// [I] No event prize or reputation pot is paid for an offer race. The
+/// races' Flashback Bonus is paid as in every reward routine (0x678BD0 and
+/// 0x678EE0 call 0x652200) [V].
 pub fn apply_driver_offer(
     catalogue: &Catalogue,
     career: &mut Career,
     offer_id: i32,
     objective_met: bool,
+    races: &[RaceResult],
+    settings: &RaceSettings,
 ) -> Result<Payout, String> {
     let offer = catalogue
         .driver_offers
@@ -557,10 +799,7 @@ pub fn apply_driver_offer(
     let tier = catalogue
         .tier(offer.tier_id)
         .ok_or(format!("tier {} absent", offer.tier_id))?;
-    let test = matches!(
-        offer.objective,
-        super::data::OfferObjective::TimeTrial | super::data::OfferObjective::SpeedTest
-    );
+    let test = rules::is_test_offer(offer);
     let mut payout = Payout {
         region: Some(tier.region),
         ..Payout::default()
@@ -568,6 +807,10 @@ pub fn apply_driver_offer(
     if !test {
         payout.driver_offer_wages = rules::appearance_fee(offer);
     }
+    payout.flashback_bonus = races
+        .iter()
+        .map(|r| rules::flashback_bonus(catalogue, tier.rank_id, settings.star_level, r))
+        .sum();
     if objective_met {
         payout.driver_offer_bonus = offer.objective_money_bonus;
         payout.driver_offer_reputation = offer.objective_reputation_bonus;
@@ -575,6 +818,7 @@ pub fn apply_driver_offer(
     career.reputation[tier.region as usize] += payout.reputation();
     career.completed_offers.insert(offer_id);
     career.count_in_season(SeasonEntry::DriverOffer(offer_id));
+    career.season_earnings += payout.money();
     payout.team_founded = career.add_money(catalogue, payout.money());
     Ok(payout)
 }
@@ -590,5 +834,6 @@ pub fn result(order: &[Entrant]) -> RaceResult {
                 undamaged: true,
             })
             .collect(),
+        flashbacks: None,
     }
 }

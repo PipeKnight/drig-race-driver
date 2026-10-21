@@ -190,20 +190,28 @@ The launch gap of section 3 was the missing AI traction control 0x77AA10
 4. **Port against original, Spa, mixed field** (BMW / Lacetti means, the field held as in the
    captures):
 
-   | After the go | Original | Port (F444 + F447) |
-   |---|---|---|
-   | 0.5 s | 9.3 / 6.9 m/s | 9.0 / 6.4 |
-   | 1.0 s | 17.0 / 15.0 | 15.7 / 13.1 |
-   | 3.0 s | 36.1 / 35.3 | 34.0 / 33.0 |
+   | After the go | Original | Port (F444 + F447), no race manager | Port with `GRID_REFERENCE_CAR=11` (F460) |
+   |---|---|---|---|
+   | 0.5 s | 9.3 / 6.9 m/s | 9.0 / 6.4 | |
+   | 1.0 s | 17.0 / 15.0 | 15.7 / 13.1 | 16.8 / 14.7 |
+   | 2.0 s | 27.7 / 26.6 | | 27.5 / 26.4 |
+   | 3.0 s | 36.1 / 35.3 | 34.0 / 33.0 | 36.0 / 35.1 |
 
-   The first half second matches. The port falls behind between 0.5 and 1 s, when the
-   original's traction-control throttle ramps back to 0.9.
+   **Correction (F460, drift-battle-ai):** the gap in the third column comes from the test setup,
+   not from the port. `grid-opponent-race` applies the race manager (race-start power ×1.05,
+   grip ×1.25) only with `GRID_REFERENCE_CAR`, and the original's Race Day always has it. With
+   the parked car 11 as the reference, the port matches the original within 0.3 m/s; throttle and
+   the 1→2 shift time already matched. Live comparisons need `GRID_REFERENCE_CAR` (and the mixed
+   field).
 5. **Milan launch steering.**
    - In the original, steering (car +0xE30) is 0 through the hold. At the go it reaches about
      ±0.32–0.40 within two frames and decays to 0 by 0.5 s. All cars launch alike (14.7–17.6 m/s
      at 1 s).
    - In the port several cars steer to full lock (±1.0), slots 7 and 9 to the opposite side.
-     Slots 9 and 10 brake at 1.5 s, and the field is at 11.9–12.8 m/s at 1 s.
+     Slots 9 and 10 brake at 1.5 s, and the field is at 11.9–12.8 m/s at 1 s (without the race
+     manager).
+   - On main with F455 (the standing-start `race_start` behaviour and the lateral PID 0x7892E0)
+     and the race manager: 14.0–17.1 m/s at 1 s, no car contacts (drift-battle-ai, F460).
    - Below 3 m/s both plan at the car's own lateral offset. The port's heading error to the
      look-ahead target at standstill is therefore at least 12° against about 4° in the
      original: the standstill look-ahead target differs (open).
@@ -213,5 +221,5 @@ The launch gap of section 3 was the missing AI traction control 0x77AA10
 Next:
 - the standstill look-ahead and target point (`update_look_ahead` below laSpeedMin) against the
   original at the Milan grid;
-- the 0.5–1 s launch gap (traction-control level and the 1→2 shift);
-- the port field for these comparisons should be mixed: `--cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`.
+- ~~the 0.5–1 s launch gap~~: the race manager's race-start factors (F460);
+- port comparisons need the mixed field and the race manager: `GRID_REFERENCE_CAR=11 … --cars bmw,bmw,lac,lac,lac,bmw,bmw,bmw,lac,lac,lac,lac`.

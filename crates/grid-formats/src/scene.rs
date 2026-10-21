@@ -295,7 +295,8 @@ pub fn decode_matrix(data: &[u8], offset: usize) -> Result<[f32; 16]> {
     Ok(result)
 }
 
-/// Compose one ordinary scene node through its affine NODE/ROOTNODE ancestry.
+/// Compose one ordinary scene node through its affine NODE/RENDERNODE/ROOTNODE
+/// ancestry (grid slots can be RENDERNODEs: Haruna route 9, garages).
 pub fn node_matrix(tree: &Tree<'_>, node: usize) -> Result<[f32; 16]> {
     if node >= tree.nodes.len() {
         return fail(node, "scene node index outside tree");
@@ -305,7 +306,7 @@ pub fn node_matrix(tree: &Tree<'_>, node: usize) -> Result<[f32; 16]> {
     let mut root = false;
     while let Some(i) = ancestor {
         match tree.name(i) {
-            b"NODE" | b"ROOTNODE" => {
+            b"NODE" | b"RENDERNODE" | b"ROOTNODE" => {
                 transform = compose(&transform, &matrix(tree, i)?);
                 root |= tree.name(i) == b"ROOTNODE";
             }

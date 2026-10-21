@@ -29,11 +29,14 @@ contacts); BP01, DF01 and the characteristics table are used when present.
 
 | Command | What it does |
 |---|---|
-| `grid-soak quick` | Seeds 1..24 (fixed; 1..12 until 2026-10-17, then 1..16, then 1..20; 13..16 are Istanbul Park, 17..20 Long Beach since F357, 21..24 Jarama since F402); seeds 25..52 only with `--seeds` (Yokohama 25..28, Haruna 29..32, the Detroit derby 33..36 since F421; Spa 37..40, Milan 41..44, Shibuya 45..48, San Francisco 49..52 since F425, Circuit de la Sarthe 53..56 since F428), 5000 ticks each, 2 jobs: about 1-3 minutes on the owner's PC (12-car Donington 5000 ticks about 30 s). Run before a push. Exit code 1 if anything failed. |
+| `grid-soak quick` | Seeds 1..24 (fixed; 1..12 until 2026-10-17, then 1..16, then 1..20; 13..16 are Istanbul Park, 17..20 Long Beach since F357, 21..24 Jarama since F402); seeds 25..52 only with `--seeds` (Yokohama 25..28, Haruna 29..32, the Detroit derby 33..36 since F421; Spa 37..40, Milan 41..44, Shibuya 45..48, San Francisco 49..52 since F425, Circuit de la Sarthe 53..56 since F428), 5000 ticks each. Jobs: a third of the hardware threads, 2..6 (6 on the owner's PC; 2 until 19 October 2026). On 19.10, with other sessions building: 417 s with 6 jobs, 1279 s with 2, the same 24 per-seed digests (docs/TOOLCHAIN.md "Build and test cost"); 12-car Donington 5000 ticks about 30 s on a quiet PC. Run before a push. Exit code 1 if anything failed. |
 | `grid-soak long --hours 8 --jobs 2` | Seeds from 1001 upwards until the deadline (or `--seeds A..B`), 6000-30000 ticks each. Unattended; the summary is rewritten after every scenario. |
 | `grid-soak run --seed N [--profile quick\|long]` | One scenario in-process (the orchestrator runs each scenario this way in a child process). |
 | `grid-soak replay local/soak/.../seed-N.inputs.tsv` | Exact replay of recorded inputs, independent of later chaos-driver changes. |
 | `grid-soak replay-log local/playtest/manual-*.log` | Headless replay of an owner playtest log, with pose verification. |
+| `grid-soak perf [--budget FILE] [--write-budget FILE] [--tracks T,..] [--affinity HEXMASK] [--retries N]` | Tick-cost budget (build gate, docs/TOOLCHAIN.md "Build gate"): one full-field quick seed per track (`grid_tools::soak_perf::CASES`, 13 tracks; Le Mans with 12 cars), each alone in its own `run` process with `GRID_THREADS=1`, `--ticks` (default 3000), pinned to `--affinity` (the gate passes `FFFF`, the P-core threads). Compares CPU time per tick (x1.3) and wall p99 (x3) with the budget file (`tools/build_gate/perf_budget.tsv`); a case over budget runs again up to `--retries` (default 2) times and keeps its best. A budget row also holds the scenario digest and peak body count; a case whose digest changed (a behaviour commit moved the scenario) is `changed`, checked at 2x the old baseline only, and does not fail. `--write-budget` records the best of two passes. Exit code 1 if a track stays over budget or its run gave no times. |
+
+Every `run` (and `replay`) also prints `soak_tick_time seed=N ticks= cpu_ms= mean_ms= p50_ms= p99_ms= max_ms=` before its `soak_result` line: the process CPU time per tick summed over the `Session::step` calls (Windows `GetProcessTimes`), and the wall time of each step, without the soak's own checks.
 
 Options: `--out local/soak/DIR` (must contain a `local` component; default
 `local/soak/<command>-<unix time>`), `--jobs J`, `--seeds A..B`, `--timeout S`
@@ -457,6 +460,67 @@ F448 adds two more cases (docs/ROBUSTNESS_RESEARCH.md §9):
     `summary.md` and a column in `summary.tsv`.
   - It is debt for the open step-size family (FIDELITY_BACKLOG row 88), not a fix. Jarama seeds 21..24 then pass 4/4 and join the default quick set. Long Beach
 forced seed 59 (a thin tyre landing through the road) is not covered and still fails.
+
+## Known failure on main: Spa quick seed 38 (F465)
+
+`grid-soak quick --seeds 37..40` fails seed 38 (12 cars, Spa): `out-of-bounds: prop piece
+falling through the world (body 13 at 582,5,977)` at tick 4557, digest 8d725584c0d3a5fd.
+[V] A build of main 75b6910 (before F462) gives the same tick and digest, so it predates the
+round-shape work.
+
+Cause [V]: a hole in the purchased road collision. Body 13 is the upper half of the brake
+board at (575.8, 40.6, 965.3) (SPA.md §2.1, the board that the chaos seeds 1, 10 and 18 lose).
+A car knocks it at tick 4349; it slides along the grass at y 40.28 and from tick 4384, at
+(579.45, 40.27, 968.2), it falls with no contact at all (`GRID_SOAK_TRACE_BODY=12,13:4300`).
+Vertical `Track::query` segments find the GRAS chunk `qt_11_11_10_10_01_00` at (575.8, 965.3),
+(578.6, 967.3) and (581.6, 977.0), but nothing at (579.0, 967.6), (579.4, 968.0), (579.45,
+968.2), (579.6, 968.8) or (580.0, 970.0). A brute-force point-in-triangle test over every
+triangle of every packed chunk finds none covering (579.45, 968.2) or (579.6, 968.8), while it
+finds the ground at the board. So no packed road triangle exists there; it is not a query or
+candidate gap. Whether the original has other collision there (or loses the piece too) is not
+known. Evidence: this worktree's `local/r20/spa38/` (trace, failure report, inputs). The seed
+stays outside the default quick set.
+
+## Known failures on main: seeds 39 (Spa) and 54 (Le Mans), from F476
+
+`grid-soak quick --seeds 25..56` fails two scenarios on main since F476 (375e262, Redgate
+braking), both `out-of-bounds: prop piece falling through the world`:
+
+- seed 39 (9 cars, Spa, tick 4886): body 10 at (555, 1, 892), 13 m from the centreline;
+- seed 54 (12 cars, Le Mans, tick 4257): body 42 at (461, -9, -2416), 8 m from the centreline.
+
+Bisect [V] (release `grid-soak`, each seed run alone, evidence worktree fervent-napier-50814b
+`local/r20/bisect-39-54/`): F475 (c583aae) passes both; F476 (375e262) fails both at the same
+ticks, bodies and positions as main bdda5de and as F484 (4f8cd6f). F476 changes only the AI
+(brake-line ratio on the cruise tables, the Derby avoid window), so the cars now hit
+different props: the AI change exposes the two losses, it does not cause them. Spa seed 38,
+which failed from F465, passes on main bdda5de and F484 (when it stopped failing is not
+bisected).
+
+Traces (F489; replays with `GRID_SOAK_TRACE_BODY`, ground with the `grid-road-hole` probe:
+the packed world's vertical query, a brute-force test of every packed triangle, and the
+`boundarylines.cqtc` sheet near the point; evidence `local/r21/trace39/`, `trace54/`):
+
+- **Seed 39, Spa: data gap [V].** Body 10 is a brake-board piece a car knocks at tick 4694
+  at 18 m/s. At tick 4706 it hits the boundary sheet (the vertical sheet from (544.9, 855.2)
+  through (550.8, 874.3) to (556.8, 893.4), y 25..126) and slows to 3 m/s, then slides along
+  it on the track side, 0.1-0.6 m from it, and falls freely from tick 4708 at
+  (549.9, 36.55, 871.7). The packed road collision (GRAS, chunks `qt_11_10_11_01`/`_11`, y
+  about 35.5) ends along a line 0.3-0.8 m short of the sheet there: no packed triangle covers
+  (549.9, 871.7) .. (552.5, 882), and none for 50 m east of the edge. The piece fell into the
+  strip between the road's edge and the sheet. The original has the same data; whether it
+  loses the piece too is not verified. Like seed 38, a known data hole.
+- **Seed 54, Le Mans: car over a piece [V trace, I mechanism].** Body 42 is a tyre of a tyre
+  stack (bodies 36-44 stacked at y 25.4-26.2) that car 0 breaks at tick 4105 (ground y 25.10, tyre centre 25.73). The
+  car drives over it: at ticks 4110-4113 the car's centre is 0.6-0.75 m from the tyre's (xz)
+  while the tyre drops 0.16 m and 0.47 m in single ticks, far more than its velocity
+  (-2.6 m/s) moves it, and its axis turns 70 degrees in a tick; by tick 4112 its centre is
+  below the road (25.02 against 25.05) and it falls through. The road is there all along
+  (`qt_00_10_10_10_00`/`_10`, y 25.10 down to 24.45). This is the port's car-against-piece
+  contact (the car-to-car hull-triangle path, not the original's AE8AD0 with summed margins;
+  "Follow-ups" below) pressing the piece through the road, a known deviation. The 1:1 port
+  was tried and lost more pieces at the port's fixed 16 ms step (BOX_CONTACTS.md, "Tried and
+  not adopted"), so it waits for the world-step work.
 
 ## Follow-ups
 

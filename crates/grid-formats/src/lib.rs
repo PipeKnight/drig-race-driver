@@ -37,6 +37,7 @@ pub mod pssg;
 pub mod replay_cameras;
 pub mod scene;
 pub mod skidmarks;
+pub mod sky;
 pub mod start_lights;
 pub mod surface;
 pub mod texture;

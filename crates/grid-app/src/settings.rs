@@ -232,9 +232,21 @@ pub struct Settings {
     /// `[game] car` / `opponent_cars` (docs/CAR_GENERALIZATION.md).
     pub car: Option<String>,
     pub opponent_cars: Option<String>,
+    /// `[game] opponent_liveries`: each opponent's livery package index
+    /// (`livery_NN`), in car order (the career field, docs/CAREER_SCREEN.md).
+    pub opponent_liveries: Option<Vec<usize>>,
+    /// `[game] opponent_names`: each opponent's name on the HUD and the
+    /// results, comma separated, in car order (the career field).
+    pub opponent_names: Option<Vec<String>>,
+    /// `[game] points`: the event's points table by finishing position
+    /// (career races), shown in the results' Points column.
+    pub points: Option<Vec<i32>>,
     /// `[game] series`: a free-race circuit series (`pro_tuned`, `touring`,
     /// `gt1`, ...; docs/SERIES.md): its cars and grid fill.
     pub series: Option<String>,
+    /// `[game] series_seed`: the seed of the series' field and grid (career
+    /// Le Mans races; `GRID_SERIES_SEED` overrides it, else the clock).
+    pub series_seed: Option<u32>,
     pub drive: bool,
     pub laps: Option<u32>,
     /// `[drive] time_limit`: seconds of a Freestyle drift event (90 in the
@@ -260,6 +272,10 @@ pub struct Settings {
     pub ai: String,
     /// `[sound] effects`, percent (the pause menu's Effects Volume).
     pub sound_effects: Option<u8>,
+    /// `[sound] speech` / `music`, percent (the pause menu's Speech and
+    /// Music Volume; the port plays neither yet).
+    pub sound_speech: Option<u8>,
+    pub sound_music: Option<u8>,
     /// `[osd]` Screen Setup of the pause menu: lap timer, race position,
     /// speed unit mph.
     pub osd_lap_timer: Option<bool>,
@@ -416,6 +432,27 @@ impl Settings {
                 }
                 ("game", "car") => self.car = Some(value.into()),
                 ("game", "opponent_cars") => self.opponent_cars = Some(value.into()),
+                ("game", "opponent_liveries") => {
+                    self.opponent_liveries = Some(
+                        value
+                            .split(',')
+                            .map(|v| v.trim().parse::<usize>())
+                            .collect::<Result<_, _>>()
+                            .map_err(|_| at("[game] opponent_liveries needs numbers".into()))?,
+                    )
+                }
+                ("game", "points") => {
+                    self.points = Some(
+                        value
+                            .split(',')
+                            .map(|v| v.trim().parse::<i32>())
+                            .collect::<Result<_, _>>()
+                            .map_err(|_| at("[game] points needs numbers".into()))?,
+                    )
+                }
+                ("game", "opponent_names") => {
+                    self.opponent_names = Some(value.split(',').map(|v| v.trim().to_owned()).collect())
+                }
                 ("game", "series") => {
                     let name = value.to_ascii_lowercase();
                     if !grid_tools::series::CIRCUIT_SERIES.contains(&name.as_str()) {
@@ -425,6 +462,9 @@ impl Settings {
                         )));
                     }
                     self.series = Some(name);
+                }
+                ("game", "series_seed") => {
+                    self.series_seed = Some(value.parse::<u32>().map_err(|_| at(number(&key)))?)
                 }
                 ("drive", "enabled") => self.drive = on(&key, value).map_err(at)?,
                 ("drive", "time_limit") => {
@@ -465,12 +505,16 @@ impl Settings {
                 ("private", "body_contacts") => self.body_contacts = private(value),
                 ("private", "body_events") => self.body_events = private(value),
                 ("private", "deformation") => self.deformation = private(value),
-                ("sound", "effects") => {
+                ("sound", "effects" | "speech" | "music") => {
                     let v = count(value).map_err(at)?;
                     if v > 100 {
-                        return Err(at("`effects` must be 0..100".into()));
+                        return Err(at(format!("`{key}` must be 0..100")));
                     }
-                    self.sound_effects = Some(v as u8);
+                    *match key.as_str() {
+                        "effects" => &mut self.sound_effects,
+                        "speech" => &mut self.sound_speech,
+                        _ => &mut self.sound_music,
+                    } = Some(v as u8);
                 }
                 ("osd", "lap_timer") => self.osd_lap_timer = Some(on(&key, value).map_err(at)?),
                 ("osd", "position") => self.osd_position = Some(on(&key, value).map_err(at)?),
@@ -563,22 +607,31 @@ pub fn with_driver_aids(text: &str, aids: &grid_tools::source_vehicle::assists::
             Transmission::Manual => "manual",
         }
     );
+    with_items(text, "assists", &AID_KEYS, line)
+}
+
+/// `text` with the items of an item-grammar section (`[assists]`,
+/// `[input]`: `key=value` items separated by spaces or commas) replaced:
+/// every `owned` item is removed from that section's lines and `line` ends
+/// the section (later keys win). Everything else, comments included, is
+/// kept.
+pub fn with_items(text: &str, section: &str, owned: &[&str], line: String) -> String {
     let mut out: Vec<String> = Vec::new();
-    let mut section = String::from("assists");
-    // The new line goes after the last [assists] line.
+    let mut current = String::from("assists");
+    // The new line goes after the section's last line.
     let mut end = None;
     for raw in text.lines() {
         let body = strip_comment(raw);
         let trimmed = body.trim();
         if let Some(name) = trimmed.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            section = name.trim().to_ascii_lowercase();
+            current = name.trim().to_ascii_lowercase();
             out.push(raw.to_owned());
-            if section == "assists" {
+            if current == section {
                 end = Some(out.len());
             }
             continue;
         }
-        if section != "assists" {
+        if current != section {
             out.push(raw.to_owned());
             continue;
         }
@@ -593,13 +646,19 @@ pub fn with_driver_aids(text: &str, aids: &grid_tools::source_vehicle::assists::
             .copied()
             .filter(|i| {
                 let key = i.split_once('=').map_or(*i, |(k, _)| k).to_ascii_lowercase();
-                !AID_KEYS.contains(&key.as_str())
+                !owned.contains(&key.as_str())
             })
             .collect();
         if kept.len() == items.len() {
             out.push(raw.to_owned());
         } else if !kept.is_empty() {
-            out.push(format!("{}{}", kept.join(" "), &raw[body.len()..]));
+            // A kept comment needs whitespace before its `#`.
+            let comment = raw[body.len()..].trim_start();
+            out.push(if comment.is_empty() {
+                kept.join(" ")
+            } else {
+                format!("{} {comment}", kept.join(" "))
+            });
         } else if body.len() < raw.len() {
             // Only its comment is left.
             out.push(raw[body.len()..].trim_start().to_owned());
@@ -613,7 +672,7 @@ pub fn with_driver_aids(text: &str, aids: &grid_tools::source_vehicle::assists::
     match end {
         Some(at) => out.insert(at, line),
         None => {
-            out.push("[assists]".into());
+            out.push(format!("[{section}]"));
             out.push(line);
         }
     }
@@ -731,6 +790,88 @@ pub fn save_driver_aids(
     };
     if owned(&back) != owned(aids) {
         return Err("saved driver aids do not read back".into());
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// `[input]` keys the pause menu's Advanced screen owns.
+const TUNE_KEYS: [&str; 6] = [
+    "steering_deadzone",
+    "steering_saturation",
+    "accelerate_deadzone",
+    "accelerate_saturation",
+    "brake_deadzone",
+    "brake_saturation",
+];
+
+/// Saves the pause menu's options in the settings file `path`
+/// (`<data dir>/settings.ini`), as the original autosaves its profile when
+/// a settings screen is left (`*_st_*_autosave`, docs/PAUSE_MENU.md):
+/// `[sound] effects`, `[osd] lap_timer / position / minimap / dials /
+/// speed_units` and, with `tunes`, the `[input]` dead zones and saturations.
+pub fn save_options(path: &Path, o: &crate::pause_menu::Options, tunes: bool) -> Result<(), String> {
+    let old = match std::fs::read_to_string(path) {
+        Ok(text) => text.trim_start_matches('\u{feff}').to_owned(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let on = |b: bool| Some(if b { "on" } else { "off" }.to_owned());
+    let mut new = with_keys(
+        &old,
+        "sound",
+        &[
+            ("effects", Some(o.effects.to_string())),
+            ("speech", Some(o.speech.to_string())),
+            ("music", Some(o.music.to_string())),
+        ],
+    );
+    new = with_keys(
+        &new,
+        "osd",
+        &[
+            ("lap_timer", on(o.lap_timer)),
+            ("position", on(o.position)),
+            ("minimap", on(o.minimap)),
+            ("dials", on(o.dials)),
+            ("speed_units", Some(if o.mph { "mph" } else { "kph" }.into())),
+        ],
+    );
+    if tunes {
+        let items: Vec<String> = TUNE_KEYS
+            .iter()
+            .enumerate()
+            .map(|(i, k)| format!("{k}={}", f32::from(o.tunes[i / 2][i % 2]) / 100.))
+            .collect();
+        new = with_items(&new, "input", &TUNE_KEYS, items.join(" "));
+        // Steering Linearity is an `[assists]` item (`linearity=`).
+        new = with_items(
+            &new,
+            "assists",
+            &["linearity", "response"],
+            format!("linearity={}", f32::from(o.linearity) / 100.),
+        );
+    }
+    // The result must still be a valid settings file with these options.
+    let mut check = Settings::new();
+    check.apply(&new, path.parent().unwrap_or(Path::new(".")))?;
+    let input = check.input()?;
+    let mut back = crate::pause_menu::initial_options(&check, None);
+    if tunes {
+        let percent = |x: Option<f32>| x.map_or(255, |x| (x * 100.).round() as u8);
+        back.tunes = [
+            [percent(input.steering.dead_zone), percent(input.steering.saturation)],
+            [percent(input.accelerate.dead_zone), percent(input.accelerate.saturation)],
+            [percent(input.brake.dead_zone), percent(input.brake.saturation)],
+        ];
+    } else {
+        back.tunes = o.tunes;
+        back.linearity = o.linearity;
+    }
+    if back != *o {
+        return Err("saved options do not read back".into());
     }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -1013,6 +1154,59 @@ prop_script_speed = 12.5
         s.apply(&std::fs::read_to_string(&file).unwrap(), &dir).unwrap();
         assert_eq!(crate::front_end::Video::from_settings(&s), video);
         assert_eq!(s.osd_minimap, Some(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pause_options_are_saved_and_read_back() {
+        let mut o = crate::pause_menu::Options {
+            effects: 40,
+            speech: 30,
+            music: 0,
+            linearity: 55,
+            lap_timer: false,
+            mph: true,
+            ..Default::default()
+        };
+        o.tunes = [[10, 95], [5, 100], [0, 85]];
+        let dir = std::env::temp_dir().join(format!("grid-options-save-{}", std::process::id()));
+        let file = dir.join("settings.ini");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = "# mine\n[input]\ndevice=wheel steering_deadzone=0.3 # wheel\n[osd]\nfps = on\n";
+        std::fs::write(&file, old).unwrap();
+        // Sound and Screen Setup: the input tunes stay as they were.
+        save_options(&file, &o, false).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("steering_deadzone=0.3"), "{text}");
+        let read = |text: &str| {
+            let mut s = Settings::new();
+            s.apply(text, &dir).unwrap();
+            s
+        };
+        let s = read(&text);
+        let back = crate::pause_menu::initial_options(&s, None);
+        assert_eq!((back.effects, back.speech, back.music), (40, 30, 0));
+        // Linearity belongs to the Advanced screen: still the default.
+        assert_eq!(back.linearity, 70);
+        assert_eq!((s.osd_lap_timer, s.osd_mph, s.osd_fps), (Some(false), Some(true), Some(true)));
+        // Advanced: the tunes replace the old items, the device stays.
+        save_options(&file, &o, true).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        // Lines before the first header are `[assists]`: linearity goes there.
+        assert!(
+            text.starts_with("# mine\nlinearity=0.55\n[input]\ndevice=wheel # wheel\nsteering_deadzone=0.1 "),
+            "{text}"
+        );
+        let input = read(&text).input().unwrap();
+        assert_eq!(input.device, crate::input::Device::Wheel);
+        assert_eq!((input.steering.dead_zone, input.brake.saturation), (Some(0.1), Some(0.85)));
+        let s = read(&text);
+        assert_eq!(crate::pause_menu::initial_options(&s, None).linearity, 55);
+        assert!((s.assists().unwrap().wheel_response - o.wheel_response()).abs() < 1e-6);
+        // Saving again changes nothing.
+        save_options(&file, &o, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

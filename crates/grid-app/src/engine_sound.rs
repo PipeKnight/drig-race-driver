@@ -9,6 +9,7 @@ use grid_tools::{
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank as EngineBank, CHASE_BUS_DB, Mixer},
 };
+use super::stereo::{Pan, Stereo};
 use std::{
     sync::{
         Arc, Mutex,
@@ -29,16 +30,17 @@ pub(crate) struct EngineSound {
     /// The original group mix (`audio/GroupModeVolumes.bin`).
     pub(crate) table: Option<Arc<Table>>,
     failure: Arc<AtomicU32>,
-    bank: Arc<EngineBank>,
+    bank: Option<Arc<EngineBank>>,
     /// One bank per field car model (`Field::models`); the player's is 0.
-    banks: Vec<Arc<EngineBank>>,
+    /// `None` where the model's bank failed to load: that car is silent.
+    banks: Vec<Option<Arc<EngineBank>>>,
     pub(crate) muted: bool,
 }
 impl EngineSound {
     pub(crate) fn new(bank: Arc<EngineBank>) -> Self {
-        Self::with_models(vec![bank])
+        Self::with_models(vec![Some(bank)])
     }
-    pub(crate) fn with_models(banks: Vec<Arc<EngineBank>>) -> Self {
+    pub(crate) fn with_models(banks: Vec<Option<Arc<EngineBank>>>) -> Self {
         Self {
             mailbox: mailbox(),
             pushed: None,
@@ -46,7 +48,7 @@ impl EngineSound {
             bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
             table: None,
             failure: Arc::new(AtomicU32::new(0)),
-            bank: banks[0].clone(),
+            bank: banks.first().cloned().flatten(),
             banks,
             muted: false,
         }
@@ -81,6 +83,11 @@ pub(crate) struct OpponentEngine {
     mailbox: Mailbox,
     bus: Arc<AtomicU64>,
     model: usize,
+    /// Heard from the camera (the AI group's listener, 433AA0).
+    pan: Pan,
+    /// This car's own decoder failure: its mixer stays silent until the
+    /// next reset, the other engines play on.
+    failure: Arc<AtomicU32>,
 }
 /// audioVarieties presets `Engine`/`Exhaust`: min/max distance in metres.
 const ENGINE_DISTANCE: (f32, f32) = (10., 175.);
@@ -99,6 +106,7 @@ fn unpack_bus(word: u64) -> [f32; 2] {
 /// emitter's distance term (A23B70); `-inf` beyond the maximum distance.
 pub(crate) fn bus_levels(
     table: Option<&Table>,
+    modes: &audio_mix::ModeMix,
     camera: Camera,
     groups: [usize; 2],
     trim: f32,
@@ -106,7 +114,7 @@ pub(crate) fn bus_levels(
 ) -> [f32; 2] {
     std::array::from_fn(|k| {
         let mix = table.map_or(CHASE_BUS_DB[k], |t| {
-            t.group_db(audio_mix::NORMAL, camera, groups[k], 0.)
+            modes.group_db(t, camera, groups[k], 0.)
         }) + trim;
         audio_mix::distance_db(distances[k], ENGINE_DISTANCE.0, ENGINE_DISTANCE.1)
             .map_or(f32::NEG_INFINITY, |d| mix + d)
@@ -119,6 +127,7 @@ pub(crate) struct EngineSource {
     mailbox: Mailbox,
     bus: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
+    pan: Pan,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
@@ -157,11 +166,60 @@ impl Iterator for Decoder {
         }
         self.count = self.count.wrapping_add(1);
         let value = self.mixer.sample(self.control);
-        if self.mixer.failure.is_some() && !self.reported_failure {
+        if let Some(error) = self.mixer.failure
+            && !self.reported_failure
+        {
+            // The reason, once per failure (the audio thread; the main
+            // thread's decoder_failed line follows).
+            eprintln!(
+                "engine_audio version=2 event=decoder_error error=\"{error}\" normalized_rpm={} throttle={} generation={}",
+                self.control.normalized_rpm, self.control.throttle, self.control.generation
+            );
             self.failure.store(1, Ordering::Relaxed);
             self.reported_failure = true;
         }
         Some(value)
+    }
+}
+#[cfg(test)]
+impl Decoder {
+    /// The mixer's failure (the race-start mix test, main.rs).
+    pub(crate) fn failure(&self) -> Option<&'static str> {
+        self.mixer.failure
+    }
+}
+/// An extra engine voice outside the ECS (the race-start mix test, main.rs):
+/// its decoder, a control push per vehicle tick, and its group levels.
+#[cfg(test)]
+pub(crate) struct TestVoice {
+    pub(crate) decoder: Stereo<Decoder>,
+    mailbox: Mailbox,
+    bus: Arc<AtomicU64>,
+}
+#[cfg(test)]
+impl TestVoice {
+    pub(crate) fn new(bank: Arc<EngineBank>, pan: Pan) -> Self {
+        let source = EngineSource {
+            bank,
+            mailbox: mailbox(),
+            bus: Arc::new(AtomicU64::new(pack_bus([f32::NEG_INFINITY; 2]))),
+            failure: Arc::new(AtomicU32::new(0)),
+            pan,
+        };
+        Self { decoder: source.decoder(), mailbox: source.mailbox, bus: source.bus }
+    }
+    pub(crate) fn push(&self, control: Control) {
+        push(&self.mailbox, control);
+    }
+    pub(crate) fn set_bus(&self, db: [f32; 2]) {
+        self.bus.store(pack_bus(db), Ordering::Relaxed);
+    }
+}
+#[cfg(test)]
+impl EngineSound {
+    /// The player's published engine and exhaust group levels in dB.
+    pub(crate) fn bus_db(&self) -> [f32; 2] {
+        unpack_bus(self.bus.load(Ordering::Relaxed))
     }
 }
 impl Source for Decoder {
@@ -179,28 +237,102 @@ impl Source for Decoder {
     }
 }
 impl Decodable for EngineSource {
-    type Decoder = Decoder;
-    fn decoder(&self) -> Decoder {
-        Decoder {
-            mixer: Mixer::new(self.bank.clone()),
-            mailbox: self.mailbox.clone(),
-            bus: self.bus.clone(),
-            control: Control::default(),
-            count: 0,
-            failure: self.failure.clone(),
-            reported_failure: false,
-        }
+    type Decoder = Stereo<Decoder>;
+    fn decoder(&self) -> Stereo<Decoder> {
+        Stereo::new(
+            Decoder {
+                mixer: Mixer::new(self.bank.clone()),
+                mailbox: self.mailbox.clone(),
+                bus: self.bus.clone(),
+                control: Control::default(),
+                count: 0,
+                failure: self.failure.clone(),
+                reported_failure: false,
+            },
+            self.pan.clone(),
+            RATE,
+        )
     }
 }
-/// `banks` holds one bank per field car model, the player's first.
-pub(crate) fn install(app: &mut App, banks: Vec<Arc<EngineBank>>, table: Option<Arc<Table>>) {
+/// One bank per field car model, the player's first. A model whose bank
+/// fails to load is `None` and logged: that car is silent, the others play.
+pub(crate) fn load_banks(root: &std::path::Path, models: &[grid_tools::car::Car]) -> Vec<Option<Arc<EngineBank>>> {
+    models
+        .iter()
+        .map(|m| match EngineBank::load(root, m) {
+            Ok(bank) => Some(bank),
+            Err(error) => {
+                warn!("Engine audio of {} unavailable; that car is silent: {error}", m.stem());
+                eprintln!("engine_audio version=2 event=bank_failed car={} error=\"{error}\"", m.stem());
+                None
+            }
+        })
+        .collect()
+}
+/// `banks` holds one bank per field car model, the player's first; a model
+/// whose bank failed to load (`None`) is silent, the others play.
+pub(crate) fn install(app: &mut App, banks: Vec<Option<Arc<EngineBank>>>, table: Option<Arc<Table>>) {
+    app.add_audio_source::<EngineSource>();
+    install_systems(app, banks, table);
+}
+/// `install` without the device playback: the race-start mix test
+/// (main.rs) registers the asset and pulls the decoders itself.
+pub(crate) fn install_systems(app: &mut App, banks: Vec<Option<Arc<EngineBank>>>, table: Option<Arc<Table>>) {
     let mut sound = EngineSound::with_models(banks);
     sound.table = table;
-    app.add_audio_source::<EngineSource>()
-        .insert_resource(sound)
+    app.insert_resource(sound)
+        .init_resource::<AudioMode>()
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, publish.after(super::drive_tick))
-        .add_systems(Update, update.after(super::drive_present));
+        .add_systems(Update, (mix_mode, update).chain().after(super::drive_present));
+}
+/// The mix mode (411C10/427ED0, `audio_mix::ModeMix`) shared by the car,
+/// collision and HUD sounds; behind a lock so the collision tick can switch
+/// to Crashed while it reads the levels.
+#[derive(Resource, Default)]
+pub(crate) struct AudioMode(pub(crate) Mutex<audio_mix::ModeMix>);
+/// The race flow's `StateAudioSetState` (docs/AUDIO_RESEARCH.md §13):
+/// StartLine through the start sequence (also after a restart), Normal from
+/// the green light (`set_audio_normal_start_race`), EndOfRace on the results
+/// screen (`c_post_set_audio_endofrace`, the parent of
+/// `results_show_screen`). Free practice has no start sequence and stays
+/// Normal. Like the flow's states, a mode is set when the flow changes, so a
+/// Crashed in between (collision_sound) returns by itself. Pause keeps its
+/// existing silence; Paused, PausedReplay and Transition (replays) are not
+/// driven here [I].
+fn mix_mode(
+    mode: Res<AudioMode>,
+    sound: Res<EngineSound>,
+    trial: Option<Res<super::time_trial::Trial>>,
+    post: Option<Res<super::post_race::PostRace>>,
+    time: Res<Time<Real>>,
+    mut flow: Local<Option<usize>>,
+) {
+    use super::post_race::{Return, Stage};
+    let start_line = trial
+        .as_ref()
+        .is_some_and(|t| matches!(t.state.phase(), grid_tools::time_trial::Phase::Countdown(_)));
+    let results = post
+        .as_ref()
+        .is_some_and(|p| matches!(p.stage, Stage::Results | Stage::Confirm(_, Return::Results)));
+    let next = if start_line {
+        audio_mix::START_LINE
+    } else if results {
+        audio_mix::END_OF_RACE
+    } else {
+        audio_mix::NORMAL
+    };
+    let Ok(mut mix) = mode.0.lock() else { return };
+    if *flow != Some(next) {
+        *flow = Some(next);
+        if next != mix.mode() {
+            mix.set(next);
+            log_line!("audio_mode version=1 event=set mode={}", audio_mix::MODE_NAMES[next]);
+        }
+    }
+    if let Some(table) = sound.table.as_deref() {
+        mix.advance(table, time.delta_secs());
+    }
 }
 fn start(
     mut commands: Commands,
@@ -209,13 +341,19 @@ fn start(
     driving: Option<Res<super::Driving>>,
     field: Option<Res<super::Field>>,
 ) {
-    let handle = assets.add(EngineSource {
-        bank: sound.bank.clone(),
-        mailbox: sound.mailbox.clone(),
-        bus: sound.bus.clone(),
-        failure: sound.failure.clone(),
-    });
-    commands.spawn(AudioPlayer(handle));
+    // The player's engine and exhaust (EngineBay (0,0,4), Exhaust (0,0,-4)
+    // in the car) are heard by the Car listener at the car: in front of and
+    // behind it, so centred.
+    if let Some(bank) = sound.bank.clone() {
+        let handle = assets.add(EngineSource {
+            bank,
+            mailbox: sound.mailbox.clone(),
+            bus: sound.bus.clone(),
+            failure: sound.failure.clone(),
+            pan: Pan::centre(),
+        });
+        commands.spawn(AudioPlayer(handle));
+    }
     let cars = driving
         .as_ref()
         .and_then(|d| d.opponents.as_ref())
@@ -229,20 +367,31 @@ fn start(
             .and_then(|f| f.car_model.get(car).copied())
             .filter(|&m| m < sound.banks.len())
             .unwrap_or(0);
+        let Some(bank) = sound.banks[model].clone() else {
+            continue;
+        };
+        let pan = Pan::centre();
+        let failure = Arc::new(AtomicU32::new(0));
         let handle = assets.add(EngineSource {
-            bank: sound.banks[model].clone(),
+            bank,
             mailbox: mailbox.clone(),
             bus: bus.clone(),
-            failure: sound.failure.clone(),
+            failure: failure.clone(),
+            pan: pan.clone(),
         });
+        // Played once, as the player's engine: the decoder never ends. LOOP
+        // wraps it in rodio's `repeat_infinite`, which keeps every sample
+        // played since the start to replay it (F482 memory growth).
         commands.spawn((
             AudioPlayer(handle),
-            PlaybackSettings::LOOP,
+            PlaybackSettings::ONCE,
             OpponentEngine {
                 car,
                 mailbox,
                 bus,
                 model,
+                pan,
+                failure,
             },
         ));
     }
@@ -265,6 +414,7 @@ pub(crate) struct Listening<'w, 's> {
     pub(crate) trial: Option<Res<'w, super::time_trial::Trial>>,
     menu: Option<Res<'w, super::pause_menu::PauseMenu>>,
     cameras: Option<Res<'w, super::camera::Cameras>>,
+    mode: Option<Res<'w, AudioMode>>,
     listener: Query<'w, 's, &'static GlobalTransform, With<super::ViewerCamera>>,
 }
 impl Listening<'_, '_> {
@@ -281,6 +431,19 @@ impl Listening<'_, '_> {
         self.trial.as_ref().is_some_and(|t| t.finished())
             && driving.opponents.as_ref().is_none_or(|o| o.standings.over())
     }
+    /// The mix mode's current group terms.
+    pub(crate) fn modes(&self) -> audio_mix::ModeMix {
+        self.mode.as_ref().and_then(|m| m.0.lock().ok().map(|m| m.clone())).unwrap_or_default()
+    }
+    /// 4535A0's request for the Crashed mix (0.2 s); whether it was set.
+    pub(crate) fn crash(&self, table: &Table) -> bool {
+        let Some(Ok(mut mix)) = self.mode.as_ref().map(|m| m.0.lock()) else { return false };
+        let set = mix.set_for(table, audio_mix::CRASHED, audio_mix::CRASH_SECONDS);
+        if set {
+            log_line!("audio_mode version=1 event=set mode=Crashed seconds={}", audio_mix::CRASH_SECONDS);
+        }
+        set
+    }
     pub(crate) fn camera(&self) -> Camera {
         self.cameras
             .as_ref()
@@ -294,6 +457,15 @@ impl Listening<'_, '_> {
                 t.translation()
             })
     }
+    /// Stereo gains of `emitter` heard at `listener` (A23DC0's listener
+    /// space: the position relative to the listener in its orientation).
+    /// Both listeners face the camera's way [I: the Car listener's chase
+    /// blend 43F7A0 is not reconstructed]; the camera listener sits at the
+    /// camera, the Car listener at the player's car.
+    pub(crate) fn heard(&self, listener: Vec3, emitter: Vec3) -> [f32; 2] {
+        let rotation = self.listener.single().map_or(Quat::IDENTITY, |t| t.rotation());
+        super::stereo::pan_from(rotation, listener, emitter)
+    }
 }
 fn update(
     mut sound: ResMut<EngineSound>,
@@ -304,18 +476,24 @@ fn update(
     listening: Listening,
     opponent_engines: Query<&OpponentEngine>,
 ) {
-    let (trim, camera) = (listening.trim(), listening.camera());
+    let (trim, camera, modes) = (listening.trim(), listening.camera(), listening.modes());
     let table = sound.table.clone();
     let table = table.as_deref();
     let ear = listening.ear(&driving.runtime.pose());
     let player = Mat4::from_cols_array(&driving.runtime.pose());
-    let emitters: Vec<_> = sound.banks.iter().map(|b| b.emitters).collect();
+    // EngineBay (0, 0, 4) and Exhaust (0, 0, -4) for a silent model.
+    let emitters: Vec<_> = sound
+        .banks
+        .iter()
+        .map(|b| b.as_ref().map_or([[0., 0., 4.], [0., 0., -4.]], |b| b.emitters))
+        .collect();
     let distances = |pose: Mat4, model: usize| {
         emitters[model].map(|e| pose.transform_point3(Vec3::from_array(e)).distance(ear))
     };
     sound.bus.store(
         pack_bus(bus_levels(
             table,
+            &modes,
             camera,
             [audio_mix::ENGINE, audio_mix::EXHAUST],
             trim,
@@ -343,11 +521,17 @@ fn update(
     }
     if let Some(opponents) = &driving.opponents {
         for engine in &opponent_engines {
+            if engine.failure.swap(0, Ordering::Relaxed) != 0 {
+                eprintln!("engine_audio version=2 event=decoder_failed car={} muted=car_only", engine.car);
+            }
             let car = &opponents.multi.cars[engine.car];
-            let distances = distances(Mat4::from_cols_array(&car.pose()), engine.model);
+            let pose = car.pose();
+            engine.pan.set(listening.heard(ear, Vec3::new(pose[12], pose[13], pose[14])));
+            let distances = distances(Mat4::from_cols_array(&pose), engine.model);
             engine.bus.store(
                 pack_bus(bus_levels(
                     table,
+                    &modes,
                     camera,
                     [audio_mix::AI; 2],
                     trim,
@@ -430,6 +614,7 @@ pub(crate) fn check(root: &std::path::Path) -> Result<(), Box<dyn std::error::Er
             throttle: 0.3,
             audible: true,
             generation: 0,
+            gear: 0,
         },
     );
     let mut app = App::new();
@@ -486,9 +671,11 @@ mod tests {
                 mailbox: mailbox.clone(),
                 bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
                 failure: Arc::new(AtomicU32::new(0)),
+                pan: Pan::centre(),
             }
-            .decoder();
-            let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0 };
+            .decoder()
+            .inner;
+            let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0, gear: 0 };
             push(&mailbox, control(0.3));
             for _ in 0..grid_tools::engine_audio_continuous::BLOCK {
                 decoder.next();
@@ -508,6 +695,27 @@ mod tests {
             assert_eq!(seen, [quantised(0.4), quantised(0.5), quantised(0.6)]);
         }).unwrap().join().unwrap();
     }
+    /// A model whose bank fails to load leaves only that car silent: the
+    /// others load, and the player's source is spawned only with a bank.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT purchased sources; no audio device used"]
+    fn a_failed_bank_silences_only_its_car() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let models = grid_tools::car::Car::list("lac,zzz,bmw").unwrap();
+        let banks = load_banks(std::path::Path::new(&root), &models);
+        assert_eq!(banks.iter().map(Option::is_some).collect::<Vec<_>>(), [true, false, true]);
+        let spawned = |banks: Vec<Option<Arc<EngineBank>>>| {
+            let mut app = App::new();
+            app.add_plugins((bevy::asset::AssetPlugin::default(), bevy::app::TaskPoolPlugin::default()))
+                .init_asset::<EngineSource>()
+                .insert_resource(EngineSound::with_models(banks))
+                .add_systems(Startup, start);
+            app.update();
+            app.world_mut().query::<&AudioPlayer<EngineSource>>().iter(app.world()).count()
+        };
+        assert_eq!(spawned(banks.clone()), 1);
+        assert_eq!(spawned(banks[1..].to_vec()), 0);
+    }
     #[test]
     #[ignore = "requires GRID_GAME_ROOT purchased sources; no audio device used"]
     fn source_engine_sound_pause_mute_reset_and_failure() {
@@ -515,7 +723,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)) }.decoder();
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre() }.decoder().inner;
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();

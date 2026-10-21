@@ -1,0 +1,4 @@
+### 7 October 2026 — five-sample radius selector verified
+
+- `wheel_radius::adjustment` and private CLI/probe/validator select nearest angular sample with strict first-tie retention, f32 phase/reflection and wide modulo/subtraction. Whole998470 plus original CRT helper run without stubs or writable mapped pages. **252cases/252words exact debug/release**, `isolated-wheel-radius-20261007-01/`, `02/`;96retained wheel inputs plus156controls. Probe b82f3019b96440d01e79ea848e2b188b923a07ca680f0e0ce690cfbe5b85dd6e. Analytic periodic/tie test passes; sample generation remains separate. [Contract](docs/WHEEL_RADIUS.md).
+- Existing tools reused, no new game launch/settings change. Contact capture committed f37ad07. Radius logic is a separate commit; new material arithmetic remains separate until its validation/docs are recorded.

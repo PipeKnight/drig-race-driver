@@ -45,6 +45,7 @@ part of the time the owner was playing a game; see "Measurement noise".
 | Bevy `trace_chrome` | Bevy 0.19.1, tracing-chrome 0.7.2, tracing 0.1.44, tracing-subscriber 0.3.23 | Per-system spans. grid-app feature `trace` (off by default). |
 | `tools/chrome_trace_summary.py` (new) | this commit, bundled Python 3.12.14 | Streams a trace (1.5 GB for 33 s) and reports busy time per thread and the largest spans per frame. |
 | `GRID_CPU_CLUSTERING=1` (new, F380) | grid-app | Bevy's CPU light clustering (the Android path) instead of GPU clustering; rendering only. |
+| `GRID_ASSET_COUNTS=1` (new, F482) | grid-app | Every 600 frames: spawned entities and Mesh/StandardMaterial/Image counts of the main world; entities, prepared meshes and images of the render world; wgpu's live buffers, textures, views, bind groups, samplers and pipelines and its GPU allocator total. Flat counts with a growing process rule out assets, entities and GPU objects (see "Memory growth"). |
 | `tools/sample_profile.py` | F305 | User-mode stack sampler, for the headless race. With Bevy's ~30 threads it samples each thread too rarely to time systems, so the app was timed with the two tools above. |
 
 Commands (private paths as in docs/SOAK_TESTING.md):
@@ -678,6 +679,55 @@ No measurable change: the per-round differences scatter around zero within ±1.5
 outlier each way under load). One small mesh per frame is below the desktop noise. Whether
 the phone shows it is not measured; it now has no per-frame mesh replacement on a solo lap
 apart from smoke-free debris and real HUD changes.
+
+## Memory growth (F482)
+
+Reported by the career session (19 October 2026): a plain release race on Nürburgring
+route_1 with `--drive-ticks` and the autopilot grew by ~9.5–10 MB/s with 20 cars and
+~5.7 MB/s with 12, and kept growing after `drive_script_complete`. An unattended 20-car
+run reached 64 GiB; a guarded one ended in wgpu `DeviceLost` and a `bevy_pbr` cluster
+`PoisonError` panic once memory ran out.
+
+**Cause [V]: audio, not rendering.** The opponent engines, every car's tyre voices and the
+HUD sounds were spawned with `PlaybackSettings::LOOP`. Their decoders synthesise sound
+forever (`Iterator::next` never returns `None`), so the loop never repeats anything, but
+Bevy plays a looped source as rodio 0.22's `repeat_infinite()`. That wraps the decoder in
+`Buffered` (`rodio/src/source/repeat.rs`) and keeps a clone of the first span to replay
+from. Every span decoded since the start then stays reachable: one `Vec<f32>` of 32 768
+samples (131 072 bytes) per source every 0.68 s. With 48 kHz mono f32 that is 192 kB/s per
+source: 19 opponent engines + 20 tyre sets + the stereo HUD ≈ 7.9 MB/s for 20 cars,
+≈ 4.8 MB/s for 12 (Rust heap; the working set adds allocator overhead). It grows with audio
+time, not frames or ticks, so it went on in a finished race. The player's engine was already
+played once and did not grow.
+
+The collision-impact source added in F479 (one mono 48 kHz source, `collision_sound.rs`)
+had the same LOOP and would have added 192 kB/s; it landed after the measurements below
+and is fixed the same way (by inspection: its decoder never ends either).
+
+**Fix.** These sources are played with `PlaybackSettings::ONCE`, as the player's engine:
+the decoder is appended to the sink as it is, nothing is buffered, and since it never ends
+the sink never empties. No cap or purge. Test
+`tyre_sound::tests::endless_tyre_voices_play_once` (ignored; needs the purchased bank).
+
+**How it was found** (evidence: worktree trusting-driscoll-f0fd01 `local/leak/`):
+1. Guarded 20-car runs (`local/leak/guard2.sh`: own PID by snapshot, working set and private
+   bytes every 10 s, killed above the limit or after the time cap).
+2. `GRID_ASSET_COUNTS=1`: all asset, entity and wgpu counts and the GPU allocator total
+   were flat (e.g. 15 819 meshes, 648 materials, 476 images, 666 GPU allocations) while the
+   process grew, so neither Bevy assets nor GPU resources were leaking.
+3. A temporary counting global allocator showed the Rust heap itself growing
+   ~55 KB per frame (`local/leak/runs/base.out`).
+4. A temporary sampling heap profiler (every 97th allocation backtraced, dropped when
+   freed, live sites printed; source kept as `local/leak/asset_counts_sampler.rs`, not
+   committed) put all growing bytes under
+   `rodio::source::buffered::extract::<engine_sound::Decoder / tyre_sound::Decoder /
+   hud_sound::Decoder>` on the cpal output thread (`local/leak/runs/sample1.out`).
+   An earlier subsystem bisection had mis-read the audio-off run as still growing (its rate
+   window included loading); its samples were in fact flat after loading.
+
+**Android** shares this path (same `bevy_audio` feature and the same `engine_sound`,
+`tyre_sound` and `hud_sound` installs), so phones grew by the same ~0.19 MB/s per endless
+source while racing, with far less memory. Not measured on a device; no APK built here.
 
 ## Follow-ups (not done here)
 

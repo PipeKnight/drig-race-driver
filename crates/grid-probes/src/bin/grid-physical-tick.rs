@@ -396,6 +396,7 @@ fn run() -> Result<(), Failure> {
                 workspace,
                 cached_pair,
                 cached_material,
+                joints: Default::default(),
             },
         };
         if grouped {
@@ -439,6 +440,7 @@ fn run() -> Result<(), Failure> {
                 contacts,
                 active_order,
                 selector: 0,
+                joints: vec![],
             };
             let manager = grouped_physical_frame::Manager {
                 parameters: input.step.parameters,

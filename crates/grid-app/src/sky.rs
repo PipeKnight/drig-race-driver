@@ -1,4 +1,6 @@
-//! Source Donington sky geometry/UVs with an independently authored background shader.
+//! The route's source sky dome (`sky.pssg`, docs/SKY.md) with an independently
+//! authored background shader: `sky.fx` on every track, Le Mans' six-slot
+//! `nightsky.fx` blended by the time of day.
 use bevy::{
     asset::{RenderAssetUsages, uuid_handle},
     camera::visibility::NoFrustumCulling,
@@ -10,7 +12,11 @@ use bevy::{
     shader::ShaderRef,
     transform::TransformSystems,
 };
-use grid_formats::{material, mesh, pssg, scene, texture};
+use grid_formats::pssg;
+use grid_tools::{
+    route::Route,
+    time_of_day::{self, Mode, Timeline},
+};
 use std::path::Path;
 
 const SHADER: Handle<Shader> = uuid_handle!("90c5b5ee-1eb2-4cec-8499-b83994cc6df2");
@@ -19,7 +25,11 @@ const SHADER: Handle<Shader> = uuid_handle!("90c5b5ee-1eb2-4cec-8499-b83994cc6df
 struct SkyMaterial {
     #[texture(0)]
     #[sampler(1)]
-    texture: Handle<Image>,
+    first: Handle<Image>,
+    #[texture(3)]
+    #[sampler(4)]
+    second: Handle<Image>,
+    /// skyScaleAndInvGamma.xy, then the nightsky blend timeOfDay.z.
     #[uniform(2)]
     tone: Vec4,
 }
@@ -49,82 +59,146 @@ impl Material for SkyMaterial {
 #[derive(Component)]
 struct SkyDome;
 
+/// Sky state at one time of day: slot pair, blend and tone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Look {
+    first: usize,
+    second: usize,
+    blend: f32,
+    scale: f32,
+    exponent: f32,
+}
+
 #[derive(Resource)]
 struct SourceSky {
     mesh: Mesh,
-    dds: Vec<u8>,
+    /// Base-level DDS per slot (one, or six for nightsky.fx).
+    dds: Vec<Vec<u8>>,
     environment: Option<Image>,
-    tone: Vec4,
+    /// Le Mans: the daynight timeline drives slots and tone.
+    timeline: Option<Timeline>,
+    /// lighting.xml tone; `None` keeps the raw texture (`--sky-tone raw`).
+    saved: Option<[f32; 2]>,
+    look: Look,
+}
+
+impl SourceSky {
+    /// The look at day fraction `t` [V 0x95FCE0, 0x9ACE90]: slots from
+    /// `skyTime`, tone from `skyScale`/`skygamma` keys over lighting.xml.
+    fn look_at(&self, t: f64) -> Look {
+        let (first, second, blend) = match (&self.timeline, self.dds.len()) {
+            (Some(tl), 6) => tl.value("skyTime", t).map_or((0, 0, 0.), time_of_day::sky_textures),
+            _ => (0, 0, 0.),
+        };
+        let [mut scale, mut exponent] = self.saved.unwrap_or([1., 1.]);
+        if let (Some(tl), Some(_)) = (&self.timeline, self.saved) {
+            scale = tl.value("skyScale", t).unwrap_or(scale);
+            exponent = tl.value("skygamma", t).unwrap_or(exponent);
+        }
+        Look {
+            first,
+            second,
+            blend,
+            scale: scale.clamp(0., 16.),
+            exponent: exponent.clamp(0.01, 16.),
+        }
+    }
+}
+
+/// The route's own `sky.pssg` (the Haruna night routes ship one), else the
+/// track's [I: same order as lighting.xml, grid_tools::environment].
+pub fn sky_file(root: &Path, route: &Route) -> String {
+    let own = route.file("sky.pssg");
+    if root.join(&own).is_file() {
+        own
+    } else {
+        route.track_file("sky.pssg")
+    }
 }
 
 pub fn install(
     app: &mut App,
     root: &Path,
+    route: &Route,
     source_ibl: bool,
     source_tone: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let tone = if source_tone {
-        let bytes = super::read(&root.join("tracks/europe/donington/lighting.xml"))?;
-        let saved = grid_formats::track_lighting::read_sky(&bytes)?;
-        Vec4::new(saved.scale, saved.exponent, 0., 0.)
+    let environment = grid_tools::environment::Environment::for_route(root, route)?;
+    let saved = if source_tone {
+        let l = &environment.lighting;
+        let scale = l.scalar("skyscale").ok_or("lighting skyscale missing")?;
+        let exponent = l.scalar("skygamma").ok_or("lighting skygamma missing")?;
+        if !(0.0..=16.).contains(&scale) || !(0.01..=16.).contains(&exponent) {
+            return Err("sky controls outside supported range".into());
+        }
+        Some([scale, exponent])
     } else {
-        Vec4::new(1., 1., 0., 0.)
+        None
     };
-    println!(
-        "source_sky_tone scale={} exponent={} source_controls={} space=linear-adaptation original-sampler-space=unverified",
-        tone.x, tone.y, source_tone
-    );
-    let bytes = super::read(&root.join("tracks/europe/donington/sky.pssg"))?;
+    let timeline = match environment.mode() {
+        Mode::Timeline => Timeline::load(root, route)?,
+        _ => None,
+    };
+    let file = sky_file(root, route);
+    let bytes = super::read(&root.join(&file))?;
     let tree = pssg::read_tree(&bytes)?;
-    let sources = mesh::read_meshes(&tree)?;
-    let draws = scene::read_static_draws(&tree, &sources)?;
-    if draws.len() != 1 {
-        return Err("expected one Donington sky draw".into());
-    }
-    let draw = &draws[0];
-    let source = &sources[draw.source];
-    if source.texcoords.len() != source.positions.len() {
-        return Err("sky UV count mismatch".into());
-    }
-    let bindings = material::read_texture_bindings(&tree)?;
-    let binding = bindings
-        .iter()
-        .find(|b| b.shader == draw.material && b.sampler == b"TDiffuseAlphaMap")
-        .ok_or("sky diffuse binding missing")?;
-    let textures = texture::read_textures(&tree)?;
-    let tex = textures
-        .iter()
-        .find(|t| t.id == binding.texture)
-        .ok_or("sky texture missing")?;
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
+    let sky = grid_formats::sky::read(&tree).map_err(|e| format!("{file}: {e}"))?;
+    let dds: Vec<_> = (0..sky.slots.len()).map(|i| sky.texture(i).base_dds()).collect();
+    let mut source = SourceSky {
+        mesh: Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()),
+        dds,
+        environment: None,
+        timeline,
+        saved,
+        look: Look {
+            first: 0,
+            second: 0,
+            blend: 0.,
+            scale: 1.,
+            exponent: 1.,
+        },
+    };
+    // Diagnostic: GRID_SKY_HOUR (0..24) sets the start look of a static
+    // render; a Le Mans drive follows its own clock.
+    let start = std::env::var("GRID_SKY_HOUR")
+        .ok()
+        .and_then(|h| h.parse::<f64>().ok())
+        .filter(|h| (0.0..24.0).contains(h))
+        .map_or_else(|| time_of_day::day_fraction(0., None), |h| h / 24.);
+    source.look = source.look_at(start);
+    let look = source.look;
+    println!(
+        "source_sky file={file} slots={} lighting={} tone_source={source_tone} timeline={} start_slots={},{} blend={:.3} scale={} exponent={} space=linear-adaptation original-sampler-space=unverified",
+        sky.slots.len(),
+        environment.lighting_file,
+        source.timeline.is_some(),
+        look.first,
+        look.second,
+        look.blend,
+        look.scale,
+        look.exponent,
     );
-    let positions: Vec<_> = source.positions[draw.vertices.clone()]
-        .iter()
-        .map(|p| scene::transform_point(&draw.transform, *p))
-        .collect();
-    let environment = source_ibl
+    // The bake takes the start look's first slot; it is not re-baked as the
+    // Le Mans day turns.
+    source.environment = source_ibl
         .then(|| {
             super::sky_environment::bake(
-                &positions,
-                &source.texcoords[draw.vertices.clone()],
-                &draw.indices,
-                tex,
-                [tone.x, tone.y],
+                &sky.positions,
+                &sky.texcoords,
+                &sky.indices,
+                sky.texture(look.first),
+                [look.scale, look.exponent],
             )
         })
         .transpose()?;
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_UV_0,
-        source.texcoords[draw.vertices.clone()].to_vec(),
-    );
-    mesh.insert_indices(Indices::U16(draw.indices.clone()));
+    source.mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, sky.positions.clone());
+    source.mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, sky.texcoords.clone());
+    source.mesh.insert_indices(Indices::U16(sky.indices.clone()));
+    let tex = sky.texture(0);
     println!(
         "source_sky vertices={} triangles={} texture={}x{}",
-        draw.vertices.len(),
-        draw.indices.len() / 3,
+        sky.positions.len(),
+        sky.indices.len() / 3,
         tex.width,
         tex.height
     );
@@ -132,19 +206,18 @@ pub fn install(
         SHADER.id(),
         Shader::from_wgsl(include_str!("sky.wgsl"), "grid_source_sky.wgsl"),
     )?;
-    app.insert_resource(SourceSky {
-        mesh,
-        dds: tex.base_dds(),
-        environment,
-        tone,
-    })
-    .add_plugins(MaterialPlugin::<SkyMaterial>::default())
-    .add_systems(Startup, setup)
-    .add_systems(PostStartup, setup_environment)
-    .add_systems(
-        PostUpdate,
-        follow_camera.before(TransformSystems::Propagate),
-    );
+    let animated = source.timeline.is_some();
+    app.insert_resource(source)
+        .add_plugins(MaterialPlugin::<SkyMaterial>::default())
+        .add_systems(Startup, setup)
+        .add_systems(PostStartup, setup_environment)
+        .add_systems(
+            PostUpdate,
+            follow_camera.before(TransformSystems::Propagate),
+        );
+    if animated {
+        app.add_systems(Update, follow_time_of_day);
+    }
     if source_ibl {
         use bevy::{
             pbr::generate,
@@ -220,6 +293,9 @@ fn setup_environment(
     );
 }
 
+#[derive(Resource)]
+struct SlotImages(Vec<Handle<Image>>);
+
 fn setup(
     mut commands: Commands,
     source: Res<SourceSky>,
@@ -227,28 +303,63 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<SkyMaterial>>,
 ) {
-    let image = super::texture_upload::image(
-        &source.dds,
-        ImageSampler::Descriptor(ImageSamplerDescriptor {
-            address_mode_u: ImageAddressMode::Repeat,
-            ..ImageSamplerDescriptor::linear()
-        }),
-        RenderAssetUsages::default(),
-    )
-    .expect("validated source sky DDS");
+    let slots: Vec<_> = source
+        .dds
+        .iter()
+        .map(|dds| {
+            let image = super::texture_upload::image(
+                dds,
+                ImageSampler::Descriptor(ImageSamplerDescriptor {
+                    address_mode_u: ImageAddressMode::Repeat,
+                    ..ImageSamplerDescriptor::linear()
+                }),
+                RenderAssetUsages::default(),
+            )
+            .expect("validated source sky DDS");
+            images.add(image)
+        })
+        .collect();
+    let look = source.look;
     commands.spawn((
         SkyDome,
-        Name::new("Donington source sky"),
+        Name::new("Source sky"),
         NoFrustumCulling,
         NotShadowCaster,
         NotShadowReceiver,
         Mesh3d(meshes.add(source.mesh.clone())),
         MeshMaterial3d(materials.add(SkyMaterial {
-            texture: images.add(image),
-            tone: source.tone,
+            first: slots[look.first].clone(),
+            second: slots[look.second].clone(),
+            tone: Vec4::new(look.scale, look.exponent, look.blend, 0.),
         })),
         Transform::default(),
     ));
+    commands.insert_resource(SlotImages(slots));
+}
+
+/// Le Mans: follow the event's clock (15:00 outside a time-limited race).
+fn follow_time_of_day(
+    event: Option<Res<super::le_mans_event::LeMansEvent>>,
+    slots: Option<Res<SlotImages>>,
+    mut source: ResMut<SourceSky>,
+    domes: Query<&MeshMaterial3d<SkyMaterial>, With<SkyDome>>,
+    mut materials: ResMut<Assets<SkyMaterial>>,
+) {
+    let (Some(event), Some(slots)) = (event, slots) else {
+        return;
+    };
+    let look = source.look_at(event.time_of_day);
+    if look == source.look {
+        return;
+    }
+    source.look = look;
+    for handle in &domes {
+        if let Some(mut m) = materials.get_mut(&handle.0) {
+            m.first = slots.0[look.first].clone();
+            m.second = slots.0[look.second].clone();
+            m.tone = Vec4::new(look.scale, look.exponent, look.blend, 0.);
+        }
+    }
 }
 
 fn follow_camera(
@@ -260,5 +371,69 @@ fn follow_camera(
     };
     for mut sky in &mut skies {
         sky.translation = camera.translation;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROOT: &str = r"C:\Program Files (x86)\Steam\steamapps\common\Grid";
+
+    #[test]
+    #[ignore = "requires owner's purchased GRID installation"]
+    fn purchased_skies_load_on_every_track_and_le_mans_turns_dark_at_night() {
+        let root = Path::new(ROOT);
+        for track in [
+            "europe/donington",
+            "europe/istanbul_park",
+            "europe/jarama",
+            "europe/le_mans",
+            "europe/milan",
+            "europe/nurburgring",
+            "europe/spa_francorchamps",
+            "japan/haruna",
+            "japan/okutama",
+            "japan/shibuya",
+            "japan/yokohama_docks",
+            "usa/detroit",
+            "usa/long_beach",
+            "usa/san_fran",
+            "usa/washington",
+        ] {
+            let route = Route::new(&format!("tracks/{track}/route_0")).unwrap();
+            let file = sky_file(root, &route);
+            let bytes = std::fs::read(root.join(&file)).unwrap();
+            let tree = pssg::read_tree(&bytes).unwrap();
+            let sky = grid_formats::sky::read(&tree).unwrap();
+            let slots = if track == "europe/le_mans" { 6 } else { 1 };
+            assert_eq!(sky.slots.len(), slots, "{track}");
+            let names: Vec<_> = sky.slots.iter().map(|s| String::from_utf8_lossy(s)).collect();
+            println!("sky {track} {file} slots={names:?}");
+        }
+        let night = Route::new("tracks/japan/haruna/route_1").unwrap();
+        assert_eq!(sky_file(root, &night), "tracks/japan/haruna/route_1/sky.pssg");
+        let route = Route::new("tracks/europe/le_mans/route_0").unwrap();
+        let source = SourceSky {
+            mesh: Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()),
+            dds: vec![vec![]; 6],
+            environment: None,
+            timeline: Timeline::load(root, &route).unwrap(),
+            saved: Some([1., 0.735]),
+            look: Look {
+                first: 0,
+                second: 0,
+                blend: 0.,
+                scale: 1.,
+                exponent: 1.,
+            },
+        };
+        let day = source.look_at(15. / 24.);
+        let night = source.look_at(1. / 24.);
+        println!("le_mans 15:00 {day:?} 01:00 {night:?}");
+        // skyTime 1/3 at 15:00: f = 2.0, slot 2 (sky_lemans_2) [V log].
+        assert_eq!((day.first, day.second), (2, 3));
+        assert_eq!(night.first, 5);
+        assert!(night.scale < day.scale);
     }
 }

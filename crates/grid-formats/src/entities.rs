@@ -11,6 +11,22 @@ pub struct Entity<'a> {
     pub renderables: Vec<Renderable<'a>>,
     pub cloth: Vec<&'a [u8]>,
     pub links: usize,
+    /// The instance's `TEMPLATEENTITYLINK`s, in file order.
+    pub entity_links: Vec<EntityLink<'a>>,
+}
+/// A `TEMPLATEENTITYLINK` of an entity instance: this entity (the holder)
+/// is linked to `primary`. A holder constraint whose `body2uri` is
+/// `link<index>` joins its body to the primary entity's body named by a
+/// `TEMPLATECONSTRAINTLINK` (0x7B7160, 0x7D3AF0, 0x7D5540).
+#[derive(Debug)]
+pub struct EntityLink<'a> {
+    /// The primary entity instance's `id` (without `#`).
+    pub primary: &'a [u8],
+    /// `index` (link record +0x34); absent: none.
+    pub index: Option<u32>,
+    /// The `TEMPLATECONSTRAINTLINK` body ids (without the container), in
+    /// file order.
+    pub bodies: Vec<&'a [u8]>,
 }
 #[derive(Debug)]
 pub struct Renderable<'a> {
@@ -46,8 +62,26 @@ pub struct ShapeBehaviour<'a> {
     /// Subentities the behaviour type adds (their own shape behaviours are
     /// not resolved).
     pub added: Vec<Renderable<'a>>,
-    /// Constraint components the behaviour type adds.
-    pub constraints: usize,
+    /// Constraint components the behaviour type adds, in its change order.
+    pub constraints: Vec<Constraint<'a>>,
+}
+/// A `TEMPLATECONSTRAINT` (the template reader 0x7CF4B0): the joint between
+/// two rigid bodies of the template, its properties and its frame in the
+/// entity.
+#[derive(Debug)]
+pub struct Constraint<'a> {
+    pub id: &'a [u8],
+    /// `#id` of a template rigid body (`body1uri`; "none" is an error in the
+    /// original).
+    pub body1: &'a [u8],
+    /// `#id`, `none`/`world` (the world) or `link1` (the linked entity's body).
+    pub body2: &'a [u8],
+    /// Qualified constraint properties (`physparams.xml#cXxx`).
+    pub properties: &'a [u8],
+    /// `TEMPLATETRANSFORM` as read (the reader renormalises it).
+    pub transform: [f32; 16],
+    /// `display` (+0x140): a non-empty value.
+    pub display: bool,
 }
 #[derive(Debug)]
 pub enum Primitive {
@@ -224,11 +258,18 @@ pub fn read<'a>(placements: &Tree<'a>, types: &Tree<'a>) -> Result<Vec<Entity<'a
             renderables: Vec::new(),
             cloth: Vec::new(),
             links: 0,
+            entity_links: Vec::new(),
         };
         for &child in &placements.nodes[i].children {
             match placements.name(child) {
                 b"TEMPLATETRANSFORM" => {}
-                b"TEMPLATEENTITYLINK" => entity.links += 1,
+                b"TEMPLATEENTITYLINK" => {
+                    entity.links += 1;
+                    // A link without `primaryentity` links nothing.
+                    if let Some(link) = entity_link(placements, child)? {
+                        entity.entity_links.push(link);
+                    }
+                }
                 _ => {
                     return fail(
                         placements.nodes[child].offset,
@@ -258,6 +299,34 @@ pub fn read<'a>(placements: &Tree<'a>, types: &Tree<'a>) -> Result<Vec<Entity<'a
         return fail(0, "no entity placements");
     }
     Ok(entities)
+}
+
+fn entity_link<'a>(tree: &Tree<'a>, node: usize) -> Result<Option<EntityLink<'a>>> {
+    let Ok(primary) = tree.string(node, b"primaryentity") else {
+        return Ok(None);
+    };
+    let primary = primary.strip_prefix(b"#").ok_or(crate::Error {
+        offset: tree.nodes[node].offset,
+        message: "unqualified primary entity",
+    })?;
+    let index = tree.integer(node, b"index").ok();
+    let mut bodies = Vec::new();
+    for &child in &tree.nodes[node].children {
+        if tree.name(child) != b"TEMPLATECONSTRAINTLINK" {
+            return fail(tree.nodes[child].offset, "unsupported entity-link child");
+        }
+        let uri = tree.string(child, b"body")?;
+        let split = uri.iter().position(|&v| v == b'#').ok_or(crate::Error {
+            offset: tree.nodes[child].offset,
+            message: "unqualified constraint-link body",
+        })?;
+        bodies.push(&uri[split + 1..]);
+    }
+    Ok(Some(EntityLink {
+        primary,
+        index,
+        bodies,
+    }))
 }
 
 /// One subentity's renderable, rigid body and collision shapes. With
@@ -378,7 +447,7 @@ fn shape_behaviour<'a>(
         behaviour_type,
         deleted: Vec::new(),
         added: Vec::new(),
-        constraints: 0,
+        constraints: Vec::new(),
     };
     for &change in &types.nodes[kind].children {
         if types.name(change) != b"TEMPLATECOMPONENTCHANGE" {
@@ -408,7 +477,16 @@ fn shape_behaviour<'a>(
                     .added
                     .push(subentity(types, type_ids, template, component, false)?);
             }
-            (b"add", b"TEMPLATECONSTRAINT") => result.constraints += 1,
+            (b"add", b"TEMPLATECONSTRAINT") => result.constraints.push(Constraint {
+                id,
+                body1: types.string(component, b"body1uri")?,
+                body2: types.string(component, b"body2uri")?,
+                properties: types.string(component, b"props")?,
+                transform: transform(types, component)?,
+                display: types
+                    .attribute(component, b"display")
+                    .is_ok_and(|v| v.iter().any(|&b| b != 0)),
+            }),
             _ => {
                 return fail(
                     types.nodes[change].offset,

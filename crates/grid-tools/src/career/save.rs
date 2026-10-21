@@ -53,12 +53,16 @@ pub fn write(c: &Career) -> Result<String, Error> {
     put(format!("team_founded {}", c.team_founded as u8));
     put(format!("team_name {}", c.team_name));
     for car in &c.cars {
-        put(format!("car {} {}", car.vehicle_id, car.livery));
+        put(format!(
+            "car {} {} {} {} {} {:?}",
+            car.vehicle_id, car.livery, car.race_wins, car.event_wins, car.major_crashes, car.odometer_m
+        ));
     }
     if let Some(t) = &c.team_mate {
         put(format!("team_mate {} {}", t.driver_id, t.winnings_percentage));
     }
     put(format!("team_mate_spending {}", c.team_mate_spending));
+    put(format!("season_earnings {}", c.season_earnings));
     for o in &c.sponsor_offers {
         put(format!("sponsor_offer {o}"));
     }
@@ -90,8 +94,12 @@ pub fn write(c: &Career) -> Result<String, Error> {
         put(format!("head_to_head {e}"));
     }
     put(format!("game_completed {}", c.game_completed as u8));
+    for (layout, n) in &c.layout_races {
+        put(format!("layout_races {layout} {n}"));
+    }
     put(format!("races_won {}", c.races_won));
     put(format!("races_lost {}", c.races_lost));
+    super::ebay::write(&c.ebay, &mut put);
     let mut body = lines.join("\n");
     body.push('\n');
     let sum = fnv1a(body.as_bytes());
@@ -156,9 +164,14 @@ pub fn read(text: &str) -> Result<Career, Error> {
             "season_number" => c.season_number = num(f.next(), key)?,
             "team_founded" => c.team_founded = flag(f.next(), key)?,
             "team_name" => c.team_name = rest.to_owned(),
+            // Older saves end after the livery: a car with no history.
             "car" => c.cars.push(OwnedCar {
                 vehicle_id: num(f.next(), key)?,
                 livery: num(f.next(), key)?,
+                race_wins: f.next().map_or(Ok(0), |v| num(Some(v), key))?,
+                event_wins: f.next().map_or(Ok(0), |v| num(Some(v), key))?,
+                major_crashes: f.next().map_or(Ok(0), |v| num(Some(v), key))?,
+                odometer_m: f.next().map_or(Ok(0.0), |v| num(Some(v), key))?,
             }),
             "team_mate" => {
                 c.team_mate = Some(HiredTeamMate {
@@ -167,6 +180,7 @@ pub fn read(text: &str) -> Result<Career, Error> {
                 })
             }
             "team_mate_spending" => c.team_mate_spending = num(f.next(), key)?,
+            "season_earnings" => c.season_earnings = num(f.next(), key)?,
             "sponsor_offer" => c.sponsor_offers.push(num(f.next(), key)?),
             "major_sponsor" => c.major_sponsor = Some(num(f.next(), key)?),
             "minor_sponsor" => {
@@ -196,12 +210,21 @@ pub fn read(text: &str) -> Result<Career, Error> {
                 c.head_to_heads.insert(num(f.next(), key)?);
             }
             "game_completed" => c.game_completed = flag(f.next(), key)?,
+            "layout_races" => {
+                let layout = num(f.next(), key)?;
+                c.layout_races.insert(layout, num(f.next(), key)?);
+            }
             "races_won" => c.races_won = num(f.next(), key)?,
             "races_lost" => c.races_lost = num(f.next(), key)?,
             "" => {}
-            other => return Err(Error(format!("unknown key {other}"))),
+            other => {
+                if !super::ebay::read(&mut c.ebay, other, rest).map_err(Error)? {
+                    return Err(Error(format!("unknown key {other}")));
+                }
+            }
         }
     }
+    c.ebay.loaded();
     Ok(c)
 }
 

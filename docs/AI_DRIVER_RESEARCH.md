@@ -167,6 +167,24 @@ driver's characteristic list (+0x30F4).
    the car (+0x180) and at the look-ahead point (+0xC0), `acos(clamp(dot, −1, 1))`,
    negated when `(P_ahead − P_car) · lateral_car < 0`, divided by the look-ahead
    distance (rad/m) when it is positive → +0x6C, copied to request+0x8C (F454).
+   - **Point and lateral on a link** [V static, F497]. Both line-point records (car +0x150,
+     look-ahead +0x90) come from 0x779C40, which calls the line object's vfunc +0x14.
+     0x798E90 builds that object on the stack with 0x787870 + 0x7804B0 (vtables 0xCF785C,
+     base 0xCF75E0). It holds four gates: the previous gate, the link's two gates and the
+     next one; a missing outer gate becomes the link's own start or end gate. Its vfunc +0x14
+     (0x791DE0) evaluates a **Catmull-Rom segment**:
+     - outer control points moved by 0x780520: `G0' = G2 + 2·((G0−G2)·(G1−G2))/|G0−G2|²·(G0−G2)`,
+       `G3' = G1 + 2·((G3−G1)·(G2−G1))/|G3−G1|²·(G3−G1)`;
+     - point 0x7786B0 = `0.5·[t³ t² t 1]·M·[G0' G1 G2 G3']` with
+       M = [[−1 3 −3 1] [2 −5 4 −1] [−1 0 1 0] [0 2 0 0]] (rows at 0xE7A260…0xE7A230, set
+       at start-up by 0xC79D60);
+     - lateral 0x7787A0 = the derivative `[1.5t² t 0.5 0]·M·G` turned to `(−t_z, 0, t_x)` and
+       normalised.
+     
+     Without all four gates the base class's straight interpolation (0xCF75E0) applies.
+     The port had used straight chords and blended gate normals (`Line::at`); `Line::curve`
+     now gives these two records. Track-limit and on-track tests keep the gates' straight
+     waypoint lines (0x7983E0).
 3. **Look-ahead point**: 0x788410 walks the link list from the car's current
    link/fraction by the look-ahead distance; link length = `L0 + L1·offset`
    (lateral-offset dependent) — i.e. distance **along the line**, not
@@ -314,6 +332,30 @@ steering_speed 15, brake_on/off 5, throttle_on/off 5 (instant when request
 [6] 0..1. **[I]** This packet uses the same path as player input into car
 +E1C/+E20/+E3C/+E40 ([REFERENCE_DRIVING_INPUT.md](REFERENCE_DRIVING_INPUT.md));
 no AI code writes those fields directly (assembly scan 0x760000–0x7D0000).
+
+**Handbrake byte +0x1C (0x77A110)** [V static, F497]: 1 when request +0xB3 is set,
+or when the force-brake flag +0xA5 is set and the speed (view +0xD0) is below
+minimumMovingSpeed (driver config +0xC48 = 1.0); else 0. The same function first
+activates brake_spin (0x7799B0) for 8–12 m/s of excess over a line target.
+- The only writer of +0xB3 is race_start's drive 0x78A740 (0x78A79F/0x78A7B4): set
+  with +0xB2 while the launch delay runs without a stall. The scan for byte stores
+  with displacement 0xB3 in 0x770000–0x7A0000 found only those two; 0x7835F5 is
+  the request reset.
+- The port does not run the launch delay (0 with the shipped data), so it
+  publishes `force_brake && speed < 1`.
+
+**Pedal mapping without a reverse request** (AUTHORED, F497): the assisted gearbox
+(`vehicle_controls`, brake-to-reverse +0x1972) selects R below speed 3 when the brake
+exceeds the throttle by 0.05, and selects 1 again when the throttle exceeds the brake.
+- A brake request near rest therefore alternated 1 and R every tick, e.g. while rolling
+  back (slip > π/2 → brake 1) in recover_tbone. The career 20-car trace shows this at
+  ticks 2586–2645.
+- Without a reverse request, the port now publishes the handbrake byte instead of the
+  brake pedal:
+  - when 0x77A110 sets it;
+  - in a forward gear below speed 3, when the brake exceeds the throttle by 0.05 (the
+    pedal state that would select R).
+  The car then stops or holds in gear. A reverse request still uses the pedal swap.
 
 ## 7. Difficulty, characteristics, randomness, rubber band
 

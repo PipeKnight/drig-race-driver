@@ -1013,6 +1013,11 @@ impl Session {
                     driver.controls(&race.car_ai[i], &view, &others, DELTA)
                 });
             }
+            if !held {
+                for (car, driver) in race.multi.cars[1..].iter_mut().zip(&race.drivers) {
+                    car.set_ai_packet(driver.reverse_request());
+                }
+            }
             std::mem::swap(&mut self.runtime, &mut race.multi.cars[0]);
             let result = race.multi.tick(&all);
             std::mem::swap(&mut self.runtime, &mut race.multi.cars[0]);
@@ -1249,6 +1254,12 @@ impl Session {
                 ));
             }
             let position = [pose[12], pose[13], pose[14]];
+            // A piece without a collision shape (a shapeless armco post)
+            // falls through the world once its joints let go, in the
+            // original too [I]; it is held below the world.
+            if i >= snapshot.cars && self.props().is_some_and(|p| !p.collides(i)) {
+                continue;
+            }
             let lost = (0..3)
                 .any(|k| position[k] < self.bounds[k] || position[k] > self.bounds[k + 3])
                 || velocity[1] < -MAX_FALL_SPEED;

@@ -122,12 +122,14 @@ menu through `set_audio_normal`).
 - The count shows on the replay interface's Flashback icon and on the race options screen
   (`race.flashback` with `flashback_number`, "FLASHBACKS AVAILABLE:" `flashbacks_available`) [D].
   No in-race OSD element for it was found in the front-end strings [I: there is none].
-- Results: the bank screen has a "Flashback Bonus" line (`bank_rewards_flashback_desc`) and the
-  manager carries the award (`flashback_bonus`), so unused flashbacks earn career money [I]. The
-  award formula was not found (no code reads the award getter 0x6A2290 or the published
-  values except the reload 0x6AA260). A script/condition `usedFlashback` (0x418FE0) reads a
+- Results: the bank screen has a "Flashback Bonus" line (`bank_rewards_flashback_desc`). The career's
+  per-race recorder 0x66DB80 pays 0x6A22A0 of the manager, `(maximum − used) × max_award / maximum`
+  (the whole award with no flashbacks), for each race the player finishes [V, F494;
+  docs/CAREER_RESEARCH.md §3.1]. The getter 0x6A2290 is still unread. A script/condition `usedFlashback` (0x418FE0) reads a
   per-race flag [D], [I] for stats/achievements (`fact_instant_replay_body` "[VALUE]
-  Flashbacks"). The port has no career money, so nothing of this is ported.
+  Flashbacks"). The career port pays the bonus (F494): each career race reports the
+  manager's `used` and `maximum` (`flashbacks` line of `career-race.result`). The race's manager
+  still uses rank 2 for its published `max_award`; the career uses the event tier's row.
 - `jump_in_confirm_title` / `_subtitle` ("Are you sure you want to resume the race from this
   point?") exist in the language file but no screen of `states.bin` uses them [D].
 

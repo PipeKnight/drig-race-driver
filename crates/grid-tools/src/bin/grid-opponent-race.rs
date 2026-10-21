@@ -379,6 +379,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(_) => None,
     };
+    // GRID_COLLISION_AUDIO_TRACE=local/X.tsv: per tick, what the collision
+    // sound listener (`collision_audio`) starts for each car and each car's
+    // scrape level, as grid-app would play them (presentation only).
+    let mut collision_trace = match std::env::var("GRID_COLLISION_AUDIO_TRACE") {
+        Ok(path) => {
+            if !Path::new(&path).starts_with("local") {
+                return Err("trace must stay under local/".into());
+            }
+            let bank = grid_tools::collision_audio::Bank::load(root)?;
+            let heights = entries
+                .iter()
+                .map(|(_, m)| grid_tools::collision_audio::Heights::of(root, m))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut t = std::io::BufWriter::new(std::fs::File::create(path)?);
+            writeln!(t, "tick\tcar\tkind\tvariety\tvolume_db\tpitch\tgroup\tcontacts\tspeed")?;
+            Some((t, grid_tools::collision_audio::Listener::new(bank), heights))
+        }
+        Err(_) => None,
+    };
     // GRID_RETIRE_CAR=car:tick: that car's controls fail at that tick, so the
     // shared world retires and holds it (F323) in front of the field.
     let retire_car = match std::env::var("GRID_RETIRE_CAR") {
@@ -611,6 +630,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Driver::Pursuit(p) => p.controls(car.pose(), car.velocity()),
             });
         }
+        for (car, driver) in multi.cars.iter_mut().zip(&drivers) {
+            if let Driver::Ai(ai) = driver {
+                car.set_ai_packet(ai.reverse_request());
+            }
+        }
         controls[0].throttle *= slow;
         if let Some(pursuit) = &mut prop_target {
             let broken_at = multi
@@ -744,6 +768,51 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             writeln!(t, "\t{pairs:?}")?;
         }
+        if let Some((t, listener, heights)) = &mut collision_trace {
+            listener.tick(grid_tools::source_vehicle::DELTA);
+            for (k, runtime) in multi.cars.iter().enumerate() {
+                let impacts = multi.contact_impacts(k);
+                let solved: Vec<_> = impacts.iter().map(|(x, _)| *x).collect();
+                let car = grid_tools::collision_audio::Car::of(runtime, heights[k], k == 0, &solved);
+                let speed = car.velocity.iter().map(|v| v * v).sum::<f32>().sqrt();
+                let mut plays = Vec::new();
+                if !impacts.is_empty() {
+                    let contacts = grid_tools::collision_audio::contacts_of(runtime, &car, &impacts);
+                    listener.contacts(k, &car, &contacts, &mut plays);
+                }
+                let airborne = grid_tools::collision_audio::airborne(runtime);
+                listener.landing(k, &car, airborne, grid_tools::source_vehicle::DELTA, &mut || false, &mut plays);
+                if k == 0 {
+                    listener.displacement(&car, grid_tools::collision_audio::angular_velocity(runtime), &mut plays);
+                }
+                for p in plays {
+                    writeln!(
+                        t,
+                        "{}\t{k}\tshot\t{}\t{:.2}\t{:.3}\t{}\t{}\t{speed:.2}",
+                        multi.ticks,
+                        p.variety,
+                        p.volume_db,
+                        p.pitch,
+                        p.group,
+                        impacts.len()
+                    )?;
+                }
+                if let Some(v) = listener.scrape_frame(k, &car)
+                    && v.volume_db > -48.
+                {
+                    writeln!(
+                        t,
+                        "{}\t{k}\tscrape\t{}\t{:.2}\t{:.3}\t{}\t{}\t{speed:.2}",
+                        multi.ticks,
+                        v.variety,
+                        v.volume_db,
+                        v.pitch,
+                        v.group,
+                        impacts.len()
+                    )?;
+                }
+            }
+        }
         if !pairs.is_empty() && std::env::var_os("GRID_TRACE_BEHAVIOUR").is_some() {
             println!("contact tick={} pairs={pairs:?}", multi.ticks);
         }
@@ -788,6 +857,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .map(|(x, other)| (x.impact, *other))
                     .collect();
                 let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flag_boxes);
+                let touched = touched || multi.touched_post(i);
                 if std::env::var_os("GRID_TRACE_DRIFT_CONTACTS").is_some() {
                     for (x, prop) in multi.contact_impacts(i) {
                         if x.impact > 100. {

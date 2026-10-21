@@ -6,3 +6,11 @@
 t = ["test", "--workspace", "--release", "--lib", "--test", "*", "--bin", "grid-app"]
 # The same in the dev profile, for quick iteration on one package: `cargo td -p grid-world`.
 td = ["test", "--lib", "--test", "*"]
+
+# The LLVM linker shipped with the toolchain (rustlib\x86_64-pc-windows-msvc\bin):
+# links grid-app in about 2.5 s instead of 25 s with MSVC link.exe, with equal
+# identities and a PDB that tools/sample_profile.py reads (docs/TOOLCHAIN.md,
+# "Build and test cost"). Changing the linker makes cargo rebuild every
+# crate once; the seed (tools/build_seed.ps1) is built with this setting.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"

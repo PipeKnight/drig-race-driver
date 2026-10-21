@@ -201,15 +201,16 @@ impl Track {
     /// every one of these sources gets up to `pair_capacity` contacts; only
     /// the world pool share `pool` bounds the sum, so a wall or prop the body
     /// leans on can no longer use up the road's slots (F342).
-    pub fn body_contacts(
+    pub fn body_contacts<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         matrix: grid_world::physical_pose::Matrix,
         query: &grid_world::convex_distance::ContactSettings,
         pair_capacity: usize,
         pool: usize,
         mut sheet: impl FnMut([u8; 4]) -> Result<bool, grid_world::Error>,
     ) -> Result<Vec<BodyContact>, grid_world::Error> {
+        let mesh = mesh.into();
         if pair_capacity > 16 || pool > grid_world::MAX_WORLD_CONTACTS {
             return Err(grid_world::Error(
                 "body world contact capacity exceeds bound",
@@ -338,15 +339,16 @@ impl Track {
     /// `start` to `end` against every packed road chunk its swept bounds
     /// reach, in archive order, at most `capacity` hits. The boundary sheet
     /// (kind 10, swept callback AE95B0) and the route props are not swept.
-    pub fn sweep_road(
+    pub fn sweep_road<'m>(
         &self,
-        mesh: &grid_world::collision_mesh::Mesh,
+        mesh: impl Into<grid_world::convex_distance::Hull<'m>>,
         start: grid_world::physical_pose::Matrix,
         end: grid_world::physical_pose::Matrix,
         query: &grid_world::convex_distance::ContactSettings,
         capacity: usize,
         mut sheet: impl FnMut([u8; 4]) -> Result<bool, grid_world::Error>,
     ) -> Result<Vec<grid_world::continuous::Hit>, grid_world::Error> {
+        let mesh = mesh.into();
         let margin = query.margin + ROAD_MARGIN;
         let [a0, a1] = mesh.world_bounds(start, margin)?;
         let [b0, b1] = mesh.world_bounds(end, margin)?;

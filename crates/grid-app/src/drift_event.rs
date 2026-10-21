@@ -234,6 +234,7 @@ pub(crate) fn tick(
                         .flag_boxes
                         .get_or_insert_with(|| o.multi.close_drift_flag_boxes());
                     let (impact, touched) = grid_tools::drift::split_contacts(&contacts, flags);
+                    let touched = touched || o.multi.touched_post(i);
                     let sample = Sample::of(
                         car,
                         o.standings.laps_covered(i) as f32,
@@ -654,6 +655,7 @@ mod tests {
             score: None,
             touge: None,
             class: None,
+            points: None,
         };
         let rows = event.results(None, vec![player]);
         assert_eq!(
