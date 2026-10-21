@@ -108,6 +108,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F543](log/F0543.md) | 2026-10-21 | Physics steps per rendered frame: original one step of the frame delta, port catch-up, no port |
 | [F542](log/F0542.md) | 2026-10-21 | Playable c4b2673f4cfc with body sleeping (F541), portable copy and APKs ee1880b472d2 |
 | [F541](log/F0541.md) | 2026-10-21 | Rigid-body sleeping for prop pieces and lost wheels |
 | [F540](log/F0540.md) | 2026-10-21 | APKs 239583f319e3: drift and drift-profile builds share one bundle |
@@ -167,7 +168,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F485](log/F0485.md) | 2026-10-19 | Soak: seeds 39 (Spa) and 54 (Le Mans) fail on main since F476 |
 | [F484](log/F0484.md) | 2026-10-19 | Joints, phase 3a: tyre walls break into blocks joined by their springs; the constraint template stage bit-for-bit against the original |
 | [F483](log/F0483.md) | 2026-10-19 | Archive of the render-leak session; evidence moved |
-| [F482](log/F0482.md) | 2026-10-19 | Memory growth in races found and fixed: looped endless audio sources, not rendering |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

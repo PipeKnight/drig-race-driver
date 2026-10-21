@@ -105,7 +105,7 @@ DOC_GROUPS = [
     ("Project process, tooling and builds", [
         r"TOOLCHAIN", r"DISK_USAGE", r"PROTOTYPE_BUILD", r"TRY_THE_PROTOTYPE", r"GITHUB", r"PROJECT_RELOCATION",
         r"IMPLEMENTATION_PLAN", r"NEXT_MILESTONES", r"PROGRESS_ASSESSMENT", r"FIDELITY_BACKLOG", r"CAPTURE_BACKLOG",
-        r"SOAK_TESTING", r"RUNTIME_LIMITS", r"ROBUSTNESS", r"PERFORMANCE", r"TICK_PERFORMANCE", r"^re/",
+        r"SOAK_TESTING", r"RUNTIME_LIMITS", r"ROBUSTNESS", r"PERFORMANCE", r"TICK_PERFORMANCE", r"FRAME_STEPPING", r"^re/",
         r"^reference/", r"^templates/", r"INDEX"]),
     ("Original reference, captures and owner sessions", [
         r"PHASE0", r"COMPATIBILITY", r"LOADER_RESEARCH", r"REFERENCE_", r"LIVE_SPAWN", r"MACRO_SETUP",
