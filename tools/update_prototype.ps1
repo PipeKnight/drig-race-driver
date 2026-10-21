@@ -17,6 +17,9 @@ if(!(Test-Path -LiteralPath $taskCargo) -or !(Test-Path -LiteralPath $taskRustc)
 $taskKeys=@('CARGO_INCREMENTAL','GRID_GAME_ROOT','GRID_CONTACT_DIRECTIONS','GRID_BODY_EVENT_PARAMETERS','GRID_DEFORMATION_PARAMETERS','GRID_BUILD_REVISION')
 $taskPrevious=@{}
 foreach($taskKey in $taskKeys){$taskPrevious[$taskKey]=[Environment]::GetEnvironmentVariable($taskKey,'Process')}
+# One cargo build at a time on this PC (tools/build_lock.ps1).
+. (Join-Path $PSScriptRoot 'build_lock.ps1')
+$taskLock=$null
 Push-Location $taskRoot
 try {
     $taskRevision=(& git rev-parse HEAD).Trim()
@@ -42,6 +45,7 @@ try {
         & $env:ComSpec /d /s /c "`"`"$taskCargo`" $taskArguments > `"$taskLog`" 2>&1`""
         return $LASTEXITCODE
     }
+    $taskLock=Enter-BuildLock -Purpose 'update_prototype'
     if((Invoke-TaskCargo (Join-Path $taskEvidence 'source-tests.txt') 'test -p grid-tools --lib --release --offline source_driving -- --ignored') -ne 0){throw "Source driving checks failed; see $taskEvidence"}
     if((Invoke-TaskCargo (Join-Path $taskEvidence 'app-tests.txt') 'test -p grid-app --release --offline -- --ignored') -ne 0){throw "App checks failed; see $taskEvidence"}
     if((Invoke-TaskCargo (Join-Path $taskEvidence 'build.txt') 'build -p grid-app --release --offline') -ne 0){throw "Prototype build failed; see $taskEvidence"}
@@ -68,6 +72,7 @@ try {
     $taskJson | Set-Content -LiteralPath (Join-Path $taskRoot 'local/playtest/current-build.json') -Encoding utf8
     Write-Output $taskJson
 } finally {
+    Exit-BuildLock $taskLock
     foreach($taskKey in $taskKeys){[Environment]::SetEnvironmentVariable($taskKey,$taskPrevious[$taskKey],'Process')}
     Pop-Location
 }

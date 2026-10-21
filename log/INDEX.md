@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F534](F0534.md) | 2026-10-21 | Pre-push tiers, machine-wide build lock and the release script |
 | [F533](F0533.md) | 2026-10-21 | Shared reverse-engineering base: docs/re/symbols.tsv, tools/re, one master Ghidra project |
 | [F532](F0532.md) | 2026-10-21 | Project log split into one file per entry; tools/log_entry.py numbers, checks and indexes them; capture backlog |
 | [F531](F0531.md) | 2026-10-20 | Playable e57f2fd391e2 with F521–F530, the portable copy refreshed, APKs a11cddf7de27, and a pause of several days |

@@ -40,6 +40,143 @@ target/release/grid-opponent-race "$ROOT" CD01 BP01 12 11200 ai | sha256sum   # 
 # and the 12-car again with both variables set (DF01 and the characteristics)
 ```
 
+`tools/prepush.ps1` (full tier) runs these three and compares them with `tools/identity.tsv`.
+A commit that changes an identity on purpose updates that file and names the change in its log entry.
+
+## Pre-push tiers, build lock and release (F534)
+
+The full pre-push gate (release tests with `--include-ignored`, workspace Clippy, the identity
+check and `grid-soak quick`) took 15–24 min even for pushes that changed only Markdown (F526,
+F529). `tools/prepush.ps1` runs only what the changed files need:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\prepush.ps1          # check before a push
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\prepush.ps1 -Plan    # classification only
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\prepush.ps1 -Full    # the whole gate
+```
+
+It fetches origin, takes every path changed since the merge base with origin/main (committed,
+uncommitted and untracked; renames as both names), classifies each and runs the highest tier any
+path needs. It prints each path's tier and reason, the tier line ("tier crate [grid-app] because
+…"), each step's result and time (and its wait for the build lock), and writes the logs and
+`summary.md` to `local/prepush/<time>/`. It warns when HEAD is not rebased on origin/main.
+Exit code 0 when every check passed.
+
+| Tier | Runs | Chosen for |
+|---|---|---|
+| docs | no cargo: `git diff --check` (conflict markers fail, whitespace is listed), relative Markdown links on added lines must exist (links into `local/` are skipped), changed `.ps1` files must parse, changed `.py` files must parse, `tools/log_entry.py check` when that tool exists | `docs/`, `log/`, `*.md`, LICENSE, .git* files, launchers `*.cmd` (the build gate smoke-runs them), `android/` (no cargo check covers it: build an APK), `tools/` scripts that no crate source names |
+| crate | that crate's release tests with `--include-ignored` and `cargo clippy --release -p CRATE --all-targets -- -D warnings` | `crates/grid-app/**` and `settings/**` (grid-app's tests read the profiles); `crates/grid-probes/**` (Clippy only); grid-tools binaries other than grid-opponent-race and grid-soak; grid-formats `tests/`/`examples/` |
+| workspace | the whole release test suite and workspace Clippy | grid-formats modules the simulation cannot reach; a `tools/` file named by crate source |
+| full | workspace + `cargo build --release -p grid-tools --bin grid-opponent-race --bin grid-soak`, the identity check against `tools/identity.tsv`, `grid-soak quick` | `crates/grid-world/**`, the grid-tools library and its race/soak binaries, sim-reachable grid-formats modules and `lib.rs`, Cargo.lock, Cargo.toml files, build.rs, rust-toolchain, `.cargo/`, `tools/identity.tsv`, and any path the table does not name |
+
+Why these rules. The crate graph is grid-formats → grid-tools → grid-app and grid-world →
+grid-tools; grid-world has no dependencies, grid-probes depends on formats, world and tools, and
+nothing depends on grid-app or grid-probes. grid-opponent-race and grid-soak are grid-tools
+binaries, so no grid-app or grid-probes change can move an identity or a soak result; grid-app's
+own behaviour is covered by its tests and by the build gate before each playable. For
+grid-formats the script computes at every run which modules are reachable from grid-tools or
+grid-world (`grid_formats::` paths and `use grid_formats::{…}` lists, then closed over the
+crate's own `crate::`/`super::` references in both directions, since a module that uses
+reachable code could add impls to reachable types). On 21 October 2026, 40 of 47 modules were
+reachable; only action_map, etc2, graphics_grade, language, skidmarks, track_lighting and
+tree_placements take the workspace tier. The grid-tools library is always full (inherent impls
+and trait impls in any module can reach the race tool without a path to it). The decision
+table is in the header of `tools/prepush.ps1`; when unsure it goes up a tier.
+
+Not covered by any tier, as before: the Android build (`tools\build_android.ps1 -Clippy` checks
+the `cfg(target_os = "android")` code) and the real app (`tools\build_gate.ps1`).
+
+**Measured** (21 October 2026, this PC, other sessions building; logs in this worktree's
+`local/prepush/`):
+
+| Change | Tier | Wall time | Steps |
+|---|---|---|---|
+| a Markdown line in docs/ | docs | 2.3 s (fetch included) | sanity 0–1 s |
+| a comment in crates/grid-app/src/main.rs | crate [grid-app] | 536 s | grid-app recompile + tests 509 s, Clippy -p grid-app 20 s |
+| the same edit, `-Full` | full | 1281 s | tests 718 s, Clippy 38 s, race/soak build 1 s, identity 144 s, soak 371 s |
+| nothing to compile, `-Full` | full | — | tests 608 s (grid-app 425 s, grid-tools 173 s, the rest 8 s), identity 74 s, soak 274 s |
+| first run in a seeded worktree | full | — | tests 998 s (our four crates compiled), Clippy 56 s, build 53 s |
+
+grid-app's own asset tests (425 s with nothing to compile) dominate the grid-app tier, so that tier is
+about 2.4x faster than the full gate, not more. Speeding up those tests is engine work and outside
+this tooling.
+
+### Build lock
+
+The PC is memory-bound, so cargo builds run one at a time across all checkouts.
+`tools/build_lock.ps1` holds `C:\cargo-build\build-lock\lock` open without write sharing for
+the duration of a build; Windows closes the handle when the holder dies, so a crash never leaves
+a stuck lock (a leftover file of a dead pid is reported as stale and taken over). Waiters queue
+in `C:\cargo-build\build-lock\queue\` first come first served (entries of dead pids are
+dropped) and print their queue position and the holder (pid, purpose, checkout, minutes).
+prepush.ps1 takes it per cargo step, update_prototype.ps1 for its tests and build,
+build_android.ps1 around cargo ndk and Gradle, release_playable.ps1 around each APK build, and
+build_gate.ps1 for the perf phase (so locked builds wait instead of disturbing the CPU timing;
+after `-PerfWaitMinutes` perf runs without it and a case over budget is `noisy`). A child script
+under a holder (GRID_BUILD_LOCK = the holder's pid) runs without queueing behind it. Builds
+started outside the lock are not stopped; the holder prints how many cargo/rustc processes run
+outside it. build_seed.ps1 does not take it (its 2-h build would block every session).
+
+Ad-hoc builds through the lock (the exit code is the command's):
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_lock.ps1 cargo build --release -p grid-app
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_lock.ps1 -Status
+```
+
+### Release (coordinator)
+
+`tools/release_playable.ps1`, in the main checkout only (it never pushes; the main checkout holds
+Codex's unpushed graphics commits):
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release_playable.ps1 -DryRun   # preflight + plan
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\release_playable.ps1           # release
+```
+
+Preflight refuses a linked worktree (`-AllowWorktree` for tests), tracked changes, a merge with
+origin/main that `git merge-tree` reports as conflicting, a running prototype or portable copy,
+and missing private inputs. Then: merge origin/main as the owner with the usual "merge:
+origin/main (Fa-Fb) into Codex's local main for the playable rebuild" message (`-NoMerge`);
+`tools/update_prototype.ps1` (`-NoPrototype`); optionally `tools/build_gate.ps1` (`-Gate`; a
+failure stops before the copies); the exe, changed `settings/*.ini` and non-Graphics launchers
+into `local/portable/GRID-Reassembly/` (`-NoPortable`); both private APKs from a temporary
+detached worktree of origin/main in `local/release/apk-src-<rev>`, named
+`grid-<rev>-bundled-PRIVATE-drift-nurburgring-debug.apk` and `…-PRIVATE-profile-debug.apk` in
+`local/android/apk/` with their manifests, after which its build dir is pruned
+(`prune_build_dirs.ps1 -ForWorktree`) and the worktree removed (`-NoApk`, `-NoProfileApk`,
+`-KeepApkWorktree`); the APK test-order text (new names and sizes, the "updated" time, the upper
+end of the F range, and the previous revision in the no-data-copy lists when the bundle version
+is unchanged; the feature summary stays manual; `-NoTestOrder`); and a draft log entry in
+`local/release/<time>.md` (revisions, merged F range and commits, exe sha256, APK sizes and
+sha256, bundle version, step times) with the step logs in `local/release/<time>/`.
+The profile APK carries the default (Donington) bundle as in the earlier releases (`-ProfileEvent`).
+Merges that conflict stop the script before anything changes. Since F532 this includes
+PROJECT_LOG.md in the main checkout, where Codex's commits still prepend `## Gnnn` entries.
+Resolve by hand: keep origin/main's file and turn each local entry into
+`py -I tools/log_entry.py new --series G`.
+
+Tested 21 October 2026 on a scratch clone of the main checkout (`-AllowWorktree` not needed;
+`-NoPrototype`, a copied exe). Preflight refused tracked changes, an add/add conflict and the
+PROJECT_LOG.md conflict of the real main checkout (c8dd04d1 vs 8d0799e1). The full run merged
+8d0799e1 (F532), refreshed a portable copy, built both APKs in `local/release/apk-src-8d0799e17389`
+(waiting 533 s for the build lock behind a prepush test run), copied and renamed them, pruned that
+build dir (5.46 GiB) and removed the worktree. It then rewrote the test-order text: names, sizes,
+"updated" time, F455–F532, and a11cddf7de27 added to the no-copy lists because the bundle version
+ecd7977054c8 is unchanged. It also wrote the draft. APK step 3318 s: drift 1865 s, profile 1441 s;
+the profile then still used the drift bundle, fixed afterwards. Evidence:
+`local/release-test-evidence/` of the checks-and-release worktree.
+
+**The seed's Android artifacts did not apply.** Both APK builds in the fresh build dir rebuilt
+android-activity and the 30 Bevy crates above it. The cause is android-activity's build script
+(cc crate), which tracks `CXX_aarch64-linux-android` etc. The seed recorded them with
+backslashes (`C:\Users\…\clang++`, seed built 19.10), while this build and the coordinator's
+APK build dir of 20.10 (`11\021f3a9841e698`) have forward slashes. cargo-ndk 4.1.2 builds the
+value with `Path::join` from ANDROID_NDK_HOME (backslashes in build_android.ps1), so the
+forward-slash form comes from the launching environment (likely Git Bash); not proven. Until the
+Android part of the seed is rebuilt from the same shell as the release (or build_android.ps1
+pins these variables), each release APK pays this rebuild.
+
 ## Build gate (F524)
 
 End-to-end checks of the real app that the coordinator runs before every rebuild of the PC

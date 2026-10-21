@@ -44,6 +44,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'build_gate\gate_lib.ps1')
+. (Join-Path $PSScriptRoot 'build_lock.ps1')
 $repo = $script:GateRepo
 if (-not $Exe) { $Exe = Join-Path $repo 'target\release\grid-app.exe' }
 if (-not $Soak) { $Soak = Join-Path $repo 'target\release\grid-soak.exe' }
@@ -65,6 +66,12 @@ $results = New-Object System.Collections.Generic.List[object]
 # ---- 1. perf ----------------------------------------------------------------------------
 if (-not $SkipPerf) {
     $phase = Get-Date
+    # Perf holds the build lock (tools/build_lock.ps1), so builds that use it wait until perf
+    # ends; builds started outside it are waited for below. After -PerfWaitMinutes perf runs
+    # without the lock and a case over budget is "noisy".
+    $perfLock = $null
+    try { $perfLock = Enter-BuildLock -Purpose 'build_gate perf' -TimeoutMinutes $PerfWaitMinutes }
+    catch { Write-Host "gate_perf_wait $($_.Exception.Message); perf runs without the build lock" }
     $waitUntil = (Get-Date).AddMinutes($PerfWaitMinutes)
     while ((Get-GateCompilers) -and (Get-Date) -lt $waitUntil) {
         Write-Host "gate_perf_wait compilers=$(Get-GateCompilers)"; Start-Sleep -Seconds 30
@@ -89,6 +96,7 @@ if (-not $SkipPerf) {
         try { $lines = @(& $Soak @perfArgs 2>&1 | ForEach-Object { "$_" }) } finally { Pop-Location }
     } finally {
         foreach ($k in $saved.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k], 'Process') }
+        Exit-BuildLock $perfLock
     }
     $lines | Set-Content -LiteralPath (Join-Path $Out 'perf.log')
     # A compiler at the start or end of perf (or started in between and still running) makes a case

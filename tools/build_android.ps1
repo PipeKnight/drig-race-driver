@@ -46,6 +46,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+. (Join-Path $PSScriptRoot 'build_lock.ps1')
+$lock = $null
 
 function Pick([string]$name, [string]$default) {
     $value = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -116,6 +118,8 @@ try {
     $jni = Join-Path $root 'android\app\build\rust-jniLibs'
     if (Test-Path -LiteralPath $jni) { Remove-Item -LiteralPath $jni -Recurse -Force }
     $started = Get-Date
+    # One build at a time on this PC (tools/build_lock.ps1): cargo ndk and Gradle under one lock.
+    $lock = Enter-BuildLock -Purpose $(if ($Clippy) { 'build_android -Clippy' } elseif ($Profile) { 'build_android -Profile' } else { 'build_android' })
     # Without the seed a build dir compiles Bevy for aarch64 once per variant,
     # about 15 min each (docs/TOOLCHAIN.md, "Build and test cost").
     if (-not $NoSeed) {
@@ -166,5 +170,6 @@ try {
     $manifest | ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath "$out.json"
     $manifest | ConvertTo-Json
 } finally {
+    Exit-BuildLock $lock
     Pop-Location
 }

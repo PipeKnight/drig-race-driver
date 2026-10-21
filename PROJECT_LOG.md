@@ -106,6 +106,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F534](log/F0534.md) | 2026-10-21 | Pre-push tiers, machine-wide build lock and the release script |
 | [F533](log/F0533.md) | 2026-10-21 | Shared reverse-engineering base: docs/re/symbols.tsv, tools/re, one master Ghidra project |
 | [F532](log/F0532.md) | 2026-10-21 | Project log split into one file per entry; tools/log_entry.py numbers, checks and indexes them; capture backlog |
 | [F531](log/F0531.md) | 2026-10-20 | Playable e57f2fd391e2 with F521–F530, the portable copy refreshed, APKs a11cddf7de27, and a pause of several days |
@@ -165,7 +166,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F476](log/F0476.md) | 2026-10-19 | Redgate braking: the brake-line ratio measures against the cruise (coast-down) tables; Derby avoid locates obstacles on the track view's link window |
 | [F475](log/F0475.md) | 2026-10-19 | Career results: a Points column on the race results, the event standings on the event page, and Balance and Season's Earnings on the payout |
 | [F474](log/F0474.md) | 2026-10-19 | Career field: the original's race draw, event_driver field and grid in the career screen |
-| [F473](log/F0473.md) | 2026-10-19 | Joints, phase 1: the original's six-degree-of-freedom joint ported as library code, constructor, prepare and rows bit-for-bit against the original |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
