@@ -441,6 +441,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G208](G0208.md) | 2026-10-21 | Native4K asphalt pilot review and separate playable comparison |
 | [G207](G0207.md) | 2026-10-21 | Speed-based asphalt RGB filtering pilot with protected masks and markings |
 | [G206](G0206.md) | 2026-10-21 | Graphics worktree migration and shared surface parameter integration |
 | [G205](G0205.md) | 2026-10-20 | Tone-map contribution to paint colour |
