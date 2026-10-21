@@ -232,7 +232,10 @@ pub struct PropWorld {
     pub events: Vec<BreakEvent>,
     pending: Vec<(usize, [f32; 4], f32)>,
     base_slots: Option<usize>,
-    /// Held kinematics of lost bodies, by index in [`Self::parts`].
+    /// Held kinematics of lost bodies, by world body index. Not by position
+    /// among the pieces and wheels: a break appends pieces before the
+    /// wheels, and a held wheel's kinematics then went to a new piece
+    /// (FIDELITY_BACKLOG row 90).
     lost: BTreeMap<usize, [u32; KINEMATICS.end - KINEMATICS.start]>,
     /// Wheels lost by cars, after the pieces in contact order.
     pub wheels: Vec<LooseWheel>,
@@ -1449,11 +1452,11 @@ impl PropWorld {
         let indices: Vec<usize> = (self.pieces.iter().map(|p| p.body))
             .chain(self.wheels.iter().map(|w| w.body))
             .collect();
-        for (k, index) in indices.into_iter().enumerate() {
+        for index in indices {
             let Some(body) = bodies.get_mut(index) else {
                 continue;
             };
-            let held = self.lost.entry(k);
+            let held = self.lost.entry(index);
             let held = match held {
                 std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
                 std::collections::btree_map::Entry::Vacant(e) => {
@@ -1496,9 +1499,10 @@ impl PropWorld {
             .is_none_or(|p| self.catalog.breakables[p.breakable].pieces[p.spec].collides())
     }
 
-    /// Whether piece `k` has been lost below the world and is held.
-    pub fn is_lost(&self, k: usize) -> bool {
-        self.lost.contains_key(&k)
+    /// Whether world body `body` (a piece or a lost wheel) has been lost
+    /// below the world and is held.
+    pub fn is_lost(&self, body: usize) -> bool {
+        self.lost.contains_key(&body)
     }
 
     /// Arm the intact breakable boxes: their threshold becomes the contact limit.
@@ -2840,7 +2844,7 @@ mod tests {
         at(&mut bodies[1], -20. - LOST_DEPTH - 0.5, -40.);
         at(&mut bodies[2], -20. - LOST_DEPTH + 0.5, -40.);
         world.hold_lost(&mut bodies, -20.);
-        assert!(world.is_lost(0) && !world.is_lost(1));
+        assert!(world.is_lost(1) && !world.is_lost(2));
         assert_eq!(f(&bodies[1], 0x224), 0.);
         assert_eq!(f(&bodies[1], 0x210), 0.);
         assert_eq!(f(&bodies[1], 0x1d0 + 52), -20. - LOST_DEPTH - 0.5);
@@ -2851,7 +2855,48 @@ mod tests {
         assert_eq!(f(&bodies[1], 0x1d0 + 52), -20. - LOST_DEPTH - 0.5);
         assert_eq!(f(&bodies[1], 0x224), 0.);
         world.reset(&mut []).unwrap();
-        assert!(!world.is_lost(0));
+        assert!(!world.is_lost(1));
+    }
+
+    #[test]
+    fn a_held_lost_wheel_stays_with_its_body_when_a_break_adds_pieces() {
+        // Le Mans 24 Hours tick 30430 (FIDELITY_BACKLOG row 90): a break
+        // appended armco pieces while lost wheels were held; the wheels'
+        // held poses, 1 km away, went to the new pieces.
+        let mut world = PropWorld::new(Catalog::default());
+        let piece = |body: usize| Piece {
+            breakable: 0,
+            spec: 0,
+            body,
+            token: body as u32 + 1,
+        };
+        world.pieces = vec![piece(1)];
+        world.wheels = vec![LooseWheel {
+            car: 0,
+            wheel: 2,
+            spec: std::sync::Arc::new(
+                PieceSpec::loose_wheel(0.3, 0.2, 20., std::array::from_fn(|r| {
+                    std::array::from_fn(|c| f32::from(r == c))
+                }))
+                .unwrap(),
+            ),
+            body: 2,
+            token: 9,
+        }];
+        let mut bodies = vec![[0u32; 0x424 / 4]; 4];
+        set(&mut bodies[2], 0x1d0 + 52, -20. - LOST_DEPTH - 1.);
+        set(&mut bodies[2], 0x1d0 + 48, 300.);
+        world.hold_lost(&mut bodies, -20.);
+        assert!(world.is_lost(2));
+        // A break adds a piece; it sits on the road.
+        world.pieces.push(piece(3));
+        set(&mut bodies[3], 0x1d0 + 52, 24.);
+        set(&mut bodies[3], 0x1d0 + 48, 1.);
+        world.hold_lost(&mut bodies, -20.);
+        assert_eq!(f(&bodies[3], 0x1d0 + 52), 24.);
+        assert_eq!(f(&bodies[3], 0x1d0 + 48), 1.);
+        assert!(!world.is_lost(3) && world.is_lost(2));
+        assert_eq!(f(&bodies[2], 0x1d0 + 48), 300.);
     }
 
     #[test]
