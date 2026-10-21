@@ -355,7 +355,7 @@ function Invoke-Sanity([string]$Log) {
     if ($py.Count -and -not $python) { $notes.Add('no Python found (GRID_PYTHON); .py files not parsed') }
     foreach ($c in $py) {
         $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-        $msg = & $python -I -c 'import ast,sys; ast.parse(open(sys.argv[1],encoding="utf-8").read(), sys.argv[1])' (Join-Path $repo $c.Path) 2>&1
+        $msg = & $python -I -c 'import ast,sys; ast.parse(open(sys.argv[1],''rb'').read(), sys.argv[1])' (Join-Path $repo $c.Path) 2>&1
         $ErrorActionPreference = $saved
         if ($LASTEXITCODE -ne 0) { $problems.Add("$($c.Path): $($msg | Select-Object -Last 1)") }
     }

@@ -380,6 +380,22 @@ def resolve_conflicts(base, fix, numbers, changed_files):
     return problems
 
 
+def unindexed_files():
+    """Notes for files in tools/ and docs/ that tools/README.md or docs/INDEX.md does not link."""
+    notes = []
+    for index, base in ((ROOT / "tools" / "README.md", ROOT / "tools"), (ROOT / "docs" / "INDEX.md", ROOT / "docs")):
+        if not index.exists():
+            continue
+        text = read(index)
+        for p in sorted(base.rglob("*")):
+            if p.is_file() and p != index and "__pycache__" not in p.parts:
+                rel = p.relative_to(base).as_posix()
+                if "(%s)" % rel not in text:
+                    notes.append("%s is not in %s: run `py -I tools/index_files.py` and commit the indexes" % (
+                        p.relative_to(ROOT).as_posix(), index.relative_to(ROOT).as_posix()))
+    return notes
+
+
 # --- commands ----------------------------------------------------------------------------
 
 def cmd_new(a):
@@ -491,6 +507,7 @@ def cmd_check(a):
     else:
         for p, _ in stale_indexes():
             problems.append("%s: index is stale; run check --fix" % p.relative_to(ROOT).as_posix())
+    notes += unindexed_files()
     size = STATE.stat().st_size
     if size > 30 * 1024:
         notes.append("PROJECT_LOG.md is %d bytes; keep the state file under 30 KB" % size)
