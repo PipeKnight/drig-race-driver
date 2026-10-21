@@ -92,6 +92,15 @@ PC is memory-bound): `py -I tools/re/master.py build --cpu 2`, then `master.py a
 `master.py functions`. `build` runs Ghidra at below-normal priority so it never competes with the
 owner; under full CPU load it can stall. Short calls (decompile, export) run at normal priority.
 
+The older runners `tools/run_ghidra_{address_refs,behavior_survey,field_stores,loader_survey,
+texture_survey,probe}.ps1` dot-source `tools/re/GhidraMaster.ps1`. It finds the main checkout,
+checks the exe hash, waits for the lock and runs the master with `-readOnly` and empty stdin.
+Scripts that create functions or labels (GridProbe) only change the in-memory copy. Outputs still
+go to the calling checkout's `local/`. The 16 per-topic projects they used to open were deleted
+on 2026-10-21. `run_ghidra_probe.ps1 -RuntimeImage` uses the captured runtime image instead; it
+holds runtime-initialised `.rdata`/`.data`, and its `.text` differs from the exe only in 16 bytes
+at 0xC883F0. The image is imported once without analysis into `local/re-cache/ghidra-runtime`.
+
 ## Tools and versions
 
 - Python: any 3.12+ (`py -I` launcher 3.14.4, or the bundled 3.12.14); stdlib only, plus
