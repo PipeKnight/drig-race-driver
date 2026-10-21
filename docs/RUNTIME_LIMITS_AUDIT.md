@@ -166,7 +166,7 @@ IDs match the per-area work tables. Rows were grouped when several guards share 
 | A09 | `grouped_physical_frame.rs:192`, `pose.rs:69`, `dynamics.rs:16` | delta ∉ (0, 0.25] | pause | yes | None (DELTA 0.016) | diagnostic precondition |
 | A10 | `grouped_physical_frame.rs:270` | registrations ≠ bodies | pause | yes | None | port |
 | A11 | `grouped_physical_frame.rs:282-314` | manager: rows > 1024, capacity < 4 × contacts, iterations, materials > 8, **sleep duration ≠ MAX**, flags | pause | yes | **Sleep duration check lifted in F541** ([BODY_SLEEPING.md](BODY_SLEEPING.md)); the other checks remain. | GROUPED_PHYSICAL_FRAME.md selected scope; 1024 port guard |
-| A12 | `grouped_physical_frame.rs:483` | group status ≠ 0 (asleep or capacity) → "unsupported grouped physical sleep or capacity status" | pause | yes | L. *F541:* status 1 of an island without a car sleeps it (B24D70); status 1 with a car (capacity overflow) and status 2 (parking) still pause | the original returns status 1 and **skips the island** (B7B850); status 2 parks it |
+| A12 | `grouped_physical_frame.rs:483` | group status ≠ 0 (asleep or capacity) → "unsupported grouped physical sleep or capacity status" | pause | yes | L. *F541:* status 1 of an island without a car sleeps it (B24D70); status 1 with a car (capacity overflow) still pauses; *F546:* status 2 parks the island (B24DF0, [BODY_SLEEPING.md](BODY_SLEEPING.md) section 8) | the original returns status 1 and **skips the island** (B7B850); status 2 parks it |
 | A13 | `grouped_physical_frame.rs:443` | `expect("registered seed")` | panic | yes | None | invariant |
 | A14 | `grouped_physical_frame.rs:364,520` | properties indexed by group-local index | silent | yes | None in effect (overwritten by `impact_frame`) | port detail |
 | A15 | `impact_frame.rs:83-117` | group bodies 0 or > 16, iterations > 32, non-finite | pause | yes | masked by A01; **H once A01 is raised** | IMPACT_STEP.md harness limits (B7B850/B7ACC0 oracle), not grid.exe |
@@ -363,7 +363,7 @@ Every fix either reproduces the original's limit and full behaviour (§2), or, w
 
 *Done in F317:* the body, group and shape bounds were raised to 1000 / 1513, and a break beyond the world bound is refused (2.1). What remains from this group:
 - port the original farthest-first restore (7D4940 → 7D4770) in place of the refusal;
-- piece sleeping (turnOffTime 1): *done in F541 (BODY_SLEEPING.md); parking (status 2) is not ported;*
+- piece sleeping (turnOffTime 1): *done in F541 (BODY_SLEEPING.md); parking (status 2) followed in F546;*
 - the per-island 200/1000/3000 skip behaviour (B7B850) for fidelity;
 - correct the `lib.rs` provenance comment (game-set island limits, not engine defaults);
 - the falling-piece bound (R06): *F342 holds lost pieces; the original bound at B44E80/B444D0 is still unrecovered.*

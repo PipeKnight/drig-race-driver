@@ -356,9 +356,30 @@ impl BodyGeometry {
         if other.count == 0 || other.count > 4096 || capacity == 0 {
             return Ok(Vec::new());
         }
+        self.car_contacts_hull_at(&self.placed(body)?, other, capacity)
+    }
+
+    /// The car's hull pose and world bounds, the first step of
+    /// `car_contacts_hull` and `car_contacts_round`; a caller testing one car
+    /// against many pieces computes it once per car.
+    pub fn placed(&self, body: &contact_groups::Body) -> Result<Placed, Error> {
         let matrix = self.pose(body)?;
+        let bounds = self.shape.mesh().world_bounds(matrix, self.query.margin)?;
+        Ok(Placed { matrix, bounds })
+    }
+
+    /// `car_contacts_hull` from an already placed car (the same pose and bounds).
+    pub fn car_contacts_hull_at(
+        &self,
+        placed: &Placed,
+        other: &WorldHull,
+        capacity: usize,
+    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        if other.count == 0 || other.count > 4096 || capacity == 0 {
+            return Ok(Vec::new());
+        }
+        let (matrix, car) = (placed.matrix, placed.bounds);
         let bounds = other.bounds;
-        let car = self.shape.mesh().world_bounds(matrix, self.query.margin)?;
         if (0..3).any(|j| car[0][j] > bounds[j + 3] || car[1][j] < bounds[j]) {
             return Ok(Vec::new());
         }
@@ -398,8 +419,20 @@ impl BodyGeometry {
         if capacity == 0 {
             return Ok(Vec::new());
         }
-        let matrix = self.pose(body)?;
-        let car = self.shape.mesh().world_bounds(matrix, self.query.margin)?;
+        self.car_contacts_round_at(&self.placed(body)?, shape, capacity)
+    }
+
+    /// `car_contacts_round` from an already placed car.
+    pub fn car_contacts_round_at(
+        &self,
+        placed: &Placed,
+        shape: &grid_world::round_contacts::RoundShape,
+        capacity: usize,
+    ) -> Result<Vec<grid_world::contact_manifold::Contact>, Error> {
+        if capacity == 0 {
+            return Ok(Vec::new());
+        }
+        let (matrix, car) = (placed.matrix, placed.bounds);
         let (pose, hull, margin) = match shape {
             grid_world::round_contacts::RoundShape::Cylinder(c) => (
                 c.matrix,
@@ -521,6 +554,13 @@ pub struct WorldHull {
     leaves: std::collections::BTreeMap<usize, Vec<u16>>,
     materials: Vec<u8>,
     checked: grid_world::packed_contacts::Checked,
+}
+
+/// A car hull's pose and world bounds for one step ([`BodyGeometry::placed`]).
+#[derive(Clone, Copy)]
+pub struct Placed {
+    pub matrix: physical_pose::Matrix,
+    pub bounds: [[f32; 4]; 2],
 }
 
 impl WorldHull {

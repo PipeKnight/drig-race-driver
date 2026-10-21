@@ -49,6 +49,9 @@ pub struct MultiRuntime {
     speeds: Vec<f32>,
     /// Opt-in breakable route props; pieces are bodies after the cars.
     props: Option<crate::dynamic_props::PropWorld>,
+    /// Parking around the player (on in the game; tests measuring a pile
+    /// near the player switch it off).
+    parking: bool,
     initial_shapes: Arc<Vec<contact_groups::Shape>>,
     /// Per car: why and since when it is out of the shared world.
     retired: Vec<Option<Retirement>>,
@@ -399,6 +402,7 @@ impl MultiRuntime {
             car_normals: Vec::new(),
             speeds: vec![0.; n],
             props: None,
+            parking: true,
             retired: vec![None; n],
             newly_retired: Vec::new(),
             parallel: true,
@@ -627,8 +631,18 @@ impl MultiRuntime {
         }
         let _tick_timer = crate::perf::Timer::start(crate::perf::Stage::WorldTick);
         let tokens: Vec<u32> = (0..n).map(|i| self.token(i)).collect();
+        // The one copy of the world per tick: the step consumes it, and on
+        // an error `self.world` keeps the last committed bodies and contacts.
+        // The solver rows (four per contact slot, megabytes with a few
+        // hundred pieces) move into the step instead of being copied: after
+        // a failed tick the world has none and refuses to step again until
+        // `reset` (every caller stops or restarts the event on an error).
+        // The wheel contacts go straight into the copy's pool prefix.
+        self.world.manager.park = (self.props.is_some() && self.parking)
+            .then(|| crate::dynamic_props::park_reference(&self.world.groups.bodies[0]));
+        let rows = std::mem::take(&mut self.world.manager.rows);
         let mut previous = self.world.clone();
-        let mut slots = self.world.groups.contacts.clone();
+        previous.manager.rows = rows;
         let mut used = 0;
         let mut failed: Vec<Option<Error>> = vec![None; n];
         let mut staged: Vec<Option<vehicle_manager::State>> = Vec::with_capacity(n);
@@ -670,10 +684,10 @@ impl MultiRuntime {
                 match stage {
                     Ok(stage) => {
                         for c in stage.contacts {
-                            let mut c = wheel_contacts::overlay(&slots[used], &c);
+                            let mut c = wheel_contacts::overlay(&previous.groups.contacts[used], &c);
                             c[1] = i as u32 + 1;
                             c[0x28 / 4] = tokens[i];
-                            slots[used] = c;
+                            previous.groups.contacts[used] = c;
                             used += 1;
                         }
                         previous.groups.bodies[i] = stage.state.owner.physical;
@@ -940,18 +954,16 @@ impl MultiRuntime {
                 registrations.iter_mut().map(Option::as_mut).collect();
             // Prop pieces follow the cars and never deform.
             owned.resize_with(previous.groups.bodies.len(), || None);
-            physical_world::advance_with_deformation(
-                &previous,
-                &slots,
+            physical_world::advance_with_deformation_in(
+                previous,
                 wheel_contacts,
                 &self.shapes,
                 &mut provider,
                 &mut owned,
             )?
         } else {
-            physical_world::advance_with_geometry_provider(
-                &previous,
-                &slots,
+            physical_world::advance_with_geometry_provider_in(
+                previous,
                 wheel_contacts,
                 &self.shapes,
                 provider,
@@ -997,11 +1009,21 @@ impl MultiRuntime {
             props_next = Some((next, disabled));
         }
         let active = wheel_contacts + body_contacts + car_contacts + piece_contacts;
-        crate::perf::world(
-            world.groups.bodies.len(),
-            world.groups.bodies.len() - n,
-            [wheel_contacts, body_contacts, car_contacts, piece_contacts],
-        );
+        if crate::perf::enabled() {
+            let bodies = &world.groups.bodies;
+            // +0x400 = -1 asleep; parked bodies also carry byte +0x413.
+            let asleep = bodies.iter().filter(|b| b[0x400 / 4] == u32::MAX).count();
+            let parked = bodies
+                .iter()
+                .filter(|b| (b[0x410 / 4] >> 24) & 255 != 0)
+                .count();
+            crate::perf::world(
+                bodies.len(),
+                bodies.len() - n,
+                [wheel_contacts, body_contacts, car_contacts, piece_contacts],
+                [asleep, parked],
+            );
+        }
         for (i, error) in contact_failed.into_iter().enumerate() {
             if let Some(error) = error
                 && failed[i].is_none()
@@ -1799,6 +1821,72 @@ mod tests {
             .unwrap();
     }
 
+    /// Parking (B7B850 status 2, B24DF0, AD6480): car 1 breaks a Le Mans tyre
+    /// wall far from the player's car 0; the moving pieces, more than 50 m
+    /// from the player, leave the active list parked (+0x413). When the
+    /// player comes back within 50 m, the start of the next tick wakes them.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn pieces_far_from_the_player_park_and_wake_when_it_returns() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/le_mans/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let at = multi.props.as_ref().unwrap().catalog.breakables[969].placement;
+                let z = [at[8], at[9], at[10]];
+                let centre = [at[12], at[13], at[14]];
+                let player = crate::dynamic_props::park_reference(&multi.bodies()[0]).0;
+                let away = (0..3)
+                    .map(|k| (player[k] - centre[k]).powi(2))
+                    .sum::<f32>()
+                    .sqrt();
+                assert!(away > 80., "the player is {away} m from the wall");
+                let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);
+                multi.place_at_rest(1, start, z.map(|v| -v)).unwrap();
+                let parked = |multi: &MultiRuntime| {
+                    multi.bodies()[multi.cars.len()..]
+                        .iter()
+                        .filter(|b| (b[0x410 / 4] >> 24) & 255 != 0)
+                        .count()
+                };
+                let mut drive = [Controls::default(); 2];
+                drive[1].throttle = 1.;
+                // Until a good part of the moving pile is parked (settled
+                // pieces later sleep instead: status 1 comes first).
+                for _ in 0..240 {
+                    multi.tick(&drive).unwrap();
+                    if parked(&multi) >= 10 {
+                        break;
+                    }
+                }
+                let pieces = multi.bodies().len() - multi.cars.len();
+                let before = parked(&multi);
+                eprintln!("pieces {pieces} parked {before}");
+                assert!(before >= 10, "{before} of {pieces} parked");
+                // The player comes within 40 m of the wall.
+                multi.place_at_rest(0, start, z.map(|v| -v)).unwrap();
+                multi.tick(&[Controls::default(); 2]).unwrap();
+                let after = parked(&multi);
+                eprintln!("parked after the player returned {after}");
+                assert!(after < before, "{after} of {before} still parked");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Sleeping cost, paired in one process: the Nürburgring drift circuit
     /// with its tyre stacks and armco broken at rest (the owner's phone
     /// field of 21 October, about 220 pieces), settled, then cloned; one
@@ -1824,6 +1912,8 @@ mod tests {
                     MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
                         .unwrap();
                 multi.enable_dynamic_props(root).unwrap();
+                // GRID_SLEEP_AB_PARK=off: the pile as if near the player.
+                multi.parking = std::env::var("GRID_SLEEP_AB_PARK").as_deref() != Ok("off");
                 let props = multi.props.as_mut().unwrap();
                 let limit: usize = std::env::var("GRID_SLEEP_AB_PIECES")
                     .ok()
@@ -1867,6 +1957,7 @@ mod tests {
                         .count()
                 };
                 let mut awake = multi.clone();
+                awake.parking = false;
                 for i in cars..awake.world.groups.bodies.len() {
                     if grouped_physical_frame::asleep(&awake.world, i) {
                         grouped_physical_frame::wake(&mut awake.world, i);
@@ -1902,8 +1993,22 @@ mod tests {
                     ms(kept),
                     ms(kept) / ms(slept),
                 );
+                // World hashes: an optimisation must leave both unchanged.
+                let hash = |m: &MultiRuntime| {
+                    m.bodies()
+                        .iter()
+                        .flatten()
+                        .chain(m.world.groups.contacts.iter().flatten())
+                        .fold(0xcbf29ce484222325u64, |h, &w| {
+                            (h ^ u64::from(w)).wrapping_mul(0x100000001b3)
+                        })
+                };
+                eprintln!(
+                    "sleep_ab hash sleeping={:016x} awake={:016x}",
+                    hash(&multi),
+                    hash(&awake)
+                );
                 assert!(asleep(&multi) * 2 > multi.bodies().len() - cars);
-                assert_eq!(asleep(&awake), 0);
             })
             .unwrap()
             .join()

@@ -126,6 +126,15 @@ pub struct Output {
     pub records: usize,
 }
 pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
+    calculate_rows(input, None)
+}
+
+/// [`calculate`] with the frame's row buffer given away (see
+/// `impact_frame::calculate_with_callbacks_rows`).
+pub(crate) fn calculate_rows(
+    input: Input<'_>,
+    rows: Option<Vec<crate::contact_rows::Row>>,
+) -> Result<Output, Error> {
     let Input {
         frame,
         owner,
@@ -207,7 +216,7 @@ pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
         bulk_invoked: false,
         records: 0,
     };
-    let (frame, c) = impact_frame::calculate_with_callbacks(frame, &context)?;
+    let (frame, c) = impact_frame::calculate_with_callbacks_rows(frame, rows, &context)?;
     Ok(Output {
         frame,
         owner: c.owner,

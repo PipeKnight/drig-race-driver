@@ -1055,6 +1055,7 @@ fn pressing_at(
     )?;
     let down = |h: &&crate::track::BodyContact| h.contact.normal[1] < -0.5;
     Ok(Pressing {
+        road: hits.iter().any(|h| h.prop.is_none()),
         road_down: hits.iter().filter(down).any(|h| h.prop.is_none()),
         entity_down: hits.iter().filter(down).any(|h| {
             h.prop.is_some_and(|i| {
@@ -1070,6 +1071,8 @@ fn pressing_at(
 /// [`PropWorld::pressing_now`]: what presses a body at its current pose.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Pressing {
+    /// Any road chunk or boundary sheet contact.
+    pub road: bool,
     pub road_down: bool,
     pub entity_down: bool,
     pub deep_road: bool,
@@ -1091,6 +1094,11 @@ pub enum Pressed {
     /// driven into the ground in one step (grid-soak's separate counter
     /// (ii); the open step-size family, docs/ROBUSTNESS_RESEARCH.md §9).
     EntityBoxInRun,
+    /// Parked (status 2, B24DF0) while a deep road contact pressed it, then
+    /// woken with no road contact since: the port's margin-based road
+    /// contact cannot recover a body that deep (docs/FIDELITY_BACKLOG.md;
+    /// parking freezes it there in the original too, F546).
+    ParkedDeep,
 }
 
 /// A wheel a car lost (car +22E4 + `wheel`) as a dynamic body.
@@ -1276,6 +1284,15 @@ fn world_triangles(spec: &PieceSpec, pose: &Matrix) -> Vec<[[f32; 3]; 3]> {
         .iter()
         .map(|t| t.map(|i| p[i as usize]))
         .collect()
+}
+
+/// The parking reference for a step (5C6B90 -> AD7D60 each frame): the
+/// player car's physical body (the first car with byte +0x28 set; the
+/// port's car 0), its published translation (A69630 copies the +0x1D0
+/// matrix; row 3 is +0x200), at scale 1. Pieces park beyond 50 m of it
+/// (+0x3FC 2500) and wake when it comes back within (AD6480).
+pub fn park_reference(player: &contact_groups::Body) -> ([f32; 4], f32) {
+    (std::array::from_fn(|k| f(player, 0x200 + 4 * k)), 1.)
 }
 
 /// Two-body contact record (MultiRuntime car-to-car layout).
@@ -1556,12 +1573,35 @@ impl PropWorld {
                     .ok_or(Error("missing prop piece body"))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        // World hulls once per call, with the largest centre-to-vertex reach.
-        let convexes: Vec<(Convex, f32)> = parts
+        // Pairs with static geometry need body byte +0x416 (B18300); an
+        // asleep body makes no pair with static geometry or with another
+        // asleep body (B18300 takes pairs only from the active list).
+        let asleep = |body: usize| {
+            bodies
+                .get(body)
+                .is_some_and(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+        };
+        let sleeping: Vec<bool> = parts.iter().map(|p| asleep(p.1)).collect();
+        let awake: Vec<usize> = (0..parts.len()).filter(|&k| !sleeping[k]).collect();
+        // A cheap upper bound of each hull's reach, to skip far pairs before
+        // building hulls: the hull's centre is its pose's translation and the
+        // pose is rigid, so a world point lies |local point| from the centre;
+        // the slack covers rounding. Skipping on it drops only pairs the exact
+        // test below also drops, so the contacts are unchanged.
+        let loose: Vec<f32> = parts
             .iter()
-            .zip(&poses)
-            .map(|(p, pose)| {
-                let convex = Convex::new(p.0, pose);
+            .map(|p| {
+                let r = (p.0.points.iter())
+                    .map(|q| (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt())
+                    .fold(0f32, f32::max);
+                r * 1.001 + 0.01
+            })
+            .collect();
+        // World hulls on first use, with the largest centre-to-vertex reach.
+        let mut convexes: Vec<Option<(Convex, f32)>> = (0..parts.len()).map(|_| None).collect();
+        let hull = |convexes: &mut Vec<Option<(Convex, f32)>>, k: usize| {
+            if convexes[k].is_none() {
+                let convex = Convex::new(parts[k].0, &poses[k]);
                 let reach = convex
                     .points
                     .iter()
@@ -1575,9 +1615,11 @@ impl PropWorld {
                         dot3(d, d).sqrt()
                     })
                     .fold(0., f32::max);
-                (convex, reach)
-            })
-            .collect();
+                convexes[k] = Some((convex, reach));
+            }
+        };
+        // Each car's pose and bounds once per call, on first use.
+        let mut placed: Vec<Option<crate::body_geometry::Placed>> = vec![None; cars.len()];
         for (k, &(spec, piece_body, piece_token)) in parts.iter().enumerate() {
             let query = convex_distance::ContactSettings {
                 margin: spec.shell,
@@ -1588,14 +1630,6 @@ impl PropWorld {
             if room == 0 {
                 break;
             }
-            // Pairs with static geometry need body byte +0x416 (B18300); an
-            // asleep body makes no pair with static geometry or with another
-            // asleep body (B18300 takes pairs only from the active list).
-            let asleep = |body: usize| {
-                bodies
-                    .get(body)
-                    .is_some_and(|b| b[0x400 / 4] == contact_groups::ASLEEP)
-            };
             let fixed = bodies
                 .get(piece_body)
                 .is_some_and(|b| byte(b, COLLIDES_WITH_FIXED) != 0)
@@ -1633,24 +1667,40 @@ impl PropWorld {
                 }
                 out.push(c);
             }
-            for (j, &(other_spec, other_body, other_token)) in parts.iter().enumerate().skip(k + 1)
-            {
+            // An asleep piece pairs only with the awake pieces after it (the
+            // asleep ones would be skipped below), in the same order.
+            let later: Vec<usize> = if sleeping[k] {
+                awake.iter().copied().filter(|&j| j > k).collect()
+            } else {
+                (k + 1..parts.len()).collect()
+            };
+            for j in later {
+                let (other_spec, other_body, other_token) = parts[j];
                 let room = remaining - out.len();
                 if room == 0 {
                     break;
                 }
                 let margin = spec.shell.max(other_spec.shell);
-                let ((a, a_reach), (b, b_reach)) = (&convexes[k], &convexes[j]);
+                // The hull centres are the poses' translations.
+                let d = [
+                    poses[k][3][0] - poses[j][3][0],
+                    poses[k][3][1] - poses[j][3][1],
+                    poses[k][3][2] - poses[j][3][2],
+                    0.,
+                ];
+                let bound = loose[k] + loose[j] + margin + 0.01;
+                if dot3(d, d) > 3. * bound * bound {
+                    continue;
+                }
+                hull(&mut convexes, k);
+                hull(&mut convexes, j);
+                let (Some((a, a_reach)), Some((b, b_reach))) = (&convexes[k], &convexes[j]) else {
+                    unreachable!("hulls built above");
+                };
                 // Each hull's face normals hold an orthonormal triple (box
                 // faces; prism cap and radials 90 degrees apart), so beyond
                 // sqrt(3) x the summed reach one of them already separates
                 // the pair and the face-axis test returns nothing.
-                let d = [
-                    a.centre[0] - b.centre[0],
-                    a.centre[1] - b.centre[1],
-                    a.centre[2] - b.centre[2],
-                    0.,
-                ];
                 let reach = a_reach + b_reach + margin + 0.01;
                 if dot3(d, d) > 3. * reach * reach {
                     continue;
@@ -1668,22 +1718,47 @@ impl PropWorld {
                     ));
                 }
             }
-            let mut hull = None;
-            for car in cars {
+            let mut world_hull = None;
+            for (c, car) in cars.iter().enumerate() {
                 let room = remaining - out.len();
                 if room == 0 {
                     break;
                 }
                 let body = bodies.get(car.body).ok_or(Error("missing car body"))?;
+                let capacity = room.min(TRACK_CONTACTS);
+                // The car's pose and bounds as `car_contacts_*` compute them
+                // first, once per car; skipped where those return before them.
+                let place = |placed: &mut Vec<Option<crate::body_geometry::Placed>>| {
+                    if placed[c].is_none() {
+                        placed[c] = Some(car.geometry.placed(body)?);
+                    }
+                    Ok::<_, Error>(placed[c].expect("placed above"))
+                };
                 let hits = if let Some(shape) = spec.round_shape(&pose) {
-                    car.geometry
-                        .car_contacts_round(body, &shape, room.min(TRACK_CONTACTS))?
+                    if capacity == 0 {
+                        Vec::new()
+                    } else {
+                        let at = place(&mut placed)?;
+                        car.geometry.car_contacts_round_at(&at, &shape, capacity)?
+                    }
+                } else if spec.triangles.is_empty() || spec.triangles.len() > 4096 || capacity == 0 {
+                    Vec::new()
                 } else {
-                    let hull = hull.get_or_insert_with(|| {
-                        crate::body_geometry::WorldHull::new(&world_triangles(spec, &pose))
-                    });
-                    car.geometry
-                        .car_contacts_hull(body, hull, room.min(TRACK_CONTACTS))?
+                    let at = place(&mut placed)?;
+                    // The hull's bounds lie within its reach of the centre:
+                    // a car clear of that box is clear of the hull's bounds,
+                    // where `car_contacts_hull` returns nothing.
+                    let centre = pose[3];
+                    if (0..3).any(|j| {
+                        at.bounds[0][j] > centre[j] + loose[k] || at.bounds[1][j] < centre[j] - loose[k]
+                    }) {
+                        Vec::new()
+                    } else {
+                        let hull = world_hull.get_or_insert_with(|| {
+                            crate::body_geometry::WorldHull::new(&world_triangles(spec, &pose))
+                        });
+                        car.geometry.car_contacts_hull_at(&at, hull, capacity)?
+                    }
                 };
                 for hit in hits {
                     out.push(pair_record(

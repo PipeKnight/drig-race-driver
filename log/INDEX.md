@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F546](F0546.md) | 2026-10-21 | Physics tick cost and parking |
 | [F545](F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
 | [F544](F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
 | [F543](F0543.md) | 2026-10-21 | Physics steps per rendered frame: original one step of the frame delta, port catch-up, no port |

@@ -458,6 +458,8 @@ impl Runtime {
             workspace: vec![[[0.; 4]; 2]],
             cached_pair: None,
             cached_material: [0.; 13],
+            park: None,
+            parked: 0,
         };
         let state = vehicle_world::from_registered(
             vehicle_manager::State {
@@ -750,6 +752,11 @@ impl Runtime {
             ));
         }
         let staged = self.staged_controls(controls)?;
+        if self.props.is_some() {
+            self.state.world.manager.park = Some(crate::dynamic_props::park_reference(
+                &self.state.world.groups.bodies[0],
+            ));
+        }
         let mut cache = self.cache;
         let query = |_, ray: grid_world::contact_ray::Ray| {
             self.track

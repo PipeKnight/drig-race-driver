@@ -133,6 +133,8 @@ fn calculate_owned(
         workspace: vec![[fs(wire, 3336), fs(wire, 3352)]],
         cached_pair,
         cached_material: fs(wire, 3200),
+        park: None,
+        parked: 0,
     };
     let mut shapes = vec![contact_groups::Shape {
         flag229: true,

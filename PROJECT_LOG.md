@@ -19,8 +19,9 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   the original where captures exist; history in log/ F139–F300 and docs/VEHICLE_*.md, docs/CONTACT_*.md.
 - Fixed 16 ms world step (owner decision F286; backlog row 11). The original steps once per frame by
   the frame time (F543); the interactive app runs at most 4 ticks per frame, so a slow tick slows the
-  game instead of collapsing FPS (F544, docs/FRAME_STEPPING.md). Props never sleep (F501, build-gate
-  xfail), which costs CPU with 100+ pieces.
+  game instead of collapsing FPS (F544, docs/FRAME_STEPPING.md). Prop pieces sleep (F541) and park
+  far from the player (F546); the tick's whole-world and row-buffer copies are gone (F546): a
+  parked piece costs about 1.3 µs per tick, an awake one about 16 µs.
 - F530: contacts with a normal drifted off unit length no longer pause the race.
 - Open: backlog row 90, the player car thrown 450 m by a body contact at Le Mans tyre walls (tick
   30431 of the run8 repro, `local/handoff/robustness.md`); continuous collision covers only props and
@@ -78,7 +79,7 @@ impact" at its head). The most visible now:
 1. AI first-corner pile-ups (rows 30, 31).
 2. Missing sounds and the artificial engine (rows 70–72).
 3. No force feedback, wheel layer or rumble (row 22).
-4. Le Mans body-contact blow-up (row 90) and props that never sleep (row 18, F501).
+4. Le Mans body-contact blow-up (row 90).
 5. Drift Battle stand-in cars and low AI drift scores (rows 36, 52).
 Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG.md](docs/CAPTURE_BACKLOG.md).
 
@@ -110,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F546](log/F0546.md) | 2026-10-21 | Physics tick cost and parking |
 | [F545](log/F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
 | [F544](log/F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
 | [F543](log/F0543.md) | 2026-10-21 | Physics steps per rendered frame: original one step of the frame delta, port catch-up, no port |
@@ -169,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F488](log/F0488.md) | 2026-10-19 | Scrape loop: the original's per-car scrape voice |
 | [F487](log/F0487.md) | 2026-10-19 | Career eBay Motors: the original's used-car market (fixed-price used cars, auctions of team cars) ported and on the career screen; the Points column checked in … |
 | [F486](log/F0486.md) | 2026-10-19 | Playable caa680f32ece with F455–F484 and Codex's local graphics commits |
-| [F485](log/F0485.md) | 2026-10-19 | Soak: seeds 39 (Spa) and 54 (Le Mans) fail on main since F476 |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

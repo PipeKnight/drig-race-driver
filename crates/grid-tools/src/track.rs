@@ -292,6 +292,10 @@ impl Track {
             }
         }
         let road_bounds = mesh.world_bounds(matrix, query.margin + ROAD_MARGIN)?;
+        // One settings value for every chunk (the directions are 704 bytes);
+        // only the room and the sheet flags change per chunk.
+        let mut chunk_settings = settings(0, ROAD_MARGIN);
+        let miss = packed_contacts::MissTest::new(&chunk_settings, directions, road_bounds);
         for (i, c) in self.chunks.iter().enumerate() {
             if contacts.len() == pool {
                 break;
@@ -306,15 +310,17 @@ impl Track {
                     "packed body material count exceeds bound",
                 ));
             }
+            if miss.misses(&c.checked, false) {
+                continue;
+            }
             let known = packed_contacts::Known {
                 checked: c.checked,
                 directions,
                 bounds: road_bounds,
             };
-            let mut settings = settings(room(contacts.len()), ROAD_MARGIN);
-            if known.misses(&settings, false) {
-                continue;
-            }
+            let settings = &mut chunk_settings;
+            settings.contact_capacity = room(contacts.len()).min(16);
+            settings.sheet_mask = 0;
             for (j, &key) in c.material_keys.iter().enumerate() {
                 settings.sheet_mask |= u32::from(sheet(key)?) << j;
             }
@@ -323,7 +329,7 @@ impl Track {
                 matrix,
                 &c.mesh(),
                 &c.material_indices,
-                &settings,
+                settings,
                 &known,
             )?;
             contacts.extend(generated.into_iter().map(|contact| BodyContact {
@@ -379,6 +385,7 @@ impl Track {
                 ROAD_MARGIN,
                 query,
                 capacity - hits.len(),
+                Some(&c.checked),
             )?);
         }
         Ok(hits)

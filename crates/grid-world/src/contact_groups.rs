@@ -140,7 +140,8 @@ fn validate_scope(input: &Input, shapes: &[Shape], carry: Option<&Carry>) -> Res
             || byte(b, 0x2c) > 1
             || byte(b, 0x2d) != 0
             || byte(b, 0x412) > u8::from(carry.is_some())
-            || byte(b, 0x413) != 0
+            // Parked (B24DF0, +0x413) only while asleep.
+            || byte(b, 0x413) > u8::from(!seen[i])
             || b[0x1c0 / 4..0x1d0 / 4]
                 .iter()
                 .any(|&x| !f32::from_bits(x).is_finite())
@@ -441,32 +442,60 @@ pub fn calculate_with_geometry(
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    build(input, shapes, 0, external_count)
+    build(input.clone(), shapes, 0, external_count, &mut 0)
 }
 
-pub(crate) fn calculate_carried(
-    input: &Input,
+/// B0F2F0 into an active list for a parked body (+0x413): it leaves the
+/// parked list (head `parked`, links +0x308 next / +0x30C previous) and the
+/// flag clears; its stale links stay, as in the original.
+pub(crate) fn leave_parked(bodies: &mut [Body], parked: &mut u32, k: usize) {
+    if byte(&bodies[k], 0x413) == 0 {
+        return;
+    }
+    let (next, previous) = (field(&bodies[k], 0x308), field(&bodies[k], 0x30c));
+    if previous == 0 {
+        *parked = next;
+    } else {
+        put(&mut bodies[previous as usize - 1], 0x308, next);
+    }
+    if next != 0 {
+        put(&mut bodies[next as usize - 1], 0x30c, previous);
+    }
+    put_byte(&mut bodies[k], 0x413, 0);
+}
+
+/// Carried-world grouping consuming its input: the bodies and contacts move
+/// into the output instead of being copied (a world step's largest buffers).
+pub(crate) fn calculate_carried_owned(
+    input: Input,
     shapes: &[Shape],
     carry: &Carry,
     external_count: usize,
+    parked: &mut u32,
 ) -> Result<Output, Error> {
-    validate_carried(input, shapes, carry)?;
+    validate_carried(&input, shapes, carry)?;
     if external_count > input.contacts.len() {
         return Err(Error("invalid external contact prefix"));
     }
-    build(input, shapes, carry.dirty_head, external_count)
+    build(input, shapes, carry.dirty_head, external_count, parked)
 }
 
 fn build(
-    input: &Input,
+    mut input: Input,
     shapes: &[Shape],
     mut dirty: u32,
     external_count: usize,
+    parked: &mut u32,
 ) -> Result<Output, Error> {
+    let n = input.bodies.len();
+    // Read before the bodies move into the output (no step below changes
+    // +0x400 before these are consulted).
+    let asleep_flags: Vec<bool> =
+        input.bodies.iter().map(|b| field(b, 0x400) == ASLEEP).collect();
     let mut out = Build {
-        bodies: input.bodies.clone(),
-        contacts: input.contacts.clone(),
-        joint_lists: vec![VecDeque::new(); input.bodies.len()],
+        bodies: std::mem::take(&mut input.bodies),
+        contacts: std::mem::take(&mut input.contacts),
+        joint_lists: vec![VecDeque::new(); n],
         heads: [0; 2],
         tails: [0; 2],
         group_head: 0,
@@ -496,7 +525,7 @@ fn build(
     // A joint reaches the stack through B's list (+0x324) only while A is
     // asleep; grouping it then moves A into the active list (AD6250: no
     // velocity or timer reset), so an awake body pulls its jointed partner.
-    let asleep = |id: u32| field(&input.bodies[id as usize - 1], 0x400) == ASLEEP;
+    let asleep = |id: u32| asleep_flags[id as usize - 1];
     let mut stack = Vec::new();
     for &id in &ids {
         for (k, j) in input.joints.iter().enumerate().rev() {
@@ -512,10 +541,12 @@ fn build(
     }
     // A pulled partner starts like the active bodies: island links cleared
     // and on the dirty chain.
-    let mut pulled = vec![false; input.bodies.len()];
+    let mut pulled = vec![false; n];
     for &k in &stack {
         let id = input.joints[k].a;
         if asleep(id) && !std::mem::replace(&mut pulled[id as usize - 1], true) {
+            // AD6250 moves it with B0F2F0, which also unparks it.
+            leave_parked(&mut out.bodies, parked, id as usize - 1);
             if byte(&out.bodies[id as usize - 1], 0x412) == 0 {
                 out.set(id, 0x2f0, dirty);
                 out.set(id, 0x2f4, 0);
@@ -555,7 +586,7 @@ fn build(
         out.create(id);
         id = next;
     }
-    let mut joints = input.joints.clone();
+    let mut joints = std::mem::take(&mut input.joints);
     let mut root = out.group_head;
     let mut manager = 0;
     let mut largest = 0;

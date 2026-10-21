@@ -66,16 +66,25 @@ pub fn add(stage: Stage, nanos: u64) {
 }
 
 /// World size per shared-world tick: bodies, pieces and lost wheels
-/// (bodies beyond the cars), and active contacts by kind (wheel, static
-/// body, car pair, piece).
-static WORLD: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+/// (bodies beyond the cars), active contacts by kind (wheel, static
+/// body, car pair, piece), and asleep and parked bodies.
+static WORLD: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
 
 /// Count one shared-world tick's size (when timing is on).
-pub fn world(bodies: usize, pieces: usize, contacts: [usize; 4]) {
+pub fn world(bodies: usize, pieces: usize, contacts: [usize; 4], resting: [usize; 2]) {
     if !enabled() {
         return;
     }
-    let values = [bodies, pieces, contacts[0], contacts[1], contacts[2], contacts[3]];
+    let values = [
+        bodies,
+        pieces,
+        contacts[0],
+        contacts[1],
+        contacts[2],
+        contacts[3],
+        resting[0],
+        resting[1],
+    ];
     for (sum, value) in WORLD.iter().zip(values) {
         sum.fetch_add(value as u64, Ordering::Relaxed);
     }
@@ -122,8 +131,8 @@ pub fn report() -> String {
     if ticks > 0 {
         let mean = |k: usize| WORLD[k].load(Ordering::Relaxed) as f64 / ticks as f64;
         line += &format!(
-            " world_bodies={:.1} world_pieces={:.1} contacts_wheel={:.1} contacts_body={:.1} contacts_car={:.1} contacts_piece={:.1}",
-            mean(0), mean(1), mean(2), mean(3), mean(4), mean(5)
+            " world_bodies={:.1} world_pieces={:.1} contacts_wheel={:.1} contacts_body={:.1} contacts_car={:.1} contacts_piece={:.1} world_asleep={:.1} world_parked={:.1}",
+            mean(0), mean(1), mean(2), mean(3), mean(4), mean(5), mean(6), mean(7)
         );
     }
     line
