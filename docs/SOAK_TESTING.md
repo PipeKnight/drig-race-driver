@@ -200,6 +200,53 @@ grid position then defaults to the race launcher's back of the grid
 `drive_replay` (`car=... opponent_cars=...`), and the session builds the same
 models. Before F345 such a log was refused.
 
+## Headless app runs (F538)
+
+`grid-soak` mirrors the app's driving path; a career or Le Mans race has more
+(class fields, the 24 Hours clock, the career result, the menu settings). For
+those, run the app itself without a window:
+
+```
+set GRID_AUTOPILOT=1
+grid-app --data-dir D --settings D/career-race.ini --from-menu --career-result D/result.txt --drive-ticks 72000 --headless
+```
+
+`--headless` (needs `--drive-ticks`; not with `--render`) adds Bevy's plugins
+with no window, no wgpu backend (the renderer is never created) and no audio,
+a run loop with no frame wait, and a manual clock of exactly one fixed tick
+(`DELTA`, 16 ms) per frame. So every frame runs `drive_tick` once, as fast as
+the CPU allows, with the same systems, resources and settings as the window.
+Systems that need a renderer resource are skipped (each distinct error is
+printed once as `drive_headless event=skipped_system`); they are presentation
+only. The app leaves when the race is over (every car finished or out, or the
+player out), at a driving pause (exit code 2) or at the tick limit, and prints
+`drive_headless version=1 event=exit reason=race_over|pause|tick_limit tick=N`.
+A race started with `--from-menu` leaves as the menu does (exit code 21), so
+`--career-result` is written.
+
+Same simulation [V], Le Mans 24 Hours career repro (`local/repro/lemans-manifold-40552`,
+17 cars, autopilot), 3000 ticks, the same executable windowed and headless:
+- every `drive_sample` line (the player's pose, velocity, controls and damage
+  each logged tick, 2663 lines) is byte-identical;
+- of all other `drive_*` and `dynamic_props` lines, only presentation differs:
+  `drive_damage_part`, `drive_damage_glass` and `drive_damage_light`
+  (damage_parts, which never writes simulation state), `drive_body_projection`
+  and the camera. One `dynamic_props` line comes in another order in the log.
+- The traced row-90 repro (F537) gave the same blow-up tick and poses headless
+  as in the window.
+
+Speed: the tick, not rendering, sets the pace, so headless helps little on a
+long Le Mans race. Headless saves the frame's render and presentation work
+(about 2-3 ms per frame with 17 cars) but not the tick, which grows with the
+pieces: 5.6 ms at 26 pieces, 54.9 ms at 408 (`GRID_PERF_TIMING`,
+docs/PERFORMANCE.md "Le Mans field"). Measured on this PC: the first 3000
+ticks in 54 s headless; the current-main 24 Hours to the player's wreck
+(12221 ticks) in 440 s; the F513 + F530 build's whole race (44860 ticks) in
+58 min headless, against about 60 min windowed (run8, 45313 ticks). What makes
+long runs fast is piece sleeping (docs/PERFORMANCE.md); headless runs remain
+useful for unattended runs, for traces (no window to keep open) and in
+parallel with other work.
+
 ## Findings (2026-10-16)
 
 Evidence: main checkout `local/soak/` (every directory has `summary.md`,

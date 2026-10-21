@@ -993,6 +993,11 @@ impl MultiRuntime {
             props_next = Some((next, disabled));
         }
         let active = wheel_contacts + body_contacts + car_contacts + piece_contacts;
+        crate::perf::world(
+            world.groups.bodies.len(),
+            world.groups.bodies.len() - n,
+            [wheel_contacts, body_contacts, car_contacts, piece_contacts],
+        );
         for (i, error) in contact_failed.into_iter().enumerate() {
             if let Some(error) = error
                 && failed[i].is_none()

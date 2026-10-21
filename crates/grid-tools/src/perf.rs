@@ -65,6 +65,22 @@ pub fn add(stage: Stage, nanos: u64) {
     COUNTS[stage as usize].fetch_add(1, Ordering::Relaxed);
 }
 
+/// World size per shared-world tick: bodies, pieces and lost wheels
+/// (bodies beyond the cars), and active contacts by kind (wheel, static
+/// body, car pair, piece).
+static WORLD: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+
+/// Count one shared-world tick's size (when timing is on).
+pub fn world(bodies: usize, pieces: usize, contacts: [usize; 4]) {
+    if !enabled() {
+        return;
+    }
+    let values = [bodies, pieces, contacts[0], contacts[1], contacts[2], contacts[3]];
+    for (sum, value) in WORLD.iter().zip(values) {
+        sum.fetch_add(value as u64, Ordering::Relaxed);
+    }
+}
+
 /// Times `stage` until dropped; does nothing when timing is off.
 pub struct Timer(Option<(Stage, Instant)>);
 
@@ -101,6 +117,14 @@ pub fn report() -> String {
                 total as f64 / count as f64 / 1e6
             );
         }
+    }
+    let ticks = COUNTS[Stage::WorldTick as usize].load(Ordering::Relaxed);
+    if ticks > 0 {
+        let mean = |k: usize| WORLD[k].load(Ordering::Relaxed) as f64 / ticks as f64;
+        line += &format!(
+            " world_bodies={:.1} world_pieces={:.1} contacts_wheel={:.1} contacts_body={:.1} contacts_car={:.1} contacts_piece={:.1}",
+            mean(0), mean(1), mean(2), mean(3), mean(4), mean(5)
+        );
     }
     line
 }
