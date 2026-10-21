@@ -106,6 +106,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F533](log/F0533.md) | 2026-10-21 | Shared reverse-engineering base: docs/re/symbols.tsv, tools/re, one master Ghidra project |
 | [F532](log/F0532.md) | 2026-10-21 | Project log split into one file per entry; tools/log_entry.py numbers, checks and indexes them; capture backlog |
 | [F531](log/F0531.md) | 2026-10-20 | Playable e57f2fd391e2 with F521–F530, the portable copy refreshed, APKs a11cddf7de27, and a pause of several days |
 | [F530](log/F0530.md) | 2026-10-20 | Contacts whose normal drifted off unit length no longer pause the race |
@@ -165,7 +166,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F475](log/F0475.md) | 2026-10-19 | Career results: a Points column on the race results, the event standings on the event page, and Balance and Season's Earnings on the payout |
 | [F474](log/F0474.md) | 2026-10-19 | Career field: the original's race draw, event_driver field and grid in the career screen |
 | [F473](log/F0473.md) | 2026-10-19 | Joints, phase 1: the original's six-degree-of-freedom joint ported as library code, constructor, prepare and rows bit-for-bit against the original |
-| [F472](log/F0472.md) | 2026-10-19 | Head-cam dynamics ported (body and head springs); car +0x10 is the chassis matrix of F177 |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

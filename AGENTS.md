@@ -44,3 +44,9 @@ On 6 October 2026 the owner requested that all progress and findings be tracked 
   - long soak runs and the separate `soak` profile: only overnight, or when the change targets robustness.
   Avoid building extra profiles you do not need.
 - Check for existing tools before installing duplicates. Prefer official sources, pin and record versions, verify signatures/hashes where supplied, and prove useful operation against the actual GRID reference.
+
+## Reverse-engineering base
+
+- Before analysing an original address, run `py -I tools/re/grid_re.py lookup <addr>` (or grep `docs/re/symbols.tsv`) and read the doc it names. Decompile through the shared master project with `grid_re.py decompile`; the output is cached in the main checkout's `local/re-cache/`.
+- After analysing, add or update rows in `docs/re/symbols.tsv` in the same commit as your doc (`py -I tools/re/mine_symbols.py` refreshes them from docs, the log and Rust comments, and never replaces an existing name).
+- Do not create new Ghidra projects. Use the master `local/ghidra-master` read-only, or a `master.py snapshot` copy for renaming work, and merge its names back (docs/re/README.md).
