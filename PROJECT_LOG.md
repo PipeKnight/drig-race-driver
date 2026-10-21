@@ -17,7 +17,9 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
 - Source-faithful single-car physics (suspension, tyres, steering, gearing, damage, deformation,
   body contacts, joints for tyre walls and armco) ported function by function and bit-checked against
   the original where captures exist; history in log/ F139–F300 and docs/VEHICLE_*.md, docs/CONTACT_*.md.
-- Fixed 16 ms world step (owner decision F286; backlog row 11). Props never sleep (F501, build-gate
+- Fixed 16 ms world step (owner decision F286; backlog row 11). The original steps once per frame by
+  the frame time (F543); the interactive app runs at most 4 ticks per frame, so a slow tick slows the
+  game instead of collapsing FPS (F544, docs/FRAME_STEPPING.md). Props never sleep (F501, build-gate
   xfail), which costs CPU with 100+ pieces.
 - F530: contacts with a normal drifted off unit length no longer pause the race.
 - Open: backlog row 90, the player car thrown 450 m by a body contact at Le Mans tyre walls (tick
@@ -108,6 +110,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F544](log/F0544.md) | 2026-10-21 | Interactive app runs at most 4 fixed ticks per frame |
 | [F543](log/F0543.md) | 2026-10-21 | Physics steps per rendered frame: original one step of the frame delta, port catch-up, no port |
 | [F542](log/F0542.md) | 2026-10-21 | Playable c4b2673f4cfc with body sleeping (F541), portable copy and APKs ee1880b472d2 |
 | [F541](log/F0541.md) | 2026-10-21 | Rigid-body sleeping for prop pieces and lost wheels |
@@ -167,7 +170,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F486](log/F0486.md) | 2026-10-19 | Playable caa680f32ece with F455–F484 and Codex's local graphics commits |
 | [F485](log/F0485.md) | 2026-10-19 | Soak: seeds 39 (Spa) and 54 (Le Mans) fail on main since F476 |
 | [F484](log/F0484.md) | 2026-10-19 | Joints, phase 3a: tyre walls break into blocks joined by their springs; the constraint template stage bit-for-bit against the original |
-| [F483](log/F0483.md) | 2026-10-19 | Archive of the render-leak session; evidence moved |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

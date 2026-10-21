@@ -2697,6 +2697,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if headless && (output.is_some() || !drive || drive_ticks.is_none()) {
         return Err("--headless requires --drive and --drive-ticks, and no --render".into());
     }
+    // A window on the real clock (desktop and Android): the only mode whose
+    // fixed ticks catch up with the wall clock. Headless and offscreen
+    // captures step a manual duration and keep one tick per frame.
+    let interactive = !headless && output.is_none();
     if headless {
         // The app's own simulation without a window, GPU or audio: the
         // renderer is never created (no wgpu backend) and every frame
@@ -3020,6 +3024,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 next,
             ))
             .add_systems(FixedUpdate, touge_event::tick.after(drive_tick));
+        }
+        if interactive {
+            cap_catch_up(&mut app);
         }
         app.insert_resource(driving)
             .insert_resource(Time::<Fixed>::from_seconds(f64::from(
@@ -3751,6 +3758,34 @@ fn capture(
             );
     }
 }
+/// Default catch-up cap of the interactive app, in fixed ticks per frame.
+const MAX_TICKS_PER_FRAME: u32 = 4;
+
+/// Interactive play: at most `MAX_TICKS_PER_FRAME` fixed ticks per rendered
+/// frame (owner's choice, docs/FRAME_STEPPING.md option 2). Bevy's default
+/// clamp of 250 ms let one slow frame run about 15 catch-up ticks, so a tick
+/// near 16 ms collapsed the frame rate (F540). Beyond the cap the game time
+/// runs slower than the wall clock. The original takes one step of the frame
+/// time per frame instead (A72930); the port keeps its fixed 16 ms tick.
+fn cap_catch_up(app: &mut App) {
+    let ticks = settings::diagnostics()
+        .max_ticks_per_frame
+        .unwrap_or(MAX_TICKS_PER_FRAME);
+    let mut time = app.world_mut().resource_mut::<Time<Virtual>>();
+    // 0: Bevy's own clamp, for comparisons.
+    if ticks > 0 {
+        // A whole number of fixed timesteps (the same Duration as
+        // `Time::<Fixed>::from_seconds(DELTA)`).
+        time.set_max_delta(
+            Duration::from_secs_f64(f64::from(grid_tools::source_vehicle::DELTA)) * ticks,
+        );
+    }
+    println!(
+        "frame_catch_up max_ticks_per_frame={ticks} max_delta_ms={:.1}",
+        time.max_delta().as_secs_f64() * 1000.
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn drive_tick(
     mut driving: ResMut<Driving>,
@@ -3774,6 +3809,10 @@ fn drive_tick(
             .is_some_and(|n| driving.runtime.ticks >= n)
     {
         return;
+    }
+    // Diagnostics tick_delay_ms: a forced slow tick (docs/FRAME_STEPPING.md).
+    if let Some(ms) = settings::diagnostics().tick_delay_ms.filter(|ms| *ms > 0.) {
+        std::thread::sleep(Duration::from_secs_f64(ms / 1000.));
     }
     // During the countdown the engine keeps running and the player may rev.
     // Authored grid hold, not a recovered original race-start rule: the

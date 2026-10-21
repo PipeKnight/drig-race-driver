@@ -8,8 +8,11 @@ from 18–34 FPS to 3.4–5.9 FPS once about 220 prop pieces lay on the track, w
 
 **Answer.** The original steps once per rendered frame, and that step is the real frame time. It is
 not a fixed step. The port's physics and game logic assume the fixed 16 ms `DELTA`, so a faithful
-port is a larger change, and the owner has to decide on it (section 4). Nothing was ported. Static
-analysis of the private analysis image only. The original game was not launched.
+port is a larger change, and the owner has to decide on it (section 4). Static analysis of the
+private analysis image only. The original game was not launched.
+
+**Done (F544).** The owner chose option 2: the interactive app runs at most 4 fixed ticks per
+rendered frame (section 5). The fixed 16 ms tick stays, so this is not the original's rule.
 
 Labels: [O] observed in the original (decompile or live read), [D] derived from [O] facts,
 [I] inference.
@@ -104,7 +107,7 @@ Let a frame cost `r` for rendering and other per-frame work, and `c` per tick.
 | Wheel substeps | `max(1, trunc(dt·1000))` of `dt/n` | 16 of 1 ms | 16 of 1 ms |
 | Slow tick | longer step, FPS ≈ 1/(r + c) | more ticks, FPS collapses | n/a (as fast as CPU) |
 
-## 3. Why this was not ported now
+## 3. Why the original's rule was not ported
 
 The task's stop condition holds. The original's step is variable, and the port's physics assumes a
 fixed dt.
@@ -155,6 +158,64 @@ fixed dt.
 
 Recommendation [I]: 2 with N = 4 now, as a small reversible change, together with 3; 1 only if the
 owner wants the original's display-rate-dependent handling.
+
+## 5. Ported: at most 4 ticks per frame (F544)
+
+Owner's choice, 21 October 2026: option 2 with N = 4.
+
+Code (`crates/grid-app`):
+- `main.rs` `cap_catch_up`: `Time<Virtual>::set_max_delta(4 × Duration::from_secs_f64(DELTA))`.
+  That is exactly four fixed timesteps, 64 ms. It logs
+  `frame_catch_up max_ticks_per_frame=4 max_delta_ms=64.0`.
+- It runs only when `interactive = !headless && output.is_none()`, which means a window on the
+  real clock. Android starts through the same `main`, so the phone gets it too.
+- Unchanged:
+  - `--headless`, `--render` captures (with `render_fixed_step` or `render_fps`) and the in-crate
+    test apps, all of which step a ManualDuration;
+  - grid-soak, grid-opponent-race and the identity runs, which never use Bevy time.
+- Diagnostics (docs/SETTINGS.md):
+  - `max_ticks_per_frame` (`GRID_MAX_TICKS_PER_FRAME`) sets N; 0 restores Bevy's 250 ms clamp.
+  - `tick_delay_ms` (`GRID_TICK_DELAY_MS`) sleeps in every vehicle tick, as a forced slow tick.
+
+What else read the 250 ms default [O]: nothing in grid-app.
+- Menus, HUD timers, the pause menu, the results screens, touch controls, engine sound and the
+  frame counter use `Time<Real>`.
+- Presentation interpolation uses `Time<Fixed>::overstep`.
+- Pause is `Driving::paused`, not `Time<Virtual>::pause`.
+- Only damage shards and the static orbit viewer read the generic (virtual) `Time` in `Update`.
+  They now slow down with the game, as the simulation does.
+- A long frame after a load, or an Android resume, now advances at most 4 ticks (64 ms of race
+  time) instead of 15. The countdown runs in ticks, so it can skip less than before, not more.
+
+### Desktop measurement
+
+Release `grid-app.exe`, windowed 1280 × 800, autopilot (`GRID_AUTOPILOT=1`), muted. Cap 0 (Bevy's
+250 ms clamp, the behaviour before F544) against cap 4. One binary for both, switched with
+`GRID_MAX_TICKS_PER_FRAME`. The evidence (scripts, logs) is private, in the worktree's
+`local/frame-cap/`.
+
+"Identical" compares every `drive_sample` tick line except `wall_seconds`.
+
+| Scenario | FPS cap 0 → 4 | ticks/s cap 0 → 4 | worst frame ms | drive samples |
+| --- | --- | --- | --- | --- |
+| Practice, Lacetti/Donington, 3000 ticks | 146.8 → 146.2 | 62.7 → 62.7 | 10.1 → 9.2 | 189/189 identical |
+| Same, forced 12 ms tick | 69.3 → 70.3 | 62.5 → 62.5 | 121 → 30 | 95/95 identical |
+| Same, forced 20 ms tick | 3.1 → 11.6 | 47.0 → 46.6 (game 0.75 → 0.74 of wall time) | 357 → 106 | 95/95 identical |
+| Drift Battle, Nürburgring `route_1`, 8 BMWs, 8000 ticks, whole run | 112.5 → 105.5 median | 61.8 → 61.7 | 700 → 167 | 7608/7608 identical |
+| Same, last 40 s (pile of about 470–490 pieces, about 30 ms per tick) | 1.8 → 7.8 | 28.2 → 31.1 (game 0.45 → 0.50) | | |
+| Same with a forced 10 ms tick, 6000 ticks, last 40 s | 2.3 → 8.4 | 36.3 → 33.2 | 481 → 178 | 5698/5698 identical |
+
+Reading [D]:
+- Fast frames are unchanged: 62.5 ticks/s and the same simulation.
+- Above 16 ms per tick, the cap turns the collapse into a slower game at a 3–4× higher frame rate.
+  The game speed is about the same as before. With Bevy's clamp it was already below real time,
+  because 15.6 ticks of 20 ms do not fit in 250 ms.
+- This matches the model of section 2. For example, a 20 ms tick with r of about 6 ms gives a frame
+  of about 90 ms, 11 FPS.
+- The desktop reproduces the phone's pile collapse at the end of the 8000-tick drift battle. The
+  piece counts are derived from the cumulative `GRID_PERF_TIMING` means: about 470–490 pieces
+  over the last 800–1500 ticks.
+- Option 3 (a cheaper tick) is still what brings back 60 FPS.
 
 ## Symbols
 

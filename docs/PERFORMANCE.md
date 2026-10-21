@@ -784,3 +784,18 @@ tick: a sample profile puts about half of the tick in whole-world memory copies
 (the 0x424-byte body array cloned several times per tick), plus the O(n²)
 piece-pair distance pass and car–piece hull tests in `PropWorld::contacts`.
 Those are the next levers.
+
+## Catch-up cap (F544)
+
+The interactive app runs at most 4 fixed ticks per rendered frame (`Time<Virtual>` max delta
+64 ms instead of Bevy's 250 ms; [FRAME_STEPPING.md](FRAME_STEPPING.md) section 5). While a tick
+costs under 16 ms nothing changes: 62.5 ticks/s, identical drive samples. Above that, the game time
+slows instead of the frame rate collapsing.
+
+Desktop measurements (cap 0 → cap 4):
+- forced 20 ms tick: 3.1 → 11.6 FPS at the same 0.75 game speed;
+- the end of an 8000-tick Nürburgring drift battle, about 480 pieces at about 30 ms per tick:
+  1.8 → 7.8 FPS, at 0.45 → 0.50 game speed.
+
+`GRID_MAX_TICKS_PER_FRAME=0` restores the old clamp for comparisons, and `GRID_TICK_DELAY_MS`
+forces a slow tick.
