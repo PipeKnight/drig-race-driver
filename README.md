@@ -1,6 +1,6 @@
-# Reassembly: an open-source engine for Race Driver: GRID (2008)
+# DRIG: an open-source engine for Race Driver: GRID (2008)
 
-Reassembly is a reimplementation of Codemasters' Race Driver: GRID (2008) in Rust with the [Bevy](https://bevyengine.org/) engine. The goal is a 1:1 recreation: the same handling, AI, damage, events and menus as the original game, running on a modern, open codebase.
+DRIG is a reimplementation of Codemasters' Race Driver: GRID (2008) in Rust with the [Bevy](https://bevyengine.org/) engine. The goal is a 1:1 recreation: the same handling, AI, damage, events and menus as the original game, running on a modern, open codebase.
 
 The repository contains **no game assets**. The engine reads tracks, cars, textures, sounds and game data from your own installed copy of GRID, the same way OpenMW uses Morrowind's data files or OpenRCT2 uses RollerCoaster Tycoon 2's.
 
@@ -91,7 +91,7 @@ Forks, bug reports and pull requests are welcome. Most of the code is written by
 
 ## Legal
 
-Reassembly is an independent project. It is not affiliated with, endorsed by or connected to Codemasters or Electronic Arts. "Race Driver: GRID" and related names are trademarks of their respective owners. You need your own copy of the original game to play.
+DRIG is an independent project. It is not affiliated with, endorsed by or connected to Codemasters or Electronic Arts. "Race Driver: GRID" and related names are trademarks of their respective owners. You need your own copy of the original game to play.
 
 The source code is licensed under the [Apache License 2.0](LICENSE).
 
