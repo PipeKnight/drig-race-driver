@@ -86,8 +86,7 @@ pub struct Surface {
     // Z/W are authored roughness/reflectance, not recovered source values.
     #[uniform(112)]
     dry_ground: Vec4,
-    // X enables the diagnostic view bias; other lanes reserved.
-    // Camera mip bias opt-in, authored specular mode, reserved, reserved.
+    // Camera mip bias opt-in, specular mode, speed low-pass bias, asphalt layer bits.
     // controls.w remains the source world-projected UV scale.
     #[uniform(113)]
     sampling: Vec4,
@@ -368,7 +367,8 @@ pub fn install(
     )?;
     app.insert_resource(source)
         .add_plugins(MaterialPlugin::<SurfaceMaterial>::default())
-        .add_systems(PostStartup, attach);
+        .add_systems(PostStartup, attach)
+        .add_systems(FixedUpdate, update_asphalt_softness.after(super::drive_tick));
     Ok(())
 }
 
@@ -409,6 +409,34 @@ fn edge_ground_layer(texture: &str, standalone: f32, enabled: bool) -> f32 {
         2.
     } else {
         standalone
+    }
+}
+
+// Exact audited standalone layers only; edge/paint atlases must never be blurred.
+fn asphalt_layer(name: &str) -> bool {
+    matches!(name, "don_track1_d.tga" | "don_track2_d.tga" | "don_track3_d.tga" | "don_track4_d.tga")
+}
+
+// A direct function of physical speed, not render delta or displacement per frame.
+// Fade in between 18 and108 km/h; reverse gets the same filtering at equal speed.
+fn asphalt_bias(velocity: [f32; 4], maximum: f32) -> f32 {
+    let speed = velocity[..3].iter().map(|v| v * v).sum::<f32>().sqrt();
+    if !speed.is_finite() { return 0.; }
+    let t = ((speed - 5.) / 25.).clamp(0., 1.);
+    maximum * t * t * (3. - 2. * t)
+}
+
+fn update_asphalt_softness(
+    driving: Option<Res<super::Driving>>,
+    settings: Res<super::graphics::Settings>,
+    mut materials: ResMut<Assets<SurfaceMaterial>>,
+) {
+    if settings.asphalt_soften == 0. { return; }
+    let bias = driving.as_ref().map_or(0., |d| asphalt_bias(d.runtime.velocity(), settings.asphalt_soften));
+    for (_, material) in materials.iter_mut() {
+        if material.extension.sampling.w > 0. {
+            material.extension.sampling.z = bias;
+        }
     }
 }
 
@@ -504,7 +532,15 @@ fn attach(
                         macro_map: textures[&d.textures[2]].clone(),
                         skids: skid_textures[&d.textures[3]].clone(),
                         scales: d.scales,
-                        sampling: Vec4::new(if settings.surface_view_mip_bias { 1. } else { 0. }, settings.surface_specular.control(), 0., 0.),
+                        sampling: Vec4::new(
+                            if settings.surface_view_mip_bias { 1. } else { 0. },
+                            settings.surface_specular.control(),
+                            0.,
+                            if settings.asphalt_soften > 0. {
+                                f32::from(asphalt_layer(&d.textures[0]))
+                                    + 2. * f32::from(asphalt_layer(&d.textures[1]))
+                            } else { 0. },
+                        ),
                         controls: d.controls,
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
@@ -532,6 +568,7 @@ fn attach(
             .insert(MeshMaterial3d(handle));
         attached += 1;
     }
+    println!("asphalt_soften maximum={} scope=don_track1-4-rgb-only speed_mps=5..30 default=off alpha_macro_skids=preserved", settings.asphalt_soften);
     println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(
         "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} specular={:?} uv1=true masks=linear-ARGB-to-RGBA",
@@ -551,6 +588,24 @@ fn attach(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn asphalt_softness_protects_mixed_atlases_and_unrelated_routes() {
+        for name in ["don_track1_d.tga", "don_track2_d.tga", "don_track3_d.tga", "don_track4_d.tga"] {
+            assert!(asphalt_layer(name));
+        }
+        for name in ["don_edge1to1_d.tga", "don_decals_01_d.tga", "don_rumble_strip_03_d.tga", "don_infield1_d.tga", "land/don_track1_d.tga", "other_track1_d.tga"] {
+            assert!(!asphalt_layer(name));
+        }
+        assert_eq!(asphalt_bias([0.; 4], 4.), 0.);
+        assert_eq!(asphalt_bias([5., 0., 0., 0.], 4.), 0.);
+        assert_eq!(asphalt_bias([60., 0., 0., 0.], 4.), 4.);
+        assert_eq!(asphalt_bias([-60., 0., 0., 0.], 4.), 4.);
+        assert_eq!(asphalt_bias([f32::NAN, 0., 0., 0.], 4.), 0.);
+        let samples: Vec<_> = (0..=120).map(|v| asphalt_bias([v as f32, 0., 0., 0.], 4.)).collect();
+        assert!(samples.windows(2).all(|p| p[0] <= p[1]));
+        assert!(samples.iter().all(|v| (0.0..=4.0).contains(v)));
+    }
+
     #[test]
     #[ignore = "requires owner's purchased GRID installation"]
     fn purchased_surfaces_resolve_both_uv_sets_and_all_layers() {

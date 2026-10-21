@@ -55,7 +55,20 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let a = textureSampleBias(first, first_sampler, uv, mip_bias);
     let b = textureSampleBias(second, second_sampler, uv, mip_bias);
     let macro_sample = textureSampleBias(macro_map, macro_sampler, in.uv_b, mip_bias);
-    let layer = mix(a, b, in.color.r);
+    // RGB-only speed low-pass BEFORE reconstruction. Keep original filtered alpha
+    // for source F0, and leave macro colour, marks and skid weights untouched.
+    var first_rgb = a.rgb;
+    var second_rgb = b.rgb;
+    let road_bits = u32(sampling.w);
+    if sampling.z > 0.0 {
+        if (road_bits & 1u) != 0u {
+            first_rgb = textureSampleBias(first, first_sampler, uv, mip_bias + sampling.z).rgb;
+        }
+        if (road_bits & 2u) != 0u {
+            second_rgb = textureSampleBias(second, second_sampler, uv, mip_bias + sampling.z).rgb;
+        }
+    }
+    let layer = vec4(mix(first_rgb, second_rgb, in.color.r), mix(a.a, b.a, in.color.r));
     // Green was limited at each vertex before interpolation, as in the source VS.
     // controls.z < 0: the material saves no macro map (no blend, no AO).
     let macro_weight = select(in.color.g, 0.0, controls.z < 0.0);

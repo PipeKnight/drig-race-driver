@@ -66,3 +66,8 @@ Implemented and GPU-validated the previously proposed bounded colour audit; see 
 
 
 G202 follow-up supersedes the mask-first proposal: installed NVIDIA guide discourages BiasCurrentColor for modern models. Stationary history control retains78-80% highpass contrast; moving virtual300 still24-26%. Correct jitter sign is locally supported by adjacent raw-HDR reprojection, not a complete integration proof. See [input contract, exact scope and next supported preset experiment](DLAA_INPUT_CONTRACT.md). No owner build change.
+
+
+## Uniform-softness pilot (G207, 21 October2026; not yet validated)
+
+The owner rejected the optional L road shimmer and prefers a uniformly soft surface. The new default-off `--asphalt-soften 0..4` experiment applies a positive RGB mip bias only to the four audited standalone Donington track textures, with smooth strength from18to108km/h. It changes neither alpha/F0 nor macro colour, skid maps, mixed edge/paint/kerb textures or vehicle materials. Physical speed is read after each fixed simulation step, so the law does not depend on rendering FPS. This is authored source-detail filtering before DLAA, not original motion-blur reconstruction and not a claim to repair the underlying temporal mechanism. Runtime/default-parity, motion30/300and4K checks remain pending. Private evidence: local/graphics/asphalt-soft01; integrated unchanged controls: local/graphics/integrated-main01.
