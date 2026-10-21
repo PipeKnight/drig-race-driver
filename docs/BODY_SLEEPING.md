@@ -156,6 +156,10 @@ when something touches it, as any asleep body).
   +0x710 is set and when +0x640 is nonzero, it takes car 9EE380(0), then walks the cars with 9EE360
   and takes the first whose byte +0x28 is set. That flag is the player (human) car [I]; the port
   uses car 0, the player in every port session.
+- 5C6B90 is slot 1 of the EntityManager service (vtable CDFA28; constructor **5B4C10** names it
+  "EntityManager" and zeroes both fields). +0x710 is never set elsewhere (whole-image scan, F548);
+  +0x640 is the entity buffer its load method **5CFB30** (slot 4) allocates. So parking runs in
+  races once a level is loaded; the race frame 5F0EE0 runs the entity update 7D64B0 itself [D].
 - From that car, the physical body [car+0x24]+0xDB0 (5C6D2B); **A69630** copies the body's current
   matrix (+0x1D0), and the point is its translation row (+0x200, the published position). The
   **scale is the constant 1.0** (0x3F800000) [D]. Distances are therefore plain world metres.
