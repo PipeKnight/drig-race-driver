@@ -64,9 +64,9 @@ Exit code 0 when every check passed.
 
 | Tier | Runs | Chosen for |
 |---|---|---|
-| docs | no cargo: `git diff --check` (conflict markers fail, whitespace is listed), relative Markdown links on added lines must exist (links into `local/` are skipped), changed `.ps1` files must parse, changed `.py` files must parse, `tools/log_entry.py check` when that tool exists | `docs/`, `log/`, `*.md`, LICENSE, .git* files, launchers `*.cmd` (the build gate smoke-runs them), `android/` (no cargo check covers it: build an APK), `tools/` scripts that no crate source names |
+| docs | no cargo: `git diff --check` (conflict markers fail, whitespace is listed), relative Markdown links on added lines must exist (links into `local/` are skipped), changed `.ps1` files must parse, changed `.py` files must parse, `tools/log_entry.py check` when that tool exists | `docs/`, `log/`, `*.md`, LICENSE, .git* files, launchers `*.cmd` (the build gate smoke-runs them), `android/` (no cargo check covers it: build an APK), `tools/` scripts that no Rust code names (comments do not count) |
 | crate | that crate's release tests with `--include-ignored` and `cargo clippy --release -p CRATE --all-targets -- -D warnings` | `crates/grid-app/**` and `settings/**` (grid-app's tests read the profiles); `crates/grid-probes/**` (Clippy only); grid-tools binaries other than grid-opponent-race and grid-soak; grid-formats `tests/`/`examples/` |
-| workspace | the whole release test suite and workspace Clippy | grid-formats modules the simulation cannot reach; a `tools/` file named by crate source |
+| workspace | the whole release test suite and workspace Clippy | grid-formats modules the simulation cannot reach; a `tools/` file named by Rust code outside comments |
 | full | workspace + `cargo build --release -p grid-tools --bin grid-opponent-race --bin grid-soak`, the identity check against `tools/identity.tsv`, `grid-soak quick` | `crates/grid-world/**`, the grid-tools library and its race/soak binaries, sim-reachable grid-formats modules and `lib.rs`, Cargo.lock, Cargo.toml files, build.rs, rust-toolchain, `.cargo/`, `tools/identity.tsv`, and any path the table does not name |
 
 Why these rules. The crate graph is grid-formats → grid-tools → grid-app and grid-world →
@@ -172,10 +172,29 @@ android-activity and the 30 Bevy crates above it. The cause is android-activity'
 (cc crate), which tracks `CXX_aarch64-linux-android` etc. The seed recorded them with
 backslashes (`C:\Users\…\clang++`, seed built 19.10), while this build and the coordinator's
 APK build dir of 20.10 (`11\021f3a9841e698`) have forward slashes. cargo-ndk 4.1.2 builds the
-value with `Path::join` from ANDROID_NDK_HOME (backslashes in build_android.ps1), so the
-forward-slash form comes from the launching environment (likely Git Bash); not proven. Until the
-Android part of the seed is rebuilt from the same shell as the release (or build_android.ps1
-pins these variables), each release APK pays this rebuild.
+value with `Path::join` from ANDROID_NDK_HOME (backslashes in build_android.ps1).
+
+**Cause and fix (F536).** In `src/cargo.rs`, cargo-ndk 4.1.2 rewrites every value of its build
+environment to forward slashes when `MSYSTEM` or `CYGWIN` is set. Git Bash sets
+`MSYSTEM=MINGW64`, and a PowerShell started from it inherits that. A/B in a native PowerShell,
+same ANDROID_NDK_HOME: `cargo ndk-env -t arm64-v8a --json` gives `C:\\Users\\…\\clang++` with
+MSYSTEM unset and `C:/Users/…/clang++` with `MSYSTEM=MINGW64`. `env -u MSYSTEM` in Git Bash does
+not help, since the MSYS runtime gives a Windows child MSYSTEM again. The seed was built from a
+PowerShell without it, so the releases and sessions launched from Git Bash never matched it.
+`tools/build_android.ps1` now removes MSYSTEM and CYGWIN from its own process before cargo ndk.
+The paths are then always the seed's backslash form, and the seed needs no rebuild. Build dirs
+made from Git Bash before F536 rebuild those crates once more.
+
+Measured on 21 October 2026, both launched from Git Bash (MSYSTEM=MINGW64). Each run used a
+fresh detached worktree and a fresh build dir seeded by the script's own `-Android` top-up, and
+built the plain APK (`tools\build_android.ps1`):
+
+| Script | Crates compiled | Time |
+|---|---|---|
+| before (501ff3e4) | 38: android-activity, our 4 crates, 33 Bevy/winit crates | 1375 s |
+| after (this fix) | 4: grid-formats, grid-world, grid-tools, grid-app | 385 s |
+
+Evidence: `local/seedtest-evidence/` in the checks-and-release worktree.
 
 ## Build gate (F524)
 

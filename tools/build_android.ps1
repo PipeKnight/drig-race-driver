@@ -67,6 +67,12 @@ $env:ANDROID_NDK_HOME = $ndk
 $env:JAVA_HOME = $jdk
 $env:GRADLE_USER_HOME = Pick 'GRADLE_USER_HOME' (Join-Path $Tools 'gradle-home')
 $env:PATH = "$cargoNdkBin;$env:USERPROFILE\.cargo\bin;$jdk\bin;$env:PATH"
+# cargo-ndk 4.1.2 writes CC_/CXX_/AR_<target> etc. with forward slashes when MSYSTEM or CYGWIN
+# is set (Git Bash sets MSYSTEM, and a PowerShell started from it inherits it). android-activity's
+# build script tracks those variables, so a value in the other slash style than the seed's
+# (backslashes) reran it and rebuilt android-activity and about 30 Bevy crates in every fresh
+# build dir (F536). Without them the paths are the same whatever shell started this script.
+Remove-Item Env:\MSYSTEM, Env:\CYGWIN -ErrorAction SilentlyContinue
 
 # Stages the private asset folder and writes grid-data/bundle.txt:
 #   grid-bundle 1

@@ -41,7 +41,7 @@ Decision table, first matching row wins; a path no row names is full:
                                                            crate grid-app (its tests read them)
   crates/grid-probes/**                                    crate grid-probes (Clippy only; no tests)
   crates/** (other)                                        full
-  tools/**                                                 docs, unless a crate source names the
+  tools/**                                                 docs, unless Rust code (not a comment) names the
                                                            file (then workspace); tools/identity.tsv
                                                            is full
   docs/**, log/**, *.md, LICENSE, .gitignore, .gitattributes, *.cmd (launchers), android/**
@@ -194,9 +194,11 @@ function Get-Class([string]$Path) {
     if ($p -eq 'tools/identity.tsv') { return New-Class 3 '' 'identity hashes' }
     if ($p -like 'tools/*') {
         $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-        $hits = @(& git grep -l -F -e $p -e $leaf -- crates 2>$null)
+        # Rust code that names the file (a test reading it); comment lines and Cargo.toml
+        # comments do not count (grid-app's Cargo.toml mentions tools/build_android.ps1).
+        $hits = @(& git grep -n -F -e $p -e $leaf -- 'crates/*.rs' 2>$null | Where-Object { $_ -notmatch '^[^:]+:\d+:\s*//' })
         $ErrorActionPreference = $saved
-        if ($hits.Count) { return New-Class 2 '' "tool named by crate source ($($hits[0]))" }
+        if ($hits.Count) { return New-Class 2 '' "tool named by crate source ($(($hits[0] -split ':')[0]))" }
         return New-Class 0 '' 'tool script, not used by any crate'
     }
     if ($p -like 'android/*') { return New-Class 0 '' 'Android project files: no cargo check covers them; build an APK (tools\build_android.ps1)' }
