@@ -108,6 +108,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F542](log/F0542.md) | 2026-10-21 | Playable c4b2673f4cfc with body sleeping (F541), portable copy and APKs ee1880b472d2 |
 | [F541](log/F0541.md) | 2026-10-21 | Rigid-body sleeping for prop pieces and lost wheels |
 | [F540](log/F0540.md) | 2026-10-21 | APKs 239583f319e3: drift and drift-profile builds share one bundle |
 | [F539](log/F0539.md) | 2026-10-21 | Bundled APK races start: Donington bundle carries the database; profile APK on the drift bundle |
@@ -167,7 +168,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F484](log/F0484.md) | 2026-10-19 | Joints, phase 3a: tyre walls break into blocks joined by their springs; the constraint template stage bit-for-bit against the original |
 | [F483](log/F0483.md) | 2026-10-19 | Archive of the render-leak session; evidence moved |
 | [F482](log/F0482.md) | 2026-10-19 | Memory growth in races found and fixed: looped endless audio sources, not rendering |
-| [F481](log/F0481.md) | 2026-10-19 | Pause menu: Steering Linearity is live and saved; Speech and Music Volume are selectable and saved |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
