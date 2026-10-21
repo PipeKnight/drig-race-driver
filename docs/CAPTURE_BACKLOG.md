@@ -1,4 +1,4 @@
-# Capture backlog
+# DRIG capture backlog
 
 Open work parked until a live recording of the original grid.exe (research copy, see docs/OWNER_ASSISTED_TESTING.md and docs/GAMEPLAY_RECORDING_GUIDE.md). Gathered on 2026-10-21 (F532) from the log entries (F300 onwards) and docs/FIDELITY_BACKLOG.md by grepping for live-capture requests; rows trace to the cited entries and docs. When a capture lands, set the row's status and cite the log entry; add new parked items as rows.
 

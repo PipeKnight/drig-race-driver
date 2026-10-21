@@ -1,4 +1,4 @@
-# GRID engine project log
+# DRIG project log
 
 The project's current state, open problems and next actions, plus an index of recent entries.
 The entries themselves are one file each in [log/](log/INDEX.md): `log/F0532.md` holds F532.
