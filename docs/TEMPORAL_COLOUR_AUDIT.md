@@ -58,3 +58,5 @@ Next isolated diagnostic: pinned dlss_wgpu4.0.0 sets InFrameTimeDeltaInMsec to0.
 
 
 G215 reproducibility: add --colour CURRENT/capture-colour to the existing analyze_temporal_audit.py CURRENT/capture-temporal --previous PREVIOUS/capture-temporal command. It checks frame/view/coverage against both HDR stages, reports eroded static-motion-compatible class contrast and own-body-motion matches among static outliers. Left/right saved G211 results reproduce within1e-12; wrong-frame and insufficient-coverage controls reject. Class statistics are descriptive, not calibrated visual quality or internal DLSS history. Raw evidence remains private.
+
+G214 exposure control completed: both explicit-unity and automatic paths request K, with identical inputHDR/motion/depth and physics, at native1080 virtual30. The road boundary remains in inspected shared HDR comparisons: stable-class highpass retention0.311585auto/0.312717unity versus previous-nearer0.910019/0.911084. Exposure changes output numerically but does not solve this bounded defect; no promotion. Active neural model is not verified by the hint roundtrip. Evidence stays private under local/graphics/exposure01.

@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G216](G0216.md) | 2026-10-22 | Locate the owner's floating-strip screenshot from its matching play log |
 | [G215](G0215.md) | 2026-10-22 | Make depth-classified HDR contrast analysis reproducible |
 | [G214](G0214.md) | 2026-10-22 | Compare DLAA automatic and unity exposure on identical HDR inputs |
 | [G213](G0213.md) | 2026-10-22 | Integrate main F558 before further DLAA controls |
