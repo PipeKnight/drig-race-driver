@@ -562,10 +562,11 @@ itself. The owner only sideloads APKs and sends logs; there is no adb.
 
 Race Options → **Performance test** (AUTHORED diagnostics; `crates/grid-app/src/perf_test.rs`).
 Each row turns one part of the frame off, live, and is never saved, so the next start is the
-normal game:
+normal game. Until F553 the panel had only 5 row texts, so the last three rows (Sample logging, Whole scene, Auto cycle) were never drawn:
 
 | Row | Off means |
 |---|---|
+| Auto cycle (first row since F553) | On: steps through the Auto cycle steps ("Mobile preset" below), 8 s each |
 | Shadows | every directional light stops rendering shadow maps |
 | Foliage | camera-facing tree and bush billboards (`source_trees::Facing`) hidden |
 | Ground cover | the `ground cover` mesh hidden |
@@ -573,7 +574,6 @@ normal game:
 | HUD | race HUD parts and the damage panel hidden, the OSD scene's camera inactive (touch zones stay) |
 | Sample logging | the periodic `drive_sample`/`drive_*_sample` "tick" reports skipped (events such as pause, reset and exit stay) |
 | Whole scene | Off: every mesh except the player's car hidden (prop pieces that their own system shows again may stay) |
-| Auto cycle | On: steps through normal → each part alone → all six off → car only → normal, 8 s each |
 
 - Every `frame_stats` line ends with `perf_test=normal` or `perf_test=off:shadows+hud…` once
   the screen has been used (or `GRID_PERF_TEST` is set). Each change logs

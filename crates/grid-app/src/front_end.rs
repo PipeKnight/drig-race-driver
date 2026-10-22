@@ -111,7 +111,13 @@ pub enum PerfRow {
     Empty,
     Auto,
 }
+/// Auto cycle first: the phone shows only the first rows (owner, 2026-10-22).
 const PERF_ROWS: [(PerfRow, &str, &str); 8] = [
+    (
+        PerfRow::Auto,
+        "Auto cycle",
+        "On: steps through every switch, 8 s each, and logs each step.",
+    ),
     (PerfRow::Shadows, "Shadows", "Shadow casting of every mesh (the sun keeps its shadow maps, empty)."),
     (PerfRow::Foliage, "Foliage", "Camera-facing tree and bush billboards."),
     (PerfRow::Ground, "Ground cover", "Grass and ground detail sprites."),
@@ -119,11 +125,6 @@ const PERF_ROWS: [(PerfRow, &str, &str); 8] = [
     (PerfRow::Hud, "HUD", "The race HUD and its OSD camera (touch zones stay)."),
     (PerfRow::Samples, "Sample logging", "The periodic drive_*_sample log lines."),
     (PerfRow::Empty, "Whole scene", "Off: only your car is drawn."),
-    (
-        PerfRow::Auto,
-        "Auto cycle",
-        "On: steps through every switch, 8 s each, and logs each step.",
-    ),
 ];
 
 /// Video screen (AUTHORED, F390: GRID's PC version has its own graphics
@@ -708,6 +709,22 @@ struct Title;
 struct Subtitle;
 #[derive(Component)]
 struct Row(usize);
+
+/// Row texts the panel holds: the longest screen's rows. The Performance test
+/// screen's last three rows had no text before (only 5 were spawned).
+const ROWS: usize = {
+    let mut n = AIDS.len();
+    if ITEMS.len() > n {
+        n = ITEMS.len();
+    }
+    if VIDEO_ROWS.len() > n {
+        n = VIDEO_ROWS.len();
+    }
+    if PERF_ROWS.len() > n {
+        n = PERF_ROWS.len();
+    }
+    n
+};
 #[derive(Component)]
 struct Help;
 
@@ -761,7 +778,7 @@ fn spawn(
                         font(18.),
                         TextColor(Color::srgb(0.75, 0.8, 0.85)),
                     ));
-                    for i in 0..AIDS.len().max(ITEMS.len()).max(VIDEO_ROWS.len()) {
+                    for i in 0..ROWS {
                         panel.spawn((Row(i), Text::new(""), font(22.), TextColor(Color::WHITE)));
                     }
                     panel.spawn((
@@ -997,21 +1014,27 @@ mod tests {
         let view = front.view(&Labels::default());
         assert_eq!(view.title, "Performance test");
         assert_eq!(view.rows.len(), 8);
-        assert!(view.rows[..7].iter().all(|r| r.1 == "On"));
-        assert_eq!(view.rows[7].1, "Off");
-        // Shadows off, then HUD (row 5) off; nothing is saved.
+        // Auto cycle is the first row (Off), the switches follow (On).
+        assert_eq!(view.rows[0].0, "Auto cycle");
+        assert_eq!(view.rows[0].1, "Off");
+        assert!(view.rows[1..].iter().all(|r| r.1 == "On"));
+        front.step(press(|n| n.right = true));
+        assert!(front.perf_auto);
+        // Shadows (row 1) off, then HUD (row 5) off; nothing is saved.
+        front.step(press(|n| n.down = true));
         front.step(press(|n| n.right = true));
         for _ in 0..4 {
             front.step(press(|n| n.down = true));
         }
         front.step(press(|n| n.left = true));
         assert_eq!(front.perf.label(), "off:shadows+hud");
-        // Auto cycle is the last row; Up wraps from the first.
+        // Up wraps from the first row to Whole scene.
         for _ in 0..5 {
             front.step(press(|n| n.up = true));
         }
+        front.step(press(|n| n.up = true));
         front.step(press(|n| n.right = true));
-        assert!(front.perf_auto);
+        assert!(front.perf.empty);
         // Ctrl/X resets everything; Back returns without a command.
         front.step(press(|n| n.button3 = true));
         assert_eq!(front.perf, crate::perf_test::Switches::default());

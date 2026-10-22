@@ -88,6 +88,7 @@ mod track_surface;
 mod tyre_smoke;
 mod tyre_sound;
 mod tyre_visual;
+mod ui_font;
 mod wheel_debris;
 mod wheel_exposure;
 mod wheel_ground;
@@ -2826,6 +2827,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.refresh_hz.flatten());
     }
+    // The full Fira Mono instead of Bevy's ASCII subset ("Nürburgring").
+    ui_font::install(&mut app);
     if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
         // validation drive into a breakable route prop.

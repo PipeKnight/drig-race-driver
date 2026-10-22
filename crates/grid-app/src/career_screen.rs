@@ -2148,6 +2148,7 @@ pub fn screen(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         }),
         ..default()
     })));
+    crate::ui_font::install(&mut app);
     crate::input::install(&mut app, actions);
     let exit = app
         .insert_resource(screen)
