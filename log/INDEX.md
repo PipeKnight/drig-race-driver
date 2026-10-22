@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G229](G0229.md) | 2026-10-23 | Temporary awake lease and independent graphics research delegation |
 | [G228](G0228.md) | 2026-10-22 | Validate window response in bounded driving |
 | [G227](G0227.md) | 2026-10-22 | Preserve window damage material ownership with a render proxy |
 | [G226](G0226.md) | 2026-10-22 | Validate window response in native 4K and DLAA |

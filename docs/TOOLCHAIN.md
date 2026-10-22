@@ -566,3 +566,17 @@ Preload (216 cases), suspension setup subset (200), range/default helpers (88), 
 ## Android ARM64 Rust target — 16 October 2026
 
 Installed Rust std for `aarch64-linux-android` with rustup 1.29.1 for the pinned toolchain `1.99.0-x86_64-pc-windows-msvc` (`rustup target add aarch64-linux-android`; official rustup distribution, which verifies component hashes itself). It is used only for `cargo check`/`clippy --target aarch64-linux-android` into ignored `local/platforms/target-android`. No Android NDK, SDK, JDK, Gradle or cargo-ndk is installed. `grid-app` therefore stops at the NDK clang that blake3 and the GameActivity glue need. See [platforms and input](PLATFORMS_AND_INPUT_RESEARCH.md) section 1.1. The SSE measurement probes in `local/platforms/sse-approx/` were built with the same pinned 1.99.0 toolchain; nothing else was installed.
+
+## Temporary automatic-sleep prevention
+
+`powershell -NoProfile -File tools/keep_awake.ps1 -Minutes 90` starts or renews this
+checkout's temporary Windows SystemRequired power request. Use it during active agent work
+and long builds/captures; renew before its deadline if work continues. Do not renew an idle
+heartbeat merely to keep a stopped task awake. Choose up to240minutes for a known long job.
+The display may turn off; power-plan settings are unchanged. The request expires automatically
+or disappears if its worker exits. `-Stop` releases within five seconds; `-Status` reports the
+worker and lease under ignored `local/keep-awake/`. A live worker/request does not prove a
+build is still active. This prevents automatic sleep, not a deliberate Sleep command, restart
+or power failure. Windows accepted creation/activation on the graphics PC; a six-second lease
+expired and its worker exited. `powercfg /requests` required an elevated prompt, so that
+independent listing was not obtained; no administrator change is needed for this helper.
