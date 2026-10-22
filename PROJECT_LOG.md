@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F552](log/F0552.md) | 2026-10-22 | Playable 01f22b4c80d3 with the tyre-pile fix (F551), portable copy and APKs f883be0507f0 |
 | [F551](log/F0551.md) | 2026-10-22 | Tyre piles sleep: original cylinder pair contacts and shell masses |
 | [F550](log/F0550.md) | 2026-10-22 | Playable 3bc513002bff with the mobile preset (F549), portable copy and APKs 32a08aa8e4a4 |
 | [F549](log/F0549.md) | 2026-10-22 | Mobile preset: Android default for 60 FPS (720 rows, one shadow cascade, small props culled, shorter ground cover, more compute threads); perf_test … |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F494](log/F0494.md) | 2026-10-20 | Career Flashback Bonus: unused flashbacks pay career money per race, and the payout lists the original's bank rows |
 | [F493](log/F0493.md) | 2026-10-20 | StartLine mix mode: AI −3 dB through the start sequence |
 | [F492](log/F0492.md) | 2026-10-20 | Stereo panning of the car sounds |
-| [F491](log/F0491.md) | 2026-10-19 | Playable 293914533e9c with F485–F490 and Codex's local graphics commits |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
