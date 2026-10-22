@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G219](G0219.md) | 2026-10-22 | Evaluate L detail retention with modest RGB footprint filtering |
 | [G218](G0218.md) | 2026-10-22 | Publish decal comparison and validate the complete Donington lap |
 | [G217](G0217.md) | 2026-10-22 | Restore saved track decal alpha and remove opaque decal shadows |
 | [G216](G0216.md) | 2026-10-22 | Locate the owner's floating-strip screenshot from its matching play log |
