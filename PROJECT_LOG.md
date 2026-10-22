@@ -113,6 +113,26 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F567](log/F0567.md) | 2026-10-24 | Playable 7360a4865f54 with F563-F566, portable copy and APKs a2b4991d6817 |
+| [F566](log/F0566.md) | 2026-10-24 | Every broken piece on the phone tracks gets a draw: bundle roots, skinned damage meshes, suffixed names |
+| [F565](log/F0565.md) | 2026-10-24 | Detached panels are world bodies: 9EC9B0 part decisions in the simulation, cars collide with the panels |
+| [F564](log/F0564.md) | 2026-10-24 | Broken tyres drawn on their bodies and lifted out of the road |
+| [F563](log/F0563.md) | 2026-10-23 | Detached panels settle lying flat: rigid box with the original's detached-part body parameters |
+| [F562](log/F0562.md) | 2026-10-23 | Playable 14696d47fe1e with no mid-air parking (F561), portable copy and APKs 99fef6aca274 |
+| [F561](log/F0561.md) | 2026-10-23 | No body parks in the air: far islands rest for turnOffTime before they stop; detached parts land on the track |
+| [F560](log/F0560.md) | 2026-10-23 | Playable 67dbeb3a5158 with Render height Auto (F559), portable copy and APKs f2af457cca2c |
+| [F559](log/F0559.md) | 2026-10-23 | Render height Auto (dynamic 480-720) on the Video screen, simulation-only CPU check, Auto cycle row removed |
+| [F558](log/F0558.md) | 2026-10-22 | Playable fc0ff3aa7868 with resolution-only dynamic preset (F555-F556) and the tyre-stack chain fix (F557), portable copy and APKs 94e06d136784 |
+| [F557](log/F0557.md) | 2026-10-22 | Pieces no longer break tyre stacks: the original's car-only break pairing (0x7C46A0) |
+| [F556](log/F0556.md) | 2026-10-22 | Dynamic render height 480-720 rows on Android; UI, HUD and OSD drawn at the window's resolution |
+| [F555](log/F0555.md) | 2026-10-22 | Mobile preset reduced to the render resolution (720 rows) and compute threads; phone Auto cycle table |
+| [F554](log/F0554.md) | 2026-10-22 | Playable b89b4be10d30 with the phone menu fixes (F553), portable copy and APKs 9ac27f9a958a |
+| [F553](log/F0553.md) | 2026-10-22 | Phone UI: Performance test shows all rows with Auto cycle first; full Fira Mono as the UI font so Nürburgring renders on Android |
+| [F552](log/F0552.md) | 2026-10-22 | Playable 01f22b4c80d3 with the tyre-pile fix (F551), portable copy and APKs f883be0507f0 |
+| [F551](log/F0551.md) | 2026-10-22 | Tyre piles sleep: original cylinder pair contacts and shell masses |
+| [F550](log/F0550.md) | 2026-10-22 | Playable 3bc513002bff with the mobile preset (F549), portable copy and APKs 32a08aa8e4a4 |
+| [F549](log/F0549.md) | 2026-10-22 | Mobile preset: Android default for 60 FPS (720 rows, one shadow cascade, small props culled, shorter ground cover, more compute threads); perf_test … |
+| [F548](log/F0548.md) | 2026-10-22 | Floating tyre report: not reproduced, diagnostics |
 | [F547](log/F0547.md) | 2026-10-21 | Playable 945575e57651 with the cheaper tick and parking (F546), portable copy and APKs 6087fbcafa30 |
 | [F546](log/F0546.md) | 2026-10-21 | Physics tick cost and parking |
 | [F545](log/F0545.md) | 2026-10-21 | Playable 512364f77245 with the catch-up cap (F544), portable copy and APKs ab8bcfafbc9e |
@@ -153,26 +173,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F509](log/F0509.md) | 2026-10-20 | Close-drift flags break into a static base and a phantom pole post |
 | [F508](log/F0508.md) | 2026-10-20 | Bonnet camera shake: the speed-gated bob of the Mounted views, from a deterministic noise table |
 | [F507](log/F0507.md) | 2026-10-20 | Career: the Le Mans selection events are offered, with their multi-class fields, so class positions and routine B run in the app |
-| [F506](log/F0506.md) | 2026-10-20 | Close-drift flag post geometry ported and verified bit for bit |
-| [F505](log/F0505.md) | 2026-10-20 | The 42D580 one-shot queue is network replication, not a mixing cap |
-| [F504](log/F0504.md) | 2026-10-20 | Yaw and pitch displacement thumps |
-| [F503](log/F0503.md) | 2026-10-20 | Close-drift flags researched: the original breaks them into a kinematic phantom post |
-| [F502](log/F0502.md) | 2026-10-20 | Landing sound after airtime |
-| [F501](log/F0501.md) | 2026-10-20 | Joints, phase 3b: armco breaks, hinged to the world and to the neighbouring section, with its override bodies and link propagation |
-| [F500](log/F0500.md) | 2026-10-20 | EndOfRace mix mode on the results screen |
-| [F499](log/F0499.md) | 2026-10-20 | Camera look input: Look Left/Right/Up/Down turn the chase, bumper/bonnet and head-cam views as in the original |
-| [F498](log/F0498.md) | 2026-10-20 | Kick-ups: the player's wheels throw up stones and grass |
-| [F497](log/F0497.md) | 2026-10-20 | Track view Catmull-Rom line, the AI handbrake byte 0x77A110, no 1/R pedal flip; the Jarama "hang" was a wrecked autopilot |
-| [F496](log/F0496.md) | 2026-10-20 | Crashed mix mode: the player's hard hits duck engine, exhaust and wheels |
-| [F495](log/F0495.md) | 2026-10-20 | Career routine B and class positions: the Le Mans 24 Hours pays by class position from the whole reputation pot |
-| [F494](log/F0494.md) | 2026-10-20 | Career Flashback Bonus: unused flashbacks pay career money per race, and the payout lists the original's bank rows |
-| [F493](log/F0493.md) | 2026-10-20 | StartLine mix mode: AI −3 dB through the start sequence |
-| [F492](log/F0492.md) | 2026-10-20 | Stereo panning of the car sounds |
-| [F491](log/F0491.md) | 2026-10-19 | Playable 293914533e9c with F485–F490 and Codex's local graphics commits |
-| [F490](log/F0490.md) | 2026-10-20 | Collision mix: silent sweeteners, their cooldown, roof test without the offset; opponent engine loudness diagnosed |
-| [F489](log/F0489.md) | 2026-10-19 | Soak seeds 39 and 54 traced: a Spa data gap and a car pressing a tyre through the Le Mans road |
-| [F488](log/F0488.md) | 2026-10-19 | Scrape loop: the original's per-car scrape voice |
-| [F487](log/F0487.md) | 2026-10-19 | Career eBay Motors: the original's used-car market (fixed-price used cars, auctions of team cars) ported and on the career screen; the Points column checked in … |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -400,13 +400,15 @@ fn present(
 /// pause menu are laid out in desktop pixels. In touch mode the UI is scaled
 /// so the window is at least 720 UI pixels high.
 fn ui_scale(
-    camera: Query<&Camera, With<crate::ViewerCamera>>,
+    viewer: Query<&Camera, With<crate::ViewerCamera>>,
+    ui: Query<&Camera, With<IsDefaultUiCamera>>,
     window: Query<&Window, With<PrimaryWindow>>,
     mut scale: ResMut<UiScale>,
 ) {
-    // The HUD camera's target: the window, the render_height image shown
-    // over the window (render_scale.rs), or the image of a --render capture.
-    // The cap keeps the HUD at the size it has on the window itself.
+    // The HUD camera's target: the window (also when render_height shows a
+    // scaled image: the UI is then on the window camera, F556), or the image
+    // of a --render capture. The cap keeps the HUD at its window size.
+    let camera = ui.iter().next().or(viewer.iter().next());
     let cap = |h: f32| {
         window
             .iter()
@@ -415,8 +417,6 @@ fn ui_scale(
             .map_or(1., |w| h / w.height())
     };
     let height = camera
-        .iter()
-        .next()
         .and_then(Camera::logical_target_size)
         .map(|s| s.y);
     if let Some(h) = height.filter(|h| *h > 0.) {

@@ -74,13 +74,22 @@ density x volume (below).
    (`MESH_CONTACT_GENERATION.md`, `tools/validate_mesh_contact.py`). The solver caps a
    contact's normal impulse at `dt x contact+0x3C` (`contact_rows.rs`), and after the
    solve stores the solved impulse divided by dt back in +0x3C.
-   [I] For car-versus-prop pairs the flag pairing applies (otherwise the 1.01 tolerance
-   below would never be reached); the exact flag provenance of shape bytes 0x17/0x18 for
-   entity shapes (`0x7B9390` descriptor bytes +5/+6) is not traced further.
+   [D] (F557) Which pairs get the threshold. `B0EE80` takes `min(+0x224)` only when
+   `A.0x228 || B.0x228 || (A.0x17 && B.0x18) || (B.0x17 && A.0x18)`, else FLT_MAX.
+   Entity shapes (`0x7C6350`): `0x469A80` zeroes descriptor bytes +4/+5/+6 (shape
+   0x17/0x18/0x216), `0x7B9390` then sets +5 (0x18) = 1 unless props byte +0x5D, sets
+   +6 for static or heavy bodies and clears dword +0x60 (shape 0x228). So every prop
+   and piece shape has 0x17 = 0, 0x18 = 1, 0x228 = 0. The car's shapes (`car_box`
+   0xA01960, e.g. 0xA026BD / 0xA02816 / 0xA01C94) set descriptor byte +4 = 1 (0x17)
+   before `0xA72350`. A car-versus-prop contact therefore carries the threshold; a
+   piece-versus-prop or prop-versus-prop contact carries FLT_MAX.
 2. **Callback.** [D] Shapes with a behaviour register `0x7C46A0` as their contact
    callback (`0x7C6350` tail, registration +0xC/+0x10). The event is built by
    `B0CFC0` (event+0x20 = contact normal, event+0x40 = contact +0x3C, event0/4 = side
-   registrations). For each side whose shape has a behaviour, `0x7BDFD0` fires when
+   registrations). `0x7C46A0` first requires world byte +0xBC20 and the same flag
+   pairing as `B0EE80` on the two sides' shapes (`0xA6A3D0` = shape 0x228, `0xA6A3F0`
+   = 0x17, `0xA6A410` = 0x18; F557), so a piece never breaks an intact prop. Then,
+   for each side whose shape has a behaviour, `0x7BDFD0` fires when
    `threshold <= 1.01 x event+0x40` (constant 0x00CBA8F0 = 1.01). It records the
    behaviour and the **other body's velocity projected on the contact normal**
    (`(v . n) n`, body +0x220), then queues the entity (+0xEA flag, list manager+0xBC08).
@@ -116,8 +125,11 @@ meets the new pieces as ordinary dynamic bodies.
 `linearStationary 0.3`, `angularStationary 0.3`, `turnOffTime 1`, wake force/torque 0,
 `gravityScale 1`, max velocities `+inf`. Shape props: sCardboard `PLAS d70`,
 sRubber/sPlastic/sDeformableRubber `PLAS d700`, sArmco `SIGN d2610`.
-[I] `d` = density in kg/m^3; mass = density x shape volume, inertia of the solid
-box/cylinder. Boards 4.8-4.9 kg, tyres 17-56 kg, cushion 996 kg, tyre-wall block 428 kg.
+[I] `d` = density in kg/m^3. [D, F549] The body's mass is density x the volume of the
+shape grown by its shell, with that shape's solid inertia (B11520 over the shape vtables;
+BOX_CONTACTS.md "Cylinder pairs and piece mass"). Before F549 the port used the bare
+template volume (boards 4.8-4.9 kg, tyres 17-56 kg, cushion 996 kg, tyre-wall block
+428 kg); with the shell a board weighs 7.0 kg and a Nürburgring tyre 26.7 kg.
 
 ## Lifetime
 
@@ -250,17 +262,17 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
   chain (the world double-buffers its active heads/tails by selector world[5]) with
   its own dynamic shape token. Explosion velocity `e (v.n) n` with the 0x7CDCD0 scatter
   is ported but all ported classes have explosion 0, so pieces start at rest. [D]
-- **Bodies.** Ported B11F40 constructor with mass = density x volume, solid
-  box/cylinder inertia, rbDefault damping/drag/gravity scale/stationary values in the
-  0x7B8F40 field order. turnOffTime 1 s since F541 (FLT_MAX before; BODY_SLEEPING.md).
-  [I mass formula]
+- **Bodies.** Ported B11F40 constructor with the mass and solid inertia of the shape grown
+  by its shell (F549, [D] B3D480/B40880, B46460/B46C90, B4A5F0/B4AAB0), rbDefault
+  damping/drag/gravity scale/stationary values in the 0x7B8F40 field order. turnOffTime
+  1 s since F541 (FLT_MAX before; BODY_SLEEPING.md).
 - **Contacts.** Piece vs track, boundary and enabled props through the same cold body
   query as the car (piece margin = shape shell 0.02); car vs piece through the
-  car-to-car hull path; piece vs piece through an authored separating-axis generator
-  (face axes of both hulls; the triangle-soup pair query lost stacked tyres once they
-  overlapped beyond the margin). Cylinders are 12-sided prisms (F465: only in the
-  piece-pair test; the world, cars and road see round kind-5/3 shapes, BOX_CONTACTS.md
-  "Round pieces"). Authored budgets: 8
+  car-to-car hull path; a cylinder piece against a cylinder or box piece through AE8AD0
+  and AE2FA0's cylinder handlers (F549, BOX_CONTACTS.md "Cylinder pairs and piece mass");
+  box against box through an authored separating-axis generator (face axes of both hulls;
+  the triangle-soup pair query lost stacked pieces once they overlapped beyond the
+  margin). Authored budgets: 8
   track and 4 pair contacts per piece, pool +12 slots per piece up to 256. [I]
 - **Single car.** `vehicle_world` now admits further dynamic bodies after the car
   (shapes after the statics, deformation registration slot None, body events skip
@@ -397,6 +409,111 @@ re-examined. Static route prop boxes are now queried as box primitives (AE8AD0),
 pieces against them included. Car against piece keeps the hull-triangle path: the
 original's AE8AD0 pairing for it was tried and lost more boards at the port's fixed
 16 ms step (BOX_CONTACTS.md, "Tried and not adopted").
+
+## Drawn pieces and road depth (F564)
+
+Owner's report of 23 October 2026 (PC, Detroit demolition derby, after F561): after a stack
+breaks, tyres jump unnaturally, partly sink into the road and pop back out, and often end up
+asleep in the air. Two separate causes.
+
+**Presentation [V].** grid-app drew each piece from `Renderables::draws(anchor)`. That composes
+transforms only from the anchor node down; the transforms of the damage renderable's nodes above
+the anchor were missing. Every Detroit and Nürburgring tyre was therefore drawn about (-0.61,
+-0.54, 0) m off its collision cylinder, in the piece frame. Lying flat, a tyre was drawn half a
+metre under its body (into the road). Standing on its edge or tilted against a wall, it was drawn
+beside or above its body (in the air). This matches the owner's screenshots. The new
+`Renderables::draws_in(renderable, anchor)` composes from the anchor up to the damage renderable.
+The test `round_piece_meshes_sit_on_their_bodies` (since F566 part of `breakable_pieces_draw_on_their_bodies`) checks every round piece of the first breakable
+per template on Detroit route_9 and Nürburgring route_1: mesh centre within 5 cm of the hull
+centre, mesh half-extents within 6 cm of the cylinder. With `draws` it fails at tyrestack_black
+piece 0 (centre (-0.609, -0.539, 0.006)).
+
+Some pieces had no draw at all: Nürburgring's `tyrewall_black_yok` pieces 6-21 and
+`close_drift_flag`, among others. F566 resolves them (next section).
+
+**Physics: sinking under load [V, AUTHORED].** A car pressing a tyre (sitting on it, or driving
+into a wall of them) pushes the hull below the road for a tick or two. The solver then recovers
+the penetration (before this change: piece 139, Detroit route_9, tick 1061, 0.30 m under the road,
+popped 0.33 m up the next tick). The original solves contacts the same way. Its recovery from
+such loads is not established, and it was not captured. The owner asked that pieces never sink,
+partly or fully. So `PropWorld::lift_sunk` runs after each committed step, after `hold_lost`. It
+moves every live piece or wheel whose hull bottom is more than `SINK_TOLERANCE` (0.01 m) below
+the road under its centre back to that tolerance, through `continuous::apply` (the B14550 move:
++0x1C0, the corrected and published poses, the +0x360 correction), and clears any downward
+linear velocity. `PropWorld::road_depths` measures the depth: the cylinder's or sphere's lowest
+point, or the mesh hull's world bounds, against a track cast from 5 cm above the centre. A start
+3 m higher hit wall ledges. The test `pieces_pressed_by_a_car_stay_above_the_road` (Le Mans wall
+969, the car at full throttle for 600 ticks) sank body 22 by 0.099 m at tick 397 before the
+change. After it, the deepest of 22091 piece-ticks is 0.0100 m.
+
+Detroit demolition derby, 12 stk cars, 12000 ticks, `GRID_SINK_CHECK=0.02 GRID_HANG_CHECK=300`
+(grid-opponent-race):
+
+| route | build | ticks with a piece > 2 cm under the road | deepest | unsupported (max per check) | breaks / pieces |
+|---|---|---|---|---|---|
+| route_8 | before | 5 | 0.231 m | 0 | 3 / 3 |
+| route_8 | after | 0 | - | 0 | 4 / 4 |
+| route_9 | before | 41 | 0.302 m | 0 | 32 / 285 |
+| route_9 | after | 0 | - | 2 | 39 / 394 |
+
+**Asleep "unsupported" pieces after the change [O].** The route_9 run after the change shows
+pairs of unsupported pieces at some checks: 112 and 120 at ticks 1200-1500, 272 and 273 at ticks
+6000-6600. These are not in the air. Bodies 112, 120, 121 lean as a heap: 112 on 120, 120 on
+121, 121 on 122, 123 and a static route prop box. At tick 900 the heap still crept about
+0.05-0.13 m/s, below the rbDefault stationary threshold of 0.3 m/s. So after turnOffTime (1 s)
+the island slept at tick 901, the original's rule [D, BODY_SLEEPING.md section 2]. The diagnostic
+wakes every piece at once with parking off, and the heap then slides on another 0.3-0.5 m. It
+counts as unsupported for that reason, though every body has a supporting contact. No
+correction: the original freezes a slowly creeping heap the same way.
+
+## Pieces without draws (F566)
+
+A test checks every piece of every breakable template on all routes of the phone tracks
+(Nürburgring route_0-3, Detroit route_0-9, Le Mans route_0-1, Donington route_0-3). Each piece
+must get a draw from its anchor in its damage renderable (`Renderables::draws_in`, as grid-app
+places it), and that draw must sit on its collision shape. Before this change, 159 of 357 pieces
+had no draw. Every piece that did draw sat on its body. Three causes [O, objects.pssg]:
+
+1. **BUNDLENODE roots.** The damage renderable of every tyre wall, Armco section and the flag is a
+   `BUNDLENODE`, not a `NODE`. The scene index only had NODE ids.
+2. **Skinned damage meshes.** Tyre-wall panels (`*_dam_fr/fc/fl/bl/bc/br`), Armco rail sections
+   (`*_dam_obj01-04`) and the flag keep their broken geometry in one `SKINNODE` per renderable,
+   not in mesh nodes under each piece:
+   - its `MODIFIERNETWORKINSTANCE` (network `skinTransformLocal`) draws a source of
+     `SkinnableVertex`/`SkinnableNormal` float3, `SkinWeights` float4 and `SkinIndices` uchar4;
+   - its `SKINJOINT`s name one `JOINTNODE` under each piece's anchor;
+   - its `SKELETON` holds one `INVERSEBINDMATRIX` per joint.
+
+   There are 18 such sources on the four tracks. `read_static_meshes` skipped them, and a piece's
+   anchor has no render instance below it. The flag is rigid (weight 1). Tyre-wall panels blend
+   about 10% of their ~290 vertices (main weight at least 0.7). Armco rails blend most of theirs
+   (main weight down to 0.39), so the rail bends.
+3. **Suffixed names.** Le Mans' `tyrewall_blue` and `tyrewall_yellow` name their tyres
+   `tyre01_obj_01!0` and so on: the exporter suffixes a repeated id. The entity data names
+   `tyre01_obj_01`.
+
+Port:
+- `Renderables` indexes BUNDLENODE ids as `draws_in` roots, BUNDLENODE composes as a transform
+  ancestor, and an anchor matches its `!N`-suffixed NODE under the root.
+- `mesh::read_object_meshes` (now grid-app's object reader) adds the skinned sources, with each
+  vertex's main joint in `skin_indices`.
+- When the anchor has no render instance, `draws_in` falls back to the root's skins. It makes one
+  draw per joint at or under the anchor: the triangles whose vertices' main joint (two of three,
+  else the first) is that joint, with transform inverse bind x joint-to-root chain. Inverse bind
+  matrices with float noise in the last column (tyre walls, about 1e-8) are cleaned.
+- AUTHORED approximation: the original blends up to four joints per vertex. Here a triangle
+  follows one joint. This is exact while the pieces are at their bind pose, and leaves seams
+  where an Armco rail bends or pieces separate. Proper blend skinning in grid-app (joint matrices
+  from the piece bodies) is not done.
+
+After the change, all 353 drawable pieces draw on their bodies: round pieces are centred and fill
+their cylinder or sphere, box pieces' mesh centres lie in their box, and every draw's material
+has a diffuse binding. The other 4 pieces are the Armco main sections' `section_dam_link1` posts
+(Nürburgring grey, red and white, Le Mans `armco_02`). Their anchors carry no geometry and no
+joint, so there is nothing to draw in the original either; grid-app counts them in
+`pieces_without_draws`. Donington's Armco link post mesh is 1.01 m tall on a 0.76 m collision
+cylinder, centred 0.12 m higher. That is data, not an offset, and the test allows a post's mesh
+up to 20% of the cylinder's height beyond it.
 
 ## Not yet established
 

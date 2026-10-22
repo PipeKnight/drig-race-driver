@@ -61,6 +61,7 @@ pub fn out_of_range(position: [f32; 4], point: [f32; 4], scale: f32, radius: f32
     let d = std::array::from_fn(|i| point[i] - position[i]);
     (scale * scale) * dot(d, d) > radius
 }
+
 pub struct Output {
     pub status: u32,
     pub started: bool,
@@ -235,12 +236,17 @@ fn run<C: Callbacks>(
     for (k, (b, s)) in out.bodies.iter_mut().zip(&mut out.step.bodies).enumerate() {
         sleeping += usize::from(asleep(b, s, delta));
         if let Some(park) = &input.park {
-            outside += usize::from(out_of_range(
-                b.basis[3],
-                park.point,
-                park.scale,
-                park.radii[k],
-            ));
+            // AUTHORED (owner's request of 23 October 2026, BODY_SLEEPING.md
+            // section 8): B7B850 counts a body outside on range alone, so an
+            // island far from the player parked in flight on its first wall
+            // contact and hung there. A body counts only once its sleep
+            // timer has reached turnOffTime, i.e. it has rested as long as
+            // sleeping needs; a body in flight cannot stay under its
+            // stationary thresholds that long.
+            outside += usize::from(
+                b.sleep[0] >= b.sleep[5]
+                    && out_of_range(b.basis[3], park.point, park.scale, park.radii[k]),
+            );
         }
         if b.gravity_scale != 0. {
             let scale = b.mass * b.gravity_scale;

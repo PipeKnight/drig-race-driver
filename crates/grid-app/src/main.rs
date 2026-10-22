@@ -55,6 +55,7 @@ mod ground_detail;
 mod ground_effect_assets;
 mod input;
 mod mesh_stream;
+mod mobile;
 mod motion_capture;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
@@ -98,6 +99,7 @@ mod track_surface;
 mod tyre_smoke;
 mod tyre_sound;
 mod tyre_visual;
+mod ui_font;
 mod wheel_debris;
 mod wheel_exposure;
 mod wheel_ground;
@@ -747,7 +749,8 @@ fn append_objects(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = read(&root.join(route.track_file("objects.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
-    let sources = mesh::read_static_meshes(&tree)?;
+    // Static meshes plus the skinned damage meshes broken pieces draw (F566).
+    let sources = mesh::read_object_meshes(&tree)?;
     let draws = scene::read_object_draws(&tree, &sources)?;
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
@@ -1098,6 +1101,9 @@ fn append_entities(
 fn main() {
     #[cfg(target_os = "android")]
     android::init();
+    // Mobile preset: more compute threads, before Bevy creates its pools.
+    #[cfg(target_os = "android")]
+    mobile::init_threads();
     // Bundled data still being copied (F451): the copy screen took over.
     #[cfg(target_os = "android")]
     if !android::data_ready() {
@@ -3010,13 +3016,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             app.add_systems(Update, update_orbit);
         }
         // [video] render_height: the 3D view renders at most that many rows
-        // (Android default 1080) and is stretched over the window.
-        render_scale::install(
-            &mut app,
-            profile
-                .render_height
-                .unwrap_or_else(render_scale::RenderHeight::platform_default),
-        );
+        // and is stretched over the window; Android default auto (480-720
+        // rows by the frame time).
+        render_scale::install(&mut app, profile.video_render_height());
         // Window size from the native surface, optional refresh-rate hint.
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.refresh_hz.flatten());
@@ -3030,6 +3032,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if let (Some(tick), Some(directory)) = (temporal_colour_tick, temporal_colour_directory) {
         temporal_colour::install(&mut app, tick, &directory, temporal_centre)?;
     }
+    // The full Fira Mono instead of Bevy's ASCII subset ("Nürburgring").
+    ui_font::install(&mut app);
     if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored
         // validation drive into a breakable route prop.
@@ -3134,6 +3138,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
             perf_test::install(&mut app);
+            // Android: the mobile preset (lower render resolution).
+            mobile::install(&mut app);
             // The Race Options front end with Driver Aids before the race
             // (docs/DRIVER_AIDS.md); not for scripted runs.
             if profile.front_end != Some(false)

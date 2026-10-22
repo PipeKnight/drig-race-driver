@@ -2,8 +2,9 @@
 //! view renders into an image of at most that many rows, and a second camera
 //! stretches it over the window. Independently authored; GRID's PC renderer
 //! always renders at the window size. On a phone, above Full HD costs GPU
-//! time without a visible gain (owner, 2026-10-18), so Android defaults to
-//! 1080 rows. The HUD, pause menu and touch zones are UI on the 3D camera, so
+//! time without a visible gain (owner, 2026-10-18); the mobile preset (Android
+//! default, `mobile.rs`) renders 720 rows (owner, 2026-10-22: a PS3-era
+//! picture on the phone is fine for a steady 60 FPS). The HUD, pause menu and touch zones are UI on the 3D camera, so
 //! they are drawn into the same image and scaled with it (retargeting every
 //! HUD module to the window camera was not a small change).
 use bevy::camera::RenderTarget;
@@ -14,7 +15,11 @@ use bevy::window::PrimaryWindow;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenderHeight {
     Native,
+    /// A fixed row count.
     Rows(u32),
+    /// Dynamic between `mobile::DYNAMIC_FLOOR_ROWS` and `mobile::RENDER_ROWS`,
+    /// driven by the frame time ([`Dynamic`], F556/F559).
+    Auto,
 }
 
 impl RenderHeight {
@@ -22,16 +27,19 @@ impl RenderHeight {
         if value.eq_ignore_ascii_case("native") {
             return Ok(Self::Native);
         }
+        if value.eq_ignore_ascii_case("auto") {
+            return Ok(Self::Auto);
+        }
         match value.parse::<u32>() {
             Ok(rows) if (240..=4320).contains(&rows) => Ok(Self::Rows(rows)),
-            _ => Err("`render_height` needs native or 240..4320".into()),
+            _ => Err("`render_height` needs auto, native or 240..4320".into()),
         }
     }
 
-    /// Android: 1080 rows; desktop: native.
+    /// The mobile preset (Android): auto; desktop: native.
     pub fn platform_default() -> Self {
-        if cfg!(target_os = "android") {
-            Self::Rows(1080)
+        if crate::mobile::enabled() {
+            Self::Auto
         } else {
             Self::Native
         }
@@ -88,14 +96,131 @@ pub fn scaled_size(physical: UVec2, height: RenderHeight) -> Option<UVec2> {
     Some(UVec2::new(width.max(1) as u32, rows))
 }
 
+/// Dynamic render height (`render_height = auto`, F556/F559): between `floor`
+/// and the ceiling `mobile::RENDER_ROWS`, driven by the frame time against
+/// 60 FPS. Lowered by [`DOWN_ROWS`] at most every [`DOWN_SECONDS`] while
+/// frames run late and the simulation is not the reason; raised by [`UP_ROWS`] after
+/// [`UP_SECONDS`] of frames on time, never back to a height that ran late in
+/// the last [`BLOCK_SECONDS`], so the sharpness does not "breathe".
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dynamic {
+    pub floor: u32,
+    pub rows: u32,
+    /// Smoothed frame time and fixed-step simulation time, ms.
+    pub frame_ms: f32,
+    pub work_ms: f32,
+    warm: f32,
+    since_change: f32,
+    good_for: f32,
+    /// Seconds late but simulation bound since the last `cpu_bound` report.
+    cpu_held: f32,
+    /// A height that ran late, and the seconds it stays blocked.
+    blocked: Option<(u32, f32)>,
+}
+
+pub const TARGET_MS: f32 = 1000. / 60.;
+/// Late: the smoothed frame time is above this (below about 55 FPS).
+pub const LATE_MS: f32 = 18.;
+/// On time: below this (60 FPS with vsync jitter).
+pub const ON_TIME_MS: f32 = 17.2;
+pub const DOWN_ROWS: u32 = 48;
+pub const UP_ROWS: u32 = 24;
+pub const DOWN_SECONDS: f32 = 0.5;
+pub const UP_SECONDS: f32 = 3.;
+pub const BLOCK_SECONDS: f32 = 15.;
+/// Simulation bound: the fixed-step loop (driving ticks) takes this share of
+/// the frame, or more than [`CPU_MS`], a whole 60 FPS frame (a tyre pile):
+/// the height holds. The phone's paused pre-race ticks took 10.7 ms (F549).
+pub const CPU_SHARE: f32 = 0.5;
+pub const CPU_MS: f32 = 16.;
+const CPU_REPORT_SECONDS: f32 = 10.;
+/// Frames longer than this (loading, a pause) are ignored.
+const HITCH_MS: f32 = 100.;
+const SMOOTHING: f32 = 0.1;
+const WARM_SECONDS: f32 = 3.;
+
+impl Dynamic {
+    pub fn new(floor: u32, ceiling: u32) -> Self {
+        Self {
+            floor: floor.min(ceiling),
+            rows: ceiling,
+            frame_ms: TARGET_MS,
+            work_ms: 0.,
+            warm: 0.,
+            since_change: 0.,
+            good_for: 0.,
+            cpu_held: 0.,
+            blocked: None,
+        }
+    }
+
+    /// One frame of `frame_ms` with `work_ms` of simulation; returns the
+    /// reason when `rows` changed, or `cpu_bound` every [`CPU_REPORT_SECONDS`]
+    /// of late frames it held (for the log; `rows` unchanged).
+    pub fn update(&mut self, frame_ms: f32, work_ms: f32, ceiling: u32) -> Option<&'static str> {
+        if !(0. ..HITCH_MS).contains(&frame_ms) {
+            return None;
+        }
+        let dt = frame_ms / 1000.;
+        self.frame_ms += (frame_ms - self.frame_ms) * SMOOTHING;
+        self.work_ms += (work_ms - self.work_ms) * SMOOTHING;
+        self.warm += dt;
+        self.since_change += dt;
+        if let Some((_, left)) = &mut self.blocked {
+            *left -= dt;
+        }
+        self.blocked = self.blocked.filter(|(_, left)| *left > 0.);
+        if self.rows > ceiling {
+            self.rows = ceiling;
+            self.since_change = 0.;
+            return Some("ceiling");
+        }
+        if self.warm < WARM_SECONDS {
+            return None;
+        }
+        let late = self.frame_ms > LATE_MS;
+        let cpu_bound = self.work_ms > CPU_SHARE * self.frame_ms || self.work_ms > CPU_MS;
+        self.good_for = if self.frame_ms < ON_TIME_MS { self.good_for + dt } else { 0. };
+        if late && !cpu_bound && self.since_change >= DOWN_SECONDS && self.rows > self.floor {
+            self.blocked = Some((self.rows, BLOCK_SECONDS));
+            self.rows = self.rows.saturating_sub(DOWN_ROWS).max(self.floor);
+            self.since_change = 0.;
+            self.good_for = 0.;
+            return Some("late");
+        }
+        self.cpu_held = if late && cpu_bound { self.cpu_held + dt } else { 0. };
+        if self.cpu_held >= CPU_REPORT_SECONDS {
+            self.cpu_held = 0.;
+            return Some("cpu_bound");
+        }
+        let next = (self.rows + UP_ROWS).min(ceiling);
+        if self.good_for >= UP_SECONDS
+            && self.since_change >= UP_SECONDS
+            && next > self.rows
+            && !self.blocked.is_some_and(|(rows, _)| next >= rows)
+        {
+            self.rows = next;
+            self.since_change = 0.;
+            self.good_for = 0.;
+            return Some("on_time");
+        }
+        None
+    }
+}
+
 /// The setting and the sizes in use, read by the frame-rate counter.
 #[derive(Resource, Debug)]
 pub struct RenderScale {
+    /// The setting.
     pub height: RenderHeight,
     /// Window size in physical pixels.
     pub screen: UVec2,
     /// Size the 3D view renders at (equal to `screen` when native).
     pub render: UVec2,
+    /// The dynamic height, while the setting is `Auto`.
+    pub dynamic: Option<Dynamic>,
+    /// The Performance test holds the setting (no dynamic height).
+    pub hold: bool,
     image: Option<Handle<Image>>,
     display: Option<Entity>,
 }
@@ -106,8 +231,26 @@ impl RenderScale {
         if self.height != height {
             self.height = height;
             self.screen = UVec2::ZERO;
+            self.dynamic = auto_dynamic(height);
         }
     }
+
+    /// The height rendered now: under `Auto` the dynamic rows (the ceiling
+    /// while held or with `GRID_DYNAMIC_RES=0`).
+    pub fn effective(&self) -> RenderHeight {
+        match (&self.dynamic, self.height) {
+            (Some(d), RenderHeight::Auto) if !self.hold => RenderHeight::Rows(d.rows),
+            (_, RenderHeight::Auto) => RenderHeight::Rows(crate::mobile::RENDER_ROWS),
+            _ => self.height,
+        }
+    }
+}
+
+/// The dynamic height for `Auto`, unless `GRID_DYNAMIC_RES=0`.
+fn auto_dynamic(height: RenderHeight) -> Option<Dynamic> {
+    let off = std::env::var("GRID_DYNAMIC_RES").is_ok_and(|v| v == "0");
+    (height == RenderHeight::Auto && !off)
+        .then(|| Dynamic::new(crate::mobile::DYNAMIC_FLOOR_ROWS, crate::mobile::RENDER_ROWS))
 }
 
 /// Window camera that shows the scaled image.
@@ -132,11 +275,12 @@ fn apply(
         return;
     };
     let screen = UVec2::new(w.physical_width(), w.physical_height());
-    if screen == scale.screen && (scale.image.is_some() || scale.render == screen) {
+    let wanted = scaled_size(screen, scale.effective());
+    if screen == scale.screen && wanted.unwrap_or(screen) == scale.render {
         return;
     }
     scale.screen = screen;
-    let Some(size) = scaled_size(screen, scale.height) else {
+    let Some(size) = wanted else {
         // Native: the 3D camera draws to the window as before.
         if scale.image.take().is_some() {
             commands.entity(camera).insert(RenderTarget::default());
@@ -150,7 +294,7 @@ fn apply(
         }
         println!(
             "render_scale height={:?} render={}x{} screen={}x{} mode=native",
-            scale.height, screen.x, screen.y, screen.x, screen.y
+            scale.effective(), screen.x, screen.y, screen.x, screen.y
         );
         return;
     };
@@ -162,7 +306,7 @@ fn apply(
     ));
     commands
         .entity(camera)
-        .insert((RenderTarget::Image(image.clone().into()), IsDefaultUiCamera));
+        .insert(RenderTarget::Image(image.clone().into()));
     match scale.display {
         Some(_) => {
             for mut node in &mut shown {
@@ -179,6 +323,8 @@ fn apply(
                         ..default()
                     },
                     Msaa::Off,
+                    // The UI is drawn here, at the window's resolution (F556).
+                    IsDefaultUiCamera,
                 ))
                 .id();
             commands.spawn((
@@ -190,6 +336,7 @@ fn apply(
                     ..default()
                 },
                 ImageNode::new(image.clone()),
+                GlobalZIndex(i32::MIN),
                 UiTargetCamera(display),
             ));
             scale.display = Some(display);
@@ -197,27 +344,124 @@ fn apply(
     }
     scale.image = Some(image);
     scale.render = size;
-    // Without touch mode (which sets its own scale) the HUD keeps the size
-    // it has on the window: UI pixels are image pixels here.
-    if touch.is_none() && w.height() > 0. {
-        ui_scale.0 = size.y as f32 / w.height();
+    // The UI is on the window camera, as when native.
+    if touch.is_none() {
+        ui_scale.0 = 1.;
     }
     println!(
-        "render_scale height={:?} render={}x{} screen={}x{} mode=upscaled-image hud=scaled-with-scene",
-        scale.height, size.x, size.y, screen.x, screen.y
+        "render_scale height={:?} render={}x{} screen={}x{} mode=upscaled-image hud=window",
+        scale.effective(), size.x, size.y, screen.x, screen.y
     );
+}
+
+/// Marks UI roots moved from the 3D camera to the window camera.
+#[derive(Component)]
+struct OnWindow;
+
+/// With the scaled image shown, UI roots aimed at the 3D camera are drawn by
+/// the window camera instead, so the HUD, menus and touch zones keep the
+/// screen's full resolution (F556); back again when native.
+fn ui_on_window(
+    mut commands: Commands,
+    scale: Res<RenderScale>,
+    viewer: Query<Entity, With<crate::ViewerCamera>>,
+    mut roots: Query<(Entity, &mut UiTargetCamera, Has<OnWindow>), Without<DisplayImage>>,
+) {
+    let Some(viewer) = viewer.iter().next() else {
+        return;
+    };
+    let (mut to_window, mut back) = (0, 0);
+    for (entity, mut target, moved) in &mut roots {
+        match scale.display {
+            Some(display) if target.0 == viewer => {
+                target.0 = display;
+                commands.entity(entity).insert(OnWindow);
+                to_window += 1;
+            }
+            None if moved => {
+                target.0 = viewer;
+                commands.entity(entity).remove::<OnWindow>();
+                back += 1;
+            }
+            _ => {}
+        }
+    }
+    if to_window + back > 0 {
+        println!("render_scale ui_roots to_window={to_window} back_to_view={back}");
+    }
+}
+
+/// Simulation time of this frame, ms: the fixed-step loop (the driving
+/// ticks), which a lower resolution cannot speed up. F556 used the whole main
+/// schedule, which on the phone is about as long as the frame (pipelined
+/// rendering), so the height never dropped (F559).
+#[derive(Resource, Default)]
+struct Work {
+    started: Option<std::time::Instant>,
+    ms: f32,
+}
+
+fn work_start(mut work: ResMut<Work>) {
+    work.started = Some(std::time::Instant::now());
+}
+
+fn work_end(mut work: ResMut<Work>) {
+    if let Some(t) = work.started.take() {
+        work.ms += t.elapsed().as_secs_f32() * 1000.;
+    }
+}
+
+fn adjust_height(mut scale: ResMut<RenderScale>, mut work: ResMut<Work>, time: Res<Time<Real>>) {
+    let work_ms = std::mem::take(&mut work.ms);
+    let ceiling = crate::mobile::RENDER_ROWS;
+    if scale.height != RenderHeight::Auto || scale.hold {
+        return;
+    }
+    let Some(d) = scale.dynamic.as_mut() else {
+        return;
+    };
+    let from = d.rows;
+    if let Some(reason) = d.update(time.delta_secs() * 1000., work_ms, ceiling) {
+        println!(
+            "render_dynamic version=1 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} floor={} ceiling={ceiling}",
+            d.rows, d.frame_ms, d.work_ms, d.floor
+        );
+    }
 }
 
 /// Windowed runs only (offscreen captures keep their own image target).
 pub fn install(app: &mut App, height: RenderHeight) {
+    let dynamic = auto_dynamic(height);
+    if let Some(d) = &dynamic {
+        println!(
+            "render_dynamic version=1 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}/{DOWN_SECONDS}s up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS}",
+            d.floor, d.rows
+        );
+    }
     app.insert_resource(RenderScale {
         height,
         screen: UVec2::ZERO,
         render: UVec2::ZERO,
+        dynamic,
+        hold: false,
         image: None,
         display: None,
     })
-    .add_systems(PostUpdate, apply);
+    .init_resource::<Work>()
+    .add_systems(
+        RunFixedMainLoop,
+        (
+            work_start.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+            work_end.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop),
+        ),
+    )
+    .add_systems(Last, adjust_height)
+    .add_systems(
+        PostUpdate,
+        (apply, ui_on_window)
+            .chain()
+            .before(bevy::ui::UiSystems::Prepare),
+    );
 }
 
 #[cfg(test)]
@@ -229,6 +473,7 @@ mod tests {
         assert_eq!(RenderHeight::parse("native"), Ok(RenderHeight::Native));
         assert_eq!(RenderHeight::parse("NATIVE"), Ok(RenderHeight::Native));
         assert_eq!(RenderHeight::parse("1080"), Ok(RenderHeight::Rows(1080)));
+        assert_eq!(RenderHeight::parse("Auto"), Ok(RenderHeight::Auto));
         for bad in ["0", "100", "5000", "full", "-1080"] {
             assert!(RenderHeight::parse(bad).is_err(), "{bad}");
         }
@@ -245,6 +490,55 @@ mod tests {
         assert!(refresh_hz("10").is_err() && refresh_hz("fast").is_err());
         assert_eq!(frame_latency("1").map(|n| n.get()), Ok(1));
         assert!(frame_latency("0").is_err() && frame_latency("4").is_err());
+    }
+
+    /// Feeds `seconds` of frames of `frame_ms` with `work_ms` of main work.
+    fn run(d: &mut Dynamic, seconds: f32, frame_ms: f32, work_ms: f32) -> Vec<u32> {
+        let mut seen = Vec::new();
+        for _ in 0..(seconds * 1000. / frame_ms) as usize {
+            let from = d.rows;
+            if d.update(frame_ms, work_ms, 720).is_some() && d.rows != from {
+                seen.push(d.rows);
+            }
+        }
+        seen
+    }
+
+    #[test]
+    fn dynamic_height_drops_fast_when_late_and_rises_slowly() {
+        let mut d = Dynamic::new(480, 720);
+        // Warm-up: no change in the first seconds.
+        assert!(run(&mut d, 2.5, 25., 5.).is_empty());
+        // GPU-bound 25 ms frames: down 48 rows every 0.5 s to the floor.
+        let down = run(&mut d, 4., 25., 5.);
+        assert_eq!(down, vec![672, 624, 576, 528, 480]);
+        // On time: up 24 rows after 3 s, but not back to 528 (late 1.5 s
+        // ago) until its block ends.
+        assert_eq!(run(&mut d, 10., 16.7, 5.), vec![504]);
+        // Then up 24 rows every 3 s to the ceiling.
+        let later = run(&mut d, 60., 16.7, 5.);
+        assert!(later.windows(2).all(|w| w[1] == w[0] + 24), "{later:?}");
+        assert_eq!(later.last(), Some(&720));
+    }
+
+    #[test]
+    fn dynamic_height_ignores_a_main_thread_bound_frame() {
+        let mut d = Dynamic::new(480, 720);
+        // A tyre pile: 40 ms frames, 35 ms of them simulation.
+        assert!(run(&mut d, 10., 40., 35.).is_empty());
+        assert_eq!(d.rows, 720);
+        // The hold is reported every 10 s of late frames (log only).
+        let reports = (0..250).filter(|_| d.update(40., 35., 720) == Some("cpu_bound")).count();
+        assert_eq!(reports, 1);
+        assert_eq!(d.rows, 720);
+        // Late with a light simulation (the phone's pre-race menu, F559):
+        // the height drops.
+        assert_eq!(run(&mut d, 1.2, 25., 4.), vec![672, 624]);
+        // Loading hitches are ignored too.
+        assert!(run(&mut d, 10., 500., 1.).is_empty());
+        // A lower ceiling (the Video screen) applies at once.
+        assert_eq!(d.update(16.7, 1., 600), Some("ceiling"));
+        assert_eq!(d.rows, 600);
     }
 
     #[test]

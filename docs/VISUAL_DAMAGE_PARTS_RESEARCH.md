@@ -233,7 +233,70 @@ The argument meanings are [I]:
 - exhausts: 0.66 × `m_exhaust_swing_multiple`;
 - mirrors: `0x9AA1D0(…, 0.4)`.
 
-The hinge solver, debris physics and per-part masses were not ported.
+The hinge solver and per-part masses were not ported.
+
+### Detached parts as bodies `0x9DC270` → `0x9DB0E0` → `0x9D9F80` → `0x9A87B0` [D] (F563)
+
+Static reading of the master project's pseudocode (`grid_re.py decompile`, cached privately in
+`local/re-cache/`); not compared with the running game.
+
+- 9DC270(part, 4): unless the part record already has a body (+0x64), it calls 9DB0E0 with
+  "loose" = (record state == 2), so 0 for a detached part. After 9DB0E0 it calls A69350(1), A6A290
+  and A72A70 on the new body [I: activates it and adds it to the world]. Mirrors 0x58/0x59 are
+  detached together with the part whose index sits at car +44C +1BDC / +1BE0 [I: the part carrying
+  the mirror].
+- 9DB0E0: for a detached part the density is 600 (for a loose part 60, or 0.6 for the hinged
+  panels 10, 0xC, 0xD, 0xF, 0x10, 0x54..0x57, 0x60..0x62, 0x63, 0x64 and the doors 0x18/0x19 unless
+  their hinge axis is near vertical). It calls 9D9F80 and stores the body at record +0x64. A detached
+  part then gets no hinge: its linear velocity is the car's velocity at the part's point (A697C0 /
+  A69800) plus R_car × record +0x30 (the kick), its angular velocity the car's (A69820) plus
+  R_car × record +0x40 (the spin). 9DC270 writes a kick and spin only for wheel-like parts (state 4
+  while car +C7A0 = 1, WHEEL_DETACHMENT.md) and parts 0x60/0x61 (random, 6..7.5 × 0.7); for body
+  panels these words keep what the new record holds [I: zero; 98C640 not read], so a panel leaves
+  with the car's motion at its point.
+- 9D9F80: bounds of the part node (min/max at node +D0/+E0, model space; wheels use the tyre node),
+  mass = box volume × density, capped at car +15A0 × 0.015 (the same cap as a lost wheel). Shape by
+  part id: wheels 0x2A..0x31 a cylinder (9A8BB0); every other part a box (9A87B0) with a material
+  descriptor per group: bonnet 10 and 0x60/0x61 D171C0, boot 0xB and 0x62..0x64 D171B0, bumpers
+  0xC..0x11 D171A0, doors 0x16..0x19 D17190, exhausts 0x1F/0x22/0x65/0x66 D17180, spoilers 0x45/0x46
+  D17170, wings 0x54..0x57 D17160, the rest (mirrors among them) CE6798; the +8 variants (D171C8 …)
+  when car +BA4 is set. The body descriptor is the lost wheel's: angular damping 0.2 on each axis
+  (0.5 for the mirrors 0x58/0x59), air resistance 0.01 × mass, linear damping 0, stationary
+  thresholds 0.1 and 0.1, turnOffTime 1 s, gravity scale 1, pose = the part node's world transform.
+- 9A87B0 (box shape): centre = (min + max) / 2, half extents (max − min) / 2 reduced by a convex
+  radius r = min(0.2, 0.5 × the smallest half extent), i.e. a rounded box of the full bounds; created
+  by A72CF0 in the world's collision set (so the body meets the road, props, pieces and cars as every
+  dynamic body does [I: contact pairs not traced]).
+- Lifetime: no despawn timer or distance test in these functions; the body stays until the car is
+  reset (9DC270(part, 0) frees it through 98C510). It sleeps by the world's island rule
+  (BODY_SLEEPING.md) with the thresholds above.
+
+Port (F565, replacing F563's grid-app-local box): the panel decisions and the bodies are simulation
+state.
+
+- `grid_tools::loose_parts::Parts` holds each car's zone totals and part states and applies the
+  9EC9B0 body-part rules in the same pass as the wheel rule (`Runtime::detach_wheels`), so headless
+  races, replays, flashback and the identity check see them. A part that detaches is queued and,
+  in `add_loose_wheels`, becomes a body of the world (solo or shared) through
+  `loose_panel::spawn` and `PropWorld::add_panel`, next to the lost wheels.
+- Body: the rounded box of the part's LOD0 node bounds (radius min(0.2, 0.5 × smallest half
+  extent)), mass = volume × 600 capped at car +15A0 × 0.015, solid box inertia over the bounds,
+  the lost wheel's body words (angular damping 0.2, 0.5 for the mirrors; air 0.01 × mass;
+  stationary 0.1/0.1; turnOffTime 1 s). Pose: the car pose with the node centre placed at the
+  drawn model offset (+1630, +1634 − +1564, +1638). Velocity: the car's velocity at that point
+  (v + ω × r about the mass centre) and the car's angular velocity; no kick or spin, as in 9DC270
+  for panels. It meets the road, props, pieces, wheels and cars like every prop body, and sleeps and
+  parks under the same island rules (F541/F546/F561). No despawn; `Runtime::reset` clears it.
+- Not ported: the per-group materials (D171C0 …); the port's prop bodies have no per-body material.
+- AUTHORED, `loose_panel::settle` (runs before the impacts each tick): a box this thin and light
+  rocks at 0.1–0.9 rad/s while lying flat, above the 0.1 stationary threshold, so it never slept;
+  and some came to rest standing on an edge, which the original's thin shell would not allow.
+  A panel lying on its broadest face (|cos| ≥ 0.94), slower than 0.1 m/s and 1 rad/s and touching
+  the road, has its spin cleared so the island rule can put it to sleep. A panel not lying flat,
+  touching the road and slower than 1.5 m/s and 4 rad/s is turned about its lowest support edge
+  (40 rad/s², up to 3 rad/s), waking it if asleep; after 20 s of this it is left alone. grid-app
+  draws each part mesh at the body's pose (`damage_parts`), and falls back to F563's local box only
+  for a part without a body.
 
 ### Windows `0x9A4A20` / `0x9D12B0` [D]
 
@@ -295,7 +358,9 @@ Inputs, all read-only:
 - Pose, physical mass, car +1630 and bytes +B13/+B14 come from the car's state.
 - The deformation field is `grid_tools::body_deformation::Field`.
 
-No physics or deformation result changes.
+The visual states do not change physics or deformation. Since F565 the 9EC9B0 body-part decisions
+run in the simulation (`grid_tools::loose_parts::Parts`) and grid-app reads them from the runtime;
+a detached part is a world body (section 2), which other bodies collide with.
 
 Recovered and ported:
 
@@ -313,8 +378,8 @@ AUTHORED, labelled as such in the code:
 
 - Hinge pivots on part bound edges, with the 9DB0E0 limits as angle ranges.
 - A damped spring swing driven by the car's acceleration.
-- Detached-part flight: launched outward and up, gravity, bounce on the detach-time ground height,
-  then the part stays.
+- Detached parts: drawn at their world body's pose (F565); only a part without a body uses the
+  grid-app box of F563.
 - Window anchors: four corners of the glass box plus its centre. These stand in for the six-anchor
   layout.
 - Smashed windows are hidden and spawn short-lived shards from the `lac.ppts` points.
@@ -357,8 +422,9 @@ Renders and logs are private, under `local/visual-damage/` in the main checkout.
 - Whether +3C carries the same magnitude in the port and the original during heavy impacts. The
   thresholds are mass × level × 4 per tick, compared with summed solved +3C values, and need a live
   comparison.
-- The 9AA960 hinge semantics and the original loose-part dynamics. The detached-part physics, its
-  lifetime and its collision.
+- The 9AA960 hinge semantics and the original loose-part dynamics. Whether the original's detached
+  panels also rock on the road and how its thin shell keeps them off their edges (F565 settles
+  them with an AUTHORED rule).
 - `_Cracked` values; light beam/emissive changes (9D1820); mirror-swing path; wiper detachment with the windscreen
   (rule found in F339, not ported); the loose-part detach timer (F339); light pods attached to bumpers
   (`m_attach_light_pod_*`, zero for the Lacetti).

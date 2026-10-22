@@ -84,8 +84,10 @@ fn lose_front_left(stem: &str, route: &str) {
     let hub = world(&car, car.wheels()[2].anchor);
     car.add_loose_wheels(lost).unwrap();
     let props = car.dynamic_props().expect("a prop world for the wheel");
-    assert_eq!(props.wheels.len(), 1);
-    let loose = props.wheels[0].clone();
+    // The same hit detaches body panels too (bodies of their own, F565).
+    let wheels: Vec<_> = props.wheels.iter().filter(|w| w.panel.is_none()).collect();
+    assert_eq!(wheels.len(), 1);
+    let loose = wheels[0].clone();
     assert_eq!((loose.car, loose.wheel), (0, 2));
     let cap = 0.015 * f(&car, 0x15a0);
     assert!(
@@ -282,5 +284,122 @@ fn a_shared_world_car_loses_a_wheel_without_retiring() {
             speed(&multi.cars[1])
         );
         assert!(speed(&multi.cars[0]) > 10.);
+    });
+}
+
+/// F565: a front-corner hit above the whole-bumper level detaches the front
+/// bumper as three bodies of the world (9DC270 state 4 for body parts), and
+/// panels dropped on an edge or an end next to the car end lying flat on
+/// their broadest face, asleep, on the road and not below it
+/// (loose_panel::settle).
+#[test]
+#[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS"]
+fn detached_panels_become_bodies_and_end_lying_flat_on_the_road() {
+    run(|| {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let table = std::fs::read(std::env::var_os("GRID_CONTACT_DIRECTIONS").unwrap()).unwrap();
+        let model = Car::new("lac").unwrap();
+        let route = Route::new(crate::route::DONINGTON).unwrap();
+        let mut car = Runtime::load(root, &route, &model, "slot_00", 200679).unwrap();
+        let geometry = car.prepare_body_geometry(root, &table).unwrap();
+        let hold = Controls {
+            handbrake: true,
+            ..Controls::default()
+        };
+        for _ in 0..30 {
+            car.tick_with_body_geometry(hold, &geometry).unwrap();
+        }
+        // Both front corners: the whole front bumper goes (front bumper
+        // detach level x mass x scalar against the two corner zones), each
+        // corner well below the wheel level.
+        let level = car
+            .loose_parts
+            .front_bumper_detach
+            .expect("a front bumper level");
+        let strength = 0.6 * level * mass(&car) * car.loose_parts.scalar;
+        assert!(strength < car.loose_parts.wheel_detach * mass(&car) * car.loose_parts.scalar);
+        let mut right = front_left_hit(&car, strength);
+        let anchor = car.wheels()[3].anchor;
+        right.point = world(&car, [anchor[0] - 0.1, anchor[1] + 0.3, anchor[2] + 0.9]);
+        car.detach_wheels(&[front_left_hit(&car, strength), right]);
+        let detached: Vec<_> = car
+            .parts()
+            .states
+            .iter()
+            .filter(|(_, s)| **s == crate::loose_parts::State::Detached)
+            .map(|(p, _)| *p)
+            .collect();
+        assert!(detached.contains(&"bumper_fm"), "{:?}", car.parts().states);
+        car.add_loose_wheels([false; 4]).unwrap();
+        assert_eq!(car.panels().len(), detached.len());
+        // Panels dropped edge-first ahead of the car, 1 m above the road.
+        let nodes = car.panel_nodes.clone().unwrap();
+        let p = car.pose();
+        let ahead = world(&car, [0., 0., 8.]);
+        let cases: [(&str, [[f32; 3]; 3]); 3] = [
+            // Bonnet on its long edge (its thin Y axis horizontal).
+            ("bonnet", [[0., 1., 0.], [1., 0., 0.], [0., 0., -1.]]),
+            // Boot on its short edge.
+            ("boot", [[1., 0., 0.], [0., 0., 1.], [0., -1., 0.]]),
+            // A door standing on its end (its length vertical).
+            ("door_fl", [[1., 0., 0.], [0., 0., -1.], [0., 1., 0.]]),
+        ];
+        for (k, (part, rows)) in cases.iter().enumerate() {
+            let Some((lo, hi)) = nodes.bounds.get(part).copied() else {
+                continue;
+            };
+            let centre: [f32; 3] = std::array::from_fn(|j| (lo[j] + hi[j]) * 0.5);
+            let at: [f32; 3] = std::array::from_fn(|j| ahead[j] + p[j] * 3. * k as f32);
+            let ground = car.ground_below(at).unwrap();
+            let mut pose = [0.; 16];
+            for r in 0..3 {
+                pose[r * 4..r * 4 + 3].copy_from_slice(&rows[r]);
+            }
+            pose[12..15].copy_from_slice(&[at[0], ground + 1., at[2]]);
+            pose[15] = 1.;
+            let motion = crate::loose_wheel::CarMotion {
+                pose,
+                centre: at,
+                velocity: [0.; 3],
+                angular: [0.; 3],
+                mass: f(&car, 0x15a0),
+                offset: centre.map(|c| -c),
+            };
+            let s = crate::loose_panel::spawn(&nodes, part, &motion).unwrap();
+            let props = car.props.as_mut().unwrap();
+            props
+                .add_panel(
+                    &mut car.state.world,
+                    &mut car.state.shapes,
+                    0,
+                    part,
+                    s.spec,
+                    s.linear,
+                    s.angular,
+                )
+                .unwrap();
+            car.state.car.owner.physical = car.state.world.groups.bodies[0];
+        }
+        // The car backs away from its bumper pieces (brake near rest selects
+        // reverse), then stops.
+        let reverse = Controls {
+            brake: 1.,
+            ..Controls::default()
+        };
+        for t in 0..900 {
+            let controls = if t < 300 { reverse } else { hold };
+            car.tick_with_body_geometry(controls, &geometry).unwrap();
+        }
+        println!("reverse gear {} car at {:?}", car.reverse_gear(), &car.pose()[12..15]);
+        let poses = car.panels();
+        assert_eq!(poses.len(), detached.len() + 3);
+        for pose in poses {
+            println!("{pose:?}");
+            assert!(pose.asleep, "{pose:?}");
+            assert!(pose.face >= 0.94, "{pose:?}");
+            assert!(pose.low > -0.01 && pose.low < 0.05, "{pose:?}");
+            assert!(pose.fourth < 0.08, "{pose:?}");
+        }
     });
 }

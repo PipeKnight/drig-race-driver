@@ -451,6 +451,7 @@ fn cylinder_polygon(
     s: &Settings,
     existing: &[Contact],
     moving: bool,
+    segment: bool,
 ) -> Result<Vec<Contact>, Error> {
     let limit = existing.len() + s.capacity;
     let order = |cylinder_face: Face<'_>, segment: bool| {
@@ -557,7 +558,9 @@ fn cylinder_polygon(
                             break;
                         }
                     }
-                    if contacts.len() <= 2 {
+                    // AE2FA0: after a two-vertex segment only an empty result
+                    // takes the fallback.
+                    if if segment { contacts.is_empty() } else { contacts.len() <= 2 } {
                         fallback(&mut contacts, s, limit);
                     }
                     return Ok(contacts);
@@ -571,13 +574,147 @@ fn cylinder_polygon(
                 oriented: reference,
                 margin: cylinder.margin,
             };
-            return order(face, false);
+            return order(face, segment);
         }
     }
     if contacts.len() <= 2 {
         fallback(&mut contacts, s, limit);
     }
     Ok(contacts)
+}
+
+/// AE2FA0 for two cylinders (a round piece against another; F549). The
+/// features are B47590's (A with -n, B with +n). A side opposite a side, or
+/// opposite a reference, becomes its generator segment (AE2F10; of two
+/// sides, B's). Of two references, a static B (no body, +0xD8 empty) keeps
+/// its flag; with both bodies dynamic the one whose normal is less aligned
+/// with n loses it (B keeps it on a tie). With none the pair gets the
+/// fallback contact. The pair table
+/// 0xD3AD70: disk/disk AEBC00, which (one disk a reference, as AE2FA0
+/// leaves it) turns the other disk into its rim triangle (AE2210, first
+/// vertex towards the reference's side) for AEB8D0; disk/segment AEB8D0
+/// with the segment rule; side/segment AE2710; disk/side has no handler.
+/// Each handler is [`cylinder_polygon`] with the reference cylinder as the
+/// cylinder and the other feature as the polygon.
+#[allow(clippy::neg_multiply)] // Original sign operations retain -0 lanes.
+fn cylinder_pair(
+    a: &CylinderShape,
+    b: &CylinderShape,
+    s: &Settings,
+    dynamic: bool,
+) -> Result<Vec<Contact>, Error> {
+    let fa = a.feature(s.normal.map(|x| -1. * x))?;
+    let fb = b.feature(s.normal)?;
+    let reference = |f: &Feature| match f {
+        Feature::Disk { oriented, .. } => *oriented,
+        Feature::Segment(_) => false,
+        Feature::Side(_) => true,
+    };
+    // AE2F10: the generator nearest the direction, margin in the radius.
+    let generator = |f: &Feature| match f {
+        Feature::Side(side) => {
+            let p0 = along(side.bottom, side.radius, side.normal);
+            Some([p0, along(p0, side.height, side.axis)])
+        }
+        _ => None,
+    };
+    let (to_a, to_b) = match (&fa, &fb) {
+        (Feature::Side(_), Feature::Side(_)) => (None, generator(&fb)),
+        (Feature::Side(_), other) if reference(other) => (generator(&fa), None),
+        (other, Feature::Side(_)) if reference(other) => (None, generator(&fb)),
+        _ => (None, None),
+    };
+    // (feature, segment vertices and margin when it is a segment)
+    let segment_a = to_a.map(|v| (v, 0.)).or(match fa {
+        Feature::Segment(v) => Some((v, a.margin)),
+        _ => None,
+    });
+    let segment_b = to_b.map(|v| (v, 0.)).or(match fb {
+        Feature::Segment(v) => Some((v, b.margin)),
+        _ => None,
+    });
+    let mut ra = segment_a.is_none() && reference(&fa);
+    let mut rb = segment_b.is_none() && reference(&fb);
+    let feature_normal = |f: &Feature| match f {
+        Feature::Disk { normal, .. } => *normal,
+        Feature::Side(side) => side.normal,
+        Feature::Segment(_) => [0.; 4],
+    };
+    if ra && rb {
+        let negative = s.normal.map(|x| -1. * x);
+        if !dynamic
+            || dot(feature_normal(&fa), negative).abs() <= dot(feature_normal(&fb), negative).abs()
+        {
+            ra = false;
+        } else {
+            rb = false;
+        }
+    }
+    let signed = |n: V| {
+        if dot(n, s.normal) < 0. {
+            n.map(|x| -1. * x)
+        } else {
+            n
+        }
+    };
+    match (&fa, &fb) {
+        (
+            Feature::Disk { .. },
+            Feature::Disk {
+                normal,
+                x_axis,
+                centre,
+                radius,
+                ..
+            },
+        ) if ra => {
+            let common = signed(feature_normal(&fa));
+            let triangle = disk_triangle(*normal, *x_axis, *centre, *radius, false, common)?;
+            let face = Face {
+                normal: *normal,
+                vertices: &triangle,
+                oriented: false,
+                margin: b.margin,
+            };
+            cylinder_polygon(face, a, s, &[], true, false)
+        }
+        (
+            Feature::Disk {
+                normal,
+                x_axis,
+                centre,
+                radius,
+                ..
+            },
+            Feature::Disk { .. },
+        ) if rb => {
+            let common = signed(feature_normal(&fb));
+            let triangle =
+                disk_triangle(*normal, *x_axis, *centre, *radius, false, common.map(|x| -1. * x))?;
+            let face = Face {
+                normal: *normal,
+                vertices: &triangle,
+                oriented: false,
+                margin: a.margin,
+            };
+            cylinder_polygon(face, b, s, &[], false, false)
+        }
+        _ => match (segment_a, segment_b) {
+            (None, Some((v, margin))) if ra => {
+                let disk = matches!(fa, Feature::Disk { .. });
+                cylinder_polygon(segment_face(&v, margin), a, s, &[], true, disk)
+            }
+            (Some((v, margin)), None) if rb => {
+                let disk = matches!(fb, Feature::Disk { .. });
+                cylinder_polygon(segment_face(&v, margin), b, s, &[], false, disk)
+            }
+            _ => {
+                let mut contacts = Vec::new();
+                fallback(&mut contacts, s, s.capacity);
+                Ok(contacts)
+            }
+        },
+    }
 }
 
 /// A two-vertex generator as a never-reference polygon feature.
@@ -612,7 +749,7 @@ pub(crate) fn moving_round_polygon(
                 half_height,
                 margin: s.margin,
             };
-            cylinder_polygon(poly, &cylinder, s, existing, true)
+            cylinder_polygon(poly, &cylinder, s, existing, true, false)
         }
         _ => {
             let mut contacts = existing.to_vec();
@@ -663,10 +800,9 @@ pub(crate) fn round_triangle_append(
 /// Contacts of the body `hull` at `matrix` (margin `query.margin`, sampled
 /// directions in the body frame) against the static `shape`, at most
 /// `capacity` (<= 16). Empty when the shapes are farther apart than their
-/// margins. The published normal pushes the body, as for boxes. Two round
-/// shapes (a cylinder piece against a cone) give AE2FA0's single fallback
-/// contact here: the disk and segment pairs (AEBC00 and friends) are not
-/// ported.
+/// margins. The published normal pushes the body, as for boxes. A cylinder
+/// body against a cylinder takes `cylinder_pair` (F549); a sphere on
+/// either side gives AE2FA0's single fallback contact.
 pub fn contacts<'m>(
     hull: impl Into<Hull<'m>>,
     matrix: Matrix,
@@ -674,7 +810,30 @@ pub fn contacts<'m>(
     query: &ContactSettings,
     capacity: usize,
 ) -> Result<Vec<Contact>, Error> {
-    let hull = hull.into();
+    shape_contacts(hull.into(), matrix, shape, query, capacity, false)
+}
+
+/// [`contacts`] for a `shape` that belongs to a dynamic body (two broken
+/// pieces): of two reference features AE2FA0 keeps the better aligned one
+/// instead of the static shape's.
+pub fn pair_contacts<'m>(
+    hull: impl Into<Hull<'m>>,
+    matrix: Matrix,
+    shape: &RoundShape,
+    query: &ContactSettings,
+    capacity: usize,
+) -> Result<Vec<Contact>, Error> {
+    shape_contacts(hull.into(), matrix, shape, query, capacity, true)
+}
+
+fn shape_contacts(
+    hull: Hull<'_>,
+    matrix: Matrix,
+    shape: &RoundShape,
+    query: &ContactSettings,
+    capacity: usize,
+    dynamic: bool,
+) -> Result<Vec<Contact>, Error> {
     let valid = match shape {
         RoundShape::Cylinder(c) => c.valid(),
         RoundShape::Sphere(s) => s.valid(),
@@ -747,7 +906,22 @@ pub fn contacts<'m>(
     match (shape, hull) {
         (RoundShape::Cylinder(c), Hull::Mesh(mesh)) => {
             let (mesh_feature, _) = contact_manifold::mesh_feature(&mut context, mesh, matrix, &s)?;
-            cylinder_polygon(mesh_feature.face(), c, &s, &[], false)
+            cylinder_polygon(mesh_feature.face(), c, &s, &[], false, false)
+        }
+        (
+            RoundShape::Cylinder(c),
+            Hull::Cylinder {
+                radius,
+                half_height,
+            },
+        ) => {
+            let a = CylinderShape {
+                matrix,
+                radius,
+                half_height,
+                margin: settings.margin,
+            };
+            cylinder_pair(&a, c, &s, dynamic)
         }
         _ => {
             let mut contacts = Vec::new();

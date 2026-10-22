@@ -8,8 +8,10 @@
 //!   (+824..+830, wheel records RL, RR, FL, FR) exceeds
 //!   `m_wheel_detach_level` × mass × `m_overall_speed_required_scalar`.
 //!
-//! The wheel flags change driving and are simulation state; the body-part
-//! rules are presentation (grid-app `damage_parts`).
+//! The wheel flags change driving and are simulation state. The body-part
+//! rules (`decide`, `Parts`) are simulation state too since F565: a detached
+//! part becomes a body of the world (`loose_panel`); grid-app `damage_parts`
+//! draws the states and swings loose parts (AUTHORED).
 use crate::car::Car;
 use grid_formats::{binxml, car_collision};
 use std::path::Path;
@@ -320,6 +322,345 @@ pub fn wheels_to_detach(
     std::array::from_fn(|i| !detached[i] && config.wheel_detach * s < zones[WHEELS + i])
 }
 
+// Body-part rules of 9EC9B0 (VISUAL_DAMAGE_PARTS_RESEARCH.md "Decisions"), moved
+// from grid-app: a detached part becomes a body of the world (loose_panel).
+
+/// Exhaust part ids 31, 34, 101, 102 of the original exhaust list.
+pub const EXHAUSTS: [&str; 4] = ["exhaust", "exhaust_b", "exhaust_bl", "exhaust_br"];
+
+/// Body parts the 9EC9B0 rules move (part names without the LOD prefix).
+pub const PARTS: [&str; 22] = [
+    "bonnet",
+    "boot",
+    "bumper_bl",
+    "bumper_br",
+    "bumper_bm",
+    "bumper_fl",
+    "bumper_fr",
+    "bumper_fm",
+    "door_bl",
+    "door_br",
+    "door_fl",
+    "door_fr",
+    "exhaust",
+    "exhaust_b",
+    "exhaust_bl",
+    "exhaust_br",
+    "wing_bl",
+    "wing_br",
+    "wing_fl",
+    "wing_fr",
+    "wing_mirror_l",
+    "wing_mirror_r",
+];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum State {
+    #[default]
+    Attached,
+    Loose,
+    Detached,
+}
+
+/// One requested state change with the zone value and threshold that caused it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Change {
+    pub part: &'static str,
+    pub state: State,
+    pub zone: f32,
+    pub threshold: f32,
+}
+
+/// Decisions of one tick so far, over the car's states before the tick.
+struct Decisions<'a> {
+    out: Vec<Change>,
+    state: &'a dyn Fn(&str) -> Option<State>,
+}
+impl Decisions<'_> {
+    fn current(&self, part: &str) -> Option<State> {
+        self.out
+            .iter()
+            .rev()
+            .find(|x| x.part == part)
+            .map(|x| x.state)
+            .or_else(|| (self.state)(part))
+    }
+    /// FUN_009a7cb0: absent parts read as state 0.
+    fn attached(&self, part: &str) -> bool {
+        self.current(part).is_none_or(|s| s == State::Attached)
+    }
+    fn not_detached(&self, part: &str) -> bool {
+        self.current(part).is_some_and(|s| s != State::Detached)
+    }
+    fn push(&mut self, part: &'static str, state: State, zone: f32, threshold: f32) {
+        if self
+            .current(part)
+            .is_some_and(|s| s != state && s != State::Detached)
+        {
+            self.out.push(Change {
+                part,
+                state,
+                zone,
+                threshold,
+            });
+        }
+    }
+    /// Wing-style rule: detach above level x S, else swing above level x mass.
+    fn wing(&mut self, rule: Rule, s: f32, scalar: f32, mass: f32, part: &'static str, zone: f32) {
+        if let Some(level) = rule.detach
+            && level * s < zone
+        {
+            self.push(part, State::Detached, zone, level * s);
+        } else if let Some(level) = rule.swing
+            && level * s < scalar * zone
+            && self.not_detached(part)
+        {
+            self.push(part, State::Loose, zone, level * mass);
+        }
+    }
+    /// Bumper corner rule: as `wing`, without the detached-state guard.
+    fn corner(
+        &mut self,
+        rule: Rule,
+        s: f32,
+        scalar: f32,
+        mass: f32,
+        part: &'static str,
+        zone: f32,
+    ) {
+        if let Some(level) = rule.detach
+            && level * s < zone
+        {
+            self.push(part, State::Detached, zone, level * s);
+        } else if let Some(level) = rule.swing
+            && level * s < scalar * zone
+        {
+            self.push(part, State::Loose, zone, level * mass);
+        }
+    }
+}
+
+/// Original 9EC9B0 decisions for one tick. `state` reports a part's current
+/// state, or `None` when the car model has no such part.
+pub fn decide(
+    c: &Config,
+    zones: &[f32; ZONES],
+    totals: &[f32; ZONES],
+    mass: f32,
+    state: &dyn Fn(&str) -> Option<State>,
+) -> Vec<Change> {
+    let mut d = Decisions {
+        out: Vec::new(),
+        state,
+    };
+    let s = mass * c.scalar;
+    let roof_doors = zones[ROOF] > 0. && s * 0.25 < zones[ROOF] && c.front_doors.is_some();
+    if let Some(level) = c.bonnet
+        && level * s < zones[BONNET]
+        && d.not_detached("bonnet")
+    {
+        d.push("bonnet", State::Loose, zones[BONNET], level * s);
+    }
+    if let Some(level) = c.boot
+        && level * s < zones[BOOT]
+        && level * s * 2.5 < totals[BOOT]
+        && d.not_detached("boot")
+    {
+        d.push("boot", State::Loose, zones[BOOT], level * s);
+    }
+    for part in EXHAUSTS {
+        let zone = zones[EXHAUST];
+        if let Some(level) = c.exhaust.detach
+            && level * s < zone
+        {
+            d.push(part, State::Detached, zone, level * s);
+        } else if let Some(level) = c.exhaust.swing
+            && level * s < zone
+            && d.not_detached(part)
+        {
+            // The original also requires car +1554 to be zero [I].
+            d.push(part, State::Loose, zone, level * s);
+        }
+    }
+    if let Some(level) = c.front_doors {
+        for (part, zone) in [("door_fr", RIGHT_SIDE), ("door_fl", LEFT_SIDE)] {
+            if (level * s < c.scalar * zones[zone] || roof_doors) && d.not_detached(part) {
+                d.push(part, State::Loose, zones[zone], level * mass);
+            }
+        }
+    }
+    d.wing(
+        c.rear_wings,
+        s,
+        c.scalar,
+        mass,
+        "wing_br",
+        zones[REAR_RIGHT_WING],
+    );
+    d.wing(
+        c.rear_wings,
+        s,
+        c.scalar,
+        mass,
+        "wing_bl",
+        zones[REAR_LEFT_WING],
+    );
+    d.wing(
+        c.front_wings,
+        s,
+        c.scalar,
+        mass,
+        "wing_fr",
+        zones[FRONT_RIGHT],
+    );
+    d.wing(
+        c.front_wings,
+        s,
+        c.scalar,
+        mass,
+        "wing_fl",
+        zones[FRONT_LEFT],
+    );
+    if let Some(level) = c.mirrors_detach {
+        for (part, zone) in [
+            ("wing_mirror_r", FRONT_RIGHT),
+            ("wing_mirror_l", FRONT_LEFT),
+        ] {
+            if level * s < zones[zone] {
+                d.push(part, State::Detached, zones[zone], level * s);
+            }
+        }
+    }
+    if let Some(level) = c.rear_doors {
+        for (part, zone) in [("door_br", RIGHT_SIDE), ("door_bl", LEFT_SIDE)] {
+            if level * s < zones[zone] && d.not_detached(part) {
+                d.push(part, State::Loose, zones[zone], level * s);
+            }
+        }
+    }
+    let corners = zones[FRONT_LEFT] + zones[FRONT_RIGHT];
+    if let Some(level) = c.front_bumper_detach
+        && level * s < corners
+        && state("bumper_fm").is_some()
+    {
+        for part in ["bumper_fl", "bumper_fr", "bumper_fm"] {
+            d.push(part, State::Detached, corners, level * s);
+        }
+    }
+    if d.attached("bumper_fm") {
+        d.corner(
+            c.front_bumper_side,
+            s,
+            c.scalar,
+            mass,
+            "bumper_fr",
+            zones[FRONT_RIGHT],
+        );
+    }
+    if d.attached("bumper_fm") {
+        d.corner(
+            c.front_bumper_side,
+            s,
+            c.scalar,
+            mass,
+            "bumper_fl",
+            zones[FRONT_LEFT],
+        );
+    }
+    if let Some(level) = c.rear_bumper_detach {
+        let zone = zones[REAR];
+        if level * s < zone {
+            if d.current("bumper_bm") != Some(State::Detached) {
+                for part in ["bumper_bl", "bumper_br", "bumper_bm"] {
+                    d.push(part, State::Detached, zone, level * s);
+                }
+            }
+        } else if level * s * 0.6 < zone
+            && d.attached("bumper_bm")
+            && (d.attached("bumper_bl") || d.attached("bumper_br"))
+        {
+            d.push("bumper_bm", State::Loose, zone, level * s * 0.6);
+        }
+    }
+    if d.attached("bumper_bm") {
+        d.corner(
+            c.rear_bumper_side,
+            s,
+            c.scalar,
+            mass,
+            "bumper_br",
+            zones[REAR_RIGHT],
+        );
+    }
+    if d.attached("bumper_bm") {
+        d.corner(
+            c.rear_bumper_side,
+            s,
+            c.scalar,
+            mass,
+            "bumper_bl",
+            zones[REAR_LEFT],
+        );
+    }
+    d.out
+}
+
+/// One car's parts object: zone totals (+7F0.. accumulated), the state of
+/// each part the car model has (absent parts are not listed), the changes of
+/// the last tick and the detached parts still waiting for their body.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Parts {
+    pub totals: [f32; ZONES],
+    pub states: std::collections::BTreeMap<&'static str, State>,
+    pub changes: Vec<Change>,
+    pub pending: Vec<&'static str>,
+}
+
+impl Parts {
+    /// The parts of a car model, all attached.
+    pub fn new(present: impl IntoIterator<Item = &'static str>) -> Self {
+        Self {
+            states: present.into_iter().map(|p| (p, State::Attached)).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// The state of `part`, `None` when the model has no such part.
+    pub fn state(&self, part: &str) -> Option<State> {
+        self.states.get(part).copied()
+    }
+
+    /// 9EC9B0's body-part rules for one tick's zones: add them to the totals,
+    /// decide, and apply the changes (a detached part never changes again).
+    /// Newly detached parts are queued in `pending`.
+    pub fn step(&mut self, config: &Config, zones: &[f32; ZONES], mass: f32) {
+        self.changes.clear();
+        for (total, zone) in self.totals.iter_mut().zip(zones) {
+            *total += zone;
+        }
+        if config.disabled || !mass.is_finite() || mass <= 0. {
+            return;
+        }
+        let states = &self.states;
+        let changes = decide(config, zones, &self.totals, mass, &|p| {
+            states.get(p).copied()
+        });
+        for change in changes {
+            let Some(state) = self.states.get_mut(change.part) else {
+                continue;
+            };
+            if *state == State::Detached || *state == change.state {
+                continue;
+            }
+            *state = change.state;
+            if change.state == State::Detached {
+                self.pending.push(change.part);
+            }
+            self.changes.push(change);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,5 +765,184 @@ mod tests {
             assert!(!c.disabled, "{stem}");
             assert_eq!((c.wheel_detach, c.scalar), (6., 4.), "{stem}");
         }
+    }
+
+    fn panel_config() -> Config {
+        Config {
+            disabled: false,
+            scalar: 4.,
+            bonnet: Some(3.),
+            boot: Some(2.5),
+            boot_max_angle: 5.,
+            exhaust: Rule {
+                swing: Some(5.),
+                detach: Some(6.),
+            },
+            exhaust_swing_multiple: 1.,
+            front_doors: Some(5.),
+            rear_doors: None,
+            front_wings: Rule {
+                swing: Some(4.),
+                detach: Some(4.2),
+            },
+            rear_wings: Rule::default(),
+            mirrors_detach: Some(5.),
+            mirror_with_door: true,
+            front_bumper_detach: Some(2.8),
+            rear_bumper_detach: Some(2.5),
+            front_bumper_side: Rule {
+                swing: Some(2.),
+                detach: Some(2.5),
+            },
+            rear_bumper_side: Rule {
+                swing: Some(2.5),
+                detach: Some(2.5),
+            },
+            crack_cos: 0.999903,
+            smash_cos: 0.999391,
+            smash_light: 0.1,
+            crack_only: [false; 6],
+            front: 0.38,
+            rear: -1.2,
+            half_width: 0.9,
+            roof: 1.4,
+            wheel_detach: 6.,
+        }
+    }
+
+    #[test]
+    fn decisions_use_level_times_scalar_times_mass() {
+        let c = panel_config();
+        let all = |_: &str| Some(State::Attached);
+        let mass = 1000.;
+        let mut z = [0.; ZONES];
+        z[BONNET] = 3. * 4. * mass; // equal is not above the threshold
+        assert!(decide(&c, &z, &z, mass, &all).is_empty());
+        z[BONNET] += 1.;
+        let out = decide(&c, &z, &z, mass, &all);
+        assert_eq!(out.len(), 1);
+        assert_eq!((out[0].part, out[0].state), ("bonnet", State::Loose));
+        // Doors: level x mass against the side zone (scalar cancels).
+        let mut z = [0.; ZONES];
+        z[LEFT_SIDE] = 5. * mass + 1.;
+        let out = decide(&c, &z, &z, mass, &all);
+        assert_eq!(out.iter().map(|x| x.part).collect::<Vec<_>>(), ["door_fl"]);
+        // Front corners together detach the whole front bumper, which then
+        // stops the side rules.
+        let mut z = [0.; ZONES];
+        z[FRONT_LEFT] = 2. * 4. * mass;
+        z[FRONT_RIGHT] = 2. * 4. * mass;
+        let out = decide(&c, &z, &z, mass, &all);
+        let parts: Vec<_> = out.iter().map(|x| (x.part, x.state)).collect();
+        assert!(parts.contains(&("bumper_fm", State::Detached)));
+        assert!(parts.contains(&("bumper_fl", State::Detached)));
+        assert!(!parts.contains(&("bumper_fl", State::Loose)));
+        // Absent parts never change.
+        let none = |_: &str| None;
+        assert!(decide(&c, &z, &z, mass, &none).is_empty());
+        // Detached parts never swing again.
+        let detached = |_: &str| Some(State::Detached);
+        assert!(decide(&c, &z, &z, mass, &detached).is_empty());
+    }
+
+    #[test]
+    fn boot_needs_the_accumulated_total() {
+        let c = panel_config();
+        let all = |_: &str| Some(State::Attached);
+        let mut z = [0.; ZONES];
+        z[BOOT] = 2.5 * 4. * 1000. + 1.;
+        let total = z;
+        assert!(
+            !decide(&c, &z, &total, 1000., &all)
+                .iter()
+                .any(|x| x.part == "boot")
+        );
+        let mut total = z;
+        total[BOOT] *= 3.;
+        assert!(
+            decide(&c, &z, &total, 1000., &all)
+                .iter()
+                .any(|x| x.part == "boot")
+        );
+    }
+
+    #[test]
+    fn parts_apply_decisions_once_and_queue_detached_parts() {
+        let c = panel_config();
+        let mut parts = Parts::new(["bumper_fl", "bumper_fr", "bumper_fm", "bonnet"]);
+        let mass = 1000.;
+        let mut z = [0.; ZONES];
+        z[FRONT_LEFT] = 2. * 4. * mass;
+        z[FRONT_RIGHT] = 2. * 4. * mass;
+        parts.step(&c, &z, mass);
+        assert_eq!(parts.pending, ["bumper_fl", "bumper_fr", "bumper_fm"]);
+        assert_eq!(parts.state("bumper_fm"), Some(State::Detached));
+        assert_eq!(parts.totals[FRONT_LEFT], z[FRONT_LEFT]);
+        assert_eq!(parts.state("door_fl"), None);
+        // A detached part changes no more; the totals keep adding up.
+        parts.pending.clear();
+        parts.step(&c, &z, mass);
+        assert!(parts.changes.is_empty() && parts.pending.is_empty());
+        assert_eq!(parts.totals[FRONT_LEFT], 2. * z[FRONT_LEFT]);
+    }
+
+    fn frame() -> Frame {
+        Frame {
+            pose: [
+                1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+            ],
+            offset: [0.; 3],
+        }
+    }
+    fn hit(point: [f32; 3], normal: [f32; 3], impact: f32) -> crate::body_impacts::Impact {
+        crate::body_impacts::Impact {
+            point,
+            normal,
+            impact,
+        }
+    }
+
+    #[test]
+    fn zones_follow_the_original_cells() {
+        let c = panel_config();
+        let mut z = [0.; ZONES];
+        // Front centre pushed back: bonnet gets -nz * m, both front wheels m.
+        frame().classify(&c, &hit([0., 0.5, 2.], [0., 0., -0.5], 100.), &mut z);
+        assert_eq!(z[BONNET], 50.);
+        assert_eq!([z[WHEELS + 2], z[WHEELS + 3]], [100., 100.]);
+        // Front left (+X) corner.
+        let mut z = [0.; ZONES];
+        frame().classify(&c, &hit([0.8, 0.5, 2.], [-1., 0., 0.], 10.), &mut z);
+        assert_eq!(z[FRONT_LEFT], 10.);
+        assert_eq!([z[WHEELS + 2], z[WHEELS + 3]], [10., 2.]);
+        assert_eq!(z[BONNET], 0.);
+        // Middle right side pushed toward +X.
+        let mut z = [0.; ZONES];
+        frame().classify(&c, &hit([-0.8, 0.5, 0.], [0.5, 0., 0.], 10.), &mut z);
+        assert_eq!(z[RIGHT_SIDE], 5.);
+        // Middle right pushed the wrong way adds nothing at all.
+        let mut z = [0.; ZONES];
+        frame().classify(&c, &hit([-0.8, 0.5, 0.], [-0.5, 0., 0.], 10.), &mut z);
+        assert!(z.iter().all(|v| *v == 0.));
+        // Rear left adds rear, boot, exhaust, rear-left wing and corner.
+        let mut z = [0.; ZONES];
+        frame().classify(&c, &hit([0.8, 0.5, -2.], [0., 0., 1.], 10.), &mut z);
+        for k in [REAR, BOOT, EXHAUST, REAR_LEFT_WING, REAR_LEFT] {
+            assert_eq!(z[k], 10.);
+        }
+        assert_eq!([z[WHEELS], z[WHEELS + 1]], [10., 2.]);
+        // Roof only on an inverted car.
+        let mut z = [0.; ZONES];
+        frame().classify(&c, &hit([0., 1.3, 0.], [0., -1., 0.], 10.), &mut z);
+        assert_eq!(z[ROOF], 0.);
+        // Upside down: the pose's up row points down (the hit is turned too).
+        let inverted = Frame {
+            pose: [
+                1., 0., 0., 0., 0., -1., 0., 0., 0., 0., -1., 0., 0., 0., 0., 1.,
+            ],
+            offset: [0.; 3],
+        };
+        inverted.classify(&c, &hit([0., -1.3, 0.], [0., 1., 0.], 10.), &mut z);
+        assert_eq!(z[ROOF], 10.);
     }
 }

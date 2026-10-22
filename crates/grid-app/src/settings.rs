@@ -299,8 +299,11 @@ pub struct Settings {
     pub osd_dials: Option<bool>,
     /// `[osd] fps`: the frame-rate counter (default on Android only).
     pub osd_fps: Option<bool>,
-    /// `[video] render_height`: `native` or rows (render_scale.rs).
+    /// `[video] render_height`: `auto`, `native` or rows (render_scale.rs).
     pub render_height: Option<crate::render_scale::RenderHeight>,
+    /// `[video] render_height_version`: [`RENDER_HEIGHT_VERSION`] once the
+    /// Video screen saved the height.
+    pub render_height_version: Option<u32>,
     /// `[video] present_mode`, `refresh_hz` (`Some(None)` = system), `frame_latency`.
     pub present_mode: Option<bevy::window::PresentMode>,
     pub refresh_hz: Option<Option<f32>>,
@@ -547,6 +550,13 @@ impl Settings {
                 ("video", "render_height") => {
                     self.render_height = Some(crate::render_scale::RenderHeight::parse(value).map_err(at)?)
                 }
+                ("video", "render_height_version") => {
+                    self.render_height_version = Some(
+                        value
+                            .parse()
+                            .map_err(|_| at("`render_height_version` needs a number".into()))?,
+                    )
+                }
                 ("osd", "speed_units") => {
                     self.osd_mph = Some(match value.to_ascii_lowercase().as_str() {
                         "kph" | "km/h" => false,
@@ -572,6 +582,19 @@ impl Settings {
             }
         }
         Ok(())
+    }
+
+    /// The render height in use. With the mobile preset a height saved before
+    /// `auto` existed (no [`RENDER_HEIGHT_VERSION`]) reads as `auto` (F559:
+    /// the Video screen offered only fixed heights then).
+    pub fn video_render_height(&self) -> crate::render_scale::RenderHeight {
+        use crate::render_scale::RenderHeight;
+        let current = self.render_height_version.unwrap_or(0) >= RENDER_HEIGHT_VERSION;
+        match self.render_height {
+            Some(_) if crate::mobile::enabled() && !current => RenderHeight::Auto,
+            Some(height) => height,
+            None => RenderHeight::platform_default(),
+        }
     }
 
     pub fn assists(&self) -> Result<grid_tools::source_vehicle::assists::Assists, String> {
@@ -761,6 +784,10 @@ pub fn with_keys(text: &str, section: &str, keys: &[(&str, Option<String>)]) -> 
     text.push('\n');
     text
 }
+
+/// `[video] render_height_version` the Video screen writes: 2 since F559
+/// added `auto` (older saved heights are migrated once on Android).
+pub const RENDER_HEIGHT_VERSION: u32 = 2;
 
 /// The Video screen's choice (front_end.rs) as settings keys: `[osd] fps`
 /// and `[video] render_height / present_mode / refresh_hz / frame_latency`.
@@ -1153,7 +1180,7 @@ tick_delay_ms = 20
         let new = with_keys(&new, "video", &video.keys());
         assert_eq!(
             new,
-            "# phone\n[osd]\nminimap = off # mine\nfps = off # counter\n[video]\nrender_height = native # cap\npresent_mode = auto_vsync\nrefresh_hz = 120\n[assists]\ntcs=on\n"
+            "# phone\n[osd]\nminimap = off # mine\nfps = off # counter\n[video]\nrender_height = native # cap\npresent_mode = auto_vsync\nrefresh_hz = 120\nrender_height_version = 2\n[assists]\ntcs=on\n"
         );
         let mut s = Settings::new();
         s.apply(&new, Path::new(".")).unwrap();

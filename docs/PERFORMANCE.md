@@ -562,7 +562,7 @@ itself. The owner only sideloads APKs and sends logs; there is no adb.
 
 Race Options → **Performance test** (AUTHORED diagnostics; `crates/grid-app/src/perf_test.rs`).
 Each row turns one part of the frame off, live, and is never saved, so the next start is the
-normal game:
+normal game. Until F553 the panel had only 5 row texts, so the last three rows (Sample logging, Whole scene, Auto cycle) were never drawn. The Auto cycle row (the first row since F553) was removed in F559 at the owner's request; `GRID_PERF_TEST=auto` still runs the cycle on the desktop, and any switch on the screen ends it:
 
 | Row | Off means |
 |---|---|
@@ -573,7 +573,6 @@ normal game:
 | HUD | race HUD parts and the damage panel hidden, the OSD scene's camera inactive (touch zones stay) |
 | Sample logging | the periodic `drive_sample`/`drive_*_sample` "tick" reports skipped (events such as pause, reset and exit stay) |
 | Whole scene | Off: every mesh except the player's car hidden (prop pieces that their own system shows again may stay) |
-| Auto cycle | On: steps through normal → each part alone → all six off → car only → normal, 8 s each |
 
 - Every `frame_stats` line ends with `perf_test=normal` or `perf_test=off:shadows+hud…` once
   the screen has been used (or `GRID_PERF_TEST` is set). Each change logs
@@ -867,3 +866,171 @@ phone-like case the owner named: the player laps away from the crash sites, so a
 155 pieces are parked and 40 more asleep. The races diverge once the first island parks, so the
 piece counts differ; base (which already sleeps, F541) has no asleep or parked counters. The world
 advance at 0 pieces also falls (0.19 → 0.12 ms on the Nürburgring, 8 cars), from the row move.
+
+## Mobile preset (F549)
+
+Owner, 2026-10-22: a steady 60 FPS on phones, including weaker ones. The phone picture may drop to
+PS3-era quality, and the desktop picture stays as it is. `crates/grid-app/src/mobile.rs` is the
+Android default. It is off on the desktop unless `GRID_MOBILE_PRESET=1`; `GRID_MOBILE_PRESET=0`
+turns it off on Android for comparisons. It changes presentation only.
+
+**What the phone logs showed** (owner's profile APK 6087fbcafa30, Adreno 740, 2308 × 1080, display
+60/120 Hz, Fifo; `log-20261022-004650.txt` and its siblings):
+
+- **Front end over the 3D grid, simulation off:** 55 ms per frame, steady for 30 s.
+  - `present_frames` waits 21.6 ms per frame: the GPU is the limit.
+  - `drive_tick` takes 10.7 ms per frame at 3.3 calls with no ticks running.
+  - [I] The first profile window's `allocate_and_free_meshes` (4.6 ms) and
+    `prepare_assets<GpuImage>` (3.1 ms) were startup uploads averaged over that window, not
+    steady churn. The second window does not have them, and the new `asset_churn` line reads 0
+    after the first 10 s on the desktop.
+- **Smooth driving:** 25 ms per frame.
+  - `present_frames` waits 1.8 ms: CPU-bound.
+  - The main app takes 19 ms, of which `drive_tick` is 6 ms.
+  - The render thread does 10.4 ms of its own work. The rest of its 23 ms is waiting for
+    visibility tasks on the 4 compute threads, each busy about 7.5 ms.
+  - Core3d runs twice per frame: the main view and the OSD camera.
+- **Entity counts** (desktop, Nürburgring drift battle): 17,785 mesh entities, 15,748 of them
+  small static ones (a bounding radius under 4 m), most of them the 11,962 breakable prop
+  pieces. Every view and shadow cascade visits them.
+
+**The F549 preset** (F555 keeps only the render rows and the compute threads; see below):
+
+| Change | Value | Why |
+|---|---|---|
+| 3D view rows (`render_scale`) | 720, stretched over the screen | the GPU-bound phases; this phone rendered its native 1080 rows before. `[video] render_height` still overrides. |
+| Sun shadows | 1 cascade, 1024 map, to 45 m | one shadow view instead of four (visibility, binning, the shadow pass) |
+| Small static meshes | no shadow; not drawn beyond 110 m (`VisibilityRange`) | most entities are small props; culled ones skip extraction, queueing and batching |
+| Ground cover | 0.4 × the authored LOD distances | about 0.16 × the sprites |
+| Compute threads | cores − 2, at least 4 (6 on an 8-core phone) | Bevy gives 4 of 8 cores to compute and leaves IO and async threads idle |
+
+**Measurement switches.** `perf_test` keeps the per-part switches. The Auto cycle (14 steps of 8 s)
+now ends with `mobile:render1080` (full resolution), `mobile:render540` and `mobile:msaa_off`; under
+the preset, the "normal" step is the preset itself. The Auto cycle also runs in the pre-race menu.
+The cycle labels `light_shadows`, `no_small_casters` and `far_props` are for runs without the preset
+(`GRID_PERF_TEST`).
+
+The new `asset_churn` line, every 10 s, reports Image and Mesh assets added, modified and removed
+per frame, with the most changed meshes named by an entity that draws them.
+
+**Checks:**
+- The desktop default is unchanged: every preset change is behind `mobile::enabled()`. The
+  `asset_churn` line is the only new desktop output.
+- Desktop with `GRID_MOBILE_PRESET=1 GRID_PERF_TEST=auto`: the whole cycle ran without a panic,
+  and `render_scale` logged 1152 × 720, then 1280 × 800 native, then 864 × 540.
+- [Not measured] The phone gain. The owner's next run of the Auto cycle (in the menu and while
+  driving) gives the table.
+
+**Next, by the data:**
+- Draw intact breakable props as one mesh each instead of their pieces (about 12,000 entities on
+  the Nürburgring).
+- Render the OSD only when it changes.
+- A lower preset for weaker phones.
+
+### Phone measurement and the reduced preset (F555)
+
+The owner ran the Auto cycle on APK 9ac27f9a958a (F549 preset + F553), Adreno 740, 2308 × 1080. The log is `log-20261022-044620.txt` (main checkout `local/android/phone-logs/20261022-0446/`). The table gives the mean of the `frame_stats` FPS per 8 s step. "normal" is the F549 preset: 720 rows plus the other cuts.
+
+| Step | Pre-race menu, 1st cycle | menu, 2nd cycle | Driving, no debris |
+|---|---:|---:|---:|
+| normal | 42.1 | 42.5 | 52.8–59.1 |
+| shadows off | 43.8 | 44.7 | 56.0 |
+| foliage / ground / effects / HUD / samples off (each) | 42.0–42.9 | 42.5–43.0 | 57.1–59.9 |
+| all six off | 45.3 | 45.9 | 59.9 |
+| only the player's car | 59.5 | 59.9 | 60.1 |
+| render1080 (native) | 31.6 | 33.1 | 58.0 |
+| render540 | 48.4 | 49.1 | 58.7 |
+| MSAA off (720 rows) | 55.5 | 54.8 | (pile-up began) |
+
+Interpretation [I]:
+
+- **Driving** is at or near the 60 FPS cap at any resolution. Even 1080 rows gave 58.
+- **The pre-race menu is the slow case.** Its frame time falls only part-way with fewer pixels: 31.6 ms at 2.49 MP, 23.5 ms at 1.11 MP, 20.7 ms at 0.62 MP. That fits about 17.6 ms + 5.6 ms per megapixel. So resolution alone cannot bring the menu under 16.7 ms: even 0 pixels would leave about 17.6 ms.
+- **MSAA 4× costs about 5.8 ms at 720 rows** (23.6 → 18.0 ms), more than halving the pixels saves.
+- **The rest is the scene behind the menu.** With only the player's car drawn the menu reaches 60 FPS, and the six parts the switches remove (shadows, foliage, grass, effects, HUD, logging) together give only about 3 FPS. So the remaining cost is the other cars and the track and prop meshes in view. With 17,785 mesh entities (Nürburgring), that is most likely per-draw GPU and driver work at 4 MSAA samples. No profile build ran this time, so the split between CPU and GPU is not confirmed.
+
+**F555 preset** (owner, 2026-10-22: "картинка стала очень плохой … обойтись только понижением разрешения"):
+- Only the 720-row render and the compute threads remain.
+- Shadows, small-prop shadows and the draw distance, and the grass distance are as on the desktop again.
+
+Expected [I, not measured]:
+- Driving: about 55–60 FPS. The F549 cuts gave about 0–4 FPS while driving.
+- Pre-race menu: about 40 FPS (F549 normal 42 minus their roughly 2–3 FPS).
+- With MSAA off, the menu would reach about 52–55 FPS. That is the owner's call: off by default only with the owner's say.
+- Dynamic resolution would not reach 60 FPS in the menu either (see the fixed part above).
+
+### Dynamic render height (F556, F559)
+
+The owner chose a dynamic resolution of 480 to 720 rows (2026-10-22). Since F559 it is the Video
+screen's Render height value **Auto** (`[video] render_height = auto`), the Android default; the
+range is fixed at 480-720 rows. A row count is a fixed height and `native` turns the scaling off.
+The Video screen shows the rows rendered now beside Auto, for example `Auto (624)`.
+
+**What went wrong in F556 (owner, APK 94e06d136784: "no dynamic resolution, the fixed Render Height
+is used").** From the code [V, reading]: the controller ran only while the setting was a row count,
+that count replaced the 720 ceiling, and the Video screen showed only the saved number, never the
+height rendered. The controller treated a frame as main-thread bound when the whole main schedule
+(`First` to `Last`) took over 80 % of the frame or 14 ms. On the phone that span is long: the F549
+profile (APK 6087fbcafa30) measured the main app at 19 ms of a 25 ms driving frame, and 10.7 ms of
+`drive_tick` alone per pre-race frame; the F555 fit (17.6 ms + 5.6 ms per megapixel) also has a large
+resolution-independent part. [I] So late frames counted as CPU-bound and the height never dropped.
+No phone log of APK 94e06d136784 was available to confirm it (no `render_dynamic` lines to read).
+
+**F559 changes:**
+- The work measure is only the fixed-step loop (`RunFixedMainLoop`, the driving ticks), which a
+  lower resolution cannot speed up; the hold thresholds are 50 % of the frame or 16 ms (a whole
+  60 FPS frame; the paused pre-race ticks' 10.7 ms stays below it).
+- Saved heights from before F559 (no `[video] render_height_version = 2`) read as Auto once with
+  the mobile preset; the Video screen writes the version with every save, so a fixed height chosen
+  after F559 stays fixed. The desktop reads the saved height as before.
+- While late frames are held as simulation bound, `render_dynamic … reason=cpu_bound` is logged
+  every 10 s (rows unchanged), so a phone log shows why the height does not drop.
+
+The rest of this section is the F556 design, with the work measure as above.
+
+**Per frame**, the controller keeps exponential averages (factor 0.1) of two values:
+- the frame time (`Time<Real>`);
+- the simulation time: the fixed-step loop (F559; F556 used the main schedule from `First` to
+  `Last`).
+
+**The rules:**
+- **Late:** the average frame time is above 18 ms (below about 55 FPS).
+- **Simulation bound:** the simulation is above 50 % of the frame time, or above 16 ms (F556:
+  the main schedule above 80 % or 14 ms). For example a tyre pile; a lower resolution would not
+  help, so the height holds.
+- **Down:** when late and not main-thread bound, 48 rows lower, at most every 0.5 s, to the floor
+  of 480. The height it left is blocked for 15 s.
+- **Up:** after 3 s on time (below 17.2 ms), 24 rows higher, but not to a blocked height. From 480
+  back to 720 this takes about 30 s.
+- **Ignored:** frames above 100 ms (loading, pauses) and the first 3 s.
+
+Render-thread CPU limits are not told apart from GPU limits. They would lower the height for little
+gain, but never below 480.
+
+**Logging:**
+- `render_dynamic version=1 event=install` gives the parameters.
+- Each change logs `render_dynamic … rows=… from=… reason=late|on_time|ceiling frame_ms=… work_ms=…`;
+  `reason=cpu_bound` (F559) is a hold report with rows unchanged.
+  Changes are at least 0.5 s apart, so the line is rate-limited.
+- `frame_stats` shows the current `render=WxH`.
+
+The Performance test's `render…` steps hold the dynamic height (`RenderScale::hold`), so they
+compare fixed heights.
+
+**Implementation:**
+- Each change allocates a new target image at the new size. Changes are at most 2 per second.
+- The UI (HUD, menus, touch zones, FPS counter) is drawn by the window camera whenever the scaled
+  image is shown: `ui_on_window` moves the UI roots, and the OSD image follows the window size. So
+  the UI keeps the screen's resolution at any render height.
+- The desktop is unchanged: it renders native by default, so no image and no move.
+
+**Expected [I, from the F555 table]:**
+- Driving: 720 rows, about 60 FPS.
+- Pre-race menu: down to 480 rows (1,026 × 480, 0.49 MP), about 17.6 + 2.8 ms, so about 46–49 FPS
+  instead of about 40 at 720.
+- 60 FPS in the menu still needs MSAA off (about 55 at 720) or a cheaper scene.
+
+**Checks:** unit tests `dynamic_height_drops_fast_when_late_and_rises_slowly` and
+`dynamic_height_ignores_a_main_thread_bound_frame`. On the desktop with `GRID_MOBILE_PRESET=1
+GRID_PERF_TEST=auto`: 8 UI roots moved to the window at 720 rows and back at native, with no panic.
+The desktop never runs late, so no dynamic change was exercised live; the phone log will show it.

@@ -52,6 +52,8 @@ pub struct MultiRuntime {
     /// Parking around the player (on in the game; tests measuring a pile
     /// near the player switch it off).
     parking: bool,
+    /// Time each detached panel's body has been turned over (loose_panel::settle).
+    panel_tipping: std::collections::BTreeMap<usize, f32>,
     initial_shapes: Arc<Vec<contact_groups::Shape>>,
     /// Per car: why and since when it is out of the shared world.
     retired: Vec<Option<Retirement>>,
@@ -76,6 +78,21 @@ pub enum Contacted {
     Track,
     /// The boundary sheet or other static geometry.
     Static,
+}
+
+/// A body [`MultiRuntime::unsupported`] found asleep or parked without
+/// support, or a held car.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Unsupported {
+    pub body: usize,
+    pub asleep: bool,
+    pub parked: bool,
+    /// A retired car, held at its last pose.
+    pub held: bool,
+    /// How far it fell in the woken clone (m).
+    pub drop: f32,
+    /// Height of its centre above the track surface below it.
+    pub gap: Option<f32>,
 }
 
 /// A car taken out after its own pipeline failed (see [`MultiRuntime::tick`]).
@@ -403,6 +420,7 @@ impl MultiRuntime {
             speeds: vec![0.; n],
             props: None,
             parking: true,
+            panel_tipping: Default::default(),
             retired: vec![None; n],
             newly_retired: Vec::new(),
             parallel: true,
@@ -419,6 +437,29 @@ impl MultiRuntime {
     /// Track, prop and car body records of car `i` in the last tick.
     pub fn body_contacts_of(&self, i: usize) -> usize {
         self.body_counts.get(i).copied().unwrap_or(0)
+    }
+
+    /// Diagnostic: the last tick's world contacts that name body `body`
+    /// (index), as (body a, body b or none for static, normal, point,
+    /// penetration +0x38, solved force +0x3C, shape tokens +0x28/+0x2C).
+    #[allow(clippy::type_complexity)]
+    pub fn contacts_with(&self, body: usize) -> Vec<(usize, Option<usize>, [f32; 3], [f32; 3], f32, f32, [u32; 2])> {
+        let g = |c: &contact_groups::Contact, o: usize| f32::from_bits(c[o / 4]);
+        (self.world.groups.contacts.iter())
+            .filter(|c| **c != contact_groups::EMPTY_CONTACT)
+            .filter(|c| c[1] as usize == body + 1 || c[2] as usize == body + 1)
+            .map(|c| {
+                (
+                    c[1] as usize - 1,
+                    (c[2] != 0).then(|| c[2] as usize - 1),
+                    [g(c, 0x60), g(c, 0x64), g(c, 0x68)],
+                    [g(c, 0x50), g(c, 0x54), g(c, 0x58)],
+                    g(c, 0x38),
+                    g(c, 0x3c),
+                    [c[0x28 / 4], c[0x2c / 4]],
+                )
+            })
+            .collect()
     }
 
     /// Cars retired by the last tick, in car order.
@@ -454,6 +495,60 @@ impl MultiRuntime {
     /// Shared world bodies: the cars, then live prop pieces.
     pub fn bodies(&self) -> &[contact_groups::Body] {
         &self.world.groups.bodies
+    }
+
+    /// Diagnostic (owner's report of 23 October 2026, bodies asleep in the
+    /// air): steps two clones `ticks` times with idle controls, one as it
+    /// is and one with every asleep piece or lost wheel woken and parking
+    /// off. A body that is asleep or parked here, stays put in the first
+    /// clone and falls more than 0.2 m in the second lacked support. Held
+    /// (retired) cars are listed too, with their height above the track.
+    pub fn unsupported(&self, ticks: usize) -> Result<Vec<Unsupported>, Error> {
+        let cars = self.cars.len();
+        let n = self.bodies().len();
+        let height = |m: &Self, i: usize| f32::from_bits(m.bodies()[i][0x204 / 4]);
+        let state = |i: usize| {
+            let b = &self.bodies()[i];
+            (b[0x400 / 4] == contact_groups::ASLEEP, (b[0x410 / 4] >> 24) & 255 != 0)
+        };
+        let gap = |i: usize| {
+            let p = [0x1c0, 0x1c4, 0x1c8].map(|o| f32::from_bits(self.bodies()[i][o / 4]));
+            self.cars[0].ground_below(p).map(|y| p[1] - y)
+        };
+        let mut out: Vec<Unsupported> = (0..cars)
+            .filter(|&i| self.retired[i].is_some())
+            .map(|i| Unsupported { body: i, asleep: false, parked: false, held: true, drop: 0., gap: gap(i) })
+            .collect();
+        let (mut kept, mut woken) = (self.clone(), self.clone());
+        woken.parking = false;
+        for i in cars..n {
+            if grouped_physical_frame::asleep(&woken.world, i) {
+                grouped_physical_frame::wake(&mut woken.world, i);
+            }
+        }
+        let idle = vec![Controls::default(); cars];
+        for _ in 0..ticks {
+            kept.tick(&idle)?;
+            woken.tick(&idle)?;
+        }
+        for i in cars..n {
+            let (asleep, parked) = state(i);
+            let before = height(self, i);
+            let drop = before - height(&woken, i);
+            if (asleep || parked) && (height(&kept, i) - before).abs() < 1e-3 && drop > 0.2 {
+                out.push(Unsupported { body: i, asleep, parked, held: false, drop, gap: gap(i) });
+            }
+        }
+        Ok(out)
+    }
+
+    /// Diagnostics: every detached panel's body and how it lies on the
+    /// track ([`crate::loose_panel::poses`]).
+    pub fn panels(&self) -> Vec<crate::loose_panel::PanelPose> {
+        let track = &self.cars[0];
+        self.props.as_ref().map_or_else(Vec::new, |props| {
+            crate::loose_panel::poses(props, self.bodies(), |p| track.ground_below(p))
+        })
     }
 
     /// Obstruction contact sum of car `i` for the AI's collided_obstruction
@@ -584,6 +679,7 @@ impl MultiRuntime {
         self.speeds = vec![0.; self.cars.len()];
         self.retired = vec![None; self.cars.len()];
         self.newly_retired.clear();
+        self.panel_tipping.clear();
     }
 
     /// [`Runtime::place_at_rest`] for car `i`, on its body in the shared
@@ -928,7 +1024,6 @@ impl MultiRuntime {
                         token: tokens[i],
                     })
                     .collect();
-                let mut local = Vec::new();
                 let more = props.contacts(
                     &cars[0].track,
                     &cars[0].surfaces,
@@ -936,10 +1031,7 @@ impl MultiRuntime {
                     &hulls,
                     geometry[0].query(),
                     remaining - out.len(),
-                    &mut local,
                 )?;
-                let base = wheel_contacts + out.len();
-                recorded.extend(local.into_iter().map(|(k, r)| (base + k, r)));
                 piece_contacts = more.len();
                 out.extend(more);
             }
@@ -985,6 +1077,7 @@ impl MultiRuntime {
             next.detect(&world.groups.contacts, &recorded, &world.groups.bodies);
             let mut changed = self.shapes.clone();
             next.hold_lost(&mut world.groups.bodies, self.cars[0].track.bounds()[1]);
+            next.lift_sunk(&self.cars[0].track, &mut world.groups.bodies)?;
             let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
             // 0x7C4830: the phantom posts after the step and the breaks.
             next.post_touches.clear();
@@ -1162,8 +1255,25 @@ impl MultiRuntime {
                 (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
             })
             .collect();
-        // The loose-part wheel rule of every car still in the world; a lost
-        // wheel becomes a body of the shared world (loose_wheel).
+        // Detached panels standing on an edge are turned over (AUTHORED).
+        if let Some(props) = &self.props {
+            let track = &self.cars[0];
+            if crate::loose_panel::settle(
+                props,
+                &mut self.world,
+                |p| track.ground_below(p),
+                &mut self.panel_tipping,
+                DELTA,
+            ) {
+                // Waking relinks the active list; keep the cars' copies in step.
+                for (j, car) in self.cars.iter_mut().enumerate() {
+                    car.state.car.owner.physical[0x300 / 4] =
+                        self.world.groups.bodies[j][0x300 / 4];
+                }
+            }
+        }
+        // The loose-part rules of every car still in the world; a lost wheel
+        // or a detached panel becomes a body of the shared world.
         for i in 0..n {
             if self.retired[i].is_none() {
                 let impacts = self.impacts(i);
@@ -1186,10 +1296,12 @@ impl MultiRuntime {
         Ok(lost.iter().any(|l| *l))
     }
 
-    /// Add car `i`'s wheels `lost` this tick as bodies of the shared world.
+    /// Add car `i`'s wheels `lost` this tick and its body parts detached this
+    /// tick as bodies of the shared world.
     pub(crate) fn add_loose_wheels(&mut self, i: usize, lost: [bool; 4]) -> Result<(), Error> {
         let spawns = self.cars[i].loose_wheels(lost, i)?;
-        if spawns.is_empty() {
+        let panels = self.cars[i].loose_panels()?;
+        if spawns.is_empty() && panels.is_empty() {
             return Ok(());
         }
         let props = self
@@ -1201,6 +1313,17 @@ impl MultiRuntime {
                 &mut self.shapes,
                 i,
                 wheel,
+                s.spec,
+                s.linear,
+                s.angular,
+            )?;
+        }
+        for (part, s) in panels {
+            props.add_panel(
+                &mut self.world,
+                &mut self.shapes,
+                i,
+                part,
                 s.spec,
                 s.linear,
                 s.angular,
@@ -1821,13 +1944,15 @@ mod tests {
             .unwrap();
     }
 
-    /// Parking (B7B850 status 2, B24DF0, AD6480): car 1 breaks a Le Mans tyre
-    /// wall far from the player's car 0; the moving pieces, more than 50 m
-    /// from the player, leave the active list parked (+0x413). When the
-    /// player comes back within 50 m, the start of the next tick wakes them.
+    /// Far pieces rest before they stop (F561, owner's request; BODY_SLEEPING
+    /// section 8): car 1 breaks a Le Mans tyre wall more than 80 m from the
+    /// player's car 0. B7B850 parked the moving pieces on their first static
+    /// contact (status 2, B24DF0); now a body counts as outside only after
+    /// turnOffTime at rest, so none parks in flight, the pile settles and
+    /// sleeps (status 1 comes first), and nothing asleep lacks support.
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
-    fn pieces_far_from_the_player_park_and_wake_when_it_returns() {
+    fn pieces_far_from_the_player_settle_before_they_stop() {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn(|| {
@@ -1855,32 +1980,350 @@ mod tests {
                 assert!(away > 80., "the player is {away} m from the wall");
                 let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);
                 multi.place_at_rest(1, start, z.map(|v| -v)).unwrap();
-                let parked = |multi: &MultiRuntime| {
-                    multi.bodies()[multi.cars.len()..]
-                        .iter()
-                        .filter(|b| (b[0x410 / 4] >> 24) & 255 != 0)
-                        .count()
+                let cars = multi.cars.len();
+                let count = |multi: &MultiRuntime, f: &dyn Fn(&contact_groups::Body) -> bool| {
+                    multi.bodies()[cars..].iter().filter(|b| f(b)).count()
                 };
                 let mut drive = [Controls::default(); 2];
                 drive[1].throttle = 1.;
-                // Until a good part of the moving pile is parked (settled
-                // pieces later sleep instead: status 1 comes first).
-                for _ in 0..240 {
+                for tick in 0..900 {
+                    if tick == 240 {
+                        drive[1] = Controls { brake: 1., ..Controls::default() };
+                    }
                     multi.tick(&drive).unwrap();
-                    if parked(&multi) >= 10 {
-                        break;
+                    let parked = count(&multi, &|b| (b[0x410 / 4] >> 24) & 255 != 0);
+                    assert_eq!(parked, 0, "tick {tick}: parked before resting");
+                }
+                let pieces = multi.bodies().len() - cars;
+                let asleep = count(&multi, &|b| b[0x400 / 4] == contact_groups::ASLEEP);
+                let hanging = multi.unsupported(120).unwrap();
+                eprintln!("pieces {pieces} asleep {asleep} unsupported {hanging:?}");
+                assert!(pieces > 0 && asleep > 0, "{asleep} of {pieces} asleep");
+                assert!(hanging.is_empty(), "{hanging:?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// No piece ends a step sunk into the road (AUTHORED, owner's request,
+    /// F564): the car driven into the Le Mans tyre wall 969 at full throttle
+    /// climbs the tyres and presses them down; every tick each piece's hull
+    /// bottom stays within [`crate::dynamic_props::SINK_TOLERANCE`] of the
+    /// road under it.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn pieces_pressed_by_a_car_stay_above_the_road() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/le_mans/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let at = multi.props.as_ref().unwrap().catalog.breakables[969].placement;
+                let z = [at[8], at[9], at[10]];
+                let centre = [at[12], at[13], at[14]];
+                let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);
+                multi.place_at_rest(1, start, z.map(|v| -v)).unwrap();
+                let mut drive = [Controls::default(); 2];
+                drive[1].throttle = 1.;
+                let (mut deepest, mut checked) = ((0., 0, 0), 0);
+                for tick in 0..600 {
+                    multi.tick(&drive).unwrap();
+                    let props = multi.props.as_ref().unwrap();
+                    for d in props.road_depths(multi.cars[0].track(), multi.bodies()) {
+                        checked += 1;
+                        if d.depth > deepest.0 {
+                            deepest = (d.depth, d.body, tick);
+                        }
                     }
                 }
-                let pieces = multi.bodies().len() - multi.cars.len();
-                let before = parked(&multi);
-                eprintln!("pieces {pieces} parked {before}");
-                assert!(before >= 10, "{before} of {pieces} parked");
-                // The player comes within 40 m of the wall.
-                multi.place_at_rest(0, start, z.map(|v| -v)).unwrap();
-                multi.tick(&[Controls::default(); 2]).unwrap();
-                let after = parked(&multi);
-                eprintln!("parked after the player returned {after}");
-                assert!(after < before, "{after} of {before} still parked");
+                eprintln!("deepest {deepest:?} of {checked} piece ticks");
+                assert!(checked > 1000, "{checked}");
+                assert!(
+                    deepest.0 <= crate::dynamic_props::SINK_TOLERANCE + 1e-3,
+                    "body {} sank {} m at tick {}",
+                    deepest.1,
+                    deepest.0,
+                    deepest.2
+                );
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Only a car breaks a prop (0x7C46A0 pairs a car shape's byte 0x17 with
+    /// the prop's 0x18; F557): the car driven through the Nürburgring
+    /// tyrestack_white 2276 the owner's phone hit, then braked to a stop in
+    /// the pile, leaves the broken set unchanged while it stands. Before,
+    /// pieces resting against the neighbouring stacks broke them at the
+    /// 50 N threshold, 83 pieces became 207 with the car at rest.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn pieces_resting_against_intact_stacks_do_not_break_them() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/nurburgring/route_1").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                multi.parking = false;
+                let props = multi.props.as_ref().unwrap();
+                let at = props.catalog.breakables[2276].placement;
+                assert!(props.catalog.breakables[2276].template.starts_with("tyrestack_white"));
+                let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 60. * at[8 + k]);
+                multi.place_at_rest(0, start, [-at[8], -at[9], -at[10]]).unwrap();
+                let mut go = [Controls::default(); 2];
+                go[0].throttle = 1.;
+                let mut stop = [Controls::default(); 2];
+                stop[0].brake = 1.;
+                let broken = |multi: &MultiRuntime| multi.dynamic_props().unwrap().broken.clone();
+                for tick in 0..600 {
+                    multi.tick(if tick < 300 { &go } else { &stop }).unwrap();
+                }
+                let speed: f32 = (0..3)
+                    .map(|k| f32::from_bits(multi.bodies()[0][0x220 / 4 + k]).powi(2))
+                    .sum::<f32>()
+                    .sqrt();
+                let stopped = broken(&multi);
+                let count = stopped.iter().filter(|b| **b).count();
+                eprintln!("car speed {speed:.3} broken {count}");
+                assert!(speed < 0.5, "{speed}");
+                assert!(stopped[2276] && count >= 2, "{count}");
+                for _ in 0..1200 {
+                    multi.tick(&stop).unwrap();
+                }
+                let later = broken(&multi);
+                let more: Vec<usize> = (0..later.len()).filter(|&i| later[i] && !stopped[i]).collect();
+                assert!(more.is_empty(), "broken with the car at rest: {more:?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Pile settle probe (F549): the Nürburgring tyrewall_black_yok
+    /// breakables the owner's phone broke (1732..1752, log 004650), every one
+    /// within 30 m of 1745 broken at rest, or (`GRID_PILE_DRIVE`) the player
+    /// driving through 1745. Prints the asleep and moving counts and the tick
+    /// cost every second, the ticks until half, 90 % and all pieces sleep, at
+    /// `GRID_PILE_DUMP` the awake pieces with their contacts and with
+    /// `GRID_PILE_TRACE` one body per tick. Parking is off. The default pile
+    /// at rest must sleep whole within 15 s.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn tyre_pile_settle_probe() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let f = |b: &contact_groups::Body, o: usize| f32::from_bits(b[o / 4]);
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let env = |name: &str, default: usize| {
+                    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+                };
+                let route = std::env::var("GRID_PILE_ROUTE")
+                    .unwrap_or_else(|_| "tracks/europe/nurburgring/route_1".into());
+                let route = Route::new(&route).unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                multi.parking = false;
+                let props = multi.props.as_mut().unwrap();
+                let template =
+                    std::env::var("GRID_PILE_TEMPLATE").unwrap_or_else(|_| "tyrewall_black_yok".into());
+                let centre = env("GRID_PILE_CENTRE", 1745);
+                let at = props.catalog.breakables[centre].placement;
+                let radius = env("GRID_PILE_RADIUS", 30) as f32;
+                // GRID_PILE_DRIVE=ticks: car 0 drives into the centre wall at full
+                // throttle for that long, then brakes; nothing breaks at rest.
+                let drive = env("GRID_PILE_DRIVE", 0);
+                let mut chosen = Vec::new();
+                for b in 0..props.catalog.breakables.len() {
+                    let e = &props.catalog.breakables[b];
+                    let p = e.placement;
+                    let d: f32 = (12..15).map(|k| (p[k] - at[k]).powi(2)).sum::<f32>().sqrt();
+                    if drive == 0 && e.template.starts_with(&template) && !e.pieces.is_empty() && d < radius {
+                        chosen.push(b);
+                        props.queue_break(b);
+                    }
+                }
+                eprintln!(
+                    "pile centre={centre} template={} breaks={chosen:?}",
+                    props.catalog.breakables[centre].template
+                );
+                for p in &props.catalog.breakables[centre].pieces {
+                    eprintln!("pile piece {:?} shell={} mass={}", p.primitive, p.shell, p.mass);
+                }
+                if drive > 0 {
+                    let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 60. * at[8 + k]);
+                    multi.place_at_rest(0, start, [-at[8], -at[9], -at[10]]).unwrap();
+                }
+                let mut go = [Controls::default(); 2];
+                go[0].throttle = 1.;
+                let mut stop = [Controls::default(); 2];
+                stop[0].brake = if drive > 0 { 1. } else { 0. };
+                let cars = multi.cars.len();
+                let ticks = env("GRID_PILE_TICKS", 3600);
+                let dump = env("GRID_PILE_DUMP", 600);
+                let (mut window, mut total) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+                let mut reached = [None; 3];
+                for tick in 0..ticks {
+                    let t = std::time::Instant::now();
+                    multi.tick(if tick < drive { &go } else { &stop }).unwrap();
+                    let e = t.elapsed();
+                    window += e;
+                    total += e;
+                    let pieces = multi.bodies().len() - cars;
+                    let asleep = multi.bodies()[cars..]
+                        .iter()
+                        .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+                        .count();
+                    for (k, share) in [0.5f32, 0.9, 1.].iter().enumerate() {
+                        if reached[k].is_none() && pieces > 0 && asleep as f32 >= share * pieces as f32 {
+                            reached[k] = Some(tick + 1);
+                        }
+                    }
+                    if (tick + 1) % 60 == 0 {
+                        let spin = multi.bodies()[cars..]
+                            .iter()
+                            .filter(|b| b[0x400 / 4] != contact_groups::ASLEEP)
+                            .map(|b| (0..3).map(|k| f(b, 0x210 + 4 * k).powi(2)).sum::<f32>().sqrt())
+                            .fold(0f32, f32::max);
+                        eprintln!(
+                            "pile t={} pieces={pieces} asleep={asleep} ms={:.3} max_w={spin:.3} moving={} used={} pool={}",
+                            (tick + 1) / 60,
+                            window.as_secs_f64() * 1e3 / 60.,
+                            multi.bodies()[cars..].iter().filter(|b| b[0x400 / 4] != contact_groups::ASLEEP && ((0..3).map(|k| f(b, 0x210 + 4 * k).powi(2)).sum::<f32>() >= 0.09 || (0..3).map(|k| f(b, 0x220 + 4 * k).powi(2)).sum::<f32>() >= 0.09)).count(),
+                            multi.world.groups.contacts.iter().filter(|c| **c != contact_groups::EMPTY_CONTACT).count(),
+                            multi.world.groups.contacts.len(),
+                        );
+                        window = std::time::Duration::ZERO;
+                    }
+                    // GRID_PILE_TRACE=body: that body every tick for 60 ticks after the dump.
+                    if let Some(t) = std::env::var("GRID_PILE_TRACE").ok().and_then(|v| v.parse::<usize>().ok())
+                        && tick + 1 >= dump
+                        && tick + 1 < dump + 60
+                    {
+                            let b = &multi.bodies()[t];
+                            let c0: [f32; 3] = std::array::from_fn(|k| f(b, 0x1c0 + 4 * k));
+                            let mut line = format!(
+                                "trace {} w={:.3},{:.3},{:.3} v={:.3},{:.3},{:.3} y={:.4} up={:.3},{:.3},{:.3} asleep={}",
+                                tick + 1,
+                                f(b, 0x210), f(b, 0x214), f(b, 0x218),
+                                f(b, 0x220), f(b, 0x224), f(b, 0x228),
+                                c0[1], f(b, 0x1e0), f(b, 0x1e4), f(b, 0x1e8),
+                                b[0x400 / 4] == contact_groups::ASLEEP
+                            );
+                            for c in &multi.world.groups.contacts {
+                                let (a, o) = (c[1] as usize, c[2] as usize);
+                                if a != t + 1 && o != t + 1 {
+                                    continue;
+                                }
+                                let g = |off: usize| f32::from_bits(c[off / 4]);
+                                line += &format!(
+                                    " | {}-{} r={:.2},{:.2} pen={:.4} f={:.2}",
+                                    a as i64 - 1, o as i64 - 1,
+                                    g(0x50) - c0[0], g(0x58) - c0[2], g(0x38), g(0x3c)
+                                );
+                            }
+                            eprintln!("{line}");
+                    }
+                    if tick + 1 == dump {
+                        let bodies = multi.bodies();
+                        for i in cars..bodies.len() {
+                            let b = &bodies[i];
+                            if b[0x400 / 4] == contact_groups::ASLEEP {
+                                if let Some(p) = multi.props.as_ref().and_then(|p| p.pieces.iter().find(|q| q.body == i).map(|q| (q, p))) {
+                                    eprintln!("asleep {i} pos={:.3},{:.3},{:.3} {:?}", f(b, 0x1c0), f(b, 0x1c4), f(b, 0x1c8), p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive);
+                                }
+                                continue;
+                            }
+                            let w: f32 = (0..3).map(|k| f(b, 0x210 + 4 * k).powi(2)).sum::<f32>().sqrt();
+                            let v: f32 = (0..3).map(|k| f(b, 0x220 + 4 * k).powi(2)).sum::<f32>().sqrt();
+                            let axis = [f(b, 0x1d0 + 16), f(b, 0x1d0 + 20), f(b, 0x1d0 + 24)];
+                            eprintln!(
+                                "body {i} w={w:.3} v={v:.3} timer={:.2} up={:.2},{:.2},{:.2} wvec={:.2},{:.2},{:.2} pos={:.3},{:.3},{:.3}",
+                                f(b, 0x3a0),
+                                axis[0],
+                                axis[1],
+                                axis[2],
+                                f(b, 0x210),
+                                f(b, 0x214),
+                                f(b, 0x218),
+                                f(b, 0x1c0),
+                                f(b, 0x1c4),
+                                f(b, 0x1c8)
+                            );
+                            if let Some(p) = multi.props.as_ref().and_then(|p| p.pieces.iter().find(|q| q.body == i).map(|q| (q, p))) {
+                                eprintln!("  piece {:?} breakable {}", p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive, p.0.breakable);
+                            }
+                            for c in &multi.world.groups.contacts {
+                                let (a, o) = (c[1] as usize, c[2] as usize);
+                                if a != i + 1 && o != i + 1 {
+                                    continue;
+                                }
+                                let g = |off: usize| f32::from_bits(c[off / 4]);
+                                eprintln!(
+                                    "  contact a={} b={} n={:.3},{:.3},{:.3} pen={:.4} p={:.2},{:.2},{:.2} f={:.2} ca={:.3},{:.3},{:.3}",
+                                    a as i64 - 1,
+                                    o as i64 - 1,
+                                    g(0x60),
+                                    g(0x64),
+                                    g(0x68),
+                                    g(0x38),
+                                    g(0x50),
+                                    g(0x54),
+                                    g(0x58),
+                                    g(0x3c),
+                                    f(&bodies[a - 1], 0x1c0),
+                                    f(&bodies[a - 1], 0x1c4),
+                                    f(&bodies[a - 1], 0x1c8)
+                                );
+                            }
+                        }
+                    }
+                }
+                eprintln!(
+                    "pile settle half={:?} ninety={:?} all={:?} mean_ms={:.3}",
+                    reached[0],
+                    reached[1],
+                    reached[2],
+                    total.as_secs_f64() * 1e3 / ticks as f64
+                );
+                // The default pile at rest sleeps whole within 15 s (4.9 s at F549;
+                // before, with the prism face-axis pairs, 31 of 330 after 60 s).
+                if drive == 0 && std::env::var_os("GRID_PILE_CENTRE").is_none() {
+                    assert!(reached[2].is_some_and(|t| t <= 900), "pile awake: {reached:?}");
+                }
             })
             .unwrap()
             .join()
@@ -2015,6 +2458,372 @@ mod tests {
             .unwrap();
     }
 
+    /// No piece sleeps or parks without support (owner's report of 23
+    /// October: tyres "fall asleep in the air"). The player breaks a tyre
+    /// wall at full throttle and, three ticks later while the pieces fly,
+    /// is put back 80 m away, as if it had driven on: every piece is beyond
+    /// the 50 m parking radius. After ten seconds a clone with every piece
+    /// woken is the reference; no asleep or parked piece may stay put where
+    /// it falls in the clone. With B7B850's range-only park (before F561) 13
+    /// parked pieces hung here, up to 3.5 m above where they fall.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn no_piece_sleeps_or_parks_in_the_air_after_the_player_drives_on() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let mut total = 0;
+                for (route, wall) in [
+                    ("tracks/europe/nurburgring/route_1", 1237),
+                    ("tracks/europe/nurburgring/route_1", 2276),
+                    ("tracks/europe/donington/route_0", 167),
+                ] {
+                    let route = Route::new(route).unwrap();
+                    let go = [Controls { throttle: 1., ..Controls::default() }, Controls::default()];
+                    let stop = [Controls { brake: 1., ..Controls::default() }, Controls::default()];
+                    let mut found = None;
+                    for side in [1f32, -1.] {
+                        let mut m = MultiRuntime::lacetti_on(
+                            root,
+                            &route,
+                            &["slot_00", "slot_01"],
+                            &table,
+                            events,
+                        )
+                        .unwrap();
+                        m.enable_dynamic_props(root).unwrap();
+                        let at = m.props.as_ref().unwrap().catalog.breakables[wall].placement;
+                        let z = [at[8], at[9], at[10]].map(|v| v * side);
+                        let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 80. * z[k]);
+                        m.place_at_rest(0, start, z.map(|v| -v)).unwrap();
+                        let mut broke = false;
+                        for _ in 0..450 {
+                            m.tick(&go).unwrap();
+                            if m.bodies().len() > m.cars.len() {
+                                broke = true;
+                                break;
+                            }
+                        }
+                        if broke {
+                            found = Some((m, start, z.map(|v| -v)));
+                            break;
+                        }
+                    }
+                    let (mut multi, start, heading) = found.expect("the car breaks the wall");
+                    for _ in 0..3 {
+                        multi.tick(&go).unwrap();
+                    }
+                    multi.place_at_rest(0, start, heading).unwrap();
+                    for _ in 0..600 {
+                        multi.tick(&stop).unwrap();
+                    }
+                    let cars = multi.cars.len();
+                    let n = multi.bodies().len();
+                    let count = |f: &dyn Fn(&contact_groups::Body) -> bool| {
+                        multi.bodies()[cars..].iter().filter(|b| f(b)).count()
+                    };
+                    let asleep = count(&|b| b[0x400 / 4] == contact_groups::ASLEEP);
+                    let parked = count(&|b| (b[0x410 / 4] >> 24) & 255 != 0);
+                    let hanging = multi.unsupported(120).unwrap();
+                    eprintln!(
+                        "wall {wall} pieces={} asleep={asleep} parked={parked} hanging={} {:?}",
+                        n - cars,
+                        hanging.len(),
+                        &hanging[..hanging.len().min(10)]
+                    );
+                    total += hanging.len();
+                }
+                assert_eq!(total, 0, "pieces asleep or parked in the air");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// The player drives into a tyre wall at full throttle (the owner's phone
+    /// reports of 22 October, Nürburgring tyrestack_white 1237 and Donington
+    /// tyre_wall 167); after the pile has settled, a clone with every piece
+    /// woken is the reference: a piece that falls there but stays put here
+    /// was hanging, asleep or parked (F561: islands park only at rest).
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    #[allow(clippy::needless_range_loop)]
+    fn a_car_driven_through_a_tyre_wall_leaves_no_piece_hanging() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                for (route, wall) in [
+                    ("tracks/europe/nurburgring/route_1", 1237),
+                    ("tracks/europe/donington/route_0", 167),
+                ] {
+                    let route = Route::new(route).unwrap();
+                    let mut drive = [Controls::default(); 2];
+                    let (mut multi, mut fastest, mut car_speed) = (None, 0f32, 0f32);
+                    // Approach along the wall's normal, from either side.
+                    for side in [1f32, -1.] {
+                        let mut m = MultiRuntime::lacetti_on(
+                            root,
+                            &route,
+                            &["slot_00", "slot_01"],
+                            &table,
+                            events,
+                        )
+                        .unwrap();
+                        m.enable_dynamic_props(root).unwrap();
+                        let at = m.props.as_ref().unwrap().catalog.breakables[wall].placement;
+                        let centre = [at[12], at[13], at[14]];
+                        let z = [at[8], at[9], at[10]].map(|v| v * side);
+                        let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 80. * z[k]);
+                        m.place_at_rest(0, start, z.map(|v| -v)).unwrap();
+                        drive[0] = Controls { throttle: 1., ..Controls::default() };
+                        let mut after = None;
+                        for tick in 0..450 {
+                            if after.is_some_and(|t| tick > t + 60) {
+                                break;
+                            }
+                            let v = |m: &MultiRuntime, i: usize| {
+                                let b = &m.bodies()[i];
+                                (0..3)
+                                    .map(|k| f32::from_bits(b[0x220 / 4 + k]).powi(2))
+                                    .sum::<f32>()
+                                    .sqrt()
+                            };
+                            let cars = m.cars.len();
+                            if m.bodies().len() == cars {
+                                car_speed = v(&m, 0);
+                            }
+                            m.tick(&drive).unwrap();
+                            for i in cars..m.bodies().len() {
+                                fastest = fastest.max(v(&m, i));
+                            }
+                            if m.bodies().len() > cars && after.is_none() {
+                                after = Some(tick);
+                            }
+                        }
+                        if m.bodies().len() > m.cars.len() {
+                            multi = Some(m);
+                            break;
+                        }
+                    }
+                    let mut multi = multi.expect("the car breaks the wall from one side");
+                    eprintln!("wall {wall} car {car_speed:.1} m/s at the break, fastest piece {fastest:.1} m/s");
+                    drive[0] = Controls { brake: 1., ..Controls::default() };
+                    for _ in 0..600 {
+                        multi.tick(&drive).unwrap();
+                    }
+                    let cars = multi.cars.len();
+                    let height = |m: &MultiRuntime, i: usize| f32::from_bits(m.bodies()[i][0x204 / 4]);
+                    let n = multi.bodies().len();
+                    let state = |m: &MultiRuntime, i: usize| {
+                        let b = &m.bodies()[i];
+                        (b[0x400 / 4] == contact_groups::ASLEEP, (b[0x410 / 4] >> 24) & 255 != 0)
+                    };
+                    let car = &multi.bodies()[0];
+                    let f = |o: usize| f32::from_bits(car[o / 4]);
+                    eprintln!(
+                        "car0 +1C0 {:.1},{:.1},{:.1} +200 {:.1},{:.1},{:.1} piece +1C0 {:.1},{:.1},{:.1}",
+                        f(0x1c0), f(0x1c4), f(0x1c8), f(0x200), f(0x204), f(0x208),
+                        f32::from_bits(multi.bodies()[cars][0x1c0 / 4]),
+                        f32::from_bits(multi.bodies()[cars][0x1c4 / 4]),
+                        f32::from_bits(multi.bodies()[cars][0x1c8 / 4])
+                    );
+                    let asleep = (cars..n).filter(|&i| state(&multi, i).0).count();
+                    let parked = (cars..n).filter(|&i| state(&multi, i).1).count();
+                    let before: Vec<f32> = (0..n).map(|i| height(&multi, i)).collect();
+                    let start: Vec<[f32; 3]> = (0..n)
+                        .map(|i| [0x1c0, 0x1c4, 0x1c8].map(|o| f32::from_bits(multi.bodies()[i][o / 4])))
+                        .collect();
+                    let mut woken = multi.clone();
+                    woken.parking = false;
+                    for i in cars..n {
+                        if grouped_physical_frame::asleep(&woken.world, i) {
+                            grouped_physical_frame::wake(&mut woken.world, i);
+                        }
+                    }
+                    for _ in 0..120 {
+                        multi.tick(&drive).unwrap();
+                        woken.tick(&drive).unwrap();
+                    }
+                    // Awake pieces after the settle: speed, spin and how far they moved.
+                    let pos = |m: &MultiRuntime, i: usize| {
+                        let b = &m.bodies()[i];
+                        [0x1c0, 0x1c4, 0x1c8].map(|o| f32::from_bits(b[o / 4]))
+                    };
+                    let mut rows = Vec::new();
+                    for i in cars..n {
+                        if state(&multi, i).0 {
+                            continue;
+                        }
+                        let b = &multi.bodies()[i];
+                        let len = |o: usize| {
+                            (0..3).map(|k| f32::from_bits(b[o / 4 + k]).powi(2)).sum::<f32>().sqrt()
+                        };
+                        let (p0, p1) = (start[i], pos(&multi, i));
+                        let moved = (0..3).map(|k| (p0[k] - p1[k]).powi(2)).sum::<f32>().sqrt();
+                        rows.push(format!(
+                            "{i}:v{:.2},w{:.2},t{:.2},h{:.2},moved{:.2}",
+                            len(0x220),
+                            len(0x210),
+                            f32::from_bits(b[0x3a0 / 4]),
+                            p1[1],
+                            moved
+                        ));
+                    }
+                    eprintln!("awake after settle: {}", rows.join(" "));
+                    let hanging: Vec<(usize, bool, bool, f32)> = (cars..n)
+                        .filter(|&i| {
+                            (height(&multi, i) - before[i]).abs() < 1e-3
+                                && height(&woken, i) < before[i] - 0.2
+                        })
+                        .map(|i| {
+                            let (a, p) = state(&multi, i);
+                            (i, a, p, before[i] - height(&woken, i))
+                        })
+                        .collect();
+                    eprintln!(
+                        "wall {wall} pieces={} asleep={asleep} parked={parked} hanging={} {:?}",
+                        n - cars,
+                        hanging.len(),
+                        &hanging[..hanging.len().min(10)]
+                    );
+                    assert!(hanging.is_empty(), "wall {wall}: {} pieces hanging", hanging.len());
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// A piece asleep on an intact stack must not stay in the air when that
+    /// stack breaks: Nürburgring tyre stacks, every other stack of each
+    /// cluster broken at rest and settled (pieces fall onto their intact
+    /// neighbours and sleep), then the neighbours break. A copy with every
+    /// piece woken right after that break is the reference: a piece that
+    /// falls there but stays put asleep here was left hanging.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn pieces_asleep_on_a_stack_fall_when_the_stack_breaks() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/nurburgring/route_1").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                multi.parking = false;
+                let props = multi.props.as_mut().unwrap();
+                let stacks: Vec<(usize, [f32; 3])> = (0..props.catalog.breakables.len())
+                    .filter(|&b| {
+                        let e = &props.catalog.breakables[b];
+                        e.template.starts_with("tyrestack") && !e.pieces.is_empty()
+                    })
+                    .map(|b| {
+                        let p = props.catalog.breakables[b].placement;
+                        (b, [p[12], p[13], p[14]])
+                    })
+                    .collect();
+                // One region (the body budget holds about 1,000 pieces).
+                let region = stacks[stacks.len() / 2].1;
+                let stacks: Vec<(usize, [f32; 3])> = stacks
+                    .into_iter()
+                    .filter(|&(_, p)| (0..3).map(|k| (p[k] - region[k]).powi(2)).sum::<f32>() < 80. * 80.)
+                    .collect();
+                let near = |a: [f32; 3], b: [f32; 3]| {
+                    (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>() < 2.5 * 2.5
+                };
+                // First wave: no two neighbours; second: their neighbours.
+                let mut first: Vec<(usize, [f32; 3])> = Vec::new();
+                for &(b, p) in &stacks {
+                    if !first.iter().any(|&(_, q)| near(p, q)) {
+                        first.push((b, p));
+                    }
+                }
+                let second: Vec<usize> = stacks
+                    .iter()
+                    .filter(|&&(b, p)| {
+                        !first.iter().any(|&(f, _)| f == b) && first.iter().any(|&(_, q)| near(p, q))
+                    })
+                    .map(|&(b, _)| b)
+                    .collect();
+                for &(b, _) in &first {
+                    props.queue_break(b);
+                }
+                let stop = [Controls::default(); 2];
+                for _ in 0..3000 {
+                    multi.tick(&stop).unwrap();
+                }
+                let cars = multi.cars.len();
+                let height = |m: &MultiRuntime, i: usize| f32::from_bits(m.bodies()[i][0x204 / 4]);
+                let settled = multi.bodies().len();
+                let asleep_before: Vec<usize> = (cars..settled)
+                    .filter(|&i| multi.bodies()[i][0x400 / 4] == contact_groups::ASLEEP)
+                    .collect();
+                let before: Vec<f32> = (0..settled).map(|i| height(&multi, i)).collect();
+                for &b in &second {
+                    multi.props.as_mut().unwrap().queue_break(b);
+                }
+                let mut woken = multi.clone();
+                // Both copies break the second wave on this tick.
+                multi.tick(&stop).unwrap();
+                woken.tick(&stop).unwrap();
+                for i in cars..woken.world.groups.bodies.len() {
+                    if grouped_physical_frame::asleep(&woken.world, i) {
+                        grouped_physical_frame::wake(&mut woken.world, i);
+                    }
+                }
+                for _ in 0..300 {
+                    multi.tick(&stop).unwrap();
+                    woken.tick(&stop).unwrap();
+                }
+                let hanging: Vec<(usize, f32)> = asleep_before
+                    .iter()
+                    .filter(|&&i| {
+                        (height(&multi, i) - before[i]).abs() < 1e-4
+                            && height(&woken, i) < before[i] - 0.2
+                    })
+                    .map(|&i| (i, before[i] - height(&woken, i)))
+                    .collect();
+                eprintln!(
+                    "stacks first={} second={} pieces={} asleep_before={} hanging={} {:?}",
+                    first.len(),
+                    second.len(),
+                    settled - cars,
+                    asleep_before.len(),
+                    hanging.len(),
+                    &hanging[..hanging.len().min(12)]
+                );
+                assert!(hanging.is_empty(), "{} pieces left hanging", hanging.len());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Sleeping (B0FE60, B24D70, B24E70): the pieces of a broken tyre wall
     /// that come to rest leave the active list after turnOffTime (1 s); the
     /// cars never sleep; a car driving into the pile wakes pieces again.
@@ -2080,7 +2889,9 @@ mod tests {
                     .max_by(|a, b| along(*a).total_cmp(&along(*b)))
                     .unwrap();
                 eprintln!("target {:.1} m out", along(target));
-                let side: [f32; 3] = std::array::from_fn(|k| target[k] + 15. * z[k]);
+                // On the first car's approach line, which it cleared (a start
+                // beside the wall can catch on its remains).
+                let side: [f32; 3] = std::array::from_fn(|k| centre[k] + (along(target) + 15.) * z[k]);
 
                 let away: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k] + 6. * x[k]);
                 multi.place_at_rest(0, away, z.map(|v| -v)).unwrap();

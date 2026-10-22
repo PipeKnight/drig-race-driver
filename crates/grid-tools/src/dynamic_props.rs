@@ -13,17 +13,19 @@
 //! walls), to the world's fixed object, and through an ENS link to the linked
 //! entity's piece (armco, 0x7D5540), with the constraints' body overrides
 //! (0x7B85A0). Uproots and other unported cases keep the entity static; see
-//! `unported`. Pieces never deactivate (the ported grouped frame admits only
-//! turnOffTime = FLT_MAX); cylinders are twelve-sided prisms.
+//! `unported`. Pieces sleep and park (docs/BODY_SLEEPING.md). A cylinder piece
+//! is round against the world, the cars and other cylinder or box pieces
+//! (F549); box against box keeps an authored face-axis test.
 use crate::{
     body_geometry::BodyGeometry, contact_surfaces::Surfaces, entity_geometry::Props, route::Route,
     track::Track,
 };
 use grid_formats::{entities, jpk, physparams, pssg};
 use grid_world::{
-    Error, collision_mesh, contact_groups, convex_distance, grouped_physical_frame, joint,
+    Error, box_contacts::{self, BoxShape}, collision_mesh, contact_groups, convex_distance,
+    grouped_physical_frame, joint,
     joint_template, phantom_post, physical_constructor, physical_pose::Matrix,
-    round_contacts::{CylinderShape, RoundShape, SphereShape},
+    round_contacts::{self, CylinderShape, RoundShape, SphereShape},
 };
 use std::{collections::BTreeMap, path::Path};
 
@@ -41,6 +43,12 @@ const SLOTS_PER_PIECE: usize = 12;
 /// AUTHORED: a piece this far below the lowest road chunk has tunnelled
 /// through the ground and is held (see [`PropWorld::hold_lost`]).
 pub const LOST_DEPTH: f32 = 100.;
+/// AUTHORED (owner's request of 23 October 2026, F564): the deepest a piece's
+/// hull may end a step below the road under it (m) before
+/// [`PropWorld::lift_sunk`] lifts it out. The original only recovers the
+/// penetration through the solver over later steps; a tyre stack pressed by a
+/// car then showed 3-30 cm under the road for a tick or two.
+pub const SINK_TOLERANCE: f32 = 0.01;
 /// Body words 0x1C0..0x230: mass centre, pose, angular and linear velocity.
 const KINEMATICS: std::ops::Range<usize> = 0x1c0 / 4..0x230 / 4;
 const CYLINDER_SIDES: usize = 12;
@@ -205,6 +213,17 @@ pub struct BreakEvent {
     pub template: String,
     pub tick: u64,
     pub force: f32,
+}
+
+/// [`PropWorld::road_depths`]: one body's hull bottom against the road.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RoadDepth {
+    pub body: usize,
+    /// Road height minus the hull's lowest point (m); positive is sunk.
+    pub depth: f32,
+    pub centre: [f32; 3],
+    pub ground: f32,
+    pub asleep: bool,
 }
 
 /// A recorded fresh contact with a route prop box, for break detection.
@@ -391,30 +410,46 @@ fn reference(uri: &[u8]) -> Result<&str, &'static str> {
     physparams::reference(uri).ok_or("invalid physics property reference")
 }
 
-fn mass_properties(primitive: Primitive, density: f32) -> (f32, [f32; 3]) {
+/// The body's mass and diagonal inertia from its one shape (B11520 sums the
+/// shapes' vtable +8 mass and +0xC inertia; F549). Every kind measures the
+/// shape grown by its shell (+0x220): box B3D480/B40880 over half extents
+/// plus shell, cylinder B46460/B46C90 over radius plus shell and twice the
+/// half height plus shell, sphere B4A5F0/B4AAB0 over radius plus shell.
+/// The x87 products are evaluated in f64 and rounded once (the caller
+/// stores the result as a float). The template dimensions are unscaled [I:
+/// the piece shape descriptor's scale rule was not read].
+fn mass_properties(primitive: Primitive, density: f32, shell: f32) -> (f32, [f32; 3]) {
+    let (density, shell) = (f64::from(density), f64::from(shell));
     match primitive {
         Primitive::Box([x, y, z]) => {
-            let m = density * x * y * z;
-            (
-                m,
-                [
-                    m * (y * y + z * z) / 12.,
-                    m * (x * x + z * z) / 12.,
-                    m * (x * x + y * y) / 12.,
-                ],
-            )
+            // B3D480: 2(hx + s) 2(hy + s) 2(hz + s) x density.
+            let [x, y, z] = [x, y, z].map(|v| v * 0.5 + shell as f32);
+            let m = ((2. * f64::from(x)) * f64::from(y) * 2. * f64::from(z) * 2. * density) as f32;
+            // B40880: m / 12 (0.083333336) x the other two full extents squared.
+            let k = m * f32::from_bits(0x3daa_aaab);
+            let [x, y, z] = [x, y, z].map(|v| v * 2.);
+            (m, [(z * z + y * y) * k, (x * x + z * z) * k, (y * y + x * x) * k])
         }
         Primitive::Cylinder { radius, height } => {
-            let m = density * std::f32::consts::PI * radius * radius * height;
-            let side = m * (3. * radius * radius + height * height) / 12.;
-            (m, [side, m * radius * radius * 0.5, side])
+            // Shape +0x240 radius, +0x244 half height (B46180).
+            let (r, h) = (radius + shell as f32, height * 0.5 + shell as f32);
+            // B46460: (r + s)^2 x 2(h + s) x pi x density.
+            let wide = f64::from(height * 0.5) + f64::from(shell as f32);
+            let m = (f64::from(r) * f64::from(r) * (wide + wide)
+                * f64::from(std::f32::consts::PI)
+                * density) as f32;
+            // B46C90: side m ((2(h + s))^2 / 12 + (r + s)^2 / 4), axis m (r + s)^2 / 2.
+            let (l, r2) = (h * 2., r * r);
+            let side = (l * l * f32::from_bits(0x3daa_aaab) + r2 * 0.25) * m;
+            (m, [side, r2 * m * 0.5, side])
         }
-        // 0x7DB060: r^3 x 4.18879 (CFAAF4) x density; a solid sphere's
-        // inertia [I].
         Primitive::Sphere { radius } => {
-            let m = radius * radius * radius * f32::from_bits(0x4086_0a92) * density;
-            let i = 0.4 * m * radius * radius;
-            (m, [i; 3])
+            // B4A5F0: (r + s)^3 x 4.18879 (CFAAF4) x density.
+            let r = f64::from(radius) + shell;
+            let m = (r * r * r * f64::from(f32::from_bits(0x4086_0a92)) * density) as f32;
+            // B4AAB0: 0.4 m (r + s)^2.
+            let r = r as f32;
+            (m, [r * r * m * 0.4; 3])
         }
     }
 }
@@ -580,7 +615,7 @@ impl Catalog {
                     }
                     entities::Primitive::Sphere { radius } => Primitive::Sphere { radius },
                 };
-                let (mass, inertia) = mass_properties(primitive, density);
+                let (mass, inertia) = mass_properties(primitive, density, shape.shell);
                 if !(mass.is_finite() && mass > 0.) {
                     return Err("invalid prop piece mass".into());
                 }
@@ -588,7 +623,7 @@ impl Catalog {
                 // unnormalised (only the render path splits off the row
                 // lengths), so a scaled placement (Nürburgring tyre stacks,
                 // 0.9718) keeps its scale in the body basis; mass stays the
-                // template's density x unscaled volume.
+                // template's density x the unscaled shape grown by its shell.
                 let pose = compose(&matrix(&shape.transform), &placement);
                 let [x, y, z] = [0, 1, 2].map(|i| pose[i]);
                 let determinant = x[0] * (y[1] * z[2] - y[2] * z[1])
@@ -938,6 +973,45 @@ impl PieceSpec {
         })
     }
 
+    /// A detached body panel's debris body (9D9F80 -> 9A87B0 for every part
+    /// but the wheels): a box of full `size` (the inner box; the rounding
+    /// `shell` grows it back to the node bounds), at world `pose`, with the
+    /// given mass, a solid box's inertia over the node bounds and the lost
+    /// wheel's body words but `angular_damping` (0.5 for the mirrors).
+    pub fn loose_panel(
+        size: [f32; 3],
+        shell: f32,
+        mass: f32,
+        angular_damping: f32,
+        pose: Matrix,
+    ) -> Result<Self, Error> {
+        if !size
+            .iter()
+            .chain([&shell, &mass])
+            .all(|v| v.is_finite() && *v >= 0.)
+            || mass <= 0.
+        {
+            return Err(Error("invalid loose panel shape"));
+        }
+        let mut spec = Self::loose_wheel(1., 1., mass, pose)?;
+        let primitive = Primitive::Box(size);
+        let outer = size.map(|v| v + 2. * shell);
+        let [x, y, z] = outer.map(|v| v * v);
+        let (points, triangles) = hull(primitive);
+        spec.hull = collision_mesh::build(&points, &triangles, 0)?;
+        spec.points = points;
+        spec.triangles = triangles;
+        spec.primitive = primitive;
+        spec.inertia = [
+            mass * (y + z) / 12.,
+            mass * (x + z) / 12.,
+            mass * (x + y) / 12.,
+        ];
+        spec.body.angular_damping = [angular_damping; 3];
+        spec.shell = shell;
+        Ok(spec)
+    }
+
     /// A rigid body without shapes (the armco posts of Istanbul Park, Le
     /// Mans and the Nürburgring): 0xB11520 finds no shape mass and keeps
     /// mass 1 and a unit inertia before sphericalising; it collides with
@@ -1101,11 +1175,14 @@ pub enum Pressed {
     ParkedDeep,
 }
 
-/// A wheel a car lost (car +22E4 + `wheel`) as a dynamic body.
+/// A wheel a car lost (car +22E4 + `wheel`), or a body panel it lost
+/// (`panel`, loose_panel), as a dynamic body.
 #[derive(Clone)]
 pub struct LooseWheel {
     pub car: usize,
     pub wheel: usize,
+    /// The detached body part (`loose_parts::PARTS`); `wheel` is unused then.
+    pub panel: Option<&'static str>,
     pub spec: std::sync::Arc<PieceSpec>,
     pub body: usize,
     pub token: u32,
@@ -1196,10 +1273,12 @@ impl Convex {
 }
 
 /// Authored separating-axis contacts between two convex piece hulls (face
-/// axes of both). The original's primitive box/cylinder colliders are not
-/// recovered; the triangle-soup pair query loses stacked pieces once they
-/// overlap beyond the margin. Same convention as the packed pair query:
-/// the normal pushes `a`, penetration includes the margin.
+/// axes of both), for the pairs without a cylinder (box against box; a
+/// sphere's inscribed icosahedron): the original's box/box AE8AD0 is not
+/// ported for two moving boxes, and the triangle-soup pair query loses
+/// stacked pieces once they overlap beyond the margin. Same convention as
+/// the packed pair query: the normal pushes `a`, penetration includes the
+/// margin.
 fn convex_contacts(
     a: &Convex,
     b: &Convex,
@@ -1517,6 +1596,71 @@ impl PropWorld {
             .is_none_or(|p| self.catalog.breakables[p.breakable].pieces[p.spec].collides())
     }
 
+    /// Diagnostic (owner's derby report of 23 October 2026, tyres sinking
+    /// into the road): for every live piece and lost wheel, how far the
+    /// lowest point of its collision hull (shell excluded) lies below the
+    /// packed track surface under its centre, from a cast starting 5 cm
+    /// above the centre (a higher start hits the ledges of walls a piece
+    /// leans on). Positive is below the road; pieces with no road under
+    /// them are skipped.
+    pub fn road_depths(&self, track: &Track, bodies: &[contact_groups::Body]) -> Vec<RoadDepth> {
+        let mut cache = grid_world::rectangle_cull::Cache::default();
+        let mut out = Vec::new();
+        for (spec, body, _) in self.parts() {
+            let Some(b) = bodies.get(body) else { continue };
+            let pose = body_pose(b);
+            let centre = pose[3];
+            let lowest = match spec.collider() {
+                convex_distance::Hull::Cylinder { radius, half_height } => {
+                    let a = pose[1][1].clamp(-1., 1.);
+                    centre[1] - (half_height * a.abs() + radius * (1. - a * a).max(0.).sqrt())
+                }
+                convex_distance::Hull::Sphere { radius } => centre[1] - radius,
+                hull => match hull.world_bounds(pose, 0.) {
+                    Ok(bounds) => bounds[0][1],
+                    Err(_) => continue,
+                },
+            };
+            let (start, end) = (centre[1] + 0.05, centre[1] - 100.);
+            let Some(hit) = track
+                .query([centre[0], start, centre[2], 1.], [centre[0], end, centre[2], 1.], &mut cache)
+                .ok()
+                .and_then(|q| q.hit)
+            else {
+                continue;
+            };
+            let ground = start + (end - start) * hit.contact.fraction;
+            out.push(RoadDepth {
+                body,
+                depth: ground - lowest,
+                centre: [centre[0], centre[1], centre[2]],
+                ground,
+                asleep: f(b, 0x400).to_bits() == contact_groups::ASLEEP,
+            });
+        }
+        out
+    }
+
+    /// AUTHORED (see [`SINK_TOLERANCE`]): lift every live piece and wheel
+    /// whose hull ends the step more than the tolerance below the road under
+    /// its centre back to that tolerance, and stop it moving further down.
+    /// Call after each committed step, after [`Self::hold_lost`].
+    pub fn lift_sunk(&self, track: &Track, bodies: &mut [contact_groups::Body]) -> Result<(), Error> {
+        for d in self.road_depths(track, bodies) {
+            if d.depth <= SINK_TOLERANCE || self.lost.contains_key(&d.body) {
+                continue;
+            }
+            let body = &mut bodies[d.body];
+            let mut position: [f32; 4] = std::array::from_fn(|k| f(body, 0x1c0 + k * 4));
+            position[1] += d.depth - SINK_TOLERANCE;
+            grid_world::continuous::apply(body, position)?;
+            if f(body, 0x214) < 0. {
+                set(body, 0x214, 0.);
+            }
+        }
+        Ok(())
+    }
+
     /// Whether world body `body` (a piece or a lost wheel) has been lost
     /// below the world and is held.
     pub fn is_lost(&self, body: usize) -> bool {
@@ -1548,9 +1692,8 @@ impl PropWorld {
     }
 
     /// Fresh contacts of every live piece: track (packed road, boundary and
-    /// enabled route props), other pieces and the given car hulls. Prop
-    /// contacts are recorded for break detection.
-    #[allow(clippy::too_many_arguments)]
+    /// enabled route props), other pieces and the given car hulls. None
+    /// feeds break detection: only car contacts break route props.
     pub fn contacts(
         &self,
         track: &Track,
@@ -1559,7 +1702,6 @@ impl PropWorld {
         cars: &[CarHull<'_>],
         directions: &convex_distance::ContactSettings,
         remaining: usize,
-        recorded: &mut Vec<(usize, PropContact)>,
     ) -> Result<Vec<contact_groups::Contact>, Error> {
         let mut out = Vec::new();
         let parts = self.parts();
@@ -1651,20 +1793,16 @@ impl PropWorld {
                 c[0x28 / 4] = piece_token;
                 c[0x2c / 4] = hit.shape + 1;
                 c[0x38 / 4] = hit.contact.penetration.to_bits();
-                c[0x3c / 4] = hit.limit.to_bits();
+                // A piece and a route prop are both entity shapes (0x7C6350:
+                // bytes 0x17 = 0, 0x228 = 0), so B0EE80 leaves their contact
+                // limit at FLT_MAX and 0x7C46A0 never calls the break check
+                // 0x7BDFD0 for them: pieces neither break intact stacks nor
+                // pass through them at the threshold cap. Only a car shape
+                // (car_box, byte 0x17 = 1) pairs with a prop's 0x18.
+                c[0x3c / 4] = if hit.prop.is_some() { f32::MAX } else { hit.limit }.to_bits();
                 c[0x50 / 4..0x60 / 4].copy_from_slice(&hit.contact.point.map(f32::to_bits));
                 c[0x60 / 4..0x70 / 4].copy_from_slice(&hit.contact.normal.map(f32::to_bits));
                 c[0x70 / 4] = (u32::from(hit.contact.flipped) << 8) | (1 << 24);
-                if let Some(prop) = hit.prop {
-                    recorded.push((
-                        out.len(),
-                        PropContact {
-                            contact: c,
-                            prop,
-                            body: piece_body,
-                        },
-                    ));
-                }
                 out.push(c);
             }
             // An asleep piece pairs only with the awake pieces after it (the
@@ -1710,12 +1848,55 @@ impl PropWorld {
                 {
                     continue;
                 }
-                for hit in convex_contacts(a, b, margin, room.min(PAIR_CONTACTS)) {
-                    out.push(pair_record(
-                        &hit,
-                        [piece_body, other_body],
-                        [piece_token, other_token],
-                    ));
+                // A cylinder piece against a cylinder or box piece: AE8AD0
+                // with the round support and AE2FA0's handlers (F549), the
+                // cylinder as the moving side and the box with its B3D890
+                // face; other pairs keep the AUTHORED face-axis test.
+                let capacity = room.min(PAIR_CONTACTS);
+                let directions = directions.directions;
+                let cylinder = |s: &PieceSpec| {
+                    matches!(s.collider(), convex_distance::Hull::Cylinder { .. })
+                };
+                let block = |s: &PieceSpec, pose: &Matrix| match (s.round, s.primitive) {
+                    (false, Primitive::Box(d)) => Some(BoxShape {
+                        matrix: *pose,
+                        half: d.map(|v| v * 0.5),
+                        margin: s.shell,
+                    }),
+                    _ => None,
+                };
+                let (hits, order) = if let (true, Some(shape @ RoundShape::Cylinder(_))) =
+                    (cylinder(spec), other_spec.round_shape(&poses[j]))
+                {
+                    let hits = round_contacts::pair_contacts(spec.collider(), pose, &shape, &query, capacity)?;
+                    (hits, false)
+                } else if let (true, Some(shape)) = (cylinder(spec), block(other_spec, &poses[j])) {
+                    let hits = box_contacts::contacts(spec.collider(), pose, &shape, &query, capacity)?;
+                    (hits, false)
+                } else if let (Some(shape), true) = (block(spec, &pose), cylinder(other_spec)) {
+                    let query = convex_distance::ContactSettings {
+                        margin: other_spec.shell,
+                        directions,
+                    };
+                    let hits = box_contacts::contacts(
+                        other_spec.collider(),
+                        poses[j],
+                        &shape,
+                        &query,
+                        capacity,
+                    )?;
+                    (hits, true)
+                } else {
+                    (convex_contacts(a, b, margin, capacity), false)
+                };
+                // The normal pushes the first body: the moving cylinder.
+                let (bodies, tokens) = if order {
+                    ([other_body, piece_body], [other_token, piece_token])
+                } else {
+                    ([piece_body, other_body], [piece_token, other_token])
+                };
+                for hit in hits {
+                    out.push(pair_record(&hit, bodies, tokens));
                 }
             }
             let mut world_hull = None;
@@ -2269,12 +2450,44 @@ impl PropWorld {
         self.wheels.push(LooseWheel {
             car,
             wheel,
+            panel: None,
             spec: std::sync::Arc::new(spec),
             body,
             token,
         });
         self.reserve(world);
         Ok(true)
+    }
+
+    /// Add a detached body panel of car `car` as a dynamic body, as
+    /// [`Self::add_wheel`] adds a lost wheel (9DC270 state 4 for a body part).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_panel(
+        &mut self,
+        world: &mut grouped_physical_frame::Output,
+        shapes: &mut Vec<contact_groups::Shape>,
+        car: usize,
+        panel: &'static str,
+        spec: PieceSpec,
+        linear: [f32; 4],
+        angular: [f32; 4],
+    ) -> Result<bool, Error> {
+        let added = self.add_wheel(world, shapes, car, usize::MAX, spec, linear, angular)?;
+        if added && let Some(last) = self.wheels.last_mut() {
+            last.panel = Some(panel);
+        }
+        Ok(added)
+    }
+
+    /// Detached panels for presentation: (car, part, pose at the loss, pose now).
+    pub fn panel_poses(
+        &self,
+        bodies: &[contact_groups::Body],
+    ) -> Vec<(usize, &'static str, Matrix, Matrix)> {
+        self.wheels
+            .iter()
+            .filter_map(|w| Some((w.car, w.panel?, w.spec.pose, body_pose(bodies.get(w.body)?))))
+            .collect()
     }
 
     /// Lost wheels for presentation: (car, wheel, pose at the loss, pose now).
@@ -2284,6 +2497,7 @@ impl PropWorld {
     ) -> Vec<(usize, usize, Matrix, Matrix)> {
         self.wheels
             .iter()
+            .filter(|w| w.panel.is_none())
             .filter_map(|w| Some((w.car, w.wheel, w.spec.pose, body_pose(bodies.get(w.body)?))))
             .collect()
     }
@@ -2518,7 +2732,7 @@ mod tests {
                 );
             }
         }
-        let (m, i) = mass_properties(Primitive::Box([1., 2., 3.]), 700.);
+        let (m, i) = mass_properties(Primitive::Box([1., 2., 3.]), 700., 0.);
         assert_eq!(m, 4200.);
         assert_eq!(i, [4550., 3500., 1750.]);
         let (m, _) = mass_properties(
@@ -2527,8 +2741,21 @@ mod tests {
                 height: 1.,
             },
             1.,
+            0.,
         );
         assert!((m - std::f32::consts::PI).abs() < 1e-6);
+        // A Nürburgring tyre (sRubber d700, shell 0.02): the shape grown by
+        // its shell, radius 0.256 and height 0.185 (B46460, B46C90).
+        let tyre = Primitive::Cylinder {
+            radius: 0.236,
+            height: 0.145,
+        };
+        let (m, i) = mass_properties(tyre, 700., 0.02);
+        let expected = std::f32::consts::PI * 0.256 * 0.256 * 0.185 * 700.;
+        assert!((m - expected).abs() < 1e-3 * expected, "{m}");
+        let side = m * (0.185 * 0.185 / 12. + 0.256 * 0.256 / 4.);
+        assert!((i[0] - side).abs() < 1e-3 * side && i[0] == i[2], "{i:?}");
+        assert!((i[1] - m * 0.256 * 0.256 * 0.5).abs() < 1e-3 * i[1], "{i:?}");
     }
 
     #[test]
@@ -2571,6 +2798,130 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Each round piece's drawn mesh (its anchor's draws in the damage
+    /// renderable's frame, `Renderables::draws_in`, as grid-app places them)
+    /// is centred on its collision cylinder (F564). With the anchor's own
+    /// transform only (`draws`), every Detroit and Nürburgring tyre was drawn
+    /// 0.6 m to the side and 0.54 m below its body: sunk into the road at
+    /// rest, in the air once it tilted.
+    /// Every piece of every breakable on the phone tracks' routes
+    /// (Nürburgring, Detroit, Le Mans, Donington) gets a draw (its anchor's
+    /// draws in the damage renderable's frame, `Renderables::draws_in`, as
+    /// grid-app places them), and that draw sits on its collision shape:
+    /// a round piece's mesh is centred on its cylinder or sphere and fills
+    /// it, a box piece's mesh centre lies inside its box (F564, F566).
+    /// F564 found every Detroit and Nürburgring tyre drawn 0.6 m off its
+    /// body; Nürburgring's tyrewall_black_yok (a BUNDLENODE renderable) and
+    /// close_drift_flag (a skinned mesh) pieces were not drawn at all.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn breakable_pieces_draw_on_their_bodies() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let mut failures = Vec::new();
+        let (mut checked, mut geometryless) = (0, 0);
+        for (track, routes) in [
+            ("europe/nurburgring", 0..4),
+            ("usa/detroit", 0..10),
+            ("europe/le_mans", 0..2),
+            ("europe/donington", 0..4),
+        ] {
+            let mut seen = std::collections::BTreeSet::new();
+            let first = Route::new(&format!("tracks/{track}/route_0")).unwrap();
+            let bytes = std::fs::read(root.join(first.track_file("objects.pssg"))).unwrap();
+            let tree = pssg::read_tree(&bytes).unwrap();
+            let sources = grid_formats::mesh::read_object_meshes(&tree).unwrap();
+            let renderables = grid_formats::scene::Renderables::new(&tree, &sources).unwrap();
+            // grid-app needs each piece material's diffuse binding.
+            let bound: std::collections::BTreeSet<&[u8]> =
+                (grid_formats::material::read_texture_bindings(&tree).unwrap().into_iter())
+                    .filter(|b| b.sampler == b"TDiffuseAlphaMap")
+                    .map(|b| b.shader)
+                    .collect();
+            for r in routes {
+                let route = Route::new(&format!("tracks/{track}/route_{r}")).unwrap();
+                let props = Props::read_route(root, &route).unwrap();
+                let catalog = Catalog::read(root, &route, &props).unwrap();
+                for b in &catalog.breakables {
+                    if !seen.insert(b.template.clone()) {
+                        continue;
+                    }
+                    for (k, piece) in b.pieces.iter().enumerate() {
+                        let what = format!("{track} route_{r} {} piece {k} ({})", b.template, piece.anchor);
+                        let draws = renderables
+                            .draws_in(piece.renderable.as_bytes(), piece.anchor.as_bytes());
+                        let draws = match draws {
+                            Ok(d) if !d.is_empty() => d,
+                            // The Armco main sections' link post carries no
+                            // geometry of its own: nothing to draw.
+                            Ok(_) if piece.anchor.ends_with("section_dam_link1") => {
+                                geometryless += 1;
+                                continue;
+                            }
+                            other => {
+                                failures.push(format!("{what}: no draw {:?}", other.map(|d| d.len())));
+                                continue;
+                            }
+                        };
+                        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                        let p = piece.pose;
+                        for draw in &draws {
+                            if !bound.contains(draw.material) {
+                                failures.push(format!("{what}: material {} unbound", String::from_utf8_lossy(draw.material)));
+                            }
+                            let m = grid_formats::scene::compose(&draw.transform, &b.placement);
+                            for v in draw.indices.iter().map(|&i| i as usize) {
+                                let w = grid_formats::scene::transform_point(
+                                    &m,
+                                    sources[draw.source].positions[v],
+                                );
+                                let d = [w[0] - p[3][0], w[1] - p[3][1], w[2] - p[3][2]];
+                                for r in 0..3 {
+                                    let l = (0..3).map(|j| d[j] * p[r][j]).sum::<f32>();
+                                    lo[r] = lo[r].min(l);
+                                    hi[r] = hi[r].max(l);
+                                }
+                            }
+                        }
+                        let mid: [f32; 3] = std::array::from_fn(|r| (lo[r] + hi[r]) * 0.5);
+                        let half: [f32; 3] = std::array::from_fn(|r| (hi[r] - lo[r]) * 0.5);
+                        let ok = match piece.primitive {
+                            // A tyre fills its cylinder: radius across, height
+                            // along. A post's mesh (Donington's Armco link,
+                            // 1.01 m on a 0.76 m cylinder) may stand above it.
+                            Primitive::Cylinder { radius, height } => {
+                                mid[0].abs() < 0.05
+                                    && mid[2].abs() < 0.05
+                                    && mid[1].abs() < 0.05_f32.max(0.2 * height)
+                                    && (half[0] - radius).abs() < 0.06
+                                    && (half[2] - radius).abs() < 0.06
+                                    && half[1] > height * 0.5 - 0.06
+                                    && half[1] < height * 0.5 + 0.06_f32.max(0.2 * height)
+                            }
+                            // A shapeless piece (radius 0, the flag's base) only
+                            // carries its mesh.
+                            Primitive::Sphere { radius } => {
+                                mid.iter().all(|v| v.abs() < 0.05)
+                                    && (radius == 0. || half.iter().all(|h| (h - radius).abs() < 0.06))
+                            }
+                            Primitive::Box(size) => (0..3).all(|r| mid[r].abs() <= size[r] * 0.5 + 0.05),
+                        };
+                        if !ok {
+                            failures.push(format!("{what}: mesh centre {mid:?} half {half:?} shape {:?}", piece.primitive));
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        eprintln!("checked {checked} pieces, {geometryless} without geometry");
+        for f in &failures {
+            eprintln!("{f}");
+        }
+        assert!(checked > 100, "{checked}");
+        assert!(failures.is_empty(), "{} of {} pieces fail", failures.len(), checked + failures.len());
     }
 
     #[test]
@@ -2651,7 +3002,8 @@ mod tests {
             .unwrap()
             .pieces[0];
         assert!(
-            (board.mass - 70. * 0.94 * 0.47 * 0.16).abs() < 0.01,
+            // The box grown by its shell 0.02 (B3D480).
+            (board.mass - 70. * 0.98 * 0.51 * 0.2).abs() < 0.01,
             "{}",
             board.mass
         );
@@ -2683,7 +3035,7 @@ mod tests {
             assert!(!pole.collides());
             assert_eq!(pole.limit, f32::MAX);
             assert_eq!((pole.body.gravity_scale, pole.body.linear_damping), (0., 0.));
-            assert!((pole.mass - 70. * std::f32::consts::PI * 0.01 * 2.93).abs() < 0.05, "{}", pole.mass);
+            assert!((pole.mass - 70. * std::f32::consts::PI * 0.12 * 0.12 * 2.97).abs() < 0.05, "{}", pole.mass);
             // Base to the world: a static A, no joint. Base to pole: swapped,
             // the pole held to the base's fixed object; the post.
             let joints: Vec<_> = b.joints.iter().map(|j| (j.a, j.b, j.link)).collect();
@@ -2711,8 +3063,8 @@ mod tests {
                     *scaled.entry(b.template.clone()).or_default() += 1;
                 }
                 if b.template.starts_with("tyrestack") {
-                    // sRubber d700 over the unscaled template cylinder.
-                    assert_eq!(p.mass, mass_properties(p.primitive, 700.).0);
+                    // sRubber d700 over the unscaled template cylinder grown by its shell.
+                    assert_eq!(p.mass, mass_properties(p.primitive, 700., p.shell).0);
                 }
             }
         }
@@ -2986,6 +3338,7 @@ mod tests {
         world.wheels = vec![LooseWheel {
             car: 0,
             wheel: 2,
+            panel: None,
             spec: std::sync::Arc::new(
                 PieceSpec::loose_wheel(0.3, 0.2, 20., std::array::from_fn(|r| {
                     std::array::from_fn(|c| f32::from(r == c))

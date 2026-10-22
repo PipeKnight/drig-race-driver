@@ -109,9 +109,10 @@ pub enum PerfRow {
     Hud,
     Samples,
     Empty,
-    Auto,
 }
-const PERF_ROWS: [(PerfRow, &str, &str); 8] = [
+/// The Auto cycle row was removed (owner, 2026-10-23, F559); `GRID_PERF_TEST=auto`
+/// still runs it.
+const PERF_ROWS: [(PerfRow, &str, &str); 7] = [
     (PerfRow::Shadows, "Shadows", "Shadow casting of every mesh (the sun keeps its shadow maps, empty)."),
     (PerfRow::Foliage, "Foliage", "Camera-facing tree and bush billboards."),
     (PerfRow::Ground, "Ground cover", "Grass and ground detail sprites."),
@@ -119,11 +120,6 @@ const PERF_ROWS: [(PerfRow, &str, &str); 8] = [
     (PerfRow::Hud, "HUD", "The race HUD and its OSD camera (touch zones stay)."),
     (PerfRow::Samples, "Sample logging", "The periodic drive_*_sample log lines."),
     (PerfRow::Empty, "Whole scene", "Off: only your car is drawn."),
-    (
-        PerfRow::Auto,
-        "Auto cycle",
-        "On: steps through every switch, 8 s each, and logs each step.",
-    ),
 ];
 
 /// Video screen (AUTHORED, F390: GRID's PC version has its own graphics
@@ -165,7 +161,8 @@ const VIDEO_ROWS: [(VideoRow, &str, &str); 5] = [
     ),
 ];
 
-const RENDER_HEIGHTS: [RenderHeight; 4] = [
+const RENDER_HEIGHTS: [RenderHeight; 5] = [
+    RenderHeight::Auto,
     RenderHeight::Rows(720),
     RenderHeight::Rows(900),
     RenderHeight::Rows(1080),
@@ -204,9 +201,7 @@ impl Video {
     pub fn from_settings(s: &crate::settings::Settings) -> Self {
         Self {
             fps: s.osd_fps.unwrap_or(cfg!(target_os = "android")),
-            render_height: s
-                .render_height
-                .unwrap_or_else(RenderHeight::platform_default),
+            render_height: s.video_render_height(),
             present_mode: s.present_mode.unwrap_or_default(),
             refresh_hz: s.refresh_hz.flatten(),
             frame_latency: s.frame_latency.map(|n| n.get()),
@@ -221,6 +216,7 @@ impl Video {
                 Some(match self.render_height {
                     RenderHeight::Native => "native".into(),
                     RenderHeight::Rows(r) => r.to_string(),
+                    RenderHeight::Auto => "auto".into(),
                 }),
             ),
             ("present_mode", Some(present_name(self.present_mode).into())),
@@ -232,6 +228,10 @@ impl Video {
                 ),
             ),
             ("frame_latency", self.frame_latency.map(|n| n.to_string())),
+            (
+                "render_height_version",
+                Some(crate::settings::RENDER_HEIGHT_VERSION.to_string()),
+            ),
         ]
     }
 
@@ -249,12 +249,15 @@ impl Video {
         }
     }
 
-    fn value(&self, row: VideoRow) -> String {
+    /// `auto_rows`: the dynamic height rendered now, shown beside Auto.
+    fn value(&self, row: VideoRow, auto_rows: Option<u32>) -> String {
         match row {
             VideoRow::Fps => if self.fps { "On" } else { "Off" }.into(),
-            VideoRow::RenderHeight => match self.render_height {
-                RenderHeight::Native => "Native".into(),
-                RenderHeight::Rows(r) => r.to_string(),
+            VideoRow::RenderHeight => match (self.render_height, auto_rows) {
+                (RenderHeight::Native, _) => "Native".into(),
+                (RenderHeight::Rows(r), _) => r.to_string(),
+                (RenderHeight::Auto, Some(r)) => format!("Auto ({r})"),
+                (RenderHeight::Auto, None) => "Auto".into(),
             },
             VideoRow::PresentMode => match self.present_mode {
                 PresentMode::Fifo => "Fifo (vsync)".into(),
@@ -308,7 +311,8 @@ pub struct FrontEnd {
     video_saved: Video,
     /// Performance test switches (live, never saved).
     pub perf: crate::perf_test::Switches,
-    pub perf_auto: bool,
+    /// Rows the `Auto` render height renders now (`apply_video`).
+    pub auto_rows: Option<u32>,
     /// Where the choice is saved (`<data dir>/settings.ini`).
     pub settings: std::path::PathBuf,
 }
@@ -324,7 +328,7 @@ impl FrontEnd {
             video_undo: video,
             video_saved: video,
             perf: Default::default(),
-            perf_auto: false,
+            auto_rows: None,
             row: 0,
             values,
             undo: values,
@@ -428,12 +432,10 @@ impl FrontEnd {
                         PerfRow::Hud => p.hud = !p.hud,
                         PerfRow::Samples => p.samples = !p.samples,
                         PerfRow::Empty => p.empty = !p.empty,
-                        PerfRow::Auto => self.perf_auto = !self.perf_auto,
                     }
                 }
                 if nav.button3 {
                     self.perf = Default::default();
-                    self.perf_auto = false;
                 }
                 if nav.back {
                     self.screen = Screen::RaceOptions;
@@ -535,7 +537,6 @@ impl FrontEnd {
                             PerfRow::Hud => p.hud,
                             PerfRow::Samples => p.samples,
                             PerfRow::Empty => p.empty,
-                            PerfRow::Auto => !self.perf_auto,
                         };
                         let value = if off { "Off" } else { "On" };
                         ((*name).into(), value.into(), true, i == self.row)
@@ -553,7 +554,7 @@ impl FrontEnd {
                     .iter()
                     .enumerate()
                     .map(|(i, (row, name, _))| {
-                        ((*name).into(), self.video.value(*row), true, i == self.row)
+                        ((*name).into(), self.video.value(*row, self.auto_rows), true, i == self.row)
                     })
                     .collect(),
                 help: format!(
@@ -649,10 +650,10 @@ pub fn update(
 /// The Performance test screen's switches reach `perf_test` (live; never saved).
 fn apply_perf(
     front: Res<FrontEnd>,
-    mut last: Local<Option<(crate::perf_test::Switches, bool)>>,
+    mut last: Local<Option<crate::perf_test::Switches>>,
     test: Option<ResMut<crate::perf_test::PerfTest>>,
 ) {
-    let now = (front.perf, front.perf_auto);
+    let now = front.perf;
     let Some(before) = last.replace(now) else {
         return;
     };
@@ -660,21 +661,26 @@ fn apply_perf(
         return;
     }
     if let Some(mut test) = test {
-        test.auto = front.perf_auto;
-        if !test.auto {
-            test.switches = front.perf;
-        }
+        // A switch ends a `GRID_PERF_TEST=auto` cycle.
+        test.auto = false;
+        test.switches = now;
     }
 }
 
 fn apply_video(
-    front: Res<FrontEnd>,
+    mut front: ResMut<FrontEnd>,
     mut applied: Local<Option<Video>>,
     fps: Option<ResMut<crate::fps_counter::FpsCounter>>,
     scale: Option<ResMut<crate::render_scale::RenderScale>>,
     mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
     #[cfg(target_os = "android")] display: Option<ResMut<crate::android_display::Display>>,
 ) {
+    if let Some(scale) = &scale {
+        let rows = scale.dynamic.as_ref().filter(|_| !scale.hold).map(|d| d.rows);
+        if front.auto_rows != rows {
+            front.auto_rows = rows;
+        }
+    }
     let video = front.video;
     let Some(before) = applied.replace(video) else {
         return;
@@ -708,6 +714,22 @@ struct Title;
 struct Subtitle;
 #[derive(Component)]
 struct Row(usize);
+
+/// Row texts the panel holds: the longest screen's rows. The Performance test
+/// screen's last three rows had no text before (only 5 were spawned).
+const ROWS: usize = {
+    let mut n = AIDS.len();
+    if ITEMS.len() > n {
+        n = ITEMS.len();
+    }
+    if VIDEO_ROWS.len() > n {
+        n = VIDEO_ROWS.len();
+    }
+    if PERF_ROWS.len() > n {
+        n = PERF_ROWS.len();
+    }
+    n
+};
 #[derive(Component)]
 struct Help;
 
@@ -761,7 +783,7 @@ fn spawn(
                         font(18.),
                         TextColor(Color::srgb(0.75, 0.8, 0.85)),
                     ));
-                    for i in 0..AIDS.len().max(ITEMS.len()).max(VIDEO_ROWS.len()) {
+                    for i in 0..ROWS {
                         panel.spawn((Row(i), Text::new(""), font(22.), TextColor(Color::WHITE)));
                     }
                     panel.spawn((
@@ -996,26 +1018,27 @@ mod tests {
         assert_eq!(front.screen, Screen::PerfTest);
         let view = front.view(&Labels::default());
         assert_eq!(view.title, "Performance test");
-        assert_eq!(view.rows.len(), 8);
-        assert!(view.rows[..7].iter().all(|r| r.1 == "On"));
-        assert_eq!(view.rows[7].1, "Off");
-        // Shadows off, then HUD (row 5) off; nothing is saved.
+        assert_eq!(view.rows.len(), 7);
+        // No Auto cycle row (F559): every switch is On.
+        assert_eq!(view.rows[0].0, "Shadows");
+        assert!(view.rows.iter().all(|r| r.1 == "On"));
+        // Shadows (row 0) off, then HUD (row 4) off; nothing is saved.
         front.step(press(|n| n.right = true));
         for _ in 0..4 {
             front.step(press(|n| n.down = true));
         }
         front.step(press(|n| n.left = true));
         assert_eq!(front.perf.label(), "off:shadows+hud");
-        // Auto cycle is the last row; Up wraps from the first.
-        for _ in 0..5 {
+        // Up wraps from the first row to Whole scene.
+        for _ in 0..4 {
             front.step(press(|n| n.up = true));
         }
+        front.step(press(|n| n.up = true));
         front.step(press(|n| n.right = true));
-        assert!(front.perf_auto);
+        assert!(front.perf.empty);
         // Ctrl/X resets everything; Back returns without a command.
         front.step(press(|n| n.button3 = true));
         assert_eq!(front.perf, crate::perf_test::Switches::default());
-        assert!(!front.perf_auto);
         assert_eq!(front.step(press(|n| n.back = true)), None);
         assert_eq!(front.screen, Screen::RaceOptions);
     }
@@ -1032,24 +1055,29 @@ mod tests {
         assert_eq!(view.title, "Video");
         assert_eq!(view.rows.len(), 5);
         assert!(view.subtitle.starts_with("Shows frames per second"));
-        // FPS toggles; Render height 720 -> 900 -> 1080 -> Native wraps.
+        // FPS toggles; Render height Auto -> 720 -> 900 -> 1080 -> Native wraps.
         front.step(press(|n| n.right = true));
         assert_eq!(front.video.fps, !start.fps);
         front.step(press(|n| n.down = true));
-        front.video.render_height = RenderHeight::Rows(720);
+        front.video.render_height = RenderHeight::Auto;
         for expected in [
+            RenderHeight::Rows(720),
             RenderHeight::Rows(900),
             RenderHeight::Rows(1080),
             RenderHeight::Native,
-            RenderHeight::Rows(720),
+            RenderHeight::Auto,
         ] {
             front.step(press(|n| n.right = true));
             assert_eq!(front.video.render_height, expected);
         }
+        // Auto shows the dynamic rows rendered now.
+        assert_eq!(front.view(&Labels::default()).rows[1].1, "Auto");
+        front.auto_rows = Some(624);
+        assert_eq!(front.view(&Labels::default()).rows[1].1, "Auto (624)");
         // An odd value from the file goes to the first entry.
         front.video.render_height = RenderHeight::Rows(600);
         front.step(press(|n| n.left = true));
-        assert_eq!(front.video.render_height, RenderHeight::Rows(720));
+        assert_eq!(front.video.render_height, RenderHeight::Auto);
         // Present mode, refresh rate (left wraps to 120), latency.
         front.step(press(|n| n.down = true));
         front.step(press(|n| n.right = true));
