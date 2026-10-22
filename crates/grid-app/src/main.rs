@@ -32,6 +32,7 @@ mod car_materials;
 mod lamp_materials;
 mod lamp_signals;
 mod paint_environment;
+mod window_response;
 mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
@@ -1838,6 +1839,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 graphics.paint_coat_roughness(&args.next().ok_or("--paint-coat-roughness needs 0.04..1")?)?;
                 paint_response_explicit = true;
             }
+            "--glass-pilot" => {
+                graphics.window_pilot = window_response::Mode::parse(&args.next().ok_or("--glass-pilot needs off, control, environment, depth or combined")?)?;
+            }
             "--glass-reflectance" => {
                 graphics.glass_reflectance(&args.next().ok_or("--glass-reflectance needs 0..1")?)?;
             }
@@ -2052,7 +2056,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
                 );
                 println!(
-                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160."
+                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined: static rendered Lacetti reference experiment only; keeps source glass textures and borders."
                 );
                 println!(
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
@@ -2152,6 +2156,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
         return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());
+    }
+    if graphics.window_pilot != window_response::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !player_car.is_default() || drive || !reference || collision || output.is_none() || lod != "LOD0_" || route.path() != Route::default().path() || matches!(graphics.reflection_mode, 1 | 2)) {
+        return Err("--glass-pilot requires static rendered enhanced forward Donington Lacetti LOD0 reference with source IBL; driving/damage integration is not implemented".into());
     }
     if graphics.paint_environment > 0. && (!cfg!(feature = "paint-specular") || !graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !graphics.source_body_specular || matches!(graphics.reflection_mode, 1 | 2) || !(track || drive) || collision) {
         return Err("--paint-environment requires enhanced forward Donington, source IBL/body-specular and paint-specular feature".into());
@@ -3346,6 +3353,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.paint_environment > 0. {
         paint_environment::install(&mut app)?;
+    }
+    if graphics.window_pilot != window_response::Mode::Off {
+        window_response::install(&mut app)?;
     }
     perf_timing::install(&mut app);
     asset_counts::install(&mut app);

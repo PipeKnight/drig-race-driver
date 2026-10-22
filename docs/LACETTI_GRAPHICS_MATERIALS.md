@@ -223,3 +223,45 @@ source texture alpha, matched captures, CPU hit/UV reports and reflection-contro
 Next compare inside/outside reflection and opacity, then isolate depth-order differences;
 keep source borders and cabin, and test exterior/damaged views before a playable change.
 No renderer, texture, geometry, AA default or accepted Motion launcher changed in G224.
+
+### Isolated static response controls (G225, in validation)
+
+`--glass-pilot off|control|environment|depth|combined` is a default-off research mode for
+static, rendered, enhanced Donington Lacetti LOD0 reference scenes with source IBL and the
+forward renderer. It rejects driving: the current damage presenter swaps cracked and reset
+`StandardMaterial` handles, so substituting an extended material without integrating that
+ownership would break the visual damage contract. This experiment does not change a launcher.
+
+The control wraps the same base material and keeps RGB/alpha, textures, two-sided culling,
+geometry and shadows. Environment blends the existing local/sky probe radiance into the
+lit colour in exposed linear HDR before stock fog and tonemapping, with constant weight
+0.24313727 (saved window environment0.48627454 times the0.5 midpoint of the saved Fresnel
+bounds). This is a bounded independently authored experiment, not the original BRDF:
+source direct specular, dust, face-dependent shadow terms and live parameter selection are
+not reconstructed here. No source alpha reduction, border removal, pane hiding or texture
+replacement is used. The depth variant separately enables depth writes in the otherwise
+unchanged alpha-blended pass; combined enables both variables.
+
+Acceptance starts with exact neutral-control/stock and new-stock/accepted-executable image
+parity, followed by rear/front/side/inside comparisons. Depth writes and an environment lobe
+must not be conflated into a single causal fix. Only after those results should a selected
+response be integrated with cracked/smashed/reset states and validated in motion/native DLAA.
+At this checkpoint compilation and GPU checks are pending, and the owner-approved Motion
+executable remains unchanged.
+
+Validation completed for this static pilot:281 resource-enabled application tests, default
+and DLAA/paint-feature Clippy, feature build,8executable guard negatives and11native1080p
+SMAA captures pass. Neutral extension matches stock exactly; new stock matches the frozen
+accepted executable exactly. Rear/front/side/inside images were inspected. Rear depth-only
+changes1296pixels (full-frame mean absolute difference0.002843byte); environment-only
+changes33607pixels (0.22658byte) and softens the outline's contrast. This selected view does
+not support a wholesale sorting failure, or prove depth is irrelevant in every view.
+
+From the cabin the all-face draft adds a visible reflected exterior wall because the local
+probe excludes the car/interior. This is a physical proxy limitation; the owner subsequently
+likes the exact inside-combined frame. Preserve that variant rather than automatically
+suppressing the inside response. The research camera is not a finished cockpit and driving
+integration is still pending. The graphics author selects environment-only (middle in the
+rear triptych) for further4K/DLAA comparison; depth-only is visually close to stock there.
+Keep the depth experiment independent, and isolate its inside contribution next. No
+accepted driving material or owner executable changed.

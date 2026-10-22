@@ -89,6 +89,8 @@ pub struct Settings {
     /// Window-only material control; light lenses are a separate material.
     pub window_roughness: f32,
     pub window_reflectance: f32,
+    /// Static-only diagnostic: no change to accepted driving materials.
+    pub window_pilot: super::window_response::Mode,
     /// Authored player-paint coat controls, independent of base mask and glass.
     pub paint_clearcoat: f32,
     /// Default-off authored environment-only paint layer; not original shader parity.
@@ -169,6 +171,7 @@ impl Default for Settings {
             post_saturation_override: None,
             window_roughness: 0.08,
             window_reflectance: 0.5,
+            window_pilot: super::window_response::Mode::Off,
             paint_clearcoat: 0.35,
             paint_environment: 0.,
             lamp_reflectors: super::lamp_materials::Mode::Off,
