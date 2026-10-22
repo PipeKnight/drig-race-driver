@@ -194,3 +194,32 @@ Surroundings controls: road meanRGB126.12/114.45/101.48 becomes127.16/114.25/99.
 All781resource tests/12harnesses,0failed/ignored, feature+default workspace releaseClippy, canonicalF455/quick24/24 pass; five executable guards reject NaN/negative/>2/non-enhanced/track grade. No new unit tests that mirror this reversible parameter were added. Release3m12s/onejob, SHAf41d35994199ef83d9a901bd905b0b578d5a69f72e64519907205b7a1bd15eee; exact frozen source patch verified. Rust1.99.0/Bevy0.19.1/wgpu29.0.4, existing Python3.12.14/Pillow12.3.0/NumPy2.3.5, no installs/dependency version/cache changes. Private body-saturation01 records commands/source/artifact/ROIs/checks, controls and surrounding statistics. Uncited mis-sized first comparison sheet removed after guarded path check; corrected sheet retained. No renderer failure or approval rejection.
 
 Existing Signals and separately delivered DLAA L builds remain unchanged. Owner L feedback is optional/pending. Next isolate the tone-map contribution versus source material response before choosing a permanent grade/material adjustment; preserve accepted reflection detail and keep any original-style global colour work explicit.
+
+### Windscreen outline through rear glass (G224, 22 October)
+
+The owner reports an overly contrasting black front-window outline through the rear pane;
+rare side-view trails immediately underneath the car are explicitly deferred. Four fresh
+1920x1080 SMAA captures reproduce a similar contour on undeformed static geometry. Neither
+DLAA nor damage is required for this appearance. Glass reflectance0/0.5/1 controls change its
+contrast; no endpoint is promoted as a correction.
+
+The six Window Glass draws are separate, with white source vertex colours. A rear-centre CPU
+ray crosses MPJRI306 (rear) then the back face of MPJRI311 (front). At a selected perimeter
+point the original atlas sample is RGB0/alpha255, while the rear clear-pane sample is
+RGB38/alpha165. Some side-edge rays also cross cabin structure. The perimeter is authored
+source content; removing it or hiding the front pane would conceal legitimate geometry.
+CPU rays/base-mip samples do not establish GPU visibility or exact filtered values.
+
+The model stub `carglass.fx` defines saved window environment RGB0.48627454, Fresnel
+power1/min0.3/max0.7, specular power300/strength64 and occlusion scale0. The shaderpack's
+separate `carglass` group links the previously disassembled glass-window fragment shader;
+its saved main colour pass blends source alpha, has no culling and writes depth. These are
+static saved states, not a capture of the selected original runtime variant. Generic Bevy
+Blend/PBR does not implement that complete response. Bevy0.19.1 sorts transparent parts by
+transformed mesh AABB centre: common transform origins alone do not establish a sorting bug.
+
+Private evidence: `local/graphics/window-through01/`, including exact source parameters,
+source texture alpha, matched captures, CPU hit/UV reports and reflection-control crop.
+Next compare inside/outside reflection and opacity, then isolate depth-order differences;
+keep source borders and cabin, and test exterior/damaged views before a playable change.
+No renderer, texture, geometry, AA default or accepted Motion launcher changed in G224.

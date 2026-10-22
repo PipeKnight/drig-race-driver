@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G224](G0224.md) | 2026-10-22 | Investigate Lacetti windscreen outline through rear glass |
 | [G223](G0223.md) | 2026-10-22 | Record owner approval of Motion DLAA road continuity and car clarity |
 | [G222](G0222.md) | 2026-10-22 | Isolate directional motion blur from asphalt texture filtering |
 | [G221](G0221.md) | 2026-10-22 | Check partial road filtering at native4K and virtual300 |
