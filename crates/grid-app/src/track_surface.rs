@@ -90,6 +90,9 @@ pub struct Surface {
     // controls.w remains the source world-projected UV scale.
     #[uniform(113)]
     sampling: Vec4,
+    // Original-to-filtered RGB mixture; YZW reserved. Alpha stays on original taps.
+    #[uniform(114)]
+    rgb_filter: Vec4,
 }
 impl MaterialExtension for Surface {
     fn fragment_shader() -> ShaderRef {
@@ -541,6 +544,7 @@ fn attach(
                                     + 2. * f32::from(asphalt_layer(&d.textures[1]))
                             } else { 0. },
                         ),
+                        rgb_filter: Vec4::new(settings.asphalt_filter_strength, 0., 0., 0.),
                         controls: d.controls,
                         skid_colour: d.colours[0],
                         skid_colour2: d.colours[1],
@@ -569,6 +573,7 @@ fn attach(
         attached += 1;
     }
     println!("asphalt_soften maximum={} scope=don_track1-4-rgb-only speed_mps=5..30 default=off alpha_macro_skids=preserved", settings.asphalt_soften);
+    println!("asphalt_filter_strength value={} scope=rgb-only alpha_macro_skids=preserved", settings.asphalt_filter_strength);
     println!("track_surface_sampling view_mip_bias={} default=false scope=source-layer-macro-skid-samples", settings.surface_view_mip_bias);
     println!(
         "track_surface attached draws={attached} of={} mismatched={mismatched} materials={} specular={:?} uv1=true masks=linear-ARGB-to-RGBA",

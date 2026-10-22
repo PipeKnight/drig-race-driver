@@ -63,6 +63,8 @@ pub struct Settings {
     pub surface_view_mip_bias: bool,
     /// Default-off RGB-only low-pass pilot for audited Donington asphalt layers.
     pub asphalt_soften: f32,
+    /// Blend original and filtered road RGB;1 preserves the existing mip pilot.
+    pub asphalt_filter_strength: f32,
     /// Bounded scripted DLAA diagnostic only; never a playable default.
     pub dlaa_reset_every_frame: bool,
     pub thin_motion_antenna: bool,
@@ -149,6 +151,7 @@ impl Default for Settings {
             surface_specular: super::track_surface::Specular::Off,
             surface_view_mip_bias: false,
             asphalt_soften: 0.,
+            asphalt_filter_strength: 1.,
             dlaa_reset_every_frame: false,
             thin_motion_antenna: false,
             ground_edge_pilot: false,

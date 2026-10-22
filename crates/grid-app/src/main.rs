@@ -1945,6 +1945,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.asphalt_soften = value;
             }
+            "--asphalt-filter-strength" => {
+                let value: f32 = args.next().ok_or("--asphalt-filter-strength needs 0..1")?.parse()?;
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err("asphalt filter strength must be finite 0..1".into());
+                }
+                graphics.asphalt_filter_strength = value;
+            }
             "--surface-mip-bias" => {
                 graphics.surface_view_mip_bias = match args.next().as_deref() {
                     Some("off") => false,
@@ -2021,6 +2028,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
+                println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
                 println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
@@ -2126,10 +2134,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         graphics.surface_specular = track_surface::Specular::SourceBase;
     }
-    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some() || graphics.ground_edge_pilot || graphics.surface_view_mip_bias || graphics.asphalt_soften > 0.)
+    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some() || graphics.ground_edge_pilot || graphics.surface_view_mip_bias || graphics.asphalt_soften > 0. || graphics.asphalt_filter_strength != 1.)
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
-        return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges/--surface-mip-bias/--asphalt-soften) require an enhanced non-collision track scene with --track-materials source".into());
+        return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges/--surface-mip-bias/--asphalt-soften/--asphalt-filter-strength) require an enhanced non-collision track scene with --track-materials source".into());
     }
     if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
         return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());

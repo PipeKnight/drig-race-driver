@@ -23,6 +23,7 @@
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> dry_ground: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(113) var<uniform> sampling: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(114) var<uniform> rgb_filter: vec4<f32>;
 
 // Independently authored dry response confined to the audited ground band.
 // Source RGB/alpha, road/line texels and the existing layer blend are preserved.
@@ -60,12 +61,16 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     var first_rgb = a.rgb;
     var second_rgb = b.rgb;
     let road_bits = u32(sampling.w);
-    if sampling.z > 0.0 {
+    if sampling.z > 0.0 && rgb_filter.x > 0.0 {
         if (road_bits & 1u) != 0u {
-            first_rgb = textureSampleBias(first, first_sampler, uv, mip_bias + sampling.z).rgb;
+            let filtered = textureSampleBias(first, first_sampler, uv, mip_bias + sampling.z).rgb;
+            first_rgb = filtered;
+            if rgb_filter.x < 1.0 { first_rgb = mix(a.rgb, filtered, rgb_filter.x); }
         }
         if (road_bits & 2u) != 0u {
-            second_rgb = textureSampleBias(second, second_sampler, uv, mip_bias + sampling.z).rgb;
+            let filtered = textureSampleBias(second, second_sampler, uv, mip_bias + sampling.z).rgb;
+            second_rgb = filtered;
+            if rgb_filter.x < 1.0 { second_rgb = mix(b.rgb, filtered, rgb_filter.x); }
         }
     }
     let layer = vec4(mix(first_rgb, second_rgb, in.color.r), mix(a.a, b.a, in.color.r));
