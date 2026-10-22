@@ -13,6 +13,19 @@
 fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOutput {
     var pbr = pbr_input_from_standard_material(in, front);
     pbr.material.base_color = alpha_discard(pbr.material, pbr.material.base_color);
+    if controls.z > 0.0 && pbr.material.base_color.a < 1.0 {
+        // Source-alpha segmentation, not a change to opacity: clear-pane165/255
+        // receives the full authored increment; opaque border/crack pixels none.
+        // It is an atlas-specific approximation, not physical glass coverage.
+        let pane = clamp((1.0 - pbr.material.base_color.a) * controls.w, 0.0, 1.0);
+        // Bevy's resolved reflectance is NOT F0: its dielectric mapping is
+        // F0=.16*reflectance^2. Change that input before ONE stock PBR call so
+        // stock Fresnel, directional highlights and local/sky IBL remain linked.
+        // Do not add raw probe radiance or suppress reflection with sun shadow.
+        let f0 = 0.16 * pbr.material.reflectance * pbr.material.reflectance;
+        let enhanced_f0 = min(f0 + vec3<f32>(controls.z * pane), vec3<f32>(0.16));
+        pbr.material.reflectance = sqrt(enhanced_f0 / 0.16);
+    }
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr);
 #ifdef ENVIRONMENT_MAP

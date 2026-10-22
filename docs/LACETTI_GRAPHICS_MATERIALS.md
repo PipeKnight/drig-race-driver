@@ -382,3 +382,30 @@ change is associated with the depth-write state rather than the neutral wrapper.
 not identify the precise rejected fragment or downstream consumer. A separate22446ray CPU
 survey of160glass triangles at the saved static rear camera finds no pane-order reversals
 or same-pane multiple intersections. Do not infer a six-pane sorting bug from these images.
+
+### Pane-only Fresnel candidate (G233)
+
+The new default-off `--glass-pilot fresnel` strengthens the existing dielectric response
+before one stock PBR lighting evaluation. It does not mix raw probe radiance over the whole
+lit window. Default clear-pane F0 changes.04 to.08, capped.16. The stored IOR is unchanged;
+this is an artistic candidate, not physical IOR1.5 or an original shader conversion. The
+atlas-specific gate uses the saved clear alpha165/255 and fades to zero at opaque alpha1;
+it changes only the reflectance increment, not texture RGB, opacity, geometry or frame.
+Existing modes remain selectable, including the owner-liked combined inside reference.
+
+Default crate gate281tests/Clippy, feature Clippy and build pass. Ten native4K DLAA captures
+cover old/new off and combined controls plus rear/side/inside under cloudy and mostly clear
+sky; all corresponding source-probe readbacks match G230 exactly. Cross-build PNG controls
+have small nonzero differences (off mean.004352/max35byte; inside combined.002949/max17),
+so full byte identity is not claimed. The initial negative CLI harness failed before GPU
+because inherited lamp flags triggered their earlier guard; minimal isolated guard inputs
+correct that harness. Preserve original failure and corrected results separately.
+
+The owner approves the new side crop. Two1800tick moving controls match four physical exits,
+30frame manifests and sampled motion/depth; an actual front-Cracked shaded case matches its
+stock events/physics/40frame manifest. Selected motion frames0/29 and shaded frame17 were
+inspected: the previous uniform paleveil is absent there, while the source crack pane stays
+visible. The rear outline remains a separate unresolved issue. Rendered Smashed/reset,
+all-frame temporal behaviour and owner monitor acceptance are not established. No accepted
+Motion launcher or default glass response is replaced. Private evidence:
+`local/graphics/glass-fresnel01/`, including build-provenance.json and motion-review.json.

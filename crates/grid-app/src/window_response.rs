@@ -19,6 +19,8 @@ pub enum Mode {
     Environment,
     Depth,
     Combined,
+    /// Authored pane-only dielectric response; one stock PBR evaluation.
+    Fresnel,
 }
 impl Mode {
     pub fn parse(value: &str) -> Result<Self, &'static str> {
@@ -28,7 +30,8 @@ impl Mode {
             "environment" => Ok(Self::Environment),
             "depth" => Ok(Self::Depth),
             "combined" => Ok(Self::Combined),
-            _ => Err("--glass-pilot needs off, control, environment, depth or combined"),
+            "fresnel" => Ok(Self::Fresnel),
+            _ => Err("--glass-pilot needs off, control, environment, depth, combined or fresnel"),
         }
     }
     fn environment(self) -> bool {
@@ -44,7 +47,7 @@ type Window = ExtendedMaterial<StandardMaterial, WindowLayer>;
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 #[bind_group_data(WindowKey)]
 pub struct WindowLayer {
-    // Environment blend, perceptual roughness, padding.
+    // Legacy environment blend, roughness, pane F0 increment, inverse pane-alpha span.
     #[uniform(100)]
     controls: Vec4,
     write_depth: bool,
@@ -99,7 +102,16 @@ impl Cache {
             base,
             extension: WindowLayer {
                 // Authored, source-motivated probe; not an exact GRID BRDF.
-                controls: Vec4::new(if settings.window_pilot.environment() { 0.24313727 } else { 0. }, settings.window_roughness, 0., 0.),
+                controls: Vec4::new(
+                    if settings.window_pilot.environment() { 0.24313727 } else { 0. },
+                    settings.window_roughness,
+                    // Bounded artistic F0 increment, not saved GRID shader parity
+                    // or physical IOR1.5: default pane F0 .04 becomes .08.
+                    if settings.window_pilot == Mode::Fresnel { 0.04 } else { 0. },
+                    // Saved clear-pane alpha165/255; opaque atlas borders must
+                    // retain their original response. Filtering fades this gate.
+                    if settings.window_pilot == Mode::Fresnel { 255. / 90. } else { 0. },
+                ),
                 write_depth: settings.window_pilot.depth(),
             },
         });
@@ -133,6 +145,9 @@ fn attach(
         count += 1;
     }
     println!("window_response attached_parts={count} mode={:?} source_parity=false textures_alpha_geometry=unchanged scope=player-window-render-proxy", settings.window_pilot);
+    if settings.window_pilot == Mode::Fresnel {
+        println!("window_fresnel stock_pbr_evaluations=1 normal_f0_increment=0.04 f0_max=0.16 clear_alpha_reference=165/255 opaque_frame_increment=0 depth_write=false physical_ior_parity=false");
+    }
 }
 #[allow(clippy::type_complexity)] // Source and proxy access are explicitly disjoint.
 fn sync(
@@ -160,8 +175,16 @@ mod tests {
     use super::*;
     #[test]
     fn proxy_tracks_crack_reset_mesh_bounds_and_keeps_source_ownership() {
+        // The new response must retain the same damage-owned source material,
+        // proxy identity and reset cache as the existing combined reference.
+        for mode in [Mode::Combined, Mode::Fresnel] {
+            check_proxy_contract(mode);
+        }
+    }
+
+    fn check_proxy_contract(mode: Mode) {
         let mut app = App::new();
-        app.insert_resource(super::super::graphics::Settings { window_pilot: Mode::Combined, reflection_mode: 3, ..default() })
+        app.insert_resource(super::super::graphics::Settings { window_pilot: mode, reflection_mode: 3, ..default() })
             .init_resource::<Assets<StandardMaterial>>().init_resource::<Assets<Window>>().init_resource::<Cache>()
             .add_systems(Update, attach).add_systems(PostUpdate, sync);
         let original = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial {
@@ -193,6 +216,11 @@ mod tests {
         assert_eq!(base.alpha_mode, AlphaMode::Blend);
         assert!(base.double_sided);
         assert_eq!(base.cull_mode, None);
+        assert_eq!(base.reflectance, 0.5); // Only the fragment's resolved input changes.
+        let layer = &app.world().resource::<Assets<Window>>().get(&baseline).unwrap().extension;
+        assert_eq!(layer.write_depth, mode == Mode::Combined);
+        assert_eq!(layer.controls.x > 0., mode == Mode::Combined);
+        assert_eq!(layer.controls.z > 0., mode == Mode::Fresnel);
         let cracked = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial { base_color: Color::srgba(0.4,0.4,0.4,0.9), ..default() });
         app.world_mut().get_mut::<MeshMaterial3d<StandardMaterial>>(ids[0]).unwrap().0 = cracked;
         let replacement: Handle<Mesh> = uuid_handle!("4b9e28c4-67eb-4adb-83f7-f82ee847e58c");

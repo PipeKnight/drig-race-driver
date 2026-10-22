@@ -2056,7 +2056,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     "--sky source|procedural: the route's own sky dome on every track and preset (source is default; sky IBL remains procedural).\n--sky-tone raw|source: the route's saved sky scale/exponent (Le Mans: its daynight curves) for the sky and source IBL; source default.\n--sun authored|source|source-colour: recovered diffuse-sun direction, optionally saved colour ratios; radiometry remains authored."
                 );
                 println!(
-                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined: static reference or bounded rendered driving experiment; keeps source glass textures and borders."
+                    "--graphics baseline|enhanced: independent rendering presets; baseline is the current prototype.\n--resolution WIDTHxHEIGHT: window or offscreen size, e.g. 3840x2160.\n--glass-pilot off|control|environment|depth|combined|fresnel: static reference or bounded rendered driving experiment; keeps source glass textures and borders."
                 );
                 println!(
                     "--reflections sky|deferred|ssr|probe: experimental reflections; sky is default.\n--probe-size 256|512|1024: HDR capture/specular face size (1024 default for probe).\n--probe-update static|moving: freeze near start or follow the player; static default.\n--reflection-calibration: diagnostic mirror sphere, excluded from probe and physics."
