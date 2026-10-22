@@ -265,3 +265,25 @@ integration is still pending. The graphics author selects environment-only (midd
 rear triptych) for further4K/DLAA comparison; depth-only is visually close to stock there.
 Keep the depth experiment independent, and isolate its inside contribution next. No
 accepted driving material or owner executable changed.
+
+### Native4K/DLAA and independent inside depth (G226)
+
+All13static renders succeed, with effective native DLAA verified for DLAA cases. Rear
+3840x2160 controls cover off/environment/depth/combined; native4K SMAA covers off/environment.
+Additional controls cover inside neutral/environment/depth and front/side DLAA off/environment.
+Images were inspected. Environment remains the rear appearance candidate; inside depth
+also changes dark upper-window overlaps. Preserve combined as the owner-liked reference.
+Static success does not establish motion history, original parity or damage compatibility.
+
+The matrix's final strict neutral-inside comparison failed, and its failed result/logs are
+retained. An extra matched stock render also succeeds but differs from the neutral material
+in25RGB channels/23pixels by exactly1byte each (mean absolute0.0000040188byte). Old60versus
+new120benchmark frames is not established as the cause. This is accepted as a bounded static
+neutral difference, not exact image equivalence or a fully green runner. Earlier exact rear
+parity is scoped to its own G225 view. Private evidence: `local/graphics/window-response02/`.
+
+Before driving promotion, retain the existing source material handle as the owner of crack
+and reset swaps. An optional rendered child can share the source mesh, follow deformation,
+transform and inherited visibility, and select a cached extended material from that source
+handle. Validate intact/cracked/smashed/reset transitions, probe exclusion and static output
+before replacing any owner-playable build.
