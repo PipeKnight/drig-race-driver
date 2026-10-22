@@ -287,3 +287,26 @@ and reset swaps. An optional rendered child can share the source mesh, follow de
 transform and inherited visibility, and select a cached extended material from that source
 handle. Validate intact/cracked/smashed/reset transitions, probe exclusion and static output
 before replacing any owner-playable build.
+
+### Render proxy preserves damage ownership (G227)
+
+Optional window rendering now uses a child of the existing source draw. The source retains
+its `Mesh3d`, ordinary material and damage-owned handle. The child shares that mesh, follows
+its bounds, transform and inherited visibility, and selects a cached extended material after
+intact/cracked/reset handle changes. The cache assumes the existing damage protocol swaps
+handles rather than mutating a cached source material in place. Source render layers are
+cleared before visibility extraction; only the child renders, on a layer excluded from a
+local scene probe. Without a local probe it uses the ordinary main-view layer.
+
+The281application tests pass, including the transition test; default/feature Clippy and the
+feature build pass after the documented fixture and query-lint corrections. Nine intended
+static captures plus a repeat render successfully, with exact source-probe readback parity.
+Rear off/control/environment/combined and inside/front/side combined match G225 PNG bytes.
+The neutral inside differs by the earlier23pixels at1byte. One initial stock render has an
+8pixel/max19byte outlier; a repeat matches G225 exactly. Its cause remains unresolved and the
+original strict failure is preserved, not recast as a fully green runner. Private evidence:
+`local/graphics/window-proxy01/` and `review.json`.
+
+The static-only CLI guard still blocks driving. These results establish static appearance
+and ECS ownership transitions; actual rendered cracked/smashed/reset states and motion remain
+open. The owner-approved Motion DLAA executable and launcher are unchanged.
