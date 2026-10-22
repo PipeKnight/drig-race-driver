@@ -96,6 +96,7 @@ mod touch_controls;
 mod track_environment;
 mod track_grade;
 mod track_surface;
+mod track_decals;
 mod tyre_smoke;
 mod tyre_sound;
 mod tyre_visual;
@@ -136,6 +137,7 @@ struct Car {
     parts: Vec<Part>,
     textures: BTreeMap<String, Vec<u8>>,
     bindings: BTreeMap<String, String>,
+    decal_materials: std::collections::BTreeSet<String>,
     center: Vec3,
     radius: f32,
     track: bool,
@@ -592,6 +594,7 @@ fn load_package(
             }
         }
     }
+    let decal_materials = if track { track_decals::materials(&tree)? } else { Default::default() };
     let mut parts = Vec::new();
     let mut bounds = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     let mut triangle_count = 0;
@@ -624,6 +627,13 @@ fn load_package(
                 Mesh::ATTRIBUTE_UV_0,
                 source.texcoords[draw.vertices.clone()].to_vec(),
             );
+        }
+        if track
+            && decal_materials.contains(std::str::from_utf8(draw.material)?)
+            && !source.colors_argb.is_empty()
+        {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR,
+                track_decals::colours(&source.colors_argb[draw.vertices.clone()]));
         }
         triangle_count += draw.indices.len() / 3;
         mesh.insert_indices(Indices::U16(draw.indices));
@@ -699,6 +709,7 @@ fn load_package(
         parts,
         textures,
         bindings,
+        decal_materials,
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
@@ -729,6 +740,9 @@ fn append_land(
         part.name = format!("land/{}", part.name);
         part.material = format!("land/{}", part.material);
         car.parts.push(part);
+    }
+    for name in land.decal_materials {
+        car.decal_materials.insert(format!("land/{name}"));
     }
     for (name, texture) in land.bindings {
         car.bindings
@@ -1240,6 +1254,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         parts,
         textures: BTreeMap::new(),
         bindings: BTreeMap::new(),
+        decal_materials: Default::default(),
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
@@ -3529,6 +3544,7 @@ fn setup(
                 .cloned()
         })
         .collect();
+    let decal_materials = car.decal_materials.clone();
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
             && graphics.smooth_tyres
@@ -3609,6 +3625,9 @@ fn setup(
                     material.occlusion_texture = body_occlusion_handles.get(&0).cloned();
                     #[cfg(feature = "paint-specular")]
                     body_specular::apply(&mut material, body_specular_handles.get(&0));
+                }
+                if decal_materials.contains(&part.material) {
+                    track_decals::configure(&mut material);
                 }
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
@@ -3696,6 +3715,11 @@ fn setup(
                 && let Some(entity) = &mut entity
             {
                 entity.insert(source.placed(matrix));
+            }
+            if decal_materials.contains(&part.material)
+                && let Some(entity) = &mut entity
+            {
+                entity.insert(bevy::light::NotShadowCaster);
             }
             if track && let Some(entity) = &mut entity {
                 entity.insert(track_surface::SourcePart(part.material.clone()));
