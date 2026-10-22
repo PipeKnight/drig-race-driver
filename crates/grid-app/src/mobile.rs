@@ -1,31 +1,24 @@
 //! Mobile preset (AUTHORED, P12, docs/PERFORMANCE.md "Mobile preset"): the
-//! Android default, aiming at a steady 60 FPS on phones. The owner (2026-10-22)
-//! accepts a PS3-era picture on the phone and wants the desktop picture
-//! unchanged, so everything here is off on the desktop unless
-//! `GRID_MOBILE_PRESET=1` is set (for checks on the PC).
+//! Android default. It is off on the desktop unless `GRID_MOBILE_PRESET=1`
+//! is set (for checks on the PC). It changes only:
+//! - the render resolution: the 3D view renders at [`RENDER_ROWS`] rows and is
+//!   stretched over the screen (`render_scale`; `[video] render_height` still
+//!   overrides);
+//! - the compute threads ([`init_threads`]), which do not change the picture.
 //!
-//! What the preset changes, in presentation only (the simulation and the race
-//! results are untouched):
-//! - the 3D view renders at [`RENDER_ROWS`] rows and is stretched over the
-//!   screen (`render_scale`; `[video] render_height` still overrides);
-//! - the sun casts one shadow cascade of a [`SHADOW_MAP`] map out to
-//!   [`SHADOW_METRES`];
-//! - small static meshes (props, signs, billboards) cast no shadow and are not
-//!   drawn beyond [`FAR_PROPS_METRES`];
-//! - ground cover is drawn to [`GROUND_COVER_SCALE`] of its authored distances.
+//! F549 also cut the shadows, small-prop shadows and draw distance and the
+//! grass distance. The owner (2026-10-22, after testing 9ac27f9a958a) found the
+//! picture too poor and wants resolution as the only cut, so F555 removed
+//! them. The helpers [`small`] and [`far_range`] remain for the Performance
+//! test's `no_small_casters` and `far_props` switches.
 use bevy::camera::primitives::Aabb;
-use bevy::camera::visibility::{RenderLayers, VisibilityRange};
-use bevy::light::{
-    CascadeShadowConfig, CascadeShadowConfigBuilder, DirectionalLightShadowMap, NotShadowCaster,
-};
+use bevy::camera::visibility::VisibilityRange;
 use bevy::prelude::*;
 use std::sync::OnceLock;
 
 pub const RENDER_ROWS: u32 = 720;
-pub const SHADOW_MAP: usize = 1024;
-pub const SHADOW_METRES: f32 = 45.;
+/// Draw distance of small meshes with the Performance test's `far_props`.
 pub const FAR_PROPS_METRES: f32 = 110.;
-pub const GROUND_COVER_SCALE: f32 = 0.4;
 /// Bounding radius in metres below which a static mesh counts as small.
 pub const SMALL_RADIUS_METRES: f32 = 4.;
 
@@ -81,53 +74,11 @@ pub fn init_threads() {
     log_line!("mobile_threads version=1 cores={cores} compute={threads}");
 }
 
-pub fn install(app: &mut App) {
+pub fn install(_app: &mut App) {
     if !enabled() {
         return;
     }
-    log_line!(
-        "mobile_preset version=1 render_rows={RENDER_ROWS} shadow_map={SHADOW_MAP} cascades=1 shadow_metres={SHADOW_METRES} small_radius={SMALL_RADIUS_METRES} small_casters=off far_props_metres={FAR_PROPS_METRES} ground_cover_scale={GROUND_COVER_SCALE}"
-    );
-    app.insert_resource(DirectionalLightShadowMap { size: SHADOW_MAP })
-        .add_systems(PostStartup, shadows)
-        .add_systems(Last, small_meshes);
-}
-
-/// One cascade: set before the first frame (changing the cascade count of a
-/// light that has rendered is not safe in Bevy 0.19.1).
-fn shadows(mut lights: Query<&mut CascadeShadowConfig, With<DirectionalLight>>) {
-    for mut config in &mut lights {
-        *config = CascadeShadowConfigBuilder {
-            num_cascades: 1,
-            minimum_distance: 0.1,
-            maximum_distance: SHADOW_METRES,
-            first_cascade_far_bound: SHADOW_METRES,
-            overlap_proportion: 0.2,
-        }
-        .build();
-    }
-}
-
-#[derive(Component)]
-struct Checked;
-
-/// New small static meshes of the main view stop casting shadows and get a
-/// draw distance (meshes on other render layers, such as the OSD, are left).
-#[allow(clippy::type_complexity)]
-fn small_meshes(
-    mut commands: Commands,
-    meshes: Query<
-        (Entity, &Aabb, &GlobalTransform, Has<crate::MovingPart>),
-        (With<Mesh3d>, Without<Checked>, Without<RenderLayers>),
-    >,
-) {
-    for (entity, aabb, transform, car) in &meshes {
-        let mut e = commands.entity(entity);
-        e.insert(Checked);
-        if !car && small(aabb, transform) {
-            e.insert((NotShadowCaster, far_range(FAR_PROPS_METRES)));
-        }
-    }
+    log_line!("mobile_preset version=2 render_rows={RENDER_ROWS} other_cuts=none");
 }
 
 #[cfg(test)]

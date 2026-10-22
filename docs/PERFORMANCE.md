@@ -895,7 +895,7 @@ turns it off on Android for comparisons. It changes presentation only.
   small static ones (a bounding radius under 4 m), most of them the 11,962 breakable prop
   pieces. Every view and shadow cascade visits them.
 
-**The preset:**
+**The F549 preset** (F555 keeps only the render rows and the compute threads; see below):
 
 | Change | Value | Why |
 |---|---|---|
@@ -927,3 +927,35 @@ per frame, with the most changed meshes named by an entity that draws them.
   the Nürburgring).
 - Render the OSD only when it changes.
 - A lower preset for weaker phones.
+
+### Phone measurement and the reduced preset (F555)
+
+The owner ran the Auto cycle on APK 9ac27f9a958a (F549 preset + F553), Adreno 740, 2308 × 1080. The log is `log-20261022-044620.txt` (main checkout `local/android/phone-logs/20261022-0446/`). The table gives the mean of the `frame_stats` FPS per 8 s step. "normal" is the F549 preset: 720 rows plus the other cuts.
+
+| Step | Pre-race menu, 1st cycle | menu, 2nd cycle | Driving, no debris |
+|---|---:|---:|---:|
+| normal | 42.1 | 42.5 | 52.8–59.1 |
+| shadows off | 43.8 | 44.7 | 56.0 |
+| foliage / ground / effects / HUD / samples off (each) | 42.0–42.9 | 42.5–43.0 | 57.1–59.9 |
+| all six off | 45.3 | 45.9 | 59.9 |
+| only the player's car | 59.5 | 59.9 | 60.1 |
+| render1080 (native) | 31.6 | 33.1 | 58.0 |
+| render540 | 48.4 | 49.1 | 58.7 |
+| MSAA off (720 rows) | 55.5 | 54.8 | (pile-up began) |
+
+Interpretation [I]:
+
+- **Driving** is at or near the 60 FPS cap at any resolution. Even 1080 rows gave 58.
+- **The pre-race menu is the slow case.** Its frame time falls only part-way with fewer pixels: 31.6 ms at 2.49 MP, 23.5 ms at 1.11 MP, 20.7 ms at 0.62 MP. That fits about 17.6 ms + 5.6 ms per megapixel. So resolution alone cannot bring the menu under 16.7 ms: even 0 pixels would leave about 17.6 ms.
+- **MSAA 4× costs about 5.8 ms at 720 rows** (23.6 → 18.0 ms), more than halving the pixels saves.
+- **The rest is the scene behind the menu.** With only the player's car drawn the menu reaches 60 FPS, and the six parts the switches remove (shadows, foliage, grass, effects, HUD, logging) together give only about 3 FPS. So the remaining cost is the other cars and the track and prop meshes in view. With 17,785 mesh entities (Nürburgring), that is most likely per-draw GPU and driver work at 4 MSAA samples. No profile build ran this time, so the split between CPU and GPU is not confirmed.
+
+**F555 preset** (owner, 2026-10-22: "картинка стала очень плохой … обойтись только понижением разрешения"):
+- Only the 720-row render and the compute threads remain.
+- Shadows, small-prop shadows and the draw distance, and the grass distance are as on the desktop again.
+
+Expected [I, not measured]:
+- Driving: about 55–60 FPS. The F549 cuts gave about 0–4 FPS while driving.
+- Pre-race menu: about 40 FPS (F549 normal 42 minus their roughly 2–3 FPS).
+- With MSAA off, the menu would reach about 52–55 FPS. That is the owner's call: off by default only with the owner's say.
+- Dynamic resolution would not reach 60 FPS in the menu either (see the fixed part above).

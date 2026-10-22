@@ -2933,7 +2933,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             pause_menu::install(&mut app, menu, pause_menu::Labels::load(&root));
             perf_test::install(&mut app);
-            // Android: the mobile preset (lower resolution, shadows, draw distance).
+            // Android: the mobile preset (lower render resolution).
             mobile::install(&mut app);
             // The Race Options front end with Driver Aids before the race
             // (docs/DRIVER_AIDS.md); not for scripted runs.
