@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F554](log/F0554.md) | 2026-10-22 | Playable b89b4be10d30 with the phone menu fixes (F553), portable copy and APKs 9ac27f9a958a |
 | [F553](log/F0553.md) | 2026-10-22 | Phone UI: Performance test shows all rows with Auto cycle first; full Fira Mono as the UI font so Nürburgring renders on Android |
 | [F552](log/F0552.md) | 2026-10-22 | Playable 01f22b4c80d3 with the tyre-pile fix (F551), portable copy and APKs f883be0507f0 |
 | [F551](log/F0551.md) | 2026-10-22 | Tyre piles sleep: original cylinder pair contacts and shell masses |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F496](log/F0496.md) | 2026-10-20 | Crashed mix mode: the player's hard hits duck engine, exhaust and wheels |
 | [F495](log/F0495.md) | 2026-10-20 | Career routine B and class positions: the Le Mans 24 Hours pays by class position from the whole reputation pot |
 | [F494](log/F0494.md) | 2026-10-20 | Career Flashback Bonus: unused flashbacks pay career money per race, and the payout lists the original's bank rows |
-| [F493](log/F0493.md) | 2026-10-20 | StartLine mix mode: AI −3 dB through the start sequence |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
