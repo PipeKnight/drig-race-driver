@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F558](log/F0558.md) | 2026-10-22 | Playable fc0ff3aa7868 with resolution-only dynamic preset (F555-F556) and the tyre-stack chain fix (F557), portable copy and APKs 94e06d136784 |
 | [F557](log/F0557.md) | 2026-10-22 | Pieces no longer break tyre stacks: the original's car-only break pairing (0x7C46A0) |
 | [F556](log/F0556.md) | 2026-10-22 | Dynamic render height 480-720 rows on Android; UI, HUD and OSD drawn at the window's resolution |
 | [F555](log/F0555.md) | 2026-10-22 | Mobile preset reduced to the render resolution (720 rows) and compute threads; phone Auto cycle table |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F500](log/F0500.md) | 2026-10-20 | EndOfRace mix mode on the results screen |
 | [F499](log/F0499.md) | 2026-10-20 | Camera look input: Look Left/Right/Up/Down turn the chase, bumper/bonnet and head-cam views as in the original |
 | [F498](log/F0498.md) | 2026-10-20 | Kick-ups: the player's wheels throw up stones and grass |
-| [F497](log/F0497.md) | 2026-10-20 | Track view Catmull-Rom line, the AI handbrake byte 0x77A110, no 1/R pedal flip; the Jarama "hang" was a wrecked autopilot |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

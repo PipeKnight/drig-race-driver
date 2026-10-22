@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F558](F0558.md) | 2026-10-22 | Playable fc0ff3aa7868 with resolution-only dynamic preset (F555-F556) and the tyre-stack chain fix (F557), portable copy and APKs 94e06d136784 |
 | [F557](F0557.md) | 2026-10-22 | Pieces no longer break tyre stacks: the original's car-only break pairing (0x7C46A0) |
 | [F556](F0556.md) | 2026-10-22 | Dynamic render height 480-720 rows on Android; UI, HUD and OSD drawn at the window's resolution |
 | [F555](F0555.md) | 2026-10-22 | Mobile preset reduced to the render resolution (720 rows) and compute threads; phone Auto cycle table |
