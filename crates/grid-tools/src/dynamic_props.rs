@@ -1568,9 +1568,8 @@ impl PropWorld {
     }
 
     /// Fresh contacts of every live piece: track (packed road, boundary and
-    /// enabled route props), other pieces and the given car hulls. Prop
-    /// contacts are recorded for break detection.
-    #[allow(clippy::too_many_arguments)]
+    /// enabled route props), other pieces and the given car hulls. None
+    /// feeds break detection: only car contacts break route props.
     pub fn contacts(
         &self,
         track: &Track,
@@ -1579,7 +1578,6 @@ impl PropWorld {
         cars: &[CarHull<'_>],
         directions: &convex_distance::ContactSettings,
         remaining: usize,
-        recorded: &mut Vec<(usize, PropContact)>,
     ) -> Result<Vec<contact_groups::Contact>, Error> {
         let mut out = Vec::new();
         let parts = self.parts();
@@ -1671,20 +1669,16 @@ impl PropWorld {
                 c[0x28 / 4] = piece_token;
                 c[0x2c / 4] = hit.shape + 1;
                 c[0x38 / 4] = hit.contact.penetration.to_bits();
-                c[0x3c / 4] = hit.limit.to_bits();
+                // A piece and a route prop are both entity shapes (0x7C6350:
+                // bytes 0x17 = 0, 0x228 = 0), so B0EE80 leaves their contact
+                // limit at FLT_MAX and 0x7C46A0 never calls the break check
+                // 0x7BDFD0 for them: pieces neither break intact stacks nor
+                // pass through them at the threshold cap. Only a car shape
+                // (car_box, byte 0x17 = 1) pairs with a prop's 0x18.
+                c[0x3c / 4] = if hit.prop.is_some() { f32::MAX } else { hit.limit }.to_bits();
                 c[0x50 / 4..0x60 / 4].copy_from_slice(&hit.contact.point.map(f32::to_bits));
                 c[0x60 / 4..0x70 / 4].copy_from_slice(&hit.contact.normal.map(f32::to_bits));
                 c[0x70 / 4] = (u32::from(hit.contact.flipped) << 8) | (1 << 24);
-                if let Some(prop) = hit.prop {
-                    recorded.push((
-                        out.len(),
-                        PropContact {
-                            contact: c,
-                            prop,
-                            body: piece_body,
-                        },
-                    ));
-                }
                 out.push(c);
             }
             // An asleep piece pairs only with the awake pieces after it (the

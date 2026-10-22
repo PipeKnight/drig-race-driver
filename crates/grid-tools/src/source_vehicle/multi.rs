@@ -928,7 +928,6 @@ impl MultiRuntime {
                         token: tokens[i],
                     })
                     .collect();
-                let mut local = Vec::new();
                 let more = props.contacts(
                     &cars[0].track,
                     &cars[0].surfaces,
@@ -936,10 +935,7 @@ impl MultiRuntime {
                     &hulls,
                     geometry[0].query(),
                     remaining - out.len(),
-                    &mut local,
                 )?;
-                let base = wheel_contacts + out.len();
-                recorded.extend(local.into_iter().map(|(k, r)| (base + k, r)));
                 piece_contacts = more.len();
                 out.extend(more);
             }
@@ -1881,6 +1877,66 @@ mod tests {
                 let after = parked(&multi);
                 eprintln!("parked after the player returned {after}");
                 assert!(after < before, "{after} of {before} still parked");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Only a car breaks a prop (0x7C46A0 pairs a car shape's byte 0x17 with
+    /// the prop's 0x18; F557): the car driven through the Nürburgring
+    /// tyrestack_white 2276 the owner's phone hit, then braked to a stop in
+    /// the pile, leaves the broken set unchanged while it stands. Before,
+    /// pieces resting against the neighbouring stacks broke them at the
+    /// 50 N threshold, 83 pieces became 207 with the car at rest.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn pieces_resting_against_intact_stacks_do_not_break_them() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/nurburgring/route_1").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                multi.parking = false;
+                let props = multi.props.as_ref().unwrap();
+                let at = props.catalog.breakables[2276].placement;
+                assert!(props.catalog.breakables[2276].template.starts_with("tyrestack_white"));
+                let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 60. * at[8 + k]);
+                multi.place_at_rest(0, start, [-at[8], -at[9], -at[10]]).unwrap();
+                let mut go = [Controls::default(); 2];
+                go[0].throttle = 1.;
+                let mut stop = [Controls::default(); 2];
+                stop[0].brake = 1.;
+                let broken = |multi: &MultiRuntime| multi.dynamic_props().unwrap().broken.clone();
+                for tick in 0..600 {
+                    multi.tick(if tick < 300 { &go } else { &stop }).unwrap();
+                }
+                let speed: f32 = (0..3)
+                    .map(|k| f32::from_bits(multi.bodies()[0][0x220 / 4 + k]).powi(2))
+                    .sum::<f32>()
+                    .sqrt();
+                let stopped = broken(&multi);
+                let count = stopped.iter().filter(|b| **b).count();
+                eprintln!("car speed {speed:.3} broken {count}");
+                assert!(speed < 0.5, "{speed}");
+                assert!(stopped[2276] && count >= 2, "{count}");
+                for _ in 0..1200 {
+                    multi.tick(&stop).unwrap();
+                }
+                let later = broken(&multi);
+                let more: Vec<usize> = (0..later.len()).filter(|&i| later[i] && !stopped[i]).collect();
+                assert!(more.is_empty(), "broken with the car at rest: {more:?}");
             })
             .unwrap()
             .join()

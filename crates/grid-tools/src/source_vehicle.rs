@@ -1354,7 +1354,6 @@ impl Runtime {
             out.push(c);
         }
         if props.has_bodies() {
-            let mut local = Vec::new();
             let more = props.contacts(
                 &self.track,
                 &self.surfaces,
@@ -1366,10 +1365,7 @@ impl Runtime {
                 }],
                 geometry.query(),
                 remaining - out.len(),
-                &mut local,
             )?;
-            let base = first + out.len();
-            recorded.extend(local.into_iter().map(|(i, r)| (base + i, r)));
             out.extend(more);
         }
         Ok(out)

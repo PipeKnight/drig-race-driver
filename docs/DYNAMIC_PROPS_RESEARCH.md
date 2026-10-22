@@ -74,13 +74,22 @@ density x volume (below).
    (`MESH_CONTACT_GENERATION.md`, `tools/validate_mesh_contact.py`). The solver caps a
    contact's normal impulse at `dt x contact+0x3C` (`contact_rows.rs`), and after the
    solve stores the solved impulse divided by dt back in +0x3C.
-   [I] For car-versus-prop pairs the flag pairing applies (otherwise the 1.01 tolerance
-   below would never be reached); the exact flag provenance of shape bytes 0x17/0x18 for
-   entity shapes (`0x7B9390` descriptor bytes +5/+6) is not traced further.
+   [D] (F557) Which pairs get the threshold. `B0EE80` takes `min(+0x224)` only when
+   `A.0x228 || B.0x228 || (A.0x17 && B.0x18) || (B.0x17 && A.0x18)`, else FLT_MAX.
+   Entity shapes (`0x7C6350`): `0x469A80` zeroes descriptor bytes +4/+5/+6 (shape
+   0x17/0x18/0x216), `0x7B9390` then sets +5 (0x18) = 1 unless props byte +0x5D, sets
+   +6 for static or heavy bodies and clears dword +0x60 (shape 0x228). So every prop
+   and piece shape has 0x17 = 0, 0x18 = 1, 0x228 = 0. The car's shapes (`car_box`
+   0xA01960, e.g. 0xA026BD / 0xA02816 / 0xA01C94) set descriptor byte +4 = 1 (0x17)
+   before `0xA72350`. A car-versus-prop contact therefore carries the threshold; a
+   piece-versus-prop or prop-versus-prop contact carries FLT_MAX.
 2. **Callback.** [D] Shapes with a behaviour register `0x7C46A0` as their contact
    callback (`0x7C6350` tail, registration +0xC/+0x10). The event is built by
    `B0CFC0` (event+0x20 = contact normal, event+0x40 = contact +0x3C, event0/4 = side
-   registrations). For each side whose shape has a behaviour, `0x7BDFD0` fires when
+   registrations). `0x7C46A0` first requires world byte +0xBC20 and the same flag
+   pairing as `B0EE80` on the two sides' shapes (`0xA6A3D0` = shape 0x228, `0xA6A3F0`
+   = 0x17, `0xA6A410` = 0x18; F557), so a piece never breaks an intact prop. Then,
+   for each side whose shape has a behaviour, `0x7BDFD0` fires when
    `threshold <= 1.01 x event+0x40` (constant 0x00CBA8F0 = 1.01). It records the
    behaviour and the **other body's velocity projected on the contact normal**
    (`(v . n) n`, body +0x220), then queues the entity (+0xEA flag, list manager+0xBC08).
