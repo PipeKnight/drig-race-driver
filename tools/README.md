@@ -150,7 +150,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [prepare_deformation_initialization.py](prepare_deformation_initialization.py) | Prepare a bounded source-derived player candidate for whole original setup. | [DEFORMATION_SOURCE_INITIALIZATION](../docs/DEFORMATION_SOURCE_INITIALIZATION.md) |
 | [prepare_deformation_settle.py](prepare_deformation_settle.py) | Execute isolated original settling against a bounded retained node pool. |  |
 | [prepare_deformed_wheel_geometry.py](prepare_deformed_wheel_geometry.py) | Run whole wheel geometry with retained grids and explicit policy provenance. | [DEFORMATION_GRID](../docs/DEFORMATION_GRID.md) |
-| [prepare_dlaa_preset_probe.py](prepare_dlaa_preset_probe.py) | Prepare a private pinned dlss_wgpu hint/frame-time probe; never edit Cargo's cache. | [DLAA_PRESET_RESEARCH](../docs/DLAA_PRESET_RESEARCH.md) |
+| [prepare_dlaa_preset_probe.py](prepare_dlaa_preset_probe.py) | Prepare a private pinned dlss_wgpu hint/frame-time/exposure probe; never edit Cargo's cache. | [DLAA_PRESET_RESEARCH](../docs/DLAA_PRESET_RESEARCH.md) |
 | [prepare_surface_edge_candidate.py](prepare_surface_edge_candidate.py) | Prepare an audited curb/asphalt RGB transition; source alpha stays separate. | [CURB_SURFACE_SEAMS](../docs/CURB_SURFACE_SEAMS.md) |
 | [prepare_texture_candidate.py](prepare_texture_candidate.py) | Package an opaque diffuse upscale privately, preserving mean linear colour. | [TEXTURE_OVERRIDES](../docs/TEXTURE_OVERRIDES.md) |
 | [re/GhidraMaster.ps1](re/GhidraMaster.ps1) | Dot-source from tools/run_ghidra_*.ps1: runs Ghidra headless scripts on the shared master project (<main checkout>/local/ghidra-master, program grid-unpacked.exe) … | [re/README](../docs/re/README.md) |
@@ -210,7 +210,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [analyze_braking.py](analyze_braking.py) | Decode original (tools/capture_grid_braking.py) and port (grid-braking-replay) braking captures and summarise the braking phase (docs/BRAKING_REFERENCE.md). | [BRAKING_REFERENCE](../docs/BRAKING_REFERENCE.md) |
 | [analyze_crash.py](analyze_crash.py) | Targeted runtime disassembly; Capstone must already exist under local/tools/python. |  |
 | [analyze_practice_drive.py](analyze_practice_drive.py) | Check private actual-physics practice traces and complete final car words. | [AUTONOMOUS_PRACTICE_VALIDATION](../docs/AUTONOMOUS_PRACTICE_VALIDATION.md) |
-| [analyze_temporal_audit.py](analyze_temporal_audit.py) | Analyze opt-in raw motion/depth evidence; write results beside private input. | [NATIVE_DLAA](../docs/NATIVE_DLAA.md) |
+| [analyze_temporal_audit.py](analyze_temporal_audit.py) | Analyze opt-in raw motion/depth evidence; write results beside private input. | [TEMPORAL_COLOUR_AUDIT](../docs/TEMPORAL_COLOUR_AUDIT.md) |
 | [analyze_temporal_colour.py](analyze_temporal_colour.py) | Validate paired private HDR audit packets and compare bounded native-pixel ROIs. | [TEMPORAL_COLOUR_AUDIT](../docs/TEMPORAL_COLOUR_AUDIT.md) |
 | [audit_lap_replay.py](audit_lap_replay.py) | Audit private sampled-lap replay against a separately decoded gate oracle. |  |
 | [audit_motion_sequence.py](audit_motion_sequence.py) | Audit private offscreen motion frames against their request-clock metadata. | [WHEEL_ROTATION_FILTERING](../docs/WHEEL_ROTATION_FILTERING.md) |

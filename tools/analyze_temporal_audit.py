@@ -6,6 +6,7 @@ segmentation. Output pixel errors measure reprojection consistency, not AA quali
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -168,7 +169,7 @@ def depth_history(world, previous_xy, previous_inverse, size, origin, depth):
                 mixed=mixed, unavailable=~good), tolerance
 
 
-def analyze_history(directory, previous_directory, map_path=None):
+def analyze_history(directory, previous_directory, map_path=None, colour_directory=None):
     # Reuse all v1/header/finite/matrix validation; failed volume thresholds are
     # descriptive and do not make the raw capture invalid.
     analyze(directory)
@@ -206,6 +207,10 @@ def analyze_history(directory, previous_directory, map_path=None):
     expected = (cur_ndc-old_ndc)*[0.5, -0.5]
     residual = np.linalg.norm((pixels[:, :2]-expected)*size, axis=1)
     ground &= pg & cg & og
+    old_world = local @ matrix(text, 'previous_body').T
+    body_old_ndc, body_good = project(old_world, previous)
+    body_expected = (cur_ndc-body_old_ndc)*[0.5, -0.5]
+    body_residual = np.linalg.norm((pixels[:, :2]-body_expected)*size, axis=1)
     def region(mask):
         selected = ground & mask
         count = int(selected.sum())
@@ -220,7 +225,40 @@ def analyze_history(directory, previous_directory, map_path=None):
                   side_candidates=int((ground & sides).sum()), rear_candidates=int((ground & rear).sum()),
                   regions={name: region(mask) for name, mask in classes.items()},
                   motion_inconsistent=region(residual > 0.5),
+                  large_static_residual_matching_body=region((residual > 0.5) & body_good & (body_residual <= 0.5)),
                   scope='Conservative geometric volumes and four-tap depth agreement, not road/object-ID segmentation, visual quality or internal DLSS history. Occluder identity is unknown. Missing previous ROI is unavailable, never disocclusion.')
+    if colour_directory:
+        spec = importlib.util.spec_from_file_location('colour_audit', Path(__file__).with_name('analyze_temporal_colour.py'))
+        colour = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(colour)
+        ch, before, sha_before = colour.read_packet(Path(colour_directory)/'before.bin', 1)
+        ah, after, sha_after = colour.read_packet(Path(colour_directory)/'after.bin', 2)
+        if ch[:3] != ah[:3] or ch[4:] != ah[4:] or ch[1:3] != h[1:3] or ch[4:6] != h[4:6]:
+            raise ValueError('HDR and motion frames/ticks/views must match')
+        dx, dy = h[6]-ch[6], h[7]-ch[7]
+        if dx < 0 or dy < 0 or dx+h[8] > ch[8] or dy+h[9] > ch[9]:
+            raise ValueError('HDR packet must cover entire motion ROI')
+        def highpass(rgba):
+            luma = rgba[:, :, :3].astype(float) @ [0.2126, 0.7152, 0.0722]
+            pad = np.pad(luma, 1, mode='reflect')
+            smooth = (pad[:-2,:-2]+2*pad[:-2,1:-1]+pad[:-2,2:]
+                      +2*pad[1:-1,:-2]+4*pad[1:-1,1:-1]+2*pad[1:-1,2:]
+                      +pad[2:,:-2]+2*pad[2:,1:-1]+pad[2:,2:])/16
+            return (luma-smooth)[dy:dy+h[9], dx:dx+h[8]]
+        first, second = highpass(before), highpass(after)
+        rows = {}
+        for name, mask in classes.items():
+            selected = (ground & mask & (residual <= 0.5)).reshape(h[9], h[8])
+            # One-pixel cross erosion excludes class/silhouette borders.
+            pad = np.pad(selected, 1, constant_values=False)
+            selected &= pad[:-2,1:-1] & pad[2:,1:-1] & pad[1:-1,:-2] & pad[1:-1,2:]
+            count = int(selected.sum())
+            rms_a = float(np.sqrt(np.mean(first[selected]**2))) if count else None
+            rms_b = float(np.sqrt(np.mean(second[selected]**2))) if count else None
+            rows[name] = dict(samples=count, before_highpass_rms=rms_a, after_highpass_rms=rms_b,
+                              after_before_ratio=rms_b/rms_a if rms_a and rms_a > 1e-12 else None)
+        report['colour_by_depth'] = dict(source_sha256=dict(before=sha_before, after=sha_after), rows=rows,
+            scope='Eroded static-motion-compatible geometric classes; different regions/materials/brightness. Spatial contrast, not calibrated quality or internal DLSS confidence.')
     if map_path:
         from PIL import Image
         image = np.full((len(ground), 3), [22, 25, 38], dtype=np.uint8)
@@ -237,11 +275,12 @@ def main():
     parser.add_argument("--out", type=Path)
     parser.add_argument("--previous", type=Path, help="adjacent previous raw audit directory; enables depth-history classification")
     parser.add_argument("--map", type=Path, help="optional native-pixel class map; requires --previous")
+    parser.add_argument("--colour", type=Path, help="paired HDR directory covering current motion ROI; requires --previous")
     args = parser.parse_args()
-    if args.map and not args.previous:
-        parser.error("--map requires --previous")
+    if (args.map or args.colour) and not args.previous:
+        parser.error("--map/--colour requires --previous")
     try:
-        report = analyze_history(args.directory, args.previous, args.map) if args.previous else analyze(args.directory)
+        report = analyze_history(args.directory, args.previous, args.map, args.colour) if args.previous else analyze(args.directory)
     except (ValueError, OSError, np.linalg.LinAlgError) as error:
         parser.error(str(error))
     output = args.out or args.directory / "analysis.json"
