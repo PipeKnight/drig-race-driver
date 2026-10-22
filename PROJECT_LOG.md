@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G210 (2026-10-22): owner rejected Asphalt DLAA comparison as too blurry. Keep road texture; investigate sharp side/rear history boundaries with pixel-level motion/depth reprojection. No blur pilot promotion. G209 raised strips remain open.
 - G206 (2026-10-21): graphics worktree migrated to rewritten Git history; G130-G205 preserved in log/. Integrated current main with source-surface controls; 891 tests, both feature configurations of Clippy, three identities, quick soak24/24 and GPU layer validation pass. Accepted owner executables unchanged. Priority: uniformly soft moving asphalt without DLAA L shimmer; raised Donington final-hairpin marking geometry still unidentified.
 - Codex's workstream (G entries, latest G129 of 2026-10-18, docs/GRAPHICS_*.md); playables include
   Codex's local graphics commits. Every circuit draws its own sky and layered road (F515, docs/SKY.md).
