@@ -41,6 +41,7 @@ struct AuditOnce(bool);
 #[derive(Clone, Resource, ExtractResource)]
 pub(crate) struct Audit {
     tick: u64,
+    centre: Option<Vec2>,
     directory: PathBuf,
     buffer: Handle<ShaderBuffer>,
     submitted: Arc<AtomicBool>,
@@ -92,7 +93,7 @@ struct Parameters {
     extent: UVec4,
 }
 // Called after renderer plugins, only for an explicit private scripted capture.
-pub fn install(app: &mut App, tick: u64, directory: &Path) -> std::io::Result<()> {
+pub fn install(app: &mut App, tick: u64, directory: &Path, centre: Option<Vec2>) -> std::io::Result<()> {
     if !(1..=1_000_000).contains(&tick) || app.get_sub_app(RenderApp).is_none() {
         return Err(std::io::Error::other(
             "temporal audit requires a bounded positive tick and renderer",
@@ -124,6 +125,7 @@ pub fn install(app: &mut App, tick: u64, directory: &Path) -> std::io::Result<()
         .add(buffer);
     app.insert_resource(Audit {
         tick,
+        centre,
         directory: directory.to_owned(),
         buffer: handle,
         submitted: Arc::default(),
@@ -254,7 +256,7 @@ fn compute(
         return;
     }
     let uv = center.truncate().truncate() / center.w * Vec2::new(0.5, -0.5) + Vec2::splat(0.5);
-    let pixel = uv * size.as_vec2();
+    let pixel = audit.centre.unwrap_or(uv * size.as_vec2());
     let origin = UVec2::new(
         (pixel.x - extent.x as f32 / 2.).clamp(0., (size.x - extent.x) as f32) as u32,
         (pixel.y - extent.y as f32 / 2.).clamp(0., (size.y - extent.y) as f32) as u32,

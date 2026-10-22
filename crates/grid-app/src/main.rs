@@ -1404,6 +1404,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut motion_sequence = None;
     let mut temporal_audit_tick = None;
     let mut temporal_colour_tick = None;
+    let mut temporal_centre = None;
     let mut texture_override_path = None;
     let mut surface_rgb_override = None;
     let mut surface_specular_explicit = false;
@@ -1636,6 +1637,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 let tick: u64 = args.next().ok_or("--temporal-colour-audit needs a positive tick")?.parse()?;
                 if !(1..=1_000_000).contains(&tick) { return Err("temporal colour tick must be 1..1000000".into()); }
                 temporal_colour_tick = Some(tick);
+            }
+            "--temporal-centre" => {
+                let value = args.next().ok_or("--temporal-centre needs X,Y")?;
+                let (x, y) = value.split_once(',').ok_or("--temporal-centre needs X,Y")?;
+                let pixel = Vec2::new(x.parse()?, y.parse()?);
+                if !pixel.is_finite() || pixel.min_element() < 0. {
+                    return Err("invalid temporal centre".into());
+                }
+                temporal_centre = Some(pixel);
             }
             "--temporal-audit" => {
                 let tick: u64 = args.next().ok_or("--temporal-audit needs a positive tick")?.parse()?;
@@ -1986,6 +1996,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--surface-rgb-overrides PRIVATE_MANIFEST: experimental 2x/4x surface RGB derivatives; purchased alpha restored, off by default.");
                 println!("--ground-edges off|atlas-pilot: optional authored dry ground band in four audited edge atlases.\n--surface-specular off|source-base|white-control: optional source blended-alpha surface base-F0 adaptation; source-base defaults on enhanced source-layer track scenes; explicit off disables; not original Phong parity.");
                 println!("--post-saturation 0..2: optional single-variable authored-grade diagnostic; enhanced only, temperature/tint unchanged, not combinable with track grade.");
+                println!("--temporal-centre X,Y: bounded diagnostic ROI centre; default tracks the car, requires a temporal audit.");
                 println!("--temporal-colour-audit TICK: bounded paired main-view HDR evidence before/after early postprocessing; native DLAA capture only.");
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
@@ -2815,6 +2826,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if render_fixed_step && render_fps.is_some() {
         return Err("choose --render-fixed-step or --render-fps, not both".into());
     }
+    if let Some(pixel) = temporal_centre
+        && ((temporal_audit_tick.is_none() && temporal_colour_tick.is_none())
+            || pixel.x >= graphics.width as f32 || pixel.y >= graphics.height as f32)
+    {
+        return Err("--temporal-centre requires an audit and a pixel inside the render resolution".into());
+    }
     let temporal_audit_directory = if let Some(tick) = temporal_audit_tick {
         if !drive || !graphics.enhanced() || output.is_none() || render_fps.is_none()
             || drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))
@@ -3007,11 +3024,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "dlaa")]
     native_dlaa::install(&mut app);
     if let (Some(tick), Some(directory)) = (temporal_audit_tick, temporal_audit_directory) {
-        temporal_audit::install(&mut app, tick, &directory)?;
+        temporal_audit::install(&mut app, tick, &directory, temporal_centre)?;
     }
     #[cfg(feature = "dlaa")]
     if let (Some(tick), Some(directory)) = (temporal_colour_tick, temporal_colour_directory) {
-        temporal_colour::install(&mut app, tick, &directory)?;
+        temporal_colour::install(&mut app, tick, &directory, temporal_centre)?;
     }
     if let Some(mut driving) = driving {
         // Diagnostics prop_script=TEMPLATE:INDEX with --drive-ticks: authored

@@ -43,6 +43,7 @@ struct Frozen {
 #[derive(Clone, Resource, ExtractResource)]
 pub(crate) struct Audit {
     tick: u64,
+    centre: Option<Vec2>,
     directory: PathBuf,
     buffers: [Handle<ShaderBuffer>; 2],
     submitted: [Arc<AtomicBool>; 2],
@@ -88,7 +89,7 @@ type Inputs = (
     Option<&'static TemporalJitter>,
 );
 
-pub fn install(app: &mut App, tick: u64, directory: &Path) -> std::io::Result<()> {
+pub fn install(app: &mut App, tick: u64, directory: &Path, centre: Option<Vec2>) -> std::io::Result<()> {
     if !(1..=1_000_000).contains(&tick) || app.get_sub_app(RenderApp).is_none() {
         return Err(std::io::Error::other(
             "colour audit requires bounded positive tick and renderer",
@@ -121,6 +122,7 @@ pub fn install(app: &mut App, tick: u64, directory: &Path) -> std::io::Result<()
     });
     app.insert_resource(Audit {
         tick,
+        centre,
         directory: directory.to_owned(),
         buffers,
         submitted: std::array::from_fn(|_| Arc::default()),
@@ -250,6 +252,7 @@ fn record<const STAGE: usize>(
     }
     let pixel = (center.truncate().truncate() / center.w * Vec2::new(0.5, -0.5) + Vec2::splat(0.5))
         * size.as_vec2();
+    let pixel = audit.centre.unwrap_or(pixel);
     let origin = (pixel - extent.as_vec2() / 2.)
         .clamp(Vec2::ZERO, (size - extent).as_vec2())
         .as_uvec2();
