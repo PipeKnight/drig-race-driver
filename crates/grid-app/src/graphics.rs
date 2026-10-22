@@ -89,7 +89,7 @@ pub struct Settings {
     /// Window-only material control; light lenses are a separate material.
     pub window_roughness: f32,
     pub window_reflectance: f32,
-    /// Static-only diagnostic: no change to accepted driving materials.
+    /// Bounded diagnostic: no change to accepted interactive driving materials.
     pub window_pilot: super::window_response::Mode,
     /// Authored player-paint coat controls, independent of base mask and glass.
     pub paint_clearcoat: f32,

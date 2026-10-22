@@ -310,3 +310,32 @@ original strict failure is preserved, not recast as a fully green runner. Privat
 The static-only CLI guard still blocks driving. These results establish static appearance
 and ECS ownership transitions; actual rendered cracked/smashed/reset states and motion remain
 open. The owner-approved Motion DLAA executable and launcher are unchanged.
+
+### Bounded driving and actual crack event (G228, validation ongoing)
+
+The pilot now permits rendered bounded `--drive-ticks` as well as static reference captures;
+unbounded interactive driving remains rejected. Default crate prepush passes281tests,
+Clippy and sanity in347s; feature Clippy and feature build pass. Three actual negative CLI
+checks reject unbounded driving, missing render output and an unsupported car.
+
+Off/environment/combined each finish1800ticks at native1080p DLAA, virtual30FPS, with the
+accepted gentle motion shutter. All four physical exit records,30frame manifests and the
+sampled motion/depth buffer match exactly. Selected first/last frames and the environment
+final frame were inspected; this does not establish every-frame history or monitor acceptance.
+
+Paired1200tick stock/combined collisions produce the same front-window Cracked event at
+tick1024 and identical four physical exits. The final wreck menu obscures the glass, so this
+is event/physics evidence, not visual cracked-material verification. A paired front-view
+sequence around that event is next; rendered smashed/reset coverage remains open. The
+accepted Motion executable is unchanged. Evidence: `local/graphics/window-drive01/`.
+
+The first front-view follow-up finishes normally with identical events, physics and frame
+manifests, but a fence occludes the window before the crack. Its intended visual coverage
+is not established. Preserve that evidence and retry a raised track-side diagnostic view;
+no renderer failure or cracked-glass acceptance is inferred from the successful process.
+
+The raised track-side pair subsequently completes normally with equal events, four physical
+exits and40frame manifests. Stock/combined frame17 (tick1027) and the combined final were
+inspected: the damaged front pane remains visible with its crack pattern; side reflections
+also respond. This covers one front-Cracked collision, not smashed windows, rendered reset
+or interactive acceptance. Earlier obstructed camera evidence is retained.
