@@ -789,14 +789,16 @@ fn spawn(
     });
 }
 
-/// Keeps the OSD image at the 3D view's size and the camera's aspect.
+/// Keeps the OSD image at the UI camera's size and aspect: the 3D view, or
+/// the window when the 3D view is a scaled image (render_scale, F556).
 fn resize(
     osd: Option<ResMut<Osd>>,
     viewer: Query<&Camera, With<crate::ViewerCamera>>,
+    ui: Query<&Camera, With<IsDefaultUiCamera>>,
     mut images: ResMut<Assets<Image>>,
     mut projection: Query<&mut Projection, With<OsdCamera>>,
 ) {
-    let (Some(mut osd), Some(camera)) = (osd, viewer.iter().next()) else {
+    let (Some(mut osd), Some(camera)) = (osd, ui.iter().next().or(viewer.iter().next())) else {
         return;
     };
     let Some(size) = camera.physical_target_size().filter(|s| s.x > 0 && s.y > 0) else {

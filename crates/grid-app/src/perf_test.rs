@@ -420,6 +420,8 @@ fn apply(
         r.msaa = None;
     }
     if let Some(scale) = view.scale.as_deref_mut() {
+        // The steps compare fixed heights: the dynamic height waits.
+        scale.hold = s.render_rows > 0;
         if s.render_rows > 0 {
             r.height.get_or_insert(scale.height);
             scale.set_height(crate::render_scale::RenderHeight::Rows(u32::from(s.render_rows)));

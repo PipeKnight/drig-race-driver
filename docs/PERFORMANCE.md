@@ -959,3 +959,53 @@ Expected [I, not measured]:
 - Pre-race menu: about 40 FPS (F549 normal 42 minus their roughly 2–3 FPS).
 - With MSAA off, the menu would reach about 52–55 FPS. That is the owner's call: off by default only with the owner's say.
 - Dynamic resolution would not reach 60 FPS in the menu either (see the fixed part above).
+
+### Dynamic render height (F556)
+
+The owner chose a dynamic resolution of 480 to 720 rows (2026-10-22). `render_scale::Dynamic` runs
+with the mobile preset whenever the row setting is a count; the setting (default 720) is the ceiling.
+
+**Per frame**, the controller keeps exponential averages (factor 0.1) of two values:
+- the frame time (`Time<Real>`);
+- the main schedule's work from `First` to `Last`. In pipelined rendering, waiting for the render
+  thread happens outside that span.
+
+**The rules:**
+- **Late:** the average frame time is above 18 ms (below about 55 FPS).
+- **Main-thread bound:** the work is above 80 % of the frame time, or above 14 ms. That is the
+  simulation, for example a tyre pile; a lower resolution would not help, so the height holds.
+- **Down:** when late and not main-thread bound, 48 rows lower, at most every 0.5 s, to the floor
+  of 480. The height it left is blocked for 15 s.
+- **Up:** after 3 s on time (below 17.2 ms), 24 rows higher, but not to a blocked height. From 480
+  back to 720 this takes about 30 s.
+- **Ignored:** frames above 100 ms (loading, pauses) and the first 3 s.
+
+Render-thread CPU limits are not told apart from GPU limits. They would lower the height for little
+gain, but never below 480.
+
+**Logging:**
+- `render_dynamic version=1 event=install` gives the parameters.
+- Each change logs `render_dynamic … rows=… from=… reason=late|on_time|ceiling frame_ms=… work_ms=…`.
+  Changes are at least 0.5 s apart, so the line is rate-limited.
+- `frame_stats` shows the current `render=WxH`.
+
+The Performance test's `render…` steps hold the dynamic height (`RenderScale::hold`), so they
+compare fixed heights.
+
+**Implementation:**
+- Each change allocates a new target image at the new size. Changes are at most 2 per second.
+- The UI (HUD, menus, touch zones, FPS counter) is drawn by the window camera whenever the scaled
+  image is shown: `ui_on_window` moves the UI roots, and the OSD image follows the window size. So
+  the UI keeps the screen's resolution at any render height.
+- The desktop is unchanged: it renders native by default, so no image and no move.
+
+**Expected [I, from the F555 table]:**
+- Driving: 720 rows, about 60 FPS.
+- Pre-race menu: down to 480 rows (1,026 × 480, 0.49 MP), about 17.6 + 2.8 ms, so about 46–49 FPS
+  instead of about 40 at 720.
+- 60 FPS in the menu still needs MSAA off (about 55 at 720) or a cheaper scene.
+
+**Checks:** unit tests `dynamic_height_drops_fast_when_late_and_rises_slowly` and
+`dynamic_height_ignores_a_main_thread_bound_frame`. On the desktop with `GRID_MOBILE_PRESET=1
+GRID_PERF_TEST=auto`: 8 UI roots moved to the window at 720 rows and back at native, with no panic.
+The desktop never runs late, so no dynamic change was exercised live; the phone log will show it.

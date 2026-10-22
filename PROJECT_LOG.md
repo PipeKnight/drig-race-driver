@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F556](log/F0556.md) | 2026-10-22 | Dynamic render height 480-720 rows on Android; UI, HUD and OSD drawn at the window's resolution |
 | [F555](log/F0555.md) | 2026-10-22 | Mobile preset reduced to the render resolution (720 rows) and compute threads; phone Auto cycle table |
 | [F554](log/F0554.md) | 2026-10-22 | Playable b89b4be10d30 with the phone menu fixes (F553), portable copy and APKs 9ac27f9a958a |
 | [F553](log/F0553.md) | 2026-10-22 | Phone UI: Performance test shows all rows with Auto cycle first; full Fira Mono as the UI font so Nürburgring renders on Android |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F498](log/F0498.md) | 2026-10-20 | Kick-ups: the player's wheels throw up stones and grass |
 | [F497](log/F0497.md) | 2026-10-20 | Track view Catmull-Rom line, the AI handbrake byte 0x77A110, no 1/R pedal flip; the Jarama "hang" was a wrecked autopilot |
 | [F496](log/F0496.md) | 2026-10-20 | Crashed mix mode: the player's hard hits duck engine, exhaust and wheels |
-| [F495](log/F0495.md) | 2026-10-20 | Career routine B and class positions: the Le Mans 24 Hours pays by class position from the whole reputation pot |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

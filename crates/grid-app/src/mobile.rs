@@ -1,9 +1,11 @@
 //! Mobile preset (AUTHORED, P12, docs/PERFORMANCE.md "Mobile preset"): the
 //! Android default. It is off on the desktop unless `GRID_MOBILE_PRESET=1`
 //! is set (for checks on the PC). It changes only:
-//! - the render resolution: the 3D view renders at [`RENDER_ROWS`] rows and is
-//!   stretched over the screen (`render_scale`; `[video] render_height` still
-//!   overrides);
+//! - the render resolution: the 3D view renders at most [`RENDER_ROWS`] rows,
+//!   dynamically down to [`DYNAMIC_FLOOR_ROWS`] when frames run late (F556,
+//!   `render_scale::Dynamic`), and is stretched over the screen; a saved
+//!   `[video] render_height` row count replaces the ceiling, `native` turns
+//!   the scaling off;
 //! - the compute threads ([`init_threads`]), which do not change the picture.
 //!
 //! F549 also cut the shadows, small-prop shadows and draw distance and the
@@ -17,6 +19,15 @@ use bevy::prelude::*;
 use std::sync::OnceLock;
 
 pub const RENDER_ROWS: u32 = 720;
+/// Lowest dynamic render height (owner, 2026-10-22: 480 to 720 rows).
+pub const DYNAMIC_FLOOR_ROWS: u32 = 480;
+
+/// The dynamic render height's floor with the preset (`render_scale`),
+/// unless `GRID_DYNAMIC_RES=0`. The row setting is its ceiling.
+pub fn dynamic_floor() -> Option<u32> {
+    let off = std::env::var("GRID_DYNAMIC_RES").is_ok_and(|v| v == "0");
+    (enabled() && !off).then_some(DYNAMIC_FLOOR_ROWS)
+}
 /// Draw distance of small meshes with the Performance test's `far_props`.
 pub const FAR_PROPS_METRES: f32 = 110.;
 /// Bounding radius in metres below which a static mesh counts as small.
