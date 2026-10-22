@@ -339,3 +339,21 @@ exits and40frame manifests. Stock/combined frame17 (tick1027) and the combined f
 inspected: the damaged front pane remains visible with its crack pattern; side reflections
 also respond. This covers one front-Cracked collision, not smashed windows, rendered reset
 or interactive acceptance. Earlier obstructed camera evidence is retained.
+
+### Cloudy and mostly clear glass comparison (G230)
+
+Six native4K DLAA renders compare rear, side and inside views with the same combined glass
+pilot, camera, Donington direct light/tone and material settings. Original cloudy Donington
+sky is paired with a visually checked mostly clear Long Beach sky, including sparse small
+horizon clouds. Both visible sky and IBL use the substituted complete sky asset; scene probe
+readback succeeds for six nonzero faces, with zero upper sky misses in both assets. Source
+sky hit counts differ because their domes differ. The donor panorama also has its own sun
+and horizon radiance: this is an appearance comparison, not reconstructed physical weather.
+
+Reviewed side glass shows soft grey cloud variation versus smoother blue-grey reflection;
+the owner-liked inside wall reflection remains. Commands, full images, crops, source hashes
+and private read-only asset overlay are under `local/graphics/sky-glass01/`. Original assets
+and accepted owner executable are unchanged. The runner's Pillow import failed after the
+six successful renders; composing the saved outputs with bundled Python/Pillow succeeded
+without rerendering. Preserve both the failed runner result and separate composition/review
+results. Never deduplicate or recursively edit through the asset overlay's links.
