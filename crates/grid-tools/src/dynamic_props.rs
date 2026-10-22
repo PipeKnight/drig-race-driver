@@ -13,17 +13,19 @@
 //! walls), to the world's fixed object, and through an ENS link to the linked
 //! entity's piece (armco, 0x7D5540), with the constraints' body overrides
 //! (0x7B85A0). Uproots and other unported cases keep the entity static; see
-//! `unported`. Pieces never deactivate (the ported grouped frame admits only
-//! turnOffTime = FLT_MAX); cylinders are twelve-sided prisms.
+//! `unported`. Pieces sleep and park (docs/BODY_SLEEPING.md). A cylinder piece
+//! is round against the world, the cars and other cylinder or box pieces
+//! (F549); box against box keeps an authored face-axis test.
 use crate::{
     body_geometry::BodyGeometry, contact_surfaces::Surfaces, entity_geometry::Props, route::Route,
     track::Track,
 };
 use grid_formats::{entities, jpk, physparams, pssg};
 use grid_world::{
-    Error, collision_mesh, contact_groups, convex_distance, grouped_physical_frame, joint,
+    Error, box_contacts::{self, BoxShape}, collision_mesh, contact_groups, convex_distance,
+    grouped_physical_frame, joint,
     joint_template, phantom_post, physical_constructor, physical_pose::Matrix,
-    round_contacts::{CylinderShape, RoundShape, SphereShape},
+    round_contacts::{self, CylinderShape, RoundShape, SphereShape},
 };
 use std::{collections::BTreeMap, path::Path};
 
@@ -391,30 +393,46 @@ fn reference(uri: &[u8]) -> Result<&str, &'static str> {
     physparams::reference(uri).ok_or("invalid physics property reference")
 }
 
-fn mass_properties(primitive: Primitive, density: f32) -> (f32, [f32; 3]) {
+/// The body's mass and diagonal inertia from its one shape (B11520 sums the
+/// shapes' vtable +8 mass and +0xC inertia; F549). Every kind measures the
+/// shape grown by its shell (+0x220): box B3D480/B40880 over half extents
+/// plus shell, cylinder B46460/B46C90 over radius plus shell and twice the
+/// half height plus shell, sphere B4A5F0/B4AAB0 over radius plus shell.
+/// The x87 products are evaluated in f64 and rounded once (the caller
+/// stores the result as a float). The template dimensions are unscaled [I:
+/// the piece shape descriptor's scale rule was not read].
+fn mass_properties(primitive: Primitive, density: f32, shell: f32) -> (f32, [f32; 3]) {
+    let (density, shell) = (f64::from(density), f64::from(shell));
     match primitive {
         Primitive::Box([x, y, z]) => {
-            let m = density * x * y * z;
-            (
-                m,
-                [
-                    m * (y * y + z * z) / 12.,
-                    m * (x * x + z * z) / 12.,
-                    m * (x * x + y * y) / 12.,
-                ],
-            )
+            // B3D480: 2(hx + s) 2(hy + s) 2(hz + s) x density.
+            let [x, y, z] = [x, y, z].map(|v| v * 0.5 + shell as f32);
+            let m = ((2. * f64::from(x)) * f64::from(y) * 2. * f64::from(z) * 2. * density) as f32;
+            // B40880: m / 12 (0.083333336) x the other two full extents squared.
+            let k = m * f32::from_bits(0x3daa_aaab);
+            let [x, y, z] = [x, y, z].map(|v| v * 2.);
+            (m, [(z * z + y * y) * k, (x * x + z * z) * k, (y * y + x * x) * k])
         }
         Primitive::Cylinder { radius, height } => {
-            let m = density * std::f32::consts::PI * radius * radius * height;
-            let side = m * (3. * radius * radius + height * height) / 12.;
-            (m, [side, m * radius * radius * 0.5, side])
+            // Shape +0x240 radius, +0x244 half height (B46180).
+            let (r, h) = (radius + shell as f32, height * 0.5 + shell as f32);
+            // B46460: (r + s)^2 x 2(h + s) x pi x density.
+            let wide = f64::from(height * 0.5) + f64::from(shell as f32);
+            let m = (f64::from(r) * f64::from(r) * (wide + wide)
+                * f64::from(std::f32::consts::PI)
+                * density) as f32;
+            // B46C90: side m ((2(h + s))^2 / 12 + (r + s)^2 / 4), axis m (r + s)^2 / 2.
+            let (l, r2) = (h * 2., r * r);
+            let side = (l * l * f32::from_bits(0x3daa_aaab) + r2 * 0.25) * m;
+            (m, [side, r2 * m * 0.5, side])
         }
-        // 0x7DB060: r^3 x 4.18879 (CFAAF4) x density; a solid sphere's
-        // inertia [I].
         Primitive::Sphere { radius } => {
-            let m = radius * radius * radius * f32::from_bits(0x4086_0a92) * density;
-            let i = 0.4 * m * radius * radius;
-            (m, [i; 3])
+            // B4A5F0: (r + s)^3 x 4.18879 (CFAAF4) x density.
+            let r = f64::from(radius) + shell;
+            let m = (r * r * r * f64::from(f32::from_bits(0x4086_0a92)) * density) as f32;
+            // B4AAB0: 0.4 m (r + s)^2.
+            let r = r as f32;
+            (m, [r * r * m * 0.4; 3])
         }
     }
 }
@@ -580,7 +598,7 @@ impl Catalog {
                     }
                     entities::Primitive::Sphere { radius } => Primitive::Sphere { radius },
                 };
-                let (mass, inertia) = mass_properties(primitive, density);
+                let (mass, inertia) = mass_properties(primitive, density, shape.shell);
                 if !(mass.is_finite() && mass > 0.) {
                     return Err("invalid prop piece mass".into());
                 }
@@ -588,7 +606,7 @@ impl Catalog {
                 // unnormalised (only the render path splits off the row
                 // lengths), so a scaled placement (Nürburgring tyre stacks,
                 // 0.9718) keeps its scale in the body basis; mass stays the
-                // template's density x unscaled volume.
+                // template's density x the unscaled shape grown by its shell.
                 let pose = compose(&matrix(&shape.transform), &placement);
                 let [x, y, z] = [0, 1, 2].map(|i| pose[i]);
                 let determinant = x[0] * (y[1] * z[2] - y[2] * z[1])
@@ -1196,10 +1214,12 @@ impl Convex {
 }
 
 /// Authored separating-axis contacts between two convex piece hulls (face
-/// axes of both). The original's primitive box/cylinder colliders are not
-/// recovered; the triangle-soup pair query loses stacked pieces once they
-/// overlap beyond the margin. Same convention as the packed pair query:
-/// the normal pushes `a`, penetration includes the margin.
+/// axes of both), for the pairs without a cylinder (box against box; a
+/// sphere's inscribed icosahedron): the original's box/box AE8AD0 is not
+/// ported for two moving boxes, and the triangle-soup pair query loses
+/// stacked pieces once they overlap beyond the margin. Same convention as
+/// the packed pair query: the normal pushes `a`, penetration includes the
+/// margin.
 fn convex_contacts(
     a: &Convex,
     b: &Convex,
@@ -1710,12 +1730,55 @@ impl PropWorld {
                 {
                     continue;
                 }
-                for hit in convex_contacts(a, b, margin, room.min(PAIR_CONTACTS)) {
-                    out.push(pair_record(
-                        &hit,
-                        [piece_body, other_body],
-                        [piece_token, other_token],
-                    ));
+                // A cylinder piece against a cylinder or box piece: AE8AD0
+                // with the round support and AE2FA0's handlers (F549), the
+                // cylinder as the moving side and the box with its B3D890
+                // face; other pairs keep the AUTHORED face-axis test.
+                let capacity = room.min(PAIR_CONTACTS);
+                let directions = directions.directions;
+                let cylinder = |s: &PieceSpec| {
+                    matches!(s.collider(), convex_distance::Hull::Cylinder { .. })
+                };
+                let block = |s: &PieceSpec, pose: &Matrix| match (s.round, s.primitive) {
+                    (false, Primitive::Box(d)) => Some(BoxShape {
+                        matrix: *pose,
+                        half: d.map(|v| v * 0.5),
+                        margin: s.shell,
+                    }),
+                    _ => None,
+                };
+                let (hits, order) = if let (true, Some(shape @ RoundShape::Cylinder(_))) =
+                    (cylinder(spec), other_spec.round_shape(&poses[j]))
+                {
+                    let hits = round_contacts::pair_contacts(spec.collider(), pose, &shape, &query, capacity)?;
+                    (hits, false)
+                } else if let (true, Some(shape)) = (cylinder(spec), block(other_spec, &poses[j])) {
+                    let hits = box_contacts::contacts(spec.collider(), pose, &shape, &query, capacity)?;
+                    (hits, false)
+                } else if let (Some(shape), true) = (block(spec, &pose), cylinder(other_spec)) {
+                    let query = convex_distance::ContactSettings {
+                        margin: other_spec.shell,
+                        directions,
+                    };
+                    let hits = box_contacts::contacts(
+                        other_spec.collider(),
+                        poses[j],
+                        &shape,
+                        &query,
+                        capacity,
+                    )?;
+                    (hits, true)
+                } else {
+                    (convex_contacts(a, b, margin, capacity), false)
+                };
+                // The normal pushes the first body: the moving cylinder.
+                let (bodies, tokens) = if order {
+                    ([other_body, piece_body], [other_token, piece_token])
+                } else {
+                    ([piece_body, other_body], [piece_token, other_token])
+                };
+                for hit in hits {
+                    out.push(pair_record(&hit, bodies, tokens));
                 }
             }
             let mut world_hull = None;
@@ -2518,7 +2581,7 @@ mod tests {
                 );
             }
         }
-        let (m, i) = mass_properties(Primitive::Box([1., 2., 3.]), 700.);
+        let (m, i) = mass_properties(Primitive::Box([1., 2., 3.]), 700., 0.);
         assert_eq!(m, 4200.);
         assert_eq!(i, [4550., 3500., 1750.]);
         let (m, _) = mass_properties(
@@ -2527,8 +2590,21 @@ mod tests {
                 height: 1.,
             },
             1.,
+            0.,
         );
         assert!((m - std::f32::consts::PI).abs() < 1e-6);
+        // A Nürburgring tyre (sRubber d700, shell 0.02): the shape grown by
+        // its shell, radius 0.256 and height 0.185 (B46460, B46C90).
+        let tyre = Primitive::Cylinder {
+            radius: 0.236,
+            height: 0.145,
+        };
+        let (m, i) = mass_properties(tyre, 700., 0.02);
+        let expected = std::f32::consts::PI * 0.256 * 0.256 * 0.185 * 700.;
+        assert!((m - expected).abs() < 1e-3 * expected, "{m}");
+        let side = m * (0.185 * 0.185 / 12. + 0.256 * 0.256 / 4.);
+        assert!((i[0] - side).abs() < 1e-3 * side && i[0] == i[2], "{i:?}");
+        assert!((i[1] - m * 0.256 * 0.256 * 0.5).abs() < 1e-3 * i[1], "{i:?}");
     }
 
     #[test]
@@ -2651,7 +2727,8 @@ mod tests {
             .unwrap()
             .pieces[0];
         assert!(
-            (board.mass - 70. * 0.94 * 0.47 * 0.16).abs() < 0.01,
+            // The box grown by its shell 0.02 (B3D480).
+            (board.mass - 70. * 0.98 * 0.51 * 0.2).abs() < 0.01,
             "{}",
             board.mass
         );
@@ -2683,7 +2760,7 @@ mod tests {
             assert!(!pole.collides());
             assert_eq!(pole.limit, f32::MAX);
             assert_eq!((pole.body.gravity_scale, pole.body.linear_damping), (0., 0.));
-            assert!((pole.mass - 70. * std::f32::consts::PI * 0.01 * 2.93).abs() < 0.05, "{}", pole.mass);
+            assert!((pole.mass - 70. * std::f32::consts::PI * 0.12 * 0.12 * 2.97).abs() < 0.05, "{}", pole.mass);
             // Base to the world: a static A, no joint. Base to pole: swapped,
             // the pole held to the base's fixed object; the post.
             let joints: Vec<_> = b.joints.iter().map(|j| (j.a, j.b, j.link)).collect();
@@ -2711,8 +2788,8 @@ mod tests {
                     *scaled.entry(b.template.clone()).or_default() += 1;
                 }
                 if b.template.starts_with("tyrestack") {
-                    // sRubber d700 over the unscaled template cylinder.
-                    assert_eq!(p.mass, mass_properties(p.primitive, 700.).0);
+                    // sRubber d700 over the unscaled template cylinder grown by its shell.
+                    assert_eq!(p.mass, mass_properties(p.primitive, 700., p.shell).0);
                 }
             }
         }

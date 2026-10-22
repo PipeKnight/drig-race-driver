@@ -1887,6 +1887,213 @@ mod tests {
             .unwrap();
     }
 
+    /// Pile settle probe (F549): the Nürburgring tyrewall_black_yok
+    /// breakables the owner's phone broke (1732..1752, log 004650), every one
+    /// within 30 m of 1745 broken at rest, or (`GRID_PILE_DRIVE`) the player
+    /// driving through 1745. Prints the asleep and moving counts and the tick
+    /// cost every second, the ticks until half, 90 % and all pieces sleep, at
+    /// `GRID_PILE_DUMP` the awake pieces with their contacts and with
+    /// `GRID_PILE_TRACE` one body per tick. Parking is off. The default pile
+    /// at rest must sleep whole within 15 s.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn tyre_pile_settle_probe() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let f = |b: &contact_groups::Body, o: usize| f32::from_bits(b[o / 4]);
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let env = |name: &str, default: usize| {
+                    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+                };
+                let route = std::env::var("GRID_PILE_ROUTE")
+                    .unwrap_or_else(|_| "tracks/europe/nurburgring/route_1".into());
+                let route = Route::new(&route).unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                multi.parking = false;
+                let props = multi.props.as_mut().unwrap();
+                let template =
+                    std::env::var("GRID_PILE_TEMPLATE").unwrap_or_else(|_| "tyrewall_black_yok".into());
+                let centre = env("GRID_PILE_CENTRE", 1745);
+                let at = props.catalog.breakables[centre].placement;
+                let radius = env("GRID_PILE_RADIUS", 30) as f32;
+                // GRID_PILE_DRIVE=ticks: car 0 drives into the centre wall at full
+                // throttle for that long, then brakes; nothing breaks at rest.
+                let drive = env("GRID_PILE_DRIVE", 0);
+                let mut chosen = Vec::new();
+                for b in 0..props.catalog.breakables.len() {
+                    let e = &props.catalog.breakables[b];
+                    let p = e.placement;
+                    let d: f32 = (12..15).map(|k| (p[k] - at[k]).powi(2)).sum::<f32>().sqrt();
+                    if drive == 0 && e.template.starts_with(&template) && !e.pieces.is_empty() && d < radius {
+                        chosen.push(b);
+                        props.queue_break(b);
+                    }
+                }
+                eprintln!(
+                    "pile centre={centre} template={} breaks={chosen:?}",
+                    props.catalog.breakables[centre].template
+                );
+                for p in &props.catalog.breakables[centre].pieces {
+                    eprintln!("pile piece {:?} shell={} mass={}", p.primitive, p.shell, p.mass);
+                }
+                if drive > 0 {
+                    let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 60. * at[8 + k]);
+                    multi.place_at_rest(0, start, [-at[8], -at[9], -at[10]]).unwrap();
+                }
+                let mut go = [Controls::default(); 2];
+                go[0].throttle = 1.;
+                let mut stop = [Controls::default(); 2];
+                stop[0].brake = if drive > 0 { 1. } else { 0. };
+                let cars = multi.cars.len();
+                let ticks = env("GRID_PILE_TICKS", 3600);
+                let dump = env("GRID_PILE_DUMP", 600);
+                let (mut window, mut total) = (std::time::Duration::ZERO, std::time::Duration::ZERO);
+                let mut reached = [None; 3];
+                for tick in 0..ticks {
+                    let t = std::time::Instant::now();
+                    multi.tick(if tick < drive { &go } else { &stop }).unwrap();
+                    let e = t.elapsed();
+                    window += e;
+                    total += e;
+                    let pieces = multi.bodies().len() - cars;
+                    let asleep = multi.bodies()[cars..]
+                        .iter()
+                        .filter(|b| b[0x400 / 4] == contact_groups::ASLEEP)
+                        .count();
+                    for (k, share) in [0.5f32, 0.9, 1.].iter().enumerate() {
+                        if reached[k].is_none() && pieces > 0 && asleep as f32 >= share * pieces as f32 {
+                            reached[k] = Some(tick + 1);
+                        }
+                    }
+                    if (tick + 1) % 60 == 0 {
+                        let spin = multi.bodies()[cars..]
+                            .iter()
+                            .filter(|b| b[0x400 / 4] != contact_groups::ASLEEP)
+                            .map(|b| (0..3).map(|k| f(b, 0x210 + 4 * k).powi(2)).sum::<f32>().sqrt())
+                            .fold(0f32, f32::max);
+                        eprintln!(
+                            "pile t={} pieces={pieces} asleep={asleep} ms={:.3} max_w={spin:.3} moving={} used={} pool={}",
+                            (tick + 1) / 60,
+                            window.as_secs_f64() * 1e3 / 60.,
+                            multi.bodies()[cars..].iter().filter(|b| b[0x400 / 4] != contact_groups::ASLEEP && ((0..3).map(|k| f(b, 0x210 + 4 * k).powi(2)).sum::<f32>() >= 0.09 || (0..3).map(|k| f(b, 0x220 + 4 * k).powi(2)).sum::<f32>() >= 0.09)).count(),
+                            multi.world.groups.contacts.iter().filter(|c| **c != contact_groups::EMPTY_CONTACT).count(),
+                            multi.world.groups.contacts.len(),
+                        );
+                        window = std::time::Duration::ZERO;
+                    }
+                    // GRID_PILE_TRACE=body: that body every tick for 60 ticks after the dump.
+                    if let Some(t) = std::env::var("GRID_PILE_TRACE").ok().and_then(|v| v.parse::<usize>().ok())
+                        && tick + 1 >= dump
+                        && tick + 1 < dump + 60
+                    {
+                            let b = &multi.bodies()[t];
+                            let c0: [f32; 3] = std::array::from_fn(|k| f(b, 0x1c0 + 4 * k));
+                            let mut line = format!(
+                                "trace {} w={:.3},{:.3},{:.3} v={:.3},{:.3},{:.3} y={:.4} up={:.3},{:.3},{:.3} asleep={}",
+                                tick + 1,
+                                f(b, 0x210), f(b, 0x214), f(b, 0x218),
+                                f(b, 0x220), f(b, 0x224), f(b, 0x228),
+                                c0[1], f(b, 0x1e0), f(b, 0x1e4), f(b, 0x1e8),
+                                b[0x400 / 4] == contact_groups::ASLEEP
+                            );
+                            for c in &multi.world.groups.contacts {
+                                let (a, o) = (c[1] as usize, c[2] as usize);
+                                if a != t + 1 && o != t + 1 {
+                                    continue;
+                                }
+                                let g = |off: usize| f32::from_bits(c[off / 4]);
+                                line += &format!(
+                                    " | {}-{} r={:.2},{:.2} pen={:.4} f={:.2}",
+                                    a as i64 - 1, o as i64 - 1,
+                                    g(0x50) - c0[0], g(0x58) - c0[2], g(0x38), g(0x3c)
+                                );
+                            }
+                            eprintln!("{line}");
+                    }
+                    if tick + 1 == dump {
+                        let bodies = multi.bodies();
+                        for i in cars..bodies.len() {
+                            let b = &bodies[i];
+                            if b[0x400 / 4] == contact_groups::ASLEEP {
+                                if let Some(p) = multi.props.as_ref().and_then(|p| p.pieces.iter().find(|q| q.body == i).map(|q| (q, p))) {
+                                    eprintln!("asleep {i} pos={:.3},{:.3},{:.3} {:?}", f(b, 0x1c0), f(b, 0x1c4), f(b, 0x1c8), p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive);
+                                }
+                                continue;
+                            }
+                            let w: f32 = (0..3).map(|k| f(b, 0x210 + 4 * k).powi(2)).sum::<f32>().sqrt();
+                            let v: f32 = (0..3).map(|k| f(b, 0x220 + 4 * k).powi(2)).sum::<f32>().sqrt();
+                            let axis = [f(b, 0x1d0 + 16), f(b, 0x1d0 + 20), f(b, 0x1d0 + 24)];
+                            eprintln!(
+                                "body {i} w={w:.3} v={v:.3} timer={:.2} up={:.2},{:.2},{:.2} wvec={:.2},{:.2},{:.2} pos={:.3},{:.3},{:.3}",
+                                f(b, 0x3a0),
+                                axis[0],
+                                axis[1],
+                                axis[2],
+                                f(b, 0x210),
+                                f(b, 0x214),
+                                f(b, 0x218),
+                                f(b, 0x1c0),
+                                f(b, 0x1c4),
+                                f(b, 0x1c8)
+                            );
+                            if let Some(p) = multi.props.as_ref().and_then(|p| p.pieces.iter().find(|q| q.body == i).map(|q| (q, p))) {
+                                eprintln!("  piece {:?} breakable {}", p.1.catalog.breakables[p.0.breakable].pieces[p.0.spec].primitive, p.0.breakable);
+                            }
+                            for c in &multi.world.groups.contacts {
+                                let (a, o) = (c[1] as usize, c[2] as usize);
+                                if a != i + 1 && o != i + 1 {
+                                    continue;
+                                }
+                                let g = |off: usize| f32::from_bits(c[off / 4]);
+                                eprintln!(
+                                    "  contact a={} b={} n={:.3},{:.3},{:.3} pen={:.4} p={:.2},{:.2},{:.2} f={:.2} ca={:.3},{:.3},{:.3}",
+                                    a as i64 - 1,
+                                    o as i64 - 1,
+                                    g(0x60),
+                                    g(0x64),
+                                    g(0x68),
+                                    g(0x38),
+                                    g(0x50),
+                                    g(0x54),
+                                    g(0x58),
+                                    g(0x3c),
+                                    f(&bodies[a - 1], 0x1c0),
+                                    f(&bodies[a - 1], 0x1c4),
+                                    f(&bodies[a - 1], 0x1c8)
+                                );
+                            }
+                        }
+                    }
+                }
+                eprintln!(
+                    "pile settle half={:?} ninety={:?} all={:?} mean_ms={:.3}",
+                    reached[0],
+                    reached[1],
+                    reached[2],
+                    total.as_secs_f64() * 1e3 / ticks as f64
+                );
+                // The default pile at rest sleeps whole within 15 s (4.9 s at F549;
+                // before, with the prism face-axis pairs, 31 of 330 after 60 s).
+                if drive == 0 && std::env::var_os("GRID_PILE_CENTRE").is_none() {
+                    assert!(reached[2].is_some_and(|t| t <= 900), "pile awake: {reached:?}");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// Sleeping cost, paired in one process: the Nürburgring drift circuit
     /// with its tyre stacks and armco broken at rest (the owner's phone
     /// field of 21 October, about 220 pieces), settled, then cloned; one
@@ -2019,7 +2226,9 @@ mod tests {
     /// reports of 22 October, Nürburgring tyrestack_white 1237 and Donington
     /// tyre_wall 167); after the pile has settled, a clone with every piece
     /// woken is the reference: a piece that falls there but stays put here
-    /// was hanging (asleep or parked in the air).
+    /// was hanging. Only asleep pieces count: a piece whose island parked
+    /// in flight, beyond 50 m of the player, stays put until the player comes
+    /// back (B7B850 status 2, AD6480; FIDELITY_BACKLOG row 91).
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
     #[allow(clippy::needless_range_loop)]
@@ -2169,7 +2378,8 @@ mod tests {
                         hanging.len(),
                         &hanging[..hanging.len().min(10)]
                     );
-                    assert!(hanging.is_empty(), "wall {wall}: {} pieces hanging", hanging.len());
+                    let asleep_hanging = hanging.iter().filter(|h| !h.2).count();
+                    assert_eq!(asleep_hanging, 0, "wall {wall}: {asleep_hanging} asleep pieces hanging");
                 }
             })
             .unwrap()
@@ -2356,7 +2566,9 @@ mod tests {
                     .max_by(|a, b| along(*a).total_cmp(&along(*b)))
                     .unwrap();
                 eprintln!("target {:.1} m out", along(target));
-                let side: [f32; 3] = std::array::from_fn(|k| target[k] + 15. * z[k]);
+                // On the first car's approach line, which it cleared (a start
+                // beside the wall can catch on its remains).
+                let side: [f32; 3] = std::array::from_fn(|k| centre[k] + (along(target) + 15.) * z[k]);
 
                 let away: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k] + 6. * x[k]);
                 multi.place_at_rest(0, away, z.map(|v| -v)).unwrap();

@@ -116,8 +116,11 @@ meets the new pieces as ordinary dynamic bodies.
 `linearStationary 0.3`, `angularStationary 0.3`, `turnOffTime 1`, wake force/torque 0,
 `gravityScale 1`, max velocities `+inf`. Shape props: sCardboard `PLAS d70`,
 sRubber/sPlastic/sDeformableRubber `PLAS d700`, sArmco `SIGN d2610`.
-[I] `d` = density in kg/m^3; mass = density x shape volume, inertia of the solid
-box/cylinder. Boards 4.8-4.9 kg, tyres 17-56 kg, cushion 996 kg, tyre-wall block 428 kg.
+[I] `d` = density in kg/m^3. [D, F549] The body's mass is density x the volume of the
+shape grown by its shell, with that shape's solid inertia (B11520 over the shape vtables;
+BOX_CONTACTS.md "Cylinder pairs and piece mass"). Before F549 the port used the bare
+template volume (boards 4.8-4.9 kg, tyres 17-56 kg, cushion 996 kg, tyre-wall block
+428 kg); with the shell a board weighs 7.0 kg and a Nürburgring tyre 26.7 kg.
 
 ## Lifetime
 
@@ -250,17 +253,17 @@ and added subentities and constraint count), `grid_tools::dynamic_props`
   chain (the world double-buffers its active heads/tails by selector world[5]) with
   its own dynamic shape token. Explosion velocity `e (v.n) n` with the 0x7CDCD0 scatter
   is ported but all ported classes have explosion 0, so pieces start at rest. [D]
-- **Bodies.** Ported B11F40 constructor with mass = density x volume, solid
-  box/cylinder inertia, rbDefault damping/drag/gravity scale/stationary values in the
-  0x7B8F40 field order. turnOffTime 1 s since F541 (FLT_MAX before; BODY_SLEEPING.md).
-  [I mass formula]
+- **Bodies.** Ported B11F40 constructor with the mass and solid inertia of the shape grown
+  by its shell (F549, [D] B3D480/B40880, B46460/B46C90, B4A5F0/B4AAB0), rbDefault
+  damping/drag/gravity scale/stationary values in the 0x7B8F40 field order. turnOffTime
+  1 s since F541 (FLT_MAX before; BODY_SLEEPING.md).
 - **Contacts.** Piece vs track, boundary and enabled props through the same cold body
   query as the car (piece margin = shape shell 0.02); car vs piece through the
-  car-to-car hull path; piece vs piece through an authored separating-axis generator
-  (face axes of both hulls; the triangle-soup pair query lost stacked tyres once they
-  overlapped beyond the margin). Cylinders are 12-sided prisms (F465: only in the
-  piece-pair test; the world, cars and road see round kind-5/3 shapes, BOX_CONTACTS.md
-  "Round pieces"). Authored budgets: 8
+  car-to-car hull path; a cylinder piece against a cylinder or box piece through AE8AD0
+  and AE2FA0's cylinder handlers (F549, BOX_CONTACTS.md "Cylinder pairs and piece mass");
+  box against box through an authored separating-axis generator (face axes of both hulls;
+  the triangle-soup pair query lost stacked pieces once they overlapped beyond the
+  margin). Authored budgets: 8
   track and 4 pair contacts per piece, pool +12 slots per piece up to 256. [I]
 - **Single car.** `vehicle_world` now admits further dynamic bodies after the car
   (shapes after the statics, deformation registration slot None, body events skip

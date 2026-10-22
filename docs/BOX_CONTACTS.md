@@ -348,12 +348,86 @@ Port:
 - A car against a round piece is AE8AD0 with the piece as the static side
   (`BodyGeometry::car_contacts_round`, `round_contacts::contacts`). Box pieces keep the
   hull-triangle path ("Tried and not adopted" above).
-- Not ported: two round shapes (a cylinder piece on a cone, or piece against piece) give
-  AE2FA0's fallback contact only (AEBC00 disk/disk and the segment pairs are not ported);
-  piece against piece stays the AUTHORED face-axis test over the 12-sided prism or, for a
+- Not ported (until F549, below): two round shapes gave AE2FA0's fallback contact only, and
+  piece against piece stayed the AUTHORED face-axis test over the 12-sided prism or, for a
   sphere, an inscribed icosahedron. The continuous stage's radius for a round body is its
   smaller half extent [I]. The lost wheel (9A8BB0) keeps its prism (FIDELITY_BACKLOG row 24).
-- `dynamic_props`: sphere pieces are accepted (`Primitive::Sphere`, mass from 0x7DB060,
-  inertia 0.4 m r² [I]). No route's catalog changes: the templates with sphere or cylinder
-  pieces that stay static (Haruna's poles and signs, cones, foam posts, drift flags) have more
-  than one shape behaviour per entity, which `Catalog::read` refuses (row 16 work).
+- `dynamic_props`: sphere pieces are accepted (`Primitive::Sphere`). No route's catalog
+  changes: the templates with sphere or cylinder pieces that stay static (Haruna's poles and
+  signs, cones, foam posts, drift flags) have more than one shape behaviour per entity, which
+  `Catalog::read` refuses (row 16 work).
+
+### Cylinder pairs and piece mass (F549)
+
+22 October 2026, Claude Code. Settled tyre piles never slept: on the Nürburgring
+tyrewall_black_yok pile (15 walls broken at rest, 330 pieces) 37 pieces still moved after
+120 s and only 70 were asleep. The movers were tyres lying on the walls' box blocks
+(1.41 x 0.94 x 0.46 m) or on other tyres, rocking at about 0.5 rad/s with the sign of w
+changing almost every tick. The AUTHORED face-axis test took the four deepest prism vertices,
+which cluster on one side of the cap, so the tyre pivoted on a 0.1 x 0.3 m patch. Decompiles
+in this worktree's private `local/robust/decomp/r20i`, `r20j` and `local/re-cache/`.
+
+**The original [D].**
+
+- The pair table 0xD3AD70 (`typeB + 4 typeA`, function and swap flag; read from the image):
+
+  | A \ B | 0 point | 1 polygon | 2 disk | 3 side |
+  |---|---|---|---|---|
+  | 0 | none | AE2C90 swap | AE2E80 swap | none |
+  | 1 | AE2C90 | AEB630 | AEB8D0 swap | AE2710 swap |
+  | 2 | AE2E80 | AEB8D0 | AEBC00 | none |
+  | 3 | none | AE2710 | none | none |
+
+- AE2FA0 before dispatch: a side opposite a side turns B's side into its generator (AE2F10);
+  a side opposite a reference turns into its generator. Of two references, a static shape
+  (shape +0xD8, its body, empty) keeps its flag; with both bodies dynamic the one whose
+  normal is less aligned with n loses it (B keeps it on a tie; the absolute dot products at
+  0xAE33E1). Without a reference the pair gets the fallback contact.
+- AEBC00 (disk/disk) as AE2FA0 leaves it, with one reference disk: the other disk becomes its
+  rim triangle (AE2210; towards the common normal for B, away from it for A) and AEB8D0 runs
+  with the reference disk first. Its circle-circle branch needs both flags equal, which
+  AE2FA0 never passes.
+- Disk against side has no handler: the fallback contact.
+- Body mass and inertia come from the shapes (B11520: vtable +8 mass for a density source,
+  +0xC inertia; shape vtables 0xD3E7B4 box, 0xD3E80C cylinder, 0xD3E868 sphere). Every kind
+  measures the shape grown by its shell (+0x220):
+  - box B3D480 `8 (hx+s)(hy+s)(hz+s) d`, B40880 `m/12 ((2(hy+s))² + (2(hz+s))²)` per axis;
+  - cylinder B46460 `(r+s)² 2(h+s) π d`, B46C90 side `m ((2(h+s))²/12 + (r+s)²/4)`, axis
+    `m (r+s)²/2`;
+  - sphere B4A5F0 `(r+s)³ 4.18879 d`, B4AAB0 `0.4 m (r+s)²`.
+
+  The template volumes 0x7DAFC0/0x7DB060 are not the body's mass. A Nürburgring tyre
+  (r 0.236, height 0.145, shell 0.02, d 700) weighs 26.7 kg, not 17.7 kg.
+
+**Port.**
+
+- `round_contacts::pair_contacts` (both bodies dynamic) and `contacts` (static shape) share
+  `cylinder_pair`. It runs the dispatch above through `cylinder_polygon`, with the reference
+  cylinder as the cylinder and the other feature (generator, B47590 segment or rim triangle)
+  as the polygon. `cylinder_polygon` gained AE2FA0's segment rule for a two-vertex polygon
+  against a disk.
+- `dynamic_props`: a cylinder piece against a cylinder piece uses `pair_contacts`; against a
+  box piece, `box_contacts::contacts` with the cylinder moving and the box (half extents,
+  shell) as the B3D890 side. The record's first body is the cylinder, whose normal it is.
+  Box against box and spheres keep the AUTHORED face-axis test.
+- `mass_properties` follows B3D480/B40880, B46460/B46C90 and B4A5F0/B4AAB0, with the shell.
+- Remaining [I]: in a box–cylinder pair `box_contacts` lets the box keep the reference flag
+  as a static shape would, where the original compares alignment; the pair order (which piece
+  is A) follows the port's piece order (B18300's pair order not read); the template
+  dimensions are unscaled (the piece shape descriptor's scale rule not read).
+
+**Measurements** [V] (release, `tyre_pile_settle_probe`, 60 s simulated, parking off; one
+executable with the old pair test and template masses behind temporary switches, removed
+before the commit; shared PC, so only same-run figures compare). Evidence: `local/r30/m/`.
+
+| Nürburgring tyrewall_black_yok | before | after |
+|---|---:|---:|
+| 15 walls broken at rest (330 pieces): all asleep | never (31 asleep, 57 moving at 60 s) | tick 296 (4.9 s) |
+| at rest: ms per tick at 60 s | 6.70 | 0.28 |
+| at rest: mean ms per tick over 60 s | 6.86 | 0.55 |
+| player through wall 1745 (22 pieces): all asleep | tick 1875 (31 s) | tick 547 (9.1 s) |
+| through wall 1745: mean ms per tick | 0.37 | 0.30 |
+
+Each change alone, at rest: the AE2FA0 cylinder pairs without the box pairs left 20 pieces
+moving after 120 s; the box pairs and pairs without the shell mass slept whole at tick 2026
+(34 s). Both are needed for the 4.9 s.

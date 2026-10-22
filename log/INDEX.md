@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F551](F0551.md) | 2026-10-22 | Tyre piles sleep: original cylinder pair contacts and shell masses |
 | [F550](F0550.md) | 2026-10-22 | Playable 3bc513002bff with the mobile preset (F549), portable copy and APKs 32a08aa8e4a4 |
 | [F549](F0549.md) | 2026-10-22 | Mobile preset: Android default for 60 FPS (720 rows, one shadow cascade, small props culled, shorter ground cover, more compute threads); perf_test … |
 | [F548](F0548.md) | 2026-10-22 | Floating tyre report: not reproduced, diagnostics |

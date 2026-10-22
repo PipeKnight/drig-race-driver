@@ -108,7 +108,10 @@ copies tick alternately (env `GRID_SLEEP_AB_KINDS`, `_PIECES`, `_SETTLE`, `_TICK
 
 An armco break takes its linked run with it (hundreds of pieces in one break), so the armco piles
 start at 755. Armco sections settle within seconds; tyres roll and take 30–50 s (39 of 228 asleep
-after 600 ticks, 157 after 3000).
+after 600 ticks, 157 after 3000). Most of that was not rolling: tyres on box blocks and on other
+tyres rocked on the AUTHORED prism pair contacts and held their islands awake. With the original's
+cylinder pairs and shell masses (F549, BOX_CONTACTS.md "Cylinder pairs and piece mass") a
+330-piece tyrewall_black_yok pile broken at rest sleeps whole in 4.9 s.
 
 **What an asleep piece still costs.** A sample profile of the sleeping copy alone (987 pieces, 897
 asleep; `tools/sample_profile.py`, `GRID_THREADS=1`) puts about half of the tick in memory copies
