@@ -150,7 +150,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [prepare_deformation_initialization.py](prepare_deformation_initialization.py) | Prepare a bounded source-derived player candidate for whole original setup. | [DEFORMATION_SOURCE_INITIALIZATION](../docs/DEFORMATION_SOURCE_INITIALIZATION.md) |
 | [prepare_deformation_settle.py](prepare_deformation_settle.py) | Execute isolated original settling against a bounded retained node pool. |  |
 | [prepare_deformed_wheel_geometry.py](prepare_deformed_wheel_geometry.py) | Run whole wheel geometry with retained grids and explicit policy provenance. | [DEFORMATION_GRID](../docs/DEFORMATION_GRID.md) |
-| [prepare_dlaa_preset_probe.py](prepare_dlaa_preset_probe.py) | Prepare a private pinned dlss_wgpu K/L hint probe; never edit Cargo's cache. | [DLAA_PRESET_RESEARCH](../docs/DLAA_PRESET_RESEARCH.md) |
+| [prepare_dlaa_preset_probe.py](prepare_dlaa_preset_probe.py) | Prepare a private pinned dlss_wgpu hint/frame-time probe; never edit Cargo's cache. | [DLAA_PRESET_RESEARCH](../docs/DLAA_PRESET_RESEARCH.md) |
 | [prepare_surface_edge_candidate.py](prepare_surface_edge_candidate.py) | Prepare an audited curb/asphalt RGB transition; source alpha stays separate. | [CURB_SURFACE_SEAMS](../docs/CURB_SURFACE_SEAMS.md) |
 | [prepare_texture_candidate.py](prepare_texture_candidate.py) | Package an opaque diffuse upscale privately, preserving mean linear colour. | [TEXTURE_OVERRIDES](../docs/TEXTURE_OVERRIDES.md) |
 | [re/GhidraMaster.ps1](re/GhidraMaster.ps1) | Dot-source from tools/run_ghidra_*.ps1: runs Ghidra headless scripts on the shared master project (<main checkout>/local/ghidra-master, program grid-unpacked.exe) … | [re/README](../docs/re/README.md) |
@@ -561,6 +561,7 @@ description is the first header found. Rows with a single file are validators wi
 | source_boundary_plans | Read-only provenance and complete-file replay audit of scheduled driving. | [audit_source_boundary_plans.py](audit_source_boundary_plans.py) |  |
 | source_boundary_plans | Scheduled source driving regressions; no whole-original-frame oracle. | [validate_source_boundary_plans.py](validate_source_boundary_plans.py) | [SCHEDULED_DONINGTON_CONTACTS](../docs/SCHEDULED_DONINGTON_CONTACTS.md) |
 | source_drive | Source-only startup, retained original world and independent driving semantics. | [validate_source_drive.py](validate_source_drive.py) |  |
+| test_temporal_audit | Synthetic reverse-Z visibility controls for analyze_temporal_audit history classification. | [test_temporal_audit.py](test_temporal_audit.py) | [TEMPORAL_COLOUR_AUDIT](../docs/TEMPORAL_COLOUR_AUDIT.md) |
 
 ## Candidates to retire
 

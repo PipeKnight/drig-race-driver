@@ -450,6 +450,10 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G212](G0212.md) | 2026-10-22 | Optional DLSS frame-time diagnostic |
+| [G211](G0211.md) | 2026-10-22 | Depth-aware history classification around the moving car |
+| [G210](G0210.md) | 2026-10-22 | Owner rejects asphalt blur; return to temporal boundary diagnosis |
+| [G209](G0209.md) | 2026-10-22 | Identify final-hairpin floating road strips from source geometry |
 | [G208](G0208.md) | 2026-10-21 | Native4K asphalt pilot review and separate playable comparison |
 | [G207](G0207.md) | 2026-10-21 | Speed-based asphalt RGB filtering pilot with protected masks and markings |
 | [G206](G0206.md) | 2026-10-21 | Graphics worktree migration and shared surface parameter integration |

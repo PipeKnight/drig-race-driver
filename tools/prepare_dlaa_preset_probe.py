@@ -1,4 +1,4 @@
-"""Prepare a private pinned dlss_wgpu K/L hint probe; never edit Cargo's cache.
+"""Prepare a private pinned dlss_wgpu hint/frame-time probe; never edit Cargo's cache.
 
 Build with the generated per-command --config, --locked and --offline. This is a
 research copy, not a renderer default or proof of the active neural preset.
@@ -33,6 +33,37 @@ INJECTION = '''        // GRID private diagnostic: supported native-DLAA hint on
 '''
 
 
+FRAME_TIME_EXPRESSION = """*{
+                static VALUE: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+                VALUE.get_or_init(|| {
+                    match std::env::var("GRID_DLSS_FRAME_TIME_MS") {
+                        Ok(raw) => {
+                            let value: f32 = raw.parse().expect("GRID_DLSS_FRAME_TIME_MS must be a number");
+                            assert!(value.is_finite() && (0.0..=250.0).contains(&value),
+                                "GRID_DLSS_FRAME_TIME_MS must be finite in 0..=250");
+                            eprintln!("grid_dlss_frame_time_ms requested={value} scope=private-diagnostic effect_verified=false");
+                            value
+                        }
+                        Err(std::env::VarError::NotPresent) => 0.0,
+                        Err(error) => panic!("invalid GRID_DLSS_FRAME_TIME_MS: {error}"),
+                    }
+                })
+            }"""
+
+
+def patch_source(text, frame_time=False):
+    anchor = "        let locked_sdk = sdk.lock().unwrap();\n"
+    if text.count(anchor) != 1:
+        raise ValueError("Expected exactly one native context-creation anchor")
+    patched = text.replace(anchor, anchor + INJECTION)
+    if frame_time:
+        field = "InFrameTimeDeltaInMsec: 0.0,"
+        if patched.count(field) != 1:
+            raise ValueError("Expected exactly one frame-time field")
+        patched = patched.replace(field, "InFrameTimeDeltaInMsec: " + FRAME_TIME_EXPRESSION + ",")
+    return patched
+
+
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -41,6 +72,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("upstream", type=Path, help="installed dlss_wgpu-4.0.0 crate directory")
     parser.add_argument("output", type=Path, help="new directory under this checkout's ignored local/")
+    parser.add_argument("--frame-time", action="store_true", help="optional process-start GRID_DLSS_FRAME_TIME_MS diagnostic; absent keeps upstream zero")
     args = parser.parse_args()
     source = args.upstream.resolve(strict=True)
     output = args.output.resolve()
@@ -54,11 +86,11 @@ def main():
     for license_name in ("LICENSE-MIT", "LICENSE-APACHE"):
         if not (source / license_name).is_file():
             parser.error("Upstream licenses must be preserved")
-    anchor = "        let locked_sdk = sdk.lock().unwrap();\n"
     text = original.read_text(encoding="utf-8")
-    if text.count(anchor) != 1:
-        parser.error("Expected exactly one native context-creation anchor")
-    patched = text.replace(anchor, anchor + INJECTION)
+    try:
+        patched = patch_source(text, args.frame_time)
+    except ValueError as error:
+        parser.error(str(error))
     output.mkdir()
     target = output / "dlss_wgpu"
     shutil.copytree(source, target)
@@ -73,7 +105,8 @@ def main():
                       patched_sha256=sha(target / "src/super_resolution.rs"),
                       patch_sha256=sha(output / "wrapper.patch"),
                       tool_sha256=sha(Path(__file__)),
-                      scope="K/L native-DLAA hint roundtrip only; active model not verified; no default change")
+                      frame_time_probe=args.frame_time,
+                      scope="Private hint/frame-time inputs; active model/effect not verified; absent environment preserves upstream values")
     (output / "provenance.json").write_text(json.dumps(provenance, indent=2), encoding="utf-8")
     print(json.dumps(provenance, indent=2))
 
