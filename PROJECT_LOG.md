@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F550](log/F0550.md) | 2026-10-22 | Playable 3bc513002bff with the mobile preset (F549), portable copy and APKs 32a08aa8e4a4 |
 | [F549](log/F0549.md) | 2026-10-22 | Mobile preset: Android default for 60 FPS (720 rows, one shadow cascade, small props culled, shorter ground cover, more compute threads); perf_test … |
 | [F548](log/F0548.md) | 2026-10-22 | Floating tyre report: not reproduced, diagnostics |
 | [F547](log/F0547.md) | 2026-10-21 | Playable 945575e57651 with the cheaper tick and parking (F546), portable copy and APKs 6087fbcafa30 |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F492](log/F0492.md) | 2026-10-20 | Stereo panning of the car sounds |
 | [F491](log/F0491.md) | 2026-10-19 | Playable 293914533e9c with F485–F490 and Codex's local graphics commits |
 | [F490](log/F0490.md) | 2026-10-20 | Collision mix: silent sweeteners, their cooldown, roof test without the offset; opponent engine loudness diagnosed |
-| [F489](log/F0489.md) | 2026-10-19 | Soak seeds 39 and 54 traced: a Spa data gap and a car pressing a tyre through the Le Mans road |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
