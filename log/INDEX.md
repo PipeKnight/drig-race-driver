@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G221](G0221.md) | 2026-10-22 | Check partial road filtering at native4K and virtual300 |
 | [G220](G0220.md) | 2026-10-22 | Separate road RGB filter blend strength from its mip offset |
 | [G219](G0219.md) | 2026-10-22 | Evaluate L detail retention with modest RGB footprint filtering |
 | [G218](G0218.md) | 2026-10-22 | Publish decal comparison and validate the complete Donington lap |
