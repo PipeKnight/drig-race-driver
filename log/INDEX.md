@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G232](G0232.md) | 2026-10-23 | Refocus rear window outline on stock reflection baseline |
 | [G231](G0231.md) | 2026-10-23 | Owner rejects uniform glass haze; audit response assumptions |
 | [G230](G0230.md) | 2026-10-23 | Compare glass reflections under cloudy and mostly clear source skies |
 | [G229](G0229.md) | 2026-10-23 | Temporary awake lease and independent graphics research delegation |
