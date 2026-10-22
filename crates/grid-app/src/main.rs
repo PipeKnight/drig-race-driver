@@ -1945,6 +1945,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 graphics.asphalt_soften = value;
             }
+            "--motion-shutter" => {
+                let value: f32 = args.next().ok_or("--motion-shutter needs 0..0.5")?.parse()?;
+                if !value.is_finite() || !(0.0..=0.5).contains(&value) {
+                    return Err("motion shutter must be finite 0..0.5".into());
+                }
+                graphics.motion_shutter = value;
+            }
             "--asphalt-filter-strength" => {
                 let value: f32 = args.next().ok_or("--asphalt-filter-strength needs 0..1")?.parse()?;
                 if !value.is_finite() || !(0.0..=1.0).contains(&value) {
@@ -2029,6 +2036,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
+                println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
                 println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
                 println!(
@@ -2117,6 +2125,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if graphics.post_saturation_override.is_some() && (!graphics.enhanced() || graphics.track_grade) {
         return Err("--post-saturation requires enhanced authored grade; do not combine with --grade track".into());
+    }
+    if graphics.motion_shutter > 0. && (!graphics.enhanced() || !drive || collision) {
+        return Err("--motion-shutter requires enhanced non-collision driving".into());
     }
     if graphics.anti_aliasing == 3 && !graphics.enhanced() {
         return Err("DLAA is an experimental enhanced-graphics mode".into());

@@ -13,7 +13,7 @@ use bevy::{
         light_consts::lux,
     },
     pbr::{AtmosphereSettings, DistanceFog, FogFalloff, ScreenSpaceAmbientOcclusion, ScreenSpaceReflections},
-    post_process::bloom::Bloom,
+    post_process::{bloom::Bloom, motion_blur::MotionBlur},
     prelude::*,
     render::view::{ColorGrading, ColorGradingGlobal},
 };
@@ -65,6 +65,8 @@ pub struct Settings {
     pub asphalt_soften: f32,
     /// Blend original and filtered road RGB;1 preserves the existing mip pilot.
     pub asphalt_filter_strength: f32,
+    /// Optional Bevy directional blur; fraction of the rendered frame, not milliseconds.
+    pub motion_shutter: f32,
     /// Bounded scripted DLAA diagnostic only; never a playable default.
     pub dlaa_reset_every_frame: bool,
     pub thin_motion_antenna: bool,
@@ -152,6 +154,7 @@ impl Default for Settings {
             surface_view_mip_bias: false,
             asphalt_soften: 0.,
             asphalt_filter_strength: 1.,
+            motion_shutter: 0.,
             dlaa_reset_every_frame: false,
             thin_motion_antenna: false,
             ground_edge_pilot: false,
@@ -425,6 +428,13 @@ pub fn configure(
         bevy::core_pipeline::prepass::MotionVectorPrepass,
         ShadowFilteringMethod::Gaussian,
     ));
+    if settings.motion_shutter > 0. {
+        commands.entity(camera).insert(MotionBlur {
+            shutter_angle: settings.motion_shutter,
+            samples: 8,
+        });
+    }
+    println!("graphics_motion_blur enabled={} shutter_angle={} samples=8 units=fraction-of-rendered-frame scope=main-view default=off", settings.motion_shutter > 0., settings.motion_shutter);
     if settings.ambient_occlusion {
         commands.entity(camera).insert(ScreenSpaceAmbientOcclusion::default());
     }
