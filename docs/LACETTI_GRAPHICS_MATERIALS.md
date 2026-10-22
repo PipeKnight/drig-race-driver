@@ -357,3 +357,28 @@ and accepted owner executable are unchanged. The runner's Pillow import failed a
 six successful renders; composing the saved outputs with bundled Python/Pillow succeeded
 without rerendering. Preserve both the failed runner result and separate composition/review
 results. Never deduplicate or recursively edit through the asset overlay's links.
+
+### Rear-outline repeat control during the reflection build (G234)
+
+An intentional repeat of frozen stock/off driving matches physics,30frame manifests and
+sampled motion/depth. In the selected rear-window ROI, frames0/29 differ by mean.0220/.0193
+RGB byte from the first off run (max3/4), compared with mean3.7455/4.3092 and max99/101 for
+depth-only. Thus the local window response exceeds the measured repeat noise. This is not
+universal frame equivalence: small background variation and sparse larger outliers remain.
+Private evidence: `local/graphics/window-outline-repeat01/repeat-noise-review.json` and
+`local/graphics/window-outline01/difference-regions.json`. No depth fix is promoted yet.
+
+The already saved original window fragment also couples output opacity to reflection,
+highlights and GhostCar controls. A conditional dust-free/no-highlight check can raise a
+clear-pane alpha from165/255 to.823529 with illustrative factor.5 and assumed controls1;
+these are not live uniforms or a material correction. Static GhostCar initialization from
+the existing lamp research is insufficient to choose runtime opacity. Keep source atlas
+and border unchanged while identifying the actual missing response.
+
+The subsequent neutral Control moving test isolates the new pipeline/proxy: selected
+Off-Control window mean differences are.02231/.01954byte(max6/4), while Control-Depth is
+3.74409/4.30970(max99/101). Physics and30frame manifests agree. Thus the observed local
+change is associated with the depth-write state rather than the neutral wrapper. This does
+not identify the precise rejected fragment or downstream consumer. A separate22446ray CPU
+survey of160glass triangles at the saved static rear camera finds no pane-order reversals
+or same-pane multiple intersections. Do not infer a six-pane sorting bug from these images.
