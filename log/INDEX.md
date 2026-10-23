@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G249](G0249.md) | 2026-10-23 | Trace BMW material sorting properties into pre-compose queues |
 | [G248](G0248.md) | 2026-10-23 | Separate skid queue ordering from raster depth bias |
 | [G247](G0247.md) | 2026-10-23 | Reduced source smoke pass and world composition research |
 | [G246](G0246.md) | 2026-10-23 | Per-sprite smoke transparency ordering diagnostic |

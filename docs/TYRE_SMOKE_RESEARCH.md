@@ -479,8 +479,8 @@ The original has an explicit reduced smoke/depth/composition path; generic OIT o
 forcing every smoke draw last would be authored alternatives, not recovered parity.
 The following remain open:
 
-1. Initial material/layer classification into world descriptor groups, specifically
-   `car_glass`/lens-cover membership relative to final compose.
+1. Active selected-material/quality overrides for the static BMW collector route in
+   section 7.6, including actual glass/cover membership in a live composed frame.
 2. `VelocityDepthPlugin` production and the meaning/content of its two accessors,
    including vehicle transparent-depth contributions.
 3. Backend MRT clear semantics, actual target formats/dimensions and active quality
@@ -493,3 +493,94 @@ Private source evidence is indexed in
 selected purchased-state metadata is in `smoke-source-pass-order-shadergroups.json`.
 Shared pseudocode caches for the four new decompiles are under the main checkout's
 `local/re-cache/`. None of that proprietary raw evidence belongs in public source.
+
+
+### 7.6 BMW material-to-collector bridge (static follow-up, 23 October 2026)
+
+The property and paired-queue part of section 7.5(1) is now traced statically. This
+follow-up used one further shared-master read-only decompile, `0x9CB5B0`, and bounded
+assembly/type/property checks. No original live render trace was obtained. Names
+assigned to recovered routines remain inferred; raw pseudocode stays private.
+
+**Collector contexts.** `0x9CB5B0` collects car/model scene entries, beyond the
+previously documented dangling-bumper branch. It creates five-word contexts: a
+view-related pointer, two output-list pointers, an excluded-node array and its count.
+For the observed `0x5B6E00` world call, the selected index uses descriptor lists
+`+0x58/+0xF8`, other indices use `+0x40/+0xE0`, and a special nonselected path uses
+`+0x130/+0xE0`. Selection compares incoming indices with manager `+0x1EA8`, with a
+fallback active-slot search; it is not independently identified here as the player.
+The special path checks per-object `+0x3A34`; other model/damage branches also exist.
+
+Entry helper `0xA17430` reads `[[entry+0x3C]+0x3C]+0x4C`: nonzero selects context
+`+0x08`, zero selects `+0x04`. `0xA17550` uses the same selector while filtering
+subtrees/excluded entries. The collector is passed implicitly in ECX; reconstructed
+call syntax can omit it, so assembly was used to verify the output pointers.
+
+**The property owner is now identified.** Static type/property evidence establishes
+this registered reference chain:
+
+`render instance +0x3C -> SHADERINSTANCE +0x3C -> SHADERGROUP +0x4C`
+
+| Link | Concrete static evidence |
+|---|---|
+| Render-instance shader reference | Attribute schema maps `shader` to ID storage `0xF5F674`; `0xBA3980` links it into instance `+0x3C` through `0xB85520`, whose reference type is SHADERINSTANCE. |
+| Shader-instance group reference | Registration names SHADERINSTANCE/type `0xF5F298`; schema maps `shaderGroup` to `0xF5F294`; reader at `0xB9CFA0` links it into `+0x3C` through `0xB9D430`, whose reference type is SHADERGROUP. |
+| Group type and field | Registration at `0xC7F360` names SHADERGROUP/type `0xF5F5D8`, with factory `0xBA2E00`/constructor `0xBA16A0`. Its vtable installs reader `0xBA2250` and writer `0xBA1770`. |
+| Sorting attribute | Schema row `0xE547BC` binds `instancesRequireSorting` to ID storage `0xF5F5B0`; reader `0xBA2250` normalizes that numeric value and stores byte `+0x4C`. The writer emits the reverse mapping. |
+| Priority attribute | Schema `0xE547C8` binds `defaultRenderSortPriority` to `0xF5F5AC`; the same reader stores its saved value at group `+0x50`. |
+
+Thus this byte requests **instance sorting**; it must not be renamed a universal
+alpha-blend flag. Saved `skidmarks`, for example, blends alpha but has this flag zero.
+
+**The distinct template fields have a real copy bridge.** The `<nefx>` loader
+`0x901740` parses `requiresSorting` into template byte `+0x114` and shifts its priority
+integer left 28 bits into `+0x118`. Inside `0x900940`, instructions
+`0x90132B..0x901340` copy those values into a typed SHADERGROUP target's `+0x4C/+0x50`.
+The target comes from typed group lookup/cast, not an assumed matching offset. This
+proves the translation exists; it does not prove that this template path runs last,
+or at all, for every saved group in the selected original frame.
+
+**Saved BMW families and group values.** A bounded read-only survey of purchased
+`cars/bmw/bmw_highLOD.pssg` and `bmw_livery.pssg` finds these exact instance references:
+
+| BMW instance ID | Saved shaderGroup reference | Corresponding family name |
+|---|---|---|
+| Window Glass | `#carglass.fx` | `carglass` |
+| Head Lights Glass | `#car_light_glass.fx` | `car_light_glass` |
+| Rear Lights Glass | `#car_light_glass.fx` | `car_light_glass` |
+
+The last column removes the literal `.fx` suffix for comparison; it is not a live
+compiler alias/variant trace. Independently, the already recorded purchased
+shaderpack metadata saves:
+
+| Group | instancesRequireSorting | defaultRenderSortPriority |
+|---|---:|---:|
+| carglass | 1 | `0x70000000` |
+| car_light_glass | 1 | `0x70000000` |
+| pfx_half_smoke | 1 | `0x80000000` |
+| skidmarks | 0 | `0x80000000` |
+
+These are saved binary attributes, separate from the NEFX integer-shift/copy path.
+The BMW instances also save `renderSortPriority` as raw `00000000` (numeric zero).
+That word is not absence; its inheritance/override meaning was not recovered here.
+Do not silently substitute the group priority for that per-instance value.
+
+**Position relative to smoke.** A sorting-enabled car entry takes the second queue
+in its context. For the world call above this is `+0xF8` (selected) or `+0xE0`
+(other/special), mapped by `0x62E220` to node-table `+0x54/+0x58`. Both families are
+submitted in `0x5C8A10` before either final particle-compose call. Descriptor `+0x40`
+and node-table `+0x40` are different structures and must not be conflated with the
+front-end contribution discussed in section 7.4.
+
+This supplies a static material/property/queue route consistent with the BMW glass
+and lens families being shaded before reduced-smoke composition. Actual loaded
+instances, later property/layer overrides, material/damage/quality selection and the
+original GPU frame remain unobserved. `VelocityDepthPlugin` contents, backend MRT
+clear semantics and exact compose/edge shader sampling remain separate open issues.
+The result guides a source-motivated staged smoke experiment; it is not verified
+pixel parity or justification to force all transparency into one global order.
+
+Private evidence: `local/handoff/smoke-classifier-next.md`,
+`local/handoff/smoke-material-bridge.md` and their adjacent draft/evidence folders.
+The single additional decompile is cached as `local/re-cache/009CB5B0.c` in the main
+checkout; no proprietary code or raw asset payload is included in this document.
