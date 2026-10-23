@@ -1034,3 +1034,10 @@ compare fixed heights.
 `dynamic_height_ignores_a_main_thread_bound_frame`. On the desktop with `GRID_MOBILE_PRESET=1
 GRID_PERF_TEST=auto`: 8 UI roots moved to the window at 720 rows and back at native, with no panic.
 The desktop never runs late, so no dynamic change was exercised live; the phone log will show it.
+
+
+## Dedicated graphics rendering work (G242, 23 October 2026)
+
+The graphics worktree now has a dedicated grass/rendering-performance agent, with a separate static-environment audit. Physics/tick/AI and generic mesh streaming remain outside this task. Current mesh/material sharing and F392 buffer reuse are already implemented; they must not be presented as new savings. Entity/source draw-record counts are not measured GPU draw calls.
+
+First candidate: [conservative grass bucket rejection](GRASS_RENDERING.md#g242-conservative-cpu-bucket-evaluation-23-october-2026), preserving the existing quality profile. Build/test and six paired timing runs completed: the candidate increased median CPU grass cost in all three pairs and was rejected. Production grass source is restored exactly; no FPS improvement is claimed. A second unapplied candidate shares immutable tree source arrays to reduce duplicate allocation, with no promised frame-time gain. Source forest sheets, shadow range/resolution, grass density and reflection update cadence are retained. More ambitious LOD/batching/per-view changes require separate source/visibility/temporal evidence and measured bottlenecks.

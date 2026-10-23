@@ -51,3 +51,29 @@ Validation completed:
 Private `grass-final-validation02.json`, `grass-final-lap4k02` and `grass-final-moving30-02` captures/logs/audit retain the successful result; the earlier timed-out attempt remains explicitly failed. Sorting of the single transparent grass mesh, original radiometry and future detailed grass geometry remain limitations. This improves the reported strokes without claiming a finished vegetation remaster.
 
 Current native-BC acceptance: source917ca5f, grass-final-offtrack-bc4k01 native4K/272ticks, 3body contacts/deformation/debris rendered and inspected. Grass remains visible around the car; no unexpected shader log messages. Uploader reports277BC assets and0upload decodes; this excludes selected leaf-mip CPU preparation, not a claim of no CPU decoding anywhere. Single tested body/grass view, not exhaustive transparency sorting proof.
+
+
+## G242: conservative CPU bucket evaluation (23 October 2026)
+
+The owner requested a separate rendering-performance agent. The first candidate reduces only CPU bucket traversal; it does not shorten source145/30/15/5m draw distances, reduce density or change soft alpha, source sprites, quad attributes/order, fade, sort centre, shadows or probes.
+
+For a16m spatial cell offset(dx,dz), max(abs(offset)-1,0)*16 is a conservative per-axis cell separation. Reject only when the squared XZ lower bound is strictly greater than(farthest_distance+16m)^2. The extra cell is numerical slack; the original f32 per-instance distance and fade remain the acceptance authority. Finite/nonnegative LOD and bounded finite-eye guards preserve the old path for invalid constructed states. This assumes valid finite instance positions assigned to their actual cells, as in the loaded source scatter.
+
+At145m the square enumeration has529slots and the candidate retains413. This is an arithmetic lookup count, not a claimed21.9% speedup: arithmetic/branch overhead can outweigh avoided empty HashMap lookups. A copied-old-path CPU fixture compares every output attribute by float bits, including order, mirrored sprites, subsets, exact distance boundaries, negative cells and invalid-input fallback. The experimental source passed287resource-backed crate tests (including this ordered comparison), default/feature Clippy and a release DLAA/paint build. The runtime candidate was subsequently rejected by actual timing; it is not present in production source.
+
+The paired baseline is frozen G240, not an older G222 executable: both arms must share every renderer feature except this candidate. Native1080/virtual30, source lighting/coverage forest, normal DLAA,250m/four4096shadow cascades and moving1024probes remain the same. `GRID_GROUND_TRACE=1` reports accumulated CPU gather/pack/stream/AABB cost divided by600mainframes. It is neither GPU time nor a per-frame percentile; virtual30 is not measured hardwareFPS. Exclude the first600frame block, match subsequent blocks, and report sensitivity excluding the block containing the30PNG evidence window. Run timings after heavy build/test jobs complete. Require actual physical/frame parity, reviewed visuals and reproducible useful savings before promotion; a null/negative result retains the baseline.
+
+
+### G242 measured outcome: candidate rejected
+
+Six full8000tick runs completed in alternating A1/B1/B2/A2/A3/B3 order, under the machine build lock after all build/test jobs. Physical streams,3846reported mainframes and motion request manifests matched. A is frozen G240; B differs only by the evaluated gather candidate. After excluding first600warmup and capture-contaminated1200blocks, the median of the four remaining600frame CPU grass block means was:
+
+| Pair | Baseline A, ms/mainframe | Candidate B, ms/mainframe | Cost change |
+|---|---:|---:|---:|
+|1|1.4975|1.5545|+3.81%|
+|2|1.5220|1.5905|+4.50%|
+|3|1.5075|1.5675|+3.98%|
+
+Including block1200 also favors the baseline in all three pairs. None meets the predeclared useful-improvement bar. Main/Render cumulative-counter interval estimates do not establish a compensating improvement; these remain CPU schedule estimates, not GPU timestamps or FPS. Source geometry equivalence does not imply faster execution. The patch was reversed after preserving its complete source/hash/evidence, restoring `ground_detail.rs` to the published baseline exactly after newline normalization. No density, distance, shadow or reflection quality reduction was substituted. Native PNG differences and raw probe comparisons are retained separately; universal byte preservation is not claimed.
+
+Private evidence: `local/graphics/grass-buckets01/paired/`, source/build hashes, decision.json and the original candidate/runner under `local/handoff/drafts/render-performance/`. The evaluated candidate SHA is7d156d3a5332d49f09ff8ba143c2db059ef8b95a99687b9895f91b93f4090199. No accepted owner launcher was replaced. Next rendering work measures larger costs rather than promoting an unhelpful lookup-count reduction.
