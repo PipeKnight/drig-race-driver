@@ -233,7 +233,55 @@ The argument meanings are [I]:
 - exhausts: 0.66 × `m_exhaust_swing_multiple`;
 - mirrors: `0x9AA1D0(…, 0.4)`.
 
-The hinge solver, debris physics and per-part masses were not ported.
+The hinge solver and per-part masses were not ported.
+
+### Detached parts as bodies `0x9DC270` → `0x9DB0E0` → `0x9D9F80` → `0x9A87B0` [D] (F563)
+
+Static reading of the master project's pseudocode (`grid_re.py decompile`, cached privately in
+`local/re-cache/`); not compared with the running game.
+
+- 9DC270(part, 4): unless the part record already has a body (+0x64), it calls 9DB0E0 with
+  "loose" = (record state == 2), so 0 for a detached part. After 9DB0E0 it calls A69350(1), A6A290
+  and A72A70 on the new body [I: activates it and adds it to the world]. Mirrors 0x58/0x59 are
+  detached together with the part whose index sits at car +44C +1BDC / +1BE0 [I: the part carrying
+  the mirror].
+- 9DB0E0: for a detached part the density is 600 (for a loose part 60, or 0.6 for the hinged
+  panels 10, 0xC, 0xD, 0xF, 0x10, 0x54..0x57, 0x60..0x62, 0x63, 0x64 and the doors 0x18/0x19 unless
+  their hinge axis is near vertical). It calls 9D9F80 and stores the body at record +0x64. A detached
+  part then gets no hinge: its linear velocity is the car's velocity at the part's point (A697C0 /
+  A69800) plus R_car × record +0x30 (the kick), its angular velocity the car's (A69820) plus
+  R_car × record +0x40 (the spin). 9DC270 writes a kick and spin only for wheel-like parts (state 4
+  while car +C7A0 = 1, WHEEL_DETACHMENT.md) and parts 0x60/0x61 (random, 6..7.5 × 0.7); for body
+  panels these words keep what the new record holds [I: zero; 98C640 not read], so a panel leaves
+  with the car's motion at its point.
+- 9D9F80: bounds of the part node (min/max at node +D0/+E0, model space; wheels use the tyre node),
+  mass = box volume × density, capped at car +15A0 × 0.015 (the same cap as a lost wheel). Shape by
+  part id: wheels 0x2A..0x31 a cylinder (9A8BB0); every other part a box (9A87B0) with a material
+  descriptor per group: bonnet 10 and 0x60/0x61 D171C0, boot 0xB and 0x62..0x64 D171B0, bumpers
+  0xC..0x11 D171A0, doors 0x16..0x19 D17190, exhausts 0x1F/0x22/0x65/0x66 D17180, spoilers 0x45/0x46
+  D17170, wings 0x54..0x57 D17160, the rest (mirrors among them) CE6798; the +8 variants (D171C8 …)
+  when car +BA4 is set. The body descriptor is the lost wheel's: angular damping 0.2 on each axis
+  (0.5 for the mirrors 0x58/0x59), air resistance 0.01 × mass, linear damping 0, stationary
+  thresholds 0.1 and 0.1, turnOffTime 1 s, gravity scale 1, pose = the part node's world transform.
+- 9A87B0 (box shape): centre = (min + max) / 2, half extents (max − min) / 2 reduced by a convex
+  radius r = min(0.2, 0.5 × the smallest half extent), i.e. a rounded box of the full bounds; created
+  by A72CF0 in the world's collision set (so the body meets the road, props, pieces and cars as every
+  dynamic body does [I: contact pairs not traced]).
+- Lifetime: no despawn timer or distance test in these functions; the body stays until the car is
+  reset (9DC270(part, 0) frees it through 98C510). It sleeps by the world's island rule
+  (BODY_SLEEPING.md) with the thresholds above.
+
+Port (F563): grid-app `damage_parts::Panel` gives each detached panel this box (full bounds, the
+rounding, box inertia, the angular damping, air resistance and the stationary thresholds with
+turnOffTime) and steps it as a rigid body against the track below it only. AUTHORED there: the
+contact solver (support-point impulses, friction 0.7, restitution 0.2), the track plane from three
+casts, and the rule that a panel sleeps only lying on its broadest face (it is tipped over its
+support edge otherwise, standing in for the thin shell the box hides). The launch stays AUTHORED
+(the car's velocity plus an outward and upward push and a spin): without contacts against its own
+car, a panel leaving with the car's motion only would sink through the car body. Not ported: the panel as a
+body of the shared world (contacts with cars, props and pieces, its mass and material); it needs the
+panel decisions (9EC9B0) in the simulation instead of grid-app, so headless races, replays and the
+identity check would see them.
 
 ### Windows `0x9A4A20` / `0x9D12B0` [D]
 

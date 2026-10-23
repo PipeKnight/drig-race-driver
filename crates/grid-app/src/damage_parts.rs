@@ -384,7 +384,94 @@ struct Debris {
     lift: f32,
     /// Landed and stopped: no more steps or casts.
     resting: bool,
+    /// The box of a body panel; `None` (a lost wheel's fallback) flies as a
+    /// point that rests `lift` above the surface.
+    panel: Option<Panel>,
 }
+
+/// A detached body panel as a rigid box. The original makes every detached
+/// part a body of the world [D]: 9DC270 state 4 -> 9DB0E0 (density 600) ->
+/// 9D9F80 -> 9A87B0, a box of the part node's model bounds rounded by
+/// min(0.2, half the smallest half extent), angular damping 0.2 (mirrors
+/// 0.5), air resistance 0.01 x mass, stationary thresholds 0.1 and 0.1,
+/// turnOffTime 1 s (docs/VISUAL_DAMAGE_PARTS_RESEARCH.md, "Detached parts as
+/// bodies"). Here the box meets only the track below it (AUTHORED contact
+/// solver: corner impulses with friction, no cars or props), and it sleeps
+/// only lying on its broadest face: a panel is a thin shell that does not
+/// stand on an edge, so off that face it is tipped over its support edge
+/// (AUTHORED, owner's report of 23 October 2026: parts froze on an edge).
+#[derive(Clone, Copy, Debug)]
+struct Panel {
+    /// Body axes at the loss (rotation of `Debris::origin`).
+    axes: Mat3,
+    /// Half extents of the inner box (rounding removed) and the rounding.
+    inner: Vec3,
+    radius: f32,
+    /// Inverse principal inertia per unit mass (box of the full extents).
+    inverse_inertia: Vec3,
+    /// Body axis normal to the broadest face (the thinnest extent).
+    thin: usize,
+    angular_damping: f32,
+    /// Track normal below the panel; `Debris::ground` is its height there.
+    normal: Vec3,
+    /// Time lain still and flat; time in touch with the track.
+    still: f32,
+    touching: f32,
+}
+
+/// 9D9F80's stationary thresholds (0.1 m/s, 0.1 rad/s) and turnOffTime.
+const STATIONARY: f32 = 0.1;
+const TURN_OFF_TIME: f32 = 1.;
+/// AUTHORED contact: friction, restitution above 1 m/s closing speed, the
+/// tilt of the broadest face from the track that counts as lying flat, the
+/// tipping push and its rate cap, and the time after which a panel in touch
+/// with the track stops however it lies.
+const FRICTION: f32 = 0.7;
+const RESTITUTION: f32 = 0.2;
+const FLAT_COS: f32 = 0.94; // 20 degrees
+const TIP: f32 = 40.;
+const TIP_RATE: f32 = 3.;
+const GIVE_UP: f32 = 20.;
+
+impl Panel {
+    /// The box of model bounds `(min, max)` under the model-to-world `origin`.
+    fn new(origin: Mat4, (min, max): (Vec3, Vec3), angular_damping: f32) -> Self {
+        let columns = [origin.x_axis, origin.y_axis, origin.z_axis].map(|c| c.truncate());
+        let scale = Vec3::from_array(columns.map(|c| c.length().max(1e-6)));
+        let axes = Mat3::from_cols(
+            columns[0] / scale.x,
+            columns[1] / scale.y,
+            columns[2] / scale.z,
+        );
+        let half = ((max - min) * 0.5 * scale).max(Vec3::splat(0.01));
+        let radius = (half.min_element() * 0.5).min(0.2);
+        let d = half * 2.;
+        let inertia = Vec3::new(
+            d.y * d.y + d.z * d.z,
+            d.x * d.x + d.z * d.z,
+            d.x * d.x + d.y * d.y,
+        ) / 12.;
+        let thin = if half.x <= half.y && half.x <= half.z {
+            0
+        } else if half.y <= half.z {
+            1
+        } else {
+            2
+        };
+        Self {
+            axes,
+            inner: half - Vec3::splat(radius),
+            radius,
+            inverse_inertia: inertia.recip(),
+            thin,
+            angular_damping,
+            normal: Vec3::Y,
+            still: 0.,
+            touching: 0.,
+        }
+    }
+}
+
 impl Debris {
     fn matrix(&self) -> Mat4 {
         Mat4::from_translation(self.position)
@@ -399,6 +486,9 @@ impl Debris {
     fn step(&mut self, dt: f32, surface: &mut dyn FnMut(Vec3) -> Option<f32>) {
         if self.resting {
             return;
+        }
+        if self.panel.is_some() {
+            return self.step_panel(dt, surface);
         }
         self.velocity.y -= 9.81 * dt;
         self.position += self.velocity * dt;
@@ -423,6 +513,174 @@ impl Debris {
                 self.spin = Vec3::ZERO;
                 self.resting = true;
             }
+        }
+    }
+
+    /// World axes of a panel's box now.
+    fn axes(&self, panel: &Panel) -> Mat3 {
+        Mat3::from_quat(self.rotation) * panel.axes
+    }
+
+    /// The support points of a panel's rounded box against a surface of
+    /// normal `n`: each inner corner moved by the rounding against `n`,
+    /// relative to the box centre.
+    fn supports(&self, panel: &Panel, n: Vec3) -> [Vec3; 8] {
+        let axes = self.axes(panel);
+        std::array::from_fn(|i| {
+            let sign = Vec3::new(
+                if i & 1 == 0 { -1. } else { 1. },
+                if i & 2 == 0 { -1. } else { 1. },
+                if i & 4 == 0 { -1. } else { 1. },
+            );
+            axes * (panel.inner * sign) - n * panel.radius
+        })
+    }
+
+    /// How a panel lies: the cosine between its broadest face's normal and
+    /// the track normal (1 = flat) and the heights of the lowest and the
+    /// fourth-lowest support point above the track below each (a face lies
+    /// on the track when both are near 0; `None` without a panel or a cast).
+    fn lying(&self, surface: &mut dyn FnMut(Vec3) -> Option<f32>) -> Option<(f32, f32, f32)> {
+        let panel = self.panel?;
+        let n = panel.normal;
+        let face = self.axes(&panel).col(panel.thin).dot(n).abs();
+        let mut gaps = [0f32; 8];
+        for (gap, r) in gaps.iter_mut().zip(self.supports(&panel, n)) {
+            let point = self.position + r;
+            *gap = point.y - surface(point)?;
+        }
+        gaps.sort_by(f32::total_cmp);
+        Some((face, gaps[0], gaps[3]))
+    }
+
+    /// The track plane below the panel from three casts (height at the
+    /// centre and slopes along X and Z); a miss keeps what is known.
+    fn track_plane(&mut self, surface: &mut dyn FnMut(Vec3) -> Option<f32>) {
+        let Some(panel) = &mut self.panel else { return };
+        let above = Vec3::Y * ((panel.inner.length() + panel.radius) + 0.1);
+        let step = 0.5;
+        let p = self.position + above;
+        let Some(centre) = surface(p) else { return };
+        self.ground = centre;
+        let x = surface(p + Vec3::X * step).unwrap_or(centre);
+        let z = surface(p + Vec3::Z * step).unwrap_or(centre);
+        let normal = Vec3::new(0., z - centre, step).cross(Vec3::new(step, x - centre, 0.));
+        panel.normal = normal.normalize_or(Vec3::Y);
+    }
+
+    /// One step of a panel's rigid box (see `Panel`).
+    fn step_panel(&mut self, dt: f32, surface: &mut dyn FnMut(Vec3) -> Option<f32>) {
+        let Some(damping) = self.panel.map(|p| p.angular_damping) else {
+            return;
+        };
+        self.velocity.y -= 9.81 * dt;
+        self.velocity *= 1. - 0.01 * dt;
+        self.spin /= 1. + damping * dt;
+        self.position += self.velocity * dt;
+        let w = self.spin.length();
+        if w > 1e-4 {
+            self.rotation =
+                (Quat::from_axis_angle(self.spin / w, w * dt) * self.rotation).normalize();
+        }
+        self.track_plane(surface);
+        let Some(mut panel) = self.panel else { return };
+        let n = panel.normal;
+        let base = Vec3::new(self.position.x, self.ground, self.position.z);
+        // Contacts: support points at or below the plane.
+        let mut contacts = [(Vec3::ZERO, 0f32); 8];
+        let mut count = 0;
+        let mut deepest = 0f32;
+        for r in self.supports(&panel, n) {
+            let depth = (base - (self.position + r)).dot(n);
+            if depth > -0.002 {
+                contacts[count] = (r, depth);
+                count += 1;
+                deepest = deepest.max(depth);
+            }
+        }
+        if count == 0 {
+            panel.still = 0.;
+            self.panel = Some(panel);
+            return;
+        }
+        panel.touching += dt;
+        self.position += n * deepest;
+        let axes = self.axes(&panel);
+        let inverse = axes * Mat3::from_diagonal(panel.inverse_inertia) * axes.transpose();
+        let contacts = &contacts[..count];
+        // Off its broadest face the panel tips over its support edge: a turn
+        // about the support point that every other support rises from.
+        let face = axes.col(panel.thin);
+        let face = if face.dot(n) < 0. { -face } else { face };
+        let flat = face.dot(n) >= FLAT_COS;
+        let axis = face.cross(n).normalize_or_zero();
+        if !flat && axis != Vec3::ZERO && self.spin.dot(axis) < TIP_RATE {
+            let side = n.cross(axis);
+            let pivot = contacts
+                .iter()
+                .map(|(r, _)| *r)
+                .min_by(|a, b| a.dot(side).total_cmp(&b.dot(side)))
+                .unwrap_or(Vec3::ZERO);
+            let turn = axis * TIP * dt;
+            self.spin += turn;
+            self.velocity -= turn.cross(pivot);
+        }
+        // Sequential impulses per unit mass: normal with restitution, then
+        // Coulomb friction on the accumulated normal impulse.
+        let mut targets = [0f32; 8];
+        for (target, (r, _)) in targets.iter_mut().zip(contacts) {
+            let closing = (self.velocity + self.spin.cross(*r)).dot(n);
+            *target = if closing < -1. {
+                -RESTITUTION * closing
+            } else {
+                0.
+            };
+        }
+        let mut normal_impulse = [0f32; 8];
+        let mut friction_impulse = [Vec3::ZERO; 8];
+        for _ in 0..8 {
+            for (i, (r, _)) in contacts.iter().enumerate() {
+                let r = *r;
+                let along = |d: Vec3| 1. + d.dot((inverse * r.cross(d)).cross(r));
+                let vn = (self.velocity + self.spin.cross(r)).dot(n);
+                let total = (normal_impulse[i] + (targets[i] - vn) / along(n)).max(0.);
+                let p = n * (total - normal_impulse[i]);
+                normal_impulse[i] = total;
+                self.velocity += p;
+                self.spin += inverse * r.cross(p);
+                let v = self.velocity + self.spin.cross(r);
+                let slip = v - n * v.dot(n);
+                let speed = slip.length();
+                if speed > 1e-6 {
+                    let t = slip / speed;
+                    let mut total = friction_impulse[i] - t * (speed / along(t));
+                    let limit = FRICTION * normal_impulse[i];
+                    if total.length() > limit {
+                        total = total.normalize_or_zero() * limit;
+                    }
+                    let p = total - friction_impulse[i];
+                    friction_impulse[i] = total;
+                    self.velocity += p;
+                    self.spin += inverse * r.cross(p);
+                }
+            }
+        }
+        let still = self.velocity.length() < STATIONARY && self.spin.length() < STATIONARY;
+        panel.still = if still && flat { panel.still + dt } else { 0. };
+        self.panel = Some(panel);
+        if panel.still >= TURN_OFF_TIME || panel.touching >= GIVE_UP {
+            self.velocity = Vec3::ZERO;
+            self.spin = Vec3::ZERO;
+            self.resting = true;
+            // Never below the track where the plane fit misses a kerb or dip.
+            let mut lift = 0f32;
+            for r in self.supports(&panel, n) {
+                let point = self.position + r;
+                if let Some(y) = surface(point) {
+                    lift = lift.max(y - point.y);
+                }
+            }
+            self.position.y += lift;
         }
     }
 }
@@ -833,6 +1091,7 @@ fn launch(r: &Reading, i: usize, seed: u32) -> Debris {
         ground: r.hubs[i].y,
         lift: 0.,
         resting: false,
+        panel: None,
     }
 }
 
@@ -997,9 +1256,19 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                             2.,
                             1.5 - seed % 2.,
                         )) * 2.,
-                        ground: r.pose.w_axis.y + (max.y - min.y) * 0.5,
-                        lift: (max.y - min.y) * 0.5,
+                        ground: r.pose.w_axis.y,
+                        lift: 0.,
                         resting: false,
+                        // 9D9F80: angular damping 0.5 for the mirrors (0x58, 0x59).
+                        panel: Some(Panel::new(
+                            origin,
+                            (min, max),
+                            if change.part.starts_with("wing_mirror") {
+                                0.5
+                            } else {
+                                0.2
+                            },
+                        )),
                     });
                 }
                 part.state = change.state;
@@ -1028,7 +1297,19 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                 }
                 State::Detached => {
                     if let Some(debris) = &mut part.debris {
+                        let flying = !debris.resting;
                         debris.step(dt, &mut surface);
+                        if flying && debris.resting {
+                            let (face, low, high) = debris.lying(&mut surface).unwrap_or((
+                                f32::NAN,
+                                f32::NAN,
+                                f32::NAN,
+                            ));
+                            log_line!(
+                                "drive_damage_part_rest car={index} tick={ticks} part={name} face={face:.4} low={low:.3} high={high:.3} touching={:.2}",
+                                debris.panel.map_or(f32::NAN, |p| p.touching)
+                            );
+                        }
                     }
                 }
                 State::Attached => {}
@@ -1704,6 +1985,7 @@ mod tests {
             ground: 2.3,
             lift: 0.3,
             resting: false,
+            panel: None,
         };
         let mut surface = |p: Vec3| road(p);
         for _ in 0..1000 {
@@ -1711,19 +1993,166 @@ mod tests {
         }
         assert!(part.resting);
         let below = road(part.position).unwrap() + 0.3;
-        assert!((part.position.y - below).abs() < 0.05, "{part:?} rests at {below}");
+        assert!(
+            (part.position.y - below).abs() < 0.05,
+            "{part:?} rests at {below}"
+        );
         assert!(part.position.y < 1., "{:?}", part.position);
         let rest = part.position;
         part.step(1. / 60., &mut surface);
         assert_eq!(part.position, rest);
         // Without a surface (cast miss) it keeps the plane it left the car at.
-        let mut blind = Debris { resting: false, velocity: Vec3::ZERO, ..part };
+        let mut blind = Debris {
+            resting: false,
+            velocity: Vec3::ZERO,
+            ..part
+        };
         blind.position.y = 5.;
         blind.ground = 2.;
         for _ in 0..600 {
             blind.step(1. / 60., &mut |_| None);
         }
         assert!((blind.position.y - 2.).abs() < 1e-3, "{:?}", blind.position);
+    }
+
+    /// A panel of model bounds `half` around the origin, posed by `pose`,
+    /// dropped from `height` above `road` and stepped for 20 s at 60 Hz.
+    /// Returns the debris and how far its broadest face is from flat on the
+    /// road (1 = flat) and its lowest support above the road (min, max).
+    fn drop_panel(
+        half: Vec3,
+        pose: Quat,
+        height: f32,
+        velocity: Vec3,
+        road: impl Fn(Vec3) -> f32,
+    ) -> (Debris, f32, (f32, f32)) {
+        let origin =
+            Mat4::from_rotation_translation(pose, Vec3::new(0., road(Vec3::ZERO) + height, 0.));
+        let centre = origin.transform_point3(Vec3::ZERO);
+        let mut part = Debris {
+            origin,
+            centre,
+            position: centre,
+            velocity,
+            rotation: Quat::IDENTITY,
+            spin: Vec3::ZERO,
+            ground: 0.,
+            lift: 0.,
+            resting: false,
+            panel: Some(Panel::new(origin, (-half, half), 0.2)),
+        };
+        let mut surface = |p: Vec3| Some(road(p));
+        for _ in 0..1200 {
+            part.step(1. / 60., &mut surface);
+        }
+        let (face, low, high) = part.lying(&mut surface).unwrap();
+        (part, face, (low, high))
+    }
+
+    /// 200 drops of panel-sized boxes in random poses, spins and speeds on a
+    /// flat road and on slopes up to 12 degrees: every one comes to rest by
+    /// the stationary rule (not the give-up time), flat on its broadest face,
+    /// on the road and never below it.
+    #[test]
+    fn random_panel_drops_all_end_lying_flat_on_the_road() {
+        let mut state = 1u32;
+        let mut random = || {
+            state = state.wrapping_mul(0x41c6_4e6d).wrapping_add(12345);
+            ((state >> 8) & 0xffff) as f32 / 65535.
+        };
+        let shapes = [
+            Vec3::new(0.7, 0.04, 0.6),  // bonnet
+            Vec3::new(0.9, 0.22, 0.17), // bumper
+            Vec3::new(0.05, 0.3, 0.5),  // wing
+            Vec3::new(0.06, 0.45, 0.6), // door
+            Vec3::new(0.1, 0.06, 0.12), // mirror
+        ];
+        let mut settle = Vec::new();
+        for i in 0..200 {
+            let half = shapes[i % shapes.len()];
+            let pose = Quat::from_euler(
+                EulerRot::XYZ,
+                random() * 6.3,
+                random() * 6.3,
+                random() * 6.3,
+            );
+            let slope = (random() - 0.5) * 0.42;
+            let velocity = Vec3::new(random() * 8. - 4., random() * 3., random() * 8. - 4.);
+            let road = move |p: Vec3| slope * p.x + 0.3 * slope * p.z;
+            let origin = Mat4::from_rotation_translation(pose, Vec3::new(0., 1. + random(), 0.));
+            let centre = origin.transform_point3(Vec3::ZERO);
+            let mut part = Debris {
+                origin,
+                centre,
+                position: centre,
+                velocity,
+                rotation: Quat::IDENTITY,
+                spin: Vec3::new(random() - 0.5, random() - 0.5, random() - 0.5) * 16.,
+                ground: 0.,
+                lift: 0.,
+                resting: false,
+                panel: Some(Panel::new(origin, (-half, half), 0.2)),
+            };
+            let mut surface = |p: Vec3| Some(road(p));
+            for _ in 0..1200 {
+                part.step(1. / 60., &mut surface);
+            }
+            let (face, low, high) = part.lying(&mut surface).unwrap();
+            let touching = part.panel.unwrap().touching;
+            assert!(part.resting && touching < 8., "drop {i}: {part:?}");
+            assert!(face > 0.995, "drop {i}: face {face}");
+            assert!(
+                low > -0.01 && high < 0.03,
+                "drop {i}: supports {low}..{high}"
+            );
+            settle.push(touching);
+        }
+        settle.sort_by(f32::total_cmp);
+        println!(
+            "settle after touchdown: median {} s, max {} s",
+            settle[100], settle[199]
+        );
+    }
+
+    /// Owner's report of 23 October 2026: parts froze in the pose they
+    /// touched the road in. A bonnet-sized panel dropped on its edge tips over
+    /// and lies on its broadest face on the road, not below it.
+    #[test]
+    fn a_panel_dropped_on_its_edge_lies_flat_on_the_road() {
+        let bonnet = Vec3::new(0.7, 0.04, 0.6);
+        let on_edge = Quat::from_rotation_z(1.4) * Quat::from_rotation_x(0.2);
+        let (part, face, (low, high)) = drop_panel(bonnet, on_edge, 1.5, Vec3::ZERO, |_| 0.);
+        assert!(part.resting, "{part:?}");
+        assert!(face > 0.999, "face {face} {part:?}");
+        assert!(low > -0.01 && low < 0.01, "lowest support {low}");
+        assert!(high < 0.03, "highest support {high}");
+        // A bumper box standing on its long narrow side tips onto its broadest face.
+        let bumper = Vec3::new(0.9, 0.22, 0.17);
+        let standing = Quat::IDENTITY;
+        let (part, face, (low, high)) =
+            drop_panel(bumper, standing, 0.4, Vec3::new(1., 0., 0.), |_| 0.);
+        assert!(part.resting, "{part:?}");
+        assert!(face > 0.999, "face {face}");
+        assert!(low > -0.01 && high < 0.03, "supports {low}..{high}");
+        assert!((part.position.y - 0.17).abs() < 0.02, "{:?}", part.position);
+    }
+
+    /// On a 10 degree slope a panel dropped edge-first ends flat on the slope
+    /// (friction holds it), every support at or just above the road.
+    #[test]
+    fn a_panel_dropped_on_a_slope_lies_flat_on_the_slope() {
+        let road = |p: Vec3| -0.176 * p.x + 3.;
+        let wing = Vec3::new(0.05, 0.3, 0.5);
+        let edge = Quat::from_rotation_y(0.7) * Quat::from_rotation_x(0.3);
+        let (part, face, (low, high)) = drop_panel(wing, edge, 1.2, Vec3::new(0., 0., 2.), road);
+        assert!(part.resting, "{part:?}");
+        assert!(face > 0.999, "face {face}");
+        assert!(low > -0.01 && high < 0.03, "supports {low}..{high}");
+        assert!((part.panel.unwrap().normal.y - 0.985).abs() < 0.002);
+        let rest = part.position;
+        let mut part = part;
+        part.step(1. / 60., &mut |p| Some(road(p)));
+        assert_eq!(part.position, rest);
     }
 
     #[test]
@@ -1739,6 +2168,7 @@ mod tests {
             ground: 0.,
             lift: 0.,
             resting: false,
+            panel: None,
         };
         let start = Mat4::from_translation(Vec3::new(1., 0.3, 2.)) * Mat4::from_rotation_z(1.);
         let mut wheel = LostWheel {
