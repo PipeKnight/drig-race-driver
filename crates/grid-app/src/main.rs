@@ -102,6 +102,8 @@ mod track_grade;
 mod track_surface;
 mod track_decals;
 mod tyre_smoke;
+mod smoke_compositor;
+mod oit_capacity_audit;
 mod tyre_sound;
 mod tyre_visual;
 mod ui_font;
@@ -1429,6 +1431,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut window_phase_target = None;
     let mut window_sort_current = false;
     let mut car_transparent_sort = false;
+    let mut smoke_compositor = smoke_compositor::Mode::Off;
+    let mut oit_capacity_target = None;
     let mut window_transition_script = None;
     let mut motion_sequence = None;
     let mut temporal_audit_tick = None;
@@ -1858,6 +1862,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--window-sort needs off or current".into()),
                 };
             }
+            "--oit-capacity-audit" => {
+                oit_capacity_target = Some(window_phase_audit::Target::parse(
+                    &args.next().ok_or("--oit-capacity-audit needs tick:N or frame:N")?
+                ).map_err(|e| e.replace("--window-phase-audit", "--oit-capacity-audit"))?);
+            }
+            "--smoke-compositor" => {
+                smoke_compositor = smoke_compositor::Mode::parse(&args.next().ok_or("--smoke-compositor needs a mode")?)?;
+            }
             "--car-transparent-sort" => {
                 car_transparent_sort = match args.next().as_deref() {
                     Some("off") => false,
@@ -2073,6 +2085,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
                 println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
+                println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
+                println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
                 println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
                 println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
@@ -2207,6 +2221,18 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         || (drive && drive_ticks.is_none()) || matches!(graphics.reflection_mode, 1 | 2))
     {
         return Err("--window-sort current requires enhanced forward Donington Lacetti LOD0 rendered reference or bounded --drive-ticks; interactive driving is not validated".into());
+    }
+    if smoke_compositor != smoke_compositor::Mode::Off && (graphics.enhanced() || !drive
+        || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
+        || graphics.width != 640 || graphics.height != 360)
+    {
+        return Err("--smoke-compositor requires bounded rendered baseline LOD0 drive at640x360; finite-capacity diagnostic only".into());
+    }
+    if let Some(target) = oit_capacity_target
+        && (!matches!(smoke_compositor, smoke_compositor::Mode::Oit16 | smoke_compositor::Mode::Oit32 | smoke_compositor::Mode::Oit32Pruned)
+            || target.tick().is_some_and(|tick| drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))))
+    {
+        return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
     }
     if car_transparent_sort && (!drive || drive_ticks.is_none() || headless || collision
         || output.is_none() || lod != "LOD0_" || graphics.window_pilot != window_response::Mode::Off)
@@ -3433,6 +3459,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if window_sort_current {
         window_response::install_current_sort(&mut app);
     }
+    smoke_compositor::install(&mut app, smoke_compositor);
+    if let Some(target) = oit_capacity_target {
+        let directory = app.world().resource::<Capture>().path.with_file_name("oit-capacity");
+        oit_capacity_audit::install(&mut app, target, &directory)?;
+    }
     if car_transparent_sort {
         window_response::install_current_car_sort(&mut app);
     }
@@ -4054,6 +4085,7 @@ fn capture(
     graphics: Res<graphics::Settings>,
     motion: Option<Res<motion_capture::Motion>>,
     temporal: Option<Res<temporal_audit::Audit>>,
+    oit_capacity: Option<Res<oit_capacity_audit::Audit>>,
     #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
     #[cfg(feature = "dlaa")] colour: Option<Res<temporal_colour::Audit>>,
     replay: Option<Res<replay::Replay>>,
@@ -4101,6 +4133,9 @@ fn capture(
     let colour_ready = colour.as_ref().is_none_or(|audit| audit.ready());
     #[cfg(not(feature = "dlaa"))]
     let colour_ready = true;
+    if oit_capacity.as_ref().is_some_and(|audit| audit.failed()) {
+        exit.write(AppExit::error()); return;
+    }
     if temporal.as_ref().is_some_and(|audit| audit.failed()) {
         exit.write(AppExit::error());
         return;
@@ -4134,6 +4169,7 @@ fn capture(
     }
     if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
         && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
+        && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
     {
         capture.requested = true;
         let path = capture.path.clone();
