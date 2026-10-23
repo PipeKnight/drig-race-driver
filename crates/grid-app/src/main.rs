@@ -1431,6 +1431,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut window_phase_target = None;
     let mut window_sort_current = false;
     let mut car_transparent_sort = false;
+    let mut smoke_order = tyre_smoke::SmokeOrder::Groups;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
     let mut window_transition_script = None;
@@ -1870,6 +1871,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--smoke-compositor" => {
                 smoke_compositor = smoke_compositor::Mode::parse(&args.next().ok_or("--smoke-compositor needs a mode")?)?;
             }
+            "--smoke-order" => {
+                smoke_order = match args.next().as_deref() {
+                    Some("groups") => tyre_smoke::SmokeOrder::Groups,
+                    Some("sprites") => tyre_smoke::SmokeOrder::Sprites,
+                    _ => return Err("--smoke-order needs groups or sprites".into()),
+                };
+            }
             "--car-transparent-sort" => {
                 car_transparent_sort = match args.next().as_deref() {
                     Some("off") => false,
@@ -2087,6 +2095,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
+                println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
                 println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
                 println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
@@ -2233,6 +2242,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             || target.tick().is_some_and(|tick| drive_ticks.is_none_or(|end| tick.checked_add(8).is_none_or(|n| n > end))))
     {
         return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
+    }
+    if smoke_order == tyre_smoke::SmokeOrder::Sprites && (graphics.enhanced() || !drive
+        || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
+        || smoke_compositor != smoke_compositor::Mode::Off
+        || !ground_effect_assets::enabled() || std::env::var_os("GRID_PERF_TEST").is_some())
+    {
+        return Err("--smoke-order sprites requires bounded rendered baseline LOD0 drive, ground effects enabled, smoke compositor off and no GRID_PERF_TEST".into());
     }
     if car_transparent_sort && (!drive || drive_ticks.is_none() || headless || collision
         || output.is_none() || lod != "LOD0_" || graphics.window_pilot != window_response::Mode::Off)
@@ -3229,7 +3245,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => warn!("Tyre audio unavailable; driving continues: {error}"),
             }
         }
-        tyre_smoke::install(&mut app, &root);
+        tyre_smoke::install(&mut app, &root, smoke_order);
         if ground_effect_assets::enabled() {
             wheel_ground::install(&mut app);
             if let Err(error) = skid_marks::install(&mut app, &root) {

@@ -75,3 +75,5 @@ The current-centre BMW control now passes: all17 reported centres agree with cur
 
 
 G245 counter readback establishes the finite-capacity OIT failure: actual tick302 attempts32,006,602 fragments versus7,372,800 nodes at average32; conservative alpha-zero pruning still attempts22,825,427. Smoke disappears through dropped fragments, so this is rejected as a fix and remains default-off diagnostics.
+
+G246 four-way BMW/Istanbul control isolates both mechanisms. Groups/Sprites × car-sortOff/Current uses identical sampled physics/input/smoke and all90frame metadata. Root-inspected frame0053/tick302 plus selected sequence crops show Sprites+Current attenuating rear glazing/lenses with the body while preserving the cloud; Sprites+Off retains stale-part ghosts. Stock material/emission/quad expressions unchanged. Skid curves still overlay smoke, and all strips remain one mesh with a sort offset50 separate from raster50. This bounded visual improvement is not yet a general default or performance claim. Source pass recovery and live-original limitations are documented in TYRE_SMOKE_RESEARCH.md section7.

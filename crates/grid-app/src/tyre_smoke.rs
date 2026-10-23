@@ -6,7 +6,10 @@
 use super::mesh_stream::{MeshStream, Quad, QuadMesh};
 use bevy::{
     asset::RenderAssetUsages,
-    camera::{primitives::Aabb, visibility::NoFrustumCulling},
+    camera::{
+        primitives::Aabb,
+        visibility::{NoFrustumCulling, VisibilitySystems},
+    },
     image::ImageSampler,
     light::{NotShadowCaster, NotShadowReceiver},
     mesh::{Indices, PrimitiveTopology},
@@ -15,9 +18,18 @@ use bevy::{
 use grid_tools::tyre_smoke::{self as smoke, Library, Smoke, Sprite};
 use std::sync::Arc;
 
+/// Default keeps the original five texture groups and draw system unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum SmokeOrder {
+    #[default]
+    Groups,
+    Sprites,
+}
+
 #[derive(Resource)]
 pub(crate) struct TyreSmoke {
     smoke: Smoke,
+    pool: Option<SpritePool>,
     last: Option<(u64, u64)>,
     meshes: Vec<Handle<Mesh>>,
     /// The group entities (identity transform), for their sort centre.
@@ -36,11 +48,11 @@ pub(crate) struct TyreSmoke {
 impl TyreSmoke {
     /// The smoke group meshes (Performance test, `perf_test`).
     pub(crate) fn mesh_handles(&self) -> &[Handle<Mesh>] {
-        &self.meshes
+        self.pool.as_ref().map_or(&self.meshes, |pool| &pool.meshes)
     }
 }
 
-pub(crate) fn install(app: &mut App, root: &std::path::Path) {
+pub(crate) fn install(app: &mut App, root: &std::path::Path, mode: SmokeOrder) {
     let loaded = Library::load(root).and_then(|library| {
         let textures = smoke::load_textures(root, &library.texture_names())?;
         Ok((Arc::new(library), textures))
@@ -55,6 +67,7 @@ pub(crate) fn install(app: &mut App, root: &std::path::Path) {
             );
             app.insert_resource(TyreSmoke {
                 smoke: Smoke::new(library.clone()),
+                pool: (mode == SmokeOrder::Sprites).then(SpritePool::default),
                 last: None,
                 meshes: Vec::new(),
                 entities: Vec::new(),
@@ -65,8 +78,20 @@ pub(crate) fn install(app: &mut App, root: &std::path::Path) {
             })
             .insert_resource(Pending(Some((library, textures))))
             .add_systems(Startup, setup)
-            .add_systems(FixedUpdate, tick.after(super::drive_tick))
-            .add_systems(PostUpdate, draw.after(TransformSystems::Propagate));
+            .add_systems(FixedUpdate, tick.after(super::drive_tick));
+            match mode {
+                SmokeOrder::Groups => {
+                    app.add_systems(PostUpdate, draw.after(TransformSystems::Propagate));
+                }
+                SmokeOrder::Sprites => {
+                    app.add_systems(
+                        PostUpdate,
+                        draw_sprites
+                            .after(TransformSystems::Propagate)
+                            .before(VisibilitySystems::VisibilityPropagate),
+                    );
+                }
+            }
         }
         Err(error) => warn!("Tyre smoke unavailable; driving continues: {error}"),
     }
@@ -103,7 +128,7 @@ fn setup(
                 Handle::default()
             }
         };
-        let mesh = meshes.add(empty_mesh());
+
         let material = materials.add(StandardMaterial {
             base_color_texture: Some(image),
             // AUTHORED: scene-lit diffuse billboards (normals face the camera)
@@ -118,6 +143,11 @@ fn setup(
             fog_enabled: false,
             ..default()
         });
+        if let Some(pool) = &mut state.pool {
+            pool.materials.push(material);
+            continue;
+        }
+        let mesh = meshes.add(empty_mesh());
         let entity = commands.spawn((
             Name::new(format!("Tyre smoke {name}")),
             Mesh3d(mesh.clone()),
@@ -267,5 +297,642 @@ fn draw(
             state.smoke.emitting_wheels(),
             state.smoke.dropped()
         );
+    }
+}
+
+
+/// A slot has a unique mesh and entity but uses one of the existing texture materials.
+/// Slot identity follows array position, not particle identity: births/deaths can
+/// shift slots, so material and all vertex attributes are refreshed on reuse.
+struct SpriteSlot {
+    entity: Entity,
+    quad: QuadMesh,
+    texture: usize,
+    hidden: bool,
+}
+
+#[derive(Default, Resource)]
+struct SpritePool {
+    materials: Vec<Handle<StandardMaterial>>,
+    meshes: Vec<Handle<Mesh>>,
+    slots: Vec<SpriteSlot>,
+}
+
+impl SpritePool {
+    fn update(
+        &mut self,
+        sprites: &[(usize, Quad)],
+        commands: &mut Commands,
+        meshes: &mut Assets<Mesh>,
+        stream: &MeshStream,
+    ) {
+        for (k, (texture, quad)) in sprites.iter().enumerate() {
+            // The caller filters unknown texture indices exactly as Groups does.
+            let material = &self.materials[*texture];
+            if k == self.slots.len() {
+                let mesh = meshes.add(empty_mesh());
+                let entity = commands
+                    .spawn((
+                        Name::new(format!("Tyre smoke sprite {k}")),
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(material.clone()),
+                        Transform::IDENTITY,
+                        NoFrustumCulling,
+                        NotShadowCaster,
+                        NotShadowReceiver,
+                    ))
+                    .id();
+                self.meshes.push(mesh);
+                self.slots.push(SpriteSlot {
+                    entity,
+                    quad: QuadMesh::default(),
+                    texture: *texture,
+                    hidden: false,
+                });
+            }
+            let slot = &mut self.slots[k];
+            if slot.texture != *texture {
+                commands
+                    .entity(slot.entity)
+                    .insert(MeshMaterial3d(material.clone()));
+                slot.texture = *texture;
+            }
+            if slot.hidden {
+                commands.entity(slot.entity).insert(Visibility::Inherited);
+                slot.hidden = false;
+            }
+            slot.quad.update(
+                std::slice::from_ref(quad),
+                [0, 1, 2, 0, 2, 3],
+                &self.meshes[k],
+                meshes,
+                stream,
+            );
+            stream.sort_centre(slot.entity, quad_centre(quad));
+        }
+        for (k, slot) in self.slots.iter_mut().enumerate().skip(sprites.len()) {
+            if !slot.hidden {
+                // Also zero the geometry: no stale sprite even if a future schedule
+                // edit were to delay visibility propagation. Never reallocates.
+                slot.quad
+                    .update(&[], [0, 1, 2, 0, 2, 3], &self.meshes[k], meshes, stream);
+                commands.entity(slot.entity).insert(Visibility::Hidden);
+                stream.sort_centre(slot.entity, Vec3::ZERO);
+                slot.hidden = true;
+            }
+        }
+    }
+}
+
+fn quad_centre(quad: &Quad) -> Vec3 {
+    Aabb::enclosing(quad.positions.map(Vec3::from_array))
+        .map_or(Vec3::ZERO, |aabb| aabb.center.into())
+}
+
+fn sprite_quad(s: &Sprite, eye: Vec3, right: Vec3, up: Vec3, uv: [f32; 4]) -> Quad {
+    let centre = Vec3::from_array(s.position);
+    let (axis_x, axis_y, normal) = if s.horizon {
+        (Vec3::X, Vec3::Z, Vec3::Y)
+    } else {
+        (right, up, (eye - centre).normalize_or(Vec3::Y))
+    };
+    // The original puts the corners at ±size (886BD0, 0x88B3DB): the
+    // stored size is the half extent, so the drawn edge is 2 × size.
+    let (sin, cos) = s.rotation.sin_cos();
+    let hx = (axis_x * cos + axis_y * sin) * s.size[0];
+    let hy = (axis_y * cos - axis_x * sin) * s.size[1];
+    let [u0, v0, u1, v1] = uv;
+    // Data colours are display-referred; vertex colours are linear.
+    let c = Color::srgba(s.colour[0], s.colour[1], s.colour[2], s.colour[3]).to_linear();
+    Quad {
+        positions: [-hx - hy, hx - hy, hx + hy, -hx + hy]
+            .map(|corner| (centre + corner).to_array()),
+        normal: normal.to_array(),
+        uvs: [[u0, v1], [u1, v1], [u1, v0], [u0, v0]],
+        colour: [c.red, c.green, c.blue, c.alpha],
+    }
+}
+
+fn draw_sprites(
+    mut commands: Commands,
+    mut state: ResMut<TyreSmoke>,
+    camera: Single<&GlobalTransform, With<crate::ViewerCamera>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    stream: Res<MeshStream>,
+) {
+    let state = &mut *state;
+    let eye = camera.translation();
+    state.eye = eye.to_array();
+    let right = camera.right().as_vec3();
+    let up = camera.up().as_vec3();
+    let library = state.smoke.library();
+    let Some(pool) = &mut state.pool else { return };
+    let quads: Vec<_> = state
+        .smoke
+        .sprites()
+        .iter()
+        .filter(|sprite| sprite.texture < pool.materials.len())
+        .map(|s| {
+            (
+                s.texture,
+                sprite_quad(s, eye, right, up, library.frame_uv(s.texture, s.frame)),
+            )
+        })
+        .collect();
+    pool.update(&quads, &mut commands, &mut meshes, &stream);
+    state.frames += 1;
+    if state.frames.is_multiple_of(600) {
+        println!(
+            "tyre_smoke event=sample frame={} sprites={} particles={} emitting_wheels={} dropped={}",
+            state.frames,
+            quads.len(),
+            state.smoke.particle_count(),
+            state.smoke.emitting_wheels(),
+            state.smoke.dropped()
+        );
+    }
+}
+
+#[cfg(test)]
+mod sprite_pool_tests {
+    use super::*;
+
+    #[derive(Resource, Default)]
+    struct Frame(Vec<(usize, Quad)>);
+
+    fn sync(
+        mut pool: ResMut<SpritePool>,
+        frame: Res<Frame>,
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        stream: Res<MeshStream>,
+    ) {
+        pool.update(&frame.0, &mut commands, &mut meshes, &stream);
+    }
+
+    fn quad(frame: u8, horizon: bool) -> Quad {
+        sprite_quad(
+            &Sprite {
+                position: [13., 2., -27.],
+                size: [2., 0.75],
+                rotation: 0.63,
+                colour: [0.8, 0.24, 0.03, 0.37],
+                texture: 0,
+                frame,
+                horizon,
+            },
+            Vec3::new(21., 6., -19.),
+            Vec3::X,
+            Vec3::Y,
+            [
+                frame as f32 * 0.125,
+                0.25,
+                (frame as f32 + 1.) * 0.125,
+                0.75,
+            ],
+        )
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let handles = (0..5)
+            .map(|_| materials.add(StandardMaterial::default()))
+            .collect();
+        app.insert_resource(SpritePool {
+            materials: handles,
+            ..default()
+        })
+        .insert_resource(materials)
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<MeshStream>()
+        .init_resource::<Frame>()
+        .add_systems(Update, sync);
+        app
+    }
+
+    fn set(app: &mut App, values: Vec<(usize, Quad)>) {
+        app.world_mut().resource_mut::<Frame>().0 = values;
+        app.update();
+    }
+
+    #[test]
+    fn sprite_pool_reuses_slots_through_shrink_empty_reset_and_material_frame_swap() {
+        let mut app = app();
+        set(&mut app, vec![]);
+        assert!(app.world().resource::<SpritePool>().meshes.is_empty());
+        set(&mut app, vec![(0, quad(0, false)), (2, quad(1, true))]);
+        let world = app.world();
+        let pool = world.resource::<SpritePool>();
+        let entities: Vec<_> = pool.slots.iter().map(|s| s.entity).collect();
+        let handles = pool.meshes.clone();
+        for (k, entity) in entities.iter().enumerate() {
+            assert_eq!(
+                *world.get::<Transform>(*entity).unwrap(),
+                Transform::IDENTITY
+            );
+            assert!(world.get::<NoFrustumCulling>(*entity).is_some());
+            assert!(world.get::<NotShadowCaster>(*entity).is_some());
+            assert!(world.get::<NotShadowReceiver>(*entity).is_some());
+            assert_eq!(
+                world.resource::<MeshStream>().queued_centre(*entity),
+                Some(quad_centre(&quad(k as u8, k == 1)))
+            );
+            assert_eq!(
+                world
+                    .resource::<Assets<Mesh>>()
+                    .get(&handles[k])
+                    .unwrap()
+                    .count_vertices(),
+                4
+            );
+        }
+        set(&mut app, vec![(4, quad(3, false))]);
+        let world = app.world();
+        let pool = world.resource::<SpritePool>();
+        assert_eq!(pool.meshes, handles);
+        assert_eq!(
+            world
+                .get::<MeshMaterial3d<StandardMaterial>>(entities[0])
+                .unwrap()
+                .0,
+            pool.materials[4]
+        );
+        assert_eq!(
+            *world.get::<Visibility>(entities[1]).unwrap(),
+            Visibility::Hidden
+        );
+        assert_eq!(
+            world.resource::<MeshStream>().queued_centre(entities[1]),
+            Some(Vec3::ZERO)
+        );
+        // Tail is also transparent zero-area geometry, without asset replacement.
+        let padded = world
+            .resource::<MeshStream>()
+            .queued(handles[1].id())
+            .unwrap();
+        let layout = super::super::mesh_stream::VertexLayout::of(
+            world.resource::<Assets<Mesh>>().get(&handles[1]).unwrap(),
+        );
+        for vertex in padded.chunks_exact(layout.stride) {
+            let pos = layout.offset(Mesh::ATTRIBUTE_POSITION).unwrap();
+            let colour = layout.offset(Mesh::ATTRIBUTE_COLOR).unwrap();
+            assert!(vertex[pos..pos + 12].iter().all(|b| *b == 0));
+            assert!(vertex[colour..colour + 16].iter().all(|b| *b == 0));
+        }
+        set(&mut app, vec![]);
+        assert!(
+            app.world()
+                .resource::<SpritePool>()
+                .slots
+                .iter()
+                .all(|s| s.hidden)
+        );
+        set(
+            &mut app,
+            vec![(1, quad(4, true)), (3, quad(5, false)), (0, quad(6, true))],
+        );
+        let world = app.world();
+        let pool = world.resource::<SpritePool>();
+        assert_eq!(pool.slots.len(), 3);
+        assert_eq!(&pool.meshes[..2], &handles);
+        assert_eq!(pool.slots[0].entity, entities[0]);
+        assert_eq!(pool.slots[1].entity, entities[1]);
+        assert_eq!(
+            *world.get::<Visibility>(entities[1]).unwrap(),
+            Visibility::Inherited
+        );
+        assert_eq!(world.resource::<Assets<Mesh>>().len(), 3);
+        assert_eq!(world.resource::<Assets<StandardMaterial>>().len(), 5);
+        assert_eq!(
+            world.resource::<MeshStream>().queued_centre(entities[1]),
+            Some(quad_centre(&quad(5, false)))
+        );
+        // Updated frame/colour/normal/UV/position bytes equal a freshly constructed
+        // single-quad asset; mesh IDs are unchanged after shrink and regrowth.
+        let mut expected_meshes = Assets::<Mesh>::default();
+        let h = expected_meshes.add(empty_mesh());
+        QuadMesh::default().update(
+            &[quad(5, false)],
+            [0, 1, 2, 0, 2, 3],
+            &h,
+            &mut expected_meshes,
+            &MeshStream::default(),
+        );
+        assert_eq!(
+            world
+                .resource::<MeshStream>()
+                .queued(handles[1].id())
+                .unwrap(),
+            expected_meshes
+                .get(&h)
+                .unwrap()
+                .create_packed_vertex_buffer_data()
+        );
+    }
+
+    #[test]
+    fn horizon_quad_has_literal_original_size_uv_colour_and_normal() {
+        let q = sprite_quad(&Sprite {
+            position: [3., 4., 5.], size: [2., 3.], rotation: 0.,
+            colour: [1., 0., 1., 0.25], texture: 0, frame: 0, horizon: true,
+        }, Vec3::new(20., 6., -4.), Vec3::Z, Vec3::Y, [0.125, 0.25, 0.5, 0.75]);
+        assert_eq!(q.positions, [[1., 4., 2.], [5., 4., 2.], [5., 4., 8.], [1., 4., 8.]]);
+        assert_eq!(q.normal, [0., 1., 0.]);
+        assert_eq!(q.uvs, [[0.125, 0.75], [0.5, 0.75], [0.5, 0.25], [0.125, 0.25]]);
+        assert_eq!(q.colour, [1., 0., 1., 0.25]);
+    }
+
+    #[test]
+    fn sprite_meshes_have_the_same_packed_quad_bytes_and_winding_as_group_mesh() {
+        let input = [quad(0, false), quad(1, true), quad(2, false)];
+        let mut meshes = Assets::<Mesh>::default();
+        let stream = MeshStream::default();
+        let grouped = meshes.add(empty_mesh());
+        QuadMesh::default().update(&input, [0, 1, 2, 0, 2, 3], &grouped, &mut meshes, &stream);
+        let mut singles = Vec::new();
+        for q in input {
+            let h = meshes.add(empty_mesh());
+            QuadMesh::default().update(&[q], [0, 1, 2, 0, 2, 3], &h, &mut meshes, &stream);
+            let asset = meshes.get(&h).unwrap();
+            singles.extend(asset.create_packed_vertex_buffer_data());
+            let Some(Indices::U32(indices)) = asset.indices() else {
+                panic!("indices")
+            };
+            assert_eq!(indices, &[0, 1, 2, 0, 2, 3]);
+        }
+        assert_eq!(
+            singles,
+            meshes
+                .get(&grouped)
+                .unwrap()
+                .create_packed_vertex_buffer_data()
+        );
+    }
+}
+
+// Append inside tyre_smoke.rs after integration. Private proposal; NOT RUN.
+#[cfg(test)]
+mod sprite_visibility_reset_regression {
+    use super::*;
+    use bevy::{
+        asset::AssetPlugin, camera::visibility::VisibilityPlugin,
+        mesh::skinning::SkinnedMeshInverseBindposes,
+    };
+
+    #[derive(Resource, Default)]
+    struct Input(Vec<(usize, Quad)>);
+
+    fn sync(
+        mut pool: ResMut<SpritePool>,
+        input: Res<Input>,
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        stream: Res<MeshStream>,
+    ) {
+        pool.update(&input.0, &mut commands, &mut meshes, &stream);
+    }
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            TransformPlugin,
+            VisibilityPlugin,
+        ))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .init_asset::<SkinnedMeshInverseBindposes>()
+        .init_resource::<MeshStream>()
+        .init_resource::<Input>();
+        let handles = (0..5)
+            .map(|_| {
+                app.world_mut()
+                    .resource_mut::<Assets<StandardMaterial>>()
+                    .add(StandardMaterial::default())
+            })
+            .collect();
+        app.insert_resource(SpritePool {
+            materials: handles,
+            ..default()
+        });
+        app.world_mut().spawn((
+            Camera3d::default(),
+            Transform::IDENTITY,
+            crate::ViewerCamera,
+        ));
+        app
+    }
+
+    fn quad() -> Quad {
+        Quad {
+            positions: [[0., 0., -5.], [1., 0., -5.], [1., 1., -5.], [0., 1., -5.]],
+            normal: [0., 0., 1.],
+            uvs: [[0., 1.], [1., 1.], [1., 0.], [0., 0.]],
+            colour: [1.; 4],
+        }
+    }
+
+    fn assert_visibility(app: &App, entity: Entity, visible: bool) {
+        assert_eq!(
+            app.world()
+                .get::<InheritedVisibility>(entity)
+                .unwrap()
+                .get(),
+            visible
+        );
+        assert_eq!(
+            app.world().get::<ViewVisibility>(entity).unwrap().get(),
+            visible
+        );
+        let camera = app.world().iter_entities().find(|e| e.contains::<crate::ViewerCamera>()).unwrap();
+        let visible_entities = camera.get::<bevy::camera::visibility::VisibleEntities>().unwrap();
+        assert_eq!(visible_entities.get(std::any::TypeId::of::<Mesh3d>()).contains(&entity), visible);
+    }
+
+    #[test]
+    fn stock_visibility_schedule_observes_spawn_shrink_and_regrow_same_update() {
+        let mut app = app();
+        app.add_systems(
+            PostUpdate,
+            sync.after(TransformSystems::Propagate)
+                .before(VisibilitySystems::VisibilityPropagate),
+        );
+        app.world_mut().resource_mut::<Input>().0 = vec![(0, quad()), (1, quad())];
+        app.update();
+        let ids: Vec<_> = app
+            .world()
+            .resource::<SpritePool>()
+            .slots
+            .iter()
+            .map(|s| s.entity)
+            .collect();
+        let handles = app.world().resource::<SpritePool>().meshes.clone();
+        assert_visibility(&app, ids[0], true);
+        assert_visibility(&app, ids[1], true);
+        app.world_mut().resource_mut::<Input>().0.truncate(1);
+        app.update();
+        assert_visibility(&app, ids[0], true);
+        assert_visibility(&app, ids[1], false);
+        app.world_mut().resource_mut::<Input>().0.clear();
+        app.update();
+        assert_visibility(&app, ids[0], false);
+        assert_visibility(&app, ids[1], false);
+        app.world_mut().resource_mut::<Input>().0 = vec![(4, quad()), (3, quad())];
+        app.update();
+        assert_visibility(&app, ids[0], true);
+        assert_visibility(&app, ids[1], true);
+        assert_eq!(app.world().resource::<SpritePool>().meshes, handles);
+        assert_eq!(app.world().resource::<SpritePool>().slots[1].entity, ids[1]);
+    }
+
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources; real BMW runtime + keyboard R"]
+    fn bmw_istanbul_real_keyboard_reset_clears_smoke_then_reuses_pool() {
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                use grid_tools::source_vehicle::{Controls, DELTA, Runtime};
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = std::path::Path::new(&root);
+                let route =
+                    grid_tools::route::Route::new("tracks/europe/istanbul_park/route_0").unwrap();
+                let car = crate::CarModel::new(grid_tools::car::BMW).unwrap();
+                let mut runtime = Runtime::load(root, &route, &car, "slot_00", 200679).unwrap();
+                let mut smoke = Smoke::new(Arc::new(Library::load(root).unwrap()));
+                for t in 0..302 {
+                    runtime
+                        .tick(Controls {
+                            throttle: 1.,
+                            steering: 1.,
+                            handbrake: t >= 190,
+                            ..default()
+                        })
+                        .unwrap();
+                    let car = smoke::CarInput::read(&runtime, false);
+                    let eye = car.pose[12..15].try_into().unwrap();
+                    smoke.tick(&[car], eye, DELTA);
+                }
+                assert!(smoke.particle_count() > 0);
+                assert!(
+                    !smoke.sprites().is_empty(),
+                    "fixture must exercise an active pool"
+                );
+                let mut app = app();
+                // Use the actual presenter draw and tick, not Input/synthetic reset.
+                let pool = app.world_mut().remove_resource::<SpritePool>().unwrap();
+                app.insert_resource(TyreSmoke {
+                    smoke,
+                    pool: Some(pool),
+                    last: Some((0, runtime.ticks)),
+                    meshes: vec![],
+                    entities: vec![],
+                    quads: vec![],
+                    hidden: vec![],
+                    eye: [0.; 3],
+                    frames: 0,
+                });
+                app.insert_resource(crate::Driving {
+                    runtime,
+                    geometry: None,
+                    paused: false,
+                    failure: None,
+                    notices: vec![],
+                    scripted_ticks: None,
+                    scripted: default(),
+                    handbrake_from: None,
+                    last_controls: None,
+                    segment: 0,
+                    started: std::time::Instant::now(),
+                    opponents: None,
+                    auto_reset: default(),
+                    reset_line: None,
+                })
+                .insert_resource(ButtonInput::<KeyCode>::default())
+                .add_message::<AppExit>();
+                app.add_systems(Update, (crate::drive_actions, tick).chain());
+                app.add_systems(
+                    PostUpdate,
+                    draw_sprites
+                        .after(TransformSystems::Propagate)
+                        .before(VisibilitySystems::VisibilityPropagate),
+                );
+                app.update();
+                let handles = app
+                    .world()
+                    .resource::<TyreSmoke>()
+                    .pool
+                    .as_ref()
+                    .unwrap()
+                    .meshes
+                    .clone();
+                let entities: Vec<_> = app
+                    .world()
+                    .resource::<TyreSmoke>()
+                    .pool
+                    .as_ref()
+                    .unwrap()
+                    .slots
+                    .iter()
+                    .map(|s| s.entity)
+                    .collect();
+                assert!(!handles.is_empty());
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::KeyR);
+                app.update();
+                assert_eq!(app.world().resource::<crate::Driving>().segment, 1);
+                assert_eq!(app.world().resource::<crate::Driving>().runtime.ticks, 0);
+                let state = app.world().resource::<TyreSmoke>();
+                assert_eq!(state.last, Some((1, 0)));
+                assert_eq!(state.smoke.particle_count(), 0);
+                assert!(state.smoke.sprites().is_empty());
+                assert!(state.pool.as_ref().unwrap().slots.iter().all(|s| s.hidden));
+                for &entity in &entities {
+                    assert_visibility(&app, entity, false);
+                }
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .reset_all();
+                // Actual runtime reset re-run generates smoke again; this fixture
+                // intentionally bypasses drive_tick's contacts/countdown scheduling.
+                app.world_mut()
+                    .resource_scope(|world, mut state: Mut<TyreSmoke>| {
+                        let mut driving = world.resource_mut::<crate::Driving>();
+                        for t in 0..302 {
+                            driving
+                                .runtime
+                                .tick(Controls {
+                                    throttle: 1.,
+                                    steering: 1.,
+                                    handbrake: t >= 190,
+                                    ..default()
+                                })
+                                .unwrap();
+                            let car = smoke::CarInput::read(&driving.runtime, false);
+                            let eye = car.pose[12..15].try_into().unwrap();
+                            state.smoke.tick(&[car], eye, DELTA);
+                        }
+                        state.last = Some((1, driving.runtime.ticks));
+                    });
+                app.update();
+                let pool = app.world().resource::<TyreSmoke>().pool.as_ref().unwrap();
+                assert!(
+                    !app.world()
+                        .resource::<TyreSmoke>()
+                        .smoke
+                        .sprites()
+                        .is_empty()
+                );
+                assert!(pool.meshes.len() >= handles.len());
+                assert_eq!(&pool.meshes[..handles.len()], handles.as_slice());
+                assert_eq!(&pool.slots[..entities.len()].iter().map(|s| s.entity).collect::<Vec<_>>(), &entities);
+                assert_eq!(pool.slots[0].entity, entities[0]);
+                assert_visibility(&app, entities[0], true);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
