@@ -1445,6 +1445,16 @@ impl Cameras {
         &self.views.0[self.current].ident
     }
 
+    /// Stable original bumper policy: 607BC0 -> 99C2F0 -> 9CB0B0 selects
+    /// one-past-last model LOD; 8F4F30 disables every real LOD node.
+    /// The app adapts this only to the main-view mesh list, keeping the source shot.
+    pub fn hides_player_model(&self) -> bool {
+        matches!(
+            self.views.0[self.shown.unwrap_or(self.current)].ident.as_str(),
+            "bumper" | "bumper_reverse"
+        )
+    }
+
     /// Audio camera of the view on screen (4139F0, docs/AUDIO_RESEARCH.md).
     pub fn audio_camera(&self) -> grid_tools::audio_mix::Camera {
         let rig = &self.views.0[self.shown.unwrap_or(self.current)].rig;

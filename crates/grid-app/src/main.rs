@@ -27,6 +27,7 @@ mod body_occlusion;
 #[cfg(feature = "paint-specular")]
 mod body_specular;
 mod camera;
+mod player_view_visibility;
 mod collision_sound;
 mod car_materials;
 mod lamp_materials;
@@ -3354,6 +3355,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
         camera::install(&mut app, &root, field.models[0].stem());
+        player_view_visibility::install(&mut app);
         track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);
         if app.world().contains_resource::<input::Actions>() {
