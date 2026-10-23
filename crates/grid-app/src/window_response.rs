@@ -42,7 +42,7 @@ impl Mode {
     }
 }
 const SHADER: Handle<Shader> = uuid_handle!("aba7a236-7189-4a8c-a47b-569ab0754806");
-type Window = ExtendedMaterial<StandardMaterial, WindowLayer>;
+pub(crate) type Window = ExtendedMaterial<StandardMaterial, WindowLayer>;
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 #[bind_group_data(WindowKey)]

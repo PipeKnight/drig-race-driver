@@ -33,6 +33,7 @@ mod lamp_materials;
 mod lamp_signals;
 mod paint_environment;
 mod window_response;
+mod window_phase_audit;
 mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
@@ -1423,6 +1424,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut headless = false;
     let mut render_fps = None;
     let mut capture_orbit_rate = None;
+    let mut window_phase_target = None;
     let mut motion_sequence = None;
     let mut temporal_audit_tick = None;
     let mut temporal_colour_tick = None;
@@ -1839,6 +1841,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 graphics.paint_coat_roughness(&args.next().ok_or("--paint-coat-roughness needs 0.04..1")?)?;
                 paint_response_explicit = true;
             }
+            "--window-phase-audit" => {
+                window_phase_target = Some(window_phase_audit::Target::parse(
+                    &args.next().ok_or("--window-phase-audit needs tick:N or frame:N")?,
+                )?);
+            }
             "--glass-pilot" => {
                 graphics.window_pilot = window_response::Mode::parse(&args.next().ok_or("--glass-pilot needs off, control, environment, depth or combined")?)?;
             }
@@ -2040,6 +2047,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
+                println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered Donington Lacetti reference or bounded drive; writes CAPTURE-window-phase.txt under ignored local/.");
                 println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
                 println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
@@ -2156,6 +2164,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
         return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());
+    }
+    if let Some(target) = window_phase_target
+        && (!player_car.is_default() || lod != "LOD0_" || route.path() != Route::default().path()
+            || collision || headless || output.is_none() || (!reference && !drive)
+            || (drive && drive_ticks.is_none())
+            || (!drive && graphics.benchmark_frames.is_none())
+            || target.tick().is_some_and(|tick| !drive || drive_ticks.is_none_or(|end| tick > end)))
+    {
+        return Err("--window-phase-audit requires rendered Donington Lacetti LOD0 reference with --benchmark-frames or bounded --drive-ticks; tick targets require a drive and must not exceed its limit".into());
     }
     if graphics.window_pilot != window_response::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !player_car.is_default() || (drive && drive_ticks.is_none()) || (!drive && !reference) || collision || output.is_none() || lod != "LOD0_" || route.path() != Route::default().path() || matches!(graphics.reflection_mode, 1 | 2)) {
         return Err("--glass-pilot requires rendered static reference or bounded --drive-ticks, enhanced forward Donington Lacetti LOD0 with source IBL; interactive driving is not validated".into());
@@ -3362,6 +3379,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
     mesh_stream::install(&mut app);
+    if let Some(target) = window_phase_target {
+        let path = app.world().resource::<Capture>().path.clone();
+        window_phase_audit::install(&mut app, target, &path)?;
+    }
     if graphics.track_grade {
         track_grade::install(&mut app);
     }
