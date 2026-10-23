@@ -16,7 +16,7 @@ Donington's organism dataset explicitly selects `crowd_anims.pssg`, the European
 
 The shared organism dataset separately names the route crowd placement binary, binary XML crowd definitions, high-level animation selection, prop definitions and hand-held cloth templates. Existing bounded binary XML decoding reads the definitions; names alone do not establish scheduler behaviour or placement-binary strides.
 
-Crowd definitions distinguish standing/sitting, skinned geometry/billboards, platform batches, animation selectors, camera eligibility and source LOD settings. The bank contains named idle, clap, excitement and reaction clips. The route crowd placement format remains unresolved; people must not be scattered at invented positions as a substitute.
+Crowd definitions distinguish standing/sitting, skinned geometry/billboards, platform batches, animation selectors, camera eligibility and source LOD settings. The bank contains named idle, clap, excitement and reaction clips. Standing crowd placement framing now has independent CPU controls described below; moving paths remain opaque. Preserve the source positions rather than scattering people at invented positions.
 
 ## Ordinary packet structure: private decoder verified, production reader unchanged
 
@@ -93,3 +93,31 @@ Time is still **bank time**. Most timestamps resemble an authoring frame grid, b
 
 Private evidence is recorded in `local/handoff/crowd-animation-audit.md`, `crowd-neanim-l4.md`, `crowd-binding-audit.md`, `crowd-evaluation-audit.md`, `crowd-runtime-evaluation.md` and their private draft/probe directories. Those files include purchased-derived metadata and must remain ignored. This public summary intentionally contains no raw key, matrix, vertex or pseudocode dump.
 
+
+
+## Standing placement reader and USA crowd continuation (private draft, 23 October 2026)
+
+A new independent CPU probe resolves the standing crowd catalogue rather than scattering spectators at invented locations. It validates all 97 installed route placement files, accounting for 1,291,209 standing records. Each source position lies in its referenced cell bounds and spatial grid cell; the saved two-component orientation has unit length within the checked tolerance. Every selected standing payload reconstructs byte-for-byte. The same private probe rejects 161 truncated synthetic prefixes and 22 synthetic corruptions. These are format controls, not execution or rendered parity.
+
+Observed framing is little endian with absolute offsets to grid metadata, occupied-cell descriptors and a group catalogue. A cell descriptor is 40 bytes; each group descriptor is 16 bytes; each standing record is 28 bytes, containing an orientation pair, XYZ position, an unknown scalar and occupied-cell reference. Moving groups are separately identified and their bounded payloads remain opaque. Exact group counts, per-cell standing/moving totals, contiguous payload ranges and the terminating name table are checked. The unknown scalar is not treated as animation time or RNG. Four valid Jarama boundary cases require care: float32 arithmetic can round across an authored cell edge. The proposed reader checks that relationship in float64 while preserving all original float32 values.
+
+The private Rust placement reader is independently authored but remains uncompiled/unapplied until the integration owner runs the crate checks. Its synthetic tests and the Python controls are distinct evidence. A production consumer requiring complete moving paths must explicitly reject the opaque moving groups rather than silently claim complete placement support.
+
+Detroit's dataset selects the USA billboard atlas and USA male/female rigs; it does not select the European resources used by the earlier Donington rig controls. Route 8 contains 6,854 saved static instances, of which 4,667 use the male/female grandstand sets. Their instance-set references resolve to the corresponding sitting stances and grandstand animation selectors. Those counts do not establish how many actors any runtime quality setting displays. Separate USA neutral-bind controls now resolve all 30 animation targets and 23 weighted joints; weighted source vertices remain at bind positions within 3.66e-7, and a deliberately rotated palette fails. This is bind-only CPU evidence, not animated orientation/time or GPU parity.
+
+Two explicitly selected saved Shader Model 3 programs were disassembled through the existing installed Microsoft helper, without another Ghidra project. The ordinary billboard vertex program expands a horizontally camera-facing card from each origin using supplied width/height/corner data. It does not consume actor yaw at this stage. The fragment program combines the diffuse texture with a three-colour tint mask, retaining the uncovered mask remainder, then applies its lighting/fog terms. This establishes a narrow saved-variant shader contract; it does not establish palette selection, skin/billboard fade scheduling, clock or arm animation. The unswayed runtime corner table is established separately below.
+
+A default-off, bounded static USA grandstand preview is prepared privately. It retains source positions, sex/group identity and opaque placement metadata; its palette choice is explicitly variant 0 / colour set 0, rather than a claimed recovered variation policy. The candidate remains a static diagnostic: unit per-instance scale, unswayed static corners, Bevy PBR lighting and Bevy A2C are adaptations, and nearby original skinned poses/animation are not reproduced. It must not be promoted as restored animated crowds before independent checks and matched original observations.
+
+### Camera flash runtime material
+
+One targeted shared-cache decompilation of setup function `0x00762370` establishes an important distinction: the flash asset's saved billboard material is replaced at runtime with the `camera_flash` shader group. The pinned shader pack's saved ordinary flash pass uses additive RGB source-alpha/one blending with depth testing/writing. This is a dedicated render effect; it is not evidence of an emitted point light. Setup is not the trigger scheduler. Eligibility, flash placement, duration/rate, visibility gates and attachment consumption remain unresolved and are not fabricated in the static preview.
+
+Private inputs, raw disassembly, exact program/asset hashes, structural reports, synthetic controls and unapplied integration drafts are under `local/handoff/drafts/stadium-crowd01/`, indexed by its `manifest.json`; the short handoff is `local/handoff/stadium-crowd.md`. The already pinned shader-pack SHA is `b6b29b80397d12def9c90f5afcff9ea8f335d07da3dc81e293273b468c9029a6`; selected billboard vertex/fragment bytecode hashes are `c621ae6e6c175ab07b21f61337fa44923843430dd1b4c024a1d5ce4279d36808` and `dde97f344b0e5fba010bc778fd2f639892ca05cd594769a7fe0b028c24b6a0e1`. These identify selected saved variants, not live original execution.
+
+
+### Runtime billboard corner stream
+
+Targeted shared-cache analysis of `0x00759280` identifies the stance table used by the bounded stream writer at `0x00751970`. The table supplies packed half-precision UV/corner pairs to four repeated compact actor descriptors. Its unswayed order is left-bottom, left-top, right-bottom, right-top, with a bottom-centre anchor and dimensions already included in the corner offsets. Horizontal atlas orientation follows the source table rather than an assumed generic quad. The saved four-vertex PSSG mesh has no UV stream and is not itself this generated corner stream.
+
+The separate `0x0075DF70` render-list builder selects LOD/distance/budget lists; it is not the GPU corner writer. Bounded assembly of `0x00773400` shows an upper-corner update, but its clock and selection remain outside this static control. The corrected private preview uses the recovered unswayed layout; individual scale/variation policy, animated skinned poses, lighting and flash scheduling remain separately unverified. Rustfmt parsing is not a compiled or rendered check.
