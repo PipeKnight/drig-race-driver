@@ -78,6 +78,21 @@ pub enum Contacted {
     Static,
 }
 
+/// A body [`MultiRuntime::unsupported`] found asleep or parked without
+/// support, or a held car.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Unsupported {
+    pub body: usize,
+    pub asleep: bool,
+    pub parked: bool,
+    /// A retired car, held at its last pose.
+    pub held: bool,
+    /// How far it fell in the woken clone (m).
+    pub drop: f32,
+    /// Height of its centre above the track surface below it.
+    pub gap: Option<f32>,
+}
+
 /// A car taken out after its own pipeline failed (see [`MultiRuntime::tick`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Retirement {
@@ -454,6 +469,51 @@ impl MultiRuntime {
     /// Shared world bodies: the cars, then live prop pieces.
     pub fn bodies(&self) -> &[contact_groups::Body] {
         &self.world.groups.bodies
+    }
+
+    /// Diagnostic (owner's report of 23 October 2026, bodies asleep in the
+    /// air): steps two clones `ticks` times with idle controls, one as it
+    /// is and one with every asleep piece or lost wheel woken and parking
+    /// off. A body that is asleep or parked here, stays put in the first
+    /// clone and falls more than 0.2 m in the second lacked support. Held
+    /// (retired) cars are listed too, with their height above the track.
+    pub fn unsupported(&self, ticks: usize) -> Result<Vec<Unsupported>, Error> {
+        let cars = self.cars.len();
+        let n = self.bodies().len();
+        let height = |m: &Self, i: usize| f32::from_bits(m.bodies()[i][0x204 / 4]);
+        let state = |i: usize| {
+            let b = &self.bodies()[i];
+            (b[0x400 / 4] == contact_groups::ASLEEP, (b[0x410 / 4] >> 24) & 255 != 0)
+        };
+        let gap = |i: usize| {
+            let p = [0x1c0, 0x1c4, 0x1c8].map(|o| f32::from_bits(self.bodies()[i][o / 4]));
+            self.cars[0].ground_below(p).map(|y| p[1] - y)
+        };
+        let mut out: Vec<Unsupported> = (0..cars)
+            .filter(|&i| self.retired[i].is_some())
+            .map(|i| Unsupported { body: i, asleep: false, parked: false, held: true, drop: 0., gap: gap(i) })
+            .collect();
+        let (mut kept, mut woken) = (self.clone(), self.clone());
+        woken.parking = false;
+        for i in cars..n {
+            if grouped_physical_frame::asleep(&woken.world, i) {
+                grouped_physical_frame::wake(&mut woken.world, i);
+            }
+        }
+        let idle = vec![Controls::default(); cars];
+        for _ in 0..ticks {
+            kept.tick(&idle)?;
+            woken.tick(&idle)?;
+        }
+        for i in cars..n {
+            let (asleep, parked) = state(i);
+            let before = height(self, i);
+            let drop = before - height(&woken, i);
+            if (asleep || parked) && (height(&kept, i) - before).abs() < 1e-3 && drop > 0.2 {
+                out.push(Unsupported { body: i, asleep, parked, held: false, drop, gap: gap(i) });
+            }
+        }
+        Ok(out)
     }
 
     /// Obstruction contact sum of car `i` for the AI's collided_obstruction
@@ -1817,13 +1877,15 @@ mod tests {
             .unwrap();
     }
 
-    /// Parking (B7B850 status 2, B24DF0, AD6480): car 1 breaks a Le Mans tyre
-    /// wall far from the player's car 0; the moving pieces, more than 50 m
-    /// from the player, leave the active list parked (+0x413). When the
-    /// player comes back within 50 m, the start of the next tick wakes them.
+    /// Far pieces rest before they stop (F561, owner's request; BODY_SLEEPING
+    /// section 8): car 1 breaks a Le Mans tyre wall more than 80 m from the
+    /// player's car 0. B7B850 parked the moving pieces on their first static
+    /// contact (status 2, B24DF0); now a body counts as outside only after
+    /// turnOffTime at rest, so none parks in flight, the pile settles and
+    /// sleeps (status 1 comes first), and nothing asleep lacks support.
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
-    fn pieces_far_from_the_player_park_and_wake_when_it_returns() {
+    fn pieces_far_from_the_player_settle_before_they_stop() {
         std::thread::Builder::new()
             .stack_size(64 * 1024 * 1024)
             .spawn(|| {
@@ -1851,32 +1913,26 @@ mod tests {
                 assert!(away > 80., "the player is {away} m from the wall");
                 let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);
                 multi.place_at_rest(1, start, z.map(|v| -v)).unwrap();
-                let parked = |multi: &MultiRuntime| {
-                    multi.bodies()[multi.cars.len()..]
-                        .iter()
-                        .filter(|b| (b[0x410 / 4] >> 24) & 255 != 0)
-                        .count()
+                let cars = multi.cars.len();
+                let count = |multi: &MultiRuntime, f: &dyn Fn(&contact_groups::Body) -> bool| {
+                    multi.bodies()[cars..].iter().filter(|b| f(b)).count()
                 };
                 let mut drive = [Controls::default(); 2];
                 drive[1].throttle = 1.;
-                // Until a good part of the moving pile is parked (settled
-                // pieces later sleep instead: status 1 comes first).
-                for _ in 0..240 {
-                    multi.tick(&drive).unwrap();
-                    if parked(&multi) >= 10 {
-                        break;
+                for tick in 0..900 {
+                    if tick == 240 {
+                        drive[1] = Controls { brake: 1., ..Controls::default() };
                     }
+                    multi.tick(&drive).unwrap();
+                    let parked = count(&multi, &|b| (b[0x410 / 4] >> 24) & 255 != 0);
+                    assert_eq!(parked, 0, "tick {tick}: parked before resting");
                 }
-                let pieces = multi.bodies().len() - multi.cars.len();
-                let before = parked(&multi);
-                eprintln!("pieces {pieces} parked {before}");
-                assert!(before >= 10, "{before} of {pieces} parked");
-                // The player comes within 40 m of the wall.
-                multi.place_at_rest(0, start, z.map(|v| -v)).unwrap();
-                multi.tick(&[Controls::default(); 2]).unwrap();
-                let after = parked(&multi);
-                eprintln!("parked after the player returned {after}");
-                assert!(after < before, "{after} of {before} still parked");
+                let pieces = multi.bodies().len() - cars;
+                let asleep = count(&multi, &|b| b[0x400 / 4] == contact_groups::ASLEEP);
+                let hanging = multi.unsupported(120).unwrap();
+                eprintln!("pieces {pieces} asleep {asleep} unsupported {hanging:?}");
+                assert!(pieces > 0 && asleep > 0, "{asleep} of {pieces} asleep");
+                assert!(hanging.is_empty(), "{hanging:?}");
             })
             .unwrap()
             .join()
@@ -2278,13 +2334,101 @@ mod tests {
             .unwrap();
     }
 
+    /// No piece sleeps or parks without support (owner's report of 23
+    /// October: tyres "fall asleep in the air"). The player breaks a tyre
+    /// wall at full throttle and, three ticks later while the pieces fly,
+    /// is put back 80 m away, as if it had driven on: every piece is beyond
+    /// the 50 m parking radius. After ten seconds a clone with every piece
+    /// woken is the reference; no asleep or parked piece may stay put where
+    /// it falls in the clone. With B7B850's range-only park (before F561) 13
+    /// parked pieces hung here, up to 3.5 m above where they fall.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn no_piece_sleeps_or_parks_in_the_air_after_the_player_drives_on() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let mut total = 0;
+                for (route, wall) in [
+                    ("tracks/europe/nurburgring/route_1", 1237),
+                    ("tracks/europe/nurburgring/route_1", 2276),
+                    ("tracks/europe/donington/route_0", 167),
+                ] {
+                    let route = Route::new(route).unwrap();
+                    let go = [Controls { throttle: 1., ..Controls::default() }, Controls::default()];
+                    let stop = [Controls { brake: 1., ..Controls::default() }, Controls::default()];
+                    let mut found = None;
+                    for side in [1f32, -1.] {
+                        let mut m = MultiRuntime::lacetti_on(
+                            root,
+                            &route,
+                            &["slot_00", "slot_01"],
+                            &table,
+                            events,
+                        )
+                        .unwrap();
+                        m.enable_dynamic_props(root).unwrap();
+                        let at = m.props.as_ref().unwrap().catalog.breakables[wall].placement;
+                        let z = [at[8], at[9], at[10]].map(|v| v * side);
+                        let start: [f32; 3] = std::array::from_fn(|k| at[12 + k] + 80. * z[k]);
+                        m.place_at_rest(0, start, z.map(|v| -v)).unwrap();
+                        let mut broke = false;
+                        for _ in 0..450 {
+                            m.tick(&go).unwrap();
+                            if m.bodies().len() > m.cars.len() {
+                                broke = true;
+                                break;
+                            }
+                        }
+                        if broke {
+                            found = Some((m, start, z.map(|v| -v)));
+                            break;
+                        }
+                    }
+                    let (mut multi, start, heading) = found.expect("the car breaks the wall");
+                    for _ in 0..3 {
+                        multi.tick(&go).unwrap();
+                    }
+                    multi.place_at_rest(0, start, heading).unwrap();
+                    for _ in 0..600 {
+                        multi.tick(&stop).unwrap();
+                    }
+                    let cars = multi.cars.len();
+                    let n = multi.bodies().len();
+                    let count = |f: &dyn Fn(&contact_groups::Body) -> bool| {
+                        multi.bodies()[cars..].iter().filter(|b| f(b)).count()
+                    };
+                    let asleep = count(&|b| b[0x400 / 4] == contact_groups::ASLEEP);
+                    let parked = count(&|b| (b[0x410 / 4] >> 24) & 255 != 0);
+                    let hanging = multi.unsupported(120).unwrap();
+                    eprintln!(
+                        "wall {wall} pieces={} asleep={asleep} parked={parked} hanging={} {:?}",
+                        n - cars,
+                        hanging.len(),
+                        &hanging[..hanging.len().min(10)]
+                    );
+                    total += hanging.len();
+                }
+                assert_eq!(total, 0, "pieces asleep or parked in the air");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
     /// The player drives into a tyre wall at full throttle (the owner's phone
     /// reports of 22 October, Nürburgring tyrestack_white 1237 and Donington
     /// tyre_wall 167); after the pile has settled, a clone with every piece
     /// woken is the reference: a piece that falls there but stays put here
-    /// was hanging. Only asleep pieces count: a piece whose island parked
-    /// in flight, beyond 50 m of the player, stays put until the player comes
-    /// back (B7B850 status 2, AD6480; FIDELITY_BACKLOG row 91).
+    /// was hanging, asleep or parked (F561: islands park only at rest).
     #[test]
     #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
     #[allow(clippy::needless_range_loop)]
@@ -2434,8 +2578,7 @@ mod tests {
                         hanging.len(),
                         &hanging[..hanging.len().min(10)]
                     );
-                    let asleep_hanging = hanging.iter().filter(|h| !h.2).count();
-                    assert_eq!(asleep_hanging, 0, "wall {wall}: {asleep_hanging} asleep pieces hanging");
+                    assert!(hanging.is_empty(), "wall {wall}: {} pieces hanging", hanging.len());
                 }
             })
             .unwrap()

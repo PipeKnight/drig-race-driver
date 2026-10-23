@@ -1272,6 +1272,20 @@ impl Runtime {
         None
     }
 
+    /// Height of the packed track surface below `point` (presentation only:
+    /// where a detached body part lands), from a vertical cast starting
+    /// half a metre above the point and reaching 100 m below it.
+    pub fn ground_below(&self, point: [f32; 3]) -> Option<f32> {
+        let mut cache = grid_world::rectangle_cull::Cache::default();
+        let (start, end) = (point[1] + 0.5, point[1] - 100.);
+        let hit = self
+            .track
+            .query([point[0], start, point[2], 1.], [point[0], end, point[2], 1.], &mut cache)
+            .ok()?
+            .hit?;
+        Some(start + (end - start) * hit.contact.fraction)
+    }
+
     /// [`Self::impacts`] without the records against packed track chunks,
     /// which the drift collision listener 0x64D840 skips (type 11).
     pub fn impacts_off_track(&self) -> Vec<crate::body_impacts::Impact> {

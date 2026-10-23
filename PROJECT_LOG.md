@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F561](log/F0561.md) | 2026-10-23 | No body parks in the air: far islands rest for turnOffTime before they stop; detached parts land on the track |
 | [F560](log/F0560.md) | 2026-10-23 | Playable 67dbeb3a5158 with Render height Auto (F559), portable copy and APKs f2af457cca2c |
 | [F559](log/F0559.md) | 2026-10-23 | Render height Auto (dynamic 480-720) on the Video screen, simulation-only CPU check, Auto cycle row removed |
 | [F558](log/F0558.md) | 2026-10-22 | Playable fc0ff3aa7868 with resolution-only dynamic preset (F555-F556) and the tyre-stack chain fix (F557), portable copy and APKs 94e06d136784 |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F503](log/F0503.md) | 2026-10-20 | Close-drift flags researched: the original breaks them into a kinematic phantom post |
 | [F502](log/F0502.md) | 2026-10-20 | Landing sound after airtime |
 | [F501](log/F0501.md) | 2026-10-20 | Joints, phase 3b: armco breaks, hinged to the world and to the neighbouring section, with its override bodies and link propagation |
-| [F500](log/F0500.md) | 2026-10-20 | EndOfRace mix mode on the results screen |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

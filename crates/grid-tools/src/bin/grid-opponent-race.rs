@@ -730,6 +730,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 multi.ticks
             );
         }
+        // GRID_HANG_CHECK=N: every N ticks, bodies asleep or parked without
+        // support and held cars (MultiRuntime::unsupported, 120 ticks ahead).
+        if let Some(every) = std::env::var("GRID_HANG_CHECK").ok().and_then(|v| v.parse::<u64>().ok())
+            && every > 0
+            && multi.ticks.is_multiple_of(every)
+        {
+            let bodies = multi.bodies().len();
+            let asleep = (multi.bodies().iter())
+                .filter(|b| b[0x400 / 4] == grid_world::contact_groups::ASLEEP)
+                .count();
+            let found = multi.unsupported(120)?;
+            println!(
+                "hang_check tick={} bodies={bodies} asleep={asleep} unsupported={}",
+                multi.ticks,
+                found.iter().filter(|u| !u.held).count()
+            );
+            for u in found {
+                println!("hang tick={} {u:?}", multi.ticks);
+            }
+        }
         if crash_car0.is_some() && multi.ticks.is_multiple_of(500) {
             report_damage(&multi.cars[0], multi.ticks);
         }

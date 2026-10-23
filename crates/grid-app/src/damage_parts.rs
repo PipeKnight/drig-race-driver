@@ -369,7 +369,7 @@ impl Hinge {
 }
 
 /// AUTHORED flight of a detached part, applied to its model-to-world transform.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Debris {
     origin: Mat4,
     centre: Vec3,
@@ -377,7 +377,13 @@ struct Debris {
     velocity: Vec3,
     rotation: Quat,
     spin: Vec3,
+    /// Resting height of `position`: the track surface below it plus `lift`
+    /// (the launch height until a cast finds the surface).
     ground: f32,
+    /// Height of `position` above the surface when the part rests.
+    lift: f32,
+    /// Landed and stopped: no more steps or casts.
+    resting: bool,
 }
 impl Debris {
     fn matrix(&self) -> Mat4 {
@@ -386,13 +392,23 @@ impl Debris {
             * Mat4::from_translation(-self.centre)
             * self.origin
     }
-    fn step(&mut self, dt: f32) {
+    /// One step of the flight. `surface` is the track height below a point
+    /// (`Runtime::ground_below`): the part lands on the track where it is,
+    /// not on the plane it left the car at, which on a slope or after an
+    /// airborne crash hung it in the air (owner's report of 23 October 2026).
+    fn step(&mut self, dt: f32, surface: &mut dyn FnMut(Vec3) -> Option<f32>) {
+        if self.resting {
+            return;
+        }
         self.velocity.y -= 9.81 * dt;
         self.position += self.velocity * dt;
         let w = self.spin.length();
         if w > 1e-4 {
             self.rotation =
                 (Quat::from_axis_angle(self.spin / w, w * dt) * self.rotation).normalize();
+        }
+        if let Some(y) = surface(self.position) {
+            self.ground = y + self.lift;
         }
         if self.position.y < self.ground {
             self.position.y = self.ground;
@@ -405,6 +421,7 @@ impl Debris {
             if self.velocity.length() < 0.3 {
                 self.velocity = Vec3::ZERO;
                 self.spin = Vec3::ZERO;
+                self.resting = true;
             }
         }
     }
@@ -814,6 +831,8 @@ fn launch(r: &Reading, i: usize, seed: u32) -> Debris {
         rotation: Quat::IDENTITY,
         spin: r.pose.x_axis.truncate() * r.spins[SPIN_RECORD[i]],
         ground: r.hubs[i].y,
+        lift: 0.,
+        resting: false,
     }
 }
 
@@ -854,6 +873,8 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
     };
     damage.cars.resize_with(readings.len(), CarDamage::default);
     let dt = grid_tools::source_vehicle::DELTA;
+    let runtime = &driving.runtime;
+    let mut surface = |p: Vec3| runtime.ground_below([p.x, p.y, p.z]);
     // Simulated debris bodies of lost wheels, by (car, wheel).
     let (props, bodies) = match &driving.opponents {
         Some(o) => (o.multi.dynamic_props(), o.multi.bodies()),
@@ -870,10 +891,15 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
             if r.detached[i] && !car.lost[i] {
                 car.lost[i] = true;
                 let seed = (ticks as u32) ^ (((index * 4 + i) as u32) << 24);
+                let mut flight = launch(r, i, seed);
+                // The hub rests as high above the track as it left the car.
+                if let Some(y) = surface(flight.position) {
+                    flight.lift = (flight.position.y - y).max(0.);
+                }
                 car.wheels[i] = Some(LostWheel {
                     origin: r.wheel_frames[i],
                     body: None,
-                    flight: launch(r, i, seed),
+                    flight,
                 });
                 log_line!(
                     "drive_wheel_detached car={index} tick={ticks} wheel={i} impact_strength={:?}",
@@ -883,7 +909,7 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
             if let Some(wheel) = &mut car.wheels[i] {
                 wheel.body = bodies.get(&(index, i)).copied();
                 if wheel.body.is_none() {
-                    wheel.flight.step(dt);
+                    wheel.flight.step(dt, &mut surface);
                 }
             }
         }
@@ -972,6 +998,8 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                             1.5 - seed % 2.,
                         )) * 2.,
                         ground: r.pose.w_axis.y + (max.y - min.y) * 0.5,
+                        lift: (max.y - min.y) * 0.5,
+                        resting: false,
                     });
                 }
                 part.state = change.state;
@@ -1000,7 +1028,7 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                 }
                 State::Detached => {
                     if let Some(debris) = &mut part.debris {
-                        debris.step(dt);
+                        debris.step(dt, &mut surface);
                     }
                 }
                 State::Attached => {}
@@ -1659,6 +1687,45 @@ mod tests {
         assert!((ratio - 4. / 1.75).abs() < 1e-4, "{ratio}");
     }
 
+    /// A detached part lands on the track below it (owner's report of 23
+    /// October 2026: parts asleep in the air). Launched 2 m above a road
+    /// that falls 1 m per 2 m ahead, it comes to rest on the road (plus its
+    /// lift), metres below the plane it left the car at, and stays there.
+    #[test]
+    fn a_detached_part_lands_on_the_road_below_it_not_in_the_air() {
+        let road = |p: Vec3| Some(-0.5 * p.x);
+        let mut part = Debris {
+            origin: Mat4::IDENTITY,
+            centre: Vec3::new(0., 2.3, 0.),
+            position: Vec3::new(0., 2.3, 0.),
+            velocity: Vec3::new(6., 2., 0.),
+            rotation: Quat::IDENTITY,
+            spin: Vec3::ZERO,
+            ground: 2.3,
+            lift: 0.3,
+            resting: false,
+        };
+        let mut surface = |p: Vec3| road(p);
+        for _ in 0..1000 {
+            part.step(1. / 60., &mut surface);
+        }
+        assert!(part.resting);
+        let below = road(part.position).unwrap() + 0.3;
+        assert!((part.position.y - below).abs() < 0.05, "{part:?} rests at {below}");
+        assert!(part.position.y < 1., "{:?}", part.position);
+        let rest = part.position;
+        part.step(1. / 60., &mut surface);
+        assert_eq!(part.position, rest);
+        // Without a surface (cast miss) it keeps the plane it left the car at.
+        let mut blind = Debris { resting: false, velocity: Vec3::ZERO, ..part };
+        blind.position.y = 5.;
+        blind.ground = 2.;
+        for _ in 0..600 {
+            blind.step(1. / 60., &mut |_| None);
+        }
+        assert!((blind.position.y - 2.).abs() < 1e-3, "{:?}", blind.position);
+    }
+
     #[test]
     fn a_lost_wheel_is_drawn_at_its_body_and_falls_back_to_the_flight() {
         let origin = Mat4::from_translation(Vec3::new(1., 0.3, 2.)) * Mat4::from_rotation_y(0.5);
@@ -1670,6 +1737,8 @@ mod tests {
             rotation: Quat::IDENTITY,
             spin: Vec3::ZERO,
             ground: 0.,
+            lift: 0.,
+            resting: false,
         };
         let start = Mat4::from_translation(Vec3::new(1., 0.3, 2.)) * Mat4::from_rotation_z(1.);
         let mut wheel = LostWheel {

@@ -206,6 +206,23 @@ depth until it wakes; the port's margin-based road contact cannot recover it the
 Test `pieces_far_from_the_player_park_and_wake_when_it_returns` (Le Mans tyre wall 969, player 80+ m
 away, car 1 breaks the wall: 37 pieces parked, all leave the list once the player returns).
 
+**Settle before parking (F561, AUTHORED, owner's request).** B7B850 has no velocity or support
+test for status 2 [D, re-read 23 October 2026: the per-body loop counts B0FE60 asleep and B106E0
+outside; status 2 needs only every body outside plus the island's one-body or static contact].
+So the original parks an island in flight as soon as one of its pieces touches a wall, a barrier
+top or the side of another stack while the player is more than 50 m away, and it hangs there until
+the player returns. The owner saw this in demolition derby ("tyres and car parts fall asleep in
+the air") and asked that bodies land first. `impact_frame::frame` now counts a body as outside
+only once its sleep timer (+0x3A0, time under its stationary thresholds) has reached its
+turnOffTime. Under gravity a body stays under 0.3 m/s for at most about 0.06 s in flight, so only
+resting islands qualify. Shorter waits still parked pieces on sagging piles: 0.25 s left a tyre
+0.39 m above where it settles, and 0.5 s left two in a derby (one 1.07 m up, 0.75 m above where it
+settles). At turnOffTime every outside body also passes B0FE60, so status 1 comes first: far
+islands now **sleep** at rest instead of parking, the parked list stays empty and AD6480 has
+nothing to wake. Islands that never come to rest (a rocking tyre) neither park nor sleep, as near
+the player. Sleep itself (status 1) cannot catch a body in the air. Measurements and tests: log
+F561.
+
 ## Open
 
 - **7D75F0**, called by 5C6B90 with the same point and scale and 1000.0: the entity manager's
