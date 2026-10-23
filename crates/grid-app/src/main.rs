@@ -34,6 +34,7 @@ mod lamp_signals;
 mod paint_environment;
 mod window_response;
 mod window_phase_audit;
+mod window_transitions;
 mod car_numbers;
 mod career_screen;
 mod clearcoat_prepass;
@@ -1426,6 +1427,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut capture_orbit_rate = None;
     let mut window_phase_target = None;
     let mut window_sort_current = false;
+    let mut window_transition_script = None;
     let mut motion_sequence = None;
     let mut temporal_audit_tick = None;
     let mut temporal_colour_tick = None;
@@ -1842,6 +1844,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 graphics.paint_coat_roughness(&args.next().ok_or("--paint-coat-roughness needs 0.04..1")?)?;
                 paint_response_explicit = true;
             }
+            "--window-transitions" => {
+                window_transition_script = Some(window_transitions::Script::parse(
+                    &args.next().ok_or("--window-transitions needs FRAME:C,FRAME:R,...")?,
+                )?);
+            }
             "--window-sort" => {
                 window_sort_current = match args.next().as_deref() {
                     Some("off") => false,
@@ -2055,6 +2062,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--dlaa-history normal|reset-every-frame: diagnostic history control; reset requires bounded enhanced DLAA driving/render, normal default.");
                 println!("--asphalt-soften 0..4: default-off Donington asphalt RGB low-pass at speed; preserves masks, markings, kerbs and macro/skid layers.");
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
+                println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
                 println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered Donington Lacetti reference or bounded drive; writes CAPTURE-window-phase.txt under ignored local/.");
                 println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
@@ -2173,6 +2181,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
         return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());
+    }
+    if let Some(script) = window_transition_script.as_ref()
+        && (!drive || drive_ticks.is_none() || render_fps.is_none() || output.is_none()
+            || headless || collision || !player_car.is_default() || route.path() != Route::default().path()
+            || input_settings.device != input::Device::Keyboard
+            || !script.fits(drive_ticks.unwrap_or(0), render_fps.unwrap_or(0)))
+    {
+        return Err("--window-transitions requires bounded rendered Donington Lacetti drive, explicit keyboard/render FPS and events before the first tick limit".into());
     }
     if window_sort_current && (!graphics.enhanced() || !graphics.layered_car
         || !player_car.is_default() || lod != "LOD0_" || route.path() != Route::default().path()
@@ -3395,6 +3411,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "profile")]
     span_profile::install(&mut app);
     mesh_stream::install(&mut app);
+    if let Some(script) = window_transition_script {
+        window_transitions::install(&mut app, script);
+    }
     if window_sort_current {
         window_response::install_current_sort(&mut app);
     }

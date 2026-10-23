@@ -432,3 +432,25 @@ the rear pane overlays the front border. The physical source border remains. An 
 front-Cracked shaded scenario preserves damage/physics and its visible crack. No claim of
 rendered Smashed/reset, manual R/C, all-frame temporal correctness or other-car acceptance.
 Private trace/captures: `local/graphics/window-phase01/`, `local/graphics/window-order01/`.
+
+### Bounded real C/R transitions — G239
+
+`--window-transitions FRAME:C,FRAME:R,...` is a default-off offscreen input diagnostic.
+It submits real keyboard pulses to normal action/reset handlers, with a monotonic Extract
+frame clock, bounded duration and at most one reset. No alternative camera/reset is added.
+A real InputPlugin/Actions fixture exercises key edges even when synthetic ticks revisit
+an old value; actual GPU runs separately verify the ordinary runtime reset.
+
+Six native1080p/virtual30 runs exercise C90, R180, C240 with one300frame sequence. Normal
+consumers change view at tick185/125; R advances segment and resets tick0. All physical
+exit records agree. Chase phase audits before/after C/R and at exact reset tick0 each
+contain six unique panes with logged centre error0 and unchanged depth state. The motion
+sequence skips exact reset tick0 and resumes at tick2; that exact RGB frame is unverified.
+DLAA logs prove a history-reset request, not an independently acknowledged NGX dispatch.
+
+Selected images expose a separate persistent opaque own-body obstruction in bumper view.
+It reproduces in accepted G222 Motion without any new window flags and in frozen G238;
+G238/G239 initial-bumper PNGs are identical. Source front-bumper geometry is ahead of the
+camera eye beyond near0.2. Original own-body visibility rules remain unresolved; no whole-car
+hide or arbitrary camera offset is promoted. Thus machine checks pass but universal visual
+C/R acceptance is not claimed. See private `window-transitions01/` and `window-bumper-baseline01/`.
