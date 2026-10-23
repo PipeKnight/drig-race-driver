@@ -4,9 +4,79 @@
 //! 4) and the atlas `skidmarks/road_tm.pssg` are read from the purchased
 //! installation. Presentation only; never feeds physics.
 use super::wheel_ground::{Wheel, WheelGround};
-use bevy::prelude::*;
+use bevy::{
+    mesh::MeshVertexBufferLayoutRef,
+    pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline},
+    prelude::*,
+    render::render_resource::{AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError},
+};
 use grid_formats::skidmarks::{Layer, Profile};
 use std::path::Path;
+
+
+/// Default-off diagnostic; no smoke/skid simulation or atlas changes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum OrderMode {
+    #[default]
+    Off,
+    Control,
+    Isolated,
+}
+impl OrderMode {
+    pub(crate) fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "off" => Ok(Self::Off),
+            "control" => Ok(Self::Control),
+            "isolated" => Ok(Self::Isolated),
+            _ => Err("--skid-order needs off, control or isolated"),
+        }
+    }
+}
+
+// StandardMaterial.depth_bias sets BOTH a transparent sort offset and raster
+// depth bias. This extension keeps raster constant50 while permitting sort0.
+// No vertex/fragment override: use the stock StandardMaterial PBR shaders.
+type SkidOrderMaterial = ExtendedMaterial<StandardMaterial, SkidRasterBias>;
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+#[bind_group_data(SkidRasterKey)]
+struct SkidRasterBias {
+    // Nonempty extension bind group; intentionally unused by stock shaders.
+    #[uniform(100)]
+    marker: Vec4,
+    raster_constant: i32,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+struct SkidRasterKey(i32);
+impl From<&SkidRasterBias> for SkidRasterKey {
+    fn from(value: &SkidRasterBias) -> Self { Self(value.raster_constant) }
+}
+impl MaterialExtension for SkidRasterBias {
+    fn specialize(
+        _: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        _: &MeshVertexBufferLayoutRef,
+        key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        // ExtendedMaterial calls this AFTER StandardMaterial specialization.
+        // Preserve slope/clamp, compare, write-enable, blend and every shader.
+        restore_raster_constant(descriptor, key.bind_group_data.0);
+        Ok(())
+    }
+}
+fn restore_raster_constant(descriptor: &mut RenderPipelineDescriptor, constant: i32) {
+    if let Some(depth) = descriptor.depth_stencil.as_mut() {
+        depth.bias.constant = constant;
+    }
+}
+
+fn extended_order_material(mut base: StandardMaterial, mode: OrderMode) -> SkidOrderMaterial {
+    debug_assert_ne!(mode, OrderMode::Off);
+    base.depth_bias = if mode == OrderMode::Control { 50. } else { 0. };
+    SkidOrderMaterial {
+        base,
+        extension: SkidRasterBias { marker: Vec4::ZERO, raster_constant: 50 },
+    }
+}
 
 /// Global strip pool and strip length [D 73F860/739570].
 const STRIPS: usize = 240;
@@ -317,7 +387,7 @@ impl SkidMarks {
     }
 }
 
-pub(crate) fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(root.join("skidmarks/road_tm.xml"))?;
     let profile = grid_formats::skidmarks::read(&text)?;
     let textures =
@@ -331,7 +401,12 @@ pub(crate) fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::err
         profile.surfaces.len(),
         profile.offset
     );
-    app.insert_resource(Pending { profile, diffuse })
+    if mode != OrderMode::Off {
+        app.add_plugins(MaterialPlugin::<SkidOrderMaterial>::default());
+    }
+    println!("skid_order mode={mode:?} raster_constant=50 sort_bias={} source_parity=false",
+        if mode == OrderMode::Isolated { 0 } else { 50 });
+    app.insert_resource(Pending { profile, diffuse, mode })
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, lay.after(super::wheel_ground::update))
         .add_systems(Update, present.after(super::drive_present));
@@ -342,6 +417,7 @@ pub(crate) fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::err
 struct Pending {
     profile: Profile,
     diffuse: Vec<u8>,
+    mode: OrderMode,
 }
 
 fn start(
@@ -350,6 +426,7 @@ fn start(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    experimental: Option<ResMut<Assets<SkidOrderMaterial>>>,
 ) {
     let Some(pending) = pending else { return };
     // Device-dependent upload must follow texture_upload::configure (PreStartup).
@@ -365,20 +442,33 @@ fn start(
     marks.mesh = meshes.add(marks.build());
     // Alpha blended, no depth write, lit by the ground normal. The original
     // also blends a normal map by the Fade bound; not reproduced (AUTHORED).
-    let material = materials.add(StandardMaterial {
+    let base = StandardMaterial {
         base_color_texture: Some(images.add(image)),
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.9,
         depth_bias: 50.,
         ..default()
-    });
-    commands.spawn((
-        Name::new("skid marks"),
-        Mesh3d(marks.mesh.clone()),
-        MeshMaterial3d(material),
-        Transform::IDENTITY,
-        bevy::camera::visibility::NoFrustumCulling,
-    ));
+    };
+    if pending.mode == OrderMode::Off {
+        let material = materials.add(base);
+        commands.spawn((
+            Name::new("skid marks"),
+            Mesh3d(marks.mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::IDENTITY,
+            bevy::camera::visibility::NoFrustumCulling,
+        ));
+    } else {
+        let mut experimental = experimental.expect("skid order MaterialPlugin installed");
+        let material = experimental.add(extended_order_material(base, pending.mode));
+        commands.spawn((
+            Name::new("skid marks"),
+            Mesh3d(marks.mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::IDENTITY,
+            bevy::camera::visibility::NoFrustumCulling,
+        ));
+    }
     commands.remove_resource::<Pending>();
     commands.insert_resource(marks);
 }
@@ -427,6 +517,82 @@ fn present(marks: Option<ResMut<SkidMarks>>, mut meshes: ResMut<Assets<Mesh>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn order_mode_is_default_off_and_rejects_unknown_values() {
+        assert_eq!(OrderMode::default(), OrderMode::Off);
+        assert_eq!(OrderMode::parse("control"), Ok(OrderMode::Control));
+        assert_eq!(OrderMode::parse("isolated"), Ok(OrderMode::Isolated));
+        assert!(OrderMode::parse("zero").is_err());
+    }
+    #[test]
+    fn isolated_sort_preserves_raster_key_atlas_alpha_and_lighting() {
+        let original = StandardMaterial {
+            base_color_texture: Some(Handle::default()),
+            base_color: Color::srgba(0.8, 0.7, 0.6, 0.4),
+            alpha_mode: AlphaMode::Blend,
+            perceptual_roughness: 0.9,
+            depth_bias: 50.,
+            ..default()
+        };
+        let control = extended_order_material(original.clone(), OrderMode::Control);
+        let isolated = extended_order_material(original.clone(), OrderMode::Isolated);
+        assert_eq!(control.base.depth_bias, 50.);
+        assert_eq!(isolated.base.depth_bias, 0.);
+        assert_eq!(<SkidOrderMaterial as bevy::pbr::Material>::depth_bias(&control), 50.);
+        assert_eq!(<SkidOrderMaterial as bevy::pbr::Material>::depth_bias(&isolated), 0.);
+        assert_eq!(SkidRasterKey::from(&control.extension), SkidRasterKey(50));
+        assert_eq!(SkidRasterKey::from(&isolated.extension), SkidRasterKey(50));
+        for material in [control, isolated] {
+            assert_eq!(material.base.base_color_texture, original.base_color_texture);
+            assert_eq!(material.base.base_color, original.base_color);
+            assert_eq!(material.base.alpha_mode, original.alpha_mode);
+            assert_eq!(material.base.perceptual_roughness, original.perceptual_roughness);
+            assert_eq!(material.base.cull_mode, original.cull_mode);
+            assert_eq!(material.base.unlit, original.unlit);
+            assert_eq!(material.base.fog_enabled, original.fog_enabled);
+        }
+        let changed = SkidRasterBias { marker: Vec4::ZERO, raster_constant: 51 };
+        assert_ne!(SkidRasterKey::from(&changed), SkidRasterKey(50));
+    }
+
+
+    #[test]
+    fn raster_restore_changes_only_constant_and_keeps_default_stock_shaders() {
+        use bevy::render::render_resource::{BlendState, ColorTargetState, ColorWrites,
+            CompareFunction, DepthBiasState, DepthStencilState, FragmentState, TextureFormat};
+        let mut descriptor = RenderPipelineDescriptor {
+            label: Some("skid-order-fixture".into()),
+            depth_stencil: Some(DepthStencilState {
+                format: TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(CompareFunction::GreaterEqual),
+                stencil: default(),
+                bias: DepthBiasState { constant: 0, slope_scale: 0.125, clamp: 0.25 },
+            }),
+            fragment: Some(FragmentState {
+                targets: vec![Some(ColorTargetState {
+                    format: TextureFormat::Rgba16Float,
+                    blend: Some(BlendState::ALPHA_BLENDING),
+                    write_mask: ColorWrites::ALL,
+                })],
+                ..default()
+            }),
+            ..default()
+        };
+        let mut expected = descriptor.clone();
+        expected.depth_stencil.as_mut().unwrap().bias.constant = 50;
+        restore_raster_constant(&mut descriptor, 50);
+        assert_eq!(descriptor, expected); // Entire descriptor; only constant differs.
+        let mut no_depth = RenderPipelineDescriptor::default();
+        let untouched = no_depth.clone();
+        restore_raster_constant(&mut no_depth, 50);
+        assert_eq!(no_depth, untouched);
+        assert!(matches!(<SkidRasterBias as MaterialExtension>::vertex_shader(), bevy::shader::ShaderRef::Default));
+        assert!(matches!(<SkidRasterBias as MaterialExtension>::fragment_shader(), bevy::shader::ShaderRef::Default));
+        assert!(matches!(<SkidRasterBias as MaterialExtension>::prepass_fragment_shader(), bevy::shader::ShaderRef::Default));
+        assert!(matches!(<SkidRasterBias as MaterialExtension>::deferred_fragment_shader(), bevy::shader::ShaderRef::Default));
+    }
 
     fn profile() -> Profile {
         grid_formats::skidmarks::read(
