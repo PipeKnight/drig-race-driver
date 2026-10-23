@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G238](G0238.md) | 2026-10-23 | Refresh moving player window sort centres without changing glass materials |
 | [G237](G0237.md) | 2026-10-23 | Audit actual transparent queue for rear glass contour |
 | [G236](G0236.md) | 2026-10-23 | Isolate rear contour from DLAA and other transparent ground cover |
 | [G235](G0235.md) | 2026-10-23 | Independent graphics backlog drafts from three parallel audits |

@@ -409,3 +409,26 @@ visible. The rear outline remains a separate unresolved issue. Rendered Smashed/
 all-frame temporal behaviour and owner monitor acceptance are not established. No accepted
 Motion launcher or default glass response is replaced. Private evidence:
 `local/graphics/glass-fresnel01/`, including build-provenance.json and motion-review.json.
+
+### Moving transparent queue — G237/G238
+
+A one-frame main-view `--window-phase-audit tick:1652` revealed that all six player-window
+world centres in Bevy's retained transparent phase were420..424m from their current world
+AABBs. Rear306 was queued before front311. The same defect occurs with ordinary materials
+and neutral extended proxies; enabling depth writes hides some symptoms without updating
+those centres. Static CPU pane order alone could not expose this moving-frame problem.
+
+Optional `--window-sort off|current` (off default) now submits current LOCAL AABB centres
+every frame through the existing MeshStream adapter, which applies the current world
+transform before sorting. The actual rendered entity is selected once: source with the
+material pilot off, proxy otherwise. Materials, alpha, depth, shaders and geometry are unchanged.
+The candidate is scoped to bounded enhanced forward Donington Lacetti LOD0 captures.
+
+Three native1080p/virtual30 moving controls have equal physical exits, frame manifests and
+sampled motion/depth. At the sampled phase, both ordinary and Fresnel current modes match
+world centres exactly to logged precision, with front311 before rear306 and depth writes
+still disabled. Selected native frames0/29 show softer rear-through-front contour because
+the rear pane overlays the front border. The physical source border remains. An actual
+front-Cracked shaded scenario preserves damage/physics and its visible crack. No claim of
+rendered Smashed/reset, manual R/C, all-frame temporal correctness or other-car acceptance.
+Private trace/captures: `local/graphics/window-phase01/`, `local/graphics/window-order01/`.

@@ -87,6 +87,41 @@ pub fn install(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .add_systems(PostUpdate, sync.before(VisibilitySystems::CheckVisibility));
     Ok(())
 }
+
+/// Default-off scoped diagnostic: refresh a retained transparent item's world
+/// centre through MeshStream, without changing its material or depth state.
+pub(crate) fn install_current_sort(app: &mut App) {
+    // Last follows source transforms/deformation and proxy sync in PostUpdate.
+    // Extraction then hands the local centre to the existing pre-sort adapter.
+    app.add_systems(Last, queue_current_sort_centres);
+    println!("window_sort enabled=true scope=car0-window-glass current_local_bounds=true source_or_proxy=true pbr_alpha_depth_geometry=unchanged");
+}
+#[allow(clippy::type_complexity)] // Explicit source-window ownership, excluding opponents.
+fn queue_current_sort_centres(
+    stream: Res<super::mesh_stream::MeshStream>,
+    sources: Query<(Entity, &super::track_surface::SourcePart, &Aabb),
+        (With<Mesh3d>, Without<super::OpponentPart>)>,
+    proxies: Query<(Entity, &Proxy, &Aabb)>,
+) {
+    let mut selected: HashMap<Entity, Vec3> = sources.iter()
+        .filter(|(_, part, _)| part.0 == "car0/Window Glass")
+        .map(|(entity, _, bounds)| (entity, bounds.center.into()))
+        .collect();
+    for (entity, proxy, bounds) in &proxies {
+        if selected.remove(&proxy.0).is_some() {
+            // A proxy uses the source's mesh with child-local identity transform.
+            // Pass LOCAL coordinates; MeshStream applies the current render-world
+            // world_from_local. Passing a world point here would transform twice.
+            stream.sort_centre(entity, bounds.center.into());
+        }
+    }
+    for (entity, local_centre) in selected {
+        // Off material pilot: the original source is the actual rendered draw.
+        // Hidden sources are not also queued when their proxy was selected above.
+        stream.sort_centre(entity, local_centre);
+    }
+}
+
 #[derive(Component)]
 struct HiddenSource;
 #[derive(Component)]
@@ -173,6 +208,63 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_sort_routes_only_player_windows_to_one_render_entity() {
+        let mut app = App::new();
+        // The real no-render MeshStream adapter clears pending writes in First.
+        // Thus a later assertion cannot accidentally pass on last frame's entry.
+        super::super::mesh_stream::install(&mut app);
+        app.add_systems(Last, queue_current_sort_centres);
+        let bounds = Aabb { center: Vec3::new(1., 2., 3.).into(), half_extents: Vec3::ONE.into() };
+        let direct = app.world_mut().spawn((
+            super::super::track_surface::SourcePart("car0/Window Glass".into()),
+            Mesh3d(Handle::default()), bounds, Transform::IDENTITY,
+        )).id();
+        let hidden_source = app.world_mut().spawn((
+            super::super::track_surface::SourcePart("car0/Window Glass".into()),
+            Mesh3d(Handle::default()), bounds, Transform::IDENTITY,
+        )).id();
+        let proxy_bounds = Aabb { center: Vec3::new(4., 5., 6.).into(), ..bounds };
+        let proxy = app.world_mut().spawn((
+            Proxy(hidden_source), proxy_bounds, ChildOf(hidden_source), Transform::IDENTITY,
+        )).id();
+        let opponent = app.world_mut().spawn((
+            super::super::track_surface::SourcePart("car1/Window Glass".into()),
+            Mesh3d(Handle::default()), bounds,
+        )).id();
+        let lamp = app.world_mut().spawn((
+            super::super::track_surface::SourcePart("car0/Head Lights Glass".into()),
+            Mesh3d(Handle::default()), bounds,
+        )).id();
+        app.update();
+        let stream = app.world().resource::<super::super::mesh_stream::MeshStream>();
+        assert_eq!(stream.queued_centre(direct), Some(Vec3::new(1., 2., 3.)));
+        assert_eq!(stream.queued_centre(proxy), Some(Vec3::new(4., 5., 6.)));
+        assert_eq!(stream.queued_centre(hidden_source), None);
+        assert_eq!(stream.queued_centre(opponent), None);
+        assert_eq!(stream.queued_centre(lamp), None);
+        // Moving the car must not turn the LOCAL centre into a world point.
+        app.world_mut().get_mut::<Transform>(direct).unwrap().translation = Vec3::new(100., -20., 300.);
+        app.world_mut().get_mut::<Transform>(hidden_source).unwrap().translation = Vec3::new(-50., -10., 200.);
+        app.world_mut().get_mut::<Aabb>(direct).unwrap().center = Vec3::new(7., 8., 9.).into();
+        app.update();
+        let stream = app.world().resource::<super::super::mesh_stream::MeshStream>();
+        assert_eq!(stream.queued_centre(direct), Some(Vec3::new(7., 8., 9.)));
+        assert_eq!(stream.queued_centre(proxy), Some(Vec3::new(4., 5., 6.)));
+        assert_eq!(stream.queued_centre(hidden_source), None);
+        // Reset presentation to its initial transform/bounds. First clears each
+        // previous frame, so unchanged proxy bounds still need a fresh emission.
+        *app.world_mut().get_mut::<Transform>(direct).unwrap() = Transform::IDENTITY;
+        *app.world_mut().get_mut::<Transform>(hidden_source).unwrap() = Transform::IDENTITY;
+        *app.world_mut().get_mut::<Aabb>(direct).unwrap() = bounds;
+        app.update();
+        let stream = app.world().resource::<super::super::mesh_stream::MeshStream>();
+        assert_eq!(stream.queued_centre(direct), Some(Vec3::new(1., 2., 3.)));
+        assert_eq!(stream.queued_centre(proxy), Some(Vec3::new(4., 5., 6.)));
+        assert_eq!(stream.queued_centre(hidden_source), None);
+    }
+
     #[test]
     fn proxy_tracks_crack_reset_mesh_bounds_and_keeps_source_ownership() {
         // The new response must retain the same damage-owned source material,
