@@ -15,291 +15,11 @@
 //! flight, glass shards from the lac.ppts points, window anchor layout and the
 //! crack-map materials standing in for the original `_Cracked` shader input.
 use bevy::{asset::RenderAssetUsages, camera::primitives::Aabb, image::ImageSampler, prelude::*};
-use grid_tools::body_impacts::Impact;
 use std::{collections::BTreeMap, path::Path};
 
-use grid_tools::loose_parts::{
-    BONNET, BOOT, Config, EXHAUST, FRONT_LEFT, FRONT_RIGHT, LEFT_SIDE, REAR, REAR_LEFT,
-    REAR_LEFT_WING, REAR_RIGHT, REAR_RIGHT_WING, RIGHT_SIDE, ROOF, Rule, WINDOWS, ZONES,
-};
+use grid_tools::loose_parts::{Config, EXHAUSTS, PARTS, State, WINDOWS, ZONES};
 #[cfg(test)]
-use grid_tools::loose_parts::WHEELS;
-/// Exhaust part ids 31, 34, 101, 102 of the original exhaust list.
-const EXHAUSTS: [&str; 4] = ["exhaust", "exhaust_b", "exhaust_bl", "exhaust_br"];
-
-/// Car frame of one tick: world-to-model transform, the car-local offset at
-/// car +1630 and the world Y of the car's up axis.
-struct Frame {
-    inverse: Mat4,
-    offset: Vec3,
-    up_y: f32,
-}
-
-/// Original 98B430 (grid_tools::loose_parts) for one notification. The wheel
-/// zones feed the simulation's own wheel rule; here they are unused.
-fn classify(config: &Config, frame: &Frame, impact: &Impact, zones: &mut [f32; ZONES]) {
-    let p = frame.inverse.transform_point3(Vec3::from(impact.point)) - frame.offset;
-    let n = frame.inverse.transform_vector3(Vec3::from(impact.normal));
-    grid_tools::loose_parts::classify(
-        config,
-        p.to_array(),
-        n.to_array(),
-        impact.impact,
-        frame.up_y < 0.,
-        zones,
-    );
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum State {
-    #[default]
-    Attached,
-    Loose,
-    Detached,
-}
-
-/// One requested state change with the zone value and threshold that caused it.
-#[derive(Debug, PartialEq)]
-struct Change {
-    part: &'static str,
-    state: State,
-    zone: f32,
-    threshold: f32,
-}
-
-/// Decisions of one tick so far, over the car's states before the tick.
-struct Decisions<'a> {
-    out: Vec<Change>,
-    state: &'a dyn Fn(&str) -> Option<State>,
-}
-impl Decisions<'_> {
-    fn current(&self, part: &str) -> Option<State> {
-        self.out
-            .iter()
-            .rev()
-            .find(|x| x.part == part)
-            .map(|x| x.state)
-            .or_else(|| (self.state)(part))
-    }
-    /// FUN_009a7cb0: absent parts read as state 0.
-    fn attached(&self, part: &str) -> bool {
-        self.current(part).is_none_or(|s| s == State::Attached)
-    }
-    fn not_detached(&self, part: &str) -> bool {
-        self.current(part).is_some_and(|s| s != State::Detached)
-    }
-    fn push(&mut self, part: &'static str, state: State, zone: f32, threshold: f32) {
-        if self
-            .current(part)
-            .is_some_and(|s| s != state && s != State::Detached)
-        {
-            self.out.push(Change {
-                part,
-                state,
-                zone,
-                threshold,
-            });
-        }
-    }
-    /// Wing-style rule: detach above level x S, else swing above level x mass.
-    fn wing(&mut self, rule: Rule, s: f32, scalar: f32, mass: f32, part: &'static str, zone: f32) {
-        if let Some(level) = rule.detach
-            && level * s < zone
-        {
-            self.push(part, State::Detached, zone, level * s);
-        } else if let Some(level) = rule.swing
-            && level * s < scalar * zone
-            && self.not_detached(part)
-        {
-            self.push(part, State::Loose, zone, level * mass);
-        }
-    }
-    /// Bumper corner rule: as `wing`, without the detached-state guard.
-    fn corner(
-        &mut self,
-        rule: Rule,
-        s: f32,
-        scalar: f32,
-        mass: f32,
-        part: &'static str,
-        zone: f32,
-    ) {
-        if let Some(level) = rule.detach
-            && level * s < zone
-        {
-            self.push(part, State::Detached, zone, level * s);
-        } else if let Some(level) = rule.swing
-            && level * s < scalar * zone
-        {
-            self.push(part, State::Loose, zone, level * mass);
-        }
-    }
-}
-
-/// Original 9EC9B0 decisions for one tick. `state` reports a part's current
-/// state, or `None` when the car model has no such part.
-fn decide(
-    c: &Config,
-    zones: &[f32; ZONES],
-    totals: &[f32; ZONES],
-    mass: f32,
-    state: &dyn Fn(&str) -> Option<State>,
-) -> Vec<Change> {
-    let mut d = Decisions {
-        out: Vec::new(),
-        state,
-    };
-    let s = mass * c.scalar;
-    let roof_doors = zones[ROOF] > 0. && s * 0.25 < zones[ROOF] && c.front_doors.is_some();
-    if let Some(level) = c.bonnet
-        && level * s < zones[BONNET]
-        && d.not_detached("bonnet")
-    {
-        d.push("bonnet", State::Loose, zones[BONNET], level * s);
-    }
-    if let Some(level) = c.boot
-        && level * s < zones[BOOT]
-        && level * s * 2.5 < totals[BOOT]
-        && d.not_detached("boot")
-    {
-        d.push("boot", State::Loose, zones[BOOT], level * s);
-    }
-    for part in EXHAUSTS {
-        let zone = zones[EXHAUST];
-        if let Some(level) = c.exhaust.detach
-            && level * s < zone
-        {
-            d.push(part, State::Detached, zone, level * s);
-        } else if let Some(level) = c.exhaust.swing
-            && level * s < zone
-            && d.not_detached(part)
-        {
-            // The original also requires car +1554 to be zero [I].
-            d.push(part, State::Loose, zone, level * s);
-        }
-    }
-    if let Some(level) = c.front_doors {
-        for (part, zone) in [("door_fr", RIGHT_SIDE), ("door_fl", LEFT_SIDE)] {
-            if (level * s < c.scalar * zones[zone] || roof_doors) && d.not_detached(part) {
-                d.push(part, State::Loose, zones[zone], level * mass);
-            }
-        }
-    }
-    d.wing(
-        c.rear_wings,
-        s,
-        c.scalar,
-        mass,
-        "wing_br",
-        zones[REAR_RIGHT_WING],
-    );
-    d.wing(
-        c.rear_wings,
-        s,
-        c.scalar,
-        mass,
-        "wing_bl",
-        zones[REAR_LEFT_WING],
-    );
-    d.wing(
-        c.front_wings,
-        s,
-        c.scalar,
-        mass,
-        "wing_fr",
-        zones[FRONT_RIGHT],
-    );
-    d.wing(
-        c.front_wings,
-        s,
-        c.scalar,
-        mass,
-        "wing_fl",
-        zones[FRONT_LEFT],
-    );
-    if let Some(level) = c.mirrors_detach {
-        for (part, zone) in [
-            ("wing_mirror_r", FRONT_RIGHT),
-            ("wing_mirror_l", FRONT_LEFT),
-        ] {
-            if level * s < zones[zone] {
-                d.push(part, State::Detached, zones[zone], level * s);
-            }
-        }
-    }
-    if let Some(level) = c.rear_doors {
-        for (part, zone) in [("door_br", RIGHT_SIDE), ("door_bl", LEFT_SIDE)] {
-            if level * s < zones[zone] && d.not_detached(part) {
-                d.push(part, State::Loose, zones[zone], level * s);
-            }
-        }
-    }
-    let corners = zones[FRONT_LEFT] + zones[FRONT_RIGHT];
-    if let Some(level) = c.front_bumper_detach
-        && level * s < corners
-        && state("bumper_fm").is_some()
-    {
-        for part in ["bumper_fl", "bumper_fr", "bumper_fm"] {
-            d.push(part, State::Detached, corners, level * s);
-        }
-    }
-    if d.attached("bumper_fm") {
-        d.corner(
-            c.front_bumper_side,
-            s,
-            c.scalar,
-            mass,
-            "bumper_fr",
-            zones[FRONT_RIGHT],
-        );
-    }
-    if d.attached("bumper_fm") {
-        d.corner(
-            c.front_bumper_side,
-            s,
-            c.scalar,
-            mass,
-            "bumper_fl",
-            zones[FRONT_LEFT],
-        );
-    }
-    if let Some(level) = c.rear_bumper_detach {
-        let zone = zones[REAR];
-        if level * s < zone {
-            if d.current("bumper_bm") != Some(State::Detached) {
-                for part in ["bumper_bl", "bumper_br", "bumper_bm"] {
-                    d.push(part, State::Detached, zone, level * s);
-                }
-            }
-        } else if level * s * 0.6 < zone
-            && d.attached("bumper_bm")
-            && (d.attached("bumper_bl") || d.attached("bumper_br"))
-        {
-            d.push("bumper_bm", State::Loose, zone, level * s * 0.6);
-        }
-    }
-    if d.attached("bumper_bm") {
-        d.corner(
-            c.rear_bumper_side,
-            s,
-            c.scalar,
-            mass,
-            "bumper_br",
-            zones[REAR_RIGHT],
-        );
-    }
-    if d.attached("bumper_bm") {
-        d.corner(
-            c.rear_bumper_side,
-            s,
-            c.scalar,
-            mass,
-            "bumper_bl",
-            zones[REAR_LEFT],
-        );
-    }
-    d.out
-}
+use grid_tools::loose_parts::Rule;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
 enum Glass {
@@ -691,6 +411,8 @@ struct Part {
     angle: f32,
     rate: f32,
     debris: Option<Debris>,
+    /// A detached part's world body: pose at the loss and now (loose_panel).
+    body: Option<(Mat4, Mat4)>,
 }
 
 #[derive(Clone, Default)]
@@ -768,31 +490,6 @@ struct Layout {
     /// Original 12 light records: member joints and grid-frame anchor.
     lights: Vec<(Vec<String>, Vec3)>,
 }
-
-const PARTS: [&str; 22] = [
-    "bonnet",
-    "boot",
-    "bumper_bl",
-    "bumper_br",
-    "bumper_bm",
-    "bumper_fl",
-    "bumper_fr",
-    "bumper_fm",
-    "door_bl",
-    "door_br",
-    "door_fl",
-    "door_fr",
-    "exhaust",
-    "exhaust_b",
-    "exhaust_bl",
-    "exhaust_br",
-    "wing_bl",
-    "wing_br",
-    "wing_fl",
-    "wing_fr",
-    "wing_mirror_l",
-    "wing_mirror_r",
-];
 
 /// Light records of 9A5EC0: front records are (pod, glass) of one variant and
 /// side; rear records join the plain, brake, reverse and combi lamps.
@@ -1001,18 +698,13 @@ pub(crate) fn install(
     .add_systems(Update, present_lost_wheels.after(crate::drive_present));
 }
 
-fn byte(words: &[u32], o: usize) -> u8 {
-    (words[o / 4] >> (o % 4 * 8)) as u8
-}
-
 /// Per-car simulation readings for one tick.
 struct Reading {
     pose: Mat4,
     mass: f32,
-    offset: Vec3,
     velocity: Vec3,
-    enabled: bool,
-    impacts: Vec<Impact>,
+    /// The car's parts object after the tick (9EC9B0 in the simulation).
+    parts: grid_tools::loose_parts::Parts,
     /// Car +22E4..+22E7 after the tick (grid_tools::loose_parts wheel rule).
     detached: [bool; 4],
     /// Each wheel's presented world frame (pose x wheel motion) and hub.
@@ -1024,7 +716,7 @@ struct Reading {
     strength: Option<f32>,
 }
 
-fn reading(runtime: &grid_tools::source_vehicle::Runtime, impacts: Vec<Impact>) -> Reading {
+fn reading(runtime: &grid_tools::source_vehicle::Runtime) -> Reading {
     let owner = &runtime.state.car.owner;
     let f = |o: usize| f32::from_bits(owner.vehicle[o / 4]);
     let v = runtime.velocity();
@@ -1035,11 +727,8 @@ fn reading(runtime: &grid_tools::source_vehicle::Runtime, impacts: Vec<Impact>) 
     Reading {
         pose,
         mass: f32::from_bits(owner.physical[0x3f0 / 4]),
-        offset: Vec3::new(f(0x1630), f(0x1634), f(0x1638)),
         velocity: Vec3::new(v[0], v[1], v[2]),
-        // 9A7670 forwards notifications only while both damage flags are set.
-        enabled: byte(&owner.vehicle, 0xb13) != 0 && byte(&owner.vehicle, 0xb14) != 0,
-        impacts,
+        parts: runtime.parts().clone(),
         detached: runtime.detached_wheels(),
         hubs: std::array::from_fn(|i| wheel_frames[i].transform_point3(anchors[i])),
         wheel_frames,
@@ -1116,7 +805,7 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
         return;
     }
     let readings: Vec<Reading> = if let Some(opponents) = &driving.opponents {
-        std::iter::once(reading(&driving.runtime, opponents.multi.impacts(0)))
+        std::iter::once(reading(&driving.runtime))
             .chain(
                 opponents
                     .multi
@@ -1124,11 +813,11 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                     .iter()
                     .enumerate()
                     .skip(1)
-                    .map(|(i, car)| reading(car, opponents.multi.impacts(i))),
+                    .map(|(_, car)| reading(car)),
             )
             .collect()
     } else {
-        vec![reading(&driving.runtime, driving.runtime.impacts())]
+        vec![reading(&driving.runtime)]
     };
     damage.cars.resize_with(readings.len(), CarDamage::default);
     let dt = grid_tools::source_vehicle::DELTA;
@@ -1139,6 +828,12 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
         Some(o) => (o.multi.dynamic_props(), o.multi.bodies()),
         None => (driving.runtime.dynamic_props(), driving.runtime.bodies()),
     };
+    let panel_bodies: BTreeMap<(usize, &str), (Mat4, Mat4)> = props
+        .map(|p| p.panel_poses(bodies))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(car, part, start, now)| ((car, part), (row_pose(&start), row_pose(&now))))
+        .collect();
     let bodies: BTreeMap<(usize, usize), (Mat4, Mat4)> = props
         .map(|p| p.wheel_poses(bodies))
         .unwrap_or_default()
@@ -1187,55 +882,43 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
             car.acceleration = inverse.transform_vector3((r.velocity - previous) / dt);
         }
         car.velocity = Some(r.velocity);
-        let mut zones = [0f32; ZONES];
-        if r.enabled {
-            let frame = Frame {
-                inverse,
-                offset: r.offset,
-                up_y: r.pose.y_axis.y,
-            };
-            for impact in &r.impacts {
-                classify(config, &frame, impact, &mut zones);
-            }
-        }
-        for (total, zone) in car.totals.iter_mut().zip(zones) {
-            *total += zone;
-        }
+        // The simulation's part totals since the last tick (the tick's zones).
+        let zones: [f32; ZONES] = std::array::from_fn(|z| r.parts.totals[z] - car.totals[z]);
+        car.totals = r.parts.totals;
         if damage.log_zones && zones.iter().any(|z| *z > 0.) {
             log_line!(
-                "drive_damage_zones car={index} tick={ticks} mass={} impacts={} zones={zones:?}",
-                r.mass,
-                r.impacts.len()
+                "drive_damage_zones car={index} tick={ticks} mass={} zones={zones:?}",
+                r.mass
             );
         }
-        if !config.disabled {
-            let parts = &car.parts;
-            let present = |part: &str| {
-                layout
-                    .bounds
-                    .contains_key(part)
-                    .then(|| parts.get(part).map_or(State::Attached, |p| p.state))
-            };
-            let changes = decide(config, &zones, &car.totals, r.mass, &present);
-            for change in changes {
-                let part = car.parts.entry(change.part).or_default();
-                if part.state == State::Detached || part.state == change.state {
-                    continue;
-                }
-                log_line!(
-                    "drive_damage_part car={index} tick={ticks} part={} state={:?} zone={:.1} threshold={:.1}",
-                    change.part,
-                    change.state,
-                    change.zone,
-                    change.threshold
-                );
-                if change.state == State::Loose {
-                    part.rate = 3.;
-                } else {
-                    // AUTHORED flight: carried along, pushed outward and up.
-                    let (min, max) = layout.bounds[change.part];
+        for change in &r.parts.changes {
+            log_line!(
+                "drive_damage_part car={index} tick={ticks} part={} state={:?} zone={:.1} threshold={:.1}",
+                change.part,
+                change.state,
+                change.zone,
+                change.threshold
+            );
+        }
+        // Follow the simulation's part states (9EC9B0 in loose_parts; a
+        // Flashback can also take a part back).
+        for (&name, &state) in &r.parts.states {
+            let part = car.parts.entry(name).or_default();
+            if part.state == state {
+                continue;
+            }
+            match state {
+                State::Attached => *part = Part::default(),
+                State::Loose => part.rate = 3.,
+                State::Detached => {
+                    // Drawn at its world body (loose_panel); the AUTHORED
+                    // flight only without one: carried along, pushed outward
+                    // and up.
+                    let Some(&(min, max)) = layout.bounds.get(name) else {
+                        continue;
+                    };
                     let centre = (min + max) * 0.5;
-                    let hinged = hinge(change.part, (min, max), config)
+                    let hinged = hinge(name, (min, max), config)
                         .map_or(Mat4::IDENTITY, |h| h.matrix(part.angle));
                     let origin = r.pose * hinged;
                     let world = origin.transform_point3(centre);
@@ -1244,7 +927,7 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                         2.5,
                         centre.z.signum() * 1.0,
                     ));
-                    let seed = change.part.len() as f32;
+                    let seed = name.len() as f32;
                     part.debris = Some(Debris {
                         origin,
                         centre: world,
@@ -1263,7 +946,7 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                         panel: Some(Panel::new(
                             origin,
                             (min, max),
-                            if change.part.starts_with("wing_mirror") {
+                            if name.starts_with("wing_mirror") {
                                 0.5
                             } else {
                                 0.2
@@ -1271,8 +954,8 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                         )),
                     });
                 }
-                part.state = change.state;
             }
+            part.state = state;
         }
         // AUTHORED swing: damped spring around a half-open rest angle, driven
         // by the car's inertial acceleration along the opening direction.
@@ -1296,6 +979,10 @@ pub(crate) fn tick(driving: Res<crate::Driving>, mut damage: ResMut<DamageParts>
                     }
                 }
                 State::Detached => {
+                    part.body = panel_bodies.get(&(index, *name)).copied();
+                    if part.body.is_some() {
+                        continue;
+                    }
                     if let Some(debris) = &mut part.debris {
                         let flying = !debris.resting;
                         debris.step(dt, &mut surface);
@@ -1503,7 +1190,12 @@ fn present(
             .and_then(|door| car.parts.get(door).map(|p| (door, p)))
             .filter(|(_, p)| p.state == State::Loose && own.is_none());
         let model = match (own, carried) {
-            (Some(part), _) if part.state == State::Detached => part.debris.map(|d| d.matrix()),
+            (Some(part), _) if part.state == State::Detached => {
+                part.debris.map(|d| match part.body {
+                    Some((start, now)) => now * start.inverse() * d.origin,
+                    None => d.matrix(),
+                })
+            }
             (Some(part), _) => layout
                 .bounds
                 .get(name)
@@ -1802,132 +1494,6 @@ mod tests {
             wheel_detach: 6.,
         }
     }
-    fn frame() -> Frame {
-        Frame {
-            inverse: Mat4::IDENTITY,
-            offset: Vec3::ZERO,
-            up_y: 1.,
-        }
-    }
-    fn hit(point: [f32; 3], normal: [f32; 3], impact: f32) -> Impact {
-        Impact {
-            point,
-            normal,
-            impact,
-        }
-    }
-
-    #[test]
-    fn zones_follow_the_original_cells() {
-        let c = config();
-        let mut z = [0.; ZONES];
-        // Front centre pushed back: bonnet gets -nz * m, both front wheels m.
-        classify(
-            &c,
-            &frame(),
-            &hit([0., 0.5, 2.], [0., 0., -0.5], 100.),
-            &mut z,
-        );
-        assert_eq!(z[BONNET], 50.);
-        assert_eq!([z[WHEELS + 2], z[WHEELS + 3]], [100., 100.]);
-        // Front left (+X) corner.
-        let mut z = [0.; ZONES];
-        classify(
-            &c,
-            &frame(),
-            &hit([0.8, 0.5, 2.], [-1., 0., 0.], 10.),
-            &mut z,
-        );
-        assert_eq!(z[FRONT_LEFT], 10.);
-        assert_eq!([z[WHEELS + 2], z[WHEELS + 3]], [10., 2.]);
-        assert_eq!(z[BONNET], 0.);
-        // Middle right side pushed toward +X.
-        let mut z = [0.; ZONES];
-        classify(
-            &c,
-            &frame(),
-            &hit([-0.8, 0.5, 0.], [0.5, 0., 0.], 10.),
-            &mut z,
-        );
-        assert_eq!(z[RIGHT_SIDE], 5.);
-        // Middle right pushed the wrong way adds nothing at all.
-        let mut z = [0.; ZONES];
-        classify(
-            &c,
-            &frame(),
-            &hit([-0.8, 0.5, 0.], [-0.5, 0., 0.], 10.),
-            &mut z,
-        );
-        assert!(z.iter().all(|v| *v == 0.));
-        // Rear left adds rear, boot, exhaust, rear-left wing and corner.
-        let mut z = [0.; ZONES];
-        classify(
-            &c,
-            &frame(),
-            &hit([0.8, 0.5, -2.], [0., 0., 1.], 10.),
-            &mut z,
-        );
-        for k in [REAR, BOOT, EXHAUST, REAR_LEFT_WING, REAR_LEFT] {
-            assert_eq!(z[k], 10.);
-        }
-        assert_eq!([z[WHEELS], z[WHEELS + 1]], [10., 2.]);
-        // Roof only on an inverted car.
-        let mut z = [0.; ZONES];
-        classify(
-            &c,
-            &frame(),
-            &hit([0., 1.3, 0.], [0., -1., 0.], 10.),
-            &mut z,
-        );
-        assert_eq!(z[ROOF], 0.);
-        let inverted = Frame {
-            up_y: -1.,
-            ..frame()
-        };
-        classify(
-            &c,
-            &inverted,
-            &hit([0., 1.3, 0.], [0., -1., 0.], 10.),
-            &mut z,
-        );
-        assert_eq!(z[ROOF], 10.);
-    }
-
-    #[test]
-    fn decisions_use_level_times_scalar_times_mass() {
-        let c = config();
-        let all = |_: &str| Some(State::Attached);
-        let mass = 1000.;
-        let mut z = [0.; ZONES];
-        z[BONNET] = 3. * 4. * mass; // equal is not above the threshold
-        assert!(decide(&c, &z, &z, mass, &all).is_empty());
-        z[BONNET] += 1.;
-        let out = decide(&c, &z, &z, mass, &all);
-        assert_eq!(out.len(), 1);
-        assert_eq!((out[0].part, out[0].state), ("bonnet", State::Loose));
-        // Doors: level x mass against the side zone (scalar cancels).
-        let mut z = [0.; ZONES];
-        z[LEFT_SIDE] = 5. * mass + 1.;
-        let out = decide(&c, &z, &z, mass, &all);
-        assert_eq!(out.iter().map(|x| x.part).collect::<Vec<_>>(), ["door_fl"]);
-        // Front corners together detach the whole front bumper, which then
-        // stops the side rules.
-        let mut z = [0.; ZONES];
-        z[FRONT_LEFT] = 2. * 4. * mass;
-        z[FRONT_RIGHT] = 2. * 4. * mass;
-        let out = decide(&c, &z, &z, mass, &all);
-        let parts: Vec<_> = out.iter().map(|x| (x.part, x.state)).collect();
-        assert!(parts.contains(&("bumper_fm", State::Detached)));
-        assert!(parts.contains(&("bumper_fl", State::Detached)));
-        assert!(!parts.contains(&("bumper_fl", State::Loose)));
-        // Absent parts never change.
-        let none = |_: &str| None;
-        assert!(decide(&c, &z, &z, mass, &none).is_empty());
-        // Detached parts never swing again.
-        let detached = |_: &str| Some(State::Detached);
-        assert!(decide(&c, &z, &z, mass, &detached).is_empty());
-    }
-
     #[test]
     fn a_lost_wheel_launches_with_the_axle_partner_spin_and_the_impact_kick() {
         let pose = Mat4::from_rotation_y(0.5) * Mat4::IDENTITY;
@@ -1935,10 +1501,8 @@ mod tests {
         let mut r = Reading {
             pose,
             mass: 1140.,
-            offset: Vec3::ZERO,
             velocity: Vec3::new(0., 0., 20.),
-            enabled: true,
-            impacts: Vec::new(),
+            parts: Default::default(),
             detached: [false, false, true, false],
             wheel_frames: [pose; 4],
             hubs: [Vec3::new(1., 0.3, 2.); 4],
@@ -2184,27 +1748,6 @@ mod tests {
         assert!(wheel.matrix().abs_diff_eq(moved * origin, 1e-5));
         wheel.body = None;
         assert_eq!(wheel.matrix(), flight.matrix());
-    }
-
-    #[test]
-    fn boot_needs_the_accumulated_total() {
-        let c = config();
-        let all = |_: &str| Some(State::Attached);
-        let mut z = [0.; ZONES];
-        z[BOOT] = 2.5 * 4. * 1000. + 1.;
-        let total = z;
-        assert!(
-            !decide(&c, &z, &total, 1000., &all)
-                .iter()
-                .any(|x| x.part == "boot")
-        );
-        let mut total = z;
-        total[BOOT] *= 3.;
-        assert!(
-            decide(&c, &z, &total, 1000., &all)
-                .iter()
-                .any(|x| x.part == "boot")
-        );
     }
 
     #[test]

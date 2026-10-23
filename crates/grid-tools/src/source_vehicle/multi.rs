@@ -52,6 +52,8 @@ pub struct MultiRuntime {
     /// Parking around the player (on in the game; tests measuring a pile
     /// near the player switch it off).
     parking: bool,
+    /// Time each detached panel's body has been turned over (loose_panel::settle).
+    panel_tipping: std::collections::BTreeMap<usize, f32>,
     initial_shapes: Arc<Vec<contact_groups::Shape>>,
     /// Per car: why and since when it is out of the shared world.
     retired: Vec<Option<Retirement>>,
@@ -418,6 +420,7 @@ impl MultiRuntime {
             speeds: vec![0.; n],
             props: None,
             parking: true,
+            panel_tipping: Default::default(),
             retired: vec![None; n],
             newly_retired: Vec::new(),
             parallel: true,
@@ -537,6 +540,15 @@ impl MultiRuntime {
             }
         }
         Ok(out)
+    }
+
+    /// Diagnostics: every detached panel's body and how it lies on the
+    /// track ([`crate::loose_panel::poses`]).
+    pub fn panels(&self) -> Vec<crate::loose_panel::PanelPose> {
+        let track = &self.cars[0];
+        self.props.as_ref().map_or_else(Vec::new, |props| {
+            crate::loose_panel::poses(props, self.bodies(), |p| track.ground_below(p))
+        })
     }
 
     /// Obstruction contact sum of car `i` for the AI's collided_obstruction
@@ -667,6 +679,7 @@ impl MultiRuntime {
         self.speeds = vec![0.; self.cars.len()];
         self.retired = vec![None; self.cars.len()];
         self.newly_retired.clear();
+        self.panel_tipping.clear();
     }
 
     /// [`Runtime::place_at_rest`] for car `i`, on its body in the shared
@@ -1242,8 +1255,25 @@ impl MultiRuntime {
                 (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
             })
             .collect();
-        // The loose-part wheel rule of every car still in the world; a lost
-        // wheel becomes a body of the shared world (loose_wheel).
+        // Detached panels standing on an edge are turned over (AUTHORED).
+        if let Some(props) = &self.props {
+            let track = &self.cars[0];
+            if crate::loose_panel::settle(
+                props,
+                &mut self.world,
+                |p| track.ground_below(p),
+                &mut self.panel_tipping,
+                DELTA,
+            ) {
+                // Waking relinks the active list; keep the cars' copies in step.
+                for (j, car) in self.cars.iter_mut().enumerate() {
+                    car.state.car.owner.physical[0x300 / 4] =
+                        self.world.groups.bodies[j][0x300 / 4];
+                }
+            }
+        }
+        // The loose-part rules of every car still in the world; a lost wheel
+        // or a detached panel becomes a body of the shared world.
         for i in 0..n {
             if self.retired[i].is_none() {
                 let impacts = self.impacts(i);
@@ -1266,10 +1296,12 @@ impl MultiRuntime {
         Ok(lost.iter().any(|l| *l))
     }
 
-    /// Add car `i`'s wheels `lost` this tick as bodies of the shared world.
+    /// Add car `i`'s wheels `lost` this tick and its body parts detached this
+    /// tick as bodies of the shared world.
     pub(crate) fn add_loose_wheels(&mut self, i: usize, lost: [bool; 4]) -> Result<(), Error> {
         let spawns = self.cars[i].loose_wheels(lost, i)?;
-        if spawns.is_empty() {
+        let panels = self.cars[i].loose_panels()?;
+        if spawns.is_empty() && panels.is_empty() {
             return Ok(());
         }
         let props = self
@@ -1281,6 +1313,17 @@ impl MultiRuntime {
                 &mut self.shapes,
                 i,
                 wheel,
+                s.spec,
+                s.linear,
+                s.angular,
+            )?;
+        }
+        for (part, s) in panels {
+            props.add_panel(
+                &mut self.world,
+                &mut self.shapes,
+                i,
+                part,
                 s.spec,
                 s.linear,
                 s.angular,

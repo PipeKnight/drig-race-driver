@@ -84,6 +84,13 @@ pub struct Runtime {
     /// Tyre and wheel node bounds of the car model, read with the body
     /// geometry; a lost wheel becomes a body of these extents.
     wheel_nodes: Option<std::sync::Arc<crate::loose_wheel::WheelNodes>>,
+    /// Body part node bounds of the car model, read with the body geometry;
+    /// a detached part becomes a body of these extents (loose_panel).
+    panel_nodes: Option<std::sync::Arc<crate::loose_panel::PanelNodes>>,
+    /// The car's parts object: zone totals and part states (9EC9B0).
+    parts: crate::loose_parts::Parts,
+    /// Time each detached panel's body has been turned over (loose_panel::settle).
+    panel_tipping: std::collections::BTreeMap<usize, f32>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -124,6 +131,20 @@ fn word(b: &[u8], o: usize) -> u32 {
 }
 fn value(b: &[u8], o: usize) -> f32 {
     f32::from_bits(word(b, o))
+}
+/// [`Runtime::ground_below`] on a track.
+fn ground_below(track: &Track, point: [f32; 3]) -> Option<f32> {
+    let mut cache = grid_world::rectangle_cull::Cache::default();
+    let (start, end) = (point[1] + 0.5, point[1] - 100.);
+    let hit = track
+        .query(
+            [point[0], start, point[2], 1.],
+            [point[0], end, point[2], 1.],
+            &mut cache,
+        )
+        .ok()?
+        .hit?;
+    Some(start + (end - start) * hit.contact.fraction)
 }
 fn byte(b: &mut [u32], o: usize, v: u8) {
     let shift = o % 4 * 8;
@@ -508,6 +529,9 @@ impl Runtime {
             hull: shape.bounds,
             loose_parts,
             wheel_nodes: None,
+            panel_nodes: None,
+            parts: Default::default(),
+            panel_tipping: Default::default(),
         })
     }
 
@@ -597,6 +621,7 @@ impl Runtime {
             2 * 1024 * 1024,
         )?)?;
         let wheel_nodes = crate::loose_wheel::WheelNodes::read(root, &self.car)?;
+        let panel_nodes = crate::loose_panel::PanelNodes::read(root, &self.car)?;
         if self.track.has_boundary() || self.state.shapes.len() != self.track.shape_count() + 1 {
             return Err("body boundary already prepared or shape registration differs".into());
         }
@@ -618,6 +643,8 @@ impl Runtime {
         });
         self.initial = std::sync::Arc::new(self.state.clone());
         self.wheel_nodes = Some(std::sync::Arc::new(wheel_nodes));
+        self.parts = crate::loose_parts::Parts::new(panel_nodes.bounds.keys().copied());
+        self.panel_nodes = Some(std::sync::Arc::new(panel_nodes));
         Ok(geometry)
     }
 
@@ -926,16 +953,31 @@ impl Runtime {
         self.cache = cache;
         self.ticks += 1;
         self.last_body_contacts = body_contacts;
+        // Detached panels standing on an edge are turned over (AUTHORED).
+        if let Some(props) = &self.props {
+            let track = &self.track;
+            if crate::loose_panel::settle(
+                props,
+                &mut self.state.world,
+                |p| ground_below(track, p),
+                &mut self.panel_tipping,
+                DELTA,
+            ) {
+                self.state.car.owner.physical = self.state.world.groups.bodies[0];
+            }
+        }
         let impacts = self.impacts();
         let lost = self.detach_wheels(&impacts);
         self.add_loose_wheels(lost)
     }
 
-    /// Add the bodies of the wheels `lost` this tick to the world (creating
-    /// an empty prop world if needed).
+    /// Add the bodies of the wheels `lost` this tick and of the body parts
+    /// detached this tick to the world (creating an empty prop world if
+    /// needed).
     pub(crate) fn add_loose_wheels(&mut self, lost: [bool; 4]) -> Result<(), Error> {
         let spawns = self.loose_wheels(lost, 0)?;
-        if !spawns.is_empty() {
+        let panels = self.loose_panels()?;
+        if !spawns.is_empty() || !panels.is_empty() {
             let props = self
                 .props
                 .get_or_insert_with(|| crate::dynamic_props::PropWorld::new(Default::default()));
@@ -945,6 +987,17 @@ impl Runtime {
                     &mut self.state.shapes,
                     0,
                     wheel,
+                    s.spec,
+                    s.linear,
+                    s.angular,
+                )?;
+            }
+            for (part, s) in panels {
+                props.add_panel(
+                    &mut self.state.world,
+                    &mut self.state.shapes,
+                    0,
+                    part,
                     s.spec,
                     s.linear,
                     s.angular,
@@ -1005,6 +1058,53 @@ impl Runtime {
         Ok(out)
     }
 
+    /// The debris bodies of the body parts detached since the last call
+    /// (9DC270 state 4, loose_panel), taking them from `parts.pending`.
+    /// Empty without body geometry.
+    pub(crate) fn loose_panels(
+        &mut self,
+    ) -> Result<Vec<(&'static str, crate::loose_wheel::Spawn)>, Error> {
+        let pending = std::mem::take(&mut self.parts.pending);
+        let Some(nodes) = &self.panel_nodes else {
+            return Ok(Vec::new());
+        };
+        if pending.is_empty() {
+            return Ok(Vec::new());
+        }
+        let v = &self.state.car.owner.vehicle;
+        let p = &self.state.car.owner.physical;
+        let f = |o: usize| f32::from_bits(v[o / 4]);
+        let g = |o: usize| -> [f32; 3] { std::array::from_fn(|j| f32::from_bits(p[o / 4 + j])) };
+        let car = crate::loose_wheel::CarMotion {
+            pose: self.pose(),
+            centre: g(0x1c0),
+            velocity: g(0x220),
+            angular: g(0x210),
+            mass: f(0x15a0),
+            // The part meshes are drawn at the model offset less +1564.
+            offset: [f(0x1630), f(0x1634) - f(0x1564), f(0x1638)],
+        };
+        pending
+            .into_iter()
+            .filter(|part| nodes.bounds.contains_key(part))
+            .map(|part| Ok((part, crate::loose_panel::spawn(nodes, part, &car)?)))
+            .collect()
+    }
+
+    /// The car's parts object: part states, zone totals and the changes of
+    /// the last committed tick (9EC9B0).
+    pub fn parts(&self) -> &crate::loose_parts::Parts {
+        &self.parts
+    }
+
+    /// Diagnostics: every detached panel's body and how it lies on the
+    /// track ([`crate::loose_panel::poses`]).
+    pub fn panels(&self) -> Vec<crate::loose_panel::PanelPose> {
+        self.props.as_ref().map_or_else(Vec::new, |props| {
+            crate::loose_panel::poses(props, self.bodies(), |p| self.ground_below(p))
+        })
+    }
+
     /// Wheels lost to the loose-part rule (car +22E4..+22E7, RL, RR, FL, FR).
     pub fn detached_wheels(&self) -> [bool; 4] {
         let v = &self.state.car.owner.vehicle;
@@ -1017,6 +1117,7 @@ impl Runtime {
     /// the suspension, grip, contacts and handling treat the wheel as gone.
     /// Returns the newly detached wheels.
     pub(crate) fn detach_wheels(&mut self, impacts: &[crate::body_impacts::Impact]) -> [bool; 4] {
+        self.parts.changes.clear();
         let v = &self.state.car.owner.vehicle;
         let flag = |o: usize| (v[o / 4] >> (o % 4 * 8)) & 255 != 0;
         // 9A7670 forwards notifications only while car B13 and B14 are set;
@@ -1034,6 +1135,9 @@ impl Runtime {
             frame.classify(&self.loose_parts, impact, &mut zones);
         }
         let mass = f32::from_bits(self.state.car.owner.physical[0x3f0 / 4]);
+        // The body-part rules of the same 9EC9B0 pass; a detached part waits
+        // in `parts.pending` for its body (`add_loose_wheels`).
+        self.parts.step(&self.loose_parts, &zones, mass);
         let new = crate::loose_parts::wheels_to_detach(
             &self.loose_parts,
             &zones,
@@ -1083,6 +1187,12 @@ impl Runtime {
             // Re-arming only fails without route props, which enabling requires.
             let _ = props.reset(&mut [&mut self.track]);
         }
+        self.parts = crate::loose_parts::Parts::new(
+            self.panel_nodes
+                .iter()
+                .flat_map(|n| n.bounds.keys().copied()),
+        );
+        self.panel_tipping.clear();
     }
     /// Mid-race re-placement at rest, the original reset placement 0x9145D0
     /// with speed 0 (docs/RESET_AND_RESPAWN_RESEARCH.md 3.3):
@@ -1273,18 +1383,11 @@ impl Runtime {
         None
     }
 
-    /// Height of the packed track surface below `point` (presentation only:
-    /// where a detached body part lands), from a vertical cast starting
-    /// half a metre above the point and reaching 100 m below it.
+    /// Height of the packed track surface below `point` (where a detached
+    /// body part lands), from a vertical cast starting half a metre above
+    /// the point and reaching 100 m below it.
     pub fn ground_below(&self, point: [f32; 3]) -> Option<f32> {
-        let mut cache = grid_world::rectangle_cull::Cache::default();
-        let (start, end) = (point[1] + 0.5, point[1] - 100.);
-        let hit = self
-            .track
-            .query([point[0], start, point[2], 1.], [point[0], end, point[2], 1.], &mut cache)
-            .ok()?
-            .hit?;
-        Some(start + (end - start) * hit.contact.fraction)
+        ground_below(&self.track, point)
     }
 
     /// [`Self::impacts`] without the records against packed track chunks,

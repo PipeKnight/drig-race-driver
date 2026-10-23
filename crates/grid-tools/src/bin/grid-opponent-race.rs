@@ -804,6 +804,32 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("sink tick={} n={} {}", multi.ticks, sunk.len(), sunk.join(" "));
             }
         }
+        // GRID_PANEL_CHECK=N: every N ticks, how each detached panel lies.
+        if let Some(every) = std::env::var("GRID_PANEL_CHECK")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            && every > 0
+            && multi.ticks.is_multiple_of(every)
+        {
+            for p in multi.panels() {
+                println!(
+                    "panel tick={} car={} part={} body={} asleep={} parked={} speed={:.3} spin={:.3} face={:.4} low={:.3} fourth={:.3} w={:.3?} size={:.3?}",
+                    multi.ticks,
+                    p.car,
+                    p.part,
+                    p.body,
+                    p.asleep,
+                    p.parked,
+                    p.speed,
+                    p.spin,
+                    p.face,
+                    p.low,
+                    p.fourth,
+                    p.angular,
+                    p.size
+                );
+            }
+        }
         if crash_car0.is_some() && multi.ticks.is_multiple_of(500) {
             report_damage(&multi.cars[0], multi.ticks);
         }

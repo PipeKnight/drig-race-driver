@@ -38,9 +38,11 @@ cargo build --release -p grid-tools --bin grid-opponent-race
 target/release/grid-opponent-race "$ROOT" CD01 BP01 1 11200 ai | sha256sum    # solo
 target/release/grid-opponent-race "$ROOT" CD01 BP01 12 11200 ai | sha256sum   # 12-car
 # and the 12-car again with both variables set (DF01 and the characteristics)
+# with both set, a 3000-tick Detroit derby, where body panels detach and become bodies (F565):
+target/release/grid-opponent-race "$ROOT" CD01 BP01 --route tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai | sha256sum
 ```
 
-`tools/prepush.ps1` (full tier) runs these three and compares them with `tools/identity.tsv`.
+`tools/prepush.ps1` (full tier) runs these four and compares them with `tools/identity.tsv`.
 A commit that changes an identity on purpose updates that file and names the change in its log entry.
 
 ## Pre-push tiers, build lock and release (F534)

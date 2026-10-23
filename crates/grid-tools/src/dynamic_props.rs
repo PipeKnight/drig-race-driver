@@ -973,6 +973,45 @@ impl PieceSpec {
         })
     }
 
+    /// A detached body panel's debris body (9D9F80 -> 9A87B0 for every part
+    /// but the wheels): a box of full `size` (the inner box; the rounding
+    /// `shell` grows it back to the node bounds), at world `pose`, with the
+    /// given mass, a solid box's inertia over the node bounds and the lost
+    /// wheel's body words but `angular_damping` (0.5 for the mirrors).
+    pub fn loose_panel(
+        size: [f32; 3],
+        shell: f32,
+        mass: f32,
+        angular_damping: f32,
+        pose: Matrix,
+    ) -> Result<Self, Error> {
+        if !size
+            .iter()
+            .chain([&shell, &mass])
+            .all(|v| v.is_finite() && *v >= 0.)
+            || mass <= 0.
+        {
+            return Err(Error("invalid loose panel shape"));
+        }
+        let mut spec = Self::loose_wheel(1., 1., mass, pose)?;
+        let primitive = Primitive::Box(size);
+        let outer = size.map(|v| v + 2. * shell);
+        let [x, y, z] = outer.map(|v| v * v);
+        let (points, triangles) = hull(primitive);
+        spec.hull = collision_mesh::build(&points, &triangles, 0)?;
+        spec.points = points;
+        spec.triangles = triangles;
+        spec.primitive = primitive;
+        spec.inertia = [
+            mass * (y + z) / 12.,
+            mass * (x + z) / 12.,
+            mass * (x + y) / 12.,
+        ];
+        spec.body.angular_damping = [angular_damping; 3];
+        spec.shell = shell;
+        Ok(spec)
+    }
+
     /// A rigid body without shapes (the armco posts of Istanbul Park, Le
     /// Mans and the Nürburgring): 0xB11520 finds no shape mass and keeps
     /// mass 1 and a unit inertia before sphericalising; it collides with
@@ -1136,11 +1175,14 @@ pub enum Pressed {
     ParkedDeep,
 }
 
-/// A wheel a car lost (car +22E4 + `wheel`) as a dynamic body.
+/// A wheel a car lost (car +22E4 + `wheel`), or a body panel it lost
+/// (`panel`, loose_panel), as a dynamic body.
 #[derive(Clone)]
 pub struct LooseWheel {
     pub car: usize,
     pub wheel: usize,
+    /// The detached body part (`loose_parts::PARTS`); `wheel` is unused then.
+    pub panel: Option<&'static str>,
     pub spec: std::sync::Arc<PieceSpec>,
     pub body: usize,
     pub token: u32,
@@ -2408,12 +2450,44 @@ impl PropWorld {
         self.wheels.push(LooseWheel {
             car,
             wheel,
+            panel: None,
             spec: std::sync::Arc::new(spec),
             body,
             token,
         });
         self.reserve(world);
         Ok(true)
+    }
+
+    /// Add a detached body panel of car `car` as a dynamic body, as
+    /// [`Self::add_wheel`] adds a lost wheel (9DC270 state 4 for a body part).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_panel(
+        &mut self,
+        world: &mut grouped_physical_frame::Output,
+        shapes: &mut Vec<contact_groups::Shape>,
+        car: usize,
+        panel: &'static str,
+        spec: PieceSpec,
+        linear: [f32; 4],
+        angular: [f32; 4],
+    ) -> Result<bool, Error> {
+        let added = self.add_wheel(world, shapes, car, usize::MAX, spec, linear, angular)?;
+        if added && let Some(last) = self.wheels.last_mut() {
+            last.panel = Some(panel);
+        }
+        Ok(added)
+    }
+
+    /// Detached panels for presentation: (car, part, pose at the loss, pose now).
+    pub fn panel_poses(
+        &self,
+        bodies: &[contact_groups::Body],
+    ) -> Vec<(usize, &'static str, Matrix, Matrix)> {
+        self.wheels
+            .iter()
+            .filter_map(|w| Some((w.car, w.panel?, w.spec.pose, body_pose(bodies.get(w.body)?))))
+            .collect()
     }
 
     /// Lost wheels for presentation: (car, wheel, pose at the loss, pose now).
@@ -2423,6 +2497,7 @@ impl PropWorld {
     ) -> Vec<(usize, usize, Matrix, Matrix)> {
         self.wheels
             .iter()
+            .filter(|w| w.panel.is_none())
             .filter_map(|w| Some((w.car, w.wheel, w.spec.pose, body_pose(bodies.get(w.body)?))))
             .collect()
     }
@@ -3208,6 +3283,7 @@ mod tests {
         world.wheels = vec![LooseWheel {
             car: 0,
             wheel: 2,
+            panel: None,
             spec: std::sync::Arc::new(
                 PieceSpec::loose_wheel(0.3, 0.2, 20., std::array::from_fn(|r| {
                     std::array::from_fn(|c| f32::from(r == c))

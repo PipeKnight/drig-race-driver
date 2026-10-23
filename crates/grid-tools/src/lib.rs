@@ -33,6 +33,7 @@ pub mod install;
 pub mod lap_progress;
 pub mod parallel;
 pub mod perf;
+pub mod loose_panel;
 pub mod loose_parts;
 pub mod loose_wheel;
 pub mod private_parameters;

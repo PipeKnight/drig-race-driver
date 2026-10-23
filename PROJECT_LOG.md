@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F565](log/F0565.md) | 2026-10-24 | Detached panels are world bodies: 9EC9B0 part decisions in the simulation, cars collide with the panels |
 | [F564](log/F0564.md) | 2026-10-24 | Broken tyres drawn on their bodies and lifted out of the road |
 | [F563](log/F0563.md) | 2026-10-23 | Detached panels settle lying flat: rigid box with the original's detached-part body parameters |
 | [F562](log/F0562.md) | 2026-10-23 | Playable 14696d47fe1e with no mid-air parking (F561), portable copy and APKs 99fef6aca274 |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F507](log/F0507.md) | 2026-10-20 | Career: the Le Mans selection events are offered, with their multi-class fields, so class positions and routine B run in the app |
 | [F506](log/F0506.md) | 2026-10-20 | Close-drift flag post geometry ported and verified bit for bit |
 | [F505](log/F0505.md) | 2026-10-20 | The 42D580 one-shot queue is network replication, not a mixing cap |
-| [F504](log/F0504.md) | 2026-10-20 | Yaw and pitch displacement thumps |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
