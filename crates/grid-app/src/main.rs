@@ -2816,15 +2816,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             app.add_systems(Update, update_orbit);
         }
         // [video] render_height: the 3D view renders at most that many rows
-        // (Android default 720) and is stretched over the window; with the
-        // mobile preset the height is dynamic below it.
-        render_scale::install(
-            &mut app,
-            profile
-                .render_height
-                .unwrap_or_else(render_scale::RenderHeight::platform_default),
-            mobile::dynamic_floor(),
-        );
+        // and is stretched over the window; Android default auto (480-720
+        // rows by the frame time).
+        render_scale::install(&mut app, profile.video_render_height());
         // Window size from the native surface, optional refresh-rate hint.
         #[cfg(target_os = "android")]
         android_display::install(&mut app, profile.refresh_hz.flatten());

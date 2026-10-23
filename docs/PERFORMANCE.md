@@ -562,11 +562,10 @@ itself. The owner only sideloads APKs and sends logs; there is no adb.
 
 Race Options → **Performance test** (AUTHORED diagnostics; `crates/grid-app/src/perf_test.rs`).
 Each row turns one part of the frame off, live, and is never saved, so the next start is the
-normal game. Until F553 the panel had only 5 row texts, so the last three rows (Sample logging, Whole scene, Auto cycle) were never drawn:
+normal game. Until F553 the panel had only 5 row texts, so the last three rows (Sample logging, Whole scene, Auto cycle) were never drawn. The Auto cycle row (the first row since F553) was removed in F559 at the owner's request; `GRID_PERF_TEST=auto` still runs the cycle on the desktop, and any switch on the screen ends it:
 
 | Row | Off means |
 |---|---|
-| Auto cycle (first row since F553) | On: steps through the Auto cycle steps ("Mobile preset" below), 8 s each |
 | Shadows | every directional light stops rendering shadow maps |
 | Foliage | camera-facing tree and bush billboards (`source_trees::Facing`) hidden |
 | Ground cover | the `ground cover` mesh hidden |
@@ -960,20 +959,45 @@ Expected [I, not measured]:
 - With MSAA off, the menu would reach about 52–55 FPS. That is the owner's call: off by default only with the owner's say.
 - Dynamic resolution would not reach 60 FPS in the menu either (see the fixed part above).
 
-### Dynamic render height (F556)
+### Dynamic render height (F556, F559)
 
-The owner chose a dynamic resolution of 480 to 720 rows (2026-10-22). `render_scale::Dynamic` runs
-with the mobile preset whenever the row setting is a count; the setting (default 720) is the ceiling.
+The owner chose a dynamic resolution of 480 to 720 rows (2026-10-22). Since F559 it is the Video
+screen's Render height value **Auto** (`[video] render_height = auto`), the Android default; the
+range is fixed at 480-720 rows. A row count is a fixed height and `native` turns the scaling off.
+The Video screen shows the rows rendered now beside Auto, for example `Auto (624)`.
+
+**What went wrong in F556 (owner, APK 94e06d136784: "no dynamic resolution, the fixed Render Height
+is used").** From the code [V, reading]: the controller ran only while the setting was a row count,
+that count replaced the 720 ceiling, and the Video screen showed only the saved number, never the
+height rendered. The controller treated a frame as main-thread bound when the whole main schedule
+(`First` to `Last`) took over 80 % of the frame or 14 ms. On the phone that span is long: the F549
+profile (APK 6087fbcafa30) measured the main app at 19 ms of a 25 ms driving frame, and 10.7 ms of
+`drive_tick` alone per pre-race frame; the F555 fit (17.6 ms + 5.6 ms per megapixel) also has a large
+resolution-independent part. [I] So late frames counted as CPU-bound and the height never dropped.
+No phone log of APK 94e06d136784 was available to confirm it (no `render_dynamic` lines to read).
+
+**F559 changes:**
+- The work measure is only the fixed-step loop (`RunFixedMainLoop`, the driving ticks), which a
+  lower resolution cannot speed up; the hold thresholds are 50 % of the frame or 16 ms (a whole
+  60 FPS frame; the paused pre-race ticks' 10.7 ms stays below it).
+- Saved heights from before F559 (no `[video] render_height_version = 2`) read as Auto once with
+  the mobile preset; the Video screen writes the version with every save, so a fixed height chosen
+  after F559 stays fixed. The desktop reads the saved height as before.
+- While late frames are held as simulation bound, `render_dynamic … reason=cpu_bound` is logged
+  every 10 s (rows unchanged), so a phone log shows why the height does not drop.
+
+The rest of this section is the F556 design, with the work measure as above.
 
 **Per frame**, the controller keeps exponential averages (factor 0.1) of two values:
 - the frame time (`Time<Real>`);
-- the main schedule's work from `First` to `Last`. In pipelined rendering, waiting for the render
-  thread happens outside that span.
+- the simulation time: the fixed-step loop (F559; F556 used the main schedule from `First` to
+  `Last`).
 
 **The rules:**
 - **Late:** the average frame time is above 18 ms (below about 55 FPS).
-- **Main-thread bound:** the work is above 80 % of the frame time, or above 14 ms. That is the
-  simulation, for example a tyre pile; a lower resolution would not help, so the height holds.
+- **Simulation bound:** the simulation is above 50 % of the frame time, or above 16 ms (F556:
+  the main schedule above 80 % or 14 ms). For example a tyre pile; a lower resolution would not
+  help, so the height holds.
 - **Down:** when late and not main-thread bound, 48 rows lower, at most every 0.5 s, to the floor
   of 480. The height it left is blocked for 15 s.
 - **Up:** after 3 s on time (below 17.2 ms), 24 rows higher, but not to a blocked height. From 480
@@ -985,7 +1009,8 @@ gain, but never below 480.
 
 **Logging:**
 - `render_dynamic version=1 event=install` gives the parameters.
-- Each change logs `render_dynamic … rows=… from=… reason=late|on_time|ceiling frame_ms=… work_ms=…`.
+- Each change logs `render_dynamic … rows=… from=… reason=late|on_time|ceiling frame_ms=… work_ms=…`;
+  `reason=cpu_bound` (F559) is a hold report with rows unchanged.
   Changes are at least 0.5 s apart, so the line is rate-limited.
 - `frame_stats` shows the current `render=WxH`.
 
