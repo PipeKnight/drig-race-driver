@@ -471,6 +471,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 | Entry | Date | Title |
 |---|---|---|
 | [G257](G0257.md) | 2026-10-24 | Source spectator descriptors and flash selection |
+| [G256](G0256.md) | 2026-10-24 | Evaluate modest Detroit fence thickness and reject universal default |
 | [G255](G0255.md) | 2026-10-24 | Source spectator placements, USA assets and flash material contract |
 | [G254](G0254.md) | 2026-10-23 | Modest fence thickness control with preserved openings |
 | [G253](G0253.md) | 2026-10-23 | Bounded fence coverage control after live original comparison |
