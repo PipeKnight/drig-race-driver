@@ -1,3 +1,4 @@
+mod object_materials;
 // Source reference viewer and serial driving prototype. A plain comment, not
 // `//!`: src/lib.rs includes this file for the Android library (P9).
 
@@ -144,6 +145,7 @@ struct Car {
     textures: BTreeMap<String, Vec<u8>>,
     bindings: BTreeMap<String, String>,
     decal_materials: std::collections::BTreeSet<String>,
+    object_glass_materials: std::collections::BTreeSet<String>,
     center: Vec3,
     radius: f32,
     track: bool,
@@ -716,6 +718,7 @@ fn load_package(
         textures,
         bindings,
         decal_materials,
+        object_glass_materials: Default::default(),
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track,
@@ -772,6 +775,7 @@ fn append_objects(
     // Static meshes plus the skinned damage meshes broken pieces draw (F566).
     let sources = mesh::read_object_meshes(&tree)?;
     let draws = scene::read_object_draws(&tree, &sources)?;
+    car.object_glass_materials.extend(object_materials::glass_materials(&tree)?);
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;
     let transforms: BTreeMap<_, _> = placements
@@ -1261,6 +1265,7 @@ fn load_collision(root: &Path, route: &Route) -> Result<Car, Box<dyn std::error:
         textures: BTreeMap::new(),
         bindings: BTreeMap::new(),
         decal_materials: Default::default(),
+        object_glass_materials: Default::default(),
         center: (bounds.0 + bounds.1) * 0.5,
         radius: (bounds.1 - bounds.0).length() * 0.5,
         track: true,
@@ -3713,6 +3718,7 @@ fn setup(
         })
         .collect();
     let decal_materials = car.decal_materials.clone();
+    let object_glass_materials = car.object_glass_materials.clone();
     for mut part in car.parts.drain(..) {
         if graphics.enhanced()
             && graphics.smooth_tyres
@@ -3797,6 +3803,7 @@ fn setup(
                 if decal_materials.contains(&part.material) {
                     track_decals::configure(&mut material);
                 }
+                object_materials::configure(name, &object_glass_materials, &mut material);
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
                     && graphics.layered_car

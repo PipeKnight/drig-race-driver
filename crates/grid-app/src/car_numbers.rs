@@ -456,6 +456,7 @@ mod tests {
             ]),
             bindings: BTreeMap::new(),
             decal_materials: Default::default(),
+            object_glass_materials: Default::default(),
             center: bevy::prelude::Vec3::ZERO,
             radius: 1.,
             track: true,

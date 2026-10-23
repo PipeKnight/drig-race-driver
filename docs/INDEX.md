@@ -376,5 +376,6 @@ Contents: [Project process, tooling and builds](#project-process-tooling-and-bui
 - [LAMP_REFLECTOR_RESEARCH.md](LAMP_REFLECTOR_RESEARCH.md) Lamp reflector material research — Initial19 October2026 static purchased-resource observations.
 - [NATIVE_DLAA.md](NATIVE_DLAA.md) Optional native-resolution DLAA — 19 October2026.
 - [PER_VIEW_FOLIAGE.md](PER_VIEW_FOLIAGE.md) Per-view foliage in shadows, reflections and temporal inputs — 19October2026.
+- [STATIC_OBJECT_MATERIALS.md](STATIC_OBJECT_MATERIALS.md) Static object material coverage — Static objects retain a material-instance to source shader-family association when loaded from `objects.pssg`.
 - [TEMPORAL_AA_DIAGNOSTICS.md](TEMPORAL_AA_DIAGNOSTICS.md) Temporal-AA input audit (implementation design, not a completed fix) — 19 October2026.
 - [TEMPORAL_COLOUR_AUDIT.md](TEMPORAL_COLOUR_AUDIT.md) Paired HDR temporal-colour audit — G201, 20 October 2026.
