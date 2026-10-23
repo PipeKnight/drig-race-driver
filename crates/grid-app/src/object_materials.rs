@@ -20,13 +20,14 @@ pub(crate) fn glass_materials(tree: &pssg::Tree<'_>) -> grid_formats::Result<BTr
 }
 
 pub(crate) fn configure(name: &str, glass: &BTreeSet<String>, material: &mut StandardMaterial) {
-    if glass.contains(name) {
-        material.alpha_mode = AlphaMode::Blend;
-    } else if name == "objects/building_grandstand_01_j_01" {
-        // Owner requests solid backing if the source coverage is not reproduced.
-        // Source uses object_simple_mesh A2C; this one panel is an authored fallback,
-        // not a family-wide opaque conversion. Keep its original RGB/UV/geometry.
+    if matches!(name,
+        "objects/building_grandstand_01_j_01" | "objects/gg_building_grandstand_01_j_04") {
+        // Owner requests solid cladding without either layer's stippled alpha.
+        // These two exact panels are an authored fallback, not a family-wide
+        // opaque conversion. Keep their original RGB/UV/geometry and the fence.
         material.alpha_mode = AlphaMode::Opaque;
+    } else if glass.contains(name) {
+        material.alpha_mode = AlphaMode::Blend;
     }
 }
 
@@ -48,7 +49,7 @@ mod tests {
             && tree.string(i, b"shaderGroup").is_ok_and(|group| group == b"#object_simple_mesh.fx")));
         assert!(glass.contains(stand));
         assert!(!glass.contains(fence));
-        for (name, expected) in [(stand, AlphaMode::Blend), (fence, AlphaMode::Mask(0.5)), (backing, AlphaMode::Opaque), ("trees/leaf", AlphaMode::Mask(0.5))] {
+        for (name, expected) in [(stand, AlphaMode::Opaque), (fence, AlphaMode::Mask(0.5)), (backing, AlphaMode::Opaque), ("trees/leaf", AlphaMode::Mask(0.5))] {
             let mut material = StandardMaterial { alpha_mode: AlphaMode::Mask(0.5), ..default() };
             configure(name, &glass, &mut material);
             assert_eq!(material.alpha_mode, expected);

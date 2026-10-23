@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G252](G0252.md) | 2026-10-23 | Remove residual stippled alpha from the front grandstand panel |
 | [G251](G0251.md) | 2026-10-23 | Restore source glass coverage on Detroit grandstand panels |
 | [G250](G0250.md) | 2026-10-23 | Derby owner report: bright skid curves through smoke and stadium ground controls |
 | [G249](G0249.md) | 2026-10-23 | Trace BMW material sorting properties into pre-compose queues |
