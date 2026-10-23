@@ -56,3 +56,82 @@ mod tests {
         }
     }
 }
+
+
+/// Authored Bevy coverage diagnostic, NOT raw source GT0/A2C parity.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum CoverageMode { #[default] Off, Control, A2c }
+impl CoverageMode {
+    pub(crate) fn parse(value: &str) -> Result<Self, &'static str> {
+        match value { "off" => Ok(Self::Off), "control" => Ok(Self::Control),
+            "a2c" => Ok(Self::A2c), _ => Err("--object-coverage needs off, control or a2c") }
+    }
+    pub(crate) fn validate(self, c: CoverageContext) -> Result<(), &'static str> {
+        if self == Self::Off { return Ok(()); }
+        if c.enhanced || c.drive || !c.reference || c.collision || c.headless
+            || !c.render || !c.detroit || !c.lod0 || c.perf || c.compositor
+            || c.frames.is_none_or(|n| !(1..=600).contains(&n)) {
+            return Err("--object-coverage requires static rendered baseline Detroit LOD0 reference, --benchmark-frames1..600, compositor off and no GRID_PERF_TEST");
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Copy)]
+pub(crate) struct CoverageContext {
+    pub enhanced: bool, pub drive: bool, pub reference: bool,
+    pub collision: bool, pub headless: bool, pub render: bool,
+    pub detroit: bool, pub lod0: bool, pub perf: bool, pub compositor: bool,
+    pub frames: Option<u32>,
+}
+pub(crate) const COVERAGE_TARGET: &str = "objects/concrete_fence_white_end_01";
+pub(crate) fn configure_coverage(mode: CoverageMode, name: &str, m: &mut StandardMaterial) {
+    // Off/Control perform ZERO material mutations, including alpha/cull/depth.
+    if mode == CoverageMode::A2c && name == COVERAGE_TARGET {
+        m.alpha_mode = AlphaMode::AlphaToCoverage;
+    }
+}
+pub(crate) fn assert_coverage_msaa(cameras: Query<&Msaa, With<super::ViewerCamera>>) {
+    let samples = cameras.single().expect("object coverage requires one main camera");
+    assert_eq!(*samples, Msaa::Sample4, "object coverage requires actual native MSAA4; no single-sample fallback");
+}
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    fn valid() -> CoverageContext { CoverageContext { enhanced:false, drive:false,
+        reference:true, collision:false, headless:false, render:true, detroit:true,
+        lod0:true, perf:false, compositor:false, frames:Some(20) } }
+    #[test]
+    fn coverage_gate_rejects_playable_perf_and_unbounded_contexts() {
+        for mode in [CoverageMode::Control, CoverageMode::A2c] {
+            assert!(mode.validate(valid()).is_ok());
+            let invalid = [CoverageContext { drive:true, ..valid() },
+                CoverageContext { enhanced:true, ..valid() }, CoverageContext { perf:true, ..valid() },
+                CoverageContext { frames:None, ..valid() }, CoverageContext { frames:Some(0), ..valid() },
+                CoverageContext { frames:Some(601), ..valid() }, CoverageContext { render:false, ..valid() },
+                CoverageContext { reference:false, ..valid() }, CoverageContext { collision:true, ..valid() },
+                CoverageContext { headless:true, ..valid() }, CoverageContext { detroit:false, ..valid() },
+                CoverageContext { lod0:false, ..valid() }, CoverageContext { compositor:true, ..valid() }];
+            for c in invalid { assert!(mode.validate(c).is_err()); assert!(CoverageMode::Off.validate(c).is_ok()); }
+        }
+    }
+    #[test]
+    fn coverage_control_is_full_material_neutral_and_a2c_is_exact_target_only() {
+        let original = StandardMaterial { alpha_mode: AlphaMode::Mask(0.5),
+            perceptual_roughness:0.73, metallic:0.17, depth_bias:3.,
+            double_sided:true, cull_mode:None, ..default() };
+        for mode in [CoverageMode::Off, CoverageMode::Control] {
+            let mut m=original.clone(); configure_coverage(mode,COVERAGE_TARGET,&mut m);
+            assert_eq!(format!("{m:?}"), format!("{original:?}"));
+        }
+        for name in ["objects/building_grandstand_01_j_01", "objects/gg_building_grandstand_01_j_04",
+            "objects/concrete_fence_white_end_01!0", "trees/leaf"] {
+            let mut m=original.clone(); configure_coverage(CoverageMode::A2c,name,&mut m);
+            assert_eq!(format!("{m:?}"),format!("{original:?}"));
+        }
+        let mut m=original.clone(); configure_coverage(CoverageMode::A2c,COVERAGE_TARGET,&mut m);
+        assert_eq!(m.alpha_mode,AlphaMode::AlphaToCoverage);
+        m.alpha_mode=original.alpha_mode;
+        assert_eq!(format!("{m:?}"),format!("{original:?}"));
+        assert!(CoverageMode::parse("blend").is_err());
+    }
+}

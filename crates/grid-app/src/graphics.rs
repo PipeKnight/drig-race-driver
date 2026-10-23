@@ -91,6 +91,7 @@ pub struct Settings {
     pub window_reflectance: f32,
     /// Bounded diagnostic: no change to accepted interactive driving materials.
     pub window_pilot: super::window_response::Mode,
+    pub object_coverage: super::object_materials::CoverageMode,
     /// Authored player-paint coat controls, independent of base mask and glass.
     pub paint_clearcoat: f32,
     /// Default-off authored environment-only paint layer; not original shader parity.
@@ -172,6 +173,7 @@ impl Default for Settings {
             window_roughness: 0.08,
             window_reflectance: 0.5,
             window_pilot: super::window_response::Mode::Off,
+            object_coverage: super::object_materials::CoverageMode::Off,
             paint_clearcoat: 0.35,
             paint_environment: 0.,
             lamp_reflectors: super::lamp_materials::Mode::Off,

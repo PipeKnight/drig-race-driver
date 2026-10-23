@@ -1862,6 +1862,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     &args.next().ok_or("--window-transitions needs FRAME:C,FRAME:R,...")?,
                 )?);
             }
+            "--object-coverage" => {
+                graphics.object_coverage = object_materials::CoverageMode::parse(
+                    &args.next().ok_or("--object-coverage needs off, control or a2c")?,
+                )?;
+            }
             "--window-sort" => {
                 window_sort_current = match args.next().as_deref() {
                     Some("off") => false,
@@ -2106,6 +2111,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
+                println!("--object-coverage off|control|a2c: defaultoff exact Detroit concrete_fence_white_end_01 only; static baseline LOD0 rendered reference, benchmark1..600, MSAA4, no GRID_PERF_TEST. A2C is Bevy .5/fwidth remap, NOT source parity.");
                 println!("--skid-order off|control|isolated: bounded baseline sort/raster diagnostic; isolated sort0, raster50; physics/emission/atlas unchanged.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
@@ -2255,6 +2261,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
     }
+    graphics.object_coverage.validate(object_materials::CoverageContext {
+        enhanced: graphics.enhanced(), drive, reference, collision, headless,
+        render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
+        lod0: lod == "LOD0_", perf: std::env::var_os("GRID_PERF_TEST").is_some(),
+        compositor: smoke_compositor != smoke_compositor::Mode::Off,
+        frames: graphics.benchmark_frames,
+    })?;
     if skid_order != skid_marks::OrderMode::Off && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || output.is_none() || headless || collision || lod != "LOD0_"
         || !ground_effect_assets::enabled() || smoke_compositor != smoke_compositor::Mode::Off
@@ -3567,6 +3580,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Update, career_screen::track_top_speed)
             .add_systems(Last, career_screen::write_result);
     }
+    if graphics.object_coverage != object_materials::CoverageMode::Off {
+        println!("object_coverage mode={:?} target={} mapping=Bevy-alpha-cutoff0.5-fwidth-remap source_parity=false samples_required=4", graphics.object_coverage, object_materials::COVERAGE_TARGET);
+        app.add_systems(PostStartup, object_materials::assert_coverage_msaa);
+    }
     let exit = app
         .insert_resource(body_occlusion)
         .insert_resource(field)
@@ -3717,6 +3734,10 @@ fn setup(
                 .cloned()
         })
         .collect();
+    if graphics.object_coverage != object_materials::CoverageMode::Off {
+        assert!(car.parts.iter().any(|part| part.material == object_materials::COVERAGE_TARGET),
+            "object coverage target absent: refusing misleading control/candidate");
+    }
     let decal_materials = car.decal_materials.clone();
     let object_glass_materials = car.object_glass_materials.clone();
     for mut part in car.parts.drain(..) {
@@ -3804,6 +3825,7 @@ fn setup(
                     track_decals::configure(&mut material);
                 }
                 object_materials::configure(name, &object_glass_materials, &mut material);
+                object_materials::configure_coverage(graphics.object_coverage, name, &mut material);
                 source_trees::configure_material(name, &mut material);
                 if graphics.enhanced()
                     && graphics.layered_car
