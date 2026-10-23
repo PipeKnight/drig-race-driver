@@ -470,6 +470,11 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G247](G0247.md) | 2026-10-23 | Reduced source smoke pass and world composition research |
+| [G246](G0246.md) | 2026-10-23 | Per-sprite smoke transparency ordering diagnostic |
+| [G245](G0245.md) | 2026-10-23 | Finite-capacity per-fragment smoke compositing experiment |
+| [G244](G0244.md) | 2026-10-23 | Bounded cross-route source surface specular diagnostic |
+| [G243](G0243.md) | 2026-10-23 | Cross-route smoke transparency diagnostic and owner defect triage |
 | [G242](G0242.md) | 2026-10-23 | Measure conservative grass bucket rejection |
 | [G241](G0241.md) | 2026-10-23 | Record crowd animation resource and evaluator research |
 | [G240](G0240.md) | 2026-10-23 | Restore source bumper model visibility policy |

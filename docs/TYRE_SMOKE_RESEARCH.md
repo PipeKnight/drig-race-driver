@@ -330,8 +330,10 @@ original) until F319.
 ## 5. Open
 
 - wheel+0x148 meaning; car+0x64/+0x65; drift object at mgr+0x90.
-- Exact renderer use of the per-particle frac; pfx_half_smoke blending, lighting sample
-  (TEXCOORD1 via mgr+0x3880), half-resolution buffer, sorting and near-fade distances.
+- Exact renderer use of the per-particle frac and lighting sample (TEXCOORD1 via
+  mgr+0x3880), queue classification, selected reduced-target configuration, shader
+  sampling and near-fade distances. Section 7 narrows saved blend states, depth
+  substitution, resource creation and frame composition; live parity remains open.
 - Whether the inherit velocity is refreshed every frame for emitters already created
   (the driver writes it per frame).
 - No runtime trace of the original confirms any of this; the live game was not touched.
@@ -345,3 +347,149 @@ original) until F319.
 disassembly dumps, `scripts/` (pe.py, calls.py, decomp.ps1). `kickup-driver/ghidra-copy/`
 is a read-only copy of the Ghidra project made while the shared one was locked; it can be
 deleted.
+
+
+## 7. Reduced smoke pass and composition (23 October 2026)
+
+This extends the earlier particle-runtime research with static renderer control-flow
+and selected saved shader states. It reuses the same hash-identified analysis PE and
+read-only shared Ghidra master/cache. Four additional functions were decompiled across
+bounded follow-ups: `0x737D20`, `0x738920`, `0x738E80` and `0x62E350`; other links below
+come from existing cached evidence or bounded disassembly. No original live GPU trace
+or selected-path comparison was obtained. Function names proposed below are inferred
+labels, not original symbols. This section contains independently written structural
+descriptions; purchased shader programs and decompiler output remain private.
+
+### 7.1 Saved render states [D]
+
+The selected metadata comes from the purchased `shaderpack/shaderpack.pssg`, SHA-256
+`b6b29b80397d12def9c90f5afcff9ea8f335d07da3dc81e293273b468c9029a6`.
+Numeric zero booleans are disabled, rather than absent attributes.
+
+| Saved group / pass mask | Colour source / destination factors | Depth test / write | Other saved state |
+|---|---|---|---|
+| `carglass` / 1 | `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` | LEQUAL / on | `car_glass` layer |
+| `car_light_glass` / 1 | `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` | LEQUAL / on | `decals` layer |
+| `car_light_pod` / 1 | blending off | LEQUAL / on | `car_layer2`, distinct from the lens cover |
+| `pfx_half_smoke` / 1 and 16 | `ONE / ONE_MINUS_SRC_ALPHA` | off / off | separate alpha `ZERO / ONE_MINUS_SRC_ALPHA` |
+| `pfx_compose` / 1 | `ONE / SRC_ALPHA` | off / off | separate alpha `ONE / ZERO` |
+| `pfx_compose_no_alpha` / 1 | `ONE / SRC_ALPHA` | off / off | alpha writes disabled |
+| `skidmarks` / 1 | `SRC_ALPHA / ONE_MINUS_SRC_ALPHA` | LEQUAL / off | skips velocity/depth, environment and shadow passes |
+
+`smokeHalf` maps to `pfx_half_smoke` with a lit particle stream in shipped config.
+Its layer flags include `halfSizePFXBuffer` and skipping ordinary Colour. Burnout_circles
+instead uses `basicDepthAlphaBlendHalf`; the smoke-only state is not established for
+all ground effects. The two saved half-smoke variants link the half-edge and half
+fragment-program families and accept `depthmap`. Saved glass/lens depth writes also
+exist in other pass masks, but this does not establish their active intact/damaged
+variant, depth target or execution position.
+
+With zero RGB/unit alpha initialization, half-smoke's separate alpha factors would
+accumulate transmittance and compose's colour factors would implement
+`smoke_rgb + transmittance * scene_rgb` [I]. This interpretation has strong supporting
+clear arguments below, but backend clear semantics and shader arithmetic remain open.
+Saved priorities (`0x70000000` for glass/cover, `0x80000000` for half smoke/compose)
+are not enough to reconstruct the queue classifier or comparator.
+
+### 7.2 Resources and dimensions [V; API format meanings open]
+
+`0x737D20` is a particle resource/configuration callback, not the per-frame renderer.
+Its config branch creates reduced colour (`+0x90`), alpha (`+0x94`), depth (`+0x98`),
+temporary blur (`+0xA8`) targets and a reduced render node (`+0xAC`, copied to `+0x108`).
+Shader handles at `+0xBC/+0xC0` select depth 2x/4x reduction; `+0xD0/+0xD4` select
+compose/compose_no_alpha. The half-size layer handle is stored at `+0xE8`.
+
+The callback reads configured width/height (defaults 1280/720), shifts both right by
+TWO, and passes these quarter-axis dimensions to at least the first reduced-colour
+target creator. The name `halfSizePFXBuffer` therefore does not establish half width
+and half height. Other creator arguments reuse recovered stack temporaries; universal
+per-target dimensions and active quality selection remain unverified. Creator format
+enums `0xC` and `0x19` have not been mapped to backend formats.
+
+Setup also binds separate colour/alpha/temp inputs to horizontal/vertical blur shader
+families. Resource binding proves that path exists; it does not prove every frame
+uses the blur branch.
+
+### 7.3 Depth substitution and reduced accumulation [V]
+
+`0x738920` reduces scene depth. Stage zero resolves `VelocityDepthPlugin`, obtains its
+source texture through the object at plugin `+0x7C`, virtual accessor `+0x18`, and uses
+the 4x shader (`+0xC0`). Later stages use the previous reduced texture with the 2x
+shader (`+0xBC`). The configured default count `+0xA4=1` supports one first 4x stage;
+it is not a claim about every original quality path. Sampler0 and dimension inputs
+are bound before the fullscreen submission.
+
+`0x728040` binds the final reduced-depth texture as `depthmap` for three shader entries,
+including the half-smoke entry. `0x738C00` restores a full-source texture through the
+same plugin object's virtual accessor `+0x14`. The distinct accessors have not been
+proved equivalent resolved/unresolved depth, and the producer's contents—including
+vehicle glass/lens inclusion—remain untraced.
+
+`0x738D60` binds reduced colour at MRT slot0 and reduced alpha at slot1, sets the
+viewport, passes float tuple `(0,0,0,1)` to renderer virtual `+0xA4`, then calls virtual
+`+0x34` with 1. It substitutes reduced depth, submits the particle tree with mask
+`0x10`, restores full depth and unbinds the two targets. This is concrete zero-RGB /
+unit-alpha initialization evidence, qualified by the unresolved backend meaning of
+those virtual clear calls and MRT channel handling.
+
+`0x738E80` performs reduced-pass preparation: downsample first, conditional accumulation,
+then edge-related or blur-related work under manager options. `0x728170` is edge work,
+not final composition; `0x738C00` is depth restoration, not composition. Option names
+are not inferred from field offsets alone.
+
+### 7.4 Final composition and world groups [V; material classification open]
+
+`0x72E7D0` binds reduced colour to sampler0 of its supplied shader and draws it.
+`0x7390F0` is the separate composition/debug entry. Its ordinary composition branch
+passes `+0xD4`, the saved **compose_no_alpha** variant, when manager option `+0x388`
+is enabled. The alpha-writing `+0xD0` state must not be silently substituted for that
+variant. The function also has debug-target display branches; their presence does
+not mean the original was running a debug mode.
+
+World constructor `0x5C8080` calls common layer-owner base `0x64BE80`, then installs
+primary vtable `0xCE088C`. The base resolves `car_glass` into `+0xDC` but is not proved
+vehicle-specific. `0xCE0880` is the secondary interface at object `+0x130`, not this
+primary vtable. The frame dispatch is:
+
+- `0x5C8370` supplies the world `+0x450` descriptor to `0x63A300`.
+- That path runs preparation (`0x5C85D0`), builds a node table (`0x62E220`), performs
+  additional partitioning (`0x62E350`) and enters camera/render wrapper `0x6430A0`.
+- `0x63AEB0` invokes the reduced-particle preparation hook (`0x5C8570` to `0x738E80`)
+  before main colour-target setup, then world-colour traversal `0x5C8A10`.
+
+The builder maps descriptor groups `+0xB8/+0xC8/+0xD0/+0xD8` to node-table fields
+`+0x40/+0x44/+0x48/+0x4C`. Producer/partition evidence narrows their meaning:
+
+| Node-table field | Established contribution or use | Not established |
+|---|---|---|
+| `+0x40` | preparation passes descriptor `+0xB8` to `FERenderPlugin` | exclusive contents; car-glass membership |
+| `+0x44` | preparation passes descriptor `+0xC8` to `SkidmarksPlugin` | that every item is a tyre skid |
+| `+0x4C` | `0x62E350` passes its address to particle hook `0x728500`; option `+0x386` extracts the half-size layer into particle `+0xEC` | that the source or remainder contains only smoke |
+
+`0x62E350` does not read the base car-glass handle `+0xDC`; it is not the missing
+car-glass classifier. In `0x5C8A10`, exact compose calls at `0x5C8F1A` and `0x5C8FAA`
+have two conditional orders: `+0x4C remainder -> compose -> +0x40`, or
+`+0x40 -> +0x4C remainder -> compose`. Earlier scene submissions also occur. These
+orders are real, but neither branch proves which side contains car glass or lens
+covers. Startup/update plugin order in `renderPriority.xml` is not draw-pass order.
+
+### 7.5 Limits and next separating evidence
+
+The original has an explicit reduced smoke/depth/composition path; generic OIT or
+forcing every smoke draw last would be authored alternatives, not recovered parity.
+The following remain open:
+
+1. Initial material/layer classification into world descriptor groups, specifically
+   `car_glass`/lens-cover membership relative to final compose.
+2. `VelocityDepthPlugin` production and the meaning/content of its two accessors,
+   including vehicle transparent-depth contributions.
+3. Backend MRT clear semantics, actual target formats/dimensions and active quality
+   options; exact half-edge/compose shader sampling and near fade.
+4. A live original trace/reference for the selected BMW smoke scenario and damaged /
+   inside-camera variants. Static saved states are not runtime overrides.
+
+Private source evidence is indexed in
+`local/handoff/smoke-source-pass-order.md` and `drafts/smoke-source-order/` beside it;
+selected purchased-state metadata is in `smoke-source-pass-order-shadergroups.json`.
+Shared pseudocode caches for the four new decompiles are under the main checkout's
+`local/re-cache/`. None of that proprietary raw evidence belongs in public source.
