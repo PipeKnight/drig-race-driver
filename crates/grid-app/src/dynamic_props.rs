@@ -86,7 +86,13 @@ pub(crate) fn append_pieces(
             let Ok(draws) = renderables
                 .as_ref()
                 .map_err(|_| ())
-                .and_then(|r| r.draws(piece.anchor.as_bytes()).map_err(|_| ()))
+                // The anchor's draws in the damage renderable's frame: a piece
+                // drawn with only its anchor's own transform sat 0.5-0.6 m
+                // off its body (F564), under the road or in the air.
+                .and_then(|r| {
+                    r.draws_in(piece.renderable.as_bytes(), piece.anchor.as_bytes())
+                        .map_err(|_| ())
+                })
             else {
                 missing += 1;
                 continue;

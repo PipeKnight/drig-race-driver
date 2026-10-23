@@ -410,6 +410,63 @@ pieces against them included. Car against piece keeps the hull-triangle path: th
 original's AE8AD0 pairing for it was tried and lost more boards at the port's fixed
 16 ms step (BOX_CONTACTS.md, "Tried and not adopted").
 
+## Drawn pieces and road depth (F564)
+
+Owner's report of 23 October 2026 (PC, Detroit demolition derby, after F561): after a stack
+breaks, tyres jump unnaturally, partly sink into the road and pop back out, and often end up
+asleep in the air. Two separate causes.
+
+**Presentation [V].** grid-app drew each piece from `Renderables::draws(anchor)`. That composes
+transforms only from the anchor node down; the transforms of the damage renderable's nodes above
+the anchor were missing. Every Detroit and Nürburgring tyre was therefore drawn about (-0.61,
+-0.54, 0) m off its collision cylinder, in the piece frame. Lying flat, a tyre was drawn half a
+metre under its body (into the road). Standing on its edge or tilted against a wall, it was drawn
+beside or above its body (in the air). This matches the owner's screenshots. The new
+`Renderables::draws_in(renderable, anchor)` composes from the anchor up to the damage renderable.
+The test `round_piece_meshes_sit_on_their_bodies` checks every round piece of the first breakable
+per template on Detroit route_9 and Nürburgring route_1: mesh centre within 5 cm of the hull
+centre, mesh half-extents within 6 cm of the cylinder. With `draws` it fails at tyrestack_black
+piece 0 (centre (-0.609, -0.539, 0.006)).
+
+The Nürburgring `tyrewall_black_yok` pieces 6-21 and `close_drift_flag` piece 0 stay undrawn.
+Their damage renderable names do not select exactly one NODE; this was already so with `draws`
+and is not resolved here.
+
+**Physics: sinking under load [V, AUTHORED].** A car pressing a tyre (sitting on it, or driving
+into a wall of them) pushes the hull below the road for a tick or two. The solver then recovers
+the penetration (before this change: piece 139, Detroit route_9, tick 1061, 0.30 m under the road,
+popped 0.33 m up the next tick). The original solves contacts the same way. Its recovery from
+such loads is not established, and it was not captured. The owner asked that pieces never sink,
+partly or fully. So `PropWorld::lift_sunk` runs after each committed step, after `hold_lost`. It
+moves every live piece or wheel whose hull bottom is more than `SINK_TOLERANCE` (0.01 m) below
+the road under its centre back to that tolerance, through `continuous::apply` (the B14550 move:
++0x1C0, the corrected and published poses, the +0x360 correction), and clears any downward
+linear velocity. `PropWorld::road_depths` measures the depth: the cylinder's or sphere's lowest
+point, or the mesh hull's world bounds, against a track cast from 5 cm above the centre. A start
+3 m higher hit wall ledges. The test `pieces_pressed_by_a_car_stay_above_the_road` (Le Mans wall
+969, the car at full throttle for 600 ticks) sank body 22 by 0.099 m at tick 397 before the
+change. After it, the deepest of 22091 piece-ticks is 0.0100 m.
+
+Detroit demolition derby, 12 stk cars, 12000 ticks, `GRID_SINK_CHECK=0.02 GRID_HANG_CHECK=300`
+(grid-opponent-race):
+
+| route | build | ticks with a piece > 2 cm under the road | deepest | unsupported (max per check) | breaks / pieces |
+|---|---|---|---|---|---|
+| route_8 | before | 5 | 0.231 m | 0 | 3 / 3 |
+| route_8 | after | 0 | - | 0 | 4 / 4 |
+| route_9 | before | 41 | 0.302 m | 0 | 32 / 285 |
+| route_9 | after | 0 | - | 2 | 39 / 394 |
+
+**Asleep "unsupported" pieces after the change [O].** The route_9 run after the change shows
+pairs of unsupported pieces at some checks: 112 and 120 at ticks 1200-1500, 272 and 273 at ticks
+6000-6600. These are not in the air. Bodies 112, 120, 121 lean as a heap: 112 on 120, 120 on
+121, 121 on 122, 123 and a static route prop box. At tick 900 the heap still crept about
+0.05-0.13 m/s, below the rbDefault stationary threshold of 0.3 m/s. So after turnOffTime (1 s)
+the island slept at tick 901, the original's rule [D, BODY_SLEEPING.md section 2]. The diagnostic
+wakes every piece at once with parking off, and the heap then slides on another 0.3-0.5 m. It
+counts as unsupported for that reason, though every body has a supporting contact. No
+correction: the original freezes a slowly creeping heap the same way.
+
 ## Not yet established
 
 - Armco end pieces (`link0`, a rail of three shapes) and scaled jointed entities stay

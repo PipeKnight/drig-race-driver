@@ -436,6 +436,29 @@ impl MultiRuntime {
         self.body_counts.get(i).copied().unwrap_or(0)
     }
 
+    /// Diagnostic: the last tick's world contacts that name body `body`
+    /// (index), as (body a, body b or none for static, normal, point,
+    /// penetration +0x38, solved force +0x3C, shape tokens +0x28/+0x2C).
+    #[allow(clippy::type_complexity)]
+    pub fn contacts_with(&self, body: usize) -> Vec<(usize, Option<usize>, [f32; 3], [f32; 3], f32, f32, [u32; 2])> {
+        let g = |c: &contact_groups::Contact, o: usize| f32::from_bits(c[o / 4]);
+        (self.world.groups.contacts.iter())
+            .filter(|c| **c != contact_groups::EMPTY_CONTACT)
+            .filter(|c| c[1] as usize == body + 1 || c[2] as usize == body + 1)
+            .map(|c| {
+                (
+                    c[1] as usize - 1,
+                    (c[2] != 0).then(|| c[2] as usize - 1),
+                    [g(c, 0x60), g(c, 0x64), g(c, 0x68)],
+                    [g(c, 0x50), g(c, 0x54), g(c, 0x58)],
+                    g(c, 0x38),
+                    g(c, 0x3c),
+                    [c[0x28 / 4], c[0x2c / 4]],
+                )
+            })
+            .collect()
+    }
+
     /// Cars retired by the last tick, in car order.
     pub fn newly_retired(&self) -> &[usize] {
         &self.newly_retired
@@ -1041,6 +1064,7 @@ impl MultiRuntime {
             next.detect(&world.groups.contacts, &recorded, &world.groups.bodies);
             let mut changed = self.shapes.clone();
             next.hold_lost(&mut world.groups.bodies, self.cars[0].track.bounds()[1]);
+            next.lift_sunk(&self.cars[0].track, &mut world.groups.bodies)?;
             let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
             // 0x7C4830: the phantom posts after the step and the breaks.
             next.post_touches.clear();
@@ -1933,6 +1957,63 @@ mod tests {
                 eprintln!("pieces {pieces} asleep {asleep} unsupported {hanging:?}");
                 assert!(pieces > 0 && asleep > 0, "{asleep} of {pieces} asleep");
                 assert!(hanging.is_empty(), "{hanging:?}");
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// No piece ends a step sunk into the road (AUTHORED, owner's request,
+    /// F564): the car driven into the Le Mans tyre wall 969 at full throttle
+    /// climbs the tyres and presses them down; every tick each piece's hull
+    /// bottom stays within [`crate::dynamic_props::SINK_TOLERANCE`] of the
+    /// road under it.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT and private GRID_CONTACT_DIRECTIONS / GRID_BODY_EVENT_PARAMETERS"]
+    fn pieces_pressed_by_a_car_stay_above_the_road() {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(|| {
+                let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+                let root = Path::new(&root);
+                let read = |name| std::fs::read(std::env::var_os(name).unwrap()).unwrap();
+                let table = read("GRID_CONTACT_DIRECTIONS");
+                let events = Some(
+                    crate::body_impact_parameters::read(&read("GRID_BODY_EVENT_PARAMETERS"))
+                        .unwrap(),
+                );
+                let route = Route::new("tracks/europe/le_mans/route_0").unwrap();
+                let mut multi =
+                    MultiRuntime::lacetti_on(root, &route, &["slot_00", "slot_01"], &table, events)
+                        .unwrap();
+                multi.enable_dynamic_props(root).unwrap();
+                let at = multi.props.as_ref().unwrap().catalog.breakables[969].placement;
+                let z = [at[8], at[9], at[10]];
+                let centre = [at[12], at[13], at[14]];
+                let start: [f32; 3] = std::array::from_fn(|k| centre[k] + 40. * z[k]);
+                multi.place_at_rest(1, start, z.map(|v| -v)).unwrap();
+                let mut drive = [Controls::default(); 2];
+                drive[1].throttle = 1.;
+                let (mut deepest, mut checked) = ((0., 0, 0), 0);
+                for tick in 0..600 {
+                    multi.tick(&drive).unwrap();
+                    let props = multi.props.as_ref().unwrap();
+                    for d in props.road_depths(multi.cars[0].track(), multi.bodies()) {
+                        checked += 1;
+                        if d.depth > deepest.0 {
+                            deepest = (d.depth, d.body, tick);
+                        }
+                    }
+                }
+                eprintln!("deepest {deepest:?} of {checked} piece ticks");
+                assert!(checked > 1000, "{checked}");
+                assert!(
+                    deepest.0 <= crate::dynamic_props::SINK_TOLERANCE + 1e-3,
+                    "body {} sank {} m at tick {}",
+                    deepest.1,
+                    deepest.0,
+                    deepest.2
+                );
             })
             .unwrap()
             .join()

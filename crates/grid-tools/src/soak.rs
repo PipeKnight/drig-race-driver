@@ -768,6 +768,54 @@ pub struct Snapshot<'a> {
     pub cars: usize,
 }
 
+/// Diagnostics for the owner's derby report of 23 October 2026, enabled by
+/// environment: `GRID_SINK_CHECK=D` prints every tick the pieces whose hull
+/// bottom is more than D m below the road (`PropWorld::road_depths`),
+/// `GRID_HANG_CHECK=N` every N ticks the bodies asleep or parked without
+/// support (`MultiRuntime::unsupported`).
+fn sink_and_hang_check(multi: &MultiRuntime) {
+    let player = &multi.cars[0];
+    let tick = player.ticks;
+    if let Some(limit) = std::env::var("GRID_SINK_CHECK").ok().and_then(|v| v.parse::<f32>().ok())
+        && let Some(props) = multi.dynamic_props()
+    {
+        let sunk: Vec<_> = (props.road_depths(player.track(), multi.bodies()).into_iter())
+            .filter(|d| d.depth > limit)
+            .collect();
+        if !sunk.is_empty() {
+            let line: Vec<String> = sunk
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{}:{:.3}{}@{:.2},{:.2},{:.2}",
+                        d.body,
+                        d.depth,
+                        if d.asleep { "z" } else { "" },
+                        d.centre[0],
+                        d.centre[1],
+                        d.centre[2]
+                    )
+                })
+                .collect();
+            println!("sink tick={tick} n={} {}", sunk.len(), line.join(" "));
+        }
+    }
+    if let Some(every) = std::env::var("GRID_HANG_CHECK").ok().and_then(|v| v.parse::<u64>().ok())
+        && every > 0
+        && tick.is_multiple_of(every)
+        && multi.dynamic_props().is_some()
+    {
+        match multi.unsupported(120) {
+            Ok(found) => {
+                for u in found.iter().filter(|u| !u.held) {
+                    println!("hang tick={tick} {u:?}");
+                }
+            }
+            Err(e) => println!("hang tick={tick} error={e}"),
+        }
+    }
+}
+
 impl Session {
     /// Build the app's driving state for `scenario` (grid-app `run`, `--drive`).
     pub fn new(
@@ -1029,6 +1077,9 @@ impl Session {
             }
             std::mem::swap(&mut self.runtime, &mut race.multi.cars[0]);
             let result = race.multi.tick(&all);
+            if result.is_ok() {
+                sink_and_hang_check(&race.multi);
+            }
             std::mem::swap(&mut self.runtime, &mut race.multi.cars[0]);
             if result.is_ok() {
                 // The player's own records, as the app reports them.

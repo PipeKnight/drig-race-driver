@@ -750,6 +750,60 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("hang tick={} {u:?}", multi.ticks);
             }
         }
+        // GRID_SINK_TRACE=body:from:to: that body's pose, velocity and contacts each tick.
+        if let Some((body, from, to)) = std::env::var("GRID_SINK_TRACE").ok().and_then(|v| {
+            let p: Vec<u64> = v.split(':').filter_map(|x| x.parse().ok()).collect();
+            (p.len() == 3).then(|| (p[0] as usize, p[1], p[2]))
+        }) && (from..=to).contains(&multi.ticks)
+            && let Some(b) = multi.bodies().get(body)
+        {
+            let f = |o: usize| f32::from_bits(b[o / 4]);
+            let depth = multi
+                .dynamic_props()
+                .map(|p| p.road_depths(multi.cars[0].track(), multi.bodies()))
+                .and_then(|d| d.into_iter().find(|d| d.body == body))
+                .map_or(f32::NAN, |d| d.depth);
+            let mut line = format!(
+                "trace tick={} body={body} y={:.3} depth={depth:.3} v={:.2},{:.2},{:.2} up={:.2},{:.2},{:.2} state={:x}",
+                multi.ticks, f(0x1c4), f(0x220), f(0x224), f(0x228), f(0x1e0), f(0x1e4), f(0x1e8), b[0x400 / 4]
+            );
+            for (a, o, n, p, pen, force, tokens) in multi.contacts_with(body) {
+                line += &format!(
+                    " | {a}-{} n={:.2},{:.2},{:.2} y={:.2} pen={pen:.3} f={force:.0} t={}",
+                    o.map_or("s".into(), |o| o.to_string()),
+                    n[0], n[1], n[2], p[1],
+                    if o.is_none() {
+                        multi.cars[0].track().shape_name(tokens[1].wrapping_sub(1)).unwrap_or("?").to_string()
+                    } else {
+                        format!("{}/{}", tokens[0], tokens[1])
+                    }
+                );
+            }
+            println!("{line}");
+        }
+        // GRID_SINK_CHECK=D: every tick, pieces whose hull bottom is more than
+        // D m below the road (PropWorld::road_depths).
+        if let Some(limit) = std::env::var("GRID_SINK_CHECK").ok().and_then(|v| v.parse::<f32>().ok())
+            && let Some(props) = multi.dynamic_props()
+        {
+            let sunk: Vec<String> = (props.road_depths(multi.cars[0].track(), multi.bodies()).iter())
+                .filter(|d| d.depth > limit)
+                .map(|d| {
+                    format!(
+                        "{}:{:.3}{}@{:.2},{:.2},{:.2}",
+                        d.body,
+                        d.depth,
+                        if d.asleep { "z" } else { "" },
+                        d.centre[0],
+                        d.centre[1],
+                        d.centre[2]
+                    )
+                })
+                .collect();
+            if !sunk.is_empty() {
+                println!("sink tick={} n={} {}", multi.ticks, sunk.len(), sunk.join(" "));
+            }
+        }
         if crash_car0.is_some() && multi.ticks.is_multiple_of(500) {
             report_damage(&multi.cars[0], multi.ticks);
         }

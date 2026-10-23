@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F564](log/F0564.md) | 2026-10-24 | Broken tyres drawn on their bodies and lifted out of the road |
 | [F563](log/F0563.md) | 2026-10-23 | Detached panels settle lying flat: rigid box with the original's detached-part body parameters |
 | [F562](log/F0562.md) | 2026-10-23 | Playable 14696d47fe1e with no mid-air parking (F561), portable copy and APKs 99fef6aca274 |
 | [F561](log/F0561.md) | 2026-10-23 | No body parks in the air: far islands rest for turnOffTime before they stop; detached parts land on the track |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F506](log/F0506.md) | 2026-10-20 | Close-drift flag post geometry ported and verified bit for bit |
 | [F505](log/F0505.md) | 2026-10-20 | The 42D580 one-shot queue is network replication, not a mixing cap |
 | [F504](log/F0504.md) | 2026-10-20 | Yaw and pitch displacement thumps |
-| [F503](log/F0503.md) | 2026-10-20 | Close-drift flags researched: the original breaks them into a kinematic phantom post |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

@@ -43,6 +43,12 @@ const SLOTS_PER_PIECE: usize = 12;
 /// AUTHORED: a piece this far below the lowest road chunk has tunnelled
 /// through the ground and is held (see [`PropWorld::hold_lost`]).
 pub const LOST_DEPTH: f32 = 100.;
+/// AUTHORED (owner's request of 23 October 2026, F564): the deepest a piece's
+/// hull may end a step below the road under it (m) before
+/// [`PropWorld::lift_sunk`] lifts it out. The original only recovers the
+/// penetration through the solver over later steps; a tyre stack pressed by a
+/// car then showed 3-30 cm under the road for a tick or two.
+pub const SINK_TOLERANCE: f32 = 0.01;
 /// Body words 0x1C0..0x230: mass centre, pose, angular and linear velocity.
 const KINEMATICS: std::ops::Range<usize> = 0x1c0 / 4..0x230 / 4;
 const CYLINDER_SIDES: usize = 12;
@@ -207,6 +213,17 @@ pub struct BreakEvent {
     pub template: String,
     pub tick: u64,
     pub force: f32,
+}
+
+/// [`PropWorld::road_depths`]: one body's hull bottom against the road.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RoadDepth {
+    pub body: usize,
+    /// Road height minus the hull's lowest point (m); positive is sunk.
+    pub depth: f32,
+    pub centre: [f32; 3],
+    pub ground: f32,
+    pub asleep: bool,
 }
 
 /// A recorded fresh contact with a route prop box, for break detection.
@@ -1537,6 +1554,71 @@ impl PropWorld {
             .is_none_or(|p| self.catalog.breakables[p.breakable].pieces[p.spec].collides())
     }
 
+    /// Diagnostic (owner's derby report of 23 October 2026, tyres sinking
+    /// into the road): for every live piece and lost wheel, how far the
+    /// lowest point of its collision hull (shell excluded) lies below the
+    /// packed track surface under its centre, from a cast starting 5 cm
+    /// above the centre (a higher start hits the ledges of walls a piece
+    /// leans on). Positive is below the road; pieces with no road under
+    /// them are skipped.
+    pub fn road_depths(&self, track: &Track, bodies: &[contact_groups::Body]) -> Vec<RoadDepth> {
+        let mut cache = grid_world::rectangle_cull::Cache::default();
+        let mut out = Vec::new();
+        for (spec, body, _) in self.parts() {
+            let Some(b) = bodies.get(body) else { continue };
+            let pose = body_pose(b);
+            let centre = pose[3];
+            let lowest = match spec.collider() {
+                convex_distance::Hull::Cylinder { radius, half_height } => {
+                    let a = pose[1][1].clamp(-1., 1.);
+                    centre[1] - (half_height * a.abs() + radius * (1. - a * a).max(0.).sqrt())
+                }
+                convex_distance::Hull::Sphere { radius } => centre[1] - radius,
+                hull => match hull.world_bounds(pose, 0.) {
+                    Ok(bounds) => bounds[0][1],
+                    Err(_) => continue,
+                },
+            };
+            let (start, end) = (centre[1] + 0.05, centre[1] - 100.);
+            let Some(hit) = track
+                .query([centre[0], start, centre[2], 1.], [centre[0], end, centre[2], 1.], &mut cache)
+                .ok()
+                .and_then(|q| q.hit)
+            else {
+                continue;
+            };
+            let ground = start + (end - start) * hit.contact.fraction;
+            out.push(RoadDepth {
+                body,
+                depth: ground - lowest,
+                centre: [centre[0], centre[1], centre[2]],
+                ground,
+                asleep: f(b, 0x400).to_bits() == contact_groups::ASLEEP,
+            });
+        }
+        out
+    }
+
+    /// AUTHORED (see [`SINK_TOLERANCE`]): lift every live piece and wheel
+    /// whose hull ends the step more than the tolerance below the road under
+    /// its centre back to that tolerance, and stop it moving further down.
+    /// Call after each committed step, after [`Self::hold_lost`].
+    pub fn lift_sunk(&self, track: &Track, bodies: &mut [contact_groups::Body]) -> Result<(), Error> {
+        for d in self.road_depths(track, bodies) {
+            if d.depth <= SINK_TOLERANCE || self.lost.contains_key(&d.body) {
+                continue;
+            }
+            let body = &mut bodies[d.body];
+            let mut position: [f32; 4] = std::array::from_fn(|k| f(body, 0x1c0 + k * 4));
+            position[1] += d.depth - SINK_TOLERANCE;
+            grid_world::continuous::apply(body, position)?;
+            if f(body, 0x214) < 0. {
+                set(body, 0x214, 0.);
+            }
+        }
+        Ok(())
+    }
+
     /// Whether world body `body` (a piece or a lost wheel) has been lost
     /// below the world and is held.
     pub fn is_lost(&self, body: usize) -> bool {
@@ -2641,6 +2723,75 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Each round piece's drawn mesh (its anchor's draws in the damage
+    /// renderable's frame, `Renderables::draws_in`, as grid-app places them)
+    /// is centred on its collision cylinder (F564). With the anchor's own
+    /// transform only (`draws`), every Detroit and Nürburgring tyre was drawn
+    /// 0.6 m to the side and 0.54 m below its body: sunk into the road at
+    /// rest, in the air once it tilted.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT"]
+    fn round_piece_meshes_sit_on_their_bodies() {
+        let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
+        let root = Path::new(&root);
+        let mut checked = 0;
+        for route in ["tracks/usa/detroit/route_9", "tracks/europe/nurburgring/route_1"] {
+            let route = Route::new(route).unwrap();
+            let props = Props::read_route(root, &route).unwrap();
+            let catalog = Catalog::read(root, &route, &props).unwrap();
+            let bytes = std::fs::read(root.join(route.track_file("objects.pssg"))).unwrap();
+            let tree = pssg::read_tree(&bytes).unwrap();
+            let sources = grid_formats::mesh::read_static_meshes(&tree).unwrap();
+            let renderables = grid_formats::scene::Renderables::new(&tree, &sources).unwrap();
+            let mut seen = std::collections::BTreeSet::new();
+            for b in &catalog.breakables {
+                if !seen.insert(b.template.clone()) {
+                    continue;
+                }
+                for (k, piece) in b.pieces.iter().enumerate() {
+                    let Primitive::Cylinder { radius, height } = piece.primitive else {
+                        continue;
+                    };
+                    // grid-app leaves a piece whose names do not select one
+                    // node undrawn (its missing count).
+                    let draws = renderables
+                        .draws_in(piece.renderable.as_bytes(), piece.anchor.as_bytes());
+                    let Ok(draws) = draws else {
+                        eprintln!("{} piece {k}: {} / {} not drawn: {draws:?}", b.template, piece.renderable, piece.anchor);
+                        continue;
+                    };
+                    assert!(!draws.is_empty(), "{} piece {k}", b.template);
+                    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                    let p = piece.pose;
+                    for draw in &draws {
+                        let m = grid_formats::scene::compose(&draw.transform, &b.placement);
+                        for v in draw.indices.iter().map(|&i| i as usize) {
+                            let w = grid_formats::scene::transform_point(
+                                &m,
+                                sources[draw.source].positions[v],
+                            );
+                            let d = [w[0] - p[3][0], w[1] - p[3][1], w[2] - p[3][2]];
+                            for r in 0..3 {
+                                let l = (0..3).map(|j| d[j] * p[r][j]).sum::<f32>();
+                                lo[r] = lo[r].min(l);
+                                hi[r] = hi[r].max(l);
+                            }
+                        }
+                    }
+                    let mid: [f32; 3] = std::array::from_fn(|r| (lo[r] + hi[r]) * 0.5);
+                    let half: [f32; 3] = std::array::from_fn(|r| (hi[r] - lo[r]) * 0.5);
+                    let what = format!("{} piece {k}: mesh centre {mid:?} half {half:?}", b.template);
+                    assert!(mid.iter().all(|v| v.abs() < 0.05), "{what}");
+                    // The tyre fills its cylinder: radius across, height along.
+                    assert!((half[0] - radius).abs() < 0.06 && (half[2] - radius).abs() < 0.06, "{what}");
+                    assert!((half[1] - height * 0.5).abs() < 0.06, "{what}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 30, "{checked}");
     }
 
     #[test]

@@ -900,6 +900,7 @@ impl Runtime {
                 &state.world.groups.bodies,
             );
             next.hold_lost(&mut state.world.groups.bodies, self.track.bounds()[1]);
+            next.lift_sunk(&self.track, &mut state.world.groups.bodies)?;
             let disabled = next.apply(&mut state.world, &mut state.shapes, self.ticks + 1)?;
             // Appending links the car body (chain tail) to the first piece.
             state.car.owner.physical = state.world.groups.bodies[0];

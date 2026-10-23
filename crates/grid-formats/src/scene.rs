@@ -116,6 +116,50 @@ impl<'t, 'a> Renderables<'t, 'a> {
         }
         Ok(result)
     }
+
+    /// Draws under the NODE `node`, placed in the frame of its ancestor NODE
+    /// `root`: the transforms of `node` and of every node between it and
+    /// `root` (inclusive) are composed. [`Self::draws`] stops at the selected
+    /// node, so a sub-node's draws (a breakable piece's body anchor inside
+    /// its damage renderable) lacked the transforms above it. `node` must be
+    /// the one NODE of that id under `root`; other renderables may reuse the
+    /// id (Nürburgring tyre walls name their tyres `tyre01_obj_01` and on).
+    pub fn draws_in(&self, root: &[u8], node: &[u8]) -> Result<Vec<Draw<'a>>> {
+        let root = match self.nodes.get(root).map(Vec::as_slice) {
+            Some([one]) => *one,
+            _ => return fail(0, "expected one selected renderable node"),
+        };
+        let under = |n: usize| {
+            let mut ancestor = Some(n);
+            while ancestor.is_some_and(|a| a != root) {
+                ancestor = ancestor.and_then(|a| self.tree.nodes[a].parent);
+            }
+            ancestor.is_some()
+        };
+        let candidates = self.nodes.get(node).map(Vec::as_slice).unwrap_or_default();
+        let node = match candidates.iter().filter(|&&n| under(n)).collect::<Vec<_>>()[..] {
+            [one] => *one,
+            _ => return fail(0, "expected one node under the renderable root"),
+        };
+        let mut instances = Vec::new();
+        let mut stack = self.tree.nodes[node].children.clone();
+        while let Some(n) = stack.pop() {
+            if self.tree.name(n) == b"RENDERSTREAMINSTANCE" {
+                instances.push(n);
+            }
+            stack.extend_from_slice(&self.tree.nodes[n].children);
+        }
+        instances.sort_unstable();
+        let mut result = Vec::new();
+        for i in instances {
+            if let Some(draw) =
+                instance_draw(self.tree, self.meshes, &self.context, i, false, Some(root))?
+            {
+                result.push(draw);
+            }
+        }
+        Ok(result)
+    }
 }
 
 /// Mesh sources by id and the tree's shader instance ids.
