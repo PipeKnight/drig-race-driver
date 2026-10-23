@@ -86,3 +86,69 @@ Next implementation should expose an explicit surface-RGB-only override contract
 The runtime replaces carrier alpha with its canonical decoded source BC3 alpha for every aligned authored mip; two or one larger levels use periodic integer bilinear, any absent small tail is explicitly derived. Candidate RGB/header bytes stay unchanged. This preserves source data according to the shared CPU decoder, not a claim of exact compressed-GPU interpolation or a new source-authored high-resolution mask. All rows stage before mutation, including transformation failures; existing opaque V1 validation stays strict. No extra GPU texture/sampler bindings or pre-device image creation.
 
 Four focused CPU tests pass, including the purchased curb and atomic late-row failure; existing V1 regression passes. First filesystem test failed on a missing default profile directory in crate cwd; corrected by an explicit canonical test root under ignored local/, preserving the failed log. Runtime GPU/native4K/motion validation remains pending. Prepared neural curb RGB is only a candidate; inferred cracks/lost grain were not accepted as a default quality upgrade.
+
+
+## Cross-route portability boundary (Detroit audit, diagnostic pending)
+
+The source-layer extension now dispatches six families: `track_surface_simple`,
+`track_surface`, `track_surface_reflective`, `track_infield`,
+`track_infield_dxt5nm` and `track_infield_wsm`. It attaches on baseline as well as
+enhanced source-layer track scenes. This reconstructs layer composition; it does
+not establish that every route has the accepted Donington material response.
+
+The source-alpha base-F0 adaptation defaults on only for eligible enhanced scenes.
+Baseline defaults to `off`; the enhanced preset is currently restricted to Lacetti
+and Donington route_0. Therefore ordinary other-track runs do not automatically
+inherit that specular correction. A default-off explicit diagnostic now
+separates `--surface-specular` eligibility from the enhanced-only surface pilots;
+it has no accepted cross-route GPU result or default promotion at this audit.
+Keep the enhanced restriction for unrelated systems rather than unlocking the
+entire preset to test one material input.
+
+The authored dry-ground response (roughness1, reflectance0.25) applies to the
+selected infield shader families and eight exact Donington terrain texture names.
+Those names bridge terrain layers used under road-surface shaders. They do not
+classify Detroit textures. Ground-edge U bands and speed-dependent RGB filtering
+also remain separate optional Donington-atlas pilots, not portable surface fixes.
+Land geometry is still appended only by enhanced scenes.
+
+A read-only inventory of the purchased Detroit shared `tracksplit.pssg` finds102
+`track_surface_simple`,14 `track_surface`,34 `track_infield`,5 `decal` and1
+`batched_track` saved material instances. Thus150 of156 package instances belong
+to accepted layer families. These are **package instance counts**, not selected
+route8/9 draw counts or visible screen coverage. Actual attachment logs must show
+available/attached/mismatched draws, since material identity and vertex-count
+checks can retain generic materials. Detroit `land.pssg` separately contains5
+infield instances and1 water instance; baseline does not append it.
+
+Detroit source diffuse alpha is far below white: base-level means are2.200569/255
+for `det_track1_d.tga` and1.825226/255 for `det_track2_d.tga`. Under baseline `off`
+that control does not weight dielectric F0. This identifies a plausible sheen
+source, not a measured per-pixel correction: actual filtered alpha, vertex blend,
+light and macro occlusion still matter. The adaptation also changes environment
+response and is not the original direct Phong implementation.
+
+`det_infield1_d` through `det_infield5_d` each occur under both infield and simple
+surface families. Current dry classification therefore differs by family even for
+the same saved diffuse texture. However Detroit infield instances also bind road
+and rumble-strip textures: shader names do not prove all texels are grass/earth.
+Do not broaden dry classification to every surface or mixed edge atlas without
+reviewing texture content and the actual draw. All14 Detroit `track_surface`
+instances save normal-map bindings that this extension does not reconstruct.
+Saved PhongPower/SpecScale vary between5/3 and10/1; they do not uniquely establish
+GGX roughness or recovered runtime uniform packing.
+
+The smallest next comparison keeps baseline, route8/stk, source layers, camera,
+lighting, sky and all other settings fixed: explicit `off` versus `white-control`
+must match; then compare `white-control` versus `source-base`. The route's source
+sky and saved sky tone are supported on baseline; this does not enable source IBL.
+Validate roads, standalone ground and mixed edges separately before extending
+classification or promoting any cross-route default. No global roughness,
+exposure, grading, metallic or grass-density change is justified by this audit.
+
+Private evidence: `local/handoff/surface-portability.md` and
+`local/handoff/drafts/surface-portability/detroit-inventory.json` (source hashes,
+bindings and base alpha statistics). No asset or shader binary is public.
+
+
+Known shared Detroit grass-layer follow-up (G244): a CPU-picked Grass_track patch and matched baseline1080 Off/White/Source captures establish a small mask response on actual textured terrain. Off/White images are exact; central confirmed-terrain rectangle mean absolute Source difference1.744RGBbytes,max8. It already receives the dry-ground roughness adaptation, so this does not establish a complete shiny-ground fix. Equivalent diffuse textures under track_surface_simple can miss the Donington-only standalone dry classifier; masks and classification are separate mechanisms. The remote test patch is outside authored grass-cover placements and far from the Derby stadium, so neither grass density nor the owner's exact location is validated. All3runs share a missing Detroit ground_cover.pssg warning; no original fallback or missing-asset repair inferred.

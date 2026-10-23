@@ -30,6 +30,15 @@ impl Specular {
             _ => Err("--surface-specular needs off, source-base or white-control"),
         }
     }
+    /// Surface-only diagnostic: independent of the enhanced lighting preset.
+    /// Off must preserve all previously valid scenes, including car/collision.
+    pub fn validate_context(self, layered_track: bool, track_scene: bool, collision: bool) -> Result<(), &'static str> {
+        if self != Self::Off && (!layered_track || !track_scene || collision) {
+            Err("--surface-specular requires a non-collision track scene with --track-materials source")
+        } else {
+            Ok(())
+        }
+    }
     fn control(self) -> f32 {
         match self {
             Self::Off => 0.,
@@ -593,6 +602,31 @@ fn attach(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn specular_diagnostic_eligibility_preserves_off_and_requires_source_track() {
+        for layered in [false, true] {
+            for track_scene in [false, true] {
+                for collision in [false, true] {
+                    assert!(Specular::Off.validate_context(layered, track_scene, collision).is_ok());
+                    for mode in [Specular::SourceBase, Specular::WhiteControl] {
+                        assert_eq!(mode.validate_context(layered, track_scene, collision).is_ok(),
+                                   layered && track_scene && !collision);
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn specular_parser_accepts_only_explicit_modes_and_keeps_off_default() {
+        assert_eq!(Specular::default(), Specular::Off);
+        assert_eq!(Specular::parse("off"), Ok(Specular::Off));
+        assert_eq!(Specular::parse("source-base"), Ok(Specular::SourceBase));
+        assert_eq!(Specular::parse("white-control"), Ok(Specular::WhiteControl));
+        for invalid in ["", "source", "on", "SourceBase", "source-base "] {
+            assert!(Specular::parse(invalid).is_err());
+        }
+    }
+
     #[test]
     fn asphalt_softness_protects_mixed_atlases_and_unrelated_routes() {
         for name in ["don_track1_d.tga", "don_track2_d.tga", "don_track3_d.tga", "don_track4_d.tga"] {

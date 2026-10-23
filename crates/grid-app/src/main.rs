@@ -2184,10 +2184,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         graphics.surface_specular = track_surface::Specular::SourceBase;
     }
-    if (graphics.surface_specular != track_surface::Specular::Off || surface_rgb_override.is_some() || graphics.ground_edge_pilot || graphics.surface_view_mip_bias || graphics.asphalt_soften > 0. || graphics.asphalt_filter_strength != 1.)
+    graphics.surface_specular.validate_context(graphics.layered_track, track || drive, collision)?;
+    if (surface_rgb_override.is_some() || graphics.ground_edge_pilot || graphics.surface_view_mip_bias || graphics.asphalt_soften > 0. || graphics.asphalt_filter_strength != 1.)
         && (!graphics.enhanced() || !graphics.layered_track || (!track && !drive) || collision)
     {
-        return Err("surface controls (--surface-specular/--surface-rgb-overrides/--ground-edges/--surface-mip-bias/--asphalt-soften/--asphalt-filter-strength) require an enhanced non-collision track scene with --track-materials source".into());
+        return Err("surface controls (--surface-rgb-overrides/--ground-edges/--surface-mip-bias/--asphalt-soften/--asphalt-filter-strength) require an enhanced non-collision track scene with --track-materials source".into());
     }
     if (graphics.lamp_reflectors != lamp_materials::Mode::Off || graphics.lamp_lenses != lamp_materials::Mode::Off || graphics.lamp_signals != lamp_signals::Mode::Off) && (!graphics.enhanced() || !graphics.layered_car || !player_car.is_default() || collision || !(track || drive) || lod != "LOD0_") {
         return Err("lamp controls (--lamp-reflectors/--lamp-lenses/--lamp-signals) require enhanced layered Lacetti LOD0 rendering".into());
