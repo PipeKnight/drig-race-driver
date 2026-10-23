@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G235](G0235.md) | 2026-10-23 | Independent graphics backlog drafts from three parallel audits |
 | [G234](G0234.md) | 2026-10-23 | Bound rear outline depth changes against repeated stock rendering |
 | [G233](G0233.md) | 2026-10-23 | Pane-only Fresnel glass candidate without raw radiance overlay |
 | [G232](G0232.md) | 2026-10-23 | Refocus rear window outline on stock reflection baseline |
