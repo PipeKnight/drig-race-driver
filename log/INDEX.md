@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G254](G0254.md) | 2026-10-23 | Modest fence thickness control with preserved openings |
 | [G253](G0253.md) | 2026-10-23 | Bounded fence coverage control after live original comparison |
 | [G252](G0252.md) | 2026-10-23 | Remove residual stippled alpha from the front grandstand panel |
 | [G251](G0251.md) | 2026-10-23 | Restore source glass coverage on Detroit grandstand panels |

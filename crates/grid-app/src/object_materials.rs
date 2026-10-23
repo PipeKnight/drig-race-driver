@@ -60,25 +60,28 @@ mod tests {
 
 /// Authored Bevy coverage diagnostic, NOT raw source GT0/A2C parity.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum CoverageMode { #[default] Off, Control, A2c }
+pub(crate) enum CoverageMode { #[default] Off, Control, A2c, Mask35 }
 impl CoverageMode {
     pub(crate) fn parse(value: &str) -> Result<Self, &'static str> {
         match value { "off" => Ok(Self::Off), "control" => Ok(Self::Control),
-            "a2c" => Ok(Self::A2c), _ => Err("--object-coverage needs off, control or a2c") }
+            "a2c" => Ok(Self::A2c), "mask35" => Ok(Self::Mask35), _ => Err("--object-coverage needs off, control, a2c or mask35") }
+    }
+    pub(crate) fn supports_dlaa(self, aa: u8) -> bool {
+        cfg!(feature = "dlaa") && aa == 3 && matches!(self, Self::Control | Self::Mask35)
     }
     pub(crate) fn validate(self, c: CoverageContext) -> Result<(), &'static str> {
         if self == Self::Off { return Ok(()); }
-        if c.enhanced || c.drive || !c.reference || c.collision || c.headless
+        if (c.enhanced && !self.supports_dlaa(c.aa)) || c.drive || !c.reference || c.collision || c.headless
             || !c.render || !c.detroit || !c.lod0 || c.perf || c.compositor
             || c.frames.is_none_or(|n| !(1..=600).contains(&n)) {
-            return Err("--object-coverage requires static rendered baseline Detroit LOD0 reference, --benchmark-frames1..600, compositor off and no GRID_PERF_TEST");
+            return Err("--object-coverage requires static rendered Detroit LOD0 reference, baseline MSAA4 or Control/Mask35 enhanced native DLAA, --benchmark-frames1..600, compositor off and no GRID_PERF_TEST");
         }
         Ok(())
     }
 }
 #[derive(Clone, Copy)]
 pub(crate) struct CoverageContext {
-    pub enhanced: bool, pub drive: bool, pub reference: bool,
+    pub enhanced: bool, pub aa: u8, pub drive: bool, pub reference: bool,
     pub collision: bool, pub headless: bool, pub render: bool,
     pub detroit: bool, pub lod0: bool, pub perf: bool, pub compositor: bool,
     pub frames: Option<u32>,
@@ -86,23 +89,35 @@ pub(crate) struct CoverageContext {
 pub(crate) const COVERAGE_TARGET: &str = "objects/concrete_fence_white_end_01";
 pub(crate) fn configure_coverage(mode: CoverageMode, name: &str, m: &mut StandardMaterial) {
     // Off/Control perform ZERO material mutations, including alpha/cull/depth.
-    if mode == CoverageMode::A2c && name == COVERAGE_TARGET {
-        m.alpha_mode = AlphaMode::AlphaToCoverage;
+    if name == COVERAGE_TARGET {
+        match mode {
+            CoverageMode::A2c => m.alpha_mode = AlphaMode::AlphaToCoverage,
+            CoverageMode::Mask35 => m.alpha_mode = AlphaMode::Mask(0.35),
+            CoverageMode::Off | CoverageMode::Control => {},
+        }
     }
 }
-pub(crate) fn assert_coverage_msaa(cameras: Query<&Msaa, With<super::ViewerCamera>>) {
+pub(crate) fn assert_coverage_msaa(
+    settings: Res<super::graphics::Settings>,
+    cameras: Query<&Msaa, With<super::ViewerCamera>>,
+) {
     let samples = cameras.single().expect("object coverage requires one main camera");
-    assert_eq!(*samples, Msaa::Sample4, "object coverage requires actual native MSAA4; no single-sample fallback");
+    let expected = if settings.enhanced() {
+        assert!(settings.object_coverage.supports_dlaa(settings.anti_aliasing),
+            "only Control/Mask35 support enhanced native DLAA object coverage");
+        Msaa::Off
+    } else { Msaa::Sample4 };
+    assert_eq!(*samples, expected, "object coverage actual MSAA differs from validated preset");
 }
 #[cfg(test)]
 mod coverage_tests {
     use super::*;
-    fn valid() -> CoverageContext { CoverageContext { enhanced:false, drive:false,
+    fn valid() -> CoverageContext { CoverageContext { enhanced:false, aa:1, drive:false,
         reference:true, collision:false, headless:false, render:true, detroit:true,
         lod0:true, perf:false, compositor:false, frames:Some(20) } }
     #[test]
     fn coverage_gate_rejects_playable_perf_and_unbounded_contexts() {
-        for mode in [CoverageMode::Control, CoverageMode::A2c] {
+        for mode in [CoverageMode::Control, CoverageMode::A2c, CoverageMode::Mask35] {
             assert!(mode.validate(valid()).is_ok());
             let invalid = [CoverageContext { drive:true, ..valid() },
                 CoverageContext { enhanced:true, ..valid() }, CoverageContext { perf:true, ..valid() },
@@ -115,6 +130,29 @@ mod coverage_tests {
         }
     }
     #[test]
+    fn enhanced_coverage_only_allows_native_dlaa_control_and_mask35() {
+        for mode in [CoverageMode::Control, CoverageMode::Mask35, CoverageMode::A2c] {
+            for aa in [0, 1, 2, 3, 4] {
+                let c = CoverageContext { enhanced:true, aa, ..valid() };
+                let allowed = cfg!(feature = "dlaa") && aa == 3
+                    && matches!(mode, CoverageMode::Control | CoverageMode::Mask35);
+                assert_eq!(mode.validate(c).is_ok(), allowed);
+                assert!(CoverageMode::Off.validate(c).is_ok());
+            }
+        }
+        let dlaa = CoverageContext { enhanced:true, aa:3, ..valid() };
+        for mode in [CoverageMode::Control, CoverageMode::Mask35] {
+            for c in [CoverageContext { drive:true, ..dlaa },
+                CoverageContext { perf:true, ..dlaa }, CoverageContext { compositor:true, ..dlaa },
+                CoverageContext { frames:None, ..dlaa }, CoverageContext { render:false, ..dlaa },
+                CoverageContext { detroit:false, ..dlaa }, CoverageContext { reference:false, ..dlaa },
+                CoverageContext { headless:true, ..dlaa }, CoverageContext { collision:true, ..dlaa },
+                CoverageContext { lod0:false, ..dlaa }, CoverageContext { frames:Some(601), ..dlaa }] {
+                assert!(mode.validate(c).is_err());
+            }
+        }
+    }
+    #[test]
     fn coverage_control_is_full_material_neutral_and_a2c_is_exact_target_only() {
         let original = StandardMaterial { alpha_mode: AlphaMode::Mask(0.5),
             perceptual_roughness:0.73, metallic:0.17, depth_bias:3.,
@@ -123,15 +161,18 @@ mod coverage_tests {
             let mut m=original.clone(); configure_coverage(mode,COVERAGE_TARGET,&mut m);
             assert_eq!(format!("{m:?}"), format!("{original:?}"));
         }
-        for name in ["objects/building_grandstand_01_j_01", "objects/gg_building_grandstand_01_j_04",
-            "objects/concrete_fence_white_end_01!0", "trees/leaf"] {
-            let mut m=original.clone(); configure_coverage(CoverageMode::A2c,name,&mut m);
+        for (mode, expected) in [(CoverageMode::A2c, AlphaMode::AlphaToCoverage),
+            (CoverageMode::Mask35, AlphaMode::Mask(0.35))] {
+            for name in ["objects/building_grandstand_01_j_01", "objects/gg_building_grandstand_01_j_04",
+                "objects/concrete_fence_white_end_01!0", "trees/leaf"] {
+                let mut m=original.clone(); configure_coverage(mode,name,&mut m);
+                assert_eq!(format!("{m:?}"),format!("{original:?}"));
+            }
+            let mut m=original.clone(); configure_coverage(mode,COVERAGE_TARGET,&mut m);
+            assert_eq!(m.alpha_mode,expected);
+            m.alpha_mode=original.alpha_mode;
             assert_eq!(format!("{m:?}"),format!("{original:?}"));
         }
-        let mut m=original.clone(); configure_coverage(CoverageMode::A2c,COVERAGE_TARGET,&mut m);
-        assert_eq!(m.alpha_mode,AlphaMode::AlphaToCoverage);
-        m.alpha_mode=original.alpha_mode;
-        assert_eq!(format!("{m:?}"),format!("{original:?}"));
         assert!(CoverageMode::parse("blend").is_err());
     }
 }

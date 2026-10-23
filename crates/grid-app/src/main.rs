@@ -1864,7 +1864,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             "--object-coverage" => {
                 graphics.object_coverage = object_materials::CoverageMode::parse(
-                    &args.next().ok_or("--object-coverage needs off, control or a2c")?,
+                    &args.next().ok_or("--object-coverage needs off, control, a2c or mask35")?,
                 )?;
             }
             "--window-sort" => {
@@ -2111,7 +2111,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
-                println!("--object-coverage off|control|a2c: defaultoff exact Detroit concrete_fence_white_end_01 only; static baseline LOD0 rendered reference, benchmark1..600, MSAA4, no GRID_PERF_TEST. A2C is Bevy .5/fwidth remap, NOT source parity.");
+                println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff; no GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--skid-order off|control|isolated: bounded baseline sort/raster diagnostic; isolated sort0, raster50; physics/emission/atlas unchanged.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
@@ -2262,7 +2262,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
     }
     graphics.object_coverage.validate(object_materials::CoverageContext {
-        enhanced: graphics.enhanced(), drive, reference, collision, headless,
+        enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
         render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
         lod0: lod == "LOD0_", perf: std::env::var_os("GRID_PERF_TEST").is_some(),
         compositor: smoke_compositor != smoke_compositor::Mode::Off,
@@ -2333,7 +2333,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let start_sequence = StartSequence::load(&root, &route)?;
-    if graphics.enhanced() && (!route.is_default() || !player_car.is_default()) {
+    // Narrow route exception only after the complete object diagnostic guard passed.
+    // This does not enable enhanced Detroit play or arbitrary AA modes.
+    let object_coverage_dlaa = graphics.enhanced()
+        && graphics.object_coverage.supports_dlaa(graphics.anti_aliasing);
+    if graphics.enhanced() && ((!route.is_default() && !object_coverage_dlaa) || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
     }
     if profile.grid_back && grid_position.is_none() {
@@ -3581,7 +3585,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .add_systems(Last, career_screen::write_result);
     }
     if graphics.object_coverage != object_materials::CoverageMode::Off {
-        println!("object_coverage mode={:?} target={} mapping=Bevy-alpha-cutoff0.5-fwidth-remap source_parity=false samples_required=4", graphics.object_coverage, object_materials::COVERAGE_TARGET);
+        println!("object_coverage mode={:?} target={} mapping=Bevy-A2c-remap-or-Mask35-authored-thickness source_parity=false samples_required={} aa={}", graphics.object_coverage, object_materials::COVERAGE_TARGET, if graphics.enhanced() { 1 } else { 4 }, graphics.anti_aliasing);
         app.add_systems(PostStartup, object_materials::assert_coverage_msaa);
     }
     let exit = app
