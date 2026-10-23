@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G241](G0241.md) | 2026-10-23 | Record crowd animation resource and evaluator research |
 | [G240](G0240.md) | 2026-10-23 | Restore source bumper model visibility policy |
 | [G239](G0239.md) | 2026-10-23 | Validate window ordering across heading and real camera/reset inputs |
 | [G238](G0238.md) | 2026-10-23 | Refresh moving player window sort centres without changing glass materials |

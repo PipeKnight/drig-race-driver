@@ -1867,6 +1867,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00ABC7B0		func	not ported	docs/VEHICLE_PHYSICAL_BRIDGE.md:20 ; docs/MESH_OVERLAP.md:3 ; docs/PACKED_MESH_CONTACTS.md:19				Whole original B0F730 refreshes all linked shapes and B100F0 derives both rotated matrices. Setter then saves publication at physical +40. ABC7B0 copies each...
 0x00ABC7C9		label	not ported	docs/VEHICLE_PHYSICAL_BRIDGE.md:47				inside 0x00ABC7B0; Static evidence: `local/behavior/state-bridge-aligned-20261010.json` and `state-bridge-reset-aligned-20261010.json`; successful Ghidra `20261010T190848950953...
 0x00ABC7D0		func	not ported	docs/INDEX.md:260 ; docs/MESH_SHAPE_CONSTRUCTOR.md:3				[MESH_SHAPE_CONSTRUCTOR.md](MESH_SHAPE_CONSTRUCTOR.md) Complete selected mesh-shape and wrapper constructors (F215) — `Mesh::construct_shape` reproduces comp...
+0x00AC7080		func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:63	G241	[D]		Called by L4/S4 evaluators to obtain output binding map; internals remain untraced.
 0x00AD1040		func	not ported	docs/DYNAMIC_PROPS_RESEARCH.md:331		[D]		`0xAD1040` as a separate scale.
 0x00AD6250	joint	func	crates/grid-world/src/contact_groups.rs:390 grid-world::contact_groups::joint	docs/GEOMETRIC_CONTACT_HANDOFF.md:11 ; docs/JOINTS_RESEARCH.md:124 ; docs/PHYSICAL_SCHEDULING.md:26				AD6250 for a joint: the same union, then the joint goes to the head of
 0x00AD6480	unpark	func	crates/grid-world/src/grouped_physical_frame.rs:117 grid-world::grouped_physical_frame::unpark ; crates/grid-tools/src/dynamic_props.rs:1372 grid-tools::dynamic_props::park_reference	docs/BODY_SLEEPING.md:67	F546 F541	[D]		(+0x3FC 2500) and wake when it comes back within (AD6480).
@@ -2063,6 +2064,11 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00B24E70	wake_island	func	crates/grid-world/src/grouped_physical_frame.rs:142 grid-world::grouped_physical_frame::wake_island ; crates/grid-tools/src/source_vehicle/multi.rs:2827 grid-tools::source_vehicle::multi	docs/BODY_SLEEPING.md:61 ; docs/VEHICLE_PHYSICAL_BRIDGE.md:22 ; docs/JOINTS_RESEARCH.md:53	F546 F541	[D]	wake	Sleeping (B0FE60, B24D70, B24E70): the pieces of a broken tyre wall
 0x00B24EE5		label	not ported	docs/VEHICLE_PHYSICAL_BRIDGE.md:47				inside 0x00B24E70; Static evidence: `local/behavior/state-bridge-aligned-20261010.json` and `state-bridge-reset-aligned-20261010.json`; successful Ghidra `20261010T190848950953...
 0x00B24EF0		func	not ported	docs/RUNTIME_LIMITS_AUDIT.md:12	F318	[V]		Evidence:** private, under `local/runtime-limits-audit/` (disassembly snippets for AD8480, AD8BA0, A74F00, A749A0, 5F5D00, B24EF0, B78530, AD9300, 7D4940, 7D...
+0x00B2DA90	anim_key_bracket	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:61	G241	[D]		Binary adjacent-key search and fraction clamped to [0,1]; no clock conversion here.
+0x00B32B80	crowd_s4_evaluate	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:56	G241	[D]		Ordinary S4 bound-slot eval; spherical below .999, unnormalized linear near; no local sign flip.
+0x00B33190	crowd_s4_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:54	G241	[D]		S4 factory installs D3E3F0 vtable.
+0x00B34770	crowd_l4_evaluate	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:60	G241	[D]		Ordinary L4 bound-slot four-component LERP; raw values and weight one.
+0x00B34C80	crowd_l4_factory	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:58	G241	[D]		L4 factory installs D3E520 vtable.
 0x00B38D80	excluded	func	crates/grid-tools/src/dynamic_props.rs:1450 grid-tools::dynamic_props::excluded	docs/JOINTS_RESEARCH.md:211 ; docs/ROBUSTNESS_RESEARCH.md:223	F484			B38D80 skips a pair an unbroken joint joins directly; the filter
 0x00B38EE0		func	not ported	docs/SERIAL_GEOMETRIC_SCHEDULING.md:15				B18300 resets the prior queued interaction state, clears worker heads and invokes B38EE0 to reset used count/contact cursor. It walks body328 shape links, sh...
 0x00B39160		func	not ported	docs/PACKED_MESH_CONTACTS.md:15				The packed branch uses B212D0 to collect source triangle candidates into a worker-owned cache. B39160 locates that cache by its packed shape identity. The ca...
@@ -2209,6 +2215,9 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00C457D0		func	not ported	docs/FRAME_STEPPING.md:66	F543			stopwatch callers of `A3F3B0`/`C457D0` are networking (`bdSocket`), and the QPC user
 0x00C79D60		func	crates/grid-tools/src/ai_driver.rs:268 grid-tools::ai_driver::curve	docs/AI_DRIVER_RESEARCH.md:180		[V]		Catmull-Rom segment (0x7786B0, basis 0xE7A230 set by 0xC79D60) through
 0x00C7B545		func	not ported	docs/TYRE_AUDIO_RESEARCH.md:248				not a function entry in the master analysis; Sample Index E9C1B4 (registration strings at C7B545..C7B68A).
+0x00C7C763		label	not ported	docs/CROWD_ANIMATION_RESEARCH.md:65	G241	[D]		Candidate instruction referencing NeAnimTimer string; not an evaluator/function-entry claim.
+0x00C7D700	crowd_s4_register	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:53	G241	[D]		S4 registration initializer; exact type/factory arguments observed.
+0x00C7D7C0	crowd_l4_register	func	not ported	docs/CROWD_ANIMATION_RESEARCH.md:57	G241	[D]		L4 registration initializer; exact type/factory arguments observed.
 0x00C7DAE0	CD01_SOURCES	func	crates/grid-tools/src/private_parameters.rs:14 grid-tools::private_parameters::CD01_SOURCES	docs/CONTACT_DIRECTIONS.md:7 ; docs/MESH_CONTACT_GENERATION.md:13 ; docs/PACKED_MESH_CONTACTS.md:17	F359 F224	[V]		CD01 recipe: the 44 startup sampling directions that C7DAE0 stores at
 0x00C7E307		label	not ported	docs/CONTACT_DIRECTIONS.md:8				inside 0x00C7DAE0; The initializer only moves data.** It is 344 instructions through its first `ret` at `C7E307`:
 0x00C89000		global	not ported	docs/CONTACT_DIRECTIONS.md:25 ; docs/SOURCE_PHYSICAL_FACTORY.md:27	F359	[V]		The sources are readable in the Steam file.** All 55 words lie in `.rdata` (`0xC89000..0xDA59A4`). SteamStub 2.1 encrypts `.text`, which holds `C7DAE0`, but ...
@@ -2268,6 +2277,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00CB0F30		global	crates/grid-app/src/camera.rs:58 grid-app::camera::SPIN_TURN_COS	docs/CAMERA_VIEWS.md:81		[D]		0x7FF3E0: the held forward is turned in (cos below 0xCB0F30, angle scale
 0x00CB0F3C		global	not ported	docs/DISCIPLINES.md:374				0xCB8DA4 2, 0xCB47E4 −12, 0xCAFBD8 20, 0xCB0C44 8, 0xCB2B74 48, 0xCB0F3C 16, 0xCB0C48 24, 0xCB3BA8
 0x00CB1104	DRIFT_INITIATE_SPEED	global	crates/grid-tools/src/ai_driver.rs:1644 grid-tools::ai_driver::DRIFT_INITIATE_SPEED ; crates/grid-tools/src/dynamic_props.rs:34 grid-tools::dynamic_props::DESCRIPTOR_EC	docs/DISCIPLINES.md:347				Descriptor +0xEC set by 0x7B8F40 (0x00CB1104).
+0x00CB15FC	anim_s4_spherical_threshold	global	not ported	docs/CROWD_ANIMATION_RESEARCH.md:62	G241	[D]		Float32 threshold near .999 for S4 spherical versus unnormalized linear branch.
 0x00CB1790	MISTAKE_SPIN_TIME	global	crates/grid-tools/src/ai_driver.rs:1702 grid-tools::ai_driver::MISTAKE_SPIN_TIME ; crates/grid-app/src/replay/player.rs:20 grid-app::replay::player::SHUTTLE_GAIN	docs/AI_MISTAKES_PACING_RESEARCH.md:149 ; docs/DISCIPLINES.md:375			SHUTTLE_GAIN	Spin and other mistake durations (.rdata 0xCB1790 3 s, 0xCB093C 5 s), the
 0x00CB1958		global	not ported	docs/ENGINE_AUDIO_CONTROL.md:134				Original attribute references CB1958/CB194C lead to 41E2E0 and 4264B0; both
 0x00CB2294	MIN_DEPTH	global	crates/grid-world/src/continuous.rs:26 grid-world::continuous::MIN_DEPTH ; crates/grid-tools/src/standard_car.rs:232 grid-tools::standard_car (in apply_default_wheel_setup)	docs/BOX_CONTACTS.md:50 ; docs/CONTACT_REORIENTATION_RESEARCH.md:55 ; docs/ROBUSTNESS_RESEARCH.md:238		[D]		0xCB2294: AE4700 keeps a start-pose overlap only beyond this length.
@@ -2460,6 +2470,7 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D19778		global	not ported	docs/BOX_CONTACTS.md:270				`0.044 < |c| <= 0.707` (D19778): type 1 with two vertices, the generator nearest
 0x00D199CC		vtable	not ported	docs/VEHICLE_STATE.md:29				Constructor `0x00a11ca0` installs general-manager vtable `0x00d199cc`. A bounded read-only search of committed private writable memory found no candidate in ...
 0x00D314E4		vtable	not ported	docs/SOURCE_PHYSICAL_FACTORY.md:46				The wrapper vtable is its original-address identity `D314E4`, never executable.
+0x00D39A74		global	not ported	docs/CROWD_ANIMATION_RESEARCH.md:64	G241	[D]		NeAnimTimer type-name string, navigation only; clock semantics unresolved.
 0x00D3A778		vtable	crates/grid-tools/src/drift.rs:347 grid-tools::drift::split_contacts	docs/DISCIPLINES.md:498	F386	[V]		[V], the wrapper class (vtable 0xD3A778) the body factory 0xA73FD0
 0x00D3AD70		global	crates/grid-world/src/round_contacts.rs:593 grid-world::round_contacts::cylinder_pair ; crates/grid-world/src/contact_manifold.rs:363 grid-world::contact_manifold::assemble_faces	docs/BOX_CONTACTS.md:66	F551 F462	[D]		0xD3AD70: disk/disk AEBC00, which (one disk a reference, as AE2FA0
 0x00D3AD98		global	not ported	docs/TRIANGLE_MESH_MANIFOLD.md:14				B45310 transforms the negative normal into local space, performs ordered support-cache hill climbing, selects the incident face with the largest local plane-...
@@ -2467,6 +2478,8 @@ address	name	kind	port	doc	entry	confidence	conflicts	comment
 0x00D3D434		vtable	not ported	docs/BRAKING_REFERENCE.md:190		[V]		contact constructor `B0ECE0` (vtable 0xD3D434) on every slot: +0x1C/+0x20 = −1 (via `B82880`),
 0x00D3D468		global	not ported	docs/BOX_CONTACTS.md:173		[D]		D3D468 does not hold it). The other writes of +0x298..+0x2A0 found there are integer
 0x00D3D508		vtable	not ported	docs/HANDLING_CONFIGURATION.md:7				Original 9C5580 fills settings at mutable owner218..37F. Its actual thiscall ABI has one stack argument and ret4; the C probe represents ECX with fastcall an...
+0x00D3E3F0	crowd_s4_vtable	vtable	not ported	docs/CROWD_ANIMATION_RESEARCH.md:55	G241	[D]		Ordinary S4 vtable; slot 34 points to B32B80.
+0x00D3E520	crowd_l4_vtable	vtable	not ported	docs/CROWD_ANIMATION_RESEARCH.md:59	G241	[D]		Ordinary L4 vtable; slot 34 points to B34770.
 0x00D3E7B4		global	not ported	docs/BOX_CONTACTS.md:392	F551	[D]		+0xC inertia; shape vtables 0xD3E7B4 box, 0xD3E80C cylinder, 0xD3E868 sphere). Every kind
 0x00D3E80C		global	not ported	docs/BOX_CONTACTS.md:392	F551	[D]		+0xC inertia; shape vtables 0xD3E7B4 box, 0xD3E80C cylinder, 0xD3E868 sphere). Every kind
 0x00D3E868		global	not ported	docs/BOX_CONTACTS.md:392	F551	[D]		+0xC inertia; shape vtables 0xD3E7B4 box, 0xD3E80C cylinder, 0xD3E868 sphere). Every kind
