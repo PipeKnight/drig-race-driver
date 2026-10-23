@@ -119,6 +119,7 @@ fn setup(
             ..default()
         });
         let entity = commands.spawn((
+            Name::new(format!("Tyre smoke {name}")),
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material),
             Transform::IDENTITY,

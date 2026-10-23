@@ -122,6 +122,28 @@ fn queue_current_sort_centres(
     }
 }
 
+/// Bounded diagnostic for the standard-material car path, including lenses.
+/// Keep extended glass on its independent pilot; no material/depth changes.
+pub(crate) fn install_current_car_sort(app: &mut App) {
+    app.add_systems(Last, queue_current_car_sort_centres);
+    println!("car_transparent_sort enabled=true scope=car0-standard-blend current_local_bounds=true material_alpha_depth_geometry=unchanged");
+}
+#[allow(clippy::type_complexity)] // Material alpha and explicit source ownership.
+fn queue_current_car_sort_centres(
+    stream: Res<super::mesh_stream::MeshStream>,
+    materials: Res<Assets<StandardMaterial>>,
+    sources: Query<(Entity, &super::track_surface::SourcePart, &Aabb, &MeshMaterial3d<StandardMaterial>),
+        (With<Mesh3d>, Without<super::OpponentPart>)>,
+) {
+    for (entity, part, bounds, material) in &sources {
+        if part.0.starts_with("car0/")
+            && materials.get(&material.0).is_some_and(|m| m.alpha_mode == AlphaMode::Blend)
+        {
+            stream.sort_centre(entity, bounds.center.into());
+        }
+    }
+}
+
 #[derive(Component)]
 struct HiddenSource;
 #[derive(Component)]
@@ -208,6 +230,38 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn car_sort_tracks_lenses_and_material_reset_without_touching_opaque_or_other_cars() {
+        let mut app = App::new();
+        super::super::mesh_stream::install(&mut app);
+        app.init_resource::<Assets<StandardMaterial>>();
+        app.add_systems(Last, queue_current_car_sort_centres);
+        let blend = app.world_mut().resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial { alpha_mode: AlphaMode::Blend, ..default() });
+        let opaque = app.world_mut().resource_mut::<Assets<StandardMaterial>>().add(StandardMaterial::default());
+        let bounds = Aabb { center: Vec3::new(1., 2., 3.).into(), half_extents: Vec3::ONE.into() };
+        let mut ids = Vec::new();
+        for (part, material) in [("car0/Rear Lights Glass", blend.clone()),
+            ("car0/Window Glass", blend.clone()), ("car0/Paint", opaque.clone()),
+            ("car1/Window Glass", blend.clone()), ("track/Window Glass", blend.clone())] {
+            ids.push(app.world_mut().spawn((super::super::track_surface::SourcePart(part.into()),
+                Mesh3d(Handle::default()), MeshMaterial3d(material), bounds, Transform::from_xyz(100., 0., 200.))).id());
+        }
+        app.update();
+        let stream = app.world().resource::<super::super::mesh_stream::MeshStream>();
+        for id in &ids[..2] { assert_eq!(stream.queued_centre(*id), Some(Vec3::new(1., 2., 3.))); }
+        for id in &ids[2..] { assert_eq!(stream.queued_centre(*id), None); }
+        app.world_mut().get_mut::<Aabb>(ids[0]).unwrap().center = Vec3::new(4., 5., 6.).into();
+        app.world_mut().get_mut::<MeshMaterial3d<StandardMaterial>>(ids[1]).unwrap().0 = opaque;
+        app.update();
+        let stream = app.world().resource::<super::super::mesh_stream::MeshStream>();
+        assert_eq!(stream.queued_centre(ids[0]), Some(Vec3::new(4., 5., 6.)));
+        assert_eq!(stream.queued_centre(ids[1]), None);
+        app.world_mut().get_mut::<MeshMaterial3d<StandardMaterial>>(ids[1]).unwrap().0 = blend;
+        app.update();
+        assert_eq!(app.world().resource::<super::super::mesh_stream::MeshStream>().queued_centre(ids[1]), Some(Vec3::new(1., 2., 3.)));
+    }
 
     #[test]
     fn current_sort_routes_only_player_windows_to_one_render_entity() {

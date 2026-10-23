@@ -1428,6 +1428,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut capture_orbit_rate = None;
     let mut window_phase_target = None;
     let mut window_sort_current = false;
+    let mut car_transparent_sort = false;
     let mut window_transition_script = None;
     let mut motion_sequence = None;
     let mut temporal_audit_tick = None;
@@ -1857,6 +1858,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--window-sort needs off or current".into()),
                 };
             }
+            "--car-transparent-sort" => {
+                car_transparent_sort = match args.next().as_deref() {
+                    Some("off") => false,
+                    Some("current") => true,
+                    _ => return Err("--car-transparent-sort needs off or current".into()),
+                };
+            }
             "--window-phase-audit" => {
                 window_phase_target = Some(window_phase_audit::Target::parse(
                     &args.next().ok_or("--window-phase-audit needs tick:N or frame:N")?,
@@ -2065,7 +2073,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
                 println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
-                println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered Donington Lacetti reference or bounded drive; writes CAPTURE-window-phase.txt under ignored local/.");
+                println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
+                println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
                 println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
                 println!("--surface-mip-bias off|view: default-off diagnostic; source surface samples follow the camera mip bias.");
                 println!("--body-occlusion off|source-ambient: optional source green paint mask adapted to PBR ambient occlusion; off default, not the original full lighting model.");
@@ -2198,14 +2207,18 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--window-sort current requires enhanced forward Donington Lacetti LOD0 rendered reference or bounded --drive-ticks; interactive driving is not validated".into());
     }
+    if car_transparent_sort && (!drive || drive_ticks.is_none() || headless || collision
+        || output.is_none() || lod != "LOD0_" || graphics.window_pilot != window_response::Mode::Off)
+    {
+        return Err("--car-transparent-sort requires bounded rendered LOD0 drive with --glass-pilot off".into());
+    }
     if let Some(target) = window_phase_target
-        && (!player_car.is_default() || lod != "LOD0_" || route.path() != Route::default().path()
-            || collision || headless || output.is_none() || (!reference && !drive)
+        && (lod != "LOD0_" || collision || headless || output.is_none() || (!reference && !drive)
             || (drive && drive_ticks.is_none())
             || (!drive && graphics.benchmark_frames.is_none())
             || target.tick().is_some_and(|tick| !drive || drive_ticks.is_none_or(|end| tick > end)))
     {
-        return Err("--window-phase-audit requires rendered Donington Lacetti LOD0 reference with --benchmark-frames or bounded --drive-ticks; tick targets require a drive and must not exceed its limit".into());
+        return Err("--window-phase-audit requires rendered LOD0 reference with --benchmark-frames or bounded --drive-ticks; tick targets require a drive and must not exceed its limit".into());
     }
     if graphics.window_pilot != window_response::Mode::Off && (!graphics.enhanced() || !graphics.layered_car || !graphics.source_ibl || !player_car.is_default() || (drive && drive_ticks.is_none()) || (!drive && !reference) || collision || output.is_none() || lod != "LOD0_" || route.path() != Route::default().path() || matches!(graphics.reflection_mode, 1 | 2)) {
         return Err("--glass-pilot requires rendered static reference or bounded --drive-ticks, enhanced forward Donington Lacetti LOD0 with source IBL; interactive driving is not validated".into());
@@ -3418,6 +3431,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if window_sort_current {
         window_response::install_current_sort(&mut app);
+    }
+    if car_transparent_sort {
+        window_response::install_current_car_sort(&mut app);
     }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();
