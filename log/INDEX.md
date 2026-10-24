@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G268](G0268.md) | 2026-10-24 | Measure practical foliage key reuse during actual driving |
 | [G267](G0267.md) | 2026-10-24 | Test bounded ground priority before smoke with captured-frame proof |
 | [G266](G0266.md) | 2026-10-24 | Join bounded skid and smoke phase rows to actual captured frames |
 | [G265](G0265.md) | 2026-10-24 | Measure bounded foliage presentation dependencies without caching |
