@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G273](G0273.md) | 2026-10-24 | Audit current all-view tree eligibility without changing rendering |
 | [G272](G0272.md) | 2026-10-24 | Validate bounded frozen camera flashes at source crowd anchors |
 | [G271](G0271.md) | 2026-10-24 | Validate bounded neutral colour-transmittance composition plumbing |
 | [G270](G0270.md) | 2026-10-24 | Reject duplicate-input tree expansion remap on actual Donington sources |

@@ -1073,3 +1073,37 @@ The first Off renderer also completed successfully, but its private parser incor
 
 
 G270 separately checks a possible exact-input remap against the four actual Donington spherical sources. All844 complete centre.xyz/UV1.xy raw-float-bit tuples are distinct. Weighted577 placements require125,172 expansions per call, agreeing with the census. Centres repeat, but offsets distinguish the full inputs; placements also have different inverse transforms/scales. This remap would eliminate no expansion in this fixture, so it is not implemented. The existing survey/stream readers are reused and game bytes stay private. No new render, performance measurement or all-track claim follows.
+
+### Current all-view eligibility audit (G273)
+
+The existing tree producer runs in `Update`, before Bevy0.19.1 computes current
+visibility. Reading `ViewVisibility` there could use a previous-frame or initial
+hidden bit and miss geometry when it returns to view. A main-camera frustum alone
+also omits reflection views and shadow-only casters. Trees keep their expanded
+bounds and cast shadows in the current app.
+
+A current all-view signal is available later in `PostUpdate`, after
+`VisibilitySystems::MarkNewlyHiddenEntitiesInvisible`: camera checks and deferred
+light/shadow marking precede that final step. Per-camera `VisibleEntities`,
+`CascadesVisibleEntities` and point/spot visibility lists can explain membership.
+This is conservative render eligibility, not measured draws or fragment coverage;
+`NoCpuCulling` can make it broader still. Moving the producer or skipping its
+writes has not been implemented or validated.
+
+The scene-reflection probe retains six active layer0 cameras in moving mode.
+After initial readiness, its six-face copy batch is submitted each render
+invocation; the first/every120 log frequency is not update cadence. Initial
+60-frame/pipeline/image copy guards do not pause the cameras. Static mode removes
+capture cameras after the first copied cube; sky-only mode does not install them.
+Active cameras indicate scheduling eligibility, not proof of completed views or
+draw counts. Their broad union may leave little tree work to exclude.
+
+The next useful check would be a bounded observer-only census after final
+visibility, retaining every existing expansion/write and counting main, probe,
+shadow-only, hidden and newly visible trees. First-visible/replaced meshes must
+still receive current full bytes through F392 streaming; an absent GPU allocation
+cannot be treated as initialized. No runtime visibility census, safe skip
+population or performance gain is established. Cached source LOD distances exist,
+but original shadow/environment LOD or exclusion policy remains unproven; see
+[per-view foliage](PER_VIEW_FOLIAGE.md). No quality or probe-cadence reduction is
+proposed.
