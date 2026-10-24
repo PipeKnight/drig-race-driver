@@ -3,6 +3,7 @@
 
 pub mod action_map;
 pub mod ai;
+pub mod anim_packet;
 pub mod audio_car_setup;
 pub mod audio_dictionary;
 pub mod binxml;

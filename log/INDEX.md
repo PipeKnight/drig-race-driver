@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G263](G0263.md) | 2026-10-24 | Read bounded ordinary L4 and S4 animation payloads |
 | [G262](G0262.md) | 2026-10-24 | Isolate skid material reflectance under Derby smoke |
 | [G261](G0261.md) | 2026-10-24 | Narrow paint parameter storage resolver without changing appearance |
 | [G260](G0260.md) | 2026-10-24 | Add bounded Detroit USA static crowd preview |

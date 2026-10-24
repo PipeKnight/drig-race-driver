@@ -18,7 +18,7 @@ The shared organism dataset separately names the route crowd placement binary, b
 
 Crowd definitions distinguish standing/sitting, skinned geometry/billboards, platform batches, animation selectors, camera eligibility and source LOD settings. The bank contains named idle, clap, excitement and reaction clips. Standing crowd placement framing now has independent CPU controls described below; moving paths remain opaque. Preserve the source positions rather than scattering people at invented positions.
 
-## Ordinary packet structure: private decoder verified, production reader unchanged
+## Ordinary packet structure: bounded payload reader
 
 `grid-formats/src/pssg.rs::read_tree` currently rejects the unsupported packet payload because it is outside the explicit raw-leaf policy. The private probe adds only explicit packet-data names in its own process; no general unknown-node fallback or production parser change was made.
 
@@ -32,7 +32,7 @@ The saved offsets describe a separately sized aligned packet layout, not offsets
 
 Private validation decoded 282 ordinary packets across the crowd and front-end animation banks with exact byte roundtrip and no failures. Eighty-five truncated prefixes of a real minimal packet and15synthetic corruptions reject. Clip reference counts and resolution were also checked across four packet-containing banks. Driver/cockpit KA variants and B1 remain unsupported; B1 must not be assumed to mean a Boolean event. A bank may contain unsupported packets and a clip may reference them. Future integration must preserve known opaque envelopes and reject unsupported clips explicitly; silently skipping a referenced packet is not complete clip support.
 
-This proves the selected resource structure, not pose evaluation or rendered compatibility. Public integration still needs independently authored bounded Rust code and synthetic tests; purchased-file fixtures remain private.
+This proves the selected resource structure, not pose evaluation or rendered compatibility. G263 adds a bounded public ordinary-payload reader, described below; purchased-file fixtures remain private. Bank-level PSSG admission and active clip support remain separate.
 
 ## Thirty animation targets and twenty-three weighted joints
 
@@ -181,3 +181,14 @@ Root and an independent reviewer see recognizable correctly placed people, plaus
 
 
 After integration of fresh main F565–F567, the full required gate passes 957 tests, workspace Clippy, four unchanged simulation identities and 24 quick-soak scenarios. A fresh baseline executable completes all six two-view GPU runs without shader errors. The static images are decoded-pixel identical to the preceding executable in both views. The second Off/Control pair remains exactly equal; the primary retains the same documented one-pixel Off-repeat variability. These are bounded static rendering checks, not animation or source radiometric parity. Full provenance and the original failed strict comparisons remain private in `local/graphics/crowd-preview01/post-main/`.
+
+
+## Bounded ordinary payload reader (G263, 24 October 2026)
+
+`grid-formats/src/anim_packet.rs` reads an explicitly bounded ordinary L4 or S4 leaf with exact parent/leaf/native-layout metadata. It preserves target order and every finite float32 key bit, including signed zero; it does not normalize quaternions, infer seconds, snap keys, interpolate, build poses or add a PSSG-wide leaf fallback. KA/B1 and mismatched families fail explicitly.
+
+Before allocation, the reader checks count/byte limits and complete serialized key spans. It validates native array alignment, header exclusion, disjoint ranges, exact aligned tail, finite nonnegative nondecreasing timestamps and complete payload consumption. Equal timestamps remain resource data with no playback policy inferred. Seven synthetic Rust tests cover roundtrip/signed zero, every synthetic truncated prefix, unsupported families, counts/names/layout, nonfinite/decreasing keys, native tail and cross-channel overlap.
+
+The independently authored private core compiles under pinned Rust1.99.0 and passes all seven tests. A separate serial Rust harness agrees with the checked Python decoder for 282 purchased ordinary payloads: 5,935 channels, 406,808 keys and 2,034,040 float32 words, every target/semantic/native offset, and 282 exact byte reencodes. Eighty-five real truncated prefixes and 15 reconstructed exact prior malformed cases reject. Stronger native alignment/header checks pass the same corpus. Original banks are read in place with hashes checked before/after; no purchased raw fixture or pseudocode is public.
+
+The public integration adds API documentation, an exported Result alias and Display/std::error::Error. Preliminary Clippy rejected two fixed-width chunks_exact loops; the correction uses typed as_chunks for the already exact 20-byte key and 4-byte word spans. The original failure is retained. A fresh harness importing the actual corrected public module repeats all 282 purchased field/bit comparisons and exact reencodes, plus 85 real prefixes and 15 malformed controls, successfully. The required full gate passes 964 workspace tests, workspace Clippy, four unchanged simulation identities and 24 quick-soak scenarios. The production PSSG bank reader and skeletal animation consumer are unchanged. Private provenance is in `local/handoff/drafts/stadium-crowd01/packet-rust-next/public-purchased-run02/`, its `public-verification-results.md`, and `local/graphics/skid-whitening01/prepush/summary.md`. This is resource-format verification, not faithful arm motion or runtime source parity.
