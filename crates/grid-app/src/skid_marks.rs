@@ -33,6 +33,15 @@ impl OrderMode {
     }
 }
 
+/// Deliberately only two scalar values; absent CLI preserves the stock path.
+pub(crate) fn parse_reflectance(value: &str) -> Result<f32, &'static str> {
+    match value {
+        "0.5" => Ok(0.5),
+        "0" => Ok(0.),
+        _ => Err("--skid-reflectance needs 0.5 (neutral) or 0 (candidate)"),
+    }
+}
+
 // StandardMaterial.depth_bias sets BOTH a transparent sort offset and raster
 // depth bias. This extension keeps raster constant50 while permitting sort0.
 // No vertex/fragment override: use the stock StandardMaterial PBR shaders.
@@ -387,7 +396,7 @@ impl SkidMarks {
     }
 }
 
-pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode, reflectance: Option<f32>) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(root.join("skidmarks/road_tm.xml"))?;
     let profile = grid_formats::skidmarks::read(&text)?;
     let textures =
@@ -406,7 +415,7 @@ pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode) -> Result<(),
     }
     println!("skid_order mode={mode:?} raster_constant=50 sort_bias={} source_parity=false",
         if mode == OrderMode::Isolated { 0 } else { 50 });
-    app.insert_resource(Pending { profile, diffuse, mode })
+    app.insert_resource(Pending { profile, diffuse, mode, reflectance })
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, lay.after(super::wheel_ground::update))
         .add_systems(Update, present.after(super::drive_present));
@@ -418,6 +427,7 @@ struct Pending {
     profile: Profile,
     diffuse: Vec<u8>,
     mode: OrderMode,
+    reflectance: Option<f32>,
 }
 
 fn start(
@@ -442,13 +452,17 @@ fn start(
     marks.mesh = meshes.add(marks.build());
     // Alpha blended, no depth write, lit by the ground normal. The original
     // also blends a normal map by the Fade bound; not reproduced (AUTHORED).
-    let base = StandardMaterial {
+    let mut base = StandardMaterial {
         base_color_texture: Some(images.add(image)),
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.9,
         depth_bias: 50.,
         ..default()
     };
+    if let Some(value) = pending.reflectance {
+        base.reflectance = value;
+        println!("skid_reflectance active=true value={value} mode=Isolated shader=stock-lit-PBR source_parity=false");
+    }
     if pending.mode == OrderMode::Off {
         let material = materials.add(base);
         commands.spawn((

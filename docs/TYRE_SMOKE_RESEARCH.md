@@ -584,3 +584,14 @@ Private evidence: `local/handoff/smoke-classifier-next.md`,
 `local/handoff/smoke-material-bridge.md` and their adjacent draft/evidence folders.
 The single additional decompile is cached as `local/re-cache/009CB5B0.c` in the main
 checkout; no proprietary code or raw asset payload is included in this document.
+
+
+## Skid material whitening control (G262, 24 October 2026)
+
+Three matched new-build Derby sequences isolate the authored skid material's reflectance: absent, explicit 0.5 and zero. All 120 frame/tick manifests, sampled simulation/emission traces and recorded queue/raster state match. The absent/0.5 control is exactly equal in 117 frames and the final image; the other three frames differ at six pixels total. Those sparse residuals are reported rather than converted into a universal determinism threshold.
+
+Native frames 70–74 now reproduce a bright white crossing of tyre strips over dark smoke. Zero reflectance removes that white component while retaining dark sharp strips. The earlier frame90 alone understated this material contribution. This demonstrates an additional authored PBR whitening cause; it does not identify every remaining contrast/ordering defect or restore the source smoke compositor.
+
+The complete selected saved ordinary skid fragment has diffuse/normal, sun/backlight, shadow/AO and fog operations, without a direct F0/view-half-vector specular BRDF term. Its vertex eye-position input drives fog distance. This follows the selected program's arithmetic, rather than inferring absence from parameter names. A single targeted disassembly agrees with the existing cache. This is selected saved-pass evidence; live variants and upstream shadow-channel contents remain separate.
+
+The G262 diagnostic keeps the old default and is bounded to the existing Isolated sort0/raster50 rendered baseline domain. Removal of the additional default PBR reflectance requires separate ordinary-path validation. Setting one scalar does not reproduce source normal crossfade, lighting, fog or reduced smoke composition. Private results and exact provenance are in `local/graphics/smoke-next03/` and `local/handoff/drafts/smoke-next03/visual-source-review.md`.

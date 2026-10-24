@@ -1439,6 +1439,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut car_transparent_sort = false;
     let mut smoke_order = tyre_smoke::SmokeOrder::Groups;
     let mut skid_order = skid_marks::OrderMode::Off;
+    let mut skid_reflectance = None;
     let mut crowd_preview = crowd_preview::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
@@ -1887,6 +1888,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--smoke-compositor" => {
                 smoke_compositor = smoke_compositor::Mode::parse(&args.next().ok_or("--smoke-compositor needs a mode")?)?;
             }
+            "--skid-reflectance" => {
+                skid_reflectance = Some(skid_marks::parse_reflectance(
+                    &args.next().ok_or("--skid-reflectance needs 0.5 or 0")?)?);
+            }
             "--skid-order" => {
                 skid_order = skid_marks::OrderMode::parse(
                     &args.next().ok_or("--skid-order needs off, control or isolated")?,
@@ -2117,6 +2122,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
                 println!("--crowd-preview off|control|static-billboards: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture, PBR adaptation, no animation/flash or source parity.");
+                println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--skid-order off|control|isolated: bounded baseline sort/raster diagnostic; isolated sort0, raster50; physics/emission/atlas unchanged.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
@@ -2314,6 +2320,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         || std::env::var_os("GRID_PERF_TEST").is_some())
     {
         return Err("--skid-order requires bounded rendered baseline LOD0 drive with ground effects, compositor off and no GRID_PERF_TEST".into());
+    }
+    // Isolated has already passed the unchanged G248 baseline/bounded guards.
+    if skid_reflectance.is_some() && (skid_order != skid_marks::OrderMode::Isolated
+        || std::env::var_os("GRID_PERF_TIMING").is_some()) {
+        return Err("--skid-reflectance requires --skid-order isolated and its bounded rendered baseline ground-effects/noPERF/compositorOff domain; no GRID_PERF_TIMING".into());
     }
     if smoke_order == tyre_smoke::SmokeOrder::Sprites && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
@@ -3323,7 +3334,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         tyre_smoke::install(&mut app, &root, smoke_order);
         if ground_effect_assets::enabled() {
             wheel_ground::install(&mut app);
-            if let Err(error) = skid_marks::install(&mut app, &root, skid_order) {
+            if let Err(error) = skid_marks::install(&mut app, &root, skid_order, skid_reflectance) {
                 warn!("Skid marks unavailable; driving continues: {error}");
             }
             if let Err(error) = wheel_debris::install(&mut app, &root) {
