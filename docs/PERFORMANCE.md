@@ -1107,3 +1107,53 @@ population or performance gain is established. Cached source LOD distances exist
 but original shadow/environment LOD or exclusion policy remains unproven; see
 [per-view foliage](PER_VIEW_FOLIAGE.md). No quality or probe-cadence reduction is
 proposed.
+
+
+## Current all-view foliage observer (G275, 24 October 2026)
+
+`GRID_FACING_VISIBILITY=1..360` enables a bounded observer after final current-frame
+camera and shadow visibility. The producer retains every original expansion and
+stream write. It joins entity, mesh handle, component change ticks, asset-event
+epoch, producer/frame/camera state and current main/probe/other/shadow membership.
+Missing, contradictory, changed or incomplete observations are explicitly unknown.
+A main-world asset-event epoch does not establish GPU allocation or upload success.
+The metadata allocations and visibility-list scans cost diagnostic CPU work; the
+feature is disabled when the variable is absent or invalid and removes its resource
+at the final budget. No culling, caching, camera or quality change is implemented.
+
+The required app gate passes365tests and Clippy; a fresh baseline build succeeds.
+In a same-executable moving Off/On pair, both render processes complete successfully
+and actual simulation/ground traces, environment, assists, camera state, source-tree
+inventory and150request-state rows agree.150of151decodedimage pairs match exactly,
+including the final image; frame0016 differs at eight distant pit-building pixels
+(maximum channel difference7, alphaexact). Native first/0016/final views were reviewed.
+Strict image-neutrality remains unproven; the raw nonzero validator result is retained.
+
+At reports240/360, actual active main/probe/other/nocpu counts are[1,6,1,0]. The private
+validator had incorrectly required other0 and therefore refuses admission. The extra
+camera is consistent with the enabled source OSD's Camera3d, separate target and render
+layer23, corroborated by its load log and visible HUD; this identifies a source-backed
+explanation, not a new live camera-entity stamp. Other-camera foliage membership is0.
+
+The later120calls contain69240spherical and360cylindrical instance visits, with no
+unknown/invalid joins and zero hidden visits in the observed current CPU union. All
+visits belong to probe visibility. Main membership is2010spherical/127cylindrical,
+and shadow membership44184/360; overlapping counts must not be summed as distinct
+objects. The stream represents15020640+701280expanded vertices, not completed GPU
+views/draws/uploads. Reports bracket actual driving ticks497..748,147.212m endpoint
+displacement and33.128..57.298m/s sampled speed. Generic motion request ticks are not
+pixel Extract/readback timestamps. No timing benchmark or performance gain is claimed.
+A policy that skips every non-main-visible tree would discard observed probe/shadow
+members in this fixture; reducing probe cadence or quality remains a separate decision.
+
+The first attempt completed its Off renderer but stopped before On when the owner's
+main game appeared; it was left running. After the owner closed it and actual process
+absence was checked, the pair above used a fresh output directory. Both attempts and
+all raw failures remain in ignored `local/graphics/visibility-census01/`.
+
+The completed Off from the interrupted first attempt also has identical canonical
+arguments, source/executable/input pins and trace/request/runtime metadata. All151of
+its decoded images equal the second Off exactly; comparing it against On reproduces
+the same eight pixels. Existing repeat evidence therefore does not establish noise.
+The diagnostic remains default-off with unresolved strict image-neutrality, and the
+original failed admission is preserved. No additional renderer or tolerance was used.

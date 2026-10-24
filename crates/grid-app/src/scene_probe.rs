@@ -27,7 +27,7 @@ use std::{
 
 const EV: f32 = 13.;
 #[derive(Component, Clone, Copy, ExtractComponent)]
-struct ProbeCamera(usize);
+pub(super) struct ProbeCamera(usize);
 #[derive(Component)]
 struct SceneProbe;
 #[derive(Component, Default)]

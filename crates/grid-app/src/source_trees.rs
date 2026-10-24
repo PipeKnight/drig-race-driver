@@ -1,4 +1,5 @@
 //! Static closest-LOD source forest. No wind, collision or original shader claim.
+mod visibility_census;
 use super::mesh_stream::{MeshStream, VertexLayout, put};
 use super::{Car, Part, read};
 use bevy::mesh::VertexAttributeValues;
@@ -607,6 +608,7 @@ fn sheet_expanded(
     expanded(center, offset, right, Vec3::Y, inverse, scale)
 }
 pub fn install(app: &mut App) {
+    visibility_census::install(app);
     app.init_resource::<MeshStream>().add_systems(
         Update,
         present
@@ -851,22 +853,31 @@ mod census_tests {
 /// source vertices, so Bevy does not reallocate and repack it every frame.
 fn present(
     camera: Query<&Transform, With<super::ViewerCamera>>,
-    foliage: Query<(Entity, Ref<Facing>, &Mesh3d)>,
+    foliage: Query<(Entity, Ref<Facing>, Ref<Mesh3d>)>,
     stream: Res<MeshStream>,
     mut census: Local<Option<FacingCensus>>,
+    mut visibility: Option<ResMut<visibility_census::Census>>,
+    frame: Option<Res<bevy::diagnostic::FrameCount>>,
+    mesh_events: Option<Res<Messages<bevy::asset::AssetEvent<Mesh>>>>,
 ) {
     let census = census.get_or_insert_with(FacingCensus::from_env);
     let started = census.begin();
+    if let Some(visibility) = visibility.as_deref_mut() {
+        visibility.begin(frame.as_deref().map(|f| f.0), mesh_events.as_deref());
+    }
     let Ok(camera) = camera.single() else {
+        if let Some(visibility) = visibility.as_deref_mut() { visibility.finish(); }
         census.finish(started, false);
         return;
     };
+    if let Some(visibility) = visibility.as_deref_mut() { visibility.camera(camera); }
     let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
     let keys = census.keys_active().then(|| facing_keys(right, up, camera.translation));
     for (entity, facing, handle) in &foliage {
         let source = &facing.source;
         let Some(at) = source.layout.offset(Mesh::ATTRIBUTE_POSITION) else {
             if keys.is_some() { census.0.as_mut().unwrap().no_position += 1; }
+            if let Some(visibility) = visibility.as_deref_mut() { visibility.no_position(source.cylindrical); }
             continue;
         };
         if let Some(keys) = keys {
@@ -899,7 +910,9 @@ fn present(
                 put(vertices, i * source.layout.stride + at, point.to_array());
             }
         });
+        if let Some(visibility) = visibility.as_deref_mut() { visibility.produced(entity, &facing, &handle); }
     }
+    if let Some(visibility) = visibility.as_deref_mut() { visibility.finish(); }
     census.finish(started, true);
 }
 
