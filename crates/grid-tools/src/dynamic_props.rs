@@ -2806,67 +2806,122 @@ mod tests {
     /// transform only (`draws`), every Detroit and Nürburgring tyre was drawn
     /// 0.6 m to the side and 0.54 m below its body: sunk into the road at
     /// rest, in the air once it tilted.
+    /// Every piece of every breakable on the phone tracks' routes
+    /// (Nürburgring, Detroit, Le Mans, Donington) gets a draw (its anchor's
+    /// draws in the damage renderable's frame, `Renderables::draws_in`, as
+    /// grid-app places them), and that draw sits on its collision shape:
+    /// a round piece's mesh is centred on its cylinder or sphere and fills
+    /// it, a box piece's mesh centre lies inside its box (F564, F566).
+    /// F564 found every Detroit and Nürburgring tyre drawn 0.6 m off its
+    /// body; Nürburgring's tyrewall_black_yok (a BUNDLENODE renderable) and
+    /// close_drift_flag (a skinned mesh) pieces were not drawn at all.
     #[test]
     #[ignore = "requires GRID_GAME_ROOT"]
-    fn round_piece_meshes_sit_on_their_bodies() {
+    fn breakable_pieces_draw_on_their_bodies() {
         let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
         let root = Path::new(&root);
-        let mut checked = 0;
-        for route in ["tracks/usa/detroit/route_9", "tracks/europe/nurburgring/route_1"] {
-            let route = Route::new(route).unwrap();
-            let props = Props::read_route(root, &route).unwrap();
-            let catalog = Catalog::read(root, &route, &props).unwrap();
-            let bytes = std::fs::read(root.join(route.track_file("objects.pssg"))).unwrap();
-            let tree = pssg::read_tree(&bytes).unwrap();
-            let sources = grid_formats::mesh::read_static_meshes(&tree).unwrap();
-            let renderables = grid_formats::scene::Renderables::new(&tree, &sources).unwrap();
+        let mut failures = Vec::new();
+        let (mut checked, mut geometryless) = (0, 0);
+        for (track, routes) in [
+            ("europe/nurburgring", 0..4),
+            ("usa/detroit", 0..10),
+            ("europe/le_mans", 0..2),
+            ("europe/donington", 0..4),
+        ] {
             let mut seen = std::collections::BTreeSet::new();
-            for b in &catalog.breakables {
-                if !seen.insert(b.template.clone()) {
-                    continue;
-                }
-                for (k, piece) in b.pieces.iter().enumerate() {
-                    let Primitive::Cylinder { radius, height } = piece.primitive else {
+            let first = Route::new(&format!("tracks/{track}/route_0")).unwrap();
+            let bytes = std::fs::read(root.join(first.track_file("objects.pssg"))).unwrap();
+            let tree = pssg::read_tree(&bytes).unwrap();
+            let sources = grid_formats::mesh::read_object_meshes(&tree).unwrap();
+            let renderables = grid_formats::scene::Renderables::new(&tree, &sources).unwrap();
+            // grid-app needs each piece material's diffuse binding.
+            let bound: std::collections::BTreeSet<&[u8]> =
+                (grid_formats::material::read_texture_bindings(&tree).unwrap().into_iter())
+                    .filter(|b| b.sampler == b"TDiffuseAlphaMap")
+                    .map(|b| b.shader)
+                    .collect();
+            for r in routes {
+                let route = Route::new(&format!("tracks/{track}/route_{r}")).unwrap();
+                let props = Props::read_route(root, &route).unwrap();
+                let catalog = Catalog::read(root, &route, &props).unwrap();
+                for b in &catalog.breakables {
+                    if !seen.insert(b.template.clone()) {
                         continue;
-                    };
-                    // grid-app leaves a piece whose names do not select one
-                    // node undrawn (its missing count).
-                    let draws = renderables
-                        .draws_in(piece.renderable.as_bytes(), piece.anchor.as_bytes());
-                    let Ok(draws) = draws else {
-                        eprintln!("{} piece {k}: {} / {} not drawn: {draws:?}", b.template, piece.renderable, piece.anchor);
-                        continue;
-                    };
-                    assert!(!draws.is_empty(), "{} piece {k}", b.template);
-                    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-                    let p = piece.pose;
-                    for draw in &draws {
-                        let m = grid_formats::scene::compose(&draw.transform, &b.placement);
-                        for v in draw.indices.iter().map(|&i| i as usize) {
-                            let w = grid_formats::scene::transform_point(
-                                &m,
-                                sources[draw.source].positions[v],
-                            );
-                            let d = [w[0] - p[3][0], w[1] - p[3][1], w[2] - p[3][2]];
-                            for r in 0..3 {
-                                let l = (0..3).map(|j| d[j] * p[r][j]).sum::<f32>();
-                                lo[r] = lo[r].min(l);
-                                hi[r] = hi[r].max(l);
+                    }
+                    for (k, piece) in b.pieces.iter().enumerate() {
+                        let what = format!("{track} route_{r} {} piece {k} ({})", b.template, piece.anchor);
+                        let draws = renderables
+                            .draws_in(piece.renderable.as_bytes(), piece.anchor.as_bytes());
+                        let draws = match draws {
+                            Ok(d) if !d.is_empty() => d,
+                            // The Armco main sections' link post carries no
+                            // geometry of its own: nothing to draw.
+                            Ok(_) if piece.anchor.ends_with("section_dam_link1") => {
+                                geometryless += 1;
+                                continue;
+                            }
+                            other => {
+                                failures.push(format!("{what}: no draw {:?}", other.map(|d| d.len())));
+                                continue;
+                            }
+                        };
+                        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                        let p = piece.pose;
+                        for draw in &draws {
+                            if !bound.contains(draw.material) {
+                                failures.push(format!("{what}: material {} unbound", String::from_utf8_lossy(draw.material)));
+                            }
+                            let m = grid_formats::scene::compose(&draw.transform, &b.placement);
+                            for v in draw.indices.iter().map(|&i| i as usize) {
+                                let w = grid_formats::scene::transform_point(
+                                    &m,
+                                    sources[draw.source].positions[v],
+                                );
+                                let d = [w[0] - p[3][0], w[1] - p[3][1], w[2] - p[3][2]];
+                                for r in 0..3 {
+                                    let l = (0..3).map(|j| d[j] * p[r][j]).sum::<f32>();
+                                    lo[r] = lo[r].min(l);
+                                    hi[r] = hi[r].max(l);
+                                }
                             }
                         }
+                        let mid: [f32; 3] = std::array::from_fn(|r| (lo[r] + hi[r]) * 0.5);
+                        let half: [f32; 3] = std::array::from_fn(|r| (hi[r] - lo[r]) * 0.5);
+                        let ok = match piece.primitive {
+                            // A tyre fills its cylinder: radius across, height
+                            // along. A post's mesh (Donington's Armco link,
+                            // 1.01 m on a 0.76 m cylinder) may stand above it.
+                            Primitive::Cylinder { radius, height } => {
+                                mid[0].abs() < 0.05
+                                    && mid[2].abs() < 0.05
+                                    && mid[1].abs() < 0.05_f32.max(0.2 * height)
+                                    && (half[0] - radius).abs() < 0.06
+                                    && (half[2] - radius).abs() < 0.06
+                                    && half[1] > height * 0.5 - 0.06
+                                    && half[1] < height * 0.5 + 0.06_f32.max(0.2 * height)
+                            }
+                            // A shapeless piece (radius 0, the flag's base) only
+                            // carries its mesh.
+                            Primitive::Sphere { radius } => {
+                                mid.iter().all(|v| v.abs() < 0.05)
+                                    && (radius == 0. || half.iter().all(|h| (h - radius).abs() < 0.06))
+                            }
+                            Primitive::Box(size) => (0..3).all(|r| mid[r].abs() <= size[r] * 0.5 + 0.05),
+                        };
+                        if !ok {
+                            failures.push(format!("{what}: mesh centre {mid:?} half {half:?} shape {:?}", piece.primitive));
+                        }
+                        checked += 1;
                     }
-                    let mid: [f32; 3] = std::array::from_fn(|r| (lo[r] + hi[r]) * 0.5);
-                    let half: [f32; 3] = std::array::from_fn(|r| (hi[r] - lo[r]) * 0.5);
-                    let what = format!("{} piece {k}: mesh centre {mid:?} half {half:?}", b.template);
-                    assert!(mid.iter().all(|v| v.abs() < 0.05), "{what}");
-                    // The tyre fills its cylinder: radius across, height along.
-                    assert!((half[0] - radius).abs() < 0.06 && (half[2] - radius).abs() < 0.06, "{what}");
-                    assert!((half[1] - height * 0.5).abs() < 0.06, "{what}");
-                    checked += 1;
                 }
             }
         }
-        assert!(checked > 30, "{checked}");
+        eprintln!("checked {checked} pieces, {geometryless} without geometry");
+        for f in &failures {
+            eprintln!("{f}");
+        }
+        assert!(checked > 100, "{checked}");
+        assert!(failures.is_empty(), "{} of {} pieces fail", failures.len(), checked + failures.len());
     }
 
     #[test]

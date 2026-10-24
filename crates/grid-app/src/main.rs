@@ -738,7 +738,8 @@ fn append_objects(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = read(&root.join(route.track_file("objects.pssg")))?;
     let tree = pssg::read_tree(&bytes)?;
-    let sources = mesh::read_static_meshes(&tree)?;
+    // Static meshes plus the skinned damage meshes broken pieces draw (F566).
+    let sources = mesh::read_object_meshes(&tree)?;
     let draws = scene::read_object_draws(&tree, &sources)?;
     let placement_bytes = read(&root.join(route.file("ornaments.bin")))?;
     let placements = ornaments::read(&placement_bytes)?;

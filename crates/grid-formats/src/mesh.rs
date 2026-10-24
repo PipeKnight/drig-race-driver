@@ -137,13 +137,30 @@ fn color_words(data: &[u8], count: usize, offset: usize, stride: usize) -> Resul
 }
 
 pub fn read_meshes<'a>(tree: &Tree<'a>) -> Result<Vec<Mesh<'a>>> {
-    read_meshes_impl(tree, false)
+    read_meshes_impl(tree, Skinned::Reject)
 }
 /// Explicit static subset: skinnable sources are excluded, never rigidified.
 pub fn read_static_meshes<'a>(tree: &Tree<'a>) -> Result<Vec<Mesh<'a>>> {
-    read_meshes_impl(tree, true)
+    read_meshes_impl(tree, Skinned::Skip)
 }
-fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<'a>>> {
+/// The static subset plus the object library's skinned sources: the damage
+/// meshes of tyre walls, Armco sections and flags (F566). Their
+/// `skin_indices` hold each vertex's main joint (largest of its four
+/// weights) as a position in the SKINJOINT list; the flags are rigid
+/// (weight 1), tyre-wall panels blend about a tenth of their vertices and
+/// Armco rails most (main weights down to 0.39), which the rigid split of
+/// [`crate::scene::Renderables::draws_in`] approximates.
+pub fn read_object_meshes<'a>(tree: &Tree<'a>) -> Result<Vec<Mesh<'a>>> {
+    read_meshes_impl(tree, Skinned::Rigid)
+}
+#[derive(Clone, Copy, PartialEq)]
+enum Skinned {
+    Reject,
+    Skip,
+    Rigid,
+}
+fn read_meshes_impl<'a>(tree: &Tree<'a>, skinned: Skinned) -> Result<Vec<Mesh<'a>>> {
+    let skip_skinned = skinned == Skinned::Skip;
     let mut blocks = BTreeMap::new();
     for i in 0..tree.nodes.len() {
         if tree.name(i) == b"DATABLOCK" {
@@ -177,6 +194,8 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
         let mut colors = None;
         let mut texcoords = Vec::new();
         let mut skin_indices = None;
+        let mut weights: Option<Vec<[f32; 4]>> = None;
+        let mut joints: Option<Vec<[u8; 4]>> = None;
         for stream in streams {
             let reference = tree.string(stream, b"dataBlock")?;
             let Some(reference) = reference.strip_prefix(b"#") else {
@@ -216,6 +235,37 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
             let stride = tree.integer(descriptor, b"stride")? as usize;
             match (kind, format) {
                 (b"SkinnableVertex", b"float3") if skip_skinned => continue 'sources,
+                (b"SkinnableVertex", b"float3") | (b"SkinnableNormal", b"float3")
+                    if skinned == Skinned::Rigid =>
+                {
+                    let target = if kind == b"SkinnableVertex" {
+                        &mut positions
+                    } else {
+                        &mut normals
+                    };
+                    if target
+                        .replace(floats(data, count, offset, stride, kind == b"SkinnableVertex")?)
+                        .is_some()
+                    {
+                        return fail(tree.nodes[stream].offset, "duplicate skinnable stream");
+                    }
+                }
+                (b"SkinWeights", b"float4") if skinned == Skinned::Rigid => {
+                    if weights.replace(floats(data, count, offset, stride, true)?).is_some() {
+                        return fail(tree.nodes[stream].offset, "duplicate skin weight stream");
+                    }
+                }
+                (b"SkinIndices", b"uchar4") if skinned == Skinned::Rigid => {
+                    if count == 0 || stride < offset + 4 || count.checked_mul(stride) != Some(data.len()) {
+                        return fail(tree.nodes[stream].offset, "unsupported skin index layout");
+                    }
+                    let values = (0..count)
+                        .map(|i| data[i * stride + offset..][..4].try_into().unwrap())
+                        .collect();
+                    if joints.replace(values).is_some() {
+                        return fail(tree.nodes[stream].offset, "duplicate skin index stream");
+                    }
+                }
                 (b"Vertex", b"float3") => {
                     total_vertices = total_vertices.checked_add(count).ok_or(crate::Error {
                         offset: 0,
@@ -311,6 +361,16 @@ fn read_meshes_impl<'a>(tree: &Tree<'a>, skip_skinned: bool) -> Result<Vec<Mesh<
         let Some(positions) = positions else {
             return fail(tree.nodes[source].offset, "position stream absent");
         };
+        match (weights, joints) {
+            (Some(weights), Some(joints)) if weights.len() == positions.len() && joints.len() == positions.len() => {
+                let main = (weights.iter().zip(&joints))
+                    .map(|(w, j)| j[(0..4).max_by(|&a, &b| w[a].total_cmp(&w[b])).unwrap()] as f32)
+                    .collect();
+                skin_indices = Some(main);
+            }
+            (None, None) => {}
+            _ => return fail(tree.nodes[source].offset, "skin weight and index streams differ"),
+        }
         let normals = normals.unwrap_or_default();
         let tangents = tangents.unwrap_or_default();
         let binormals = binormals.unwrap_or_default();

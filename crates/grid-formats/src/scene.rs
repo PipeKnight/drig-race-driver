@@ -64,16 +64,43 @@ pub struct Renderables<'t, 'a> {
     meshes: &'t [Mesh<'a>],
     context: Context<'a>,
     nodes: std::collections::HashMap<&'a [u8], Vec<usize>>,
+    /// BUNDLENODE ids: the damage renderables of tyre walls, Armco sections
+    /// and flags ([`Self::draws_in`] roots).
+    bundles: std::collections::HashMap<&'a [u8], Vec<usize>>,
+    skeletons: std::collections::HashMap<&'a [u8], usize>,
+    /// NODE ids with the exporter's `!N` suffix for a repeated name, by the
+    /// name before it (Le Mans' blue and yellow tyre walls name their tyres
+    /// `tyre01_obj_01!0`; the entity data names `tyre01_obj_01`).
+    suffixed: std::collections::HashMap<&'a [u8], Vec<usize>>,
 }
 
 impl<'t, 'a> Renderables<'t, 'a> {
     pub fn new(tree: &'t Tree<'a>, meshes: &'t [Mesh<'a>]) -> Result<Self> {
         let mut nodes: std::collections::HashMap<&'a [u8], Vec<usize>> = Default::default();
+        let mut bundles: std::collections::HashMap<&'a [u8], Vec<usize>> = Default::default();
+        let mut skeletons = std::collections::HashMap::new();
+        let mut suffixed: std::collections::HashMap<&'a [u8], Vec<usize>> = Default::default();
         for i in 0..tree.nodes.len() {
             if tree.name(i) == b"NODE"
                 && let Ok(name) = tree.string(i, b"id")
+                && let Some(at) = name.iter().rposition(|&c| c == b'!')
+                && at > 0
+                && name[at + 1..].iter().all(u8::is_ascii_digit)
             {
-                nodes.entry(name).or_default().push(i);
+                suffixed.entry(&name[..at]).or_default().push(i);
+            }
+            if tree.name(i) == b"SKELETON"
+                && let Ok(name) = tree.string(i, b"id")
+            {
+                skeletons.insert(name, i);
+            }
+            let index = match tree.name(i) {
+                b"NODE" => &mut nodes,
+                b"BUNDLENODE" => &mut bundles,
+                _ => continue,
+            };
+            if let Ok(name) = tree.string(i, b"id") {
+                index.entry(name).or_default().push(i);
             }
         }
         Ok(Self {
@@ -81,6 +108,9 @@ impl<'t, 'a> Renderables<'t, 'a> {
             meshes,
             context: Context::new(tree, meshes)?,
             nodes,
+            bundles,
+            skeletons,
+            suffixed,
         })
     }
 
@@ -118,15 +148,15 @@ impl<'t, 'a> Renderables<'t, 'a> {
     }
 
     /// Draws under the NODE `node`, placed in the frame of its ancestor NODE
-    /// `root`: the transforms of `node` and of every node between it and
+    /// or BUNDLENODE `root` (`node` may carry the exporter's `!N` suffix): the transforms of `node` and of every node between it and
     /// `root` (inclusive) are composed. [`Self::draws`] stops at the selected
     /// node, so a sub-node's draws (a breakable piece's body anchor inside
     /// its damage renderable) lacked the transforms above it. `node` must be
     /// the one NODE of that id under `root`; other renderables may reuse the
     /// id (Nürburgring tyre walls name their tyres `tyre01_obj_01` and on).
     pub fn draws_in(&self, root: &[u8], node: &[u8]) -> Result<Vec<Draw<'a>>> {
-        let root = match self.nodes.get(root).map(Vec::as_slice) {
-            Some([one]) => *one,
+        let root = match (self.nodes.get(root), self.bundles.get(root)) {
+            (Some(n), None) | (None, Some(n)) if n.len() == 1 => n[0],
             _ => return fail(0, "expected one selected renderable node"),
         };
         let under = |n: usize| {
@@ -136,8 +166,9 @@ impl<'t, 'a> Renderables<'t, 'a> {
             }
             ancestor.is_some()
         };
-        let candidates = self.nodes.get(node).map(Vec::as_slice).unwrap_or_default();
-        let node = match candidates.iter().filter(|&&n| under(n)).collect::<Vec<_>>()[..] {
+        let candidates = (self.nodes.get(node).into_iter().flatten())
+            .chain(self.suffixed.get(node).into_iter().flatten());
+        let node = match candidates.filter(|&&n| under(n)).collect::<Vec<_>>()[..] {
             [one] => *one,
             _ => return fail(0, "expected one node under the renderable root"),
         };
@@ -150,12 +181,137 @@ impl<'t, 'a> Renderables<'t, 'a> {
             stack.extend_from_slice(&self.tree.nodes[n].children);
         }
         instances.sort_unstable();
+        if instances.is_empty() {
+            return self.skin_draws(root, node);
+        }
         let mut result = Vec::new();
         for i in instances {
             if let Some(draw) =
                 instance_draw(self.tree, self.meshes, &self.context, i, false, Some(root))?
             {
                 result.push(draw);
+            }
+        }
+        Ok(result)
+    }
+
+    /// The triangles of `root`'s skinned meshes (SKINNODE, network
+    /// `skinTransformLocal`) whose main joint is a JOINTNODE at or under
+    /// `node`, one draw per joint, in `root`'s frame: a bind-space vertex goes
+    /// through the joint's INVERSEBINDMATRIX, then the joint's and its
+    /// ancestors' transforms up to `root`. Tyre walls, Armco sections and
+    /// flags keep their damage geometry in such a mesh (F566). AUTHORED
+    /// approximation: the original blends up to four joints per vertex
+    /// (Armco rails bend smoothly); here each triangle follows one joint
+    /// (its vertices' main joint, [`crate::mesh::read_object_meshes`]), exact
+    /// at the bind pose and with seams once the pieces separate.
+    fn skin_draws(&self, root: usize, node: usize) -> Result<Vec<Draw<'a>>> {
+        let tree = self.tree;
+        let descendants = |from: usize| {
+            let mut out = Vec::new();
+            let mut stack = vec![from];
+            while let Some(n) = stack.pop() {
+                out.push(n);
+                stack.extend(tree.nodes[n].children.iter().rev());
+            }
+            out
+        };
+        let under_node = |mut n: usize| loop {
+            if n == node {
+                break true;
+            }
+            match tree.nodes[n].parent {
+                Some(p) if n != root => n = p,
+                _ => break false,
+            }
+        };
+        let in_root = descendants(root);
+        let mut result = Vec::new();
+        for &skin in in_root.iter().filter(|&&n| tree.name(n) == b"SKINNODE") {
+            let children = &tree.nodes[skin].children;
+            let skeleton = tree.string(skin, b"skeleton")?.strip_prefix(b"#").unwrap_or_default();
+            let Some(&skeleton) = self.skeletons.get(skeleton) else {
+                return fail(tree.nodes[skin].offset, "unresolved skin skeleton");
+            };
+            let inverse: Vec<[f32; 16]> = (tree.nodes[skeleton].children.iter())
+                .filter(|&&c| tree.name(c) == b"INVERSEBINDMATRIX")
+                .map(|&c| decode_bind_matrix(tree.nodes[c].data.unwrap_or_default(), tree.nodes[c].offset))
+                .collect::<Result<_>>()?;
+            let mut joints = Vec::new();
+            for &c in children.iter().filter(|&&c| tree.name(c) == b"SKINJOINT") {
+                let id = tree.string(c, b"joint")?.strip_prefix(b"#").unwrap_or_default();
+                let found: Vec<usize> = (in_root.iter().copied())
+                    .filter(|&n| tree.name(n) == b"JOINTNODE" && tree.string(n, b"id").ok() == Some(id))
+                    .collect();
+                let [joint] = found[..] else {
+                    return fail(tree.nodes[c].offset, "expected one skin joint under the renderable root");
+                };
+                joints.push(joint);
+            }
+            if joints.len() != inverse.len() {
+                return fail(tree.nodes[skin].offset, "skin joint and bind matrix counts differ");
+            }
+            for &instance in children.iter().filter(|&&c| tree.name(c) == b"MODIFIERNETWORKINSTANCE") {
+                if !tree.string(instance, b"network")?.ends_with(b"#skinTransformLocal") {
+                    continue;
+                }
+                let reference = tree.string(instance, b"indices")?.strip_prefix(b"#").unwrap_or_default();
+                // Not rigid, so not read: no draw.
+                let Some(&source) = self.context.sources.get(reference) else {
+                    continue;
+                };
+                let mesh = &self.meshes[source];
+                let Some(bound) = &mesh.skin_indices else {
+                    return fail(tree.nodes[instance].offset, "skinned source without joints");
+                };
+                let material = tree.string(instance, b"shader")?.strip_prefix(b"#").ok_or(crate::Error {
+                    offset: tree.nodes[instance].offset,
+                    message: "expected local skin shader",
+                })?;
+                if !self.context.shaders.contains(material) {
+                    return fail(tree.nodes[instance].offset, "unresolved skin shader");
+                }
+                for (j, &joint) in joints.iter().enumerate() {
+                    if !under_node(joint) {
+                        continue;
+                    }
+                    // A triangle follows the main joint of two of its
+                    // vertices, else of its first.
+                    let main = |t: &[u16; 3]| {
+                        let [a, b, c] = t.map(|v| bound[v as usize]);
+                        if a == b || a == c { a } else if b == c { b } else { a }
+                    };
+                    let indices: Vec<u16> = (mesh.indices.as_chunks::<3>().0.iter())
+                        .filter(|t| main(t) == j as f32)
+                        .flatten()
+                        .copied()
+                        .collect();
+                    if indices.is_empty() {
+                        continue;
+                    }
+                    let mut chain = IDENTITY;
+                    let mut a = joint;
+                    loop {
+                        chain = compose(&chain, &matrix(tree, a)?);
+                        if a == root {
+                            break;
+                        }
+                        a = tree.nodes[a].parent.ok_or(crate::Error {
+                            offset: tree.nodes[a].offset,
+                            message: "skin joint outside its root",
+                        })?;
+                    }
+                    result.push(Draw {
+                        id: tree.string(instance, b"id")?,
+                        joint: tree.string(joint, b"id")?,
+                        material,
+                        source,
+                        prototype: None,
+                        vertices: 0..mesh.positions.len(),
+                        indices,
+                        transform: compose(&inverse[j], &chain),
+                    });
+                }
             }
         }
         Ok(result)
@@ -267,7 +423,7 @@ fn instance_draw<'a>(
         let mut prototype = None;
         while let Some(a) = ancestor {
             match tree.name(a) {
-                b"RENDERNODE" | b"LODVISIBLERENDERNODE" | b"NODE" | b"ROOTNODE" => {
+                b"RENDERNODE" | b"LODVISIBLERENDERNODE" | b"NODE" | b"ROOTNODE" | b"BUNDLENODE" => {
                     transform = compose(&transform, &matrix(tree, a)?);
                     if tree.name(a) == b"ROOTNODE" {
                         root_seen = true;
@@ -321,6 +477,24 @@ pub fn matrix(tree: &Tree<'_>, node: usize) -> Result<[f32; 16]> {
         tree.nodes[children[0]].data.unwrap(),
         tree.nodes[children[0]].offset,
     )
+}
+/// An INVERSEBINDMATRIX: affine up to float noise (the tyre walls' carry
+/// -0.0 and values near 1e-8 in the last column), which is cleared.
+fn decode_bind_matrix(data: &[u8], offset: usize) -> Result<[f32; 16]> {
+    if data.len() != 64 {
+        return fail(offset, "expected 16-float bind matrix");
+    }
+    let mut m = [0.0; 16];
+    for (value, bytes) in m.iter_mut().zip(data.as_chunks::<4>().0) {
+        *value = f32::from_be_bytes(*bytes);
+    }
+    if m.iter().any(|v| !v.is_finite())
+        || [m[3], m[7], m[11], m[15] - 1.].iter().any(|v| v.abs() > 1e-4)
+    {
+        return fail(offset, "only affine bind matrices supported");
+    }
+    [m[3], m[7], m[11], m[15]] = [0., 0., 0., 1.];
+    Ok(m)
 }
 pub fn decode_matrix(data: &[u8], offset: usize) -> Result<[f32; 16]> {
     if data.len() != 64 {

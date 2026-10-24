@@ -423,14 +423,13 @@ the anchor were missing. Every Detroit and Nürburgring tyre was therefore drawn
 metre under its body (into the road). Standing on its edge or tilted against a wall, it was drawn
 beside or above its body (in the air). This matches the owner's screenshots. The new
 `Renderables::draws_in(renderable, anchor)` composes from the anchor up to the damage renderable.
-The test `round_piece_meshes_sit_on_their_bodies` checks every round piece of the first breakable
+The test `round_piece_meshes_sit_on_their_bodies` (since F566 part of `breakable_pieces_draw_on_their_bodies`) checks every round piece of the first breakable
 per template on Detroit route_9 and Nürburgring route_1: mesh centre within 5 cm of the hull
 centre, mesh half-extents within 6 cm of the cylinder. With `draws` it fails at tyrestack_black
 piece 0 (centre (-0.609, -0.539, 0.006)).
 
-The Nürburgring `tyrewall_black_yok` pieces 6-21 and `close_drift_flag` piece 0 stay undrawn.
-Their damage renderable names do not select exactly one NODE; this was already so with `draws`
-and is not resolved here.
+Some pieces had no draw at all: Nürburgring's `tyrewall_black_yok` pieces 6-21 and
+`close_drift_flag`, among others. F566 resolves them (next section).
 
 **Physics: sinking under load [V, AUTHORED].** A car pressing a tyre (sitting on it, or driving
 into a wall of them) pushes the hull below the road for a tick or two. The solver then recovers
@@ -466,6 +465,55 @@ the island slept at tick 901, the original's rule [D, BODY_SLEEPING.md section 2
 wakes every piece at once with parking off, and the heap then slides on another 0.3-0.5 m. It
 counts as unsupported for that reason, though every body has a supporting contact. No
 correction: the original freezes a slowly creeping heap the same way.
+
+## Pieces without draws (F566)
+
+A test checks every piece of every breakable template on all routes of the phone tracks
+(Nürburgring route_0-3, Detroit route_0-9, Le Mans route_0-1, Donington route_0-3). Each piece
+must get a draw from its anchor in its damage renderable (`Renderables::draws_in`, as grid-app
+places it), and that draw must sit on its collision shape. Before this change, 159 of 357 pieces
+had no draw. Every piece that did draw sat on its body. Three causes [O, objects.pssg]:
+
+1. **BUNDLENODE roots.** The damage renderable of every tyre wall, Armco section and the flag is a
+   `BUNDLENODE`, not a `NODE`. The scene index only had NODE ids.
+2. **Skinned damage meshes.** Tyre-wall panels (`*_dam_fr/fc/fl/bl/bc/br`), Armco rail sections
+   (`*_dam_obj01-04`) and the flag keep their broken geometry in one `SKINNODE` per renderable,
+   not in mesh nodes under each piece:
+   - its `MODIFIERNETWORKINSTANCE` (network `skinTransformLocal`) draws a source of
+     `SkinnableVertex`/`SkinnableNormal` float3, `SkinWeights` float4 and `SkinIndices` uchar4;
+   - its `SKINJOINT`s name one `JOINTNODE` under each piece's anchor;
+   - its `SKELETON` holds one `INVERSEBINDMATRIX` per joint.
+
+   There are 18 such sources on the four tracks. `read_static_meshes` skipped them, and a piece's
+   anchor has no render instance below it. The flag is rigid (weight 1). Tyre-wall panels blend
+   about 10% of their ~290 vertices (main weight at least 0.7). Armco rails blend most of theirs
+   (main weight down to 0.39), so the rail bends.
+3. **Suffixed names.** Le Mans' `tyrewall_blue` and `tyrewall_yellow` name their tyres
+   `tyre01_obj_01!0` and so on: the exporter suffixes a repeated id. The entity data names
+   `tyre01_obj_01`.
+
+Port:
+- `Renderables` indexes BUNDLENODE ids as `draws_in` roots, BUNDLENODE composes as a transform
+  ancestor, and an anchor matches its `!N`-suffixed NODE under the root.
+- `mesh::read_object_meshes` (now grid-app's object reader) adds the skinned sources, with each
+  vertex's main joint in `skin_indices`.
+- When the anchor has no render instance, `draws_in` falls back to the root's skins. It makes one
+  draw per joint at or under the anchor: the triangles whose vertices' main joint (two of three,
+  else the first) is that joint, with transform inverse bind x joint-to-root chain. Inverse bind
+  matrices with float noise in the last column (tyre walls, about 1e-8) are cleaned.
+- AUTHORED approximation: the original blends up to four joints per vertex. Here a triangle
+  follows one joint. This is exact while the pieces are at their bind pose, and leaves seams
+  where an Armco rail bends or pieces separate. Proper blend skinning in grid-app (joint matrices
+  from the piece bodies) is not done.
+
+After the change, all 353 drawable pieces draw on their bodies: round pieces are centred and fill
+their cylinder or sphere, box pieces' mesh centres lie in their box, and every draw's material
+has a diffuse binding. The other 4 pieces are the Armco main sections' `section_dam_link1` posts
+(Nürburgring grey, red and white, Le Mans `armco_02`). Their anchors carry no geometry and no
+joint, so there is nothing to draw in the original either; grid-app counts them in
+`pieces_without_draws`. Donington's Armco link post mesh is 1.01 m tall on a 0.76 m collision
+cylinder, centred 0.12 m higher. That is data, not an offset, and the test allows a post's mesh
+up to 20% of the cylinder's height beyond it.
 
 ## Not yet established
 
