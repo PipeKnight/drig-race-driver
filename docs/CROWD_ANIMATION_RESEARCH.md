@@ -208,3 +208,44 @@ The integrated full gate passes986 workspace tests, workspace Clippy, four uncha
 The original full gate is successful. A subsequent private artifact wrapper failed because Windows PowerShell5 treated ordinary Cargo stderr output as a terminating native error; the failed result is preserved. Only the short artifact step was repeated with separate native stdout/stderr/exit handling. The new linked run then completes compile, corpus execution and exact comparison successfully. The unchanged comparator retains its historical draft/direct-module scope string; actual compiler arguments, library receipt and root admission identify this new run as production linked. Its raw label was not rewritten. Exact evidence remains in `local/graphics/crowd-tree01/` and the private `packet-tree-next/head-f4d03c3b-integration01/` directory.
 
 This completes bounded bank framing/resource verification, while the evaluator, concrete pose consumer, runtime binding, clip clock, B1/KA decoding, arm motion and flash rendering remain separate work. No default crowd setting or playable launcher changes.
+
+
+## Frozen camera-flash material diagnostic (G272)
+
+A default-off `--crowd-flash-preview control|frozen-pulse` diagnostic uses three exact
+camera-bearing grandstand placements from the existing Detroit static crowd reader.
+Off does not load/register the flash. Control validates source inputs without render
+entities. FrozenPulse uses the purchased `flash3.tga` full BC3 mip chain and an
+independently authored card adapter: raw RGB, texture alpha times opacity once,
+explicit SRC_ALPHA/ONE blending, source depth writing and reverse-Z GreaterEqual.
+No scene lights are emitted. Axis normalization, local geometry, double-sided
+indices, sRGB, attachment offset and phase0.5 are authored fixtures. They do not
+recover source node binding, clock, random scheduler or skeletal animation.
+
+The bounded baseline MSAA4/static reference requires configuration0 (`--aa taa`);
+baseline returns before enhanced AA is installed, so the backend here remains
+MSAA4. The real default is configuration1. An initial no-AA-argument runner
+incorrectly assumed0 and was refused by Control; its failure is preserved.
+
+The first rendered frozen candidate exposed black sky rectangles. Actual Bevy0.19.1
+Transparent3d sorts view-space Z plus bias ascending; the source-sky adapter's
+positive bias drew it after the depth-writing cards. Correcting that existing bias
+to negative preserves its intended background-first order. A real material/sort-key
+regression and344 app tests plus Clippy pass. The next three GPU processes pass;
+Off/Control raw RGBA match exactly. Frozen changes10,952 pixels, all nonnegative
+RGB deltas with alpha unchanged. Root and independent native review find the black
+rectangles removed and foreground rails/posts retained. Logs establish three
+prepared anchors, not a measured GPU card/draw count.
+
+This admits one frozen baseline snapshot, not animated flashes or original runtime
+parity. Private evidence, rejected runs and actual hashes are under
+`local/graphics/crowd-flash01/`; G272 records the separate glass regression outcome.
+No crowd default or playable launcher is changed.
+
+G272 baseline glass follow-up: historical G271835613... and corrected84d84... both
+render the same authored Donington Lacetti side view successfully,120samples each;
+decoded1920x1080 RGBA matches exactly. Root native review finds no new glass/sky
+edge defect. This is a qualified different-build comparison with new flash paths
+defaultOff, not enhanced/DLAA/scene-probe validation. The first attempted old-exe
+comparison refused a changed hardlink archive hash before GPU; that failure is
+preserved and the lost archive is not represented as the original binary.

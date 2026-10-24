@@ -1,5 +1,7 @@
 mod object_materials;
 mod crowd_preview;
+mod flash_fixture;
+mod flash_preview;
 // Source reference viewer and serial driving prototype. A plain comment, not
 // `//!`: src/lib.rs includes this file for the Android library (P9).
 
@@ -1445,6 +1447,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut motion_phase_map = false;
     let mut smoke_ct = smoke_ct_neutral::Mode::Off;
     let mut crowd_preview = crowd_preview::Mode::Off;
+    let mut crowd_flash_preview = flash_preview::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
     let mut window_transition_script = None;
@@ -1872,6 +1875,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--crowd-preview" => {
                 crowd_preview = crowd_preview::Mode::parse(&args.next().ok_or("--crowd-preview needs a mode")?)?;
             }
+            "--crowd-flash-preview" => {
+                crowd_flash_preview = flash_preview::Mode::parse(&args.next().ok_or("--crowd-flash-preview needs off, control or frozen-pulse")?)?;
+            }
             "--object-coverage" => {
                 graphics.object_coverage = object_materials::CoverageMode::parse(
                     &args.next().ok_or("--object-coverage needs off, control, a2c or mask35")?,
@@ -2136,6 +2142,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
                 println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
+                println!("--crowd-flash-preview off|control|frozen-pulse: default-off authored three-anchor static Detroit crowd flash diagnostic; requires --crowd-preview static-billboards, baseline MSAA4, --reflections sky and bounded rendered reference. No source clock or scene lights.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
                 println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
                 println!("--motion-shutter 0..0.5: optional directional scene blur; frame fraction, 8 samples per direction, default0/off; enhanced driving only.");
@@ -2292,6 +2299,13 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         lod == "LOD0_", output.is_some(), graphics.benchmark_frames,
         std::env::var_os("GRID_PERF_TEST").is_none(),
     )?;
+    // Baseline camera retains Bevy's MSAA4; startup asserts the actual component.
+    // Existing crowd admission above enforces exact route/static/render/frame scope.
+    crowd_flash_preview.validate(crowd_preview, graphics.benchmark_frames,
+        !graphics.enhanced() && graphics.anti_aliasing == 0, graphics.reflection_mode == 0)?;
+    if crowd_flash_preview != flash_preview::Mode::Off && capture_orbit_rate.is_some() {
+        return Err("--crowd-flash-preview frozen fixture rejects scripted camera orbit".into());
+    }
     let coverage_context = object_materials::CoverageContext {
         enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
         render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
@@ -3687,7 +3701,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if crowd_preview != crowd_preview::Mode::Off {
         let prepared = crowd_preview::prepare(&root, &route, crowd_preview)?;
+        let flash = if crowd_flash_preview != flash_preview::Mode::Off {
+            let anchors = crowd_preview::flash_fixture_anchors(&root, &prepared)?;
+            Some(flash_preview::prepare(&root, crowd_flash_preview, &anchors)?)
+        } else { None };
         crowd_preview::install(&mut app, prepared)?;
+        if let Some(flash) = flash { flash_preview::install(&mut app, flash)?; }
     }
     let exit = app
         .insert_resource(body_occlusion)

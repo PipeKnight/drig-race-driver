@@ -281,6 +281,90 @@ pub fn prepare(root: &Path, route: &Route, mode: Mode) -> AnyResult<Prepared> {
         total: catalogue.total_instances,
     })
 }
+
+// Only the authored frozen-pulse diagnostic uses these selected-grandstand
+// ordinals. Coordinates always come from current validated Prepared rows.
+#[derive(Clone, Copy)]
+struct FlashRequest {
+    ordinal: usize,
+    sex: usize,
+    cell: u32,
+}
+const FLASH_REQUESTS: [FlashRequest; 3] = [
+    FlashRequest {
+        ordinal: 1907,
+        sex: 0,
+        cell: 88,
+    },
+    FlashRequest {
+        ordinal: 1902,
+        sex: 0,
+        cell: 89,
+    },
+    FlashRequest {
+        ordinal: 4275,
+        sex: 1,
+        cell: 89,
+    },
+];
+fn select_flash_rows(
+    rows: &[Row],
+    has_camera: [bool; 2],
+    requests: &[FlashRequest],
+) -> AnyResult<Vec<super::flash_fixture::Anchor>> {
+    if requests.len() != 3 {
+        return Err("flash fixture requires exactly three requested source rows".into());
+    }
+    let mut anchors = Vec::with_capacity(3);
+    for (i, request) in requests.iter().enumerate() {
+        if requests[..i].iter().any(|r| r.ordinal == request.ordinal) {
+            return Err("duplicate flash fixture source ordinal".into());
+        }
+        let row = rows
+            .get(request.ordinal)
+            .ok_or("flash fixture source ordinal missing")?;
+        if request.sex > 1 || row.sex != request.sex || row.cell != request.cell {
+            return Err("flash fixture source group/cell changed".into());
+        }
+        if !has_camera.get(request.sex).copied().unwrap_or(false) {
+            return Err("flash fixture source definition hasCamera is false".into());
+        }
+        if !row.position.is_finite() {
+            return Err("nonfinite flash fixture source origin".into());
+        }
+        anchors.push(super::flash_fixture::Anchor {
+            source_index: u32::try_from(request.ordinal)?,
+            source_cell: row.cell,
+            position: row.position.to_array(),
+        });
+    }
+    Ok(anchors)
+}
+pub(crate) fn flash_fixture_anchors(
+    root: &Path,
+    prepared: &Prepared,
+) -> AnyResult<Vec<super::flash_fixture::Anchor>> {
+    if prepared.mode != Mode::StaticBillboards
+        || prepared.total != 6854
+        || prepared.rows.len() != 4667
+    {
+        return Err("flash fixture needs exact admitted Detroit static crowd population".into());
+    }
+    let raw = std::fs::read(root.join("anims/crowdDefs.xml"))?;
+    let doc = binxml::read(&raw)?;
+    let (country, _) = one(&doc, 0, "crowdDefSet", Some("usa"))?;
+    let mut has_camera = [false; 2];
+    for (slot, name) in ["crowdMale", "crowdFemale"].into_iter().enumerate() {
+        let (_, definition) = one(&doc, country, "crowdDef", Some(name))?;
+        has_camera[slot] = match attr(definition, "hasCamera")? {
+            "0" => false,
+            "1" => true,
+            _ => return Err("unsupported crowd hasCamera flag".into()),
+        };
+    }
+    select_flash_rows(&prepared.rows, has_camera, &FLASH_REQUESTS)
+}
+
 const SHADER: Handle<Shader> = uuid_handle!("3f1983b1-35cd-4ea7-986e-22b81999f3a2");
 type CrowdMaterial = ExtendedMaterial<StandardMaterial, Tint>;
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
@@ -483,6 +567,92 @@ fn spawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn flash_rows_fixture() -> (Vec<Row>, [FlashRequest; 3]) {
+        let rows = (0..3)
+            .map(|i| Row {
+                position: Vec3::new(i as f32, 2., 3.),
+                orientation_pair: [0., 1.],
+                opaque_scalar: 0.,
+                cell: i as u32 + 7,
+                sex: usize::from(i == 2),
+            })
+            .collect();
+        let requests = [
+            FlashRequest {
+                ordinal: 0,
+                sex: 0,
+                cell: 7,
+            },
+            FlashRequest {
+                ordinal: 1,
+                sex: 0,
+                cell: 8,
+            },
+            FlashRequest {
+                ordinal: 2,
+                sex: 1,
+                cell: 9,
+            },
+        ];
+        (rows, requests)
+    }
+    #[test]
+    fn flash_row_bridge_retains_exact_source_origin_and_order() {
+        let (rows, requests) = flash_rows_fixture();
+        let anchors = select_flash_rows(&rows, [true, true], &requests).unwrap();
+        assert_eq!(anchors.len(), 3);
+        for (i, a) in anchors.iter().enumerate() {
+            assert_eq!(a.source_index, i as u32);
+            assert_eq!(a.source_cell, rows[i].cell);
+            assert_eq!(
+                a.position.map(f32::to_bits),
+                rows[i].position.to_array().map(f32::to_bits)
+            );
+        }
+    }
+    #[test]
+    fn flash_row_bridge_rejects_duplicate_missing_group_cell_camera_and_nonfinite() {
+        let (mut rows, requests) = flash_rows_fixture();
+        let mut bad = requests;
+        bad[1] = bad[0];
+        assert!(select_flash_rows(&rows, [true, true], &bad).is_err());
+        let mut bad = requests;
+        bad[2].ordinal = 3;
+        assert!(select_flash_rows(&rows, [true, true], &bad).is_err());
+        let mut bad = requests;
+        bad[0].sex = 1;
+        assert!(select_flash_rows(&rows, [true, true], &bad).is_err());
+        let mut bad = requests;
+        bad[0].cell = 99;
+        assert!(select_flash_rows(&rows, [true, true], &bad).is_err());
+        assert!(select_flash_rows(&rows, [true, false], &requests).is_err());
+        assert!(select_flash_rows(&rows, [true, true], &requests[..2]).is_err());
+        rows[0].position.x = f32::NAN;
+        assert!(select_flash_rows(&rows, [true, true], &requests).is_err());
+    }
+    #[test]
+    #[ignore = "requires purchased GRID_GAME_ROOT; CPU only, no GPU"]
+    fn purchased_flash_bridge_resolves_exact_three_usa_camera_rows() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("GRID_GAME_ROOT").expect("GRID_GAME_ROOT required"),
+        );
+        let route = Route::new("tracks/usa/detroit/route_8").unwrap();
+        let prepared = prepare(&root, &route, Mode::StaticBillboards).unwrap();
+        let anchors = flash_fixture_anchors(&root, &prepared).unwrap();
+        assert_eq!(anchors.len(), 3);
+        for (request, anchor) in FLASH_REQUESTS.iter().zip(anchors) {
+            let row = &prepared.rows[request.ordinal];
+            assert_eq!(anchor.source_index, request.ordinal as u32);
+            assert_eq!(anchor.source_cell, request.cell);
+            assert_eq!(row.sex, request.sex);
+            assert_eq!(
+                anchor.position.map(f32::to_bits),
+                row.position.to_array().map(f32::to_bits)
+            );
+        }
+    }
+
     #[test]
     fn static_billboard_has_source_anchor_dimensions_and_distinct_stance_uv() {
         let row = Row {
