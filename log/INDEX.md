@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F567](F0567.md) | 2026-10-24 | Playable 7360a4865f54 with F563-F566, portable copy and APKs a2b4991d6817 |
 | [F566](F0566.md) | 2026-10-24 | Every broken piece on the phone tracks gets a draw: bundle roots, skinned damage meshes, suffixed names |
 | [F565](F0565.md) | 2026-10-24 | Detached panels are world bodies: 9EC9B0 part decisions in the simulation, cars collide with the panels |
 | [F564](F0564.md) | 2026-10-24 | Broken tyres drawn on their bodies and lifted out of the road |
