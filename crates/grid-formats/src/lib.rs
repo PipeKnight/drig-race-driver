@@ -10,6 +10,7 @@ pub mod car_collision;
 pub mod car_decals;
 pub mod collision;
 pub mod cqtc;
+pub mod crowd_placements;
 pub mod damage_boxes;
 pub mod database;
 pub mod daynight;

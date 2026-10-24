@@ -1,6 +1,6 @@
 # Crowd animation resources and packet evaluation
 
-Crowd animation is researched at the resource, local timer and ordinary packet-dispatch level; the playable renderer still omits the crowd subsystem and cloth, and faithful animated poses are not yet verified.
+Crowd animation is researched at the resource, local timer and ordinary packet-dispatch level; the ordinary playable renderer still omits the crowd subsystem and cloth. A default-off bounded Detroit USA static billboard preview is under validation; faithful animated poses are not yet verified.
 
 Recorded 23 October 2026. Independently authored findings; no original pseudocode, asset payloads, matrices, key samples, textures or captures are included. Detailed purchased-data checks remain in ignored private evidence.
 
@@ -167,3 +167,17 @@ No wall-clock conversion is established here. The common evaluation entry is des
 One targeted shared-master decompile of `0x00AC3D90` closes the local timer-to-packet bridge. The selected controller's mapped timer output is passed unchanged through a packet traversal to virtual slot +0x34. Previously confirmed ordinary S4/L4 vtables resolve that slot to the recovered interpolation functions. The traversal clears output weights before dispatch, rather than clearing every stored float4 value; channels left at zero weight must not become valid pose data merely because old values remain in memory.
 
 This connects the recovered local stages when the selected packet has the confirmed ordinary class. Actual crowd clip selection and clock units, full binding semantics, layer combination and the final bound-slot-to-local-pose consumer remain unresolved. No faithful arm animation or rendered parity is claimed. Private evidence is recorded in `local/handoff/drafts/stadium-crowd01/animation-packet-dispatch-note-04.md`.
+
+## Bounded static USA preview (G260, two-view diagnostic)
+
+The observed placement reader preserves standing XYZ, orientation pair, opaque scalar and cell, and leaves moving payloads opaque. An opt-in `--crowd-preview control|static-billboards` adapter selects Detroit route_8 male/female grandstand placements and USA dataset/atlas definitions. Off loads no crowd resources; Control validates source data without adding render assets or entities. Static rendering is bounded to baseline MSAA4, LOD0 reference, subroute0, output and benchmark1..600, with no driving/menu/headless/collision/PERF/compositor or simultaneous fence-coverage diagnostic.
+
+The preview uses variant0/colourSet0 and an explicit source-draw5000 scale fixture; it does not replay global RNG, sway, arm motion, near skinned LOD or camera flashes. PBR curved normals, Bevy A2C and disabled crowd shadows are authored adaptations. Finite coordinates and output vertices are checked before appending each card. Rust synthetic/purchased tests and actual rendered Off/Control/Static comparisons must pass before claiming visible spectators; prior Python framing checks do not substitute for Rust execution.
+
+
+The integrated Rust candidate passes seven app and five placement tests, including actual purchased controls, and package Clippy. A baseline release executable renders all three modes successfully in two fixed views without WGSL errors. The second view's Off/Control decoded pixels match exactly; the first has one green-channel quantization difference also observed between independent Off repeats. Each Control exactly matches an independent Off repeat, so the bounded neutrality admission records that variability instead of claiming deterministic within-pair equality. Original failed exact checks remain private evidence.
+
+Root and an independent reviewer see recognizable correctly placed people, plausible scale and foreground occlusion without obvious opaque card rectangles or scrambled UVs. Repeated variant0 faces/shirts remain visible. The second angle is a previously recorded authored port camera, not an independently sampled original viewpoint. This establishes a static diagnostic only; actual source animation, nearby skinned actors, variation, flashes, lighting parity and runtime quality/performance remain open. Final integration checks are separate from these frozen-executable captures.
+
+
+After integration of fresh main F565–F567, the full required gate passes 957 tests, workspace Clippy, four unchanged simulation identities and 24 quick-soak scenarios. A fresh baseline executable completes all six two-view GPU runs without shader errors. The static images are decoded-pixel identical to the preceding executable in both views. The second Off/Control pair remains exactly equal; the primary retains the same documented one-pixel Off-repeat variability. These are bounded static rendering checks, not animation or source radiometric parity. Full provenance and the original failed strict comparisons remain private in `local/graphics/crowd-preview01/post-main/`.

@@ -1,4 +1,5 @@
 mod object_materials;
+mod crowd_preview;
 // Source reference viewer and serial driving prototype. A plain comment, not
 // `//!`: src/lib.rs includes this file for the Android library (P9).
 
@@ -1438,6 +1439,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut car_transparent_sort = false;
     let mut smoke_order = tyre_smoke::SmokeOrder::Groups;
     let mut skid_order = skid_marks::OrderMode::Off;
+    let mut crowd_preview = crowd_preview::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
     let mut window_transition_script = None;
@@ -1862,6 +1864,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     &args.next().ok_or("--window-transitions needs FRAME:C,FRAME:R,...")?,
                 )?);
             }
+            "--crowd-preview" => {
+                crowd_preview = crowd_preview::Mode::parse(&args.next().ok_or("--crowd-preview needs a mode")?)?;
+            }
             "--object-coverage" => {
                 graphics.object_coverage = object_materials::CoverageMode::parse(
                     &args.next().ok_or("--object-coverage needs off, control, a2c or mask35")?,
@@ -2111,6 +2116,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
+                println!("--crowd-preview off|control|static-billboards: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture, PBR adaptation, no animation/flash or source parity.");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--skid-order off|control|isolated: bounded baseline sort/raster diagnostic; isolated sort0, raster50; physics/emission/atlas unchanged.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
@@ -2261,6 +2267,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
     }
+    crowd_preview.validate(
+        !graphics.enhanced(),
+        reference && !drive && !headless && !collision && !from_menu
+            && smoke_compositor == smoke_compositor::Mode::Off
+            && graphics.object_coverage == object_materials::CoverageMode::Off,
+        route.path() == "tracks/usa/detroit/route_8" && route.subroute() == 0,
+        lod == "LOD0_", output.is_some(), graphics.benchmark_frames,
+        std::env::var_os("GRID_PERF_TEST").is_none(),
+    )?;
     let coverage_context = object_materials::CoverageContext {
         enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
         render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
@@ -3611,6 +3626,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if graphics.object_coverage != object_materials::CoverageMode::Off {
         println!("object_coverage mode={:?} target={} mapping=Bevy-A2c-remap-or-Mask35-authored-thickness source_parity=false samples_required={} aa={}", graphics.object_coverage, object_materials::COVERAGE_TARGET, if graphics.enhanced() { 1 } else { 4 }, graphics.anti_aliasing);
         app.add_systems(PostStartup, object_materials::assert_coverage_msaa);
+    }
+    if crowd_preview != crowd_preview::Mode::Off {
+        let prepared = crowd_preview::prepare(&root, &route, crowd_preview)?;
+        crowd_preview::install(&mut app, prepared)?;
     }
     let exit = app
         .insert_resource(body_occlusion)
