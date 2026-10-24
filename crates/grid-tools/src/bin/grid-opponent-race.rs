@@ -516,6 +516,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     let trace_laps = std::env::var_os("GRID_TRACE_LAPS").is_some();
+    // GRID_SERIAL_TWIN=1 (F568): every tick also runs on a serial clone of
+    // the world, and every body and car record must match the parallel tick.
+    let serial_twin = std::env::var_os("GRID_SERIAL_TWIN").is_some();
+    let mut twin_checked = (0u64, 0usize);
     let mut maximum_speed = 0f32;
     for _ in 0..ticks {
         let positions: Vec<Other> = multi
@@ -719,9 +723,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         {
             crash(&mut multi.cars[0], impulse, count)?;
         }
+        let mut twin = serial_twin.then(|| {
+            let mut twin = multi.clone();
+            twin.parallel = false;
+            twin
+        });
         if let Err(error) = multi.tick(&controls) {
             println!("failure tick={} error={error}", multi.ticks + 1);
             break;
+        }
+        if let Some(twin) = &mut twin {
+            twin.tick(&controls)?;
+            let words = |m: &MultiRuntime| -> Vec<u32> {
+                let mut all: Vec<u32> = m.bodies().iter().flatten().copied().collect();
+                for car in &m.cars {
+                    all.extend(&car.state.car.owner.vehicle);
+                    all.extend(car.state.car.owner.physical);
+                    all.extend(&car.state.car.frame.body);
+                }
+
+                all.push(m.dynamic_props().map_or(0, |p| p.events.len()) as u32);
+                all
+            };
+            if words(twin) != words(&multi) {
+                return Err(format!("serial twin differs at tick {}", multi.ticks).into());
+            }
+            twin_checked.0 += 1;
+            twin_checked.1 = twin_checked.1.max(multi.bodies().len());
         }
         if let Some((car, _, wheel)) = lose_wheel.filter(|l| l.1 == multi.ticks) {
             let lost = multi.force_wheel_loss(car, wheel)?;
@@ -1177,6 +1205,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         race_order.extend(multi.cars.len()..entries.len());
         let order = grid_tools::drift::classification(entries, &race_order);
         println!("drift_results order={order:?}");
+    }
+    // On stderr: the identity check hashes standard output.
+    if serial_twin {
+        eprintln!(
+            "serial_twin ticks={} max_bodies={} threads={}",
+            twin_checked.0,
+            twin_checked.1,
+            grid_tools::parallel::threads()
+        );
     }
     for (i, car) in multi.cars.iter().enumerate() {
         let lap = car.lap.as_ref().unwrap();

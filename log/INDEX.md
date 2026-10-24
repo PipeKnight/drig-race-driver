@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F568](F0568.md) | 2026-10-24 | Derby frame rate measured against F561; debris contacts and lift_sunk on the compute pool, bit-identical |
 | [F567](F0567.md) | 2026-10-24 | Playable 7360a4865f54 with F563-F566, portable copy and APKs a2b4991d6817 |
 | [F566](F0566.md) | 2026-10-24 | Every broken piece on the phone tracks gets a draw: bundle roots, skinned damage meshes, suffixed names |
 | [F565](F0565.md) | 2026-10-24 | Detached panels are world bodies: 9EC9B0 part decisions in the simulation, cars collide with the panels |
@@ -470,6 +471,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G277](G0277.md) | 2026-10-24 | Integrate F568 main and verify the combined graphics tree |
 | [G276](G0276.md) | 2026-10-24 | Validate grouped smoke boundary on separately guarded BMW glass and lamps |
 | [G275](G0275.md) | 2026-10-24 | Measure current foliage eligibility across camera and shadow views without skipping draws |
 | [G274](G0274.md) | 2026-10-24 | Validate bounded direct smoke boundary before colour-transmittance accumulation |

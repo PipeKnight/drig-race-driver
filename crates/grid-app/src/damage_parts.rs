@@ -1032,6 +1032,7 @@ fn present(
     mut meshes: ResMut<Assets<Mesh>>,
     mut glass: Option<ResMut<crate::collision_sound::GlassBreaks>>,
 ) {
+    let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DamageParts);
     let damage = &mut *damage;
     for m in 0..damage.models.len() {
         if damage.models[m].layout.is_none() {
@@ -1443,6 +1444,7 @@ fn present_lost_wheels(
     mut parts: Query<(&crate::MovingPart, &mut Transform), Without<crate::OpponentPart>>,
     mut opponents: Query<(&crate::OpponentPart, &mut Transform), Without<crate::MovingPart>>,
 ) {
+    let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::DamageParts);
     let flight = |car: usize, wheel: Option<usize>, flies: bool| {
         let lost = damage.cars.get(car)?.wheels[wheel?].as_ref()?;
         flies.then(|| lost.matrix())

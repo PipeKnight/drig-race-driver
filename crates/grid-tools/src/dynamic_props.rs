@@ -38,6 +38,12 @@ const DESCRIPTOR_EC: f32 = 50.;
 /// track source (props, boundary, every road chunk).
 const TRACK_CONTACTS: usize = 8;
 const PAIR_CONTACTS: usize = 4;
+/// Spare pool slots after the parallel piece contacts for them to equal the
+/// serial ones: the largest capacity of one call (`Track::body_contacts`
+/// allows 16).
+const POOL_SLACK: usize = 16;
+/// Live pieces from which [`PropWorld::contacts`] may use the compute pool.
+const PARALLEL_PIECES: usize = 8;
 /// Pool slots added per live piece, up to the world bound.
 const SLOTS_PER_PIECE: usize = 12;
 /// AUTHORED: a piece this far below the lowest road chunk has tunnelled
@@ -1604,10 +1610,25 @@ impl PropWorld {
     /// leans on). Positive is below the road; pieces with no road under
     /// them are skipped.
     pub fn road_depths(&self, track: &Track, bodies: &[contact_groups::Body]) -> Vec<RoadDepth> {
-        let mut cache = grid_world::rectangle_cull::Cache::default();
-        let mut out = Vec::new();
-        for (spec, body, _) in self.parts() {
-            let Some(b) = bodies.get(body) else { continue };
+        self.depths(track, bodies, false)
+    }
+
+    /// [`Self::road_depths`], with `parallel` in one run of pieces per
+    /// compute thread (F568). Each cast is vertical, so the rectangle-cull
+    /// cache's plane order cannot change a result and a cache per piece gives
+    /// the same depths as one shared cache.
+    fn depths(&self, track: &Track, bodies: &[contact_groups::Body], parallel: bool) -> Vec<RoadDepth> {
+        let parts = self.parts();
+        let runs = if parallel && parts.len() >= PARALLEL_PIECES {
+            crate::parallel::threads().min(parts.len())
+        } else {
+            1
+        };
+        let per_run = parts.len().div_ceil(runs.max(1));
+        let depth = |k: usize| {
+            let (spec, body, _) = parts[k];
+            let mut cache = grid_world::rectangle_cull::Cache::default();
+            let b = bodies.get(body)?;
             let pose = body_pose(b);
             let centre = pose[3];
             let lowest = match spec.collider() {
@@ -1616,37 +1637,44 @@ impl PropWorld {
                     centre[1] - (half_height * a.abs() + radius * (1. - a * a).max(0.).sqrt())
                 }
                 convex_distance::Hull::Sphere { radius } => centre[1] - radius,
-                hull => match hull.world_bounds(pose, 0.) {
-                    Ok(bounds) => bounds[0][1],
-                    Err(_) => continue,
-                },
+                hull => hull.world_bounds(pose, 0.).ok()?[0][1],
             };
             let (start, end) = (centre[1] + 0.05, centre[1] - 100.);
-            let Some(hit) = track
+            let hit = track
                 .query([centre[0], start, centre[2], 1.], [centre[0], end, centre[2], 1.], &mut cache)
                 .ok()
-                .and_then(|q| q.hit)
-            else {
-                continue;
-            };
+                .and_then(|q| q.hit)?;
             let ground = start + (end - start) * hit.contact.fraction;
-            out.push(RoadDepth {
+            Some(RoadDepth {
                 body,
                 depth: ground - lowest,
                 centre: [centre[0], centre[1], centre[2]],
                 ground,
                 asleep: f(b, 0x400).to_bits() == contact_groups::ASLEEP,
-            });
-        }
-        out
+            })
+        };
+        crate::parallel::map(runs, runs > 1, |r| {
+            (r * per_run..((r + 1) * per_run).min(parts.len()))
+                .filter_map(depth)
+                .collect::<Vec<_>>()
+        })
+        .into_iter()
+        .flatten()
+        .collect()
     }
 
     /// AUTHORED (see [`SINK_TOLERANCE`]): lift every live piece and wheel
     /// whose hull ends the step more than the tolerance below the road under
     /// its centre back to that tolerance, and stop it moving further down.
-    /// Call after each committed step, after [`Self::hold_lost`].
-    pub fn lift_sunk(&self, track: &Track, bodies: &mut [contact_groups::Body]) -> Result<(), Error> {
-        for d in self.road_depths(track, bodies) {
+    /// Call after each committed step, after [`Self::hold_lost`]. With
+    /// `parallel` the depths come from the compute pool (same values).
+    pub fn lift_sunk(
+        &self,
+        track: &Track,
+        bodies: &mut [contact_groups::Body],
+        parallel: bool,
+    ) -> Result<(), Error> {
+        for d in self.depths(track, bodies, parallel) {
             if d.depth <= SINK_TOLERANCE || self.lost.contains_key(&d.body) {
                 continue;
             }
@@ -1694,6 +1722,13 @@ impl PropWorld {
     /// Fresh contacts of every live piece: track (packed road, boundary and
     /// enabled route props), other pieces and the given car hulls. None
     /// feeds break detection: only car contacts break route props.
+    ///
+    /// With `parallel`, each piece's contacts are generated on the compute
+    /// pool and joined in piece order (F568). They equal the serial ones when
+    /// the pool keeps [`POOL_SLACK`] spare slots after them: then no capacity
+    /// limited any call. Otherwise, or on an error, the serial pass runs, so
+    /// the result is always the serial result.
+    #[allow(clippy::too_many_arguments)]
     pub fn contacts(
         &self,
         track: &Track,
@@ -1702,8 +1737,8 @@ impl PropWorld {
         cars: &[CarHull<'_>],
         directions: &convex_distance::ContactSettings,
         remaining: usize,
+        parallel: bool,
     ) -> Result<Vec<contact_groups::Contact>, Error> {
-        let mut out = Vec::new();
         let parts = self.parts();
         let exclusion = self.exclusion();
         let poses = parts
@@ -1740,9 +1775,10 @@ impl PropWorld {
             })
             .collect();
         // World hulls on first use, with the largest centre-to-vertex reach.
-        let mut convexes: Vec<Option<(Convex, f32)>> = (0..parts.len()).map(|_| None).collect();
-        let hull = |convexes: &mut Vec<Option<(Convex, f32)>>, k: usize| {
-            if convexes[k].is_none() {
+        let convexes: Vec<std::sync::OnceLock<(Convex, f32)>> =
+            (0..parts.len()).map(|_| std::sync::OnceLock::new()).collect();
+        let hull = |k: usize| {
+            let (convex, reach) = convexes[k].get_or_init(|| {
                 let convex = Convex::new(parts[k].0, &poses[k]);
                 let reach = convex
                     .points
@@ -1757,20 +1793,26 @@ impl PropWorld {
                         dot3(d, d).sqrt()
                     })
                     .fold(0., f32::max);
-                convexes[k] = Some((convex, reach));
-            }
+                (convex, reach)
+            });
+            (convex, *reach)
         };
         // Each car's pose and bounds once per call, on first use.
-        let mut placed: Vec<Option<crate::body_geometry::Placed>> = vec![None; cars.len()];
-        for (k, &(spec, piece_body, piece_token)) in parts.iter().enumerate() {
+        let placed: Vec<std::sync::OnceLock<Result<crate::body_geometry::Placed, Error>>> =
+            (0..cars.len()).map(|_| std::sync::OnceLock::new()).collect();
+        let placed = &placed[..];
+        // Piece `k`'s contacts with `room0` pool slots left before it.
+        let piece = |k: usize, room0: usize| -> Result<Vec<contact_groups::Contact>, Error> {
+            let (spec, piece_body, piece_token) = parts[k];
+            let mut out = Vec::new();
             let query = convex_distance::ContactSettings {
                 margin: spec.shell,
                 directions: directions.directions,
             };
             let pose = poses[k];
-            let room = remaining - out.len();
+            let room = room0 - out.len();
             if room == 0 {
-                break;
+                return Ok(out);
             }
             let fixed = bodies
                 .get(piece_body)
@@ -1814,7 +1856,7 @@ impl PropWorld {
             };
             for j in later {
                 let (other_spec, other_body, other_token) = parts[j];
-                let room = remaining - out.len();
+                let room = room0 - out.len();
                 if room == 0 {
                     break;
                 }
@@ -1830,11 +1872,8 @@ impl PropWorld {
                 if dot3(d, d) > 3. * bound * bound {
                     continue;
                 }
-                hull(&mut convexes, k);
-                hull(&mut convexes, j);
-                let (Some((a, a_reach)), Some((b, b_reach))) = (&convexes[k], &convexes[j]) else {
-                    unreachable!("hulls built above");
-                };
+                let (a, a_reach) = hull(k);
+                let (b, b_reach) = hull(j);
                 // Each hull's face normals hold an orthonormal triple (box
                 // faces; prism cap and radials 90 degrees apart), so beyond
                 // sqrt(3) x the summed reach one of them already separates
@@ -1901,7 +1940,7 @@ impl PropWorld {
             }
             let mut world_hull = None;
             for (c, car) in cars.iter().enumerate() {
-                let room = remaining - out.len();
+                let room = room0 - out.len();
                 if room == 0 {
                     break;
                 }
@@ -1909,23 +1948,20 @@ impl PropWorld {
                 let capacity = room.min(TRACK_CONTACTS);
                 // The car's pose and bounds as `car_contacts_*` compute them
                 // first, once per car; skipped where those return before them.
-                let place = |placed: &mut Vec<Option<crate::body_geometry::Placed>>| {
-                    if placed[c].is_none() {
-                        placed[c] = Some(car.geometry.placed(body)?);
-                    }
-                    Ok::<_, Error>(placed[c].expect("placed above"))
+                let place = |placed: &[std::sync::OnceLock<Result<crate::body_geometry::Placed, Error>>]| {
+                    placed[c].get_or_init(|| car.geometry.placed(body)).clone()
                 };
                 let hits = if let Some(shape) = spec.round_shape(&pose) {
                     if capacity == 0 {
                         Vec::new()
                     } else {
-                        let at = place(&mut placed)?;
+                        let at = place(placed)?;
                         car.geometry.car_contacts_round_at(&at, &shape, capacity)?
                     }
                 } else if spec.triangles.is_empty() || spec.triangles.len() > 4096 || capacity == 0 {
                     Vec::new()
                 } else {
-                    let at = place(&mut placed)?;
+                    let at = place(placed)?;
                     // The hull's bounds lie within its reach of the centre:
                     // a car clear of that box is clear of the hull's bounds,
                     // where `car_contacts_hull` returns nothing.
@@ -1949,6 +1985,28 @@ impl PropWorld {
                     ));
                 }
             }
+            Ok(out)
+        };
+        if parallel && parts.len() >= PARALLEL_PIECES && crate::parallel::threads() > 1 {
+            let lists = crate::parallel::map(parts.len(), true, |k| piece(k, remaining));
+            let total = lists
+                .iter()
+                .try_fold(0usize, |n, l| l.as_ref().ok().map(|l| n + l.len()));
+            if total.is_some_and(|n| n + POOL_SLACK <= remaining) {
+                let mut out = Vec::with_capacity(total.unwrap_or(0));
+                for list in lists {
+                    out.extend(list?);
+                }
+                return Ok(out);
+            }
+        }
+        let mut out = Vec::new();
+        for k in 0..parts.len() {
+            let room0 = remaining - out.len();
+            if room0 == 0 {
+                break;
+            }
+            out.extend(piece(k, room0)?);
         }
         Ok(out)
     }

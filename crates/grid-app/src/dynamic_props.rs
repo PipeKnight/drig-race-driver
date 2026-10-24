@@ -181,6 +181,7 @@ pub(crate) fn present(
     mut pieces: Query<(&PropPiece, &mut Transform, &mut Visibility), Without<IntactProp>>,
     mut logged: Local<usize>,
 ) {
+    let _timer = grid_tools::perf::Timer::start(grid_tools::perf::Stage::PropPresent);
     let Some(driving) = driving else {
         return;
     };

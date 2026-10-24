@@ -30,13 +30,26 @@ pub enum Stage {
     WorldAdvance,
     /// Prop detection, body events, lap timing and the commit.
     Commit,
+    /// Of the commit: the prop world's clone, detection, breaks and posts.
+    PropCommit,
+    /// Of the prop commit: `PropWorld::lift_sunk` (F564).
+    LiftSunk,
+    /// `loose_panel::settle` (F565), after the commit.
+    PanelSettle,
+    /// Every car's loose-part rules (`detach_wheels`, `Parts::step`) and
+    /// the new loose bodies (`add_loose_wheels`).
+    LooseParts,
+    /// grid-app `damage_parts::present` and `present_lost_wheels`.
+    DamageParts,
+    /// grid-app `dynamic_props::present` (piece transforms).
+    PropPresent,
     /// The main schedule, First to Last (grid-app).
     MainSchedule,
     /// The render schedule, extract commands to the end of rendering (grid-app).
     RenderSchedule,
 }
 
-const STAGES: [Stage; 11] = [
+const STAGES: [Stage; 17] = [
     Stage::DriveTick,
     Stage::AiDrivers,
     Stage::WorldTick,
@@ -46,12 +59,18 @@ const STAGES: [Stage; 11] = [
     Stage::PieceContacts,
     Stage::WorldAdvance,
     Stage::Commit,
+    Stage::PropCommit,
+    Stage::LiftSunk,
+    Stage::PanelSettle,
+    Stage::LooseParts,
+    Stage::DamageParts,
+    Stage::PropPresent,
     Stage::MainSchedule,
     Stage::RenderSchedule,
 ];
 
-static TOTALS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
-static COUNTS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+static TOTALS: [AtomicU64; STAGES.len()] = [const { AtomicU64::new(0) }; STAGES.len()];
+static COUNTS: [AtomicU64; STAGES.len()] = [const { AtomicU64::new(0) }; STAGES.len()];
 
 /// Whether timing is on (`GRID_PERF_TIMING` set at the first query).
 pub fn enabled() -> bool {
