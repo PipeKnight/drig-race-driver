@@ -1,6 +1,6 @@
 # Crowd animation resources and packet evaluation
 
-Crowd animation is researched at the resource and ordinary packet-evaluator level; the playable renderer still omits the crowd subsystem and cloth, and faithful animated poses are not yet verified.
+Crowd animation is researched at the resource, local timer and ordinary packet-dispatch level; the playable renderer still omits the crowd subsystem and cloth, and faithful animated poses are not yet verified.
 
 Recorded 23 October 2026. Independently authored findings; no original pseudocode, asset payloads, matrices, key samples, textures or captures are included. Detailed purchased-data checks remain in ignored private evidence.
 
@@ -142,3 +142,28 @@ Together with0x00762710 this supports a small private CPU behavior draft with ca
 Two selected saved camera-flash shader programs now close the vertex-scalar ambiguity: the vertex program uses XYZ for projection, forwards the fourth position component as opacity and preserves UVs. The fragment program samples the source flash texture, preserves its RGB and multiplies its alpha by that opacity. The saved ordinary pass then adds the result with source-alpha/one blending. This is an unlit texture effect rather than an emitted scene light. Runtime setup0x00762370 resolves the dedicated camera_flash group and texture binding, connecting the earlier CPU producer with this selected saved consumer. Actual live variant/overrides, colour-space handling, index winding and caller-axis/clock/attachment details remain unverified.
 
 Selected VP SHA:f2399e34d331d9c3d83238afcdd532b6bd6f09337637ccd8bbd127681b54e920; FP SHA:202ea16028955f875ab99ecaf00010786446220f4325cd6c3f3c19f660c57690. Evidence remains private under local/handoff/drafts/stadium-crowd01/.
+
+## Source stance sway accumulator (G259)
+
+Bounded assembly identifies 0x007595B0 as the upper-corner sway phase updater. It adds saved swaySpeed times an incoming scalar to the phase, repeatedly subtracts 360 above 360 or adds 360 below zero, then calls the existing corner writer. Exactly 360 is retained. The incoming scalar is forwarded through the identified controller wrapper; its wall-clock origin is not established. This is independent of skeletal arm animation.
+
+## Source animation timer continuation (G259, 24 October 2026)
+
+One targeted shared-master decompile identifies the confirmed animation timer's absolute input setter/remapper at `0x00ACA930`. It retains requested input separately from mapped output and uses configured input extent, output span/offset and repeat count. The finite-count branch retains the final endpoint, with no general beyond-end clamp. Its integer conversion truncates toward zero; a generic nearest-rounded or normalized modulo implementation would not reproduce that contract.
+
+Bounded assembly separately identifies `0x00ACAC50` as the delta accumulator with enable/stop flags. This distinguishes remapping from advancement, but establishes neither wall-clock seconds nor the actual crowd playback configuration. The upstream caller and mapped-output-to-pose consumer remain unverified. Source corner sway also has its own phase accumulator; it is independent of skeletal arm animation.
+
+Private evidence: `local/handoff/drafts/stadium-crowd01/animation-timer-note-02.md`, `animation-timer-contract-02.json` and bounded ASM. The independently authored Python examples exercise arithmetic distinctions only; no native execution, animation integration or rendered parity is claimed.
+
+## Crowd controller timer/evaluation connection
+
+A targeted shared-master decompile of `0x0074F720` connects the selected controller timer to an evaluation entry. Both modes advance the same timer with the incoming scalar unchanged, then pass its mapped output to `0x00AC3D90`. One mode evaluates a primary pair; another evaluates two selected pairs at that same mapped time before combination. The result is forwarded to a virtual consumer. This establishes ordering and data flow, without identifying the pair's concrete clip/binding types or proving the downstream packet and local-pose consumer.
+
+No wall-clock conversion is established here. The common evaluation entry is described below; the binding and local-pose consumer remain unverified. Private evidence and field distinctions are recorded in `local/handoff/drafts/stadium-crowd01/animation-evaluation-note-03.md`. No skeletal animation implementation or rendered parity is claimed.
+
+
+## Timer to ordinary packet dispatch
+
+One targeted shared-master decompile of `0x00AC3D90` closes the local timer-to-packet bridge. The selected controller's mapped timer output is passed unchanged through a packet traversal to virtual slot +0x34. Previously confirmed ordinary S4/L4 vtables resolve that slot to the recovered interpolation functions. The traversal clears output weights before dispatch, rather than clearing every stored float4 value; channels left at zero weight must not become valid pose data merely because old values remain in memory.
+
+This connects the recovered local stages when the selected packet has the confirmed ordinary class. Actual crowd clip selection and clock units, full binding semantics, layer combination and the final bound-slot-to-local-pose consumer remain unresolved. No faithful arm animation or rendered parity is claimed. Private evidence is recorded in `local/handoff/drafts/stadium-crowd01/animation-packet-dispatch-note-04.md`.
