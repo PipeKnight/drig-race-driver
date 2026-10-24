@@ -1031,6 +1031,7 @@ impl MultiRuntime {
                     &hulls,
                     geometry[0].query(),
                     remaining - out.len(),
+                    parallel,
                 )?;
                 piece_contacts = more.len();
                 out.extend(more);
@@ -1073,11 +1074,14 @@ impl MultiRuntime {
         let mut shapes = None;
         let mut props_next = None;
         if let Some(current) = &self.props {
+            let _prop_timer = crate::perf::Timer::start(crate::perf::Stage::PropCommit);
             let mut next = current.clone();
             next.detect(&world.groups.contacts, &recorded, &world.groups.bodies);
             let mut changed = self.shapes.clone();
             next.hold_lost(&mut world.groups.bodies, self.cars[0].track.bounds()[1]);
-            next.lift_sunk(&self.cars[0].track, &mut world.groups.bodies)?;
+            let lift_timer = crate::perf::Timer::start(crate::perf::Stage::LiftSunk);
+            next.lift_sunk(&self.cars[0].track, &mut world.groups.bodies, self.parallel)?;
+            drop(lift_timer);
             let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
             // 0x7C4830: the phantom posts after the step and the breaks.
             next.post_touches.clear();
@@ -1257,6 +1261,7 @@ impl MultiRuntime {
             .collect();
         // Detached panels standing on an edge are turned over (AUTHORED).
         if let Some(props) = &self.props {
+            let _settle_timer = crate::perf::Timer::start(crate::perf::Stage::PanelSettle);
             let track = &self.cars[0];
             if crate::loose_panel::settle(
                 props,
@@ -1274,6 +1279,7 @@ impl MultiRuntime {
         }
         // The loose-part rules of every car still in the world; a lost wheel
         // or a detached panel becomes a body of the shared world.
+        let _parts_timer = crate::perf::Timer::start(crate::perf::Stage::LooseParts);
         for i in 0..n {
             if self.retired[i].is_none() {
                 let impacts = self.impacts(i);

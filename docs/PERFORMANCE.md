@@ -1034,3 +1034,100 @@ compare fixed heights.
 `dynamic_height_ignores_a_main_thread_bound_frame`. On the desktop with `GRID_MOBILE_PRESET=1
 GRID_PERF_TEST=auto`: 8 UI roots moved to the window at 720 rows and back at native, with no panic.
 The desktop never runs late, so no dynamic change was exercised live; the phone log will show it.
+
+## Demolition derby frame rate and parallel debris (F568)
+
+Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,
+RTX 4070, i7-12700): "FPS стало заметно меньше. Мы распределяем операции между ядрами процессора?"
+
+**The owner's two derby logs [O]:**
+- `local/r33/manual-24447-19896.log` (main checkout; F561-era build, logged `revision=unversioned`):
+  about 145-155 FPS in the race. `present_mode=Fifo`, and it did not load `local\settings.ini`.
+- `local/playtest/manual-30625-23044.log` (7360a4865f54-dirty): mean 112 FPS, 95-130 with dips to
+  70. It loaded `local\settings.ini`: `present_mode = auto_no_vsync` and the FPS counter on.
+- The lower rate starts at the green light, before the first prop break (tick 2295). Both runs
+  logged `dynamic_props breakables=91 drawn_pieces=322`.
+
+**Matched measurement, this PC, offscreen** (`--resolution 2560x1369 --render ... --drive-ticks 3600
+--throttle 0.6 --steering 0 --benchmark-frames 2400`, `GRID_PERF_TIMING=1`). F561 = 99fef6aca274;
+current = c52097d3 plus the timers below. Three alternating runs each, taken while no other cargo
+build held the build lock:
+
+| ms | F561 | current |
+|---|---|---|
+| `DriveTick` per tick | 1.46-1.57 | 1.84-1.94 (+0.38, +25 %) |
+| `MainSchedule` per frame | 3.63-3.88 | 4.09-4.24 |
+| `RenderSchedule` per frame | 6.12-6.41 | 6.17-6.32 |
+| `DamageParts` (new timer) | - | 0.055 |
+| `PropPresent` (new timer) | - | 0.003 |
+
+The offscreen run is paced at about 60 Hz (mean frame 17 ms either way), so it gives stage times,
+not a frame rate. The scripted run breaks no prop; the current build has 14 detached panels as bodies.
+
+- Only the simulation got more expensive: the F565 panels as bodies, F564's `lift_sunk` and the
+  piece contacts they bring. Presentation (`damage_parts`, piece transforms) and the render schedule
+  did not change.
+- [I] At the owner's 0.55 ticks per frame, +0.38 ms per tick is about +0.2 ms per frame. That is too
+  small for 145 -> 112 FPS (6.9 -> 8.9 ms). The render schedule (6.2 ms) is longer than the main
+  schedule (4 ms) here.
+- [I] Two other differences between the runs are larger candidates.
+  - The present mode: Fifo -> AutoNoVsync, from the settings file that only the second run loaded.
+  - Load from other processes. While I measured, other sessions' cargo builds made the same run
+    3x slower (`DriveTick` 5.5 instead of 1.85 ms), and builds were running when the owner played.
+- The FPS counter costs nothing measurable (offscreen A/B).
+- Not measured: the owner's windowed run with each present mode on an idle PC. That needs a window,
+  which this session must not open.
+
+**Headless derby with breakable props** (`GRID_DYNAMIC_PROPS=1 grid-opponent-race ... --route
+tracks/usa/detroit/route_8 --demolition --cars stk 12 3000 ai`, serial). The F561 race breaks
+nothing in 3000 ticks. The current race breaks 8 stacks at tick 1697; F565 makes the race diverge.
+- F561: world tick 3.2-3.8 ms, 12 bodies.
+- Current: 4.8-4.9 ms, 48.7 bodies and 71.6 piece contacts on average.
+  - `PieceContacts` 0.37 ms.
+  - `LiftSunk` 0.16 ms (one cast per piece and wheel every tick).
+  - `PanelSettle` 0.008 ms.
+  - `LooseParts` 0.01 ms.
+
+**New timers** (grid-tools `perf::Stage`, `GRID_PERF_TIMING` only):
+- `PropCommit`: the prop world's clone, detection, breaks and posts.
+- `LiftSunk`.
+- `PanelSettle`.
+- `LooseParts`: `detach_wheels`, `Parts::step` and the new loose bodies.
+- grid-app: `DamageParts` and `PropPresent`.
+
+**Parallel debris (F568):**
+- `PropWorld::contacts`:
+  - Each piece's contacts (track, later pieces, car hulls) are generated on the compute pool
+    (`grid_tools::parallel::map`) and joined in piece order.
+  - Hulls and car placements are built once per call behind `OnceLock`s.
+  - The parallel lists equal the serial ones when the pool keeps 16 spare slots after them
+    (`POOL_SLACK`, the largest capacity of one call), so no room-limited capacity applied.
+    Otherwise, or on any error, the serial pass runs.
+  - It applies from 8 live pieces (`PARALLEL_PIECES`).
+- `PropWorld::lift_sunk`: the road depths are computed in one run of pieces per thread. Each cast is
+  vertical, so the rectangle-cull cache's plane order cannot change a result.
+- `MultiRuntime::parallel` switches both (the serial twin turns it off). The solo `Runtime` passes
+  `true`.
+- Not done: per-island solving. `WorldAdvance` is 0.5 ms per tick with 110 pieces, for all bodies
+  together.
+
+**Identity [V]:**
+- `derby-df` (no dynamic props) still gives `166c2d18…` (tools/identity.tsv).
+- `GRID_SERIAL_TWIN=1` (new, grid-opponent-race) runs every tick also on a serial clone. It compares
+  every body word, each car's vehicle, physical and frame records, and the break count.
+  - Derby with props, 12000 ticks requested (the race ends at 8174): `serial_twin ticks=8174
+    max_bodies=183 threads=20`, 16 breaks, 137 pieces, no difference.
+- The current and parallel builds print identical outputs: derby `e9011d21…`, drift `bb1661c7…`.
+
+**Effect** (headless with dynamic props, two alternating runs each):
+
+| | threads | current | F568 |
+|---|---|---|---|
+| Detroit derby, 8174 ticks, 110 pieces | 20 | world tick 2.00 ms, `PieceContacts` 0.36, `LiftSunk` 0.225 | 1.61-1.74 ms, 0.14, 0.12 |
+| same | 4 (phone) | 1.98-2.00 ms | 1.56-1.63 ms |
+| Nürburgring drift battle, 8 bmw, 9000 ticks, 48 pieces | 4 (phone) | 1.15-1.22 ms, `PieceContacts` 0.25 | 0.95-1.02 ms, 0.08-0.09 |
+
+- [I] The phone runs the same work about 3x slower than this PC. That makes about 1.2 ms less per
+  tick in a derby full of debris, and 0.6 ms less in the drift battle.
+- In the scripted grid-app run (14 pieces, no break) the change is within noise: `DriveTick`
+  1.79-1.81 against 1.81-1.82 ms.

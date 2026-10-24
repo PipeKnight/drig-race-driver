@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F568](log/F0568.md) | 2026-10-24 | Derby frame rate measured against F561; debris contacts and lift_sunk on the compute pool, bit-identical |
 | [F567](log/F0567.md) | 2026-10-24 | Playable 7360a4865f54 with F563-F566, portable copy and APKs a2b4991d6817 |
 | [F566](log/F0566.md) | 2026-10-24 | Every broken piece on the phone tracks gets a draw: bundle roots, skinned damage meshes, suffixed names |
 | [F565](log/F0565.md) | 2026-10-24 | Detached panels are world bodies: 9EC9B0 part decisions in the simulation, cars collide with the panels |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F510](log/F0510.md) | 2026-10-20 | Chase drift blend weight read from the car (car +0xFE0, 0 for every shipped car); the bonnet's 4.7 mm forward residual was capture sampling |
 | [F509](log/F0509.md) | 2026-10-20 | Close-drift flags break into a static base and a phantom pole post |
 | [F508](log/F0508.md) | 2026-10-20 | Bonnet camera shake: the speed-gated bob of the Mounted views, from a deterministic noise table |
-| [F507](log/F0507.md) | 2026-10-20 | Career: the Le Mans selection events are offered, with their multi-class fields, so class positions and routine B run in the app |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
