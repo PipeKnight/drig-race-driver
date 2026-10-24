@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G271](G0271.md) | 2026-10-24 | Validate bounded neutral colour-transmittance composition plumbing |
 | [G270](G0270.md) | 2026-10-24 | Reject duplicate-input tree expansion remap on actual Donington sources |
 | [G269](G0269.md) | 2026-10-24 | Admit exact observed animation packet leaves in PSSG trees |
 | [G268](G0268.md) | 2026-10-24 | Measure practical foliage key reuse during actual driving |

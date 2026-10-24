@@ -64,6 +64,7 @@ mod mesh_stream;
 mod mobile;
 mod motion_capture;
 mod skid_phase_ledger;
+mod smoke_ct_neutral;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
 mod temporal_colour;
@@ -1442,6 +1443,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut skid_order = skid_marks::OrderMode::Off;
     let mut skid_reflectance = None;
     let mut motion_phase_map = false;
+    let mut smoke_ct = smoke_ct_neutral::Mode::Off;
     let mut crowd_preview = crowd_preview::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
@@ -1914,6 +1916,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--motion-phase-map" => motion_phase_map = true,
+            "--smoke-ct" => {
+                smoke_ct = smoke_ct_neutral::Mode::parse(&args.next().ok_or("--smoke-ct needs off or neutral")?)?;
+            }
             "--window-phase-audit" => {
                 window_phase_target = Some(window_phase_audit::Target::parse(
                     &args.next().ok_or("--window-phase-audit needs tick:N or frame:N")?,
@@ -2129,6 +2134,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
+                println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
                 println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
@@ -2332,6 +2338,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if skid_order == skid_marks::OrderMode::GroundFirst && !motion_phase_map {
         return Err("--skid-order ground-first requires the exact bounded Derby --motion-phase-map pilot".into());
+    }
+    if smoke_ct != smoke_ct_neutral::Mode::Off
+        && (!motion_phase_map || skid_order != skid_marks::OrderMode::GroundFirst)
+    {
+        return Err("--smoke-ct neutral requires the exact bounded --motion-phase-map GroundFirst pilot; smoke remains in its existing phase".into());
     }
     if motion_phase_map {
         let mut diagnostics = settings::diagnostics().clone();
@@ -3601,6 +3612,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let path = app.world().resource::<Capture>().path.clone();
         skid_phase_ledger::install(&mut app, &path, skid_order)?;
     }
+    if smoke_ct != smoke_ct_neutral::Mode::Off {
+        let path = app.world().resource::<Capture>().path.clone();
+        smoke_ct_neutral::install(&mut app, smoke_ct, Some(&path))?;
+    }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();
         window_phase_audit::install(&mut app, target, &path)?;
@@ -4234,6 +4249,7 @@ fn capture(
     graphics: Res<graphics::Settings>,
     motion: Option<Res<motion_capture::Motion>>,
     motion_phase: Option<Res<skid_phase_ledger::Audit>>,
+    smoke_ct: Option<Res<smoke_ct_neutral::Audit>>,
     temporal: Option<Res<temporal_audit::Audit>>,
     oit_capacity: Option<Res<oit_capacity_audit::Audit>>,
     #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
@@ -4283,6 +4299,9 @@ fn capture(
     let colour_ready = colour.as_ref().is_none_or(|audit| audit.ready());
     #[cfg(not(feature = "dlaa"))]
     let colour_ready = true;
+    if smoke_ct.as_ref().is_some_and(|audit| audit.failed()) {
+        exit.write(AppExit::error()); return;
+    }
     if oit_capacity.as_ref().is_some_and(|audit| audit.failed()) {
         exit.write(AppExit::error()); return;
     }
@@ -4321,6 +4340,7 @@ fn capture(
         && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
         && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
         && motion_phase.as_ref().is_none_or(|audit| audit.ready())
+        && smoke_ct.as_ref().is_none_or(|audit| audit.ready())
     {
         capture.requested = true;
         let path = capture.path.clone();
