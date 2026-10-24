@@ -730,3 +730,10 @@ black source texels. The grouped boundary also preserves intra-smoke group order
 These facts provide a targeted next check, not pixel attribution of0090rings or a
 proved remedy. The cached smokeHalf colour/transmittance contract must not be
 silently assigned to the distinct unlit-half-depth family.
+
+## G277: combined F568 regression (24 October 2026)
+
+- Independent offline comparison actual-compare01/comparison.json003e6af5bda3709c07506fe1126bf37289f04dce3184beb8a4061bf34f0b8968 reparses all90/120 phases, surfaces and restoration transactions. Across G276→G277 all recorded requests/traces/camera/semantic phase+cover fields/actual Extract stamps/views and same-arm inputs/argv match. Raw pixels are not completely identical: BMW Off89/90sequence exact plus one final pixel/max9; grouped89/90+final exact(one sequence pixel/max1). Derby Off114/120+finalexact(7sequence pixels/max43), grouped113/120+finalexact(10pixels/max21). Alpha exact throughout. These unresolved differences remain evidence, not automatically noise or strict rendering equivalence. New within-build treatment has0/90 BMW exact and50/120 Derby exact/max82, retaining intended cover attenuation.
+- Fresh fetch finds F5698cceee2b changes only release-state docs/log/index since compiled F5683cdbf523. Merge these docs separately without rebuilding unchanged production; all21 frozen source SHA still match after validation. Root post-validation-source-proof.json records this boundary. No old/new performance improvement asserted. Completed-capture dedup BMW0 and Derby50files/0.09GiB/errors0.
+
+The combined baseline artifact is private `local/graphics/f568-graphics01/grid-bmw-smoke-boundary.exe` (SHA7b876cb1d673921184f75c567dee756203971001bf53ef304eeca6033a3e5233). Both paired renderers finish0 with separate exact BMW90 and implicit Derby120 guards. This validates the bounded experiment after integration; damaged/general vehicles, original half-resolution compositor and dark wheel rings remain open. Ordinary launchers were not changed.

@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G277 (2026-10-24): F568 main integrated; combined1028tests/Clippy/4physics identities/24soak and fresh BMW90/Derby120 GPU pairs pass. Recorded simulation/phase controls match G276; sparse unresolved pixel differences retained. F569 docs merged separately; dark wheel rings remain open, defaults/playable unchanged.
 - G276 (2026-10-24): separately guarded BMW90 smoke boundary passes373app tests/Clippy, both90-frame GPU controls and same-exe Derby120 regression. Dense-cloud rear-glass/lens/skid ghosts attenuate with all17surfaces/physics preserved; dark wheel rings and damaged/general coverage remain open. DefaultOff/playable unchanged.
 - G275 (2026-10-24): bounded default-off current camera/shadow foliage observer passes365app tests/Clippy. Moving controls have matching traces and zero hidden CPU-union visits with six probe views;150/151images exact, eight pixels unresolved despite exact Off repeat. Extra OSD camera invalidates private runner inventory assumption; original failure retained, no skip/FPS/default promotion.
 - G274 (2026-10-24): default-off grouped-direct smoke boundary passes357app tests/Clippy and same-build120-frame GPU/stage/restoration proof. Native0065 driver safety net now attenuates through smoke;0074/0090 unchanged and dark wheel rings/BMW remain open. No default/playable or source-halfres promotion.
@@ -129,6 +130,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F569](log/F0569.md) | 2026-10-24 | Playable 9c1bfe65e68f with F567-F568, portable copy and APKs 3cdbf523a7f0 |
 | [F568](log/F0568.md) | 2026-10-24 | Derby frame rate measured against F561; debris contacts and lift_sunk on the compute pool, bit-identical |
 | [F567](log/F0567.md) | 2026-10-24 | Playable 7360a4865f54 with F563-F566, portable copy and APKs a2b4991d6817 |
 | [F566](log/F0566.md) | 2026-10-24 | Every broken piece on the phone tracks gets a draw: bundle roots, skinned damage meshes, suffixed names |
@@ -188,7 +190,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F511](log/F0511.md) | 2026-10-20 | Window glass sounds: WindScreen/Window Crack and Smash when a window cracks or smashes |
 | [F510](log/F0510.md) | 2026-10-20 | Chase drift blend weight read from the car (car +0xFE0, 0 for every shipped car); the bonnet's 4.7 mm forward residual was capture sampling |
 | [F509](log/F0509.md) | 2026-10-20 | Close-drift flags break into a static base and a phantom pole post |
-| [F508](log/F0508.md) | 2026-10-20 | Bonnet camera shake: the speed-gated bob of the Mounted views, from a deterministic noise table |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
