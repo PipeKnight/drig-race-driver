@@ -21,6 +21,7 @@ pub(crate) enum OrderMode {
     Off,
     Control,
     Isolated,
+    GroundFirst,
 }
 impl OrderMode {
     pub(crate) fn parse(value: &str) -> Result<Self, &'static str> {
@@ -28,8 +29,12 @@ impl OrderMode {
             "off" => Ok(Self::Off),
             "control" => Ok(Self::Control),
             "isolated" => Ok(Self::Isolated),
-            _ => Err("--skid-order needs off, control or isolated"),
+            "ground-first" => Ok(Self::GroundFirst),
+            _ => Err("--skid-order needs off, control, isolated or ground-first"),
         }
+    }
+    pub(crate) fn sort_bias(self) -> f32 {
+        match self { Self::Off | Self::Control => 50., Self::Isolated => 0., Self::GroundFirst => -1024. }
     }
 }
 
@@ -43,7 +48,7 @@ pub(crate) fn parse_reflectance(value: &str) -> Result<f32, &'static str> {
 }
 
 // StandardMaterial.depth_bias sets BOTH a transparent sort offset and raster
-// depth bias. This extension keeps raster constant50 while permitting sort0.
+// depth bias. This extension keeps raster constant50 while permitting bounded diagnostic sort offsets.
 // No vertex/fragment override: use the stock StandardMaterial PBR shaders.
 type SkidOrderMaterial = ExtendedMaterial<StandardMaterial, SkidRasterBias>;
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
@@ -80,7 +85,7 @@ fn restore_raster_constant(descriptor: &mut RenderPipelineDescriptor, constant: 
 
 fn extended_order_material(mut base: StandardMaterial, mode: OrderMode) -> SkidOrderMaterial {
     debug_assert_ne!(mode, OrderMode::Off);
-    base.depth_bias = if mode == OrderMode::Control { 50. } else { 0. };
+    base.depth_bias = mode.sort_bias();
     SkidOrderMaterial {
         base,
         extension: SkidRasterBias { marker: Vec4::ZERO, raster_constant: 50 },
@@ -414,7 +419,7 @@ pub(crate) fn install(app: &mut App, root: &Path, mode: OrderMode, reflectance: 
         app.add_plugins(MaterialPlugin::<SkidOrderMaterial>::default());
     }
     println!("skid_order mode={mode:?} raster_constant=50 sort_bias={} source_parity=false",
-        if mode == OrderMode::Isolated { 0 } else { 50 });
+        mode.sort_bias());
     app.insert_resource(Pending { profile, diffuse, mode, reflectance })
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, lay.after(super::wheel_ground::update))

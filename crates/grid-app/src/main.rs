@@ -1896,7 +1896,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             "--skid-order" => {
                 skid_order = skid_marks::OrderMode::parse(
-                    &args.next().ok_or("--skid-order needs off, control or isolated")?,
+                    &args.next().ok_or("--skid-order needs off, control, isolated or ground-first")?,
                 )?;
             }
             "--smoke-order" => {
@@ -2125,10 +2125,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
                 println!("--crowd-preview off|control|static-billboards: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture, PBR adaptation, no animation/flash or source parity.");
-                println!("--motion-phase-map: default absent; exact baseline Derby Isolated350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
+                println!("--motion-phase-map: default absent; exact baseline Derby Isolated|GroundFirst350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
-                println!("--skid-order off|control|isolated: bounded baseline sort/raster diagnostic; isolated sort0, raster50; physics/emission/atlas unchanged.");
+                println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
                 println!("--window-phase-audit tick:N|frame:N: default-off one-main-view transparent-order log before batching; rendered LOD0 reference or bounded drive on supported cars/routes; writes CAPTURE-window-phase.txt under ignored local/.");
@@ -2330,6 +2330,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         || std::env::var_os("GRID_PERF_TIMING").is_some()) {
         return Err("--skid-reflectance requires --skid-order isolated and its bounded rendered baseline ground-effects/noPERF/compositorOff domain; no GRID_PERF_TIMING".into());
     }
+    if skid_order == skid_marks::OrderMode::GroundFirst && !motion_phase_map {
+        return Err("--skid-order ground-first requires the exact bounded Derby --motion-phase-map pilot".into());
+    }
     if motion_phase_map {
         let mut diagnostics = settings::diagnostics().clone();
         diagnostics.ground_trace = false; // Existing CPU trace is permitted; no timing claims.
@@ -2338,7 +2341,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             || output.is_none() || headless || collision || from_menu || lod != "LOD0_"
             || route.path() != "tracks/usa/detroit/route_8" || route.subroute() != 0
             || player_car.stem() != "stk" || discipline.as_deref() != Some("demolition_derby")
-            || skid_order != skid_marks::OrderMode::Isolated || skid_reflectance.is_some()
+            || !matches!(skid_order, skid_marks::OrderMode::Isolated | skid_marks::OrderMode::GroundFirst) || skid_reflectance.is_some()
             || smoke_order != tyre_smoke::SmokeOrder::Groups || smoke_compositor != smoke_compositor::Mode::Off
             || window_phase_target.is_some() || oit_capacity_target.is_some()
             || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
@@ -2349,7 +2352,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             || !scripted.throttle.is_finite() || !scripted.steering.is_finite()
             || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
             || graphics.width != 1920 || graphics.height != 1080
-        { return Err("--motion-phase-map requires the bounded native baseline Derby stk/Isolated350,120/fps30/900ticks Groups pilot, no other captures/audits/controls/PERF".into()); }
+        { return Err("--motion-phase-map requires the bounded native baseline Derby stk/Isolated|GroundFirst350,120/fps30/900ticks Groups pilot, no other captures/audits/controls/PERF".into()); }
     }
     if smoke_order == tyre_smoke::SmokeOrder::Sprites && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
@@ -3596,7 +3599,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if motion_phase_map {
         let path = app.world().resource::<Capture>().path.clone();
-        skid_phase_ledger::install(&mut app, &path)?;
+        skid_phase_ledger::install(&mut app, &path, skid_order)?;
     }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();

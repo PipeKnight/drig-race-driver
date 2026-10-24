@@ -80,8 +80,29 @@ impl RelevantItems {
         if skid { self.skids+=1; } else { self.smoke+=1; } Ok(())
     }
 }
+// This check proves only main-view CPU phase priority, not smoke fragment coverage.
+fn expected_bias(mode: super::skid_marks::OrderMode) -> Result<f32, &'static str> {
+    use super::skid_marks::OrderMode;
+    match mode { OrderMode::Isolated => Ok(0.), OrderMode::GroundFirst => Ok(-1024.),
+        _ => Err("mapped skid pilot accepts only Isolated or GroundFirst") }
+}
+fn priority_margin(require_before: bool, skid: (usize,f32), smoke: &[(usize,f32)]) -> Result<Option<f32>, &'static str> {
+    if !skid.1.is_finite() || smoke.iter().any(|(_,key)| !key.is_finite()) {
+        return Err("nonfinite skid/smoke priority key");
+    }
+    let mut minimum: Option<f32>=None;
+    for &(rank,key) in smoke {
+        let margin=key-skid.1;
+        if !margin.is_finite() {return Err("nonfinite skid/smoke priority margin");}
+        if require_before && (rank<=skid.0 || margin<=0.) {
+            return Err("GroundFirst does not strictly precede every queued smoke draw");
+        }
+        minimum=Some(minimum.map_or(margin,|m|m.min(margin)));
+    }
+    Ok(minimum) // None: no queued smoke, not eligible layering/fragment evidence.
+}
 #[derive(Resource, Clone)]
-pub(crate) struct Audit { state: Arc<Mutex<State>>, output: Arc<Mutex<File>> }
+pub(crate) struct Audit { state: Arc<Mutex<State>>, output: Arc<Mutex<File>>, expected_bias: f32, require_before: bool }
 impl Audit {
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|p| { let mut s=p.into_inner(); s.error=Some("ledger lock poisoned".into()); s })
@@ -109,7 +130,9 @@ struct Selected { index: usize, entity: Entity, frame: u32, tick: u64, camera: E
 #[derive(Resource, Default)]
 struct Snapshot { audit: Option<Audit>, shot: Option<Selected>, names: HashMap<Entity,(String,bool)> }
 
-pub(crate) fn install(app: &mut App, capture: &Path) -> std::io::Result<()> {
+pub(crate) fn install(app: &mut App, capture: &Path, mode: super::skid_marks::OrderMode) -> std::io::Result<()> {
+    let bias=expected_bias(mode).map_err(std::io::Error::other)?;
+    let require_before=mode==super::skid_marks::OrderMode::GroundFirst;
     if app.get_sub_app(RenderApp).is_none() { return Err(std::io::Error::other("skid phase ledger requires renderer")); }
     let local=Path::new("local").canonicalize()?;
     let parent=capture.parent().ok_or_else(|| std::io::Error::other("capture parent absent"))?.canonicalize()?;
@@ -118,12 +141,12 @@ pub(crate) fn install(app: &mut App, capture: &Path) -> std::io::Result<()> {
     let mut file=OpenOptions::new().write(true).create_new(true).open(&output)?;
     writeln!(file,"skid_phase version=1 status=pending expected={COUNT} scope=sorted-CPU-phase-before-batching")?;
     file.flush()?;
-    app.insert_resource(Audit { state: Arc::new(Mutex::new(State::new(COUNT))), output: Arc::new(Mutex::new(file)) })
+    app.insert_resource(Audit { state: Arc::new(Mutex::new(State::new(COUNT))), output: Arc::new(Mutex::new(file)), expected_bias: bias, require_before })
         .add_systems(Update,publish);
     app.get_sub_app_mut(RenderApp).expect("renderer checked")
         .init_resource::<Snapshot>().add_systems(ExtractSchedule,extract)
         .add_systems(Render,record_phase.in_set(RenderSystems::PhaseSort).after(sort_phase_system::<Transparent3d>));
-    println!("skid_phase enabled=true expected={COUNT} output={} default=false",output.display()); Ok(())
+    println!("skid_phase enabled=true expected={COUNT} output={} default=false expected_sort_bias={bias} require_ground_first={require_before}",output.display()); Ok(())
 }
 fn publish(audit: Res<Audit>, driving: Res<super::Driving>, mut exit: MessageWriter<AppExit>) {
     let mut s=audit.state();
@@ -202,6 +225,7 @@ fn record_phase(snapshot: Res<Snapshot>, phases: Res<ViewSortedRenderPhases<Tran
     let Some(phase)=phases.get(&view.retained_view_entity) else {audit.fail("main Transparent3d phase missing");return;};
     if phase.items.len()>50_000 {audit.fail("phase exceeds bounded item limit");return;}
     let mut text=String::new(); let mut relevant=RelevantItems::default();
+    let mut skid_key=None; let mut smoke_keys=Vec::with_capacity(5);
     let _=writeln!(text,"phase index={} entity_bits={} frame={} tick={} main_camera={:?} render_view={entity:?} target={:?} items={}",shot.index,shot.entity.to_bits(),shot.frame,shot.tick,shot.camera,shot.target,phase.items.len());
     for (rank,(key,item)) in phase.items.iter().enumerate() {
         let main=item.entity.1.id();
@@ -214,13 +238,25 @@ fn record_phase(snapshot: Res<Snapshot>, phases: Res<ViewSortedRenderPhases<Tran
         if !ready {audit.fail("relevant pipeline unready; descriptor not read");return;}
         let descriptor=pipelines.get_render_pipeline_descriptor(item.pipeline);
         let Some(depth)=descriptor.depth_stencil.as_ref() else {audit.fail("relevant depth state missing");return;};
-        if *skid && (depth_bias!=0. || depth.bias.constant!=50 || depth.depth_write_enabled!=Some(false)) {
-            audit.fail("Isolated skid sort/raster/write invariant differs");return;
+        if *skid && (depth_bias!=audit.expected_bias || depth.bias.constant!=50 || depth.depth_write_enabled!=Some(false)) {
+            audit.fail("expected mapped skid sort/raster/write invariant differs");return;
         }
+        if *skid {skid_key=Some((rank,item.distance));} else {smoke_keys.push((rank,item.distance));}
         let _=writeln!(text,"item index={} rank={rank} phase_entity_key={key:?} entity_bits={} name={name:?} centre={mesh_center:?} projected_z={z} sort_bias={depth_bias} sort_distance={} pipeline={:?} ready={ready} depth={depth:?} draw={:?}",shot.index,main.to_bits(),item.distance,item.pipeline,item.draw_function);
     }
     let RelevantItems {skids,smoke,..}=relevant;
     if skids!=1 {audit.fail("expected one queued skid draw in selected capture");return;}
+    let Some(skid_key)=skid_key else {audit.fail("queued skid priority key absent");return;};
+    let margin=match priority_margin(audit.require_before,skid_key,&smoke_keys) {
+        Ok(margin)=>margin,
+        Err(reason)=>{
+            let _=writeln!(text,"phase_priority index={} status=failed expected_sort_bias={} require_ground_first={} reason={reason:?}",shot.index,audit.expected_bias,audit.require_before);
+            // Preserve this captured frame's actual item ranks/keys even on failed admission.
+            audit.attempt(|s|s.phase(shot.index,shot.entity.to_bits(),shot.frame,text));
+            audit.fail(reason);return;
+        }
+    };
+    let _=writeln!(text,"phase_priority index={} expected_sort_bias={} require_ground_first={} queued_smoke={} min_key_margin={margin:?} fragment_visibility_unproven=true",shot.index,audit.expected_bias,audit.require_before,smoke_keys.len());
     let _=writeln!(text,"phase_counts index={} skid={skids} smoke={smoke} smoke_queued={} fragment_visibility_unproven=true",shot.index,smoke>0);
     audit.attempt(|s|s.phase(shot.index,shot.entity.to_bits(),shot.frame,text));
 }
@@ -231,6 +267,26 @@ mod tests {
         let mut s=State::new(2);
         s.request(0,100,350).unwrap(); s.extract(0,100,10,350).unwrap();
         s.request(1,101,352).unwrap(); s.extract(1,101,11,352).unwrap();s
+    }
+    #[test]
+    fn ground_first_requires_strict_rank_and_key_margin_not_only_sorted_distance() {
+        assert_eq!(priority_margin(true,(2,-100.),&[(4,-99.),(6,-90.)]),Ok(Some(1.)));
+        assert!(priority_margin(true,(5,-100.),&[(4,-99.)]).is_err()); // Key alone is insufficient.
+        assert!(priority_margin(true,(2,-100.),&[(4,-100.)]).is_err()); // Tie is not strict.
+        assert!(priority_margin(true,(2,-100.),&[(4,-101.)]).is_err());
+        assert_eq!(priority_margin(false,(5,-100.),&[(4,-101.)]),Ok(Some(-1.))); // Isolated observation remains legal.
+        assert_eq!(priority_margin(true,(2,-100.),&[]),Ok(None)); // No queued smoke is not fragment evidence.
+    }
+    #[test]
+    fn priority_proof_rejects_nonfinite_keys_margins_and_unsupported_install_modes() {
+        for bad in [f32::NAN,f32::INFINITY,f32::NEG_INFINITY] {
+            assert!(priority_margin(true,(0,bad),&[(1,1.)]).is_err());
+            assert!(priority_margin(false,(0,0.),&[(1,bad)]).is_err());
+        }
+        assert!(priority_margin(true,(0,-f32::MAX),&[(1,f32::MAX)]).is_err());
+        for mode in [super::super::skid_marks::OrderMode::Off,super::super::skid_marks::OrderMode::Control] {
+            assert!(expected_bias(mode).is_err()); // Ordinary/default cannot instantiate mapped priority audit.
+        }
     }
     #[test]
     fn six_distinct_source_draws_fit_but_duplicate_and_sixth_smoke_do_not() {

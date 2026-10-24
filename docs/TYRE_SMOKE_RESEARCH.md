@@ -615,3 +615,14 @@ A fresh crate gate passes329 app tests and Clippy, followed by a baseline execut
 Some empty smoke groups still queue degenerate origin quads. Queue membership alone does not establish positive fragment coverage. The CPU phase is recorded before batching, not as a GPU fragment trace or proof of the original reduced compositor.
 
 The original pair has115/120 exactly equal decoded frames plus an exact final image; five frames differ at eight pixels total. One additional uninstrumented repeat reproduces seven of those eight mapped pixel values; frame0027's remaining point is not reproduced in that repeat. All raw values remain recorded without a universal tolerance or strict image-identity claim. Root reviewed native0074 and0090; the diagnostic does not fix their dark marks. Exact provenance, real failure attempts and the separate root admission remain private in `local/graphics/skid-phase-ledger01/`.
+
+
+## Guarded ground-priority experiment (G267, 24 October 2026)
+
+The explicit `ground-first` mode is confined to the mapped baseline Derby pilot. It changes the skid sort bias from zero to -1024, preserving raster bias50, reflectance0, alpha, shaders, geometry and emission. Every captured PNG must prove a finite strictly positive key margin and a skid rank before every queued smoke item. Ties, overflow or a failed rank reject the diagnostic; the value is not automatically retuned. Defaults are unchanged.
+
+The crate gate passes331 tests and Clippy, followed by a baseline build and two successful same-build mapped120-frame sequences. Physical/emission traces, camera and request manifests match. Both ledgers have120 complete screenshot/Extract/phase/readback/PNG joins. GroundFirst precedes every queued smoke item in all120 rows, with minimum key margins ranging980.39453125..1083.275634765625. The control precedes all smoke in58 rows and is late in62.
+
+All62 late-control frames change. Native0074 loses the sharp dark protruding strips while retaining the cloud. Native0090, whose skid draw already preceded smoke, is exactly equal and still contains dark wheel-adjacent rings. Of the58 already-before frames,56 are decoded-RGBA exact;0092 and0116 each differ at one pixel, maximum channel differences20 and13 respectively. These are retained as unexplained residuals, not automatically accepted as noise. The final image changes too; both native final images were reviewed.
+
+This is a useful bounded falsification of an ordering-only explanation: order accounts for some visible strips, but cannot fix every remaining defect. The treatment also changes skid order relative to other transparent items. It neither restores the original saved ground/reduced-smoke composition nor proves positive smoke fragment coverage, all-car correctness or performance. No playable launcher or ordinary default is promoted. Exact source/executable provenance and both raw ledgers remain in `local/graphics/skid-ground-first01/`.
