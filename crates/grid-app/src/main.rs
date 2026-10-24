@@ -63,6 +63,7 @@ mod input;
 mod mesh_stream;
 mod mobile;
 mod motion_capture;
+mod skid_phase_ledger;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
 mod temporal_colour;
@@ -1440,6 +1441,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut smoke_order = tyre_smoke::SmokeOrder::Groups;
     let mut skid_order = skid_marks::OrderMode::Off;
     let mut skid_reflectance = None;
+    let mut motion_phase_map = false;
     let mut crowd_preview = crowd_preview::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
@@ -1911,6 +1913,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     _ => return Err("--car-transparent-sort needs off or current".into()),
                 };
             }
+            "--motion-phase-map" => motion_phase_map = true,
             "--window-phase-audit" => {
                 window_phase_target = Some(window_phase_audit::Target::parse(
                     &args.next().ok_or("--window-phase-audit needs tick:N or frame:N")?,
@@ -2122,6 +2125,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
                 println!("--crowd-preview off|control|static-billboards: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture, PBR adaptation, no animation/flash or source parity.");
+                println!("--motion-phase-map: default absent; exact baseline Derby Isolated350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--skid-order off|control|isolated: bounded baseline sort/raster diagnostic; isolated sort0, raster50; physics/emission/atlas unchanged.");
@@ -2325,6 +2329,27 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if skid_reflectance.is_some() && (skid_order != skid_marks::OrderMode::Isolated
         || std::env::var_os("GRID_PERF_TIMING").is_some()) {
         return Err("--skid-reflectance requires --skid-order isolated and its bounded rendered baseline ground-effects/noPERF/compositorOff domain; no GRID_PERF_TIMING".into());
+    }
+    if motion_phase_map {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false; // Existing CPU trace is permitted; no timing claims.
+        if graphics.enhanced() || !drive || drive_ticks != Some(900) || render_fps != Some(30)
+            || !motion_sequence.is_some_and(|c| c.skid_phase_window())
+            || output.is_none() || headless || collision || from_menu || lod != "LOD0_"
+            || route.path() != "tracks/usa/detroit/route_8" || route.subroute() != 0
+            || player_car.stem() != "stk" || discipline.as_deref() != Some("demolition_derby")
+            || skid_order != skid_marks::OrderMode::Isolated || skid_reflectance.is_some()
+            || smoke_order != tyre_smoke::SmokeOrder::Groups || smoke_compositor != smoke_compositor::Mode::Off
+            || window_phase_target.is_some() || oit_capacity_target.is_some()
+            || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
+            || window_sort_current || car_transparent_sort || graphics.window_pilot != window_response::Mode::Off
+            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || diagnostics != settings::Diagnostics::default() || !ground_effect_assets::enabled()
+            || input_settings.device != input::Device::Keyboard
+            || !scripted.throttle.is_finite() || !scripted.steering.is_finite()
+            || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
+            || graphics.width != 1920 || graphics.height != 1080
+        { return Err("--motion-phase-map requires the bounded native baseline Derby stk/Isolated350,120/fps30/900ticks Groups pilot, no other captures/audits/controls/PERF".into()); }
     }
     if smoke_order == tyre_smoke::SmokeOrder::Sprites && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
@@ -3569,6 +3594,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if car_transparent_sort {
         window_response::install_current_car_sort(&mut app);
     }
+    if motion_phase_map {
+        let path = app.world().resource::<Capture>().path.clone();
+        skid_phase_ledger::install(&mut app, &path)?;
+    }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();
         window_phase_audit::install(&mut app, target, &path)?;
@@ -4201,6 +4230,7 @@ fn capture(
     probe: Option<Res<scene_probe::Cube>>,
     graphics: Res<graphics::Settings>,
     motion: Option<Res<motion_capture::Motion>>,
+    motion_phase: Option<Res<skid_phase_ledger::Audit>>,
     temporal: Option<Res<temporal_audit::Audit>>,
     oit_capacity: Option<Res<oit_capacity_audit::Audit>>,
     #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
@@ -4287,6 +4317,7 @@ fn capture(
     if capture.frames >= 180 && !capture.requested && motion.as_ref().is_none_or(|m| m.finished())
         && temporal.as_ref().is_none_or(|audit| audit.ready()) && colour_ready
         && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
+        && motion_phase.as_ref().is_none_or(|audit| audit.ready())
     {
         capture.requested = true;
         let path = capture.path.clone();
