@@ -91,7 +91,8 @@ impl<'a> Tree<'a> {
 }
 
 /// Explicit data-node policy, validated on selected GRID car/texture resources.
-/// Unknown elements are parsed as containers; malformed children are errors,
+/// Animation packet data requires its exact known parent; KA/B1 stays raw.
+/// Other unknown elements are containers; malformed children are errors,
 /// never silently reclassified as data.
 pub fn read_tree(bytes: &[u8]) -> Result<Tree<'_>> {
     let framing = inspect(bytes)?;
@@ -143,8 +144,27 @@ pub fn read_tree(bytes: &[u8]) -> Result<Tree<'_>> {
                 value: c.take(length)?,
             });
         }
-        let data_node = (*name == b"DATA"
-            && parent.is_some_and(|p| names.get(&nodes[p].id).is_some_and(|n| *n == b"PNSTRING")))
+        // Raw admission is a framing decision, not support for a packet codec.
+        let animation_parent: Option<&[u8]> = match *name {
+            b"NeAnimPacketData_L4" => Some(b"NeAnimPacket_L4"),
+            b"NeAnimPacketData_S4" => Some(b"NeAnimPacket_S4"),
+            b"NeAnimPacketData_B1" => Some(b"NeAnimPacket_B1"),
+            b"NeAnimPacketData_L4_KA" => Some(b"NeAnimPacket_L4_KA"),
+            _ if name.starts_with(b"NeAnimPacketData_") => {
+                return fail(offset, "unsupported animation packet data family");
+            }
+            _ => None,
+        };
+        if let Some(expected) = animation_parent {
+            let actual = parent.and_then(|p| names.get(&nodes[p].id).copied());
+            if actual != Some(expected) {
+                return fail(offset, "animation packet data has wrong parent");
+            }
+        }
+        let data_node = animation_parent.is_some()
+            || (*name == b"DATA"
+                && parent
+                    .is_some_and(|p| names.get(&nodes[p].id).is_some_and(|n| *n == b"PNSTRING")))
             || matches!(
                 *name,
                 b"BOUNDINGBOX"
