@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G274 (2026-10-24): default-off grouped-direct smoke boundary passes357app tests/Clippy and same-build120-frame GPU/stage/restoration proof. Native0065 driver safety net now attenuates through smoke;0074/0090 unchanged and dark wheel rings/BMW remain open. No default/playable or source-halfres promotion.
 - G272 (2026-10-24): bounded frozen crowd-flash material validated after fixing source-sky sort bias;344 app tests/Clippy and3 GPU arms pass, exact Off/Control. Baseline Lacetti glass historical pair matches exactly. Animated scheduler and enhanced/probe regression remain open; no playable launcher changed.
 - G271 (2026-10-24): default-off bounded neutral C/T composition passes336app tests/Clippy, exact4pixelGPUblend probe and120stage/PNG joins. Smoke draws unchanged;116/120+finalexact, one absentrepeat reproduces4of5residualvalues, one remains unresolved. Composition foundation only, no strict image-neutrality/source-smoke/FPS/default promotion.
 - G269 (2026-10-24): exact four animation-data leaf/parent pairs now enter production PSSG trees; B1/KA stay opaque. Full986tests/Clippy/4identities/24soak and production-linked five-bank282ordinary bit/reencode corpus pass. No evaluator, pose/clock/arm-motion or flash acceptance; private artifact-wrapper failure retained separately from successful gate.

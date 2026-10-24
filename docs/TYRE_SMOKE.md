@@ -96,3 +96,38 @@ clean.
 
 Not compared side by side with the running original. Owner feedback on look and density is
 needed.
+
+
+## Bounded grouped-direct boundary control (G274)
+
+`--smoke-boundary grouped-direct` is default-off and restricted to the existing
+mapped Detroit stock-car GroundFirst120-frame fixture, with CT disabled. It isolates
+five existing smoke groups before batching, validates prepared spans, suppresses
+their ordinary main-phase ranges, and replays their original commands after normal
+main transparency into the same scene colour/depth/MSAA attachments. It restores
+all retained keys/ranges/draw IDs unconditionally. Materials, shaders, meshes,
+source emission and simulation remain unchanged.
+
+A success marker executes only after the real material draw succeeds; render Ok
+without markers cannot certify coverage. Every expected screenshot is registered
+before readiness checks and must carry matching Extract entity/frame/tick through
+barrier, preparation, replay and restoration. All120 rows and original PNG joins
+plus a flushed sidecar gate the final capture. Missing stages, skipped draws,
+duplicates, mixed batches and partial errors reject while restoring surviving state.
+
+357 tests and Clippy pass. A new baseline executable completes both same-build
+GPU arms with matched source traces/camera/geometry/phase sort state. All120 mapped
+rows restore exactly; one to four successful batch heads cover five logical groups.
+This counts encoded commands, not positive smoke fragments or GPU completion.
+
+51 of120 sequence frames match exactly. The largest difference is0065:9434pixels,
+maximum channel82. Native paired review shows its conspicuous driver safety net
+becoming naturally attenuated by the cloud.0074 and0090 remain pixel-exact; the dark
+wheel rings at0090 remain unresolved. Final405pixels differ, channel maxima40/41/42,
+alpha unchanged. No universal tolerance or explanation for every residual is assumed.
+
+This admits the transaction and the local0065 occlusion improvement. It does not
+implement colour/transmittance accumulation or the original reduced-resolution
+compositor, fix BMW glass/lenses, change defaults/playable launchers, or establish a
+performance gain. A separate exact BMW profile is needed. Private evidence and all
+actual hashes are retained in `local/graphics/smoke-boundary01/` and G274.

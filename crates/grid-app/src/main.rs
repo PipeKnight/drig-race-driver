@@ -67,6 +67,8 @@ mod mobile;
 mod motion_capture;
 mod skid_phase_ledger;
 mod smoke_ct_neutral;
+mod smoke_boundary_core;
+mod smoke_boundary;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
 mod temporal_colour;
@@ -1446,6 +1448,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut skid_reflectance = None;
     let mut motion_phase_map = false;
     let mut smoke_ct = smoke_ct_neutral::Mode::Off;
+    let mut smoke_boundary = smoke_boundary::Mode::Off;
     let mut crowd_preview = crowd_preview::Mode::Off;
     let mut crowd_flash_preview = flash_preview::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
@@ -1922,6 +1925,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--motion-phase-map" => motion_phase_map = true,
+            "--smoke-boundary" => {
+                smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off or grouped-direct")?)?;
+            }
             "--smoke-ct" => {
                 smoke_ct = smoke_ct_neutral::Mode::parse(&args.next().ok_or("--smoke-ct needs off or neutral")?)?;
             }
@@ -2357,6 +2363,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         && (!motion_phase_map || skid_order != skid_marks::OrderMode::GroundFirst)
     {
         return Err("--smoke-ct neutral requires the exact bounded --motion-phase-map GroundFirst pilot; smoke remains in its existing phase".into());
+    }
+    if smoke_boundary != smoke_boundary::Mode::Off
+        && (!motion_phase_map || skid_order != skid_marks::OrderMode::GroundFirst
+            || smoke_ct != smoke_ct_neutral::Mode::Off)
+    {
+        return Err("--smoke-boundary grouped-direct requires the exact bounded GroundFirst --motion-phase-map pilot and --smoke-ct off".into());
     }
     if motion_phase_map {
         let mut diagnostics = settings::diagnostics().clone();
@@ -3630,6 +3642,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         let path = app.world().resource::<Capture>().path.clone();
         smoke_ct_neutral::install(&mut app, smoke_ct, Some(&path))?;
     }
+    if smoke_boundary != smoke_boundary::Mode::Off {
+        let path = app.world().resource::<Capture>().path.clone();
+        smoke_boundary::install(&mut app, smoke_boundary, Some(&path))?;
+    }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();
         window_phase_audit::install(&mut app, target, &path)?;
@@ -4269,6 +4285,7 @@ fn capture(
     motion: Option<Res<motion_capture::Motion>>,
     motion_phase: Option<Res<skid_phase_ledger::Audit>>,
     smoke_ct: Option<Res<smoke_ct_neutral::Audit>>,
+    smoke_boundary: Option<Res<smoke_boundary::Audit>>,
     temporal: Option<Res<temporal_audit::Audit>>,
     oit_capacity: Option<Res<oit_capacity_audit::Audit>>,
     #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
@@ -4276,6 +4293,9 @@ fn capture(
     replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
+    if smoke_boundary.as_ref().is_some_and(|audit| audit.failed()) {
+        exit.write(AppExit::error()); return;
+    }
     // Diagnostics replay_capture: the replay plays first.
     if replay.is_some_and(|r| r.capture_pending()) {
         return;
@@ -4360,6 +4380,7 @@ fn capture(
         && oit_capacity.as_ref().is_none_or(|audit| audit.ready())
         && motion_phase.as_ref().is_none_or(|audit| audit.ready())
         && smoke_ct.as_ref().is_none_or(|audit| audit.ready())
+        && smoke_boundary.as_ref().is_none_or(|audit| audit.ready())
     {
         capture.requested = true;
         let path = capture.path.clone();

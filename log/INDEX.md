@@ -470,6 +470,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G274](G0274.md) | 2026-10-24 | Validate bounded direct smoke boundary before colour-transmittance accumulation |
 | [G273](G0273.md) | 2026-10-24 | Audit current all-view tree eligibility without changing rendering |
 | [G272](G0272.md) | 2026-10-24 | Validate bounded frozen camera flashes at source crowd anchors |
 | [G271](G0271.md) | 2026-10-24 | Validate bounded neutral colour-transmittance composition plumbing |
