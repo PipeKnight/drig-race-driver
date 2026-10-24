@@ -454,3 +454,14 @@ G238/G239 initial-bumper PNGs are identical. Source front-bumper geometry is ahe
 camera eye beyond near0.2. Original own-body visibility rules remain unresolved; no whole-car
 hide or arbitrary camera offset is promoted. Thus machine checks pass but universal visual
 C/R acceptance is not claimed. See private `window-transitions01/` and `window-bumper-baseline01/`.
+
+
+### Parameter storage resolver boundary (G261, 24 October 2026)
+
+One targeted shared-master analysis of `0x00B9F090` narrows the named-vector assignment path. The collection exposes either contiguous 0x50-byte entries or a pointer array. A pointer-array write can allocate a missing entry when explicitly requested; existing entry pointers are returned unchanged. This function does not allocate the backing collection or check the index itself; the previously traced caller checks the index first.
+
+The conditional override writer assembles its vector before reaching this resolver, with creation enabled. Within this resolver there is no parent/default lookup, scalar-to-vector computation, value merge or copy-on-write branch. Prior population may still establish aliases or inherited values elsewhere. Constructor initialization of new entries remains outside this bounded analysis.
+
+This closes a storage question, not the clean Lacetti production writer or active constants. It does not establish a cause of the pink appearance, so no paint, exposure or tone-mapping default changes follow. A superficially similar callback was excluded after its actual construction identified GhostCarValues. Further work needs ordinary collection population or active-value evidence rather than another traversal of this setter.
+
+Private evidence: `local/handoff/drafts/paint-next02/binding-next.md` and `resolver-b9f090.md`; one 120-byte shared-cache decompile, independently checked against the same bounded assembly. No original-derived listing is published.
