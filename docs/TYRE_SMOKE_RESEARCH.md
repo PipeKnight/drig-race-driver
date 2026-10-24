@@ -595,3 +595,12 @@ Native frames 70–74 now reproduce a bright white crossing of tyre strips over 
 The complete selected saved ordinary skid fragment has diffuse/normal, sun/backlight, shadow/AO and fog operations, without a direct F0/view-half-vector specular BRDF term. Its vertex eye-position input drives fog distance. This follows the selected program's arithmetic, rather than inferring absence from parameter names. A single targeted disassembly agrees with the existing cache. This is selected saved-pass evidence; live variants and upstream shadow-channel contents remain separate.
 
 The G262 diagnostic keeps the old default and is bounded to the existing Isolated sort0/raster50 rendered baseline domain. Removal of the additional default PBR reflectance requires separate ordinary-path validation. Setting one scalar does not reproduce source normal crossfade, lighting, fog or reduced smoke composition. Private results and exact provenance are in `local/graphics/smoke-next03/` and `local/handoff/drafts/smoke-next03/visual-source-review.md`.
+
+
+## Ordinary skid whitening correction (G264)
+
+The base lit skid material now explicitly sets reflectance to zero, removing the extra authored dielectric specular lobe. Texture, alpha blending, roughness, fog, mesh, sort and raster bias remain unchanged. The historical 0.5 value remains available only in the bounded Isolated diagnostic. This removes additional whitening without claiming a complete port of the selected original shader.
+
+A fresh full gate passes 964 tests, workspace Clippy, four unchanged simulation identities and 24 quick-soak scenarios. Two new ordinary Off sequences, neither supplying the diagnostic scalar, complete successfully with 120 PNGs each. Their actual frame/tick manifests, normalized physical/emission traces, camera and sampled phase state agree. Native frame74 confirms removal of the bright crossed strips; frame90 and the final image still show sharp dark strips through smoke. The remaining order/composition defect is open.
+
+The recorded tick602 phase snapshot does not identify the rendering frame of each earlier PNG. The next diagnostic must join the screenshot entity through Extract, sorted phase and readback completion; request indices or callback times alone cannot establish that relationship. These captures are material evidence, not per-fragment order proof, a performance benchmark or all-track smoke acceptance. Private exact source/executable provenance and root visual review are in `local/graphics/skid-whitening01/`.

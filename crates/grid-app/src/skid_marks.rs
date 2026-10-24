@@ -38,7 +38,7 @@ pub(crate) fn parse_reflectance(value: &str) -> Result<f32, &'static str> {
     match value {
         "0.5" => Ok(0.5),
         "0" => Ok(0.),
-        _ => Err("--skid-reflectance needs 0.5 (neutral) or 0 (candidate)"),
+        _ => Err("--skid-reflectance needs 0.5 (historical PBR control) or 0"),
     }
 }
 
@@ -456,6 +456,11 @@ fn start(
         base_color_texture: Some(images.add(image)),
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.9,
+        // The selected ordinary source skid fragment is diffuse/normal/light/fog,
+        // without the extra dielectric F0 lobe of the authored PBR adaptation.
+        // G262 matched controls trace white bands over smoke to the old 0.5.
+        // This does not restore source normal crossfade or smoke composition.
+        reflectance: 0.,
         depth_bias: 50.,
         ..default()
     };
