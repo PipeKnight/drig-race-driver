@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G276 (2026-10-24): separately guarded BMW90 smoke boundary passes373app tests/Clippy, both90-frame GPU controls and same-exe Derby120 regression. Dense-cloud rear-glass/lens/skid ghosts attenuate with all17surfaces/physics preserved; dark wheel rings and damaged/general coverage remain open. DefaultOff/playable unchanged.
 - G275 (2026-10-24): bounded default-off current camera/shadow foliage observer passes365app tests/Clippy. Moving controls have matching traces and zero hidden CPU-union visits with six probe views;150/151images exact, eight pixels unresolved despite exact Off repeat. Extra OSD camera invalidates private runner inventory assumption; original failure retained, no skip/FPS/default promotion.
 - G274 (2026-10-24): default-off grouped-direct smoke boundary passes357app tests/Clippy and same-build120-frame GPU/stage/restoration proof. Native0065 driver safety net now attenuates through smoke;0074/0090 unchanged and dark wheel rings/BMW remain open. No default/playable or source-halfres promotion.
 - G272 (2026-10-24): bounded frozen crowd-flash material validated after fixing source-sky sort bias;344 app tests/Clippy and3 GPU arms pass, exact Off/Control. Baseline Lacetti glass historical pair matches exactly. Animated scheduler and enhanced/probe regression remain open; no playable launcher changed.

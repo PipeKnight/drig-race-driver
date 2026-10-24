@@ -26,6 +26,10 @@ impl Config {
         Ok(Self { start, frames })
     }
     pub(crate) fn skid_phase_window(self) -> bool { self.start == 350 && self.frames == 120 }
+    /// Called only with the selected typed diagnostic profile's exact constants.
+    pub(crate) fn exact_phase_window(self, start: u64, frames: u32, fps: u32, stop: u64) -> bool {
+        self.start == start && self.frames == frames && self.check(fps, stop).is_ok()
+    }
     fn required_ticks(self, fps: u32) -> u64 {
         (f64::from(self.frames) / f64::from(fps) / f64::from(grid_tools::source_vehicle::DELTA)).ceil() as u64
     }

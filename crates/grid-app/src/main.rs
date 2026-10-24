@@ -69,6 +69,7 @@ mod skid_phase_ledger;
 mod smoke_ct_neutral;
 mod smoke_boundary_core;
 mod smoke_boundary;
+mod smoke_pilot;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
 mod temporal_colour;
@@ -1447,6 +1448,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut skid_order = skid_marks::OrderMode::Off;
     let mut skid_reflectance = None;
     let mut motion_phase_map = false;
+    let mut motion_phase_profile = None;
     let mut smoke_ct = smoke_ct_neutral::Mode::Off;
     let mut smoke_boundary = smoke_boundary::Mode::Off;
     let mut crowd_preview = crowd_preview::Mode::Off;
@@ -1925,6 +1927,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "--motion-phase-map" => motion_phase_map = true,
+            "--motion-phase-profile" => {
+                motion_phase_profile = Some(smoke_pilot::Profile::parse(&args.next().ok_or("--motion-phase-profile needs an exact profile")?)?);
+            }
             "--smoke-boundary" => {
                 smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off or grouped-direct")?)?;
             }
@@ -2356,21 +2361,25 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         || std::env::var_os("GRID_PERF_TIMING").is_some()) {
         return Err("--skid-reflectance requires --skid-order isolated and its bounded rendered baseline ground-effects/noPERF/compositorOff domain; no GRID_PERF_TIMING".into());
     }
+    if motion_phase_profile.is_some() && !motion_phase_map {
+        return Err("--motion-phase-profile requires --motion-phase-map".into());
+    }
+    let motion_phase_profile = motion_phase_profile.unwrap_or_default();
     if skid_order == skid_marks::OrderMode::GroundFirst && !motion_phase_map {
         return Err("--skid-order ground-first requires the exact bounded Derby --motion-phase-map pilot".into());
     }
     if smoke_ct != smoke_ct_neutral::Mode::Off
-        && (!motion_phase_map || skid_order != skid_marks::OrderMode::GroundFirst)
+        && (motion_phase_profile != smoke_pilot::Profile::Derby120 || !motion_phase_map || skid_order != skid_marks::OrderMode::GroundFirst)
     {
         return Err("--smoke-ct neutral requires the exact bounded --motion-phase-map GroundFirst pilot; smoke remains in its existing phase".into());
     }
     if smoke_boundary != smoke_boundary::Mode::Off
-        && (!motion_phase_map || skid_order != skid_marks::OrderMode::GroundFirst
+        && (!motion_phase_map || !motion_phase_profile.boundary_order(skid_order)
             || smoke_ct != smoke_ct_neutral::Mode::Off)
     {
-        return Err("--smoke-boundary grouped-direct requires the exact bounded GroundFirst --motion-phase-map pilot and --smoke-ct off".into());
+        return Err("--smoke-boundary grouped-direct requires the selected exact bounded --motion-phase-map profile/order and --smoke-ct off".into());
     }
-    if motion_phase_map {
+    if motion_phase_map && motion_phase_profile == smoke_pilot::Profile::Derby120 {
         let mut diagnostics = settings::diagnostics().clone();
         diagnostics.ground_trace = false; // Existing CPU trace is permitted; no timing claims.
         if graphics.enhanced() || !drive || drive_ticks != Some(900) || render_fps != Some(30)
@@ -2390,6 +2399,32 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
             || graphics.width != 1920 || graphics.height != 1080
         { return Err("--motion-phase-map requires the bounded native baseline Derby stk/Isolated|GroundFirst350,120/fps30/900ticks Groups pilot, no other captures/audits/controls/PERF".into()); }
+    }
+    if motion_phase_map && motion_phase_profile == smoke_pilot::Profile::BmwIstanbul90 {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false;
+        let fixture = smoke_pilot::BmwFixture {
+            route:route.path(), subroute:route.subroute(), car:player_car.stem(),
+            solo:opponents.is_none() && opponent_cars.is_none() && series.is_none()
+                && discipline.is_none() && trial_laps.is_none() && profile.time_limit.is_none() && grid_position.is_none(),
+            damage_inputs_off:body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
+            handbrake_from, throttle:scripted.throttle, steering:scripted.steering,
+        };
+        if !motion_phase_profile.bmw_fixture(fixture)
+            || !motion_phase_profile.check_capture(motion_sequence,render_fps,drive_ticks)
+            || graphics.enhanced() || !drive || output.is_none() || headless || collision || from_menu || lod != "LOD0_"
+            || skid_order != skid_marks::OrderMode::Off || skid_reflectance.is_some()
+            || smoke_order != tyre_smoke::SmokeOrder::Groups || smoke_compositor != smoke_compositor::Mode::Off
+            || smoke_ct != smoke_ct_neutral::Mode::Off || graphics.benchmark_frames.is_some()
+            || window_phase_target.is_some() || oit_capacity_target.is_some()
+            || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
+            || window_sort_current || car_transparent_sort || graphics.window_pilot != window_response::Mode::Off
+            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || diagnostics != settings::Diagnostics::default() || !ground_effect_assets::enabled()
+            || input_settings.device != input::Device::Keyboard
+            || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
+            || graphics.width != 1920 || graphics.height != 1080
+        { return Err("BMW phase profile requires exact native baseline BMW/Istanbul0 solo practice,450ticks/HB190/motion190,90/fps30/Groups/skidOff/CTOff and no competing audits/controls/PERF".into()); }
     }
     if smoke_order == tyre_smoke::SmokeOrder::Sprites && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || headless || collision || output.is_none() || lod != "LOD0_"
@@ -3636,7 +3671,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if motion_phase_map {
         let path = app.world().resource::<Capture>().path.clone();
-        skid_phase_ledger::install(&mut app, &path, skid_order)?;
+        skid_phase_ledger::install(&mut app, &path, skid_order, motion_phase_profile)?;
     }
     if smoke_ct != smoke_ct_neutral::Mode::Off {
         let path = app.world().resource::<Capture>().path.clone();
@@ -3644,7 +3679,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     if smoke_boundary != smoke_boundary::Mode::Off {
         let path = app.world().resource::<Capture>().path.clone();
-        smoke_boundary::install(&mut app, smoke_boundary, Some(&path))?;
+        smoke_boundary::install(&mut app, smoke_boundary, Some(&path), motion_phase_profile)?;
     }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();

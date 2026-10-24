@@ -1,6 +1,7 @@
 //! Bounded five-group direct-boundary control; independently authored.
 //! Moves existing prepared draws only. No material, pipeline, simulation or sample changes.
 use super::smoke_boundary_core as core;
+use super::smoke_pilot::Profile;
 use bevy::{
     camera::{MainPassResolutionOverride, NormalizedRenderTarget, RenderTarget},
     core_pipeline::{
@@ -30,7 +31,6 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
 };
-const COUNT: usize = 120;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Mode {
     #[default]
@@ -68,6 +68,7 @@ struct Row {
 }
 #[derive(Default, Debug)]
 struct Ledger {
+    profile: Profile,
     rows: Vec<Row>,
     error: Option<String>,
     published: bool,
@@ -78,7 +79,7 @@ impl Ledger {
         if self.rows.iter().any(|r| r.ticket.entity == ticket.entity) {
             return Ok(None);
         }
-        if self.rows.len() >= COUNT
+        if self.rows.len() >= self.profile.shots()
             || self
                 .rows
                 .last()
@@ -137,7 +138,7 @@ impl Ledger {
     }
     fn complete(&self) -> bool {
         self.error.is_none()
-            && self.rows.len() == COUNT
+            && self.rows.len() == self.profile.shots()
             && self.rows.iter().all(|r| r.stage == Stage::Restored)
     }
 }
@@ -207,7 +208,12 @@ impl Routing {
     }
 }
 /// Off does not install resources, hooks, files or render commands.
-pub(crate) fn install(app: &mut App, mode: Mode, capture: Option<&Path>) -> std::io::Result<()> {
+pub(crate) fn install(
+    app: &mut App,
+    mode: Mode,
+    capture: Option<&Path>,
+    profile: Profile,
+) -> std::io::Result<()> {
     if mode == Mode::Off {
         return Ok(());
     }
@@ -231,13 +237,14 @@ pub(crate) fn install(app: &mut App, mode: Mode, capture: Option<&Path>) -> std:
             .file_name()
             .ok_or_else(|| std::io::Error::other("boundary output name absent"))?,
     );
+    let count = profile.shots();
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&path)?;
     writeln!(
         output,
-        "smoke_boundary version=1 status=pending expected={COUNT} mode=grouped-direct"
+        "smoke_boundary version=1 status=pending expected={count} mode=grouped-direct"
     )?;
     output.flush()?;
     let Some((_, ids)) = core::register(app, true)? else {
@@ -246,7 +253,10 @@ pub(crate) fn install(app: &mut App, mode: Mode, capture: Option<&Path>) -> std:
         ));
     };
     app.insert_resource(Audit {
-        state: Arc::new(Mutex::new(Ledger::default())),
+        state: Arc::new(Mutex::new(Ledger {
+            profile,
+            ..default()
+        })),
         output: Arc::new(Mutex::new(output)),
     })
     .add_plugins(ExtractResourcePlugin::<Audit>::default())
@@ -284,7 +294,7 @@ pub(crate) fn install(app: &mut App, mode: Mode, capture: Option<&Path>) -> std:
                 .before(RenderSystems::Cleanup),
         );
     println!(
-        "smoke_boundary enabled=true expected={COUNT} output={} default=false",
+        "smoke_boundary enabled=true expected={count} output={} default=false",
         path.display()
     );
     Ok(())
@@ -719,6 +729,7 @@ fn finalize(
 }
 fn publish(audit: Res<Audit>, driving: Res<super::Driving>, mut exit: MessageWriter<AppExit>) {
     let mut s = audit.state();
+    let count = s.profile.shots();
     if !s.complete()
         && (driving.paused
             || driving.failure.is_some()
@@ -740,7 +751,7 @@ fn publish(audit: Res<Audit>, driving: Res<super::Driving>, mut exit: MessageWri
         }
         let _ = writeln!(
             text,
-            "smoke_boundary status={} expected={COUNT} rows={} error={:?}",
+            "smoke_boundary status={} expected={count} rows={} error={:?}",
             if s.complete() { "complete" } else { "failed" },
             s.rows.len(),
             s.error
@@ -783,7 +794,7 @@ mod tests {
     #[test]
     fn absent_installer_is_resource_and_renderer_free() {
         let mut app = App::new();
-        install(&mut app, Mode::Off, None).unwrap();
+        install(&mut app, Mode::Off, None, Profile::default()).unwrap();
         assert!(!app.world().contains_resource::<Audit>());
         assert!(!app.world().contains_resource::<core::Proof>());
         assert!(app.get_sub_app(RenderApp).is_none());
@@ -800,6 +811,34 @@ mod tests {
         assert!(s.observe(t(120)).is_err());
         s.rows[74].stage = Stage::Prepared;
         assert!(!s.complete());
+    }
+    #[test]
+    fn bmw_expected90_does_not_silently_change_derby120_or_admit_incomplete_rows() {
+        let mut bmw = Ledger {
+            profile: Profile::BmwIstanbul90,
+            ..default()
+        };
+        let mut derby = Ledger::default();
+        for i in 0..90 {
+            let ticket = Ticket {
+                tick: 190 + u64::from(i),
+                ..t(i)
+            };
+            bmw.observe(ticket).unwrap();
+            finish(&mut bmw, i as usize, ticket);
+            derby.observe(t(i)).unwrap();
+            finish(&mut derby, i as usize, t(i));
+        }
+        assert!(bmw.complete());
+        assert!(!derby.complete());
+        assert!(bmw.observe(Ticket { tick: 280, ..t(90) }).is_err());
+        bmw.rows[53].stage = Stage::Replayed;
+        assert!(!bmw.complete());
+        for i in 90..120 {
+            derby.observe(t(i)).unwrap();
+            finish(&mut derby, i as usize, t(i));
+        }
+        assert!(derby.complete());
     }
     #[test]
     fn lost_entire_stage_duplicate_replay_or_wrong_frame_cannot_use_previous_success() {

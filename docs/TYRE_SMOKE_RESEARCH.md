@@ -639,3 +639,94 @@ The required crate gate passes336 tests and Clippy; a new baseline executable an
 The pair has116/120 exactly equal decoded images plus an exact final image. Five pixels across four frames differ. One additional absent repeat reproduces four of the five neutral alternative values; frame0056 at(1391,821) remains unreproduced. No universal noise tolerance or strict scene-image neutrality is established. Native0074,0090 and final were reviewed and are exact within the original pair; the existing dark wheel regions remain. Raw values and exact provenance are preserved in `local/graphics/smoke-ct-neutral01/`.
 
 This accepts a bounded composition/probe/stage-association foundation only. It does not move particles, restore the original reduced-resolution compositor, identify every dark region, improve FPS or change ordinary playable settings. Active accumulation requires a separately reviewed phase/depth/format path; a second smoke camera without the main opaque depth would not be equivalent.
+
+
+## Grouped-direct smoke boundary (G274; recorded here during G276)
+
+The default-off `--smoke-boundary grouped-direct` replays the same five prepared
+smoke groups after ordinary main transparency, into the same colour/depth/MSAA
+attachments. A prebatch draw-command barrier keeps selected batch spans separate;
+postbatch validation rejects mixed spans. Original phase ranges are temporarily
+masked and restored unconditionally, including failure. A marker follows actual
+DrawMaterial success; phase.render returning Ok alone cannot count as a draw.
+No material, shader, mesh, emission, simulation or new smoke layer is introduced.
+
+The original exact Derby/GroundFirst120/CTOff pilot passes357app tests and Clippy,
+a fresh build and two same-build GPU processes. Every120screenshot/Extract/phase/
+readback/PNG association and candidate120stage/restoration chain completes. Actual
+one to four successful heads cover five logical groups; tail ranges may be nonzero
+because render_range skips an entire head span. This proves encoded draw-command
+coverage and restoration, not positive fragments or GPU completion.
+
+Physical/emission/input/camera/projected geometry, sort/rank/raster and membership
+controls agree.51of120sequence images are exact. Native0065 changes9434pixels
+(maximum82): the bright driver safety net attenuates strongly through smoke.
+Native0074and0090are exact, and the dark wheel-adjacent rings remain in0090.
+The final image changes405pixels, maximum RGB40/41/42 with alphaexact; most belong
+to a rear-window/C-pillar cluster, without per-pixel mesh attribution. No automatic
+noise tolerance or claim that all changed pixels are explained is made.
+
+The bounded transaction and observed local net improvement are accepted, while
+BMW, damaged-car coverage, active colour/transmittance accumulation, original
+half-resolution parity, performance and default/playable promotion remain open.
+Exact provenance, failures and native/raw comparisons are private under
+`local/graphics/smoke-boundary01/`; [G274](../log/G0274.md) records the full gate.
+
+## Separately guarded BMW phase profile (G276)
+
+An explicit separately guarded BMW/Istanbul0 solo practice profile adds90per-PNG
+phase associations to the existing grouped-direct experiment. Derby's120denominator,
+guard and boundary transaction remain unchanged. Each BMW shot must prove actual
+native1920/MSAA4/sRGB/fullviewport/nooverride target state, five owned smoke meshes
+and6window/3head-lens/8rear-lens source entities with stable selected material and
+geometry/sort metadata. Missing, changed, culled or unready entities refuse capture.
+Damage/contact/opponents must be inactive; this does not cover the owner's damaged
+Shibuya drift-battle report. The required app gate passes373tests and Clippy; a fresh baseline build and
+actual same-executable BMW pair complete successfully. This is a bounded diagnostic,
+not a general BMW or original-compositor claim.
+
+
+Each BMW arm completes90unique screenshot/Extract/phase/readback/PNG associations,
+90actualview-attachment checks and1530cover records (540window/270head/720rear).
+Physical/input/emission/camera/phase/geometry and selected material controls match.
+The treatment completes90five-group replay/restoration chains: one prepared head
+in14frames, two in65and three in11. This is encoded-command coverage, not measured
+positive fragments or GPU completion. Phase ticks191..377 correspond to Extract
+frames93..182 in these actual runs.
+
+All90sequenceimages change with alphaexact. Root native0001/0053/final comparisons
+show the sharp rear-glass/lens/skid ghosts attenuated; dense0053cloud completely
+hides them. Thinner0001/final cloud retains the body while reducing overly sharp
+cover contrast. A dark wheel swirl remains visible in0001. The worst changed
+frame0001has73463pixels/max152;0053has59732/max148;the final has59590/max133.
+No pixel tolerance or all-smoke/original half-resolution/FPS claim is introduced.
+
+A separate same-executable implicit-default Derby regression retains120phase/PNG
+links and120complete grouped transactions, with matched state/phase controls.
+52of120sequenceimages match exactly, maximum82. Native0065retains the safety-net
+improvement, while0090still contains the prior dark wheel rings. Missing Detroit
+ground-cover and gamepad-mapping warnings are recorded rather than suppressed.
+Playable defaults remain unchanged.
+
+The first BMW renderer succeeded but its inherited private parser incorrectly
+required deformation traces in the intentionally damage-off profile. Its result0,
+wrapperfailure and sidecars remain intact. The corrected parser instead explicitly
+requires empty deformation and present remaining trace families;40CPUcontrols and
+a separate read-only reparse pass before the fresh pair. Two machine-idle preflights
+also refused other checkout's active runs before starting an arm; none was stopped.
+Source/build/reader/resource/command pins and every failure remain private under
+`local/graphics/bmw-smoke-boundary01/` and `local/graphics/bmw-derby-regression01/`.
+
+## Wheel-ring material-family distinction (G276 audit, no visual fix)
+
+The shipped Burnout_circles/Wheel_spin emitter selects
+`basicDepthAlphaBlendHalf`, mapped by config to `pfx_unlit_half_depth` with a standard
+stream. Other cloud emitters select `smokeHalf`/`pfx_half_smoke` with a lit stream.
+The current adapter retains texture and horizon alignment but drops this type/layer
+identity and assigns all five texture groups the same scene-lit StandardMaterial.
+This is a concrete adaptation mismatch. Existing Wheel_spin atlas observations are
+near-white RGB with alpha shape; a filename such as SM33_dark is not evidence of
+black source texels. The grouped boundary also preserves intra-smoke group ordering.
+These facts provide a targeted next check, not pixel attribution of0090rings or a
+proved remedy. The cached smokeHalf colour/transmittance contract must not be
+silently assigned to the distinct unlit-half-depth family.
