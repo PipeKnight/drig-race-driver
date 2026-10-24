@@ -238,6 +238,8 @@ fn android_data_dir() -> Option<PathBuf> {
 /// Values from the settings files. `None` keeps the built-in default.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Settings {
+    /// Number of files actually selected by load; diagnostic admission provenance only.
+    pub loaded_file_count: usize,
     pub root: Option<PathBuf>,
     pub route: Option<String>,
     /// `[game] subroute`: a point-to-point route's direction, 0 (the
@@ -920,8 +922,21 @@ pub fn save_options(path: &Path, o: &crate::pause_menu::Options, tunes: bool) ->
     std::fs::write(path, new).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Reads `--data-dir` and the settings files named by `--settings`, sets the
-/// run's data dir and diagnostics, and returns the merged settings.
+// The bundled APK's event profile (track, discipline, field; replaced on
+// every install, docs/ANDROID.md), read first so the owner's settings.ini
+// (kept across installs, written by the in-app screens) overrides it.
+// Explicit --settings files follow in command-line order.
+fn profile_files(args: &[String], dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for name in ["event.ini", "settings.ini"] {
+        let path = dir.join(name);
+        if path.is_file() { files.push(path); }
+    }
+    files.extend(args.windows(2).filter(|w| w[0] == "--settings").map(|w| PathBuf::from(&w[1])));
+    files
+}
+
+/// Reads the data dir and selected settings files, then returns merged settings.
 pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
     let value = |flag: &str| -> Vec<String> {
         args.windows(2)
@@ -933,19 +948,7 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
         .pop()
         .map(PathBuf::from)
         .unwrap_or_else(default_data_dir);
-    let mut files: Vec<PathBuf> = Vec::new();
-    // The bundled APK's event profile (track, discipline, field; replaced on
-    // every install, docs/ANDROID.md), read first so the owner's settings.ini
-    // (kept across installs, written by the in-app screens) overrides it.
-    let event = dir.join("event.ini");
-    if event.is_file() {
-        files.push(event);
-    }
-    let user = dir.join("settings.ini");
-    if user.is_file() {
-        files.push(user);
-    }
-    files.extend(value("--settings").into_iter().map(PathBuf::from));
+    let files = profile_files(args, &dir);
     if args
         .last()
         .is_some_and(|a| a == "--settings" || a == "--data-dir")
@@ -967,6 +970,7 @@ pub fn load(args: &[String]) -> Result<Settings, Box<dyn std::error::Error>> {
             .map_err(|e| format!("settings file {}: {e}", file.display()))?;
         println!("settings_file path={}", file.display());
     }
+    settings.loaded_file_count = files.len();
     println!("data_dir path={}", dir.display());
     let _ = DATA_DIR.set(dir);
     let _ = DIAGNOSTICS.set(settings.diagnostics.clone());
@@ -1303,5 +1307,25 @@ tick_delay_ms = 20
     fn comments_need_whitespace_before_hash() {
         assert_eq!(strip_comment("a = b#c # d"), "a = b#c ");
         assert_eq!(strip_comment("# all"), "");
+    }
+}
+
+#[cfg(test)]
+mod coverage_provenance_tests {
+    use super::*;
+    #[test]
+    fn selects_automatic_and_explicit_paths_in_load_order() {
+        let dir = std::env::temp_dir().join(format!("grid-fence-provenance-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&dir).unwrap();
+        assert!(profile_files(&[], &dir).is_empty());
+        std::fs::write(dir.join("event.ini"), "").unwrap();
+        std::fs::write(dir.join("settings.ini"), "").unwrap();
+        let args = vec!["--settings".into(), "private-empty.ini".into()];
+        assert_eq!(profile_files(&args,&dir),vec![dir.join("event.ini"),dir.join("settings.ini"),PathBuf::from("private-empty.ini")]);
+        // Selection/provenance depends on the loader's actual file list, not file contents.
+        std::fs::remove_file(dir.join("event.ini")).unwrap();
+        std::fs::remove_file(dir.join("settings.ini")).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+        assert_eq!(Settings::default().loaded_file_count,0);
     }
 }

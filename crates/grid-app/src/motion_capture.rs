@@ -25,11 +25,18 @@ impl Config {
         }
         Ok(Self { start, frames })
     }
+    fn required_ticks(self, fps: u32) -> u64 {
+        (f64::from(self.frames) / f64::from(fps) / f64::from(grid_tools::source_vehicle::DELTA)).ceil() as u64
+    }
+    /// Narrow fence pilot only; general motion capture admission is unchanged.
+    pub(crate) fn check_fence_window(self, fps: Option<u32>, ticks: Option<u64>) -> bool {
+        let (Some(fps), Some(ticks)) = (fps, ticks) else { return false; };
+        if !(30..=60).contains(&self.frames) || !(30..=60).contains(&fps) || !(1..=600).contains(&ticks) || self.check(fps,ticks).is_err() { return false; }
+        let required = self.required_ticks(fps);
+        self.start.checked_add(required + 8).is_some_and(|end| end <= ticks)
+    }
     fn check(self, fps: u32, ticks: u64) -> Result<(), &'static str> {
-        let required = (f64::from(self.frames)
-            / f64::from(fps)
-            / f64::from(grid_tools::source_vehicle::DELTA))
-        .ceil() as u64;
+        let required = self.required_ticks(fps);
         if !(30..=300).contains(&fps)
             || self
                 .start
@@ -166,5 +173,21 @@ mod tests {
         ] {
             assert!(Config::parse(text).and_then(|c| c.check(30, 400)).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod fence_window_tests {
+    use super::*;
+    #[test]
+    fn real_capture_config_requires_requested_frames_fps_bound_and_extra_headroom() {
+        let c=Config::parse("80,60").unwrap();
+        assert!(c.check_fence_window(Some(30),Some(220)));
+        assert!(!c.check_fence_window(None,Some(220)));
+        assert!(!c.check_fence_window(Some(30),None));
+        assert!(!c.check_fence_window(Some(30),Some(212)));
+        assert!(!c.check_fence_window(Some(61),Some(220)));
+        assert!(!c.check_fence_window(Some(30),Some(601)));
+        for text in ["80,29","80,61","18446744073709551615,60"] { assert!(!Config::parse(text).unwrap().check_fence_window(Some(30),Some(220))); }
     }
 }

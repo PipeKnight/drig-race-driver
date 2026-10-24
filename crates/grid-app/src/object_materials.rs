@@ -176,3 +176,46 @@ mod coverage_tests {
         assert!(CoverageMode::parse("blend").is_err());
     }
 }
+
+/// Separate bounded native-DLAA drive contract. Static validate is unchanged.
+#[derive(Clone, Copy)]
+pub(crate) struct MovingCoverageContext {
+    pub base: CoverageContext,
+    pub exact_route_and_car: bool,
+    pub clean_settings: bool,
+    pub solo: bool,
+    pub no_menu: bool,
+    pub no_extra_diagnostics: bool,
+    pub native_resolution_land_off: bool,
+    pub capture_fits: bool,
+}
+impl CoverageMode {
+    pub(crate) fn validate_moving(self, c: MovingCoverageContext) -> Result<(), &'static str> {
+        let b=c.base;
+        if !b.drive || !b.enhanced || !self.supports_dlaa(b.aa) || !b.reference || b.collision || b.headless || !b.render || !b.detroit || !b.lod0 || b.perf || b.compositor || b.frames.is_some()
+            || !c.exact_route_and_car || !c.clean_settings || !c.solo || !c.no_menu || !c.no_extra_diagnostics || !c.native_resolution_land_off || !c.capture_fits {
+            return Err("moving object coverage requires isolated solo Detroit route_8 Lacetti LOD0 reference, enhanced native DLAA Control/Mask35, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture, no menu/perf/other audits");
+        }
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod moving_coverage_tests {
+    use super::*;
+    fn valid() -> MovingCoverageContext { MovingCoverageContext {
+        base:CoverageContext { enhanced:true,aa:3,drive:true,reference:true,collision:false,headless:false,render:true,detroit:true,lod0:true,perf:false,compositor:false,frames:None },
+        exact_route_and_car:true,clean_settings:true,solo:true,no_menu:true,no_extra_diagnostics:true,native_resolution_land_off:true,capture_fits:true } }
+    #[test]
+    fn moving_exception_is_separate_and_all_context_guards_are_required() {
+        let c=valid();
+        for mode in [CoverageMode::Control,CoverageMode::Mask35] {
+            assert_eq!(mode.validate_moving(c).is_ok(),cfg!(feature="dlaa"));
+            // Original static validator still rejects this drive.
+            assert!(mode.validate(c.base).is_err());
+            let invalid=[MovingCoverageContext { exact_route_and_car:false,..c },MovingCoverageContext { clean_settings:false,..c },MovingCoverageContext { solo:false,..c },MovingCoverageContext { no_menu:false,..c },MovingCoverageContext { no_extra_diagnostics:false,..c },MovingCoverageContext { native_resolution_land_off:false,..c },MovingCoverageContext { capture_fits:false,..c }];
+            for bad in invalid {assert!(mode.validate_moving(bad).is_err());}
+            for b in [CoverageContext { drive:false,..c.base },CoverageContext { enhanced:false,..c.base },CoverageContext { aa:0,..c.base },CoverageContext { aa:1,..c.base },CoverageContext { aa:2,..c.base },CoverageContext { reference:false,..c.base },CoverageContext { collision:true,..c.base },CoverageContext { headless:true,..c.base },CoverageContext { render:false,..c.base },CoverageContext { detroit:false,..c.base },CoverageContext { lod0:false,..c.base },CoverageContext { perf:true,..c.base },CoverageContext { compositor:true,..c.base },CoverageContext { frames:Some(120),..c.base }] {assert!(mode.validate_moving(MovingCoverageContext {base:b,..c}).is_err());}
+        }
+        for mode in [CoverageMode::Off,CoverageMode::A2c] {assert!(mode.validate_moving(c).is_err());}
+    }
+}

@@ -2111,7 +2111,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
-                println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff; no GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
+                println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--skid-order off|control|isolated: bounded baseline sort/raster diagnostic; isolated sort0, raster50; physics/emission/atlas unchanged.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
@@ -2261,13 +2261,38 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--oit-capacity-audit requires an OIT mode with eight ticks of headroom".into());
     }
-    graphics.object_coverage.validate(object_materials::CoverageContext {
+    let coverage_context = object_materials::CoverageContext {
         enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
         render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
         lod0: lod == "LOD0_", perf: std::env::var_os("GRID_PERF_TEST").is_some(),
         compositor: smoke_compositor != smoke_compositor::Mode::Off,
         frames: graphics.benchmark_frames,
-    })?;
+    };
+    if graphics.object_coverage != object_materials::CoverageMode::Off && drive {
+        graphics.object_coverage.validate_moving(object_materials::MovingCoverageContext {
+            base:coverage_context,
+            exact_route_and_car:car_chosen && route.path()=="tracks/usa/detroit/route_8" && route.subroute()==0 && player_car.is_default(),
+            clean_settings:profile.loaded_file_count==0,
+            solo:opponents.is_none() && opponent_cars.is_none() && series.is_none() && discipline.is_none() && trial_laps.is_none() && profile.time_limit.is_none() && grid_position.is_none(),
+            no_menu:!from_menu,
+            no_extra_diagnostics:*settings::diagnostics()==settings::Diagnostics::default()
+                && std::env::var_os("GRID_PERF_TIMING").is_none()
+                && window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none() && temporal_colour_tick.is_none()
+                && window_transition_script.is_none() && !window_sort_current && !car_transparent_sort && smoke_order==tyre_smoke::SmokeOrder::Groups && skid_order==skid_marks::OrderMode::Off
+                && texture_override_path.is_none() && surface_rgb_override.is_none() && !graphics.dlaa_reset_every_frame && !graphics.thin_motion_antenna
+                && geometry_pixel.is_none() && !audio_check && !reflection_calibration
+                && input_settings.device==input::Device::Keyboard
+                && body_contacts.is_none() && body_events.is_none() && deformation.is_none()
+                && graphics.window_pilot==window_response::Mode::Off && !render_fixed_step && capture_orbit_rate.is_none() && eye.is_none() && target.is_none(),
+            native_resolution_land_off:graphics.width==1920 && graphics.height==1080 && !graphics.source_land,
+            capture_fits:motion_sequence.is_some_and(|c| c.check_fence_window(render_fps,drive_ticks)),
+        })?;
+    } else {
+        graphics.object_coverage.validate(coverage_context)?;
+    }
+    let validated_coverage_dlaa = graphics.enhanced()
+        && graphics.object_coverage.supports_dlaa(graphics.anti_aliasing);
+
     if skid_order != skid_marks::OrderMode::Off && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || output.is_none() || headless || collision || lod != "LOD0_"
         || !ground_effect_assets::enabled() || smoke_compositor != smoke_compositor::Mode::Off
@@ -2335,8 +2360,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let start_sequence = StartSequence::load(&root, &route)?;
     // Narrow route exception only after the complete object diagnostic guard passed.
     // This does not enable enhanced Detroit play or arbitrary AA modes.
-    let object_coverage_dlaa = graphics.enhanced()
-        && graphics.object_coverage.supports_dlaa(graphics.anti_aliasing);
+    let object_coverage_dlaa = validated_coverage_dlaa;
     if graphics.enhanced() && ((!route.is_default() && !object_coverage_dlaa) || !player_car.is_default()) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
     }
