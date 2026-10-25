@@ -201,3 +201,43 @@
 - При архивации сессии: `prune_build_dirs.ps1 -ForWorktree <worktree> -Apply` перед `git worktree remove`.
 - При периодической проверке лимитов координатор запускает `prune_build_dirs.ps1 -Apply`.
 - Правило записано в `AGENTS.md`.
+
+
+## 10. Graphics session retention (owner instruction, 25 October 2026)
+
+At the end of every graphics work session, inspect its own worktree and record
+free space before/after plus an exact deletion manifest. Search log/, docs/ and
+local/handoff/ for each capture folder before deleting evidence. Keep cited
+captures in full and retain cited PNGs. For superseded uncited runs, keep logs,
+validation/summary/failure notes and representative PNGs; retire raw rgba16f,
+intermediate binary dumps and copied build artifacts. Archive builds with source
+revision and SHA-256 rather than retaining an executable in each capture folder.
+Current playable launcher targets/dependencies and SDK sources remain working;
+they are runtime inputs, not disposable archived builds. Never remove the private
+original-game executable as though it were a rebuildable Rust artifact.
+
+Run tools/dedup_hardlinks.py --apply on retained immutable capture folders.
+Identical logical bytes linked together are not extra physical savings; report
+actual disk free-space change separately, since other sessions can affect it.
+Keep a manifest of retired artifact paths, sizes and SHA-256 before removal.
+Do not edit hardlinked captures in place. Do not touch C:/Dev/Reassembly/local,
+Steam, or build directories of other checkouts. Existing prune-before-worktree-
+removal rules continue to apply; routine capture cleanup does not remove a live
+worktree or its build directory. G278 records the first graphics sweep.
+
+
+### Windows junction safety (G278 incident)
+
+`os.walk(..., followlinks=False)` alone traverses Windows directory junctions.
+The cleanup tool now prunes directory symlinks/junctions explicitly and refuses a
+linked root. The isolated NTFS control verifies both refusal and actual ordinary
+hardlinking while external fixture inode/content remain unchanged. Inventory and
+cleanup must use the same no-junction boundary, including nested asset overlays.
+
+The first graphics per-folder sweep exposed this defect in the existing tool:
+527 aliases were introduced through the clear-sky asset overlay into the original
+Steam installation. Exact byte contents are preserved, but link topology changed.
+The prepared byte-preserving undo is blocked by automatic approval review under
+the owner's original-installation no-touch rule; explicit owner approval remains
+required. Do not treat cleanup as fully resolved until that correction is handled.
+All targets, SHA and actual reports remain in the private G278 cleanup evidence.

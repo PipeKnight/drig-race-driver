@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F570](F0570.md) | 2026-10-25 | Disk cleanup: obsolete APKs, idle sessions' build dirs, uncited behavior captures |
 | [F569](F0569.md) | 2026-10-24 | Playable 9c1bfe65e68f with F567-F568, portable copy and APKs 3cdbf523a7f0 |
 | [F568](F0568.md) | 2026-10-24 | Derby frame rate measured against F561; debris contacts and lift_sunk on the compute pool, bit-identical |
 | [F567](F0567.md) | 2026-10-24 | Playable 7360a4865f54 with F563-F566, portable copy and APKs a2b4991d6817 |
@@ -472,6 +473,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G278](G0278.md) | 2026-10-25 | Clean archived graphics artifacts and integrate F570 records |
 | [G277](G0277.md) | 2026-10-24 | Integrate F568 main and verify the combined graphics tree |
 | [G276](G0276.md) | 2026-10-24 | Validate grouped smoke boundary on separately guarded BMW glass and lamps |
 | [G275](G0275.md) | 2026-10-24 | Measure current foliage eligibility across camera and shadow views without skipping draws |

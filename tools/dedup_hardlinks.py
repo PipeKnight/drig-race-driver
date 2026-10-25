@@ -2,6 +2,7 @@
 
 Every path keeps existing and keeps its exact bytes, so citations, pinned hashes and
 tools that read the captures keep working; only the duplicate storage is released.
+Directory symlinks and Windows junctions are never traversed, and cannot be the root.
 Captures are write-once, which is what makes sharing storage safe: do not edit a file
 in place afterwards (that would change every linked path). Deleting one path is safe.
 
@@ -50,9 +51,19 @@ def main():
     args = ap.parse_args()
 
     root = os.path.abspath(args.root)
+    if os.path.islink(root) or os.path.isjunction(root):
+        ap.error("root must be an ordinary directory, not a symlink or junction")
     newest = time.time() - args.min_age_minutes * 60
     by_size = defaultdict(list)
-    for d, _, files in os.walk(root):
+    excluded = []
+    for d, dirs, files in os.walk(root, followlinks=False):
+        # On Windows followlinks=False alone still traverses directory junctions.
+        # Prune them before os.walk descends, including nested asset installations.
+        for name in list(dirs):
+            child = os.path.join(d, name)
+            if os.path.islink(child) or os.path.isjunction(child):
+                dirs.remove(name)
+                excluded.append(os.path.relpath(child, root))
         for f in files:
             p = os.path.join(d, f)
             if p.endswith(".dedup-tmp"):
@@ -64,6 +75,8 @@ def main():
             if st.st_size >= args.min_size and st.st_mtime <= newest and not os.path.islink(p):
                 by_size[st.st_size].append(p)
 
+    if excluded:
+        print(f"excluded directory links: {len(excluded)}", flush=True)
     candidates = sum(len(v) for v in by_size.values() if len(v) > 1)
     print(f"size-collision files to hash: {candidates}", flush=True)
 
