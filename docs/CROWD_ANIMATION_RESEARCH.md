@@ -249,3 +249,14 @@ edge defect. This is a qualified different-build comparison with new flash paths
 defaultOff, not enhanced/DLAA/scene-probe validation. The first attempted old-exe
 comparison refused a changed hardlink archive hash before GPU; that failure is
 preserved and the lost archive is not represented as the original binary.
+
+## Source cell-selection metric (G289)
+
+### Camera-flash candidate cells and cadence metric
+
+Targeted shared-master analysis of `0x0075C8A0` connects flash cadence with selected source crowd cells. It scans the cell array in source order, selects at most 1000 cells inside a camera-relative distance interval and directional cone, and returns the wrapping unsigned sum of their actor counts. This metric includes every actor in the selected cells; the later spawn function separately filters camera-bearing actors. The distance interval scales with an incoming angle parameter and the cone compares against its cosine. Four-component distance and dot products retain the source pairwise arithmetic order. The constructor supplies near/far defaults of 40/100 and the reference-angle constant has bits `0x3f75be0b`.
+
+A private, independently authored CPU kernel compiled with Rust 1.99.0, edition 2024, optimization enabled and warnings denied through the shared build lock. All seven fixtures passed: inclusive interval and source order, cone boundary, angle-scaled distances, fourth component, 1000-cell cap, wrapping metric and angle forwarding, and diagnostic rejection of invalid inputs. They use explicit synthetic cosine and reciprocal providers. This verifies the bounded kernel's analytical cases, not original floating-point bit parity or live flash behavior. Its finite-input and work bounds are authored diagnostic policy.
+
+The caller's angle convention, signed cadence scalar, source clock, live cell construction and attachment poses remain unverified. No production hook, random timer, guessed point light, animated spectator or default flash behavior is introduced. Before connecting the existing emitter draft, capture actual camera/cell/math inputs and resolve these caller semantics; reuse the existing reciprocal emulation rather than introduce another approximation.
+A bounded caller observation at `0x00765140` further establishes a null-checked forwarding wrapper: it supplies the embedded source owner and forwards three pointer inputs, the signed event scalar and the selection angle unchanged to `0x00762710`. It performs no scalar multiplication or angle conversion. The master map has no confirmed entry for this small wrapper; its locally observed return is distinct from a master-verified function boundary. A subsequent exact-target direct-call reference query found no candidates for the wrapper. That negative direct-reference result does not rule out indirect dispatch and does not establish either float's clock/FOV convention. The other updater call remains unexpanded.
