@@ -1,4 +1,8 @@
 mod object_materials;
+#[cfg(not(target_os = "android"))]
+mod coverage_probe;
+#[cfg(not(target_os = "android"))]
+mod coverage_probe_entry;
 mod foundation_front;
 mod foundation_front_audit;
 mod crowd_preview;
@@ -1149,6 +1153,15 @@ fn main() {
     // No command line on Android: the event menu, or the race it chose.
     #[cfg(target_os = "android")]
     let args = event_menu::android_args();
+    // Isolated sample probe branches before menu/settings/game-root discovery.
+    #[cfg(not(target_os = "android"))]
+    if args.iter().any(|arg| arg == "--coverage-sample-probe") {
+        if let Err(error) = coverage_probe_entry::run(&args) {
+            eprintln!("grid-app coverage probe: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     // `--menu`: the event menu and the races it starts, each its own
     // process (event_menu.rs).
     #[cfg(not(target_os = "android"))]

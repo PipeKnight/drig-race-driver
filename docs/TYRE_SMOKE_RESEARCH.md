@@ -737,3 +737,26 @@ silently assigned to the distinct unlit-half-depth family.
 - Fresh fetch finds F5698cceee2b changes only release-state docs/log/index since compiled F5683cdbf523. Merge these docs separately without rebuilding unchanged production; all21 frozen source SHA still match after validation. Root post-validation-source-proof.json records this boundary. No old/new performance improvement asserted. Completed-capture dedup BMW0 and Derby50files/0.09GiB/errors0.
 
 The combined baseline artifact is private `local/graphics/f568-graphics01/grid-bmw-smoke-boundary.exe` (SHA7b876cb1d673921184f75c567dee756203971001bf53ef304eeca6033a3e5233). Both paired renderers finish0 with separate exact BMW90 and implicit Derby120 guards. This validates the bounded experiment after integration; damaged/general vehicles, original half-resolution compositor and dark wheel rings remain open. Ordinary launchers were not changed.
+
+## Capture-channel correction (25 October 2026)
+
+The final and motion screenshot writers explicitly convert captured images to
+RGB8 before saving PNG. Pinned Bevy0.19.1 save_to_disk does the same. Historical
+helpers often converted those PNGs back to RGBA for comparison; their opaque255
+fourth lane is CPU padding, not measured render-attachment alpha. Consequently
+PNG-derived alphaexact/alpha_changed=0 statements in G271/G275/G276 do not prove
+alpha preservation or coverage. The sampled files in those stages and G279 are
+nativeRGB without transparency metadata. Existing RGB equality, changed-pixel
+counts and maximum-channel differences remain valid. Four-lane padded mean error
+is3/4 of nativeRGB mean only when both inputs have RGB plus an identical synthetic
+zero-difference alpha lane; the old metrics are retained with that qualification.
+
+This does not invalidate G271's separately recorded exact16-word binary16 GPU
+probe: its four genuine alpha words were read and verified directly. Likewise,
+.rgba16f cube data and typed temporal-colour sidecars retain real fourth storage
+lanes, whose shader/stage semantics still need identification; they are not
+implicitly opacity. The motion-depth sidecar's fourth value is authored1 and is
+not alpha. Future reports record native channels and alpha_observed explicitly,
+use null/unobserved for absent alpha, and reserve attachment/per-sample alpha
+claims for the corresponding typed readback. No historical captures are rewritten
+and no screenshot equality is promoted into source-pass alpha proof.

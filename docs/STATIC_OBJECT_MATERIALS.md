@@ -90,3 +90,26 @@ The source-derived ZERO/ZERO alpha state is observed in the ready descriptor,
 while screenshot alpha is unavailable. Native channel analysis preserves this
 absence explicitly; raw captures remain unchanged. A raw-alpha4x per-sample colour/depth fixture for the separate backing pass
 is planned; Bevy A2C sharpening and source D3D9 level2 are not assumed equivalent.
+
+## G280: isolated per-sample coverage measurement
+
+An explicit desktop-only `--coverage-sample-probe local/.../fresh-result.json`
+branches before gameplay/settings/asset-root discovery. It uses no game input,
+only an authored64x4 chart, private RGBA8Unorm/Depth32Float4x attachments and a
+16KiB storage readback. Four policies compare Opaque, Mask.5, Bevy's sharpened
+A2C and rawGT0 hardwareA2C. Each sample is recorded before and after a behind-red
+surface. Colour/depth ownership, unwritten sentinel, exact threshold/equality
+and alpha0/1 extremes are independently verified. Stored zero alpha is not used
+as an opacity/coverage proxy; no screenshot conversion or resolve intervenes.
+
+Actual Vulkan GPU result passes1024sample records and256masks. Covered-sample
+histograms for the64pixels in each row are: Opaque4:64; Mask0:36,4:28;
+sharpened0:36,2:8,4:20; raw0:23,1:13,2:9,3:8,4:11. Raw and sharpened masks differ
+at22/64x positions. Intermediate counts are observations, not universal
+alpha-to-sample thresholds. The fixture passes380app tests and Clippy.
+
+This measures the selected adapter's authored4x behaviour. It does not establish
+original D3D9level2 mapping, filtered source texture/mip behaviour or a visually
+accepted stadium fix. Front/backing/fence ordinary materials are unchanged;
+no default or playable promotion. Private evidence: backing-coverage01/sample02,
+result SHA561cc284e19d2b399f3b2265ef3a8a839da125aae233d2500b02eee16292cf8e.
