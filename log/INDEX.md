@@ -473,6 +473,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G288](G0288.md) | 2026-10-26 | Integrate explicit native HDR skid replay after atmospheric rendering |
 | [G287](G0287.md) | 2026-10-26 | Validate public native transparency composition before enhanced smoke replay |
 | [G286](G0286.md) | 2026-10-25 | Try doubled foreground fence wire thickness |
 | [G285](G0285.md) | 2026-10-25 | Check fence visibility at matched near and far camera distances |

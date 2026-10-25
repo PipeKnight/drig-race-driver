@@ -843,3 +843,36 @@ reviewed render-world installation, preserved native constraints and a loud
 failure path after mutation; AppExit alone is not a same-frame render barrier.
 The accepted Motion configuration and the G281 baseline renderer remain intact.
 Private evidence: `local/graphics/skid-native-pipe01/`.
+
+### G288: first-frame native HDR replay integration (work in progress)
+
+The explicit experimental native-DLAA profile uses the current HDR main colour
+attachment directly at one sample, with no resolve, and requires matching
+colour/depth extents, real depth/motion prepasses, native-resolution override,
+main-view identity and a ready original skid pipeline. Baseline MSAA4 remains a
+separate profile. Default Off installs no adapter. The native A stage uses
+optional lookups and normal unit returns so unsupported views retain actual
+native transparency B; retained skid masking still requires command success.
+
+The proposed installer runs once in a dedicated single-threaded schedule before
+Render, preserving the public native function's typed dependencies. A panic
+inside Bevy's multithreaded Render schedule can allow dependents to proceed;
+therefore it cannot serve as the postmutation failure barrier. Ordinary refusal
+before mutation leaves the native function intact.
+
+Actual first compilation exposed three API errors, corrected explicitly. The
+next compile succeeded but two graph tests failed (23 passed): Schedule.initialize
+moves systems AND conditions into executable storage. Reading empty/drained
+conditions afterward cannot establish absence of a run condition. The corrected
+proposal inspects first-frame graph systems/conditions before that move,
+refuses already-built schedules, traverses typed hierarchy for membership and
+uses the executable's public keyed iterator after building. Native and opaque
+conditions, including ancestor sets, must both be absent. The corrected tests
+use the actual Core3d base schedule and include already-built refusal.
+
+Corrected baseline tests (26), native-DLAA feature tests (27), all 433 app
+tests and strict baseline/feature Clippy now pass. Actual GPU submission,
+atmosphere and smoke controls remain pending. No successful native HDR rendering or
+playable/default promotion is claimed. Private evidence:
+local/graphics/skid-native-hdr01 and the immutable native-hdr-composition01
+packets under local/handoff/drafts/smoke-wheel-family02.

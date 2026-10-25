@@ -2190,7 +2190,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--foundation-backing off|control|raw-a2c: defaultOff exact Detroit backing sheet; static baseline MSAA4, requires same SourceFront composite; matched NoAuto/NoShadow Control, raw GT0 hardwareA2C. Not source level2/shadow/cull parity.");
                 println!("--fence-wire-scale 1|2: default1; approximately double the exact Detroit wire alpha, static baseline trial only. Atlas RGB, rails and concrete preserved.");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
-                println!("--ground-skid-pass off|control|before-transparent: default-off ordinary baseline AA0 driving/Groups ground pass before ALL transparency; current native MSAA4 GPU-building main-view readiness required, unsupported runtime views use ordinary fallback. Off installs nothing; Control isolates owned-skid NoAutomaticBatching. Not source compositor parity.");
+                println!("--ground-skid-pass off|control|before-transparent: default-off experimental skid-only pass before ALL transparency. Profiles: ordinary baseline AA0/sky/MSAA4, or enhanced native --aa dlaa --reflections probe with HDR/sample1 and equal native resolution. Groups/ground and other phase policies off; current typed main-view readiness required, unsupported views use ordinary fallback. Off installs nothing; Control isolates owned-skid NoAutomaticBatching. Not source compositor parity.");
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
                 println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
@@ -2421,7 +2421,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let validated_coverage_dlaa = graphics.enhanced()
         && graphics.object_coverage.supports_dlaa(graphics.anti_aliasing);
 
-    ground_skid_pass.validate(ground_skid_pass::Context {
+    let ground_skid_profile = ground_skid_pass.validate(ground_skid_pass::Context {
+        native_dlaa: cfg!(feature="dlaa") && graphics.enhanced() && graphics.anti_aliasing==3, probe:graphics.reflection_mode==3,
         baseline: !graphics.enhanced(), drive, headless, collision,
         aa0: graphics.anti_aliasing == 0, groups: smoke_order == tyre_smoke::SmokeOrder::Groups,
         ground: ground_effect_assets::enabled(), skid_off: skid_order == skid_marks::OrderMode::Off && skid_reflectance.is_none(),
@@ -3743,7 +3744,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         window_response::install_current_sort(&mut app);
     }
     smoke_compositor::install(&mut app, smoke_compositor);
-    ground_skid_pass::install(&mut app, ground_skid_pass)?;
+    ground_skid_pass::install_profile(&mut app, ground_skid_pass, ground_skid_profile)?;
     if let Some(target) = oit_capacity_target {
         let directory = app.world().resource::<Capture>().path.with_file_name("oit-capacity");
         oit_capacity_audit::install(&mut app, target, &directory)?;
