@@ -75,3 +75,26 @@ G199 adds --surface-mip-bias off|view, defaultOff, in4964eef0. Merge track_surfa
 G200 adds --dlaa-history normal|reset-every-frame, defaultNormal, with explicit guards requiring enhanced nativeDLAA scripted drive ticks plus --render. Keep this as a diagnostic: it removes the observed road detail band but gives up history accumulation. NativeDLAA render-world validation checks forced reset survives extraction. Do not add forced reset to owner launchers or treat it as a finished temporal-AA fix. New graphics Settings booleans both defaultfalse; preserve peer additions when resolving settings/main merges. Existing ordinary, DLAA, Reflections, Lamps and Signals launchers/executables remain preserved; owner accepted Signals brightness.
 
 Neither stage updates dependencies or rebases main. When integrating newer main, perform its requested seed_build_dir.ps1 -Reseed once **after** that merge/rebase with the updated script, before Cargo; no reseed was attempted against this older script. Keep private diagnostic binaries/captures/original-derived research ignored. Exact checks, scope, failures and raw evidence are in PROJECT_LOG.md/G199–G200 and ASPHALT_TEMPORAL_DETAIL.md. Colour raw before DLAA is still not captured; the motion/depth audit protocol remains unchanged.
+
+## 25 October 2026: obsolete integration checkout removed
+
+The owner requested removal of the obsolete 16 October integration checkout.
+Its 54 ignored local evidence files (50,443,131 bytes) are preserved with per-file
+SHA-256 verification under
+`local/archives/grid-graphics-integration-20261025/evidence/local/` in the active
+graphics worktree. Historical integration evidence references map from the old
+checkout's `local/` prefix to this preserved prefix; preservation.json records
+exact files, hashes, branch and 18eac2c1 source revision. The obsolete dedicated
+build cache was removed after exact path/active-main exclusion checks.
+
+The managed archiver initially refused removal because another active task still
+used the checkout. The available thread listing did not identify that task, so
+no manual override of its ownership guard was attempted.
+
+The owner subsequently removed the old checkout. Verification confirms both its
+filesystem directory and Git worktree registration are absent; all 54 preserved
+private files still match SHA-256. Tracked 18eac2c1 history also has a verified
+local-only `integration-source.bundle` in the same archive folder. This legacy
+history is recovery-only and must not be merged or pushed. An old app attachment
+may remain as stale metadata; it is not a live Git checkout. No internal app
+metadata was edited. Removal is complete; active graphics work continues.
