@@ -815,3 +815,31 @@ screenshot, live pixel/perceptual, wholetrace timing, audio-audition or FPS proo
 is claimed. Enhanced/DLAA and the unresolved offscreen foreign-pixel residuals
 still prevent calling this a general default promotion. No source changed for
 this check; private evidence is skid-live01 and ground-skid-pass01/live-window-first01.
+
+### G287: public native transparency composition feasibility
+
+The next enhanced skid-replay draft has a real ordering gap: Bevy's atmosphere
+pass can change scene radiance between opaque and transparent rendering, while
+the draft early-skid system occupies that same interval without a dependency.
+A public `try_skid.pipe(main_transparent_pass_3d)` can retain the native type-set
+and its predecessor dependencies, but its first stage must return normally on
+unsupported views. An actual `ViewQuery` validation skip propagates through
+Pipe and prevents the native second stage from running.
+
+Four actual CPU fixtures pass against pinned Bevy 0.19.1. They initialize the
+real public native function's graph without executing its renderer; verify
+exact typed membership/removal/re-addition, the actual private-equivalent
+system-to-native-set dependency edge before and after replacement, an
+adversarial graph without that edge, and refusal of missing/uninitialized/
+zero/duplicate membership. Executed CPU continuation tests cover supported,
+missing-resource, missing-view, unsupported and stale-entity cases. A real
+ViewQuery-Skip negative control suppresses the second stage as expected.
+Strict Clippy also passes. The prior production source prefix is byte-exact;
+only a cfg(test) module was added.
+
+These are feasibility results, not actual atmosphere, RenderContext submission,
+native-DLAA or smoke-rendering validation. Production replacement still needs
+reviewed render-world installation, preserved native constraints and a loud
+failure path after mutation; AppExit alone is not a same-frame render barrier.
+The accepted Motion configuration and the G281 baseline renderer remain intact.
+Private evidence: `local/graphics/skid-native-pipe01/`.

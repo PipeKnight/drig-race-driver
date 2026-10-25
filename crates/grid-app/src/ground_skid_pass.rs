@@ -1078,3 +1078,158 @@ mod receipt_tests {
         assert_eq!(r.notes, 3);
     }
 }
+
+#[cfg(test)]
+mod native_pipe_cpu_feasibility {
+//! CPU feasibility controls for preserving the native transparency dependency.
+//! No RenderContext/GPU execution; actual native function is initialized, NEVER run.
+use bevy::{
+    core_pipeline::{core_3d::main_transparent_pass_3d, schedule::Core3dSystems},
+    ecs::{schedule::{IntoSystemSet, InternedSystemSet, ScheduleCleanupPolicy, SystemSet, NodeId, ScheduleError}, system::{IntoSystem, System}},
+    prelude::*,
+    render::renderer::{CurrentView, ViewQuery},
+};
+#[derive(Resource, Default)]
+struct Trace { events:Vec<&'static str>, a_calls:usize, native_calls:usize }
+#[derive(Resource)] struct SkidRequest;
+#[derive(Component)] struct SupportedSkidView;
+fn opaque(mut t:ResMut<Trace>){t.events.push("opaque");}
+// All A-only resources are optional; missing view is an ordinary Query error.
+// Trace is mandatory for BOTH A and B in CPU forwarding tests, never A-only.
+fn try_a(current:Option<Res<CurrentView>>,request:Option<Res<SkidRequest>>,views:Query<&SupportedSkidView>,mut t:ResMut<Trace>){
+    t.a_calls+=1;
+    let (Some(current),Some(_request))=(current,request) else{return};
+    if views.get(current.0).is_err(){return;}
+    t.events.push("skid");
+}
+fn native_cpu(mut t:ResMut<Trace>){t.native_calls+=1;t.events.push("native");}
+// Deliberately broken control, demonstrating why the production ViewQuery A cannot be piped unchanged.
+fn skipped_a(_view:ViewQuery<&SupportedSkidView>,mut t:ResMut<Trace>){t.a_calls+=1;t.events.push("bad-a");}
+mod private_dependency {
+    use super::*;
+    // Caller cannot name this private function. Its dependency is registered by plugin code.
+    fn scattering(mut t:ResMut<Trace>){t.events.push("atmosphere");}
+    pub(super) fn register_actual(schedule:&mut Schedule)->InternedSystemSet {
+        schedule.add_systems(scattering.after(opaque).before(main_transparent_pass_3d));
+        scattering.into_system_set().intern()
+    }
+    pub(super) fn register_unordered_actual(schedule:&mut Schedule)->InternedSystemSet {
+        schedule.add_systems(scattering.after(opaque));
+        scattering.into_system_set().intern()
+    }
+    pub(super) fn register_cpu(schedule:&mut Schedule)->InternedSystemSet {
+        schedule.add_systems(scattering.after(opaque).before(native_cpu));
+        scattering.into_system_set().intern()
+    }
+}
+fn count(schedule:&Schedule,set:InternedSystemSet)->usize {
+    schedule.graph().systems_in_set(set).expect("initialized typed set").len()
+}
+fn sole(schedule:&Schedule,set:InternedSystemSet)->usize {
+    let ids=schedule.graph().systems_in_set(set).unwrap();assert_eq!(ids.len(),1);
+    let key=*ids.iter().next().unwrap();
+    schedule.systems().unwrap().position(|(id,_)|id==key).unwrap()
+}
+#[derive(Debug, PartialEq, Eq)]
+enum Refusal { Count(usize), MissingSet, InvalidGraph }
+fn refuse_if_not_one(schedule:&Schedule,set:InternedSystemSet)->Result<(),Refusal>{
+    match schedule.graph().systems_in_set(set) {
+        Ok(ids) if ids.len()==1=>Ok(()),
+        Ok(ids)=>Err(Refusal::Count(ids.len())),
+        Err(ScheduleError::SetNotFound)=>Err(Refusal::MissingSet),
+        Err(_)=>Err(Refusal::InvalidGraph),
+    }
+}
+// Direct graph constraint is the proof; one observed topological index order is only diagnostic.
+fn private_before_native_edge(schedule:&Schedule,private_set:InternedSystemSet,native_set:InternedSystemSet)->bool {
+    let graph=schedule.graph();
+    let Ok(ids)=graph.systems_in_set(private_set) else{return false};
+    if ids.len()!=1{return false;}
+    let Some(native)=graph.system_sets.get_key(native_set) else{return false};
+    graph.dependency().graph().contains_edge(NodeId::System(*ids.iter().next().unwrap()),NodeId::Set(native))
+}
+#[test]
+fn actual_native_public_type_set_exact_count_survives_remove_readd_graph_only(){
+    let mut world=World::new();world.insert_resource(Trace::default());
+    let mut schedule=Schedule::default();
+    let native_set=main_transparent_pass_3d.into_system_set().intern();
+    schedule.add_systems((opaque,main_transparent_pass_3d).chain().in_set(Core3dSystems::MainPass));
+    let private_set=private_dependency::register_actual(&mut schedule);
+    let _=schedule.initialize(&mut world).unwrap();
+    assert_eq!(refuse_if_not_one(&schedule,native_set),Ok(()));
+    assert!(private_before_native_edge(&schedule,private_set,native_set));
+    assert!(sole(&schedule,private_set)<sole(&schedule,native_set));
+    let total_before=schedule.systems_len();
+    // Refuse BEFORE mutation; returned removed count is a second independent check.
+    let removed=schedule.remove_systems_in_set(main_transparent_pass_3d,&mut world,ScheduleCleanupPolicy::RemoveSystemsOnly).unwrap();
+    assert_eq!(removed,1);
+    let combined=IntoSystem::into_system(try_a.pipe(main_transparent_pass_3d));
+    assert!(combined.default_system_sets().contains(&native_set));
+    schedule.add_systems(combined.after(opaque).in_set(Core3dSystems::MainPass));
+    let _=schedule.initialize(&mut world).unwrap();
+    assert_eq!(count(&schedule,native_set),1);
+    assert_eq!(schedule.systems_len(),total_before);
+    assert!(private_before_native_edge(&schedule,private_set,native_set));
+    assert!(sole(&schedule,private_set)<sole(&schedule,native_set));
+    // Adversarial structure: same nodes, no before(native) constraint. A coincidental
+    // topological index order must NOT pass the dependency proof.
+    let mut unordered=Schedule::default();
+    unordered.add_systems((opaque,main_transparent_pass_3d).chain());
+    let unordered_private=private_dependency::register_unordered_actual(&mut unordered);
+    let _=unordered.initialize(&mut world).unwrap();
+    assert_eq!(count(&unordered,native_set),1);
+    assert!(!private_before_native_edge(&unordered,unordered_private,native_set));
+    // DO NOT schedule.run(): actual native ViewTarget/RenderContext needs renderer/GPU.
+}
+#[test]
+fn exact_count_refuses_zero_and_duplicate_before_any_mutation(){
+    let mut world=World::new();let mut schedule=Schedule::default();
+    let native_set=main_transparent_pass_3d.into_system_set().intern();
+    // Absent is a refusal, not a successful zero-count admission or a panic.
+    let _=schedule.initialize(&mut world).unwrap();
+    assert!(matches!(schedule.graph().systems_in_set(native_set),Err(ScheduleError::SetNotFound)));
+    assert_eq!(refuse_if_not_one(&schedule,native_set),Err(Refusal::MissingSet));
+    assert_eq!(schedule.systems_len(),0);
+    // Changed/uninitialized graphs are also refused without mutating native systems.
+    schedule.add_systems(opaque);
+    assert_eq!(refuse_if_not_one(&schedule,native_set),Err(Refusal::InvalidGraph));
+    let _=schedule.initialize(&mut world).unwrap();
+    // Existing empty native set: initialize native, remove it, retain the typed set.
+    schedule.add_systems(main_transparent_pass_3d);let _=schedule.initialize(&mut world).unwrap();
+    assert_eq!(schedule.remove_systems_in_set(main_transparent_pass_3d,&mut world,ScheduleCleanupPolicy::RemoveSystemsOnly).unwrap(),1);
+    let _=schedule.initialize(&mut world).unwrap();assert_eq!(refuse_if_not_one(&schedule,native_set),Err(Refusal::Count(0)));
+    schedule.add_systems((main_transparent_pass_3d,main_transparent_pass_3d));let _=schedule.initialize(&mut world).unwrap();
+    assert_eq!(refuse_if_not_one(&schedule,native_set),Err(Refusal::Count(2)));assert_eq!(count(&schedule,native_set),2);
+}
+#[derive(Clone,Copy)] enum Case {Supported,NoRequest,NoCurrentView,UnsupportedView,StaleEntity}
+fn run_cpu(case:Case)->Trace {
+    let mut world=World::new();world.insert_resource(Trace::default());world.insert_resource(SkidRequest);
+    let entity=match case {Case::UnsupportedView=>world.spawn_empty().id(),_=>world.spawn(SupportedSkidView).id()};
+    world.insert_resource(CurrentView(entity));
+    match case {Case::NoRequest=>{let _=world.remove_resource::<SkidRequest>();},Case::NoCurrentView=>{let _=world.remove_resource::<CurrentView>();},Case::StaleEntity=>{let _=world.despawn(entity);},_=>{}}
+    let mut schedule=Schedule::default();let native_set=native_cpu.into_system_set().intern();
+    schedule.add_systems((opaque,native_cpu).chain());let private_set=private_dependency::register_cpu(&mut schedule);
+    let _=schedule.initialize(&mut world).unwrap();assert_eq!(count(&schedule,native_set),1);
+    assert_eq!(schedule.remove_systems_in_set(native_cpu,&mut world,ScheduleCleanupPolicy::RemoveSystemsOnly).unwrap(),1);
+    schedule.add_systems(try_a.pipe(native_cpu).after(opaque));let _=schedule.initialize(&mut world).unwrap();
+    assert_eq!(count(&schedule,native_set),1);assert!(private_before_native_edge(&schedule,private_set,native_set));
+    assert!(sole(&schedule,private_set)<sole(&schedule,native_set));
+    schedule.run(&mut world);world.remove_resource::<Trace>().unwrap()
+}
+#[test]
+fn cpu_native_continuation_once_for_supported_and_every_normal_refusal(){
+    for case in [Case::Supported,Case::NoRequest,Case::NoCurrentView,Case::UnsupportedView,Case::StaleEntity]{
+        let t=run_cpu(case);assert_eq!(t.a_calls,1);assert_eq!(t.native_calls,1);
+        let expected=if matches!(case,Case::Supported){vec!["opaque","atmosphere","skid","native"]}else{vec!["opaque","atmosphere","native"]};
+        assert_eq!(t.events,expected);
+    }
+}
+#[test]
+fn real_viewquery_skip_negative_control_suppresses_b(){
+    let mut world=World::new();world.insert_resource(Trace::default());
+    let entity=world.spawn_empty().id();world.insert_resource(CurrentView(entity));
+    let mut schedule=Schedule::default();schedule.add_systems(skipped_a.pipe(native_cpu));schedule.run(&mut world);
+    let t=world.resource::<Trace>();assert_eq!(t.a_calls,0);assert_eq!(t.native_calls,0);
+}
+
+}
