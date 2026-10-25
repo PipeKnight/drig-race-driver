@@ -170,7 +170,7 @@ pub(crate) fn summary() -> String {
 }
 
 /// Replaces BC1/BC3 levels by RGBA8 levels; other formats are kept.
-fn decode_in_place(image: &mut Image) -> Result<bool, TextureError> {
+pub(crate) fn decode_in_place(image: &mut Image) -> Result<bool, TextureError> {
     let (decoded, alpha) = match image.texture_descriptor.format {
         TextureFormat::Bc1RgbaUnormSrgb => (TextureFormat::Rgba8UnormSrgb, false),
         TextureFormat::Bc1RgbaUnorm => (TextureFormat::Rgba8Unorm, false),

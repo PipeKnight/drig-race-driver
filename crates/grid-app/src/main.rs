@@ -1911,6 +1911,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--foundation-front" => {
                 foundation_front = foundation_front::Mode::parse(&args.next().ok_or("--foundation-front needs off, control or source-front")?)?;
             }
+            "--fence-wire-scale" => {
+                graphics.double_fence_wire = match args.next().as_deref() {
+                    Some("1") => false, Some("2") => true,
+                    _ => return Err("--fence-wire-scale needs 1 or 2".into()),
+                };
+            }
             "--object-coverage" => {
                 graphics.object_coverage = object_materials::CoverageMode::parse(
                     &args.next().ok_or("--object-coverage needs off, control, a2c or mask35")?,
@@ -2182,6 +2188,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--foundation-front off|control|source-front: defaultoff exact Detroit front grandstand sheet only, static route8/sub0 LOD0 reference baseline/native1080/configAA0/actualMSAA4/source sky+track, clean settings, benchmark1..600/no other pilots. SourceFront uses inherited PBR with saved colour/separate-alpha/depth states; existing cull retained, no original shadow/auxiliary/source shader parity. BackingOpaque/fence unchanged.");
                 println!("--foundation-backing off|control|raw-a2c: defaultOff exact Detroit backing sheet; static baseline MSAA4, requires same SourceFront composite; matched NoAuto/NoShadow Control, raw GT0 hardwareA2C. Not source level2/shadow/cull parity.");
+                println!("--fence-wire-scale 1|2: default1; approximately double the exact Detroit wire alpha, static baseline trial only. Atlas RGB, rails and concrete preserved.");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--ground-skid-pass off|control|before-transparent: default-off ordinary baseline AA0 driving/Groups ground pass before ALL transparency; current native MSAA4 GPU-building main-view readiness required, unsupported runtime views use ordinary fallback. Off installs nothing; Control isolates owned-skid NoAutomaticBatching. Not source compositor parity.");
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
@@ -2383,6 +2390,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         compositor: smoke_compositor != smoke_compositor::Mode::Off,
         frames: graphics.benchmark_frames,
     };
+    if graphics.double_fence_wire {
+        object_materials::CoverageMode::Control.validate(coverage_context)?;
+        if graphics.object_coverage != object_materials::CoverageMode::Off {
+            return Err("fence thickness trial requires unchanged object coverage".into());
+        }
+    }
     if graphics.object_coverage != object_materials::CoverageMode::Off && drive {
         graphics.object_coverage.validate_moving(object_materials::MovingCoverageContext {
             base:coverage_context,
@@ -4070,6 +4083,12 @@ fn setup(
                 }
                 if decal_materials.contains(&part.material) {
                     track_decals::configure(&mut material);
+                }
+                if graphics.double_fence_wire && name == object_materials::COVERAGE_TARGET {
+                    let original = material.base_color_texture.as_ref().expect("fence diffuse required");
+                    let mut image = images.get(original).expect("loaded fence image").clone();
+                    object_materials::double_wire(&mut image).expect("audited fence atlas");
+                    material.base_color_texture = Some(images.add(image));
                 }
                 object_materials::configure(name, &object_glass_materials, &mut material);
                 object_materials::configure_coverage(graphics.object_coverage, name, &mut material);

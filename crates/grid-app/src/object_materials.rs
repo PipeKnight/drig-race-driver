@@ -219,3 +219,62 @@ mod moving_coverage_tests {
         for mode in [CoverageMode::Off,CoverageMode::A2c] {assert!(mode.validate_moving(c).is_err());}
     }
 }
+
+/// Authored atlas-space thickness trial; only the material-specific image clone changes.
+/// Radius one takes the audited median base wire cross-section about 5 -> 9 texels.
+pub(crate) fn double_wire(image: &mut Image) -> Result<(), &'static str> {
+    use bevy::render::render_resource::TextureFormat;
+    let size = image.texture_descriptor.size;
+    if size.width != 512 || size.height != 512 || size.depth_or_array_layers != 1
+        || image.texture_descriptor.mip_level_count != 10 {
+        return Err("fence trial requires the audited 512x512 complete mip atlas");
+    }
+    super::texture_upload::decode_in_place(image).map_err(|_| "fence BC decode failed")?;
+    if image.texture_descriptor.format != TextureFormat::Rgba8UnormSrgb {
+        return Err("fence trial requires RGBA8 sRGB");
+    }
+    let data = image.data.as_mut().ok_or("missing fence pixels")?;
+    let expected: usize = (0..10).map(|m| (512usize >> m).max(1).pow(2)*4).sum();
+    if data.len() != expected { return Err("fence mip payload differs"); }
+    let mut alpha: Vec<u8> = data[..512*512*4].as_chunks::<4>().0.iter().map(|p| p[3]).collect();
+    let source = alpha.clone();
+    for y in 0..384usize {
+        for x in 0..512usize {
+            let mut a = source[y*512+x];
+            for dy in -1..=1isize {
+                let sy = (y as isize+dy).clamp(0,383) as usize;
+                for dx in -1..=1isize {
+                    let sx = (x as isize+dx).rem_euclid(512) as usize;
+                    a = a.max(source[sy*512+sx]);
+                }
+            }
+            alpha[y*512+x] = a;
+        }
+    }
+    // Rebuild only alpha inside the mapped wire ROI at each level. All RGB and
+    // every alpha sample outside that ROI retain the decoded source bytes.
+    let mut width = 512usize;
+    let mut wire_height = 384usize;
+    let mut offset = 0;
+    for level in 0..10 {
+        for y in 0..wire_height {
+            for x in 0..width { data[offset+(y*width+x)*4+3] = alpha[y*width+x]; }
+        }
+        offset += width*width*4;
+        if level == 9 { break; }
+        let next_width = width/2;
+        let mut next = vec![0u8;next_width*next_width];
+        for y in 0..next_width {
+            for x in 0..next_width {
+                let sum = u16::from(alpha[(y*2)*width+x*2])
+                    + u16::from(alpha[(y*2)*width+x*2+1])
+                    + u16::from(alpha[(y*2+1)*width+x*2])
+                    + u16::from(alpha[(y*2+1)*width+x*2+1]);
+                next[y*next_width+x] = ((sum+2)/4) as u8;
+            }
+        }
+        alpha = next; width = next_width; wire_height /= 2;
+    }
+    println!("fence_wire scale=2 authored=true atlas=512x512 wire_roi=0,0,512,384 radius=1 nominal_median_texels=5_to_9 rgb=source other_materials=source rails_concrete=source");
+    Ok(())
+}

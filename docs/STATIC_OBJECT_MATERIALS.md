@@ -183,3 +183,27 @@ isolate texture filtering, mip selection, thresholding, sample coverage or
 background contrast, nor establish parity with the original. No thickness,
 mask, AA or ordinary-material setting was changed. Private evidence:
 `local/graphics/foundation-backing01/distance-pair01/`.
+
+## G286: owner-requested approximately doubled wire trial
+
+`--fence-wire-scale 1|2` defaults to 1. Scale 2 clones the diffuse image only for
+`objects/concrete_fence_white_end_01`; other materials retain the original shared
+image. Its audited 512x512 atlas has wire in [0,512)x[0,384). A radius-one 3x3
+alpha maximum, periodic in X and clamped within that wire region in Y, increases
+measured base horizontal wire runs from median 5 to 9 texels. This is roughly
+1.8x, not an exact projected or perpendicular diameter. Radius two overshoots
+at about 13 texels, so it was not selected.
+
+The existing BC decoder supplies RGBA8. All decoded RGB bytes are retained;
+only the wire-region alpha and its interior mapped mip alpha change. Guard band,
+lower rail and concrete alpha stay unchanged, as do the final 1x1 source mip and
+all other material image handles. The original game assets are never written.
+Decoded RGB preservation is not a compressed-format sampling identity claim.
+
+Admission reuses the existing static coverage Control validator and refuses
+combination with the cutout-threshold pilot. The current baseline build is the
+trial target. Feature builds inherit that validator's static native-DLAA
+exception; it is not an independently validated enhanced thickness mode.
+No moving, general-route or playable-default promotion follows from these
+static trials. Keep this small comparison separate from smoke work.
+Actual G286 captures complete in four successful native processes. Original-scale near/far images exactly match G285 native RGB; the thicker candidate improves diamond-wire visibility in both views, with residual distant fragmentation. 418 tests passed before the equivalent fixed-size-chunk lint correction; strict Clippy and the release build passed afterward. No extra moving matrix was run for this owner-requested small trial. Evidence: `local/graphics/fence-wire02/gpu01/`.
