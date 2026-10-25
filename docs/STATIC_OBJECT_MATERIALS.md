@@ -113,3 +113,54 @@ original D3D9level2 mapping, filtered source texture/mip behaviour or a visually
 accepted stadium fix. Front/backing/fence ordinary materials are unchanged;
 no default or playable promotion. Private evidence: backing-coverage01/sample02,
 result SHA561cc284e19d2b399f3b2265ef3a8a839da125aae233d2500b02eee16292cf8e.
+
+## G283: backing coverage experiment and shutdown ordering
+
+The default-off `--foundation-backing control|raw-a2c` experiment selects only
+`objects/building_grandstand_01_j_01`, with `--foundation-front source-front`
+fixed in both arms. Control and Raw both disable batching and shadow casting
+for those selected entities, retaining their previous marker presence for
+restoration. Therefore backing-Off is a reference, not a pixel-neutral control.
+The fence, front material, geometry, textures and culling remain fixed.
+Raw preserves filtered diffuse alpha, discards zero alpha and uses hardware
+4x coverage without Bevy's alpha sharpening. Emission and clustered-decals
+must be absent; the ready native opaque pipeline and typed ownership are checked.
+This does not establish original D3D9 level2 coverage or a complete visual fix.
+
+The first native series stopped after its third process: Raw saved a screenshot
+and exited zero but logged actual bind-group/pipeline validation errors after
+material restoration. It is a failed run, retained under
+`local/graphics/foundation-backing01/static-run01/`; no visual acceptance follows
+from that image. Bevy's PostUpdate material collectors ran before the old Last
+restore, allowing the new material binding to meet a retained pipeline.
+
+The correction moves restoration and its deferred verification before the native
+mesh/material collectors in PostUpdate. A CPU fixture installs actual
+MaterialPlugins, warms change detection, delivers ScreenshotCaptured in Update,
+and reads native specialization lists for both success and error AppExit.
+The previous Last order is its negative control. This fixture passed in the
+418-test attempt03; Clippy then rejected its complex test Query signature.
+A local test-only lint annotation is the sole subsequent change. The fresh gate,
+build and six native runs remain required before accepting the correction.
+A shader-layout label alone does not identify the failing entity: the front
+adapter never swaps back at shutdown, and no corresponding front patch is justified.
+
+Fresh attempt04 passed the required crate gate: 418 tests and Clippy, followed by
+an actual baseline release build. Executable SHA-256:
+`c3f44060b5b5647c0daca04e063d94cc683027942644c1eaec67eadf240c4b4e`.
+All six native processes in `foundation-backing01/static-run02` completed with
+no renderer errors, including after restoration. Control and Raw each selected
+eight components, joined two visible ready targets and restored all eight in
+both poses. Independent offline re-parsing agrees. Two additional ordinary-Off
+captures match the historical G280 controls exactly in native RGB and PNG bytes.
+These are bounded static results, not temporal or enhanced/DLAA validation.
+
+Raw restores visible structural depth behind the panel. It also leaves a dense
+lower-panel point pattern, more conspicuous than the solid control in both views.
+The owner likes the source-pose Raw appearance; the successfully completed fresh
+capture is pixel-exact to that liked image from the failed first run. Preserve
+this approved visual direction. Remaining points cannot all be assigned to the
+backing: front and foreground fence are separate fixed layers. The owner also
+notes weak fence visibility in this view; distance/filtering is a hypothesis
+requiring near/far controls, not a confirmed cause. Default material settings
+remain unchanged pending broader coverage and the fence check.

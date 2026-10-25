@@ -5,6 +5,8 @@ mod coverage_probe;
 mod coverage_probe_entry;
 mod foundation_front;
 mod foundation_front_audit;
+mod foundation_backing;
+mod foundation_backing_audit;
 mod crowd_preview;
 mod flash_fixture;
 mod flash_preview;
@@ -1472,6 +1474,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut crowd_preview = crowd_preview::Mode::Off;
     let mut crowd_flash_preview = flash_preview::Mode::Off;
     let mut foundation_front = foundation_front::Mode::Off;
+    let mut foundation_backing = foundation_backing::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
     let mut window_transition_script = None;
@@ -1902,6 +1905,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--crowd-flash-preview" => {
                 crowd_flash_preview = flash_preview::Mode::parse(&args.next().ok_or("--crowd-flash-preview needs off, control or frozen-pulse")?)?;
             }
+            "--foundation-backing" => {
+                foundation_backing=foundation_backing::Mode::parse(&args.next().ok_or("--foundation-backing needs off, control or raw-a2c")?)?;
+            }
             "--foundation-front" => {
                 foundation_front = foundation_front::Mode::parse(&args.next().ok_or("--foundation-front needs off, control or source-front")?)?;
             }
@@ -2175,6 +2181,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--motion-phase-map: default absent; exact baseline Derby Isolated|GroundFirst350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--foundation-front off|control|source-front: defaultoff exact Detroit front grandstand sheet only, static route8/sub0 LOD0 reference baseline/native1080/configAA0/actualMSAA4/source sky+track, clean settings, benchmark1..600/no other pilots. SourceFront uses inherited PBR with saved colour/separate-alpha/depth states; existing cull retained, no original shadow/auxiliary/source shader parity. BackingOpaque/fence unchanged.");
+                println!("--foundation-backing off|control|raw-a2c: defaultOff exact Detroit backing sheet; static baseline MSAA4, requires same SourceFront composite; matched NoAuto/NoShadow Control, raw GT0 hardwareA2C. Not source level2/shadow/cull parity.");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--ground-skid-pass off|control|before-transparent: default-off ordinary baseline AA0 driving/Groups ground pass before ALL transparency; current native MSAA4 GPU-building main-view readiness required, unsupported runtime views use ordinary fallback. Off installs nothing; Control isolates owned-skid NoAutomaticBatching. Not source compositor parity.");
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
@@ -2344,7 +2351,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if crowd_flash_preview != flash_preview::Mode::Off && capture_orbit_rate.is_some() {
         return Err("--crowd-flash-preview frozen fixture rejects scripted camera orbit".into());
     }
-    foundation_front.validate(foundation_front::Context {
+    let foundation_context = foundation_front::Context {
         enhanced:graphics.enhanced(), aa:graphics.anti_aliasing, drive, reference, collision, headless,
         render:output.is_some(), route8:route.path()=="tracks/usa/detroit/route_8" && route.subroute()==0,
         lod0:lod=="LOD0_", clean_settings:profile.loaded_file_count==0,
@@ -2363,7 +2370,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             && motion_sequence.is_none() && body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
         no_perf:std::env::var_os("GRID_PERF_TEST").is_none() && std::env::var_os("GRID_PERF_TIMING").is_none(),
         no_orbit:capture_orbit_rate.is_none(), no_menu:!from_menu, frames:graphics.benchmark_frames,
-    })?;
+    };
+    foundation_front.validate(foundation_context)?;
+    foundation_backing.validate(foundation_context, foundation_front)?;
+    if foundation_backing!=foundation_backing::Mode::Off && (ground_skid_pass!=ground_skid_pass::Mode::Off || smoke_ct!=smoke_ct_neutral::Mode::Off || smoke_boundary!=smoke_boundary::Mode::Off || motion_phase_map) {
+        return Err("foundation backing composite rejects ground/skid/smoke audit passes".into());
+    }
     let coverage_context = object_materials::CoverageContext {
         enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
         render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
@@ -3818,6 +3830,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
     foundation_front::install(&mut app, foundation_front);
     foundation_front_audit::install(&mut app, foundation_front);
+    foundation_backing::install(&mut app, foundation_backing)?;
     let exit = app
         .insert_resource(body_occlusion)
         .insert_resource(field)
