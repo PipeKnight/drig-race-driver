@@ -473,6 +473,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G282](G0282.md) | 2026-10-25 | Validate the skid pass in a real baseline window |
 | [G281](G0281.md) | 2026-10-25 | Pilot an owned skid pass before ordinary transparency |
 | [G280](G0280.md) | 2026-10-25 | Measure raw and sharpened MSAA sample coverage in an isolated GPU fixture |
 | [G279](G0279.md) | 2026-10-25 | Validate separately scoped Detroit front-sheet alpha and depth experiment |

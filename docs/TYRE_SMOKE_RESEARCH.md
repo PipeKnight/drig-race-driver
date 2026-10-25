@@ -800,3 +800,18 @@ in the observed interval. This is a bounded pilot, not a default/playable or
 whole-smoke fix. Private evidence is ground-skid-pass01, with source/executable,
 current resource receipts, every raw PNG/log, native-channel metrics and failures
 retained. Source material/raster/emission/simulation settings are unchanged.
+
+### G282: real baseline window check
+
+The existing G281 executable also passes two real Windows-target baseline BMW
+runs with asynchronous pipeline compilation. Control and treatment reach120
+scripted physics ticks and actual current GPU singleton readiness on native
+RGBA8sRGB/MSAA4/depth4. Treatment records322 successful terminal/restoration
+transactions,80 after script completion. Each owned window is closed through
+CloseMainWindow only after evidence is present; both actual processes exit0.
+The tick limit stops simulation but does not close the window automatically.
+View fallback during window teardown is retained. No forced termination,
+screenshot, live pixel/perceptual, wholetrace timing, audio-audition or FPS proof
+is claimed. Enhanced/DLAA and the unresolved offscreen foreign-pixel residuals
+still prevent calling this a general default promotion. No source changed for
+this check; private evidence is skid-live01 and ground-skid-pass01/live-window-first01.
