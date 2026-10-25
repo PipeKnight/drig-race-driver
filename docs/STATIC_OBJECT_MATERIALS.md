@@ -58,3 +58,35 @@ Therefore the universal default promotion was reverted before publication. Ordin
 Control/Mask35 have a separate opt-in moving diagnostic for solo Lacetti on Detroit route_8/subroute0: reference LOD0, enhanced native DLAA, land off, 1920x1080, no loaded settings/event files, bounded drive and 30–60 captured frames. The static validator and ordinary Mask(.5) default remain unchanged. Capture timing reuses the existing motion contract with eight ticks of headroom. This admission is not interactive route support or proof of temporal quality; actual DLAA preparation, matching traces, visible fence and moving image review are still required. Other render arguments are pinned by the paired private runner, not universally whitelisted by admission.
 
 The bounded G258 pilot completed two native-DLAA 60-frame sequences with identical capture manifests and sampled physics/input traces. Review of the ordered native fence crops finds substantially better near-wire connectivity with Mask35, preserving openings. Distant dots and disappearing thin wire remain. The window covers roughly 15–37 km/h and is not high-speed or real-time temporal acceptance. The ordinary default stays Mask(.5); the experiment is not promoted to an interactive launcher.
+
+
+## Front-sheet pass isolation (G279; validation in progress)
+
+The owner requests revisiting the solid fallback. The default-off experiment
+`--foundation-front off|control|source-front` changes only the exact front sheet
+`objects/gg_building_grandstand_01_j_04`. Control retains Opaque and only audits.
+SourceFront inherits PBR/texture/geometry and uses explicit source colour
+SRC_ALPHA/ONE_MINUS_SRC_ALPHA, separate alpha ZERO/ZERO, depth-write on and A2C
+off. Cull remains unchanged; source auxiliary/shadow/prepass parity is not claimed.
+Backing and fence remain fixed. The scope is static route8/sub0 baseline reference,
+LOD0/native1080/source sky+track/sky reflections/clean settings/1..600 frames.
+
+Both audit arms verify the actual native image/full viewport/no override/MSAA4.
+SourceFront additionally joins CPU-main-visible identities to ready sorted-phase
+pipelines. GPU-culling candidates are refused as visibility proof. This is one
+earlier snapshot, not a final screenshot ticket or completed fragment proof;
+Control has no opaque-phase pipeline join. The required crate gate passed379tests and Clippy, followed by a fresh baseline
+release and six successful native GPU arms (two poses, Off/Control/SourceFront).
+Off and Control decoded images match exactly at both poses. SourceFront replaces
+eight material components; two CPU-visible targets join two ready phase entries
+at frame3 in each view. The native front remains coherent, but fine dotted/grainy
+structures remain, so this is not a complete foundation fix or default promotion.
+Changes extend outside the coarse panel ROI; auxiliary/shadow behaviour is not
+emulated and the ROI is not a material segmentation mask.
+
+Stored PNGs are RGB. The historical comparison helper expands them to RGBA with
+synthetic alpha255; its unchanged alpha is therefore not attachment-alpha proof.
+The source-derived ZERO/ZERO alpha state is observed in the ready descriptor,
+while screenshot alpha is unavailable. Native channel analysis preserves this
+absence explicitly; raw captures remain unchanged. A raw-alpha4x per-sample colour/depth fixture for the separate backing pass
+is planned; Bevy A2C sharpening and source D3D9 level2 are not assumed equivalent.

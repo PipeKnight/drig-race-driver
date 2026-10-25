@@ -1,4 +1,6 @@
 mod object_materials;
+mod foundation_front;
+mod foundation_front_audit;
 mod crowd_preview;
 mod flash_fixture;
 mod flash_preview;
@@ -1453,6 +1455,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut smoke_boundary = smoke_boundary::Mode::Off;
     let mut crowd_preview = crowd_preview::Mode::Off;
     let mut crowd_flash_preview = flash_preview::Mode::Off;
+    let mut foundation_front = foundation_front::Mode::Off;
     let mut smoke_compositor = smoke_compositor::Mode::Off;
     let mut oit_capacity_target = None;
     let mut window_transition_script = None;
@@ -1883,6 +1886,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--crowd-flash-preview" => {
                 crowd_flash_preview = flash_preview::Mode::parse(&args.next().ok_or("--crowd-flash-preview needs off, control or frozen-pulse")?)?;
             }
+            "--foundation-front" => {
+                foundation_front = foundation_front::Mode::parse(&args.next().ok_or("--foundation-front needs off, control or source-front")?)?;
+            }
             "--object-coverage" => {
                 graphics.object_coverage = object_materials::CoverageMode::parse(
                     &args.next().ok_or("--object-coverage needs off, control, a2c or mask35")?,
@@ -2149,6 +2155,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--crowd-preview off|control|static-billboards: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture, PBR adaptation, no animation/flash or source parity.");
                 println!("--motion-phase-map: default absent; exact baseline Derby Isolated|GroundFirst350,120/fps30/900ticks screenshot-to-phase ledger; no sorting changes.");
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
+                println!("--foundation-front off|control|source-front: defaultoff exact Detroit front grandstand sheet only, static route8/sub0 LOD0 reference baseline/native1080/configAA0/actualMSAA4/source sky+track, clean settings, benchmark1..600/no other pilots. SourceFront uses inherited PBR with saved colour/separate-alpha/depth states; existing cull retained, no original shadow/auxiliary/source shader parity. BackingOpaque/fence unchanged.");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
                 println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
@@ -2317,6 +2324,26 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if crowd_flash_preview != flash_preview::Mode::Off && capture_orbit_rate.is_some() {
         return Err("--crowd-flash-preview frozen fixture rejects scripted camera orbit".into());
     }
+    foundation_front.validate(foundation_front::Context {
+        enhanced:graphics.enhanced(), aa:graphics.anti_aliasing, drive, reference, collision, headless,
+        render:output.is_some(), route8:route.path()=="tracks/usa/detroit/route_8" && route.subroute()==0,
+        lod0:lod=="LOD0_", clean_settings:profile.loaded_file_count==0,
+        source_sky:graphics.source_sky, source_track:graphics.layered_track,
+        sky_reflections:graphics.reflection_mode==0,
+        native1080:graphics.width==1920 && graphics.height==1080,
+        other_pilots_off:*settings::diagnostics()==settings::Diagnostics::default()
+            && graphics.object_coverage==object_materials::CoverageMode::Off
+            && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
+            && smoke_compositor==smoke_compositor::Mode::Off && skid_order==skid_marks::OrderMode::Off
+            && graphics.window_pilot==window_response::Mode::Off && !window_sort_current && !car_transparent_sort
+            && window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none() && temporal_colour_tick.is_none()
+            && window_transition_script.is_none() && texture_override_path.is_none() && surface_rgb_override.is_none()
+            && !graphics.dlaa_reset_every_frame && !graphics.thin_motion_antenna
+            && geometry_pixel.is_none() && !audio_check && !reflection_calibration && !render_fixed_step
+            && motion_sequence.is_none() && body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
+        no_perf:std::env::var_os("GRID_PERF_TEST").is_none() && std::env::var_os("GRID_PERF_TIMING").is_none(),
+        no_orbit:capture_orbit_rate.is_none(), no_menu:!from_menu, frames:graphics.benchmark_frames,
+    })?;
     let coverage_context = object_materials::CoverageContext {
         enhanced: graphics.enhanced(), aa: graphics.anti_aliasing, drive, reference, collision, headless,
         render: output.is_some(), detroit: route.track_file("objects.pssg") == "tracks/usa/detroit/objects.pssg",
@@ -3759,6 +3786,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         crowd_preview::install(&mut app, prepared)?;
         if let Some(flash) = flash { flash_preview::install(&mut app, flash)?; }
     }
+    foundation_front::install(&mut app, foundation_front);
+    foundation_front_audit::install(&mut app, foundation_front);
     let exit = app
         .insert_resource(body_occlusion)
         .insert_resource(field)

@@ -473,6 +473,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G279](G0279.md) | 2026-10-25 | Validate separately scoped Detroit front-sheet alpha and depth experiment |
 | [G278](G0278.md) | 2026-10-25 | Clean archived graphics artifacts and integrate F570 records |
 | [G277](G0277.md) | 2026-10-24 | Integrate F568 main and verify the combined graphics tree |
 | [G276](G0276.md) | 2026-10-24 | Validate grouped smoke boundary on separately guarded BMW glass and lamps |
