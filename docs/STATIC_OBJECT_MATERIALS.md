@@ -164,3 +164,22 @@ backing: front and foreground fence are separate fixed layers. The owner also
 notes weak fence visibility in this view; distance/filtering is a hypothesis
 requiring near/far controls, not a confirmed cause. Default material settings
 remain unchanged pending broader coverage and the fence check.
+
+## G285: foreground fence distance control
+
+The owner noticed the weak foreground mesh in the liked Raw view. A new pair
+holds the G283 SourceFront+Raw backing, fence material, AA, FOV and other settings
+fixed. The closer authored camera translates eye and look-at by 12 m along a
+previously resolved fence ray: the known first hit moves from 17.31 m to 5.31 m.
+This is a bounded camera test, not an original matched view or exhaustive
+collision survey. Both native processes finish successfully with strict ready
+pipeline/restoration checks and no renderer errors. The far repeat is native-RGB
+exact to the accepted G283 direction.
+
+The closer image clearly shows connected diamond wire on the right foreground
+fence, with visibility receding along the more distant sections. Distance and
+minification therefore affect its visibility in this setup. This does not
+isolate texture filtering, mip selection, thresholding, sample coverage or
+background contrast, nor establish parity with the original. No thickness,
+mask, AA or ordinary-material setting was changed. Private evidence:
+`local/graphics/foundation-backing01/distance-pair01/`.

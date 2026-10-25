@@ -473,6 +473,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G285](G0285.md) | 2026-10-25 | Check fence visibility at matched near and far camera distances |
 | [G284](G0284.md) | 2026-10-25 | Archive the obsolete graphics integration worktree |
 | [G283](G0283.md) | 2026-10-25 | Test raw multisample coverage on the stadium backing sheet |
 | [G282](G0282.md) | 2026-10-25 | Validate the skid pass in a real baseline window |
