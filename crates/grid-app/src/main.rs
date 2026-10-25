@@ -75,6 +75,8 @@ mod skid_phase_ledger;
 mod smoke_ct_neutral;
 mod smoke_boundary_core;
 mod smoke_boundary;
+mod ground_skid_pass;
+mod ground_skid_pass_core;
 mod smoke_pilot;
 mod temporal_audit;
 #[cfg(feature = "dlaa")]
@@ -1461,6 +1463,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut car_transparent_sort = false;
     let mut smoke_order = tyre_smoke::SmokeOrder::Groups;
     let mut skid_order = skid_marks::OrderMode::Off;
+    let mut ground_skid_pass = ground_skid_pass::Mode::Off;
     let mut skid_reflectance = None;
     let mut motion_phase_map = false;
     let mut motion_phase_profile = None;
@@ -1926,6 +1929,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 skid_reflectance = Some(skid_marks::parse_reflectance(
                     &args.next().ok_or("--skid-reflectance needs 0.5 or 0")?)?);
             }
+            "--ground-skid-pass" => {
+                ground_skid_pass = ground_skid_pass::Mode::parse(&args.next().ok_or("--ground-skid-pass needs off, control or before-transparent")?)?;
+            }
             "--skid-order" => {
                 skid_order = skid_marks::OrderMode::parse(
                     &args.next().ok_or("--skid-order needs off, control, isolated or ground-first")?,
@@ -2170,6 +2176,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--skid-reflectance 0.5|0: default absent; bounded baseline skid-orderIsolated only, compositorOff/noPERF; one litPBR scalar diagnostic, not source parity");
                 println!("--foundation-front off|control|source-front: defaultoff exact Detroit front grandstand sheet only, static route8/sub0 LOD0 reference baseline/native1080/configAA0/actualMSAA4/source sky+track, clean settings, benchmark1..600/no other pilots. SourceFront uses inherited PBR with saved colour/separate-alpha/depth states; existing cull retained, no original shadow/auxiliary/source shader parity. BackingOpaque/fence unchanged.");
                 println!("--object-coverage off|control|a2c|mask35: defaultoff exact Detroit concrete_fence_white_end_01 only; static LOD0 rendered reference, benchmark1..600, baseline MSAA4; Control/Mask35 also enhanced native DLAA/MSAAoff. Moving Control/Mask35 requires isolated solo Lacetti Detroit route_8, land off/native1080, clean settings, drive1..600ticks and30..60frame bounded capture; no interactive admission or GRID_PERF_TEST. A2C is Bevy .5/fwidth remap; mask35 modestly thickens edges at cutoff .35. NOT source parity.");
+                println!("--ground-skid-pass off|control|before-transparent: default-off ordinary baseline AA0 driving/Groups ground pass before ALL transparency; current native MSAA4 GPU-building main-view readiness required, unsupported runtime views use ordinary fallback. Off installs nothing; Control isolates owned-skid NoAutomaticBatching. Not source compositor parity.");
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
                 println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
@@ -2389,6 +2396,15 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let validated_coverage_dlaa = graphics.enhanced()
         && graphics.object_coverage.supports_dlaa(graphics.anti_aliasing);
 
+    ground_skid_pass.validate(ground_skid_pass::Context {
+        baseline: !graphics.enhanced(), drive, headless, collision,
+        aa0: graphics.anti_aliasing == 0, groups: smoke_order == tyre_smoke::SmokeOrder::Groups,
+        ground: ground_effect_assets::enabled(), skid_off: skid_order == skid_marks::OrderMode::Off && skid_reflectance.is_none(),
+        composition_off: smoke_compositor == smoke_compositor::Mode::Off && smoke_ct == smoke_ct_neutral::Mode::Off && smoke_boundary == smoke_boundary::Mode::Off,
+        other_policy_off: !motion_phase_map && !window_sort_current && !car_transparent_sort && window_phase_target.is_none() && oit_capacity_target.is_none()
+            && graphics.window_pilot == window_response::Mode::Off && foundation_front == foundation_front::Mode::Off,
+        sky: graphics.reflection_mode == 0,
+    })?;
     if skid_order != skid_marks::OrderMode::Off && (graphics.enhanced() || !drive
         || drive_ticks.is_none() || output.is_none() || headless || collision || lod != "LOD0_"
         || !ground_effect_assets::enabled() || smoke_compositor != smoke_compositor::Mode::Off
@@ -3702,6 +3718,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         window_response::install_current_sort(&mut app);
     }
     smoke_compositor::install(&mut app, smoke_compositor);
+    ground_skid_pass::install(&mut app, ground_skid_pass)?;
     if let Some(target) = oit_capacity_target {
         let directory = app.world().resource::<Capture>().path.with_file_name("oit-capacity");
         oit_capacity_audit::install(&mut app, target, &directory)?;

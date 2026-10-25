@@ -760,3 +760,43 @@ not alpha. Future reports record native channels and alpha_observed explicitly,
 use null/unobserved for absent alpha, and reserve attachment/per-sample alpha
 claims for the corresponding typed readback. No historical captures are rewritten
 and no screenshot equality is promoted into source-pass alpha proof.
+
+## G281: owned ground-skid pass before ordinary transparency
+
+`--ground-skid-pass off|control|before-transparent` is a separate default-off
+pilot. It targets the typed global persistent skid presenter, with no route/car
+whitelist. Control and treatment keep stable NoAutomaticBatching on that entity;
+Off installs nothing. Treatment draws its current prepared singleton before ALL
+ordinary transparency, preserving native phase keys/order/ranges/extra indices.
+A conditional ordinary wrapper skips only after the matching terminal stock
+DrawMesh command succeeds; otherwise ordinary drawing remains. The original draw
+ID is restored after rendering. Current GPU inputs, mesh/material identity,
+ready pipeline and native MSAA attachments are checked every frame. Unsupported
+views fall back. Positive fragments and per-PNG stage joins are not established
+by the command receipts.
+
+Admission is ordinary baseline driving/Groups/native RGBA8sRGB+Depth32Float4x,
+GPU instance building, sky reflections, other phase policies off. Enhanced/DLAA,
+HDR/OIT/CPU building/custom viewports and source reduced-pass parity remain open.
+This changes skid order relative to foreign transparency as well as smoke; it is
+not a car/lens/net or Wheel_spin fix.
+
+The required crate gate passes407tests and Clippy. Nine serial native GPU runs
+cover Detroit/STK12cars, solo BMW/Istanbul and Lacetti/Donington with five camera
+changes plus reset. Physical/input/handling/deformation traces match within each
+three-arm profile. Control/treatment first become ready at frame3 after two cold
+pipeline fallbacks. Observed treatment terminal/restoration receipts are358/358
+for Derby,218/218 for BMW and358/358 for the bounded Lacetti window. Late command
+Skip is covered by CPU fixtures, not observed in these GPU runs.
+
+Native RGB Off/Control equality is117/121 images in Derby (seven pixels across
+four images, global max20),91/91 BMW,284/301 Lacetti (at most2pixels/image,
+global max12). These residuals remain unresolved; no tolerance or noise
+attribution is accepted. Treatment attenuates sharp ground curves beneath smoke
+in viewed Derby/BMW pairs. Rear-window/lens/net ghosts remain unchanged. Lacetti
+state receipts follow chase_close/far/bumper/bonnet/head-cam/close and reset to
+segment1/tick0; no stale successful suppression or restoration failure appears
+in the observed interval. This is a bounded pilot, not a default/playable or
+whole-smoke fix. Private evidence is ground-skid-pass01, with source/executable,
+current resource receipts, every raw PNG/log, native-channel metrics and failures
+retained. Source material/raster/emission/simulation settings are unchanged.

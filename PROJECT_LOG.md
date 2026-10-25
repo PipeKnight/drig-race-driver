@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G281 (2026-10-25): default-off owned ground-skid early pass passes407app tests/Clippy and9native GPU runs across Derby/BMW/Lacetti camera+reset. Ground curves attenuate through smoke; bounded terminal/restoration and physics controls pass. Sparse Off/Control residuals remain unresolved, car/lens/net ghosts open; no enhanced/DLAA/default promotion. See TYRE_SMOKE_RESEARCH.
 - G279 (2026-10-25): isolated default-off Detroit front-sheet alpha/depth experiment passes379app tests/Clippy and six native GPU arms. Off/Control images exact; eight source material components/two visible ready targets verified. Fine pattern remains; backingOpaque/fence fixed, no complete foundation/default promotion. Stored PNGsRGB expose no alpha; see STATIC_OBJECT_MATERIALS.
 - G277 (2026-10-24): F568 main integrated; combined1028tests/Clippy/4physics identities/24soak and fresh BMW90/Derby120 GPU pairs pass. Recorded simulation/phase controls match G276; sparse unresolved pixel differences retained. F569 docs merged separately; dark wheel rings remain open, defaults/playable unchanged.
 - G276 (2026-10-24): separately guarded BMW90 smoke boundary passes373app tests/Clippy, both90-frame GPU controls and same-exe Derby120 regression. Dense-cloud rear-glass/lens/skid ghosts attenuate with all17surfaces/physics preserved; dark wheel rings and damaged/general coverage remain open. DefaultOff/playable unchanged.

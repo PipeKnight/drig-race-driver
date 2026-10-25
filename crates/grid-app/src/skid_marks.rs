@@ -178,11 +178,15 @@ pub(crate) struct SkidMarks {
     camera: Vec3,
     generation: u64,
     mesh: Handle<Mesh>,
+    owned_ground: Option<super::ground_skid_pass::OwnedGroundSkid>,
     dirty: bool,
     pub laid: u64,
 }
 
 impl SkidMarks {
+    pub(crate) fn owned_ground_draw(&self) -> Option<super::ground_skid_pass::OwnedGroundSkid> {
+        self.owned_ground.filter(|draw| draw.mesh == self.mesh.id())
+    }
     fn new(profile: Profile) -> Self {
         Self {
             profile,
@@ -191,6 +195,7 @@ impl SkidMarks {
             camera: Vec3::ZERO,
             generation: 0,
             mesh: Handle::default(),
+            owned_ground: None,
             dirty: true,
             laid: 0,
         }
@@ -442,6 +447,7 @@ fn start(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     experimental: Option<ResMut<Assets<SkidOrderMaterial>>>,
+    ground_pass: Option<Res<super::ground_skid_pass::ProducerPolicy>>,
 ) {
     let Some(pending) = pending else { return };
     // Device-dependent upload must follow texture_upload::configure (PreStartup).
@@ -475,13 +481,19 @@ fn start(
     }
     if pending.mode == OrderMode::Off {
         let material = materials.add(base);
-        commands.spawn((
+        let material_id = material.id();
+        let entity = commands.spawn((
             Name::new("skid marks"),
             Mesh3d(marks.mesh.clone()),
             MeshMaterial3d(material),
             Transform::IDENTITY,
             bevy::camera::visibility::NoFrustumCulling,
-        ));
+        )).id();
+        if ground_pass.is_some() {
+            let owner = super::ground_skid_pass::OwnedGroundSkid::new(entity, marks.mesh.id(), material_id);
+            commands.entity(entity).insert((owner, bevy::render::batching::NoAutomaticBatching));
+            marks.owned_ground = Some(owner);
+        }
     } else {
         let mut experimental = experimental.expect("skid order MaterialPlugin installed");
         let material = experimental.add(extended_order_material(base, pending.mode));
