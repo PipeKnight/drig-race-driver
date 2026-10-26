@@ -1062,6 +1062,49 @@ compare fixed heights.
 GRID_PERF_TEST=auto`: 8 UI roots moved to the window at 720 rows and back at native, with no panic.
 The desktop never runs late, so no dynamic change was exercised live; the phone log will show it.
 
+**Desktop Auto (F573):**
+- The Video screen offers `Auto` on the desktop too. The desktop default stays `native`.
+- Range: from native down to half of native, rounded up to the 24-row step (2560 × 1369: 696–1369).
+  It starts at native, and while frames are on time it stays there (native means no scaled image).
+  A resized window starts again at its new native height (`render_dynamic version=2 event=range`).
+- Controller changes for both platforms, found by the desktop test (a jump from 7 ms to 80 ms
+  frames): the probe stepped down while the smoothed time was still rising, and judged the step
+  ineffective.
+  - A step down waits for 20 consecutive late frames (`LATE_FRAMES`).
+  - The probe compares a frame time smoothed by 0.25 per frame instead of 0.1. One probe second at
+    80 ms is 13 frames; with 0.1 the average would still be settling. Late and on-time decisions
+    keep the slow average.
+- Test `desktop_auto_range_starts_native_and_stays_there_on_time`.
+
+### Compute threads on the desktop (F573)
+
+`mobile::compute_threads` (cores − 2, at least 4) against Bevy's default split (compute gets 12 of
+20 threads on the measuring PC, an i7-12700 with 20 logical cores). Switch for measurement: `GRID_COMPUTE_SPLIT=preset`.
+
+Runs from 14:54 to 15:04 on 26 Oct 2026 (after 14:07, under the build lock, so no other cargo
+build ran). Offscreen 2560 × 1369, autopilot, 3,600 benchmark frames, alternating:
+
+| Run | Compute threads | DriveTick ms | Main ms | Render ms | p95 ms |
+|---|---|---|---|---|---|
+| race 1 | 12 | 1.51 | 5.02 | 9.47 | 20.04 |
+| race 1 | 18 | 1.24 | 4.56 | 7.24 | 18.21 |
+| race 2 | 12 | 1.22 | 4.40 | 7.09 | 18.13 |
+| race 2 | 18 | 1.20 | 4.43 | 7.03 | 18.07 |
+| derby 1 | 12 | 1.76 | 3.88 | 5.60 | 18.74 |
+| derby 1 | 18 | 1.67 | 3.79 | 5.48 | 18.68 |
+| derby 2 | 12 | 1.71 | 3.80 | 5.60 | 18.75 |
+| derby 2 | 18 | 1.69 | 3.77 | 5.44 | 18.63 |
+
+(race: Donington, 12 cars; derby: `settings/demolition-derby.ini`. Mean frame time is 17.0 ms in
+every run: the benchmark is paced at 60 Hz.)
+
+- The first race pair is a warm-up outlier (the first run after the build). From the repeats, the
+  gain is 0–3 %, which is within run-to-run noise.
+- The simulation is unchanged: every derby run logged the same 6 breaks at the same ticks. The
+  parallel paths are index-ordered (F568).
+- Decision: Bevy's split stays the desktop default. The preset split stays on Android (and with
+  `GRID_MOBILE_PRESET=1`, which now also applies it on the desktop).
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

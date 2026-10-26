@@ -17,8 +17,10 @@ pub enum RenderHeight {
     Native,
     /// A fixed row count.
     Rows(u32),
-    /// Dynamic between `mobile::DYNAMIC_FLOOR_ROWS` and `mobile::RENDER_ROWS`,
-    /// driven by the frame time ([`Dynamic`], F556/F559).
+    /// Dynamic, driven by the frame time ([`Dynamic`], F556/F559): with the
+    /// mobile preset between `mobile::DYNAMIC_FLOOR_ROWS` and
+    /// `mobile::RENDER_ROWS`, on the desktop between half the window height
+    /// and native (F573, [`auto_range`]).
     Auto,
 }
 
@@ -112,9 +114,13 @@ pub fn scaled_size(physical: UVec2, height: RenderHeight) -> Option<UVec2> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dynamic {
     pub floor: u32,
+    /// The highest height ([`Self::set_range`]); 0 until the window is known.
+    pub ceiling: u32,
     pub rows: u32,
     /// Smoothed frame time and fixed-step simulation time, ms.
     pub frame_ms: f32,
+    /// Frame time smoothed over a few frames, for judging a probe.
+    recent_ms: f32,
     pub work_ms: f32,
     warm: f32,
     since_change: f32,
@@ -123,11 +129,13 @@ pub struct Dynamic {
     cpu_held: f32,
     /// A height that ran late, and the seconds it stays blocked.
     blocked: Option<(u32, f32)>,
-    /// The last step down under test: rows before and after, smoothed frame
+    /// The last step down under test: rows before and after, recent frame
     /// time before.
     probe: Option<(u32, u32, f32)>,
     /// Seconds left at the ceiling after a step that did not help.
     held: f32,
+    /// Consecutive late frames (the smoothed time has settled).
+    late_frames: u32,
     /// The last probe's gain and the gain of a pixel-bound frame, ms (log).
     pub gain: (f32, f32),
 }
@@ -154,17 +162,25 @@ pub const PROBE_SECONDS: f32 = 1.;
 pub const GPU_SHARE: f32 = 0.5;
 /// Seconds at the ceiling after a step that did not help.
 pub const HOLD_SECONDS: f32 = 60.;
+/// A step down waits for this many late frames, so that a sudden load is
+/// probed against a settled frame time (88 % of the change).
+pub const LATE_FRAMES: u32 = 20;
 /// Frames longer than this (loading, a pause) are ignored.
 const HITCH_MS: f32 = 100.;
 const SMOOTHING: f32 = 0.1;
+/// A probe second at 80 ms frames is 13 frames: the slow smoothing would
+/// still be settling (F573).
+const PROBE_SMOOTHING: f32 = 0.25;
 const WARM_SECONDS: f32 = 3.;
 
 impl Dynamic {
     pub fn new(floor: u32, ceiling: u32) -> Self {
         Self {
             floor: floor.min(ceiling),
+            ceiling,
             rows: ceiling,
             frame_ms: TARGET_MS,
+            recent_ms: TARGET_MS,
             work_ms: 0.,
             warm: 0.,
             since_change: 0.,
@@ -173,8 +189,24 @@ impl Dynamic {
             blocked: None,
             probe: None,
             held: 0.,
+            late_frames: 0,
             gain: (0., 0.),
         }
+    }
+
+    /// A new range (the desktop window changed size): start again at the
+    /// ceiling. Returns whether it changed.
+    pub fn set_range(&mut self, floor: u32, ceiling: u32) -> bool {
+        if (floor.min(ceiling), ceiling) == (self.floor, self.ceiling) {
+            return false;
+        }
+        *self = Self {
+            warm: self.warm,
+            frame_ms: self.frame_ms,
+            recent_ms: self.recent_ms,
+            ..Self::new(floor, ceiling)
+        };
+        true
     }
 
     /// One frame of `frame_ms` with `work_ms` of simulation; returns the
@@ -187,6 +219,7 @@ impl Dynamic {
         }
         let dt = frame_ms / 1000.;
         self.frame_ms += (frame_ms - self.frame_ms) * SMOOTHING;
+        self.recent_ms += (frame_ms - self.recent_ms) * PROBE_SMOOTHING;
         self.work_ms += (work_ms - self.work_ms) * SMOOTHING;
         self.warm += dt;
         self.since_change += dt;
@@ -210,7 +243,7 @@ impl Dynamic {
             }
             self.probe = None;
             let pixels = (to as f32 / from as f32).powi(2);
-            self.gain = (before - self.frame_ms, before * (1. - pixels));
+            self.gain = (before - self.recent_ms, before * (1. - pixels));
             if self.gain.0 < GPU_SHARE * self.gain.1 {
                 self.rows = ceiling;
                 self.blocked = None;
@@ -221,15 +254,16 @@ impl Dynamic {
             }
         }
         let late = self.frame_ms > LATE_MS;
+        self.late_frames = if late { self.late_frames + 1 } else { 0 };
         let cpu_bound = self.work_ms > CPU_SHARE * self.frame_ms || self.work_ms > CPU_MS;
         self.good_for = if self.frame_ms < ON_TIME_MS { self.good_for + dt } else { 0. };
-        if late
+        if self.late_frames >= LATE_FRAMES
             && !cpu_bound
             && self.held == 0.
             && self.since_change >= DOWN_SECONDS
             && self.rows > self.floor
         {
-            self.probe = Some((self.rows, self.rows.saturating_sub(DOWN_ROWS).max(self.floor), self.frame_ms));
+            self.probe = Some((self.rows, self.rows.saturating_sub(DOWN_ROWS).max(self.floor), self.recent_ms));
             self.blocked = Some((self.rows, BLOCK_SECONDS));
             self.rows = self.rows.saturating_sub(DOWN_ROWS).max(self.floor);
             self.since_change = 0.;
@@ -284,21 +318,38 @@ impl RenderScale {
     }
 
     /// The height rendered now: under `Auto` the dynamic rows (the ceiling
-    /// while held or with `GRID_DYNAMIC_RES=0`).
+    /// while held, with `GRID_DYNAMIC_RES=0` or before the desktop window is
+    /// known: 720 rows with the mobile preset, else native).
     pub fn effective(&self) -> RenderHeight {
         match (&self.dynamic, self.height) {
-            (Some(d), RenderHeight::Auto) if !self.hold => RenderHeight::Rows(d.rows),
-            (_, RenderHeight::Auto) => RenderHeight::Rows(crate::mobile::RENDER_ROWS),
+            (Some(d), RenderHeight::Auto) if !self.hold && d.rows > 0 => RenderHeight::Rows(d.rows),
+            (_, RenderHeight::Auto) if crate::mobile::enabled() => {
+                RenderHeight::Rows(crate::mobile::RENDER_ROWS)
+            }
+            (_, RenderHeight::Auto) => RenderHeight::Native,
             _ => self.height,
         }
+    }
+}
+
+/// The `Auto` range for a window `rows` high: with the mobile preset 480-720
+/// rows (owner, 2026-10-22); on the desktop native down to half of it,
+/// rounded up to [`UP_ROWS`] (owner, 2026-10-26). Native is the desktop
+/// default; `Auto` is chosen on the Video screen.
+pub fn auto_range(rows: u32) -> (u32, u32) {
+    if crate::mobile::enabled() {
+        (crate::mobile::DYNAMIC_FLOOR_ROWS, crate::mobile::RENDER_ROWS)
+    } else {
+        ((rows / 2).div_ceil(UP_ROWS) * UP_ROWS, rows)
     }
 }
 
 /// The dynamic height for `Auto`, unless `GRID_DYNAMIC_RES=0`.
 fn auto_dynamic(height: RenderHeight) -> Option<Dynamic> {
     let off = std::env::var("GRID_DYNAMIC_RES").is_ok_and(|v| v == "0");
-    (height == RenderHeight::Auto && !off)
-        .then(|| Dynamic::new(crate::mobile::DYNAMIC_FLOOR_ROWS, crate::mobile::RENDER_ROWS))
+    // The desktop range waits for the window size (`adjust_height`).
+    let (floor, ceiling) = if crate::mobile::enabled() { auto_range(0) } else { (0, 0) };
+    (height == RenderHeight::Auto && !off).then(|| Dynamic::new(floor, ceiling))
 }
 
 /// Window camera that shows the scaled image.
@@ -461,13 +512,16 @@ fn work_end(mut work: ResMut<Work>) {
 
 fn adjust_height(mut scale: ResMut<RenderScale>, mut work: ResMut<Work>, time: Res<Time<Real>>) {
     let work_ms = std::mem::take(&mut work.ms);
-    let ceiling = crate::mobile::RENDER_ROWS;
-    if scale.height != RenderHeight::Auto || scale.hold {
+    if scale.height != RenderHeight::Auto || scale.hold || scale.screen.y == 0 {
         return;
     }
+    let (floor, ceiling) = auto_range(scale.screen.y);
     let Some(d) = scale.dynamic.as_mut() else {
         return;
     };
+    if d.set_range(floor, ceiling) {
+        println!("render_dynamic version=2 event=range floor={floor} ceiling={ceiling}");
+    }
     let from = d.rows;
     if let Some(reason) = d.update(time.delta_secs() * 1000., work_ms, ceiling) {
         println!(
@@ -547,13 +601,23 @@ mod tests {
 
     /// Frames whose time depends on the rows rendered.
     fn run_with(d: &mut Dynamic, seconds: f32, frame: impl Fn(u32) -> f32, work_ms: f32) -> Vec<u32> {
+        run_with_ceiling(d, seconds, frame, work_ms, 720)
+    }
+
+    fn run_with_ceiling(
+        d: &mut Dynamic,
+        seconds: f32,
+        frame: impl Fn(u32) -> f32,
+        work_ms: f32,
+        ceiling: u32,
+    ) -> Vec<u32> {
         let mut seen = Vec::new();
         let mut t = 0.;
         while t < seconds * 1000. {
             let ms = frame(d.rows);
             t += ms;
             let from = d.rows;
-            if d.update(ms, work_ms, 720).is_some() && d.rows != from {
+            if d.update(ms, work_ms, ceiling).is_some() && d.rows != from {
                 seen.push(d.rows);
             }
         }
@@ -622,6 +686,29 @@ mod tests {
         assert!(run_with(&mut d, 57., mostly_cpu, 1.5).is_empty());
         assert_eq!(run_with(&mut d, 4., mostly_cpu, 1.5), vec![672, 720]);
         assert_eq!(d.rows, 720);
+    }
+
+    /// F573: desktop Auto runs from native down to half of it; at full speed
+    /// it stays native.
+    #[test]
+    fn desktop_auto_range_starts_native_and_stays_there_on_time() {
+        let (floor, ceiling) = (684u32.div_ceil(UP_ROWS) * UP_ROWS, 1369);
+        assert_eq!((floor, ceiling), (696, 1369));
+        let mut d = Dynamic::new(0, 0);
+        assert!(d.set_range(floor, ceiling));
+        assert!(!d.set_range(floor, ceiling));
+        assert_eq!(d.rows, 1369);
+        // 7 ms frames for a minute: no change, and native means no image.
+        assert!(run_with_ceiling(&mut d, 60., |_| 7., 1., 1369).is_empty());
+        assert_eq!(d.rows, 1369);
+        assert_eq!(scaled_size(UVec2::new(2560, 1369), RenderHeight::Rows(d.rows)), None);
+        // Pixel-bound late frames step down to the floor and not below.
+        let frame = |rows: u32| 80. * (rows as f32 / 1369.).powi(2);
+        let down = run_with_ceiling(&mut d, 30., frame, 1., 1369);
+        assert_eq!(down.last(), Some(&floor), "{down:?}");
+        // A resized window starts again at its native height.
+        assert!(d.set_range(540, 1080));
+        assert_eq!(d.rows, 1080);
     }
 
     #[test]

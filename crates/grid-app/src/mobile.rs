@@ -62,10 +62,11 @@ pub fn compute_threads(cores: usize) -> usize {
 }
 
 /// Creates Bevy's compute pool before the app does (its task pool plugin
-/// keeps a pool that exists). Called first thing on Android.
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+/// keeps a pool that exists). Called first thing in `main`; with the preset,
+/// or on the desktop with `GRID_COMPUTE_SPLIT=preset` (F573 measurement).
 pub fn init_threads() {
-    if !enabled() {
+    let requested = std::env::var("GRID_COMPUTE_SPLIT").is_ok_and(|v| v == "preset");
+    if !enabled() && !requested {
         return;
     }
     let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);

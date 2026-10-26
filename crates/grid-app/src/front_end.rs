@@ -142,7 +142,7 @@ const VIDEO_ROWS: [(VideoRow, &str, &str); 5] = [
     (
         VideoRow::RenderHeight,
         "Render height",
-        "How many pixel rows the 3D picture is drawn with before it is stretched to the screen. Fewer rows: faster, softer. Native: the full screen. Applies at once.",
+        "How many pixel rows the 3D picture is drawn with before it is stretched to the screen. Fewer rows: faster, softer. Native: the full screen. Auto: fewer rows only while frames run late (phone 480-720, desktop down to half the screen). Applies at once.",
     ),
     (
         VideoRow::PresentMode,

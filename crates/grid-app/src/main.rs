@@ -1091,7 +1091,6 @@ fn main() {
     #[cfg(target_os = "android")]
     android::init();
     // Mobile preset: more compute threads, before Bevy creates its pools.
-    #[cfg(target_os = "android")]
     mobile::init_threads();
     // Bundled data still being copied (F451): the copy screen took over.
     #[cfg(target_os = "android")]
