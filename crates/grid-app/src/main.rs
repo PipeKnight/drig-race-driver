@@ -1968,7 +1968,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 motion_phase_profile = Some(smoke_pilot::Profile::parse(&args.next().ok_or("--motion-phase-profile needs an exact profile")?)?);
             }
             "--smoke-boundary" => {
-                smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off or grouped-direct")?)?;
+                smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off, grouped-direct or grouped-live")?)?;
             }
             "--smoke-ct" => {
                 smoke_ct = smoke_ct_neutral::Mode::parse(&args.next().ok_or("--smoke-ct needs off or neutral")?)?;
@@ -2193,6 +2193,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--ground-skid-pass off|control|before-transparent: default-off experimental skid-only pass before ALL transparency. Profiles: ordinary baseline AA0/sky/MSAA4, or enhanced native --aa dlaa --reflections probe with HDR/sample1 and equal native resolution. Groups/ground and other phase policies off; current typed main-view readiness required, unsupported views use ordinary fallback. Off installs nothing; Control isolates owned-skid NoAutomaticBatching. Not source compositor parity.");
                 println!("--skid-order off|control|isolated|ground-first: isolated sort0; ground-first sort-1024 requires exact --motion-phase-map pilot and per-PNG priority proof; raster50, physics/emission/atlas unchanged.");
                 println!("--smoke-ct off|neutral: default off; exact mapped GroundFirst pilot only; neutral fullres C/T plus GPU blend-contract probe, smoke draws unchanged; no source parity");
+                println!("--smoke-boundary grouped-live: opt-in solo baseline AA0/sky BMW Istanbul route_0 keyboard fix using existing five smoke groups after transparency; interactive Window or bounded --render, no screenshot ledger/native DLAA/general-car admission. Cold/empty/unsupported frames retain ordinary draws; unexpected post-mask skip is a reported failure.");
                 println!("--smoke-order groups|sprites: default groups; bounded baseline per-sprite sorting diagnostic without material or simulation changes.");
                 println!("--crowd-flash-preview off|control|frozen-pulse: default-off authored three-anchor static Detroit crowd flash diagnostic; requires --crowd-preview static-billboards, baseline MSAA4, --reflections sky and bounded rendered reference. No source clock or scene lights.");
                 println!("--car-transparent-sort off|current: default-off bounded rendered drive diagnostic for current car0 StandardMaterial blend sort centres; glass-pilot must be off.");
@@ -2455,7 +2456,38 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     {
         return Err("--smoke-ct neutral requires the exact bounded --motion-phase-map GroundFirst pilot; smoke remains in its existing phase".into());
     }
-    if smoke_boundary != smoke_boundary::Mode::Off
+    if smoke_boundary == smoke_boundary::Mode::GroupedLive {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false;
+        if graphics.enhanced() || graphics.anti_aliasing != 0 || graphics.reflection_mode != 0
+            || !drive || headless || collision || from_menu || lod != "LOD0_"
+            || player_car.stem() != grid_tools::car::BMW
+            || route.path() != "tracks/europe/istanbul_park/route_0" || route.subroute() != 0
+            || opponents.is_some() || opponent_cars.is_some() || series.is_some() || discipline.is_some()
+            || trial_laps.is_some() || profile.time_limit.is_some() || grid_position.is_some()
+            || smoke_order != tyre_smoke::SmokeOrder::Groups || skid_order != skid_marks::OrderMode::Off
+            || ground_skid_pass != ground_skid_pass::Mode::Off || skid_reflectance.is_some()
+            || !ground_effect_assets::enabled()
+            || body_contacts.is_some() || body_events.is_some() || deformation.is_some()
+            || render_fixed_step || capture_orbit_rate.is_some() || eye.is_some() || target.is_some()
+            || smoke_ct != smoke_ct_neutral::Mode::Off || smoke_compositor != smoke_compositor::Mode::Off
+            || motion_phase_map || motion_phase_profile != smoke_pilot::Profile::Derby120
+            || graphics.window_pilot != window_response::Mode::Off || window_sort_current || car_transparent_sort
+            || foundation_front != foundation_front::Mode::Off || foundation_backing != foundation_backing::Mode::Off
+            || graphics.object_coverage != object_materials::CoverageMode::Off || graphics.double_fence_wire
+            || crowd_preview != crowd_preview::Mode::Off || crowd_flash_preview != flash_preview::Mode::Off
+            || window_phase_target.is_some() || oit_capacity_target.is_some()
+            || temporal_audit_tick.is_some() || temporal_colour_tick.is_some() || window_transition_script.is_some()
+            || texture_override_path.is_some() || surface_rgb_override.is_some()
+            || input_settings.device != input::Device::Keyboard
+            || std::env::var_os("GRID_PERF_TEST").is_some() || std::env::var_os("GRID_PERF_TIMING").is_some()
+            || diagnostics != settings::Diagnostics::default()
+            || (output.is_some() && drive_ticks.is_none())
+        {
+            return Err("--smoke-boundary grouped-live requires solo undamaged baseline AA0/sky BMW Istanbul route_0/sub0 LOD0 keyboard driving, Groups/ground effects, ground-skid-pass/skid-order/compositors/audits/custom camera controls off; captures need --drive-ticks, interactive windows have no screenshot ledger".into());
+        }
+    }
+    if smoke_boundary == smoke_boundary::Mode::GroupedDirect
         && (!motion_phase_map || !motion_phase_profile.boundary_order(skid_order)
             || smoke_ct != smoke_ct_neutral::Mode::Off)
     {
@@ -3761,8 +3793,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         smoke_ct_neutral::install(&mut app, smoke_ct, Some(&path))?;
     }
     if smoke_boundary != smoke_boundary::Mode::Off {
-        let path = app.world().resource::<Capture>().path.clone();
-        smoke_boundary::install(&mut app, smoke_boundary, Some(&path), motion_phase_profile)?;
+        let path = (smoke_boundary == smoke_boundary::Mode::GroupedDirect)
+            .then(|| app.world().resource::<Capture>().path.clone());
+        smoke_boundary::install(&mut app, smoke_boundary, path.as_deref(), motion_phase_profile)?;
     }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();
@@ -4412,7 +4445,7 @@ fn capture(
     motion: Option<Res<motion_capture::Motion>>,
     motion_phase: Option<Res<skid_phase_ledger::Audit>>,
     smoke_ct: Option<Res<smoke_ct_neutral::Audit>>,
-    smoke_boundary: Option<Res<smoke_boundary::Audit>>,
+    (smoke_boundary, smoke_boundary_live): (Option<Res<smoke_boundary::Audit>>, Option<Res<smoke_boundary::LiveState>>),
     temporal: Option<Res<temporal_audit::Audit>>,
     oit_capacity: Option<Res<oit_capacity_audit::Audit>>,
     #[cfg(feature = "dlaa")] native: Option<Res<native_dlaa::State>>,
@@ -4420,7 +4453,8 @@ fn capture(
     replay: Option<Res<replay::Replay>>,
 ) {
     capture.frames += 1;
-    if smoke_boundary.as_ref().is_some_and(|audit| audit.failed()) {
+    if smoke_boundary.as_ref().is_some_and(|audit| audit.failed())
+        || smoke_boundary_live.as_ref().is_some_and(|state| state.failed()) {
         exit.write(AppExit::error()); return;
     }
     // Diagnostics replay_capture: the replay plays first.

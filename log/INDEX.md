@@ -473,6 +473,9 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G293](G0293.md) | 2026-10-26 | Add an opt-in BMW glass and lamp smoke boundary |
+| [G292](G0292.md) | 2026-10-26 | Recheck dense BMW smoke using the current replay artifact |
+| [G291](G0291.md) | 2026-10-26 | Verify native HDR skid replay with accepted Motion materials |
 | [G290](G0290.md) | 2026-10-26 | Exercise native HDR skid replay with DLAA camera and reset controls |
 | [G289](G0289.md) | 2026-10-26 | Recover source crowd flash cell selection and validate a bounded CPU kernel |
 | [G288](G0288.md) | 2026-10-26 | Integrate explicit native HDR skid replay after atmospheric rendering |

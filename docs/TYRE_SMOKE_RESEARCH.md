@@ -916,3 +916,97 @@ attachment-alpha measurement. Defaults and accepted Motion remain unchanged.
 Private evidence: `local/graphics/skid-native-hdr01/`, its frozen source/build
 records, four native case folders and complete RGB analyses. Executable SHA256:
 `eade66da816bacbee4b0d4e85272ffd21c246e42b895e4148e07fbab98f23667`.
+
+### G291–G292: material compatibility and the actual BMW glass/lens defect
+
+The combined-feature c93d504b artifact (dlaa,paint-specular) built successfully
+and passed strict combined-feature Clippy. Three accepted-Motion material runs
+retain the canonical800tick camera/reset state and actual20-part paint bindings.
+Selected0049/0054 Off/Control remain byte-exact while Treatment attenuates tyre
+strips. Broad pixel residuals remain recorded and unresolved; this does not
+establish global neutrality. The dedicated optional Lacetti launcher preserves
+Motion. The owner correctly notes that Lacetti emits insufficient smoke for
+acceptance, so subsequent checks use BMW.
+
+Three current-artifact BMW/Istanbul450tick cases (Off, Control, early ground
+replay) pass90native1080p shots each, exact canonical state and Treatment218
+successful/restored draw receipts. Native0053 removes black ground curves but
+leaves the rear window/frame and left rear lens floating visibly in the dense
+cloud. The owner supplied this exact image and requested work on glass/lenses.
+Further nativeBMW/DLAA scope expansion is deferred.
+
+A fresh same-artifact mappedBMW90 pair then rechecks the EXISTING five-group
+late smoke boundary with ground-skid-pass off in both arms. Both processes
+exit0; all90actual PNG/Extract/phase links and Treatment90replay/restoration rows
+pass. All1530cover records per arm retain paired properties, depth/ranks and
+centres for17window/head/rear surfaces. Root native0053 inspection confirms
+that grouped-direct hides the conspicuous window and lens; absent reproduces
+the defect. Thinner0001/final retain a coherent visible car. Dark wheel rings
+remain open. No material, light, alpha or mesh modifications are required for
+this bounded observation. Actual ordinary-driving, damaged, other camera and
+nativeDLAA admission remain separate work; the strict diagnostic is not yet a
+playable fix.
+
+Private evidence: local/graphics/skid-native-hdr01/accepted-motion/,
+local/graphics/skid-native-hdr-motion01/,
+local/graphics/bmw-smoke-current01/run01/ and
+local/graphics/bmw-boundary-current01/run01/.
+Current combined executable SHA256:
+20e63f172f1ffdd384e4ace7967bc333de5c0b3ea594c6a1aa7c4d5dd4cc940a.
+
+### G293: opt-in ordinary BMW boundary bridge
+
+The new grouped-live option reuses the unchanged five-group transaction during
+ordinary BMW/Istanbul0 baseline driving. The existing grouped-direct90/120
+ledger and default Off remain intact. There is no screenshot-count readiness
+requirement for the new Window/Image mode. Materials, light, alpha, geometry,
+physics and emission are unchanged; this is an authored draw-order adaptation,
+not the original half-resolution compositor.
+
+Before masking, current main-view target/extent/MSAA/depth, five-group ownership,
+prepared batches and graphics/native dependencies must be ready. The bridge
+checks the actual view bind groups, simple public mesh/material prerequisites
+and Bevy0.19.1 GPU preprocessing predicate (2/15 compute IDs by support mode).
+Unsupported/cold frames restore ordinary draw IDs before native drawing. There
+is no timer or forced synchronous Window shader compilation. Postmask failure
+still requires restoration and a loud persistent error; AppExit cannot undo an
+already submitted frame. First-frame shared State is inserted eagerly in both
+worlds, avoiding deferred-resource installation during Extract.
+
+Final source06 passes five focused lifecycle/installer controls, all438 app
+tests and strict Clippy. Two fresh Image processes exit0 with90native1080p PNGs
+plus final each. Native0053 hides the floating glass/lens; thinner0001/final
+retain a coherent car. All197 recorded rows match exactly within six ordered
+families, and all90 request metadata rows are byte-exact. Global inter-family
+stdout order differs and remains recorded. The observer now compares typed
+ordered families without sorting/deduplicating/deleting values; it also rejects
+immediate fatal replay diagnostics even after an earlier success. This is not
+per-PNG GPU-stage association, whole-image neutrality or positive fragment proof.
+
+The actual Window first defers unready compute pipelines before masking, then
+reports successful terminal/restoration. A change from chase_close to chase_far,
+one restart, two450tick segments and normal own-window closure are observed
+without errors. Full five-view cycling and minimize/resize remain open; the
+periodic334replays atcalls360 is not a lifetime count. All failed compile/test,
+first-Extract and first-Window experiments are retained, including the observer's
+initial merged-order failure. Neither errors nor skipped stages are relabelled
+successful draws.
+
+Play GRID BMW Smoke.cmd uses a separate baseline executable and isolated manual
+profile. The accepted enhanced Motion/Lacetti launchers and executables remain
+unchanged. NativeDLAA/HDR, other cars/routes/opponents/damage and dark wheel
+rings remain separate work. Private evidence: local/graphics/bmw-boundary-live01/
+with source06/build06, dense450-run03, window-cr-run02, window-final-audit01 and
+retained failed runs. Executable SHA256:
+8f45f35adf3b4e9e8e71e4934080e05268a111d8efe661083b52187bb22ff9e9.
+
+The owner then accepted the manual BMW trial: no remaining critical smoke
+problems; minor unnatural appearance is deferred. The complete owner log
+manual-bmw-smoke-15099-25937.log (318187bytes,
+SHA668c5a2d934d63a84c646cdba53ca481c18a2b4c3813eb7439ac63444051e454)
+is retained both at its original path and in
+local/graphics/bmw-boundary-live01/owner-session01/, alongside exact launcher,
+build/source metadata and camera profile copies plus a SHA manifest. No binary
+was copied into that evidence folder. Keep this folder in full. Logs and settings
+are a future comparison baseline, not a recorded video or full camera timeline.
+No C/R coverage beyond the actual logs is inferred from the owner's feedback.

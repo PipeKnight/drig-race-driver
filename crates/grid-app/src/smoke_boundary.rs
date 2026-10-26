@@ -1,6 +1,7 @@
 //! Bounded five-group direct-boundary control; independently authored.
 //! Moves existing prepared draws only. No material, pipeline, simulation or sample changes.
 use super::smoke_boundary_core as core;
+mod live;
 use super::smoke_pilot::Profile;
 use bevy::{
     camera::{MainPassResolutionOverride, NormalizedRenderTarget, RenderTarget},
@@ -23,6 +24,7 @@ use bevy::{
         },
     },
 };
+pub(crate) use live::State as LiveState;
 use std::{
     fmt::Write as _,
     fs::{File, OpenOptions},
@@ -36,13 +38,15 @@ pub(crate) enum Mode {
     #[default]
     Off,
     GroupedDirect,
+    GroupedLive,
 }
 impl Mode {
     pub(crate) fn parse(text: &str) -> Result<Self, &'static str> {
         match text {
             "off" => Ok(Self::Off),
             "grouped-direct" => Ok(Self::GroupedDirect),
-            _ => Err("--smoke-boundary needs off or grouped-direct"),
+            "grouped-live" => Ok(Self::GroupedLive),
+            _ => Err("--smoke-boundary needs off, grouped-direct or grouped-live"),
         }
     }
 }
@@ -216,6 +220,9 @@ pub(crate) fn install(
 ) -> std::io::Result<()> {
     if mode == Mode::Off {
         return Ok(());
+    }
+    if mode == Mode::GroupedLive {
+        return live::install(app);
     }
     if app.world().contains_resource::<Audit>() {
         return Err(std::io::Error::other("duplicate boundary install"));
