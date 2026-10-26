@@ -51,6 +51,7 @@ mod span_profile;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
+mod lean_pieces;
 mod mesh_stream;
 mod mobile;
 mod motion_capture;
@@ -3054,6 +3055,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             )
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
+        // Hidden pieces of unbroken props skip the per-entity passes (F574).
+        lean_pieces::install(&mut app);
         camera::install(&mut app, &root, field.models[0].stem());
         track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);

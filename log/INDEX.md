@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F574](F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
 | [F573](F0573.md) | 2026-10-26 | Desktop Auto render height and compute threads on the desktop |
 | [F572](F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |
 | [F571](F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |

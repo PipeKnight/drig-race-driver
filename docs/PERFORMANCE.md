@@ -1105,6 +1105,50 @@ every run: the benchmark is paced at 60 Hz.)
 - Decision: Bevy's split stays the desktop default. The preset split stays on Android (and with
   `GRID_MOBILE_PRESET=1`, which now also applies it on the desktop).
 
+## Dormant pieces (F574)
+
+Every breakable's pieces are spawned with the track and stay hidden until the breakable breaks:
+14,463 drawn pieces on Donington and 11,962 piece entities on the Nürburgring. Hidden, they still
+cost CPU every frame in each pass that walks the mesh entities. On the phone (log
+`log-20261026-125712.txt`) these passes were among the top spans:
+- view visibility: 2.65 + 1.27 ms;
+- the directional light's casters: 1.9–2.6 ms;
+- changed-mesh checks: 1.3 ms;
+- Aabb: 0.76 ms.
+
+`lean_pieces.rs` (every build) gives a hidden piece of an unbroken breakable Bevy's `Disabled`, which
+the default query filter skips. Timing:
+- from frame 30 on, then again every 60 frames (after a restart clears the breaks);
+- the piece wakes, losing `Disabled`, before `dynamic_props::present`, in the frame its breakable
+  breaks.
+Such a piece is never drawn, so the picture does not change. `GRID_LAZY_PIECES=0` turns it off. The
+log shows `lean_pieces version=1 event=rest frame= disabled= dormant=`.
+
+**Checks (26 Oct 2026, 14:28–14:36, after 14:07):**
+- Image A/B on the Detroit derby at tick 2,700 with `--render-fixed-step`, 1600 × 900, 6 breaks
+  before the capture:
+  - a repeated baseline gives 0 changed pixels;
+  - dormant on against off also gives 0 changed pixels, with broken debris in the picture.
+- Phone view on the desktop (`GRID_MOBILE_PRESET=1`, 4 threads, Donington, 12 cars, 1539 × 720,
+  profile build, 3,600 frames, 2 runs each). Another session's cargo test held the build lock
+  during these runs, so the absolute values carry load noise.
+
+| | Main ms | Render ms | DriveTick ms |
+|---|---|---|---|
+| off (`GRID_LAZY_PIECES=0`) | 6.05 / 6.16 | 9.75 / 9.46 | 1.47–1.54 |
+| on | 5.81 / 5.64 | 9.07 / 8.87 | 1.47–1.54 |
+
+- Entities (`GRID_ASSET_COUNTS=1`):
+  - main world 21,589, of which 14,706 pieces are disabled (disabled entities still count);
+  - 18,320 mesh assets.
+- In the span tables, the Aabb pass (0.77 ms) and the changed-mesh pass (0.74 ms) drop out of the
+  top entries, and view visibility goes from 0.675 to 0.472 ms.
+- Phone estimate [I]: the disabled passes cost about 6–7 ms of compute-pool work per frame on the
+  Adreno phone, which is maybe 2–3 ms on the critical path. Not measured on the phone yet.
+
+`GRID_ASSET_COUNTS` now also prints `mesh_entities` with all/disabled/drawn counts by kind (track,
+intact, piece, foliage, player, opponent, other).
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

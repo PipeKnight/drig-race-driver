@@ -1,6 +1,8 @@
 //! `GRID_ASSET_COUNTS=1`: spawned entities, asset counts and wgpu resources of
 //! the main and render worlds, printed every 600 frames (memory leak checks,
 //! docs/PERFORMANCE.md "Memory growth"). Nothing is added without the variable.
+use bevy::ecs::entity_disabling::Disabled;
+use bevy::ecs::query::Allow;
 use bevy::mesh::Mesh;
 use bevy::prelude::*;
 use bevy::render::mesh::RenderMesh;
@@ -37,6 +39,44 @@ fn main_report(world: &World, mut frames: Local<u32>) {
         len::<Mesh>(world),
         len::<StandardMaterial>(world),
         len::<Image>(world),
+    );
+    mesh_report(world, *frames);
+}
+
+/// Mesh entities by kind: all, disabled, and drawn in the last frame.
+fn mesh_report(world: &World, frame: u32) {
+    type Kinds = (
+        Has<Disabled>,
+        Has<crate::track_surface::SourcePart>,
+        Has<crate::dynamic_props::IntactProp>,
+        Has<crate::dynamic_props::PropPiece>,
+        Has<crate::source_trees::Facing>,
+        Has<crate::MovingPart>,
+        Has<crate::OpponentPart>,
+        &'static ViewVisibility,
+    );
+    let Some(mut query) = world.try_query_filtered::<Kinds, (With<Mesh3d>, Allow<Disabled>)>() else {
+        return;
+    };
+    let names = ["track", "intact", "piece", "foliage", "player", "opponent", "other"];
+    let mut counts = [[0usize; 3]; 7];
+    for (disabled, track, intact, piece, foliage, player, opponent, seen) in query.iter(world) {
+        let kind = [track, intact, piece, foliage, player, opponent]
+            .iter()
+            .position(|&k| k)
+            .unwrap_or(6);
+        counts[kind][0] += 1;
+        counts[kind][1] += usize::from(disabled);
+        counts[kind][2] += usize::from(!disabled && seen.get());
+    }
+    let fields: Vec<String> = names
+        .iter()
+        .zip(counts)
+        .map(|(n, [all, off, seen])| format!("{n}={all}/{off}/{seen}"))
+        .collect();
+    println!(
+        "mesh_entities frame={frame} kind=all/disabled/drawn {}",
+        fields.join(" ")
     );
 }
 
