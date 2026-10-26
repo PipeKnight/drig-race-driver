@@ -3,14 +3,22 @@
 //! The surface profile `skidmarks/road_tm.xml` (Lacetti `vehicle_skid_type`
 //! 4) and the atlas `skidmarks/road_tm.pssg` are read from the purchased
 //! installation. Presentation only; never feeds physics.
+use super::mesh_stream::{MeshStream, VertexLayout, put};
 use super::wheel_ground::{Wheel, WheelGround};
-use bevy::prelude::*;
+use bevy::{
+    asset::RenderAssetUsages,
+    camera::primitives::Aabb,
+    mesh::{Indices, PrimitiveTopology},
+    prelude::*,
+};
 use grid_formats::skidmarks::{Layer, Profile};
 use std::path::Path;
 
 /// Global strip pool and strip length [D 73F860/739570].
 const STRIPS: usize = 240;
 const QUADS: usize = 32;
+/// Vertices of one strip slot in the streamed mesh: two per point (F580).
+const SLOT: usize = (QUADS + 1) * 2;
 /// Retire the farthest finished strip while free + retiring strips < 40 [D].
 const SPARE: usize = 40;
 /// Alpha lost by the oldest quad of a retiring strip per update (25/255) [D].
@@ -94,6 +102,10 @@ pub(crate) struct SkidMarks {
     camera: Vec3,
     generation: u64,
     mesh: Handle<Mesh>,
+    /// The marks entity (alpha blended: its sort centre) and the streamed
+    /// mesh's vertex layout.
+    entity: Entity,
+    layout: Option<VertexLayout>,
     dirty: bool,
     pub laid: u64,
 }
@@ -107,6 +119,8 @@ impl SkidMarks {
             camera: Vec3::ZERO,
             generation: 0,
             mesh: Handle::default(),
+            entity: Entity::PLACEHOLDER,
+            layout: None,
             dirty: true,
             laid: 0,
         }
@@ -280,6 +294,110 @@ impl SkidMarks {
         }
     }
 
+    /// Vertex `k` of a strip slot: point `k / 2`, left or right edge, as
+    /// `build` places them. Points past the strip's end repeat its last one,
+    /// so their quads have no area; a strip under two points collapses to the
+    /// origin.
+    fn slot_vertex(strip: &Strip, k: usize) -> ([f32; 3], [f32; 3], [f32; 2], [f32; 4]) {
+        if strip.points.len() < 2 {
+            return ([0.; 3], [0., 1., 0.], [0.; 2], [0.; 4]);
+        }
+        let i = (k / 2).min(strip.points.len() - 1);
+        let p = &strip.points[i];
+        // Fresh strips ramp in over their first two quads [D byte0 ramp].
+        let ramp = match i {
+            0 => 0.,
+            1 => 0.5,
+            _ => 1.,
+        };
+        let alpha = p.alpha
+            * if strip.owner.is_some() || i < 2 {
+                ramp
+            } else {
+                1.
+            };
+        let (sign, u) = if k.is_multiple_of(2) { (-1., p.u[0]) } else { (1., p.u[1]) };
+        (
+            (p.center + p.side * p.half_width * sign).to_array(),
+            p.normal.to_array(),
+            [u, p.v],
+            [1., 1., 1., alpha],
+        )
+    }
+
+    /// Every strip slot at its full length, so later changes are written over
+    /// the mesh's GPU allocation (mesh_stream) instead of replacing the asset.
+    /// The triangles with area and their order are the ones `build` makes.
+    fn streamed(&self) -> Mesh {
+        let count = STRIPS * SLOT;
+        let (mut positions, mut normals, mut uvs, mut colors) = (
+            Vec::with_capacity(count),
+            Vec::with_capacity(count),
+            Vec::with_capacity(count),
+            Vec::with_capacity(count),
+        );
+        let mut indices = Vec::with_capacity(STRIPS * QUADS * 6);
+        for (s, strip) in self.strips.iter().enumerate() {
+            for k in 0..SLOT {
+                let (p, n, uv, c) = Self::slot_vertex(strip, k);
+                positions.push(p);
+                normals.push(n);
+                uvs.push(uv);
+                colors.push(c);
+            }
+            for i in 0..QUADS as u32 {
+                let a = (s * SLOT) as u32 + i * 2;
+                indices.extend([a, a + 2, a + 1, a + 1, a + 2, a + 3]);
+            }
+        }
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        mesh.insert_indices(Indices::U32(indices));
+        mesh
+    }
+
+    /// The packed vertex bytes of `streamed()`.
+    fn pack(&self, layout: &VertexLayout, bytes: &mut Vec<u8>) {
+        let at = |attribute| layout.offset(attribute).expect("skid mark attribute");
+        let (p, n, uv, c) = (
+            at(Mesh::ATTRIBUTE_POSITION),
+            at(Mesh::ATTRIBUTE_NORMAL),
+            at(Mesh::ATTRIBUTE_UV_0),
+            at(Mesh::ATTRIBUTE_COLOR),
+        );
+        let start = bytes.len();
+        bytes.resize(start + STRIPS * SLOT * layout.stride, 0);
+        let mut vertex = start;
+        for strip in &self.strips {
+            for k in 0..SLOT {
+                let (pv, nv, uvv, cv) = Self::slot_vertex(strip, k);
+                put(bytes, vertex + p, pv);
+                put(bytes, vertex + n, nv);
+                put(bytes, vertex + uv, uvv);
+                put(bytes, vertex + c, cv);
+                vertex += layout.stride;
+            }
+        }
+    }
+
+    /// Centre of the bounding box `build`'s mesh would have (its transparent
+    /// sort key): the strips' vertices, or the origin when there are none.
+    fn sort_centre(&self) -> Vec3 {
+        let corners = self
+            .strips
+            .iter()
+            .filter(|s| s.points.len() >= 2)
+            .flat_map(|s| (0..s.points.len() * 2).map(move |k| Vec3::from(Self::slot_vertex(s, k).0)));
+        Aabb::enclosing(corners).map_or(Vec3::ZERO, |aabb| aabb.center.into())
+    }
+
+    #[cfg(test)]
     fn build(&self) -> Mesh {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
@@ -331,7 +449,8 @@ pub(crate) fn install(app: &mut App, root: &Path) -> Result<(), Box<dyn std::err
         profile.surfaces.len(),
         profile.offset
     );
-    app.insert_resource(Pending { profile, diffuse })
+    app.init_resource::<MeshStream>()
+        .insert_resource(Pending { profile, diffuse })
         .add_systems(Startup, start)
         .add_systems(FixedUpdate, lay.after(super::wheel_ground::update))
         .add_systems(Update, present.after(super::drive_present));
@@ -362,7 +481,9 @@ fn start(
         }
     };
     let mut marks = SkidMarks::new(pending.profile.clone());
-    marks.mesh = meshes.add(marks.build());
+    let mesh = marks.streamed();
+    marks.layout = Some(VertexLayout::of(&mesh));
+    marks.mesh = meshes.add(mesh);
     // Alpha blended, no depth write, lit by the ground normal. The original
     // also blends a normal map by the Fade bound; not reproduced (AUTHORED).
     let material = materials.add(StandardMaterial {
@@ -372,13 +493,13 @@ fn start(
         depth_bias: 50.,
         ..default()
     });
-    commands.spawn((
+    marks.entity = commands.spawn((
         Name::new("skid marks"),
         Mesh3d(marks.mesh.clone()),
         MeshMaterial3d(material),
         Transform::IDENTITY,
         bevy::camera::visibility::NoFrustumCulling,
-    ));
+    )).id();
     commands.remove_resource::<Pending>();
     commands.insert_resource(marks);
 }
@@ -410,16 +531,18 @@ fn lay(
     super::ground_effect_assets::charge(super::ground_effect_assets::TICK, start);
 }
 
-fn present(marks: Option<ResMut<SkidMarks>>, mut meshes: ResMut<Assets<Mesh>>) {
+/// Writes the changed marks over the mesh's GPU allocation (F580; before,
+/// every change replaced the asset, which Bevy reallocated and repacked).
+fn present(marks: Option<ResMut<SkidMarks>>, stream: Res<MeshStream>) {
     let Some(mut marks) = marks else { return };
     if !marks.dirty {
         return;
     }
     let start = std::time::Instant::now();
     marks.dirty = false;
-    let mesh = marks.build();
-    if let Some(mut target) = meshes.get_mut(&marks.mesh) {
-        *target = mesh;
+    if let Some(layout) = &marks.layout {
+        stream.write(marks.mesh.id(), |bytes| marks.pack(layout, bytes));
+        stream.sort_centre(marks.entity, marks.sort_centre());
     }
     super::ground_effect_assets::charge(super::ground_effect_assets::SKID, start);
 }
@@ -511,6 +634,38 @@ mod tests {
         assert_eq!(marks.strips.len(), STRIPS);
         assert!(marks.strips.iter().any(|s| s.retiring) || marks.strips.iter().any(|s| !s.used));
         assert!(marks.build().count_vertices() > 0);
+        assert_same_triangles(&marks);
+    }
+
+    /// Triangles with area, as position triples in draw order.
+    fn drawn(mesh: &Mesh) -> Vec<[[f32; 3]; 3]> {
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(p)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions");
+        };
+        let indices: Vec<usize> = mesh.indices().unwrap().iter().collect();
+        indices
+            .chunks(3)
+            .map(|t| [p[t[0]], p[t[1]], p[t[2]]])
+            .filter(|t| {
+                let [a, b, c] = t.map(Vec3::from);
+                (b - a).cross(c - a).length_squared() > 0.
+            })
+            .collect()
+    }
+
+    fn assert_same_triangles(marks: &SkidMarks) {
+        use bevy::camera::primitives::MeshAabb;
+        let streamed = marks.streamed();
+        assert_eq!(drawn(&marks.build()), drawn(&streamed));
+        assert_eq!(streamed.count_vertices(), STRIPS * SLOT);
+        let layout = VertexLayout::of(&streamed);
+        let mut bytes = Vec::new();
+        marks.pack(&layout, &mut bytes);
+        assert_eq!(bytes, streamed.create_packed_vertex_buffer_data());
+        let built = marks.build().compute_aabb().map(|a| Vec3::from(a.center));
+        assert_eq!(Some(marks.sort_centre()), built);
     }
 
     #[test]
@@ -544,5 +699,7 @@ mod tests {
         assert_eq!(marks.allocate(), Some(far));
         assert!(marks.heads[1][0].is_none());
         assert!(marks.strips[far].owner.is_none() && marks.strips[far].points.is_empty());
+        assert_same_triangles(&marks);
+        assert_same_triangles(&SkidMarks::new(profile()));
     }
 }

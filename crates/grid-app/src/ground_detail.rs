@@ -3,9 +3,18 @@
 //! vertices 94FAF0, update 97EDE0). `grass.grs`, `ground_cover.xml` and
 //! `ground_cover.pssg` (sprites and `gc_billboard.tga`) are read from the
 //! purchased installation for the selected route's track. Presentation only.
-use super::mesh_stream::{MeshStream, Quad, QuadMesh};
+use super::mesh_stream::{MeshStream, VertexLayout, put};
 use bevy::camera::primitives::Aabb;
-use bevy::prelude::*;
+use bevy::{
+    asset::{RenderAssetUsages, uuid_handle},
+    mesh::{Indices, PrimitiveTopology},
+    pbr::{ExtendedMaterial, MaterialExtension},
+    prelude::*,
+    render::render_resource::{AsBindGroup, ShaderType},
+    shader::ShaderRef,
+    tasks::{AsyncComputeTaskPool, Task, block_on, poll_once},
+};
+use std::sync::Arc;
 use grid_formats::{
     binxml,
     ground_cover::{self, CoverType, Distances, Patch},
@@ -21,10 +30,47 @@ const JITTER: f32 = 0.1;
 const SUBSETS: [u8; 16] = [0, 1, 2, 3, 3, 2, 1, 0, 1, 0, 3, 2, 2, 3, 0, 1];
 /// Spatial buckets for gathering instances near the camera (AUTHORED).
 const BUCKET: f32 = 16.;
-/// Rebuild when the camera moved or turned this much (AUTHORED; the original
+/// Update when the camera moved or turned this much (AUTHORED; the original
 /// regenerates instances after 10 m and orients billboards every frame).
 const MOVE: f32 = 0.05;
 const TURN_COS: f32 = 0.9998;
+/// The vertex shader faces and fades the billboards (F580). The CPU gathers
+/// every instance within its draw distance plus this margin; a gather stays
+/// valid until the camera moved this far. The next one starts on the async
+/// compute pool after half of it. Blended cover also gathers again, at once,
+/// in a new bucket (the bucket order sets its draw order, as before).
+const MARGIN: f32 = 6.;
+
+const SHADER: Handle<Shader> = uuid_handle!("a9b2b0e1-4de3-4237-a7bb-c3488244f121");
+type CoverMaterial = ExtendedMaterial<StandardMaterial, CoverFacing>;
+
+/// The main camera every pass faces, as the CPU path used it.
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
+struct CoverView {
+    right: Vec4,
+    up: Vec4,
+    eye: Vec4,
+    /// x: fade start as a share of the draw distance.
+    fade: Vec4,
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
+struct CoverFacing {
+    #[uniform(100)]
+    view: CoverView,
+}
+
+impl MaterialExtension for CoverFacing {
+    fn vertex_shader() -> ShaderRef {
+        SHADER.into()
+    }
+    fn prepass_vertex_shader() -> ShaderRef {
+        SHADER.into()
+    }
+    fn deferred_vertex_shader() -> ShaderRef {
+        SHADER.into()
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Instance {
@@ -191,19 +237,38 @@ fn scatter(patches: &[Patch], types: &[CoverType]) -> (Vec<Instance>, Vec<Sprite
     (instances, quads)
 }
 
-#[derive(Resource)]
-pub(crate) struct GroundDetail {
+/// The scattered cover, shared with the gathers on the async pool.
+struct Cover {
     instances: Vec<Instance>,
     quads: Vec<SpriteQuad>,
     buckets: HashMap<(i32, i32), Vec<u32>>,
     distances: Distances,
+}
+
+/// A finished gather: the eye, the instances in draw order and, when they
+/// fit the capacity it was packed for, the vertex bytes.
+struct Gathered {
+    eye: Vec3,
+    indices: Vec<u32>,
+    bytes: Option<Vec<u8>>,
+}
+
+#[derive(Resource)]
+pub(crate) struct GroundDetail {
+    cover: Arc<Cover>,
     mesh: Handle<Mesh>,
+    material: Handle<CoverMaterial>,
     /// The cover entity (alpha-blended in Enhanced: its sort centre).
     entity: Entity,
     last: Option<(Vec3, Vec3)>,
-    pub drawn: usize,
-    stream: QuadMesh,
-    scratch: Vec<Quad>,
+    /// Alpha blended (Enhanced soft alpha): sorted by its drawn quads.
+    blended: bool,
+    /// Instances in the mesh, in draw order, and the eye they were gathered at.
+    gathered: Vec<u32>,
+    gathered_at: Option<Vec3>,
+    capacity: usize,
+    layout: Option<VertexLayout>,
+    pending: Option<Task<Gathered>>,
 }
 
 struct Loaded {
@@ -255,7 +320,12 @@ pub(crate) fn install(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let loaded = load(root, route)?;
     super::ground_effect_assets::install_timing(app);
-    app.init_resource::<MeshStream>()
+    app.world_mut().resource_mut::<Assets<Shader>>().insert(
+        SHADER.id(),
+        Shader::from_wgsl(include_str!("ground_cover.wgsl"), "grid_ground_cover.wgsl"),
+    )?;
+    app.add_plugins(MaterialPlugin::<CoverMaterial>::default())
+        .init_resource::<MeshStream>()
         .insert_resource(PendingDetail(Some(loaded)))
         .add_systems(Startup, start)
         .add_systems(
@@ -277,7 +347,7 @@ fn start(
     graphics: Res<super::graphics::Settings>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<CoverMaterial>>,
 ) {
     let Some(loaded) = pending.0.take() else {
         return;
@@ -297,7 +367,7 @@ fn start(
         );
         buckets.entry(key).or_default().push(i as u32);
     }
-    let mesh = meshes.add(empty());
+    let mesh = meshes.add(cover_mesh(&[], 1));
     // Original coverage needs MSAA. With MSAA off, a hard mask loses thin
     // blades and leaves dark opaque remnants. Enhanced soft alpha is an
     // authored alternative; mask stays available as an exact control.
@@ -308,20 +378,28 @@ fn start(
     } else {
         AlphaMode::AlphaToCoverage
     };
-    let material = materials.add(StandardMaterial {
-        base_color_texture: Some(image),
-        alpha_mode,
-        perceptual_roughness: 1.,
-        reflectance: 0.,
-        double_sided: false,
-        cull_mode: None,
-        ..default()
+    let material = materials.add(ExtendedMaterial {
+        base: StandardMaterial {
+            base_color_texture: Some(image),
+            alpha_mode,
+            perceptual_roughness: 1.,
+            reflectance: 0.,
+            double_sided: false,
+            cull_mode: None,
+            ..default()
+        },
+        extension: CoverFacing {
+            view: CoverView {
+                fade: Vec4::new(loaded.distances.fade_start, 0., 0., 0.),
+                ..default()
+            },
+        },
     });
     let entity = commands
         .spawn((
             Name::new("ground cover"),
             Mesh3d(mesh.clone()),
-            MeshMaterial3d(material),
+            MeshMaterial3d(material.clone()),
             Transform::IDENTITY,
             bevy::camera::visibility::NoFrustumCulling,
             bevy::light::NotShadowCaster,
@@ -337,33 +415,134 @@ fn start(
         graphics.grass_receive_shadows, graphics.ambient_occlusion
     );
     commands.insert_resource(GroundDetail {
-        instances: loaded.instances,
-        quads: loaded.quads,
-        buckets,
-        distances: loaded.distances,
+        cover: Arc::new(Cover {
+            instances: loaded.instances,
+            quads: loaded.quads,
+            buckets,
+            distances: loaded.distances,
+        }),
         mesh,
+        material,
         entity,
         last: None,
-        drawn: 0,
-        stream: QuadMesh::default(),
-        scratch: Vec::new(),
+        blended: alpha_mode == AlphaMode::Blend,
+        gathered: Vec::new(),
+        gathered_at: None,
+        capacity: 0,
+        layout: None,
+        pending: None,
     });
 }
 
-fn empty() -> Mesh {
-    super::ground_effect_assets::effect_mesh(
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-    )
+/// One billboard's vertices: the centre four times, the corner offsets in
+/// UV1 and the draw distance in the colour's alpha (the shader faces, fades
+/// and drops it). Padding has distance 0 and is never drawn.
+#[derive(Clone, Copy)]
+struct Billboard {
+    centre: [f32; 3],
+    normal: [f32; 3],
+    uvs: [[f32; 2]; 4],
+    offsets: [[f32; 2]; 4],
+    limit: f32,
 }
 
-impl GroundDetail {
-    /// Camera-facing quads for every instance inside its subset's draw
-    /// distance; alpha 1 up to fadestart * D, then linear to 0 at D [D shader].
-    fn gather(&self, eye: Vec3, right: Vec3, up: Vec3, out: &mut Vec<Quad>) {
+const PAD: Billboard = Billboard {
+    centre: [0.; 3],
+    normal: [0., 1., 0.],
+    uvs: [[0.; 2]; 4],
+    offsets: [[0.; 2]; 4],
+    limit: 0.,
+};
+
+fn padded(billboards: &[Billboard], capacity: usize) -> impl Iterator<Item = &Billboard> {
+    billboards
+        .iter()
+        .chain(std::iter::repeat_n(&PAD, capacity.saturating_sub(billboards.len())))
+}
+
+fn cover_mesh(billboards: &[Billboard], capacity: usize) -> Mesh {
+    let (mut positions, mut normals, mut uvs, mut offsets, mut colours, mut indices) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for b in padded(billboards, capacity) {
+        let base = positions.len() as u32;
+        positions.extend([b.centre; 4]);
+        normals.extend([b.normal; 4]);
+        uvs.extend(b.uvs);
+        offsets.extend(b.offsets);
+        colours.extend([[1., 1., 1., b.limit]; 4]);
+        indices.extend(TRIANGLES.map(|k| base + k));
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, offsets);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colours);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+/// The packed vertex bytes of `cover_mesh(billboards, capacity)`.
+fn pack(billboards: &[Billboard], capacity: usize, layout: &VertexLayout, bytes: &mut Vec<u8>) {
+    let at = |attribute| layout.offset(attribute).expect("cover attribute");
+    let (p, n, uv, o, c) = (
+        at(Mesh::ATTRIBUTE_POSITION),
+        at(Mesh::ATTRIBUTE_NORMAL),
+        at(Mesh::ATTRIBUTE_UV_0),
+        at(Mesh::ATTRIBUTE_UV_1),
+        at(Mesh::ATTRIBUTE_COLOR),
+    );
+    let start = bytes.len();
+    bytes.resize(start + capacity * 4 * layout.stride, 0);
+    let mut vertex = start;
+    for b in padded(billboards, capacity) {
+        for k in 0..4 {
+            put(bytes, vertex + p, b.centre);
+            put(bytes, vertex + n, b.normal);
+            put(bytes, vertex + uv, b.uvs[k]);
+            put(bytes, vertex + o, b.offsets[k]);
+            put(bytes, vertex + c, [1., 1., 1., b.limit]);
+            vertex += layout.stride;
+        }
+    }
+}
+
+impl Cover {
+    /// Gather at `eye` and pack the vertices for `capacity` billboards.
+    fn gathered(&self, eye: Vec3, capacity: usize, layout: Option<&VertexLayout>) -> Gathered {
+        let mut indices = Vec::new();
+        self.gather(eye, MARGIN, &mut indices);
+        let bytes = layout.filter(|_| indices.len() <= capacity).map(|layout| {
+            let billboards: Vec<_> = indices.iter().map(|&i| self.billboard(i)).collect();
+            let mut bytes = Vec::new();
+            pack(&billboards, capacity, layout, &mut bytes);
+            bytes
+        });
+        Gathered { eye, indices, bytes }
+    }
+
+    fn billboard(&self, i: u32) -> Billboard {
+        let g = &self.instances[i as usize];
+        let quad = &self.quads[g.sprite as usize];
+        Billboard {
+            centre: g.position.to_array(),
+            normal: g.normal.to_array(),
+            // Mirroring swaps left and right UVs [D 94FAF0].
+            uvs: std::array::from_fn(|k| quad.uvs[if g.mirror { k ^ 2 } else { k }]),
+            offsets: std::array::from_fn(|k| {
+                let [x, y] = quad.corners[k];
+                [x * g.width, y * g.height]
+            }),
+            limit: self.distances.lods[g.subset as usize],
+        }
+    }
+
+    /// Every instance within its subset's draw distance plus `margin` of
+    /// `eye`, in the bucket order the draw used before F580.
+    fn gather(&self, eye: Vec3, margin: f32, out: &mut Vec<u32>) {
         out.clear();
         let far = self.distances.lods.iter().copied().fold(0., f32::max);
         let reach = (far / BUCKET).ceil() as i32 + 1;
@@ -379,27 +558,10 @@ impl GroundDetail {
                 for &i in list {
                     let g = &self.instances[i as usize];
                     let limit = self.distances.lods[g.subset as usize];
-                    let distance = g.position.distance(eye);
-                    if distance >= limit {
+                    if g.position.distance(eye) >= limit + margin {
                         continue;
                     }
-                    let start = self.distances.fade_start * limit;
-                    let alpha = if distance <= start {
-                        1.
-                    } else {
-                        1. - (distance - start) / (limit - start).max(1e-3)
-                    };
-                    let quad = &self.quads[g.sprite as usize];
-                    out.push(Quad {
-                        positions: std::array::from_fn(|k| {
-                            let [x, y] = quad.corners[k];
-                            (g.position + right * (x * g.width) + up * (y * g.height)).to_array()
-                        }),
-                        normal: g.normal.to_array(),
-                        // Mirroring swaps left and right UVs [D 94FAF0].
-                        uvs: std::array::from_fn(|k| quad.uvs[if g.mirror { k ^ 2 } else { k }]),
-                        colour: [1., 1., 1., alpha],
-                    });
+                    out.push(i);
                 }
             }
         }
@@ -409,13 +571,38 @@ impl GroundDetail {
 /// Corners are (left, top), (left, bottom), (right, top), (right, bottom).
 const TRIANGLES: [u32; 6] = [0, 1, 2, 2, 1, 3];
 
-/// Rebuilds the cover when the camera moved or turned past the threshold.
-/// The asset is replaced only when the cover outgrows its capacity; otherwise
-/// the new vertices are written over its GPU allocation (mesh_stream, F392).
+impl GroundDetail {
+    /// Puts a gather in the mesh: its bytes over the GPU allocation, or a new
+    /// asset when the cover outgrew its capacity (AUTHORED headroom, so the
+    /// asset is rarely replaced again).
+    fn apply(&mut self, done: Gathered, meshes: &mut Assets<Mesh>, stream: &MeshStream) {
+        match done.bytes {
+            Some(bytes) => stream.write(self.mesh.id(), |out| out.extend_from_slice(&bytes)),
+            None => {
+                let billboards: Vec<_> = done.indices.iter().map(|&i| self.cover.billboard(i)).collect();
+                self.capacity = (billboards.len() + billboards.len() / 4).max(1);
+                let asset = cover_mesh(&billboards, self.capacity);
+                self.layout = Some(VertexLayout::of(&asset));
+                if let Some(mut target) = meshes.get_mut(&self.mesh) {
+                    *target = asset;
+                }
+            }
+        }
+        self.gathered = done.indices;
+        self.gathered_at = Some(done.eye);
+    }
+}
+
+/// Faces the cover to the camera when it moved or turned past the threshold:
+/// the vertex shader expands and fades the billboards from the camera given
+/// here (F580). The instances are gathered again as `MARGIN` says, off the
+/// main thread when there is time (`GroundDetail::apply` puts a gather in
+/// the mesh).
 fn present(
     detail: Option<ResMut<GroundDetail>>,
     camera: Query<&Transform, With<super::ViewerCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<CoverMaterial>>,
     stream: Res<MeshStream>,
 ) {
     let Some(mut detail) = detail else { return };
@@ -431,19 +618,56 @@ fn present(
     let detail = &mut *detail;
     detail.last = Some((eye, forward));
     let start = std::time::Instant::now();
-    let mut quads = std::mem::take(&mut detail.scratch);
-    detail.gather(eye, camera.right().as_vec3(), camera.up().as_vec3(), &mut quads);
-    detail.drawn = quads.len();
-    detail
-        .stream
-        .update(&quads, TRIANGLES, &detail.mesh, &mut meshes, &stream);
+    let (right, up) = (camera.right().as_vec3(), camera.up().as_vec3());
+    let bucket = |p: Vec3| ((p.x / BUCKET).floor() as i32, (p.z / BUCKET).floor() as i32);
+    if let Some(done) = detail.pending.as_mut().and_then(|task| block_on(poll_once(task))) {
+        detail.pending = None;
+        detail.apply(done, &mut meshes, &stream);
+    }
+    let moved = detail.gathered_at.map(|at| (at.distance(eye), bucket(at) != bucket(eye)));
+    match moved {
+        Some((distance, new_bucket)) if distance <= MARGIN && !(detail.blended && new_bucket) => {
+            if detail.pending.is_none() && distance > MARGIN / 2. {
+                let (cover, capacity, layout) =
+                    (detail.cover.clone(), detail.capacity, detail.layout.clone());
+                detail.pending = Some(AsyncComputeTaskPool::get().spawn(async move {
+                    cover.gathered(eye, capacity, layout.as_ref())
+                }));
+            }
+        }
+        // First frame, out of the gather's reach, or blended cover in a new
+        // bucket: gather now.
+        _ => {
+            detail.pending = None;
+            let done = detail.cover.gathered(eye, detail.capacity, detail.layout.as_ref());
+            detail.apply(done, &mut meshes, &stream);
+        }
+    }
+    if let Some(mut material) = materials.get_mut(&detail.material) {
+        let view = &mut material.extension.view;
+        view.right = right.extend(0.);
+        view.up = up.extend(0.);
+        view.eye = eye.extend(1.);
+    }
     // Blended (Enhanced soft alpha) cover sorts by the centre of the drawn
     // quads, as the unpadded mesh replaced on every rebuild before F392; an
-    // empty cover was three degenerate vertices at the origin (F398).
-    let corners = quads.iter().flat_map(|q| q.positions.map(Vec3::from_array));
-    let centre = Aabb::enclosing(corners).map_or(Vec3::ZERO, |aabb| aabb.center.into());
-    stream.sort_centre(detail.entity, centre);
-    detail.scratch = quads;
+    // empty cover was three degenerate vertices at the origin (F398). The
+    // corners are the shader's. Masked cover is not sorted.
+    if detail.blended {
+        let cover = &detail.cover;
+        let corners = detail.gathered.iter().flat_map(|&i| {
+            let g = &cover.instances[i as usize];
+            let shown = g.position.distance(eye) < cover.distances.lods[g.subset as usize];
+            let quad = &cover.quads[g.sprite as usize];
+            let corners: [Vec3; 4] = std::array::from_fn(|k| {
+                let [x, y] = quad.corners[k];
+                g.position + right * (x * g.width) + up * (y * g.height)
+            });
+            corners.into_iter().take(if shown { 4 } else { 0 })
+        });
+        let centre = Aabb::enclosing(corners).map_or(Vec3::ZERO, |aabb| aabb.center.into());
+        stream.sort_centre(detail.entity, centre);
+    }
     super::ground_effect_assets::charge(super::ground_effect_assets::GRASS, start);
 }
 

@@ -1203,6 +1203,63 @@ intact, piece, foliage, player, opponent, other).
 - Not verified: a restart restoring broken props in a batch (the code path is shared with replay
   visibility); tracks other than Donington and Detroit.
 
+## Per-frame mesh work: ground cover and skid marks (F580)
+
+**Ground cover.** Before, `ground_detail::present` rebuilt and streamed every visible billboard
+whenever the camera moved or turned, which is every frame while driving. Now:
+- a material extension (`ground_cover.wgsl`, vertex, prepass and deferred stages) faces each
+  billboard to the main camera and fades it with distance, using the CPU path's formulas;
+- the camera arrives in a uniform, so every pass faces the main camera, as the CPU path did;
+- the vertex buffer holds each billboard's centre four times, the corner offsets (sprite corner ×
+  width, height) in UV1 and its draw distance in the colour's alpha. A billboard past its distance
+  becomes a degenerate quad;
+- the CPU gathers every instance within its distance plus 6 m (`MARGIN`), in the old bucket order.
+  The gather stays valid for 6 m. The next one starts on the async compute pool after 3 m, and its
+  bytes are written over the mesh's allocation (mesh_stream) when ready. Blended cover (Enhanced
+  soft alpha) also gathers again at once in a new 16 m bucket, because the bucket order sets its
+  draw order;
+- blended cover still gets the exact sort centre of its drawn quads each frame. Masked cover skips
+  it, since it is not sorted;
+- motion vectors use the current corner for the previous position, as Bevy did with the CPU-written
+  vertices.
+
+**Skid marks.** Before, every change replaced the whole mesh asset, so Bevy reallocated and repacked
+it about once per frame in a race. Now:
+- the mesh holds every strip slot at full length (240 × 33 points);
+- changes are written in place;
+- points past a strip's end repeat its last point, so their quads have no area. The triangles with
+  area, their order, the packed bytes and the sort centre equal those of the old mesh (unit test).
+
+Tyre smoke was already streamed in place (F392/F394), and source foliage is opt-in
+(`source_trees = false` by default). Neither changed here.
+
+**Checks (26 Oct 2026, 17:00–17:50, after 14:07; timing under the build lock):**
+- Images, 1600 × 900 with `--render-fixed-step`, F576 build against this one:
+  - Donington tick 600, baseline (alpha to coverage, grass in view): 0 changed pixels;
+  - Enhanced preset (blended grass, TAA): 7 pixels differ, by 1 level;
+  - Detroit derby tick 2,700: 0 changed pixels.
+- No capture showed skid marks; the unit test covers their equivalence.
+
+| Phone view (desktop, mobile preset, 4 sim threads), 2 runs each | F576 | F580 |
+|---|---|---|
+| Grass CPU ms/frame (`GRID_GROUND_TRACE`) | 0.760 / 0.755 | 0.058 / 0.060 |
+| Skid CPU ms/frame | 0.004 / 0.004 | 0.013 / 0.012 |
+| Main ms | 4.31 / 4.31 | 3.21 / 3.27 |
+| Render ms | 7.11 / 7.04 | 6.50 / 6.52 |
+| p95 / p99 frame interval ms | 18.03, 20.68 / 18.01, 20.54 | 18.24, 20.09 / 18.18, 21.33 |
+
+- Mesh assets modified per frame (`asset_churn`) drop by about one (the skid marks).
+- A first version gathered on the main thread: about 1.5 ms every ~6 frames (17,000 billboards).
+  That raised p95 to 19.0 ms and put about 225 frames in 18.5–19.5 ms (against about 25). With
+  the async gather that bin holds 65–71.
+- The remaining spread comes from the 4.7 MB vertex upload of each new gather (21,000 × 4 vertices ×
+  56 bytes); before, about 2.3 MB went up every frame.
+- Desktop, 2560 × 1369, no preset, 2 runs each (17:42–17:47): Main 4.30 / 4.26 → 3.13 / 3.32 ms,
+  Render 6.83 / 6.79 → 6.29 / 6.31 ms, p95 18.08 / 18.14 → 18.30 / 18.23 ms.
+- Phone estimate [I]: the grass work moves off the main thread; on the phone it was 1.6–2.0 ms per
+  frame (`ground_detail::present`, log `log-20261026-125712.txt`). Main thread about 1.5–2.5 ms
+  faster, render thread about 1–1.5 ms. Not measured on the phone.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,
