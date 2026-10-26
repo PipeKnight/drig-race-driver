@@ -111,6 +111,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F576](log/F0576.md) | 2026-10-26 | Static world batching |
 | [F575](log/F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
 | [F574](log/F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
 | [F573](log/F0573.md) | 2026-10-26 | Desktop Auto render height and compute threads on the desktop |
@@ -170,7 +171,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F518](log/F0518.md) | 2026-10-20 | Playable 5d8f3f454655 with F514–F517, and the portable copy refreshed |
 | [F517](log/F0517.md) | 2026-10-20 | AI reverse byte +0x1E: the car-side consumer is found and ported |
 | [F516](log/F0516.md) | 2026-10-20 | Silent engine on the F513 playable fixed: BMW engine decoders no longer fail at idle; race-start audio mix test |
-| [F515](log/F0515.md) | 2026-10-20 | Every circuit draws its own sky and the layered road surface, in both presets; Le Mans' sky follows the time of day; the "unresolved road batches" were … |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

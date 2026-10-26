@@ -1149,6 +1149,60 @@ log shows `lean_pieces version=1 event=rest frame= disabled= dormant=`.
 `GRID_ASSET_COUNTS` now also prints `mesh_entities` with all/disabled/drawn counts by kind (track,
 intact, piece, foliage, player, opponent, other).
 
+## Static world batching (F576)
+
+`static_batch.rs` (every build) merges the track's static parts into one mesh per material and
+64 m ground cell, at `PostStartup` after the track surfaces are attached.
+- Vertices are moved into the cell's frame as the vertex shader would place them:
+  - positions by the part's matrix;
+  - normals by its inverse transpose, normalized as the shader does;
+  - tangents with the determinant's sign;
+  - triangle order and winding kept.
+- Opaque and Mask materials only. Blended parts, foliage that faces the camera, car parts, pieces,
+  parts with children, render layers, `NotShadowCaster` or `VisibilityRange` keep their own entities.
+- A batch holds at most 65,536 vertices (16-bit indices). A cell with a single part keeps it as is.
+- The original static entities are despawned, which frees the meshes only they used.
+- Intact breakable props get batches of their own:
+  - their entities stay, without a mesh, and keep the visibility that `dynamic_props::present`
+    and the replay set;
+  - a batch drops a prop's triangles while the prop is hidden (broken) and restores them when it
+    shows again (a restart);
+  - a batch with nothing left is hidden.
+- `GRID_STATIC_BATCH=0` keeps every part separate. `GRID_STATIC_BATCH_CELL=<metres>` changes the
+  cell size (for measurements).
+- Log: `static_batch version=1 material= parts= batches= intact_parts= intact_batches= vertices=`.
+
+**Checks (26 Oct 2026, 15:49–16:18, after 14:07; timing runs under the build lock):**
+- Images, offscreen 1600 × 900 with `--render-fixed-step`, batching off against on:
+  - Donington, 12 cars, tick 600: 1 pixel differs, by 1 level;
+  - Detroit derby, tick 2,700, with breaks before the capture: 3 pixels differ, by 1 level.
+- Donington batches: 1,937 static parts became 569 batches; 1,609 intact props became 207 batches;
+  16 surface-material parts became 7 batches.
+- Drawn mesh entities at frame 3,600 (`mesh_entities`, phone view):
+  - track and intact: 2,467 + 1,199 = 3,666 without batching;
+  - 927 + 618 batches = 1,545 at 64 m;
+  - 746 + 481 = 1,227 at 128 m.
+- GPU memory (`wgpu_memory`): Donington 472 → 532 MB allocated, because instanced props are copied
+  into their batches; derby 399 → 407 MB. Reserved memory unchanged.
+
+| Phone view (desktop, mobile preset, 4 sim threads), 2 runs each | off | 64 m | 128 m |
+|---|---|---|---|
+| Main ms (release) | 4.27 / 4.39 | 4.39 / 4.32 | 4.37 / 4.26 |
+| Render ms (release) | 7.17 / 7.32 | 7.07 / 7.15 | 7.13 / 7.04 |
+| Compute-pool work ms/frame (profile build) | 9.18 / 9.24 | 8.84 / 8.84 | — |
+
+- In the profile build, the main visibility pass goes 0.36 → 0.23 ms per frame and the Aabb pass
+  0.085 → 0. Other per-entity spans shrink by 0.01–0.04 ms. The render thread is flat (3.49 / 3.45
+  → 3.45 / 3.43 ms).
+- Desktop, 2560 × 1369, no preset, 2 runs each: Main 4.24 / 4.30 → 4.27 / 4.30 ms, Render 6.88 /
+  6.92 → 6.84 / 6.79 ms. That is within noise; the desktop's per-entity passes are cheap.
+- Phone estimate [I]: the saved compute work scales with the phone's slower cores (about 3–4×), so
+  roughly 1–1.5 ms of compute-pool work per frame. On the critical path that is likely under 1 ms.
+  Not measured on the phone.
+- Unit test `parts_keep_their_shader_placement_and_order`.
+- Not verified: a restart restoring broken props in a batch (the code path is shared with replay
+  visibility); tracks other than Donington and Detroit.
+
 ## Demolition derby frame rate and parallel debris (F568)
 
 Owner (24 October 2026, playable 7360a4865f54 with F563-F566, Detroit route_8 derby, 12 stk, 2560 x 1369,

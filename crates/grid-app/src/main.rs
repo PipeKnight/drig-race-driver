@@ -70,6 +70,7 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod static_batch;
 mod stereo;
 mod foliage_mips;
 mod fps_counter;
@@ -3057,6 +3058,8 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
         // Hidden pieces of unbroken props skip the per-entity passes (F574).
         lean_pieces::install(&mut app);
+        // Static track parts and intact props drawn as merged meshes (F576).
+        static_batch::install(&mut app);
         camera::install(&mut app, &root, field.models[0].stem());
         track_environment::install(&mut app, &root, &route);
         damage_hud::install(&mut app);

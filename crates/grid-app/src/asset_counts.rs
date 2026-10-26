@@ -17,6 +17,15 @@ pub fn install(app: &mut App) {
     if std::env::var_os("GRID_ASSET_COUNTS").is_none() {
         return;
     }
+    // The mesh report needs every kind registered, spawned or not.
+    let world = app.world_mut();
+    world.register_component::<crate::static_batch::Batch>();
+    world.register_component::<crate::track_surface::SourcePart>();
+    world.register_component::<crate::dynamic_props::IntactProp>();
+    world.register_component::<crate::dynamic_props::PropPiece>();
+    world.register_component::<crate::source_trees::Facing>();
+    world.register_component::<crate::MovingPart>();
+    world.register_component::<crate::OpponentPart>();
     app.add_systems(Last, main_report);
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
         render.add_systems(Render, render_report.after(RenderSystems::Cleanup));
@@ -47,6 +56,7 @@ fn main_report(world: &World, mut frames: Local<u32>) {
 fn mesh_report(world: &World, frame: u32) {
     type Kinds = (
         Has<Disabled>,
+        Has<crate::static_batch::Batch>,
         Has<crate::track_surface::SourcePart>,
         Has<crate::dynamic_props::IntactProp>,
         Has<crate::dynamic_props::PropPiece>,
@@ -58,13 +68,13 @@ fn mesh_report(world: &World, frame: u32) {
     let Some(mut query) = world.try_query_filtered::<Kinds, (With<Mesh3d>, Allow<Disabled>)>() else {
         return;
     };
-    let names = ["track", "intact", "piece", "foliage", "player", "opponent", "other"];
-    let mut counts = [[0usize; 3]; 7];
-    for (disabled, track, intact, piece, foliage, player, opponent, seen) in query.iter(world) {
-        let kind = [track, intact, piece, foliage, player, opponent]
+    let names = ["batch", "intact", "piece", "foliage", "player", "opponent", "track", "other"];
+    let mut counts = [[0usize; 3]; 8];
+    for (disabled, batch, track, intact, piece, foliage, player, opponent, seen) in query.iter(world) {
+        let kind = [batch, intact, piece, foliage, player, opponent, track]
             .iter()
             .position(|&k| k)
-            .unwrap_or(6);
+            .unwrap_or(7);
         counts[kind][0] += 1;
         counts[kind][1] += usize::from(disabled);
         counts[kind][2] += usize::from(!disabled && seen.get());
