@@ -381,7 +381,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     // GRID_ENGINE_AUDIO_TRACE=local/X.tsv: per tick, car 0's engine-audio
     // inputs as grid-app publishes them after the tick (`Control::vehicle`
-    // with the applied throttle, vehicle +0xE1C) and the driver's throttle,
+    // with the applied throttle, vehicle +0xE1C), the driver's throttle and
+    // the gear whine (`engine_audio_whine`, run per tick as grid-app does),
     // for offline renders.
     let mut engine_trace = match std::env::var("GRID_ENGINE_AUDIO_TRACE") {
         Ok(path) => {
@@ -389,8 +390,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("trace must stay under local/".into());
             }
             let mut t = std::io::BufWriter::new(std::fs::File::create(path)?);
-            writeln!(t, "tick	normalized_rpm	applied_throttle	gear	driver_throttle")?;
-            Some(t)
+            writeln!(t, "tick	normalized_rpm	applied_throttle	gear	driver_throttle	whine")?;
+            let settings = grid_tools::engine_audio_whine::Settings::load(root, &models[0])?;
+            Some((t, grid_tools::engine_audio_whine::Whine::new(settings, 0x5eed)))
         }
         Err(_) => None,
     };
@@ -886,20 +888,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         let pairs = multi.contact_pairs();
-        if let Some(t) = &mut engine_trace {
+        if let Some((t, whine)) = &mut engine_trace {
             let car = &multi.cars[0];
             let words = &car.state.car.owner.vehicle;
             let applied = grid_tools::engine_audio::Control::applied_throttle(words);
             let throttle = if car.terminal_wheel().is_some() { 0. } else { applied };
             let c = grid_tools::engine_audio::Control::vehicle(words, throttle, true, 0);
+            let voice = whine.frame(0.016, grid_tools::engine_audio_whine::Input::vehicle(words));
             writeln!(
                 t,
-                "{}	{}	{}	{}	{}",
+                "{}	{}	{}	{}	{}	{:x}",
                 multi.ticks,
                 c.normalized_rpm,
                 c.throttle,
                 c.gear,
-                controls[0].throttle
+                controls[0].throttle,
+                grid_tools::engine_audio_whine::Voice::pack(voice)
             )?;
         }
         if let Some(t) = &mut field_trace {

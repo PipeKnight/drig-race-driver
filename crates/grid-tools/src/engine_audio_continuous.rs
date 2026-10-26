@@ -8,6 +8,7 @@ use crate::{
     engine_audio_schedule,
     engine_audio_load,
     engine_audio_shift::{self, Shift},
+    engine_audio_whine,
     mech_audio::{self, Backfire, Exhaust, Turbo},
 };
 use grid_formats::{audio_car_setup, audio_dictionary, tuning, vehicle_properties};
@@ -43,6 +44,9 @@ pub struct Bank {
     pub mechanics_bank: String,
     /// Its samples, when loaded for the player (`mech_audio::Bank::load`).
     pub mech: Option<Arc<mech_audio::Bank>>,
+    /// The gear whine's parameters, when loaded for the player
+    /// (`engine_audio_whine::Settings::load`).
+    pub whine: Option<engine_audio_whine::Settings>,
     /// engine.ini [Physics] gear-shift settings.
     shift: engine_audio_shift::Settings,
 }
@@ -147,6 +151,7 @@ impl Bank {
             gearbox: setup.offsets[2],
             mechanics_bank: setup.mechanics_bank.to_owned(),
             mech: None,
+            whine: None,
             shift,
         }))
     }
@@ -189,6 +194,10 @@ pub struct Mixer {
     /// 451260 and 44D840 state of the player.
     backfire: Backfire,
     turbo: Turbo,
+    /// The gear whine this block (`engine_audio_whine`, run per tick by the
+    /// caller from the vehicle), and the last start it played.
+    pub whine: Option<engine_audio_whine::Voice>,
+    whine_start: Option<u8>,
 }
 /// Normal/Chase/PC levels of the Engine and Exhaust groups.
 pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
@@ -210,6 +219,8 @@ impl Mixer {
             mech_levels: mech_audio::Levels::SILENT,
             backfire: Backfire::new(0x5eed),
             turbo: Turbo::new(Turbo::SPIDLE, Turbo::HISS),
+            whine: None,
+            whine_start: None,
         };
         result.reset();
         result
@@ -225,6 +236,7 @@ impl Mixer {
         self.shift = Shift::new(self.bank.shift, 0x5eed);
         self.backfire = Backfire::new(0x5eed);
         self.turbo = Turbo::new(Turbo::SPIDLE, Turbo::HISS);
+        self.whine_start = None;
         if let Some(mech) = &mut self.mech {
             mech.clear();
         }
@@ -292,6 +304,16 @@ impl Mixer {
             let state = if since_shift == 0. { if up { 1 } else { 2 } } else { 0 };
             let blow = self.turbo.frame(dt, f(&self.controller, 0xc8), f(&self.controller, 0xb0), state);
             self.turbo.play(blow, mech);
+            // 4518E0 between 451770 and 44D840: the whine.
+            match self.whine {
+                Some(w) => {
+                    mech.whine(w.entry, self.whine_start != Some(w.start), w.db, w.pitch);
+                    self.whine_start = Some(w.start);
+                }
+                None => {
+                    mech.stop(mech_audio::WHINE);
+                }
+            }
             mech.frame(self.mech_levels);
         }
         put(&mut self.controller, 0xcc, control.throttle);
@@ -410,6 +432,7 @@ mod tests {
             gearbox: [0., 0., 4.],
             mechanics_bank: String::new(),
             mech: None,
+            whine: None,
             shift: engine_audio_shift::Settings::NONE,
         })
     }

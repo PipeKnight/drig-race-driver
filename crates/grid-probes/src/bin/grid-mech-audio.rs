@@ -1,16 +1,18 @@
 //! Private offline render of the player's engine with its mechanical sounds
-//! (`mech_audio`: clunk, backfire, turbo) for listening checks. Replays the
+//! (`mech_audio`: clunk, backfire, turbo, whine) for listening checks. Replays the
 //! engine-audio trace of a headless solo race (`GRID_ENGINE_AUDIO_TRACE` of
 //! grid-opponent-race) through the continuous mixer, one control per 16 ms
 //! block as grid-app publishes them, heard from the car's mounted bumper
 //! view (Normal mode, Bonnet audio camera). Writes one 48 kHz mono WAV per
 //! variant: `base` without mechanical sounds, then one per sound group and
-//! `all`. After the lap, 4 s of authored controls: the limiter, then a lift.
+//! `all`. After the lap, 4 s of authored controls: the limiter, then a lift
+//! (without the whine, which needs the vehicle).
 use grid_tools::{
     audio_mix::{self, Camera, Table},
     car::Car,
     engine_audio::{Control, RATE},
     engine_audio_continuous::{BLOCK, Bank as EngineBank, Mixer},
+    engine_audio_whine::Voice,
     mech_audio::{self, Levels},
 };
 use std::{fs, io::Write, path::Path};
@@ -36,13 +38,16 @@ fn wave(path: &Path, pcm: &[i16]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Mechanical groups heard in a variant (`mech_audio` group indices).
-const VARIANTS: [(&str, &[usize]); 5] = [
-    ("base", &[]),
-    ("clunk", &[mech_audio::GEARBOX]),
-    ("backfire", &[mech_audio::EXHAUST]),
-    ("turbo", &[mech_audio::TURBO, mech_audio::ENGINE]),
-    ("all", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE]),
+/// Mechanical groups heard in a variant (`mech_audio` group indices), and
+/// whether the whine plays. It shares the Gearbox group with the clunk, so
+/// `whine` holds both; compare it with `clunk`.
+const VARIANTS: [(&str, &[usize], bool); 6] = [
+    ("base", &[], false),
+    ("clunk", &[mech_audio::GEARBOX], false),
+    ("backfire", &[mech_audio::EXHAUST], false),
+    ("turbo", &[mech_audio::TURBO, mech_audio::ENGINE], false),
+    ("whine", &[mech_audio::GEARBOX], true),
+    ("all", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE], true),
 ];
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -57,11 +62,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("new private output required".into());
     }
     let mut controls = Vec::new();
+    let mut whines = Vec::new();
     for line in fs::read_to_string(&args[1])?.lines().skip(1) {
         let f: Vec<&str> = line.split('\t').collect();
-        if f.len() < 4 {
+        if f.len() < 6 {
             return Err(format!("trace line `{line}`").into());
         }
+        whines.push(Voice::unpack(u64::from_str_radix(f[5], 16)?));
         controls.push(Control {
             normalized_rpm: f[1].parse()?,
             throttle: f[2].parse()?,
@@ -120,7 +127,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         controls.len()
     );
     fs::create_dir(out)?;
-    for (name, groups) in VARIANTS {
+    for (name, groups, whine) in VARIANTS {
         let mut mixer = Mixer::new(bank.clone());
         mixer.bus_db = [engine_db[0], engine_db[1]];
         let group_db = [mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE].map(|g| {
@@ -131,7 +138,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         mixer.mech_levels = Levels { group_db, distance: [gearbox, exhaust, bay] };
         let mut pcm = Vec::with_capacity(controls.len() * BLOCK);
         let mut peak = 0f32;
-        for &control in &controls {
+        for (k, &control) in controls.iter().enumerate() {
+            mixer.whine = if whine { whines.get(k).copied().flatten() } else { None };
             for _ in 0..BLOCK {
                 let v = mixer.sample(control);
                 peak = peak.max(v.abs());

@@ -26,6 +26,7 @@ pub mod engine_audio_restart;
 pub mod engine_audio_schedule;
 pub mod engine_audio_load;
 pub mod engine_audio_shift;
+pub mod engine_audio_whine;
 pub mod mech_audio;
 pub mod hud_audio;
 pub mod entity_geometry;

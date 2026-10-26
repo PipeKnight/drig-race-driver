@@ -8,6 +8,7 @@ use grid_tools::{
     audio_pacing::Paced,
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank as EngineBank, CHASE_BUS_DB, Mixer},
+    engine_audio_whine::{self, Whine},
     mech_audio,
 };
 use super::stereo::{Pan, Stereo};
@@ -21,15 +22,19 @@ use std::{
 
 #[derive(Resource)]
 pub(crate) struct EngineSound {
-    /// Packed controls, one per vehicle tick (`audio_pacing`).
+    /// Packed controls and the whine, one per vehicle tick (`audio_pacing`).
     mailbox: Mailbox,
     /// The last player control pushed, and the tick last published.
     pushed: Option<u64>,
     ticked: Option<(u64, u64)>,
     /// Engine/exhaust group levels in dB for the audio thread (`pack_bus`).
     bus: Arc<AtomicU64>,
-    /// The player's mechanical-sound levels (clunk, backfire, turbo).
+    /// The player's mechanical-sound levels (clunk, backfire, turbo, whine).
     mech: MechBus,
+    /// The player's gear whine (4518E0), run once per vehicle tick, with its
+    /// segment; and its last voice (`engine_audio_whine::Voice::pack`).
+    whine: Option<(u64, Whine)>,
+    whine_word: u64,
     /// The original group mix (`audio/GroupModeVolumes.bin`).
     pub(crate) table: Option<Arc<Table>>,
     failure: Arc<AtomicU32>,
@@ -50,6 +55,8 @@ impl EngineSound {
             ticked: None,
             bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
             mech: mech_bus(),
+            whine: None,
+            whine_word: 0,
             table: None,
             failure: Arc::new(AtomicU32::new(0)),
             bank: banks.first().cloned().flatten(),
@@ -76,14 +83,18 @@ type MechBus = Arc<[AtomicU32; 7]>;
 fn mech_bus() -> MechBus {
     Arc::new(mech_audio::Levels::SILENT.to_bits().map(AtomicU32::new))
 }
-/// Tick-paced packed controls shared with one engine decoder.
-type Mailbox = Arc<Mutex<Paced<u64>>>;
+/// Tick-paced packed controls shared with one engine decoder, each with
+/// the whine's voice (`engine_audio_whine::Voice::pack`, 0 for none).
+type Mailbox = Arc<Mutex<Paced<[u64; 2]>>>;
 fn mailbox() -> Mailbox {
-    Arc::new(Mutex::new(Paced::new(0)))
+    Arc::new(Mutex::new(Paced::new([0; 2])))
 }
 fn push(mailbox: &Mailbox, control: Control) {
+    send(mailbox, control, 0);
+}
+fn send(mailbox: &Mailbox, control: Control, whine: u64) {
     if let Ok(mut m) = mailbox.lock() {
-        m.push(control.pack());
+        m.push([control.pack(), whine]);
     }
 }
 /// One opponent's engine voice set (car index in the shared world).
@@ -163,9 +174,11 @@ impl Iterator for Decoder {
             && let Ok(mut mailbox) = self.mailbox.try_lock()
         {
             let generation = self.control.generation;
-            let latest = Control::unpack(mailbox.latest());
+            let latest = Control::unpack(mailbox.latest()[0]);
             if block || latest.generation != generation {
-                let next = Control::unpack(mailbox.take());
+                let [next, whine] = mailbox.take();
+                let next = Control::unpack(next);
+                self.mixer.whine = engine_audio_whine::Voice::unpack(whine);
                 self.control.normalized_rpm = next.normalized_rpm;
                 self.control.throttle = next.throttle;
                 self.control.gear = next.gear;
@@ -290,6 +303,13 @@ pub(crate) fn load_banks(root: &std::path::Path, models: &[grid_tools::car::Car]
             Ok(mut bank) => {
                 // The player's mechanical sounds come from its carsetup MechBank.
                 if k == 0 {
+                    match engine_audio_whine::Settings::load(root, m) {
+                        Ok(whine) => Arc::get_mut(&mut bank).unwrap().whine = Some(whine),
+                        Err(error) => {
+                            warn!("Gear whine of {} unavailable: {error}", m.stem());
+                            eprintln!("engine_audio version=2 event=whine_failed car={} error=\"{error}\"", m.stem());
+                        }
+                    }
                     match mech_audio::Bank::load(root, &bank.mechanics_bank) {
                         Ok(mech) => Arc::get_mut(&mut bank).unwrap().mech = Some(mech),
                         Err(error) => {
@@ -618,7 +638,7 @@ fn push_controls(
     opponent_engines: &Query<&OpponentEngine>,
 ) {
     let control = player_control(sound, driving, finished);
-    push(&sound.mailbox, control);
+    send(&sound.mailbox, control, sound.whine_word);
     sound.pushed = Some(control.pack());
     if let Some(opponents) = &driving.opponents {
         let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;
@@ -651,6 +671,17 @@ fn publish(
         return;
     }
     sound.ticked = Some(now);
+    // 4518E0 for the player, per tick on the vehicle's words.
+    if let Some(settings) = sound.bank.as_ref().and_then(|b| b.whine.clone()) {
+        let segment = driving.segment;
+        if sound.whine.as_ref().is_none_or(|(s, _)| *s != segment) {
+            sound.whine = Some((segment, Whine::new(settings, 0x5eed)));
+        }
+        if let Some((_, whine)) = &mut sound.whine {
+            let voice = whine.frame(0.016, engine_audio_whine::Input::vehicle(&driving.runtime.state.car.owner.vehicle));
+            sound.whine_word = engine_audio_whine::Voice::pack(voice);
+        }
+    }
     let finished = listening.stopped(&driving);
     push_controls(&mut sound, &driving, finished, &opponent_engines);
 }
@@ -788,7 +819,7 @@ mod tests {
                 .add_message::<AppExit>()
                 .insert_resource(crate::Driving { runtime: grid_tools::source_vehicle::Runtime::lacetti(root,"slot_00",200679).unwrap(), geometry: None, paused:false, failure:None, notices:Vec::new(), scripted_ticks:None, scripted:Default::default(),handbrake_from:None, last_controls:None, segment:0, started:std::time::Instant::now(), opponents: None, auto_reset: Default::default(), reset_line: None })
                 .insert_resource(crate::input::Actions::new(crate::input::ActionMap::keyboard(),crate::input::Pads::Off)).init_resource::<crate::input::ShiftQueue>().insert_resource(crate::pause_menu::PauseMenu::new(crate::pause_menu::Variant::TestDrive,false,false,Default::default())).add_systems(Update,(crate::input::sample,crate::pause_menu::update,crate::drive_actions,crate::drive_tick,update).chain());
-            let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.lock().unwrap().latest());
+            let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.lock().unwrap().latest()[0]);
             let press = |app: &mut App,key| {let mut input=app.world_mut().resource_mut::<ButtonInput<KeyCode>>();input.reset_all();input.press(key);};
             press(&mut app,KeyCode::ArrowUp);app.update();
             assert!(control(&app).audible);assert_eq!(control(&app).throttle,1.);

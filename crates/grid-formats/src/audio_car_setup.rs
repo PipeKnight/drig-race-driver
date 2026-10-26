@@ -13,6 +13,15 @@ pub struct Setup<'a> {
     pub trims: [f32; 3], // gear, engine, exhaust; native units not inferred here.
     pub offsets: [[f32; 3]; 4], // engine bay, exhaust, gearbox, cockpit.
     pub open_cockpit: bool,
+    /// The car's `GearPreset` from `GearPresets`: per forward gear the
+    /// whine's basePitch, maxPitch and mec sample (4265D0, 410C00).
+    pub gears: Vec<Gear<'a>>,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Gear<'a> {
+    pub base_pitch: f32,
+    pub max_pitch: f32,
+    pub sample: &'a str,
 }
 fn attribute<'a>(element: &binxml::Element<'a>, name: &str) -> Result<&'a str> {
     let mut values = element.attributes.iter().filter(|(key, _)| *key == name);
@@ -94,6 +103,42 @@ fn number(value: &str) -> Result<f32> {
     }
     Ok(value)
 }
+fn gears<'a>(doc: &binxml::Document<'a>, root: &binxml::Element<'a>, name: &str) -> Result<Vec<Gear<'a>>> {
+    let presets = child(doc, root, "GearPresets")?;
+    let children = doc.elements.get(presets.children.clone()).ok_or(Error {
+        offset: 0,
+        message: "audio setup children outside document",
+    })?;
+    let mut matching = children
+        .iter()
+        .filter(|element| element.name == "Gears" && element.attributes.contains(&("name", name)));
+    let preset = matching.next().ok_or(Error {
+        offset: 0,
+        message: "selected gear preset absent",
+    })?;
+    if matching.next().is_some() {
+        return fail(0, "duplicate gear preset");
+    }
+    let entries = doc.elements.get(preset.children.clone()).ok_or(Error {
+        offset: 0,
+        message: "audio setup children outside document",
+    })?;
+    if entries.is_empty() || entries.len() > 9 {
+        return fail(0, "gear preset count bound");
+    }
+    let mut out = Vec::new();
+    for (k, entry) in entries.iter().enumerate() {
+        if entry.name != format!("Gear{}", k + 1) {
+            return fail(0, "gear preset entries out of order");
+        }
+        out.push(Gear {
+            base_pitch: number(attribute(entry, "basePitch")?)?,
+            max_pitch: number(attribute(entry, "maxPitch")?)?,
+            sample: bank(attribute(entry, "sample")?)?,
+        });
+    }
+    Ok(out)
+}
 fn select<'a>(doc: &binxml::Document<'a>, name: &str) -> Result<Setup<'a>> {
     let root = doc.elements.first().ok_or(Error {
         offset: 0,
@@ -152,6 +197,7 @@ fn select<'a>(doc: &binxml::Document<'a>, name: &str) -> Result<Setup<'a>> {
         trims: trim_values,
         offsets: offset_values,
         open_cockpit,
+        gears: gears(doc, root, attribute(child(doc, car, "GearPreset")?, "value")?)?,
     })
 }
 pub fn read<'a>(bytes: &'a [u8], name: &str) -> Result<Setup<'a>> {

@@ -13,6 +13,9 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 
 /// The car-audio table entries (43D59D…43D6A3) with a CollisionInfo.
 pub const INFOS: [&str; 6] = ["GearClucks", "Detonations", "TurboHiss", "TurboSpindle", "TurboDump", "TurboPip"];
+/// The gear whine's CollisionInfo (variety table +0xB0, 44BAD0); its
+/// samples are the bank's `01_gear`…`08_gear`, in gear order.
+pub const WHINE: &str = "Gearwhine";
 
 /// One CollisionInfo with its variety's samples (indices into `Bank::sounds`)
 /// and preset distances (A23B70 law).
@@ -104,6 +107,29 @@ impl Bank {
                 attr(variety, "preset").and_then(|p| presets.get(p).copied()).unwrap_or((1., 2.));
             out.insert(info.to_owned(), Info { curve, samples, min_distance, max_distance });
         }
+        // The Gearwhine variety names no samples: 4377F0 plays the car's
+        // GearPreset entry (`01_gear`…) from the mec bank, at the variety's
+        // preset distances.
+        let curve = curves.get(WHINE).ok_or("CollisionInfo Gearwhine absent")?.clone();
+        let (min_distance, max_distance) = doc
+            .elements
+            .iter()
+            .find(|e| e.name == "AudioVariety" && attr(e, "name") == Some(curve.variety.as_str()))
+            .and_then(|v| attr(v, "preset"))
+            .and_then(|p| presets.get(p).copied())
+            .ok_or("Gearwhine preset absent")?;
+        let mut samples = Vec::new();
+        for gear in 1..=8 {
+            let sample = format!("{gear:02}_gear");
+            let i = bank
+                .samples
+                .iter()
+                .position(|b| b.name == sample)
+                .ok_or_else(|| format!("{name}: sample {sample} absent"))?;
+            sounds.push(wip_sound(bank, i, data)?);
+            samples.push(sounds.len() - 1);
+        }
+        out.insert(WHINE.to_owned(), Info { curve, samples, min_distance, max_distance });
         Ok(Self { name: name.to_owned(), sounds, infos: out })
     }
 }
@@ -146,7 +172,7 @@ impl Levels {
 /// The group and emitter of a CollisionInfo's voice.
 fn route(info: &str) -> (usize, usize) {
     match info {
-        "GearClucks" => (GEARBOX, GEARBOX_EMITTER),
+        "GearClucks" | WHINE => (GEARBOX, GEARBOX_EMITTER),
         "Detonations" => (EXHAUST, EXHAUST_EMITTER),
         "TurboDump" | "TurboPip" => (ENGINE, BAY_EMITTER),
         _ => (TURBO, BAY_EMITTER),
@@ -222,6 +248,25 @@ impl Voices {
             self.begin(info, None);
         }
         if let Some(v) = self.voices.iter_mut().find(|v| v.info == info) {
+            v.db = db;
+            v.pitch = pitch;
+        }
+    }
+
+    /// The gear whine's voice (+0x850 of the 4518E0 object): 4377F0
+    /// (re)starts GearPreset entry `entry` on a change of gear (`restart`,
+    /// or a different entry playing); 444280 sets its level and pitch each
+    /// frame while the handle lives. A sample that ended (no loop flag) is
+    /// not restarted until the next change of gear.
+    pub fn whine(&mut self, entry: usize, restart: bool, db: f32, pitch: f32) {
+        let Some(&sound) = self.bank.infos.get(WHINE).and_then(|i| i.samples.get(entry)) else { return };
+        let other = self.voices.iter().any(|v| v.info == WHINE && v.sound != sound);
+        if restart || other {
+            self.voices.retain(|v| v.info != WHINE);
+            let step = f64::from(self.bank.sounds[sound].rate) / f64::from(self.rate);
+            self.voices.push(Voice { info: WHINE, sound, position: 0., step, x: None, db, pitch, gain: 0. });
+        }
+        if let Some(v) = self.voices.iter_mut().find(|v| v.info == WHINE) {
             v.db = db;
             v.pitch = pitch;
         }
@@ -609,6 +654,12 @@ mod tests {
                 })
                 .collect();
             println!("mec_bank {name} {}", sums.join(" "));
+            let gears: Vec<String> = bank.infos[WHINE]
+                .samples
+                .iter()
+                .map(|&k| format!("{}:{}:{}", bank.sounds[k].rate, bank.sounds[k].pcm.len(), bank.sounds[k].looped))
+                .collect();
+            println!("mec_gears {name} {}", gears.join(" "));
         }
         let dbr = Bank::load(&root, "mec_dbr").unwrap();
         assert!(dbr.sounds.iter().all(|s| s.channels == 1), "mono samples");
@@ -616,5 +667,7 @@ mod tests {
         assert_eq!((clunk.samples.len(), clunk.min_distance, clunk.max_distance), (3, 3.5, 4.));
         assert_eq!(clunk.curve.at(1.), (0., 1.));
         assert_eq!(dbr.infos["Detonations"].curve.at(1.), (-11., 1.1));
+        let whine = &dbr.infos[WHINE];
+        assert_eq!((whine.samples.len(), whine.min_distance, whine.max_distance), (8, 6., 10.));
     }
 }

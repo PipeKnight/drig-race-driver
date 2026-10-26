@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F578](log/F0578.md) | 2026-10-26 | Engine audio: the gear whine ported (GearPreset loop per gear, envelope, upshift wobble) |
 | [F577](log/F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
 | [F576](log/F0576.md) | 2026-10-26 | Static world batching |
 | [F575](log/F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F520](log/F0520.md) | 2026-10-20 | Career locations: Washington GP route 0 (event 73) and the Haruna head-to-head roads, routes 9 and 4 (events 75, 77), load and race |
 | [F519](log/F0519.md) | 2026-10-20 | Every raceable car's engine bank loads; one car's failing bank or decoder silences only that car |
 | [F518](log/F0518.md) | 2026-10-20 | Playable 5d8f3f454655 with F514–F517, and the portable copy refreshed |
-| [F517](log/F0517.md) | 2026-10-20 | AI reverse byte +0x1E: the car-side consumer is found and ported |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 
