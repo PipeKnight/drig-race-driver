@@ -74,13 +74,30 @@ fn lookup(value: f32, p: Parameters) -> f64 {
 }
 /// Pointers are explicit owned roles: first contact body equals this owner,
 /// +0C is nonzero, and no second body, shape graph or wake call is followed.
-pub(crate) fn validate(
+/// Returns the node count. `grid` holds [`validate_grid`]'s verdict once
+/// computed: [`calculate_side_in`] never writes the grid words (+A414
+/// dimensions, +A420 spacing, +A430 origin, the nodes below +A3B8), so one
+/// verdict serves every contact of a descriptor.
+pub(crate) fn validate_cached(
     descriptor: &[u32],
+    grid: &mut Option<Result<usize, Error>>,
     body: &[u32; PHYSICAL_WORDS],
     center: [f32; 4],
     contact: &[u32; 32],
     p: Parameters,
 ) -> Result<usize, Error> {
+    validate_contact(descriptor, body, center, contact, p)?;
+    grid.get_or_insert_with(|| validate_grid(descriptor))
+        .clone()
+}
+
+fn validate_contact(
+    descriptor: &[u32],
+    body: &[u32; PHYSICAL_WORDS],
+    center: [f32; 4],
+    contact: &[u32; 32],
+    p: Parameters,
+) -> Result<(), Error> {
     if descriptor.len() != WORDS
         || byte(contact, 0xc) > 1
         || contact[1] != 0
@@ -117,6 +134,12 @@ pub(crate) fn validate(
     {
         return Err(Error("invalid static deformation contact limit"));
     }
+    Ok(())
+}
+
+/// The grid and node checks of [`validate_cached`] (after its per-contact checks,
+/// which guarantee the descriptor length).
+fn validate_grid(descriptor: &[u32]) -> Result<usize, Error> {
     let dimensions: [usize; 3] = std::array::from_fn(|i| descriptor[0xa414 / 4 + i] as usize);
     if dimensions.iter().any(|d| !(2..=16).contains(d))
         || dimensions.iter().product::<usize>() > 400
@@ -151,7 +174,6 @@ pub fn calculate(
 /// the penetration term uses the owner-oriented normal and `own.360 - peer.360`,
 /// the coefficient is scaled by A488 (deformable peer, also setting contact
 /// +0E) or A48C, and the side-B coefficient slot is +44.
-#[allow(clippy::assign_op_pattern)] // Retain original SSE/x87 operation order.
 pub fn calculate_side(
     descriptor: &[u32],
     body: &[u32; PHYSICAL_WORDS],
@@ -160,12 +182,37 @@ pub fn calculate_side(
     p: Parameters,
     side: Side<'_>,
 ) -> Result<Output, Error> {
+    let mut descriptor = descriptor.to_vec();
+    let (contact, cap) =
+        calculate_side_in(&mut descriptor, &mut None, body, center, contact, p, side)?;
+    Ok(Output {
+        descriptor,
+        contact,
+        cap,
+    })
+}
+
+/// [`calculate_side`] on a descriptor updated in place (the per-contact
+/// window and level words), returning the contact and the cap; `grid` caches
+/// the grid verdict as in [`validate_cached`]. On an error the descriptor may
+/// hold this call's window update, so callers discard it.
+#[allow(clippy::assign_op_pattern)] // Retain original SSE/x87 operation order.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn calculate_side_in(
+    descriptor: &mut [u32],
+    grid: &mut Option<Result<usize, Error>>,
+    body: &[u32; PHYSICAL_WORDS],
+    center: [f32; 4],
+    contact: &[u32; 32],
+    p: Parameters,
+    side: Side<'_>,
+) -> Result<([u32; 32], f64), Error> {
     let mut tokenless = *contact;
     if side.peer.is_some() || side.second {
         tokenless[1] = 0;
         tokenless[2] = 0;
     }
-    let count = validate(descriptor, body, center, &tokenless, p)?;
+    let count = validate_cached(descriptor, grid, body, center, &tokenless, p)?;
     if let Some(peer) = side.peer
         && ([0x210, 0x220, 0x360]
             .iter()
@@ -184,11 +231,11 @@ pub fn calculate_side(
     }
     let slot = if side.second { 0x44 } else { 0x40 };
     let dimensions: [usize; 3] = std::array::from_fn(|i| descriptor[0xa414 / 4 + i] as usize);
-    let mut out = Output {
-        descriptor: descriptor.to_vec(),
-        contact: *contact,
-        cap: f64::from(p.unlimited),
-    };
+    // In place, every read sees what it saw when this wrote a copy: the copy
+    // differed only in the window slot and +A490..+A498, read after their
+    // writes (+A490 also just before its own).
+    let mut out_contact = *contact;
+    let mut cap = f64::from(p.unlimited);
     let normal = vec4(contact, 0x60);
     let point = vec4(contact, 0x50);
     let point_velocity = velocity(body, center, point);
@@ -210,19 +257,19 @@ pub fn calculate_side(
         speed
     };
     let window_at = 0xa4c4 + descriptor[0xa4ec / 4] as usize * 4;
-    if speed > f(&out.descriptor, window_at) {
-        out.descriptor[window_at / 4] = speed.to_bits();
+    if speed > f(descriptor, window_at) {
+        descriptor[window_at / 4] = speed.to_bits();
     }
-    let mut maximum = f(&out.descriptor, 0xa4c4);
+    let mut maximum = f(descriptor, 0xa4c4);
     for i in 1..10 {
-        let v = f(&out.descriptor, 0xa4c4 + i * 4);
+        let v = f(descriptor, 0xa4c4 + i * 4);
         if maximum < v {
             maximum = v;
         }
     }
     if byte(descriptor, 0xa4b0) == 0 || byte(descriptor, 0xa4af) != 0 || p.global_disabled {
-        out.contact[slot / 4] = p.unlimited.to_bits();
-        return Ok(out);
+        out_contact[slot / 4] = p.unlimited.to_bits();
+        return Ok((out_contact, cap));
     }
     let pose = std::array::from_fn(|i| vec4(body, 0x1d0 + i * 16));
     let inverse = contact_inverse::calculate(pose)?;
@@ -236,8 +283,8 @@ pub fn calculate_side(
     let corner = usize::from(half_x < local[0] - f(descriptor, 0xa430))
         + 2 * usize::from(half_z < local[2] - f(descriptor, 0xa438));
     if maximum < f(descriptor, 0xa4b4 + corner * 4) * p.corner_scale {
-        out.contact[slot / 4] = p.unlimited.to_bits();
-        return Ok(out);
+        out_contact[slot / 4] = p.unlimited.to_bits();
+        return Ok((out_contact, cap));
     }
     let own = vec4(body, 0x360);
     let projected = match side.peer {
@@ -288,9 +335,9 @@ pub fn calculate_side(
         f64::from(p.unlimited)
     };
     if stiffness == f64::from(p.unlimited) {
-        out.contact[slot / 4] = (stiffness as f32).to_bits();
-        out.cap = stiffness;
-        return Ok(out);
+        out_contact[slot / 4] = (stiffness as f32).to_bits();
+        cap = stiffness;
+        return Ok((out_contact, cap));
     }
     let velocity = match peer_velocity {
         None => dot(normal, point_velocity).abs(),
@@ -298,11 +345,11 @@ pub fn calculate_side(
     };
     let level = lookup(velocity, p);
     if f64::from(f(descriptor, 0xa490)) < level {
-        out.descriptor[0xa490 / 4] = (level as f32).to_bits();
-        out.descriptor[0xa498 / 4] = descriptor[0xa49c / 4];
-        out.descriptor[0xa494 / 4] = velocity.to_bits();
+        descriptor[0xa490 / 4] = (level as f32).to_bits();
+        descriptor[0xa498 / 4] = descriptor[0xa49c / 4];
+        descriptor[0xa494 / 4] = velocity.to_bits();
     }
-    let level = f(&out.descriptor, 0xa490);
+    let level = f(descriptor, 0xa490);
     let mut multiplier = if level != 0. {
         (stiffness as f32) / level
     } else {
@@ -314,19 +361,19 @@ pub fn calculate_side(
         multiplier = multiplier * f(descriptor, if q.deformable { 0xa488 } else { 0xa48c });
         if q.deformable {
             // B0CD10(contact, 1): disables the optional correction rows.
-            out.contact[0xc / 4] = (out.contact[0xc / 4] & !0xff_0000) | 0x1_0000;
+            out_contact[0xc / 4] = (out_contact[0xc / 4] & !0xff_0000) | 0x1_0000;
         }
     }
-    out.contact[slot / 4] = multiplier.to_bits();
-    out.cap = if multiplier != p.unlimited {
+    out_contact[slot / 4] = multiplier.to_bits();
+    cap = if multiplier != p.unlimited {
         f64::from(multiplier) * f64::from(penetration)
     } else {
         f64::from(multiplier)
     };
-    if !out.cap.is_finite() || !f(&out.contact, slot).is_finite() {
+    if !cap.is_finite() || !f(&out_contact, slot).is_finite() {
         return Err(Error("nonfinite static deformation cap"));
     }
-    Ok(out)
+    Ok((out_contact, cap))
 }
 
 #[cfg(test)]

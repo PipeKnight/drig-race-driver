@@ -31,6 +31,72 @@ pub fn calculate_with_queries(
     random_state: u32,
     queries: Option<&[vehicle_handling::QueryRecord]>,
 ) -> Result<Output, Error> {
+    let threshold = validate(input, point, impact, wheel_mode, random_state, queries)?;
+    let mut state = input.clone();
+    let (random_state, applied) = apply(
+        &mut state,
+        threshold,
+        point,
+        impact,
+        wheel_mode,
+        random_state,
+        queries,
+    )?;
+    Ok(Output {
+        state,
+        random_state,
+        applied,
+    })
+}
+
+/// [`calculate`] on the car's state in place, returning the RNG state and
+/// whether damage applied; the state changes only on success.
+pub fn calculate_in_place(
+    state: &mut State,
+    point: [f32; 4],
+    impact: f32,
+    wheel_mode: bool,
+    random_state: u32,
+) -> Result<(u32, bool), Error> {
+    if point[3] != 1. {
+        return Err(Error("invalid collision damage framing"));
+    }
+    let threshold = validate(state, point, impact, wheel_mode, random_state, None)?;
+    apply(
+        state,
+        threshold,
+        point,
+        impact,
+        wheel_mode,
+        random_state,
+        None,
+    )
+}
+
+/// [`calculate`]'s verdict without its result (no copy of the state).
+pub(crate) fn check(
+    input: &State,
+    point: [f32; 4],
+    impact: f32,
+    wheel_mode: bool,
+    random_state: u32,
+) -> Result<(), Error> {
+    if point[3] != 1. {
+        return Err(Error("invalid collision damage framing"));
+    }
+    validate(input, point, impact, wheel_mode, random_state, None).map(|_| ())
+}
+
+/// Every check of the dispatcher; returns the impact threshold. The settings
+/// validation of each region consumes no random state.
+fn validate(
+    input: &State,
+    point: [f32; 4],
+    impact: f32,
+    wheel_mode: bool,
+    random_state: u32,
+    queries: Option<&[vehicle_handling::QueryRecord]>,
+) -> Result<f32, Error> {
     let f = |b: &[u32], o: usize| f32::from_bits(b[o / 4]);
     // 9E6660 bounds neither the world point nor the car translation: it
     // subtracts and transforms them unchecked, so only finiteness is kept.
@@ -112,15 +178,33 @@ pub fn calculate_with_queries(
     if !(0. ..=1000.).contains(&f(b, at)) || !(0. ..=1000.).contains(&f(b, at + 4)) {
         return Err(Error("unsupported collision damage threshold"));
     }
-    let threshold = (mass as f64 * f(b, at) as f64) as f32;
-    let mut next = Output {
-        state: input.clone(),
-        random_state,
-        applied: false,
-    };
+    Ok((mass as f64 * f(b, at) as f64) as f32)
+}
+
+/// The damage itself, after [`validate`]: the owner's mutable block is
+/// written back only once every region succeeded.
+fn apply(
+    state: &mut State,
+    threshold: f32,
+    point: [f32; 4],
+    impact: f32,
+    wheel_mode: bool,
+    random_state: u32,
+    queries: Option<&[vehicle_handling::QueryRecord]>,
+) -> Result<(u32, bool), Error> {
     if impact <= threshold {
-        return Ok(next);
+        return Ok((random_state, false));
     }
+    let f = |b: &[u32], o: usize| f32::from_bits(b[o / 4]);
+    let car = &state.vehicle;
+    let m = vehicle_handling::MUTABLE;
+    let b = &car[m / 4..(m + 0x460) / 4];
+    let p = &state.physical;
+    let mass = f(p, 0x3f0);
+    let at = if wheel_mode { 0x368 } else { 0x360 };
+    let main_gain = (f(b, 0x438) * f(b, 0x430)) * f(b, 0x434);
+    let secondary_gain = (f(b, 0x438) * f(b, 0x434)) * f(b, 0x430);
+    let mut next_random = random_state;
     let divisor = (mass as f64 * f(b, at + 4) as f64) as f32;
     if divisor <= 0. {
         return Err(Error("invalid active collision damage divisor"));
@@ -152,10 +236,10 @@ pub fn calculate_with_queries(
                 enabled: flag != 0,
                 radius: f(&mutable, 0x370),
                 factors: [f(&mutable, 0x374), f(&mutable, 0x378)],
-                random_state: next.random_state,
+                random_state: next_random,
             })?;
             mutable[level / 4] = result.level.to_bits();
-            next.random_state = result.random_state;
+            next_random = result.random_state;
             Ok(())
         };
     for i in 0..4 {
@@ -173,7 +257,6 @@ pub fn calculate_with_queries(
         apply(0x14, 0x120, 0x340, main_gain)?;
     }
     vehicle_handling::effects(&mut mutable, queries, true)?;
-    next.state.vehicle[m / 4..(m + 0x460) / 4].copy_from_slice(&mutable);
-    next.applied = true;
-    Ok(next)
+    state.vehicle[m / 4..(m + 0x460) / 4].copy_from_slice(&mutable);
+    Ok((next_random, true))
 }

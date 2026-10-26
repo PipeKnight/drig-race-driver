@@ -6,8 +6,10 @@ use crate::{
     engine_audio_publication::{Environment, VOICE_BYTES},
     engine_audio_restart::PlaybackService,
     engine_audio_schedule,
+    engine_audio_load,
     engine_audio_shift::{self, Shift},
-    mech_audio,
+    engine_audio_whine,
+    mech_audio::{self, Backfire, Exhaust, Turbo},
 };
 use grid_formats::{audio_car_setup, audio_dictionary, tuning, vehicle_properties};
 use std::{fs, io::Read, path::Path, sync::Arc};
@@ -34,14 +36,18 @@ pub struct Bank {
     trims: [f32; 2],
     /// carsetup EngineBay and Exhaust emitter offsets in the car frame.
     pub emitters: [[f32; 3]; 2],
-    /// carsetup GearBox emitter offset.
+    /// carsetup GearBox and Cockpit emitter offsets.
     pub gearbox: [f32; 3],
+    pub cockpit: [f32; 3],
     /// carsetup MechBank: the `mec_*` bank of the car's mechanical sounds
     /// (41E785 resolves it into the car record +0x14, which 4511E0 passes to
     /// 435940 in place of the variety's template bank).
     pub mechanics_bank: String,
     /// Its samples, when loaded for the player (`mech_audio::Bank::load`).
     pub mech: Option<Arc<mech_audio::Bank>>,
+    /// The gear whine's parameters, when loaded for the player
+    /// (`engine_audio_whine::Settings::load`).
+    pub whine: Option<engine_audio_whine::Settings>,
     /// engine.ini [Physics] gear-shift settings.
     shift: engine_audio_shift::Settings,
 }
@@ -144,8 +150,10 @@ impl Bank {
             trims: [setup.trims[1], setup.trims[2]],
             emitters: [setup.offsets[0], setup.offsets[1]],
             gearbox: setup.offsets[2],
+            cockpit: setup.offsets[3],
             mechanics_bank: setup.mechanics_bank.to_owned(),
             mech: None,
+            whine: None,
             shift,
         }))
     }
@@ -180,11 +188,25 @@ pub struct Mixer {
     pub failure: Option<&'static str>,
     /// 451770's gear-shift state (`engine_audio_shift`).
     shift: Shift,
-    /// The player's mechanical sounds (`mech_audio`); `None` for opponents,
-    /// which 4511E0 and the turbo update skip (+0x310, +0xA4D8).
+    /// The car's mechanical sounds (`mech_audio`), `None` without a mec bank.
     pub mech: Option<mech_audio::Voices>,
+    /// The player's car (car +0x6C = 0): only it plays the clunk (414750
+    /// sets +0x310 for it alone) and the turbo (+0xA4D8), and its backfire
+    /// plays at x = 1 (+0x334 clear, the focused car); other cars' at x = 0.
+    pub player: bool,
     /// Their group levels and emitter distances.
     pub mech_levels: mech_audio::Levels,
+    /// 451260 and 44D840 state of the player.
+    backfire: Backfire,
+    turbo: Turbo,
+    /// The gear whine this block (`engine_audio_whine`, run per tick by the
+    /// caller from the vehicle), and the last start it played.
+    pub whine: Option<engine_audio_whine::Voice>,
+    whine_start: Option<u8>,
+    /// The handbrake button this block (vehicle +0xE38, 9961B0(8)), and
+    /// 43C320's latch: +0xA5E8 pulled, +0xA5E9 released, +0xA5EA played.
+    pub handbrake: bool,
+    handbrake_latch: [bool; 3],
 }
 /// Normal/Chase/PC levels of the Engine and Exhaust groups.
 pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
@@ -203,7 +225,14 @@ impl Mixer {
             diagnostics: Diagnostics::default(),
             failure: None,
             mech: None,
+            player: true,
             mech_levels: mech_audio::Levels::SILENT,
+            backfire: Backfire::new(0x5eed),
+            turbo: Turbo::new(Turbo::SPIDLE, Turbo::HISS),
+            whine: None,
+            whine_start: None,
+            handbrake: false,
+            handbrake_latch: [false; 3],
         };
         result.reset();
         result
@@ -217,8 +246,13 @@ impl Mixer {
         self.failure = None;
         // The constructor's shift state [I: the seed of A682A0's sequence].
         self.shift = Shift::new(self.bank.shift, 0x5eed);
+        self.backfire = Backfire::new(0x5eed);
+        self.turbo = Turbo::new(Turbo::SPIDLE, Turbo::HISS);
+        self.whine_start = None;
+        // 43B1F0: released set, so the first frame plays hbrakeoff.
+        self.handbrake_latch = [false, true, false];
         if let Some(mech) = &mut self.mech {
-            mech.stop();
+            mech.clear();
         }
         for (at, value) in [
             (0, 1.),
@@ -254,14 +288,60 @@ impl Mixer {
         engine_audio_control::update(&mut self.controller, engine, &self.bank.curves)?;
         // 451770 after 422A40: the gear-shift effects (414750, 451580,
         // 4150D0). The rest of its load effects are not reconstructed.
-        let shift = self.shift.frame(control.gear, engine.delta as f32);
+        let dt = engine.delta as f32;
+        let phase = f(&self.controller, 0x2c) + dt;
+        put(&mut self.controller, 0x2c, phase);
+        let shift = self.shift.frame(control.gear, dt);
         put(&mut self.controller, 0, shift.scale);
         put(&mut self.controller, 0x1a0, shift.load);
         put(&mut self.controller, 0x2f8, shift.pitch);
+        // 4148A0 and 414970 with the applied throttle (`Control::throttle`).
+        engine_audio_load::throttle(&mut self.controller, control.throttle, dt);
+        engine_audio_load::limiter(&mut self.controller, control.gear, dt);
         if let Some(mech) = &mut self.mech {
             // 451580 → 4511E0: GearClucks at x = 1 (0 dB, pitch 1).
-            if shift.clunk {
+            if shift.clunk && self.player {
                 mech.start("GearClucks", 1.);
+            }
+            let (up, since_shift) = self.shift.since();
+            // 451260; +0x20 is +0x48 after 414C70 [I: its fall limit and
+            // 451580's RPM blend are not ported]. x = 1: the focused car.
+            let exhaust = Exhaust {
+                change: f(&self.controller, 0x304),
+                rpm: f(&self.controller, 0x48),
+                up,
+                since_shift,
+                limiter: self.controller[0xd0] != 0,
+            };
+            self.backfire.frame(exhaust, dt, if self.player { 1. } else { 0. }, mech);
+            // 44D840 after 451770: the turbo on +0xC8 and +0xB0.
+            if self.player {
+                let state = if since_shift == 0. { if up { 1 } else { 2 } } else { 0 };
+                let blow = self.turbo.frame(dt, f(&self.controller, 0xc8), f(&self.controller, 0xb0), state);
+                self.turbo.play(blow, mech);
+            }
+            // 4518E0 between 451770 and 44D840: the whine.
+            match self.whine {
+                Some(w) => {
+                    mech.whine(w.entry, self.whine_start != Some(w.start), w.db, w.pitch);
+                    self.whine_start = Some(w.start);
+                }
+                None => {
+                    mech.stop(mech_audio::WHINE);
+                }
+            }
+            // 43C320, the player only: one sample per edge of the button.
+            if self.player {
+                let [pulled, released, played] = &mut self.handbrake_latch;
+                if self.handbrake && *released {
+                    (*pulled, *released, *played) = (true, false, false);
+                } else if !self.handbrake && *pulled {
+                    (*pulled, *released, *played) = (false, true, false);
+                }
+                if !*played && (*pulled || *released) {
+                    mech.start(if *pulled { mech_audio::HANDBRAKE_ON } else { mech_audio::HANDBRAKE_OFF }, 1.);
+                    *played = true;
+                }
             }
             mech.frame(self.mech_levels);
         }
@@ -379,8 +459,10 @@ mod tests {
             trims: [0.; 2],
             emitters: [[0., 0., 4.], [0., 0., -4.]],
             gearbox: [0., 0., 4.],
+            cockpit: [0.; 3],
             mechanics_bank: String::new(),
             mech: None,
+            whine: None,
             shift: engine_audio_shift::Settings::NONE,
         })
     }
@@ -449,6 +531,44 @@ mod tests {
     /// effects (RPM dip, off-load crossfade for 0.13 s, the wobble from
     /// 0.18 s) change the sound. `GRID_ENGINE_SHIFT_WAV=dir` writes both
     /// renders as 48 kHz mono 16-bit WAVs.
+    /// 43C320: hbrakeoff on the first frame (43B1F0 starts released), then
+    /// one sample per edge of the button; opponents play none.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn the_handbrake_plays_once_per_edge_for_the_player() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let bank = Bank::lacetti(&root).unwrap();
+        let mech = mech_audio::Bank::load(&root, "mec_lac").unwrap();
+        let control = Control { normalized_rpm: 0.3, throttle: 0., audible: true, generation: 1, gear: 1 };
+        let block = |m: &mut Mixer, pulled: bool| {
+            m.handbrake = pulled;
+            for _ in 0..BLOCK {
+                m.sample(control);
+            }
+            let v = m.mech.as_ref().unwrap();
+            (v.playing(mech_audio::HANDBRAKE_ON), v.playing(mech_audio::HANDBRAKE_OFF))
+        };
+        let mut m = Mixer::new(bank.clone());
+        m.mech = Some(mech_audio::Voices::new(mech.clone(), RATE));
+        assert_eq!(block(&mut m, false), (false, true));
+        let mut blocks = 0;
+        while block(&mut m, false).1 {
+            blocks += 1;
+            assert!(blocks < 400, "hbrakeoff never ends");
+        }
+        assert_eq!(block(&mut m, true), (true, false));
+        for _ in 0..400 {
+            block(&mut m, true);
+        }
+        assert_eq!(block(&mut m, true), (false, false), "held: no retrigger");
+        assert_eq!(block(&mut m, false), (false, true));
+        let mut opponent = Mixer::new(bank);
+        opponent.player = false;
+        opponent.mech = Some(mech_audio::Voices::new(mech, RATE));
+        assert_eq!(block(&mut opponent, false), (false, false));
+        assert_eq!(block(&mut opponent, true), (false, false));
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn an_upshift_changes_the_lacetti_only_from_the_shift() {

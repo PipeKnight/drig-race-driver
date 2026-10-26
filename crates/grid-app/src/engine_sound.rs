@@ -8,6 +8,7 @@ use grid_tools::{
     audio_pacing::Paced,
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank as EngineBank, CHASE_BUS_DB, Mixer},
+    engine_audio_whine::{self, Whine},
     mech_audio,
 };
 use super::stereo::{Pan, Stereo};
@@ -21,15 +22,18 @@ use std::{
 
 #[derive(Resource)]
 pub(crate) struct EngineSound {
-    /// Packed controls, one per vehicle tick (`audio_pacing`).
+    /// Packed controls and the whine, one per vehicle tick (`audio_pacing`).
     mailbox: Mailbox,
     /// The last player control pushed, and the tick last published.
     pushed: Option<u64>,
     ticked: Option<(u64, u64)>,
     /// Engine/exhaust group levels in dB for the audio thread (`pack_bus`).
     bus: Arc<AtomicU64>,
-    /// The player's mechanical-sound levels (gear clunk).
+    /// The player's mechanical-sound levels (clunk, backfire, turbo, whine).
     mech: MechBus,
+    /// Each car's gear whine (4518E0), run once per vehicle tick; index 0 is
+    /// the player, then the opponents by car index.
+    whines: Vec<CarWhine>,
     /// The original group mix (`audio/GroupModeVolumes.bin`).
     pub(crate) table: Option<Arc<Table>>,
     failure: Arc<AtomicU32>,
@@ -50,6 +54,7 @@ impl EngineSound {
             ticked: None,
             bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
             mech: mech_bus(),
+            whines: Vec::new(),
             table: None,
             failure: Arc::new(AtomicU32::new(0)),
             bank: banks.first().cloned().flatten(),
@@ -63,7 +68,7 @@ impl EngineSound {
             if driving.runtime.terminal_wheel().is_some() {
                 0.
             } else {
-                driving.last_controls.unwrap_or_default().throttle
+                Control::applied_throttle(&driving.runtime.state.car.owner.vehicle)
             },
             !self.muted && !driving.paused && driving.failure.is_none(),
             driving.segment as u32,
@@ -72,18 +77,50 @@ impl EngineSound {
 }
 /// The player's mechanical-sound levels for the audio thread
 /// (`mech_audio::Levels::to_bits`).
-type MechBus = Arc<[AtomicU32; 6]>;
+type MechBus = Arc<[AtomicU32; 9]>;
 fn mech_bus() -> MechBus {
     Arc::new(mech_audio::Levels::SILENT.to_bits().map(AtomicU32::new))
 }
-/// Tick-paced packed controls shared with one engine decoder.
-type Mailbox = Arc<Mutex<Paced<u64>>>;
+/// One car's whine model, its segment, and its last voice
+/// (`engine_audio_whine::Voice::pack`, 0 for none).
+#[derive(Default)]
+struct CarWhine {
+    model: Option<(u64, Whine)>,
+    word: u64,
+}
+impl CarWhine {
+    /// 4518E0 for one tick of the car's `words`; a new segment starts over.
+    fn tick(&mut self, settings: Option<&engine_audio_whine::Settings>, segment: u64, seed: u32, words: &[u32]) {
+        let Some(settings) = settings else {
+            self.word = 0;
+            return;
+        };
+        if self.model.as_ref().is_none_or(|(s, _)| *s != segment) {
+            self.model = Some((segment, Whine::new(settings.clone(), seed)));
+        }
+        if let Some((_, whine)) = &mut self.model {
+            self.word = engine_audio_whine::Voice::pack(whine.frame(0.016, engine_audio_whine::Input::vehicle(words)));
+        }
+    }
+}
+/// Tick-paced packed controls shared with one engine decoder, each with
+/// the whine's voice (`engine_audio_whine::Voice::pack`, 0 for none).
+type Mailbox = Arc<Mutex<Paced<[u64; 2]>>>;
 fn mailbox() -> Mailbox {
-    Arc::new(Mutex::new(Paced::new(0)))
+    Arc::new(Mutex::new(Paced::new([0; 2])))
 }
 fn push(mailbox: &Mailbox, control: Control) {
+    send(mailbox, control, 0);
+}
+/// The mechanical word: the whine's voice and, in bit 60, the handbrake
+/// button (vehicle +0xE38, 43C320's input).
+const HANDBRAKE_BIT: u64 = 1 << 60;
+fn handbrake(words: &[u32]) -> u64 {
+    if words.get(0xe38 / 4).is_some_and(|w| w & 255 != 0) { HANDBRAKE_BIT } else { 0 }
+}
+fn send(mailbox: &Mailbox, control: Control, whine: u64) {
     if let Ok(mut m) = mailbox.lock() {
-        m.push(control.pack());
+        m.push([control.pack(), whine]);
     }
 }
 /// One opponent's engine voice set (car index in the shared world).
@@ -92,6 +129,8 @@ pub(crate) struct OpponentEngine {
     car: usize,
     mailbox: Mailbox,
     bus: Arc<AtomicU64>,
+    /// Its mechanical-sound levels: the AI group at its own emitters.
+    mech: MechBus,
     model: usize,
     /// Heard from the camera (the AI group's listener, 433AA0).
     pan: Pan,
@@ -138,9 +177,11 @@ pub(crate) struct EngineSource {
     bus: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
     pan: Pan,
-    /// The player's mechanical-sound levels (`mech_audio::Levels::to_bits`);
-    /// `None` for opponents, which play none.
+    /// The car's mechanical-sound levels (`mech_audio::Levels::to_bits`);
+    /// `None` when its model has no mec bank.
     mech: Option<MechBus>,
+    /// The player's car (`Mixer::player`): clunk, turbo, focused backfire.
+    player: bool,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
@@ -163,9 +204,12 @@ impl Iterator for Decoder {
             && let Ok(mut mailbox) = self.mailbox.try_lock()
         {
             let generation = self.control.generation;
-            let latest = Control::unpack(mailbox.latest());
+            let latest = Control::unpack(mailbox.latest()[0]);
             if block || latest.generation != generation {
-                let next = Control::unpack(mailbox.take());
+                let [next, whine] = mailbox.take();
+                let next = Control::unpack(next);
+                self.mixer.whine = engine_audio_whine::Voice::unpack(whine);
+                self.mixer.handbrake = whine & HANDBRAKE_BIT != 0;
                 self.control.normalized_rpm = next.normalized_rpm;
                 self.control.throttle = next.throttle;
                 self.control.gear = next.gear;
@@ -224,6 +268,7 @@ impl TestVoice {
             failure: Arc::new(AtomicU32::new(0)),
             pan,
             mech: None,
+            player: false,
         };
         Self { decoder: source.decoder(), mailbox: source.mailbox, bus: source.bus }
     }
@@ -262,6 +307,7 @@ impl Decodable for EngineSource {
             Decoder {
                 mixer: {
                     let mut mixer = Mixer::new(self.bank.clone());
+                    mixer.player = self.player;
                     if self.mech.is_some() {
                         mixer.mech = self.bank.mech.clone().map(|m| mech_audio::Voices::new(m, RATE));
                     }
@@ -285,17 +331,22 @@ impl Decodable for EngineSource {
 pub(crate) fn load_banks(root: &std::path::Path, models: &[grid_tools::car::Car]) -> Vec<Option<Arc<EngineBank>>> {
     models
         .iter()
-        .enumerate()
-        .map(|(k, m)| match EngineBank::load(root, m) {
+        .map(|m| match EngineBank::load(root, m) {
             Ok(mut bank) => {
-                // The player's mechanical sounds come from its carsetup MechBank.
-                if k == 0 {
-                    match mech_audio::Bank::load(root, &bank.mechanics_bank) {
-                        Ok(mech) => Arc::get_mut(&mut bank).unwrap().mech = Some(mech),
-                        Err(error) => {
-                            warn!("Mechanical sounds of {} unavailable: {error}", m.stem());
-                            eprintln!("engine_audio version=2 event=mech_bank_failed car={} error=\"{error}\"", m.stem());
-                        }
+                // Each car's mechanical sounds come from its carsetup MechBank
+                // (the clunk and turbo of the player only, `Mixer::player`).
+                match engine_audio_whine::Settings::load(root, m) {
+                    Ok(whine) => Arc::get_mut(&mut bank).unwrap().whine = Some(whine),
+                    Err(error) => {
+                        warn!("Gear whine of {} unavailable: {error}", m.stem());
+                        eprintln!("engine_audio version=2 event=whine_failed car={} error=\"{error}\"", m.stem());
+                    }
+                }
+                match mech_audio::Bank::load(root, &bank.mechanics_bank) {
+                    Ok(mech) => Arc::get_mut(&mut bank).unwrap().mech = Some(mech),
+                    Err(error) => {
+                        warn!("Mechanical sounds of {} unavailable: {error}", m.stem());
+                        eprintln!("engine_audio version=2 event=mech_bank_failed car={} error=\"{error}\"", m.stem());
                     }
                 }
                 Some(bank)
@@ -391,6 +442,7 @@ fn start(
             failure: sound.failure.clone(),
             pan: Pan::centre(),
             mech: Some(sound.mech.clone()),
+            player: true,
         });
         commands.spawn(AudioPlayer(handle));
     }
@@ -412,13 +464,16 @@ fn start(
         };
         let pan = Pan::centre();
         let failure = Arc::new(AtomicU32::new(0));
+        // Its backfire and gear whine (451260, 4518E0) from its own mec bank.
+        let mech = mech_bus();
         let handle = assets.add(EngineSource {
+            mech: bank.mech.is_some().then(|| mech.clone()),
             bank,
             mailbox: mailbox.clone(),
             bus: bus.clone(),
             failure: failure.clone(),
             pan: pan.clone(),
-            mech: None,
+            player: false,
         });
         // Played once, as the player's engine: the decoder never ends. LOOP
         // wraps it in rodio's `repeat_infinite`, which keeps every sample
@@ -430,6 +485,7 @@ fn start(
                 car,
                 mailbox,
                 bus,
+                mech,
                 model,
                 pan,
                 failure,
@@ -542,16 +598,19 @@ fn update(
         )),
         Ordering::Relaxed,
     );
-    // The player's gear clunk (GearBox emitter, group Gearbox); the backfire
-    // and turbo groups stay silent until they are ported.
-    let gearbox = sound.bank.as_ref().map_or([0., 0., 4.], |b| b.gearbox);
+    // The player's clunk (Gearbox), backfire (Exhaust), turbo loops (Turbo),
+    // turbo dump and pip (Engine) and handbrake (Other Mech) at the GearBox,
+    // Exhaust, EngineBay and Cockpit emitters.
+    let (gearbox, cockpit) = sound.bank.as_ref().map_or(([0., 0., 4.], [0.; 3]), |b| (b.gearbox, b.cockpit));
     let group = |g: usize| table.map_or(f32::NEG_INFINITY, |t| modes.group_db(t, camera, g, trim));
     let levels = mech_audio::Levels {
-        group_db: [group(audio_mix::GEARBOX), f32::NEG_INFINITY, f32::NEG_INFINITY],
+        group_db: [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE, audio_mix::OTHER_MECH]
+            .map(group),
         distance: [
             player.transform_point3(Vec3::from_array(gearbox)).distance(ear),
             player.transform_point3(Vec3::from_array(emitters[0][1])).distance(ear),
             player.transform_point3(Vec3::from_array(emitters[0][0])).distance(ear),
+            player.transform_point3(Vec3::from_array(cockpit)).distance(ear),
         ],
     };
     for (a, bits) in sound.mech.iter().zip(levels.to_bits()) {
@@ -583,7 +642,25 @@ fn update(
             let car = &opponents.multi.cars[engine.car];
             let pose = car.pose();
             engine.pan.set(listening.heard(ear, Vec3::new(pose[12], pose[13], pose[14])));
-            let distances = distances(Mat4::from_cols_array(&pose), engine.model);
+            let at = Mat4::from_cols_array(&pose);
+            let distances = distances(at, engine.model);
+            // Its backfire and whine: the AI group (4223D0: 0x11 for all of an
+            // opponent's groups) at its GearBox, Exhaust and EngineBay.
+            let (gearbox, cockpit) =
+                sound.banks[engine.model].as_ref().map_or(([0., 0., 4.], [0.; 3]), |b| (b.gearbox, b.cockpit));
+            let ai = table.map_or(f32::NEG_INFINITY, |t| modes.group_db(t, camera, audio_mix::AI, trim));
+            let levels = mech_audio::Levels {
+                group_db: [ai; 5],
+                distance: [
+                    at.transform_point3(Vec3::from_array(gearbox)).distance(ear),
+                    distances[1],
+                    distances[0],
+                    at.transform_point3(Vec3::from_array(cockpit)).distance(ear),
+                ],
+            };
+            for (a, bits) in engine.mech.iter().zip(levels.to_bits()) {
+                a.store(bits, Ordering::Relaxed);
+            }
             engine.bus.store(
                 pack_bus(bus_levels(
                     table,
@@ -617,17 +694,14 @@ fn push_controls(
     opponent_engines: &Query<&OpponentEngine>,
 ) {
     let control = player_control(sound, driving, finished);
-    push(&sound.mailbox, control);
+    let word = sound.whines.first().map_or(0, |w| w.word) | handbrake(&driving.runtime.state.car.owner.vehicle);
+    send(&sound.mailbox, control, word);
     sound.pushed = Some(control.pack());
     if let Some(opponents) = &driving.opponents {
         let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;
         for engine in opponent_engines {
             let car = &opponents.multi.cars[engine.car];
-            let throttle = opponents
-                .throttles
-                .get(engine.car - 1)
-                .copied()
-                .unwrap_or(0.);
+            let throttle = Control::applied_throttle(&car.state.car.owner.vehicle);
             let control = Control::vehicle(
                 &car.state.car.owner.vehicle,
                 if car.terminal_wheel().is_some() {
@@ -638,7 +712,7 @@ fn push_controls(
                 audible,
                 driving.segment as u32,
             );
-            push(&engine.mailbox, control);
+            send(&engine.mailbox, control, sound.whines.get(engine.car).map_or(0, |w| w.word));
         }
     }
 }
@@ -654,6 +728,20 @@ fn publish(
         return;
     }
     sound.ticked = Some(now);
+    // 4518E0 for every car, per tick on its vehicle words.
+    let segment = driving.segment;
+    let EngineSound { banks, whines, .. } = &mut *sound;
+    let cars = driving.opponents.as_ref().map_or(1, |o| o.multi.cars.len().max(1));
+    whines.resize_with(cars, CarWhine::default);
+    let settings = |model: usize| banks.get(model).and_then(|b| b.as_ref()).and_then(|b| b.whine.as_ref());
+    whines[0].tick(settings(0), segment, 0x5eed, &driving.runtime.state.car.owner.vehicle);
+    if let Some(opponents) = &driving.opponents {
+        for engine in &opponent_engines {
+            if let (Some(whine), Some(car)) = (whines.get_mut(engine.car), opponents.multi.cars.get(engine.car)) {
+                whine.tick(settings(engine.model), segment, 0x5eed ^ engine.car as u32, &car.state.car.owner.vehicle);
+            }
+        }
+    }
     let finished = listening.stopped(&driving);
     push_controls(&mut sound, &driving, finished, &opponent_engines);
 }
@@ -729,6 +817,7 @@ mod tests {
                 failure: Arc::new(AtomicU32::new(0)),
                 pan: Pan::centre(),
                 mech: None,
+                player: true,
             }
             .decoder()
             .inner;
@@ -782,7 +871,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre(), mech: None }.decoder().inner;
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre(), mech: None, player: true }.decoder().inner;
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();
@@ -791,7 +880,7 @@ mod tests {
                 .add_message::<AppExit>()
                 .insert_resource(crate::Driving { runtime: grid_tools::source_vehicle::Runtime::lacetti(root,"slot_00",200679).unwrap(), geometry: None, paused:false, failure:None, notices:Vec::new(), scripted_ticks:None, scripted:Default::default(),handbrake_from:None, last_controls:None, segment:0, started:std::time::Instant::now(), opponents: None, auto_reset: Default::default(), reset_line: None })
                 .insert_resource(crate::input::Actions::new(crate::input::ActionMap::keyboard(),crate::input::Pads::Off)).init_resource::<crate::input::ShiftQueue>().insert_resource(crate::pause_menu::PauseMenu::new(crate::pause_menu::Variant::TestDrive,false,false,Default::default())).add_systems(Update,(crate::input::sample,crate::pause_menu::update,crate::drive_actions,crate::drive_tick,update).chain());
-            let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.lock().unwrap().latest());
+            let control = |app: &App| Control::unpack(app.world().resource::<EngineSound>().mailbox.lock().unwrap().latest()[0]);
             let press = |app: &mut App,key| {let mut input=app.world_mut().resource_mut::<ButtonInput<KeyCode>>();input.reset_all();input.press(key);};
             press(&mut app,KeyCode::ArrowUp);app.update();
             assert!(control(&app).audible);assert_eq!(control(&app).throttle,1.);

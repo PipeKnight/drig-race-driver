@@ -385,6 +385,8 @@ Evidence: Ghidra output in the worktree `local/gtfix/decomp/wind1`–`wind4`; sc
   Probability is per frame (frame-rate dependent). Not ported yet.
 - **Handbrake**: hbrakeon/hbrakeoff (car_genmec) are resolved into M+0x128/+0x12C, but no
   reader was found [I: unused like wind].
+  Corrected in F582: 43C320 reads them (through [[car +0x2C] +0x18] = M+0x70, +0xB8/+0xBC) and
+  plays them on the edges of input 9961B0(8), player only, from 457BE0 (§26).
 
 ### 7.5 Crowd and ambience [O unless marked]
 
@@ -1296,3 +1298,274 @@ The AI lap stays below 0.93 of the maximum RPM, so it never reaches the limiter.
 argument, `[car +0x6C] == 0`, the player. 44D840 runs the turbo model 416BC0 on the object at
 car-audio +0x800, then one-shots TurboDump (+0x819) and TurboPip (+0x818) and the loops Spindle
 (44D560, voice +0xA39C) and Hiss (44D6D0, +0xA3A0), all at the EngineBay emitter. Port pending.
+
+## 23. Backfire, turbo and the load path ported (F575)
+
+26 October 2026, Claude Code (car-series, owner task items 2 and 4). Static (`tools/re/grid_re.py`,
+Capstone on the unpacked image) and offline renders; GRID was not launched.
+
+**Correction of §20–§22 [O].** 43C6D7 calls the [GearWhine]/[Envelope] loader 4376B0 → 42F880
+with `this` = car-audio +0x8B0, and 43C6F1 stores car-audio +0x8F10 at +0xA494. So the engine
+controller is car-audio +0x8F10 (+0x8B0 + 0x8660), and the "car-audio" offsets of §20–§22 that came
+from 42F770/42F880 (+0x8660, +0x1190, +0xD10…) are relative to +0x8B0. The [GearWhine] floats sit
+at car-audio +0x15C0…, which is the whine object's [+0xC] (+0x10B0, 416A70) +0x510…: the whine
+reads them (4166E0, 4378A0, 4518E0). 423600 loads the whine's `[Envelope]` (Length +0x100,
+Volume +0x104, Pitch +0x304, 128 entries each) into +0x10B0.
+
+**4148A0 [O].** With a = 9961D0(1), the applied throttle (vehicle +0xE1C): +0xB0 = a; +0x304 =
+a − +0x308; +0x308 = a; +0x24 = (1 − dt)·+0x24 + a·dt. When +0x24 > 0.55 and a < 0.1: +0x28 =
+max(+0x28, +0x6C · clamp((+0x24 − 0.55)·2.857) · 0.1) and +0x24 = a. +0x6C is 1.0 (reset 422470,
+4224CF).
+
+**The burble in 422A40 [O].** After the smoothing: if +0x28 > 0, b = sin(+0x2C · 125.68) · +0x28
+(BF4E44 on the float product), the RPM before the idle remap gains b, +0xBC = b (b − (+0x48 − 1)
+when the sum passes 1, which is then clamped to 1), and +0x28 −= 0.25·dt, clamped to 0…999.
+451770 adds dt to +0x2C after 422A40. So a lift from full throttle wobbles the RPM at 20 Hz by up
+to ±0.1, fading over 0.4 s.
+
+**414970, the limiter [O].** +0x324 += dt. Below +0x38 = 0.99, or in fifth gear and up: +0x64,
++0xD0, +0xB4 = 0. Otherwise +0xD0 = 1, +0xB4 ≤ 0.63, a counter +0xD4 toggles +0x64 every second
+frame, and +0xB4 = +0x64 ? +0xB4 + 0.05 : 0; 422A40 subtracts +0xB4 from the remapped RPM. So the
+limiter cuts 0, 0.05, 0.1, 0 every four frames. It also drives the exhaust-flame state vehicle
++0x21DC (8 on, 0xB after 0.5 s; not ported).
+
+**451260, the backfire [O].** Player groups (422547): +0x11C Engine, +0x120 Gearbox, +0x124
+Exhaust; opponents 17 (AI) for all three. 411120 sets +0x334 on every car but the focused one, so
+the focused car plays at x = 1 (−11 dB, pitch 1.1) and the others at x = 0 (−30 dB, pitch 1).
+- Start, when the handle +0x21C is free: +0x304 < −0.25 with +0x20 > 0.25, or +0xC < 0.2 after an
+  upshift, or the limiter (+0xD0). Detonations (detloop1–3, ExhaustDet 10/40 m) at the Exhaust
+  emitter; despite the names the samples carry no loop flag (only turbo_hiss and turbo_spindle
+  do), so each start is one pop; active +0x318; timer +0x31C = (rand % 300)·0.01 + 0.1 s.
+- While active: past 0.2 s from a shift, a throttle rise of more than 0.25 in a frame, +0x20 ≤
+  0.55 or a shift 0.2–0.4 s old stop it (A23350). Else the timer runs down; at 0 the voice stops
+  and +0x320 restarts it, timer (rand % 300)·0.01, once the handle is free.
+- +0x20 is +0x48 after 414C70 (with a fall limit while vehicle +0x1971 is set).
+
+**The turbo [O].** 44D840 runs only while car-audio +0xA4D8 (the player). Inputs: RPM controller
++0xC8, load +0xB0, and on the frame of a counted shift (+0xC = 0) state 1 (up) or 2 (down); vehicle
++0x1860 zeroes RPM and load. 416BC0 on car-audio +0x800 (constants checked in the disassembly):
+- +0x30 demand += (min(2·rpm, 1)·load − demand)·16·dt; a = 0.66·demand, below 0.33 ×5 capped at
+  0.33, capped at 0.33 below half RPM; a kick +0x38 (×0.97 a frame, added to a; +0.05 up to 0.75
+  only when the load jumps by more than 0.5 from below 0.5);
+- flutter phase +0x34 += rpm⁵·load; boost +0x1C = (sin(phase)·0.04·rpm² + a)·4 (published to the
+  dashboard);
+- upshift: boost ×0.8, level +0x14 ×0.75, Spindle +0 ×0.75, TurboPip (+0x818), demand ×0.05;
+  downshift with demand > 0.5, or a throttle drop over 0.25 in a frame with demand > 0.5 and no
+  pip: level ×0.75, Spindle ×0.25, boost ×0.6, demand ×0.05, TurboDump (+0x819);
+- level += dt·d with d = demand − level, doubled when not positive; Hiss level +0xC = level; Hiss
+  pitch +0x10 = +0x48·rpm + +0x44; slow +8 += (demand − slow)·0.5·dt; Spindle pitch +4 =
+  +0x40·slow + +0x3C; Spindle level +0 += (load − +0)·dt.
+- 43B285 copies the car record's +0x70…+0x7C (carsetup Spidle 0.75/1.5, Hiss 1.0/0.0 in all cars)
+  to +0x83C…+0x848.
+- 44D840 then: a misfire zeroes +0x830 when rand % 1000 < 100·damage² (engine damage 99A4D0(1));
+  TurboDump/TurboPip one-shots at x = 1 in group +0xA3C4 (= +0xA4D8 ≠ 0: Engine) at the EngineBay
+  emitter; Spindle 44D560 and Hiss 44D6D0 loops (voices +0xA39C/+0xA3A0) at lin2db(level) + the
+  CollisionInfo's maximum volume (−12 / −15 dB), pitch +4 / +0x10, TurboLoops 6/20 m, group
+  car-audio +4 (Turbo for the player, 43B8E0).
+
+**Port.**
+- `grid_tools::engine_audio_load`: `throttle` (4148A0) and `limiter` (414970) on the controller
+  bytes; `engine_audio_control::update` plays the burble (the old "+0x28 = 0" domain check is
+  gone).
+- `Control::throttle` is now the applied throttle (`Control::applied_throttle`, vehicle +0xE1C) for
+  the player and the opponents; in the AI lap it equals the driver's throttle at every tick.
+- `mech_audio::Backfire` (451260) and `mech_audio::Turbo` (416BC0 and the rest of 44D840) in the
+  player's mixer; `Voices` gained loops (the sample's loop flag), caller-set level and pitch
+  (435690/444280) and stop (A23350). `Levels` carries four groups.
+- Not ported: the exhaust flames (+0x21DC), the misfire (no engine damage reaches the audio),
+  vehicle +0x1860, opponents' backfires (they have no mechanical voices), 422CA0's throttle
+  smoothing and downshift blip, 414C70.
+
+## 24. The gear whine ported (F578)
+
+26 October 2026, Claude Code (car-series, owner task item 3). Static (`tools/re/grid_re.py`
+decompile/dis, cache `local/re-cache`) and offline renders; GRID was not launched.
+
+**It plays [O].** §22 established that 457BE0 calls 4518E0 for every car. The rest of the chain,
+read in full here:
+- 457BE0 passes car-audio +0x7D0 as the position. 451770 (`Effects`) copies the same vector to
+  the controller's +0x100, which the clunk (4511E0, `lea edx, [ecx+0x100]`) also uses. So the whine
+  sits at the GearBox emitter, (0, 0, 4) in every car. +0xA480 (the velocity) goes to 42C220.
+- Group: the voice's +0x18 (416A70): Gearbox (3) for the player, AI (0x11) for the others.
+- Distances: the Gearwhine variety's preset, 6/10 m (44BAD0 reads them through the variety table
+  +0xB0 → +0x28 → +0x1E0).
+
+**4518E0, per frame [O].** The object is car-audio +0x84C, its block [+0xC] car-audio +0x10B0.
+- 437A20, first frame only: starts the voice +0x850 with GearPreset entry 0 (`[record +0x20] +8`,
+  bank record +0x14), clears the envelope position +0x50C, the gear +0x504 and the lift timer
+  +0x540.
+- +0x54 = 1, then 416820:
+  - the mean over the driven wheels (+0x18D8, count +0x18F0) of 990FB0·990DB0, i.e. wheel
+    +0xE0·+0x104, is smoothed into +0x24 (0.1 a frame);
+  - +0x1C follows the old +0x24, also at 0.1 a frame (m/s);
+  - +0x20 follows the old +0x1C × 2.2369363 at 0.1 a frame (mph), clamped to 0…200, and is 0
+    while vehicle +0x1FA0 (fuel) is 0;
+  - each driven wheel without contact (990FD0: wheel +0xC0 = 0) takes 0.125 off +0x54.
+- +0x50C += (+0x20 / MPHForNormalEnvelopeRate)·dt, less the envelope Length once it reaches it.
+  4169A0 reads Volume and Pitch (128 entries each, linear between neighbours, wrapping) at
+  +0x50C / Length into +0x44 and +0x48.
+- 4378A0, with g = vehicle +0x196C and t = vehicle +0x1974:
+  - +0x50 = 1; in neutral, +0x54 = 0 and nothing else;
+  - on a change of gear: +0x508 = (g > +0x504 and g ≠ 9), +0x504 = g, and 4377F0 restarts the
+    voice with entry g − 1 (reverse: entry 0);
+  - if t ≤ StartDelay or the change was not an upshift, a new random +0x520 = (rand & 0xFF)/256;
+  - else, with u = t − StartDelay and L = Length·g: while u < L, +0x50 += sin(2π·Rate·u) ·
+    ((2·+0x520 − 1)·Randomness·0.01 + 1) · (1 − u/L) · Loudness.
+- 4166E0, with p = vehicle +0x185C (the drivetrain's throttle):
+  - below 0.5 (negative counts as 0) the lift timer +0x540 += dt; at 0.5 or more after a lift,
+    +0x544 = (rand & 0xFF)·0.0017647 + 0.05 s and +0x540 = 0;
+  - +0x4C = (1 − s·o·(1 − p))·MaxLowLoadEffectMultiple + (1 − MaxLowLoadEffectMultiple), with
+    o = clamp((+0x540 − +0x544)·100) and s = clamp((FadedOut − mph)/(FadedOut − FullVolume)).
+- Below 10 mph, +0x54 ×= mph·0.1. Then 44BAD0.
+
+**44BAD0 [O].** In neutral the voice's volume parameter is set to −48 dB and nothing else. Else,
+with g (reverse as first):
+- the shift speeds: up = +0x191C[g], down = +0x1944[g]; an up speed above 90 (the top gear's
+  10 000) is replaced by +0x1918[g]·(+0x18F4[g] / +0x18F0[g]), the previous gear's up speed scaled
+  by the ratios;
+- t = (+0x1C − down)/(up − down); base pitch = lerp(entry basePitch, maxPitch, t), unclamped;
+- volume factor v = 0.5·+0x44 + 0.5 and pitch factor q = 0.1·+0x48 + 0.9, each pulled towards 1
+  by +0x4C (exactly 1 at +0x4C ≥ 1); above the up speed v −= t − 1;
+- 413130 over the Gearwhine CollisionInfo (minVel 5, maxVel 50, minVol 1.0, maxVol 0.6): below
+  +0x1C = 5 m/s, lerp(0, 1.0, +0x1C/5); above, lerp(1.0, 1.0, …) = 1.0. maxVol 0.6 is never
+  read, so the intended fade over 5–50 m/s does not happen (an original data/code mismatch,
+  ported as is);
+- level = lin2db(+0x54·v·factor) + (vehicle +0x185C − 1) + car record +0xC8 (carsetup VolumeTrims
+  `gear`, −1 dB in the Lacetti); pitch = +0x50·q·base pitch.
+
+**Parameters [O].**
+- carsetup `GearPresets`: four presets (holden, truck, andy, staff), Gear1…6 (truck 8), each with
+  basePitch, maxPitch and the sample `0N_gear`; the car names one (`GearPreset`, record +0x20).
+  The Lacetti uses holden: 0.75–1.12, 0.85–1.023, 0.95–1.023, 0.9–1.05, 0.9–1.123, 1.0–1.2.
+- gear.ini (one file content shared by all 45 cars): `[GearWhine]` EnvelopeFadedOutSpeed 80,
+  EnvelopeFullVolumeSpeed 40, MaxLowLoadEffectMultiple 1, MPHForNormalEnvelopeRate 40;
+  `[Envelope]` Length 7 s with 128-entry Volume (0.16–1.0) and Pitch (0.96–1.14). FreqAt200mph/B,
+  MaxBalance and VolumeSpeed are loaded but 4518E0 does not read them.
+- engine.ini `[Physics]` GearWhine = 3 in all 45 cars, so 42F770 reads fUpshiftWhineLength 0.01
+  (one car 0.4), Loudness 0.075, Randomness 75, StartDelay 0.01 (one car 0.1), Rate 10.
+
+**Port.**
+- `grid_formats::audio_car_setup`: the car's GearPreset entries (`Setup::gears`).
+- `grid_tools::engine_audio_whine`: `Settings` (preset, gear.ini, engine.ini, CollisionInfo,
+  trim), `Input::vehicle` (the vehicle words above), `Whine::frame` (4518E0 with 437A20, 416820,
+  4169A0, 4378A0, 4166E0 and 44BAD0) giving the entry, level and pitch. `Voice::pack` carries it in
+  one word, with a start counter so a repeated or dropped tick restarts the sample once per gear.
+  rand is an xorshift [I: the CRT sequence is not reproduced].
+- `mech_audio`: the bank also loads `01_gear`…`08_gear` as the `Gearwhine` info (6/10 m, Gearbox
+  group, GearBox emitter); `Voices::whine` restarts on a new start or entry and otherwise only sets
+  level and pitch. [O] Every `01_gear`…`08_gear` in the 45 banks carries the WIP loop flag, so the whine loops
+  for as long as the voice lives; in the Lacetti's bank (`mec_lac`, the same samples as `mec_ply`) gears
+  1–6 are 1.0–1.7 s loops at 40 kHz and gears 7–8 are 116-frame stubs.
+- grid-app: the player's whine runs once per vehicle tick on the main thread (dt 0.016 s, reset
+  per segment) and rides the engine mailbox with the tick's control; the decoder hands it to the
+  mixer. The race tool's `GRID_ENGINE_AUDIO_TRACE` gains a `whine` column (the packed word).
+- [I] The original runs 4518E0 per rendered frame, so its 0.1-per-frame smoothing depends on the
+  frame rate; the port runs it per 16 ms tick like the engine controller.
+- Not ported: opponents' whines (AI group, x = 0; no mechanical voices for opponents yet), the
+  velocity 42C220 gives the voice, the 0 mph frequencies.
+
+**Render [port, offline].** Solo Lacetti, Donington, the same lap as §23 (race output and the
+first five trace columns are identical): the `whine` column holds a voice on every tick, 16
+restarts (one per gear change, counter mod 16). Under the AI's throttle (0.8–0.96) the voice level
+is −1.0 to −4 dB (mean −1.2 to −1.8 dB per gear; gear trim −1 dB), with −50 dB at the start
+(0 mph). Pitch spans per gear: 1st 0.75–1.10, 2nd 0.84–1.06, 3rd 0.95–1.04, 4th 0.91–1.07,
+5th 0.93–1.12. At the bumper view (GearBox 2.35 m, 0 dB distance term; Gearbox group −18 dB) the
+whine adds an RMS of 0.027–0.032 against the engine's 0.12–0.15 (`local/mech/render-03/whine.wav`
+minus `clunk.wav`). The other variants are bit-identical to `render-02`. The authored 4 s tail
+has no whine, since it has no vehicle. Not compared with the original by ear or capture.
+
+## 25. Opponents' mechanical sounds; the voice pool (F582)
+
+26 October 2026, Claude Code (car-series, owner task "the remaining missing sounds", item 1). Static
+(`tools/re/grid_re.py`) and offline renders; GRID was not launched.
+
+**Which mechanical sounds other cars play [O].**
+- Clunk: player only. 414750 sets +0x310 only when the car's +0x6C is 0 (41487F: `cmp [edx+0x6c],
+  0; jne`), and 451580 plays GearClucks only while +0x310 is set.
+- Turbo: player only (44D840 runs while car-audio +0xA4D8, §22).
+- Backfire: every car. 451770 runs 451260 for each car's controller; 411120 sets +0x334 on every
+  car but the focused one, so other cars play Detonations at x = 0 (−30 dB, pitch 1.0), ExhaustDet
+  10/40 m, on their +0x124 group (AI 0x11).
+- Whine: every car (§22, §24); 416A70 gives other cars group 0x11 and voice priority +8 = 0.
+
+**The voice pool [O].** 43EC80 sets the backend's voice count from `system/hardware_settings_config.xml`
+`<audio_card><audio mixing=… voices=…>`: software mixing (the shipped setting, `voices="120"`)
+uses 120, otherwise `voices` (default 50, capped by the card). The sfx_quality options set 119, 120
+and 121. The VoiceManager update A32B70 binds waiting voices to free channels after sorting them
+(A32DE0, a shell sort on A23530); with no channel free, A31E30 steals the first playing voice
+that the waiting one outranks (A23530: higher priority +0x40, then +0x70), else the voice is
+dropped ("can't find anything less important"). The priority is StartVoice's argument (435690's
+fourth, the whine's +8: 0 for other cars). No variety or CollisionInfo carries a priority.
+- [I] So other cars' whines are the first voices stolen once 120 play. The port has no voice
+  pool for any sound (engines, tyres, collisions, mechanical); with 12 cars it plays everything.
+
+**Port.**
+- `engine_audio_continuous::Mixer::player`: the clunk and the turbo only for the player; the
+  backfire at x = 1 for the player and x = 0 for others.
+- grid-app loads every field model's mec bank and whine settings; each opponent's decoder has its
+  mechanical voices; every car's whine runs per vehicle tick on the main thread (`CarWhine`); each
+  opponent's levels are the AI group (with the Effects trim) at its own GearBox, Exhaust and
+  EngineBay emitters, measured from the camera like its engine.
+- Probe `grid-mech-audio`: variants `opponent-base` and `opponent`, the traced Lacetti as an
+  opponent 3 m from every emitter (AI group, Bonnet camera −8 dB).
+
+**Render [port, offline].** `local/mech/render-04/`: the player variants are bit-identical to
+`render-03`. As an opponent at 3 m, its whine and backfire add RMS 0.085–0.10 against its engine's
+0.15–0.19, three times what the player's own add at the bumper (0.03): the AI group is −8 dB in
+the Bonnet camera, the player's Gearbox group −18 dB, and 3 m is inside the whine's 6 m minimum
+distance. The table makes a close opponent's whine louder than the player's own [I: as the
+original's table gives it; not compared with the original by ear or capture].
+- Not ported: the voice pool and stealing (all sounds), opponents' turbo and clunk (the original
+  has none).
+
+## 26. The handbrake ported; wind is never started (F583)
+
+26 October 2026, Claude Code (car-series, owner task item 4). Static (`tools/re/grid_re.py`
+decompile/dis, cache `local/re-cache`) and offline renders; GRID was not launched.
+
+**43C320 [O].** 457BE0 calls it once a frame for the player's car only (458C92, inside the
+car-audio +0xA4D8 block).
+- The input is 9961B0(8), the byte at vehicle +0xE38: the port's handbrake byte
+  (`source_vehicle.rs`, `controls.handbrake`).
+- A latch of three bytes: +0xA5E8 pulled, +0xA5E9 released, +0xA5EA played. The constructor 43B1F0
+  sets pulled 0, released 1 and played 0 (43B5FD..43B60A).
+- With the input set and released set: pulled 1, released 0 (played stays). With the input clear
+  and pulled set: released 1, pulled 0, played 0.
+- While played is clear: pulled plays `hbrakeon` (M+0x128, read as [P+0xB8], 43C3A8), else released
+  plays `hbrakeoff` (M+0x12C, [P+0xBC], 43C515); then played = 1 (43C677).
+- [O] So the first frame plays `hbrakeoff` once, before any pull.
+- The one-shot goes through 421B70 at 0 dB, pitch 1, Doppler 0, at the Cockpit emitter
+  car-audio +0x7E0, group car-audio +8 (Other Mech, 9), priority +0xA3C4.
+- Varieties (car_genmec): `hbrakeon` (handon1, handon2) and `hbrakeoff` (handoff1, handoff2), preset
+  Handbrake 4/8.5 m.
+- This corrects §7.4: the varieties are read through P = M+0x70, not unused.
+
+**Wind [O].** No reader of M+0xF8/+0xFC (`WindSlow`, `WindFast`), as [P+0x88]/[P+0x8C] or
+directly, in all of .text (a P-tracking scan) or in the 685 decompiled audio functions of
+the audio code range (`local/sounds-research/callers.md`). Group 20 (Sense Of Speed) is used once, by the front-end ambience loop 44A9D0,
+so §7.4's "no play call passes group 20" holds for races only. Wind stays unported: the original
+does not play it in races.
+
+**Port.**
+- `mech_audio`: the bank also reads `car_genmec.WIP` and loads the `hbrakeon`/`hbrakeoff`
+  varieties with a constant curve (0 dB, pitch 1) and their preset distances.
+  - Route (Other Mech group, Cockpit emitter).
+  - `Levels` gains the Other Mech group and the Cockpit distance.
+- `engine_audio_continuous::Mixer`: `handbrake` input and the three-byte latch above, player only;
+  `reset` sets it as 43B1F0 does.
+- grid-app:
+  - the player's mailbox word carries the handbrake byte in bit 60;
+  - the mixer level of Other Mech is published with the other player groups;
+  - the Cockpit distance comes from the car setup's cockpit offset.
+- The race tool's `GRID_ENGINE_AUDIO_TRACE` gains a `handbrake` column. The probe
+  `grid-mech-audio` gains a `handbrake` variant, with the handbrake pulled in the authored tail.
+
+**Render [port, offline].** `local/mech/render-05/`, the same solo Lacetti lap. Since F579 the
+lap differs from §24's from tick 1518; the race tool built from origin/main gives the same race
+and trace as this one. The AI never pulls the handbrake (the trace column is 0 on all 5600 ticks),
+so the `handbrake` variant (Other Mech −11.5 dB, Cockpit 1.91 m from the bumper ear) has three
+events over `base`:
+- the first frame's `hbrakeoff` at 0 s (RMS 0.055, peak 0.26);
+- the authored pull at 90.10 s (`hbrakeon`, RMS 0.055);
+- the release at 91.10 s (`hbrakeoff`, RMS 0.065).
+Not compared with the original by ear or capture.

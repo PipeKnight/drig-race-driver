@@ -264,7 +264,23 @@ pub struct PropWorld {
     lost: BTreeMap<usize, [u32; KINEMATICS.end - KINEMATICS.start]>,
     /// Wheels lost by cars, after the pieces in contact order.
     pub wheels: Vec<LooseWheel>,
+    /// Road casts of asleep pieces, shared by the world's copies.
+    depth_memo: std::sync::Arc<std::sync::Mutex<DepthMemo>>,
 }
+
+/// A piece's road cast (`PropWorld::depths`) is a function of its collider,
+/// its pose bits (+0x1D0..+0x210) and the static road chunks alone, so an
+/// asleep piece's cast is looked up instead of repeated every tick: by world
+/// body, kept with its (breakable, piece) and pose bits and used only on an
+/// exact match, so a memo hit gives the cast's own result.
+#[derive(Default)]
+struct DepthMemo {
+    road: Option<crate::track::Road>,
+    entries: std::collections::HashMap<usize, MemoCast>,
+}
+
+/// (breakable, piece), pose bits, (depth, ground) or none (no road hit).
+type MemoCast = ((usize, usize), [u32; 16], Option<(f32, f32)>);
 
 fn f(b: &[u32], o: usize) -> f32 {
     f32::from_bits(b[o / 4])
@@ -1521,6 +1537,16 @@ impl PropWorld {
             base_slots: None,
             lost: BTreeMap::new(),
             wheels: Vec::new(),
+            depth_memo: Default::default(),
+        }
+    }
+
+    /// This world with an empty road-depth memo (tests: memo against casts).
+    #[cfg(test)]
+    pub(crate) fn without_depth_memo(&self) -> Self {
+        Self {
+            depth_memo: Default::default(),
+            ..self.clone()
         }
     }
 
@@ -1619,17 +1645,52 @@ impl PropWorld {
     /// the same depths as one shared cache.
     fn depths(&self, track: &Track, bodies: &[contact_groups::Body], parallel: bool) -> Vec<RoadDepth> {
         let parts = self.parts();
-        let runs = if parallel && parts.len() >= PARALLEL_PIECES {
-            crate::parallel::threads().min(parts.len())
+        // Memo keys of `parts` (pieces, then lost wheels, which are not kept).
+        let keys: Vec<Option<(usize, usize)>> = self
+            .pieces
+            .iter()
+            .filter(|p| self.catalog.breakables[p.breakable].pieces[p.spec].collides())
+            .map(|p| Some((p.breakable, p.spec)))
+            .chain(self.wheels.iter().map(|_| None))
+            .collect();
+        let asleep = |b: &contact_groups::Body| f(b, 0x400).to_bits() == contact_groups::ASLEEP;
+        let pose_bits =
+            |b: &contact_groups::Body| -> [u32; 16] { std::array::from_fn(|i| b[0x1d0 / 4 + i]) };
+        // (depth, ground) per part once known; None for a missing body.
+        let mut casts: Vec<Option<Option<(f32, f32)>>> = vec![None; parts.len()];
+        let mut todo = Vec::new();
+        {
+            let mut memo = self.depth_memo.lock().unwrap_or_else(|e| e.into_inner());
+            if !memo.road.as_ref().is_some_and(|r| r.is(track)) {
+                memo.road = Some(track.road());
+                memo.entries.clear();
+            }
+            for (k, &(_, body, _)) in parts.iter().enumerate() {
+                let Some(b) = bodies.get(body) else {
+                    continue;
+                };
+                if let Some(key) = keys[k]
+                    && asleep(b)
+                    && let Some(&(kept, pose, cast)) = memo.entries.get(&body)
+                    && kept == key
+                    && pose == pose_bits(b)
+                {
+                    casts[k] = Some(cast);
+                    continue;
+                }
+                todo.push(k);
+            }
+        }
+        let runs = if parallel && todo.len() >= PARALLEL_PIECES {
+            crate::parallel::threads().min(todo.len())
         } else {
             1
         };
-        let per_run = parts.len().div_ceil(runs.max(1));
-        let depth = |k: usize| {
+        let per_run = todo.len().div_ceil(runs.max(1));
+        let cast = |k: usize| {
             let (spec, body, _) = parts[k];
             let mut cache = grid_world::rectangle_cull::Cache::default();
-            let b = bodies.get(body)?;
-            let pose = body_pose(b);
+            let pose = body_pose(&bodies[body]);
             let centre = pose[3];
             let lowest = match spec.collider() {
                 convex_distance::Hull::Cylinder { radius, half_height } => {
@@ -1645,22 +1706,42 @@ impl PropWorld {
                 .ok()
                 .and_then(|q| q.hit)?;
             let ground = start + (end - start) * hit.contact.fraction;
-            Some(RoadDepth {
-                body,
-                depth: ground - lowest,
-                centre: [centre[0], centre[1], centre[2]],
-                ground,
-                asleep: f(b, 0x400).to_bits() == contact_groups::ASLEEP,
-            })
+            Some((ground - lowest, ground))
         };
-        crate::parallel::map(runs, runs > 1, |r| {
-            (r * per_run..((r + 1) * per_run).min(parts.len()))
-                .filter_map(depth)
+        let computed = crate::parallel::map(runs, runs > 1, |r| {
+            todo[(r * per_run).min(todo.len())..((r + 1) * per_run).min(todo.len())]
+                .iter()
+                .map(|&k| (k, cast(k)))
                 .collect::<Vec<_>>()
-        })
-        .into_iter()
-        .flatten()
-        .collect()
+        });
+        let mut memo = self.depth_memo.lock().unwrap_or_else(|e| e.into_inner());
+        for (k, result) in computed.into_iter().flatten() {
+            let body = parts[k].1;
+            if let Some(key) = keys[k]
+                && asleep(&bodies[body])
+            {
+                memo.entries
+                    .insert(body, (key, pose_bits(&bodies[body]), result));
+            }
+            casts[k] = Some(result);
+        }
+        drop(memo);
+        parts
+            .iter()
+            .zip(casts)
+            .filter_map(|(&(_, body, _), cast)| {
+                let (depth, ground) = cast??;
+                let b = &bodies[body];
+                let centre = body_pose(b)[3];
+                Some(RoadDepth {
+                    body,
+                    depth,
+                    centre: [centre[0], centre[1], centre[2]],
+                    ground,
+                    asleep: asleep(b),
+                })
+            })
+            .collect()
     }
 
     /// AUTHORED (see [`SINK_TOLERANCE`]): lift every live piece and wheel

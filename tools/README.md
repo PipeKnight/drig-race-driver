@@ -18,6 +18,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [build_gate.ps1](build_gate.ps1) | Build gate (docs/TOOLCHAIN.md "Build gate"): end-to-end checks of the real app before a rebuild of the PC playable, the portable copy or the APKs. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [build_gate_nightly.ps1](build_gate_nightly.ps1) | Nightly long soak of the real app (docs/TOOLCHAIN.md "Build gate", part 4). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [build_lock.ps1](build_lock.ps1) | One cargo build at a time across every checkout on this PC (docs/TOOLCHAIN.md, "Build lock"). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
+| [build_macos.py](build_macos.py) | Build the native macOS game and package a code-only DRIG.app (docs/MACOS.md). | [MACOS](../docs/MACOS.md) |
 | [build_seed.ps1](build_seed.ps1) | Build a new cargo build-dir seed beside C:\cargo-build\seed and swap it in. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [dedup_hardlinks.py](dedup_hardlinks.py) | Replace byte-identical files under a directory with NTFS hard links. | [DISK_USAGE](../docs/DISK_USAGE.md) |
 | [disk_report.ps1](disk_report.ps1) | Report disk usage of the project folder: cargo target dirs, worktrees and local/ captures. | [DISK_USAGE](../docs/DISK_USAGE.md) |
@@ -222,7 +223,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [replay_damage_freeze.py](replay_damage_freeze.py) | Reproduce logged controls and prove sampled motion before a damage stop. | [PLAYTEST_DAMAGE_FREEZE_2026_10_14](../docs/PLAYTEST_DAMAGE_FREEZE_2026_10_14.md) |
 | [replay_driving_lap.py](replay_driving_lap.py) | Private observed-pose replay; interpolation is not vehicle resimulation. |  |
 | [route_survey.sh](route_survey.sh) | Solo-AI survey of every shipped route: grid-opponent-race --route R ROOT CD01 BP01 1 TICKS ai. | [SERIES](../docs/SERIES.md) |
-| [sample_profile.py](sample_profile.py) | User-mode sampling profiler for the port's Windows x64 executables. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
+| [sample_profile.py](sample_profile.py) | User-mode sampling profiler for the port's Windows x64 executables. | [PERFORMANCE](../docs/PERFORMANCE.md) |
 | [summarize_driving_log.py](summarize_driving_log.py) | Summarize private version-1 driving telemetry without inferring a lap. | [OWNER_TIME_TRIAL_2026_10_15](../docs/OWNER_TIME_TRIAL_2026_10_15.md) |
 | [validate_grid_driving_capture.py](validate_grid_driving_capture.py) | Inspect bounded private DT01 read-only controls/motion observations. | [REFERENCE_DRIVING_INPUT](../docs/REFERENCE_DRIVING_INPUT.md) |
 | [validate_grid_driving_guards.py](validate_grid_driving_guards.py) | Check DT01 reader bounds/identity without input or game-state changes. | [REFERENCE_DRIVING_INPUT](../docs/REFERENCE_DRIVING_INPUT.md) |

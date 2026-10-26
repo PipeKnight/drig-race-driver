@@ -54,7 +54,8 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
-- G296 (2026-10-26): BMW/Donington and Istanbul native-DLAA HDR smoke replay passes Image controls and source04 checks/16 CLI refusals; dense glass/lens/skid ghosts attenuate. Manual cold Window renders, but UI input was not consumed and finite test timed out: C/R unverified, no enabled native playable. Owner baseline/Motion preserved; see TYRE_SMOKE_RESEARCH.
+- G297 (2026-10-27): F573-F583 integrated with full1124tests/Clippy/4identities/24soak, native34/skid6 checks and a fresh paired Istanbul GPU comparison. Streaming strips/glass/lens ghosts attenuate through smoke. Private unforced C/R test available; actual Manual feedback remains open, accepted launchers unchanged. See TYRE_SMOKE_RESEARCH.
+- G296 (2026-10-26): BMW/Donington and Istanbul native-DLAA HDR smoke replay passes Image controls and source04 checks/16 CLI refusals; dense glass/lens/skid ghosts attenuate. Manual cold Window renders, but UI input was not consumed and finite test timed out: C/R unverified, no validated native release. Owner baseline/Motion preserved; see TYRE_SMOKE_RESEARCH.
 - G294 (2026-10-26): native reverse-pipe CPU graph/failure proof and shared installer transaction pass443app tests/Clippy after F571 integration. Existing early body and accepted BMW/Motion playables preserved; HDR1 late profile/admission and actual DLAA rendering remain unverified. See TYRE_SMOKE_RESEARCH.
 - G293 (2026-10-26): owner accepts the BMW/Istanbul baseline smoke fix; critical glass/lens ghosts resolved in this trial, minor appearance deferred. 438 app tests/Clippy, paired Image and actual Window cold-start/one-C/R checks pass. Owner log archived in full; Motion/Lacetti preserved. NativeDLAA/general/damage remain open; see TYRE_SMOKE_RESEARCH.
 - G292 (2026-10-26): fresh mapped BMW90 pair confirms existing late smoke replay hides the floating rear glass/lens in dense smoke without altering17surface materials; ground-only replay does not fix them. G293 ordinary-driving bridge is under test; no general/default/DLAA acceptance. See TYRE_SMOKE_RESEARCH.
@@ -88,6 +89,10 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   profile only for Lacetti on Donington (row 78), strobing wheels (row 81).
 
 ### Android and platforms
+- macOS F577: native arm64 release build and code-only `DRIG.app` packaging pass
+  on macOS 15.7.7, with no engine changes. CLI help and the menu's expected
+  missing-installation exit pass; Finder launch, graphics, input, audio and
+  actual races are not tested (no game data). See [docs/MACOS.md](docs/MACOS.md).
 - Android P9–P12: code-only APK importing the user's own GRID folder (F405), bundled event APKs
   (F418), touch/tilt/pad controls (P11, F404), per-system profiling (F395); docs/ANDROID.md.
 - Open: the a11cddf7de27 APKs are not tested on the phone; CPU-bound at about 30–34 FPS (row 85);
@@ -139,6 +144,17 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F583](log/F0583.md) | 2026-10-26 | Engine audio: the handbrake ported (hbrakeon/hbrakeoff on the player's handbrake edges); wind is never started |
+| [F582](log/F0582.md) | 2026-10-26 | Engine audio: opponents' backfire and gear whine; the original's 120-voice pool |
+| [F581](log/F0581.md) | 2026-10-26 | Playable 975c018e7e2c with F569-F580, portable copy and APKs a2fc9b444690 |
+| [F580](log/F0580.md) | 2026-10-26 | Ground cover faces the camera in the vertex shader; skid marks stream in place |
+| [F579](log/F0579.md) | 2026-10-26 | Physics cost growth over a race: per-contact copies in car groups cut |
+| [F578](log/F0578.md) | 2026-10-26 | Engine audio: the gear whine ported (GearPreset loop per gear, envelope, upshift wobble) |
+| [F577](log/F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
+| [F576](log/F0576.md) | 2026-10-26 | Static world batching |
+| [F575](log/F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
+| [F574](log/F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
+| [F573](log/F0573.md) | 2026-10-26 | Desktop Auto render height and compute threads on the desktop |
 | [F572](log/F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |
 | [F571](log/F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |
 | [F570](log/F0570.md) | 2026-10-25 | Disk cleanup: obsolete APKs, idle sessions' build dirs, uncited behavior captures |
@@ -188,17 +204,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F526](log/F0526.md) | 2026-10-20 | Row 41, Washington route 0: the AI's no-brake bend explained from the shipped data; no 1:1 fix found; row 41 text updated |
 | [F524](log/F0524.md) | 2026-10-20 | Build gate: launcher smoke, memory growth, tick-cost budget and a nightly long soak of the real app |
 | [F523](log/F0523.md) | 2026-10-20 | Washington after F520: the Lacetti wreck 1 km into route 0 was driving and is gone since F517; routes 0, 2, 3, 5, 7 and 8 re-surveyed |
-| [F522](log/F0522.md) | 2026-10-20 | Career: head-to-heads 73, 75 and 77 checked from the career side after F520, and paid as the original |
-| [F521](log/F0521.md) | 2026-10-20 | Playable b4e9267f47b1 with F519–F520, the portable copy refreshed, and APKs dcc22d914f21 |
-| [F520](log/F0520.md) | 2026-10-20 | Career locations: Washington GP route 0 (event 73) and the Haruna head-to-head roads, routes 9 and 4 (events 75, 77), load and race |
-| [F519](log/F0519.md) | 2026-10-20 | Every raceable car's engine bank loads; one car's failing bank or decoder silences only that car |
-| [F518](log/F0518.md) | 2026-10-20 | Playable 5d8f3f454655 with F514–F517, and the portable copy refreshed |
-| [F517](log/F0517.md) | 2026-10-20 | AI reverse byte +0x1E: the car-side consumer is found and ported |
-| [F516](log/F0516.md) | 2026-10-20 | Silent engine on the F513 playable fixed: BMW engine decoders no longer fail at idle; race-start audio mix test |
-| [F515](log/F0515.md) | 2026-10-20 | Every circuit draws its own sky and the layered road surface, in both presets; Le Mans' sky follows the time of day; the "unresolved road batches" were … |
-| [F514](log/F0514.md) | 2026-10-20 | Career: winning the International head-to-head unlocks every car (the original's 0x65AD90); head_to_head_rewards is never read; a longer unattended Le Mans … |
-| [F513](log/F0513.md) | 2026-10-20 | Playable 141433900886 with F491–F512, and a private portable copy for another Windows PC |
-| [F512](log/F0512.md) | 2026-10-20 | Angular corrections and rotations past 64 rad turn as in the original |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

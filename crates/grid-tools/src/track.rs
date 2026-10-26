@@ -64,7 +64,24 @@ pub struct BodyContact {
     pub limit: f32,
 }
 
+/// The identity of a track's road chunks ([`Track::road`]): it holds the
+/// shared chunks, so their address cannot be reused while it is kept.
+#[derive(Clone)]
+pub(crate) struct Road(Arc<Vec<Chunk>>);
+
+impl Road {
+    /// Whether `track` queries these very chunks.
+    pub(crate) fn is(&self, track: &Track) -> bool {
+        Arc::ptr_eq(&self.0, &track.chunks)
+    }
+}
+
 impl Track {
+    /// The road chunks [`Self::query`] reads; they never change after loading.
+    pub(crate) fn road(&self) -> Road {
+        Road(self.chunks.clone())
+    }
+
     pub fn read(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
         if bytes.len() > 256 * 1024 * 1024 {
             return Err("collision archive exceeds bound".into());

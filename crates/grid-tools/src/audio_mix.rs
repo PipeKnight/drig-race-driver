@@ -19,6 +19,7 @@ pub const TURBO: usize = 2;
 pub const GEARBOX: usize = 3;
 pub const WHEELS: usize = 6;
 pub const SKIDS: usize = 7;
+pub const OTHER_MECH: usize = 9;
 pub const AI: usize = 17;
 pub const GROUP_NAMES: [&str; GROUPS] = [
     "Exhaust",

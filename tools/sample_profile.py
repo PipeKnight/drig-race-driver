@@ -7,7 +7,7 @@ needed. Prints the hottest functions by self samples (leaf frame) and by
 inclusive samples (anywhere on the stack), plus the hottest call paths.
 
 usage: python -I tools/sample_profile.py [--interval-ms N] [--top N]
-           [--filter TEXT] [--out REPORT.txt] -- EXE ARG...
+           [--filter TEXT] [--busy] [--out REPORT.txt] -- EXE ARG...
 
 Build the target with symbols, e.g.
     CARGO_PROFILE_RELEASE_DEBUG=limited cargo build --release --target-dir target/profile
@@ -171,6 +171,7 @@ class Sampler:
         self.pid = pid
         self.interval = interval
         self.threads = {}
+        self.cycles = {}
         self.stacks = collections.Counter()
         self.samples = 0
         self.line_counts = collections.Counter()
@@ -189,6 +190,17 @@ class Sampler:
                 )
                 if handle:
                     self.threads[tid] = handle
+
+    def busy(self, tid, handle):
+        # A thread whose cycle count has not moved since its last sample was
+        # waiting the whole time; skipping it keeps the rate up with many
+        # idle pool threads (Bevy).
+        cycles = ctypes.c_uint64()
+        if not kernel32.QueryThreadCycleTime(handle, ctypes.byref(cycles)):
+            return True
+        moved = self.cycles.get(tid) != cycles.value
+        self.cycles[tid] = cycles.value
+        return moved
 
     def sample_thread(self, handle):
         if kernel32.SuspendThread(handle) == 0xFFFFFFFF:
@@ -278,6 +290,10 @@ def main():
     parser.add_argument("--filter", default="", help="keep only stacks containing this text")
     parser.add_argument("--out")
     parser.add_argument(
+        "--busy", action="store_true",
+        help="sample only threads that ran since their last sample (skips idle pool threads)",
+    )
+    parser.add_argument(
         "--lines-in", action="append", default=[],
         help="also attribute samples to source lines of the innermost frame of this function",
     )
@@ -307,6 +323,8 @@ def main():
                 dbghelp.SymRefreshModuleList(process)
             last_refresh = now
         for tid, handle in list(sampler.threads.items()):
+            if args.busy and not sampler.busy(tid, handle):
+                continue
             stack = sampler.sample_thread(handle)
             if stack:
                 # Resolve names while the process (and its modules) are alive.

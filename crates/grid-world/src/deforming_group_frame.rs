@@ -110,13 +110,17 @@ impl impact_frame::Callbacks for Context {
         step: &mut impact_step::Input,
         _: &mut [impact_frame::Body],
     ) -> Result<(), Error> {
+        let _timer = crate::stage_timing::Timer::start(crate::stage_timing::Stage::GroupPrepare);
         for k in self.order() {
             let local = self.owners[k].local;
             let mut body = self.owners[k].physical;
             body[0x334 / 4] = 0;
             let center = vec4(&body, 0x1c0);
             let parameters = self.owners[k].limit;
-            let mut descriptor = self.owners[k].owner[0x2300 / 4..0xc800 / 4].to_vec();
+            // Taken, not copied: an error drops the whole context.
+            let mut owner = std::mem::take(&mut self.owners[k].owner);
+            let descriptor = &mut owner[0x2300 / 4..0xc800 / 4];
+            let mut grid = None;
             for (i, second) in self.selection(local) {
                 let raw = self.contacts[i];
                 let mut tokenless = raw;
@@ -131,20 +135,19 @@ impl impact_frame::Callbacks for Context {
                     center: vec4(&self.bodies[p], 0x1c0),
                     deformable: self.owner_of(p).is_some(),
                 });
-                let result = limit::calculate_side(
-                    &descriptor,
+                let (mut c, cap) = limit::calculate_side_in(
+                    descriptor,
+                    &mut grid,
                     &body,
                     center,
                     &tokenless,
                     parameters,
                     limit::Side { second, peer },
                 )?;
-                descriptor = result.descriptor;
-                let mut c = result.contact;
                 c[1] = raw[1];
                 c[2] = raw[2];
-                if result.cap != f64::from(parameters.unlimited) {
-                    let rounded = result.cap as f32;
+                if cap != f64::from(parameters.unlimited) {
+                    let rounded = cap as f32;
                     if f32::from_bits(c[0x3c / 4]) > rounded {
                         c[0x3c / 4] = rounded.to_bits();
                     }
@@ -155,7 +158,7 @@ impl impact_frame::Callbacks for Context {
                 }
                 self.contacts[i] = c;
             }
-            self.owners[k].owner[0x2300 / 4..0xc800 / 4].copy_from_slice(&descriptor);
+            self.owners[k].owner = owner;
         }
         for (c, raw) in step.contacts.iter_mut().zip(&self.contacts) {
             c.previous_impulse = f32::from_bits(raw[0x3c / 4]);
@@ -169,6 +172,7 @@ impl impact_frame::Callbacks for Context {
         step: &mut impact_step::Output,
         bodies: &mut [impact_frame::Body],
     ) -> Result<(), Error> {
+        let _timer = crate::stage_timing::Timer::start(crate::stage_timing::Stage::GroupSolved);
         for (c, raw) in step.contacts.iter().zip(&mut self.contacts) {
             raw[0x3c / 4] = c.previous_impulse.to_bits();
             raw[0x38 / 4] = c.accumulated.to_bits();
@@ -347,7 +351,7 @@ pub(crate) fn calculate(
         random_seed,
         toggle,
     };
-    let (frame, c) = impact_frame::calculate_with_callbacks_rows(frame, rows, &context)?;
+    let (frame, c) = impact_frame::calculate_with_callbacks_rows(frame, rows, context)?;
     Ok(Output {
         frame,
         owners: c.owners,

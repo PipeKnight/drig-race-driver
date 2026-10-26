@@ -44,6 +44,29 @@ pub fn calculate(
     users: &[Option<u32>; 11],
     random_state: u32,
 ) -> Result<Output, Error> {
+    let mut state = input.clone();
+    let (random_state, notifications) =
+        calculate_in_place(&mut state, event, side, parameters, users, random_state)?;
+    Ok(Output {
+        state,
+        random_state,
+        notifications,
+    })
+}
+
+/// [`calculate`] on the car's state in place (a car's state is a few hundred
+/// kilobytes, and a car in a pile has dozens of contacts per tick), returning
+/// the RNG state and the notifications. On an error the state may hold part
+/// of the update, so the caller discards it.
+pub fn calculate_in_place(
+    state: &mut State,
+    event: Event,
+    side: usize,
+    parameters: Parameters,
+    users: &[Option<u32>; 11],
+    random_state: u32,
+) -> Result<(u32, Vec<[u32; 14]>), Error> {
+    let input = &*state;
     let p = parameters;
     if input.vehicle.len() != crate::vehicle_publication::VEHICLE_WORDS
         || side > 1
@@ -84,35 +107,34 @@ pub fn calculate(
     }
     // The selected owned context admits the complete damage descriptor even
     // when its two dispatch flags disable the reached damage call.
-    collision_damage::calculate(input, event.point, 0., false, random_state)?;
-    let mut out = Output {
-        state: input.clone(),
-        random_state,
-        notifications: Vec::new(),
-    };
+    collision_damage::check(input, event.point, 0., false, random_state)?;
+    let mut out_random = random_state;
+    let mut notifications = Vec::new();
     if event.impact == f32::MAX {
-        return Ok(out);
+        return Ok((out_random, notifications));
     }
-    out.state.vehicle[0x1568 / 4] = 0;
+    // In place: bytes B13/B14 and the physical record read below are not
+    // among the words written before them.
+    let damage = byte(&state.vehicle, 0xb13) != 0 && byte(&state.vehicle, 0xb14) != 0;
+    state.vehicle[0x1568 / 4] = 0;
     let mask = 0xff << 8; // Byte BA5 in its containing word.
-    out.state.vehicle[0xba5 / 4] &= !mask;
-    if byte(&input.vehicle, 0xb13) != 0 && byte(&input.vehicle, 0xb14) != 0 {
-        let result = collision_damage::calculate(
-            &out.state,
+    state.vehicle[0xba5 / 4] &= !mask;
+    if damage {
+        let (random, applied) = collision_damage::calculate_in_place(
+            state,
             event.point,
             p.impact_scale * event.impact,
             false,
             random_state,
         )?;
-        out.state = result.state;
-        out.random_state = result.random_state;
-        out.state.vehicle[0xba5 / 4] |= u32::from(result.applied) << 8;
+        out_random = random;
+        state.vehicle[0xba5 / 4] |= u32::from(applied) << 8;
     }
-    let b = &mut out.state.vehicle;
+    let a: [f32; 4] = std::array::from_fn(|j| f(&state.physical, 0x220 + j * 4));
+    let b = &mut state.vehicle;
     if event.impact > f(b, 0x15a0) && f(b, 0x2e8) < p.timer_cap {
         b[0x2e8 / 4] = p.timer_cap.to_bits();
     }
-    let a: [f32; 4] = std::array::from_fn(|j| f(&input.physical, 0x220 + j * 4));
     let squared = a.map(|v| v * v);
     let magnitude = (squared[0] + squared[1]) + (squared[2] + squared[3]);
     if magnitude < p.linear_squared_threshold {
@@ -133,7 +155,7 @@ pub fn calculate(
             event.impact.to_bits(),
             event.parameter.to_bits(),
         ]);
-        out.notifications.push(packet);
+        notifications.push(packet);
     }
-    Ok(out)
+    Ok((out_random, notifications))
 }

@@ -49,6 +49,7 @@ pub mod force_view;
 pub mod grid_population;
 pub mod grip_history;
 pub mod grouped_physical_frame;
+pub mod stage_timing;
 pub mod impact_body;
 pub mod impact_correction;
 pub mod impact_frame;

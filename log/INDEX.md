@@ -8,6 +8,17 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F583](F0583.md) | 2026-10-26 | Engine audio: the handbrake ported (hbrakeon/hbrakeoff on the player's handbrake edges); wind is never started |
+| [F582](F0582.md) | 2026-10-26 | Engine audio: opponents' backfire and gear whine; the original's 120-voice pool |
+| [F581](F0581.md) | 2026-10-26 | Playable 975c018e7e2c with F569-F580, portable copy and APKs a2fc9b444690 |
+| [F580](F0580.md) | 2026-10-26 | Ground cover faces the camera in the vertex shader; skid marks stream in place |
+| [F579](F0579.md) | 2026-10-26 | Physics cost growth over a race: per-contact copies in car groups cut |
+| [F578](F0578.md) | 2026-10-26 | Engine audio: the gear whine ported (GearPreset loop per gear, envelope, upshift wobble) |
+| [F577](F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
+| [F576](F0576.md) | 2026-10-26 | Static world batching |
+| [F575](F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
+| [F574](F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
+| [F573](F0573.md) | 2026-10-26 | Desktop Auto render height and compute threads on the desktop |
 | [F572](F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |
 | [F571](F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |
 | [F570](F0570.md) | 2026-10-25 | Disk cleanup: obsolete APKs, idle sessions' build dirs, uncited behavior captures |
@@ -475,6 +486,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G297](G0297.md) | 2026-10-26 | Integrate F573-F583 while preserving native smoke and skid ownership |
 | [G296](G0296.md) | 2026-10-26 | Add a bounded native DLAA late smoke profile for BMW |
 | [G295](G0295.md) | 2026-10-26 | Integrate the current engine-audio main into the graphics branch |
 | [G294](G0294.md) | 2026-10-26 | Verify the native late-smoke scheduling boundary before DLAA admission |

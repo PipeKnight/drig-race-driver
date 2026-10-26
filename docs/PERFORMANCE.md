@@ -1062,6 +1062,203 @@ compare fixed heights.
 GRID_PERF_TEST=auto`: 8 UI roots moved to the window at 720 rows and back at native, with no panic.
 The desktop never runs late, so no dynamic change was exercised live; the phone log will show it.
 
+**Desktop Auto (F573):**
+- The Video screen offers `Auto` on the desktop too. The desktop default stays `native`.
+- Range: from native down to half of native, rounded up to the 24-row step (2560 × 1369: 696–1369).
+  It starts at native, and while frames are on time it stays there (native means no scaled image).
+  A resized window starts again at its new native height (`render_dynamic version=2 event=range`).
+- Controller changes for both platforms, found by the desktop test (a jump from 7 ms to 80 ms
+  frames): the probe stepped down while the smoothed time was still rising, and judged the step
+  ineffective.
+  - A step down waits for 20 consecutive late frames (`LATE_FRAMES`).
+  - The probe compares a frame time smoothed by 0.25 per frame instead of 0.1. One probe second at
+    80 ms is 13 frames; with 0.1 the average would still be settling. Late and on-time decisions
+    keep the slow average.
+- Test `desktop_auto_range_starts_native_and_stays_there_on_time`.
+
+### Compute threads on the desktop (F573)
+
+`mobile::compute_threads` (cores − 2, at least 4) against Bevy's default split (compute gets 12 of
+20 threads on the measuring PC, an i7-12700 with 20 logical cores). Switch for measurement: `GRID_COMPUTE_SPLIT=preset`.
+
+Runs from 14:54 to 15:04 on 26 Oct 2026 (after 14:07, under the build lock, so no other cargo
+build ran). Offscreen 2560 × 1369, autopilot, 3,600 benchmark frames, alternating:
+
+| Run | Compute threads | DriveTick ms | Main ms | Render ms | p95 ms |
+|---|---|---|---|---|---|
+| race 1 | 12 | 1.51 | 5.02 | 9.47 | 20.04 |
+| race 1 | 18 | 1.24 | 4.56 | 7.24 | 18.21 |
+| race 2 | 12 | 1.22 | 4.40 | 7.09 | 18.13 |
+| race 2 | 18 | 1.20 | 4.43 | 7.03 | 18.07 |
+| derby 1 | 12 | 1.76 | 3.88 | 5.60 | 18.74 |
+| derby 1 | 18 | 1.67 | 3.79 | 5.48 | 18.68 |
+| derby 2 | 12 | 1.71 | 3.80 | 5.60 | 18.75 |
+| derby 2 | 18 | 1.69 | 3.77 | 5.44 | 18.63 |
+
+(race: Donington, 12 cars; derby: `settings/demolition-derby.ini`. Mean frame time is 17.0 ms in
+every run: the benchmark is paced at 60 Hz.)
+
+- The first race pair is a warm-up outlier (the first run after the build). From the repeats, the
+  gain is 0–3 %, which is within run-to-run noise.
+- The simulation is unchanged: every derby run logged the same 6 breaks at the same ticks. The
+  parallel paths are index-ordered (F568).
+- Decision: Bevy's split stays the desktop default. The preset split stays on Android (and with
+  `GRID_MOBILE_PRESET=1`, which now also applies it on the desktop).
+
+## Dormant pieces (F574)
+
+Every breakable's pieces are spawned with the track and stay hidden until the breakable breaks:
+14,463 drawn pieces on Donington and 11,962 piece entities on the Nürburgring. Hidden, they still
+cost CPU every frame in each pass that walks the mesh entities. On the phone (log
+`log-20261026-125712.txt`) these passes were among the top spans:
+- view visibility: 2.65 + 1.27 ms;
+- the directional light's casters: 1.9–2.6 ms;
+- changed-mesh checks: 1.3 ms;
+- Aabb: 0.76 ms.
+
+`lean_pieces.rs` (every build) gives a hidden piece of an unbroken breakable Bevy's `Disabled`, which
+the default query filter skips. Timing:
+- from frame 30 on, then again every 60 frames (after a restart clears the breaks);
+- the piece wakes, losing `Disabled`, before `dynamic_props::present`, in the frame its breakable
+  breaks.
+Such a piece is never drawn, so the picture does not change. `GRID_LAZY_PIECES=0` turns it off. The
+log shows `lean_pieces version=1 event=rest frame= disabled= dormant=`.
+
+**Checks (26 Oct 2026, 14:28–14:36, after 14:07):**
+- Image A/B on the Detroit derby at tick 2,700 with `--render-fixed-step`, 1600 × 900, 6 breaks
+  before the capture:
+  - a repeated baseline gives 0 changed pixels;
+  - dormant on against off also gives 0 changed pixels, with broken debris in the picture.
+- Phone view on the desktop (`GRID_MOBILE_PRESET=1`, 4 threads, Donington, 12 cars, 1539 × 720,
+  profile build, 3,600 frames, 2 runs each). Another session's cargo test held the build lock
+  during these runs, so the absolute values carry load noise.
+
+| | Main ms | Render ms | DriveTick ms |
+|---|---|---|---|
+| off (`GRID_LAZY_PIECES=0`) | 6.05 / 6.16 | 9.75 / 9.46 | 1.47–1.54 |
+| on | 5.81 / 5.64 | 9.07 / 8.87 | 1.47–1.54 |
+
+- Entities (`GRID_ASSET_COUNTS=1`):
+  - main world 21,589, of which 14,706 pieces are disabled (disabled entities still count);
+  - 18,320 mesh assets.
+- In the span tables, the Aabb pass (0.77 ms) and the changed-mesh pass (0.74 ms) drop out of the
+  top entries, and view visibility goes from 0.675 to 0.472 ms.
+- Phone estimate [I]: the disabled passes cost about 6–7 ms of compute-pool work per frame on the
+  Adreno phone, which is maybe 2–3 ms on the critical path. Not measured on the phone yet.
+
+`GRID_ASSET_COUNTS` now also prints `mesh_entities` with all/disabled/drawn counts by kind (track,
+intact, piece, foliage, player, opponent, other).
+
+## Static world batching (F576)
+
+`static_batch.rs` (every build) merges the track's static parts into one mesh per material and
+64 m ground cell, at `PostStartup` after the track surfaces are attached.
+- Vertices are moved into the cell's frame as the vertex shader would place them:
+  - positions by the part's matrix;
+  - normals by its inverse transpose, normalized as the shader does;
+  - tangents with the determinant's sign;
+  - triangle order and winding kept.
+- Opaque and Mask materials only. Blended parts, foliage that faces the camera, car parts, pieces,
+  parts with children, render layers, `NotShadowCaster` or `VisibilityRange` keep their own entities.
+- A batch holds at most 65,536 vertices (16-bit indices). A cell with a single part keeps it as is.
+- The original static entities are despawned, which frees the meshes only they used.
+- Intact breakable props get batches of their own:
+  - their entities stay, without a mesh, and keep the visibility that `dynamic_props::present`
+    and the replay set;
+  - a batch drops a prop's triangles while the prop is hidden (broken) and restores them when it
+    shows again (a restart);
+  - a batch with nothing left is hidden.
+- `GRID_STATIC_BATCH=0` keeps every part separate. `GRID_STATIC_BATCH_CELL=<metres>` changes the
+  cell size (for measurements).
+- Log: `static_batch version=1 material= parts= batches= intact_parts= intact_batches= vertices=`.
+
+**Checks (26 Oct 2026, 15:49–16:18, after 14:07; timing runs under the build lock):**
+- Images, offscreen 1600 × 900 with `--render-fixed-step`, batching off against on:
+  - Donington, 12 cars, tick 600: 1 pixel differs, by 1 level;
+  - Detroit derby, tick 2,700, with breaks before the capture: 3 pixels differ, by 1 level.
+- Donington batches: 1,937 static parts became 569 batches; 1,609 intact props became 207 batches;
+  16 surface-material parts became 7 batches.
+- Drawn mesh entities at frame 3,600 (`mesh_entities`, phone view):
+  - track and intact: 2,467 + 1,199 = 3,666 without batching;
+  - 927 + 618 batches = 1,545 at 64 m;
+  - 746 + 481 = 1,227 at 128 m.
+- GPU memory (`wgpu_memory`): Donington 472 → 532 MB allocated, because instanced props are copied
+  into their batches; derby 399 → 407 MB. Reserved memory unchanged.
+
+| Phone view (desktop, mobile preset, 4 sim threads), 2 runs each | off | 64 m | 128 m |
+|---|---|---|---|
+| Main ms (release) | 4.27 / 4.39 | 4.39 / 4.32 | 4.37 / 4.26 |
+| Render ms (release) | 7.17 / 7.32 | 7.07 / 7.15 | 7.13 / 7.04 |
+| Compute-pool work ms/frame (profile build) | 9.18 / 9.24 | 8.84 / 8.84 | — |
+
+- In the profile build, the main visibility pass goes 0.36 → 0.23 ms per frame and the Aabb pass
+  0.085 → 0. Other per-entity spans shrink by 0.01–0.04 ms. The render thread is flat (3.49 / 3.45
+  → 3.45 / 3.43 ms).
+- Desktop, 2560 × 1369, no preset, 2 runs each: Main 4.24 / 4.30 → 4.27 / 4.30 ms, Render 6.88 /
+  6.92 → 6.84 / 6.79 ms. That is within noise; the desktop's per-entity passes are cheap.
+- Phone estimate [I]: the saved compute work scales with the phone's slower cores (about 3–4×), so
+  roughly 1–1.5 ms of compute-pool work per frame. On the critical path that is likely under 1 ms.
+  Not measured on the phone.
+- Unit test `parts_keep_their_shader_placement_and_order`.
+- Not verified: a restart restoring broken props in a batch (the code path is shared with replay
+  visibility); tracks other than Donington and Detroit.
+
+## Per-frame mesh work: ground cover and skid marks (F580)
+
+**Ground cover.** Before, `ground_detail::present` rebuilt and streamed every visible billboard
+whenever the camera moved or turned, which is every frame while driving. Now:
+- a material extension (`ground_cover.wgsl`, vertex, prepass and deferred stages) faces each
+  billboard to the main camera and fades it with distance, using the CPU path's formulas;
+- the camera arrives in a uniform, so every pass faces the main camera, as the CPU path did;
+- the vertex buffer holds each billboard's centre four times, the corner offsets (sprite corner ×
+  width, height) in UV1 and its draw distance in the colour's alpha. A billboard past its distance
+  becomes a degenerate quad;
+- the CPU gathers every instance within its distance plus 6 m (`MARGIN`), in the old bucket order.
+  The gather stays valid for 6 m. The next one starts on the async compute pool after 3 m, and its
+  bytes are written over the mesh's allocation (mesh_stream) when ready. Blended cover (Enhanced
+  soft alpha) also gathers again at once in a new 16 m bucket, because the bucket order sets its
+  draw order;
+- blended cover still gets the exact sort centre of its drawn quads each frame. Masked cover skips
+  it, since it is not sorted;
+- motion vectors use the current corner for the previous position, as Bevy did with the CPU-written
+  vertices.
+
+**Skid marks.** Before, every change replaced the whole mesh asset, so Bevy reallocated and repacked
+it about once per frame in a race. Now:
+- the mesh holds every strip slot at full length (240 × 33 points);
+- changes are written in place;
+- points past a strip's end repeat its last point, so their quads have no area. The triangles with
+  area, their order, the packed bytes and the sort centre equal those of the old mesh (unit test).
+
+Tyre smoke was already streamed in place (F392/F394), and source foliage is opt-in
+(`source_trees = false` by default). Neither changed here.
+
+**Checks (26 Oct 2026, 17:00–17:50, after 14:07; timing under the build lock):**
+- Images, 1600 × 900 with `--render-fixed-step`, F576 build against this one:
+  - Donington tick 600, baseline (alpha to coverage, grass in view): 0 changed pixels;
+  - Enhanced preset (blended grass, TAA): 7 pixels differ, by 1 level;
+  - Detroit derby tick 2,700: 0 changed pixels.
+- No capture showed skid marks; the unit test covers their equivalence.
+
+| Phone view (desktop, mobile preset, 4 sim threads), 2 runs each | F576 | F580 |
+|---|---|---|
+| Grass CPU ms/frame (`GRID_GROUND_TRACE`) | 0.760 / 0.755 | 0.058 / 0.060 |
+| Skid CPU ms/frame | 0.004 / 0.004 | 0.013 / 0.012 |
+| Main ms | 4.31 / 4.31 | 3.21 / 3.27 |
+| Render ms | 7.11 / 7.04 | 6.50 / 6.52 |
+| p95 / p99 frame interval ms | 18.03, 20.68 / 18.01, 20.54 | 18.24, 20.09 / 18.18, 21.33 |
+
+- Mesh assets modified per frame (`asset_churn`) drop by about one (the skid marks).
+- A first version gathered on the main thread: about 1.5 ms every ~6 frames (17,000 billboards).
+  That raised p95 to 19.0 ms and put about 225 frames in 18.5–19.5 ms (against about 25). With
+  the async gather that bin holds 65–71.
+- The remaining spread comes from the 4.7 MB vertex upload of each new gather (21,000 × 4 vertices ×
+  56 bytes); before, about 2.3 MB went up every frame.
+- Desktop, 2560 × 1369, no preset, 2 runs each (17:42–17:47): Main 4.30 / 4.26 → 3.13 / 3.32 ms,
+  Render 6.83 / 6.79 → 6.29 / 6.31 ms, p95 18.08 / 18.14 → 18.30 / 18.23 ms.
+- Phone estimate [I]: the grass work moves off the main thread; on the phone it was 1.6–2.0 ms per
+  frame (`ground_detail::present`, log `log-20261026-125712.txt`). Main thread about 1.5–2.5 ms
+  faster, render thread about 1–1.5 ms. Not measured on the phone.
 
 ## Dedicated graphics rendering work (G242, 23 October 2026)
 
@@ -1281,3 +1478,120 @@ nothing in 3000 ticks. The current race breaks 8 stacks at tick 1697; F565 makes
   tick in a derby full of debris, and 0.6 ms less in the drift battle.
 - In the scripted grid-app run (14 pieces, no break) the change is within noise: `DriveTick`
   1.79-1.81 against 1.81-1.82 ms.
+
+## Physics cost growth over a race (F579)
+
+Coordinator's task (26 October 2026): the phone's physics cost grows over a race from about 4 to
+9 ms per frame; find why and cut it with bit-identical results.
+
+**The phone curve [O]** (owner's profile APK log `log-20261026-125712.txt`, Xiaomi 13 Ultra, 4
+compute threads, Donington route_0, 12 BMWs; `drive_tick` exclusive ms per frame divided by ticks
+per frame): about 2.8 ms per tick for the first 80 s, then 3.5, 4.5, 5.1, 5.3 ms per tick from 90 to
+140 s, and 3.1 ms after the finish. The replay of that log on this PC (`grid-soak replay-log`)
+diverges at tick 958 (ARM against x86), so it does not reproduce the phone's pile.
+
+**Reproduction off the phone.** `grid-app --headless` with `GRID_AUTOPILOT=1 GRID_THREADS=4
+GRID_PERF_TIMING=1` on the same event (`--settings donington-12.ini`: route_0, bmw against 11 bmw,
+15,000 ticks) and on the Nürburgring drift battle (`settings/drift-battle-nurburgring.ini`, 12,000
+ticks). All timed runs below ran under the build lock (no cargo build overlapped them), between
+14:25 and 17:02 on 26 October, after the owner's game had closed at 14:07. Earlier runs that day
+were discarded.
+
+New diagnostic timers (`GRID_PERF_TIMING` only; they never feed the simulation):
+- grid-tools `perf::Stage`: `WorldClone`, `Continuous`, `PropClone`, `PropDetect`, `PropApply`,
+  `BodyEvents`.
+- grid-world `stage_timing` (reported on the same line): `Predict`, `Islands`, `IslandPack`,
+  `IslandFrame`, `IslandStore`, and the frame by island kind: `FramePlain` (no car), `FrameCar` (a
+  car with static contacts only), `FrameGroup` (a car with other bodies), `GroupPrepare` and
+  `GroupSolved` (its two deformation phases), `GroupContacts` (contacts per tick in car groups).
+- grid-soak prints the cumulative line every 600 ticks.
+
+**Cause [V].** The growth follows the piece count. Pieces that cars keep touching never sleep:
+sleeping is per island, cars never sleep, so a car touching a pile keeps the pile in its island
+(BODY_SLEEPING.md, as the original). Such an island is a car group (`FrameGroup`), and the car
+group's per-contact work copied whole records:
+- `response_consumption::validate` compared every contact identity and owner with every other
+  (O(n²)), twice per car and tick, over all contacts of the group (about 1,200 per tick late in
+  the drift battle);
+- `deformation_contact_limit::calculate_side` copied the car's 42 KB deformation descriptor and
+  re-checked its 400 grid nodes for every contact;
+- `body_impact::calculate` copied the car's whole state (the 135 KB vehicle record) two or three
+  times for every contact of the car, in the body events after the solve;
+- `impact_frame::run` cloned the callback context (every owner's vehicle record) once per frame.
+
+Drift battle, ticks 9000-12000 (268 pieces, 54 asleep, 1,271 piece contacts per tick), timer build
+before → fixed build, ms per tick:
+
+| Stage | before | after |
+|---|---:|---:|
+| `WorldTick` | 5.76 | 3.93 |
+| `FrameGroup` | 3.20 | 1.93-1.94 |
+| `GroupSolved` | 1.40 | 0.33 |
+| `GroupPrepare` | 0.14 | 0.03 |
+| `BodyEvents` | 0.57 | 0.10 |
+| `FramePlain` | 0.15 | 0.14 |
+| `PieceContacts` | 0.66 | 0.61-0.64 |
+| `LiftSunk` | 0.23 | 0.23 |
+
+What is left in `FrameGroup` is the solve of those contacts. On Donington, where the pile sleeps
+(56 pieces, 56 asleep late), the growth is spread over many small per-body costs; the largest one
+removable without changing a result was `lift_sunk`, which cast a 100 m ray under every piece every
+tick, asleep or not.
+
+**Changes [V], all result-preserving:**
+- `response_consumption::validate`: identities sorted once, duplicates and pending lookups by
+  neighbour and binary search, owners sorted by (identity, registration). The test
+  `sorted_validation_matches_the_pairwise_checks` compares it with the pairwise version on 20,000
+  random inputs (accepted and rejected, same messages).
+- `deformation_contact_limit::calculate_side_in`: the descriptor is updated in place (the window
+  slot and +A490..+A498, the only words written; each read sees what it saw in the copy), and the
+  grid check (`validate_grid`, words the limit never writes) runs once per descriptor
+  (`validate_cached`). Used by `deforming_group_frame` and `deformation_preparation`;
+  `calculate_side` keeps its copying form.
+- `collision_damage` split into `validate` and `apply`; `calculate_in_place` writes the owner's
+  mutable block only after every region succeeded, as before. `body_impact::calculate_in_place`
+  uses it and the validation-only `check` (the first damage call's result was discarded). The
+  multi-car body events and the solo `vehicle_world` path use the in-place forms; an error
+  discards the staged car either way.
+- `impact_frame::calculate_with_callbacks_rows` takes the callbacks by value, and the group
+  deformation phase takes each owner's record instead of copying its descriptor.
+- `PropWorld::depths`: a memo of asleep pieces' road casts, by world body, used only when the
+  (breakable, piece) and the 16 pose words match bit for bit, and only for the road chunks it was
+  made with (`Track::road`). The cast reads only the static road with a fresh cull cache, so a hit
+  equals the cast. `pieces_at_rest_sleep_and_a_car_wakes_them` compares memo and fresh casts.
+
+**Identity [V]:**
+- Headless drive samples (every `drive_*` line without its wall-clock field): drift battle
+  `62b70b73…` and Donington `9d232e98…`, the same for the base build (origin/main 96a9008d) and
+  every step, two rounds each.
+- grid-opponent-race with dynamic props, 4 threads: Detroit derby (`--route tracks/usa/detroit/
+  route_8 --demolition --cars stk 12 12000 ai`) `e9011d21…` and Nürburgring (`--route tracks/
+  europe/nurburgring/route_1 --cars bmw 8 9000 ai`) `0eaebdd8…`, base = fixed; with
+  `GRID_SERIAL_TWIN=1` 8174 and 9000 ticks without a difference.
+- The identity runs (`tools/identity.tsv`) in the full prepush tier.
+
+**Before and after at 4 threads** (base build without timers against the fixed build, alternating,
+two rounds; ms per world tick, early = ticks 600-3000):
+
+| Event | Window | base | fixed |
+|---|---|---:|---:|
+| Drift battle | early (0 pieces) | 0.55 | 0.50-0.59 |
+| Drift battle | late, 9000-12000 (268 pieces) | 5.46-5.55 | 3.92-4.10 |
+| Donington, 12 bmw | early (0 pieces) | 0.73-0.76 | 0.71-0.74 |
+| Donington, 12 bmw | late, 12000-15000 (56 pieces) | 1.14-1.18 | 1.02-1.06 |
+
+- Donington late: `LiftSunk` 0.080-0.084 → 0.012-0.013 ms; `Commit` (which holds it and the body
+  events) 0.29-0.30 → 0.20-0.21 ms.
+- [I] The phone runs this work about 3-4x slower (2.8 against 0.75 ms early in the same race).
+  That suggests about 0.4 ms per tick less late in a Donington race and several ms in an awake
+  pile like the drift battle's. Not measured on the phone.
+- Not done: the solve of a car group's contacts itself, and the per-body work of asleep pieces
+  (piece pairs, the world's rollback copy, the vehicle stage's growth from damage). They are the
+  rest of the growth.
+
+**Profiling** (`tools/sample_profile.py --busy`, new: it samples only threads that ran since their
+last sample, so Bevy's idle pool threads no longer dilute a headless race). The release build's
+names are the nearest public symbols, so call paths are approximate; the leaf
+`response_consumption::validate` (8 % of busy samples in the drift race) led to the first fix.
+Evidence (machine-local): worktree `local/tick-growth/` (`runs.txt` lists every run with its start
+time and the lock state).

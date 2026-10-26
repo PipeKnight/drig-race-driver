@@ -61,7 +61,7 @@ const GROUPS: [(&[u8], bool); 6] = [
 ];
 
 const SHADER: Handle<Shader> = uuid_handle!("ef412ff6-5acc-4977-bdb9-d5f314970b66");
-type SurfaceMaterial = ExtendedMaterial<StandardMaterial, Surface>;
+pub(crate) type SurfaceMaterial = ExtendedMaterial<StandardMaterial, Surface>;
 
 /// IDs are package-local; include the material identity when selecting draws.
 #[derive(Component)]
@@ -125,7 +125,7 @@ struct Draw {
     masks: Vec<[f32; 4]>,
 }
 #[derive(Resource)]
-struct Source {
+pub(crate) struct Source {
     definitions: BTreeMap<String, Definition>,
     draws: BTreeMap<String, Draw>,
     textures: BTreeMap<String, Vec<u8>>,
@@ -460,7 +460,7 @@ fn mask([a, r, g, b]: [u8; 4]) -> [f32; 4] {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn attach(
+pub(crate) fn attach(
     mut commands: Commands,
     source: Res<Source>,
     settings: Res<super::graphics::Settings>,

@@ -147,6 +147,12 @@ impl Shift {
         }
     }
 
+    /// +4 and +0xC: the last counted change went up, seconds since it (0 on
+    /// the frame of the change).
+    pub fn since(&self) -> (bool, f32) {
+        (self.up, self.elapsed)
+    }
+
     fn next_random(&mut self) -> u32 {
         // xorshift32 [I].
         let mut x = self.random;

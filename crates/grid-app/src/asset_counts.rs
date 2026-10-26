@@ -1,6 +1,8 @@
 //! `GRID_ASSET_COUNTS=1`: spawned entities, asset counts and wgpu resources of
 //! the main and render worlds, printed every 600 frames (memory leak checks,
 //! docs/PERFORMANCE.md "Memory growth"). Nothing is added without the variable.
+use bevy::ecs::entity_disabling::Disabled;
+use bevy::ecs::query::Allow;
 use bevy::mesh::Mesh;
 use bevy::prelude::*;
 use bevy::render::mesh::RenderMesh;
@@ -15,6 +17,15 @@ pub fn install(app: &mut App) {
     if std::env::var_os("GRID_ASSET_COUNTS").is_none() {
         return;
     }
+    // The mesh report needs every kind registered, spawned or not.
+    let world = app.world_mut();
+    world.register_component::<crate::static_batch::Batch>();
+    world.register_component::<crate::track_surface::SourcePart>();
+    world.register_component::<crate::dynamic_props::IntactProp>();
+    world.register_component::<crate::dynamic_props::PropPiece>();
+    world.register_component::<crate::source_trees::Facing>();
+    world.register_component::<crate::MovingPart>();
+    world.register_component::<crate::OpponentPart>();
     app.add_systems(Last, main_report);
     if let Some(render) = app.get_sub_app_mut(RenderApp) {
         render.add_systems(Render, render_report.after(RenderSystems::Cleanup));
@@ -37,6 +48,45 @@ fn main_report(world: &World, mut frames: Local<u32>) {
         len::<Mesh>(world),
         len::<StandardMaterial>(world),
         len::<Image>(world),
+    );
+    mesh_report(world, *frames);
+}
+
+/// Mesh entities by kind: all, disabled, and drawn in the last frame.
+fn mesh_report(world: &World, frame: u32) {
+    type Kinds = (
+        Has<Disabled>,
+        Has<crate::static_batch::Batch>,
+        Has<crate::track_surface::SourcePart>,
+        Has<crate::dynamic_props::IntactProp>,
+        Has<crate::dynamic_props::PropPiece>,
+        Has<crate::source_trees::Facing>,
+        Has<crate::MovingPart>,
+        Has<crate::OpponentPart>,
+        &'static ViewVisibility,
+    );
+    let Some(mut query) = world.try_query_filtered::<Kinds, (With<Mesh3d>, Allow<Disabled>)>() else {
+        return;
+    };
+    let names = ["batch", "intact", "piece", "foliage", "player", "opponent", "track", "other"];
+    let mut counts = [[0usize; 3]; 8];
+    for (disabled, batch, track, intact, piece, foliage, player, opponent, seen) in query.iter(world) {
+        let kind = [batch, intact, piece, foliage, player, opponent, track]
+            .iter()
+            .position(|&k| k)
+            .unwrap_or(7);
+        counts[kind][0] += 1;
+        counts[kind][1] += usize::from(disabled);
+        counts[kind][2] += usize::from(!disabled && seen.get());
+    }
+    let fields: Vec<String> = names
+        .iter()
+        .zip(counts)
+        .map(|(n, [all, off, seen])| format!("{n}={all}/{off}/{seen}"))
+        .collect();
+    println!(
+        "mesh_entities frame={frame} kind=all/disabled/drawn {}",
+        fields.join(" ")
     );
 }
 

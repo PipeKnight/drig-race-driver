@@ -1092,3 +1092,26 @@ the owned child; manual01-result is exit1 and retained. C/R and clean manual exi
 are unverified, not a rendering success. One dedicated private EXE/DLL candidate
 is preserved with NOT_WINDOW_CR_VALIDATED provenance and no enabled launcher.
 Future main integration must use fresh source/build/runtime evidence.
+
+### G297: integrated main with streaming skids
+
+F573-F583 are merged while retaining reflectance0 and explicit skid ownership.
+The combined573-source snapshot passes the full1124-test gate, workspace Clippy,
+four unchanged physics identities,24quick-soak scenarios,34native smoke tests,
+six skid tests, feature Clippy and release. New EXE11c8f0cb44bb4ad9b349f1121d3d9f7f320d16c456553d15c3bb9cc8a119fa90.
+
+A fresh Off/Late Istanbul pair completes0 with90native1080 PNGs+final per arm,
+exact197ordered-family rows and90request ledgers. Late first restores HDR1 at
+frame3/tick4, with summary240/238/errorNone. Root's actual0053 inspection finds
+visible curved tyre strips, glass and lamp ghosts in Off attenuated by Late;
+0001/final keep a coherent car. The32eligible wheel-input samples are not a
+laid counter; visible pixels supply a separate, limited observation. No old
+G296 cube/image proof is substituted. New captures/readbacks and independent
+audit are under local/graphics/main-f583-smoke01 and
+local/handoff/drafts/main-f583-pair-actual-audit01/.
+
+Manual C/R is still open. An explicit private human-input test uses the same
+merged binary and clean unforced Manual arguments, preserving raw log/exit code
+without a timeout. It is labelled MANUAL_INPUT_TEST_ONLY; accepted launchers and
+the guarded validated-release template remain unchanged. This test's existence
+is not evidence that C/R or general playability passed.

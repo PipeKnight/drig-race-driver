@@ -385,8 +385,13 @@ fn calculate_owned(
                 [false, false] if input.world.groups.bodies.len() > 1 => continue,
                 _ => return Err(Error("unsupported body event registrations")),
             };
-            let result = body_impact::calculate(
-                &car.owner,
+            let random = car
+                .owner
+                .damage_random_state
+                .ok_or(Error("body impact requires owned damage RNG"))?;
+            // In place: an error discards this car's staged state.
+            let (random, _) = body_impact::calculate_in_place(
+                &mut car.owner,
                 body_impact::Event {
                     point: std::array::from_fn(|j| f32::from_bits(contact[0x50 / 4 + j])),
                     normal: std::array::from_fn(|j| f32::from_bits(contact[0x60 / 4 + j])),
@@ -398,12 +403,9 @@ fn calculate_owned(
                 side,
                 parameters,
                 &[None; 11],
-                car.owner
-                    .damage_random_state
-                    .ok_or(Error("body impact requires owned damage RNG"))?,
+                random,
             )?;
-            car.owner = result.state;
-            car.owner.damage_random_state = Some(result.random_state);
+            car.owner.damage_random_state = Some(random);
         }
         car.frame
             .body

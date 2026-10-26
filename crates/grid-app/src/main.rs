@@ -70,6 +70,7 @@ mod span_profile;
 mod ground_detail;
 mod ground_effect_assets;
 mod input;
+mod lean_pieces;
 mod mesh_stream;
 mod mobile;
 mod motion_capture;
@@ -103,6 +104,7 @@ mod skid_marks;
 mod sky;
 mod sky_environment;
 mod source_trees;
+mod static_batch;
 mod stereo;
 mod foliage_mips;
 mod fps_counter;
@@ -1145,7 +1147,6 @@ fn main() {
     #[cfg(target_os = "android")]
     android::init();
     // Mobile preset: more compute threads, before Bevy creates its pools.
-    #[cfg(target_os = "android")]
     mobile::init_threads();
     // Bundled data still being copied (F451): the copy screen took over.
     #[cfg(target_os = "android")]
@@ -3776,6 +3777,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             )
             .add_systems(Update, update_start_lights);
         damage_parts::install(&mut app, &root, &field.models, &field.car_model);
+        // Hidden pieces of unbroken props skip the per-entity passes (F574).
+        lean_pieces::install(&mut app);
+        // Static track parts and intact props drawn as merged meshes (F576).
+        static_batch::install(&mut app);
         camera::install(&mut app, &root, field.models[0].stem());
         player_view_visibility::install(&mut app);
         track_environment::install(&mut app, &root, &route);
