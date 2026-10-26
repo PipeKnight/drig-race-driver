@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F577](F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
 | [F576](F0576.md) | 2026-10-26 | Static world batching |
 | [F575](F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
 | [F574](F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |

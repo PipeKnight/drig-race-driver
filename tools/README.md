@@ -18,6 +18,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [build_gate.ps1](build_gate.ps1) | Build gate (docs/TOOLCHAIN.md "Build gate"): end-to-end checks of the real app before a rebuild of the PC playable, the portable copy or the APKs. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [build_gate_nightly.ps1](build_gate_nightly.ps1) | Nightly long soak of the real app (docs/TOOLCHAIN.md "Build gate", part 4). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [build_lock.ps1](build_lock.ps1) | One cargo build at a time across every checkout on this PC (docs/TOOLCHAIN.md, "Build lock"). | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
+| [build_macos.py](build_macos.py) | Build the native macOS game and package a code-only DRIG.app (docs/MACOS.md). | [MACOS](../docs/MACOS.md) |
 | [build_seed.ps1](build_seed.ps1) | Build a new cargo build-dir seed beside C:\cargo-build\seed and swap it in. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
 | [dedup_hardlinks.py](dedup_hardlinks.py) | Replace byte-identical files under a directory with NTFS hard links. | [DISK_USAGE](../docs/DISK_USAGE.md) |
 | [disk_report.ps1](disk_report.ps1) | Report disk usage of the project folder: cargo target dirs, worktrees and local/ captures. | [DISK_USAGE](../docs/DISK_USAGE.md) |
