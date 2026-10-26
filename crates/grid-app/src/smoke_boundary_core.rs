@@ -676,6 +676,48 @@ mod tests {
         );
     }
     #[test]
+    fn reverse_pipe_viewquery_skip_leaves_no_late_terminal_and_real_core_restore_fails_closed() {
+        use bevy::render::renderer::{CurrentView, ViewQuery};
+        #[derive(Component)]
+        struct NativeRequired;
+        #[derive(Resource, Default)]
+        struct Calls {
+            native: usize,
+            late: usize,
+        }
+        fn native_cpu(_view: ViewQuery<&NativeRequired>, mut calls: ResMut<Calls>) {
+            calls.native += 1;
+        }
+        fn late_cpu(mut calls: ResMut<Calls>) {
+            calls.late += 1;
+        }
+        // These execute real ECS ViewQuery validation and the real prepared core
+        // restore, not the GPU native function or a simulated successful draw.
+        let (mut phase, groups, ids, view) = fixture();
+        let old = ranges_and_draws(&phase);
+        let proof = Proof::default();
+        let mut frame = Frame::default();
+        barrier(&mut phase, &groups, ids, &mut frame).unwrap();
+        prepare_and_mask(&mut phase, &mut frame, view, &proof).unwrap();
+        let mut world = World::new();
+        world.insert_resource(Calls::default());
+        let entity = world.spawn_empty().id();
+        world.insert_resource(CurrentView(entity));
+        let mut schedule = Schedule::default();
+        schedule.add_systems(native_cpu.pipe(late_cpu));
+        schedule.run(&mut world);
+        assert_eq!(world.resource::<Calls>().native, 0);
+        assert_eq!(world.resource::<Calls>().late, 0);
+        assert!(restore(&mut phase, &mut frame, &proof).is_err());
+        assert!(proof.failed());
+        assert!(!proof.current_frame_ready());
+        assert_eq!(ranges_and_draws(&phase), old);
+        assert!(frame.saved.is_empty());
+        assert!(frame.owned.items.is_empty());
+        // Missing late receipt is fatal even though native ViewQuery validation
+        // skipped before either CPU body. No harmless fallback after masking.
+    }
+    #[test]
     fn missing_replay_or_drawmesh_skip_cannot_ack_but_still_restores_retained_state() {
         for pretend_ok in [false, true] {
             let (mut phase, groups, ids, view) = fixture();

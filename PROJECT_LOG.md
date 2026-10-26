@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G294 (2026-10-26): native reverse-pipe CPU graph/failure proof and shared installer transaction pass443app tests/Clippy after F571 integration. Existing early body and accepted BMW/Motion playables preserved; HDR1 late profile/admission and actual DLAA rendering remain unverified. See TYRE_SMOKE_RESEARCH.
 - G293 (2026-10-26): owner accepts the BMW/Istanbul baseline smoke fix; critical glass/lens ghosts resolved in this trial, minor appearance deferred. 438 app tests/Clippy, paired Image and actual Window cold-start/one-C/R checks pass. Owner log archived in full; Motion/Lacetti preserved. NativeDLAA/general/damage remain open; see TYRE_SMOKE_RESEARCH.
 - G292 (2026-10-26): fresh mapped BMW90 pair confirms existing late smoke replay hides the floating rear glass/lens in dense smoke without altering17surface materials; ground-only replay does not fix them. G293 ordinary-driving bridge is under test; no general/default/DLAA acceptance. See TYRE_SMOKE_RESEARCH.
 - G290 (2026-10-26): four native-DLAA HDR skid runs pass camera/reset/physics/runtime checks; selected tyre strips attenuate through smoke with clean local controls. Same-Off variation reproduces31 changed Control frames, but55 broad residual pairs remain unresolved. G291 verifies material compatibility; default promotion remains open; see TYRE_SMOKE_RESEARCH.
@@ -137,6 +138,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F571](log/F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |
 | [F570](log/F0570.md) | 2026-10-25 | Disk cleanup: obsolete APKs, idle sessions' build dirs, uncited behavior captures |
 | [F569](log/F0569.md) | 2026-10-24 | Playable 9c1bfe65e68f with F567-F568, portable copy and APKs 3cdbf523a7f0 |
 | [F568](log/F0568.md) | 2026-10-24 | Derby frame rate measured against F561; debris contacts and lift_sunk on the compute pool, bit-identical |
@@ -196,7 +198,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F513](log/F0513.md) | 2026-10-20 | Playable 141433900886 with F491–F512, and a private portable copy for another Windows PC |
 | [F512](log/F0512.md) | 2026-10-20 | Angular corrections and rotations past 64 rad turn as in the original |
 | [F511](log/F0511.md) | 2026-10-20 | Window glass sounds: WindScreen/Window Crack and Smash when a window cracks or smashes |
-| [F510](log/F0510.md) | 2026-10-20 | Chase drift blend weight read from the car (car +0xFE0, 0 for every shipped car); the bonnet's 4.7 mm forward residual was capture sampling |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

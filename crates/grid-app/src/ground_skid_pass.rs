@@ -1302,8 +1302,21 @@ fn preflight_native_shape(
 // Err(false,..) is preflight refusal with untouched native. Err(true,..) is
 // postmutation failure and MUST unwind the dedicated single-threaded pre-Render schedule.
 fn compose_native(world: &mut World, schedule: &mut Schedule) -> Result<(), (bool, String)> {
+    compose_native_candidate(
+        world,
+        schedule,
+        IntoSystem::into_system(try_native_skid.pipe(main_transparent_pass_3d)),
+    )
+}
+// Shared bounded transaction, not a new runtime policy. The early entry above
+// remains the sole production caller until a reviewed late bridge is installed.
+// Callers MUST preserve the dedicated single-threaded pre-Render failure barrier.
+fn compose_native_candidate<S: System<In = (), Out = ()>>(
+    world: &mut World,
+    schedule: &mut Schedule,
+    candidate: S,
+) -> Result<(), (bool, String)> {
     let shape = preflight_native_shape(world, schedule).map_err(|e| (false, e))?;
-    let candidate = IntoSystem::into_system(try_native_skid.pipe(main_transparent_pass_3d));
     if !candidate.default_system_sets().contains(&shape.native_set) {
         return Err((false, "candidate lost native default set".into()));
     }
@@ -2465,5 +2478,176 @@ mod already_built_native_refusal03 {
         };
         assert!(error.contains("already built"));
         assert_eq!(sole_key(&schedule, set).unwrap(), before);
+    }
+}
+
+#[cfg(test)]
+mod native_reverse_pipe_cpu01 {
+    //! Actual native function is initialized, never executed. CPU graph proof only.
+    use super::*;
+    fn late_cpu() {}
+    // No runtime admission yet. This exact constructor can be moved to the
+    // future late bridge without changing the shared transaction.
+    fn compose_reverse(world: &mut World, schedule: &mut Schedule) -> Result<(), (bool, String)> {
+        compose_native_candidate(
+            world,
+            schedule,
+            IntoSystem::into_system(main_transparent_pass_3d.pipe(late_cpu)),
+        )
+    }
+    mod private_atmosphere {
+        use super::*;
+        fn scattering() {}
+        pub(super) fn register(schedule: &mut Schedule) -> InternedSystemSet {
+            schedule.add_systems(
+                scattering
+                    .after(main_opaque_pass_3d)
+                    .before(main_transparent_pass_3d)
+                    .in_set(Core3dSystems::MainPass),
+            );
+            scattering.into_system_set().intern()
+        }
+    }
+    fn base() -> Schedule {
+        let mut schedule = Core3d::base_schedule();
+        schedule.add_systems(
+            (main_opaque_pass_3d, main_transparent_pass_3d)
+                .chain()
+                .in_set(Core3dSystems::MainPass),
+        );
+        schedule
+    }
+    fn stage_edge(schedule: &Schedule) -> bool {
+        let graph = schedule.graph();
+        let main = graph
+            .system_sets
+            .get_key(Core3dSystems::MainPass.intern())
+            .unwrap();
+        let early = graph
+            .system_sets
+            .get_key(Core3dSystems::EarlyPostProcess.intern())
+            .unwrap();
+        graph
+            .dependency()
+            .graph()
+            .contains_edge(NodeId::Set(main), NodeId::Set(early))
+    }
+    #[test]
+    fn actual_native_reverse_pipe_retains_private_predecessor_and_earlypostprocess_boundary() {
+        let mut world = World::new();
+        let mut schedule = base();
+        let private = private_atmosphere::register(&mut schedule);
+        let shape = preflight_native_shape(&mut world, &mut schedule).unwrap();
+        let candidate = IntoSystem::into_system(main_transparent_pass_3d.pipe(late_cpu));
+        assert!(candidate.default_system_sets().contains(&shape.native_set));
+        let candidate_type = candidate.system_type();
+        assert!(stage_edge(&schedule));
+        let private_key = sole_unbuilt_key(&schedule, private).unwrap();
+        let native_set_key = schedule
+            .graph()
+            .system_sets
+            .get_key(shape.native_set)
+            .unwrap();
+        assert!(
+            schedule
+                .graph()
+                .dependency()
+                .graph()
+                .contains_edge(NodeId::System(private_key), NodeId::Set(native_set_key))
+        );
+        compose_reverse(&mut world, &mut schedule).unwrap();
+        let new_key = sole_key(&schedule, shape.native_set).unwrap();
+        assert_ne!(new_key, shape.native_key);
+        assert_eq!(schedule.systems_len(), shape.count);
+        assert_eq!(
+            incident_edges(&schedule, shape.native_set).unwrap(),
+            shape.incident
+        );
+        assert_eq!(
+            schedule
+                .systems()
+                .unwrap()
+                .find(|(key, _)| *key == new_key)
+                .unwrap()
+                .1
+                .system_type(),
+            candidate_type
+        );
+        assert!(
+            schedule
+                .graph()
+                .systems_in_set(Core3dSystems::MainPass.intern())
+                .unwrap()
+                .contains(&new_key)
+        );
+        assert!(stage_edge(&schedule));
+        assert!(
+            schedule
+                .graph()
+                .dependency()
+                .graph()
+                .contains_edge(NodeId::System(private_key), NodeId::Set(native_set_key))
+        );
+        // The actual native function requires render resources; NEVER schedule.run().
+        let error = compose_reverse(&mut world, &mut schedule).unwrap_err();
+        assert!(!error.0);
+        assert!(error.1.contains("already built"));
+        assert_eq!(sole_key(&schedule, shape.native_set).unwrap(), new_key);
+    }
+    #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+    struct ConditionalNative;
+    fn yes() -> bool {
+        true
+    }
+    #[test]
+    fn reverse_candidate_source_preflight_refuses_native_own_and_ancestor_conditions_without_removal()
+     {
+        for ancestor in [false, true] {
+            let mut world = World::new();
+            let mut schedule = Core3d::base_schedule();
+            if ancestor {
+                schedule.configure_sets(ConditionalNative.run_if(yes));
+                schedule.add_systems(
+                    (
+                        main_opaque_pass_3d,
+                        main_transparent_pass_3d.in_set(ConditionalNative),
+                    )
+                        .chain()
+                        .in_set(Core3dSystems::MainPass),
+                );
+            } else {
+                schedule.add_systems(
+                    (main_opaque_pass_3d, main_transparent_pass_3d.run_if(yes))
+                        .chain()
+                        .in_set(Core3dSystems::MainPass),
+                );
+            }
+            schedule.graph_mut().initialize(&mut world);
+            let set = main_transparent_pass_3d.into_system_set().intern();
+            let key = sole_unbuilt_key(&schedule, set).unwrap();
+            let count = schedule.graph().systems.len();
+            let error = compose_reverse(&mut world, &mut schedule).unwrap_err();
+            assert!(!error.0);
+            assert!(error.1.contains("native or ancestor has run conditions"));
+            assert_eq!(sole_unbuilt_key(&schedule, set).unwrap(), key);
+            assert_eq!(schedule.graph().systems.len(), count);
+        }
+    }
+    #[test]
+    fn shared_transaction_refuses_candidate_without_native_set_before_mutation() {
+        let mut world = World::new();
+        let mut schedule = base();
+        let shape = preflight_native_shape(&mut world, &mut schedule).unwrap();
+        let error =
+            compose_native_candidate(&mut world, &mut schedule, IntoSystem::into_system(late_cpu))
+                .unwrap_err();
+        assert!(!error.0);
+        assert!(error.1.contains("candidate lost native default set"));
+        assert_eq!(
+            sole_unbuilt_key(&schedule, shape.native_set).unwrap(),
+            shape.native_key
+        );
+        assert_eq!(schedule.graph().systems.len(), shape.count);
+        assert!(schedule.systems().is_err());
     }
 }

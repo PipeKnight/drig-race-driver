@@ -1010,3 +1010,19 @@ build/source metadata and camera profile copies plus a SHA manifest. No binary
 was copied into that evidence folder. Keep this folder in full. Logs and settings
 are a future comparison baseline, not a recorded video or full camera timeline.
 No C/R coverage beyond the actual logs is inferred from the owner's feedback.
+
+### G294: reverse native scheduling proof
+
+CPU graph tests now cover the actual native transparency function followed by a
+late callback, retaining its typed set, a private Atmosphere-style predecessor and
+the real MainPass-to-EarlyPostProcess boundary. A missing native ViewQuery skips
+the pipe; the real five-group core then restores exact state and refuses a success
+receipt. These are CPU scheduling and failure-path observations, not DLAA images.
+
+The existing early-pass installer delegates to a private shared transaction, so
+reverse tests exercise the same mutation checks instead of mirroring them.
+Production still installs only the existing early pipe; no late HDR profile or BMW
+enhanced admission is enabled. The accepted G293 owner build/log remain unchanged.
+The refactor and freshly integrated F571 pass the grid-app crate gate: 443 tests,
+strict Clippy and documentation sanity. No native HDR rendering is claimed.
+Evidence: ignored local/graphics/native-late-pipe-cpu01/gate02 and source02.json.

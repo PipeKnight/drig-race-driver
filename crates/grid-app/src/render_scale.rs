@@ -102,6 +102,13 @@ pub fn scaled_size(physical: UVec2, height: RenderHeight) -> Option<UVec2> {
 /// frames run late and the simulation is not the reason; raised by [`UP_ROWS`] after
 /// [`UP_SECONDS`] of frames on time, never back to a height that ran late in
 /// the last [`BLOCK_SECONDS`], so the sharpness does not "breathe".
+///
+/// Each step down is a probe (F571): [`PROBE_SECONDS`] later the frame must
+/// have gained at least [`GPU_SHARE`] of what a frame bound only by the
+/// pixel count would gain. Otherwise the rows were not what made it late
+/// (the phone's race, F571: 41 -> 36 ms from 720 to 480 rows while the CPU
+/// work holds it near 26 ms), so the height returns to the ceiling and
+/// stays there for [`HOLD_SECONDS`] before the next probe.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dynamic {
     pub floor: u32,
@@ -116,6 +123,13 @@ pub struct Dynamic {
     cpu_held: f32,
     /// A height that ran late, and the seconds it stays blocked.
     blocked: Option<(u32, f32)>,
+    /// The last step down under test: rows before and after, smoothed frame
+    /// time before.
+    probe: Option<(u32, u32, f32)>,
+    /// Seconds left at the ceiling after a step that did not help.
+    held: f32,
+    /// The last probe's gain and the gain of a pixel-bound frame, ms (log).
+    pub gain: (f32, f32),
 }
 
 pub const TARGET_MS: f32 = 1000. / 60.;
@@ -134,6 +148,12 @@ pub const BLOCK_SECONDS: f32 = 15.;
 pub const CPU_SHARE: f32 = 0.5;
 pub const CPU_MS: f32 = 16.;
 const CPU_REPORT_SECONDS: f32 = 10.;
+/// A step down is judged this long after it (the smoothing settles).
+pub const PROBE_SECONDS: f32 = 1.;
+/// A step must gain this share of a pixel-bound frame's gain to stay.
+pub const GPU_SHARE: f32 = 0.5;
+/// Seconds at the ceiling after a step that did not help.
+pub const HOLD_SECONDS: f32 = 60.;
 /// Frames longer than this (loading, a pause) are ignored.
 const HITCH_MS: f32 = 100.;
 const SMOOTHING: f32 = 0.1;
@@ -151,12 +171,16 @@ impl Dynamic {
             good_for: 0.,
             cpu_held: 0.,
             blocked: None,
+            probe: None,
+            held: 0.,
+            gain: (0., 0.),
         }
     }
 
     /// One frame of `frame_ms` with `work_ms` of simulation; returns the
-    /// reason when `rows` changed, or `cpu_bound` every [`CPU_REPORT_SECONDS`]
-    /// of late frames it held (for the log; `rows` unchanged).
+    /// reason when `rows` changed (`ineffective`: back to the ceiling after a
+    /// probe), or `cpu_bound` every [`CPU_REPORT_SECONDS`] of late frames it
+    /// held (for the log; `rows` unchanged).
     pub fn update(&mut self, frame_ms: f32, work_ms: f32, ceiling: u32) -> Option<&'static str> {
         if !(0. ..HITCH_MS).contains(&frame_ms) {
             return None;
@@ -170,18 +194,42 @@ impl Dynamic {
             *left -= dt;
         }
         self.blocked = self.blocked.filter(|(_, left)| *left > 0.);
+        self.held = (self.held - dt).max(0.);
         if self.rows > ceiling {
             self.rows = ceiling;
             self.since_change = 0.;
+            self.probe = None;
             return Some("ceiling");
         }
         if self.warm < WARM_SECONDS {
             return None;
         }
+        if let Some((from, to, before)) = self.probe {
+            if self.since_change < PROBE_SECONDS {
+                return None;
+            }
+            self.probe = None;
+            let pixels = (to as f32 / from as f32).powi(2);
+            self.gain = (before - self.frame_ms, before * (1. - pixels));
+            if self.gain.0 < GPU_SHARE * self.gain.1 {
+                self.rows = ceiling;
+                self.blocked = None;
+                self.held = HOLD_SECONDS;
+                self.since_change = 0.;
+                self.good_for = 0.;
+                return Some("ineffective");
+            }
+        }
         let late = self.frame_ms > LATE_MS;
         let cpu_bound = self.work_ms > CPU_SHARE * self.frame_ms || self.work_ms > CPU_MS;
         self.good_for = if self.frame_ms < ON_TIME_MS { self.good_for + dt } else { 0. };
-        if late && !cpu_bound && self.since_change >= DOWN_SECONDS && self.rows > self.floor {
+        if late
+            && !cpu_bound
+            && self.held == 0.
+            && self.since_change >= DOWN_SECONDS
+            && self.rows > self.floor
+        {
+            self.probe = Some((self.rows, self.rows.saturating_sub(DOWN_ROWS).max(self.floor), self.frame_ms));
             self.blocked = Some((self.rows, BLOCK_SECONDS));
             self.rows = self.rows.saturating_sub(DOWN_ROWS).max(self.floor);
             self.since_change = 0.;
@@ -423,8 +471,8 @@ fn adjust_height(mut scale: ResMut<RenderScale>, mut work: ResMut<Work>, time: R
     let from = d.rows;
     if let Some(reason) = d.update(time.delta_secs() * 1000., work_ms, ceiling) {
         println!(
-            "render_dynamic version=1 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} floor={} ceiling={ceiling}",
-            d.rows, d.frame_ms, d.work_ms, d.floor
+            "render_dynamic version=2 rows={} from={from} reason={reason} frame_ms={:.1} work_ms={:.1} probe_gain_ms={:.2} pixel_gain_ms={:.2} floor={} ceiling={ceiling}",
+            d.rows, d.frame_ms, d.work_ms, d.gain.0, d.gain.1, d.floor
         );
     }
 }
@@ -434,7 +482,7 @@ pub fn install(app: &mut App, height: RenderHeight) {
     let dynamic = auto_dynamic(height);
     if let Some(d) = &dynamic {
         println!(
-            "render_dynamic version=1 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}/{DOWN_SECONDS}s up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS}",
+            "render_dynamic version=2 event=install floor={} ceiling={} target_ms={TARGET_MS:.2} late_ms={LATE_MS} on_time_ms={ON_TIME_MS} down_rows={DOWN_ROWS}/{DOWN_SECONDS}s up_rows={UP_ROWS}/{UP_SECONDS}s block_s={BLOCK_SECONDS} cpu_share={CPU_SHARE} cpu_ms={CPU_MS} probe_s={PROBE_SECONDS} gpu_share={GPU_SHARE} hold_s={HOLD_SECONDS}",
             d.floor, d.rows
         );
     }
@@ -494,26 +542,40 @@ mod tests {
 
     /// Feeds `seconds` of frames of `frame_ms` with `work_ms` of main work.
     fn run(d: &mut Dynamic, seconds: f32, frame_ms: f32, work_ms: f32) -> Vec<u32> {
+        run_with(d, seconds, |_| frame_ms, work_ms)
+    }
+
+    /// Frames whose time depends on the rows rendered.
+    fn run_with(d: &mut Dynamic, seconds: f32, frame: impl Fn(u32) -> f32, work_ms: f32) -> Vec<u32> {
         let mut seen = Vec::new();
-        for _ in 0..(seconds * 1000. / frame_ms) as usize {
+        let mut t = 0.;
+        while t < seconds * 1000. {
+            let ms = frame(d.rows);
+            t += ms;
             let from = d.rows;
-            if d.update(frame_ms, work_ms, 720).is_some() && d.rows != from {
+            if d.update(ms, work_ms, 720).is_some() && d.rows != from {
                 seen.push(d.rows);
             }
         }
         seen
     }
 
+    /// A frame bound by the pixel count: `ms` at 720 rows.
+    fn pixel_bound(ms: f32) -> impl Fn(u32) -> f32 {
+        move |rows| ms * (rows as f32 / 720.).powi(2)
+    }
+
     #[test]
     fn dynamic_height_drops_fast_when_late_and_rises_slowly() {
         let mut d = Dynamic::new(480, 720);
         // Warm-up: no change in the first seconds.
-        assert!(run(&mut d, 2.5, 25., 5.).is_empty());
-        // GPU-bound 25 ms frames: down 48 rows every 0.5 s to the floor.
-        let down = run(&mut d, 4., 25., 5.);
+        assert!(run_with(&mut d, 2.5, pixel_bound(45.), 5.).is_empty());
+        // Frames bound by the pixel count (45 ms at 720 rows): down 48 rows
+        // per probe second to the floor; each step gains what it should.
+        let down = run_with(&mut d, 6., pixel_bound(45.), 5.);
         assert_eq!(down, vec![672, 624, 576, 528, 480]);
-        // On time: up 24 rows after 3 s, but not back to 528 (late 1.5 s
-        // ago) until its block ends.
+        // On time: up 24 rows after 3 s, but not back to 528 (late 1 s ago)
+        // until its block ends.
         assert_eq!(run(&mut d, 10., 16.7, 5.), vec![504]);
         // Then up 24 rows every 3 s to the ceiling.
         let later = run(&mut d, 60., 16.7, 5.);
@@ -531,14 +593,35 @@ mod tests {
         let reports = (0..250).filter(|_| d.update(40., 35., 720) == Some("cpu_bound")).count();
         assert_eq!(reports, 1);
         assert_eq!(d.rows, 720);
-        // Late with a light simulation (the phone's pre-race menu, F559):
-        // the height drops.
-        assert_eq!(run(&mut d, 1.2, 25., 4.), vec![672, 624]);
+        // Late with a light simulation and pixel-bound frames: the height
+        // drops.
+        assert_eq!(run_with(&mut d, 2., pixel_bound(30.), 4.), vec![672, 624]);
         // Loading hitches are ignored too.
         assert!(run(&mut d, 10., 500., 1.).is_empty());
         // A lower ceiling (the Video screen) applies at once.
         assert_eq!(d.update(16.7, 1., 600), Some("ceiling"));
         assert_eq!(d.rows, 600);
+    }
+
+    /// F571: the phone's race (36-41 ms frames, a light fixed step) went
+    /// 720 -> 480 rows and stayed there, although the rows hardly changed the
+    /// frame. A step that does not help returns to the ceiling and holds.
+    #[test]
+    fn dynamic_height_returns_when_a_step_does_not_help() {
+        let mut d = Dynamic::new(480, 720);
+        assert!(run(&mut d, 2.9, 37., 1.5).is_empty());
+        // CPU-bound: 37 ms whatever the rows. One probe, then back.
+        assert_eq!(run(&mut d, 2., 37., 1.5), vec![672, 720]);
+        assert!(d.gain.0.abs() < 0.5 && d.gain.1 > 4.5, "{:?}", d.gain);
+        // Held at the ceiling for HOLD_SECONDS, then one more probe.
+        assert!(run(&mut d, 58., 37., 1.5).is_empty());
+        assert_eq!(run(&mut d, 4., 37., 1.5), vec![672, 720]);
+        // Mostly CPU-bound (a quarter of the frame scales with the pixels):
+        // still back.
+        let mostly_cpu = |rows: u32| 28. + 9. * (rows as f32 / 720.).powi(2);
+        assert!(run_with(&mut d, 57., mostly_cpu, 1.5).is_empty());
+        assert_eq!(run_with(&mut d, 4., mostly_cpu, 1.5), vec![672, 720]);
+        assert_eq!(d.rows, 720);
     }
 
     #[test]
