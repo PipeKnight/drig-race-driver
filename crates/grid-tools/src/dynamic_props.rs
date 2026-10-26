@@ -1185,6 +1185,11 @@ pub enum Pressed {
     /// No road chunk under the body's xz: it left the collision ground,
     /// which the original shares [I] (grid-soak's expected loss (i)).
     NoGround,
+    /// No road chunk under the body's xz at its last contact of any kind,
+    /// where its free fall began: it left the collision ground there and
+    /// drifted over road while falling (grid-soak's expected loss (i) at the
+    /// fall start, coordinator's approval of 26 October 2026).
+    NoGroundAtFall,
     /// During the run, a downward route entity box contact in the same or
     /// the previous step as the body's first deep road contact: a body
     /// driven into the ground in one step (grid-soak's separate counter

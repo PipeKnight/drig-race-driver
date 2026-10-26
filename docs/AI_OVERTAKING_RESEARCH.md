@@ -35,6 +35,16 @@ at +8); accessor 0x7A3820(out, i) reads `map[i+1]` (0-based) [V].
   planned point when the car changes link [V]. View +0xD0 = line point + lateral × that offset.
   Sample 2 (+0x150 block, offset +0x1A0) is the look-ahead equivalent (0x788030).
   This is the port's `offset` state.
+- **Correction (2026-10-26, drift-battle-ai):** the sample positions in this and the previous
+  bullet are swapped, as AI_AVOID_RECOVERY_RESEARCH §1 already found for the blocks. 0x798E90
+  builds the +0x90 block (+0xE0) at the look-ahead link and the +0x150 block (+0x1A0) at the
+  car's link, and fills +0x218/+0x21C (track limits) and **+0x220/+0x224 (racing limits) from
+  the +0x150 block, at the car**, then +0x228/+0x22C (track) and **+0x230/+0x234 (racing)
+  from the +0x90 block, at the look-ahead** [V]. 0x797190 returns (planned offset of that
+  block + line length) − left limit and right limit − that. So +0x230/+0x234 is the room at
+  the look-ahead; the race start (0x78A740, 0x776740), the overtake side choice (0x77BD20),
+  the yield (0x789780) and the alongside squeeze (0x799630) read it. The text below keeps the
+  old wording.
 - View +0x230/+0x234 [V] (0x797190 called from 0x798E90 with types 1/2 at the car sample):
   `abs = planned offset + racing-line length` (lengths from the left track edge);
   +0x230 = abs − left_racing_limit, +0x234 = right_racing_limit − abs, i.e. free lateral room

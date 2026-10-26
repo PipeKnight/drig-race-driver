@@ -508,6 +508,42 @@ F448 adds two more cases (docs/ROBUSTNESS_RESEARCH.md §9):
   - It is debt for the open step-size family (FIDELITY_BACKLOG row 88), not a fix. Jarama seeds 21..24 then pass 4/4 and join the default quick set. Long Beach
 forced seed 59 (a thin tyre landing through the road) is not covered and still fails.
 
+F585's follow-up (coordinator's approval of 26 October 2026, harness only) widens
+`NoGround` to where a free fall began:
+- `pressed_by=NoGroundAtFall`: no road chunk under the body's xz at its last *supported*
+  tick, an expected loss. Checked after `NoGround` (failure point), so the rule only widens.
+- `soak::Session` records that xz each tick for every prop body: a contact within 2 m of its
+  centre whose normal pushes the body up (y above 0.5). The 2 m reach (AUTHORED) drops world
+  contact records kept from earlier steps, which `contacts_with` still lists while a body
+  falls 25 m below them; the upward test drops the vertical boundary sheet a falling body
+  can brush far under the road.
+- Case [V]: quick seed 15 (Istanbul Park, 9 cars). The player hits the wall at about 21 m/s
+  at tick 1689 and loses wheel body 13. It rolls to (590, 21.3, 11.9), where no packed
+  triangle exists (`grid-road-hole`: 0 triangles at x 588.7..592.6, z about 12), and falls
+  from tick about 1860. It drifts 14 m sideways while falling and fails at (604, -24, 10),
+  where road (`qt_11_10_00_01`) lies 24 m above it, so plain `NoGround` missed it.
+- Quick 1..56 with `GRID_AI_CHARACTERISTICS` set: the new branch catches seed 15 body 13 and
+  nothing else; every other expected loss (seeds 14, 18, 20, 29, 37, 38) stays `NoGround`.
+- Tests: `soak::tests::support_needs_a_near_contact_pushing_up`, asset test
+  `no_road_at_tells_the_fall_start_from_the_failure_point`.
+- Replays and single runs need `GRID_AI_CHARACTERISTICS` like `prepush.ps1`'s soak step;
+  without it the scenario's `characteristics=1` runs a different trajectory.
+
+## Known failures on F585: seeds 39, 40 and 46 (outside the default set)
+
+`grid-soak quick --seeds 1..56` on F585 (with `GRID_AI_CHARACTERISTICS`), compared with the
+same seeds on base 12aa5b00 (a temporary worktree build, removed afterwards):
+
+| seed | on F585 | on base 12aa5b00 |
+|---|---|---|
+| 39 (9 cars, Spa) | fail, tick 4683: prop piece, body 11 at (-197, -63, -175) | fail, tick 3867: prop piece, body 12 at (594, 7, 1026) |
+| 40 (4 cars, Spa) | fail, segment 1, tick 2944: prop piece, body 6 at (-393, -50, -603) | pass (1 expected loss) |
+| 46 (12 cars, Shibuya) | fail, tick 4844: car 4 falling through the world at (38, 1, -149), 74 m from the centreline | pass |
+
+Seed 39 fails on both, at different spots. Seeds 40 and 46 are exposed by F585's AI
+trajectories; neither is traced. A rule (ii) extension that caught seed 40 (an entity box
+driving a body below the road in one step) was not adopted: its only catch is untraced.
+
 ## Known failure on main: Spa quick seed 38 (F465)
 
 `grid-soak quick --seeds 37..40` fails seed 38 (12 cars, Spa): `out-of-bounds: prop piece

@@ -328,6 +328,11 @@ impl Line {
         (point, [-tangent[2] / length, 0., tangent[0] / length])
     }
 
+    /// Racing-limit point (waypoint type 1 for `k` 0, type 2 for `k` 1) at gate `i`.
+    fn racing_limit_point(&self, i: usize, k: usize) -> [f32; 3] {
+        std::array::from_fn(|c| self.points[i][c] + self.lateral[i][c] * self.limits[i][k])
+    }
+
     /// Link `i` of the track view's 32-link window that starts one link
     /// behind `segment`, and the next gate (`None` past an open road's end).
     fn window_link(&self, segment: usize, k: usize) -> Option<(usize, usize)> {
@@ -443,6 +448,28 @@ impl Line {
     /// Arc length of the racing-line point nearest to `p` (global search).
     pub fn arc(&self, p: [f32; 3]) -> f32 {
         self.project(p, None).1
+    }
+
+    /// Signed distance along the line from arc `from` to arc `to` (0x909340):
+    /// clamped to the length on an open line, wrapped into half a lap
+    /// either way on a closed one.
+    #[allow(clippy::neg_cmp_op_on_partial_ord)] // The original's NaN outcomes.
+    fn along(&self, from: f32, to: f32) -> f32 {
+        let mut d = to - from;
+        let length = self.length;
+        if !(length > 0.) || !d.is_finite() {
+            return d;
+        }
+        if self.open {
+            return d.min(length).max(-length);
+        }
+        while length * 0.5 < d {
+            d -= length;
+        }
+        while d < -length * 0.5 {
+            d += length;
+        }
+        d
     }
 
     /// The racing line alone, from the route's `ai_track.xml`.
@@ -961,6 +988,8 @@ const AVOID_FOLLOW_DISTANCE: f32 = 3.;
 const BRAKE_LINE_CANCEL_FACTOR: f32 = 0.8;
 const SLOW_SPEED: f32 = 3.;
 const MINIMUM_MOVING_SPEED: f32 = 1.;
+/// Alongside gaps above this are "no car on that side" (0xCBD664 = 2000).
+const ALONGSIDE_EMPTY_GAP: f32 = 2000.;
 const SLIDE_LIFT_MIN_SPEED: f32 = 5.;
 /// Grip input for the speed->distance tables. The AI car-view grip (+0x144)
 /// is not yet traced; the lowest shipped grip is used.
@@ -1108,6 +1137,7 @@ impl Parameters {
                 ],
                 as_reject: d_or("asRejectDistance", 10.),
                 as_merge: d_or("asOffsetMergeFactor", 4.),
+                as_target_buffer: d_or("asTargetBuffer", -2.),
                 front_projection: [
                     m("alongside_front_projection_on_distance")?,
                     m("alongside_front_projection_off_distance")?,
@@ -1262,6 +1292,8 @@ pub struct Traffic {
     ov_corner: [f32; 2],
     as_reject: f32,
     as_merge: f32,
+    /// asTargetBuffer (driver config +0x464): the alongside squeeze test.
+    as_target_buffer: f32,
     front_projection: [f32; 2],
     rear_projection: [f32; 2],
     min_space: f32,
@@ -1396,54 +1428,566 @@ impl Other {
         let v = [self.velocity[0], self.velocity[1], self.velocity[2]];
         self.speed() > MINIMUM_MOVING_SPEED && dot3(v, self.forward) < 0.
     }
-    /// Box corners inflated by `margin`, flattened to the car's height:
-    /// front-right, front-left, rear-right, rear-left (0x77B400/0x77F9F0).
-    fn corners(&self, margin: f32) -> [[f32; 3]; 4] {
-        let f = horizontal(self.forward);
-        let right = horizontal(self.left.map(|x| -x));
-        let e = self.extents;
-        let (front, rear, w) = (e.front + margin, e.rear - margin, e.half_width + margin);
-        let at =
-            |a: f32, b: f32| std::array::from_fn(|k| self.position[k] + f[k] * a + right[k] * b);
-        [at(front, w), at(front, -w), at(rear, w), at(rear, -w)]
-    }
-    /// Box-local (forward, right) coordinates of `p`.
-    fn local(&self, p: [f32; 3]) -> (f32, f32) {
-        let d = sub(p, self.position);
-        (
-            dot2(d, horizontal(self.forward)),
-            dot2(d, horizontal(self.left.map(|x| -x))),
-        )
-    }
-    fn contains(&self, p: [f32; 3], margin: f32) -> bool {
-        let (x, y) = self.local(p);
-        let e = self.extents;
-        e.rear - margin <= x && x <= e.front + margin && y.abs() <= e.half_width + margin
-    }
 }
 
-/// contacted_vehicle (0x784650) contact type of `own` against `other`
-/// (§3.5): 1-4 own corner inside the other box, 5-8 an other corner inside
-/// our box by our nearest face (front, rear, right, left). The two-corner
-/// length-ratio refinement is not ported.
-fn contact_type(own: &Other, other: &Other, margin: f32) -> Option<u8> {
-    if let Some(k) = own
-        .corners(margin)
-        .iter()
-        .position(|&c| other.contains(c, margin))
-    {
-        return Some(k as u8 + 1);
+/// maxObservableVehicles, maxObservableVehiclesRear and
+/// maxObservableViewDistance (cfg +0xC20/+0xC34/+0xC0C, §5.2).
+const OBSERVABLE_MAX: usize = 5;
+const OBSERVABLE_REAR: usize = 2;
+const OBSERVABLE_VIEW: f32 = 200.;
+
+/// Observable-list selection 0x7ACA60 (§5.2): the cars `own` observes,
+/// given each other car's signed distance along the line (`along`,
+/// positive ahead). With no more candidates than the maximum (the original
+/// counts its own car among them), every car within the view distance is
+/// kept in order. Otherwise each car within the view distance is classified
+/// (types 1 ahead, 2/3 ahead off-axis, 4/5 behind, 6/7 alongside) and the
+/// list is filled by priority: the front car, one rear car, one car on each
+/// side, then the nearest of the rest up to the maximum.
+fn observable(own: &Other, others: &[Other], along: &[f32]) -> Vec<Other> {
+    observable_with(
+        own,
+        others,
+        along,
+        OBSERVABLE_MAX,
+        OBSERVABLE_REAR.min(OBSERVABLE_MAX),
+        OBSERVABLE_VIEW,
+    )
+}
+
+#[allow(clippy::neg_cmp_op_on_partial_ord)] // The original's NaN outcomes.
+fn observable_with(
+    own: &Other,
+    others: &[Other],
+    along: &[f32],
+    max: usize,
+    rear: usize,
+    view: f32,
+) -> Vec<Other> {
+    if others.len() < max {
+        return others
+            .iter()
+            .zip(along)
+            .filter(|(_, s)| s.abs() < view)
+            .map(|(o, _)| *o)
+            .collect();
     }
-    let corner = other
-        .corners(margin)
-        .into_iter()
-        .find(|&c| own.contains(c, margin))?;
-    let (x, y) = own.local(corner);
-    let e = own.extents;
-    let w = e.half_width + margin;
-    let faces = [e.front + margin - x, x - (e.rear - margin), w - y, w + y];
-    let nearest = (0..4).min_by(|&a, &b| faces[a].total_cmp(&faces[b]))?;
-    Some(5 + nearest as u8)
+    // Records {car, type, distance, value, taken}; the local list holds 19.
+    struct Record {
+        car: usize,
+        kind: u8,
+        distance: f32,
+        value: f32,
+        taken: bool,
+    }
+    let mut records: Vec<Record> = Vec::new();
+    let (mut ahead, mut behind, mut side_6, mut side_7) = (0, 0, 0, 0);
+    let right = own.left.map(|x| -x);
+    let (own_front, own_rear) = (own.front(), own.rear());
+    for (car, (o, &s)) in others.iter().zip(along).enumerate() {
+        let distance = s.abs();
+        if !(distance < view) {
+            continue;
+        }
+        let record = if distance <= 20. {
+            let w = own.half_width() * 2.;
+            let d = sub(o.position, own.position);
+            let lateral = dot3(right, d);
+            let euclid = dot3(d, d).sqrt();
+            // Angle between own forward and the direction to the car.
+            let angle = (dot3(own.forward, d) / euclid).acos().to_degrees();
+            let gap = dot3(own.forward, sub(o.rear(), own_front)) - 1.;
+            let kind = if lateral - w >= 0. || -lateral - w >= 0. {
+                if gap > 0. {
+                    if angle >= 15. {
+                        if lateral <= 0. { 2 } else { 3 }
+                    } else {
+                        ahead += 1;
+                        1
+                    }
+                } else if dot3(own.forward, sub(o.front(), own_rear)) + 1. >= 0. {
+                    if lateral <= 0. {
+                        side_6 += 1;
+                        6
+                    } else {
+                        side_7 += 1;
+                        7
+                    }
+                } else if angle > 165. {
+                    behind += 1;
+                    4
+                } else {
+                    5
+                }
+            } else if dot3(own.forward, d) > 0. {
+                ahead += 1;
+                1
+            } else {
+                behind += 1;
+                4
+            };
+            Record {
+                car,
+                kind,
+                distance: euclid,
+                value: gap,
+                taken: false,
+            }
+        } else {
+            let kind = if s <= 0. { 5 } else { 1 };
+            Record {
+                car,
+                kind,
+                distance,
+                value: s,
+                taken: false,
+            }
+        };
+        if records.len() < 19 {
+            records.push(record);
+        }
+    }
+    let mut out: Vec<Other> = Vec::new();
+    // The first record with the smallest key below the view distance.
+    let pick = |records: &[Record], key: &dyn Fn(&Record) -> Option<f32>| {
+        let mut best = view;
+        let mut found = None;
+        for (i, r) in records.iter().enumerate() {
+            if let Some(k) = key(r)
+                && k < best
+            {
+                best = k;
+                found = Some(i);
+            }
+        }
+        found
+    };
+    let take = |records: &mut [Record], i: Option<usize>, out: &mut Vec<Other>| {
+        if let Some(i) = i {
+            out.push(others[records[i].car]);
+            records[i].taken = true;
+        }
+    };
+    // Front: the nearest type 1 by bumper gap, else the nearest of 1-3.
+    let front = if ahead == 0 {
+        pick(&records, &|r| (r.kind < 4).then_some(r.distance))
+    } else {
+        pick(&records, &|r| (r.kind == 1).then_some(r.value))
+    };
+    take(&mut records, front, &mut out);
+    if rear != 0 {
+        let back = if behind == 0 {
+            pick(&records, &|r| (r.kind == 5).then_some(r.distance))
+        } else {
+            pick(&records, &|r| (r.kind == 4).then_some(-r.value))
+        };
+        take(&mut records, back, &mut out);
+    }
+    if side_6 + side_7 > 0 {
+        if side_6 == 0 {
+            let i = pick(&records, &|r| (r.kind == 7).then_some(-r.value));
+            take(&mut records, i, &mut out);
+        } else if side_7 == 0 {
+            let i = pick(&records, &|r| (r.kind == 6).then_some(r.value));
+            take(&mut records, i, &mut out);
+        } else {
+            // One pass: type 6 by the smallest value; type 7 is tested
+            // against the type-6 running minimum, so the last such type 7
+            // wins (as in the original).
+            let (mut best, mut six, mut seven) = (view, None, None);
+            for (i, r) in records.iter().enumerate() {
+                if r.kind == 6 && r.value < best {
+                    best = r.value;
+                    six = Some(i);
+                }
+                if r.kind == 7 && -r.value < best {
+                    seven = Some(i);
+                }
+            }
+            take(&mut records, six, &mut out);
+            take(&mut records, seven, &mut out);
+        }
+    }
+    // The rest: the nearest untaken cars (rear types only with a rear count).
+    for _ in out.len()..max {
+        let i = pick(&records, &|r| {
+            (!r.taken && (rear != 0 || (r.kind != 4 && r.kind != 5))).then_some(r.distance)
+        });
+        take(&mut records, i, &mut out);
+    }
+    out
+}
+
+/// Box corners of a car state or observed record (0x77B400 / 0x77F9F0):
+/// front point + m·forward and rear point − m·forward, ± (half width + m)
+/// along car-right, flattened: front-right, front-left, rear-right, rear-left.
+/// The forward axis is used as stored (not flattened or normalised).
+fn box_corners(o: &Other, m: f32) -> [[f32; 3]; 4] {
+    let right = o.left.map(|x| -x);
+    let (front, rear) = (o.front(), o.rear());
+    let f: [f32; 3] = std::array::from_fn(|k| front[k] + m * o.forward[k]);
+    let r: [f32; 3] = std::array::from_fn(|k| rear[k] - m * o.forward[k]);
+    let s = right.map(|x| x * (o.half_width() + m));
+    let at = |p: [f32; 3], sign: f32| [p[0] + sign * s[0], 0., p[2] + sign * s[2]];
+    [at(f, 1.), at(f, -1.), at(r, 1.), at(r, -1.)]
+}
+
+/// 0x774B00: one ordering pass over squared distances to `p`. Index 0 is
+/// the nearest (first minimum), index 3 the farthest; 1 and 2 are the rest
+/// in whatever order the single pass leaves them (not a full sort).
+fn nearest_order(p: [f32; 3], points: &[[f32; 3]; 4]) -> [usize; 4] {
+    let dist = points.map(|q| {
+        let d = sub(q, p);
+        dot3(d, d)
+    });
+    let mut out = [0, 1, 2, 3];
+    for i in 0..4 {
+        let d = dist[i];
+        let last = out[3];
+        if d > dist[last] {
+            out[i] = last;
+            out[3] = i;
+        }
+        let first = out[0];
+        if dist[first] > d {
+            out[i] = first;
+            out[0] = i;
+        }
+    }
+    out
+}
+
+/// 0x7792C0: intersection of segments a0→a1 and b0→b1 in the xz plane:
+/// (result, s, point) with result 1 when both parameters lie in 0..1, 2 when
+/// the lines cross outside the segments, -1 parallel, -2 collinear;
+/// point = a0 + s·(a1 − a0).
+fn segment_intersect_xz(
+    a0: [f32; 3],
+    a1: [f32; 3],
+    b0: [f32; 3],
+    b1: [f32; 3],
+) -> (i32, f32, [f32; 3]) {
+    let (d, e, w) = (sub(a1, a0), sub(b1, b0), sub(a0, b0));
+    let den = d[0] * e[2] - d[2] * e[0];
+    let (result, s) = if -1e-5 < den && den < 1e-5 {
+        let ns = w[2] * e[0] - w[0] * e[2];
+        (if -1e-5 < ns && ns < 1e-5 { -2 } else { -1 }, 0.)
+    } else {
+        let inv = 1. / den;
+        let s = (w[2] * e[0] - w[0] * e[2]) * inv;
+        let t = (d[0] * w[2] - d[2] * w[0]) * inv;
+        let inside = (0. ..=1.).contains(&s) && (0. ..=1.).contains(&t);
+        (if inside { 1 } else { 2 }, s)
+    };
+    (result, s, std::array::from_fn(|k| a0[k] + s * d[k]))
+}
+
+/// contact classification 0x783B20 (always returns 0 in the original; its
+/// effect is the contact-list entry): 1–4 an own corner inside the other
+/// box, 5–8 an other corner inside ours (front, rear, right, left face),
+/// refined when two corners are inside.
+fn contact_classify(own: &Other, rec: &Other, margin: f32) -> Option<u8> {
+    let (ob, rb) = (box_corners(own, margin), box_corners(rec, margin));
+    let (own_right, rec_right) = (own.left.map(|x| -x), rec.left.map(|x| -x));
+    let mut hits: Vec<(u8, [f32; 3])> = Vec::new();
+    for (i, &c) in ob.iter().enumerate() {
+        let (a, b) = (sub(rb[0], c), sub(rb[3], c));
+        if 0. > dot3(rec.forward, a) * dot3(rec.forward, b)
+            && 0. > dot3(rec_right, a) * dot3(rec_right, b)
+        {
+            hits.push((i as u8 + 1, c));
+        }
+    }
+    if hits.len() != 2 {
+        for &c in &rb {
+            let (a, b) = (sub(ob[0], c), sub(ob[3], c));
+            let (p1, q1) = (dot3(own.forward, a), dot3(own.forward, b));
+            let (p2, q2) = (dot3(own_right, a), dot3(own_right, b));
+            if 0. > p1 * q1 && 0. > p2 * q2 {
+                let (lat, side) = if q2.abs() > p2.abs() {
+                    (p2.abs(), 7)
+                } else {
+                    (q2.abs(), 8)
+                };
+                let (lon, face) = if q1.abs() > p1.abs() {
+                    (p1.abs(), 5)
+                } else {
+                    (q1.abs(), 6)
+                };
+                hits.push((if lat > lon { face } else { side }, c));
+            }
+        }
+    }
+    let length = own.extents.front - own.extents.rear;
+    let ratio = |a: [f32; 3], b: [f32; 3]| dot3(own.forward, sub(a, b)) / length;
+    Some(match hits[..] {
+        [] => return None,
+        [(7, p)] => {
+            if 0.33 > ratio(p, ob[2]) {
+                3
+            } else {
+                7
+            }
+        }
+        [(8, p)] => {
+            if 0.33 > ratio(p, ob[2]) {
+                4
+            } else {
+                8
+            }
+        }
+        [(t, _)] => t,
+        [(t1, p1), (t2, p2)] => match t1 {
+            1 if t2 == 7 => {
+                if ratio(p1, p2) > 0.35 {
+                    7
+                } else {
+                    1
+                }
+            }
+            1 => {
+                if t2 == 5 || t2 == 2 {
+                    5
+                } else {
+                    7
+                }
+            }
+            2 if t2 == 8 => {
+                if ratio(p1, p2) > 0.35 {
+                    8
+                } else {
+                    2
+                }
+            }
+            2 => {
+                if t2 == 5 || t2 == 1 {
+                    5
+                } else {
+                    8
+                }
+            }
+            3 if t2 == 7 => {
+                if ratio(p2, p1) > 0.45 {
+                    7
+                } else {
+                    3
+                }
+            }
+            3 => {
+                if t2 == 6 || t2 == 4 {
+                    6
+                } else {
+                    7
+                }
+            }
+            4 if t2 == 8 => {
+                if ratio(p2, p1) > 0.45 {
+                    8
+                } else {
+                    4
+                }
+            }
+            4 => {
+                if t2 == 6 || t2 == 3 {
+                    6
+                } else {
+                    8
+                }
+            }
+            t => t,
+        },
+        [(t, _), ..] => t,
+    })
+}
+
+/// One path-obstacle entry (0x30 bytes in the original): relative velocity
+/// (y cleared), hit point, record, distance along the sweep, time (≥ 0).
+#[derive(Clone, Copy, Debug)]
+struct ObstacleEntry {
+    relative: [f32; 3],
+    #[allow(dead_code)]
+    point: [f32; 3],
+    other: usize,
+    distance: f32,
+    #[allow(dead_code)]
+    time: f32,
+}
+
+/// Path-obstacle scan 0x78B560 result: the kept obstacle (smallest unclamped
+/// time, first on ties), the obstacle list and the contact list (6 each).
+struct PathObstacle {
+    best: Option<ObstacleEntry>,
+    #[allow(dead_code)]
+    list: Vec<ObstacleEntry>,
+    contacts: Vec<(usize, u8)>,
+}
+
+/// Inputs of [`path_obstacle_scan`] from the driver config (cfg +0x8D8,
+/// +0x928, +0x93C, +0x9A0, +0xBE4).
+struct ScanConfig {
+    stopped_speed: f32,
+    buffer_zone: f32,
+    buffer_base_speed: f32,
+    similar_angle: f32,
+    contact_zone: f32,
+}
+
+/// Path-obstacle scan 0x78B560 (docs/AI_AVOID_RECOVERY_RESEARCH.md §2.1):
+/// per observed car, the contact classification, then the sweep of our box
+/// along the relative velocity against the car's box.
+#[allow(clippy::neg_cmp_op_on_partial_ord)] // The original's NaN outcomes.
+fn path_obstacle_scan(
+    own: &Other,
+    own_speed: f32,
+    others: &[Other],
+    cfg: &ScanConfig,
+    reverse: bool,
+) -> PathObstacle {
+    let mut result = PathObstacle {
+        best: None,
+        list: Vec::new(),
+        contacts: Vec::new(),
+    };
+    let base = cfg.buffer_base_speed;
+    let ratio = if base == 0. { 0. } else { own_speed / base };
+    let raw = ratio * cfg.buffer_zone;
+    let b = cfg.buffer_zone;
+    let buffer = if b > 0. {
+        if raw < 0. {
+            0.
+        } else if raw > b {
+            b
+        } else {
+            raw
+        }
+    } else if b > raw {
+        b
+    } else if raw > 0. {
+        0.
+    } else {
+        raw
+    };
+    let fwd = horizontal(own.forward);
+    let (front, rear) = (own.front(), own.rear());
+    let own_front: [f32; 3] = std::array::from_fn(|k| front[k] + buffer * fwd[k]);
+    let own_rear: [f32; 3] = std::array::from_fn(|k| rear[k] - buffer * fwd[k]);
+    let centre = own.position;
+    let heading = fwd;
+    let cos_similar = (f64::from(cfg.similar_angle).cos() as f32).abs();
+    let mut best_time = f32::MAX;
+    for (index, rec) in others.iter().enumerate() {
+        if let Some(kind) = contact_classify(own, rec, cfg.contact_zone)
+            && result.contacts.len() < 6
+        {
+            result.contacts.push((index, kind));
+        }
+        if !(own_speed > cfg.stopped_speed) && !(rec.speed() > cfg.stopped_speed) {
+            continue;
+        }
+        let direction = if rec.speed() > cfg.stopped_speed {
+            horizontal(rec.forward)
+        } else {
+            rec.forward
+        };
+        let hdot = dot3(direction, heading);
+        let p = if hdot > cos_similar {
+            if rec.backwards() { rec.rear() } else { rec.front() }
+        } else {
+            rec.position
+        };
+        if !(dot3(sub(p, centre), heading) > 0.) {
+            continue;
+        }
+        let v = own.velocity;
+        let mut relative = [v[0] - rec.velocity[0], 0., v[2] - rec.velocity[2]];
+        if !(dot3(sub(rec.position, centre), relative) > 0.) {
+            continue;
+        }
+        let (rf, rr) = (rec.front(), rec.rear());
+        let rec_front: [f32; 3] = std::array::from_fn(|k| rf[k] + buffer * rec.forward[k]);
+        let rec_rear: [f32; 3] = std::array::from_fn(|k| rr[k] - buffer * rec.forward[k]);
+        let gap = if reverse {
+            sub(rec_front, own_rear)
+        } else if hdot < 0. {
+            sub(rec_front, own_front)
+        } else {
+            sub(rec_rear, own_front)
+        };
+        if dot3(gap, heading) > 0. && !(dot3(heading, relative) > 0.) {
+            continue;
+        }
+        // Lateral test: an own corner (unbuffered box) inside the record box's
+        // interval across the relative velocity.
+        let rec_box = box_corners(rec, buffer);
+        let ri = nearest_order(centre, &rec_box);
+        if dot3(relative, relative) == 0. {
+            let g = normalize(gap);
+            relative = [g[0] * 1e-4, 0., g[2] * 1e-4];
+        }
+        let n = normalize(relative);
+        let perp = [-n[2], 0., n[0]];
+        let a = ri.map(|i| -dot3(rec_box[i], perp));
+        let lo = a.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = a.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let own_box = box_corners(own, 0.);
+        if !own_box.iter().any(|&c| {
+            let d = dot3(perp, c);
+            0. >= (d + hi) * (lo + d)
+        }) {
+            continue;
+        }
+        // Distance: four segment intersections over a 500 m sweep.
+        let own_box = box_corners(own, buffer);
+        let cr0 = rec_box[ri[0]];
+        let oi = nearest_order(cr0, &own_box);
+        let co0 = own_box[oi[0]];
+        const SWEEP: f32 = 500.;
+        let a_own: [f32; 3] = std::array::from_fn(|k| co0[k] + SWEEP * n[k]);
+        let a_rec: [f32; 3] = std::array::from_fn(|k| cr0[k] - SWEEP * n[k]);
+        let (mut distance, mut point, mut kind) = (f32::MAX, cr0, 2);
+        let calls = [
+            (co0, a_own, cr0, rec_box[ri[1]], true),
+            (co0, a_own, cr0, rec_box[ri[2]], false),
+            (cr0, a_rec, co0, own_box[oi[1]], false),
+            (cr0, a_rec, co0, own_box[oi[2]], true),
+        ];
+        for (k, &(a0, a1, b0, b1, keep_point)) in calls.iter().enumerate() {
+            let (r, s, out) = segment_intersect_xz(a0, a1, b0, b1);
+            let accept = if k == 0 {
+                r == 1 || r == 2
+            } else {
+                (r == 1 || (r == 2 && kind == 2)) && (s * SWEEP < distance || (r == 1 && kind == 2))
+            };
+            if accept {
+                distance = s * SWEEP;
+                point = if keep_point { out } else { cr0 };
+                if k < 3 {
+                    kind = r;
+                }
+            }
+        }
+        let time = distance / dot3(relative, relative).sqrt();
+        let entry = ObstacleEntry {
+            relative,
+            point,
+            other: index,
+            distance,
+            time: if time > 0. { time } else { 0. },
+        };
+        if result.list.len() < 6 {
+            result.list.push(entry);
+        }
+        if best_time > time {
+            best_time = time;
+            result.best = Some(entry);
+        }
+    }
+    result
+}
+
+fn normalize(a: [f32; 3]) -> [f32; 3] {
+    let l = dot3(a, a).sqrt();
+    a.map(|x| x / l)
 }
 
 fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
@@ -1931,6 +2475,8 @@ pub struct AiDriver {
     seed: u32,
     random: u32,
     segment: Option<usize>,
+    /// Racing-line segment of each other car's last projection (by id).
+    other_segments: Vec<(u32, usize)>,
     look_ahead: f32,
     curvature: f32,
     offset: f32,
@@ -2068,6 +2614,7 @@ impl AiDriver {
             seed,
             random: seed,
             segment: None,
+            other_segments: Vec::new(),
             curvature: 0.,
             offset: 0.,
             desired_offset: 0.,
@@ -2242,38 +2789,69 @@ impl AiDriver {
         // Track view: progress along the racing line (0x79C360).
         let (segment, arc, line_distance) = data.line.project(position, self.segment);
         self.segment = Some(segment);
+        // Racing limits at the car and at the look-ahead sample (the +0x150
+        // and +0x90 blocks of 0x798E90, before this tick's look-ahead update).
+        // The rooms to them are view +0x220/+0x224 and +0x230/+0x234.
         let (_, _, _, limits_here) = data.line.at(arc);
+        let (_, _, _, limits_ahead) = data.line.at(arc + self.look_ahead);
         let tr = p.traffic.clone();
         let own = Other::from_pose(0, view.pose, view.velocity, view.extents);
+        // Observable list (0x7ACA60): the tests below see only the selected cars.
+        let along: Vec<f32> = others
+            .iter()
+            .map(|o| {
+                let hint = self
+                    .other_segments
+                    .iter()
+                    .find(|x| x.0 == o.id)
+                    .map(|x| x.1);
+                let (i, s, _) = data.line.project(o.position, hint);
+                match self.other_segments.iter_mut().find(|x| x.0 == o.id) {
+                    Some(x) => x.1 = i,
+                    None => self.other_segments.push((o.id, i)),
+                }
+                data.line.along(arc, s)
+            })
+            .collect();
+        let observed = observable(&own, others, &along);
+        let others = &observed[..];
         let f = horizontal(forward);
         // Car-right in the original's sense is our -X (car left is +X).
         let right_vec = [-right[0], -right[1], -right[2]];
         let (own_front, own_rear) = (own.front(), own.rear());
 
-        // brake_for_vehicle (0x78F6F0) on the nearest car in our path. AUTHORED
-        // path scan: a straight corridor along our heading inside the view cone.
+        // brake_for_vehicle (0x78F6F0) on the path obstacle of 0x78B560.
         let mut pass_vehicle = None;
         let mut brake_follow: Option<(Other, f32)> = None;
         let cone = (tr.view_angle.to_radians())
             .clamp(0., std::f32::consts::PI)
             .cos();
-        if let Some(r) = others
-            .iter()
-            .filter(|r| {
-                let d = sub(r.position, position);
-                let along = dot3(d, f);
-                let lat = dot3(d, right_vec);
-                let to_rear = sub(r.rear(), own_rear);
-                let visible = dot3(horizontal(to_rear), f) >= cone;
-                along > 0.
-                    && along < 200.
-                    && lat.abs() < own.half_width() + r.half_width() + tr.buffer + 0.5
-                    && visible
-            })
-            .min_by(|a, b| {
-                dot3(sub(a.position, position), f).total_cmp(&dot3(sub(b.position, position), f))
-            })
-        {
+        // Path-obstacle scan 0x78B560, before the tests.
+        let scan = path_obstacle_scan(
+                &own,
+                speed,
+                others,
+                &ScanConfig {
+                    stopped_speed: p.rescue.av_stopped_speed,
+                    buffer_zone: p.rescue.av_buffer,
+                    buffer_base_speed: p.rescue.av_buffer_speed,
+                    similar_angle: tr.similar_angle,
+                    contact_zone: p.rescue.contact_zone,
+                },
+            self.reverse,
+        );
+        // brake_for_vehicle takes the path obstacle when one of its corners
+        // is inside the view cone seen from our rear point (0x7A2F30).
+        let scan_target = scan.best.and_then(|e| {
+            let r = &others[e.other];
+            box_corners(r, 0.)
+                .iter()
+                .any(|&c| dot3(horizontal(sub(c, own_rear)), f) > cone)
+                .then_some((*r, e.distance))
+        });
+        let candidate = scan_target.map(|(r, _)| r);
+        if let Some(r) = candidate {
+            let r = &r;
             let w = own.half_width() + r.half_width();
             let lat = dot3(sub(r.position, position), right_vec);
             let (gap_r, gap_l) = (lat - w, -lat - w);
@@ -2303,9 +2881,9 @@ impl AiDriver {
                 let dist = if similar {
                     dot3(sub(r.rear(), own_front), f)
                 } else {
-                    (dot3(sub(r.position, position), sub(r.position, position))).sqrt()
-                        - own.half_length()
-                        - r.half_length()
+                    // [I] The path-relative distance from the obstacle's
+                    // nearest corner is the scan's sweep distance.
+                    scan_target.map_or(0., |(_, distance)| distance)
                 };
                 let sep = remap(
                     closing,
@@ -2401,6 +2979,28 @@ impl AiDriver {
             }
         }
         self.alongside_fired = fired;
+        // 0x795C00 tail: an empty side (gap FLT_MAX) gets gap 0 when our side
+        // edge (centre ± half width along the car's left axis +0x50) lies
+        // beyond that side's racing-limit line through the current link's
+        // gates (0x793790 types 1/2 at view links +0x24 and +0x20). The order
+        // of the two gates is [I]: start then end makes the test an outside test.
+        let mut gaps = slots.map(|s| s.map_or(f32::MAX, |s| s.0));
+        if gaps.iter().any(|&g| g > ALONGSIDE_EMPTY_GAP)
+            && let Some((i, j)) = data.line.window_link(segment, 1)
+        {
+            for (k, gap) in gaps.iter_mut().enumerate() {
+                if *gap <= ALONGSIDE_EMPTY_GAP {
+                    continue;
+                }
+                let (a, b) = (data.line.racing_limit_point(i, k), data.line.racing_limit_point(j, k));
+                let side = if k == 0 { -own.half_width() } else { own.half_width() };
+                let edge: [f32; 3] = std::array::from_fn(|c| position[c] + right_vec[c] * side);
+                let cross = (b[0] - a[0]) * (edge[2] - b[2]) - (b[2] - a[2]) * (edge[0] - b[0]);
+                if (k == 0 && cross < 0.) || (k == 1 && cross > 0.) {
+                    *gap = 0.;
+                }
+            }
+        }
 
         // Track view at the start of the tick (0x798E90, previous planned
         // offset and look-ahead): planned look-ahead point (+0xD0), racing-line
@@ -2452,9 +3052,7 @@ impl AiDriver {
         };
         let frontal = obstruction && dot3(forward, o_direction) < -0.5;
         // contacted_vehicle (0x784650): first car whose box touches ours.
-        let contact = others
-            .iter()
-            .find_map(|r| contact_type(&own, r, rs.contact_zone).map(|t| (*r, t)));
+        let contact = scan.contacts.first().map(|&(i, t)| (others[i], t));
         // recover_tbone score (0x78ACC0): front contact at a T-bone, head-on or
         // slow nose-to-tail angle holds the score for 1 s.
         if let Some((r, kind)) = contact
@@ -2498,33 +3096,11 @@ impl AiDriver {
         let stuck = self.stuck.is_some_and(|s| s.2);
         let faults = self.fault_scores(speed);
 
-        // Path obstacle (0x78B560; AUTHORED corridor as brake_for_vehicle):
-        // the car ahead we close on with the smallest time to reach it, our
-        // box extended by the speed-scaled buffer zone.
-        let buffer = clamp01(speed / rs.av_buffer_speed) * rs.av_buffer;
-        let mut obstacle: Option<(Other, f32, f32)> = None;
-        let mut best_time = f32::MAX;
-        for r in others {
-            let d = sub(r.position, position);
-            let along = dot3(d, f);
-            let lat = dot3(d, right_vec);
-            let relative = [v[0] - r.velocity[0], 0., v[2] - r.velocity[2]];
-            if along <= 0.
-                || lat.abs() >= own.half_width() + r.half_width() + tr.buffer + 0.5
-                || dot3(relative, d) <= 0.
-            {
-                continue;
-            }
-            let extent = dot2(horizontal(r.forward), f).abs() * r.half_length()
-                + dot2(horizontal(r.left), f).abs() * r.half_width();
-            let distance = (along - own.extents.front - extent - buffer).max(0.);
-            let closing = dot3(relative, relative).sqrt();
-            let time = distance / closing.max(1e-6);
-            if time < best_time {
-                best_time = time;
-                obstacle = Some((*r, distance, closing));
-            }
-        }
+        // Path obstacle (0x78B560): the kept obstacle with its sweep distance
+        // and closing speed.
+        let obstacle: Option<(Other, f32, f32)> = scan
+            .best
+            .map(|e| (others[e.other], e.distance, dot3(e.relative, e.relative).sqrt()));
         // avoid test (0x79A960): (target, ETA, closing speed).
         let mut avoid_fire: Option<(Other, f32, f32)> = None;
         if let Some((r, distance, closing)) = obstacle {
@@ -2608,7 +3184,7 @@ impl AiDriver {
                     .filter(|side| side.abs() > RACE_START_SIDE_DISTANCE)
                 {
                     Some(side) => side > 0.,
-                    None => self.offset - limits_here[0] > limits_here[1] - self.offset,
+                    None => self.offset - limits_ahead[0] > limits_ahead[1] - self.offset,
                 };
                 let [end_1, end_2, merge_1, merge_2, timeout] = p.rs;
                 let mut between = |a: f32, b: f32| a + (b - a) * (self.uniform() * 0.5 + 0.5);
@@ -2805,12 +3381,13 @@ impl AiDriver {
                 if speed >= SLOW_SPEED {
                     request.merge = rs.merge;
                     if rs.initial {
-                        // Room from the planned path at the car to the chosen
-                        // side's racing limit (view +0x230/+0x234).
+                        // Room from the planned path at the look-ahead sample
+                        // to the chosen side's racing limit (view +0x230/+0x234,
+                        // the +0x90 block; 0x798E90, 0x797190).
                         let room = if rs.right {
-                            limits_here[1] - self.offset
+                            limits_ahead[1] - self.offset
                         } else {
-                            self.offset - limits_here[0]
+                            self.offset - limits_ahead[0]
                         };
                         if room <= own.half_width() {
                             rs.offset = 0.;
@@ -2855,8 +3432,8 @@ impl AiDriver {
                             let s = target_lat - self.offset;
                             let dist = s.abs();
                             let w = own.half_width() + target.half_width();
-                            let room_l = self.offset - limits_here[0] + s;
-                            let room_r = limits_here[1] - self.offset - s;
+                            let room_l = self.offset - limits_ahead[0] + s;
+                            let room_r = limits_ahead[1] - self.offset - s;
                             let need = w + tr.ov_safe;
                             self.overtake.state = if dist > w + tr.ov_desired {
                                 3
@@ -2919,23 +3496,71 @@ impl AiDriver {
                 self.overtake.min_fire -= dt;
             }
             Behaviour::Alongside => {
-                // Drive 0x799630: keep min space from a car on one side.
+                // Drive 0x799630. The sides come from the strict-overlap flags
+                // (+0x24/+0x25), or from the slot cars when neither is strict.
                 request.merge = tr.as_merge;
-                match slots {
-                    [Some((g, _, _)), None] | [None, Some((g, _, _))] => {
-                        // Slot 0: car on our left (negative offset side).
-                        let away = if slots[0].is_some() { 1. } else { -1. };
-                        let mut desired = self.offset;
-                        if g < tr.min_space {
-                            desired += away * (tr.min_space - g);
+                let strict = slots.map(|s| s.is_some_and(|s| s.1));
+                let [left, right] = if strict[0] || strict[1] {
+                    strict
+                } else {
+                    slots.map(|s| s.is_some())
+                };
+                let cur = self.offset;
+                request.desired_offset = if left == right {
+                    // Cars on both sides: the mean of their laterals from the
+                    // racing line on the view's link window (0x798C00 /
+                    // 0x798D00); if either is not located, our centre's
+                    // lateral at the car's line point (+0x170/+0x180) less the
+                    // left gap and plus the right gap. 0 without both records
+                    // or when the look-ahead point is the car's line point.
+                    match slots {
+                        [Some((_, _, a)), Some((_, _, b))] => {
+                            let lateral = |r: Other| {
+                                data.line
+                                    .locate_in_window(segment, r.position, false)
+                                    .map(|(_, l)| l)
+                            };
+                            match (lateral(a), lateral(b)) {
+                                (Some(a), Some(b)) => (a + b) * 0.5,
+                                _ if dot2(sub(la_point, here_point), sub(la_point, here_point))
+                                    > 0. =>
+                                {
+                                    let own = dot2(sub(position, here_point), here_lateral);
+                                    ((own - gaps[0]) + (gaps[1] + own)) * 0.5
+                                }
+                                _ => 0.,
+                            }
                         }
-                        if desired * -away > 0. && g > tr.max_space {
-                            desired = 0.;
-                        }
-                        request.desired_offset = desired;
+                        _ => 0.,
                     }
-                    _ => request.desired_offset = self.offset,
-                }
+                } else {
+                    // One side, with g that car's gap: closer than minSpace,
+                    // move away by the shortfall; else when the room on that
+                    // car's side at the look-ahead (view +0x230/+0x234, from
+                    // the +0x90 block), less the room there at the car
+                    // (+0x220/+0x224, the +0x150 block; 0x798E90, 0x797190)
+                    // plus asTargetBuffer minus g, is below minSpace, move
+                    // away by minSpace ("squeezed", +0x30). Displaced toward
+                    // that car with g above maxSpace: back to the racing line.
+                    // The room at the car uses the planned offset +0xE0 for
+                    // the car link's own +0x1A0, which is not kept [I].
+                    let (g, room_here, room_ahead, away) = if left {
+                        (gaps[0], cur - limits_here[0], cur - limits_ahead[0], 1.)
+                    } else {
+                        (gaps[1], limits_here[1] - cur, limits_ahead[1] - cur, -1.)
+                    };
+                    let mut desired = cur;
+                    if g < tr.min_space {
+                        desired += away * (tr.min_space - g);
+                    } else if room_ahead - ((room_here + tr.as_target_buffer) - g) < tr.min_space {
+                        desired += away * tr.min_space;
+                    }
+                    if desired * -away > 0. && g > tr.max_space {
+                        0.
+                    } else {
+                        desired
+                    }
+                };
                 // Yield 0x789780 / 0x77B7D0: follow a car beside us that is mostly
                 // ahead when we cannot move away from it.
                 let [
@@ -2961,16 +3586,15 @@ impl AiDriver {
                                 && dot3(sub(respect_point, own_front), f) > 0.
                         })
                     };
-                    let gap = |slot: &Option<(f32, bool, Other)>| slot.map_or(f32::MAX, |s| s.0);
                     let (left, right) = (yields(&slots[0]), yields(&slots[1]));
-                    let room_l = self.offset - limits_here[0] - own.half_width();
-                    let room_r = limits_here[1] - self.offset - own.half_width();
+                    let room_l = self.offset - limits_ahead[0] - own.half_width();
+                    let room_r = limits_ahead[1] - self.offset - own.half_width();
                     let chosen = match (left, right) {
                         (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
-                        (Some(a), None) if distance > gap(&slots[1]) || room_r < to_limit => {
+                        (Some(a), None) if distance > gaps[1] || room_r < to_limit => {
                             Some(a)
                         }
-                        (None, Some(b)) if distance > gap(&slots[0]) || room_l < to_limit => {
+                        (None, Some(b)) if distance > gaps[0] || room_l < to_limit => {
                             Some(b)
                         }
                         _ => None,
@@ -3018,10 +3642,9 @@ impl AiDriver {
                             if rs.av_alongside && !fired {
                                 side = 3 - side;
                             } else {
-                                let gap = |slot: usize| slots[slot].map_or(f32::MAX, |s| s.0);
                                 side = match side {
-                                    1 if w < gap(1) => 2,
-                                    2 if w < gap(0) => 1,
+                                    1 if w < gaps[1] => 2,
+                                    2 if w < gaps[0] => 1,
                                     _ => 0,
                                 };
                             }
@@ -4312,25 +4935,117 @@ mod tests {
         let own = car([0.; 3], long);
         assert_eq!(own.front(), [0., 0., 2.]);
         assert_eq!(own.rear(), [0., 0., -2.5]);
-        assert!(own.contains([0., 0., -2.45], 0.));
-        assert!(!own.contains([0., 0., 2.05], 0.));
-        assert!(own.contains([0.94, 0., 0.], 0.));
-        assert!(!own.contains([0.96, 0., 0.], 0.));
-        // A narrow car whose nose reaches 0.05 m into our rear face (type 6).
-        let narrow = Extents {
-            half_width: 0.5,
-            front: 1.0,
-            rear: -1.0,
-        };
-        assert_eq!(
-            contact_type(&own, &car([0., 0., -3.45], narrow), 0.),
-            Some(6)
-        );
-        assert_eq!(contact_type(&own, &car([0., 0., -3.55], narrow), 0.), None);
     }
 
     #[test]
-    fn contact_types_classify_corners_and_faces() {
+    fn nearest_order_is_the_single_pass_of_0x774b00() {
+        let p = [0.; 3];
+        let at = |d: f32| [d, 0., 0.];
+        // Nearest first and farthest last; the middle two as the pass leaves them.
+        assert_eq!(nearest_order(p, &[at(3.), at(1.), at(4.), at(2.)]), [1, 3, 0, 2]);
+        assert_eq!(nearest_order(p, &[at(1.), at(2.), at(3.), at(4.)]), [0, 1, 2, 3]);
+        assert_eq!(nearest_order(p, &[at(4.), at(3.), at(2.), at(1.)]), [3, 1, 2, 0]);
+    }
+
+    #[test]
+    fn segment_intersection_codes() {
+        let o = [0.; 3];
+        let (r, s, point) = segment_intersect_xz(o, [0., 0., 10.], [-1., 0., 5.], [1., 0., 5.]);
+        assert_eq!((r, s, point), (1, 0.5, [0., 0., 5.]));
+        let (r, s, _) = segment_intersect_xz(o, [0., 0., 10.], [-1., 0., 15.], [1., 0., 15.]);
+        assert_eq!((r, s), (2, 1.5));
+        assert_eq!(segment_intersect_xz(o, [0., 0., 1.], [1., 0., 0.], [1., 0., 1.]).0, -1);
+        assert_eq!(segment_intersect_xz(o, [0., 0., 1.], [0., 0., 2.], [0., 0., 3.]).0, -2);
+    }
+
+    #[test]
+    fn path_obstacle_scan_sweeps_to_the_slower_car_ahead() {
+        let extents = Extents {
+            half_width: 0.9,
+            front: 2.0,
+            rear: -2.0,
+        };
+        let car = |id, x: f32, z: f32, v: f32| Other {
+            id,
+            position: [x, 0., z],
+            velocity: [0., 0., v, 0.],
+            forward: [0., 0., 1.],
+            left: [1., 0., 0.],
+            extents,
+        };
+        let own = car(0, 0., 0., 20.);
+        let cfg = ScanConfig {
+            stopped_speed: 1.,
+            buffer_zone: 2.,
+            buffer_base_speed: 10.,
+            similar_angle: 0.5,
+            contact_zone: 0.1,
+        };
+        // Ahead in lane at 10 m/s; beside us; behind; ahead but 6 m to the side.
+        let others = [
+            car(1, 0., 20., 10.),
+            car(2, 1.8, 0.5, 20.),
+            car(3, 0., -20., 10.),
+            car(4, 6., 20., 10.),
+        ];
+        let scan = path_obstacle_scan(&own, 20., &others, &cfg, false);
+        let best = scan.best.unwrap();
+        assert_eq!(best.other, 0);
+        // Bumpers 16 m apart, each box widened by the 2 m buffer.
+        assert!((best.distance - 12.).abs() < 1e-4, "{}", best.distance);
+        assert!((best.time - 1.2).abs() < 1e-4);
+        assert_eq!(scan.list.len(), 1);
+        // The car beside us: our front-left corner in its box and its rear
+        // corner in ours, refined by the length ratio to type 8.
+        assert_eq!(scan.contacts, vec![(1, 8)]);
+    }
+
+    #[test]
+    fn observable_list_picks_by_priority() {
+        let extents = Extents {
+            half_width: 0.9,
+            front: 2.0,
+            rear: -2.0,
+        };
+        let car = |id, x: f32, z: f32| Other {
+            id,
+            position: [x, 0., z],
+            velocity: [0.; 4],
+            forward: [0., 0., 1.],
+            left: [1., 0., 0.],
+            extents,
+        };
+        let own = car(0, 0., 0.);
+        // 1 ahead (gap 5), 2 far ahead, 3 behind in lane, 4 far behind,
+        // 5/6 alongside on either side, 7 ahead (gap 10).
+        let others = [
+            car(1, 0., 10.),
+            car(2, 0., 30.),
+            car(3, 0., -8.),
+            car(4, 0., -40.),
+            car(5, 3., 0.),
+            car(6, -3., 0.),
+            car(7, 0., 15.),
+        ];
+        let along = [10., 30., -8., -40., 0., 0., 15.];
+        let ids = |list: Vec<Other>| list.iter().map(|o| o.id).collect::<Vec<_>>();
+        // Front 1, rear 3, side type 6 = car 5; the type-7 pick tests
+        // against the type-6 minimum and finds nothing; then the nearest.
+        assert_eq!(ids(observable(&own, &others, &along)), vec![1, 3, 5, 6, 7]);
+        // Without a rear count, no behind car is picked or filled.
+        assert_eq!(
+            ids(observable_with(&own, &others, &along, 5, 0, 200.)),
+            vec![1, 5, 6, 7, 2]
+        );
+        // Up to the maximum every car within the view distance stays.
+        assert_eq!(
+            ids(observable_with(&own, &others[..4], &along[..4], 5, 2, 35.)),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn contact_classify_corners_and_faces() {
         let car = |position: [f32; 3], forward: [f32; 3]| Other {
             id: 1,
             position,
@@ -4345,23 +5060,24 @@ mod tests {
             },
         };
         let own = car([0.; 3], [0., 0., 1.]);
-        // Other car's rear overlapping our nose: our front corners are inside.
+        // Other car's rear overlapping our nose, offset 0.3 m to our left (the
+        // tests are strict, so equal widths exactly in line touch no edge).
         assert!(matches!(
-            contact_type(&own, &car([0., 0., 4.5], [0., 0., 1.]), 0.1),
-            Some(1 | 2)
+            contact_classify(&own, &car([0.3, 0., 4.5], [0., 0., 1.]), 0.1),
+            Some(1 | 2 | 5)
         ));
         // Nose of a car from our right (-X) into our side: right face.
         assert_eq!(
-            contact_type(&own, &car([-2.5, 0., 0.], [1., 0., 0.]), 0.1),
+            contact_classify(&own, &car([-2.5, 0., 0.], [1., 0., 0.]), 0.1),
             Some(7)
         );
         // Same from our left: left face.
         assert_eq!(
-            contact_type(&own, &car([2.5, 0., 0.], [-1., 0., 0.]), 0.1),
+            contact_classify(&own, &car([2.5, 0., 0.], [-1., 0., 0.]), 0.1),
             Some(8)
         );
         assert_eq!(
-            contact_type(&own, &car([10., 0., 0.], [0., 0., 1.]), 0.1),
+            contact_classify(&own, &car([10., 0., 0.], [0., 0., 1.]), 0.1),
             None
         );
     }

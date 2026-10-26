@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F585](log/F0585.md) | 2026-10-26 | AI first corners: view-room fix, alongside parts, observer list and path scan ported; live queue comparison |
 | [F584](log/F0584.md) | 2026-10-26 | Car part batching |
 | [F583](log/F0583.md) | 2026-10-26 | Engine audio: the handbrake ported (hbrakeon/hbrakeoff on the player's handbrake edges); wind is never started |
 | [F582](log/F0582.md) | 2026-10-26 | Engine audio: opponents' backfire and gear whine; the original's 120-voice pool |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F528](log/F0528.md) | 2026-10-20 | Engine audio: gear shifts of 451770 ported: RPM dip, off-load crossfade and pitch wobble |
 | [F527](log/F0527.md) | 2026-10-20 | Opponent engine mix confirmed offline against the original's group table |
 | [F526](log/F0526.md) | 2026-10-20 | Row 41, Washington route 0: the AI's no-brake bend explained from the shipped data; no 1:1 fix found; row 41 text updated |
-| [F524](log/F0524.md) | 2026-10-20 | Build gate: launcher smoke, memory growth, tick-cost budget and a nightly long soak of the real app |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

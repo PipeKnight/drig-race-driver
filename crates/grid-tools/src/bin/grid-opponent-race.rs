@@ -186,6 +186,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         NORMAL_DIFFICULTY
     };
+    // GRID_AI_SEED_OFFSET=k shifts every AI driver's seed by 1000·k (noise
+    // band of the first-corner measurements, docs/AI_OVERTAKING_RESEARCH.md §8.5).
+    let seed_offset: u32 = std::env::var("GRID_AI_SEED_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let mut drivers: Vec<Driver> = (0..cars)
         .map(|i| -> Result<Driver, Box<dyn std::error::Error>> {
             Ok(match kind {
@@ -196,7 +202,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .and_then(|row| row.get(name).copied())
                             .unwrap_or(1.)
                     })?,
-                    0x5eed + i as u32,
+                    0x5eed + i as u32 + 1000 * seed_offset,
                 ))),
                 "pursuit" => Driver::Pursuit(PursuitDriver::new(&progress, 18. + i as f64 * 0.5)),
                 _ => return Err("driver must be ai or pursuit".into()),
