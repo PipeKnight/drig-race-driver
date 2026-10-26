@@ -3,14 +3,17 @@
 //! through the original's collision listener (`grid_tools::collision_audio`)
 //! and the one-shots play on the player's Panel Coll group or the AI group,
 //! with the A23B70 distance law; each car's scrape loop (453710/458780)
-//! follows on the same groups. Presentation only, never feeds physics.
+//! follows on the same groups. The player's damage and suspension sounds
+//! (`grid_tools::damage_audio`, §27) use the same bank and mixer.
+//! Presentation only, never feeds physics.
 use bevy::{
     audio::{AddAudioSource, ChannelCount, SampleRate, Source},
     prelude::*,
 };
 use grid_tools::{
     audio_mix::{self, Table},
-    collision_audio::{Bank, Car, Heights, Listener, Mixer, contacts_of},
+    collision_audio::{Bank, Car, Heights, LOOP_SLOTS, Listener, Mixer, contacts_of},
+    damage_audio::{self, Damage, Place},
     source_vehicle::{DELTA, Runtime, multi::Contacted},
 };
 use std::{
@@ -23,11 +26,13 @@ use std::{
 
 const RATE: u32 = grid_tools::engine_audio::RATE;
 
-/// For the audio thread: a one-shot (variety, pitch, linear gain, pan) or
-/// car k's scrape loop level and pan.
+/// For the audio thread: a one-shot (variety, pitch, linear gain, pan),
+/// loop slot k's level and pan (car k's scrape below `LOOP_SLOTS`), or the
+/// end of a loop.
 enum Start {
     Shot(String, f32, f32, [f32; 2]),
     Scrape(usize, String, f32, f32, [f32; 2]),
+    Stop(usize),
 }
 
 #[derive(Resource)]
@@ -38,6 +43,10 @@ pub(crate) struct CollisionSound {
     /// Heights per field model; `car_model[k]` selects car k's.
     heights: Vec<Heights>,
     car_model: Vec<usize>,
+    /// Per field model: the carsetup EngineBay and Cockpit offsets.
+    emitters: Vec<[[f32; 3]; 2]>,
+    /// The player's damage sounds.
+    damage: Damage,
     starts: Sender<Start>,
     last: Option<(u64, u64)>,
 }
@@ -68,7 +77,8 @@ impl Iterator for Decoder {
                     Start::Shot(variety, pitch, gain, pan) => {
                         self.mixer.start(&variety, pitch, gain, pan);
                     }
-                    Start::Scrape(car, variety, pitch, gain, pan) => self.mixer.scrape(car, &variety, pitch, gain, pan),
+                    Start::Scrape(slot, variety, pitch, gain, pan) => self.mixer.looped(slot, &variety, pitch, gain, pan),
+                    Start::Stop(slot) => self.mixer.stop(slot),
                 }
             }
         }
@@ -109,10 +119,11 @@ pub(crate) fn install(
     bank: Arc<Bank>,
     table: Option<Arc<Table>>,
     heights: Vec<Heights>,
+    emitters: Vec<[[f32; 3]; 2]>,
     car_model: Vec<usize>,
 ) {
     app.add_audio_source::<CollisionSource>();
-    install_systems(app, bank, table, heights, car_model);
+    install_systems(app, bank, table, heights, emitters, car_model);
 }
 /// `install` without the device playback (the race-start mix test).
 pub(crate) fn install_systems(
@@ -120,6 +131,7 @@ pub(crate) fn install_systems(
     bank: Arc<Bank>,
     table: Option<Arc<Table>>,
     heights: Vec<Heights>,
+    emitters: Vec<[[f32; 3]; 2]>,
     car_model: Vec<usize>,
 ) {
     let (starts, receiver) = channel();
@@ -130,6 +142,8 @@ pub(crate) fn install_systems(
         table,
         heights,
         car_model,
+        emitters,
+        damage: Damage::default(),
         starts,
         last: None,
     })
@@ -167,6 +181,13 @@ fn tick(
     listening: super::engine_sound::Listening,
 ) {
     let now = (driving.segment, driving.runtime.ticks);
+    if sound.last.is_some_and(|(segment, _)| segment != now.0) {
+        // A new segment: the player's damage voices start again.
+        sound.damage = Damage::default();
+        for slot in 0..damage_audio::SLOTS {
+            let _ = sound.starts.send(Start::Stop(LOOP_SLOTS + slot));
+        }
+    }
     if sound.last == Some(now) || now.1 == 0 || driving.paused || driving.failure.is_some() {
         sound.last = Some(now);
         return;
@@ -232,6 +253,52 @@ fn tick(
             );
             let pan = listening.heard(listener, position + Vec3::from_array(voice.offset));
             let _ = sound.starts.send(Start::Scrape(k, voice.variety, voice.pitch, gain, pan));
+        }
+        // 457BE0's player calls: suspension, engine, brake and steering damage.
+        if k == 0 {
+            let input = damage_audio::Input::vehicle(&runtime.state.car.owner.vehicle, runtime.velocity());
+            let frame = sound.damage.frame(&sound.bank, &mut sound.listener, &input, DELTA);
+            let pose = Mat4::from_cols_array(&car.pose);
+            let offsets = sound.emitters.get(model).copied().unwrap_or([[0., 0., 2.], [0., 0.5, 0.]]);
+            let wheels = runtime.wheels();
+            let place = |p: Place| {
+                pose.transform_point3(Vec3::from_array(match p {
+                    Place::EngineBay => offsets[0],
+                    Place::Cockpit => offsets[1],
+                    Place::Wheel(i) => wheels[i.min(3)].anchor,
+                }))
+            };
+            // [I] Engine and Other Mech heard from the camera as the engine
+            // and mechanical voices are; Displacement from the car as the
+            // player's other collision one-shots.
+            let heard_from = |group: usize| if group == grid_tools::collision_audio::DISPLACEMENT { position } else { ear };
+            for slot in frame.stops {
+                let _ = sound.starts.send(Start::Stop(LOOP_SLOTS + slot));
+            }
+            for l in frame.loops {
+                let Some(variety) = sound.bank.varieties.get(&l.variety) else { continue };
+                let (at, from) = (place(l.place), heard_from(l.group));
+                let gain = audio_mix::backend_gain(
+                    l.volume_db,
+                    group_db(sound, l.group),
+                    audio_mix::distance_db(at.distance(from), variety.min_distance, variety.max_distance),
+                );
+                let pan = listening.heard(from, at);
+                let _ = sound.starts.send(Start::Scrape(LOOP_SLOTS + l.slot, l.variety, l.pitch, gain, pan));
+            }
+            for shot in frame.shots {
+                let Some(variety) = sound.bank.varieties.get(&shot.variety) else { continue };
+                let (at, from) = (place(shot.place), heard_from(shot.group));
+                let gain = audio_mix::backend_gain(
+                    shot.volume_db,
+                    group_db(sound, shot.group),
+                    audio_mix::distance_db(at.distance(from), variety.min_distance, variety.max_distance),
+                );
+                if gain > 0. {
+                    let pan = listening.heard(from, at);
+                    let _ = sound.starts.send(Start::Shot(shot.variety, shot.pitch, gain, pan));
+                }
+            }
         }
         for play in plays {
             let Some(variety) = sound.bank.varieties.get(&play.variety) else { continue };

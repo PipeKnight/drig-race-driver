@@ -2866,6 +2866,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             // A model whose bank fails to load is silent; the other cars
             // keep their engines.
             let banks = engine_sound::load_banks(&root, &field.models);
+            // The EngineBay and Cockpit offsets of each model, for the
+            // player's damage sounds.
+            let emitters: Vec<[[f32; 3]; 2]> =
+                banks.iter().map(|b| b.as_ref().map_or([[0., 0., 2.], [0., 0.5, 0.]], |b| [b.emitters[0], b.cockpit])).collect();
             engine_sound::install(&mut app, banks, mix.clone());
             match grid_tools::collision_audio::Bank::load(&root) {
                 Ok(bank) => {
@@ -2879,7 +2883,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                             })
                         })
                         .collect();
-                    collision_sound::install(&mut app, bank, mix.clone(), heights, field.car_model.clone());
+                    collision_sound::install(&mut app, bank, mix.clone(), heights, emitters, field.car_model.clone());
                 }
                 Err(error) => warn!("Collision audio unavailable; driving continues: {error}"),
             }
@@ -6030,6 +6034,7 @@ mod driving_tests {
             grid_tools::collision_audio::Bank::load(root).unwrap(),
             mix.clone(),
             vec![grid_tools::collision_audio::Heights::of(root, &model).unwrap()],
+            vec![[[0., 0., 2.], [0., 0.5, 0.]]],
             vec![0],
         );
         hud_sound::install_systems(&mut app, grid_tools::hud_audio::Bank::load(root).unwrap(), mix.clone());
