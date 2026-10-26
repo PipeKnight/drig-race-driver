@@ -475,6 +475,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G296](G0296.md) | 2026-10-26 | Add a bounded native DLAA late smoke profile for BMW |
 | [G295](G0295.md) | 2026-10-26 | Integrate the current engine-audio main into the graphics branch |
 | [G294](G0294.md) | 2026-10-26 | Verify the native late-smoke scheduling boundary before DLAA admission |
 | [G293](G0293.md) | 2026-10-26 | Add an opt-in BMW glass and lamp smoke boundary |

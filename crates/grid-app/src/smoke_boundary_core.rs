@@ -433,10 +433,76 @@ pub(crate) fn draw_into_scene<'w>(
     frame: &'w Frame,
     proof: &Proof,
 ) -> Result<(), &'static str> {
-    if !frame.prepared
-        || proof.failed()
-        || target.main_texture_format() != TextureFormat::Rgba8UnormSrgb
+    draw_into_scene_format(
+        context,
+        world,
+        view,
+        target,
+        depth,
+        frame,
+        proof,
+        TextureFormat::Rgba8UnormSrgb,
+        "grouped-direct same scene/depth",
+    )
+}
+
+/// Native HDR1 entry ONLY after actual main DlaaView/Dlss Dlaa/prepass,
+/// retained identity, full physical extent, viewport and source-pipeline preflight.
+/// These caller checks must also be repeated immediately before replay.
+#[cfg(feature = "dlaa")]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_into_scene_native_hdr1<'w>(
+    context: &'w mut RenderContext,
+    world: &'w World,
+    view: Entity,
+    target: &'w ViewTarget,
+    depth: &'w ViewDepthTexture,
+    frame: &'w Frame,
+    proof: &Proof,
+) -> Result<(), &'static str> {
+    let extent = target.main_texture().size();
+    if target.main_texture_format() != TextureFormat::Rgba16Float
+        || target.main_texture().format() != TextureFormat::Rgba16Float
+        || target.main_texture().sample_count() != 1
+        || target.sampled_main_texture().is_some()
+        || extent.width == 0
+        || extent.height == 0
+        || extent.depth_or_array_layers != 1
+        || depth.texture.format() != TextureFormat::Depth32Float
+        || depth.texture.sample_count() != 1
+        || depth.texture.size() != extent
     {
+        proof.fail("boundary native HDR1 attachment unsupported");
+        return Err("boundary native HDR1 attachment unsupported");
+    }
+    draw_into_scene_format(
+        context,
+        world,
+        view,
+        target,
+        depth,
+        frame,
+        proof,
+        TextureFormat::Rgba16Float,
+        "grouped-native HDR1 same scene/depth",
+    )
+}
+
+// Private expected format, never an unrestricted public rendering profile.
+// Baseline guard/label/order/body unchanged apart from this extraction.
+#[allow(clippy::too_many_arguments)]
+fn draw_into_scene_format<'w>(
+    context: &'w mut RenderContext,
+    world: &'w World,
+    view: Entity,
+    target: &'w ViewTarget,
+    depth: &'w ViewDepthTexture,
+    frame: &'w Frame,
+    proof: &Proof,
+    format: TextureFormat,
+    label: &'static str,
+) -> Result<(), &'static str> {
+    if !frame.prepared || proof.failed() || target.main_texture_format() != format {
         proof.fail("boundary frame/target unready");
         return Err("boundary frame/target unready");
     }
@@ -444,7 +510,7 @@ pub(crate) fn draw_into_scene<'w>(
     let ok = {
         let colours = [Some(target.get_color_attachment())];
         let mut pass = context.begin_tracked_render_pass(RenderPassDescriptor {
-            label: Some("grouped-direct same scene/depth"),
+            label: Some(label),
             color_attachments: &colours,
             depth_stencil_attachment: Some(depth.get_attachment(StoreOp::Store)),
             timestamp_writes: None,

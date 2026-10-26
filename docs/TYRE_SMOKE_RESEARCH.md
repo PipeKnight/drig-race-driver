@@ -1026,3 +1026,69 @@ enhanced admission is enabled. The accepted G293 owner build/log remain unchange
 The refactor and freshly integrated F571 pass the grid-app crate gate: 443 tests,
 strict Clippy and documentation sanity. No native HDR rendering is claimed.
 Evidence: ignored local/graphics/native-late-pipe-cpu01/gate02 and source02.json.
+
+### G296: native DLAA late smoke replay (in progress)
+
+The opt-in BMW/Donington native1080 Image profile now executes the same five-group
+smoke transaction after native transparency and before EarlyPostProcess/DLAA.
+All selected Off/Control/Late arms share strict source-context validation;
+Control retains ordinary transparency and is not a neutral late-reorder control.
+The new HDR1 path validates current target/depth and actual depth/motion prepass
+textures, and retains mandatory restoration/failure reporting. Defaults and the
+owner-accepted baseline BMW playable remain unchanged.
+
+Source02 passes450 no-feature tests (before declaration-order cleanup), strict
+Clippy in both variants,30 feature smoke tests and a release build. Nine actual
+CLI refusals pass. The three native GPU runs exit0 with90PNG+final each and197
+ordered-family rows plus request ledgers matching across arms. Late records the
+first current HDR1 terminal/restored view at frame3/tick4 and periodic238 replays
+in240 calls with errorNone. Request metadata is not a PNG/render-stage join.
+
+The first observer rejected the normal50MiB HDR scene-probe readback after an
+otherwise successful Off run. Its failure and files remain intact; a separately
+reviewed observer revalidated all original Off files and continued only the two
+missing arms. This is an observer correction, with no source/executable change.
+
+Every full RGB pair differs, including Off/Control (max55); residuals remain
+unresolved and are not labelled noise. Root's selected partial-cloud0001 window
+ROI changes strongly under Late, while the final car remains coherent. The
+scenario stops near the pit wall and smoke decays, so this does not establish
+heavy-smoke/Window/general/source-compositor parity. A global late layer can
+also attenuate a transparent surface geometrically in front of smoke; general
+promotion requires foreground/background controls.
+
+Evidence: ignored local/graphics/bmw-native-boundary01, source02/check02,
+negative-cli-run01, dense450-run01/resume03-result.json, full RGB/ROI analyses,
+and the independent runtime03 audit. Executable SHA256
+3a569b745b5f82a1d2d5edd0b90ebfb1ab097d6116dc92d00e98e55677638412.
+Selected-route Istanbul and manual Window admission are the next unverified
+continuation; the source02 results cannot be attributed to that future code.
+
+The selected-route/manual continuation is applied as source03/source04. It passes
+456 baseline app tests, including real Istanbul probe installation/calibration
+and the source-sky CPU cube bake. That bake is six 256x256 sRGB faces, not an HDR
+GPU validation. Baseline Clippy then rejected four iterator-style expressions
+inside the new sky test; source04 changes only those test iterators. The original
+failure is retained. Source04/check05 now passes34native smoke tests and three Istanbul tests,
+including both actual-resource cases and the existing smoke restart regression.
+Both strict Clippy variants and the native release build pass. The new executable
+SHA256 is437afa47b978884b6082609b8302c2b8e5882892354b9865e3678ffac5148025.
+Fresh Istanbul GPU and actual manual Window/camera/restart checks are pending;
+no new playable or broader compatibility is claimed yet.
+
+
+Current Istanbul RGB controls also retain unresolved residuals: all91 Off/Control
+pairs differ, maximum channel24, with36457changed pixels at the largest-count
+frame0083. In native0053, the preselected rear-glass rectangle has ordinary
+max5 versus Control/Late max94, and the lamp rectangle max1 versus max67. These
+are rectangles, not semantic masks; no noise or whole-image neutrality claim.
+Exact per-frame counts/histograms/hashes and bundled-tool provenance are saved
+under istanbul450-run01/rgb-analysis01/ (result SHAd28cf39555049b0ff6bbd014cdb9706bc2ea0ed91c97c50a51092efadcfaf4f4).
+
+Actual Manual cold Window reaches native prepared1920 and first HDR1 restoration
+at frame13/tick0, with errorNone summaries. Automated menu keys were not consumed;
+no GoToRace/C/R was recorded. Its predetermined600s harness timeout killed only
+the owned child; manual01-result is exit1 and retained. C/R and clean manual exit
+are unverified, not a rendering success. One dedicated private EXE/DLL candidate
+is preserved with NOT_WINDOW_CR_VALIDATED provenance and no enabled launcher.
+Future main integration must use fresh source/build/runtime evidence.

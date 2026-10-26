@@ -2,6 +2,7 @@
 //! Moves existing prepared draws only. No material, pipeline, simulation or sample changes.
 use super::smoke_boundary_core as core;
 mod live;
+pub(crate) mod native_diagnostic;
 use super::smoke_pilot::Profile;
 use bevy::{
     camera::{MainPassResolutionOverride, NormalizedRenderTarget, RenderTarget},
@@ -24,7 +25,7 @@ use bevy::{
         },
     },
 };
-pub(crate) use live::State as LiveState;
+pub(crate) use live::{State as LiveState, NativeLatePolicy};
 use std::{
     fmt::Write as _,
     fs::{File, OpenOptions},
@@ -778,6 +779,22 @@ fn publish(audit: Res<Audit>, driving: Res<super::Driving>, mut exit: MessageWri
         exit.write(AppExit::error());
     }
 }
+/// Context token construction is private to native_diagnostic::Arm::validate.
+/// Off and Control deliberately register no draw/phase policy. Control is an
+/// ordinary-transparency admission control, NOT an image-neutral late reorder.
+pub(crate) fn install_native_diagnostic(app: &mut App, context: native_diagnostic::Validated) -> std::io::Result<()> {
+    #[cfg(not(feature = "dlaa"))]
+    let _ = app;
+    println!("native_smoke_diagnostic arm={:?} source_context_validated=true native_runtime=unproven boundary_registration={} control_semantics=ordinary_transparency route={:?} capture_profile={:?}", context.arm(), context.installs_boundary(), context.route(), context.capture_profile());
+    if context.installs_boundary() {
+        #[cfg(feature="dlaa")]
+        { return live::install_profile(app, crate::ground_skid_pass::Profile::NativeDlaaHdr1); }
+        #[cfg(not(feature="dlaa"))]
+        { return Err(std::io::Error::other("native smoke requires dlaa feature")); }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

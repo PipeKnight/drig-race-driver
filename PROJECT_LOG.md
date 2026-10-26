@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G296 (2026-10-26): BMW/Donington and Istanbul native-DLAA HDR smoke replay passes Image controls and source04 checks/16 CLI refusals; dense glass/lens/skid ghosts attenuate. Manual cold Window renders, but UI input was not consumed and finite test timed out: C/R unverified, no enabled native playable. Owner baseline/Motion preserved; see TYRE_SMOKE_RESEARCH.
 - G294 (2026-10-26): native reverse-pipe CPU graph/failure proof and shared installer transaction pass443app tests/Clippy after F571 integration. Existing early body and accepted BMW/Motion playables preserved; HDR1 late profile/admission and actual DLAA rendering remain unverified. See TYRE_SMOKE_RESEARCH.
 - G293 (2026-10-26): owner accepts the BMW/Istanbul baseline smoke fix; critical glass/lens ghosts resolved in this trial, minor appearance deferred. 438 app tests/Clippy, paired Image and actual Window cold-start/one-C/R checks pass. Owner log archived in full; Motion/Lacetti preserved. NativeDLAA/general/damage remain open; see TYRE_SMOKE_RESEARCH.
 - G292 (2026-10-26): fresh mapped BMW90 pair confirms existing late smoke replay hides the floating rear glass/lens in dense smoke without altering17surface materials; ground-only replay does not fix them. G293 ordinary-driving bridge is under test; no general/default/DLAA acceptance. See TYRE_SMOKE_RESEARCH.

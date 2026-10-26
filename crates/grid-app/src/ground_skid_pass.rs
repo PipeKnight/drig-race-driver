@@ -308,6 +308,14 @@ pub(crate) fn install_profile(
     if mode == Mode::Off {
         return Ok(());
     }
+    if app
+        .world()
+        .contains_resource::<super::smoke_boundary::NativeLatePolicy>()
+    {
+        return Err(
+            std::io::Error::other("early ground pass requires native late boundary OFF").into(),
+        );
+    }
     let proof = Proof::default();
     app.insert_resource(ProducerPolicy)
         .insert_resource(Config(mode, profile))
@@ -544,14 +552,18 @@ fn extract(
     snapshot.owner = Some(expected);
 }
 #[cfg(feature = "dlaa")]
-type NativeInputs = (
+pub(crate) type NativeInputs = (
     Has<super::native_dlaa::DlaaView>,
     Option<&'static bevy::anti_alias::dlss::Dlss>,
     Option<&'static bevy::core_pipeline::prepass::ViewPrepassTextures>,
 );
 #[cfg(not(feature = "dlaa"))]
-type NativeInputs = ();
-fn query_native(entity: Entity, query: &Query<NativeInputs>, size: Option<UVec2>) -> bool {
+pub(crate) type NativeInputs = ();
+pub(crate) fn query_native(
+    entity: Entity,
+    query: &Query<NativeInputs>,
+    size: Option<UVec2>,
+) -> bool {
     #[cfg(feature = "dlaa")]
     {
         query
@@ -564,7 +576,7 @@ fn query_native(entity: Entity, query: &Query<NativeInputs>, size: Option<UVec2>
         false
     }
 }
-fn world_native(world: &World, entity: Entity, size: Option<UVec2>) -> bool {
+pub(crate) fn world_native(world: &World, entity: Entity, size: Option<UVec2>) -> bool {
     #[cfg(feature = "dlaa")]
     {
         native_components(
@@ -1308,9 +1320,25 @@ fn compose_native(world: &mut World, schedule: &mut Schedule) -> Result<(), (boo
         IntoSystem::into_system(try_native_skid.pipe(main_transparent_pass_3d)),
     )
 }
-// Shared bounded transaction, not a new runtime policy. The early entry above
-// remains the sole production caller until a reviewed late bridge is installed.
+// Shared bounded transaction for the exact native early/late constructors.
+// Runtime admission must select only one policy; this helper does not admit it.
 // Callers MUST preserve the dedicated single-threaded pre-Render failure barrier.
+// Narrow crate entry: constructs the actual native function exactly once.
+// The live bridge owns its separate single-threaded pre-Render failure barrier.
+pub(crate) fn compose_native_late<Late, Marker>(
+    world: &mut World,
+    schedule: &mut Schedule,
+    late: Late,
+) -> Result<(), (bool, String)>
+where
+    Late: IntoSystem<(), (), Marker>,
+{
+    compose_native_candidate(
+        world,
+        schedule,
+        IntoSystem::into_system(main_transparent_pass_3d.pipe(late)),
+    )
+}
 fn compose_native_candidate<S: System<In = (), Out = ()>>(
     world: &mut World,
     schedule: &mut Schedule,

@@ -77,6 +77,7 @@ mod skid_phase_ledger;
 mod smoke_ct_neutral;
 mod smoke_boundary_core;
 mod smoke_boundary;
+use smoke_boundary::native_diagnostic as native_smoke;
 mod ground_skid_pass;
 mod ground_skid_pass_core;
 mod smoke_pilot;
@@ -1157,6 +1158,9 @@ fn main() {
     // No command line on Android: the event menu, or the race it chose.
     #[cfg(target_os = "android")]
     let args = event_menu::android_args();
+    if let Err(error)=native_smoke::validate_entry_args(&args) {
+        eprintln!("grid-app: {error}");std::process::exit(1);
+    }
     // Isolated sample probe branches before menu/settings/game-root discovery.
     #[cfg(not(target_os = "android"))]
     if args.iter().any(|arg| arg == "--coverage-sample-probe") {
@@ -1471,6 +1475,10 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut motion_phase_profile = None;
     let mut smoke_ct = smoke_ct_neutral::Mode::Off;
     let mut smoke_boundary = smoke_boundary::Mode::Off;
+    let mut native_smoke_arm: Option<native_smoke::Arm> = None;
+    let mut native_smoke_data_dir_explicit = false;
+    let mut native_smoke_capture_profile = None;
+    let mut native_smoke_script_flags = native_smoke::ScriptFlags::default();
     let mut crowd_preview = crowd_preview::Mode::Off;
     let mut crowd_flash_preview = flash_preview::Mode::Off;
     let mut foundation_front = foundation_front::Mode::Off;
@@ -1500,9 +1508,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut handbrake_from = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
+        native_smoke_script_flags.note_arg(&arg);
         match arg.as_str() {
             // Already read by settings::load.
             "--settings" | "--data-dir" => {
+                if arg == "--data-dir" { native_smoke_data_dir_explicit = true; }
                 args.next();
             }
             "--drive" => drive = true,
@@ -1967,6 +1977,14 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             "--motion-phase-profile" => {
                 motion_phase_profile = Some(smoke_pilot::Profile::parse(&args.next().ok_or("--motion-phase-profile needs an exact profile")?)?);
             }
+            "--native-smoke-profile" => {
+                let selected=native_smoke::CaptureProfile::parse(&args.next().ok_or("--native-smoke-profile needs image450 or manual")?)?;
+                if native_smoke_capture_profile.replace(selected).is_some(){return Err("--native-smoke-profile must occur once".into());}
+            }
+            "--native-smoke-boundary" => {
+                let selected = native_smoke::Arm::parse(&args.next().ok_or("--native-smoke-boundary needs off, control or late")?)?;
+                if native_smoke_arm.replace(selected).is_some() { return Err("--native-smoke-boundary must occur once".into()); }
+            }
             "--smoke-boundary" => {
                 smoke_boundary = smoke_boundary::Mode::parse(&args.next().ok_or("--smoke-boundary needs off, grouped-direct or grouped-live")?)?;
             }
@@ -2181,6 +2199,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("--asphalt-filter-strength 0..1: mix original/filtered asphalt RGB; default1 retains the mip pilot,0 disables RGB filtering.");
                 println!("--window-transitions FRAME:C,FRAME:R,...: default-off bounded offscreen raw keyboard pulses; expected Extract frame clock; at most8events and one R; explicit --input device=keyboard/--render-fps required.");
                 println!("--window-sort off|current: defaultoff; optional current per-frame car0 window sort centres; source textures/PBR/alpha/depth unchanged; bounded rendered Donington Lacetti only.");
+                println!("--native-smoke-boundary off|control|late: explicit BMW Don0/Istanbul0 HDR1 scope; all arms share native DLAA/probe3/clean-data/legacy-source-stock guards. Control registers no boundary. --native-smoke-profile image450|manual (default image450); manual uses direct --drive Race Options/Go To Race in the same process and forbids ALL explicit script/capture/clock flags, even neutral values.");
                 println!("--oit-capacity-audit tick:N|frame:N: one pre-resolve GPU attempted-fragment/capacity snapshot for bounded OIT modes only; final capture waits for verified readback.");
                 println!("--smoke-compositor off|control|oit16|oit32|oit32-pruned: default-off bounded baseline640x360 fragment transparency diagnostic; all trials MSAAoff, finite capacity not validated for production.");
                 println!("--crowd-preview off|control|static-billboards: default-off bounded static Detroit route_8 USA grandstand preview, baseline MSAA4/LOD0/reference/render/benchmark1..600 only; fixed source scale/palette fixture, PBR adaptation, no animation/flash or source parity.");
@@ -2601,7 +2620,54 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Narrow route exception only after the complete object diagnostic guard passed.
     // This does not enable enhanced Detroit play or arbitrary AA modes.
     let object_coverage_dlaa = validated_coverage_dlaa;
-    if graphics.enhanced() && ((!route.is_default() && !object_coverage_dlaa) || !player_car.is_default()) {
+    // This token validates ALL explicitly selected arms, INCLUDING Off. It is
+    // source-context admission only; actual native-view readiness remains required.
+    if native_smoke_capture_profile.is_some() && native_smoke_arm.is_none() {return Err("--native-smoke-profile requires explicit --native-smoke-boundary".into());}
+    let native_smoke_context = native_smoke_arm.map(|arm| {
+        let mut diagnostics = settings::diagnostics().clone();
+        diagnostics.ground_trace = false; // Existing CPU evidence only, no timing exemption.
+        arm.validate(native_smoke::Context {
+            feature_dlaa: cfg!(feature="dlaa"), graphics:&graphics,
+            explicit_car:car_chosen, car:player_car.stem(), route:route.path(), subroute:route.subroute(),
+            scene:native_smoke::Scene {
+                drive, track:track || drive, headless, collision, menu:from_menu, lod:&lod,
+                solo:opponents.is_none() && opponent_cars.is_none() && series.is_none() && discipline.is_none()
+                    && trial_laps.is_none() && profile.time_limit.is_none() && grid_position.is_none() && career_result.is_none(),
+                undamaged:body_contacts.is_none() && body_events.is_none() && deformation.is_none(),
+                keyboard:input_settings.device==input::Device::Keyboard,
+            },
+            clean:native_smoke::Clean {
+                explicit_data_dir:native_smoke_data_dir_explicit, loaded_files:profile.loaded_file_count,
+                diagnostics_clean:diagnostics==settings::Diagnostics::default(),
+                no_perf:std::env::var_os("GRID_PERF_TEST").is_none() && std::env::var_os("GRID_PERF_TIMING").is_none(),
+            },
+            capture_profile:native_smoke_capture_profile.unwrap_or_default(),
+            capture:native_smoke::Capture {
+                image:output.is_some(),native_window:matches!(profile.video_render_height(),render_scale::RenderHeight::Native) && !mobile::enabled(),motion:motion_sequence.is_some(),script_flags:native_smoke_script_flags,ticks:drive_ticks,fps:render_fps,
+                exact_window:motion_sequence.is_some_and(|c| c.exact_phase_window(190,90,30,450)),
+                handbrake:handbrake_from,throttle:scripted.throttle,steering:scripted.steering,
+            },
+            exclusions:native_smoke::Exclusions {
+                phases_off:ground_skid_pass==ground_skid_pass::Mode::Off && smoke_boundary==smoke_boundary::Mode::Off
+                    && skid_order==skid_marks::OrderMode::Off && skid_reflectance.is_none()
+                    && smoke_compositor==smoke_compositor::Mode::Off && smoke_ct==smoke_ct_neutral::Mode::Off
+                    && !motion_phase_map && motion_phase_profile==smoke_pilot::Profile::Derby120,
+                scene_pilots_off:foundation_front==foundation_front::Mode::Off && foundation_backing==foundation_backing::Mode::Off
+                    && crowd_preview==crowd_preview::Mode::Off && crowd_flash_preview==flash_preview::Mode::Off
+                    && graphics.object_coverage==object_materials::CoverageMode::Off && !graphics.double_fence_wire
+                    && !source_haze && !reflection_calibration && !include_batches && !audio_check,
+                camera_off:!render_fixed_step && capture_orbit_rate.is_none() && eye.is_none() && target.is_none(),
+                groups_ground:smoke_order==tyre_smoke::SmokeOrder::Groups && ground_effect_assets::enabled(),
+                overrides_off:window_phase_target.is_none() && oit_capacity_target.is_none() && temporal_audit_tick.is_none()
+                    && temporal_colour_tick.is_none() && temporal_centre.is_none() && window_transition_script.is_none()
+                    && !window_sort_current && !car_transparent_sort && texture_override_path.is_none()
+                    && surface_rgb_override.is_none() && geometry_pixel.is_none(),
+            },
+            paint_response_explicit,surface_specular_explicit,
+        })
+    }).transpose()?;
+    let native_smoke_route_admitted=native_smoke_context.is_some_and(|c|c.matches_route(route.path(),route.subroute()));
+    if graphics.enhanced() && ((!route.is_default() && !object_coverage_dlaa && !native_smoke_route_admitted) || (!player_car.is_default() && !native_smoke_route_admitted)) {
         return Err("enhanced graphics currently requires Lacetti and Donington route_0; baseline supports other cars/routes".into());
     }
     if profile.grid_back && grid_position.is_none() {
@@ -3797,6 +3863,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .then(|| app.world().resource::<Capture>().path.clone());
         smoke_boundary::install(&mut app, smoke_boundary, path.as_deref(), motion_phase_profile)?;
     }
+    if let Some(context) = native_smoke_context {
+        smoke_boundary::install_native_diagnostic(&mut app, context)?;
+    }
     if let Some(target) = window_phase_target {
         let path = app.world().resource::<Capture>().path.clone();
         window_phase_audit::install(&mut app, target, &path)?;
@@ -3822,10 +3891,11 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             || !track
             || collision
             || !(reference || drive)
+            || (!route.is_default() && !native_smoke_route_admitted)
         {
-            return Err("--reflections probe requires enhanced source IBL and a Donington reference/drive scene".into());
+            return Err("--reflections probe requires enhanced source IBL and default Donington or the exact validated native BMW route".into());
         }
-        scene_probe::install(&mut app, &root)?;
+        scene_probe::install(&mut app, &root, &route)?;
     }
     if graphics.moving_probe && graphics.reflection_mode != 3 {
         return Err("--probe-update moving requires --reflections probe".into());
@@ -3834,7 +3904,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         if !track || collision || !(reference || drive) {
             return Err("reflection calibration requires Donington reference/drive".into());
         }
-        scene_probe::install_calibration(&mut app, &root)?;
+        scene_probe::install_calibration(&mut app, &root, &route)?;
     }
     if graphics.enhanced() && graphics.clearcoat_prepass_fix {
         clearcoat_prepass::install(&mut app);
