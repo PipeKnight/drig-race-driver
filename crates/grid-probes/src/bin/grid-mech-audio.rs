@@ -5,8 +5,9 @@
 //! block as grid-app publishes them, heard from the car's mounted bumper
 //! view (Normal mode, Bonnet audio camera). Writes one 48 kHz mono WAV per
 //! variant: `base` without mechanical sounds, then one per sound group and
-//! `all`. After the lap, 4 s of authored controls: the limiter, then a lift
-//! (without the whine, which needs the vehicle).
+//! `all`, and the same car heard as an opponent 3 m away without and with
+//! its mechanical sounds. After the lap, 4 s of authored controls: the
+//! limiter, then a lift (without the whine, which needs the vehicle).
 use grid_tools::{
     audio_mix::{self, Camera, Table},
     car::Car,
@@ -38,17 +39,23 @@ fn wave(path: &Path, pcm: &[i16]) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Mechanical groups heard in a variant (`mech_audio` group indices), and
-/// whether the whine plays. It shares the Gearbox group with the clunk, so
-/// `whine` holds both; compare it with `clunk`.
-const VARIANTS: [(&str, &[usize], bool); 6] = [
-    ("base", &[], false),
-    ("clunk", &[mech_audio::GEARBOX], false),
-    ("backfire", &[mech_audio::EXHAUST], false),
-    ("turbo", &[mech_audio::TURBO, mech_audio::ENGINE], false),
-    ("whine", &[mech_audio::GEARBOX], true),
-    ("all", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE], true),
+/// Mechanical groups heard in a variant (`mech_audio` group indices),
+/// whether the whine plays, and whether the car is the player's. The whine
+/// shares the Gearbox group with the clunk, so `whine` holds both; compare
+/// it with `clunk`. The `opponent` variants play the same car as an AI car
+/// (AI group for everything, `Mixer::player` false) 3 m from each emitter.
+const VARIANTS: [(&str, &[usize], bool, bool); 8] = [
+    ("base", &[], false, true),
+    ("clunk", &[mech_audio::GEARBOX], false, true),
+    ("backfire", &[mech_audio::EXHAUST], false, true),
+    ("turbo", &[mech_audio::TURBO, mech_audio::ENGINE], false, true),
+    ("whine", &[mech_audio::GEARBOX], true, true),
+    ("all", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE], true, true),
+    ("opponent-base", &[], false, false),
+    ("opponent", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE], true, false),
 ];
+/// The opponent variants' distance from every emitter, m.
+const OPPONENT_DISTANCE: f32 = 3.;
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -127,15 +134,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         controls.len()
     );
     fs::create_dir(out)?;
-    for (name, groups, whine) in VARIANTS {
+    for (name, groups, whine, player) in VARIANTS {
         let mut mixer = Mixer::new(bank.clone());
-        mixer.bus_db = [engine_db[0], engine_db[1]];
+        mixer.player = player;
+        mixer.bus_db = if player { [engine_db[0], engine_db[1]] } else { [group(audio_mix::AI); 2] };
         let group_db = [mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE].map(|g| {
             let mix = [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE][g];
-            if groups.contains(&g) { group(mix) } else { f32::NEG_INFINITY }
+            match (groups.contains(&g), player) {
+                (false, _) => f32::NEG_INFINITY,
+                (true, true) => group(mix),
+                (true, false) => group(audio_mix::AI),
+            }
         });
         mixer.mech = Some(mech_audio::Voices::new(mech.clone(), RATE));
-        mixer.mech_levels = Levels { group_db, distance: [gearbox, exhaust, bay] };
+        let distance = if player { [gearbox, exhaust, bay] } else { [OPPONENT_DISTANCE; 3] };
+        mixer.mech_levels = Levels { group_db, distance };
         let mut pcm = Vec::with_capacity(controls.len() * BLOCK);
         let mut peak = 0f32;
         for (k, &control) in controls.iter().enumerate() {

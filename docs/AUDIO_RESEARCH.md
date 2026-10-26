@@ -385,6 +385,8 @@ Evidence: Ghidra output in the worktree `local/gtfix/decomp/wind1`–`wind4`; sc
   Probability is per frame (frame-rate dependent). Not ported yet.
 - **Handbrake**: hbrakeon/hbrakeoff (car_genmec) are resolved into M+0x128/+0x12C, but no
   reader was found [I: unused like wind].
+  Corrected in F582: 43C320 reads them (through [[car +0x2C] +0x18] = M+0x70, +0xB8/+0xBC) and
+  plays them on the edges of input 9961B0(8), player only, from 457BE0 (§25).
 
 ### 7.5 Crowd and ambience [O unless marked]
 
@@ -1471,3 +1473,47 @@ is −1.0 to −4 dB (mean −1.2 to −1.8 dB per gear; gear trim −1 dB), wit
 whine adds an RMS of 0.027–0.032 against the engine's 0.12–0.15 (`local/mech/render-03/whine.wav`
 minus `clunk.wav`). The other variants are bit-identical to `render-02`. The authored 4 s tail
 has no whine, since it has no vehicle. Not compared with the original by ear or capture.
+
+## 25. Opponents' mechanical sounds; the voice pool (F582)
+
+26 October 2026, Claude Code (car-series, owner task "the remaining missing sounds", item 1). Static
+(`tools/re/grid_re.py`) and offline renders; GRID was not launched.
+
+**Which mechanical sounds other cars play [O].**
+- Clunk: player only. 414750 sets +0x310 only when the car's +0x6C is 0 (41487F: `cmp [edx+0x6c],
+  0; jne`), and 451580 plays GearClucks only while +0x310 is set.
+- Turbo: player only (44D840 runs while car-audio +0xA4D8, §22).
+- Backfire: every car. 451770 runs 451260 for each car's controller; 411120 sets +0x334 on every
+  car but the focused one, so other cars play Detonations at x = 0 (−30 dB, pitch 1.0), ExhaustDet
+  10/40 m, on their +0x124 group (AI 0x11).
+- Whine: every car (§22, §24); 416A70 gives other cars group 0x11 and voice priority +8 = 0.
+
+**The voice pool [O].** 43EC80 sets the backend's voice count from `system/hardware_settings_config.xml`
+`<audio_card><audio mixing=… voices=…>`: software mixing (the shipped setting, `voices="120"`)
+uses 120, otherwise `voices` (default 50, capped by the card). The sfx_quality options set 119, 120
+and 121. The VoiceManager update A32B70 binds waiting voices to free channels after sorting them
+(A32DE0, a shell sort on A23530); with no channel free, A31E30 steals the first playing voice
+that the waiting one outranks (A23530: higher priority +0x40, then +0x70), else the voice is
+dropped ("can't find anything less important"). The priority is StartVoice's argument (435690's
+fourth, the whine's +8: 0 for other cars). No variety or CollisionInfo carries a priority.
+- [I] So other cars' whines are the first voices stolen once 120 play. The port has no voice
+  pool for any sound (engines, tyres, collisions, mechanical); with 12 cars it plays everything.
+
+**Port.**
+- `engine_audio_continuous::Mixer::player`: the clunk and the turbo only for the player; the
+  backfire at x = 1 for the player and x = 0 for others.
+- grid-app loads every field model's mec bank and whine settings; each opponent's decoder has its
+  mechanical voices; every car's whine runs per vehicle tick on the main thread (`CarWhine`); each
+  opponent's levels are the AI group (with the Effects trim) at its own GearBox, Exhaust and
+  EngineBay emitters, measured from the camera like its engine.
+- Probe `grid-mech-audio`: variants `opponent-base` and `opponent`, the traced Lacetti as an
+  opponent 3 m from every emitter (AI group, Bonnet camera −8 dB).
+
+**Render [port, offline].** `local/mech/render-04/`: the player variants are bit-identical to
+`render-03`. As an opponent at 3 m, its whine and backfire add RMS 0.085–0.10 against its engine's
+0.15–0.19, three times what the player's own add at the bumper (0.03): the AI group is −8 dB in
+the Bonnet camera, the player's Gearbox group −18 dB, and 3 m is inside the whine's 6 m minimum
+distance. The table makes a close opponent's whine louder than the player's own [I: as the
+original's table gives it; not compared with the original by ear or capture].
+- Not ported: the voice pool and stealing (all sounds), opponents' turbo and clunk (the original
+  has none).

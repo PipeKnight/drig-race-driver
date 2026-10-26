@@ -186,9 +186,12 @@ pub struct Mixer {
     pub failure: Option<&'static str>,
     /// 451770's gear-shift state (`engine_audio_shift`).
     shift: Shift,
-    /// The player's mechanical sounds (`mech_audio`); `None` for opponents,
-    /// which 4511E0 and the turbo update skip (+0x310, +0xA4D8).
+    /// The car's mechanical sounds (`mech_audio`), `None` without a mec bank.
     pub mech: Option<mech_audio::Voices>,
+    /// The player's car (car +0x6C = 0): only it plays the clunk (414750
+    /// sets +0x310 for it alone) and the turbo (+0xA4D8), and its backfire
+    /// plays at x = 1 (+0x334 clear, the focused car); other cars' at x = 0.
+    pub player: bool,
     /// Their group levels and emitter distances.
     pub mech_levels: mech_audio::Levels,
     /// 451260 and 44D840 state of the player.
@@ -216,6 +219,7 @@ impl Mixer {
             diagnostics: Diagnostics::default(),
             failure: None,
             mech: None,
+            player: true,
             mech_levels: mech_audio::Levels::SILENT,
             backfire: Backfire::new(0x5eed),
             turbo: Turbo::new(Turbo::SPIDLE, Turbo::HISS),
@@ -286,7 +290,7 @@ impl Mixer {
         engine_audio_load::limiter(&mut self.controller, control.gear, dt);
         if let Some(mech) = &mut self.mech {
             // 451580 → 4511E0: GearClucks at x = 1 (0 dB, pitch 1).
-            if shift.clunk {
+            if shift.clunk && self.player {
                 mech.start("GearClucks", 1.);
             }
             let (up, since_shift) = self.shift.since();
@@ -299,11 +303,13 @@ impl Mixer {
                 since_shift,
                 limiter: self.controller[0xd0] != 0,
             };
-            self.backfire.frame(exhaust, dt, 1., mech);
+            self.backfire.frame(exhaust, dt, if self.player { 1. } else { 0. }, mech);
             // 44D840 after 451770: the turbo on +0xC8 and +0xB0.
-            let state = if since_shift == 0. { if up { 1 } else { 2 } } else { 0 };
-            let blow = self.turbo.frame(dt, f(&self.controller, 0xc8), f(&self.controller, 0xb0), state);
-            self.turbo.play(blow, mech);
+            if self.player {
+                let state = if since_shift == 0. { if up { 1 } else { 2 } } else { 0 };
+                let blow = self.turbo.frame(dt, f(&self.controller, 0xc8), f(&self.controller, 0xb0), state);
+                self.turbo.play(blow, mech);
+            }
             // 4518E0 between 451770 and 44D840: the whine.
             match self.whine {
                 Some(w) => {

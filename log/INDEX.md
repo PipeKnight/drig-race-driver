@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F582](F0582.md) | 2026-10-26 | Engine audio: opponents' backfire and gear whine; the original's 120-voice pool |
 | [F581](F0581.md) | 2026-10-26 | Playable 975c018e7e2c with F569-F580, portable copy and APKs a2fc9b444690 |
 | [F580](F0580.md) | 2026-10-26 | Ground cover faces the camera in the vertex shader; skid marks stream in place |
 | [F579](F0579.md) | 2026-10-26 | Physics cost growth over a race: per-contact copies in car groups cut |
