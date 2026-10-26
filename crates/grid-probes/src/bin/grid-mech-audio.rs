@@ -7,7 +7,8 @@
 //! variant: `base` without mechanical sounds, then one per sound group and
 //! `all`, and the same car heard as an opponent 3 m away without and with
 //! its mechanical sounds. After the lap, 4 s of authored controls: the
-//! limiter, then a lift (without the whine, which needs the vehicle).
+//! limiter with the handbrake pulled 0.5–1.5 s in, then a lift (without
+//! the whine, which needs the vehicle).
 use grid_tools::{
     audio_mix::{self, Camera, Table},
     car::Car,
@@ -44,16 +45,19 @@ fn wave(path: &Path, pcm: &[i16]) -> Result<(), Box<dyn std::error::Error>> {
 /// shares the Gearbox group with the clunk, so `whine` holds both; compare
 /// it with `clunk`. The `opponent` variants play the same car as an AI car
 /// (AI group for everything, `Mixer::player` false) 3 m from each emitter.
-const VARIANTS: [(&str, &[usize], bool, bool); 8] = [
+const VARIANTS: [(&str, &[usize], bool, bool); 9] = [
     ("base", &[], false, true),
     ("clunk", &[mech_audio::GEARBOX], false, true),
     ("backfire", &[mech_audio::EXHAUST], false, true),
     ("turbo", &[mech_audio::TURBO, mech_audio::ENGINE], false, true),
     ("whine", &[mech_audio::GEARBOX], true, true),
-    ("all", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE], true, true),
+    ("handbrake", &[mech_audio::OTHER_MECH], false, true),
+    ("all", &ALL, true, true),
     ("opponent-base", &[], false, false),
-    ("opponent", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE], true, false),
+    ("opponent", &ALL, true, false),
 ];
+const ALL: [usize; 5] =
+    [mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE, mech_audio::OTHER_MECH];
 /// The opponent variants' distance from every emitter, m.
 const OPPONENT_DISTANCE: f32 = 3.;
 
@@ -70,12 +74,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut controls = Vec::new();
     let mut whines = Vec::new();
+    let mut handbrakes = Vec::new();
     for line in fs::read_to_string(&args[1])?.lines().skip(1) {
         let f: Vec<&str> = line.split('\t').collect();
         if f.len() < 6 {
             return Err(format!("trace line `{line}`").into());
         }
         whines.push(Voice::unpack(u64::from_str_radix(f[5], 16)?));
+        handbrakes.push(f.get(6).is_some_and(|h| *h == "1"));
         controls.push(Control {
             normalized_rpm: f[1].parse()?,
             throttle: f[2].parse()?,
@@ -90,6 +96,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // with the RPM falling to 0.4 over 2 s.
     for tick in 0..250 {
         let lift = tick >= 125;
+        // The handbrake pulled 0.5–1.5 s into the tail.
+        handbrakes.push((31..94).contains(&tick));
         let t = (tick as f32 - 125.).max(0.) / 125.;
         controls.push(Control {
             normalized_rpm: if lift { 1. - 0.6 * t } else { 1. },
@@ -120,6 +128,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let distance = |e: [f32; 3]| ((e[0] - ear[0]).powi(2) + (e[1] - ear[1]).powi(2) + (e[2] - ear[2]).powi(2)).sqrt();
     let [bay, exhaust] = bank.emitters.map(distance);
     let gearbox = distance(bank.gearbox);
+    let cockpit = distance(bank.cockpit);
     let mode = audio_mix::ModeMix::default();
     let group = |g: usize| mode.group_db(&table, Camera::Bonnet, g, 0.);
     let engine_db = [audio_mix::ENGINE, audio_mix::EXHAUST]
@@ -128,7 +137,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|(g, d)| audio_mix::distance_db(d, 10., 175.).map_or(f32::NEG_INFINITY, |d| group(g) + d))
         .collect::<Vec<_>>();
     println!(
-        "mech_render car={} mec={} view={view} ear={ear:?} distance_m gearbox={gearbox:.2} bay={bay:.2} exhaust={exhaust:.2} engine_db={engine_db:?} ticks={} lap_ticks={lap}",
+        "mech_render car={} mec={} view={view} ear={ear:?} distance_m gearbox={gearbox:.2} cockpit={cockpit:.2} bay={bay:.2} exhaust={exhaust:.2} engine_db={engine_db:?} ticks={} lap_ticks={lap}",
         car.stem(),
         bank.mechanics_bank,
         controls.len()
@@ -138,8 +147,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut mixer = Mixer::new(bank.clone());
         mixer.player = player;
         mixer.bus_db = if player { [engine_db[0], engine_db[1]] } else { [group(audio_mix::AI); 2] };
-        let group_db = [mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE].map(|g| {
-            let mix = [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE][g];
+        let group_db = ALL.map(|g| {
+            let mix = [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE, audio_mix::OTHER_MECH][g];
             match (groups.contains(&g), player) {
                 (false, _) => f32::NEG_INFINITY,
                 (true, true) => group(mix),
@@ -147,12 +156,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
         mixer.mech = Some(mech_audio::Voices::new(mech.clone(), RATE));
-        let distance = if player { [gearbox, exhaust, bay] } else { [OPPONENT_DISTANCE; 3] };
+        let distance = if player { [gearbox, exhaust, bay, cockpit] } else { [OPPONENT_DISTANCE; 4] };
         mixer.mech_levels = Levels { group_db, distance };
         let mut pcm = Vec::with_capacity(controls.len() * BLOCK);
         let mut peak = 0f32;
         for (k, &control) in controls.iter().enumerate() {
             mixer.whine = if whine { whines.get(k).copied().flatten() } else { None };
+            mixer.handbrake = handbrakes.get(k).copied().unwrap_or(false);
             for _ in 0..BLOCK {
                 let v = mixer.sample(control);
                 peak = peak.max(v.abs());

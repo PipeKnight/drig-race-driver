@@ -36,8 +36,9 @@ pub struct Bank {
     trims: [f32; 2],
     /// carsetup EngineBay and Exhaust emitter offsets in the car frame.
     pub emitters: [[f32; 3]; 2],
-    /// carsetup GearBox emitter offset.
+    /// carsetup GearBox and Cockpit emitter offsets.
     pub gearbox: [f32; 3],
+    pub cockpit: [f32; 3],
     /// carsetup MechBank: the `mec_*` bank of the car's mechanical sounds
     /// (41E785 resolves it into the car record +0x14, which 4511E0 passes to
     /// 435940 in place of the variety's template bank).
@@ -149,6 +150,7 @@ impl Bank {
             trims: [setup.trims[1], setup.trims[2]],
             emitters: [setup.offsets[0], setup.offsets[1]],
             gearbox: setup.offsets[2],
+            cockpit: setup.offsets[3],
             mechanics_bank: setup.mechanics_bank.to_owned(),
             mech: None,
             whine: None,
@@ -201,6 +203,10 @@ pub struct Mixer {
     /// caller from the vehicle), and the last start it played.
     pub whine: Option<engine_audio_whine::Voice>,
     whine_start: Option<u8>,
+    /// The handbrake button this block (vehicle +0xE38, 9961B0(8)), and
+    /// 43C320's latch: +0xA5E8 pulled, +0xA5E9 released, +0xA5EA played.
+    pub handbrake: bool,
+    handbrake_latch: [bool; 3],
 }
 /// Normal/Chase/PC levels of the Engine and Exhaust groups.
 pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
@@ -225,6 +231,8 @@ impl Mixer {
             turbo: Turbo::new(Turbo::SPIDLE, Turbo::HISS),
             whine: None,
             whine_start: None,
+            handbrake: false,
+            handbrake_latch: [false; 3],
         };
         result.reset();
         result
@@ -241,6 +249,8 @@ impl Mixer {
         self.backfire = Backfire::new(0x5eed);
         self.turbo = Turbo::new(Turbo::SPIDLE, Turbo::HISS);
         self.whine_start = None;
+        // 43B1F0: released set, so the first frame plays hbrakeoff.
+        self.handbrake_latch = [false, true, false];
         if let Some(mech) = &mut self.mech {
             mech.clear();
         }
@@ -318,6 +328,19 @@ impl Mixer {
                 }
                 None => {
                     mech.stop(mech_audio::WHINE);
+                }
+            }
+            // 43C320, the player only: one sample per edge of the button.
+            if self.player {
+                let [pulled, released, played] = &mut self.handbrake_latch;
+                if self.handbrake && *released {
+                    (*pulled, *released, *played) = (true, false, false);
+                } else if !self.handbrake && *pulled {
+                    (*pulled, *released, *played) = (false, true, false);
+                }
+                if !*played && (*pulled || *released) {
+                    mech.start(if *pulled { mech_audio::HANDBRAKE_ON } else { mech_audio::HANDBRAKE_OFF }, 1.);
+                    *played = true;
                 }
             }
             mech.frame(self.mech_levels);
@@ -436,6 +459,7 @@ mod tests {
             trims: [0.; 2],
             emitters: [[0., 0., 4.], [0., 0., -4.]],
             gearbox: [0., 0., 4.],
+            cockpit: [0.; 3],
             mechanics_bank: String::new(),
             mech: None,
             whine: None,
@@ -507,6 +531,44 @@ mod tests {
     /// effects (RPM dip, off-load crossfade for 0.13 s, the wobble from
     /// 0.18 s) change the sound. `GRID_ENGINE_SHIFT_WAV=dir` writes both
     /// renders as 48 kHz mono 16-bit WAVs.
+    /// 43C320: hbrakeoff on the first frame (43B1F0 starts released), then
+    /// one sample per edge of the button; opponents play none.
+    #[test]
+    #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
+    fn the_handbrake_plays_once_per_edge_for_the_player() {
+        let root = std::path::PathBuf::from(std::env::var_os("GRID_GAME_ROOT").unwrap());
+        let bank = Bank::lacetti(&root).unwrap();
+        let mech = mech_audio::Bank::load(&root, "mec_lac").unwrap();
+        let control = Control { normalized_rpm: 0.3, throttle: 0., audible: true, generation: 1, gear: 1 };
+        let block = |m: &mut Mixer, pulled: bool| {
+            m.handbrake = pulled;
+            for _ in 0..BLOCK {
+                m.sample(control);
+            }
+            let v = m.mech.as_ref().unwrap();
+            (v.playing(mech_audio::HANDBRAKE_ON), v.playing(mech_audio::HANDBRAKE_OFF))
+        };
+        let mut m = Mixer::new(bank.clone());
+        m.mech = Some(mech_audio::Voices::new(mech.clone(), RATE));
+        assert_eq!(block(&mut m, false), (false, true));
+        let mut blocks = 0;
+        while block(&mut m, false).1 {
+            blocks += 1;
+            assert!(blocks < 400, "hbrakeoff never ends");
+        }
+        assert_eq!(block(&mut m, true), (true, false));
+        for _ in 0..400 {
+            block(&mut m, true);
+        }
+        assert_eq!(block(&mut m, true), (false, false), "held: no retrigger");
+        assert_eq!(block(&mut m, false), (false, true));
+        let mut opponent = Mixer::new(bank);
+        opponent.player = false;
+        opponent.mech = Some(mech_audio::Voices::new(mech, RATE));
+        assert_eq!(block(&mut opponent, false), (false, false));
+        assert_eq!(block(&mut opponent, true), (false, false));
+    }
+
     #[test]
     #[ignore = "requires GRID_GAME_ROOT pointing to purchased resources"]
     fn an_upshift_changes_the_lacetti_only_from_the_shift() {

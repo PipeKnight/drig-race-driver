@@ -386,7 +386,7 @@ Evidence: Ghidra output in the worktree `local/gtfix/decomp/wind1`–`wind4`; sc
 - **Handbrake**: hbrakeon/hbrakeoff (car_genmec) are resolved into M+0x128/+0x12C, but no
   reader was found [I: unused like wind].
   Corrected in F582: 43C320 reads them (through [[car +0x2C] +0x18] = M+0x70, +0xB8/+0xBC) and
-  plays them on the edges of input 9961B0(8), player only, from 457BE0 (§25).
+  plays them on the edges of input 9961B0(8), player only, from 457BE0 (§26).
 
 ### 7.5 Crowd and ambience [O unless marked]
 
@@ -1517,3 +1517,55 @@ distance. The table makes a close opponent's whine louder than the player's own 
 original's table gives it; not compared with the original by ear or capture].
 - Not ported: the voice pool and stealing (all sounds), opponents' turbo and clunk (the original
   has none).
+
+## 26. The handbrake ported; wind is never started (F583)
+
+26 October 2026, Claude Code (car-series, owner task item 4). Static (`tools/re/grid_re.py`
+decompile/dis, cache `local/re-cache`) and offline renders; GRID was not launched.
+
+**43C320 [O].** 457BE0 calls it once a frame for the player's car only (458C92, inside the
+car-audio +0xA4D8 block).
+- The input is 9961B0(8), the byte at vehicle +0xE38: the port's handbrake byte
+  (`source_vehicle.rs`, `controls.handbrake`).
+- A latch of three bytes: +0xA5E8 pulled, +0xA5E9 released, +0xA5EA played. The constructor 43B1F0
+  sets pulled 0, released 1 and played 0 (43B5FD..43B60A).
+- With the input set and released set: pulled 1, released 0 (played stays). With the input clear
+  and pulled set: released 1, pulled 0, played 0.
+- While played is clear: pulled plays `hbrakeon` (M+0x128, read as [P+0xB8], 43C3A8), else released
+  plays `hbrakeoff` (M+0x12C, [P+0xBC], 43C515); then played = 1 (43C677).
+- [O] So the first frame plays `hbrakeoff` once, before any pull.
+- The one-shot goes through 421B70 at 0 dB, pitch 1, Doppler 0, at the Cockpit emitter
+  car-audio +0x7E0, group car-audio +8 (Other Mech, 9), priority +0xA3C4.
+- Varieties (car_genmec): `hbrakeon` (handon1, handon2) and `hbrakeoff` (handoff1, handoff2), preset
+  Handbrake 4/8.5 m.
+- This corrects §7.4: the varieties are read through P = M+0x70, not unused.
+
+**Wind [O].** No reader of M+0xF8/+0xFC (`WindSlow`, `WindFast`), as [P+0x88]/[P+0x8C] or
+directly, in all of .text (a P-tracking scan) or in the 685 decompiled audio functions of
+the audio code range (`local/sounds-research/callers.md`). Group 20 (Sense Of Speed) is used once, by the front-end ambience loop 44A9D0,
+so §7.4's "no play call passes group 20" holds for races only. Wind stays unported: the original
+does not play it in races.
+
+**Port.**
+- `mech_audio`: the bank also reads `car_genmec.WIP` and loads the `hbrakeon`/`hbrakeoff`
+  varieties with a constant curve (0 dB, pitch 1) and their preset distances.
+  - Route (Other Mech group, Cockpit emitter).
+  - `Levels` gains the Other Mech group and the Cockpit distance.
+- `engine_audio_continuous::Mixer`: `handbrake` input and the three-byte latch above, player only;
+  `reset` sets it as 43B1F0 does.
+- grid-app:
+  - the player's mailbox word carries the handbrake byte in bit 60;
+  - the mixer level of Other Mech is published with the other player groups;
+  - the Cockpit distance comes from the car setup's cockpit offset.
+- The race tool's `GRID_ENGINE_AUDIO_TRACE` gains a `handbrake` column. The probe
+  `grid-mech-audio` gains a `handbrake` variant, with the handbrake pulled in the authored tail.
+
+**Render [port, offline].** `local/mech/render-05/`, the same solo Lacetti lap. Since F579 the
+lap differs from §24's from tick 1518; the race tool built from origin/main gives the same race
+and trace as this one. The AI never pulls the handbrake (the trace column is 0 on all 5600 ticks),
+so the `handbrake` variant (Other Mech −11.5 dB, Cockpit 1.91 m from the bumper ear) has three
+events over `base`:
+- the first frame's `hbrakeoff` at 0 s (RMS 0.055, peak 0.26);
+- the authored pull at 90.10 s (`hbrakeon`, RMS 0.055);
+- the release at 91.10 s (`hbrakeoff`, RMS 0.065).
+Not compared with the original by ear or capture.

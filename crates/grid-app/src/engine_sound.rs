@@ -77,7 +77,7 @@ impl EngineSound {
 }
 /// The player's mechanical-sound levels for the audio thread
 /// (`mech_audio::Levels::to_bits`).
-type MechBus = Arc<[AtomicU32; 7]>;
+type MechBus = Arc<[AtomicU32; 9]>;
 fn mech_bus() -> MechBus {
     Arc::new(mech_audio::Levels::SILENT.to_bits().map(AtomicU32::new))
 }
@@ -111,6 +111,12 @@ fn mailbox() -> Mailbox {
 }
 fn push(mailbox: &Mailbox, control: Control) {
     send(mailbox, control, 0);
+}
+/// The mechanical word: the whine's voice and, in bit 60, the handbrake
+/// button (vehicle +0xE38, 43C320's input).
+const HANDBRAKE_BIT: u64 = 1 << 60;
+fn handbrake(words: &[u32]) -> u64 {
+    if words.get(0xe38 / 4).is_some_and(|w| w & 255 != 0) { HANDBRAKE_BIT } else { 0 }
 }
 fn send(mailbox: &Mailbox, control: Control, whine: u64) {
     if let Ok(mut m) = mailbox.lock() {
@@ -203,6 +209,7 @@ impl Iterator for Decoder {
                 let [next, whine] = mailbox.take();
                 let next = Control::unpack(next);
                 self.mixer.whine = engine_audio_whine::Voice::unpack(whine);
+                self.mixer.handbrake = whine & HANDBRAKE_BIT != 0;
                 self.control.normalized_rpm = next.normalized_rpm;
                 self.control.throttle = next.throttle;
                 self.control.gear = next.gear;
@@ -591,17 +598,19 @@ fn update(
         )),
         Ordering::Relaxed,
     );
-    // The player's clunk (Gearbox), backfire (Exhaust), turbo loops (Turbo)
-    // and turbo dump and pip (Engine) at the GearBox, Exhaust and EngineBay
-    // emitters.
-    let gearbox = sound.bank.as_ref().map_or([0., 0., 4.], |b| b.gearbox);
+    // The player's clunk (Gearbox), backfire (Exhaust), turbo loops (Turbo),
+    // turbo dump and pip (Engine) and handbrake (Other Mech) at the GearBox,
+    // Exhaust, EngineBay and Cockpit emitters.
+    let (gearbox, cockpit) = sound.bank.as_ref().map_or(([0., 0., 4.], [0.; 3]), |b| (b.gearbox, b.cockpit));
     let group = |g: usize| table.map_or(f32::NEG_INFINITY, |t| modes.group_db(t, camera, g, trim));
     let levels = mech_audio::Levels {
-        group_db: [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE].map(group),
+        group_db: [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE, audio_mix::OTHER_MECH]
+            .map(group),
         distance: [
             player.transform_point3(Vec3::from_array(gearbox)).distance(ear),
             player.transform_point3(Vec3::from_array(emitters[0][1])).distance(ear),
             player.transform_point3(Vec3::from_array(emitters[0][0])).distance(ear),
+            player.transform_point3(Vec3::from_array(cockpit)).distance(ear),
         ],
     };
     for (a, bits) in sound.mech.iter().zip(levels.to_bits()) {
@@ -637,11 +646,17 @@ fn update(
             let distances = distances(at, engine.model);
             // Its backfire and whine: the AI group (4223D0: 0x11 for all of an
             // opponent's groups) at its GearBox, Exhaust and EngineBay.
-            let gearbox = sound.banks[engine.model].as_ref().map_or([0., 0., 4.], |b| b.gearbox);
+            let (gearbox, cockpit) =
+                sound.banks[engine.model].as_ref().map_or(([0., 0., 4.], [0.; 3]), |b| (b.gearbox, b.cockpit));
             let ai = table.map_or(f32::NEG_INFINITY, |t| modes.group_db(t, camera, audio_mix::AI, trim));
             let levels = mech_audio::Levels {
-                group_db: [ai; 4],
-                distance: [at.transform_point3(Vec3::from_array(gearbox)).distance(ear), distances[1], distances[0]],
+                group_db: [ai; 5],
+                distance: [
+                    at.transform_point3(Vec3::from_array(gearbox)).distance(ear),
+                    distances[1],
+                    distances[0],
+                    at.transform_point3(Vec3::from_array(cockpit)).distance(ear),
+                ],
             };
             for (a, bits) in engine.mech.iter().zip(levels.to_bits()) {
                 a.store(bits, Ordering::Relaxed);
@@ -679,7 +694,8 @@ fn push_controls(
     opponent_engines: &Query<&OpponentEngine>,
 ) {
     let control = player_control(sound, driving, finished);
-    send(&sound.mailbox, control, sound.whines.first().map_or(0, |w| w.word));
+    let word = sound.whines.first().map_or(0, |w| w.word) | handbrake(&driving.runtime.state.car.owner.vehicle);
+    send(&sound.mailbox, control, word);
     sound.pushed = Some(control.pack());
     if let Some(opponents) = &driving.opponents {
         let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;

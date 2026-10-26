@@ -390,7 +390,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("trace must stay under local/".into());
             }
             let mut t = std::io::BufWriter::new(std::fs::File::create(path)?);
-            writeln!(t, "tick	normalized_rpm	applied_throttle	gear	driver_throttle	whine")?;
+            writeln!(t, "tick	normalized_rpm	applied_throttle	gear	driver_throttle	whine	handbrake")?;
             let settings = grid_tools::engine_audio_whine::Settings::load(root, &models[0])?;
             Some((t, grid_tools::engine_audio_whine::Whine::new(settings, 0x5eed)))
         }
@@ -897,13 +897,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let voice = whine.frame(0.016, grid_tools::engine_audio_whine::Input::vehicle(words));
             writeln!(
                 t,
-                "{}	{}	{}	{}	{}	{:x}",
+                "{}	{}	{}	{}	{}	{:x}	{}",
                 multi.ticks,
                 c.normalized_rpm,
                 c.throttle,
                 c.gear,
                 controls[0].throttle,
-                grid_tools::engine_audio_whine::Voice::pack(voice)
+                grid_tools::engine_audio_whine::Voice::pack(voice),
+                u8::from(words[0xe38 / 4] & 255 != 0)
             )?;
         }
         if let Some(t) = &mut field_trace {

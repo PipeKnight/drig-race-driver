@@ -16,6 +16,12 @@ pub const INFOS: [&str; 6] = ["GearClucks", "Detonations", "TurboHiss", "TurboSp
 /// The gear whine's CollisionInfo (variety table +0xB0, 44BAD0); its
 /// samples are the bank's `01_gear`…`08_gear`, in gear order.
 pub const WHINE: &str = "Gearwhine";
+/// The handbrake's varieties (43CF10 resolves them into M+0x128/+0x12C;
+/// 43C320 plays them). They have no CollisionInfo: 421B70 plays them at
+/// 0 dB and pitch 1, from the `car_genmec` bank.
+pub const HANDBRAKE_ON: &str = "hbrakeon";
+pub const HANDBRAKE_OFF: &str = "hbrakeoff";
+const GENMEC: &str = "car_genmec";
 
 /// One CollisionInfo with its variety's samples (indices into `Bank::sounds`)
 /// and preset distances (A23B70 law).
@@ -49,12 +55,21 @@ impl Bank {
             bank,
             &read(&audio.join("CMSamples.dic"))?,
             &read(&audio.join(format!("{bank}.WIP")))?,
+            &read(&audio.join(format!("{GENMEC}.WIP")))?,
             &read(&audio.join("audioVarieties.bin"))?,
             &read(&audio.join("CollisionInfos.bin"))?,
         )?))
     }
 
-    pub fn parse(name: &str, dictionary: &[u8], data: &[u8], varieties: &[u8], infos: &[u8]) -> Result<Self, String> {
+    /// `data` is the mec bank's WIP, `genmec` the `car_genmec` bank's.
+    pub fn parse(
+        name: &str,
+        dictionary: &[u8],
+        data: &[u8],
+        genmec: &[u8],
+        varieties: &[u8],
+        infos: &[u8],
+    ) -> Result<Self, String> {
         let dictionary = audio_dictionary::read(dictionary).map_err(|e| format!("{e:?}"))?;
         let bank = dictionary
             .banks
@@ -130,21 +145,64 @@ impl Bank {
             samples.push(sounds.len() - 1);
         }
         out.insert(WHINE.to_owned(), Info { curve, samples, min_distance, max_distance });
+        let general = dictionary
+            .banks
+            .iter()
+            .find(|b| b.name == GENMEC)
+            .ok_or_else(|| format!("{GENMEC} bank absent"))?;
+        for info in [HANDBRAKE_ON, HANDBRAKE_OFF] {
+            let (v, variety) = doc
+                .elements
+                .iter()
+                .enumerate()
+                .find(|(_, e)| e.name == "AudioVariety" && attr(e, "name") == Some(info))
+                .ok_or_else(|| format!("AudioVariety {info} absent"))?;
+            let mut samples = Vec::new();
+            for s in doc.elements.iter().filter(|s| {
+                s.name == "Sample" && s.parent.is_some_and(|p| doc.elements[p].parent == Some(v))
+            }) {
+                let Some(sample) = attr(s, "index") else { continue };
+                let i = general
+                    .samples
+                    .iter()
+                    .position(|b| b.name == sample)
+                    .ok_or_else(|| format!("{GENMEC}: sample {sample} absent"))?;
+                sounds.push(wip_sound(general, i, genmec)?);
+                samples.push(sounds.len() - 1);
+            }
+            let (min_distance, max_distance) = attr(variety, "preset")
+                .and_then(|p| presets.get(p).copied())
+                .ok_or_else(|| format!("{info} preset absent"))?;
+            let curve = Curve {
+                variety: info.to_owned(),
+                min_vel: 0.,
+                max_vel: 1.,
+                min_vol: 0.,
+                max_vol: 0.,
+                min_pitch: 1.,
+                max_pitch: 1.,
+            };
+            out.insert(info.to_owned(), Info { curve, samples, min_distance, max_distance });
+        }
         Ok(Self { name: name.to_owned(), sounds, infos: out })
     }
 }
 
 /// Group (`group_db`) indices of [`Levels`]: the player's groups of 4511E0
 /// (+0x120 Gearbox), 451260 (+0x124 Exhaust), the turbo loops (car-audio +4,
-/// Turbo) and its dump and pip (+0xA3C4, Engine).
+/// Turbo), its dump and pip (+0xA3C4, Engine) and the handbrake (car-audio
+/// +8, Other Mech).
 pub const GEARBOX: usize = 0;
 pub const EXHAUST: usize = 1;
 pub const TURBO: usize = 2;
 pub const ENGINE: usize = 3;
-/// Emitter (`distance`) indices: GearBox, Exhaust, EngineBay.
+pub const OTHER_MECH: usize = 4;
+/// Emitter (`distance`) indices: GearBox, Exhaust, EngineBay, Cockpit
+/// (car-audio +0x7D0, +0x7C0, +0x7B0, +0x7E0).
 pub const GEARBOX_EMITTER: usize = 0;
 pub const EXHAUST_EMITTER: usize = 1;
 pub const BAY_EMITTER: usize = 2;
+pub const COCKPIT_EMITTER: usize = 3;
 
 /// What the presentation supplies each frame for one car's mechanical
 /// sounds: its group levels in dB (group mix plus trim, 4223D0) and the
@@ -152,20 +210,20 @@ pub const BAY_EMITTER: usize = 2;
 /// listener (A23B70 applies each variety's own preset to them).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Levels {
-    pub group_db: [f32; 4],
-    pub distance: [f32; 3],
+    pub group_db: [f32; 5],
+    pub distance: [f32; 4],
 }
 impl Levels {
     /// Silent: every emitter out of range.
-    pub const SILENT: Self = Self { group_db: [0.; 4], distance: [f32::INFINITY; 3] };
-    pub fn to_bits(self) -> [u32; 7] {
-        let [a, b, c, d] = self.group_db;
-        let [e, f, g] = self.distance;
-        [a, b, c, d, e, f, g].map(f32::to_bits)
+    pub const SILENT: Self = Self { group_db: [0.; 5], distance: [f32::INFINITY; 4] };
+    pub fn to_bits(self) -> [u32; 9] {
+        let [a, b, c, d, e] = self.group_db;
+        let [f, g, h, i] = self.distance;
+        [a, b, c, d, e, f, g, h, i].map(f32::to_bits)
     }
-    pub fn from_bits(bits: [u32; 7]) -> Self {
+    pub fn from_bits(bits: [u32; 9]) -> Self {
         let v = bits.map(f32::from_bits);
-        Self { group_db: [v[0], v[1], v[2], v[3]], distance: [v[4], v[5], v[6]] }
+        Self { group_db: [v[0], v[1], v[2], v[3], v[4]], distance: [v[5], v[6], v[7], v[8]] }
     }
 }
 
@@ -175,6 +233,7 @@ fn route(info: &str) -> (usize, usize) {
         "GearClucks" | WHINE => (GEARBOX, GEARBOX_EMITTER),
         "Detonations" => (EXHAUST, EXHAUST_EMITTER),
         "TurboDump" | "TurboPip" => (ENGINE, BAY_EMITTER),
+        HANDBRAKE_ON | HANDBRAKE_OFF => (OTHER_MECH, COCKPIT_EMITTER),
         _ => (TURBO, BAY_EMITTER),
     }
 }
@@ -669,5 +728,9 @@ mod tests {
         assert_eq!(dbr.infos["Detonations"].curve.at(1.), (-11., 1.1));
         let whine = &dbr.infos[WHINE];
         assert_eq!((whine.samples.len(), whine.min_distance, whine.max_distance), (8, 6., 10.));
+        for info in [HANDBRAKE_ON, HANDBRAKE_OFF] {
+            let h = &dbr.infos[info];
+            assert_eq!((h.samples.len(), h.min_distance, h.max_distance, h.curve.at(1.)), (2, 4., 8.5, (0., 1.)));
+        }
     }
 }
