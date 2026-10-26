@@ -36,8 +36,8 @@ const WRAPPERS: [&str; 9] = [
     "system: name=\"bevy_render::run_render_schedule\"",
     "system: name=\"bevy_time::fixed::run_fixed_main_schedule\"",
 ];
-const TOP_WORK: usize = 25;
-const TOP_WRAPPERS: usize = 12;
+const TOP_WORK: usize = 60;
+const TOP_WRAPPERS: usize = 30;
 
 /// Seconds per logged table: `GRID_PROFILE_SECONDS`, default 10.
 pub fn window_seconds() -> f32 {
@@ -48,6 +48,18 @@ pub fn window_seconds() -> f32 {
             .and_then(|v| v.parse().ok())
             .filter(|&s: &f32| s >= 1.)
             .unwrap_or(10.)
+    })
+}
+
+/// Spans per table: `GRID_PROFILE_TOP`, default [`TOP_WORK`] (a local
+/// run can list them all).
+fn top_work() -> usize {
+    static TOP: OnceLock<usize> = OnceLock::new();
+    *TOP.get_or_init(|| {
+        std::env::var("GRID_PROFILE_TOP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(TOP_WORK)
     })
 }
 
@@ -210,7 +222,7 @@ fn report(time: Res<Time<Real>>, mut elapsed: Local<f32>) {
         .into_iter()
         .partition(|(k, _)| WRAPPERS.iter().any(|w| name(*k).starts_with(w)));
     work.sort_by_key(|(_, v)| std::cmp::Reverse(v[1]));
-    for (rank, (key, v)) in work.iter().take(TOP_WORK).enumerate() {
+    for (rank, (key, v)) in work.iter().take(top_work()).enumerate() {
         log_line!(
             "profile_span rank={} excl_ms_per_frame={:.3} incl_ms_per_frame={:.3} calls_per_frame={:.2} name={}",
             rank + 1,

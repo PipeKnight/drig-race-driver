@@ -36,7 +36,7 @@ fn cell_metres() -> f32 {
         .unwrap_or(CELL_METRES)
 }
 /// Vertices per batch: 16-bit indices.
-const MAX_VERTICES: usize = 1 << 16;
+pub(crate) const MAX_VERTICES: usize = 1 << 16;
 const INTACT: &str = "dynamic/intact/";
 const PIECE: &str = "dynamic/piece/";
 
@@ -82,7 +82,7 @@ type Plain = (
     Without<VisibilityRange>,
 );
 
-const ATTRIBUTES: [MeshVertexAttributeId; 6] = [
+pub(crate) const ATTRIBUTES: [MeshVertexAttributeId; 6] = [
     Mesh::ATTRIBUTE_POSITION.id,
     Mesh::ATTRIBUTE_NORMAL.id,
     Mesh::ATTRIBUTE_UV_0.id,
@@ -99,13 +99,13 @@ struct Key {
     cell: (i32, i32),
 }
 
-struct Part<M: Asset> {
-    entity: Entity,
-    material: Handle<M>,
-    intact: bool,
-    mesh: Handle<Mesh>,
-    matrix: Mat4,
-    vertices: usize,
+pub(crate) struct Part<M: Asset> {
+    pub(crate) entity: Entity,
+    pub(crate) material: Handle<M>,
+    pub(crate) intact: bool,
+    pub(crate) mesh: Handle<Mesh>,
+    pub(crate) matrix: Mat4,
+    pub(crate) vertices: usize,
 }
 
 #[allow(clippy::type_complexity)]
@@ -239,7 +239,7 @@ fn merge<M: Material>(
     );
 }
 
-fn supported(format: VertexFormat) -> bool {
+pub(crate) fn supported(format: VertexFormat) -> bool {
     matches!(
         format,
         VertexFormat::Float32x2 | VertexFormat::Float32x3 | VertexFormat::Float32x4
@@ -250,7 +250,7 @@ fn supported(format: VertexFormat) -> bool {
 /// them: positions by the matrix, normals by its inverse transpose
 /// (normalized, as the shader does), tangents by the matrix with the sign of
 /// its determinant. Triangle order and winding are kept.
-fn build<M: Asset>(
+pub(crate) fn build<M: Asset>(
     parts: &[Part<M>],
     meshes: &Assets<Mesh>,
     origin: Vec3,
