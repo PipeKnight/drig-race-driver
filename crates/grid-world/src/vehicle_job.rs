@@ -7,8 +7,9 @@ use crate::{
 };
 /// A caller-owned publication consumer. Called exactly after the driver update;
 /// the caller stages external resources until the complete world succeeds.
+/// It takes the staged owner state by value (an error drops it with the job).
 pub type Publication<'a> =
-    dyn FnMut(&vehicle_publication::State, f32) -> Result<vehicle_publication::State, Error> + 'a;
+    dyn FnMut(vehicle_publication::State, f32) -> Result<vehicle_publication::State, Error> + 'a;
 
 /// Preserves complete input on failure, including a late mutable-effect failure.
 pub fn calculate(
@@ -128,22 +129,29 @@ pub(crate) fn calculate_staged(
     {
         return Err(Error("unsupported car job physical links"));
     }
-    let synced = vehicle_sync::calculate(&vehicle_sync::State {
-        vehicle: input.owner.vehicle[..vehicle_sync::VEHICLE_WORDS].to_vec(),
-        physical: input.owner.physical,
-    })?;
+    // In place: the staged copy is the caller's to drop on an error.
     let mut next = input;
-    next.owner.vehicle[..vehicle_sync::VEHICLE_WORDS].copy_from_slice(&synced.vehicle);
-    next.owner.physical = synced.physical;
+    vehicle_sync::calculate_in(
+        &mut next.owner.vehicle[..vehicle_sync::VEHICLE_WORDS],
+        &mut next.owner.physical,
+    )?;
     next.frame
         .body
-        .copy_from_slice(&synced.vehicle[..vehicle_force::BODY_WORDS]);
+        .copy_from_slice(&next.owner.vehicle[..vehicle_force::BODY_WORDS]);
     let materials =
         crate::vehicle_step::apply(&mut next.frame, pair, delta, gravity, query, material)?;
     next.owner.vehicle[..vehicle_force::BODY_WORDS].copy_from_slice(&next.frame.body);
     next.owner = if let Some(publication) = publication {
-        vehicle_handling::calculate_with_empty_notification_receiver(
-            &publication(&next.owner, delta)?,
+        let owner = std::mem::replace(
+            &mut next.owner,
+            vehicle_publication::State {
+                vehicle: Vec::new(),
+                physical: [0; vehicle_publication::PHYSICAL_WORDS],
+                damage_random_state: None,
+            },
+        );
+        vehicle_handling::calculate_with_empty_notification_receiver_owned(
+            publication(owner, delta)?,
             delta,
             handling_queries,
         )?

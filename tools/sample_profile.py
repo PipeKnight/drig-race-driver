@@ -7,7 +7,7 @@ needed. Prints the hottest functions by self samples (leaf frame) and by
 inclusive samples (anywhere on the stack), plus the hottest call paths.
 
 usage: python -I tools/sample_profile.py [--interval-ms N] [--top N]
-           [--filter TEXT] [--busy] [--out REPORT.txt] -- EXE ARG...
+           [--filter TEXT] [--busy] [--path-frames N] [--out REPORT.txt] -- EXE ARG...
 
 Build the target with symbols, e.g.
     CARGO_PROFILE_RELEASE_DEBUG=limited cargo build --release --target-dir target/profile
@@ -289,6 +289,7 @@ def main():
     parser.add_argument("--top", type=int, default=40)
     parser.add_argument("--filter", default="", help="keep only stacks containing this text")
     parser.add_argument("--out")
+    parser.add_argument("--path-frames", type=int, default=8, help="frames per printed call path")
     parser.add_argument(
         "--busy", action="store_true",
         help="sample only threads that ran since their last sample (skips idle pool threads)",
@@ -363,10 +364,10 @@ def main():
     lines += ["", "incl %  function"]
     for f, n in inclusive.most_common(args.top * 2):
         lines.append(f"{100 * n / max(total, 1):6.2f}  {f}")
-    lines += ["", "top call paths (leaf first, 8 frames)"]
+    lines += ["", f"top call paths (leaf first, {args.path_frames} frames)"]
     paths = collections.Counter()
     for stack, n in stacks.items():
-        paths[" <- ".join(stack[:8])] += n
+        paths[" <- ".join(stack[: args.path_frames])] += n
     for p, n in paths.most_common(args.top // 2):
         lines.append(f"{100 * n / max(total, 1):6.2f}  {p}")
     lines += ["", "self % by leaf source line"]

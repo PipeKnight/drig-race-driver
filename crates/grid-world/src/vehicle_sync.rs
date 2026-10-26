@@ -109,11 +109,23 @@ fn mass_matrix(b: &[u32]) -> Result<(f32, [f32; 4], [f32; 4]), Error> {
 }
 
 pub fn calculate(input: &State) -> Result<State, Error> {
-    let b = &input.vehicle;
+    let mut next = input.clone();
+    calculate_in(&mut next.vehicle, &mut next.physical)?;
+    Ok(next)
+}
+
+/// [`calculate`] in place. Every check precedes the first write except the
+/// settled-strain grid's, so an error there leaves the record partly written.
+/// Each word read after a write is one this update never writes.
+pub(crate) fn calculate_in(
+    vehicle: &mut [u32],
+    physical: &mut [u32; PHYSICAL_WORDS],
+) -> Result<(), Error> {
+    let b = &*vehicle;
     if b.len() != VEHICLE_WORDS
         || b[0xdb0 / 4] != 0
         || b[0xc7ec / 4] >= 10
-        || input.physical[0x1d0 / 4..0x230 / 4]
+        || physical[0x1d0 / 4..0x230 / 4]
             .iter()
             .any(|w| !f32::from_bits(*w).is_finite())
         || (0..10).any(|i| !f(b, 0xc7c4 + i * 4).is_finite())
@@ -154,11 +166,10 @@ pub fn calculate(input: &State) -> Result<State, Error> {
         return Err(Error("nonfinite vehicle synchronization settings"));
     }
     let (mass, diagonal, inverse) = mass_matrix(b)?;
-    let mut next = input.clone();
-    let b = &mut next.vehicle;
+    let b = vehicle;
     for (target, source, count) in [(0x15c0, 0x220, 4), (0x15d0, 0x210, 4), (0x15e0, 0x1d0, 16)] {
         b[target / 4..target / 4 + count]
-            .copy_from_slice(&input.physical[source / 4..source / 4 + count]);
+            .copy_from_slice(&physical[source / 4..source / 4 + count]);
     }
     for base in [0x15c0, 0x15d0] {
         if (0..3).all(|i| f(b, base + i * 4).abs() < f32::from_bits(0x29e12e13)) {
@@ -183,7 +194,7 @@ pub fn calculate(input: &State) -> Result<State, Error> {
             set(b, 0xc7b4 + 4 * i, score);
         }
     }
-    let p = &mut next.physical;
+    let p = physical;
     set(p, 0x3f0, mass);
     set(p, 0x3f4, 1. / mass);
     for (base, values) in [(0x90, diagonal), (0x150, inverse)] {
@@ -200,8 +211,8 @@ pub fn calculate(input: &State) -> Result<State, Error> {
     let disabled = (0..4).any(|i| byte(b, 0x22e4 + i) != 0);
     set(b, 0x2270, if disabled { 1. } else { 0. });
     for i in 0..4 {
-        put_byte(b, 0x2278 + i, byte(&input.vehicle, 0x22e4 + i));
-        put_byte(b, 0x227c + i, byte(&input.vehicle, 0x22e0 + i));
+        put_byte(b, 0x2278 + i, byte(b, 0x22e4 + i));
+        put_byte(b, 0x227c + i, byte(b, 0x22e0 + i));
     }
     let stabilization = byte(b, 0xd1b4) as f32;
     set(b, 0x2274, stabilization);
@@ -211,11 +222,11 @@ pub fn calculate(input: &State) -> Result<State, Error> {
         (0x22ce, 0xd1fc),
         (0x22cf, 0xd214),
     ] {
-        put_byte(b, to, byte(&input.vehicle, from));
+        put_byte(b, to, byte(b, from));
     }
     let inactive = u8::from(byte(b, 0xb13) == 0 || byte(b, 0xb14) == 0);
     put_byte(b, 0xc7af, inactive);
-    Ok(next)
+    Ok(())
 }
 
 #[cfg(test)]

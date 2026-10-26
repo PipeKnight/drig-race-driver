@@ -18,6 +18,9 @@ struct Context {
     random_seed: u32,
     bulk_invoked: bool,
     records: usize,
+    /// The descriptor's grid verdict from the validation, for the prepare
+    /// phase on the same descriptor (the limit never writes its grid).
+    grid: Option<Result<usize, Error>>,
 }
 impl impact_frame::Callbacks for Context {
     fn prepare(
@@ -25,21 +28,21 @@ impl impact_frame::Callbacks for Context {
         step: &mut impact_step::Input,
         _: &mut [impact_frame::Body],
     ) -> Result<(), Error> {
-        let result = deformation_preparation::calculate(
-            &self.owner[0x2300 / 4..0xc800 / 4],
+        // In place: an error discards the whole context.
+        let (_, complete) = deformation_preparation::calculate_in(
+            &mut self.owner[0x2300 / 4..0xc800 / 4],
+            &mut self.grid,
             &self.physical,
             std::array::from_fn(|i| f32::from_bits(self.physical[0x1c0 / 4 + i])),
-            &self.contacts,
+            &mut self.contacts,
             0,
             10000,
             0,
             self.limit,
         )?;
-        if !result.complete {
+        if !complete {
             return Err(Error("incomplete deforming frame preparation"));
         }
-        self.owner[0x2300 / 4..0xc800 / 4].copy_from_slice(&result.descriptor);
-        self.contacts = result.contacts;
         for (c, raw) in step.contacts.iter_mut().zip(&self.contacts) {
             c.previous_impulse = f32::from_bits(raw[0x3c / 4]);
         }
@@ -126,15 +129,17 @@ pub struct Output {
     pub records: usize,
 }
 pub fn calculate(input: Input<'_>) -> Result<Output, Error> {
-    calculate_rows(input, None)
+    let (frame, owner) = (input.frame, input.owner);
+    let context = prepare(input)?;
+    finish(frame, None, context, owner.to_vec())
 }
 
-/// [`calculate`] with the frame's row buffer given away (see
-/// `impact_frame::calculate_with_callbacks_rows`).
-pub(crate) fn calculate_rows(
-    input: Input<'_>,
-    rows: Option<Vec<crate::contact_rows::Row>>,
-) -> Result<Output, Error> {
+/// The checked frame state of [`calculate`], waiting for its owner record.
+pub(crate) struct Prepared(Context);
+
+/// [`calculate`]'s checks and state, without the owner record: [`finish`]
+/// takes it by value, so a caller can move it instead of copying it.
+pub(crate) fn prepare(input: Input<'_>) -> Result<Prepared, Error> {
     let Input {
         frame,
         owner,
@@ -193,18 +198,17 @@ pub(crate) fn calculate_rows(
     }
     let mut physical = *physical;
     physical[0x334 / 4] = 0;
-    deformation_preparation::calculate(
+    let mut grid = None;
+    deformation_preparation::validate(
         &owner[0x2300 / 4..0xc800 / 4],
+        &mut grid,
         &physical,
         std::array::from_fn(|i| f32::from_bits(physical[0x1c0 / 4 + i])),
         contacts,
-        0,
-        0,
-        0,
         limit,
     )?;
-    let context = Context {
-        owner: owner.to_vec(),
+    Ok(Prepared(Context {
+        owner: Vec::new(),
         physical,
         contacts: contacts.to_vec(),
         settings: settings.to_vec(),
@@ -215,7 +219,20 @@ pub(crate) fn calculate_rows(
         random_seed,
         bulk_invoked: false,
         records: 0,
-    };
+        grid,
+    }))
+}
+
+/// Runs a [`prepare`]d frame with the owner record it was checked against
+/// (`Input::owner`, equal word for word) and the frame's row buffer given away
+/// (see `impact_frame::calculate_with_callbacks_rows`). An error drops `owner`.
+pub(crate) fn finish(
+    frame: &impact_frame::Input,
+    rows: Option<Vec<crate::contact_rows::Row>>,
+    Prepared(mut context): Prepared,
+    owner: Vec<u32>,
+) -> Result<Output, Error> {
+    context.owner = owner;
     let (frame, c) = impact_frame::calculate_with_callbacks_rows(frame, rows, context)?;
     Ok(Output {
         frame,

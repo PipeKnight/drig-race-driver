@@ -170,7 +170,7 @@ fn vehicle_stage(
     let manager = if car.deformation_enabled {
         // The body geometry is copied only when a publication rebuilds it.
         let mut rebuilt: Option<crate::body_geometry::BodyGeometry> = None;
-        let manager = vehicle_manager::calculate_with_world_publication_staged(
+        let mut manager = vehicle_manager::calculate_with_world_publication_staged(
             state,
             pool,
             car.pair,
@@ -183,7 +183,7 @@ fn vehicle_stage(
                 let (geometry, next) = rebuilt
                     .as_ref()
                     .unwrap_or(base)
-                    .deformation_publication(owner, delta)?;
+                    .deformation_publication_owned(owner, delta)?;
                 if geometry.is_some() {
                     rebuilt = geometry;
                 }
@@ -193,7 +193,9 @@ fn vehicle_stage(
         published = rebuilt;
         if let Some(current) = &car.deformation_registration {
             registration = Some(deformation_world::Registration {
-                owner: manager.job.state.owner.vehicle.clone(),
+                // Moved, not copied: the staged state's vehicle is not read
+                // again before the body events take the registration's back.
+                owner: std::mem::take(&mut manager.job.state.owner.vehicle),
                 limit: current.limit,
                 bulk: current.bulk.clone(),
                 random_seed: current.random_seed,
@@ -1144,34 +1146,63 @@ impl MultiRuntime {
             }
         }
         let events_timer = crate::perf::Timer::start(crate::perf::Stage::BodyEvents);
-        for (i, slot) in staged.iter_mut().enumerate() {
-            let Some(state) = slot else {
-                continue;
-            };
-            // The registration's owner is moved into the car and refilled below.
-            if let Some(registration) = &mut registrations[i] {
-                std::mem::swap(&mut state.owner.vehicle, &mut registration.owner);
-            }
-            state.owner.physical = world.groups.bodies[i];
-            if let Some(parameters) = self.cars[i].body_events
-                && let Err(error) = body_events(
-                    state,
-                    parameters,
-                    &world.groups.contacts[..active.min(world.groups.contacts.len())],
-                    tokens[i],
-                    world.manager.parameters[0],
-                )
-            {
-                failed[i] = Some(error);
-                *slot = None;
-                continue;
-            }
-            if let Some(registration) = &mut registrations[i] {
-                state
-                    .frame
-                    .body
-                    .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
-                registration.owner.clone_from(&state.owner.vehicle);
+        // Each car's body events touch only its own staged state, registration
+        // and damage RNG, so the cars run on the compute pool, one run of cars
+        // per thread, and are joined in car order.
+        type Job = (vehicle_manager::State, Option<deformation_world::Registration>);
+        let jobs: Vec<std::sync::Mutex<Option<Job>>> = staged
+            .iter_mut()
+            .zip(registrations.iter_mut())
+            .map(|(slot, registration)| {
+                std::sync::Mutex::new(slot.take().map(|state| (state, registration.take())))
+            })
+            .collect();
+        let runs = if self.parallel { crate::parallel::threads().min(n) } else { 1 };
+        let per_run = n.div_ceil(runs.max(1));
+        let events = {
+            let (cars, bodies, tokens, jobs) = (&self.cars, &world.groups.bodies, &tokens, &jobs);
+            let contacts = &world.groups.contacts[..active.min(world.groups.contacts.len())];
+            let parameter = world.manager.parameters[0];
+            crate::parallel::map(runs, runs > 1, |r| {
+                (r * per_run..((r + 1) * per_run).min(n))
+                    .map(|i| {
+                        let (mut state, mut registration) =
+                            jobs[i].lock().unwrap_or_else(|e| e.into_inner()).take()?;
+                        // The registration's owner is moved into the car; the registration
+                        // keeps an empty owner until the next vehicle stage moves the car's
+                        // record back in (`deformation_world::Registration::owner`).
+                        if let Some(registration) = &mut registration {
+                            std::mem::swap(&mut state.owner.vehicle, &mut registration.owner);
+                        }
+                        state.owner.physical = bodies[i];
+                        if let Some(parameters) = cars[i].body_events
+                            && let Err(error) =
+                                body_events(&mut state, parameters, contacts, tokens[i], parameter)
+                        {
+                            return Some(Err((error, registration)));
+                        }
+                        if registration.is_some() {
+                            state
+                                .frame
+                                .body
+                                .copy_from_slice(&state.owner.vehicle[..vehicle_force::BODY_WORDS]);
+                        }
+                        Some(Ok((state, registration)))
+                    })
+                    .collect::<Vec<_>>()
+            })
+        };
+        for (i, event) in events.into_iter().flatten().enumerate() {
+            match event {
+                None => {}
+                Some(Ok((state, registration))) => {
+                    staged[i] = Some(state);
+                    registrations[i] = registration;
+                }
+                Some(Err((error, registration))) => {
+                    failed[i] = Some(error);
+                    registrations[i] = registration;
+                }
             }
         }
         drop(events_timer);

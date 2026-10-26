@@ -1524,3 +1524,92 @@ names are the nearest public symbols, so call paths are approximate; the leaf
 `response_consumption::validate` (8 % of busy samples in the drift race) led to the first fix.
 Evidence (machine-local): worktree `local/tick-growth/` (`runs.txt` lists every run with its start
 time and the lock state).
+
+## Early-race tick cost: whole-record copies (round 2)
+
+Coordinator's task (26 October 2026): after F579 the phone still pays about 2.8 ms per tick early
+in a race at 4 threads (Donington, 12 cars; owner's log `log-20261026-125712.txt`). Profile the
+early-race tick and cut its largest costs with bit-identical results.
+
+**Profile [O]** (`tools/sample_profile.py --busy` on a line-tables build of `grid-opponent-race`
+with deformation, AI and props, 12 cars, 4 threads; new option `--path-frames N` prints longer call
+paths). The leaf `_NLG_Return2` (vcruntime's memcpy) was 31.6 % of all samples. About 26 points of
+that fell inside `MultiRuntime::tick` (69 % of samples; the rest is loading), so about 40 % of the
+tick's CPU was copying. Each car's 132 KB vehicle record was copied about eight times per tick:
+- in the serial body events, the mirror copy into the deformation registration (9.3 % inclusive
+  at that one line);
+- in the serial world advance, the deforming frame's `owner.to_vec()` (5.9 %) and a
+  validation-only `deformation_preparation::calculate` call that copied the 42 KB descriptor and
+  the contacts and threw them away (about 3.4 %). The descriptor's 400-node grid check also ran
+  twice per frame (3.1 %);
+- in the parallel vehicle stage, the staged registration's owner clone, the sync slice (53 KB:
+  `to_vec`, a clone inside `vehicle_sync::calculate`, and the copy back), the deformation
+  publication's whole-state clone (`update_without_rebuild`), and the handling update's clone of
+  the publication's fresh output.
+
+**Changes [V], all result-preserving:**
+- The vehicle stage moves the car's record into its staged registration (`mem::take`); nothing
+  reads the staged state's record before the body events take it back.
+- `deformation_world::Registration::owner` is documented as a slot that is valid only during a
+  world tick. Every caller fills it from the car first: the solo `vehicle_world` path copies it,
+  and the multi-car runtime moves it in. No reader looks at its content between ticks (checked:
+  grid-app, grid-tools, the probes and the tests read only `bulk_calls`, `records`, `random_seed`,
+  `owner_toggle`, or the owner's length for the flashback memory estimate). So the multi-car body
+  events no longer copy the car's record back into it; the committed registration keeps an empty
+  owner.
+- The body events run on the compute pool, one run of cars per thread, joined in car order (each
+  car touches only its own staged state, registration and damage RNG).
+- `deforming_physical_frame` is split into `prepare` (every check, no owner) and `finish` (takes
+  the owner record by value). `deformation_world::calculate_group` moves the registration's owner
+  in; a failure inside the frame drops it, and both callers discard the registration with the
+  failed tick (the solo path works on a clone, the multi-car path on per-tick staging).
+- `deformation_preparation::validate` (the checks alone) replaces the validation-only call, and
+  `calculate_in` runs the prepare phase on the context's own descriptor and contacts. The grid
+  verdict from the validation is kept for the prepare phase, which sees the same descriptor word
+  for word, and the limit never writes the grid.
+- `vehicle_sync::calculate_in` updates the record and the physical body in place. Every word it
+  reads after its first write is one it never writes. `vehicle_job::calculate_staged` uses it on
+  its staged copy.
+- `vehicle_job::Publication` takes the owner state by value.
+  `deformation_publication::calculate_owned` and `after_geometry_rebuild_owned` update in place
+  (`vehicle_publication::update_in`). The words the update writes (+C780..+C798, +15CC, +15DC,
+  physical +210/+220) are not among those read after it, and each later write is read, if at all,
+  before it. `BodyGeometry::deformation_publication_owned` serves the multi-car stage.
+- `vehicle_handling::calculate_with_empty_notification_receiver_owned` takes the publication's
+  output by value. The damage dispatches' inputs (wheel impacts, collision points, the physical
+  record) are read before the state becomes the output, as the copying version read them from its
+  input.
+- Kept: `Runtime::staged_car`'s copy, which is the car's rollback state when the world tick fails.
+
+**Identity [V]** (base = origin/main 12aa5b00 built in this worktree; fixed = the change):
+- grid-opponent-race with props, 4 threads: derby `e9011d21…` and Nürburgring `0eaebdd8…`, base =
+  fixed, and the same with `GRID_SERIAL_TWIN=1`.
+- Headless drive samples without wall-clock fields (`GRID_AUTOPILOT=1 GRID_THREADS=4`, no timers):
+  drift battle `d01bde2a…`, Donington 12 bmw `5be6f0c1…`, base = fixed.
+- Solo grid-opponent-race (Donington route_0, `1 5600 ai`) with `GRID_ENGINE_AUDIO_TRACE`, with and
+  without `GRID_DEFORMATION_PARAMETERS`: race output and trace base = fixed in both. The
+  deformation parameters alone change this lap (86.792 s without, 86.785 s with, from tick 1518).
+  That explains a reported lap difference against an F578-era trace, which ran without them.
+- `tools/identity.tsv` in the full prepush tier.
+
+**Before and after at 4 threads** (headless `GRID_PERF_TIMING=1`, base against fixed, alternating,
+three rounds, all under the build lock, 22:42-22:49 on 26 October, after the owner had finished
+playing; an earlier set at 22:04 was disturbed by outside load and dropped). ms per world tick;
+early = ticks 600-3000, late = the last 3000:
+
+| Event | Window | base | fixed |
+|---|---|---:|---:|
+| Donington, 12 bmw | early | 0.70-0.74 | 0.46-0.50 |
+| Donington, 12 bmw | late (56 pieces, asleep) | 1.00-1.08 | 0.61-0.67 |
+| Drift battle | early | 0.51-0.53 | 0.37-0.38 |
+| Drift battle | late (268 pieces) | 3.86-3.94 | 3.63-3.71 |
+
+Donington early by stage, base → fixed: `WorldAdvance` 0.18-0.19 → 0.08; `VehicleStage`
+0.27-0.29 → 0.18-0.21; `BodyEvents` 0.08-0.09 → 0.05; `Commit` (which holds the body events)
+0.13 → 0.08-0.09.
+
+- [I] Early in a Donington race the PC's tick falls by about a third. At the phone's 2.8 ms that
+  would be about 1.9 ms per tick (2.8 × 0.48 / 0.72), assuming the phone's cost scales like the
+  PC's. Memory-bound copies may gain more on the phone; this is not measured there.
+- Left: the vehicle stage itself (wheels, suspension, contact updates; 0.18-0.21 ms on 4 threads),
+  `staged_car`'s rollback copy, and in an awake pile the solve of a car group's contacts.
