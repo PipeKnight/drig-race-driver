@@ -60,6 +60,10 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   profile only for Lacetti on Donington (row 78), strobing wheels (row 81).
 
 ### Android and platforms
+- macOS F577: native arm64 release build and code-only `DRIG.app` packaging pass
+  on macOS 15.7.7, with no engine changes. CLI help and the menu's expected
+  missing-installation exit pass; Finder launch, graphics, input, audio and
+  actual races are not tested (no game data). See [docs/MACOS.md](docs/MACOS.md).
 - Android P9–P12: code-only APK importing the user's own GRID folder (F405), bundled event APKs
   (F418), touch/tilt/pad controls (P11, F404), per-system profiling (F395); docs/ANDROID.md.
 - Open: the a11cddf7de27 APKs are not tested on the phone; CPU-bound at about 30–34 FPS (row 85);
@@ -111,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F577](log/F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
 | [F576](log/F0576.md) | 2026-10-26 | Static world batching |
 | [F575](log/F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
 | [F574](log/F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
@@ -170,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F519](log/F0519.md) | 2026-10-20 | Every raceable car's engine bank loads; one car's failing bank or decoder silences only that car |
 | [F518](log/F0518.md) | 2026-10-20 | Playable 5d8f3f454655 with F514–F517, and the portable copy refreshed |
 | [F517](log/F0517.md) | 2026-10-20 | AI reverse byte +0x1E: the car-side consumer is found and ported |
-| [F516](log/F0516.md) | 2026-10-20 | Silent engine on the F513 playable fixed: BMW engine decoders no longer fail at idle; race-start audio mix test |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

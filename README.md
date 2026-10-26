@@ -66,6 +66,12 @@ More detail, including gamepad, wheel and driver-aid settings: [docs/TRY_THE_PRO
 
 The Android build is experimental. It runs the same program on arm64 phones (Android 12+), using game files you import from your own copy. See [docs/ANDROID.md](docs/ANDROID.md).
 
+### macOS
+
+Native build and local `.app` packaging: `python3 -I tools/build_macos.py`.
+Compilation needs no original game files; playing requires your own Windows GRID
+2008 installation. See [docs/MACOS.md](docs/MACOS.md) for setup and validation limits.
+
 ## How it is made
 
 The original `grid.exe` is studied with Ghidra and other reverse-engineering tools. Its behaviour is then written again in Rust and checked against the original: recorded driving, AI and audio traces, plus bit-exact comparisons of individual routines. The port does not reuse original code or bundle original data.

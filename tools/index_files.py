@@ -59,7 +59,7 @@ FAMILY_TOPICS = [
 GROUPS = [
     ("Process: log, indexes, pre-push, release, builds and disk", [
         r"tools/(log_entry|split_project_log|index_files)\.py", r"tools/prepush\.ps1", r"tools/release_playable",
-        r"tools/update_prototype", r"tools/build_gate", r"tools/build_seed", r"tools/seed_build_dir",
+        r"tools/update_prototype", r"tools/build_gate", r"tools/build_seed", r"tools/build_macos", r"tools/seed_build_dir",
         r"tools/prune_build_dirs", r"tools/dedup_hardlinks", r"tools/disk_report", r"tools/time_build",
         r"tools/install_", r"tools/identity\.tsv", r"tools/build_lock", r"tools/.*lock.*\.ps1"]),
     ("Android", [r"android", r"tools/push_android"]),
@@ -129,7 +129,7 @@ DOC_GROUPS = [
         r"SCENE_HDR", r"IMAGE_FORMATION", r"LIGHTING", r"LACETTI_GRAPHICS", r"TREAD_NORMAL", r"TYRE_VISUAL",
         r"TYRE_SMOKE", r"BODY_DEFORMATION_PRESENTATION", r"VISUAL_DAMAGE", r"GROUND_EFFECTS", r"DYNAMIC_PROPS"]),
     ("Input, platforms and Android", [
-        r"ANDROID", r"PLATFORMS", r"PAD_PROBE", r"DRIVER_AIDS", r"DRIVING_ASSISTS", r"VEHICLE_CONTROLS"]),
+        r"ANDROID", r"MACOS", r"PLATFORMS", r"PAD_PROBE", r"DRIVER_AIDS", r"DRIVING_ASSISTS", r"VEHICLE_CONTROLS"]),
     ("Damage and deformation", [
         r"DAMAGE", r"DEFORM", r"WHEEL_DETACHMENT", r"IMPACT", r"BODY_IMPACT", r"COLLISION_DAMAGE",
         r"MECHANICAL_DAMAGE", r"HANDLING_DAMAGE", r"CAR_TO_CAR"]),
