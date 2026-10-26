@@ -216,7 +216,7 @@ pub(crate) fn calculate_rows(
         bulk_invoked: false,
         records: 0,
     };
-    let (frame, c) = impact_frame::calculate_with_callbacks_rows(frame, rows, &context)?;
+    let (frame, c) = impact_frame::calculate_with_callbacks_rows(frame, rows, context)?;
     Ok(Output {
         frame,
         owner: c.owner,

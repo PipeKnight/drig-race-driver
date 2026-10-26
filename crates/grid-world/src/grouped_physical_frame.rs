@@ -412,6 +412,7 @@ fn tick(
     }
     let active_order = input.active_order.clone();
     let mut next = input;
+    let predict_timer = crate::stage_timing::Timer::start(crate::stage_timing::Stage::Predict);
     for &i in active_order.iter().rev() {
         let raw = &mut next.bodies[i];
         let basis = m(raw, 0x190);
@@ -439,6 +440,7 @@ fn tick(
             store_matrix(raw, offset, value);
         }
     }
+    drop(predict_timer);
     if let Some(provider) = provider {
         let capacity = carry
             .ok_or(Error("geometry provider requires retained capacity"))?
@@ -559,6 +561,7 @@ fn calculate_impl(
     }
     let pool_used = input.contacts.len();
     let mut manager = manager;
+    let islands_timer = crate::stage_timing::Timer::start(crate::stage_timing::Stage::Islands);
     let mut groups = if let Some(carry) = carry {
         contact_groups::calculate_carried_owned(
             input,
@@ -570,12 +573,14 @@ fn calculate_impl(
     } else {
         contact_groups::calculate_with_geometry(&input, shapes, external_count)?
     };
+    drop(islands_timer);
     let mut visits = Vec::new();
     // AD8130: status 1 sleeps (B24D70), status 2 parks (B24DF0), island by
     // island after every frame.
     let mut resting: Vec<(u32, Vec<usize>)> = Vec::new();
     let roots = chain(groups.world[1], &groups.bodies, 0x1c);
     for root in roots {
+        let pack_timer = crate::stage_timing::Timer::start(crate::stage_timing::Stage::IslandPack);
         let ids = chain(groups.bodies[root][8 / 4], &groups.bodies, 0x2fc);
         let mut contact_ids = Vec::new();
         let mut id = groups.bodies[root][0];
@@ -717,6 +722,9 @@ fn calculate_impl(
                 joints,
             },
         };
+        drop(pack_timer);
+        let frame_timer =
+            crate::stage_timing::Timer::start(crate::stage_timing::Stage::IslandFrame);
         // Selected scope: a registered car alone in its group (static peers) runs
         // both deformation phases; groups of several cars solve without them.
         let several_registered = ids.len() >= 2
@@ -727,6 +735,17 @@ fn calculate_impl(
             [only] => registrations.get_mut(only).and_then(|r| r.as_deref_mut()),
             _ => None,
         };
+        let _kind_timer = crate::stage_timing::Timer::start(if several_registered {
+            crate::stage_timing::count(
+                crate::stage_timing::Stage::GroupContacts,
+                contact_ids.len(),
+            );
+            crate::stage_timing::Stage::FrameGroup
+        } else if registered.is_some() {
+            crate::stage_timing::Stage::FrameCar
+        } else {
+            crate::stage_timing::Stage::FramePlain
+        });
         let frame = if several_registered {
             // Car-to-car contact group: per-owner deformation phases.
             let mut taken: Vec<_> = ids.iter().map(|&i| registrations[i].take()).collect();
@@ -783,6 +802,10 @@ fn calculate_impl(
         } else {
             impact_frame::calculate_owned(frame_input)?
         };
+        drop(_kind_timer);
+        drop(frame_timer);
+        let _store_timer =
+            crate::stage_timing::Timer::start(crate::stage_timing::Stage::IslandStore);
         // B77310: a nonzero status clears the island's contacts' written-back
         // impulse (B0F0A0, +0x3C); AD8130 then sleeps a status-1 island and
         // parks a status-2 one (below, after every frame). Cars never sleep

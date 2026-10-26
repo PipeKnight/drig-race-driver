@@ -231,8 +231,13 @@ fn body_events(
             [false, true] => 1,
             _ => continue,
         };
-        let result = body_impact::calculate(
-            &state.owner,
+        let random = state
+            .owner
+            .damage_random_state
+            .ok_or(Error("body impact requires owned damage RNG"))?;
+        // In place: an error discards this car's staged state.
+        let (random, _) = body_impact::calculate_in_place(
+            &mut state.owner,
             body_impact::Event {
                 point: std::array::from_fn(|j| f32::from_bits(contact[0x50 / 4 + j])),
                 normal: std::array::from_fn(|j| f32::from_bits(contact[0x60 / 4 + j])),
@@ -250,13 +255,9 @@ fn body_events(
             side,
             parameters,
             &[None; 11],
-            state
-                .owner
-                .damage_random_state
-                .ok_or(Error("body impact requires owned damage RNG"))?,
+            random,
         )?;
-        state.owner = result.state;
-        state.owner.damage_random_state = Some(result.random_state);
+        state.owner.damage_random_state = Some(random);
     }
     state
         .frame
@@ -737,7 +738,9 @@ impl MultiRuntime {
         self.world.manager.park = (self.props.is_some() && self.parking)
             .then(|| crate::dynamic_props::park_reference(&self.world.groups.bodies[0]));
         let rows = std::mem::take(&mut self.world.manager.rows);
+        let clone_timer = crate::perf::Timer::start(crate::perf::Stage::WorldClone);
         let mut previous = self.world.clone();
+        drop(clone_timer);
         previous.manager.rows = rows;
         let mut used = 0;
         let mut failed: Vec<Option<Error>> = vec![None; n];
@@ -831,6 +834,7 @@ impl MultiRuntime {
             provider_calls += 1;
             // World phase 2 (continuous) before the contacts of phase 3.
             if let Some(props) = props.filter(|p| p.has_bodies() && provider_calls == 1) {
+                let _continuous_timer = crate::perf::Timer::start(crate::perf::Stage::Continuous);
                 props.continuous(
                     &cars[0].track,
                     &cars[0].surfaces,
@@ -1075,14 +1079,24 @@ impl MultiRuntime {
         let mut props_next = None;
         if let Some(current) = &self.props {
             let _prop_timer = crate::perf::Timer::start(crate::perf::Stage::PropCommit);
+            let clone_timer = crate::perf::Timer::start(crate::perf::Stage::PropClone);
             let mut next = current.clone();
+            drop(clone_timer);
+            let detect_timer = crate::perf::Timer::start(crate::perf::Stage::PropDetect);
             next.detect(&world.groups.contacts, &recorded, &world.groups.bodies);
+            drop(detect_timer);
+            let clone_timer = crate::perf::Timer::start(crate::perf::Stage::PropClone);
             let mut changed = self.shapes.clone();
+            drop(clone_timer);
+            let detect_timer = crate::perf::Timer::start(crate::perf::Stage::PropDetect);
             next.hold_lost(&mut world.groups.bodies, self.cars[0].track.bounds()[1]);
+            drop(detect_timer);
             let lift_timer = crate::perf::Timer::start(crate::perf::Stage::LiftSunk);
             next.lift_sunk(&self.cars[0].track, &mut world.groups.bodies, self.parallel)?;
             drop(lift_timer);
+            let apply_timer = crate::perf::Timer::start(crate::perf::Stage::PropApply);
             let disabled = next.apply(&mut world, &mut changed, self.ticks + 1)?;
+            drop(apply_timer);
             // 0x7C4830: the phantom posts after the step and the breaks.
             next.post_touches.clear();
             if !next.posts.is_empty() {
@@ -1129,6 +1143,7 @@ impl MultiRuntime {
                 staged[i] = None;
             }
         }
+        let events_timer = crate::perf::Timer::start(crate::perf::Stage::BodyEvents);
         for (i, slot) in staged.iter_mut().enumerate() {
             let Some(state) = slot else {
                 continue;
@@ -1159,6 +1174,7 @@ impl MultiRuntime {
                 registration.owner.clone_from(&state.owner.vehicle);
             }
         }
+        drop(events_timer);
         // Lap timing per car, staged before any commit.
         let mut laps = Vec::with_capacity(n);
         for (i, car) in self.cars.iter().enumerate() {
@@ -2879,6 +2895,26 @@ mod tests {
                 let slept = asleep(&multi);
                 eprintln!("pieces {pieces} asleep {slept}");
                 assert!(slept * 2 > pieces, "{slept} of {pieces} pieces asleep");
+                // The asleep pieces' road depths now come from the memo; they
+                // equal fresh casts bit for bit.
+                let props = multi.props.as_ref().unwrap();
+                let bits = |p: &crate::dynamic_props::PropWorld| {
+                    p.road_depths(multi.cars[0].track(), multi.bodies())
+                        .iter()
+                        .map(|d| {
+                            (
+                                d.body,
+                                d.depth.to_bits(),
+                                d.ground.to_bits(),
+                                d.centre.map(f32::to_bits),
+                                d.asleep,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let memo = bits(props);
+                assert_eq!(memo, bits(&props.without_depth_memo()));
+                assert!(memo.iter().any(|d| d.4));
                 assert!(
                     multi.bodies()[..multi.cars.len()]
                         .iter()

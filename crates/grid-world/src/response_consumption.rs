@@ -41,43 +41,48 @@ pub struct Output {
 }
 
 pub(crate) fn validate(input: &Input<'_>) -> Result<(), Error> {
+    // Identities sorted once: duplicate and pending lookups in O(n log n), the
+    // same verdicts as the pairwise scans (a pile in a car's group has
+    // hundreds of contacts, validated twice per owner and tick).
+    let mut identities: Vec<u32> = input.contacts.iter().map(|c| c.identity).collect();
+    identities.sort_unstable();
     if input.owner == 0
         || input.contacts.len() > crate::MAX_WORLD_CONTACTS
         || input.selected.len() > 80
         || input.selected.len() != input.response.len()
         || input.pending.len() > 240
-        || input.contacts.iter().enumerate().any(|(i, c)| {
+        || input.contacts.iter().any(|c| {
             c.identity == 0
                 || !c.accumulated.is_finite()
-                || input.contacts[..i].iter().any(|p| p.identity == c.identity)
                 || [c.first, c.second]
                     .into_iter()
                     .flatten()
                     .any(|o| o.identity == 0)
         })
+        || identities.windows(2).any(|w| w[0] == w[1])
         || input.selected.iter().any(|&i| i >= input.contacts.len())
         || input.response.iter().any(|v| !v.is_finite())
-        || input.pending.iter().any(|p| {
-            !p.value.is_finite() || !input.contacts.iter().any(|c| c.identity == p.contact)
-        })
+        || input
+            .pending
+            .iter()
+            .any(|p| !p.value.is_finite() || identities.binary_search(&p.contact).is_err())
     {
         return Err(Error("invalid response consumption input"));
     }
     // An identity denotes one owner. Reject conflicting callback registrations.
-    let mut owners: Vec<Owner> = Vec::new();
-    for owner in input
+    let mut owners: Vec<(u32, bool)> = input
         .contacts
         .iter()
         .flat_map(|c| [c.first, c.second])
         .flatten()
+        .map(|o| (o.identity, o.registered))
+        .collect();
+    owners.sort_unstable();
+    if owners
+        .windows(2)
+        .any(|w| w[0].0 == w[1].0 && w[0].1 != w[1].1)
     {
-        if owners
-            .iter()
-            .any(|o| o.identity == owner.identity && o.registered != owner.registered)
-        {
-            return Err(Error("inconsistent response owner registration"));
-        }
-        owners.push(owner);
+        return Err(Error("inconsistent response owner registration"));
     }
     Ok(())
 }
@@ -221,6 +226,102 @@ mod tests {
             result.pending.iter().map(|p| p.contact).collect::<Vec<_>>(),
             [12, 11]
         );
+    }
+
+    /// The pairwise checks `validate` replaced (F-entry of the tick-growth work).
+    fn validate_pairwise(input: &Input<'_>) -> Result<(), Error> {
+        if input.owner == 0
+            || input.contacts.len() > crate::MAX_WORLD_CONTACTS
+            || input.selected.len() > 80
+            || input.selected.len() != input.response.len()
+            || input.pending.len() > 240
+            || input.contacts.iter().enumerate().any(|(i, c)| {
+                c.identity == 0
+                    || !c.accumulated.is_finite()
+                    || input.contacts[..i].iter().any(|p| p.identity == c.identity)
+                    || [c.first, c.second]
+                        .into_iter()
+                        .flatten()
+                        .any(|o| o.identity == 0)
+            })
+            || input.selected.iter().any(|&i| i >= input.contacts.len())
+            || input.response.iter().any(|v| !v.is_finite())
+            || input.pending.iter().any(|p| {
+                !p.value.is_finite() || !input.contacts.iter().any(|c| c.identity == p.contact)
+            })
+        {
+            return Err(Error("invalid response consumption input"));
+        }
+        let mut owners: Vec<Owner> = Vec::new();
+        for owner in input
+            .contacts
+            .iter()
+            .flat_map(|c| [c.first, c.second])
+            .flatten()
+        {
+            if owners
+                .iter()
+                .any(|o| o.identity == owner.identity && o.registered != owner.registered)
+            {
+                return Err(Error("inconsistent response owner registration"));
+            }
+            owners.push(owner);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn sorted_validation_matches_the_pairwise_checks() {
+        // Small identity ranges, so duplicates, missing pending contacts,
+        // zero identities and conflicting registrations all occur.
+        let mut seed = 0x2545_f491_u32;
+        let mut next = |n: u32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed % n
+        };
+        let (mut accepted, mut rejected) = (0, 0);
+        for _ in 0..20_000 {
+            let owner = |next: &mut dyn FnMut(u32) -> u32| {
+                (next(4) != 0).then(|| Owner {
+                    identity: next(5),
+                    registered: next(5) != 0,
+                })
+            };
+            let contacts: Vec<Contact> = (0..next(12))
+                .map(|_| Contact {
+                    identity: next(16),
+                    first: owner(&mut next),
+                    second: owner(&mut next),
+                    second_is_body: next(2) == 0,
+                    accumulated: if next(40) == 0 { f32::NAN } else { 0.5 },
+                })
+                .collect();
+            let selected: Vec<usize> = (0..next(4)).map(|_| next(14) as usize).collect();
+            let response = vec![1.; selected.len()];
+            let pending: Vec<Pending> = (0..next(3))
+                .map(|_| Pending {
+                    contact: next(16),
+                    value: 1.,
+                })
+                .collect();
+            let input = Input {
+                owner: next(3),
+                contacts: &contacts,
+                selected: &selected,
+                response: &response,
+                pending: &pending,
+            };
+            let (a, b) = (validate(&input), validate_pairwise(&input));
+            assert_eq!(a.as_ref().err().map(|e| e.0), b.as_ref().err().map(|e| e.0));
+            if a.is_ok() {
+                accepted += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+        assert!(accepted > 100 && rejected > 100, "{accepted} {rejected}");
     }
 
     #[test]

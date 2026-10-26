@@ -115,6 +115,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F579](log/F0579.md) | 2026-10-26 | Physics cost growth over a race: per-contact copies in car groups cut |
 | [F578](log/F0578.md) | 2026-10-26 | Engine audio: the gear whine ported (GearPreset loop per gear, envelope, upshift wobble) |
 | [F577](log/F0577.md) | 2026-10-26 | Native macOS build and code-only application bundle |
 | [F576](log/F0576.md) | 2026-10-26 | Static world batching |
@@ -174,7 +175,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F521](log/F0521.md) | 2026-10-20 | Playable b4e9267f47b1 with F519–F520, the portable copy refreshed, and APKs dcc22d914f21 |
 | [F520](log/F0520.md) | 2026-10-20 | Career locations: Washington GP route 0 (event 73) and the Haruna head-to-head roads, routes 9 and 4 (events 75, 77), load and race |
 | [F519](log/F0519.md) | 2026-10-20 | Every raceable car's engine bank loads; one car's failing bank or decoder silences only that car |
-| [F518](log/F0518.md) | 2026-10-20 | Playable 5d8f3f454655 with F514–F517, and the portable copy refreshed |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

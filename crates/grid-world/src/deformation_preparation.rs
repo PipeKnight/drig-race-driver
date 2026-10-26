@@ -34,13 +34,22 @@ pub fn calculate(
     // fields are required by this API's bounded domain, not native dereferences.
     let mut placeholder = [0; 32];
     placeholder[3] = 1;
-    limit::validate(descriptor, body, center, &placeholder, parameters)?;
+    // One grid verdict for the descriptor: the limit never writes its grid.
+    let mut grid = None;
+    limit::validate_cached(
+        descriptor,
+        &mut grid,
+        body,
+        center,
+        &placeholder,
+        parameters,
+    )?;
     for c in contacts {
         if c[1] > 1 {
             return Err(Error("invalid preparation owner token"));
         }
         if c[1] == 0 {
-            limit::validate(descriptor, body, center, c, parameters)?;
+            limit::validate_cached(descriptor, &mut grid, body, center, c, parameters)?;
             if !f32::from_bits(c[0x3c / 4]).is_finite() {
                 return Err(Error("invalid preparation existing cap"));
             }
@@ -61,13 +70,21 @@ pub fn calculate(
                 if budget == 0 {
                     break;
                 }
-                let result = limit::calculate(&out.descriptor, body, center, c, parameters)?;
-                out.descriptor = result.descriptor;
-                *c = result.contact;
-                if result.cap != f64::from(parameters.unlimited) {
+                // In place: an error discards `out`, so no input changes.
+                let (contact, cap) = limit::calculate_side_in(
+                    &mut out.descriptor,
+                    &mut grid,
+                    body,
+                    center,
+                    c,
+                    parameters,
+                    limit::Side::default(),
+                )?;
+                *c = contact;
+                if cap != f64::from(parameters.unlimited) {
                     // Native saves ST(0) to f32 before COMISS; the comparison
                     // against the unlimited sentinel itself retains ST(0).
-                    let rounded = result.cap as f32;
+                    let rounded = cap as f32;
                     if f32::from_bits(c[0x3c / 4]) > rounded {
                         c[0x3c / 4] = rounded.to_bits();
                     }

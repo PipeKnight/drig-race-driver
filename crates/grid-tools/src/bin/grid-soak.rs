@@ -424,6 +424,11 @@ impl Run<'_> {
                         let timer = Instant::now();
                         let stepped = session.step(controls, shift);
                         outcome.tick_ms.push(timer.elapsed().as_secs_f32() * 1000.);
+                        // GRID_PERF_TIMING: the cumulative stage line every 600
+                        // ticks, as grid-app prints it every 600 frames.
+                        if grid_tools::perf::enabled() && tick % 600 == 0 {
+                            eprintln!("{} tick={tick}", grid_tools::perf::report());
+                        }
                         if let (Some(total), Some(a), Some(b)) =
                             (outcome.cpu_ms.as_mut(), cpu, grid_tools::soak_perf::process_cpu_ms())
                         {

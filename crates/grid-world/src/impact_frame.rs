@@ -168,23 +168,27 @@ pub(crate) fn calculate_with_callbacks<C: Callbacks>(
     callbacks: &C,
 ) -> Result<(Output, C), Error> {
     validate(input)?;
-    run(input, None, callbacks)
+    run(input, None, callbacks.clone())
 }
 
 /// [`calculate_with_callbacks`] with the shared row buffer given away by
 /// the caller (`input.step.rows` is then unused), so it moves through the
-/// step instead of being copied; `None` copies `input.step.rows`.
+/// step instead of being copied; `None` copies `input.step.rows`. The
+/// callbacks move in too (a car's state is a few hundred kilobytes).
 pub(crate) fn calculate_with_callbacks_rows<C: Callbacks>(
     input: &Input,
     rows: Option<Vec<crate::contact_rows::Row>>,
-    callbacks: &C,
+    callbacks: C,
 ) -> Result<(Output, C), Error> {
     match rows {
         Some(rows) => {
             validate_rows(input, &rows)?;
             run(input, Some(rows), callbacks)
         }
-        None => calculate_with_callbacks(input, callbacks),
+        None => {
+            validate(input)?;
+            run(input, None, callbacks)
+        }
     }
 }
 
@@ -193,7 +197,7 @@ pub(crate) fn calculate_with_callbacks_rows<C: Callbacks>(
 pub(crate) fn calculate_owned(mut input: Input) -> Result<Output, Error> {
     validate(&input)?;
     let rows = std::mem::take(&mut input.step.rows);
-    run(&input, Some(rows), &NoCallbacks).map(|(out, _)| out)
+    run(&input, Some(rows), NoCallbacks).map(|(out, _)| out)
 }
 
 /// `rows` replaces `input.step.rows` when the caller gave the buffer away.
@@ -201,9 +205,8 @@ pub(crate) fn calculate_owned(mut input: Input) -> Result<Output, Error> {
 fn run<C: Callbacks>(
     input: &Input,
     mut rows: Option<Vec<crate::contact_rows::Row>>,
-    callbacks: &C,
+    mut callbacks: C,
 ) -> Result<(Output, C), Error> {
-    let mut callbacks = callbacks.clone();
     let delta = input.step.parameters[0];
     let s = &input.step;
     let mut out = Output {

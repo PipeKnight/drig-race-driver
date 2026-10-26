@@ -36,6 +36,18 @@ pub enum Stage {
     LiftSunk,
     /// `loose_panel::settle` (F565), after the commit.
     PanelSettle,
+    /// The tick's one rollback copy of the world (bodies, contacts, joints).
+    WorldClone,
+    /// Of the contact provider: the continuous stage of props and lost wheels.
+    Continuous,
+    /// Of the prop commit: the prop world's and the shapes' clones.
+    PropClone,
+    /// Of the prop commit: break detection and `hold_lost`.
+    PropDetect,
+    /// Of the prop commit: `PropWorld::apply` (breaks, new pieces).
+    PropApply,
+    /// Of the commit: every car's body events and deformation registration.
+    BodyEvents,
     /// Every car's loose-part rules (`detach_wheels`, `Parts::step`) and
     /// the new loose bodies (`add_loose_wheels`).
     LooseParts,
@@ -49,7 +61,7 @@ pub enum Stage {
     RenderSchedule,
 }
 
-const STAGES: [Stage; 17] = [
+const STAGES: [Stage; 23] = [
     Stage::DriveTick,
     Stage::AiDrivers,
     Stage::WorldTick,
@@ -62,6 +74,12 @@ const STAGES: [Stage; 17] = [
     Stage::PropCommit,
     Stage::LiftSunk,
     Stage::PanelSettle,
+    Stage::WorldClone,
+    Stage::Continuous,
+    Stage::PropClone,
+    Stage::PropDetect,
+    Stage::PropApply,
+    Stage::BodyEvents,
     Stage::LooseParts,
     Stage::DamageParts,
     Stage::PropPresent,
@@ -75,7 +93,13 @@ static COUNTS: [AtomicU64; STAGES.len()] = [const { AtomicU64::new(0) }; STAGES.
 /// Whether timing is on (`GRID_PERF_TIMING` set at the first query).
 pub fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("GRID_PERF_TIMING").is_some())
+    *ENABLED.get_or_init(|| {
+        let on = std::env::var_os("GRID_PERF_TIMING").is_some();
+        if on {
+            grid_world::stage_timing::enable();
+        }
+        on
+    })
 }
 
 /// Add an externally measured duration to `stage`.
@@ -139,6 +163,15 @@ pub fn report() -> String {
     for stage in STAGES {
         let count = COUNTS[stage as usize].load(Ordering::Relaxed);
         let total = TOTALS[stage as usize].load(Ordering::Relaxed);
+        if count > 0 {
+            line += &format!(
+                " {stage:?}={count}x{:.4}ms",
+                total as f64 / count as f64 / 1e6
+            );
+        }
+    }
+    for stage in grid_world::stage_timing::STAGES {
+        let (total, count) = grid_world::stage_timing::totals(stage);
         if count > 0 {
             line += &format!(
                 " {stage:?}={count}x{:.4}ms",

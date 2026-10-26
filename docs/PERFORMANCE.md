@@ -1299,3 +1299,120 @@ nothing in 3000 ticks. The current race breaks 8 stacks at tick 1697; F565 makes
   tick in a derby full of debris, and 0.6 ms less in the drift battle.
 - In the scripted grid-app run (14 pieces, no break) the change is within noise: `DriveTick`
   1.79-1.81 against 1.81-1.82 ms.
+
+## Physics cost growth over a race (F579)
+
+Coordinator's task (26 October 2026): the phone's physics cost grows over a race from about 4 to
+9 ms per frame; find why and cut it with bit-identical results.
+
+**The phone curve [O]** (owner's profile APK log `log-20261026-125712.txt`, Xiaomi 13 Ultra, 4
+compute threads, Donington route_0, 12 BMWs; `drive_tick` exclusive ms per frame divided by ticks
+per frame): about 2.8 ms per tick for the first 80 s, then 3.5, 4.5, 5.1, 5.3 ms per tick from 90 to
+140 s, and 3.1 ms after the finish. The replay of that log on this PC (`grid-soak replay-log`)
+diverges at tick 958 (ARM against x86), so it does not reproduce the phone's pile.
+
+**Reproduction off the phone.** `grid-app --headless` with `GRID_AUTOPILOT=1 GRID_THREADS=4
+GRID_PERF_TIMING=1` on the same event (`--settings donington-12.ini`: route_0, bmw against 11 bmw,
+15,000 ticks) and on the Nürburgring drift battle (`settings/drift-battle-nurburgring.ini`, 12,000
+ticks). All timed runs below ran under the build lock (no cargo build overlapped them), between
+14:25 and 17:02 on 26 October, after the owner's game had closed at 14:07. Earlier runs that day
+were discarded.
+
+New diagnostic timers (`GRID_PERF_TIMING` only; they never feed the simulation):
+- grid-tools `perf::Stage`: `WorldClone`, `Continuous`, `PropClone`, `PropDetect`, `PropApply`,
+  `BodyEvents`.
+- grid-world `stage_timing` (reported on the same line): `Predict`, `Islands`, `IslandPack`,
+  `IslandFrame`, `IslandStore`, and the frame by island kind: `FramePlain` (no car), `FrameCar` (a
+  car with static contacts only), `FrameGroup` (a car with other bodies), `GroupPrepare` and
+  `GroupSolved` (its two deformation phases), `GroupContacts` (contacts per tick in car groups).
+- grid-soak prints the cumulative line every 600 ticks.
+
+**Cause [V].** The growth follows the piece count. Pieces that cars keep touching never sleep:
+sleeping is per island, cars never sleep, so a car touching a pile keeps the pile in its island
+(BODY_SLEEPING.md, as the original). Such an island is a car group (`FrameGroup`), and the car
+group's per-contact work copied whole records:
+- `response_consumption::validate` compared every contact identity and owner with every other
+  (O(n²)), twice per car and tick, over all contacts of the group (about 1,200 per tick late in
+  the drift battle);
+- `deformation_contact_limit::calculate_side` copied the car's 42 KB deformation descriptor and
+  re-checked its 400 grid nodes for every contact;
+- `body_impact::calculate` copied the car's whole state (the 135 KB vehicle record) two or three
+  times for every contact of the car, in the body events after the solve;
+- `impact_frame::run` cloned the callback context (every owner's vehicle record) once per frame.
+
+Drift battle, ticks 9000-12000 (268 pieces, 54 asleep, 1,271 piece contacts per tick), timer build
+before → fixed build, ms per tick:
+
+| Stage | before | after |
+|---|---:|---:|
+| `WorldTick` | 5.76 | 3.93 |
+| `FrameGroup` | 3.20 | 1.93-1.94 |
+| `GroupSolved` | 1.40 | 0.33 |
+| `GroupPrepare` | 0.14 | 0.03 |
+| `BodyEvents` | 0.57 | 0.10 |
+| `FramePlain` | 0.15 | 0.14 |
+| `PieceContacts` | 0.66 | 0.61-0.64 |
+| `LiftSunk` | 0.23 | 0.23 |
+
+What is left in `FrameGroup` is the solve of those contacts. On Donington, where the pile sleeps
+(56 pieces, 56 asleep late), the growth is spread over many small per-body costs; the largest one
+removable without changing a result was `lift_sunk`, which cast a 100 m ray under every piece every
+tick, asleep or not.
+
+**Changes [V], all result-preserving:**
+- `response_consumption::validate`: identities sorted once, duplicates and pending lookups by
+  neighbour and binary search, owners sorted by (identity, registration). The test
+  `sorted_validation_matches_the_pairwise_checks` compares it with the pairwise version on 20,000
+  random inputs (accepted and rejected, same messages).
+- `deformation_contact_limit::calculate_side_in`: the descriptor is updated in place (the window
+  slot and +A490..+A498, the only words written; each read sees what it saw in the copy), and the
+  grid check (`validate_grid`, words the limit never writes) runs once per descriptor
+  (`validate_cached`). Used by `deforming_group_frame` and `deformation_preparation`;
+  `calculate_side` keeps its copying form.
+- `collision_damage` split into `validate` and `apply`; `calculate_in_place` writes the owner's
+  mutable block only after every region succeeded, as before. `body_impact::calculate_in_place`
+  uses it and the validation-only `check` (the first damage call's result was discarded). The
+  multi-car body events and the solo `vehicle_world` path use the in-place forms; an error
+  discards the staged car either way.
+- `impact_frame::calculate_with_callbacks_rows` takes the callbacks by value, and the group
+  deformation phase takes each owner's record instead of copying its descriptor.
+- `PropWorld::depths`: a memo of asleep pieces' road casts, by world body, used only when the
+  (breakable, piece) and the 16 pose words match bit for bit, and only for the road chunks it was
+  made with (`Track::road`). The cast reads only the static road with a fresh cull cache, so a hit
+  equals the cast. `pieces_at_rest_sleep_and_a_car_wakes_them` compares memo and fresh casts.
+
+**Identity [V]:**
+- Headless drive samples (every `drive_*` line without its wall-clock field): drift battle
+  `62b70b73…` and Donington `9d232e98…`, the same for the base build (origin/main 96a9008d) and
+  every step, two rounds each.
+- grid-opponent-race with dynamic props, 4 threads: Detroit derby (`--route tracks/usa/detroit/
+  route_8 --demolition --cars stk 12 12000 ai`) `e9011d21…` and Nürburgring (`--route tracks/
+  europe/nurburgring/route_1 --cars bmw 8 9000 ai`) `0eaebdd8…`, base = fixed; with
+  `GRID_SERIAL_TWIN=1` 8174 and 9000 ticks without a difference.
+- The identity runs (`tools/identity.tsv`) in the full prepush tier.
+
+**Before and after at 4 threads** (base build without timers against the fixed build, alternating,
+two rounds; ms per world tick, early = ticks 600-3000):
+
+| Event | Window | base | fixed |
+|---|---|---:|---:|
+| Drift battle | early (0 pieces) | 0.55 | 0.50-0.59 |
+| Drift battle | late, 9000-12000 (268 pieces) | 5.46-5.55 | 3.92-4.10 |
+| Donington, 12 bmw | early (0 pieces) | 0.73-0.76 | 0.71-0.74 |
+| Donington, 12 bmw | late, 12000-15000 (56 pieces) | 1.14-1.18 | 1.02-1.06 |
+
+- Donington late: `LiftSunk` 0.080-0.084 → 0.012-0.013 ms; `Commit` (which holds it and the body
+  events) 0.29-0.30 → 0.20-0.21 ms.
+- [I] The phone runs this work about 3-4x slower (2.8 against 0.75 ms early in the same race).
+  That suggests about 0.4 ms per tick less late in a Donington race and several ms in an awake
+  pile like the drift battle's. Not measured on the phone.
+- Not done: the solve of a car group's contacts itself, and the per-body work of asleep pieces
+  (piece pairs, the world's rollback copy, the vehicle stage's growth from damage). They are the
+  rest of the growth.
+
+**Profiling** (`tools/sample_profile.py --busy`, new: it samples only threads that ran since their
+last sample, so Bevy's idle pool threads no longer dilute a headless race). The release build's
+names are the nearest public symbols, so call paths are approximate; the leaf
+`response_consumption::validate` (8 % of busy samples in the drift race) led to the first fix.
+Evidence (machine-local): worktree `local/tick-growth/` (`runs.txt` lists every run with its start
+time and the lock state).

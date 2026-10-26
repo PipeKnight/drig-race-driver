@@ -219,7 +219,7 @@ Contents: [Process: log, indexes, pre-push, release, builds and disk](#process-l
 | [replay_damage_freeze.py](replay_damage_freeze.py) | Reproduce logged controls and prove sampled motion before a damage stop. | [PLAYTEST_DAMAGE_FREEZE_2026_10_14](../docs/PLAYTEST_DAMAGE_FREEZE_2026_10_14.md) |
 | [replay_driving_lap.py](replay_driving_lap.py) | Private observed-pose replay; interpolation is not vehicle resimulation. |  |
 | [route_survey.sh](route_survey.sh) | Solo-AI survey of every shipped route: grid-opponent-race --route R ROOT CD01 BP01 1 TICKS ai. | [SERIES](../docs/SERIES.md) |
-| [sample_profile.py](sample_profile.py) | User-mode sampling profiler for the port's Windows x64 executables. | [TOOLCHAIN](../docs/TOOLCHAIN.md) |
+| [sample_profile.py](sample_profile.py) | User-mode sampling profiler for the port's Windows x64 executables. | [PERFORMANCE](../docs/PERFORMANCE.md) |
 | [summarize_driving_log.py](summarize_driving_log.py) | Summarize private version-1 driving telemetry without inferring a lap. | [OWNER_TIME_TRIAL_2026_10_15](../docs/OWNER_TIME_TRIAL_2026_10_15.md) |
 | [validate_grid_driving_capture.py](validate_grid_driving_capture.py) | Inspect bounded private DT01 read-only controls/motion observations. | [REFERENCE_DRIVING_INPUT](../docs/REFERENCE_DRIVING_INPUT.md) |
 | [validate_grid_driving_guards.py](validate_grid_driving_guards.py) | Check DT01 reader bounds/identity without input or game-state changes. | [REFERENCE_DRIVING_INPUT](../docs/REFERENCE_DRIVING_INPUT.md) |
