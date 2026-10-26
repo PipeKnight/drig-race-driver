@@ -1205,3 +1205,94 @@ targets read +0x3C, which 414C70 writes, so a faithful +0xCC needs 414C70 ported
 - [O] The varieties are TurboHiss and TurboSpindle (loops, 6/20 m), TurboDump (dump1–2, 6/60 m)
   and TurboPip (pip1–2, 5/20 m).
 - The update that plays them is not traced.
+
+## 22. Gear clunk ported; car mec banks; the whine plays (F572)
+
+26 October 2026, Claude Code (car-series, owner task "port the engine sounds of F529", item 1;
+findings for items 3 and 4). Static: `tools/re/grid_re.py` dis/decompile (cache
+`local/re-cache`), Capstone displacement scans; offline renders. GRID was not launched.
+
+**View mapping of 43F7A0 [O].** 4139F0 stores the audio camera at group-mix +0xC1C and reads the
+mix mode at +0xBF0; the group mix sits at manager +0xB08, so 43F7A0's [+0x1724] is the audio
+camera (§13: Internal 0, Bonnet 1, Chase 2, Detached 3, DetachedMultiCar 4) and [+0x16F8] the mix
+mode (6 = EndOfRace). 454C39 forces camera 3 while +0x34D60 is set. So:
+- Chase: the slerp branch (§21);
+- Detached/DetachedMultiCar (trackside), not EndOfRace and +0x34D60 clear: 0.25·d;
+- Internal and Bonnet (head-cam, bumper, bonnet), and EndOfRace: d, the camera relative to the car.
+
+This corrects §21's [I] reading of views 3/4 as interior views. For the player's mounted and head
+views the original's emitter distances equal the port's camera-to-emitter distances.
+
+**Clunk audibility [O from data].** GearBox (0, 0, 4), GearStick 3.5/4 m, curve GearClucks 0 dB /
+pitch 1 at x = 1: Lacetti bumper (0, 0.73, 1.77) 2.35 m → 0 dB; bonnet (0, 1.11, 0.86) 3.33 m →
+0 dB; head-cam (0.36, 1.10, −0.19) 4.35 m → silent; chase 9–11 m → silent. The level is the
+Gearbox group (Normal/Bonnet/PC −18 dB in `GroupModeVolumes`).
+
+**Trigger [O].** 451580 (after the 451580 load offset): while +4 (up) is set and +0xC ≥
+fGearUpShiftTime (+0x80), if +0x310 is set it calls 4511E0 and clears +0x310. 414750 sets +0x310
+on every counted change of the player. So one clunk per counted upshift, on the first frame past
+fGearUpShiftTime (Lacetti 0.13 s: the 9th frame).
+
+**Which bank [O].** 4511E0 passes `[[car-audio +0x128] +0x2C] +0x14` as 44F010's last argument;
+44F010 hands it to 435940 as the bank, and 435940 uses the variety's own bank (412E50 on the
+template `mec_dbr`) only when it is −1. The +0x2C object is the car record built by 41E1A0 in the
+carsetup loader 41E2E0:
+- +0x10 engine bank, +0x14 mech bank: the backend's id (vtable +0x38, 41E747/41E785) of the car's
+  `EngineBank`/`MechBank` names ("bad Engine/Mech bank" messages 41E7CE, 41E817);
+- +0x18 the variety table (manager +0x70);
+- +0x20 the car's GearPreset (410C00 finds it by name, 41E684).
+
+So every car plays its own `mec_*` bank. The 45 banks differ: the GearClucks samples come in at
+least eight sets (lengths 7270–20020 frames at 40 kHz, `local/mech/test1.log`). All banks hold
+the same 22 sample names, so the template's names resolve in each.
+
+**Port.**
+- `grid_tools::mech_audio`: the six CollisionInfos with their varieties' samples (resolved by name
+  in the car's mec bank) and preset distances; `Voices` plays one-shots (44F010, one handle per
+  info) at curve level + group + A23B70 distance, pitch from the curve; 413B80 pick without repeat
+  [I: RNG].
+- `engine_audio_shift::Effects.clunk`: the 451580 trigger above. The continuous mixer starts
+  GearClucks at x = 1 when it fires and the mixer has mechanical voices.
+- grid-app: only the player's decoder gets voices (`EngineBank::mech`, loaded from its carsetup
+  MechBank). Levels per frame: Gearbox group (mode, audio camera, Effects Volume trim) and the
+  GearBox emitter's distance from the listener. Mono, centred like the engine (§12) [I: the
+  original positions it at the gearbox].
+- Fix: grid-app's decoder copied only rpm and throttle from each tick's control, not the gear, so
+  F528's shift effects never played in the game (the offline tests drove the mixer directly). The
+  decoder test now checks the gear.
+
+**Render [port, offline].** `GRID_ENGINE_AUDIO_TRACE` (new in grid-opponent-race, output
+unchanged) records car 0's engine-audio control per tick; the probe `grid-mech-audio` replays it
+through the mixer at the Lacetti's bumper view (Normal mode, Bonnet camera: engine −8 dB, exhaust
+−14 dB, Gearbox −18 dB). Solo Lacetti, Donington route_0, 5600 ticks (lap 86.8 s): 20 counted
+upshifts, each with a clunk 9 blocks after the change, about 0.27 s long, difference RMS
+0.034–0.038 against an engine RMS of 0.08–0.14 in the same window (`local/mech/render-01/`).
+The AI lap stays below 0.93 of the maximum RPM, so it never reaches the limiter.
+
+**The whine plays [O].** This answers §21's open question:
+- 457BE0 calls 4518E0 for every car (player and AI) after 451770, on the object at car-audio
+  +0x84C.
+- 4518E0 first starts the voice +0x850 (437A20: preset Gear1 sample from bank record +0x14), then
+  each frame:
+  - 416820: wheel speeds → speed (+0x1C, smoothed 0.1), mph (+0x20, 0..200); −0.125 on +0x54 per
+    wheel off the ground;
+  - 4169A0: two 128-entry tables of the object [+0xC] (+0x104, +0x304) over its period +0x100 →
+    +0x44/+0x48;
+  - 4378A0: on a gear change 4377F0 restarts the voice with the preset entry (gear − 1)·12 + 8;
+    after an upshift a decaying sine on the pitch (+0x50) from [+0xC] +0x520…+0x534;
+  - 4166E0: +0x4C from [+0xC] +0x514/+0x538/+0x53C and the damage term vehicle +0x185C;
+  - below 10 mph +0x54 scales down; then 44BAD0.
+- 44BAD0: neutral → −48 dB. Otherwise pitch = lerp(preset basePitch, maxPitch) over the wheel
+  speed between the gear's ratios (vehicle +0x191C/+0x1944/+0x18F0/+0x18F4/+0x1918), times +0x50
+  and a load term; volume = lin2db(+0x54 · load term · the Gearwhine CollisionInfo over mph 5–50)
+  + vehicle +0x185C − 1 + record +0xC8 (the car's gear VolumeTrim); Min/MaxDistance from the
+  Gearwhine preset (6/10 m).
+- So the earlier scan was wrong: the variety table entry +0xB0 is read (44BBxx), through a register
+  the scan did not follow. gear.ini `[GearWhine]` at car-audio +0xD10… is still unread; the
+  parameters 44BAD0 uses live in the [+0xC] object, whose loader is not traced yet.
+- Not ported yet: it needs the [+0xC] loader, the wheel and gear-ratio inputs and the AI group.
+
+**Turbo [O, static].** 457BE0 calls 44D840 only while car-audio +0xA4D8 is set: 43B1F0's sixth
+argument, `[car +0x6C] == 0`, the player. 44D840 runs the turbo model 416BC0 on the object at
+car-audio +0x800, then one-shots TurboDump (+0x819) and TurboPip (+0x818) and the loops Spindle
+(44D560, voice +0xA39C) and Hiss (44D6D0, +0xA3A0), all at the EngineBay emitter. Port pending.

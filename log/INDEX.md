@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F572](F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |
 | [F571](F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |
 | [F570](F0570.md) | 2026-10-25 | Disk cleanup: obsolete APKs, idle sessions' build dirs, uncited behavior captures |
 | [F569](F0569.md) | 2026-10-24 | Playable 9c1bfe65e68f with F567-F568, portable copy and APKs 3cdbf523a7f0 |
@@ -474,6 +475,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G295](G0295.md) | 2026-10-26 | Integrate the current engine-audio main into the graphics branch |
 | [G294](G0294.md) | 2026-10-26 | Verify the native late-smoke scheduling boundary before DLAA admission |
 | [G293](G0293.md) | 2026-10-26 | Add an opt-in BMW glass and lamp smoke boundary |
 | [G292](G0292.md) | 2026-10-26 | Recheck dense BMW smoke using the current replay artifact |

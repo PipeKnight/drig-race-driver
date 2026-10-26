@@ -138,6 +138,7 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 
 | Entry | Date | Title |
 |---|---|---|
+| [F572](log/F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |
 | [F571](log/F0571.md) | 2026-10-26 | Auto render height probes each step and returns to 720 when the rows are not what makes the frame late |
 | [F570](log/F0570.md) | 2026-10-25 | Disk cleanup: obsolete APKs, idle sessions' build dirs, uncited behavior captures |
 | [F569](log/F0569.md) | 2026-10-24 | Playable 9c1bfe65e68f with F567-F568, portable copy and APKs 3cdbf523a7f0 |
@@ -197,7 +198,6 @@ Work that needs a live recording of the original grid.exe: [docs/CAPTURE_BACKLOG
 | [F514](log/F0514.md) | 2026-10-20 | Career: winning the International head-to-head unlocks every car (the original's 0x65AD90); head_to_head_rewards is never read; a longer unattended Le Mans … |
 | [F513](log/F0513.md) | 2026-10-20 | Playable 141433900886 with F491–F512, and a private portable copy for another Windows PC |
 | [F512](log/F0512.md) | 2026-10-20 | Angular corrections and rotations past 64 rad turn as in the original |
-| [F511](log/F0511.md) | 2026-10-20 | Window glass sounds: WindScreen/Window Crack and Smash when a window cracks or smashes |
 
 Older entries: [log/INDEX.md](log/INDEX.md).
 

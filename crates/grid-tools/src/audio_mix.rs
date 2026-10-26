@@ -15,6 +15,7 @@ pub const GROUPS: usize = 21;
 /// match the tyre and engine constructors 413E50/4223D0).
 pub const EXHAUST: usize = 0;
 pub const ENGINE: usize = 1;
+pub const TURBO: usize = 2;
 pub const GEARBOX: usize = 3;
 pub const WHEELS: usize = 6;
 pub const SKIDS: usize = 7;
