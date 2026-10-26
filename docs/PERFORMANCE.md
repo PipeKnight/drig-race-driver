@@ -959,7 +959,34 @@ Expected [I, not measured]:
 - With MSAA off, the menu would reach about 52–55 FPS. That is the owner's call: off by default only with the owner's say.
 - Dynamic resolution would not reach 60 FPS in the menu either (see the fixed part above).
 
-### Dynamic render height (F556, F559)
+### Dynamic render height (F556, F559, F571)
+
+**Stuck at 480 rows (F571).** Owner, APKs 3cdbf523a7f0: never below 30 FPS, but the render height
+never rose above 480. Phone log `log-20261026-125712.txt` (profile APK, Donington, 12 bmw; worktree
+`local/playtest/phone-20261026/`) [O]:
+- `render_dynamic` stepped 720 -> 480 in 2.5 s from 14.7 s on. The frame went 41.3 -> 36.0 ms while
+  the fixed-step work read 1.3-1.8 ms, so every frame counted as GPU bound.
+- From 40 s on, the profile windows show a CPU-bound frame: 23-27 ms with Main 18-24 ms and Render
+  21-25 ms. The six compute threads work about 6 ms each per frame. The render thread is inside spans
+  for 23-26 ms but works 8.5-10.7 ms. `present_frames` takes 1-3 ms.
+- A height is raised only after 3 s under 17.2 ms, which this race never reached, so it stayed at 480.
+
+Fix: every step down is a probe. One second (`PROBE_SECONDS`) later, the smoothed frame time must have
+gained at least half (`GPU_SHARE`) of what a frame bound only by the pixel count would gain:
+`before x (1 - (to/from)^2)`, 5.4 ms from 720 to 672 rows at 41 ms. Otherwise the height returns to
+the 720 ceiling at once and holds there for 60 s (`HOLD_SECONDS`), then probes again.
+- `render_dynamic version=2` logs `reason=ineffective` with `probe_gain_ms` and `pixel_gain_ms`.
+- Down steps now come once per probe second, so 720 -> 480 takes 5 s when every step helps.
+- The fixed-step check (F559) stays.
+- [I] On the race above, a step gains about 0.8 ms (F555 fit: 5.6 ms per megapixel, 0.14 MP per
+  step) against 5.4 ms, so the height returns to 720. It probes once a minute, at 672 rows for one
+  second.
+- [I] The pre-race menu (F555: 17.6 ms + 5.6 ms per MP, 24 ms at 720 rows) is also mostly not
+  pixel bound (about 26 %), so it now stays at 720 instead of dropping to 480 for about +6 FPS.
+- Checked by the unit tests `dynamic_height_returns_when_a_step_does_not_help` (a constant 37 ms
+  frame, and a frame of which a quarter scales with the pixels) and
+  `dynamic_height_drops_fast_when_late_and_rises_slowly` (pixel-bound frames still go to 480). Not
+  verified on the phone yet.
 
 The owner chose a dynamic resolution of 480 to 720 rows (2026-10-22). Since F559 it is the Video
 screen's Render height value **Auto** (`[video] render_height = auto`), the Android default; the
