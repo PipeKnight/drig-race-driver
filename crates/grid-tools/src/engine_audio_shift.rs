@@ -111,6 +111,9 @@ pub struct Shift {
     loudness: f32,
     /// +0x1A0: load offset.
     load: f32,
+    /// +0x310: a counted change not yet ended by the clunk (414750 sets it
+    /// for the player only; 451580 clears it).
+    clunk: bool,
     random: u32,
 }
 
@@ -123,6 +126,8 @@ pub struct Effects {
     pub load: f32,
     /// +0x2F8: multiplies every voice pitch in 42DE60.
     pub pitch: f32,
+    /// 451580 calls 4511E0 this frame: the gear clunk (player only).
+    pub clunk: bool,
 }
 
 impl Shift {
@@ -137,6 +142,7 @@ impl Shift {
             gear: NEUTRAL,
             loudness: settings.up_wobble_level,
             load: 0.,
+            clunk: false,
             random: seed | 1,
         }
     }
@@ -173,6 +179,7 @@ impl Shift {
             if between(FIRST) + between(NEUTRAL) + between(REVERSE) < 2 {
                 self.up = up;
                 self.elapsed = 0.;
+                self.clunk = true;
             }
             self.gear = gear;
         }
@@ -181,9 +188,14 @@ impl Shift {
         // load crossfade to off-load), a downshift up by 0.1 a frame.
         let decayed = self.load * 0.9;
         self.load = if decayed >= -1. { decayed.min(1.) } else { -1. };
+        let mut clunk = false;
         if self.up {
             if self.elapsed < s.up_shift_time {
                 self.load -= 0.5;
+            } else if self.clunk {
+                // The upshift has ended: 4511E0 plays GearClucks.
+                clunk = true;
+                self.clunk = false;
             }
         } else if self.elapsed < s.down_shift_time {
             self.load += 0.1;
@@ -206,7 +218,7 @@ impl Shift {
                 pitch = sine * (random * ((1. - t / s.down_wobble_length) * self.loudness)) + 1.;
             }
         }
-        Effects { scale: self.scale, load: self.load, pitch }
+        Effects { scale: self.scale, load: self.load, pitch, clunk }
     }
 }
 
@@ -242,7 +254,7 @@ mod tests {
         for _ in 0..40 {
             start.push(shift.frame(FIRST, dt));
         }
-        assert_eq!(start[39], Effects { scale: 1., load: 0., pitch: 1. }.with_load(start[39].load));
+        assert_eq!(start[39], Effects { scale: 1., load: 0., pitch: 1., clunk: false }.with_load(start[39].load));
         let up = shift.frame(2, dt);
         assert!((0.95..1.).contains(&up.scale), "{up:?}");
         // 0.9·previous − 0.5 for 0.13 s: off-load (the phase is clamped).
@@ -251,6 +263,10 @@ mod tests {
         // −1.5 from the third frame to the end of the 0.13 s, then the clamp.
         assert!(frames[2..8].iter().all(|f| f.load == -1.5), "{frames:?}");
         assert_eq!((frames[8].load, frames[9].load), (-1., -0.9));
+        // 451580 → 4511E0: the clunk once, on the first frame past 0.13 s.
+        assert!(!up.clunk);
+        assert_eq!(frames.iter().position(|f| f.clunk), Some(8));
+        assert_eq!(frames.iter().filter(|f| f.clunk).count(), 1);
         // The dip recovers by 0.003 per frame.
         assert!((frames[0].scale - up.scale - 0.003).abs() < 1e-6 || frames[0].scale == 1.);
         // No wobble before 0.18 s, then 1.75 · 5 Hz at 0.15 · (1 − 2/6).
@@ -271,6 +287,14 @@ mod tests {
             }
         }
         let down = shift.frame(2, 0.016);
+        assert!((0..60).all(|_| !shift.frame(2, 0.016).clunk), "no clunk after a downshift");
+        let mut shift = Shift::new(lacetti(), 7);
+        for gear in [1, 2, 3] {
+            for _ in 0..60 {
+                shift.frame(gear, 0.016);
+            }
+        }
+        assert_eq!(shift.frame(2, 0.016), down);
         assert_eq!(down.scale, 1.);
         assert!(down.load > 0.);
         // 15 Hz, loudness 0.15 · (1 − 2/6) = 0.1, from the first frame.

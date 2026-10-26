@@ -87,6 +87,38 @@ fn children<'d, 'a>(doc: &'d binxml::Document<'a>, i: usize) -> impl Iterator<It
     doc.elements[doc.elements[i].children.clone()].iter()
 }
 
+/// CollisionInfos.bin: each CollisionInfo's variety and curve; a preset gives
+/// the defaults, the CollisionInfo's own attributes override them.
+pub fn read_infos(bytes: &[u8]) -> Result<HashMap<String, Curve>, String> {
+    let doc = binxml::read(bytes).map_err(|e| format!("CollisionInfos: {e:?}"))?;
+    const FIELDS: [&str; 6] = ["minVel", "maxVel", "minVol", "maxVol", "minPitch", "maxPitch"];
+    let mut curves: HashMap<&str, [Option<f32>; 6]> = HashMap::new();
+    for e in doc.elements.iter().filter(|e| e.name == "Preset") {
+        if let Some(n) = attr(e, "name") {
+            curves.insert(n, FIELDS.map(|f| number(e, f)));
+        }
+    }
+    let mut out_infos = HashMap::new();
+    for e in doc.elements.iter().filter(|e| e.name == "CollisionInfo") {
+        let Some(name) = attr(e, "name") else { continue };
+        let preset = attr(e, "preset").and_then(|p| curves.get(p)).copied().unwrap_or([None; 6]);
+        let v: [f32; 6] = std::array::from_fn(|k| number(e, FIELDS[k]).or(preset[k]).unwrap_or(0.));
+        out_infos.insert(
+            name.to_owned(),
+            Curve {
+                variety: attr(e, "variety").unwrap_or_default().to_owned(),
+                min_vel: v[0],
+                max_vel: v[1],
+                min_vol: v[2],
+                max_vol: v[3],
+                min_pitch: v[4],
+                max_pitch: v[5],
+            },
+        );
+    }
+    Ok(out_infos)
+}
+
 impl Bank {
     pub fn load(root: &Path) -> Result<Arc<Self>, String> {
         let audio = root.join("audio");
@@ -146,33 +178,7 @@ impl Bank {
                 out_varieties.insert(name.to_owned(), Variety { samples, min_distance, max_distance });
             }
         }
-        // CollisionInfos: presets give the curve, each CollisionInfo may override.
-        let doc = binxml::read(infos).map_err(|e| format!("CollisionInfos: {e:?}"))?;
-        const FIELDS: [&str; 6] = ["minVel", "maxVel", "minVol", "maxVol", "minPitch", "maxPitch"];
-        let mut curves: HashMap<&str, [Option<f32>; 6]> = HashMap::new();
-        for e in doc.elements.iter().filter(|e| e.name == "Preset") {
-            if let Some(n) = attr(e, "name") {
-                curves.insert(n, FIELDS.map(|f| number(e, f)));
-            }
-        }
-        let mut out_infos = HashMap::new();
-        for e in doc.elements.iter().filter(|e| e.name == "CollisionInfo") {
-            let Some(name) = attr(e, "name") else { continue };
-            let preset = attr(e, "preset").and_then(|p| curves.get(p)).copied().unwrap_or([None; 6]);
-            let v: [f32; 6] = std::array::from_fn(|k| number(e, FIELDS[k]).or(preset[k]).unwrap_or(0.));
-            out_infos.insert(
-                name.to_owned(),
-                Curve {
-                    variety: attr(e, "variety").unwrap_or_default().to_owned(),
-                    min_vel: v[0],
-                    max_vel: v[1],
-                    min_vol: v[2],
-                    max_vol: v[3],
-                    min_pitch: v[4],
-                    max_pitch: v[5],
-                },
-            );
-        }
+        let out_infos = read_infos(infos)?;
         // ImpactVarieties: the first three children in file order (45B040).
         let doc = binxml::read(impacts).map_err(|e| format!("ImpactVarieties: {e:?}"))?;
         let mut out_impacts = HashMap::new();

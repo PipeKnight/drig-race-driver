@@ -317,6 +317,11 @@ path = "src/bin/grid-engine-continuous.rs"
 test = false
 
 [[bin]]
+name = "grid-mech-audio"
+path = "src/bin/grid-mech-audio.rs"
+test = false
+
+[[bin]]
 name = "grid-entities"
 path = "src/bin/grid-entities.rs"
 test = false

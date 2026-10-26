@@ -7,6 +7,7 @@ use crate::{
     engine_audio_restart::PlaybackService,
     engine_audio_schedule,
     engine_audio_shift::{self, Shift},
+    mech_audio,
 };
 use grid_formats::{audio_car_setup, audio_dictionary, tuning, vehicle_properties};
 use std::{fs, io::Read, path::Path, sync::Arc};
@@ -33,6 +34,14 @@ pub struct Bank {
     trims: [f32; 2],
     /// carsetup EngineBay and Exhaust emitter offsets in the car frame.
     pub emitters: [[f32; 3]; 2],
+    /// carsetup GearBox emitter offset.
+    pub gearbox: [f32; 3],
+    /// carsetup MechBank: the `mec_*` bank of the car's mechanical sounds
+    /// (41E785 resolves it into the car record +0x14, which 4511E0 passes to
+    /// 435940 in place of the variety's template bank).
+    pub mechanics_bank: String,
+    /// Its samples, when loaded for the player (`mech_audio::Bank::load`).
+    pub mech: Option<Arc<mech_audio::Bank>>,
     /// engine.ini [Physics] gear-shift settings.
     shift: engine_audio_shift::Settings,
 }
@@ -134,6 +143,9 @@ impl Bank {
             idle,
             trims: [setup.trims[1], setup.trims[2]],
             emitters: [setup.offsets[0], setup.offsets[1]],
+            gearbox: setup.offsets[2],
+            mechanics_bank: setup.mechanics_bank.to_owned(),
+            mech: None,
             shift,
         }))
     }
@@ -168,6 +180,11 @@ pub struct Mixer {
     pub failure: Option<&'static str>,
     /// 451770's gear-shift state (`engine_audio_shift`).
     shift: Shift,
+    /// The player's mechanical sounds (`mech_audio`); `None` for opponents,
+    /// which 4511E0 and the turbo update skip (+0x310, +0xA4D8).
+    pub mech: Option<mech_audio::Voices>,
+    /// Their group levels and emitter distances.
+    pub mech_levels: mech_audio::Levels,
 }
 /// Normal/Chase/PC levels of the Engine and Exhaust groups.
 pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
@@ -185,6 +202,8 @@ impl Mixer {
             bus_db: CHASE_BUS_DB,
             diagnostics: Diagnostics::default(),
             failure: None,
+            mech: None,
+            mech_levels: mech_audio::Levels::SILENT,
         };
         result.reset();
         result
@@ -198,6 +217,9 @@ impl Mixer {
         self.failure = None;
         // The constructor's shift state [I: the seed of A682A0's sequence].
         self.shift = Shift::new(self.bank.shift, 0x5eed);
+        if let Some(mech) = &mut self.mech {
+            mech.stop();
+        }
         for (at, value) in [
             (0, 1.),
             (0xb0, 1.),
@@ -236,6 +258,13 @@ impl Mixer {
         put(&mut self.controller, 0, shift.scale);
         put(&mut self.controller, 0x1a0, shift.load);
         put(&mut self.controller, 0x2f8, shift.pitch);
+        if let Some(mech) = &mut self.mech {
+            // 451580 → 4511E0: GearClucks at x = 1 (0 dB, pitch 1).
+            if shift.clunk {
+                mech.start("GearClucks", 1.);
+            }
+            mech.frame(self.mech_levels);
+        }
         put(&mut self.controller, 0xcc, control.throttle);
         let environment = Environment {
             motion_210: [0.; 4],
@@ -322,6 +351,9 @@ impl Mixer {
             }
             cursor.position += cursor.step;
         }
+        if let Some(mech) = &mut self.mech {
+            value += mech.sample();
+        }
         let value = value * self.gain;
         if value.abs() > 0.98 {
             self.diagnostics.clipped_samples += 1;
@@ -346,6 +378,9 @@ mod tests {
             idle: 240.,
             trims: [0.; 2],
             emitters: [[0., 0., 4.], [0., 0., -4.]],
+            gearbox: [0., 0., 4.],
+            mechanics_bank: String::new(),
+            mech: None,
             shift: engine_audio_shift::Settings::NONE,
         })
     }

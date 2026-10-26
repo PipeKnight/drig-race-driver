@@ -8,6 +8,7 @@ use grid_tools::{
     audio_pacing::Paced,
     engine_audio::{Control, RATE},
     engine_audio_continuous::{Bank as EngineBank, CHASE_BUS_DB, Mixer},
+    mech_audio,
 };
 use super::stereo::{Pan, Stereo};
 use std::{
@@ -27,6 +28,8 @@ pub(crate) struct EngineSound {
     ticked: Option<(u64, u64)>,
     /// Engine/exhaust group levels in dB for the audio thread (`pack_bus`).
     bus: Arc<AtomicU64>,
+    /// The player's mechanical-sound levels (gear clunk).
+    mech: MechBus,
     /// The original group mix (`audio/GroupModeVolumes.bin`).
     pub(crate) table: Option<Arc<Table>>,
     failure: Arc<AtomicU32>,
@@ -46,6 +49,7 @@ impl EngineSound {
             pushed: None,
             ticked: None,
             bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
+            mech: mech_bus(),
             table: None,
             failure: Arc::new(AtomicU32::new(0)),
             bank: banks.first().cloned().flatten(),
@@ -65,6 +69,12 @@ impl EngineSound {
             driving.segment as u32,
         )
     }
+}
+/// The player's mechanical-sound levels for the audio thread
+/// (`mech_audio::Levels::to_bits`).
+type MechBus = Arc<[AtomicU32; 6]>;
+fn mech_bus() -> MechBus {
+    Arc::new(mech_audio::Levels::SILENT.to_bits().map(AtomicU32::new))
 }
 /// Tick-paced packed controls shared with one engine decoder.
 type Mailbox = Arc<Mutex<Paced<u64>>>;
@@ -128,11 +138,15 @@ pub(crate) struct EngineSource {
     bus: Arc<AtomicU64>,
     failure: Arc<AtomicU32>,
     pan: Pan,
+    /// The player's mechanical-sound levels (`mech_audio::Levels::to_bits`);
+    /// `None` for opponents, which play none.
+    mech: Option<MechBus>,
 }
 pub(crate) struct Decoder {
     mixer: Mixer,
     mailbox: Mailbox,
     bus: Arc<AtomicU64>,
+    mech: Option<MechBus>,
     control: Control,
     count: usize,
     failure: Arc<AtomicU32>,
@@ -154,6 +168,7 @@ impl Iterator for Decoder {
                 let next = Control::unpack(mailbox.take());
                 self.control.normalized_rpm = next.normalized_rpm;
                 self.control.throttle = next.throttle;
+                self.control.gear = next.gear;
             }
             self.control.audible = latest.audible;
             self.control.generation = latest.generation;
@@ -163,6 +178,9 @@ impl Iterator for Decoder {
         }
         if self.count.is_multiple_of(64) {
             self.mixer.bus_db = unpack_bus(self.bus.load(Ordering::Relaxed));
+            if let Some(mech) = &self.mech {
+                self.mixer.mech_levels = mech_audio::Levels::from_bits(mech.each_ref().map(|a| a.load(Ordering::Relaxed)));
+            }
         }
         self.count = self.count.wrapping_add(1);
         let value = self.mixer.sample(self.control);
@@ -205,6 +223,7 @@ impl TestVoice {
             bus: Arc::new(AtomicU64::new(pack_bus([f32::NEG_INFINITY; 2]))),
             failure: Arc::new(AtomicU32::new(0)),
             pan,
+            mech: None,
         };
         Self { decoder: source.decoder(), mailbox: source.mailbox, bus: source.bus }
     }
@@ -241,9 +260,16 @@ impl Decodable for EngineSource {
     fn decoder(&self) -> Stereo<Decoder> {
         Stereo::new(
             Decoder {
-                mixer: Mixer::new(self.bank.clone()),
+                mixer: {
+                    let mut mixer = Mixer::new(self.bank.clone());
+                    if self.mech.is_some() {
+                        mixer.mech = self.bank.mech.clone().map(|m| mech_audio::Voices::new(m, RATE));
+                    }
+                    mixer
+                },
                 mailbox: self.mailbox.clone(),
                 bus: self.bus.clone(),
+                mech: self.mech.clone(),
                 control: Control::default(),
                 count: 0,
                 failure: self.failure.clone(),
@@ -259,8 +285,21 @@ impl Decodable for EngineSource {
 pub(crate) fn load_banks(root: &std::path::Path, models: &[grid_tools::car::Car]) -> Vec<Option<Arc<EngineBank>>> {
     models
         .iter()
-        .map(|m| match EngineBank::load(root, m) {
-            Ok(bank) => Some(bank),
+        .enumerate()
+        .map(|(k, m)| match EngineBank::load(root, m) {
+            Ok(mut bank) => {
+                // The player's mechanical sounds come from its carsetup MechBank.
+                if k == 0 {
+                    match mech_audio::Bank::load(root, &bank.mechanics_bank) {
+                        Ok(mech) => Arc::get_mut(&mut bank).unwrap().mech = Some(mech),
+                        Err(error) => {
+                            warn!("Mechanical sounds of {} unavailable: {error}", m.stem());
+                            eprintln!("engine_audio version=2 event=mech_bank_failed car={} error=\"{error}\"", m.stem());
+                        }
+                    }
+                }
+                Some(bank)
+            }
             Err(error) => {
                 warn!("Engine audio of {} unavailable; that car is silent: {error}", m.stem());
                 eprintln!("engine_audio version=2 event=bank_failed car={} error=\"{error}\"", m.stem());
@@ -351,6 +390,7 @@ fn start(
             bus: sound.bus.clone(),
             failure: sound.failure.clone(),
             pan: Pan::centre(),
+            mech: Some(sound.mech.clone()),
         });
         commands.spawn(AudioPlayer(handle));
     }
@@ -378,6 +418,7 @@ fn start(
             bus: bus.clone(),
             failure: failure.clone(),
             pan: pan.clone(),
+            mech: None,
         });
         // Played once, as the player's engine: the decoder never ends. LOOP
         // wraps it in rodio's `repeat_infinite`, which keeps every sample
@@ -501,6 +542,21 @@ fn update(
         )),
         Ordering::Relaxed,
     );
+    // The player's gear clunk (GearBox emitter, group Gearbox); the backfire
+    // and turbo groups stay silent until they are ported.
+    let gearbox = sound.bank.as_ref().map_or([0., 0., 4.], |b| b.gearbox);
+    let group = |g: usize| table.map_or(f32::NEG_INFINITY, |t| modes.group_db(t, camera, g, trim));
+    let levels = mech_audio::Levels {
+        group_db: [group(audio_mix::GEARBOX), f32::NEG_INFINITY, f32::NEG_INFINITY],
+        distance: [
+            player.transform_point3(Vec3::from_array(gearbox)).distance(ear),
+            player.transform_point3(Vec3::from_array(emitters[0][1])).distance(ear),
+            player.transform_point3(Vec3::from_array(emitters[0][0])).distance(ear),
+        ],
+    };
+    for (a, bits) in sound.mech.iter().zip(levels.to_bits()) {
+        a.store(bits, Ordering::Relaxed);
+    }
     if sound.failure.swap(0, Ordering::Relaxed) != 0 && !sound.muted {
         sound.muted = true;
         eprintln!("engine_audio version=2 event=decoder_failed muted=true reset_key=R");
@@ -672,10 +728,13 @@ mod tests {
                 bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))),
                 failure: Arc::new(AtomicU32::new(0)),
                 pan: Pan::centre(),
+                mech: None,
             }
             .decoder()
             .inner;
-            let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0, gear: 0 };
+            // Each tick in its own gear: the gear reaches the mixer with the
+            // RPM (before the gear clunk port it stayed 0, so no shift effect played).
+            let control = |rpm: f32| Control { normalized_rpm: rpm, throttle: 0.5, audible: true, generation: 0, gear: (rpm * 10.).round() as u32 };
             push(&mailbox, control(0.3));
             for _ in 0..grid_tools::engine_audio_continuous::BLOCK {
                 decoder.next();
@@ -686,13 +745,13 @@ mod tests {
             let mut seen = Vec::new();
             for _ in 0..3 {
                 decoder.next();
-                seen.push(decoder.control.normalized_rpm);
+                seen.push((decoder.control.normalized_rpm, decoder.control.gear));
                 for _ in 1..grid_tools::engine_audio_continuous::BLOCK {
                     decoder.next();
                 }
             }
             let quantised = |rpm: f32| Control::unpack(control(rpm).pack()).normalized_rpm;
-            assert_eq!(seen, [quantised(0.4), quantised(0.5), quantised(0.6)]);
+            assert_eq!(seen, [(quantised(0.4), 4), (quantised(0.5), 5), (quantised(0.6), 6)]);
         }).unwrap().join().unwrap();
     }
     /// A model whose bank fails to load leaves only that car silent: the
@@ -723,7 +782,7 @@ mod tests {
             let root = std::env::var_os("GRID_GAME_ROOT").unwrap();
             let root = std::path::Path::new(&root);
             let bank = EngineBank::lacetti(root).unwrap();
-            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre() }.decoder().inner;
+            let mut decoder = EngineSource { bank: bank.clone(), mailbox: mailbox(), bus: Arc::new(AtomicU64::new(pack_bus(CHASE_BUS_DB))), failure: Arc::new(AtomicU32::new(0)), pan: Pan::centre(), mech: None }.decoder().inner;
             let sound = EngineSound::new(bank);
             decoder.mailbox = sound.mailbox.clone();
             decoder.bus = sound.bus.clone();
