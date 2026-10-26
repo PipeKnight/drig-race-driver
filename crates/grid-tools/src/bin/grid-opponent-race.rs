@@ -380,15 +380,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => None,
     };
     // GRID_ENGINE_AUDIO_TRACE=local/X.tsv: per tick, car 0's engine-audio
-    // inputs as grid-app publishes them after the tick (`Control::vehicle`)
-    // and the applied throttle (vehicle +0xE1C), for offline renders.
+    // inputs as grid-app publishes them after the tick (`Control::vehicle`
+    // with the applied throttle, vehicle +0xE1C) and the driver's throttle,
+    // for offline renders.
     let mut engine_trace = match std::env::var("GRID_ENGINE_AUDIO_TRACE") {
         Ok(path) => {
             if !Path::new(&path).starts_with("local") {
                 return Err("trace must stay under local/".into());
             }
             let mut t = std::io::BufWriter::new(std::fs::File::create(path)?);
-            writeln!(t, "tick	normalized_rpm	throttle	gear	applied_throttle")?;
+            writeln!(t, "tick	normalized_rpm	applied_throttle	gear	driver_throttle")?;
             Some(t)
         }
         Err(_) => None,
@@ -888,7 +889,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(t) = &mut engine_trace {
             let car = &multi.cars[0];
             let words = &car.state.car.owner.vehicle;
-            let throttle = if car.terminal_wheel().is_some() { 0. } else { controls[0].throttle };
+            let applied = grid_tools::engine_audio::Control::applied_throttle(words);
+            let throttle = if car.terminal_wheel().is_some() { 0. } else { applied };
             let c = grid_tools::engine_audio::Control::vehicle(words, throttle, true, 0);
             writeln!(
                 t,
@@ -897,7 +899,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 c.normalized_rpm,
                 c.throttle,
                 c.gear,
-                f32::from_bits(words[0xe1c / 4])
+                controls[0].throttle
             )?;
         }
         if let Some(t) = &mut field_trace {

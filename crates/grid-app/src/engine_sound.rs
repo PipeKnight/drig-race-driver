@@ -28,7 +28,7 @@ pub(crate) struct EngineSound {
     ticked: Option<(u64, u64)>,
     /// Engine/exhaust group levels in dB for the audio thread (`pack_bus`).
     bus: Arc<AtomicU64>,
-    /// The player's mechanical-sound levels (gear clunk).
+    /// The player's mechanical-sound levels (clunk, backfire, turbo).
     mech: MechBus,
     /// The original group mix (`audio/GroupModeVolumes.bin`).
     pub(crate) table: Option<Arc<Table>>,
@@ -63,7 +63,7 @@ impl EngineSound {
             if driving.runtime.terminal_wheel().is_some() {
                 0.
             } else {
-                driving.last_controls.unwrap_or_default().throttle
+                Control::applied_throttle(&driving.runtime.state.car.owner.vehicle)
             },
             !self.muted && !driving.paused && driving.failure.is_none(),
             driving.segment as u32,
@@ -72,7 +72,7 @@ impl EngineSound {
 }
 /// The player's mechanical-sound levels for the audio thread
 /// (`mech_audio::Levels::to_bits`).
-type MechBus = Arc<[AtomicU32; 6]>;
+type MechBus = Arc<[AtomicU32; 7]>;
 fn mech_bus() -> MechBus {
     Arc::new(mech_audio::Levels::SILENT.to_bits().map(AtomicU32::new))
 }
@@ -542,12 +542,13 @@ fn update(
         )),
         Ordering::Relaxed,
     );
-    // The player's gear clunk (GearBox emitter, group Gearbox); the backfire
-    // and turbo groups stay silent until they are ported.
+    // The player's clunk (Gearbox), backfire (Exhaust), turbo loops (Turbo)
+    // and turbo dump and pip (Engine) at the GearBox, Exhaust and EngineBay
+    // emitters.
     let gearbox = sound.bank.as_ref().map_or([0., 0., 4.], |b| b.gearbox);
     let group = |g: usize| table.map_or(f32::NEG_INFINITY, |t| modes.group_db(t, camera, g, trim));
     let levels = mech_audio::Levels {
-        group_db: [group(audio_mix::GEARBOX), f32::NEG_INFINITY, f32::NEG_INFINITY],
+        group_db: [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE].map(group),
         distance: [
             player.transform_point3(Vec3::from_array(gearbox)).distance(ear),
             player.transform_point3(Vec3::from_array(emitters[0][1])).distance(ear),
@@ -623,11 +624,7 @@ fn push_controls(
         let audible = !sound.muted && !driving.paused && driving.failure.is_none() && !finished;
         for engine in opponent_engines {
             let car = &opponents.multi.cars[engine.car];
-            let throttle = opponents
-                .throttles
-                .get(engine.car - 1)
-                .copied()
-                .unwrap_or(0.);
+            let throttle = Control::applied_throttle(&car.state.car.owner.vehicle);
             let control = Control::vehicle(
                 &car.state.car.owner.vehicle,
                 if car.terminal_wheel().is_some() {

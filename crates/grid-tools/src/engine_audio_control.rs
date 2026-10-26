@@ -77,12 +77,12 @@ pub fn update(
             return Err("engine audio curve domain");
         }
     }
-    for at in [0, 0x38, 0xb0, 0xb4, 0xc8, 0x30c] {
+    for at in [0, 0x28, 0x2c, 0x38, 0xb0, 0xb4, 0xc8, 0x30c] {
         if !scalar(controller, at).is_finite() {
             return Err("engine audio controller scalar");
         }
     }
-    if word(controller, 0x28) != 0
+    if !(0.0..=1.).contains(&scalar(controller, 0x28))
         || !(0.0..=2.).contains(&scalar(controller, 0x38))
         || !(0.0..=2.).contains(&scalar(controller, 0))
         || scalar(controller, 0xb0).abs() > 2.
@@ -123,9 +123,24 @@ pub fn update(
     let increment = ((weight * ratio - old) * 0.25).clamp(-0.2, 0.2);
     let smoothed = old + increment;
     put(&mut next, 0x38, smoothed);
-    let rpm = smoothed.min(1.);
+    let mut rpm = smoothed.min(1.);
     put(&mut next, 0x14, rpm);
     put(&mut next, 0xbc, 0.);
+    // The lift-off burble (4148A0 sets +0x28): a 20 Hz sine on the RPM over
+    // the phase +0x2C (451770 adds dt after this), decaying by 0.25 a second.
+    let level = scalar(&next, 0x28);
+    if level > 0. {
+        let burble = f64::from(scalar(&next, 0x2c) * 125.68).sin() as f32 * level;
+        put(&mut next, 0xbc, burble);
+        rpm += burble;
+        if rpm > 1. {
+            let previous = scalar(&next, 0x48);
+            put(&mut next, 0xbc, burble - (previous - 1.));
+            rpm = 1.;
+        }
+        let decayed = level - engine.delta as f32 * 0.25;
+        put(&mut next, 0x28, if decayed < 0. { 0. } else { decayed.min(999.) });
+    }
     let recorded_idle = curves[1023];
     put(&mut next, 0xc0, recorded_idle);
     put(&mut next, 0xc4, physical_idle);

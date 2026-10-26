@@ -8,6 +8,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [F575](F0575.md) | 2026-10-26 | Engine audio: backfire, turbo and the load path (applied throttle, lift-off burble, rev limiter) ported |
 | [F574](F0574.md) | 2026-10-26 | Dormant prop pieces skip the per-entity passes |
 | [F573](F0573.md) | 2026-10-26 | Desktop Auto render height and compute threads on the desktop |
 | [F572](F0572.md) | 2026-10-26 | Engine audio: gear clunk ported (GearClucks from the car's mec bank); the whine plays; shift effects reach grid-app |

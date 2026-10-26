@@ -149,6 +149,11 @@ impl Control {
             gear: ((word >> 25) & 15) as u32,
         }
     }
+    /// The applied throttle, vehicle +0xE1C: what 9961D0(1) gives 4148A0
+    /// and 422CA0 (docs/AUDIO_RESEARCH.md §23).
+    pub fn applied_throttle(words: &[u32]) -> f32 {
+        words.get(0xe1c / 4).copied().map_or(0., f32::from_bits)
+    }
     /// Offsets are established engine angular speed / maximum speed, rad/s.
     pub fn vehicle(words: &[u32], throttle: f32, audible: bool, generation: u32) -> Self {
         let max = words

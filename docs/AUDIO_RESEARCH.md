@@ -1296,3 +1296,80 @@ The AI lap stays below 0.93 of the maximum RPM, so it never reaches the limiter.
 argument, `[car +0x6C] == 0`, the player. 44D840 runs the turbo model 416BC0 on the object at
 car-audio +0x800, then one-shots TurboDump (+0x819) and TurboPip (+0x818) and the loops Spindle
 (44D560, voice +0xA39C) and Hiss (44D6D0, +0xA3A0), all at the EngineBay emitter. Port pending.
+
+## 23. Backfire, turbo and the load path ported (F575)
+
+26 October 2026, Claude Code (car-series, owner task items 2 and 4). Static (`tools/re/grid_re.py`,
+Capstone on the unpacked image) and offline renders; GRID was not launched.
+
+**Correction of §20–§22 [O].** 43C6D7 calls the [GearWhine]/[Envelope] loader 4376B0 → 42F880
+with `this` = car-audio +0x8B0, and 43C6F1 stores car-audio +0x8F10 at +0xA494. So the engine
+controller is car-audio +0x8F10 (+0x8B0 + 0x8660), and the "car-audio" offsets of §20–§22 that came
+from 42F770/42F880 (+0x8660, +0x1190, +0xD10…) are relative to +0x8B0. The [GearWhine] floats sit
+at car-audio +0x15C0…, which is the whine object's [+0xC] (+0x10B0, 416A70) +0x510…: the whine
+reads them (4166E0, 4378A0, 4518E0). 423600 loads the whine's `[Envelope]` (Length +0x100,
+Volume +0x104, Pitch +0x304, 128 entries each) into +0x10B0.
+
+**4148A0 [O].** With a = 9961D0(1), the applied throttle (vehicle +0xE1C): +0xB0 = a; +0x304 =
+a − +0x308; +0x308 = a; +0x24 = (1 − dt)·+0x24 + a·dt. When +0x24 > 0.55 and a < 0.1: +0x28 =
+max(+0x28, +0x6C · clamp((+0x24 − 0.55)·2.857) · 0.1) and +0x24 = a. +0x6C is 1.0 (reset 422470,
+4224CF).
+
+**The burble in 422A40 [O].** After the smoothing: if +0x28 > 0, b = sin(+0x2C · 125.68) · +0x28
+(BF4E44 on the float product), the RPM before the idle remap gains b, +0xBC = b (b − (+0x48 − 1)
+when the sum passes 1, which is then clamped to 1), and +0x28 −= 0.25·dt, clamped to 0…999.
+451770 adds dt to +0x2C after 422A40. So a lift from full throttle wobbles the RPM at 20 Hz by up
+to ±0.1, fading over 0.4 s.
+
+**414970, the limiter [O].** +0x324 += dt. Below +0x38 = 0.99, or in fifth gear and up: +0x64,
++0xD0, +0xB4 = 0. Otherwise +0xD0 = 1, +0xB4 ≤ 0.63, a counter +0xD4 toggles +0x64 every second
+frame, and +0xB4 = +0x64 ? +0xB4 + 0.05 : 0; 422A40 subtracts +0xB4 from the remapped RPM. So the
+limiter cuts 0, 0.05, 0.1, 0 every four frames. It also drives the exhaust-flame state vehicle
++0x21DC (8 on, 0xB after 0.5 s; not ported).
+
+**451260, the backfire [O].** Player groups (422547): +0x11C Engine, +0x120 Gearbox, +0x124
+Exhaust; opponents 17 (AI) for all three. 411120 sets +0x334 on every car but the focused one, so
+the focused car plays at x = 1 (−11 dB, pitch 1.1) and the others at x = 0 (−30 dB, pitch 1).
+- Start, when the handle +0x21C is free: +0x304 < −0.25 with +0x20 > 0.25, or +0xC < 0.2 after an
+  upshift, or the limiter (+0xD0). Detonations (detloop1–3, ExhaustDet 10/40 m) at the Exhaust
+  emitter; despite the names the samples carry no loop flag (only turbo_hiss and turbo_spindle
+  do), so each start is one pop; active +0x318; timer +0x31C = (rand % 300)·0.01 + 0.1 s.
+- While active: past 0.2 s from a shift, a throttle rise of more than 0.25 in a frame, +0x20 ≤
+  0.55 or a shift 0.2–0.4 s old stop it (A23350). Else the timer runs down; at 0 the voice stops
+  and +0x320 restarts it, timer (rand % 300)·0.01, once the handle is free.
+- +0x20 is +0x48 after 414C70 (with a fall limit while vehicle +0x1971 is set).
+
+**The turbo [O].** 44D840 runs only while car-audio +0xA4D8 (the player). Inputs: RPM controller
++0xC8, load +0xB0, and on the frame of a counted shift (+0xC = 0) state 1 (up) or 2 (down); vehicle
++0x1860 zeroes RPM and load. 416BC0 on car-audio +0x800 (constants checked in the disassembly):
+- +0x30 demand += (min(2·rpm, 1)·load − demand)·16·dt; a = 0.66·demand, below 0.33 ×5 capped at
+  0.33, capped at 0.33 below half RPM; a kick +0x38 (×0.97 a frame, added to a; +0.05 up to 0.75
+  only when the load jumps by more than 0.5 from below 0.5);
+- flutter phase +0x34 += rpm⁵·load; boost +0x1C = (sin(phase)·0.04·rpm² + a)·4 (published to the
+  dashboard);
+- upshift: boost ×0.8, level +0x14 ×0.75, Spindle +0 ×0.75, TurboPip (+0x818), demand ×0.05;
+  downshift with demand > 0.5, or a throttle drop over 0.25 in a frame with demand > 0.5 and no
+  pip: level ×0.75, Spindle ×0.25, boost ×0.6, demand ×0.05, TurboDump (+0x819);
+- level += dt·d with d = demand − level, doubled when not positive; Hiss level +0xC = level; Hiss
+  pitch +0x10 = +0x48·rpm + +0x44; slow +8 += (demand − slow)·0.5·dt; Spindle pitch +4 =
+  +0x40·slow + +0x3C; Spindle level +0 += (load − +0)·dt.
+- 43B285 copies the car record's +0x70…+0x7C (carsetup Spidle 0.75/1.5, Hiss 1.0/0.0 in all cars)
+  to +0x83C…+0x848.
+- 44D840 then: a misfire zeroes +0x830 when rand % 1000 < 100·damage² (engine damage 99A4D0(1));
+  TurboDump/TurboPip one-shots at x = 1 in group +0xA3C4 (= +0xA4D8 ≠ 0: Engine) at the EngineBay
+  emitter; Spindle 44D560 and Hiss 44D6D0 loops (voices +0xA39C/+0xA3A0) at lin2db(level) + the
+  CollisionInfo's maximum volume (−12 / −15 dB), pitch +4 / +0x10, TurboLoops 6/20 m, group
+  car-audio +4 (Turbo for the player, 43B8E0).
+
+**Port.**
+- `grid_tools::engine_audio_load`: `throttle` (4148A0) and `limiter` (414970) on the controller
+  bytes; `engine_audio_control::update` plays the burble (the old "+0x28 = 0" domain check is
+  gone).
+- `Control::throttle` is now the applied throttle (`Control::applied_throttle`, vehicle +0xE1C) for
+  the player and the opponents; in the AI lap it equals the driver's throttle at every tick.
+- `mech_audio::Backfire` (451260) and `mech_audio::Turbo` (416BC0 and the rest of 44D840) in the
+  player's mixer; `Voices` gained loops (the sample's loop flag), caller-set level and pitch
+  (435690/444280) and stop (A23350). `Levels` carries four groups.
+- Not ported: the exhaust flames (+0x21DC), the misfire (no engine damage reaches the audio),
+  vehicle +0x1860, opponents' backfires (they have no mechanical voices), 422CA0's throttle
+  smoothing and downshift blip, 414C70.

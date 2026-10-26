@@ -4,7 +4,8 @@
 //! grid-opponent-race) through the continuous mixer, one control per 16 ms
 //! block as grid-app publishes them, heard from the car's mounted bumper
 //! view (Normal mode, Bonnet audio camera). Writes one 48 kHz mono WAV per
-//! variant: `base` without mechanical sounds, then one per sound group.
+//! variant: `base` without mechanical sounds, then one per sound group and
+//! `all`. After the lap, 4 s of authored controls: the limiter, then a lift.
 use grid_tools::{
     audio_mix::{self, Camera, Table},
     car::Car,
@@ -36,7 +37,13 @@ fn wave(path: &Path, pcm: &[i16]) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Mechanical groups heard in a variant (`mech_audio` group indices).
-const VARIANTS: [(&str, &[usize]); 2] = [("base", &[]), ("clunk", &[mech_audio::GEARBOX])];
+const VARIANTS: [(&str, &[usize]); 5] = [
+    ("base", &[]),
+    ("clunk", &[mech_audio::GEARBOX]),
+    ("backfire", &[mech_audio::EXHAUST]),
+    ("turbo", &[mech_audio::TURBO, mech_audio::ENGINE]),
+    ("all", &[mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE]),
+];
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
@@ -61,6 +68,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             audible: true,
             generation: 1,
             gear: f[3].parse()?,
+        });
+    }
+    let lap = controls.len();
+    // A synthetic tail the AI lap never reaches [authored]: 2 s at the
+    // maximum RPM in third at full throttle (the limiter, 414970), then a lift
+    // with the RPM falling to 0.4 over 2 s.
+    for tick in 0..250 {
+        let lift = tick >= 125;
+        let t = (tick as f32 - 125.).max(0.) / 125.;
+        controls.push(Control {
+            normalized_rpm: if lift { 1. - 0.6 * t } else { 1. },
+            throttle: if lift { 0. } else { 1. },
+            audible: true,
+            generation: 1,
+            gear: 3,
         });
     }
     let car = Car::default();
@@ -92,7 +114,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(|(g, d)| audio_mix::distance_db(d, 10., 175.).map_or(f32::NEG_INFINITY, |d| group(g) + d))
         .collect::<Vec<_>>();
     println!(
-        "mech_render car={} mec={} view={view} ear={ear:?} distance_m gearbox={gearbox:.2} bay={bay:.2} exhaust={exhaust:.2} engine_db={engine_db:?} ticks={}",
+        "mech_render car={} mec={} view={view} ear={ear:?} distance_m gearbox={gearbox:.2} bay={bay:.2} exhaust={exhaust:.2} engine_db={engine_db:?} ticks={} lap_ticks={lap}",
         car.stem(),
         bank.mechanics_bank,
         controls.len()
@@ -101,8 +123,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for (name, groups) in VARIANTS {
         let mut mixer = Mixer::new(bank.clone());
         mixer.bus_db = [engine_db[0], engine_db[1]];
-        let group_db = [mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO].map(|g| {
-            let mix = [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO][g];
+        let group_db = [mech_audio::GEARBOX, mech_audio::EXHAUST, mech_audio::TURBO, mech_audio::ENGINE].map(|g| {
+            let mix = [audio_mix::GEARBOX, audio_mix::EXHAUST, audio_mix::TURBO, audio_mix::ENGINE][g];
             if groups.contains(&g) { group(mix) } else { f32::NEG_INFINITY }
         });
         mixer.mech = Some(mech_audio::Voices::new(mech.clone(), RATE));

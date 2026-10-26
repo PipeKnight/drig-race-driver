@@ -24,6 +24,7 @@ pub mod engine_audio_gain;
 pub mod engine_audio_publication;
 pub mod engine_audio_restart;
 pub mod engine_audio_schedule;
+pub mod engine_audio_load;
 pub mod engine_audio_shift;
 pub mod mech_audio;
 pub mod hud_audio;

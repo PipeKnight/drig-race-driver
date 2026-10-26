@@ -6,8 +6,9 @@ use crate::{
     engine_audio_publication::{Environment, VOICE_BYTES},
     engine_audio_restart::PlaybackService,
     engine_audio_schedule,
+    engine_audio_load,
     engine_audio_shift::{self, Shift},
-    mech_audio,
+    mech_audio::{self, Backfire, Exhaust, Turbo},
 };
 use grid_formats::{audio_car_setup, audio_dictionary, tuning, vehicle_properties};
 use std::{fs, io::Read, path::Path, sync::Arc};
@@ -185,6 +186,9 @@ pub struct Mixer {
     pub mech: Option<mech_audio::Voices>,
     /// Their group levels and emitter distances.
     pub mech_levels: mech_audio::Levels,
+    /// 451260 and 44D840 state of the player.
+    backfire: Backfire,
+    turbo: Turbo,
 }
 /// Normal/Chase/PC levels of the Engine and Exhaust groups.
 pub const CHASE_BUS_DB: [f32; 2] = [-14., -7.];
@@ -204,6 +208,8 @@ impl Mixer {
             failure: None,
             mech: None,
             mech_levels: mech_audio::Levels::SILENT,
+            backfire: Backfire::new(0x5eed),
+            turbo: Turbo::new(Turbo::SPIDLE, Turbo::HISS),
         };
         result.reset();
         result
@@ -217,8 +223,10 @@ impl Mixer {
         self.failure = None;
         // The constructor's shift state [I: the seed of A682A0's sequence].
         self.shift = Shift::new(self.bank.shift, 0x5eed);
+        self.backfire = Backfire::new(0x5eed);
+        self.turbo = Turbo::new(Turbo::SPIDLE, Turbo::HISS);
         if let Some(mech) = &mut self.mech {
-            mech.stop();
+            mech.clear();
         }
         for (at, value) in [
             (0, 1.),
@@ -254,15 +262,36 @@ impl Mixer {
         engine_audio_control::update(&mut self.controller, engine, &self.bank.curves)?;
         // 451770 after 422A40: the gear-shift effects (414750, 451580,
         // 4150D0). The rest of its load effects are not reconstructed.
-        let shift = self.shift.frame(control.gear, engine.delta as f32);
+        let dt = engine.delta as f32;
+        let phase = f(&self.controller, 0x2c) + dt;
+        put(&mut self.controller, 0x2c, phase);
+        let shift = self.shift.frame(control.gear, dt);
         put(&mut self.controller, 0, shift.scale);
         put(&mut self.controller, 0x1a0, shift.load);
         put(&mut self.controller, 0x2f8, shift.pitch);
+        // 4148A0 and 414970 with the applied throttle (`Control::throttle`).
+        engine_audio_load::throttle(&mut self.controller, control.throttle, dt);
+        engine_audio_load::limiter(&mut self.controller, control.gear, dt);
         if let Some(mech) = &mut self.mech {
             // 451580 → 4511E0: GearClucks at x = 1 (0 dB, pitch 1).
             if shift.clunk {
                 mech.start("GearClucks", 1.);
             }
+            let (up, since_shift) = self.shift.since();
+            // 451260; +0x20 is +0x48 after 414C70 [I: its fall limit and
+            // 451580's RPM blend are not ported]. x = 1: the focused car.
+            let exhaust = Exhaust {
+                change: f(&self.controller, 0x304),
+                rpm: f(&self.controller, 0x48),
+                up,
+                since_shift,
+                limiter: self.controller[0xd0] != 0,
+            };
+            self.backfire.frame(exhaust, dt, 1., mech);
+            // 44D840 after 451770: the turbo on +0xC8 and +0xB0.
+            let state = if since_shift == 0. { if up { 1 } else { 2 } } else { 0 };
+            let blow = self.turbo.frame(dt, f(&self.controller, 0xc8), f(&self.controller, 0xb0), state);
+            self.turbo.play(blow, mech);
             mech.frame(self.mech_levels);
         }
         put(&mut self.controller, 0xcc, control.throttle);
