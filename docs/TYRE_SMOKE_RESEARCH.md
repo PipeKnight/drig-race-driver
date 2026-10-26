@@ -876,3 +876,43 @@ atmosphere and smoke controls remain pending. No successful native HDR rendering
 playable/default promotion is claimed. Private evidence:
 local/graphics/skid-native-hdr01 and the immutable native-hdr-composition01
 packets under local/handoff/drafts/smoke-wheel-family02.
+
+### G290: native HDR runtime and selected smoke attenuation
+
+The guarded native adapter now runs on the actual DLAA renderer. A release
+artifact from913de6c0 (`dlaa` feature only) passed three Lacetti/Donington GPU
+cases and one same-Off repeat. Each exited0, saved300 native1080p frames plus
+a final image, executed five camera changes and a reset, and produced identical
+canonical physics/input/handling/deformation traces. Active cases installed one
+native pipe retaining three original type-set edges. The actual ready skid
+pipeline and current main/depth attachments used one sample and
+Rgba16Float/Depth32Float. Treatment recorded359 terminal successes and restored
+keys in its bounded360-call reporting window; Control recorded no replays.
+The initial pipeline-cold fallback remained ordinary rendering.
+
+Stored native RGB comparisons retain all differences:
+
+| Pair | Exact pairs /301 | Global channel maximum | Largest changed-pixel count |
+|---|---:|---:|---:|
+| Off / Control |215|51|157617 at0066, local max18|
+| Control / Treatment |165|116 at0048|204201 at0066, local max20|
+| Off / same-Off repeat |215|51|157617 at0066|
+| Repeat / Control |246|27 at0265|70235 at0267, local max14|
+
+The same-Off repeat exactly reproduces Control in31 of the86 formerly differing
+frames;215 already matched. The remaining55 Repeat/Control pairs still contain
+1922785 changed pixels. Aggregate count subtraction cannot measure that
+residual, and neither noise nor full image neutrality is established.
+
+Native0049 and0054 are locally clean controls: Off, Control and Repeat PNGs are
+byte-exact there. Root inspection of Control/Treatment0049 shows the two lower
+tyre strips attenuating through smoke in Treatment;0054 corroborates the bounded
+observation. This is useful selected visual evidence, not general car/lens or
+original-compositor acceptance. The recipe deliberately omits the optional
+paint material feature, so full accepted Motion material parity is still open.
+Native readiness receipts are not direct NGX dispatch, atmosphere-fragment or
+attachment-alpha measurement. Defaults and accepted Motion remain unchanged.
+
+Private evidence: `local/graphics/skid-native-hdr01/`, its frozen source/build
+records, four native case folders and complete RGB analyses. Executable SHA256:
+`eade66da816bacbee4b0d4e85272ffd21c246e42b895e4148e07fbab98f23667`.

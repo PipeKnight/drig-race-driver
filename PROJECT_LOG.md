@@ -54,6 +54,7 @@ child sessions resume on the owner's word. Every "Not checked" below is open, no
   artificial to the owner (row 72); never compared by ear on this build.
 
 ### Graphics
+- G290 (2026-10-26): four native-DLAA HDR skid runs pass camera/reset/physics/runtime checks; selected tyre strips attenuate through smoke with clean local controls. Same-Off variation reproduces31 changed Control frames, but55 broad residual pairs remain unresolved. Accepted Motion material-feature validation/default promotion still open; see TYRE_SMOKE_RESEARCH.
 - G288 (2026-10-26): default-off native HDR skid replay now preserves the actual transparency dependency and refuses unsupported first-frame graph/condition states. Baseline26, native-DLAA27, full app433 tests and strict Clippy pass; release/GPU/visual smoke controls still pending. Accepted Motion unchanged. See TYRE_SMOKE_RESEARCH.
 - G283 (2026-10-25): default-off stadium backing coverage passes418app tests/Clippy, six native GPU cases and two exact ordinary regressions after fixing late restoration. Owner likes recovered structural depth; lower points/fence visibility and moving/DLAA coverage remain open. See STATIC_OBJECT_MATERIALS.
 - G281 (2026-10-25): default-off owned ground-skid early pass passes407app tests/Clippy and9native GPU runs across Derby/BMW/Lacetti camera+reset. Ground curves attenuate through smoke; bounded terminal/restoration and physics controls pass. Sparse Off/Control residuals remain unresolved, car/lens/net ghosts open; no enhanced/DLAA/default promotion. See TYRE_SMOKE_RESEARCH.
