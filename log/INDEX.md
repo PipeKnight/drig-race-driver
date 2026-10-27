@@ -495,6 +495,7 @@ details are in the entry files: `grep -rn "F512 " log/` lands in log/F0512.md.
 
 | Entry | Date | Title |
 |---|---|---|
+| [G310](G0310.md) | 2026-10-27 | Compare the grazing asphalt pilot with accepted Motion DLAA in motion |
 | [G309](G0309.md) | 2026-10-27 | Test a bounded grazing-angle asphalt reflection gain |
 | [G308](G0308.md) | 2026-10-27 | Test one stored S4 forearm key as an explicit interpretation hypothesis |
 | [G307](G0307.md) | 2026-10-27 | Add one authored fixed forearm pose to the crowd preview |
